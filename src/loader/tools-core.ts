@@ -14,6 +14,7 @@ import { loadMemories, saveMemories, memoryFilePath } from '../runtime/services/
 import { openInBrowser } from '../runtime/services.js';
 import { resolveIdentityToken } from '../runtime/plugin-identity.js';
 import { DEFAULT_THEME } from '../playback/theme.js';
+import { writtenKey } from '../playback/keys.js';
 import type { ToolGroup, ToolDef } from './tools.js';
 import { parseAskArgs, askResult, type AskQuestion, type AskState } from '../assistant/ask.js';
 
@@ -42,8 +43,10 @@ function pluginScopeName(ctx: CoreCtx): string | undefined {
 // Renders a resolved hotkey map ({ action: [keys] }) compactly for tool output:
 // a single-key action renders as the bare name, multiple as `a/b`. Used by the
 // config tool so `config get/explain keys` reports the effective bindings.
+// Shown as a person WRITES a key ("enter", "space"), since this is what the model
+// repeats to them in a `config set keys.…` command.
 function prettyKeys(map: Record<string, string[]>): string {
-  const parts = Object.entries(map).map(([action, ks]) => (ks.length === 1 ? ks[0] : ks.join('/')));
+  const parts = Object.values(map).map((ks) => ks.map(writtenKey).join('/'));
   return `{ ${Object.keys(map).map((a, i) => `${a}: ${parts[i]}`).join(', ')} }`;
 }
 

@@ -5,7 +5,7 @@
 // set. Key bindings are merged BY ACTION NAME (not namespaced).
 
 import { z } from 'zod';
-import { HOST_DEFAULT_KEYS, isKey } from '../playback/keys.js';
+import { HOST_DEFAULT_KEYS, canonicalBinding, isKey } from '../playback/keys.js';
 import { hostConfigSchema } from '../config/schema.js';
 import { BASE_COMMANDS, helpText } from '../config/commands.js';
 import type { Command as BaseCommand } from '../config/commands.js';
@@ -180,7 +180,6 @@ export function buildKeys(
   config: KeysConfig = {},
   base: Record<string, string | string[]> = HOST_DEFAULT_KEYS,
 ): Record<string, string[]> {
-  const toArr = (v: string | string[] | null | undefined): string[] => (Array.isArray(v) ? v : v == null ? [] : [v]);
   const merged: Record<string, string | string[]> = { ...base };
   for (const p of plugins) {
     const pk = p.keys ?? p.keyActions ?? {};
@@ -191,7 +190,7 @@ export function buildKeys(
   }
   const out: Record<string, string[]> = {};
   for (const [action, def] of Object.entries(merged)) {
-    out[action] = toArr(config?.keys?.[action] ?? def);
+    out[action] = canonicalBinding(config?.keys?.[action] ?? def);
   }
   return out;
 }

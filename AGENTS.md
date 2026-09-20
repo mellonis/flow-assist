@@ -127,9 +127,16 @@ same reason: a display-only system message never reaches the model.
   `src/views/modals.ts` — the one spelling every hint uses); a blank line is kept.
   ⇧⏎ works too where the terminal sends it (decoded since flowtty 1.0.0-alpha.7),
   but the hint names the key that works in every terminal that has an Alt.
-- **Key names are the decoder's, not friendly ones**: Enter is `'return'`, the space
-  bar is `' '`, a colon is `':'`. There is no `'enter'`, `'space'` or `'colon'` — a
-  branch or a test helper matching on those tests a keyboard no terminal has.
+- **A key has two names, and they meet in one place.** The TERMINAL's name is what
+  flowtty's decoder gives as `key.name`: `'return'`, `' '`, `':'`, `'escape'`. A
+  PERSON's name is what gets written in a binding — `config.keys`, a plugin's `keys`
+  table: `"enter"`, `"space"`, `"colon"`, `"esc"`. `canonicalBinding` in
+  `src/playback/keys.ts` turns the second into the first, once, when `buildKeys` /
+  `resolveKeys` assemble the map; `writtenKey` goes back for anything shown in words
+  (the model's `config_schema`). So: a **binding** may say `'enter'`; a **comparison**
+  (`key.name === …`, a test's `press(…)`) must use the terminal's name — there is no
+  `'enter'`, `'space'` or `'colon'` there, and flowtty's `TestBackend.press()` throws
+  on them. What is DRAWN for a key (⏎, ␣) is a third thing: a plugin's keycaps.
 - **↑/↓** walk the prompt history, only while the field is empty or still shows a
   history entry untouched. The **wheel** and **PgUp/PgDn** scroll. **^r** unfolds
   thinking, notes and the tool calls behind the one-line `▸ N tools` summary.

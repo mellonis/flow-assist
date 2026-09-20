@@ -426,7 +426,7 @@ test('config_schema reports EFFECTIVE key bindings and a plugin\'s own flags', a
   // host defaults + plugin keys, not the (empty) override map.
   expect(out).toMatch(/chat: A/);
   expect(out).toMatch(/quit: q/);
-  expect(out).toMatch(/open: enter\/return/);
+  expect(out).toMatch(/open: enter[,} ]/); // shown as a person writes it, not as "return"
   // The host sees `plugins` as an opaque record; the plugin's configSchema fills it in.
   expect(out).toMatch(/- plugins\.keycaps\.enabled: true\|false — unset/);
 });
