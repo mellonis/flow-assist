@@ -5,7 +5,7 @@
 //
 // Contract of a group: { id, alwaysOn, tools, exec(name, args, ctx) } where
 // `args` is an already-parsed object and `ctx` is the runtime context
-// ({ buildFeatureContext, memoryFile, configLocalPath }). Each writing tool is
+// ({ memoryFile, configLocalPath }). Each writing tool is
 // flagged `write` (true or a predicate `(args) => boolean`).
 
 import { hostConfigSchema } from '../config/schema.js';
@@ -25,7 +25,6 @@ import { parseAskArgs, askResult, type AskQuestion, type AskState } from '../ass
 // plugin's identity token (a `plugin` memory scope resolves to the plugin it was
 // issued to — the host maps the token to the name; a caller cannot forge one).
 export interface CoreCtx {
-  buildFeatureContext?: (issueCode?: string) => Promise<string> | string;
   memoryFile?: string;
   configLocalPath?: string;
   pluginToken?: symbol;
@@ -226,14 +225,6 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
     {
       type: 'function',
       function: {
-        name: 'get_feature_context',
-        description: 'Full context of the CURRENT issue (the one the chat is opened on): the gathered analysis report — status, relations, tags, comments, attachments, etc. Call when you need the whole feature context. Do not pass issueCode — the tool works with the current issue.',
-        parameters: { type: 'object', properties: { issueCode: { type: 'string' } }, required: [] },
-      },
-    },
-    {
-      type: 'function',
-      function: {
         name: 'memory',
         description: 'Persistent cross-session memory. Facts the user asks you to remember are stored here and injected into the system prompt (re-read on every message, so edits take effect immediately). action: "list" — show stored memories (optional scope and/or label filter); "add" — store a new one (text, optional label to classify it, scope: "host" for host-wide memory or "plugin" for the current plugin\'s memory, default "host"); "update" — edit an existing one (id + text and/or scope and/or label); "forget" — delete by id. This writes only a local JSON file on this machine, not the tracker.',
         parameters: {
@@ -355,12 +346,6 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
         if (!url) return 'No URL provided';
         openInBrowser(url);
         return `Opened ${url} in the browser`;
-      }
-      case 'get_feature_context': {
-        if (typeof ctx.buildFeatureContext !== 'function') {
-          return 'Feature context is unavailable: chat is not opened from an issue detail.';
-        }
-        return await ctx.buildFeatureContext(args.issueCode as string | undefined);
       }
       case 'memory': {
         // The assistant's memory lives in a local JSON file (ctx.memoryFile from

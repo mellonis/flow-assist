@@ -119,6 +119,19 @@ hardest. Rules the `repo` and `gitlab` plugins hold, each with a test that tries
   `--raw-field`. Check the same before wrapping any other CLI (`gh api -F` is alike —
   this applies to the planned `github` plugin).
 
+### A tool's result is what the model will tell the person
+
+- **A failure is reported as a failure, in the failing thing's own words.** The
+  `gitlab` plugin's `glab` runner was a stub that answered `{}` to everything; the
+  model made five calls, read five empty objects, and told the person with full
+  confidence to run `glab auth login`. A wrapper returns the exit code and stderr,
+  says "not installed" when the binary is missing, says "empty body" when it is
+  empty, and times out instead of hanging the turn (`plugins-available/gitlab/src/glab.ts`).
+- **A tool that can never work is not offered.** `get_feature_context` always answered
+  "unavailable" — nothing ever supplied its context — yet it sat first in the list
+  and the model called it. A dead tool costs a call, tokens on every request, and a
+  wrong turn in the reasoning. Remove it, do not leave it answering "unavailable".
+
 ## The conversation the model sees
 
 **The chat's display list is never the model's history.** `agentChat` returns the

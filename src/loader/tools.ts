@@ -46,7 +46,7 @@ export type AiToolDef = ToolDef & { run: (...args: unknown[]) => unknown };
 export type ToolCtx = CoreCtx & Record<string, unknown>;
 
 // A self-contained tool group factory object — `args` is already parsed, `ctx`
-// is the runtime context ({ buildFeatureContext, memoryFile, configLocalPath }).
+// is the runtime context ({ memoryFile, configLocalPath }).
 export interface ToolGroup {
   id: string;
   alwaysOn?: boolean;

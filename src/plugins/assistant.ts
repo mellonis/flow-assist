@@ -4,8 +4,6 @@
 // ft.config.ai (baseUrl/model/tokenEnv), token from process.env[tokenEnv].
 //   - `ft.services.currentIssue`/`currentComments`/`openIssue` are tracker-specific
 //     → referenced as possibly-undefined (a tracker plugin may supply them later).
-//   - `get_feature_context` returns "unavailable" until a plugin supplies
-//     `ctx.buildFeatureContext` (not set here — a plugin's services may provide it).
 //   - the chat's language is `ai.assistantLanguage` (chatLanguage).
 
 import { addTrigger, chatUser } from '../loader/registry.js';
@@ -381,9 +379,6 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 extraTools: (f.services as Record<string, any>).pluginAiTools ?? [],
                 toolCtx: {
                   plan: planRef.current,
-                  // buildFeatureContext is NOT set here: get_feature_context returns
-                  // «unavailable» until a plugin supplies ctx.buildFeatureContext (a
-                  // tracker/feature plugin may provide it via ...ft.services).
                   memoryFile: memoryFilePath(f.config),
                   // The plugin's OWN host-issued token. The CALLER never supplies a
                   // name here — a raw plugin-name string is ignored by the memory

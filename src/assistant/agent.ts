@@ -282,7 +282,7 @@ function modelToolResult(outcome: string, detail: unknown): string {
 // is pushed back as `role: tool`, and the loop runs until a final text round (or
 // `maxRounds`, to guard against an infinite loop). `onTool(name, args)` reports the
 // call to the host (for a status line). `toolCtx` is the runtime context the
-// plugin/tool consumer hands through (current issue/report for get_feature_context).
+// plugin/tool consumer hands through (the plan, the memory file, host services).
 //
 // Note on chat content: a "chatty" model's narration of its moves ("Let's try…")
 // arrives in a round's `content` that ALSO carries tool_calls — before, that landed
