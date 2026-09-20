@@ -245,7 +245,11 @@ export function inputVisualRows(input: string, cur: number, fieldW: number): { b
     const s = start[li];
     const e = s + lines[li].text.length;
     const last = li === lines.length - 1;
-    if (cur < e || (last && cur >= s)) {
+    // The caret stays at the END of a line when a newline follows it (the next row
+    // starts a new paragraph) — that is also what lets it stand on a blank line,
+    // whose start equals its end. Only at a soft wrap does it open the next row.
+    const newlineFollows = !last && start[li + 1] > e;
+    if (cur < e || (cur === e && newlineFollows) || (last && cur >= s)) {
       caretLi = li;
       caretOff = Math.max(0, Math.min(lines[li].text.length, cur - s));
       break;
@@ -562,7 +566,9 @@ export function renderChatModal({
           : (streaming && !input)
             ? h(Text, { dim: true }, '…')
             : visible.map((row, i) => {
-                if (row.caret === '') return h(Text, { key: i, wrap: 'truncate' }, row.before);
+                // A blank line still takes a row: an empty Text has no height and the
+                // line would vanish, which is how "two newlines" used to collapse.
+                if (row.caret === '') return h(Text, { key: i, wrap: 'truncate' }, row.before || ' ');
                 const isEmpty = input === '';
                 return h(Box, { key: i, flexDirection: 'row' },
                   row.before ? h(Text, { wrap: 'truncate' }, row.before) : null,

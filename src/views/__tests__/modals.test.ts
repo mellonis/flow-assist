@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { createElement as h } from 'react';
 import { render } from '@flowtty/react';
 import { TestBackend } from '@flowtty/core/testing';
-import { renderChatModal, renderHelp, renderLogModal, renderReminder } from '../modals.js';
+import { inputVisualRows, renderChatModal, renderHelp, renderLogModal, renderReminder } from '../modals.js';
 
 // Task #20: the built-in modal renderers were deferred to an "empty-shell"
 // integration test; here we drive them directly so the chat/help/log surfaces are
@@ -237,4 +237,35 @@ test('reminder banner shows the text and the dismiss hint, centered', async () =
   expect(backend.lastFrame).toContain('stand up and stretch');
   expect(backend.lastFrame).toContain('Esc / Enter — dismiss');
   handle.unmount();
+});
+test('the input keeps a blank line, and the caret can stand on it', () => {
+  // Two newlines in a row are how a person separates two thoughts. The row was
+  // there all along but rendered as an empty Text — zero height, so it vanished —
+  // and the caret skipped it, landing on the first character of the next line.
+  const at = (input: string, cur: number) => inputVisualRows(input, cur, 40);
+  const caretRow = (rows: { caret: string }[]) => rows.findIndex((r) => r.caret !== '');
+
+  const two = at('first\n\nsecond', 13);
+  expect(two).toHaveLength(3);
+  expect(two[1]).toEqual({ before: '', caret: '', after: '' });
+
+  // Caret ON the blank line (right after the first newline).
+  const on = at('first\n\nsecond', 6);
+  expect(caretRow(on)).toBe(1);
+  expect(on[1]).toEqual({ before: '', caret: ' ', after: '' });
+  expect(on[2]).toEqual({ before: 'second', caret: '', after: '' });
+
+  // Caret at the END of a line that is followed by a newline stays on that line.
+  const end = at('first\n\nsecond', 5);
+  expect(caretRow(end)).toBe(0);
+  expect(end[0]).toEqual({ before: 'first', caret: ' ', after: '' });
+
+  // Trailing blank lines: the caret is on the last one.
+  const trailing = at('first\n\n', 7);
+  expect(trailing).toHaveLength(3);
+  expect(caretRow(trailing)).toBe(2);
+
+  // A wrapped paragraph is unchanged: at the wrap point the caret opens the next row.
+  const wrapped = inputVisualRows('aaaa bbbb', 5, 5);
+  expect(caretRow(wrapped)).toBe(1);
 });

@@ -99,6 +99,18 @@ const scenarios: Record<string, () => Promise<void>> = {
     ui.app.unmount();
   },
 
+  // A multi-line draft: two thoughts separated by a blank line.
+  async multiline() {
+    const ui = await boot(new ScriptedModel());
+    await ui.press('A');
+    await ui.type('first thought');
+    ui.backend.press({ name: 'return', shift: true });
+    ui.backend.press({ name: 'return', shift: true });
+    await ui.type('second thought');
+    ui.frame('two thoughts with a blank line between them');
+    ui.app.unmount();
+  },
+
   // What happens to a message sent WHILE an answer is still streaming.
   async streaming() {
     const model = new ScriptedModel();
