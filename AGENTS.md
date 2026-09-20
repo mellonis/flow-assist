@@ -63,12 +63,35 @@ A plugin module default-exports `build<Name>Plugin({ renders, config, make })`.
 `make(name, shape)` injects `config.plugins.<name>` and qualified keys. The
 returned `shape` has optional: `commands`, `keys`, `keyActions`, `views`,
 `surface`, `modals`, `colors`, `configSchema`, `components`, `tools`, `services`,
-`aiTools`, `keycaps(ft)`, `setup(ft)`. `components[slot] = (ft) => Component`;
+`aiTools`, `keycaps(ft)`, `entry`, `setup(ft)`. `components[slot] = (ft) => Component`;
 `services` expose host services through `ft.services` — the host wins on every
 key it owns, a plugin's same-named key never clobbers it. `setup(ft)` runs once,
 before any of the plugin's components mount (it is where a plugin seeds its store). Tool groups are delivered by plugins — there is
 **no** `tools-available/` → `tools-enabled/` repository; `ai.disabledTools` is
 the blacklist.
+
+### A plugin is a guest: whose screen it is
+
+The app opens on the HOST's start screen (`src/views/home.ts`: the ƒ mark drawn
+large, what can be done from here, the enabled plugins). flow-assist grew out of a
+tracker TUI and for a long time still opened like one — every plugin component
+mounted from the first frame, so the tracker's board drew "No board data" over an
+assistant nobody had asked for a board.
+
+- A plugin's **surface** — its own full screen — is the component slot named `view`,
+  or named after `shape.surface`. Every other slot (modals, key triggers, the
+  workspace that feeds them) is furniture and is always mounted, which is how a
+  plugin's own key (`c`, the board picker) works from the start screen.
+- The surface is mounted **only while the plugin says its context is active**:
+  `keycaps(ft)` non-empty. That is the existing contract of `keycaps` ("returns `[]`
+  when its surface is inactive"), so a plugin needs no new API to be a good guest. A
+  plugin with a surface and no `keycaps` cannot say, and is shown always.
+- Over a guest's surface the host keeps its title bar; on the start screen it does not.
+- `shape.entry?: string[]` names the key actions that lead INTO the plugin; the start
+  screen shows those beside the plugin's name. Without it, every key the plugin binds
+  is listed — including ones that only mean something inside.
+- The start screen draws keys with `bindingGlyph(keys[action])` and offers nothing
+  that is unbound.
 
 ## What the model can do (the `core` tool group)
 

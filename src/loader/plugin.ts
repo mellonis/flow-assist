@@ -31,6 +31,10 @@ export type PluginShape = {
   // and the hint would then name a key that does nothing. `''` means unbound: show
   // no hint for it.
   keycaps?: (ft: unknown) => string[];
+  // The key actions that lead INTO the plugin from the host's start screen (e.g.
+  // `['boardPicker']`). The start screen names these beside the plugin; without
+  // `entry` it lists every key the plugin binds.
+  entry?: string[];
   // Whether the plugin keeps data in `services.cache` (default true). The footer
   // offers "flush cache" only while such a plugin is showing hints; a plugin with
   // nothing in the cache says `false`, so its hint does not advertise one.

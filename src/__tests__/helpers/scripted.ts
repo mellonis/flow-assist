@@ -8,6 +8,7 @@
 
 import { TestBackend, flush } from '@flowtty/core/testing';
 import { loadPlugins } from '../../loader/build.ts';
+import { makeFactory, type Make, type Plugin } from '../../loader/plugin.ts';
 import { assembleToolRegistry } from '../../loader/tools.ts';
 import { renderApp } from '../../runtime/app.tsx';
 import { renderChatModal, renderHelp, renderLogModal, renderReminder } from '../../views/modals.ts';
@@ -50,13 +51,16 @@ export class ScriptedModel {
 
 export const settle = async (n = 10) => { for (let i = 0; i < n; i++) { await flush(); await new Promise((r) => setTimeout(r, 4)); } };
 
-export async function bootApp(model: ScriptedModel, cols = 100, rows = 28) {
+// `guests` adds plugins that are not the host's own — built with the same `make` the
+// loader uses, so they are namespaced exactly as an installed plugin is.
+export async function bootApp(model: ScriptedModel, cols = 100, rows = 28, guests?: (make: Make) => Plugin[]) {
   process.env.LLM_TOKEN = 'scripted';
   model.install();
   const config: Record<string, unknown> = { ai: { baseUrl: 'http://scripted.model', model: 'scripted' } };
   const repo = { enabledPlugins: async () => [], list: async () => [] } as never;
   const renders = { chat: renderChatModal, help: renderHelp, log: renderLogModal, reminder: renderReminder };
   const plugins = await loadPlugins({ config, repo, renders: renders as never });
+  if (guests) plugins.push(...guests(makeFactory(config as never)));
   const tools = assembleToolRegistry({ plugins, config, repo });
   const backend = new TestBackend(cols, rows);
   const app = await renderApp(backend, { plugins, config, tools, onExit: () => {} });

@@ -47,7 +47,12 @@ import { bindingGlyph, isKey } from '../playback/keys.js';
 import { resolveAppTheme } from '../playback/theme.js';
 import type { Theme } from '../playback/theme.js';
 import type { Command } from '../loader/plugin.js';
-import type { Plugin } from '../loader/plugin.js';
+import type { Plugin, PluginShape } from '../loader/plugin.js';
+import { renderHome } from '../views/home.js';
+
+// The host's own plugins: they ARE the host, so the start screen does not list them
+// among the guests.
+const BUILTIN_PLUGINS = ['core', 'assistant', 'keycaps', 'log'];
 
 // ─── Two-phase input dispatch (spec §7) ──────────────────────────────────────
 // Observers (mode 'observe') always run, never consume; then the consumer race
@@ -233,7 +238,7 @@ export function renderApp(
     const pFtMap = useRef<Record<string, unknown>>({}).current;
     const overlayComps = useMemo(
       () => {
-        const comps: { Comp: () => unknown; key: string }[] = [];
+        const comps: { Comp: () => unknown; key: string; plugin: PluginShape; surface: boolean }[] = [];
         for (const p of plugins) {
           // Host contract (AGENTS.md §shape): a plugin's `services` are exposed
           // through `ft.services`, but the HOST must win on keys it owns — a
@@ -257,7 +262,11 @@ export function renderApp(
           p.setup?.(pFt);
           for (const [slot, factory] of Object.entries(p.components ?? {})) {
             const Comp = factory(pFt);
-            if (typeof Comp === 'function') comps.push({ Comp: Comp as () => unknown, key: `${p.name}:${slot}` });
+            // A plugin's SURFACE — its own full screen — is the slot named `view`, or
+            // named after `shape.surface`. Everything else (modals, triggers, the
+            // workspace that feeds them) is furniture and is always mounted.
+            const surface = slot === 'view' || (!!p.surface && slot === p.surface);
+            if (typeof Comp === 'function') comps.push({ Comp: Comp as () => unknown, key: `${p.name}:${slot}`, plugin: p, surface });
           }
         }
         return comps;
@@ -535,6 +544,12 @@ export function renderApp(
     // by `overlayComps`; the plugin's services/store are mutated live, so reading
     // them here each render stays fresh.
     const hints = composeFooterHints(plugins, pFtMap, keys).join(' · ');
+    const surfaceActive = (p: PluginShape): boolean => {
+      const kc = (p as Plugin).keycaps;
+      const pFt = pFtMap[p.name];
+      return !kc || !pFt ? true : kc(pFt).length > 0;
+    };
+    const atHome = !overlayComps.some((c) => c.surface && surfaceActive(c.plugin));
 
     const title = String((config.app as { title?: string } | undefined)?.title ?? 'flow-assist');
     // `bottom` is the command-line buffer (with a leading `: `), the active toast,
@@ -557,8 +572,16 @@ export function renderApp(
     return h(
       Box,
       { flexDirection: 'column' },
-      h(Box, { padding: 1 }, h(Text, { bold: true }, title)),
-      h(Box, { flexGrow: 1 }, overlayComps.map(({ Comp, key }) => h(Comp as any, { key }))),
+      // The title bar names the app over a guest's screen; the start screen says it itself.
+      atHome ? h(Box, { height: 1 }) : h(Box, { padding: 1 }, h(Text, { bold: true }, title)),
+      // A plugin is a guest: its surface takes the screen only while the plugin says
+      // its context is active — `keycaps(ft)` non-empty, which is already the
+      // contract ("returns [] when its surface is inactive"). Until then the screen
+      // is the host's own. A plugin with no `keycaps` cannot say, and keeps the old
+      // behaviour of being shown always.
+      h(Box, { flexGrow: 1 },
+        overlayComps.filter((c) => !c.surface || surfaceActive(c.plugin)).map(({ Comp, key }) => h(Comp as any, { key })),
+        atHome ? renderHome({ title, plugins, keys, builtins: BUILTIN_PLUGINS }) : null),
       h(Box, { padding: 1, flexDirection: 'column' },
         // `dim`, not `dimColor` — the latter is another library's prop; flowtty does
         // not know it, and an `as any` had been hiding that the footer was never dimmed.
