@@ -541,3 +541,20 @@ test('a background task plans on its own plan, not on the chat\'s', async () => 
   expect(ui.backend.lastFrame).not.toContain('▾ plan');
   ui.app.unmount();
 });
+
+test('an open modal pushes the screen behind it back, and stays bright itself', async () => {
+  const ui = await bootApp(new ScriptedModel(), 100, 24);
+  // The host's own title, before anything is open.
+  expect(styleAt(ui.backend, 'flow-assist').dim).toBeFalsy();
+  await ui.press('A');
+  // Behind the chat: same characters, dimmed. (A flag on the cell, not a repaint.)
+  expect(ui.backend.lastFrame).toContain('flow-assist');
+  expect(styleAt(ui.backend, 'flow-assist').dim).toBe(true);
+  // The chat itself is not behind anything.
+  expect(styleAt(ui.backend, 'ƒ Flow Assist').dim).toBeFalsy();
+  expect(styleAt(ui.backend, '› ').dim).toBeFalsy();
+  // Closed again, the screen comes back.
+  await ui.press('escape', 'escape');
+  expect(styleAt(ui.backend, 'flow-assist').dim).toBeFalsy();
+  ui.app.unmount();
+});

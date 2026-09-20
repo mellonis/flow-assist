@@ -218,7 +218,13 @@ same reason: a display-only system message never reaches the model.
   - The **wheel scrolls only while the pointer is over the box**. In a test pass
     coordinates — `backend.wheel('up', 20, 8)`; the default `(0, 0)` is the app title.
   - Every `ChatRow` is exactly one terminal line; the pinned-question check reads a
-    row's index as its line. A row that wraps would break it.
+    row's index as its line. A row that wraps would break it. Long lines of fenced
+    code are hard-wrapped by `layoutMarkdown` since flowtty 1.0.0-alpha.11 (before,
+    one ran out of its box as a single over-wide row); a test holds it.
+- Every host modal is centred on one full-screen layer, `overlay()` in
+  `src/views/modals.ts`, which carries `backdrop: 'dim'`: the screen behind a modal
+  keeps its characters and colours and steps back. A new modal uses `overlay()` —
+  do not rebuild the absolute box by hand (there were four copies of it).
   - Rows are cached per message OBJECT (`rowCache`, a WeakMap). It is correct only
     because the chat replaces a message and never mutates one — keep every
     `setMessages` updater that way.

@@ -113,6 +113,24 @@ interface Theme {
   [k: string]: unknown;
 }
 
+// The full-screen layer every host modal is centred on. It paints nothing of its
+// own; `backdrop: 'dim'` (flowtty ≥ 1.0.0-alpha.11) restyles the cells ALREADY
+// painted under it — characters and colours stay, the screen behind the modal steps
+// back. Dim is a flag on a cell, not an opacity, so a modal over a modal (a reminder
+// over the chat) never darkens anything twice.
+const overlay = (width: number, height: number, zIndex = 10) => ({
+  position: 'absolute' as const,
+  top: 0,
+  left: 0,
+  width,
+  height,
+  flexDirection: 'column' as const,
+  justifyContent: 'center' as const,
+  alignItems: 'center' as const,
+  backdrop: 'dim' as const,
+  zIndex,
+});
+
 const SPINNER = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 const spin = (ms: number) => SPINNER[Math.floor(ms / 120) % SPINNER.length];
 const fmtSec = (ms: number) => `${(ms / 1000).toFixed(1)}s`;
@@ -489,18 +507,7 @@ export function renderChatModal({
 
   return h(
     Box,
-    {
-      position: 'absolute',
-      top: 0,
-      left: 0,
-      width,
-      height,
-      flexDirection: 'column',
-      justifyContent: 'center',
-      alignItems: 'center',
-      backgroundColor: undefined,
-      zIndex: 10,
-    },
+    overlay(width, height),
     h(
       Box,
       {
@@ -635,18 +642,7 @@ export function renderLogModal({
   const title = total
     ? `Session log (${start + 1}–${start + visible.length} / ${total})`
     : 'Session log';
-  return h(Box, {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    width,
-    height,
-    flexDirection: 'column',
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: undefined,
-    zIndex: 10,
-  },
+  return h(Box, overlay(width, height),
     h(Box, {
       border: 'double',
       backgroundColor: m.bg,
@@ -682,18 +678,7 @@ export function renderHelp({
 }) {
   if (!helpOpen) return null;
   const m = (theme?.modals ?? {}) as unknown as Record<string, string | undefined>;
-  return h(Box, {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    width,
-    height,
-    flexDirection: 'column',
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: undefined,
-    zIndex: 10,
-  },
+  return h(Box, overlay(width, height),
     h(Box, {
       border: 'double',
       backgroundColor: m.bg,
@@ -732,18 +717,8 @@ export function renderReminder({
   // Size to the text (with a small inset), clamped to the terminal; a short note
   // stays small, a long one wraps rather than growing off-screen.
   const w = Math.min(Math.max(40, [...text].length + 8), width - 8);
-  return h(Box, {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    width,
-    height,
-    flexDirection: 'column',
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: undefined,
-    zIndex: 20,
-  },
+  // Above the other modals: a reminder may fire while the chat is open.
+  return h(Box, overlay(width, height, 20),
     h(Box, {
       border: 'double',
       backgroundColor: m.bg,

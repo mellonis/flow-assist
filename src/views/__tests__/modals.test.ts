@@ -315,3 +315,15 @@ test('a markdown table in an answer is laid out by flowtty, not by the host', ()
   const row = mdLines('| a | b |\n|---|---|\n| lint | **ok** |', 60).find((l) => l.spans.some((s) => s.text === 'ok'));
   expect(row?.spans.find((s) => s.text === 'ok')?.bold).toBe(true);
 });
+
+test('a long line of fenced code wraps to the width — every chat row is one terminal line', () => {
+  // The conversation treats a row's index as its line in the scroll box (the pinned
+  // question depends on it). Before flowtty 1.0.0-alpha.11 a long code line ran out
+  // of its box as ONE over-wide row; now layoutMarkdown hard-wraps it.
+  const long = `const value = ${'x'.repeat(120)};`;
+  const lines = mdLines(`Look:\n\n\`\`\`ts\n${long}\n\`\`\`\n`, 40);
+  const widths = lines.map((l) => Array.from(l.spans.map((s) => s.text).join('')).length);
+  expect(Math.max(...widths)).toBeLessThanOrEqual(40);
+  // Nothing was dropped on the way.
+  expect(lines.map((l) => l.spans.map((s) => s.text).join('')).join('').replace(/\s/g, '')).toContain('x'.repeat(120));
+});
