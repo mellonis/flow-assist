@@ -12,6 +12,8 @@ import { addTrigger, chatUser } from '../loader/registry.js';
 import { bgActiveCount, todoSnapshot } from '../loader/tools-core.js';
 import { apiHistory, compactConversation, chatLanguage } from '../assistant/agent.js';
 import type { ChatMessage } from '../assistant/agent.js';
+import { editorReducer } from '@flowtty/core';
+import { chatFieldWidth } from '../views/modals.js';
 import { askKey, askStart, type AskQuestion, type AskState } from '../assistant/ask.js';
 import { loadMemories, memoryFilePath } from '../runtime/services/memory.js';
 import type { Make } from '../loader/plugin.js';
@@ -204,7 +206,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const historyRef = f.useRef<string[]>([]);
           const histAt = f.useRef<number | null>(null);
           const histShown = f.useRef<string>('');
-          const setField = (t: string) => { setInput(t); inputRef.current = t; setCursor(Array.from(t).length); f.notify(); };
+          const setField = (t: string) => { setInput(t); inputRef.current = t; setCursor(t.length); f.notify(); };
           // Exit «arming» by Esc: 0 — not armed; else ms when the first Esc was pressed.
           // A second Esc within the window closes the chat; any other key disarms.
           const [escArmAt, setEscArmAt] = f.useState(0);
@@ -772,7 +774,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               }
               if (pendingRef.current) {
                 if (key.name === 'escape' || key.name === 'n') { settleConfirm(false); return true; }
-                if (key.name === 'y' || key.name === 'enter' || key.name === 'return') { settleConfirm(true); return true; }
+                if (key.name === 'y' || key.name === 'return') { settleConfirm(true); return true; }
                 return true;
               }
               // Any key except the second Esc disarms the exit.
@@ -815,7 +817,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                     const nxt = (idx + 1) % matches.length;
                     const newText = `/${matches[nxt]}${suffix}`;
                     setInput(newText); inputRef.current = newText;
-                    setCursor(Array.from(newText).length);
+                    setCursor(newText.length);
                     tabRef.current = { base, idx: nxt, cmd: matches[nxt] };
                     f.notify();
                     return true;
@@ -824,19 +826,38 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 tabRef.current = null;
                 return true;
               }
-              // ── Shift+Enter / Alt+Enter — a newline in the input; Enter — send.
-              if ((key.name === 'enter' || key.name === 'return') && (key.shift || key.meta)) {
-                const chars = Array.from(inputRef.current);
-                const at = cursorRef.current;
-                chars.splice(at, 0, '\n');
-                const next = chars.join('');
-                setInput(next); inputRef.current = next;
-                setCursor(at + 1);
-                disarmEsc();
-                f.notify();
-                return true;
+              // ── ↑/↓ — prompt history, but only while the field is empty or still shows
+              // the history entry untouched; in a draft they move the caret between its
+              // rows (the editor below), so a draft is never replaced.
+              if (key.name === 'up' || key.name === 'down') {
+                const hist = historyRef.current;
+                const untouched = inputRef.current === '' || (histAt.current != null && inputRef.current === histShown.current);
+                if (untouched) {
+                  if (!hist.length) return true;
+                  const at = histAt.current;
+                  const next = key.name === 'up' ? (at == null ? hist.length - 1 : Math.max(0, at - 1)) : (at == null ? null : at + 1 >= hist.length ? null : at + 1);
+                  histAt.current = next;
+                  histShown.current = next == null ? '' : hist[next]!;
+                  setField(histShown.current);
+                  return true;
+                }
               }
-              if (key.name === 'enter' || key.name === 'return') {
+              // Ctrl+r — fold/unfold the model's «thinking».
+              if (key.name === 'r' && key.ctrl) { setShowReasoning(v => !v); return true; }
+              // PgUp/PgDn and the wheel belong to the conversation's own scroll box (the
+              // view's <ScrollBox> hears them itself).
+              // ── Everything else is EDITING, and that is flowtty's editor reducer: caret
+              // motion by character, word and visual row, Home/End and the kill bindings
+              // per line, a paste going in as ONE key with its line breaks kept (so a
+              // pasted newline does not send and pasted letters fire no binding), and
+              // the newline keys — Shift+Enter, Alt+Enter, backslash-then-Enter. It says
+              // `submit` for a plain Enter; what that means here is the chat's business.
+              const act = editorReducer(
+                { value: inputRef.current, cursor: cursorRef.current },
+                key as Parameters<typeof editorReducer>[1],
+                { multiline: true, width: chatFieldWidth(width) },
+              );
+              if (act.kind === 'submit') {
                 const cmd = inputRef.current.trim();
                 disarmEsc();
                 if (cmd.startsWith('/')) runChatCommand(cmd.slice(1));
@@ -846,73 +867,11 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 } else send();
                 return true;
               }
-              // ── ↑/↓ — prompt history. Only while the field is empty or still shows
-              // the history entry untouched; a draft is never replaced.
-              if (key.name === 'up' || key.name === 'down') {
-                const hist = historyRef.current;
-                const untouched = inputRef.current === '' || (histAt.current != null && inputRef.current === histShown.current);
-                if (!hist.length || !untouched) return true;
-                const at = histAt.current;
-                const next = key.name === 'up' ? (at == null ? hist.length - 1 : Math.max(0, at - 1)) : (at == null ? null : at + 1 >= hist.length ? null : at + 1);
-                histAt.current = next;
-                histShown.current = next == null ? '' : hist[next]!;
-                setField(histShown.current);
-                return true;
-              }
-              // PgUp/PgDn and the wheel belong to the conversation's own scroll box (the
-              // view's <ScrollBox> hears them itself); the arrows belong to history.
-              // Ctrl+r — fold/unfold the model's «thinking».
-              if (key.name === 'r' && key.ctrl) { setShowReasoning(v => !v); return true; }
-              // ── caret movement in the input field (codepoint index) ──
-              if (key.name === 'left') { setCursor(c => Math.max(0, c - 1)); return true; }
-              if (key.name === 'right') { setCursor(c => Math.min(Array.from(inputRef.current).length, c + 1)); return true; }
-              if (key.name === 'home') { setCursor(0); return true; }
-              if (key.name === 'end') { setCursor(Array.from(inputRef.current).length); return true; }
-              // Readline emulation: Ctrl+A/Ctrl+E — start/end of line (like a shell).
-              if (key.name === 'a' && key.ctrl) { setCursor(0); return true; }
-              if (key.name === 'e' && key.ctrl) { setCursor(Array.from(inputRef.current).length); return true; }
-              // ── deletion by caret: Backspace — char BEFORE the caret, Delete — UNDER it.
-              if (key.name === 'backspace' || key.name === 'delete') {
-                const chars = Array.from(inputRef.current);
-                const at = cursorRef.current;
-                if (key.name === 'backspace') {
-                  if (at <= 0) return true;
-                  chars.splice(at - 1, 1);
-                  setCursor(at - 1);
-                } else {
-                  if (at >= chars.length) return true;
-                  chars.splice(at, 1);
-                  setCursor(at);
-                }
-                const next = chars.join('');
-                setInput(next); inputRef.current = next;
-                return true;
-              }
-              // ── A paste is ONE key carrying its text (bracketed paste): it goes in at
-              // the caret with its line breaks kept. It is never decoded into keys, so
-              // a pasted newline does not send and pasted letters fire no binding.
-              if (key.name === 'paste') {
-                const text = String((key as { text?: string }).text ?? '').replace(/\r\n?/g, '\n');
-                if (!text) return true;
-                const chars = Array.from(inputRef.current);
-                const at = cursorRef.current;
-                const pasted = Array.from(text);
-                chars.splice(at, 0, ...pasted);
-                const next = chars.join('');
-                setInput(next); inputRef.current = next;
-                setCursor(at + pasted.length);
-                tabRef.current = null;
-                return true;
-              }
-              if (key.name && key.name.length === 1 && !key.ctrl && !key.meta) {
-                const ch = key.shift ? key.name.toUpperCase() : key.name;
-                const chars = Array.from(inputRef.current);
-                const at = cursorRef.current;
-                chars.splice(at, 0, ch);
-                const next = chars.join('');
-                setInput(next); inputRef.current = next;
-                setCursor(at + 1);
-                return true;
+              if (act.kind === 'edit') {
+                if (act.state.value !== inputRef.current) { tabRef.current = null; disarmEsc(); }
+                setInput(act.state.value); inputRef.current = act.state.value;
+                setCursor(act.state.cursor); cursorRef.current = act.state.cursor;
+                f.notify();
               }
               return true;
             },

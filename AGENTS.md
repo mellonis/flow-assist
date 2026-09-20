@@ -125,8 +125,8 @@ same reason: a display-only system message never reaches the model.
   the turn ends). **Esc**: clear the field → take the last queued message back →
   stop the answer → arm/close. **Alt+⏎** is a newline (`NEWLINE_KEY` in
   `src/views/modals.ts` — the one spelling every hint uses); a blank line is kept.
-  ⇧⏎ is not offered: flowtty's decoder does not turn the CSI-u / modifyOtherKeys
-  form into `return`+`shift`, so in a real terminal it never arrives as Enter.
+  ⇧⏎ works too where the terminal sends it (decoded since flowtty 1.0.0-alpha.7),
+  but the hint names the key that works in every terminal that has an Alt.
 - **Key names are the decoder's, not friendly ones**: Enter is `'return'`, the space
   bar is `' '`, a colon is `':'`. There is no `'enter'`, `'space'` or `'colon'` — a
   branch or a test helper matching on those tests a keyboard no terminal has.
@@ -180,12 +180,24 @@ same reason: a display-only system message never reaches the model.
     not an overlay: in flowtty 1.0.0-alpha.7 an absolute child of a `<ScrollBox>` (and
     its `scrollbar`) is not drawn when any ancestor has `padding`. It is not pinned
     when the box has fewer than `MIN_ROWS_TO_PIN` rows.
-- The input field is still hand-written. flowtty's `editorReducer` / `<TextArea>`
-  replace it, but NOT at 1.0.0-alpha.7: there the caret moves by UTF-16 unit and
-  tears an emoji in two on backspace, an astral character cannot be typed, and a
-  paste keeps `\r`. Fixed upstream, unreleased — adopt the pure parts
-  (`editorReducer`, `inputRows`, `caretPosition`) once a fixed version is out; the
-  host has ONE key dispatcher, so a mounted `<TextArea>` would be a second listener.
+- The field's EDITING is flowtty's `editorReducer` (`multiline`, ≥ 1.0.0-alpha.8),
+  called from the chat's key handler after the chat's own keys (Esc ladder, Tab
+  completion, history, ^r); its geometry (`inputRows`, `caretPosition`) draws the
+  rows in `inputVisualRows`. So caret motion by character / word / visual row,
+  Home/End and the kill bindings per line, paste and the newline keys are NOT host
+  code — do not re-add branches for them. The reducer answers `submit` for a plain
+  Enter; what submit means (send, queue, run a `/command`) stays here.
+  - `<TextArea>` itself is not mounted: the host has ONE key dispatcher
+    (`useInputHandler`), and a mounted field would be a second listener.
+  - The caret (`cursor`) is a **UTF-16 index into the value, resting on a code-point
+    boundary** — flowtty's unit. `value.slice(0, cursor)` works; `Array.from(value)`
+    indices do not. Columns are counted in characters.
+  - Newline keys: **Alt+⏎** (what the hints name), Shift+⏎ where the terminal sends
+    it, and backslash-then-⏎, which works everywhere.
+  - In a draft ↑/↓ move the caret between rows; they walk history only while the
+    field is empty or shows an untouched history entry.
+  - `chatFieldWidth(width)` is the one place the field's width is computed — the
+    view and the key handler must agree on it, or ↑/↓ land in the wrong column.
 
 ## CLI
 

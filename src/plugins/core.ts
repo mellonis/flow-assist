@@ -91,7 +91,7 @@ export function buildCorePlugin({ renders, config, make }: BuildCoreParams): Plu
             priority: (ui) => (ui.cmdOpen || ui.welcome) ? 0 : (helpModal ? 100 : 0),
             handler: (key) => {
               if (!helpModal) return false;
-              if (key.name === 'escape' || key.name === 'enter' || key.name === 'return' || key.name === 'q' || key.name === 'l') setHelpModal(false);
+              if (key.name === 'escape' || key.name === 'return' || key.name === 'q' || key.name === 'l') setHelpModal(false);
               return true;
             },
           });
@@ -117,7 +117,7 @@ export function buildCorePlugin({ renders, config, make }: BuildCoreParams): Plu
             priority: () => (active ? 200 : 0),
             handler: (key) => {
               if (!active) return false;
-              if (key.name === 'escape' || key.name === 'enter' || key.name === 'return') {
+              if (key.name === 'escape' || key.name === 'return') {
                 sx.dismissReminder?.();
                 return true;
               }

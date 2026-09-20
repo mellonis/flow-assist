@@ -391,3 +391,99 @@ test('a background result does not open the chat — the footer says it is waiti
   expect(ui.backend.lastFrame).not.toMatch(/◆ \d+ new/);
   ui.app.unmount();
 });
+
+// ── The field's editing is flowtty's editor reducer. These pin what the chat relies
+// on from it, through the real key path, so a flowtty upgrade that changes any of it
+// fails here and not in somebody's terminal.
+const fieldText = (ui: { backend: { lastFrame: string } }) =>
+  (ui.backend.lastFrame.split('\n').filter((r) => r.includes('› ')).at(-1) ?? '').replace(/^.*› /, '').replace(/\s*│\s*$/, '');
+
+test('an emoji is one character: the caret steps over it and backspace removes it whole', async () => {
+  const model = new ScriptedModel();
+  model.script([{ text: 'ok' }]);
+  const ui = await bootApp(model, 100, 24);
+  await ui.press('A');
+  paste(ui, 'a😀b');
+  await settle();
+  await ui.press('left'); // before "b"
+  await ui.press('backspace'); // the whole emoji goes — not half of a surrogate pair
+  expect(fieldText(ui)).toBe('ab');
+  await ui.press('return');
+  await settle(14);
+  // What reached the model is the clean string, with no lone surrogate in it.
+  expect(model.requests[0]!.messages.at(-1)).toMatchObject({ role: 'user', content: 'ab' });
+  ui.app.unmount();
+});
+
+test('an emoji can be typed, and a pasted CR never reaches the message', async () => {
+  const model = new ScriptedModel();
+  model.script([{ text: 'ok' }]);
+  const ui = await bootApp(model, 100, 24);
+  await ui.press('A');
+  await ui.press('😀');
+  paste(ui, 'one\r\ntwo\rthree');
+  await settle();
+  await ui.press('return');
+  await settle(14);
+  expect(model.requests[0]!.messages.at(-1)).toMatchObject({ role: 'user', content: '😀one\ntwo\nthree' });
+  ui.app.unmount();
+});
+
+test('every newline key starts a new line, and none of them sends', async () => {
+  const model = new ScriptedModel();
+  model.script([{ text: 'ok' }]);
+  const ui = await bootApp(model, 100, 24);
+  await ui.press('A');
+  await ui.type('a');
+  ui.backend.press({ name: 'return', meta: true }); // Alt+Enter — what the hint names
+  await settle();
+  await ui.type('b');
+  ui.backend.press({ name: 'return', shift: true }); // Shift+Enter, where the terminal sends it
+  await settle();
+  await ui.type('c\\');
+  await ui.press('return'); // backslash-then-Enter: works in every terminal
+  await ui.type('d');
+  expect(model.requests).toHaveLength(0);
+  await ui.press('return');
+  await settle(14);
+  expect(model.requests[0]!.messages.at(-1)).toMatchObject({ role: 'user', content: 'a\nb\nc\nd' });
+  ui.app.unmount();
+});
+
+test('in a draft ↑/↓ move the caret between its rows; history is for an empty field', async () => {
+  const model = new ScriptedModel();
+  model.script([{ text: 'one.' }], [{ text: 'two.' }]);
+  const ui = await bootApp(model, 100, 26);
+  await ui.press('A');
+  await ui.type('earlier prompt');
+  await ui.press('return');
+  await settle(14);
+
+  paste(ui, 'top\nbottom');
+  await settle();
+  await ui.press('up'); // to the row above — NOT the history entry
+  expect(ui.backend.lastFrame).not.toContain('› earlier prompt\n');
+  await ui.type('!'); // lands on the first row, at the column the caret kept
+  await ui.press('return');
+  await settle(14);
+  expect(model.requests[1]!.messages.at(-1)).toMatchObject({ role: 'user', content: 'top!\nbottom' });
+  ui.app.unmount();
+});
+
+test('readline keys work in the field: word delete, kill to the line start', async () => {
+  const model = new ScriptedModel();
+  model.script([{ text: 'ok' }]);
+  const ui = await bootApp(model, 100, 24);
+  await ui.press('A');
+  await ui.type('keep this drop');
+  ui.backend.press({ name: 'w', ctrl: true }); // delete the word before the caret
+  await settle();
+  expect(fieldText(ui)).toBe('keep this');
+  ui.backend.press({ name: 'u', ctrl: true }); // kill to the start of the line
+  await settle();
+  await ui.type('fresh');
+  await ui.press('return');
+  await settle(14);
+  expect(model.requests[0]!.messages.at(-1)).toMatchObject({ role: 'user', content: 'fresh' });
+  ui.app.unmount();
+});

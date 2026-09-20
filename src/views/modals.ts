@@ -25,7 +25,8 @@ import {
   ScrollBox,
   Text,
   layoutMarkdown,
-  splitVisualLines,
+  caretPosition,
+  inputRows,
   windowAround,
   type ScrollBoxHandle,
   type ScrollMetrics,
@@ -137,57 +138,32 @@ export function mdLines(text: string | null | undefined, wrap: number): Line[] {
 }
 
 // ─── Multiline input field with caret ─────────────────────────────────────────
-// splitVisualLines gives visual lines (wrapped by width) but not the caret position.
-// inputVisualRows finds the visual line + column the codepoint caret index falls into
-// and returns rows: exactly one with `{ before, caret, after }`, the rest blank caret.
-// Each row is already ≤ fieldW cells, so rendering as-is matches measurement.
+// The field's visual rows, exactly one of them carrying the caret as
+// `{ before, caret, after }`. The geometry is flowtty's (`inputRows` +
+// `caretPosition`, ≥ 1.0.0-alpha.8) — the same functions its editor reducer moves
+// the caret with, so what up/down do and what is drawn cannot drift apart. `cur` is a
+// UTF-16 index into `input` resting on a code-point boundary; the column is counted
+// in characters, the grid's unit, so the caret cell holds a whole emoji.
+export const CHAT_FIELD_MIN = 20;
+// The field's width for a terminal `width` columns wide — shared with the key
+// handler, which needs it for up/down across wrapped rows.
+export function chatBoxWidth(width: number): number {
+  return Math.min(width - 4, Math.max(90, Math.floor(width * 0.88)));
+}
+export function chatFieldWidth(width: number): number {
+  return Math.max(CHAT_FIELD_MIN, chatBoxWidth(width) - 4 - GUTTER);
+}
 export function inputVisualRows(input: string, cur: number, fieldW: number): { before: string; caret: string; after: string }[] {
-  const lines = splitVisualLines(input || '', 'wrap', Math.max(1, fieldW)) as { text: string; lineNum: number | null }[];
-  if (!lines.length) lines.push({ text: '', lineNum: null });
-  // Codepoint-start of each visual line in the input. splitVisualLines splits by '\n'
-  // and by width; segments of one physical paragraph are contiguous, and between
-  // paragraphs (lineNum becomes non-zero) there was exactly one '\n'.
-  let para = lines[0]?.lineNum ?? 1;
-  let paraStart = 0;
-  let paraLen = 0;
-  const start: number[] = [];
-  for (let i = 0; i < lines.length; i++) {
-    const ownPara = lines[i].lineNum;
-    if (ownPara != null && ownPara !== para) {
-      paraStart += paraLen + 1;
-      para = ownPara;
-      paraLen = 0;
-    }
-    start[i] = paraStart + paraLen;
-    paraLen += lines[i].text.length;
-  }
-  let caretLi = lines.length - 1;
-  let caretOff = Array.from(lines[lines.length - 1].text).length;
-  for (let li = 0; li < lines.length; li++) {
-    const s = start[li];
-    const e = s + lines[li].text.length;
-    const last = li === lines.length - 1;
-    // The caret stays at the END of a line when a newline follows it (the next row
-    // starts a new paragraph) — that is also what lets it stand on a blank line,
-    // whose start equals its end. Only at a soft wrap does it open the next row.
-    const newlineFollows = !last && start[li + 1] > e;
-    if (cur < e || (cur === e && newlineFollows) || (last && cur >= s)) {
-      caretLi = li;
-      caretOff = Math.max(0, Math.min(lines[li].text.length, cur - s));
-      break;
-    }
-  }
-  return lines.map((line, li) => {
-    if (li !== caretLi) return { before: line.text, caret: '', after: '' };
-    const chars = Array.from(line.text);
-    const cg = chars[caretOff];
-    return {
-      before: chars.slice(0, caretOff).join(''),
-      caret: cg !== undefined ? cg : ' ',
-      after: chars.slice(caretOff + (cg !== undefined ? 1 : 0)).join(''),
-    };
+  const w = Math.max(1, fieldW);
+  const rows = inputRows(input || '', w, cur);
+  const at = caretPosition(input || '', cur, w);
+  return rows.map((r, i) => {
+    if (i !== at.row) return { before: r.text, caret: '', after: '' };
+    const chars = Array.from(r.text);
+    return { before: chars.slice(0, at.col).join(''), caret: chars[at.col] ?? ' ', after: chars.slice(at.col + 1).join('') };
   });
 }
+
 
 // ─── Chat rows ─────────────────────────────────────────────────────────────────
 // Flatten messages into one list of visual rows: a role label, markdown content
@@ -451,11 +427,11 @@ export function renderChatModal({
   bgCount?: number;
   todo?: PlanItem[] | null;
 }) {
-  const boxW = Math.min(width - 4, Math.max(90, Math.floor(width * 0.88)));
+  const boxW = chatBoxWidth(width);
   const boxH = Math.min(Math.floor(height * 0.82), height - 4);
   const wrap = Math.max(20, boxW - 6);
   const m = (theme?.modals?.chat ?? {}) as Record<string, string | undefined>;
-  const fieldW = Math.max(20, boxW - 4 - GUTTER); // the prompt lives in the gutter
+  const fieldW = chatFieldWidth(width); // the prompt lives in the gutter
   const fieldRows = inputVisualRows(input, cursor, fieldW);
   const caretLi = Math.max(0, fieldRows.findIndex((r) => r.caret !== ''));
   const MAX_INPUT_LINES = 5;
@@ -487,7 +463,7 @@ export function renderChatModal({
   // caret is at the end of a one-line `/command` — there is nothing to continue
   // from the middle of a word.
   const suggestion = completions?.matches[completions.sel] ?? '';
-  const atEnd = cursor >= Array.from(input).length;
+  const atEnd = cursor >= input.length;
   const ghost = suggestion && atEnd && !input.includes('\n') ? suggestion.slice(input.length - 1) : '';
   const others = completions && atEnd ? completions.matches.filter((_, i) => i !== completions.sel) : [];
   const confirmAsk = pendingConfirm
