@@ -3,7 +3,7 @@ import { createElement as h } from 'react';
 import { render } from '@flowtty/react';
 import { TestBackend } from '@flowtty/core/testing';
 import { MODAL_COLOR_DEFAULTS } from '../../playback/theme.js';
-import { inputVisualRows, renderChatModal, renderHelp, renderLogModal, renderReminder } from '../modals.js';
+import { inputVisualRows, mdLines, renderChatModal, renderHelp, renderLogModal, renderReminder } from '../modals.js';
 
 // Task #20: the built-in modal renderers were deferred to an "empty-shell"
 // integration test; here we drive them directly so the chat/help/log surfaces are
@@ -279,4 +279,22 @@ test('the input keeps a blank line, and the caret can stand on it', () => {
   // A wrapped paragraph is unchanged: at the wrap point the caret opens the next row.
   const wrapped = inputVisualRows('aaaa bbbb', 5, 5);
   expect(caretRow(wrapped)).toBe(1);
+});
+
+test('a markdown table in an answer is laid out by flowtty, not by the host', () => {
+  // The host used to re-write GFM tables itself because layoutMarkdown did not
+  // understand them. It does now — with a ruled separator and inline markup inside
+  // cells — so the host's own layout is gone and this pins flowtty's.
+  const text = (md: string) => mdLines(md, 60).map((l) => l.spans.map((s) => s.text).join(''));
+  const lines = text('Result:\n\n| check | state |\n|---|---|\n| lint | ✅ **ok** |\n| tests | ❌ 2 failed |\n\nDone.');
+  expect(lines).toContain('check  state');
+  expect(lines.some((l) => /^─+\s+─+$/.test(l))).toBe(true);
+  expect(lines).toContain('lint   ✅ ok');
+  expect(lines).toContain('tests  ❌ 2 failed');
+  // Text around the table is still there, in order.
+  expect(lines.indexOf('Result:')).toBeLessThan(lines.indexOf('check  state'));
+  expect(lines.indexOf('Done.')).toBeGreaterThan(lines.indexOf('tests  ❌ 2 failed'));
+  // The bold inside a cell survives as a bold span.
+  const row = mdLines('| a | b |\n|---|---|\n| lint | **ok** |', 60).find((l) => l.spans.some((s) => s.text === 'ok'));
+  expect(row?.spans.find((s) => s.text === 'ok')?.bold).toBe(true);
 });

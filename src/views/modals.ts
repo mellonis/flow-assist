@@ -24,7 +24,6 @@ import {
   Box,
   Text,
   layoutMarkdown,
-  parseInline,
   splitVisualLines,
   windowAround,
 } from '@flowtty/react';
@@ -113,90 +112,13 @@ const SPINNER = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', 
 const spin = (ms: number) => SPINNER[Math.floor(ms / 120) % SPINNER.length];
 const fmtSec = (ms: number) => `${(ms / 1000).toFixed(1)}s`;
 
-// ─── Markdown → styled lines (GFM tables handled before layoutMarkdown) ────────
-// layoutMarkdown does not understand GFM pipe tables (their rows collapse into one
-// line with literal `|`), so a table block is re-written into column-aligned lines
-// that it then leaves alone. Each cell runs through parseInline, so bold/code/emoji
-// inside a cell render like the rest of the text.
-function parseTableRow(line: string): string[] {
-  const parts = line.split('|');
-  if (parts[0]?.trim() === '') parts.shift();
-  if (parts[parts.length - 1]?.trim() === '') parts.pop();
-  return parts.map((s) => s.trim());
-}
-const cellSegs = (t: unknown): Span[] => parseInline(String(t ?? '')) as unknown as Span[];
-const segWidth = (segs: Span[]) => segs.reduce((n, s) => n + [...s.text].length, 0);
-function tableBlockAt(lines: string[], i: number, wrap: number): { lines: Line[]; end: number } | null {
-  if (i + 1 >= lines.length) return null;
-  const header = lines[i];
-  const sepRow = lines[i + 1];
-  if (!header.includes('|')) return null;
-  if (!/^\s*\|?[\s:|-]+\|?\s*$/.test(sepRow) || !sepRow.includes('-')) return null;
-  let end = i;
-  const rows: string[][] = [];
-  while (end < lines.length && lines[end].includes('|') && lines[end].trim() !== '') {
-    rows.push(parseTableRow(lines[end]));
-    end++;
-  }
-  if (rows.length < 2) return null;
-  const body = rows.slice(0, 1).concat(rows.slice(2));
-  const cols = Math.max(1, ...body.map((r) => r.length));
-  const widths: number[] = [];
-  for (let c = 0; c < cols; c++) widths[c] = Math.max(...body.map((r) => segWidth(cellSegs(r[c]))));
-  let totalW = widths.reduce((a, b) => a + b, 0) + (cols - 1) * 2 + 2;
-  for (let guard = 0; guard < 1000 && totalW > wrap; guard++) {
-    const widest = widths.indexOf(Math.max(...widths));
-    widths[widest] = Math.max(3, widths[widest] - 1);
-    totalW = widths.reduce((a, b) => a + b, 0) + (cols - 1) * 2 + 2;
-  }
-  const padTo = (segs: Span[], w: number): Span[] => {
-    const cur = segWidth(segs);
-    if (cur > w) {
-      let need = w;
-      const out: Span[] = [];
-      for (const s of segs) {
-        if (need <= 0) break;
-        const take = s.text.slice(0, need);
-        out.push({ ...s, text: take });
-        need -= take.length;
-      }
-      return out;
-    }
-    return [...segs, { text: ' '.repeat(w - cur) }];
-  };
-  const renderRow = (r: unknown[]): Line => {
-    const out: Span[] = [];
-    for (let c = 0; c < cols; c++) {
-      out.push(...padTo(cellSegs(r[c]), widths[c]));
-      if (c < cols - 1) out.push({ text: '  ' });
-    }
-    return { spans: out };
-  };
-  const out: Line[] = [];
-  out.push(renderRow(body[0] ?? []));
-  out.push({ spans: [{ text: ' ' }, ...widths.map((w) => ({ text: '-'.repeat(w), dim: true })).flatMap((s, ci) => (ci ? [{ text: '  ' }, s] : [s]))] });
-  for (let r = 1; r < body.length; r++) out.push(renderRow(body[r] ?? []));
-  return { lines: out, end };
-}
-
+// ─── Markdown → styled lines ──────────────────────────────────────────────────
+// flowtty's layoutMarkdown does the whole layout, GFM tables included; the host
+// only softens the heading marker below.
 export function mdLines(text: string | null | undefined, wrap: number): Line[] {
   if (!text) return [{ spans: [] }];
   try {
-    const hasTable = text.includes('|');
-    const lines = text.split('\n');
-    const out: Line[] = [];
-    let i = 0;
-    while (i < lines.length) {
-      const tbl = hasTable ? tableBlockAt(lines, i, wrap) : null;
-      if (tbl) {
-        for (const l of tbl.lines) out.push({ spans: l.spans });
-        i = tbl.end;
-      } else {
-        const run: string[] = [];
-        while (i < lines.length && !(hasTable && tableBlockAt(lines, i, wrap))) { run.push(lines[i]); i++; }
-        if (run.some((s) => s.trim() !== '')) for (const line of layoutMarkdown(run.join('\n'), wrap)) out.push(line as Line);
-      }
-    }
+    const out = layoutMarkdown(text, wrap) as Line[];
     // Quiet the `###`-heading noise: layoutMarkdown renders them as dim-`###` + bold
     // colored text. Replace the hashes with a soft `▍` marker instead.
     return out.map((r) => {
