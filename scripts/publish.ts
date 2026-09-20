@@ -1,5 +1,5 @@
 // Plugin publishing for the distribution layer.
-// `publishPlugin` tars a plugin's available dir and uploads it to a GitLab Generic
+// `publishPlugin` builds and packs a plugin (see "What a published plugin is") and uploads it to a GitLab Generic
 // Packages Registry so the host (`fetchPluginFromRegistry`) can download it
 // for `install`/`update`. Both the registry URL and the transport (`upload`) are
 // injectable so the module is testable offline; production wires a
@@ -14,9 +14,9 @@
 // by the unit test.
 
 import { execSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 
 // No built-in registry: FLOW_ASSIST_PLUGIN_REGISTRY_URL / FLOW_ASSIST_PLUGIN_REGISTRY_PROJECT (or the
 // matching options) must name one, mirroring src/loader/registry-download.ts.
@@ -34,6 +34,8 @@ export interface PublishOptions {
   // `file` is the path to the built `{name}-{version}.tar.gz`. Defaults to a
   // `curl --upload-file` invocation via `node:child_process`.
   upload?: (url: string, file: string) => void | Promise<void>;
+  // Inject the build runner (test-only). Defaults to running the command in `cwd`.
+  run?: (cmd: string, cwd: string) => void;
 }
 
 export interface PublishResult {
@@ -60,6 +62,53 @@ function readVersion(manifestPath: string): string {
   throw new Error(
     `cannot determine version for plugin — no version arg and no valid version in ${manifestPath}`,
   );
+}
+
+// ─── What a published plugin is ────────────────────────────────────────────────
+// A published plugin ships NO `node_modules`. If it has dependencies it is BUILT
+// first — its own `build` script bundles them into the one file `package.json`'s
+// `main` names (React and flowtty stay external: the host provides them) — and the
+// archive holds the manifest, package.json, the built entry's directory and the
+// licence/readme. The host's loader already prefers `main` and only falls back to
+// `src/` when it is missing.
+//
+// This is not a size optimisation. A `bun build --compile` host cannot import an
+// on-disk package whose package.json has `exports` (see AGENTS.md, Stack), so a
+// plugin installed WITH its node_modules is skipped by the single binary; a bundled
+// one loads and renders. It also keeps a symlinked `file:` dependency — a path that
+// exists on the author's machine only — out of the archive.
+const NEVER_SHIPPED = ['node_modules', '__tests__', 'bun.lock', 'package-lock.json', 'tsconfig.json'];
+
+export interface PackResult { ok: boolean; error?: string; built?: boolean; shipped?: string[] }
+
+export function packPlugin(pluginDir: string, tarPath: string, run: (cmd: string, cwd: string) => void = (cmd, cwd) => { execSync(cmd, { cwd, stdio: 'inherit' }); }): PackResult {
+  const pkgFile = join(pluginDir, 'package.json');
+  const pkg = existsSync(pkgFile)
+    ? (JSON.parse(readFileSync(pkgFile, 'utf8')) as { main?: string; scripts?: Record<string, string>; dependencies?: Record<string, string> })
+    : {};
+  const deps = Object.keys(pkg.dependencies ?? {});
+  const hasBuild = !!pkg.scripts?.build;
+  if (deps.length && !hasBuild) {
+    return { ok: false, error: `plugin has dependencies (${deps.join(', ')}) but no "build" script — a published plugin ships no node_modules, so they must be bundled into its "main"` };
+  }
+  if (hasBuild) {
+    try { run('bun run build', pluginDir); } catch (e) { return { ok: false, error: `build failed: ${(e as Error).message}` }; }
+    if (!pkg.main || !existsSync(join(pluginDir, pkg.main))) {
+      return { ok: false, error: `build did not produce package.json "main" (${pkg.main ?? 'unset'})` };
+    }
+  }
+  // A built plugin ships its build, not the sources it was built from — with both
+  // present an install would work by accident if the build were broken.
+  const skip = [...NEVER_SHIPPED, ...(hasBuild ? ['src'] : [])];
+  // Dotfiles (.gitignore, .env, editor folders) are the author's, not the plugin's.
+  const shipped = readdirSync(pluginDir).filter((entry) => !entry.startsWith('.') && !skip.includes(entry)).sort();
+  const name = basename(pluginDir);
+  try {
+    execSync(`tar -czf ${shq(tarPath)} -C ${shq(dirname(pluginDir))} ${shipped.map((e) => shq(join(name, e))).join(' ')}`);
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+  return { ok: true, built: hasBuild, shipped };
 }
 
 export async function publishPlugin(opts: PublishOptions): Promise<PublishResult> {
@@ -91,8 +140,9 @@ export async function publishPlugin(opts: PublishOptions): Promise<PublishResult
   try {
     const tmp = mkdtempSync(join(tmpdir(), 'fa-pk-'));
     tarPath = join(tmp, filename);
-    // Archive the plugin dir as a top-level `<name>/` into the tarball.
-    execSync(`tar -czf ${shq(tarPath)} -C ${shq(availableDir)} ${shq(name)}`);
+    // The archive holds a top-level `<name>/` — built, and without node_modules.
+    const packed = packPlugin(join(availableDir, name), tarPath, opts.run);
+    if (!packed.ok) return { ok: false, error: packed.error };
   } catch (e) {
     return { ok: false, error: (e as Error).message };
   }

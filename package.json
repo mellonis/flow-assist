@@ -7,7 +7,7 @@
   },
   "scripts": {
     "build": "tsc",
-    "build:binary": "echo 'build:binary is not shipped: in a bun build --compile binary (Bun 1.3.14) a runtime import of an on-disk package whose package.json has an \"exports\" field fails with Cannot find module, so an on-disk plugin with such a dependency is skipped. See AGENTS.md (Stack). Run the TUI via bun src/cli.ts.' && bun run typecheck",
+    "build:binary": "bun build --compile src/cli.ts --outfile dist/flow-assist",
     "plugin:publish": "bun run scripts/publish.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test"

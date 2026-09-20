@@ -18,17 +18,22 @@ English throughout; a half-translated screen is worse than either language.
 
 - TypeScript **7.0.2** (native `tsc`), module `NodeNext`, target `ES2022`, `strict`.
 - Bun **1.3.x** — `bun run`, `bun test`. The TUI runs as `bun src/cli.ts`.
-  **A `bun build --compile` binary is not shipped**, for one measured reason (Bun
-  1.3.14, probed 2026-09-21): inside a compiled binary, a runtime `import()` of an
-  on-disk package fails with "Cannot find module" when that package's `package.json`
-  has an **`exports`** field — scoped or not, string or conditions. A package with
-  only `main` resolves, and so does a deep path into the same package. Nearly every
-  npm package uses `exports`, so an on-disk plugin with any dependency that is not
-  already inside the binary is skipped (`acme-tracker` → `@acme/client`). What
-  DOES work in the binary: the CLI, the host itself, a plugin with no dependencies
-  or `main`-only ones. It is NOT a two-React problem — plugins take hooks from `ft`
-  and import only types from React. Re-probe on a Bun upgrade; if it is fixed, the
-  single binary is back on the table.
+  **A `bun build --compile` binary WORKS, given plugins are shipped BUILT** (probed
+  end to end on Bun 1.3.14, 2026-09-21: pack → install → the compiled host draws the
+  tracker's board). The one limit: inside a compiled binary a runtime `import()` of
+  an on-disk package fails with "Cannot find module" when that package's
+  `package.json` has an **`exports`** field — scoped or not, string or conditions
+  (`main`-only packages and deep paths resolve). So a plugin run from SOURCE with its
+  own `node_modules` is skipped by the binary; a plugin bundled into one file has no
+  on-disk package left to resolve, and loads. It was never a two-React problem —
+  plugins take hooks from `ft` and import only types from React.
+- **A published plugin ships no `node_modules`** (`packPlugin` in
+  `scripts/publish.ts`). With dependencies it must have a `build` script that bundles
+  them into `package.json`'s `main` (React and flowtty external — the host provides
+  them); publishing runs it and ships the build without `src/`. No dependencies →
+  the sources ship as they are. Dependencies and no `build` → publishing refuses. The
+  loader takes `main` first and falls back to `src/` only when it is missing, which
+  is what a working copy in `plugins-available/` relies on.
 - React 19 + `@flowtty/react` / `@flowtty/tty-backend`, zod 4.
 
 ## Repos
