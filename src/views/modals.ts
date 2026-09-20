@@ -307,16 +307,10 @@ function ChatMessages({ messages, wrap, showReasoning, palette: m, errorColor }:
     if (messages[mi]?.role === 'user') { lastUserText = String(messages[mi]!.content ?? '').trim(); break; }
   }
   // Every row is one terminal line, so a row's index is its line in the content. The
-  // last question is pinned above the box while it is scrolled out of view. (Pinning
-  // takes a row from the box, which only moves its top further down — so it cannot
-  // flip back and forth.)
-  // …and only while the conversation has rows to spare: on a short screen the pin
-  // would take the one row the newest answer has. `room` is the box's height with the
-  // pin's own row given back, so the decision does not depend on its own outcome.
-  const wasPinned = useRef(false);
-  const room = (view?.height ?? 0) + (wasPinned.current ? 1 : 0);
-  const pinned = !!view && room >= MIN_ROWS_TO_PIN && lastUserKey >= 0 && (lastUserKey < view.top || lastUserKey >= view.top + view.height);
-  wasPinned.current = pinned;
+  // last question is pinned over the box's top row while it is scrolled out of view —
+  // but only while the conversation has rows to spare: on a short screen the pin
+  // would cover the one row the newest answer has.
+  const pinned = !!view && view.height >= MIN_ROWS_TO_PIN && lastUserKey >= 0 && (lastUserKey < view.top || lastUserKey >= view.top + view.height);
 
   // Who is speaking is said by a marker in the gutter and by the ground under the
   // message — not by a label. The person's marker is the input field's own prompt.
@@ -331,15 +325,16 @@ function ChatMessages({ messages, wrap, showReasoning, palette: m, errorColor }:
     return h(Text, null, ' '.repeat(GUTTER));
   };
 
-  // The pinned question is a row of its own, not an overlay on the scroll box: in
-  // flowtty 1.0.0-alpha.7 an absolute child of a <ScrollBox> is not drawn when any
-  // ancestor has padding (this modal does).
+  // An absolute child of a scroll box is an overlay: it stays put while the rows move
+  // under it, so pinning does not shift what the person is reading. Needs flowtty
+  // ≥ 1.0.0-alpha.9 — before it an overlay vanished under a padded ancestor (this
+  // modal has padding).
   const sticky = pinned
-    ? h(Box, { key: 'chat-sticky', flexDirection: 'row', flexShrink: 0, width: '100%', backgroundColor: m.userBg },
+    ? h(Box, { key: 'chat-sticky', position: 'absolute', top: 0, left: 0, width: '100%', flexDirection: 'row', backgroundColor: m.userBg ?? m.bg },
         h(Text, { bold: true, dim: true, color: m.accent }, '› '),
         h(Text, { dim: true, wrap: 'truncate' }, lastUserText.length > 60 ? `${lastUserText.slice(0, 60)}…` : lastUserText || '…'))
     : null;
-  return h(Box, { flexGrow: 1, flexShrink: 1, flexDirection: 'column' }, sticky, h(ScrollBox, { ref: box, anchor: 'bottom', flexGrow: 1, flexShrink: 1, flexDirection: 'column', onScroll: (_o: number, x: ScrollMetrics) => see(x), onMetrics: see },
+  return h(ScrollBox, { ref: box, anchor: 'bottom', flexGrow: 1, flexShrink: 1, flexDirection: 'column', onScroll: (_o: number, x: ScrollMetrics) => see(x), onMetrics: see },
     rows.length
       ? null
       : h(Text, { dim: true }, `Ask anything. ⏎ sends, ${NEWLINE_KEY} starts a new line, / opens the commands.`),
@@ -372,7 +367,8 @@ function ChatMessages({ messages, wrap, showReasoning, palette: m, errorColor }:
       // A blank line inside a message keeps the message's ground.
       return h(Box, { key, height: 1, flexShrink: 0, ...groundStyle });
     }),
-  ));
+    sticky,
+  );
 }
 
 // ─── Chat modal (pure render) ──────────────────────────────────────────────────

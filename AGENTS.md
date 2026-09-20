@@ -176,10 +176,11 @@ same reason: a display-only system message never reaches the model.
   - Rows are cached per message OBJECT (`rowCache`, a WeakMap). It is correct only
     because the chat replaces a message and never mutates one — keep every
     `setMessages` updater that way.
-  - The last question, once scrolled out of view, is pinned as a ROW above the box,
-    not an overlay: in flowtty 1.0.0-alpha.7 an absolute child of a `<ScrollBox>` (and
-    its `scrollbar`) is not drawn when any ancestor has `padding`. It is not pinned
-    when the box has fewer than `MIN_ROWS_TO_PIN` rows.
+  - The last question, once scrolled out of view, is pinned as an OVERLAY — an
+    absolute child of the box, over its top row — so pinning never shifts the rows
+    being read. Needs flowtty ≥ 1.0.0-alpha.9 (before it, an overlay and the
+    `scrollbar` vanished under any ancestor with `padding`). It is not pinned when
+    the box has fewer than `MIN_ROWS_TO_PIN` rows.
 - The field's EDITING is flowtty's `editorReducer` (`multiline`, ≥ 1.0.0-alpha.8),
   called from the chat's key handler after the chat's own keys (Esc ladder, Tab
   completion, history, ^r); its geometry (`inputRows`, `caretPosition`) draws the
