@@ -12,6 +12,7 @@ import { addTrigger, chatUser } from '../loader/registry.js';
 import { bgActiveCount, todoSnapshot } from '../loader/tools-core.js';
 import { apiHistory, compactConversation, chatLanguage } from '../assistant/agent.js';
 import type { ChatMessage } from '../assistant/agent.js';
+import { askKey, askStart, type AskQuestion, type AskState } from '../assistant/ask.js';
 import { loadMemories, memoryFilePath } from '../runtime/services/memory.js';
 import type { Make } from '../loader/plugin.js';
 import type { Plugin } from '../loader/plugin.js';
@@ -169,6 +170,22 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // input-handler (a ref, always current); pendingAsk is only for render.
           const pendingRef = f.useRef<{ name: string; args: string; resolve: (ok: boolean) => void } | null>(null);
           const [pendingAsk, setPendingAsk] = f.useState<{ name: string; args: string } | null>(null);
+          // `ask_user`: the same kind of pause, but the person picks among options.
+          // askRef is what the input handler steps key by key (a ref, always current);
+          // pendingQuestion mirrors it for the render.
+          const askRef = f.useRef<{ state: AskState; resolve: (done: AskState) => void } | null>(null);
+          const [pendingQuestion, setPendingQuestion] = f.useState<AskState | null>(null);
+          const settleAsk = (done: AskState) => {
+            const a = askRef.current;
+            if (!a) return;
+            askRef.current = null;
+            setPendingQuestion(null);
+            a.resolve(done);
+            f.notify();
+          };
+          // Leaving the chat or resetting it must not leave the tool hanging: an
+          // unanswered question is reported to the model as dismissed.
+          const dismissAsk = () => { if (askRef.current) settleAsk({ ...askRef.current.state, done: true, cancelled: true }); };
 
           // ── Esc-exit logic (double Esc) ─────────────────────────────────────────
           const armEsc = () => {
@@ -317,6 +334,12 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   // tool (it resolves `plugin` scope only through a token the host
                   // issued), so a plugin can present itself but not impersonate one.
                   pluginToken: f.pluginToken,
+                  askUser: (questions: AskQuestion[]) => new Promise<AskState>((resolve) => {
+                    const state = askStart(questions);
+                    askRef.current = { state, resolve };
+                    setPendingQuestion(state);
+                    f.notify();
+                  }),
                   // Pass the host services into toolCtx: a plugin ai-tool may call
                   // ctx.<service>. This supplements the host bundle, not replaces it.
                   ...(f.services as Record<string, unknown>),
@@ -548,6 +571,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 if (tickRef.current) { clearInterval(tickRef.current); tickRef.current = null; }
                 abortRef.current?.abort(); abortRef.current = null;
                 if (pendingRef.current) settleConfirm(false);
+                dismissAsk();
                 ctxIssueIdRef.current = null;
                 contentRef.current = '';
                 // A cleared session must not have a pre-clear background result surface in
@@ -586,6 +610,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // Closing during a y/n pause: do not wait — decline the op, else the
             // confirmWrite promise would hang and the stream never finish.
             if (pendingRef.current) settleConfirm(false);
+            dismissAsk();
             setOpen(false);
             f.notify();
           };
@@ -656,6 +681,14 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               if (!open) return false;
               // While awaiting a write confirmation (y/n pause), the chat consumes ALL
               // keys: 'y'/⏎ — confirm, 'n'/Esc — decline; normal field input is paused.
+              // An open question consumes every key too: arrows/digits/Space/⏎ answer it,
+              // Esc dismisses it, and in the free-text field every printable key is text.
+              if (askRef.current) {
+                const next = askKey(askRef.current.state, key);
+                if (next.done) settleAsk(next);
+                else { askRef.current.state = next; setPendingQuestion(next); f.notify(); }
+                return true;
+              }
               if (pendingRef.current) {
                 if (key.name === 'escape' || key.name === 'n') { settleConfirm(false); return true; }
                 if (key.name === 'y' || key.name === 'enter' || key.name === 'return') { settleConfirm(true); return true; }
@@ -788,6 +821,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           return (f.viewRegistry.chat as (p: Record<string, unknown>) => unknown)({
             width, height, theme: f.config.theme, messages, input, streaming, error, scroll, toolLabel, showReasoning, cursor, escArmed,
             pendingConfirm: pendingAsk,
+            pendingQuestion,
             currentIssueId: (f.services as Record<string, any>).currentIssue?.id,
             elapsed: elapsedMs, emptyNotice, toolCount, completions,
             // Live count of IN-FLIGHT background tasks (the host re-renders via

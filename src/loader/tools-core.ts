@@ -15,6 +15,7 @@ import { openInBrowser } from '../runtime/services.js';
 import { resolveIdentityToken } from '../runtime/plugin-identity.js';
 import { DEFAULT_THEME } from '../playback/theme.js';
 import type { ToolGroup, ToolDef } from './tools.js';
+import { parseAskArgs, askResult, type AskQuestion, type AskState } from '../assistant/ask.js';
 
 // Runtime context handed to core tools by the caller: the issue-context builder
 // (absent when the chat is not opened from an issue detail), the resolved memory
@@ -26,6 +27,9 @@ export interface CoreCtx {
   memoryFile?: string;
   configLocalPath?: string;
   pluginToken?: symbol;
+  // Supplied by an interactive chat: shows the questions and resolves once the
+  // person has answered or dismissed them. Absent where there is nobody to ask.
+  askUser?: (questions: AskQuestion[]) => Promise<Pick<AskState, 'answers' | 'cancelled'>>;
 }
 
 // Resolves the memory `plugin` scope to the owning plugin name from the host-issued
@@ -367,6 +371,24 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
     {
       type: 'function',
       function: {
+        name: 'ask_user',
+        description: 'Ask the person a question and wait for the answer. Use it when a decision is genuinely theirs and you cannot settle it from the request, the context or a sensible default — not for things you can look up, and not to ask permission to continue. Offer 2–4 concrete options per question; put the one you recommend first and end its label with "(Recommended)". Do not add an "Other" option: the person can always answer in their own words.',
+        parameters: { type: 'object', properties: {
+          questions: { type: 'array', minItems: 1, maxItems: 4, description: '1–4 questions, asked in turn.', items: { type: 'object', properties: {
+            question: { type: 'string', description: 'The full question, ending with a question mark.' },
+            header: { type: 'string', description: 'A very short label for the question (a word or two).' },
+            options: { type: 'array', minItems: 2, maxItems: 4, items: { type: 'object', properties: {
+              label: { type: 'string', description: 'The choice, 1–5 words.' },
+              description: { type: 'string', description: 'What choosing it means or costs.' },
+            }, required: ['label'] } },
+            multiSelect: { type: 'boolean', description: 'true when several options can be chosen together.' },
+          }, required: ['question', 'options'] } },
+        }, required: ['questions'] },
+      },
+    },
+    {
+      type: 'function',
+      function: {
         name: 'open_url',
         description: 'NAVIGATION ONLY — open a URL in the system browser. It does NOT fetch the page content — it only opens the URL in the user\'s browser. Use it when the user asks to OPEN a page, not to read data (use a read tool for that). Pass a FULL URL; when a tool result carries a ready web link for an entity (a `webUrl` field), pass that link as-is rather than assembling one by hand.',
         parameters: { type: 'object', properties: { url: { type: 'string', description: 'Full URL to open in the browser (e.g. "https://example.com"), or a `webUrl` taken from a tool result.' } }, required: ['url'] },
@@ -375,6 +397,15 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
   ],
   exec: async (name, args, ctx: CoreCtx) => {
     switch (name) {
+      case 'ask_user': {
+        const parsed = parseAskArgs(args);
+        if ('error' in parsed) return `ask_user: ${parsed.error}`;
+        // A one-shot prompt or a background task has no chat to ask in: answer at
+        // once rather than hang on a question nobody will see.
+        if (!ctx.askUser) return 'ask_user: there is nobody to ask here (not an interactive chat). Proceed on your best assumption and say which one you made.';
+        const done = await ctx.askUser(parsed.questions);
+        return askResult({ ...done, questions: parsed.questions, index: 0, cursor: 0, picked: [], typing: false, text: '', done: true });
+      }
       case 'open_url': {
         // Universal browser opener: the host owns the primitive (openInBrowser).
         // The tool takes a FULL URL — a plugin that knows an entity's web address
@@ -551,7 +582,11 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
         // Spread the live toolCtx so the nested run's tools resolve config, memory
         // plugin scope, and host services the same way the chat's do. Thread the
         // chain depth so a follow-up background task knows how deep it is.
-        const toolCtx = { ...(ctx as Record<string, unknown>), _bgDepth: depth + 1 };
+        // …minus `askUser`: a background task runs while the person is doing something
+        // else, and a question popping up would seize every key mid-sentence. With
+        // no hook, `ask_user` answers "nobody to ask" and the task proceeds on a
+        // stated assumption.
+        const toolCtx = { ...(ctx as Record<string, unknown>), _bgDepth: depth + 1, askUser: undefined };
         // The nested run needs its OWN LLM credentials — the same way the chat's
         // send() derives them (`ai.baseUrl`, `ai.model`, `process.env[tokenEnv]`).
         // `ctx` is the chat's toolCtx (config + host services), so read ai.* from it;

@@ -566,3 +566,41 @@ test('host:plugins_remove purges the removed plugin\'s scoped memories', async (
   expect(mems.some(m => m.scope === 'keycaps')).toBe(false);
   expect(mems.some(m => m.scope === 'host')).toBe(true);
 });
+test('ask_user hands validated questions to the chat and reads the answer back', async () => {
+  const reg = assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
+  expect(reg.tools.map((t) => t.function.name)).toContain('ask_user');
+  const args = { questions: [{ question: 'Rebase or merge?', options: [{ label: 'rebase' }, { label: 'merge' }] }] };
+
+  const asked: unknown[] = [];
+  const askUser = async (questions: any[]) => {
+    asked.push(questions);
+    return { cancelled: false, answers: [{ question: questions[0].question, labels: ['rebase'] }] } as any;
+  };
+  expect(await reg.exec('ask_user', args, { askUser })).toBe('The user answered:\n- Rebase or merge? → rebase');
+  expect(asked).toHaveLength(1);
+
+  // Malformed questions never reach the person.
+  const bad = await reg.exec('ask_user', { questions: [{ question: 'q', options: [{ label: 'only' }] }] }, { askUser });
+  expect(bad).toMatch(/2–4 options/);
+  expect(asked).toHaveLength(1);
+
+  // A dismissal is reported as one.
+  const dismissed = await reg.exec('ask_user', args, { askUser: async () => ({ cancelled: true, answers: [] }) as any });
+  expect(dismissed).toMatch(/dismissed the question/);
+
+  // No chat to ask in (a one-shot prompt, a background task): say so, do not hang.
+  expect(await reg.exec('ask_user', args, {})).toMatch(/nobody to ask/i);
+});
+
+test('a background task cannot put a question to the person', async () => {
+  const reg = assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
+  let nested: Record<string, unknown> | undefined;
+  const chatLLM = async (_messages: unknown[], opts: Record<string, unknown>) => { nested = opts.toolCtx as Record<string, unknown>; return { content: 'done' }; };
+  await reg.exec('background', { task: 'summarize the repo' }, { chatLLM, askUser: async () => ({ cancelled: false, answers: [] }), postToChat: () => {} } as any);
+  for (let i = 0; i < 20 && !nested; i++) await new Promise((r) => setTimeout(r, 5));
+  expect(nested).toBeDefined();
+  expect(nested!.askUser).toBeUndefined();
+  // …and with no hook the tool says so instead of hanging.
+  const args = { questions: [{ question: 'q?', options: [{ label: 'a' }, { label: 'b' }] }] };
+  expect(await reg.exec('ask_user', args, nested as any)).toMatch(/nobody to ask/i);
+});

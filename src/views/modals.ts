@@ -18,6 +18,7 @@
 //   - `theme` may be undefined / lack a resolved `modals` map, so every
 //     `theme.modals.<name>.<prop>` read is guarded (`m = theme?.modals?.chat ?? {}`).
 
+import { askRows, type AskRow, type AskState } from '../assistant/ask.js';
 import { createElement as h } from 'react';
 import {
   Box,
@@ -353,6 +354,7 @@ export function renderChatModal({
   cursor = 0,
   escArmed = false,
   pendingConfirm = null,
+  pendingQuestion = null,
   elapsed = 0,
   emptyNotice = '',
   toolCount = 0,
@@ -374,6 +376,7 @@ export function renderChatModal({
   cursor?: number;
   escArmed?: boolean;
   pendingConfirm?: { name: string; args?: string | unknown } | null;
+  pendingQuestion?: AskState | null;
   elapsed?: number;
   emptyNotice?: string;
   toolCount?: number;
@@ -546,7 +549,9 @@ export function renderChatModal({
         : null,
       // The input field group (the y/n confirm block or the multiline input box).
       h(Box, { flexDirection: 'column', width: '100%' },
-        confirmAsk
+        pendingQuestion
+          ? renderAsk(pendingQuestion, m.bg, wrap)
+          : confirmAsk
           ? h(Box, { flexDirection: 'column', width: '100%', gap: 1, border: 'single', paddingX: 1, borderColor: 'yellow', backgroundColor: m.bg },
               h(Text, { bold: true, color: 'yellow' }, `⚠ Confirm write: ${confirmAsk.name}`),
               h(Text, { dim: true, wrap: 'truncate' }, confirmAsk.args),
@@ -566,6 +571,30 @@ export function renderChatModal({
       ),
     ),
   );
+}
+
+// ─── `ask_user` block (pure render) ───────────────────────────────────────────
+// Takes the place of the input field while a question is open. One question at a
+// time; the header line says where the person is when there are several.
+function renderAsk(state: AskState, bg: string | undefined, wrap: number) {
+  const q = state.questions[state.index]!;
+  const many = state.questions.length > 1 ? `${state.index + 1}/${state.questions.length} · ` : '';
+  const rows = askRows(state);
+  const mark = (r: AskRow) => (q.multiSelect && !r.other ? (r.picked ? '[x]' : '[ ]') : r.active ? ' ❯ ' : '   ');
+  const hint = state.typing
+    ? '⏎ submit · Esc back to the list'
+    : q.multiSelect
+      ? '↑↓ move · Space toggle · ⏎ confirm · Esc dismiss'
+      : '↑↓ move · ⏎ or a digit to answer · Esc dismiss';
+  return h(Box, { flexDirection: 'column', width: '100%', border: 'single', paddingX: 1, borderColor: 'cyan', backgroundColor: bg },
+    h(Text, { bold: true, color: 'cyan', wrap: 'wrap' }, `? ${many}${q.header ? `${q.header} — ` : ''}${q.question}`),
+    ...rows.map((r, i) => h(Box, { key: i, flexDirection: 'column' },
+      h(Text, { bold: r.active, inverse: r.active && !state.typing, wrap: 'truncate' }, `${mark(r)} ${i + 1}. ${r.label}`),
+      r.description ? h(Text, { dim: true, wrap: 'truncate' }, `       ${r.description.slice(0, Math.max(10, wrap - 8))}`) : null)),
+    state.typing
+      ? h(Box, { flexDirection: 'row' }, h(Text, null, '     › '), h(Text, { wrap: 'truncate' }, state.text), h(Text, { inverse: true }, ' '))
+      : null,
+    h(Text, { dim: true }, hint));
 }
 
 // ─── Log modal (pure render) ───────────────────────────────────────────────────
