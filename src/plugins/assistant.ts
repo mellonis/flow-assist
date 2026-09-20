@@ -831,6 +831,25 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 setInput(next); inputRef.current = next;
                 return true;
               }
+              // ── A paste is ONE key carrying its text (bracketed paste): it goes in at
+              // the caret with its line breaks kept. It is never decoded into keys, so
+              // a pasted newline does not send and pasted letters fire no binding.
+              if (key.name === 'paste') {
+                const text = String((key as { text?: string }).text ?? '').replace(/\r\n?/g, '\n');
+                if (!text) return true;
+                const chars = Array.from(inputRef.current);
+                const at = cursorRef.current;
+                const pasted = Array.from(text);
+                chars.splice(at, 0, ...pasted);
+                const next = chars.join('');
+                setInput(next); inputRef.current = next;
+                setCursor(at + pasted.length);
+                tabRef.current = null;
+                return true;
+              }
+              // ── The wheel scrolls the conversation, three rows a notch.
+              if (key.name === 'wheelup') { setScroll(s => Math.min(s + 3, 1e6)); return true; }
+              if (key.name === 'wheeldown') { setScroll(s => Math.max(0, s - 3)); return true; }
               if (key.name && key.name.length === 1 && !key.ctrl && !key.meta) {
                 const ch = key.shift ? key.name.toUpperCase() : key.name;
                 const chars = Array.from(inputRef.current);

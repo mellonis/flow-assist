@@ -56,6 +56,9 @@ const KEY_DEFAULTS: Record<string, string> = {
   cache: 'enabled: true; ON unless config.cache.enabled = false',
   theme: `${JSON.stringify(DEFAULT_THEME)}; flowtty default theme`,
   debug: 'logTools: false',
+  // Said in full because it answers a question people really ask the assistant:
+  // "why can't I select text with the mouse?"
+  ui: 'mouse: true — the wheel scrolls the chat; while it is on, selecting text in the terminal needs Shift (or Option on macOS) held, and config set ui.mouse false turns it off (takes effect on restart)',
   memory: 'file: memory.json in the config directory; empty to start',
   fs: 'roots: []; no file tools unless a plugin adds them',
   // "always LOADED", not always visible: each built-in is configured via its own

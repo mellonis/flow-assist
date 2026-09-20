@@ -263,10 +263,17 @@ async function runPrompt(args: string[], config: Record<string, unknown>, repo: 
 }
 
 // ─── interactive TUI ──────────────────────────────────────────────────────────
+// Whether the terminal reports the wheel to the app. On unless `ui.mouse` is
+// explicitly false: while it is on, the terminal's own drag-to-select needs Shift
+// (or Option) held, and some people will rather have that than the wheel.
+export function mouseEnabled(config: Record<string, unknown>): boolean {
+  return (config.ui as { mouse?: unknown } | undefined)?.mouse !== false;
+}
+
 async function runInteractive(config: Record<string, unknown>, repo: PluginRepo): Promise<void> {
   const plugins = await loadPlugins({ config, repo, renders, enabledDir });
   const registry = assembleToolRegistry({ plugins, config, repo: repo as unknown as RepoShape });
-  const backend = new TtyBackend();
+  const backend = new TtyBackend(process.stdout, process.stdin, { mouse: mouseEnabled(config) });
 
   let handle: { unmount(): void } | undefined;
   const onExit = () => {

@@ -229,3 +229,71 @@ test('the plan lists what is in progress first, and re-orders live without a cra
   expect(ui.backend.lastFrame).toContain('Started the summary.');
   ui.app.unmount();
 });
+
+// A paste arrives as ONE key, { name: 'paste', text } (flowtty ≥ 1.0.0-alpha.6,
+// bracketed paste); the test backend delivers it the way a terminal would.
+const paste = (ui: { backend: { paste(text: string): void } }, text: string) => ui.backend.paste(text);
+
+test('a multi-line paste lands in the field as text — it sends nothing and fires no binding', async () => {
+  // Without bracketed paste a pasted newline IS the Enter key: the first line was
+  // sent and the rest arrived as keystrokes, single-letter bindings included.
+  const model = new ScriptedModel();
+  const ui = await bootApp(model, 100, 26);
+  await ui.press('A');
+  await ui.type('see: ');
+  paste(ui, 'TypeError: x is undefined\n    at run (a.ts:3)\n\nq y n A');
+  await settle();
+
+  const frame = ui.backend.lastFrame;
+  expect(frame).toContain('› see: TypeError: x is undefined');
+  expect(frame).toContain('at run (a.ts:3)');
+  expect(frame).toContain('q y n A');
+  // The blank line inside the paste is kept, nothing was sent, the chat is still open.
+  const rows = frame.split('\n');
+  expect(rows.findIndex((r) => r.includes('q y n A')) - rows.findIndex((r) => r.includes('at run (a.ts:3)'))).toBe(2);
+  expect(model.requests).toHaveLength(0);
+
+  // The caret is after the pasted text: typing continues it.
+  await ui.type('!');
+  expect(ui.backend.lastFrame).toContain('q y n A!');
+
+  // Pasted in the middle, it goes in at the caret.
+  await ui.press('escape');
+  await ui.type('ab');
+  await ui.press('left');
+  paste(ui, 'XY');
+  await settle();
+  expect(ui.backend.lastFrame).toContain('› aXYb');
+  ui.app.unmount();
+});
+
+test('a paste while the chat is closed does nothing — it never reaches a single-letter binding', async () => {
+  const model = new ScriptedModel();
+  const ui = await bootApp(model, 100, 26);
+  const before = ui.backend.lastFrame;
+  paste(ui, 'A quick q');
+  await settle();
+  expect(ui.backend.lastFrame).toBe(before);
+  ui.app.unmount();
+});
+
+test('the wheel scrolls the conversation', async () => {
+  const model = new ScriptedModel();
+  model.script([{ text: Array.from({ length: 40 }, (_, i) => `line ${i + 1}`).join('\n\n') }]);
+  const ui = await bootApp(model, 100, 22);
+  await ui.press('A');
+  await ui.type('print forty lines');
+  await ui.press('return');
+  await settle(20);
+  expect(ui.backend.lastFrame).toContain('line 40');
+  expect(ui.backend.lastFrame).not.toContain('line 30\n');
+
+  for (let i = 0; i < 6; i++) ui.backend.wheel('up');
+  await settle();
+  const up = ui.backend.lastFrame;
+  expect(up).not.toContain('line 40');
+  for (let i = 0; i < 6; i++) ui.backend.wheel('down');
+  await settle();
+  expect(ui.backend.lastFrame).toContain('line 40');
+  ui.app.unmount();
+});

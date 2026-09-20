@@ -496,7 +496,7 @@ export function renderChatModal({
             ? `${spin(elapsed)} ${fmtSec(elapsed)}${toolCount ? ` · ${toolCount} tool call${toolCount === 1 ? '' : 's'}` : ''}${toolLabel ? ` · ${toolLabel}` : ''} · Esc stops`
             : emptyNotice
               ? `⚠ ${emptyNotice}`
-              : (`↑↓ history · PgUp/PgDn scroll · ^r details · / commands${bgCount > 0 ? ` · ${bgCount} in background` : ''}`)),
+              : (`↑↓ history · wheel or PgUp/PgDn scroll · ^r details · / commands${bgCount > 0 ? ` · ${bgCount} in background` : ''}`)),
       // The task plan sits ABOVE the input (not above the messages) — the newest
       // answer stays pinned just above it, so a growing plan never hides it. Its
       // height (todoH) is accounted for in `available`.

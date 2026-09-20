@@ -108,8 +108,17 @@ same reason: a display-only system message never reaches the model.
   the turn ends). **Esc**: clear the field → take the last queued message back →
   stop the answer → arm/close. **⇧⏎** is a newline; a blank line is kept.
 - **↑/↓** walk the prompt history, only while the field is empty or still shows a
-  history entry untouched. **PgUp/PgDn** scroll. **^r** unfolds thinking, notes
-  and the tool calls behind the one-line `▸ N tools` summary.
+  history entry untouched. The **wheel** and **PgUp/PgDn** scroll. **^r** unfolds
+  thinking, notes and the tool calls behind the one-line `▸ N tools` summary.
+- A **paste** is one key, `{ name: 'paste', text }` (flowtty's bracketed paste): it
+  goes in at the caret with its line breaks kept. It is never decoded into keys, so
+  a pasted newline does not send and pasted letters fire no binding — any new
+  key handler must keep it that way (match on `key.name`, never on characters of
+  pasted text).
+- The wheel is reported because the TTY backend is opened with `{ mouse }`, on
+  unless `ui.mouse` is `false`. The cost is the terminal's own drag-to-select,
+  which then needs Shift (Option on macOS); the active default in `config_schema`
+  says so, because "why can't I select text" is asked of the assistant.
 - A `/command` **completes inline**, like a shell's autosuggestion: the part not
   typed yet is drawn after the caret in the dimmed accent colour, the other
   candidates follow as `⇥ a · b`, **Tab** takes the offer and then walks the rest.
