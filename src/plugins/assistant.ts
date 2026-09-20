@@ -227,7 +227,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               const w = t.status === 'done' ? 'done' : t.status === 'in_progress' ? 'in progress' : 'pending';
               return `${g} ${t.id} · ${t.text} (${w})`;
             });
-            return `## Current task plan (the \`todo\` tool)\nThis is the plan you maintain for the task and the chat renders it as \`▾ plan\`. It is a LIVE object: it reflects exactly what the \`todo\` tool last received, so you keep it accurate by calling \`todo\`. Maintain it as a WHOLE, the way TodoWrite works: whenever any item's status or the set of items should change, call \`todo\` with action="set" and pass the ENTIRE updated list as \`todos\` (each item as { text, status: "pending" | "in_progress" | "done" }) — the plan is rewritten from that one call, so never claim a status in your answer that the list you send does not already carry. You decide which items exist and their status, based on the task. Call \`todo action="list"\` to re-read it.\n${lines.join('\n')}`;
+            return `## Current task plan (the \`todo\` tool)\nYou maintain it through \`todo\`; it changes only when you call the tool.\n${lines.join('\n')}`;
           };
           // The full system context of a message = the «cheap» base (directive+identity)
           // + fresh memory + the current plan. No network: the base is synchronous,
