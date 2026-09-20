@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 test('built-ins are always present and not removable', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'da-build-'));
+  const root = mkdtempSync(join(tmpdir(), 'fa-build-'));
   const repo = createPluginRepo({ availableDir: join(root, 'plugins-available'), enabledDir: join(root, 'plugins-enabled'), projectRoot: root });
   const plugins = await loadPlugins({ config: {}, repo });
   const names = plugins.map(p => p.name);

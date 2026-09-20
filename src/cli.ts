@@ -49,7 +49,7 @@ const renders = { chat: renderChatModal, help: renderHelp, log: renderLogModal, 
 // `plugins-enabled/` (a symlink dir). Registry downloads are wired to the real
 // fetcher (`fetchPluginFromRegistry`): when a source is absent locally,
 // `plugins install/update` fetch it from a GitLab Generic Packages Registry,
-// which needs a DA_PLUGIN_REGISTRY_TOKEN (read-only). If the token is unset, the repo falls
+// which needs a FLOW_ASSIST_PLUGIN_REGISTRY_TOKEN (read-only). If the token is unset, the repo falls
 // back to "not available locally" cleanly.
 //
 // Robustness guard: when the entry is bundle-wrapped the runtime dirname may
@@ -65,13 +65,13 @@ const projectRoot =
     : candidateRoot;
 const availableDir = join(projectRoot, 'plugins-available');
 const enabledDir = join(projectRoot, 'plugins-enabled');
-// The registry fetcher reads env defaults at construction (DA_PLUGIN_REGISTRY_URL /
-// DA_PLUGIN_REGISTRY_PROJECT / DA_PLUGIN_REGISTRY_TOKEN) so the CLI still runs `plugins ls`
+// The registry fetcher reads env defaults at construction (FLOW_ASSIST_PLUGIN_REGISTRY_URL /
+// FLOW_ASSIST_PLUGIN_REGISTRY_PROJECT / FLOW_ASSIST_PLUGIN_REGISTRY_TOKEN) so the CLI still runs `plugins ls`
 // without a token; a missing token only surfaces as an error at download time.
 const fetchPlugin = fetchPluginFromRegistry({
-  baseUrl: process.env.DA_PLUGIN_REGISTRY_URL,
-  projectId: process.env.DA_PLUGIN_REGISTRY_PROJECT,
-  token: process.env.DA_PLUGIN_REGISTRY_TOKEN ?? process.env.GITLAB_TOKEN,
+  baseUrl: process.env.FLOW_ASSIST_PLUGIN_REGISTRY_URL,
+  projectId: process.env.FLOW_ASSIST_PLUGIN_REGISTRY_PROJECT,
+  token: process.env.FLOW_ASSIST_PLUGIN_REGISTRY_TOKEN ?? process.env.GITLAB_TOKEN,
   availableDir,
 });
 
@@ -271,15 +271,15 @@ async function runInteractive(config: Record<string, unknown>, repo: PluginRepo)
 function printUsage(): void {
   console.log(
     [
-      'developer-assistant',
+      'flow-assist',
       '',
       'Usage:',
-      '  developer-assistant                       Start the interactive TUI',
-      '  developer-assistant config <cmd> ...      get|set|unset|help on host config',
-      '  developer-assistant plugins <cmd> ...     ls|install|remove|update plugins',
-      '  developer-assistant <prompt>              One-shot chat with the loaded tool registry',
-      '  developer-assistant --help                Show this help',
-      '  developer-assistant --version             Show the host version',
+      '  flow-assist                       Start the interactive TUI',
+      '  flow-assist config <cmd> ...      get|set|unset|help on host config',
+      '  flow-assist plugins <cmd> ...     ls|install|remove|update plugins',
+      '  flow-assist <prompt>              One-shot chat with the loaded tool registry',
+      '  flow-assist --help                Show this help',
+      '  flow-assist --version             Show the host version',
     ].join('\n'),
   );
 }

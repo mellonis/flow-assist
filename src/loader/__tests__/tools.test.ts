@@ -280,9 +280,9 @@ test('background offloads a detached task and reports the result when done', asy
     pluginAiTools: [],
     // The chat toolCtx carries the host config; the nested run derives its LLM
     // creds from here + the env var (the same way the chat's send() does).
-    config: { ai: { baseUrl: 'http://llm.local', model: 'test-model', tokenEnv: 'DA_BG_TOKEN' } },
+    config: { ai: { baseUrl: 'http://llm.local', model: 'test-model', tokenEnv: 'FLOW_ASSIST_BG_TOKEN' } },
   } as any;
-  process.env.DA_BG_TOKEN = 'secret';
+  process.env.FLOW_ASSIST_BG_TOKEN = 'secret';
   const out = await reg.exec('background', { task: 'run the build', label: 'build' }, ctx);
   expect(out).toContain('Background task started');
   expect(out).toContain('build');
@@ -314,7 +314,7 @@ test('background offloads a detached task and reports the result when done', asy
   const sysPrompt = String((capturedMsgs?.[0] as { role?: string; content?: string } | undefined)?.content ?? '');
   expect(sysPrompt).toContain('`datetime` tool');
   expect(sysPrompt).toContain('stale');
-  delete process.env.DA_BG_TOKEN;
+  delete process.env.FLOW_ASSIST_BG_TOKEN;
 });
 
 test('background honors a start delay (not scheduled to run yet)', async () => {
@@ -354,9 +354,9 @@ test('background bursts are QUEUED, not dropped (concurrency cap bounds parallel
     pushLog: () => {}, showMessage: () => {}, notify: () => {},
     postToChat: (t: string) => chatPosts.push(t),
     pluginAiTools: [],
-    config: { ai: { baseUrl: 'http://llm.local', model: 'm', tokenEnv: 'DA_BG_TOKEN' } },
+    config: { ai: { baseUrl: 'http://llm.local', model: 'm', tokenEnv: 'FLOW_ASSIST_BG_TOKEN' } },
   } as any;
-  process.env.DA_BG_TOKEN = 'secret';
+  process.env.FLOW_ASSIST_BG_TOKEN = 'secret';
   const outs: string[] = [];
   for (let i = 0; i < 5; i++) outs.push(await reg.exec('background', { task: `t${i}`, label: `t${i}`, in: '0s' }, ctx));
   // No task is rejected — every one is accepted (they may wait for a slot).
@@ -369,7 +369,7 @@ test('background bursts are QUEUED, not dropped (concurrency cap bounds parallel
   expect(chatPosts.join('\n')).toMatch(/t4 finished/);
   // The cap still bounds CONCURRENT runs (the safety valve holds).
   expect(peak).toBeLessThanOrEqual(3);
-  delete process.env.DA_BG_TOKEN;
+  delete process.env.FLOW_ASSIST_BG_TOKEN;
 });
 
 test('ai.disabledTools withholds a whole group', () => {
@@ -501,7 +501,7 @@ test('ai-tool run fuses the OWNING plugin services + preserves caller ctx + host
 test('memory plugin scope resolves ONLY from a host-issued token, not a caller-supplied name', async () => {
   const make = makeFactory({});
   const plugins = [make('keycaps', { keys: {} })];
-  const memFile = join(tmpdir(), `da-mem-token-${Date.now()}.json`);
+  const memFile = join(tmpdir(), `fa-mem-token-${Date.now()}.json`);
   const config = { memory: { file: memFile } };
   const reg = assembleToolRegistry({ plugins, config, repo: { list: async () => [] } as any });
   // A mixed ctx: a raw `pluginName` string AND the real host token. The string is
@@ -518,7 +518,7 @@ test('memory plugin scope resolves ONLY from a host-issued token, not a caller-s
 test('memory tool enforces host|plugin scope, resolves plugin, and supports a label', async () => {
   const make = makeFactory({});
   const plugins = [make('keycaps', { keys: {} })];
-  const memFile = join(tmpdir(), `da-mem-scope-${Date.now()}.json`);
+  const memFile = join(tmpdir(), `fa-mem-scope-${Date.now()}.json`);
   const config = { memory: { file: memFile } };
   const reg = assembleToolRegistry({ plugins, config, repo: { list: async () => [] } as any });
   const ctx = { memoryFile: memFile };
@@ -589,7 +589,7 @@ test('log appends/reads/clears the host log (the `l` panel), a write NOT confirm
 test('host:plugins_remove purges the removed plugin\'s scoped memories', async () => {
   const make = makeFactory({});
   const plugins = [make('keycaps', { keys: {} })];
-  const memFile = join(tmpdir(), `da-mem-purge-${Date.now()}.json`);
+  const memFile = join(tmpdir(), `fa-mem-purge-${Date.now()}.json`);
   const config = { memory: { file: memFile } };
   const repo = { list: async () => [], remove: async () => ({ ok: true }) } as any;
   const reg = assembleToolRegistry({ plugins, config, repo });

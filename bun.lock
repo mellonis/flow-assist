@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "@local/developer-assistant",
+      "name": "flow-assist",
       "dependencies": {
         "@flowtty/react": "^1.0.0-alpha.3",
         "@flowtty/tty-backend": "^1.0.0-alpha.3",

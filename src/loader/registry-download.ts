@@ -2,7 +2,7 @@
 // `fetchPluginFromRegistry` returns the real `fetchPlugin` injected into
 // `createPluginRepo`: when a plugin's source is absent locally,
 // `install`/`update` call it to fetch the tarball from a GitLab Generic Packages
-// Registry, extract it into `availableDir/<name>/`, and stamp the `.da-source`
+// Registry, extract it into `availableDir/<name>/`, and stamp the `.flow-assist-source`
 // provenance marker so the repo can tell registry-managed plugins from git
 // checkouts.
 //
@@ -17,26 +17,26 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 // The registry is read from the environment at construction and has NO built-in
-// default: DA_PLUGIN_REGISTRY_URL (a GitLab `/api/v4` base) and
-// DA_PLUGIN_REGISTRY_PROJECT (numeric id or `group/project`). Unset, the host
+// default: FLOW_ASSIST_PLUGIN_REGISTRY_URL (a GitLab `/api/v4` base) and
+// FLOW_ASSIST_PLUGIN_REGISTRY_PROJECT (numeric id or `group/project`). Unset, the host
 // never contacts any server and a download names what to set. The token is
-// read-only (sufficient for install/update): DA_PLUGIN_REGISTRY_TOKEN, falling
+// read-only (sufficient for install/update): FLOW_ASSIST_PLUGIN_REGISTRY_TOKEN, falling
 // back to GITLAB_TOKEN. Publishing is gated on a separate write token (see
 // scripts/publish.ts) and is NOT read here.
 export const REGISTRY_NOT_CONFIGURED =
-  'plugin registry is not configured — set DA_PLUGIN_REGISTRY_URL and DA_PLUGIN_REGISTRY_PROJECT';
-const TOKEN_ENVS = ['DA_PLUGIN_REGISTRY_TOKEN', 'GITLAB_TOKEN'] as const;
+  'plugin registry is not configured — set FLOW_ASSIST_PLUGIN_REGISTRY_URL and FLOW_ASSIST_PLUGIN_REGISTRY_PROJECT';
+const TOKEN_ENVS = ['FLOW_ASSIST_PLUGIN_REGISTRY_TOKEN', 'GITLAB_TOKEN'] as const;
 // The provenance marker filename (matches repo.ts's `SOURCE_MARKER`), containing
 // `registry\n`. Written after extraction so `list()`/`update()` can tell
 // registry-managed plugins from git checkouts.
-const SOURCE_MARKER = '.da-source';
+const SOURCE_MARKER = '.flow-assist-source';
 
 export interface RegistryFetchOptions {
   baseUrl?: string;
   projectId?: string | number;
   token?: string;
   // The directory that holds plugin sources (`plugins-available/`). Required: the
-  // fetcher untars into `join(availableDir, name)` and writes the `.da-source`
+  // fetcher untars into `join(availableDir, name)` and writes the `.flow-assist-source`
   // marker there. The repo (`createPluginRepo`) passes the SAME directory, so the
   // repo's own idempotent `writeSourceMarker(pluginDir)` lands on the same path.
   availableDir: string;
@@ -70,8 +70,8 @@ function compareVersions(a: string, b: string): number {
 }
 
 export function fetchPluginFromRegistry(opts: RegistryFetchOptions): RegistryFetch {
-  const baseUrl = (opts.baseUrl ?? process.env.DA_PLUGIN_REGISTRY_URL ?? '').replace(/\/+$/, '');
-  const project = String(opts.projectId ?? process.env.DA_PLUGIN_REGISTRY_PROJECT ?? '');
+  const baseUrl = (opts.baseUrl ?? process.env.FLOW_ASSIST_PLUGIN_REGISTRY_URL ?? '').replace(/\/+$/, '');
+  const project = String(opts.projectId ?? process.env.FLOW_ASSIST_PLUGIN_REGISTRY_PROJECT ?? '');
   const configured = Boolean(baseUrl && project);
   // projectId may be a numeric ID or a URL-encoded slug (`group/project`); encode
   // so a slash in the slug becomes the GitLab `%2F` path segment.
@@ -97,11 +97,11 @@ export function fetchPluginFromRegistry(opts: RegistryFetchOptions): RegistryFet
   };
 
   // Download one version: GET the tarball, untar into `availableDir/<name>/`,
-  // then write the `.da-source` provenance marker (the dir exists after untar).
+  // then write the `.flow-assist-source` provenance marker (the dir exists after untar).
   const download = async (name: string, version?: string): Promise<{ version: string }> => {
     if (!configured) throw new Error(REGISTRY_NOT_CONFIGURED);
     if (!token) {
-      throw new Error('no DA_PLUGIN_REGISTRY_TOKEN set — set it to download plugins from the registry');
+      throw new Error('no FLOW_ASSIST_PLUGIN_REGISTRY_TOKEN set — set it to download plugins from the registry');
     }
     const resolved = version ?? (await latestVersion(name));
 

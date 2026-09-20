@@ -6,7 +6,7 @@
 // `curl --upload-file` fallback and the GitLab package endpoint.
 //
 // Token is a WRITE token: `GITLAB_WRITE_TOKEN` (falling back to `CI_JOB_TOKEN` in a
-// GitLab pipeline), distinct from the read-only `DA_PLUGIN_REGISTRY_TOKEN` the host uses for
+// GitLab pipeline), distinct from the read-only `FLOW_ASSIST_PLUGIN_REGISTRY_TOKEN` the host uses for
 // install/update.
 //
 // This file is at the repo root (NOT under `src/`), so it is not typechecked or
@@ -18,10 +18,10 @@ import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-// No built-in registry: DA_PLUGIN_REGISTRY_URL / DA_PLUGIN_REGISTRY_PROJECT (or the
+// No built-in registry: FLOW_ASSIST_PLUGIN_REGISTRY_URL / FLOW_ASSIST_PLUGIN_REGISTRY_PROJECT (or the
 // matching options) must name one, mirroring src/loader/registry-download.ts.
 const REGISTRY_NOT_CONFIGURED =
-  'plugin registry is not configured — set DA_PLUGIN_REGISTRY_URL and DA_PLUGIN_REGISTRY_PROJECT';
+  'plugin registry is not configured — set FLOW_ASSIST_PLUGIN_REGISTRY_URL and FLOW_ASSIST_PLUGIN_REGISTRY_PROJECT';
 
 export interface PublishOptions {
   availableDir: string;
@@ -65,8 +65,8 @@ function readVersion(manifestPath: string): string {
 export async function publishPlugin(opts: PublishOptions): Promise<PublishResult> {
   const { availableDir, name, token } = opts;
   const version = opts.version ?? readVersion(join(availableDir, name, 'manifest.json'));
-  const baseUrl = (opts.baseUrl ?? process.env.DA_PLUGIN_REGISTRY_URL ?? '').replace(/\/+$/, '');
-  const project = String(opts.projectId ?? process.env.DA_PLUGIN_REGISTRY_PROJECT ?? '');
+  const baseUrl = (opts.baseUrl ?? process.env.FLOW_ASSIST_PLUGIN_REGISTRY_URL ?? '').replace(/\/+$/, '');
+  const project = String(opts.projectId ?? process.env.FLOW_ASSIST_PLUGIN_REGISTRY_PROJECT ?? '');
   if (!baseUrl || !project) return { ok: false, error: REGISTRY_NOT_CONFIGURED };
   const projectPath = encodeURIComponent(project);
   const upload = opts.upload ?? ((url: string, file: string) => {
@@ -89,7 +89,7 @@ export async function publishPlugin(opts: PublishOptions): Promise<PublishResult
 
   let tarPath: string;
   try {
-    const tmp = mkdtempSync(join(tmpdir(), 'da-pk-'));
+    const tmp = mkdtempSync(join(tmpdir(), 'fa-pk-'));
     tarPath = join(tmp, filename);
     // Archive the plugin dir as a top-level `<name>/` into the tarball.
     execSync(`tar -czf ${shq(tarPath)} -C ${shq(availableDir)} ${shq(name)}`);

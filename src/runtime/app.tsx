@@ -535,7 +535,7 @@ export function renderApp(
     // them here each render stays fresh.
     const hints = composeFooterHints(plugins, pFtMap, keys).join(' · ');
 
-    const title = String((config.app as { title?: string } | undefined)?.title ?? 'developer-assistant');
+    const title = String((config.app as { title?: string } | undefined)?.title ?? 'flow-assist');
     // `bottom` is the command-line buffer (with a leading `: `), the active toast,
     // or the footer hints — which START with `: commands` (part of the host base),
     // so no extra `: ` literal is prepended here.

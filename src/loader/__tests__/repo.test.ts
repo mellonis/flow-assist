@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 function fakeRepo() {
-  const root = mkdtempSync(join(tmpdir(), 'da-repo-'));
+  const root = mkdtempSync(join(tmpdir(), 'fa-repo-'));
   const avail = join(root, 'plugins-available');
   const enabled = join(root, 'plugins-enabled');
   mkdirSync(avail, { recursive: true }); mkdirSync(enabled, { recursive: true });
@@ -31,7 +31,7 @@ test('install symlinks into enabled; remove unlinks', async () => {
 });
 
 test('install downloads from the registry when source is absent, then symlinks; update re-fetches', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'da-repo-'));
+  const root = mkdtempSync(join(tmpdir(), 'fa-repo-'));
   const avail = join(root, 'plugins-available'); const enabled = join(root, 'plugins-enabled');
   mkdirSync(avail, { recursive: true }); mkdirSync(enabled, { recursive: true });
   const calls: string[] = [];
@@ -45,7 +45,7 @@ test('install downloads from the registry when source is absent, then symlinks; 
     },
   });
   expect((await repo.install('tracker')).ok).toBe(true);   // downloaded + symlinked
-  expect(existsSync(join(avail, 'tracker', '.da-source'))).toBe(true);
+  expect(existsSync(join(avail, 'tracker', '.flow-assist-source'))).toBe(true);
   expect((await repo.update('tracker')).ok).toBe(true);    // re-download, symlink intact
   expect(calls).toEqual(['tracker@latest', 'tracker@latest']);
 });
@@ -64,14 +64,14 @@ test('rejects a path-traversal plugin name (defense-in-depth)', async () => {
 test('list reports requiredSettings missing from the environment', async () => {
   const { repo, avail } = fakeRepo();
   const pluginDir = join(avail, 'tracker');
-  writeFileSync(join(pluginDir, 'manifest.json'), JSON.stringify({ name: 'tracker', version: '1.0.0', requiredSettings: ['DA_TEST_REQUIRED_VAR'] }));
+  writeFileSync(join(pluginDir, 'manifest.json'), JSON.stringify({ name: 'tracker', version: '1.0.0', requiredSettings: ['FLOW_ASSIST_TEST_REQUIRED_VAR'] }));
   // Unset (empty) → reported missing.
-  process.env.DA_TEST_REQUIRED_VAR = '';
+  process.env.FLOW_ASSIST_TEST_REQUIRED_VAR = '';
   let list = await repo.list();
-  expect(list.find(e => e.name === 'tracker')?.missingSettings).toContain('DA_TEST_REQUIRED_VAR');
+  expect(list.find(e => e.name === 'tracker')?.missingSettings).toContain('FLOW_ASSIST_TEST_REQUIRED_VAR');
   // Set → not missing.
-  process.env.DA_TEST_REQUIRED_VAR = 'set';
+  process.env.FLOW_ASSIST_TEST_REQUIRED_VAR = 'set';
   list = await repo.list();
-  expect(list.find(e => e.name === 'tracker')?.missingSettings).not.toContain('DA_TEST_REQUIRED_VAR');
-  delete process.env.DA_TEST_REQUIRED_VAR;
+  expect(list.find(e => e.name === 'tracker')?.missingSettings).not.toContain('FLOW_ASSIST_TEST_REQUIRED_VAR');
+  delete process.env.FLOW_ASSIST_TEST_REQUIRED_VAR;
 });

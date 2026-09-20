@@ -1,9 +1,9 @@
 {
-  "name": "@local/developer-assistant",
+  "name": "flow-assist",
   "version": "0.0.1",
   "type": "module",
   "bin": {
-    "developer-assistant": "src/cli.ts"
+    "flow-assist": "src/cli.ts"
   },
   "scripts": {
     "build": "tsc",

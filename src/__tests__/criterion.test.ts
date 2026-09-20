@@ -32,7 +32,7 @@ test('C3: host schema exposes no tracker keys', () => {
 
 // C6 — built-in core/assistant are always present (loadPlugins) and never repo-removable.
 test('C6: built-ins (core/assistant) are always present and not repo-removable', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'da-crit-'));
+  const root = mkdtempSync(join(tmpdir(), 'fa-crit-'));
   const avail = join(root, 'plugins-available');
   const enabled = join(root, 'plugins-enabled');
   mkdirSync(avail, { recursive: true });

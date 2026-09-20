@@ -1,4 +1,4 @@
-# developer-assistant
+# flow-assist
 
 A standalone, domain-agnostic TUI/CLI assistant host. It ships no domain logic
 of its own — plugins (the bundled `gitlab` and `repo`, or your own) deliver
@@ -11,8 +11,8 @@ surfaces, commands, and LLM tool groups.
 ## Install
 
 ```sh
-git clone <repo-url> developer-assistant
-cd developer-assistant
+git clone <repo-url> flow-assist
+cd flow-assist
 bun install
 bun run build
 ```
@@ -40,11 +40,11 @@ is no separate tools repo.
 
 ## Config & environment
 
-- **Config**: `~/.config/developer-assistant/config.json` — schema comes from each
+- **Config**: `~/.config/flow-assist/config.json` — schema comes from each
   plugin's `configSchema` (see `config get`).
 - **Environment**: the host reads `LLM_TOKEN` (or the variable named by
-  `ai.tokenEnv`) and the optional `DA_PLUGIN_REGISTRY_URL` /
-  `DA_PLUGIN_REGISTRY_PROJECT` / `DA_PLUGIN_REGISTRY_TOKEN` — see `.env.example`.
+  `ai.tokenEnv`) and the optional `FLOW_ASSIST_PLUGIN_REGISTRY_URL` /
+  `FLOW_ASSIST_PLUGIN_REGISTRY_PROJECT` / `FLOW_ASSIST_PLUGIN_REGISTRY_TOKEN` — see `.env.example`.
   A plugin documents its own variables and declares them in its manifest's
   `requiredSettings`. Secrets belong in env, not in the config file.
 - **Who you are**: `config set user.name <name>` (and optionally `user.login`)
@@ -59,13 +59,13 @@ bun run build:binary                          # prints a notice + type-checks; n
 `bun build --compile` is **retired**: the bundler emits a broken artifact with
 **two React instances** ("Invalid hook call") — an upstream @flowtty 1.0.0-alpha
 + Bun bundler bug that app code cannot fix. The host therefore ships and runs as
-a **Bun-executable** via `bun src/cli.ts`. The `bin` entry (`developer-assistant`)
+a **Bun-executable** via `bun src/cli.ts`. The `bin` entry (`flow-assist`)
 points at `src/cli.ts`, whose `#!/usr/bin/env bun` shebang makes npm link and
 run it under bun. `bun run build:binary` now only explains this and type-checks.
 
 ## Repository
 
-- `developer-assistant` — this host. Plugins are separate packages under
+- `flow-assist` — this host. Plugins are separate packages under
   `plugins-available/`, each with its own dependencies; the host imports none of them.
 
 See [AGENTS.md](./AGENTS.md) for the project's conventions (language rule,
@@ -73,7 +73,7 @@ plugin contract, git rules).
 
 ## License
 
-Copyright (C) 2026 developer-assistant contributors.
+Copyright (C) 2026 flow-assist contributors.
 
 This project is free software, licensed under the **GNU General Public
 License, version 3 or (at your option) any later version** — see [LICENSE](./LICENSE).

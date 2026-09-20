@@ -8,7 +8,7 @@ import { fetchPluginFromRegistry } from '../registry-download';
 // Build a gzipped tarball (top-level `<name>/`) with the system `tar` — the SAME
 // engine the fetcher extracts with — so the round-trip archive format matches.
 function tarStub(name: string, version: string): Uint8Array {
-  const root = mkdtempSync(join(tmpdir(), 'da-tar-'));
+  const root = mkdtempSync(join(tmpdir(), 'fa-tar-'));
   const pluginDir = join(root, name);
   mkdirSync(pluginDir, { recursive: true });
   writeFileSync(
@@ -22,7 +22,7 @@ function tarStub(name: string, version: string): Uint8Array {
 }
 
 test('downloads the tarball, extracts, and writes the provenance marker', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'da-reg-'));
+  const root = mkdtempSync(join(tmpdir(), 'fa-reg-'));
   const avail = join(root, 'plugins-available');
   mkdirSync(avail, { recursive: true });
   // fake transport returns a gzipped tarball containing manifest.json + index.ts
@@ -36,26 +36,26 @@ test('downloads the tarball, extracts, and writes the provenance marker', async 
   });
   const r = await fetchOne('tracker', '2.0.0');
   expect(r.version).toBe('2.0.0');
-  expect(existsSync(join(avail, 'tracker', '.da-source'))).toBe(true);
+  expect(existsSync(join(avail, 'tracker', '.flow-assist-source'))).toBe(true);
   expect(JSON.parse(readFileSync(join(avail, 'tracker', 'manifest.json'), 'utf8')).name).toBe('tracker');
 });
 test('an unconfigured registry refuses to download and never touches the network', async () => {
-  // No built-in registry: a host with no DA_PLUGIN_REGISTRY_URL/PROJECT must not
+  // No built-in registry: a host with no FLOW_ASSIST_PLUGIN_REGISTRY_URL/PROJECT must not
   // phone any default server — it names what to set instead.
-  const saved = { url: process.env.DA_PLUGIN_REGISTRY_URL, project: process.env.DA_PLUGIN_REGISTRY_PROJECT };
-  delete process.env.DA_PLUGIN_REGISTRY_URL;
-  delete process.env.DA_PLUGIN_REGISTRY_PROJECT;
+  const saved = { url: process.env.FLOW_ASSIST_PLUGIN_REGISTRY_URL, project: process.env.FLOW_ASSIST_PLUGIN_REGISTRY_PROJECT };
+  delete process.env.FLOW_ASSIST_PLUGIN_REGISTRY_URL;
+  delete process.env.FLOW_ASSIST_PLUGIN_REGISTRY_PROJECT;
   try {
     const urls: string[] = [];
     const fetchOne = fetchPluginFromRegistry({
       token: 't',
-      availableDir: mkdtempSync(join(tmpdir(), 'da-reg-')),
+      availableDir: mkdtempSync(join(tmpdir(), 'fa-reg-')),
       fetch: (async (url: string) => { urls.push(url); return new Response('', { status: 500 }); }) as any,
     });
-    await expect(fetchOne('demo', '1.0.0')).rejects.toThrow(/DA_PLUGIN_REGISTRY_URL.*DA_PLUGIN_REGISTRY_PROJECT/);
+    await expect(fetchOne('demo', '1.0.0')).rejects.toThrow(/FLOW_ASSIST_PLUGIN_REGISTRY_URL.*FLOW_ASSIST_PLUGIN_REGISTRY_PROJECT/);
     expect(urls).toEqual([]);
   } finally {
-    if (saved.url !== undefined) process.env.DA_PLUGIN_REGISTRY_URL = saved.url;
-    if (saved.project !== undefined) process.env.DA_PLUGIN_REGISTRY_PROJECT = saved.project;
+    if (saved.url !== undefined) process.env.FLOW_ASSIST_PLUGIN_REGISTRY_URL = saved.url;
+    if (saved.project !== undefined) process.env.FLOW_ASSIST_PLUGIN_REGISTRY_PROJECT = saved.project;
   }
 });

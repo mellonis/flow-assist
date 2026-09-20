@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 test('loads an enabled runtime plugin; skips broken/missing-deps plugin with a warn', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'da-buildrt-'));
+  const root = mkdtempSync(join(tmpdir(), 'fa-buildrt-'));
   const avail = join(root, 'plugins-available');
   const enabled = join(root, 'plugins-enabled');
   mkdirSync(avail, { recursive: true });
@@ -25,7 +25,7 @@ test('loads an enabled runtime plugin; skips broken/missing-deps plugin with a w
 });
 
 test('loads a plugin dir via its package.json main and a single-file plugin (entry-file resolution)', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'da-entry-'));
+  const root = mkdtempSync(join(tmpdir(), 'fa-entry-'));
   const avail = join(root, 'plugins-available');
   const enabled = join(root, 'plugins-enabled');
   mkdirSync(avail, { recursive: true });

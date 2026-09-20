@@ -8,7 +8,7 @@ import path from 'node:path';
 export const DEFAULT_MEMORY_PATH = path.join(
   os.homedir(),
   '.config',
-  'developer-assistant',
+  'flow-assist',
   'memory.json',
 );
 

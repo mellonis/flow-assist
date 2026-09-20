@@ -1,5 +1,5 @@
-developer-assistant — a standalone, domain-agnostic TUI/CLI assistant host
-Copyright (C) 2026 developer-assistant contributors
+flow-assist — a standalone, domain-agnostic TUI/CLI assistant host
+Copyright (C) 2026 flow-assist contributors
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -26,7 +26,7 @@ a plug-in, PROVIDED that the plug-in:
   2. is distributed independently under the terms of its own license.
 
 A "plug-in" for the purposes of this exception is a separately
-distributable program that implements the developer-assistant plugin
+distributable program that implements the flow-assist plugin
 contract — exposing a manifest.json and a "shape" (commands/keys/views/
 surfaces/aiTools/services/tools/configSchema) and loaded by this program
 at runtime through its documented interface. Such plug-ins (for example

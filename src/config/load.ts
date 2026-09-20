@@ -6,7 +6,7 @@ import { hostConfigSchema } from './schema.js';
 // Config files live outside the repo, under the user's home config dir (or the
 // XDG override). config.json is the committed/default base; config.local.json
 // holds machine-specific overrides and is the only file the write helpers touch.
-const CONFIG_DIR = process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), '.config', 'developer-assistant');
+const CONFIG_DIR = process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), '.config', 'flow-assist');
 const CONFIG_PATH = path.join(CONFIG_DIR, 'config.json');
 const CONFIG_LOCAL_PATH = path.join(CONFIG_DIR, 'config.local.json');
 

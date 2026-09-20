@@ -12,7 +12,7 @@ import { TestBackend, flush } from '@flowtty/core/testing';
 import { renderApp } from '../runtime/app';
 
 test('host is tracker-agnostic and loads a plugin-delivered tool', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'da-host-'));
+  const root = mkdtempSync(join(tmpdir(), 'fa-host-'));
   const avail = join(root, 'plugins-available');
   const enabled = join(root, 'plugins-enabled');
   mkdirSync(avail, { recursive: true });
@@ -69,7 +69,7 @@ test('renderApp wires an enabled plugin: setup runs before mount, plugin service
   // A throwaway plugin in a temp dir, enabled through the same symlink set the
   // real CLI uses. The host must stay testable with `plugins-available/` empty,
   // so nothing here may name a shipped plugin.
-  const root = mkdtempSync(join(tmpdir(), 'da-host-'));
+  const root = mkdtempSync(join(tmpdir(), 'fa-host-'));
   const available = join(root, 'plugins-available');
   const enabled = join(root, 'plugins-enabled');
   mkdirSync(join(available, 'demo'), { recursive: true });

@@ -1,4 +1,4 @@
-# developer-assistant
+# flow-assist
 
 A standalone, **domain-agnostic** TUI/CLI assistant host. It has no notion of
 "issue", "board", or "sprint" in its core, and none of any company's systems. Functionality is delivered as
@@ -22,12 +22,12 @@ tree.
 
 ## Repos
 
-- `developer-assistant` — this host. Plugin sources live under `plugins-available/`, each a package with its own dependencies; the host never imports a plugin or a plugin's dependency.
+- `flow-assist` — this host. Plugin sources live under `plugins-available/`, each a package with its own dependencies; the host never imports a plugin or a plugin's dependency.
 
 ## Layout
 
 ```
-developer-assistant/
+flow-assist/
 ├── package.json               # host; workspace root for plugins-available/*
 ├── plugins-available/
 │   ├── gitlab/                # glab_api tool group (no UI)
@@ -54,7 +54,7 @@ the blacklist.
 
 ## CLI
 
-`developer-assistant` with subcommands:
+`flow-assist` with subcommands:
 
 - (default) `interactive` — the TUI.
 - `config get|set|unset|help` — host config.
@@ -63,8 +63,8 @@ the blacklist.
 
 ## Config & environment
 
-- Config: `~/.config/developer-assistant/config.json` (schema from each plugin's `configSchema`).
-- Environment: the host reads `LLM_TOKEN` (or `ai.tokenEnv`) and the optional `DA_PLUGIN_REGISTRY_URL` / `DA_PLUGIN_REGISTRY_PROJECT` / `DA_PLUGIN_REGISTRY_TOKEN`; host variables take the `DA_` prefix. A plugin owns its own variables and declares them in `requiredSettings`.
+- Config: `~/.config/flow-assist/config.json` (schema from each plugin's `configSchema`).
+- Environment: the host reads `LLM_TOKEN` (or `ai.tokenEnv`) and the optional `FLOW_ASSIST_PLUGIN_REGISTRY_URL` / `FLOW_ASSIST_PLUGIN_REGISTRY_PROJECT` / `FLOW_ASSIST_PLUGIN_REGISTRY_TOKEN`; host variables take the `FLOW_ASSIST_` prefix. A plugin owns its own variables and declares them in `requiredSettings`.
 - `config.user` (`name`, `login`) is the only source of the person's identity in the chat context — never the environment or the OS account.
 
 ## Testing

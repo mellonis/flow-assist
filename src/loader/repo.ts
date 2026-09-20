@@ -7,8 +7,8 @@
 // `update` re-fetches only registry-managed plugins.
 //
 // Networking is never done here. `fetchPlugin` is injected by the caller (the real
-// HTTP + untar implementation is registry-download.ts, reading DA_PLUGIN_REGISTRY_TOKEN /
-// DA_PLUGIN_REGISTRY_URL / DA_PLUGIN_REGISTRY_PROJECT); tests inject a fake so
+// HTTP + untar implementation is registry-download.ts, reading FLOW_ASSIST_PLUGIN_REGISTRY_TOKEN /
+// FLOW_ASSIST_PLUGIN_REGISTRY_URL / FLOW_ASSIST_PLUGIN_REGISTRY_PROJECT); tests inject a fake so
 // this module stays hermetic (no network, no tar). The config paths are also
 // dependency-injected (NOT imported from src/config): `createPluginRepo` receives
 // `availableDir` / `enabledDir` / `projectRoot` as explicit parameters.
@@ -34,7 +34,7 @@ export interface InstallResult {
 }
 
 // A discovered plugin, as reported by `list()`. `source` is the provenance marker:
-// 'registry' when the plugin was downloaded (a `.da-source` file containing
+// 'registry' when the plugin was downloaded (a `.flow-assist-source` file containing
 // 'registry' is present), otherwise 'git' (a locally-checked-out clone). `surfaces`
 // and `tools` are surfaced from the manifest when present. `builtin` plugins are
 // omitted entirely (they live in `plugins/`, not `enabled`, and cannot be removed).
@@ -88,7 +88,7 @@ interface Manifest {
 
 // ─── Low-level helpers ────────────────────────────────────────────────────────
 
-const SOURCE_MARKER = '.da-source';
+const SOURCE_MARKER = '.flow-assist-source';
 const REGISTRY_SOURCE = 'registry';
 
 // A plugin name must be a single filesystem path segment: non-empty, not `.`/`..`,
@@ -121,7 +121,7 @@ function writeSourceMarker(pluginDir: string): void {
   writeFileSync(join(pluginDir, SOURCE_MARKER), `${REGISTRY_SOURCE}\n`, 'utf8');
 }
 
-// Provenance for a plugin dir: 'registry' if a `.da-source` marker says so,
+// Provenance for a plugin dir: 'registry' if a `.flow-assist-source` marker says so,
 // otherwise 'git' (locally checked out / unmarked).
 function sourceFor(pluginDir: string): 'git' | 'registry' {
   const marker = join(pluginDir, SOURCE_MARKER);
@@ -188,7 +188,7 @@ export function resolveDeps(
 // ─── Factory ──────────────────────────────────────────────────────────────────
 
 export function createPluginRepo({ availableDir, enabledDir, projectRoot, fetchPlugin }: PluginRepoOptions): PluginRepo {
-  // Registry-managed plugin names: every available plugin whose `.da-source` says
+  // Registry-managed plugin names: every available plugin whose `.flow-assist-source` says
   // 'registry'. Used by `update(name?)` with no name to re-fetch them all.
   const registryManagedNames = (): string[] => {
     if (!existsSync(availableDir)) return [];
@@ -206,7 +206,7 @@ export function createPluginRepo({ availableDir, enabledDir, projectRoot, fetchP
     if (!fetchPlugin) {
       return {
         ok: false,
-        error: `plugin '${n}' not available locally and no registry token (set DA_PLUGIN_REGISTRY_TOKEN)`,
+        error: `plugin '${n}' not available locally and no registry token (set FLOW_ASSIST_PLUGIN_REGISTRY_TOKEN)`,
       };
     }
     const pluginDir = join(availableDir, n);
@@ -245,7 +245,7 @@ export function createPluginRepo({ availableDir, enabledDir, projectRoot, fetchP
     },
 
     // Removes a plugin: unlinks it from `enabled`. The available dir (and any
-    // `.da-source` marker) is left in place so re-install is instant.
+    // `.flow-assist-source` marker) is left in place so re-install is instant.
     async remove(name: string): Promise<InstallResult> {
       const n = validPluginName(name);
       if (!n) return { ok: false, error: `plugin '${name}' — invalid name (must be a single path segment)` };
@@ -262,7 +262,7 @@ export function createPluginRepo({ availableDir, enabledDir, projectRoot, fetchP
     },
 
     // Updates a plugin: registry-only re-download of the latest published version.
-    // Git checkouts are never clobbered — only `.da-source=registry` plugins are
+    // Git checkouts are never clobbered — only `.flow-assist-source=registry` plugins are
     // re-fetched; a git plugin is skipped with a "use `git pull`" hint. `name` given
     // updates that one; omitted updates every registry-managed plugin.
     async update(name?: string): Promise<InstallResult> {
