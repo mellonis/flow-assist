@@ -60,3 +60,22 @@ test('resolveAppTheme lets the user theme override the base palette', () => {
   expect(out.modals.chat.border).toBe('red');
   expect(out.error).toBe('yellow');
 });
+
+test('every colour the host ships is one flowtty can paint', async () => {
+  // An unknown colour name paints NOTHING, silently: `fieldBg: 'gray'` was exactly
+  // that until flowtty learned the name. flowtty publishes the list (≥ 1.0.0-alpha.10),
+  // so a colour in a default palette is checked against it — a name, a #hex or rgb().
+  const { NAMED_COLORS } = await import('@flowtty/core');
+  const { buildKeycapsPlugin } = await import('../../plugins/keycaps');
+  const paintable = (v: string) => (NAMED_COLORS as readonly string[]).includes(v) || /^#[0-9a-f]{3}([0-9a-f]{3})?$/i.test(v) || /^rgb\(/.test(v);
+  const bad: string[] = [];
+  const walk = (node: unknown, path: string) => {
+    if (typeof node === 'string') { if (!paintable(node)) bad.push(`${path} = ${node}`); return; }
+    if (node && typeof node === 'object') for (const [k, v] of Object.entries(node)) walk(v, `${path}.${k}`);
+  };
+  // The resolved theme: the base palette, every modal's palette with its `${ref}`s
+  // resolved, and a plugin's own palette on top.
+  const keycaps = buildKeycapsPlugin({ renders: {}, config: {}, make: ((_: string, shape: unknown) => shape) as never });
+  walk(resolveAppTheme({}, [keycaps as never], {}), 'theme');
+  expect(bad).toEqual([]);
+});
