@@ -9,11 +9,8 @@
 // flagged `write` (true or a predicate `(args) => boolean`).
 
 import { hostConfigSchema } from '../config/schema.js';
-import {
-  loadConfig, saveConfigSetting, saveConfigUnset,
-  editConfigArray, getDeep, getSchemaAtPath, describeSchema, unwrapNode, parseValue,
-} from '../config/load.js';
-import { loadMemories, saveMemories, memoryFilePath, DEFAULT_MEMORY_PATH } from '../runtime/services/memory.js';
+import { loadConfig, getDeep, getSchemaAtPath, describeSchema, unwrapNode } from '../config/load.js';
+import { loadMemories, saveMemories, memoryFilePath } from '../runtime/services/memory.js';
 import { openInBrowser } from '../runtime/services.js';
 import { resolveIdentityToken } from '../runtime/plugin-identity.js';
 import { DEFAULT_THEME } from '../playback/theme.js';
@@ -38,13 +35,6 @@ function pluginScopeName(ctx: CoreCtx): string | undefined {
   return ctx.pluginToken !== undefined ? resolveIdentityToken(ctx.pluginToken) : undefined;
 }
 
-// Predicate "is this call a write": the listed actions mutate state (config
-// set/unset/push/insert/remove and memory add/update/forget) and require a
-// y/n pause in the chat; the others are read-only.
-const coreIsWrite = (actionSet: string[]) => {
-  return (a: Record<string, unknown>) => actionSet.includes(String(a?.action ?? ''));
-};
-
 // Renders a resolved hotkey map ({ action: [keys] }) compactly for tool output:
 // a single-key action renders as the bare name, multiple as `a/b`. Used by the
 // config tool so `config get/explain keys` reports the effective bindings.
@@ -62,27 +52,14 @@ const KEY_DEFAULTS: Record<string, string> = {
   cache: 'enabled: true; ON unless config.cache.enabled = false',
   theme: `${JSON.stringify(DEFAULT_THEME)}; flowtty default theme`,
   debug: 'logTools: false',
-  memory: `file: ${DEFAULT_MEMORY_PATH}; empty to start`,
-  fs: 'roots: []; no fs tool in the tracker-agnostic host',
+  memory: 'file: memory.json in the config directory; empty to start',
+  fs: 'roots: []; no file tools unless a plugin adds them',
   // "always LOADED", not always visible: each built-in is configured via its own
   // config.plugins.<name>.* namespace. keycaps is OFF by default — its panel shows
   // only when config.plugins.keycaps.enabled = true. Saying "always active" made the
   // LLM conclude "already on, nothing to enable" and refuse the request.
   plugins: 'built-in core, assistant, keycaps, log are always LOADED; each is configured via config.plugins.<name>.* (keycaps shows its panel only when config.plugins.keycaps.enabled = true — it is OFF by default)',
 };
-
-// A "(note)" appended to a config key's output: the effective-hotkeys note for
-// `keys`, or the ACTIVE default for an unset key that has one. Empty when the key
-// is set (its real value already describes itself) or has no known default.
-function keyNote(key: string, cfg: Record<string, unknown>, resolvedKeys?: Record<string, string[]>): string {
-  if (key === 'keys' && resolvedKeys) {
-    return `effective: ${Object.keys(resolvedKeys).length} bindings — config set keys.<action> <key> to remap`;
-  }
-  const raw = getDeep(cfg, key);
-  const d = KEY_DEFAULTS[key];
-  if (raw != null || !d) return '';
-  return `default: ${d}`;
-}
 
 // Resolves the zod node for a config key, falling back to a plugin's own
 // configSchema for `plugins.<name>.*` paths. The host schema sees `plugins` only as
@@ -97,16 +74,6 @@ function schemaAt(key: string, pluginConfigs?: Record<string, unknown>): any {
   const pluginSchema = m?.[1] && pluginConfigs?.[m[1]];
   if (pluginSchema) return getSchemaAtPath(pluginSchema, m[2] ?? '');
   return null;
-}
-
-// Comma-joined "flag (type)" list for a plugin's configSchema, so `config list`
-// tells the LLM which config.plugins.<name>.<flag> keys exist (and their types).
-function pluginFlags(node: unknown): string {
-  const shape = unwrapNode(node)?.shape;
-  if (!shape) return 'config.plugins.<name>.<flag>';
-  return Object.keys(shape)
-    .map(f => `${f} (${describeSchema(shape[f])})`)
-    .join(', ');
 }
 
 // Normalizes a memory scope to the host scope-model. Only two literals are accepted:
@@ -345,31 +312,10 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
     {
       type: 'function',
       function: {
-        name: 'log',
-        description: 'Append a line to the host log (the `l` panel) — an append-only activity trail, distinct from cross-session `memory` facts. Call when the user asks to LOG something («log X»): log lines are an audit trail the user can open with `l`; `memory` is for facts to remember across sessions. action: "append" — add a log line (text required); "read" — show the recent log lines; "clear" — empty the in-memory log. Log lines are session-only (in-memory, cleared on restart) — use `memory` to persist.',
-        parameters: { type: 'object', properties: {
-          action: { type: 'string', enum: ['append', 'read', 'clear'], description: 'append — add a line to the log (text required); read — show recent lines; clear — empty the in-memory log.' },
-          text: { type: 'string', description: 'The log line to append (for action=append).' },
-        }, required: ['action'] },
+        name: 'config_schema',
+        description: 'The shape of the configuration, so you can help the person set it up: every key with its type, whether it is set, its active default, the effective key bindings and each plugin\'s own flags. It shows NO values and cannot write — the person changes config themselves with `config set <key> <value>`; answer with that exact command.',
+        parameters: { type: 'object', properties: { key: { type: 'string', description: 'Optional dot path to narrow the listing to one subtree, e.g. "ai" or "plugins.<name>".' } } },
       },
-    },
-    {
-      type: 'function',
-      function: {
-        name: 'config',
-        description: 'Read and modify the assistant configuration. action: "list" — show known config keys with their current values; "get" — read one key by dot path (e.g. ai.model); "explain" — describe one key (its type and current value); "set" — set a key (WRITE: writes to config.local.json, overriding config.json; for array keys the whole array is replaced — covers reordering/clearing); "push" — append an element to an array key (WRITE); "insert" — insert an element at index into an array key (WRITE, needs index + value); "remove" — remove by value (all occurrences) or by index (value or index). "unset" — remove a key (WRITE). For set/push/insert/remove the value must match the key\'s type from the schema. Inspect or adjust settings like ai.model, ai.language, ai.assistantLanguage, ai.disabledTools, keys.*, memory.file, cache.enabled, plugins.<ns>.*. CAUTION: set/unset/push/insert/remove change the running app\'s configuration — use deliberately, only on explicit user request.',
-        parameters: {
-          type: 'object',
-          properties: {
-            action: { type: 'string', enum: ['list', 'get', 'explain', 'set', 'unset', 'push', 'insert', 'remove'], description: 'list — show keys+values; get — read one key; explain — describe one key; set — write one key (whole array for array keys); unset — remove one key; push — append to an array key; insert — insert into an array key; remove — remove from an array key.' },
-            key: { type: 'string', description: 'Dot path of the config key (for get/explain/set/unset/push/insert/remove), e.g. ai.disabledTools.' },
-            value: { description: 'New value for set; element for push/insert; element-or-index for remove (must match the key type).' },
-            index: { type: 'number', description: 'Position for insert (0-based); for remove, use value OR index (whichever given).' },
-          },
-          required: ['action'],
-        },
-      },
-      write: coreIsWrite(['set', 'unset', 'push', 'insert', 'remove']),
     },
     {
       type: 'function',
@@ -507,112 +453,43 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
         }
         return 'action is required — list|add|update|forget.';
       }
-      case 'log': {
-        // Append to the host's log buffer (the `l` panel) — the append-only audit
-        // trail. Distinct from `memory` (cross-session facts): a log entry is an
-        // activity trail, not a fact to remember. The buffer is session-only
-        // (in-memory, cleared on restart) — that is what the `l` panel reads. A
-        // LOGICAL write, but deliberately NOT write-confirmed (like memory): the
-        // user asked to log it, and a y/n pause on a trivial append is noise.
-        const action = String(args.action ?? '').trim();
-        if (action === 'append') {
-          const text = String(args.text ?? '').trim();
-          if (!text) return 'text is required — the log line to append.';
-          (ctx as { pushLog?: (line: string) => void }).pushLog?.(text);
-          return `Logged: ${text}`;
-        }
-        if (action === 'read') {
-          const lines = (ctx as { log?: { read(): string[] } }).log?.read() ?? [];
-          return lines.length ? lines.slice(-20).join('\n') : '(log is empty)';
-        }
-        if (action === 'clear') {
-          (ctx as { log?: { clear(): void } }).log?.clear();
-          (ctx as { pushLog?: (line: string) => void }).pushLog?.('(log cleared)');
-          return 'Log cleared.';
-        }
-        return 'action is required — append|read|clear.';
-      }
-      case 'config': {
-        // The application config: read/describe need no write; set/unset/push/
-        // insert/remove write config.local.json (as the :config command), not the
-        // committed config.json. Values are validated against the schema BEFORE
-        // writing (and for an array, the whole resulting array). ctx.configLocalPath
-        // is passed by the caller to point at a temp file (undefined → default).
-        const action = String(args.action ?? '').trim();
+      case 'config_schema': {
+        // Read-only and value-free by design: config is the model's own leash
+        // (disabledTools, baseUrl, tokenEnv, plugin roots) and the assistant reads
+        // other people's text, so the person owns the values and the model sees only
+        // the structure. `configLocalPath` points a test at a temp file.
         const key = String(args.key ?? '').trim();
-        const cfg = loadConfig();
-        const localPath = ctx.configLocalPath;
-        if (action === 'list') {
-          const shape = unwrapNode(hostConfigSchema)?.shape ?? {};
-          const rows = Object.keys(shape).map(k => {
-            const val = getDeep(cfg, k);
-            const shown = JSON.stringify(val ?? null);
-            const note = keyNote(k, cfg, resolvedKeys);
-            return note ? `- ${k}: ${shown} (${note})` : `- ${k}: ${shown}`;
-          });
-          // Per-plugin config namespaces (config.plugins.<name>.*), so the LLM sees
-          // the flags a plugin actually declares — e.g. keycaps.enabled — rather than
-          // being told plugins is an opaque record and left guessing.
-          for (const name of Object.keys(pluginConfigs ?? {})) {
-            const val = getDeep(cfg, `plugins.${name}`) ?? null;
-            rows.push(`- plugins.${name}: ${JSON.stringify(val)} (config.plugins.${name}.<flag> — ${pluginFlags(pluginConfigs![name])})`);
-          }
-          return rows.length ? rows.join('\n') : 'No known config keys.';
+        const cfg = loadConfig(ctx.configLocalPath ? { localPath: ctx.configLocalPath } : undefined);
+        const rows: string[] = [];
+        const leaf = (path: string, node: unknown) => {
+          const top = path.split('.')[0]!;
+          const state = getDeep(cfg, path) == null ? 'unset' : 'set';
+          const note = state === 'unset' && KEY_DEFAULTS[top] ? ` (default: ${KEY_DEFAULTS[top]})` : '';
+          rows.push(`- ${path}: ${describeSchema(node)} — ${state}${note}`);
+        };
+        const walk = (path: string, node: unknown) => {
+          const shape = unwrapNode(node)?.shape as Record<string, unknown> | undefined;
+          if (shape && Object.keys(shape).length) for (const k of Object.keys(shape)) walk(path ? `${path}.${k}` : k, shape[k]);
+          else if (path) leaf(path, node);
+        };
+        const roots: [string, unknown][] = [];
+        const hostShape = (unwrapNode(hostConfigSchema)?.shape ?? {}) as Record<string, unknown>;
+        for (const k of Object.keys(hostShape)) if (k !== 'plugins') roots.push([k, hostShape[k]]);
+        for (const name of Object.keys(pluginConfigs ?? {})) roots.push([`plugins.${name}`, pluginConfigs![name]]);
+        const wanted = roots.filter(([path]) => !key || path === key || path.startsWith(`${key}.`) || key.startsWith(`${path}.`));
+        if (key && !wanted.length) return `config_schema: unknown key ${key}`;
+        for (const [path, node] of wanted) {
+          if (key && key.startsWith(`${path}.`)) {
+            const sub = schemaAt(key, pluginConfigs);
+            if (!sub) return `config_schema: unknown key ${key}`;
+            walk(key, sub);
+          } else walk(path, node);
         }
-        if (action === 'get') {
-          if (!key) return 'key is required — dot path of the config key (e.g. ai.model).';
-          if (key === 'keys' && resolvedKeys) {
-            const override = getDeep(cfg, 'keys');
-            const note = override == null ? 'no override — host defaults + plugin keys are active' : `override: ${JSON.stringify(override)}`;
-            return `config.keys — ${note}. Effective bindings:\n${prettyKeys(resolvedKeys)}\nRemap with config set keys.<action> <key> (e.g. config set keys.chat c).`;
-          }
-          if (key.startsWith('keys.') && resolvedKeys) {
-            const actionName = key.slice('keys.'.length);
-            if (actionName in resolvedKeys) return `config.${key} = ${JSON.stringify(resolvedKeys[actionName])} (effective binding for '${actionName}').`;
-          }
-          const note = keyNote(key, cfg, resolvedKeys);
-          const value = JSON.stringify(getDeep(cfg, key));
-          return note ? `config.${key} = ${value} (${note})` : `config.${key} = ${value}`;
+        if (resolvedKeys && (!key || key === 'keys' || key.startsWith('keys.'))) {
+          rows.push(`Effective key bindings (host defaults + plugin keys; \`keys\` is an override map): ${prettyKeys(resolvedKeys)}`);
         }
-        if (action === 'explain') {
-          if (!key) return 'key is required — dot path of the config key (e.g. ai.model).';
-          if (key === 'keys' && resolvedKeys) {
-            const node = getSchemaAtPath(hostConfigSchema, 'keys');
-            const want = node ? describeSchema(node) : 'record of action->key';
-            return `config.keys: type ${want}; it is an OVERRIDE map — when unset, host defaults + plugin keys apply. Current effective bindings:\n${prettyKeys(resolvedKeys)}\nRemap with config set keys.<action> <key>.`;
-          }
-          const node = schemaAt(key, pluginConfigs);
-          const want = node ? describeSchema(node) : 'unknown key (not in the schema — use get to inspect)';
-          const note = keyNote(key, cfg, resolvedKeys);
-          const value = JSON.stringify(getDeep(cfg, key));
-          return note
-            ? `config.${key}: type ${want}; current value ${value}. ${note}`
-            : `config.${key}: type ${want}; current value ${value}.`;
-        }
-        if (action === 'set') {
-          if (!key) return 'key is required — dot path of the config key (e.g. ai.model).';
-          const v = typeof args.value === 'string' ? parseValue(args.value) : args.value;
-          // Validate against the plugin's configSchema for config.plugins.<name>.*
-          // (schemaAt falls back to it), so config set plugins.keycaps.enabled works.
-          const node = schemaAt(key, pluginConfigs);
-          if (!node) return `config: unknown key ${key}`;
-          const res = node.safeParse(v);
-          if (!res.success) return `config: ${key} — expected ${describeSchema(node)}, got ${JSON.stringify(v)}`;
-          saveConfigSetting(key, res.data, localPath);
-          return `config.${key} = ${JSON.stringify(res.data)} (saved to config.local.json).`;
-        }
-        if (action === 'unset') {
-          if (!key) return 'key is required — dot path of the config key (e.g. ai.model).';
-          saveConfigUnset(key, localPath);
-          return `config.${key} removed (config.local.json updated).`;
-        }
-        if (action === 'push' || action === 'insert' || action === 'remove') {
-          if (!key) return 'key is required — dot path of the array config key (e.g. ai.disabledTools).';
-          const res = editConfigArray(key, action, { value: args.value, index: args.index as number | undefined }, hostConfigSchema, localPath);
-          if (!res.ok) return res.error;
-          return `config.${key} = ${JSON.stringify(res.value)} (saved to config.local.json).`;
-        }
-        return 'action is required — list|get|explain|set|unset|push|insert|remove.';
+        rows.push('You cannot read values or write config. To change something, give the person the exact command: config set <key> <value> (config unset <key> to clear).');
+        return rows.join('\n');
       }
       case 'datetime': {
         // Current date/time in the requested zone (or the host local one). LLMs

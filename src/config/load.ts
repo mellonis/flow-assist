@@ -51,9 +51,10 @@ function asConfigObject(v: unknown): Record<string, unknown> | null {
 // Loads the effective host config: config.json deep-merged with the local
 // overrides in config.local.json. Missing files simply fall back to the other
 // side (or an empty object), never throwing.
-export function loadConfig(): Record<string, unknown> {
+// `localPath` swaps the local overrides file — tests point it at a temp file.
+export function loadConfig(opts?: { localPath?: string }): Record<string, unknown> {
   const base = asConfigObject(readConfigFile(CONFIG_PATH)) ?? {};
-  const local = asConfigObject(readConfigFile(CONFIG_LOCAL_PATH));
+  const local = asConfigObject(readConfigFile(opts?.localPath ?? CONFIG_LOCAL_PATH));
   if (local == null) return base;
   return deepMerge(base, local);
 }

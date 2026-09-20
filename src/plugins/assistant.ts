@@ -18,7 +18,20 @@ import type { Plugin } from '../loader/plugin.js';
 
 // Slash-commands of the chat — a single source for runChatCommand and Tab-completion.
 // `/analyze` is a tracker slash command and is removed.
-const CHAT_COMMANDS = ['refresh-context', 'compact', 'clear', 'exit'];
+const CHAT_COMMANDS = ['refresh-context', 'compact', 'clear', 'log', 'exit'];
+
+// `/log [N]`: the person shares the tail of the host log with the model, as their
+// own message. The model has no log tool — what it sees of the log is what the
+// person chose to show, when they chose to show it.
+export const LOG_SHARE_DEFAULT = 20;
+export const LOG_SHARE_MAX = 200;
+export function logShareMessage(lines: readonly string[], arg = ''): string | null {
+  const asked = Number.parseInt(arg, 10);
+  const n = Math.min(Number.isFinite(asked) && asked > 0 ? asked : LOG_SHARE_DEFAULT, LOG_SHARE_MAX);
+  const tail = lines.slice(-n);
+  if (!tail.length) return null;
+  return `Host log, last ${tail.length} line${tail.length === 1 ? '' : 's'}:\n\`\`\`\n${tail.join('\n')}\n\`\`\``;
+}
 
 // A chat message. `role` is the OpenAI role; `content` may be null when a message
 // carries tool_calls. Extra fields ride along (live/reasoning/process/toolRuns/…).
@@ -521,8 +534,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const runChatCommand = (cmd: string) => {
             const [name, ...rest] = cmd.split(/\s+/);
             const arg = rest.join(' ');
-            void arg;
             switch (name) {
+              case 'log': {
+                const svc = f.services as Record<string, any>;
+                const shared = logShareMessage((svc.log?.read?.() ?? svc.logs ?? []) as string[], arg);
+                if (shared) void send(shared); else setError('the log is empty — nothing to share');
+                return;
+              }
               case 'clear':
                 // Full session reset: clear not only messages but everything that would
                 // survive a rebuild — emptyNotice, the tool name/counter, the time, the

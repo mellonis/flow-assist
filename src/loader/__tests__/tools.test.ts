@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
 import { z } from 'zod';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { assembleToolRegistry } from '../tools';
@@ -16,8 +17,7 @@ test('assembles built-in core + host + plugin groups, deduped by name', () => {
   const reg = assembleToolRegistry({ plugins, config: {}, repo: { list: async () => [] } as any });
   const names = reg.tools.map(t => t.function.name);
   expect(names).toContain('memory');
-  expect(names).toContain('log');
-  expect(names).toContain('config');
+  expect(names).toContain('config_schema');
   expect(names).toContain('datetime');
   expect(names).toContain('remind');
   expect(names).toContain('background');
@@ -379,60 +379,56 @@ test('ai.disabledTools withholds a whole group', () => {
   expect(reg.tools.map(t => t.function.name)).not.toContain('gitlab:mr');
 });
 
-test('config get keys reports EFFECTIVE bindings (host defaults + plugin keys), not the empty override', async () => {
+test('the model gets no `config` and no `log` tool — only the read-only `config_schema`', () => {
+  // Config is the model's own leash (disabledTools, baseUrl, tokenEnv, plugin
+  // roots) and the assistant reads other people's text, so even a y/n-confirmed
+  // write is one prompt injection plus one tired keypress away. The person owns
+  // the values; the model sees the structure and proposes the command.
+  const reg = assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
+  const names = reg.tools.map((t) => t.function.name);
+  expect(names).toContain('config_schema');
+  expect(names).not.toContain('config');
+  expect(names).not.toContain('log');
+  expect(reg.tools.find((t) => t.function.name === 'config_schema')?.write).toBeUndefined();
+});
+
+test('config_schema shows structure, defaults and set/unset — never a value', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'fa-cfgschema-'));
+  const local = join(dir, 'config.local.json');
+  writeFileSync(local, JSON.stringify({ ai: { model: 'secret-model-name', baseUrl: 'https://llm.internal.example' }, user: { name: 'Ada Lovelace' } }));
+  const reg = assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
+  const out = await reg.exec('config_schema', {}, { configLocalPath: local });
+  expect(out).toMatch(/- ai\.model: string — set/);
+  expect(out).toMatch(/- ai\.stream: true\|false — unset/);
+  expect(out).toMatch(/- user\.name: string — set/);
+  for (const secret of ['secret-model-name', 'llm.internal.example', 'Ada Lovelace']) expect(out).not.toContain(secret);
+  // The model once claimed "cache is off by default": an unset key carries its ACTIVE default.
+  expect(out).toMatch(/- cache\.enabled: true\|false — unset \(default: enabled: true/);
+  // It can help, but only by handing the person a command.
+  expect(out).toMatch(/config set <key> <value>/);
+  // A subtree narrows the listing.
+  const ai = await reg.exec('config_schema', { key: 'ai' }, { configLocalPath: local });
+  expect(ai).toMatch(/- ai\.model/);
+  expect(ai).not.toMatch(/- cache/);
+  expect(await reg.exec('config_schema', { key: 'nope.nothing' }, {})).toMatch(/unknown key/);
+});
+
+test('config_schema reports EFFECTIVE key bindings and a plugin\'s own flags', async () => {
   const make = makeFactory({});
+  const keycapsSchema = z.object({ enabled: z.boolean().optional(), colors: z.record(z.string(), z.unknown()).optional() }).optional();
   const plugins = [
     make('assistant', { keys: { chat: 'A' } }),
-    make('log', { keys: { log: 'l' } }),
+    make('keycaps', { configSchema: keycapsSchema, keys: {} }),
   ];
   const reg = assembleToolRegistry({ plugins, config: {}, repo: { list: async () => [] } as any });
-  const out = await reg.exec('config', { action: 'get', key: 'keys' }, {});
-  // The LLM must not be told "keys is not configured" — it should see the real map.
-  expect(out).toContain('chat: A');
-  expect(out).toContain('log: l');
-  expect(out).toContain('commandLine');
-  expect(out).toContain('Effective bindings');
-  // A single-key binding renders bare (q), multi-key as enter/return.
+  const out = await reg.exec('config_schema', {}, {});
+  // Bindings are not personal data and are exactly what "how do I remap X" needs:
+  // host defaults + plugin keys, not the (empty) override map.
+  expect(out).toMatch(/chat: A/);
   expect(out).toMatch(/quit: q/);
   expect(out).toMatch(/open: enter\/return/);
-});
-
-test('config get/explain derive from real defaults for unset keys (cache is ON unless disabled)', async () => {
-  const make = makeFactory({});
-  const reg = assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
-  // The LLM once claimed "cache is off by default" — the runtime default is ON
-  // unless config.cache.enabled is false. Surface that so it stops guessing.
-  const got = await reg.exec('config', { action: 'get', key: 'cache' }, {});
-  expect(got).toMatch(/config\.cache = undefined/); // the override is unset
-  expect(got).toMatch(/default: enabled: true/);     // but the ACTIVE default is ON
-  const explained = await reg.exec('config', { action: 'explain', key: 'cache' }, {});
-  expect(explained).toMatch(/enabled: true/);
-  expect(explained).toMatch(/current value undefined/);
-  // `list` carries the same note for every unset-keyed-row.
-  const listed = await reg.exec('config', { action: 'list' }, {});
-  expect(listed).toMatch(/- cache: null \(default: enabled: true/);
-});
-
-test('config resolves plugins.<name>.<flag> via the plugin configSchema (keycaps.enabled)', async () => {
-  const make = makeFactory({});
-  // keycaps declares an `enabled` flag in its own configSchema; the host schema sees
-  // `plugins` as an opaque record and reports it as an "unknown key".
-  const keycapsSchema = z.object({ enabled: z.boolean().optional(), colors: z.record(z.string(), z.unknown()).optional() }).optional();
-  const plugins = [make('keycaps', { configSchema: keycapsSchema, keys: {} })];
-  const reg = assembleToolRegistry({ plugins, config: {}, repo: { list: async () => [] } as any });
-  const ctx = {};
-  // explain now describes the flag rather than saying "unknown key".
-  const explained = await reg.exec('config', { action: 'explain', key: 'plugins.keycaps.enabled' }, ctx);
-  expect(explained).toMatch(/true\|false/);
-  expect(explained).not.toMatch(/unknown key/);
-  // set accepts the flag (previously rejected as "unknown key"), writing to a temp file.
-  const setOut = await reg.exec('config', { action: 'set', key: 'plugins.keycaps.enabled', value: 'true' }, { configLocalPath: '/tmp/dacfg-test-keycaps.json' });
-  expect(setOut).toMatch(/saved to config\.local\.json/);
-  expect(setOut).toMatch(/enabled = true/);
-  // list surfaces the plugin namespace and its flags.
-  const listed = await reg.exec('config', { action: 'list' }, ctx);
-  expect(listed).toMatch(/- plugins\.keycaps: /);
-  expect(listed).toMatch(/enabled \(true\|false\)/);
+  // The host sees `plugins` as an opaque record; the plugin's configSchema fills it in.
+  expect(out).toMatch(/- plugins\.keycaps\.enabled: true\|false — unset/);
 });
 
 test('host:plugins_list reports the always-loaded built-ins, not just the (empty) registry', async () => {
@@ -550,40 +546,6 @@ test('memory tool enforces host|plugin scope, resolves plugin, and supports a la
   await reg.exec('memory', { action: 'update', id, label: 'host:misc' }, ctx);
   const relabeled = await reg.exec('memory', { action: 'list', label: 'host:misc' }, ctx);
   expect(relabeled).toContain('cache is ON by default');
-});
-
-test('log appends/reads/clears the host log (the `l` panel), a write NOT confirmed', async () => {
-  const make = makeFactory({});
-  const reg = assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
-  // pushLog is the host's live log channel (append → logs → re-render); log is the
-  // LogService (in-memory buffer) — both are on the toolCtx. We stub them to capture.
-  const pushed: string[] = [];
-  const buffer: string[] = ['older line'];
-  const ctx = {
-    pushLog: (line: string) => { pushed.push(line); buffer.push(line); },
-    log: { read: () => buffer.slice(), clear: () => { buffer.length = 0; } },
-  } as any;
-
-  // append: text required and a line lands in the log.
-  const needText = await reg.exec('log', { action: 'append' }, ctx);
-  expect(needText).toContain('text is required');
-  const out = await reg.exec('log', { action: 'append', text: 'HELLO!' }, ctx);
-  expect(out).toContain('Logged: HELLO!');
-  expect(pushed).toEqual(['HELLO!']);
-
-  // read: the recent lines (buffer order).
-  const read = await reg.exec('log', { action: 'read' }, ctx);
-  expect(read).toContain('older line');
-  expect(read).toContain('HELLO!');
-
-  // clear: empties the buffer and marks it.
-  const cleared = await reg.exec('log', { action: 'clear' }, ctx);
-  expect(cleared).toContain('Log cleared');
-  expect(pushed).toEqual(['HELLO!', '(log cleared)']);
-
-  // action required.
-  const noAction = await reg.exec('log', {}, ctx);
-  expect(noAction).toContain('action is required');
 });
 
 test('host:plugins_remove purges the removed plugin\'s scoped memories', async () => {
