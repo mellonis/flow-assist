@@ -77,6 +77,23 @@ A qualified tool name (`plugin:tool`) is translated to a provider-safe wire name
 (`plugin__tool`) in `src/assistant/agent.ts` and nowhere else: providers validate
 names against `^[a-zA-Z0-9_-]{1,128}$`.
 
+### A tool argument is hostile input
+
+The model writes every argument, and what it read a minute ago (a ticket, a README,
+a web page) may have told it what to write. A tool that pauses for y/n is guarded by
+a person; a **read-only tool is guarded by nothing**, so it is the one to check
+hardest. Rules the `repo` and `gitlab` plugins hold, each with a test that tries it:
+
+- **A value that reaches a CLI's argv never starts with `-`**, and refs go after
+  `--end-of-options`. `git diff --output=<file>` writes a file from a "read" tool.
+- **A path check is on the real path, not the spelled one** — a clone may carry a
+  symlink out of the root (`realOf` in `repo`, which also handles a path that does
+  not exist yet and a dangling link).
+- **A configured root is never deleted**, confirmed or not.
+- **No "magic" flags**: glab's `--field` reads `@path` from disk; strings go through
+  `--raw-field`. Check the same before wrapping any other CLI (`gh api -F` is alike —
+  this applies to the planned `github` plugin).
+
 ## The conversation the model sees
 
 **The chat's display list is never the model's history.** `agentChat` returns the

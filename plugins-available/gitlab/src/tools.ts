@@ -53,6 +53,9 @@ export function buildGitlabGroup({ clip, glabAvailable, runGlab }: GitlabDeps) {
       }
       const path = String(args.path ?? '').trim();
       if (!path) return 'path is required — the GitLab API path.';
+      // The path is glab's positional argument; one starting with `-` would be read
+      // as a flag (`--input=<file>` uploads a file as the request body).
+      if (path.startsWith('-')) return `Invalid path «${path}» — an API path cannot start with "-".`;
       if (!await glabAvailable()) return 'glab is not installed or not available in PATH.';
       const fields: Record<string, any> = {};
       for (const k of Object.keys(args.fields ?? {})) {
@@ -68,13 +71,19 @@ export function buildGitlabGroup({ clip, glabAvailable, runGlab }: GitlabDeps) {
   };
 }
 
-// `--field k=v`: v is JSON for objects/arrays, a string otherwise.
+// glab's `--field` is the "magic" flag: a value starting with `@` is read FROM A
+// FILE (`@-` from stdin). With it, `fields: { title: "@~/.ssh/id_ed25519" }` would
+// send a private key to GitLab — and on a GET not even a y/n stands in the way.
+// `--raw-field` sends the value as the literal string it is, so everything a model
+// can spell goes through it; only numbers and booleans keep `--field`, for the type
+// conversion, and neither can begin with `@`.
 function toFieldFlags(fields: Record<string, any> | undefined): string[] {
   const out: string[] = [];
   for (const [k, v] of Object.entries(fields || {})) {
     const key = String(k).trim();
     if (!key || key.startsWith('-')) continue;
-    out.push('--field', `${key}=${typeof v === 'object' ? JSON.stringify(v) : String(v)}`);
+    const typed = typeof v === 'number' || typeof v === 'boolean';
+    out.push(typed ? '--field' : '--raw-field', `${key}=${typeof v === 'object' && v !== null ? JSON.stringify(v) : String(v)}`);
   }
   return out;
 }

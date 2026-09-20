@@ -44,6 +44,24 @@ export function buildRepoGroup({ clip, roots, homeDir = os.homedir() }: RepoDeps
     return best;
   };
 
+  // The real location of a path that may not exist yet (write_file creates it):
+  // the deepest existing ancestor is resolved through its links, the rest rejoined.
+  const realOf = (abs: string): string => {
+    let head = abs;
+    const tail: string[] = [];
+    for (;;) {
+      try { return path.join(fs.realpathSync(head), ...tail); } catch {}
+      // A dangling link has no real path, yet a write through it lands at its target.
+      try {
+        if (fs.lstatSync(head).isSymbolicLink()) return path.join(path.resolve(path.dirname(head), fs.readlinkSync(head)), ...tail);
+      } catch {}
+      const up = path.dirname(head);
+      if (up === head) return abs;
+      tail.unshift(path.basename(head));
+      head = up;
+    }
+  };
+
   // Resolves a path under a root. A relative path is tried from every root, and the
   // one that stays inside its root wins (the longest root when several do); an
   // absolute path is only checked to be inside one of the roots.
@@ -68,7 +86,21 @@ export function buildRepoGroup({ clip, roots, homeDir = os.homedir() }: RepoDeps
     }
     const root = matchRoot(abs, all);
     if (!root) return { error: `repo: «${abs}» is outside the configured roots` };
+    // The check above is lexical, and a clone may hold a symlink that points out of
+    // it (`docs -> /etc`): the path reads as inside the root while the file it names
+    // is not. So the REAL location must sit under a root's real location as well.
+    const real = realOf(abs);
+    if (!matchRoot(real, all.map(realOf))) return { error: `repo: «${abs}» resolves through a link to «${real}», outside the configured roots` };
     return { abs, root };
+  };
+
+  // A git ref that starts with `-` is an option, not a ref: `--output=<file>` makes
+  // `git diff` and `git log` WRITE that file — from a tool that is read-only and so
+  // never pauses for a y/n. Refused by name here; `--end-of-options` in the argv is
+  // the second lock on the same door.
+  const badRef = (...refs: string[]): string | null => {
+    const bad = refs.find((r) => r.startsWith('-'));
+    return bad ? `git: «${bad}» is not a ref — a ref cannot start with "-".` : null;
   };
 
   // A window over a list: [start..end] (1-based, inclusive); without bounds, the
@@ -217,6 +249,9 @@ export function buildRepoGroup({ clip, roots, homeDir = os.homedir() }: RepoDeps
     const r = resolveRead(args.path, all);
     if (r.error) return r.error;
     const abs = r.abs;
+    // A configured root is the clone itself. One confirmed y/n must never be the
+    // whole repository with its unpushed work, so the root is not deletable at all.
+    if (abs === r.root) return `delete_file: «${abs}» is a configured root — it is not deleted from here.`;
     if (!fs.existsSync(abs)) return `delete_file: no such path «${abs}»`;
     const st = fs.statSync(abs);
     const recursive = args.recursive === true;
@@ -461,21 +496,27 @@ export function buildRepoGroup({ clip, roots, homeDir = os.homedir() }: RepoDeps
               // base + ref — only the commits ref has and base has not
               // (`git log base..ref`): the model sees "what was done in ABC-18",
               // not master's whole history that the branch carries along.
-              const argv = ['log', '--oneline', '-n', '100'];
+              const bad = badRef(lref, lbase);
+              if (bad) return clip(bad);
+              const argv = ['log', '--oneline', '-n', '100', '--end-of-options'];
               if (lbase && lref) argv.push(`${lbase}..${lref}`);
               else if (lref) argv.push(lref);
               label = `git_log${lbase && lref ? `(${lbase}..${lref})` : lref ? `(${lref})` : ''}`;
               text = await runGit(repo, argv);
             }
             else if (name === 'git_ls_tree') {
-              const argv = ['ls-tree', '--name-only', String(args.ref ?? '').trim()];
+              const bad = badRef(String(args.ref ?? '').trim());
+              if (bad) return clip(bad);
+              const argv = ['ls-tree', '--name-only', '--end-of-options', String(args.ref ?? '').trim()];
               if (args.path != null && String(args.path).trim()) argv.push('--', String(args.path).trim());
               label = `git_ls_tree(${String(args.ref ?? '').trim()})`; text = await runGit(repo, argv);
             }
             else if (name === 'git_show') {
               const ref = String(args.ref ?? '').trim();
               const p = String(args.path ?? '').trim();
-              label = `git_show(${ref}:${p})`; text = await runGit(repo, ['show', `${ref}:${p}`]);
+              const bad = badRef(ref);
+              if (bad) return clip(bad);
+              label = `git_show(${ref}:${p})`; text = await runGit(repo, ['show', '--end-of-options', `${ref}:${p}`]);
             }
             else { // git_diff
               const base = String(args.base ?? '').trim();
@@ -485,10 +526,12 @@ export function buildRepoGroup({ clip, roots, homeDir = os.homedir() }: RepoDeps
               // base + ref the argv has EXACTLY two refs, `git diff <base> <ref>`: an
               // extra `HEAD` in it makes git print nothing, and the assistant then
               // concludes the branch changes nothing.
+              const bad = badRef(base, ref);
+              if (bad) return clip(bad);
               const argv = base && ref
-                ? ['diff', base, ref]
+                ? ['diff', '--end-of-options', base, ref]
                 : ref
-                  ? ['diff', 'HEAD', ref]
+                  ? ['diff', '--end-of-options', 'HEAD', ref]
                   : ['diff', 'HEAD'];
               if (args.path != null && String(args.path).trim()) argv.push('--', String(args.path).trim());
               label = `git_diff${base && ref ? `(${base}..${ref})` : ref ? `(HEAD..${ref})` : ''}`;
