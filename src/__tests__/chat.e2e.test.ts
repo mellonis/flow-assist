@@ -287,14 +287,30 @@ test('the wheel scrolls the conversation', async () => {
   await settle(20);
   expect(ui.backend.lastFrame).toContain('line 40');
   expect(ui.backend.lastFrame).not.toContain('line 30\n');
+  // The question has scrolled out of view, so it is pinned above the conversation.
+  expect(ui.backend.lastFrame).toContain('› print forty lines');
 
-  for (let i = 0; i < 6; i++) ui.backend.wheel('up');
+  // The scroll box answers the wheel only while the pointer is over it — as any
+  // scrolling pane does. (20, 8) is inside the conversation; (0, 0) is the app title.
+  for (let i = 0; i < 6; i++) ui.backend.wheel('up', 0, 0);
+  await settle();
+  expect(ui.backend.lastFrame).toContain('line 40');
+  for (let i = 0; i < 6; i++) ui.backend.wheel('up', 20, 8);
   await settle();
   const up = ui.backend.lastFrame;
   expect(up).not.toContain('line 40');
-  for (let i = 0; i < 6; i++) ui.backend.wheel('down');
+  for (let i = 0; i < 6; i++) ui.backend.wheel('down', 20, 8);
   await settle();
   expect(ui.backend.lastFrame).toContain('line 40');
+  // PgUp / PgDn need no pointer.
+  await ui.press('pageup');
+  expect(ui.backend.lastFrame).not.toContain('line 40');
+  // Sending a message brings the view back to the newest rows.
+  model.script([{ text: 'the newest answer' }]);
+  await ui.type('again');
+  await ui.press('return');
+  await settle(20);
+  expect(ui.backend.lastFrame).toContain('the newest answer');
   ui.app.unmount();
 });
 

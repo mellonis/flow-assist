@@ -19,13 +19,16 @@
 //     `theme.modals.<name>.<prop>` read is guarded (`m = theme?.modals?.chat ?? {}`).
 
 import { askRows, type AskRow, type AskState } from '../assistant/ask.js';
-import { createElement as h } from 'react';
+import { createElement as h, useEffect, useRef, useState } from 'react';
 import {
   Box,
+  ScrollBox,
   Text,
   layoutMarkdown,
   splitVisualLines,
   windowAround,
+  type ScrollBoxHandle,
+  type ScrollMetrics,
 } from '@flowtty/react';
 
 // ─── Shapes ────────────────────────────────────────────────────────────────────
@@ -237,17 +240,35 @@ function toolSummary(runs: ToolRun[]): string {
   return [...count].map(([name, n]) => (n > 1 ? `${name} ×${n}` : name)).join(', ');
 }
 
+// The rows of ONE message. Laying markdown out is the expensive part of drawing the
+// chat, and the whole conversation is handed to the scroll box on every frame — so
+// the rows are remembered per message object. The chat replaces a message when it
+// changes and never mutates one (see the `setMessages` updaters), which makes the
+// object itself the right key: only the message that is streaming is laid out again.
+const rowCache = new WeakMap<ChatMsg, Map<string, ChatRow[]>>();
+function messageRows(m: ChatMsg, last: boolean, wrap: number, showReasoning: boolean): ChatRow[] {
+  const key = `${wrap}:${showReasoning ? 1 : 0}:${last ? 1 : 0}`;
+  let byKey = rowCache.get(m);
+  if (!byKey) rowCache.set(m, (byKey = new Map()));
+  let rows = byKey.get(key);
+  if (!rows) byKey.set(key, (rows = buildMessageRows(m, last, wrap, showReasoning)));
+  return rows;
+}
+
 function chatRows(messages: ChatMsg[], wrap: number, showReasoning: boolean): ChatRow[] {
+  return messages.flatMap((m, mi) => messageRows(m, mi === messages.length - 1, wrap, showReasoning));
+}
+
+function buildMessageRows(m: ChatMsg, last: boolean, wrap: number, showReasoning: boolean): ChatRow[] {
   const rows: ChatRow[] = [];
   const inner = Math.max(10, wrap - GUTTER);
-  for (let mi = 0; mi < messages.length; mi++) {
-    const m = messages[mi];
+  {
     const role = m.role;
     // The system prompt (instructions + task context) is CONTEXT, not conversation —
     // it is not drawn in history (as a system prompt in Claude Code). It stays
     // role:'system' in the API; here it is just not rendered. See/replace via
     // /refresh-context.
-    if (role === 'system') continue;
+    if (role === 'system') return rows;
     const reasoning = String(m.reasoning ?? '').trim();
     const process = String(m.process ?? '').trim();
     const live = String(m.live ?? '').trim();
@@ -273,19 +294,117 @@ function chatRows(messages: ChatMsg[], wrap: number, showReasoning: boolean): Ch
     // One quiet line under the answer; ^r unfolds the calls themselves.
     if (runs.length || duration) rows.push({ role, meta: true, duration, runs });
     if (runs.length && showReasoning) for (const run of runs) rows.push({ role, toolRun: true, spans: [toolRunText(run, inner)] });
-    if (mi < messages.length - 1) rows.push({ gap: true });
+    if (!last) rows.push({ gap: true });
   }
   return rows;
 }
 
+// ─── The conversation: a scroll box, anchored to its bottom ───────────────────
+// flowtty's <ScrollBox> takes whatever height the column leaves and follows new
+// rows until the person scrolls up; PgUp/PgDn and the wheel are its own. Before
+// 1.0.0-alpha.7 this view added up the heights of everything around the messages
+// (error, status, plan, queue, input field, question block, the gaps between them)
+// to know how many rows fit, and sliced the list by hand — every block added to the
+// chat was one more term to forget, and twice was.
+// Below this many rows the conversation keeps every row for itself.
+const MIN_ROWS_TO_PIN = 4;
+function ChatMessages({ messages, wrap, showReasoning, palette: m, errorColor }: {
+  messages: ChatMsg[];
+  wrap: number;
+  showReasoning: boolean;
+  palette: Record<string, string | undefined>;
+  errorColor?: string;
+}) {
+  const box = useRef<ScrollBoxHandle>(null);
+  const [view, setView] = useState<{ top: number; height: number } | null>(null);
+  const see = (x: ScrollMetrics) => setView((v) => (v && v.top === x.scrollTop && v.height === x.viewportHeight ? v : { top: x.scrollTop, height: x.viewportHeight }));
+  // A message the person sends brings the view back to the bottom, wherever they had
+  // scrolled to: they want to see the answer to what they just asked.
+  const asked = messages.reduce((n, x) => n + (x.role === 'user' ? 1 : 0), 0);
+  useEffect(() => { box.current?.scrollToEnd(); }, [asked]);
+
+  const rows = chatRows(messages, wrap, showReasoning);
+  let lastUserKey = -1;
+  for (let i = 0; i < rows.length; i++) if (rows[i]!.role === 'user' && rows[i]!.first) lastUserKey = i;
+  let lastUserText = '';
+  for (let mi = messages.length - 1; mi >= 0; mi--) {
+    if (messages[mi]?.role === 'user') { lastUserText = String(messages[mi]!.content ?? '').trim(); break; }
+  }
+  // Every row is one terminal line, so a row's index is its line in the content. The
+  // last question is pinned above the box while it is scrolled out of view. (Pinning
+  // takes a row from the box, which only moves its top further down — so it cannot
+  // flip back and forth.)
+  // …and only while the conversation has rows to spare: on a short screen the pin
+  // would take the one row the newest answer has. `room` is the box's height with the
+  // pin's own row given back, so the decision does not depend on its own outcome.
+  const wasPinned = useRef(false);
+  const room = (view?.height ?? 0) + (wasPinned.current ? 1 : 0);
+  const pinned = !!view && room >= MIN_ROWS_TO_PIN && lastUserKey >= 0 && (lastUserKey < view.top || lastUserKey >= view.top + view.height);
+  wasPinned.current = pinned;
+
+  // Who is speaking is said by a marker in the gutter and by the ground under the
+  // message — not by a label. The person's marker is the input field's own prompt.
+  const groundOf = (role?: string) => (role === 'user' ? m.userBg : role === 'bg' ? m.bgBg : undefined);
+  const gutter = (row: ChatRow) => {
+    if (row.first && row.role === 'user') return h(Text, { bold: true, color: m.accent }, '› ');
+    if (row.first && row.role === 'bg') return h(Text, { bold: true, color: m.bgAccent }, '◆ ');
+    // ƒ — F for Flow, and a function. A narrow code point every monospace font has;
+    // ∮ reads well as "a loop" but is East-Asian-ambiguous width, and flowtty counts
+    // one cell per code point, so it would shift the row in some terminals.
+    if (row.first && row.role === 'assistant') return h(Text, { bold: true, color: m.assistantAccent }, `${ASSISTANT_MARK} `);
+    return h(Text, null, ' '.repeat(GUTTER));
+  };
+
+  // The pinned question is a row of its own, not an overlay on the scroll box: in
+  // flowtty 1.0.0-alpha.7 an absolute child of a <ScrollBox> is not drawn when any
+  // ancestor has padding (this modal does).
+  const sticky = pinned
+    ? h(Box, { key: 'chat-sticky', flexDirection: 'row', flexShrink: 0, width: '100%', backgroundColor: m.userBg },
+        h(Text, { bold: true, dim: true, color: m.accent }, '› '),
+        h(Text, { dim: true, wrap: 'truncate' }, lastUserText.length > 60 ? `${lastUserText.slice(0, 60)}…` : lastUserText || '…'))
+    : null;
+  return h(Box, { flexGrow: 1, flexShrink: 1, flexDirection: 'column' }, sticky, h(ScrollBox, { ref: box, anchor: 'bottom', flexGrow: 1, flexShrink: 1, flexDirection: 'column', onScroll: (_o: number, x: ScrollMetrics) => see(x), onMetrics: see },
+    rows.length
+      ? null
+      : h(Text, { dim: true }, `Ask anything. ⏎ sends, ${NEWLINE_KEY} starts a new line, / opens the commands.`),
+    rows.map((row, i) => {
+      const key = `chat-${i}`;
+      if (row.gap) return h(Box, { key, height: 1, flexShrink: 0 });
+      if (row.reasonHeader) return h(Text, { key, dim: true, color: 'magenta' }, `${' '.repeat(GUTTER)}${row.open ? '▾' : '▸'} ${row.label}`);
+      if (row.reason) return h(Box, { key, flexDirection: 'row', flexShrink: 0 },
+        h(Text, null, ' '.repeat(GUTTER)),
+        (row.spans || []).map((s, j) => h(Text, { key: j, dim: true, bold: s.bold, underline: s.underline, color: s.color }, String(s.text ?? ''))));
+      if (row.toolRun) return h(Box, { key, flexDirection: 'row', flexShrink: 0 },
+        h(Text, null, ' '.repeat(GUTTER)),
+        (row.spans || []).map((s, j) => h(Text, { key: j, dim: true }, String(s.text ?? ''))));
+      if (row.meta) {
+        const runs = row.runs ?? [];
+        const wrote = runs.some((r) => r.outcome === 'applied');
+        const failed = runs.some((r) => r.outcome === 'error' || r.outcome === 'declined');
+        return h(Box, { key, flexDirection: 'row', flexShrink: 0 },
+          h(Text, null, ' '.repeat(GUTTER)),
+          row.duration ? h(Text, { dim: true }, `${fmtSec(row.duration)}${runs.length ? ' · ' : ''}`) : null,
+          runs.length ? h(Text, { dim: !failed, color: failed ? errorColor : wrote ? m.warn : m.ok }, `${showReasoning ? '▾' : '▸'} ${runs.length} tool${runs.length === 1 ? '' : 's'}${wrote ? ' ✎' : ''}: `) : null,
+          runs.length ? h(Text, { dim: true }, `${toolSummary(runs)}${showReasoning ? '' : ' · ^r'}`) : null);
+      }
+      const ground = groundOf(row.role);
+      const groundStyle = ground ? { width: '100%', backgroundColor: ground } : {};
+      if (row.spans && row.spans.length) {
+        const inner = row.spans.map((s, j) => h(Text, { key: j, bold: s.bold, dim: s.dim, underline: s.underline, color: s.color }, String(s.text ?? '')));
+        return h(Box, { key, flexDirection: 'row', flexShrink: 0, ...groundStyle }, gutter(row), inner);
+      }
+      // A blank line inside a message keeps the message's ground.
+      return h(Box, { key, height: 1, flexShrink: 0, ...groundStyle });
+    }),
+  ));
+}
+
 // ─── Chat modal (pure render) ──────────────────────────────────────────────────
 // The wide chat: nearly all the terminal width (with an inset from the frame), so
-// markdown answers unroll to the width and wrap grows automatically. The message list
-// anchors to the bottom (fresh answers always visible); `scroll > 0` lifts the window
-// to earlier rows. Each message is a role label (You/Assistant/Context) + wrapped
-// content. Palette: theme.modals.chat. The user's messages get a full-width background
-// bubble (Text carries no background, so the role-user rows wrap in a full-width Box);
-// if the last user question scrolls off, a dim sticky dump pins it at the top edge.
+// markdown answers unroll to the width. The conversation is <ChatMessages> above — a
+// scroll box that takes the rows the rest of the column leaves; under it sit the
+// error, the status line, the plan, the queue line and the field (or the question /
+// y-n block that replaces it). Palette: theme.modals.chat.
 export function renderChatModal({
   width,
   height,
@@ -294,7 +413,6 @@ export function renderChatModal({
   input,
   streaming,
   error,
-  scroll = 0,
   currentIssueId,
   toolLabel = '',
   showReasoning = false,
@@ -317,7 +435,6 @@ export function renderChatModal({
   input: string;
   streaming: boolean;
   error?: string | null;
-  scroll?: number;
   currentIssueId?: unknown;
   toolLabel?: string;
   showReasoning?: boolean;
@@ -338,20 +455,16 @@ export function renderChatModal({
   const boxH = Math.min(Math.floor(height * 0.82), height - 4);
   const wrap = Math.max(20, boxW - 6);
   const m = (theme?.modals?.chat ?? {}) as Record<string, string | undefined>;
-  const errorH = error ? 1 : 0;
-  const statusH = 1;
   const fieldW = Math.max(20, boxW - 4 - GUTTER); // the prompt lives in the gutter
   const fieldRows = inputVisualRows(input, cursor, fieldW);
   const caretLi = Math.max(0, fieldRows.findIndex((r) => r.caret !== ''));
   const MAX_INPUT_LINES = 5;
   const visible = windowAround(fieldRows, caretLi, MAX_INPUT_LINES).items;
-  // The question block is far taller than the input field it replaces; budget its
-  // real height, or its last row and the key hints fall below the frame.
-  const inputH = pendingQuestion ? askHeight(pendingQuestion) : visible.length;
-  // The todo plan block (above the message list): in-progress items first, then
-  // pending, capped at MAX_VISIBLE_PLAN active rows; done items are counted, not
-  // listed. `todoH` is its height — subtracted from `available` so the message
-  // window's scroll budget still lines up w/ the visible area.
+  // No heights are added up here: the conversation is a scroll box that takes what
+  // the column leaves, so the plan, the queue line, the field and the question block
+  // (each `flexShrink: 0`) simply take their own rows.
+  // The todo plan block: in-progress items first, then pending, capped at
+  // MAX_VISIBLE_PLAN active rows; done items are counted, not listed.
   // An open question takes the plan's room: the person is answering, not planning.
   const planList = (pendingQuestion ? [] : (todo ?? [])) as PlanItem[];
   // What is in progress comes first, then what is pending, each in insertion order
@@ -369,15 +482,6 @@ export function renderChatModal({
     planHidden > 0 ? `+${planHidden} pending` : '',
     planDone > 0 ? `· ${planDone} done` : '',
   ].filter(Boolean).join(' ');
-  const todoH = planList.length ? planShown.length + (planSummary ? 1 : 0) + 1 : 0;
-  // Real gap rows between the column's children (gap:1 between each pair). Each
-  // OPTIONAL child (error, queue line, plan) adds one gap beyond its own height;
-  // the 2 base gaps cover the always-present message-window↔status↔input links.
-  // Before, the plan's gap was not counted, so `available` was one row too generous
-  // and the newest message row slid under the plan block.
-  const queuedH = queued.length ? 1 : 0;
-  const gaps = (error ? 1 : 0) + queuedH + (planList.length ? 1 : 0) + 2;
-  const available = Math.max(2, boxH - 2 - 2 - errorH - statusH - queuedH - inputH - todoH - gaps);
   // Inline completion: the part of the suggested command not typed yet, drawn
   // right after the caret, and the other candidates named beside it. Only while the
   // caret is at the end of a one-line `/command` — there is nothing to continue
@@ -386,37 +490,6 @@ export function renderChatModal({
   const atEnd = cursor >= Array.from(input).length;
   const ghost = suggestion && atEnd && !input.includes('\n') ? suggestion.slice(input.length - 1) : '';
   const others = completions && atEnd ? completions.matches.filter((_, i) => i !== completions.sel) : [];
-  const rows = chatRows(messages, wrap, showReasoning);
-  const total = rows.length;
-  let lastUserKey = -1;
-  for (let i = 0; i < rows.length; i++) if (rows[i].role === 'user' && rows[i].first) lastUserKey = i;
-  let lastUserText = '';
-  for (let mi = messages.length - 1; mi >= 0; mi--) {
-    if (messages[mi]?.role === 'user') { lastUserText = String(messages[mi].content ?? '').trim(); break; }
-  }
-  const capacity = available;
-  const baseMax = Math.max(0, total - capacity);
-  const baseScr = Math.min(Math.max(0, scroll), baseMax);
-  const baseStart = Math.max(0, total - capacity - baseScr);
-  const pinned = lastUserKey >= 0 && (lastUserKey < baseStart || lastUserKey >= baseStart + capacity);
-  const viewN = pinned ? capacity - 1 : capacity;
-  const maxScroll = Math.max(0, total - viewN);
-  const scr = Math.min(Math.max(0, scroll), maxScroll);
-  const start = Math.max(0, total - viewN - scr);
-  const win = rows.slice(start, start + viewN);
-  // Who is speaking is said by a marker in the gutter and by the ground under the
-  // message — not by a label. The person's marker is the input field's own prompt.
-  const groundOf = (role?: string) => (role === 'user' ? m.userBg : role === 'bg' ? m.bgBg : undefined);
-  const gutter = (row: ChatRow) => {
-    if (row.first && row.role === 'user') return h(Text, { bold: true, color: m.accent }, '› ');
-    if (row.first && row.role === 'bg') return h(Text, { bold: true, color: m.bgAccent }, '◆ ');
-    // ƒ — F for Flow, and a function. A narrow code point every monospace font has;
-    // ∮ reads well as "a loop" but is East-Asian-ambiguous width, and flowtty counts
-    // one cell per code point, so it would shift the row in some terminals.
-    if (row.first && row.role === 'assistant') return h(Text, { bold: true, color: m.assistantAccent }, `${ASSISTANT_MARK} `);
-    return h(Text, null, ' '.repeat(GUTTER));
-  };
-  const userStyle = m.userBg ? { width: '100%', backgroundColor: m.userBg } : null;
   const confirmAsk = pendingConfirm
     ? {
         name: pendingConfirm.name,
@@ -455,45 +528,7 @@ export function renderChatModal({
         gap: 1,
         overflow: 'hidden',
       },
-      h(Box, { flexGrow: 1, flexShrink: 1, flexDirection: 'column', overflow: 'hidden' },
-        win.length
-          ? null
-          : h(Text, { dim: true }, `Ask anything. ⏎ sends, ${NEWLINE_KEY} starts a new line, / opens the commands.`),
-        pinned
-          ? h(Box, { key: 'chat-sticky', flexDirection: 'row', ...(userStyle || { backgroundColor: undefined, width: '100%' }) },
-              h(Text, { bold: true, dim: true, color: m.accent }, '› '),
-              h(Text, { dim: true }, lastUserText.length > 60 ? `${lastUserText.slice(0, 60)}…` : lastUserText || '…'))
-          : null,
-        win.map((row, i) => {
-          const key = `chat-${start + i}`;
-          if (row.gap) return h(Box, { key, height: 1 });
-          if (row.reasonHeader) return h(Text, { key, dim: true, color: 'magenta' }, `${' '.repeat(GUTTER)}${row.open ? '▾' : '▸'} ${row.label}`);
-          if (row.reason) return h(Box, { key, flexDirection: 'row' },
-            h(Text, null, ' '.repeat(GUTTER)),
-            (row.spans || []).map((s, j) => h(Text, { key: j, dim: true, bold: s.bold, underline: s.underline, color: s.color }, String(s.text ?? ''))));
-          if (row.toolRun) return h(Box, { key, flexDirection: 'row' },
-            h(Text, null, ' '.repeat(GUTTER)),
-            (row.spans || []).map((s, j) => h(Text, { key: j, dim: true }, String(s.text ?? ''))));
-          if (row.meta) {
-            const runs = row.runs ?? [];
-            const wrote = runs.some((r) => r.outcome === 'applied');
-            const failed = runs.some((r) => r.outcome === 'error' || r.outcome === 'declined');
-            return h(Box, { key, flexDirection: 'row' },
-              h(Text, null, ' '.repeat(GUTTER)),
-              row.duration ? h(Text, { dim: true }, `${fmtSec(row.duration)}${runs.length ? ' · ' : ''}`) : null,
-              runs.length ? h(Text, { dim: !failed, color: failed ? theme?.error : wrote ? m.warn : m.ok }, `${showReasoning ? '▾' : '▸'} ${runs.length} tool${runs.length === 1 ? '' : 's'}${wrote ? ' ✎' : ''}: `) : null,
-              runs.length ? h(Text, { dim: true }, `${toolSummary(runs)}${showReasoning ? '' : ' · ^r'}`) : null);
-          }
-          const ground = groundOf(row.role);
-          const groundStyle = ground ? { width: '100%', backgroundColor: ground } : {};
-          if (row.spans && row.spans.length) {
-            const inner = row.spans.map((s, j) => h(Text, { key: j, bold: s.bold, dim: s.dim, underline: s.underline, color: s.color }, String(s.text ?? '')));
-            return h(Box, { key, flexDirection: 'row', ...groundStyle }, gutter(row), inner);
-          }
-          // A blank line inside a message keeps the message's ground.
-          return h(Box, { key, height: 1, ...groundStyle });
-        }),
-      ),
+      h(ChatMessages, { messages, wrap, showReasoning, palette: m, errorColor: theme?.error }),
       error ? h(Text, { color: 'red' }, `⚠ ${error}`) : null,
       h(Text, (emptyNotice && !streaming && !toolLabel && !escArmed) ? { color: 'yellow' } : { dim: true },
         escArmed
@@ -566,15 +601,6 @@ export function renderChatModal({
   );
 }
 
-// Rows the question block occupies: border (2) + question (1) + one row per option,
-// two where it has a description + the free-text field when open + the hint (1).
-function askHeight(state: AskState): number {
-  return 2 + 1 + askRows(state).reduce((n, r) => n + (r.description ? 2 : 1), 0) + (state.typing ? 1 : 0) + 1;
-}
-
-// ─── `ask_user` block (pure render) ───────────────────────────────────────────
-// Takes the place of the input field while a question is open. One question at a
-// time; the header line says where the person is when there are several.
 function renderAsk(state: AskState, bg: string | undefined, wrap: number) {
   const q = state.questions[state.index]!;
   const many = state.questions.length > 1 ? `${state.index + 1}/${state.questions.length} · ` : '';

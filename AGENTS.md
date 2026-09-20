@@ -163,10 +163,29 @@ same reason: a display-only system message never reaches the model.
   host services sit on the PROTOTYPE of the per-plugin services view, and a spread
   copies own properties only. The spread silently gave tools a ctx with no
   `chatLLM`/`config`/`showMessage`, and `background` answered "no LLM service".
-- The view sums the heights of everything under the message list by hand
-  (`available` in `renderChatModal`): a new block there must add its own height,
-  or it is clipped. flowtty's `ScrollBox` (alpha.7) replaces this; do not
-  hand-refactor it meanwhile.
+- The conversation is a flowtty **`<ScrollBox anchor="bottom">`** (`ChatMessages` in
+  `src/views/modals.ts`): it takes the rows the column leaves, follows new rows until
+  the person scrolls up, and hears PgUp/PgDn and the wheel ITSELF — the chat's key
+  handler must not. No heights are added up anywhere: a new block under the
+  conversation needs `flexShrink: 0` and nothing else. Sending a message calls
+  `scrollToEnd()`.
+  - The **wheel scrolls only while the pointer is over the box**. In a test pass
+    coordinates — `backend.wheel('up', 20, 8)`; the default `(0, 0)` is the app title.
+  - Every `ChatRow` is exactly one terminal line; the pinned-question check reads a
+    row's index as its line. A row that wraps would break it.
+  - Rows are cached per message OBJECT (`rowCache`, a WeakMap). It is correct only
+    because the chat replaces a message and never mutates one — keep every
+    `setMessages` updater that way.
+  - The last question, once scrolled out of view, is pinned as a ROW above the box,
+    not an overlay: in flowtty 1.0.0-alpha.7 an absolute child of a `<ScrollBox>` (and
+    its `scrollbar`) is not drawn when any ancestor has `padding`. It is not pinned
+    when the box has fewer than `MIN_ROWS_TO_PIN` rows.
+- The input field is still hand-written. flowtty's `editorReducer` / `<TextArea>`
+  replace it, but NOT at 1.0.0-alpha.7: there the caret moves by UTF-16 unit and
+  tears an emoji in two on backspace, an astral character cannot be typed, and a
+  paste keeps `\r`. Fixed upstream, unreleased — adopt the pure parts
+  (`editorReducer`, `inputRows`, `caretPosition`) once a fixed version is out; the
+  host has ONE key dispatcher, so a mounted `<TextArea>` would be a second listener.
 
 ## CLI
 

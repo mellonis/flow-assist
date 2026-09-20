@@ -145,7 +145,6 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const [streaming, setStreaming] = f.useState(false);
           const [error, setError] = f.useState<string | null>(null);
           const [toolLabel, setToolLabel] = f.useState(''); // «⚙ calling get_issue…» during tool rounds
-          const [scroll, setScroll] = f.useState(0);
           // Show the model's «thinking» (reasoning_content): folded by default (one
           // dim-line «▸ reasoning»), Ctrl+r unfolds/folds all.
           const [showReasoning, setShowReasoning] = f.useState(false);
@@ -357,7 +356,6 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // Tick the indicator every 120ms: spinner frame + tenths of a second.
             if (tickRef.current) clearInterval(tickRef.current);
             tickRef.current = setInterval(() => setElapsedMs(Date.now() - t0Ref.current), 120);
-            setScroll(0);
             disarmEsc();
             const abort = new AbortController();
             abortRef.current = abort;
@@ -562,7 +560,6 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               setInput('');
               inputRef.current = '';
               setCursor(0);
-              setScroll(0);
               (f.services as Record<string, any>).showMessage?.('Context refreshed');
             }
             f.notify();
@@ -612,7 +609,6 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               setInput('');
               inputRef.current = '';
               setCursor(0);
-              setScroll(0);
               (f.services as Record<string, any>).showMessage?.('History compacted');
             });
           };
@@ -652,7 +648,6 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 setToolCount(0);
                 setToolLabel('');
                 setElapsedMs(0);
-                setScroll(0);
                 setShowReasoning(false);
                 setStreaming(false);
                 disarmEsc();
@@ -699,7 +694,6 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             setUnread(0);
             unreadRef.current = 0;
             publish({ open: true, unread: 0 });
-            setScroll(0);
             setError(null);
             // Only a caller that brings text replaces the field: re-opening the chat
             // keeps the draft the person left in it.
@@ -865,9 +859,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 setField(histShown.current);
                 return true;
               }
-              // ── PgUp/PgDn — scroll the conversation (the arrows belong to history).
-              if (key.name === 'pageup') { setScroll(s => Math.min(s + 8, 1e6)); return true; }
-              if (key.name === 'pagedown') { setScroll(s => Math.max(0, s - 8)); return true; }
+              // PgUp/PgDn and the wheel belong to the conversation's own scroll box (the
+              // view's <ScrollBox> hears them itself); the arrows belong to history.
               // Ctrl+r — fold/unfold the model's «thinking».
               if (key.name === 'r' && key.ctrl) { setShowReasoning(v => !v); return true; }
               // ── caret movement in the input field (codepoint index) ──
@@ -911,9 +904,6 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 tabRef.current = null;
                 return true;
               }
-              // ── The wheel scrolls the conversation, three rows a notch.
-              if (key.name === 'wheelup') { setScroll(s => Math.min(s + 3, 1e6)); return true; }
-              if (key.name === 'wheeldown') { setScroll(s => Math.max(0, s - 3)); return true; }
               if (key.name && key.name.length === 1 && !key.ctrl && !key.meta) {
                 const ch = key.shift ? key.name.toUpperCase() : key.name;
                 const chars = Array.from(inputRef.current);
@@ -948,7 +938,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             if (matches.length) completions = { matches, sel: walking ? Math.min(walking.idx, matches.length - 1) : 0 };
           }
           return (f.viewRegistry.chat as (p: Record<string, unknown>) => unknown)({
-            width, height, theme: f.config.theme, messages, input, streaming, error, scroll, toolLabel, showReasoning, cursor, escArmed,
+            width, height, theme: f.config.theme, messages, input, streaming, error, toolLabel, showReasoning, cursor, escArmed,
             pendingConfirm: pendingAsk,
             pendingQuestion,
             queued,
