@@ -399,12 +399,15 @@ export function renderChatModal({
   const caretLi = Math.max(0, fieldRows.findIndex((r) => r.caret !== ''));
   const MAX_INPUT_LINES = 5;
   const visible = windowAround(fieldRows, caretLi, MAX_INPUT_LINES).items;
-  const inputH = visible.length;
+  // The question block is far taller than the input field it replaces; budget its
+  // real height, or its last row and the key hints fall below the frame.
+  const inputH = pendingQuestion ? askHeight(pendingQuestion) : visible.length;
   // The todo plan block (above the message list): in-progress items first, then
   // pending, capped at MAX_VISIBLE_PLAN active rows; done items are counted, not
   // listed. `todoH` is its height — subtracted from `available` so the message
   // window's scroll budget still lines up w/ the visible area.
-  const planList = (todo ?? []) as PlanItem[];
+  // An open question takes the plan's room: the person is answering, not planning.
+  const planList = (pendingQuestion ? [] : (todo ?? [])) as PlanItem[];
   // Rendered in STABLE insertion (id) order — never re-sorted by status. Reordering
   // keyed children makes React `insertBefore` a node that is already attached to the
   // same parent, and @flowtty/core's host `insertChild` aborts yoga (`Aborted()`).
@@ -571,6 +574,12 @@ export function renderChatModal({
       ),
     ),
   );
+}
+
+// Rows the question block occupies: border (2) + question (1) + one row per option,
+// two where it has a description + the free-text field when open + the hint (1).
+function askHeight(state: AskState): number {
+  return 2 + 1 + askRows(state).reduce((n, r) => n + (r.description ? 2 : 1), 0) + (state.typing ? 1 : 0) + 1;
 }
 
 // ─── `ask_user` block (pure render) ───────────────────────────────────────────

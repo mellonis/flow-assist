@@ -4,18 +4,22 @@
 import { afterEach, expect, test } from 'bun:test';
 import { TestBackend, flush } from '@flowtty/core/testing';
 import { loadPlugins } from '../loader/build';
-import { assembleToolRegistry } from '../loader/tools';
+import { assembleToolRegistry, execChatTool } from '../loader/tools';
 import { renderApp } from '../runtime/app';
 import { renderChatModal, renderHelp, renderLogModal, renderReminder } from '../views/modals';
 
 const realFetch = globalThis.fetch;
-afterEach(() => { globalThis.fetch = realFetch; });
+// The plan is module-level state: leave none behind for the suites that follow.
+afterEach(async () => { globalThis.fetch = realFetch; await execChatTool('todo', { action: 'clear' }, {}).catch(() => {}); });
 
 const sse = (...chunks: unknown[]) =>
   new Response([...chunks.map((c) => `data: ${JSON.stringify(c)}\n\n`), 'data: [DONE]\n\n'].join(''), { headers: { 'content-type': 'text/event-stream' } });
 const settle = async () => { for (let i = 0; i < 8; i++) { await flush(); await new Promise((r) => setTimeout(r, 5)); } };
 
-test('the model asks, the person picks with the keyboard, the model gets the answer', async () => {
+test.each([[110, 40], [100, 22]])('the model asks, the person picks with the keyboard, the model gets the answer (%ix%i)', async (cols, rows) => {
+  // The short screen carries a plan too: the question block must still show its
+  // last row and its key hints — it used to be budgeted as a one-line input field
+  // and lost "Other…" and the hint line below the frame.
   process.env.LLM_TOKEN = 't';
   const bodies: any[] = [];
   globalThis.fetch = (async (_url: unknown, init: RequestInit) => {
@@ -36,7 +40,8 @@ test('the model asks, the person picks with the keyboard, the model gets the ans
   const renders = { chat: renderChatModal, help: renderHelp, log: renderLogModal, reminder: renderReminder };
   const plugins = await loadPlugins({ config, repo, renders: renders as any });
   const tools = assembleToolRegistry({ plugins, config, repo });
-  const backend = new TestBackend(110, 40);
+  await execChatTool('todo', { action: 'set', todos: [{ text: 'one' }, { text: 'two' }, { text: 'three' }] }, {});
+  const backend = new TestBackend(cols, rows);
   const handle = await renderApp(backend, { plugins, config, tools, onExit: () => {} });
   await settle();
 
@@ -51,6 +56,7 @@ test('the model asks, the person picks with the keyboard, the model gets the ans
   expect(backend.lastFrame).toContain('1. rebase (Recommended)');
   expect(backend.lastFrame).toContain('Linear history');
   expect(backend.lastFrame).toContain('3. Other…');
+  expect(backend.lastFrame).toContain('Esc dismiss');
   expect(bodies).toHaveLength(1);
 
   backend.press({ name: 'down' });
