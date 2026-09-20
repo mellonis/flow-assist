@@ -93,10 +93,17 @@ same reason: a display-only system message never reaches the model.
 ## The chat
 
 - Who speaks is said by a **gutter marker and a ground**, not a label: `›` on the
-  user ground for the person (the input field's own prompt), `◆` on its own ground
-  for a background result, nothing for the answer. Colours come from
-  `theme.modals.chat` (`accent`, `userBg`, `fieldBg`, `bgAccent`, `bgBg`, `warn`,
-  `ok`) and are overridable via `config.plugins.assistant.colors`.
+  user ground for the person (the input field's own prompt), `ƒ` for the
+  assistant's answer (also signing the frame, `ƒ Flow Assist`), `◆` on its own
+  ground for a background result. Colours come from `theme.modals.chat` (`accent`,
+  `assistantAccent`, `userBg`, `fieldBg`, `bgAccent`, `bgBg`, `warn`, `ok`) and are
+  overridable via `config.plugins.assistant.colors`.
+- A marker is ONE narrow code point: flowtty's grid counts one cell per code point,
+  so an East-Asian-ambiguous glyph (`∮`, `≈`, most of Mathematical Operators)
+  shifts the row in terminals that draw it two cells wide.
+- Markdown in answers — tables included — is laid out by flowtty's
+  `layoutMarkdown`. The host adds nothing but the soft `▍` heading marker; a gap in
+  that layout is fixed in flowtty, not papered over here.
 - **⏎** sends; while an answer is coming it **queues** instead (sent in order when
   the turn ends). **Esc**: clear the field → take the last queued message back →
   stop the answer → arm/close. **⇧⏎** is a newline; a blank line is kept.

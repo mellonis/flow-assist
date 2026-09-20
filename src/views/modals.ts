@@ -221,6 +221,8 @@ function toolRunText(run: ToolRun, wrap: number): Span {
 // it on a message's first row (`› ` for the person, `◆ ` for a background result),
 // so text lines up whoever is speaking and no role label is needed.
 const GUTTER = 2;
+// The assistant's mark: on its answers, and signing the chat's frame.
+export const ASSISTANT_MARK = 'ƒ';
 
 // `todo ×2, memory` — the tools of a turn, in the order first used.
 function toolSummary(runs: ToolRun[]): string {
@@ -393,6 +395,10 @@ export function renderChatModal({
   const gutter = (row: ChatRow) => {
     if (row.first && row.role === 'user') return h(Text, { bold: true, color: m.accent }, '› ');
     if (row.first && row.role === 'bg') return h(Text, { bold: true, color: m.bgAccent }, '◆ ');
+    // ƒ — F for Flow, and a function. A narrow code point every monospace font has;
+    // ∮ reads well as "a loop" but is East-Asian-ambiguous width, and flowtty counts
+    // one cell per code point, so it would shift the row in some terminals.
+    if (row.first && row.role === 'assistant') return h(Text, { bold: true, color: m.assistantAccent }, `${ASSISTANT_MARK} `);
     return h(Text, null, ' '.repeat(GUTTER));
   };
   const userStyle = m.userBg ? { width: '100%', backgroundColor: m.userBg } : null;
@@ -426,7 +432,7 @@ export function renderChatModal({
         backgroundColor: m.bg,
         borderBackgroundColor: m.borderBg,
         borderColor: m.border,
-        borderTitle: currentIssueId ? `Flow Assist · ${currentIssueId}` : 'Flow Assist',
+        borderTitle: currentIssueId ? `${ASSISTANT_MARK} Flow Assist · ${currentIssueId}` : `${ASSISTANT_MARK} Flow Assist`,
         width: boxW,
         height: boxH,
         padding: 1,

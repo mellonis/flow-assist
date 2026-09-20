@@ -33,10 +33,10 @@ test('chat marks who is speaking with a gutter marker, not a role label', async 
     }),
     backend,
   );
-  // The person's message carries the input field's own prompt; the answer sits
-  // under it in the same gutter, so the text lines up whoever speaks.
+  // The person's message carries the input field's own prompt, the answer the
+  // assistant's ƒ — both in the same two-cell gutter, so the text lines up.
   expect(backend.lastFrame).toContain('› hello');
-  expect(backend.lastFrame).toMatch(/ {2}hi there/);
+  expect(backend.lastFrame).toContain('ƒ hi there');
   expect(backend.lastFrame).not.toMatch(/\bYou\b|\bAssistant\b/);
   handle.unmount();
 });

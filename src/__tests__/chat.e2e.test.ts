@@ -39,10 +39,15 @@ test('messages carry a marker and colour instead of a role label', async () => {
   expect(mine.fg).toBe('cyan');
   expect(mine.bg).toBe('#2b2b40');
   expect(styleAt(ui.backend, '› how far is my branch', 2).bg).toBe('#2b2b40');
-  // The answer sits on the plain modal ground, aligned under the message text.
+  // The answer carries the assistant's own mark — ƒ, in its own colour — on the plain
+  // modal ground, its text aligned under the message text.
+  expect(frame).toMatch(/│ ƒ Three commits ahead/);
+  const its = styleAt(ui.backend, 'ƒ Three commits ahead');
+  expect(its.fg).toBe('green');
+  expect(its.bg).toBe('black');
   expect(styleAt(ui.backend, 'Three commits ahead').bg).toBe('black');
-  expect(frame).toMatch(/│ {3}Three commits ahead/);
-  // The title does not dangle a preposition when there is no context.
+  // The same mark signs the frame; the title dangles no preposition without a context.
+  expect(frame).toContain('ƒ Flow Assist');
   expect(frame).not.toContain('Chat about');
   ui.app.unmount();
 });

@@ -80,9 +80,10 @@ export const MODAL_COLOR_DEFAULTS: Record<string, Record<string, string>> = {
   //   accent   — the `›` prompt, shared by the input field and the person's messages
   //   userBg   — the ground under the person's messages
   //   fieldBg  — the ground under the input field
+  //   assistantAccent — the `ƒ` mark on the assistant's answers
   //   bgAccent / bgBg — the `◆` marker and ground of a background-task result
   //   warn     — things waiting on the person (the queue); ok — finished work
-  chat: { userBg: '#2b2b40', accent: 'cyan', fieldBg: '#1f1f2e', bgAccent: 'magenta', bgBg: '#2a2438', warn: 'yellow', ok: 'green' },
+  chat: { userBg: '#2b2b40', accent: 'cyan', assistantAccent: 'green', fieldBg: '#1f1f2e', bgAccent: 'magenta', bgBg: '#2a2438', warn: 'yellow', ok: 'green' },
   relation: { border: 'blue' },
   delete: { border: 'red' },
   story: { border: 'green', selected: 'yellow' },
