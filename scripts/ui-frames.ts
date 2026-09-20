@@ -89,6 +89,23 @@ const scenarios: Record<string, () => Promise<void>> = {
     ui.app.unmount();
   },
 
+  // Slash-command completion inside the field, and the caret moved back into text.
+  async completion() {
+    const ui = await boot(new ScriptedModel());
+    await ui.press('A');
+    await ui.type('/');
+    ui.frame('"/" typed: the first command is offered, the others are named');
+    await ui.type('co');
+    ui.frame('"/co" typed: one candidate left');
+    await ui.press('tab');
+    ui.frame('Tab pressed: the command is taken');
+    await ui.press('escape');
+    await ui.type('move the caret back');
+    await ui.press('left', 'left', 'left', 'left');
+    ui.frame('caret inside the text: both sides are drawn alike');
+    ui.app.unmount();
+  },
+
   // A multi-line draft: two thoughts separated by a blank line.
   async multiline() {
     const ui = await boot(new ScriptedModel());

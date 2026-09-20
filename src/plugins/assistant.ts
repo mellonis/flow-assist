@@ -851,18 +851,18 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // already open; closed is not handled by the base consumer (priority 0).
           addTrigger({ ft: f, action: 'chat', isOpen: () => open, open: () => openChat() });
           if (!open) return null;
-          // Slash-command autocomplete (visible candidate list), derived from the
-          // live input: shown while it starts with '/' and no argument is typed yet.
-          // `sel` is the highlighted index (Tab cycles through the matches; a new
-          // prefix restarts at the first). The chat VIEW renders this.
+          // Slash-command completion, shown INLINE in the field: `matches[sel]` is the
+          // suggestion and the view draws the part of it not typed yet right after the
+          // caret; the other matches are named beside it. While Tab is walking the
+          // candidates the field already holds a whole command, so the list is taken
+          // from the prefix the walk started from (`tabRef.base`), not from the field —
+          // otherwise the first Tab would narrow the list to the one it just picked.
           let completions: { matches: string[]; sel: number } | null = null;
           if (input.startsWith('/') && !input.includes(' ')) {
-            const prefix = input.slice(1);
-            const matches = CHAT_COMMANDS.filter((c) => c.startsWith(prefix));
-            if (matches.length) {
-              const sel = tabRef.current && tabRef.current.base === prefix ? Math.min(tabRef.current.idx, matches.length - 1) : 0;
-              completions = { matches, sel };
-            }
+            const typed = input.slice(1);
+            const walking = tabRef.current && tabRef.current.cmd === typed ? tabRef.current : null;
+            const matches = CHAT_COMMANDS.filter((c) => c.startsWith(walking ? walking.base : typed));
+            if (matches.length) completions = { matches, sel: walking ? Math.min(walking.idx, matches.length - 1) : 0 };
           }
           return (f.viewRegistry.chat as (p: Record<string, unknown>) => unknown)({
             width, height, theme: f.config.theme, messages, input, streaming, error, scroll, toolLabel, showReasoning, cursor, escArmed,

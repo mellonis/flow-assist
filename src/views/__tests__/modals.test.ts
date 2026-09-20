@@ -67,18 +67,35 @@ test('chat marks a background result with its own marker and ground, never as th
   handle.unmount();
 });
 
-test('chat draws the slash-command autocomplete candidate row', async () => {
+test('chat draws a slash-command completion inside the field, not on a row of its own', async () => {
   const backend = new TestBackend(80, 24);
   const handle = await render(
     h(renderChatModal, {
       ...baseChat,
       messages: [],
+      input: '/c',
+      cursor: 2,
       completions: { matches: ['compact', 'clear'], sel: 0 },
     }),
     backend,
   );
-  expect(backend.lastFrame).toContain('/compact');
-  expect(backend.lastFrame).toContain('/clear');
+  // What was typed and what is offered read as one word, on the field's own row;
+  // the other candidate is named beside it with the key that reaches it.
+  const rows = backend.lastFrame.split('\n').filter((r) => r.includes('/compact'));
+  expect(rows).toHaveLength(1);
+  expect(rows[0]).toContain('› /compact');
+  expect(rows[0]).toContain('⇥ clear');
+  handle.unmount();
+});
+
+test('chat offers no completion while the caret is inside the word', async () => {
+  const backend = new TestBackend(80, 24);
+  const handle = await render(
+    h(renderChatModal, { ...baseChat, messages: [], input: '/c', cursor: 1, completions: { matches: ['compact', 'clear'], sel: 0 } }),
+    backend,
+  );
+  expect(backend.lastFrame).not.toContain('/compact');
+  expect(backend.lastFrame).not.toContain('⇥');
   handle.unmount();
 });
 

@@ -363,14 +363,21 @@ export function renderChatModal({
   ].filter(Boolean).join(' ');
   const todoH = planList.length ? planShown.length + (planSummary ? 1 : 0) + 1 : 0;
   // Real gap rows between the column's children (gap:1 between each pair). Each
-  // OPTIONAL child (error, completion row, plan) adds one gap beyond its own height;
+  // OPTIONAL child (error, queue line, plan) adds one gap beyond its own height;
   // the 2 base gaps cover the always-present message-window↔status↔input links.
   // Before, the plan's gap was not counted, so `available` was one row too generous
   // and the newest message row slid under the plan block.
-  const completionsH = completions && completions.matches.length ? 1 : 0;
   const queuedH = queued.length ? 1 : 0;
-  const gaps = (error ? 1 : 0) + completionsH + queuedH + (planList.length ? 1 : 0) + 2;
-  const available = Math.max(2, boxH - 2 - 2 - errorH - statusH - completionsH - queuedH - inputH - todoH - gaps);
+  const gaps = (error ? 1 : 0) + queuedH + (planList.length ? 1 : 0) + 2;
+  const available = Math.max(2, boxH - 2 - 2 - errorH - statusH - queuedH - inputH - todoH - gaps);
+  // Inline completion: the part of the suggested command not typed yet, drawn
+  // right after the caret, and the other candidates named beside it. Only while the
+  // caret is at the end of a one-line `/command` — there is nothing to continue
+  // from the middle of a word.
+  const suggestion = completions?.matches[completions.sel] ?? '';
+  const atEnd = cursor >= Array.from(input).length;
+  const ghost = suggestion && atEnd && !input.includes('\n') ? suggestion.slice(input.length - 1) : '';
+  const others = completions && atEnd ? completions.matches.filter((_, i) => i !== completions.sel) : [];
   const rows = chatRows(messages, wrap, showReasoning);
   const total = rows.length;
   let lastUserKey = -1;
@@ -488,13 +495,6 @@ export function renderChatModal({
             : emptyNotice
               ? `⚠ ${emptyNotice}`
               : (`↑↓ history · PgUp/PgDn scroll · ^r details · / commands${bgCount > 0 ? ` · ${bgCount} in background` : ''}`)),
-      // Slash-command autocomplete (Task #20): the `/`-candidate row, highlighted at
-      // `sel`. Tab cycles the highlight (handled in the plugin); a new prefix restarts.
-      completions && completions.matches.length
-        ? h(Box, { flexDirection: 'row', width: '100%', gap: 1 },
-            completions.matches.map((cand, i) =>
-              h(Text, { key: cand, ...(i === completions.sel ? { inverse: true } : { dim: true }) }, `/${cand}`)))
-        : null,
       // The task plan sits ABOVE the input (not above the messages) — the newest
       // answer stays pinned just above it, so a growing plan never hides it. Its
       // height (todoH) is accounted for in `available`.
@@ -533,13 +533,25 @@ export function renderChatModal({
                 // A blank line still takes a row: an empty Text has no height and the
                 // line would vanish, which is how "two newlines" used to collapse.
                 if (row.caret === '') return h(Box, { key: i, flexDirection: 'row' }, prompt, h(Text, { wrap: 'truncate' }, row.before || ' '));
+                // The caret sits ON the first suggested character, as a shell's
+                // autosuggestion does, so what was typed and what is offered read as one
+                // word: `/co` + `mpact`. The offer is the accent colour, dimmed; the
+                // other candidates follow, and ⇥ says which key takes them.
+                const offer = ghost
+                  ? [h(Text, { key: 'g0', inverse: true, dim: true, color: m.accent }, ghost[0]),
+                     h(Text, { key: 'g1', dim: true, color: m.accent }, ghost.slice(1))]
+                  : [h(Text, { key: 'c', inverse: true }, row.caret)];
                 return h(Box, { key: i, flexDirection: 'row' },
                   prompt,
                   row.before ? h(Text, { wrap: 'truncate' }, row.before) : null,
-                  h(Text, { inverse: true }, row.caret),
+                  ...offer,
+                  others.length ? h(Text, { wrap: 'truncate', dim: true }, `  ⇥ ${others.join(' · ')}`) : null,
                   input === ''
                     ? h(Text, { wrap: 'truncate', dim: true }, streaming ? ' an answer is coming — ⏎ queues your next message' : ' ⏎ send · ⇧⏎ new line · Esc Esc close')
-                    : row.after ? h(Text, { wrap: 'truncate', dim: true }, row.after) : null);
+                    // Text after the caret is the person's own text — drawn like the rest
+                    // of it. It used to take the placeholder's dim and went grey whenever
+                    // the caret moved back.
+                    : row.after ? h(Text, { wrap: 'truncate' }, row.after) : null);
               })),
       ),
     ),

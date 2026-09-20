@@ -110,6 +110,12 @@ same reason: a display-only system message never reaches the model.
 - **↑/↓** walk the prompt history, only while the field is empty or still shows a
   history entry untouched. **PgUp/PgDn** scroll. **^r** unfolds thinking, notes
   and the tool calls behind the one-line `▸ N tools` summary.
+- A `/command` **completes inline**, like a shell's autosuggestion: the part not
+  typed yet is drawn after the caret in the dimmed accent colour, the other
+  candidates follow as `⇥ a · b`, **Tab** takes the offer and then walks the rest.
+  Only with the caret at the end of a one-line `/word`. In the field, dim means
+  "offered, not yours yet" — the person's own text is never dimmed, on either side
+  of the caret.
 - The view sums the heights of everything under the message list by hand
   (`available` in `renderChatModal`): a new block there must add its own height,
   or it is clipped. Moving this to flex (`flexGrow` + `overflow` + `onLayout`) is

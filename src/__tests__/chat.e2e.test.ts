@@ -134,3 +134,51 @@ test('↑/↓ walk the prompt history; the draft in progress is not lost', async
   expect(field()).toContain('› a new draft');
   ui.app.unmount();
 });
+
+test('a slash command completes inline: the rest of it is shown in the field, Tab takes it', async () => {
+  const ui = await bootApp(new ScriptedModel(), 100, 24);
+  await ui.press('A');
+  const fieldRow = () => ui.backend.lastFrame.split('\n').filter((r) => r.includes('› ')).at(-1) ?? '';
+
+  // The continuation appears IN the field, after what was typed — not on a row of
+  // candidates somewhere above it.
+  await ui.type('/co');
+  expect(fieldRow()).toContain('› /compact');
+  expect(ui.backend.lastFrame.split('\n').filter((r) => /\/compact/.test(r))).toHaveLength(1);
+  // Typed text is plain; the suggested rest is the accent colour, dimmed.
+  expect(styleAt(ui.backend, '› /compact', 2).dim).toBeFalsy();
+  const ghost = styleAt(ui.backend, '› /compact', 6); // the "p" of com|pact — past the caret cell
+  expect(ghost.dim).toBe(true);
+  expect(ghost.fg).toBe('cyan');
+
+  // Tab takes it; the field now holds the whole command and nothing is suggested.
+  await ui.press('tab');
+  expect(fieldRow()).toContain('› /compact');
+  expect(styleAt(ui.backend, '› /compact', 6).dim).toBeFalsy();
+
+  // With several candidates the others are named beside it, and Tab walks them.
+  await ui.press('escape');
+  await ui.type('/');
+  expect(fieldRow()).toMatch(/› \/refresh-context|› \/clear|› \/compact|› \/log|› \/exit/);
+  expect(fieldRow()).toMatch(/⇥/);
+  await ui.press('tab');
+  const first = fieldRow();
+  await ui.press('tab');
+  expect(fieldRow()).not.toBe(first);
+  ui.app.unmount();
+});
+
+test('text to the right of the caret is drawn like the text to its left', async () => {
+  // It used to be dimmed — the placeholder's style had leaked onto real text, so
+  // moving the caret back greyed out everything after it.
+  const ui = await bootApp(new ScriptedModel(), 100, 24);
+  await ui.press('A');
+  await ui.type('hello world');
+  await ui.press('left', 'left', 'left', 'left', 'left');
+  const left = styleAt(ui.backend, '› hello world', 2); // "h"
+  const right = styleAt(ui.backend, '› hello world', 10); // "o" of world, past the caret
+  expect(left.dim).toBeFalsy();
+  expect(right.dim).toBeFalsy();
+  expect(right.fg).toBe(left.fg);
+  ui.app.unmount();
+});
