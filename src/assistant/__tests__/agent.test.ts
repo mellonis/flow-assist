@@ -198,3 +198,35 @@ test('a qualified tool name travels to the provider in a form it accepts, and co
   // …while the transcript replays what the provider saw, so the next turn is consistent.
   expect((res.transcript[0] as any).tool_calls[0].function.name).toBe('demo__get_thing');
 });
+
+test('a plugin ai-tool is sent to the provider ONCE, though it reaches agentChat twice', async () => {
+  // Exactly what the app does: the registry holds the plugin's aiTools as a group
+  // (so they are among the base tools), and the chat passes the same tools again as
+  // `extraTools`, for their `run`. The provider rejects a duplicate name with 400
+  // before the model runs — with a real plugin enabled, every message failed.
+  const make = makeFactory({});
+  const plugin = make('acme-tracker', {
+    aiTools: [{
+      type: 'function',
+      function: { name: 'open_issue', description: 'open', parameters: { type: 'object', properties: {} } },
+      run: () => 'opened',
+    }],
+  });
+  const reg = assembleToolRegistry({ plugins: [plugin], config: {}, repo: { list: async () => [] } as any });
+  const pluginAiTools = reg.groups.filter((g) => g.id.endsWith(':aiTools')).flatMap((g) => g.tools);
+  expect(pluginAiTools).toHaveLength(1);
+
+  let sent: Array<{ function: { name: string } }> = [];
+  await agentChat([{ role: 'user', content: 'hi' }], {
+    baseUrl: 'http://x', model: 'm', token: 't',
+    extraTools: pluginAiTools as never,
+    chatRound: async (_messages, o) => {
+      sent = (o as { tools: typeof sent }).tools;
+      return { content: 'hello', reasoning: '', finishReason: 'stop', toolCalls: [] };
+    },
+  });
+  const names = sent.map((t) => t.function.name);
+  expect(names.filter((n) => n === 'acme-tracker__open_issue')).toEqual(['acme-tracker__open_issue']);
+  // …and no name at all is declared twice.
+  expect(new Set(names).size).toBe(names.length);
+});

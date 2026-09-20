@@ -335,10 +335,16 @@ export async function agentChat(
     realName.set(wire, t.function.name);
     return wire === t.function.name ? t : { ...t, function: { ...t.function, name: wire } };
   };
-  const apiTools: ToolDef[] = [
-    ...baseTools,
-    ...extraTools.map(({ write, run, ...rest }) => rest),
-  ].map(onWire);
+  // One entry per name. A plugin's aiTools reach this function TWICE: they are in the
+  // registry (the synthetic `<plugin>:aiTools` group, so they are in `baseTools`) and
+  // the chat passes them again as `extraTools` for their `run`. `toolByName` above
+  // takes the later one by name; the list for the provider used to concatenate both,
+  // and a provider answers a duplicate name with 400 before the model runs — so with
+  // a real plugin enabled, every message failed. The extra wins, as in `toolByName`.
+  const sent = new Map<string, ToolDef>();
+  for (const t of baseTools) sent.set(t.function.name, t);
+  for (const { write, run, ...rest } of extraTools) sent.set(rest.function.name, rest);
+  const apiTools: ToolDef[] = [...sent.values()].map(onWire);
   let content = ''; // final answer (last round without tool_calls)
   let process = ''; // narration of moves from rounds WITH tool_calls — folded
   const toolRuns: ToolRun[] = []; // trace of executed tools
