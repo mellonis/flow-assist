@@ -324,10 +324,21 @@ export async function agentChat(
   const toolByName = new Map<string, ToolDef>();
   for (const t of chatToolDefs()) toolByName.set(t.function.name, t);
   for (const et of extraTools) toolByName.set(et.function.name, et);
+  // Wire names. Providers validate a tool name against ^[a-zA-Z0-9_-]{1,128}$ and
+  // answer 400 before the model runs, while the host qualifies plugin tools as
+  // `plugin:tool`. The translation lives here and nowhere else: what is sent and
+  // what the model calls use the wire name, everything inside the host — lookup,
+  // confirmation, the trail the person sees — uses the real one.
+  const realName = new Map<string, string>();
+  const onWire = (t: ToolDef): ToolDef => {
+    const wire = t.function.name.replace(/[^a-zA-Z0-9_-]/g, '__').slice(0, 128);
+    realName.set(wire, t.function.name);
+    return wire === t.function.name ? t : { ...t, function: { ...t.function, name: wire } };
+  };
   const apiTools: ToolDef[] = [
     ...baseTools,
     ...extraTools.map(({ write, run, ...rest }) => rest),
-  ];
+  ].map(onWire);
   let content = ''; // final answer (last round without tool_calls)
   let process = ''; // narration of moves from rounds WITH tool_calls — folded
   const toolRuns: ToolRun[] = []; // trace of executed tools
@@ -386,7 +397,8 @@ export async function agentChat(
         function: { name: tc.name, arguments: tc.arguments },
       })),
     });
-    for (const tc of r.toolCalls) {
+    for (const called of r.toolCalls) {
+      const tc = { ...called, name: realName.get(called.name) ?? called.name };
       onTool(tc.name, tc.arguments);
       const def = toolByName.get(tc.name);
       const parsed = parseToolArgs(tc.arguments);

@@ -170,3 +170,31 @@ test('apiHistory never leaves a tool result without the call that asked for it',
   ]);
   expect(cut.map((m) => m.role)).toEqual(['user', 'user']);
 });
+
+test('a qualified tool name travels to the provider in a form it accepts, and comes back as itself', async () => {
+  // Providers validate tool names against ^[a-zA-Z0-9_-]{1,128}$ — a plugin's
+  // `name:tool` is rejected with a 400 before the model ever runs. The colon is
+  // the host's own convention, so it is translated at the wire and nowhere else.
+  assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
+  const ran: unknown[] = [];
+  const extraTools = [{ type: 'function', function: { name: 'demo:get_thing', description: 'd', parameters: { type: 'object', properties: {} } }, run: async (args: unknown) => { ran.push(args); return 'thing'; } }] as any;
+  let sent: any[] = [];
+  let round = 0;
+  const chatRound = async (_m: any[], opts: any) => {
+    round++;
+    sent = opts.tools;
+    if (round === 1) return { content: '', finishReason: 'tool_calls', toolCalls: [{ id: 'c1', name: 'demo__get_thing', arguments: '{"id":7}' }] };
+    opts.onDelta?.('ok');
+    return { content: 'ok', finishReason: 'stop', toolCalls: [] };
+  };
+  const res = await agentChat([{ role: 'user', content: 'go' }], { baseUrl: 'http://x', model: 'm', token: 't', onLive: () => {}, onLiveCommit: () => {}, extraTools, chatRound });
+
+  const names = sent.map((t) => t.function.name);
+  expect(names).toContain('demo__get_thing');
+  expect(names.every((n: string) => /^[a-zA-Z0-9_-]{1,128}$/.test(n))).toBe(true);
+  expect(ran).toEqual([{ id: 7 }]);
+  // Inside the host the tool keeps its real name — in the trail the person sees…
+  expect(res.toolRuns.map((r) => r.name)).toEqual(['demo:get_thing']);
+  // …while the transcript replays what the provider saw, so the next turn is consistent.
+  expect((res.transcript[0] as any).tool_calls[0].function.name).toBe('demo__get_thing');
+});
