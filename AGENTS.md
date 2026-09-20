@@ -17,7 +17,18 @@ English throughout; a half-translated screen is worse than either language.
 ## Stack
 
 - TypeScript **7.0.2** (native `tsc`), module `NodeNext`, target `ES2022`, `strict`.
-- Bun **1.3.x** — `bun run`, `bun test`, `bun build --compile` (the TUI runs as a Bun-executable via `bun src/cli.ts`; `--compile` is retired — it produces a two-React-instance bundle).
+- Bun **1.3.x** — `bun run`, `bun test`. The TUI runs as `bun src/cli.ts`.
+  **A `bun build --compile` binary is not shipped**, for one measured reason (Bun
+  1.3.14, probed 2026-09-21): inside a compiled binary, a runtime `import()` of an
+  on-disk package fails with "Cannot find module" when that package's `package.json`
+  has an **`exports`** field — scoped or not, string or conditions. A package with
+  only `main` resolves, and so does a deep path into the same package. Nearly every
+  npm package uses `exports`, so an on-disk plugin with any dependency that is not
+  already inside the binary is skipped (`acme-tracker` → `@acme/client`). What
+  DOES work in the binary: the CLI, the host itself, a plugin with no dependencies
+  or `main`-only ones. It is NOT a two-React problem — plugins take hooks from `ft`
+  and import only types from React. Re-probe on a Bun upgrade; if it is fixed, the
+  single binary is back on the table.
 - React 19 + `@flowtty/react` / `@flowtty/tty-backend`, zod 4.
 
 ## Repos
