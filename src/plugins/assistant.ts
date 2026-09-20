@@ -10,7 +10,7 @@
 
 import { addTrigger, chatUser } from '../loader/registry.js';
 import { bgActiveCount, todoSnapshot } from '../loader/tools-core.js';
-import { compactConversation, chatLanguage } from '../assistant/agent.js';
+import { apiHistory, compactConversation, chatLanguage } from '../assistant/agent.js';
 import type { ChatMessage } from '../assistant/agent.js';
 import { loadMemories, memoryFilePath } from '../runtime/services/memory.js';
 import type { Make } from '../loader/plugin.js';
@@ -122,6 +122,15 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const tabRef = f.useRef<{ base: string; idx: number; cmd: string } | null>(null);
           const inputRef = f.useRef(input); inputRef.current = input;
           const msgsRef = f.useRef(messages); msgsRef.current = messages;
+          // The MODEL's history, kept apart from the display list above. `messages`
+          // holds what the person reads (final text + process/toolRuns/live); this
+          // holds what was actually exchanged — tool calls and tool results included
+          // — and is what every turn replays. See `apiHistory` for why the display
+          // list must never stand in for it.
+          const apiRef = f.useRef<ChatMessage[]>([]);
+          // `/compact`'s summary. It rides in the system context of every later turn;
+          // a display-only `system` message would be dropped by `send` and lost.
+          const summaryRef = f.useRef<string>('');
           const streamRef = f.useRef(streaming); streamRef.current = streaming;
           // Background-result queue (populated by `postToChat`, see below): results are
           // NOT dropped when the chat is busy — they wait here and are auto-fed through
@@ -224,7 +233,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // + fresh memory + the current plan. No network: the base is synchronous,
           // memory a local file, the plan the tool's module state.
           const assembleSystem = () => {
-            const parts = [baseStatic(), memoryBlock(), planBlock()].filter(Boolean);
+            const summary = summaryRef.current ? `Summary of the conversation so far (older turns were compacted):\n${summaryRef.current}` : '';
+            const parts = [baseStatic(), memoryBlock(), planBlock(), summary].filter(Boolean);
             return parts.length ? parts.join('\n\n') : null;
           };
 
@@ -246,11 +256,14 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // must never render as "You"), while for the model it is still a prompt to
             // answer — apiMsgs maps 'bg' → 'user'. History messages are re-mapped too.
             const history = msgsRef.current.filter(m => m.role !== 'system').map(m => ({ ...m }));
-            const apiMsgs = history.map(m => (m.role === 'bg' ? { ...m, role: 'user' as const } : m));
+            const apiMsgs: ChatMessage[] = apiHistory(apiRef.current);
             const displayMsgs = [...history];
             if (sys) { displayMsgs.unshift({ role: 'system', content: sys }); apiMsgs.unshift({ role: 'system', content: sys }); }
             displayMsgs.push({ role: opts.fromBackground ? 'bg' : 'user', content: q });
             apiMsgs.push({ role: 'user', content: q });
+            // The question joins the model's history now, so a failed or cancelled
+            // turn still leaves it on record; the turn's transcript follows on success.
+            apiRef.current = [...apiRef.current, { role: 'user', content: q }];
             setMessages(displayMsgs);
             setInput('');
             inputRef.current = '';
@@ -372,6 +385,11 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               (f.services as Record<string, any>).pushLog?.(`[chat] ${q.slice(0, 40)}… → ${(apiMsgs[apiMsgs.length - 1]?.content ?? '').length || 0} chars`);
               // A persistent trail of executed tools: put it on the last assistant message
               // so the render shows «▸ update_issue … → applied/declined/error».
+              const turn = (chatResult as { transcript?: ChatMessage[]; content?: string } | undefined);
+              apiRef.current = [
+                ...apiRef.current,
+                ...(turn?.transcript?.length ? turn.transcript : [{ role: 'assistant', content: turn?.content ?? '' }]),
+              ];
               const runs = (chatResult as { toolRuns?: unknown[] } | undefined)?.toolRuns ?? [];
               if (runs.length) {
                 setMessages(cur => {
@@ -482,12 +500,15 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // runAsyncCommand, which clears streaming/toolLabel on completion.
             runAsyncCommand('compact', async () => {
               const ai = (f.config.ai ?? {}) as Record<string, any>;
-              const summary = await compactConversation(msgsRef.current as unknown as ChatMessage[], {
+              // Compact what the MODEL saw (tool results included), not the display list.
+              const summary = await compactConversation(apiHistory(apiRef.current), {
                 baseUrl: ai.baseUrl,
                 model: ai.model,
                 token: process.env[ai.tokenEnv ?? 'LLM_TOKEN'],
               });
               const last = msgsRef.current[msgsRef.current.length - 1];
+              summaryRef.current = summaryRef.current ? `${summaryRef.current}\n\n${summary}` : summary;
+              apiRef.current = [];
               setMessages([{ role: 'system', content: summary }, ...(last ? [last] : [])]);
               setInput('');
               inputRef.current = '';
@@ -517,6 +538,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // legitimate result; only already-queued pending ones are stale.)
                 bgQueueRef.current = [];
                 clearFlush();
+                apiRef.current = []; summaryRef.current = '';
                 setMessages([]);
                 setInput(''); inputRef.current = '';
                 setCursor(0);
@@ -556,6 +578,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // continues the history, nothing is cleared.
             if (issueId !== ctxIssueIdRef.current) {
               ctxIssueIdRef.current = issueId;
+              apiRef.current = []; summaryRef.current = '';
               setMessages([]);
               // Task change — a new session: reset the status fields too, else the
               // «limit of steps» warning / tool name from the old task moves into the new.

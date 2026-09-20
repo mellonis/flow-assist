@@ -50,6 +50,11 @@ export interface AgentResult {
   content: string;
   process: string;
   toolRuns: ToolRun[];
+  // Every message this turn ADDED to the conversation, in API shape: the
+  // assistant messages carrying `tool_calls`, each tool result, and the final
+  // assistant answer. The caller appends it to its API-side history so the next
+  // turn replays what really happened (see `apiHistory`).
+  transcript: ChatMessage[];
 }
 
 // Injectable tool-run logger (see the logToolRun reconciliation comment below).
@@ -82,6 +87,44 @@ export interface AgentOpts {
   onRound?: (info: { index: number; finishReason: string; toolCalls: number; contentLen: number }) => void;
   // Any remaining OpenAI-ish options (tools, signal, …) — spread into the round.
   [key: string]: unknown;
+}
+
+// ─── API-side history ─────────────────────────────────────────────────────────
+// What a caller sends back on the next turn. The chat UI's own message list is a
+// DISPLAY list — final text plus `process`/`toolRuns`/`live`/`reasoning` — and
+// must never be the model's history: replaying only the final text of each turn
+// shows the model a transcript in which state changed with no tool call and no
+// tool result, and it imitates exactly that (narrates the change, guesses at
+// state). No system-prompt directive outweighs examples sitting in the history.
+//
+// So: keep only API fields, speak a background result to the model as the user,
+// drop system messages (the caller prepends a fresh one), and never leave half of
+// a call/result pair — providers reject an orphaned `tool` message and a
+// `tool_calls` message with a missing result, and one bad pair poisons every
+// later request.
+export function apiHistory(messages: ChatMessage[]): ChatMessage[] {
+  const clean: ChatMessage[] = [];
+  for (const m of messages) {
+    if (m.role === 'system') continue;
+    const out: ChatMessage = { role: m.role === 'bg' ? 'user' : m.role, content: m.content ?? null };
+    if (Array.isArray(m.tool_calls) && m.tool_calls.length) out.tool_calls = m.tool_calls;
+    if (typeof m.tool_call_id === 'string') out.tool_call_id = m.tool_call_id;
+    clean.push(out);
+  }
+  const answered = new Set(clean.filter((m) => m.role === 'tool').map((m) => m.tool_call_id as string));
+  const asked = new Set<string>();
+  const kept: ChatMessage[] = [];
+  for (const m of clean) {
+    if (m.role === 'assistant' && Array.isArray(m.tool_calls)) {
+      const ids = (m.tool_calls as { id?: string }[]).map((c) => String(c.id));
+      if (!ids.every((id) => answered.has(id))) continue; // a call whose result never arrived
+      ids.forEach((id) => asked.add(id));
+    } else if (m.role === 'tool' && !asked.has(String(m.tool_call_id))) {
+      continue; // a result whose call is gone
+    }
+    kept.push(m);
+  }
+  return kept;
 }
 
 // ─── AI preconditions & headers ───────────────────────────────────────────────
@@ -267,6 +310,7 @@ export async function agentChat(
   // service; `logTools`/`logToolsPath` are kept for source compatibility but are
   // NOT used for the actual write (no toolsLogFile computed here).
   let current: ChatMessage[] = messages.slice();
+  const turnStart = current.length;
   const baseTools = chatTools(); // active groups; already tree-shaken (write/run stripped)
   // Writing tools (write flag: true or a predicate (args) => boolean) ask for
   // confirmation via opts.confirmWrite (a y/n pause in chat) before running. In the
@@ -318,6 +362,7 @@ export async function agentChat(
       // content. If the caller does not use onLiveCommit, fall back to chunked
       // onDelta (old behavior) so the agentic API stays compatible.
       content = roundContent;
+      current.push({ role: 'assistant', content: roundContent });
       if (opts.onLiveCommit) opts.onLiveCommit(roundContent, true);
       else if (typeof opts.onDelta === 'function') {
         for (const p of roundContent.match(/.{1,8}/gs) ?? []) {
@@ -393,7 +438,7 @@ export async function agentChat(
       toolRuns.push({ name: tc.name, args: parsed, write, outcome, detail: detailStr });
     }
   }
-  return { content, process, toolRuns };
+  return { content, process, toolRuns, transcript: current.slice(turnStart) };
 }
 
 // One-shot non-streaming call for /compact: compresses the history into a compact

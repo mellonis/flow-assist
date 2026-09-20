@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { chatLanguage } from '../agent';
-import { agentChat } from '../agent';
+import { agentChat, apiHistory } from '../agent';
 import { assembleToolRegistry } from '../../loader/tools';
 import { makeFactory } from '../../loader/plugin';
 
@@ -114,4 +114,59 @@ test('agentChat tags the model-facing tool result with OK / ERROR / DECLINED', a
   expect(seen).toContain('OK: saved');
   expect(seen).toContain('ERROR: boom');
   expect(seen.some((s) => s.startsWith('DECLINED:'))).toBe(true);
+});
+
+test('a turn hands back its full transcript, so the next turn replays the tool calls and their results', async () => {
+  // The regression this guards: the chat kept only the final TEXT of each
+  // assistant turn. By the third turn the model had two in-context examples of
+  // "the user asked for a change → I said done" with no tool call and no tool
+  // result in sight, so it imitated them: it narrated the change and guessed at
+  // state instead of calling the tool. No prompt overrides examples in history.
+  assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
+  let n = 0;
+  const turnOne = async (_m: any[], opts: any) => {
+    n++;
+    if (n === 1) return { content: '', finishReason: 'tool_calls', toolCalls: [{ id: 'call_1', name: 'memory', arguments: '{"action":"list"}' }] };
+    opts.onDelta?.('listed');
+    return { content: 'listed', finishReason: 'stop', toolCalls: [] };
+  };
+  const first = await agentChat([{ role: 'user', content: 'list memory' }], { baseUrl: 'http://x', model: 'm', token: 't', onLive: () => {}, onLiveCommit: () => {}, chatRound: turnOne });
+
+  expect(first.transcript.map((m) => m.role)).toEqual(['assistant', 'tool', 'assistant']);
+  expect((first.transcript[0] as any).tool_calls[0]).toEqual({ id: 'call_1', type: 'function', function: { name: 'memory', arguments: '{"action":"list"}' } });
+  expect(first.transcript[1]).toMatchObject({ role: 'tool', tool_call_id: 'call_1' });
+  expect(first.transcript[2]).toEqual({ role: 'assistant', content: 'listed' });
+
+  // The caller's API-side history is: what it sent + the transcript. Display-only
+  // fields never travel, and a background result speaks to the model as the user.
+  const history = apiHistory([
+    { role: 'system', content: 'old system' },
+    { role: 'user', content: 'list memory' },
+    ...first.transcript,
+    { role: 'assistant', content: 'shown', process: 'narration', toolRuns: [{}], live: 'x', reasoning: 'y' } as any,
+    { role: 'bg', content: 'job finished' },
+  ]);
+  expect(history.map((m) => m.role)).toEqual(['user', 'assistant', 'tool', 'assistant', 'assistant', 'user']);
+  expect(Object.keys(history[4]!).sort()).toEqual(['content', 'role']);
+  expect((history[1] as any).tool_calls).toHaveLength(1);
+
+  // Turn two sees turn one's call and result verbatim.
+  let seen: any[] = [];
+  const turnTwo = async (messages: any[], opts: any) => { seen = messages; opts.onDelta?.('ok'); return { content: 'ok', finishReason: 'stop', toolCalls: [] }; };
+  await agentChat([...history, { role: 'user', content: 'again' }], { baseUrl: 'http://x', model: 'm', token: 't', onLive: () => {}, onLiveCommit: () => {}, chatRound: turnTwo });
+  expect(seen.some((m) => m.role === 'tool' && m.tool_call_id === 'call_1')).toBe(true);
+  expect(seen.some((m) => m.role === 'assistant' && m.tool_calls?.[0]?.id === 'call_1')).toBe(true);
+});
+
+test('apiHistory never leaves a tool result without the call that asked for it', () => {
+  // Providers reject an orphaned `tool` message (and a tool_calls message with a
+  // missing result). A history cut mid-pair — by compaction or a cancelled turn —
+  // must drop the broken pair rather than poison every later request.
+  const cut = apiHistory([
+    { role: 'tool', tool_call_id: 'gone', content: 'orphan' },
+    { role: 'user', content: 'hi' },
+    { role: 'assistant', content: null, tool_calls: [{ id: 'a', type: 'function', function: { name: 'x', arguments: '{}' } }] } as any,
+    { role: 'user', content: 'interrupted before the result' },
+  ]);
+  expect(cut.map((m) => m.role)).toEqual(['user', 'user']);
 });
