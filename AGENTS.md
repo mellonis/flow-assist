@@ -136,7 +136,14 @@ same reason: a display-only system message never reaches the model.
   (the model's `config_schema`). So: a **binding** may say `'enter'`; a **comparison**
   (`key.name === …`, a test's `press(…)`) must use the terminal's name — there is no
   `'enter'`, `'space'` or `'colon'` there, and flowtty's `TestBackend.press()` throws
-  on them. What is DRAWN for a key (⏎, ␣) is a third thing: a plugin's keycaps.
+  on them.
+  - What is DRAWN for a key is the **third** vocabulary: `keyGlyph` in the same file
+    — `⏎ ␣ ⇥ ⌫ ↑`, `^r`, `⌥⏎`, `⇧⇥`; one code point per glyph, a short word where no
+    glyph exists. The keycaps panel draws pressed keys with it (the raw name read
+    `return`, and `' '` drew an empty cap). A hint that shows a key as a symbol
+    should go through it too, so one key never looks two ways on a screen — the
+    hand-written `⏎` / `⇥` in the chat hints and the plugins' `keycaps(ft)` labels
+    do not yet.
 - **↑/↓** walk the prompt history, only while the field is empty or still shows a
   history entry untouched. The **wheel** and **PgUp/PgDn** scroll. **^r** unfolds
   thinking, notes and the tool calls behind the one-line `▸ N tools` summary.

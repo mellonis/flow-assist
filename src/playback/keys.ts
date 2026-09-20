@@ -92,6 +92,44 @@ export function writtenKey(name: string): string {
   return WRITTEN[name] ?? name;
 }
 
+// ─── The third vocabulary: what is DRAWN for a key ─────────────────────────────
+// A keycap is neither the terminal's name nor a config spelling — it is what is
+// printed on the key: ⏎, ␣, ⇥, ⌫, arrows. One code point each where a glyph exists
+// (flowtty counts one cell per code point), a short word where none does. The
+// keycaps panel draws the pressed keys with it, and any hint that shows a binding as
+// a symbol should too, so the same key never looks two ways on one screen.
+const KEY_GLYPHS: Record<string, string> = {
+  return: '⏎',
+  ' ': '␣',
+  tab: '⇥',
+  backspace: '⌫',
+  delete: '⌦',
+  escape: 'Esc',
+  up: '↑',
+  down: '↓',
+  left: '←',
+  right: '→',
+  home: 'Home',
+  end: 'End',
+  pageup: 'PgUp',
+  pagedown: 'PgDn',
+  insert: 'Ins',
+  paste: 'paste',
+  wheelup: 'wheel↑',
+  wheeldown: 'wheel↓',
+};
+// The cap for a key as the terminal reported it — or for a terminal-side NAME alone
+// (a resolved binding). Modifiers are part of what was pressed: `^r` is not `r`.
+// Shift is shown only with a named key (⇧⇥): for a character the character already
+// says it ('A'), and the decoder reports 'A', not shift+'a'.
+export function keyGlyph(key: string | { name?: string; ctrl?: boolean; meta?: boolean; shift?: boolean }): string {
+  const k = typeof key === 'string' ? { name: key } : key;
+  const name = k.name ?? '';
+  const named = Array.from(name).length !== 1;
+  const cap = KEY_GLYPHS[name] ?? (/^f\d{1,2}$/.test(name) ? name.toUpperCase() : name);
+  return `${k.ctrl ? '^' : ''}${k.meta ? '⌥' : ''}${k.shift && (named || name === ' ') ? '⇧' : ''}${cap}`;
+}
+
 // Host base of key bindings: only the shared/navigation actions the host keeps.
 // Domain actions (log/bookmarks/filters/tags/...) are declared by each plugin in
 // its own `keys` field instead — the plugin registers its own hotkeys, with a

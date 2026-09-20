@@ -5,6 +5,7 @@
 import { z } from 'zod';
 import type { Make } from '../loader/plugin.js';
 import type { Plugin } from '../loader/plugin.js';
+import { keyGlyph } from '../playback/keys.js';
 
 // The app-glue dispatched to by the :keycaps command.
 interface KeycapsCtx {
@@ -17,7 +18,7 @@ interface KeycapsFT {
   useInputHandler(opts: {
     mode: 'observe';
     priority: () => number;
-    handler: (key: { name: string }) => void;
+    handler: (key: { name: string; ctrl?: boolean; meta?: boolean; shift?: boolean }) => void;
   }): void;
   store: Record<string, unknown>;
   services: Record<string, unknown>;
@@ -59,7 +60,11 @@ export function buildKeycapsPlugin({ renders, config, make }: BuildKeycapsParams
           f.useInputHandler({
             mode: 'observe',
             priority: () => 1000,
-            handler: (key) => { if (enabled) setRecent(r => [...r, key.name].slice(-6)); },
+            // The cap is what is printed on the key — ⏎, ␣, ^r — not the terminal's name
+            // for it: 'return' reads as a word, and ' ' drew an EMPTY cap. The panel is
+            // for someone watching a screen, who knows keys by their caps.
+            // The wheel is not a key: one flick is a dozen events and would flush the panel.
+            handler: (key) => { if (enabled && !key.name.startsWith('wheel')) setRecent(r => [...r, keyGlyph(key)].slice(-6)); },
           });
           // API for the :keycaps command — toggles/enables/disables the panel. Reads
           // `enabled` from the latest render (the toggle is recreated each render).

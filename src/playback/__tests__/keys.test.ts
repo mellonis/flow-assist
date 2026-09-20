@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { NAMED_KEYS } from '@flowtty/core';
-import { canonicalBinding, canonicalKey, isKey, resolveKeys, writtenKey } from '../keys';
+import { canonicalBinding, canonicalKey, isKey, keyGlyph, resolveKeys, writtenKey } from '../keys';
 import { buildKeys } from '../../loader/registry';
 
 test('resolveKeys folds string to array and defaults to [] when missing', () => {
@@ -60,4 +60,28 @@ test('shown in words, a key reads as a person would write it', () => {
   expect(writtenKey('q')).toBe('q');
   // Round trip: what is shown can be typed back into the config.
   for (const name of ['return', ' ', 'escape', 'q', ':']) expect(canonicalKey(writtenKey(name))).toBe(name);
+});
+
+test('drawn, a key is its cap — and the modifiers are part of what was pressed', () => {
+  expect(keyGlyph('return')).toBe('⏎');
+  expect(keyGlyph(' ')).toBe('␣'); // the terminal's name for it is invisible
+  expect(keyGlyph('tab')).toBe('⇥');
+  expect(keyGlyph('backspace')).toBe('⌫');
+  expect(keyGlyph('escape')).toBe('Esc');
+  expect(keyGlyph('up')).toBe('↑');
+  expect(keyGlyph('f5')).toBe('F5');
+  expect(keyGlyph('q')).toBe('q');
+  expect(keyGlyph({ name: 'r', ctrl: true })).toBe('^r');
+  expect(keyGlyph({ name: 'return', meta: true })).toBe('⌥⏎');
+  expect(keyGlyph({ name: 'tab', shift: true })).toBe('⇧⇥');
+  // For a character Shift is already in the character: the decoder says 'A'.
+  expect(keyGlyph({ name: 'A', shift: true })).toBe('A');
+  // Every named key the decoder can produce has a cap that is not its raw name
+  // spelled in lower case — except the two that are words anyway.
+  for (const name of NAMED_KEYS) expect(keyGlyph(name)).not.toBe('');
+  // A cap goes on a one-row key: nothing in the table is wider than a short word.
+  for (const name of NAMED_KEYS) expect(Array.from(keyGlyph(name)).length).toBeLessThanOrEqual(6);
+  // The three vocabularies agree about which key they mean.
+  expect(keyGlyph(canonicalKey('enter'))).toBe('⏎');
+  expect(keyGlyph(canonicalKey('space'))).toBe('␣');
 });
