@@ -150,13 +150,23 @@ async function runConfig(args: string[], config: Record<string, unknown>): Promi
       process.exitCode = 1;
       return;
     }
-    saveConfigSetting(key, check.value);
+    // A value is only echoed once it is really on disk: a failed write used to
+    // print the value just the same, which read as "saved".
+    if (!saveConfigSetting(key, check.value)) {
+      console.log(`config: could not write ${key} — check that the config directory is writable`);
+      process.exitCode = 1;
+      return;
+    }
     console.log(JSON.stringify(check.value));
     return;
   }
 
   if (sub === 'unset' && key) {
-    saveConfigUnset(key);
+    if (!saveConfigUnset(key)) {
+      console.log(`config: could not unset ${key} — check that the config directory is writable`);
+      process.exitCode = 1;
+      return;
+    }
     console.log(`config: unset ${key}`);
     return;
   }

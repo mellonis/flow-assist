@@ -1,6 +1,9 @@
 import { expect, test } from 'bun:test';
 import { hostConfigSchema } from '../schema';
-import { getDeep, setDeep, unsetDeep, parseValue, validateConfigWriteValue, configWarnings } from '../load';
+import { mkdtempSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { getDeep, setDeep, unsetDeep, parseValue, validateConfigWriteValue, configWarnings, saveConfigSetting, saveConfigUnset, configDir } from '../load';
 
 test('schema has NO tracker-only keys at direct level', () => {
   const shape = (hostConfigSchema as any).shape;
@@ -54,4 +57,24 @@ test('configWarnings flags an incomplete LLM and a schema type error, silent for
     if (saved === undefined) delete process.env.LLM_TOKEN;
     else process.env.LLM_TOKEN = saved;
   }
+});
+test('a first `config set` on a fresh machine creates the config directory and persists', () => {
+  // The regression: the file was written without creating its directory, the
+  // ENOENT was swallowed, and the CLI printed the value as if it had been saved —
+  // so the very first setup on any new machine silently did nothing.
+  const dir = join(mkdtempSync(join(tmpdir(), 'fa-cfg-')), 'not', 'there', 'yet');
+  const file = join(dir, 'config.local.json');
+  expect(saveConfigSetting('ai.model', 'm1', file)).toEqual({ ai: { model: 'm1' } });
+  expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual({ ai: { model: 'm1' } });
+  expect(saveConfigSetting('ai.baseUrl', 'http://x', file)).toEqual({ ai: { model: 'm1', baseUrl: 'http://x' } });
+  expect(saveConfigUnset('ai.model', file)).toEqual({ ai: { baseUrl: 'http://x' } });
+  // A path that cannot be written is reported, not hidden.
+  const blocked = join(file, 'a-file-is-not-a-directory', 'config.local.json');
+  expect(saveConfigSetting('ai.model', 'm2', blocked)).toBeNull();
+});
+
+test('the config directory is a flow-assist folder under XDG_CONFIG_HOME, never XDG_CONFIG_HOME itself', () => {
+  expect(configDir({ XDG_CONFIG_HOME: '/x/cfg' }, '/home/me')).toBe('/x/cfg/flow-assist');
+  expect(configDir({}, '/home/me')).toBe('/home/me/.config/flow-assist');
+  expect(configDir({ XDG_CONFIG_HOME: '' }, '/home/me')).toBe('/home/me/.config/flow-assist');
 });

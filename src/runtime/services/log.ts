@@ -1,11 +1,12 @@
 import fs from 'node:fs';
+import { configDir } from '../../config/load.js';
 import os from 'node:os';
 import path from 'node:path';
 
 // Debug log for tool runs lives with the rest of the host state, under the
 // user's config dir (honoring the XDG override).
 const CONFIG_DIR =
-  process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), '.config', 'flow-assist');
+  configDir();
 const TOOLS_LOG_PATH = path.join(CONFIG_DIR, 'tools.log');
 
 // ~5 MB cap on the tool-call log file — a simple rotation: when the file grows

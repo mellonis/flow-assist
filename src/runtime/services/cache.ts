@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { configDir } from '../../config/load.js';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -7,7 +8,7 @@ import path from 'node:path';
 // namespaced KV + TTL store; plugins (tracker, gitlab, …) each get their own
 // namespace so keys never collide.
 const CONFIG_DIR =
-  process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), '.config', 'flow-assist');
+  configDir();
 const DEFAULT_CACHE_PATH = path.join(CONFIG_DIR, 'cache.json');
 
 // Default TTL for an entry when `set` is called without an explicit ttl.

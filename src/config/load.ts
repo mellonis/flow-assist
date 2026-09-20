@@ -6,7 +6,13 @@ import { hostConfigSchema } from './schema.js';
 // Config files live outside the repo, under the user's home config dir (or the
 // XDG override). config.json is the committed/default base; config.local.json
 // holds machine-specific overrides and is the only file the write helpers touch.
-const CONFIG_DIR = process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), '.config', 'flow-assist');
+// One place decides where flow-assist keeps its files: a `flow-assist` folder
+// under XDG_CONFIG_HOME (or ~/.config). Never XDG_CONFIG_HOME itself — that is
+// everybody's directory.
+export function configDir(env: Record<string, string | undefined> = process.env, home: string = os.homedir()): string {
+  return path.join(env.XDG_CONFIG_HOME || path.join(home, '.config'), 'flow-assist');
+}
+const CONFIG_DIR = configDir();
 const CONFIG_PATH = path.join(CONFIG_DIR, 'config.json');
 const CONFIG_LOCAL_PATH = path.join(CONFIG_DIR, 'config.local.json');
 
@@ -208,6 +214,7 @@ export function saveConfig(merge: Record<string, unknown>, filePath: string = CO
   try {
     const current = fs.existsSync(filePath) ? JSON.parse(fs.readFileSync(filePath, 'utf8')) : {};
     const next = { ...current, ...merge };
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
     fs.writeFileSync(filePath, JSON.stringify(next, null, 2), 'utf8');
     return next;
   } catch {
@@ -219,9 +226,10 @@ export function saveConfig(merge: Record<string, unknown>, filePath: string = CO
 // overrides. Returns the resulting object or null.
 export function saveConfigSetting(key: string, value: unknown, filePath: string = CONFIG_LOCAL_PATH): Record<string, unknown> | null {
   try {
-    const current = fs.existsSync(filePath) ? JSON.parse(fs.readFileSync(filePath, 'utf8')) : { value: undefined };
+    const current = fs.existsSync(filePath) ? JSON.parse(fs.readFileSync(filePath, 'utf8')) : {};
     const base: Record<string, unknown> = current && typeof current === 'object' ? current : {};
     const next = setDeep(base, key, value);
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
     fs.writeFileSync(filePath, JSON.stringify(next, null, 2), 'utf8');
     return next;
   } catch {
@@ -236,6 +244,7 @@ export function saveConfigUnset(key: string, filePath: string = CONFIG_LOCAL_PAT
     const current = fs.existsSync(filePath) ? JSON.parse(fs.readFileSync(filePath, 'utf8')) : {};
     const base: Record<string, unknown> = current && typeof current === 'object' ? current : {};
     const next = unsetDeep(base, key);
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
     fs.writeFileSync(filePath, JSON.stringify(next, null, 2), 'utf8');
     return next;
   } catch {
