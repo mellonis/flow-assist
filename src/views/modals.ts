@@ -348,12 +348,14 @@ export function renderChatModal({
   // window's scroll budget still lines up w/ the visible area.
   // An open question takes the plan's room: the person is answering, not planning.
   const planList = (pendingQuestion ? [] : (todo ?? [])) as PlanItem[];
-  // Rendered in STABLE insertion (id) order — never re-sorted by status. Reordering
-  // keyed children makes React `insertBefore` a node that is already attached to the
-  // same parent, and @flowtty/core's host `insertChild` aborts yoga (`Aborted()`).
-  // The status is still visible via the checkbox glyph (☐/◐/☑), so sorting adds
-  // nothing but the crash. Items only ever get appended or removed, never moved.
-  const planActive = planList.filter((t) => t.status !== 'done');
+  // What is in progress comes first, then what is pending, each in insertion order
+  // (the sort is stable): the cap below cuts from the END, so the items being worked
+  // on are the last to fall off the screen. Needs flowtty ≥ 1.0.0-alpha.5 — before
+  // it, re-ordering keyed children aborted Yoga and the plan was pinned to insertion
+  // order.
+  const planActive = planList
+    .filter((t) => t.status !== 'done')
+    .sort((a, b) => Number(b.status === 'in_progress') - Number(a.status === 'in_progress'));
   const planShown = planActive.slice(0, MAX_VISIBLE_PLAN);
   const planDone = planList.filter((t) => t.status === 'done').length;
   const planHidden = planActive.length - planShown.length;
@@ -530,9 +532,9 @@ export function renderChatModal({
                 // The prompt marks the field's first line; it dims while an answer is
                 // coming, when ⏎ queues instead of sending.
                 const prompt = h(Text, { bold: !streaming, dim: streaming, color: m.accent }, visible[i] === fieldRows[0] ? '› ' : ' '.repeat(GUTTER));
-                // A blank line still takes a row: an empty Text has no height and the
-                // line would vanish, which is how "two newlines" used to collapse.
-                if (row.caret === '') return h(Box, { key: i, flexDirection: 'row' }, prompt, h(Text, { wrap: 'truncate' }, row.before || ' '));
+                // A blank line is a real '' — flowtty ≥ 1.0.0-alpha.5 gives an empty Text
+                // its row (it used to collapse, which is how "two newlines" vanished).
+                if (row.caret === '') return h(Box, { key: i, flexDirection: 'row' }, prompt, h(Text, { wrap: 'truncate' }, row.before));
                 // The caret sits ON the first suggested character, as a shell's
                 // autosuggestion does, so what was typed and what is offered read as one
                 // word: `/co` + `mpact`. The offer is the accent colour, dimmed; the

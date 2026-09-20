@@ -1,9 +1,11 @@
 // The chat as a person meets it, through the real TUI with a scripted model.
 import { afterEach, expect, test } from 'bun:test';
 import { ScriptedModel, bootApp, settle } from './helpers/scripted';
+import { execChatTool } from '../loader/tools';
 
 const realFetch = globalThis.fetch;
-afterEach(() => { globalThis.fetch = realFetch; });
+// The plan is module-level state: leave none behind for the suites that follow.
+afterEach(async () => { globalThis.fetch = realFetch; await execChatTool('todo', { action: 'clear' }, {}).catch(() => {}); });
 
 // The style of the cell where `text` starts (plus `offset` cells).
 function styleAt(backend: { lastBuffer: any; lastFrame: string }, text: string, offset = 0) {
@@ -180,5 +182,50 @@ test('text to the right of the caret is drawn like the text to its left', async 
   expect(left.dim).toBeFalsy();
   expect(right.dim).toBeFalsy();
   expect(right.fg).toBe(left.fg);
+  ui.app.unmount();
+});
+
+test('a blank line between two thoughts is a row of the field on screen', async () => {
+  const ui = await bootApp(new ScriptedModel(), 100, 24);
+  await ui.press('A');
+  await ui.type('first thought');
+  ui.backend.press({ name: 'return', shift: true });
+  ui.backend.press({ name: 'return', shift: true });
+  await ui.type('second thought');
+  const rows = ui.backend.lastFrame.split('\n');
+  const first = rows.findIndex((r) => r.includes('› first thought'));
+  const second = rows.findIndex((r) => r.includes('second thought'));
+  expect(first).toBeGreaterThanOrEqual(0);
+  // Exactly one row between them, and it is an empty row of the field itself.
+  expect(second - first).toBe(2);
+  expect(rows[first + 1]!.replace(/[│\s]/g, '')).toBe('');
+  expect(ui.backend.lastBuffer!.get(rows[first]!.indexOf('›') + 4, first + 1).style.bg).toBe('#1f1f2e');
+  ui.app.unmount();
+});
+
+test('the plan lists what is in progress first, and re-orders live without a crash', async () => {
+  // Re-ordering keyed children used to abort Yoga inside flowtty, so the plan was
+  // pinned to insertion order. Fixed in flowtty 1.0.0-alpha.5.
+  const model = new ScriptedModel();
+  model.script(
+    [{ tool: 'todo', args: { action: 'add', items: ['read the diff', 'run the tests', 'write the summary'] } }],
+    [{ text: 'Planned.' }],
+    [{ tool: 'todo', args: { action: 'start', text: 'write the summary' } }],
+    [{ text: 'Started the summary.' }],
+  );
+  const ui = await bootApp(model, 100, 30);
+  await ui.press('A');
+  await ui.type('plan it');
+  await ui.press('return');
+  await settle(20);
+  const order = () => ui.backend.lastFrame.split('\n').filter((r) => /[☐◐☑] \d+ · /.test(r)).map((r) => r.replace(/^.*· /, '').replace(/[│\s]+$/, ''));
+  expect(order()).toEqual(['read the diff', 'run the tests', 'write the summary']);
+
+  await ui.type('start the last one');
+  await ui.press('return');
+  await settle(24);
+  // The item in progress moved to the top; the app is still alive and drew the answer.
+  expect(order()).toEqual(['write the summary', 'read the diff', 'run the tests']);
+  expect(ui.backend.lastFrame).toContain('Started the summary.');
   ui.app.unmount();
 });
