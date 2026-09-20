@@ -13,8 +13,8 @@
     "test": "bun test"
   },
   "dependencies": {
-    "@flowtty/react": "^1.0.0-alpha.3",
-    "@flowtty/tty-backend": "^1.0.0-alpha.3",
+    "@flowtty/react": "^1.0.0-alpha.4",
+    "@flowtty/tty-backend": "^1.0.0-alpha.4",
     "react": "^19.2.8",
     "zod": "^4.6.5"
   },
