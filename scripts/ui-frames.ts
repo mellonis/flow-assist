@@ -3,6 +3,8 @@
 //   bun scripts/ui-frames.ts                 # every scenario
 //   bun scripts/ui-frames.ts streaming bg    # only these
 //   bun scripts/ui-frames.ts --size 120x36 streaming
+//   bun scripts/ui-frames.ts --color input   # real ANSI colours, for your terminal
+//   bun scripts/ui-frames.ts --styles input  # colours spelled out per row, for a log or a diff
 //
 // Each scenario boots the REAL app on a test backend, plays a scripted model
 // (no network, no key, no cost) and prints the frame at named checkpoints. It is
@@ -14,75 +16,63 @@
 // `hold` that freezes the stream until the scenario releases it — which is how a
 // frame is taken "while the answer is still coming".
 
-import { TestBackend, flush } from '@flowtty/core/testing';
-import { loadPlugins } from '../src/loader/build.ts';
-import { assembleToolRegistry } from '../src/loader/tools.ts';
-import { renderApp } from '../src/runtime/app.tsx';
-import { renderChatModal, renderHelp, renderLogModal, renderReminder } from '../src/views/modals.ts';
-
-type Step = { text: string } | { tool: string; args: unknown } | { hold: true };
-type Turn = Step[];
+import { ScriptedModel, bootApp, settle } from '../src/__tests__/helpers/scripted.ts';
 
 const argv = process.argv.slice(2);
 const sizeAt = argv.indexOf('--size');
 const [W, H] = (sizeAt >= 0 ? argv[sizeAt + 1]! : '100x28').split('x').map(Number) as [number, number];
+const COLOR = argv.includes('--color');
+const STYLES = argv.includes('--styles');
 const wanted = argv.filter((a, i) => !a.startsWith('--') && !(sizeAt >= 0 && i === sizeAt + 1));
 
-// ─── the scripted model ───────────────────────────────────────────────────────
-class ScriptedModel {
-  private turns: Turn[] = [];
-  private gate: (() => void) | null = null;
-  requests: { messages: { role: string }[] }[] = [];
-  script(...turns: Turn[]) { this.turns.push(...turns); }
-  release() { this.gate?.(); this.gate = null; }
+// ─── styled output ────────────────────────────────────────────────────────────
+type CellStyle = { fg?: string; bg?: string; bold?: boolean; dim?: boolean; underline?: boolean; inverse?: boolean };
+type CellBuffer = { width: number; height: number; get(x: number, y: number): { char: string; style: CellStyle } };
+const NAMED: Record<string, number> = { black: 0, red: 1, green: 2, yellow: 3, blue: 4, magenta: 5, cyan: 6, white: 7, gray: 8, grey: 8 };
+const sgrColor = (c: string, bg: boolean): string => {
+  const hex = /^#([0-9a-f]{6})$/i.exec(c);
+  if (hex) { const n = parseInt(hex[1]!, 16); return `${bg ? 48 : 38};2;${n >> 16};${(n >> 8) & 255};${n & 255}`; }
+  const n = NAMED[c.toLowerCase()];
+  if (n === undefined) return '';
+  return n === 8 ? String(bg ? 100 : 90) : String((bg ? 40 : 30) + n);
+};
+const sgr = (st: CellStyle) => [st.bold && '1', st.dim && '2', st.underline && '4', st.inverse && '7', st.fg && sgrColor(st.fg, false), st.bg && sgrColor(st.bg, true)].filter(Boolean).join(';');
+const label = (st: CellStyle) => [st.fg && `fg=${st.fg}`, st.bg && `bg=${st.bg}`, st.bold && 'bold', st.dim && 'dim', st.underline && 'underline', st.inverse && 'inverse'].filter(Boolean).join(' ');
 
-  install() {
-    globalThis.fetch = (async (_url: unknown, init: RequestInit) => {
-      this.requests.push(JSON.parse(String(init.body)));
-      const turn = this.turns.shift() ?? [{ text: '(the script has no more turns)' }];
-      const enc = new TextEncoder();
-      const send = (c: ReadableStreamDefaultController, o: unknown) => c.enqueue(enc.encode(`data: ${JSON.stringify(o)}\n\n`));
-      const self = this;
-      const body = new ReadableStream({
-        async start(c) {
-          let calls = 0;
-          for (const step of turn) {
-            if ('hold' in step) await new Promise<void>((r) => { self.gate = r; });
-            else if ('text' in step) for (const piece of step.text.match(/.{1,12}/gs) ?? []) send(c, { choices: [{ delta: { content: piece }, finish_reason: null }] });
-            else send(c, { choices: [{ delta: { tool_calls: [{ index: calls, id: `call_${calls++}`, function: { name: step.tool, arguments: JSON.stringify(step.args) } }] }, finish_reason: null }] });
-          }
-          send(c, { choices: [{ delta: {}, finish_reason: calls ? 'tool_calls' : 'stop' }] });
-          c.enqueue(enc.encode('data: [DONE]\n\n'));
-          c.close();
-        },
-      });
-      return new Response(body, { headers: { 'content-type': 'text/event-stream' } });
-    }) as typeof fetch;
+function styledFrame(buf: CellBuffer): string {
+  const rows: string[] = [];
+  for (let y = 0; y < buf.height; y++) {
+    let ansi = '';
+    let plain = '';
+    const runs: string[] = [];
+    let open = '';
+    let from = 0;
+    for (let x = 0; x <= buf.width; x++) {
+      const cell = x < buf.width ? buf.get(x, y) : null;
+      const now = cell ? label(cell.style) : '\u0000';
+      if (now !== open) {
+        if (open && plain.slice(from).trim()) runs.push(`${from}–${x - 1} ${open}`);
+        open = now; from = x;
+      }
+      if (cell) { const code = sgr(cell.style); ansi += code ? `\x1b[${code}m${cell.char || ' '}\x1b[0m` : (cell.char || ' '); plain += cell.char || ' '; }
+    }
+    rows.push(COLOR ? ansi.replace(/(\s|\x1b\[0m)+$/, '\x1b[0m') : `${plain.replace(/\s+$/, '')}${runs.length ? `\n      ⟨${runs.join(' ⟩⟨')} ⟩` : ''}`);
   }
+  while (rows.length && !rows.at(-1)!.replace(/\x1b\[[0-9;]*m/g, '').trim()) rows.pop();
+  return rows.join('\n');
 }
 
 // ─── the rig ──────────────────────────────────────────────────────────────────
-const settle = async (n = 10) => { for (let i = 0; i < n; i++) { await flush(); await new Promise((r) => setTimeout(r, 4)); } };
-
 async function boot(model: ScriptedModel) {
-  process.env.LLM_TOKEN = 'scripted';
-  model.install();
-  const config: Record<string, unknown> = { ai: { baseUrl: 'http://scripted.model', model: 'scripted' } };
-  const repo = { enabledPlugins: async () => [], list: async () => [] } as never;
-  const renders = { chat: renderChatModal, help: renderHelp, log: renderLogModal, reminder: renderReminder };
-  const plugins = await loadPlugins({ config, repo, renders: renders as never });
-  const tools = assembleToolRegistry({ plugins, config, repo });
-  const backend = new TestBackend(W, H);
-  const app = await renderApp(backend, { plugins, config, tools, onExit: () => {} });
-  await settle();
+  const ui = await bootApp(model, W, H);
   const frame = (title: string) => {
-    const lines = backend.lastFrame.split('\n').map((l) => l.replace(/\s+$/, ''));
+    const buf = ui.backend.lastBuffer;
+    if ((COLOR || STYLES) && buf) { console.log(`\n┏━━ ${title}\n${styledFrame(buf)}`); return; }
+    const lines = ui.backend.lastFrame.split('\n').map((l) => l.replace(/\s+$/, ''));
     while (lines.length && !lines.at(-1)) lines.pop();
     console.log(`\n┏━━ ${title}\n${lines.join('\n')}`);
   };
-  const press = async (...names: string[]) => { for (const name of names) backend.press({ name }); await settle(); };
-  const type = async (text: string) => { backend.type(text); await settle(); };
-  return { backend, app, frame, press, type };
+  return { ...ui, frame };
 }
 
 // ─── scenarios ────────────────────────────────────────────────────────────────
