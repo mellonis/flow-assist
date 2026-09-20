@@ -1,16 +1,13 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { configDir } from '../../config/load.js';
 
-// The assistant's memory lives outside the repo, under the user's home config
-// dir, so personal notes never end up in git. This mirrors the source tracker
-// path but under the host's own config directory.
-export const DEFAULT_MEMORY_PATH = path.join(
-  os.homedir(),
-  '.config',
-  'flow-assist',
-  'memory.json',
-);
+// The assistant's memory lives outside the repo, in the host's config directory,
+// so personal notes never end up in git. `configDir()` is the one place that
+// decides where that is — this file used to spell `~/.config/flow-assist` by hand
+// and so ignored XDG_CONFIG_HOME while the config, the log and the cache obeyed it.
+export const DEFAULT_MEMORY_PATH = path.join(configDir(), 'memory.json');
 
 // A single stored memory: free text plus optional scope, an optional label (a
 // classification the assistant can use to filter memories, e.g. the tool a fact

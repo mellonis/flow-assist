@@ -106,7 +106,13 @@ same reason: a display-only system message never reaches the model.
   that layout is fixed in flowtty, not papered over here.
 - **⏎** sends; while an answer is coming it **queues** instead (sent in order when
   the turn ends). **Esc**: clear the field → take the last queued message back →
-  stop the answer → arm/close. **⇧⏎** is a newline; a blank line is kept.
+  stop the answer → arm/close. **Alt+⏎** is a newline (`NEWLINE_KEY` in
+  `src/views/modals.ts` — the one spelling every hint uses); a blank line is kept.
+  ⇧⏎ is not offered: flowtty's decoder does not turn the CSI-u / modifyOtherKeys
+  form into `return`+`shift`, so in a real terminal it never arrives as Enter.
+- **Key names are the decoder's, not friendly ones**: Enter is `'return'`, the space
+  bar is `' '`, a colon is `':'`. There is no `'enter'`, `'space'` or `'colon'` — a
+  branch or a test helper matching on those tests a keyboard no terminal has.
 - **↑/↓** walk the prompt history, only while the field is empty or still shows a
   history entry untouched. The **wheel** and **PgUp/PgDn** scroll. **^r** unfolds
   thinking, notes and the tool calls behind the one-line `▸ N tools` summary.

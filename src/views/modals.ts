@@ -223,6 +223,12 @@ function toolRunText(run: ToolRun, wrap: number): Span {
 const GUTTER = 2;
 // The assistant's mark: on its answers, and signing the chat's frame.
 export const ASSISTANT_MARK = 'ƒ';
+// The key the hints name for a newline. Alt+Enter is what a terminal really sends
+// as a distinguishable key (ESC + CR → `return` with `meta`). Shift+Enter is NOT:
+// without the kitty keyboard protocol most terminals send a bare CR for it, and
+// when one does send CSI-u, flowtty's decoder (alpha.6) names it 'csi-u', not
+// `return` + `shift`. The handler still accepts `shift`, for the day that lands.
+export const NEWLINE_KEY = 'Alt+⏎';
 
 // `todo ×2, memory` — the tools of a turn, in the order first used.
 function toolSummary(runs: ToolRun[]): string {
@@ -452,7 +458,7 @@ export function renderChatModal({
       h(Box, { flexGrow: 1, flexShrink: 1, flexDirection: 'column', overflow: 'hidden' },
         win.length
           ? null
-          : h(Text, { dim: true }, 'Ask anything. ⏎ sends, ⇧⏎ starts a new line, / opens the commands.'),
+          : h(Text, { dim: true }, `Ask anything. ⏎ sends, ${NEWLINE_KEY} starts a new line, / opens the commands.`),
         pinned
           ? h(Box, { key: 'chat-sticky', flexDirection: 'row', ...(userStyle || { backgroundColor: undefined, width: '100%' }) },
               h(Text, { bold: true, dim: true, color: m.accent }, '› '),
@@ -549,7 +555,7 @@ export function renderChatModal({
                   ...offer,
                   others.length ? h(Text, { wrap: 'truncate', dim: true }, `  ⇥ ${others.join(' · ')}`) : null,
                   input === ''
-                    ? h(Text, { wrap: 'truncate', dim: true }, streaming ? ' an answer is coming — ⏎ queues your next message' : ' ⏎ send · ⇧⏎ new line · Esc Esc close')
+                    ? h(Text, { wrap: 'truncate', dim: true }, streaming ? ' an answer is coming — ⏎ queues your next message' : ` ⏎ send · ${NEWLINE_KEY} new line · Esc Esc close`)
                     // Text after the caret is the person's own text — drawn like the rest
                     // of it. It used to take the placeholder's dim and went grey whenever
                     // the caret moved back.

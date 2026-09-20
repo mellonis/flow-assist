@@ -559,8 +559,10 @@ export function renderApp(
       h(Box, { padding: 1 }, h(Text, { bold: true }, title)),
       h(Box, { flexGrow: 1 }, overlayComps.map(({ Comp, key }) => h(Comp as any, { key }))),
       h(Box, { padding: 1, flexDirection: 'column' },
-        h(Text, { dimColor: true } as any, bottom),
-        hintText ? h(Text, { dimColor: true } as any, `  ${hintText}`) : null,
+        // `dim`, not `dimColor` — the latter is another library's prop; flowtty does
+        // not know it, and an `as any` had been hiding that the footer was never dimmed.
+        h(Text, { dim: true }, bottom),
+        hintText ? h(Text, { dim: true }, `  ${hintText}`) : null,
       ),
     );
   }

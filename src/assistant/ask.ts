@@ -80,8 +80,12 @@ function answer(state: AskState, labels: string[], other?: string): AskState {
 export function askKey(state: AskState, key: { name?: string; ctrl?: boolean; meta?: boolean }): AskState {
   if (state.done) return state;
   const q = state.questions[state.index]!;
+  // Key names as flowtty's decoder produces them: Enter is 'return' and the space
+  // bar is ' ' — there is no 'enter' and no 'space'. (This file first matched on
+  // 'space', with a test helper that invented the same name, so Space toggled
+  // nothing in a real terminal.)
   const name = key.name ?? '';
-  const enter = name === 'return' || name === 'enter';
+  const enter = name === 'return';
   const otherRow = q.options.length;
 
   // While typing, every printable key is text: `y`, `n` and digits are not shortcuts.
@@ -93,7 +97,6 @@ export function askKey(state: AskState, key: { name?: string; ctrl?: boolean; me
       if (!other) return state;
       return answer(state, q.multiSelect ? state.picked.map((i) => q.options[i]!.label) : [], other);
     }
-    if (name === 'space') return { ...state, text: `${state.text} ` };
     if (name.length === 1 && !key.ctrl && !key.meta) return { ...state, text: state.text + name };
     return state;
   }
@@ -111,7 +114,7 @@ export function askKey(state: AskState, key: { name?: string; ctrl?: boolean; me
     if (i === otherRow) return { ...state, cursor: otherRow, typing: true };
     return q.multiSelect ? toggle(i) : answer(state, [q.options[i]!.label]);
   }
-  if (name === 'space' && q.multiSelect && state.cursor < otherRow) return toggle(state.cursor);
+  if (name === ' ' && q.multiSelect && state.cursor < otherRow) return toggle(state.cursor);
   if (enter) {
     if (state.cursor === otherRow) return { ...state, typing: true };
     if (!q.multiSelect) return answer(state, [q.options[state.cursor]!.label]);

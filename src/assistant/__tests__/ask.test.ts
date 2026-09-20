@@ -1,8 +1,13 @@
 import { expect, test } from 'bun:test';
 import { askKey, askResult, askRows, askStart, parseAskArgs, type AskState } from '../ask';
 
-const press = (state: AskState, ...names: string[]) => names.reduce((s, name) => askKey(s, { name }), state);
-const type = (state: AskState, text: string) => press(state, ...[...text].map((c) => (c === ' ' ? 'space' : c)));
+// Key names are the ones flowtty's decoder really produces — checked against
+// `decodeKeys`: the space bar is ' ' (there is no 'space'), Enter is 'return'
+// (there is no 'enter'). A helper that invents friendlier names tests a keyboard
+// no terminal has: the first version of this file did, and blessed a dead branch.
+const SPACE = ' ';
+const press = (state: AskState, ...names: string[]) => names.reduce((s, name) => askKey(s, { name: name === 'space' ? SPACE : name }), state);
+const type = (state: AskState, text: string) => [...text].reduce((s, c) => askKey(s, { name: c }), state);
 
 const one = {
   questions: [{
