@@ -27,6 +27,10 @@ export type PluginShape = {
   // The host footer = its base (`: commands · q quit`) + concat of each plugin's
   // non-empty `keycaps(ft)`. Optional — absent/null means `() => []`.
   keycaps?: (ft: unknown) => string[];
+  // Whether the plugin keeps data in `services.cache` (default true). The footer
+  // offers "flush cache" only while such a plugin is showing hints; a plugin with
+  // nothing in the cache says `false`, so its hint does not advertise one.
+  usesCache?: boolean;
   // A per-plugin setup hook the host calls ONCE with the plugin's `ft` before any
   // of its components mount. A plugin uses it to seed its cross-component store
   // channel (e.g. tracker's `createTrackerStore(ft)`), so hooks that read the
@@ -64,6 +68,7 @@ export interface Plugin {
   services?: Record<string, unknown>;
   aiTools?: unknown[];
   keycaps?: (ft: unknown) => string[];
+  usesCache?: boolean;
   setup?: (ft: unknown) => unknown;
 }
 

@@ -297,3 +297,81 @@ test('the wheel scrolls the conversation', async () => {
   expect(ui.backend.lastFrame).toContain('line 40');
   ui.app.unmount();
 });
+
+// A turn that hands work to the background: the model calls `background`, says so,
+// and the nested run answers with RESULT. Three requests in all — a fourth would be
+// the chat spending a turn on the result by itself.
+const backgroundScript = (model: ScriptedModel, result: string) => model.script(
+  [{ tool: 'background', args: { task: 'count the TODO comments' } }],
+  [{ text: 'Started it in the background.' }],
+  [{ text: result }],
+);
+
+test('a background result shows at once — a half-typed draft does not hold it back, and no turn is spent on it', async () => {
+  // It used to wait for an EMPTY field with nothing on screen saying so: type half
+  // a line, stop to think, and a finished task stayed invisible indefinitely.
+  const model = new ScriptedModel();
+  backgroundScript(model, 'There are 14 TODO comments.');
+  const ui = await bootApp(model, 100, 28);
+  await ui.press('A');
+  await ui.type('count the TODOs in the background');
+  await ui.press('return');
+  await ui.type('meanwhile, half a th');
+  await settle(40);
+
+  const frame = ui.backend.lastFrame;
+  expect(frame).toContain('◆ ');
+  expect(frame).toContain('There are 14 TODO comments.');
+  expect(frame).toContain('› meanwhile, half a th');
+  expect(model.requests).toHaveLength(3);
+
+  // The model still learns of it: the result rides in the history of the next turn.
+  model.script([{ text: 'Noted: 14.' }]);
+  await ui.press('escape');
+  await ui.type('how many was that');
+  await ui.press('return');
+  await settle(20);
+  const sent = model.requests.at(-1)!.messages as { role: string; content: string }[];
+  expect(sent.some((m) => m.role === 'user' && String(m.content).includes('There are 14 TODO comments.'))).toBe(true);
+  ui.app.unmount();
+});
+
+test('a background result does not open the chat — the footer says it is waiting', async () => {
+  const model = new ScriptedModel();
+  // The nested run is held, so the task is still working when the chat is closed.
+  model.script(
+    [{ tool: 'background', args: { task: 'count the TODO comments' } }],
+    [{ text: 'Started it in the background.' }],
+    [{ hold: true }, { text: 'There are 14 TODO comments.' }],
+  );
+  const ui = await bootApp(model, 100, 28);
+  // Closed, the chat is reachable from the footer at all — and a chat hint alone
+  // does not drag in the cache hint, which belongs to plugins that cache.
+  expect(ui.backend.lastFrame).toMatch(/A chat/);
+  expect(ui.backend.lastFrame).not.toContain('flush cache');
+
+  await ui.press('A');
+  await ui.type('count the TODOs in the background');
+  await ui.press('return');
+  await settle(20);
+  await ui.press('escape', 'escape'); // close while the task is still running
+  model.release();
+  await settle(40);
+
+  // Still closed. The host's toast announces the result first — it takes the
+  // footer's place for four seconds — and the count is what remains once it is gone.
+  expect(ui.backend.lastFrame).not.toContain('Flow Assist');
+  expect(ui.backend.lastFrame).toContain('count the TODO comments done');
+  await new Promise((r) => setTimeout(r, 4100));
+  await settle(4);
+  expect(ui.backend.lastFrame).not.toContain('Flow Assist');
+  expect(ui.backend.lastFrame).toMatch(/A chat · ◆ 1 new/);
+
+  // Opening it shows the result and clears the count.
+  await ui.press('A');
+  expect(ui.backend.lastFrame).toContain('There are 14 TODO comments.');
+  await ui.press('escape', 'escape');
+  expect(ui.backend.lastFrame).toMatch(/A chat/);
+  expect(ui.backend.lastFrame).not.toMatch(/◆ \d+ new/);
+  ui.app.unmount();
+});

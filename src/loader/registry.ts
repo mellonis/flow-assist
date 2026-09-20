@@ -152,15 +152,17 @@ export function composeFooterHints(
 ): string[] {
   const keyStr = (action: string): string => (keys[action] ?? []).join('/');
   const hints: string[] = [': commands', `${keyStr('quit') || 'q'} quit`];
-  const pluginHints = plugins
+  const shown = plugins
     .map((p) => {
       const kc = (p as Plugin).keycaps;
       const pFt = pFtMap[p.name];
-      return kc && pFt ? kc(pFt) : [];
+      return { caches: (p as Plugin).usesCache !== false, hints: kc && pFt ? kc(pFt) : [] };
     })
-    .filter((h) => h.length);
-  if (pluginHints.length) hints.push(`${keyStr('clearCache') || 'x'} flush cache`);
-  return [...hints, ...pluginHints.flat()];
+    .filter((s) => s.hints.length);
+  // "flush cache" is offered only while a plugin that keeps something in the cache
+  // is on screen — the chat's own hint must not advertise a cache it never fills.
+  if (shown.some((s) => s.caches)) hints.push(`${keyStr('clearCache') || 'x'} flush cache`);
+  return [...hints, ...shown.flatMap((s) => s.hints)];
 }
 
 // Merges hotkeys by directive Model B: the host base (HOST_DEFAULT_KEYS) + each

@@ -21,6 +21,14 @@ import type { Plugin } from '../loader/plugin.js';
 // `/analyze` is a tracker slash command and is removed.
 const CHAT_COMMANDS = ['refresh-context', 'compact', 'clear', 'log', 'exit'];
 
+// A plain object holding every enumerable service, inherited ones included.
+// `for…in` walks the prototype chain, which is exactly what a spread does not.
+export function allServices(services: object): Record<string, unknown> {
+  const flat: Record<string, unknown> = {};
+  for (const key in services) flat[key] = (services as Record<string, unknown>)[key];
+  return flat;
+}
+
 // `/log [N]`: the person shares the tail of the host log with the model, as their
 // own message. The model has no log tool — what it sees of the log is what the
 // person chose to show, when they chose to show it.
@@ -100,6 +108,17 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
       },
     ],
     keys: { chat: 'A' },
+    // The footer's word for the chat while it is closed: the key that opens it and,
+    // when background results landed meanwhile, how many are waiting. Open, the
+    // chat says its own keys inside its frame.
+    usesCache: false,
+    keycaps: (ft) => {
+      const p = ft as { keys?: Record<string, string | string[]>; store?: { chat?: { open?: boolean; unread?: number } } };
+      const chat = p.store?.chat;
+      if (chat?.open) return [];
+      const key = [p.keys?.chat ?? 'A'].flat()[0];
+      return [`${key} chat${chat?.unread ? ` · ◆ ${chat.unread} new` : ''}`];
+    },
     views: { chat: renders.chat },
     components: {
       chat: (ft) => {
@@ -107,6 +126,20 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
         return function ChatModal() {
           const { width, height } = f.useTerminalSize();
           const [open, setOpen] = f.useState(false);
+          // `openRef` is what the detached background flush reads (a timer's closure
+          // would see a stale `open`); `unread` counts results that landed while the
+          // chat was closed — the footer shows it, opening the chat clears it.
+          const openRef = f.useRef(open); openRef.current = open;
+          const [unread, setUnread] = f.useState(0);
+          const unreadRef = f.useRef(unread); unreadRef.current = unread;
+          // The host draws its footer BEFORE this component re-renders, so what the
+          // footer reads (`ft.store.chat.open` / `.unread`) is patched synchronously at
+          // the moment it changes — otherwise the footer runs one render behind and
+          // "A chat" vanishes on close.
+          const publish = (patch: { open?: boolean; unread?: number }) => {
+            const store = f.store as Record<string, any>;
+            store.chat = { ...(store.chat ?? {}), ...patch };
+          };
           const [messages, setMessages] = f.useState<ChatMsg[]>([]);
           const [input, setInput] = f.useState('');
           const [streaming, setStreaming] = f.useState(false);
@@ -356,9 +389,12 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                     setPendingQuestion(state);
                     f.notify();
                   }),
-                  // Pass the host services into toolCtx: a plugin ai-tool may call
-                  // ctx.<service>. This supplements the host bundle, not replaces it.
-                  ...(f.services as Record<string, unknown>),
+                  // Every service a tool may call through ctx — flattened, not spread:
+                  // `ft.services` is a per-plugin view whose HOST services sit on its
+                  // prototype, and `...obj` copies own properties only. Spreading it
+                  // silently handed tools a ctx with no chatLLM, config, showMessage or
+                  // pushLog — `background` answered "no LLM service" and nothing ran.
+                  ...allServices(f.services),
                 },
                 // The y/n pause on a writing op: agentChat calls confirmWrite for tools
                 // with a write-flag, we set pendingRef + pendingAsk and wait for the
@@ -504,6 +540,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 const nextQueued = queueRef.current.shift() as string;
                 syncQueue();
                 setTimeout(() => { void send(nextQueued); }, 0);
+              } else {
+                // A background result that arrived mid-turn lands the moment the turn
+                // ends, not on the flush timer's next 400 ms tick.
+                setTimeout(() => flushPending(), 0);
               }
             }
             return true;
@@ -635,6 +675,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             if (pendingRef.current) settleConfirm(false);
             dismissAsk();
             setOpen(false);
+            openRef.current = false; // the background flush may fire before the next render
+            publish({ open: false });
             f.notify();
           };
 
@@ -653,32 +695,54 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               setToolCount(0);
             }
             setOpen(true);
+            openRef.current = true;
+            setUnread(0);
+            unreadRef.current = 0;
+            publish({ open: true, unread: 0 });
             setScroll(0);
             setError(null);
-            const t = initialText ?? '';
-            setInput(t);
-            inputRef.current = t;
-            setCursor(Array.from(t).length);
+            // Only a caller that brings text replaces the field: re-opening the chat
+            // keeps the draft the person left in it.
+            if (initialText !== undefined) {
+              setInput(initialText);
+              inputRef.current = initialText;
+              setCursor(Array.from(initialText).length);
+            }
             disarmEsc();
             f.notify();
-            if (t.trim()) send(t);
+            if (initialText?.trim()) send(initialText);
           };
 
-          (f.store as Record<string, any>).chat = { open, openChat, closeChat, send, messages, streaming, toolLabel, cursor, escArmed, pendingConfirm: pendingAsk };
-          // Drains the background-result queue: feeds the next queued result through
-          // `send` (which appends it + streams the analysis) once the chat is idle —
-          // not streaming, no half-typed draft. `send()` closes the re-entrancy
-          // window SYNCHRONOUSLY (sets streamRef.current = true at its top, before any
-          // await), so a fast interval tick can't re-enter it before the stream state
-          // renders — and unlike setting it HERE, it doesn't trip send()'s own
-          // `if (streamRef.current) return false` guard (which dropped the result).
+          (f.store as Record<string, any>).chat = { open, unread, openChat, closeChat, send, messages, streaming, toolLabel, cursor, escArmed, pendingConfirm: pendingAsk };
+          // Lands the next background result. It is SHOWN as soon as no turn is being
+          // written (a streaming turn keeps rewriting the display list's last message,
+          // so a result cannot be appended under it) — a half-typed draft does not hold
+          // it back, the chat is not opened for it, and no model turn is spent on it:
+          // the result joins the model's history and is read with the person's next
+          // message. With the chat closed it is counted as unread for the footer.
+          //
+          // `ai.backgroundFollowUp: true` opts back into the assistant reacting by
+          // itself — a turn per result — and then only with the chat open, the field
+          // empty and nothing queued, so it never talks over the person.
           flushPending = () => {
-            if (streamRef.current || inputRef.current || queueRef.current.length) return;
-            const q = bgQueueRef.current.shift();
+            if (streamRef.current) return;
+            const q = bgQueueRef.current[0];
             if (q == null) { clearFlush(); return; }
-            setOpen(true);
+            const followUp = (f.config.ai as { backgroundFollowUp?: unknown } | undefined)?.backgroundFollowUp === true;
+            if (followUp && openRef.current && !inputRef.current && !queueRef.current.length) {
+              bgQueueRef.current.shift();
+              void send(q, { fromBackground: true });
+              return;
+            }
+            bgQueueRef.current.shift();
+            setMessages((cur) => [...cur, { role: 'bg', content: q }]);
+            apiRef.current = [...apiRef.current, { role: 'bg', content: q }];
+            if (!openRef.current) {
+              unreadRef.current += 1;
+              setUnread(unreadRef.current);
+              publish({ unread: unreadRef.current });
+            }
             f.notify();
-            void send(q, { fromBackground: true });
           };
           // A host-reachable channel to inject a message into the chat from OUTSIDE
           // (e.g. a `background` task's result). Registered per render (idempotent) so

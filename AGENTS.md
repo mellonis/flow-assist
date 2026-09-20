@@ -125,10 +125,25 @@ same reason: a display-only system message never reaches the model.
   Only with the caret at the end of a one-line `/word`. In the field, dim means
   "offered, not yours yet" — the person's own text is never dimmed, on either side
   of the caret.
+- A **background result** (the `background` tool's nested run finishing) is SHOWN as
+  soon as no turn is being written — a half-typed draft does not hold it back. It
+  does not open the chat and does not spend a model turn: it joins the model's
+  history and is read with the person's next message. Landing while the chat is
+  closed, it is counted as unread; the host footer shows `A chat · ◆ N new` through
+  the chat plugin's `keycaps`, and opening the chat clears the count.
+  `ai.backgroundFollowUp: true` opts back into a turn per result, and then only
+  with the chat open, the field empty and nothing queued.
+- What the footer reads from a plugin (`ft.store.<x>`) must be patched
+  synchronously when it changes: the host draws its footer BEFORE the plugin's
+  component re-renders, so a value assigned during render is one frame stale.
+- A tool's ctx is built with `allServices(ft.services)`, never `...ft.services`:
+  host services sit on the PROTOTYPE of the per-plugin services view, and a spread
+  copies own properties only. The spread silently gave tools a ctx with no
+  `chatLLM`/`config`/`showMessage`, and `background` answered "no LLM service".
 - The view sums the heights of everything under the message list by hand
   (`available` in `renderChatModal`): a new block there must add its own height,
-  or it is clipped. Moving this to flex (`flexGrow` + `overflow` + `onLayout`) is
-  the intended fix.
+  or it is clipped. flowtty's `ScrollBox` (alpha.7) replaces this; do not
+  hand-refactor it meanwhile.
 
 ## CLI
 
