@@ -1,11 +1,9 @@
 // The chat as a person meets it, through the real TUI with a scripted model.
 import { afterEach, expect, test } from 'bun:test';
 import { ScriptedModel, bootApp, settle } from './helpers/scripted';
-import { execChatTool } from '../loader/tools';
 
 const realFetch = globalThis.fetch;
-// The plan is module-level state: leave none behind for the suites that follow.
-afterEach(async () => { globalThis.fetch = realFetch; await execChatTool('todo', { action: 'clear' }, {}).catch(() => {}); });
+afterEach(() => { globalThis.fetch = realFetch; });
 
 // The style of the cell where `text` starts (plus `offset` cells).
 function styleAt(backend: { lastBuffer: any; lastFrame: string }, text: string, offset = 0) {
@@ -485,5 +483,61 @@ test('readline keys work in the field: word delete, kill to the line start', asy
   await ui.press('return');
   await settle(14);
   expect(model.requests[0]!.messages.at(-1)).toMatchObject({ role: 'user', content: 'fresh' });
+  ui.app.unmount();
+});
+
+// ── The plan belongs to the conversation ──────────────────────────────────────
+test('/clear starts a conversation with no plan, and a new chat does not inherit one', async () => {
+  const model = new ScriptedModel();
+  model.script([{ tool: 'todo', args: { action: 'add', items: ['alpha item', 'beta item'] } }], [{ text: 'Planned.' }]);
+  const ui = await bootApp(model, 100, 28);
+  await ui.press('A');
+  await ui.type('plan it');
+  await ui.press('return');
+  await settle(20);
+  expect(ui.backend.lastFrame).toContain('▾ plan');
+  expect(ui.backend.lastFrame).toContain('alpha item');
+
+  // The plan described work the model no longer remembers after /clear. It used to
+  // stay on screen — and in the system prompt — of the next conversation.
+  await ui.type('/clear');
+  await ui.press('return');
+  await settle();
+  expect(ui.backend.lastFrame).not.toContain('▾ plan');
+  expect(ui.backend.lastFrame).not.toContain('alpha item');
+
+  // …and the next turn's system prompt carries no plan block either.
+  model.script([{ text: 'Hello.' }]);
+  await ui.type('hi');
+  await ui.press('return');
+  await settle(14);
+  expect(JSON.stringify(model.requests.at(-1)!.messages)).not.toContain('alpha item');
+  ui.app.unmount();
+
+  // A second chat in the same process — what every test after this one is.
+  const other = await bootApp(new ScriptedModel(), 100, 28);
+  await other.press('A');
+  expect(other.backend.lastFrame).not.toContain('▾ plan');
+  other.app.unmount();
+});
+
+test('a background task plans on its own plan, not on the chat\'s', async () => {
+  const model = new ScriptedModel();
+  model.script(
+    [{ tool: 'background', args: { task: 'sweep the repo' } }],
+    [{ text: 'Started it in the background.' }],
+    // The nested run: it makes a plan of its own, then reports.
+    [{ tool: 'todo', args: { action: 'add', items: ['nested step'] } }],
+    [{ text: 'Swept.' }],
+  );
+  const ui = await bootApp(model, 100, 28);
+  await ui.press('A');
+  await ui.type('sweep it in the background');
+  await ui.press('return');
+  await settle(40);
+  expect(ui.backend.lastFrame).toContain('Swept.');
+  // Its checkboxes never appeared among the chat's.
+  expect(ui.backend.lastFrame).not.toContain('nested step');
+  expect(ui.backend.lastFrame).not.toContain('▾ plan');
   ui.app.unmount();
 });

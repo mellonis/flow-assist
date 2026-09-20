@@ -72,6 +72,15 @@ the blacklist.
   `src/assistant/ask.ts`; the chat owns only the pause and the render. A
   background task is never given the hook — a question popping up would seize the
   keyboard mid-sentence — so there the tool answers "nobody to ask".
+- **The plan (`todo`) belongs to a conversation, not to the process.**
+  `createPlan()` in `src/assistant/plan.ts` makes one; its owner passes it to the
+  tool as `ctx.plan`. The chat holds its own (`planRef`), and `/clear` resets it; a
+  background run gets a fresh one, so its checkboxes never appear among the chat's;
+  an eval trial makes one per trial. Only a caller with no conversation of its own
+  (the one-shot CLI, a bare `execChatTool`) falls back to the process-wide plan.
+  **Tool state that describes a conversation is never module-level** — as a module
+  variable the plan outlived `/clear`, was shared with background runs, and leaked
+  from one test into the next.
 
 A qualified tool name (`plugin:tool`) is translated to a provider-safe wire name
 (`plugin__tool`) in `src/assistant/agent.ts` and nowhere else: providers validate

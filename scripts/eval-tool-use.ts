@@ -32,8 +32,8 @@
 
 import { appendFileSync } from 'node:fs';
 import { agentChat, apiHistory, type ChatMessage, type ChatRoundResult } from '../src/assistant/agent.ts';
-import { assembleToolRegistry, execChatTool } from '../src/loader/tools.ts';
-import { todoSnapshot } from '../src/loader/tools-core.ts';
+import { assembleToolRegistry } from '../src/loader/tools.ts';
+import { createPlan } from '../src/assistant/plan.ts';
 
 type Variant = 'api' | 'display';
 const argv = process.argv.slice(2);
@@ -56,6 +56,9 @@ if (!FAKE && !token) {
 }
 
 const SYSTEM = 'You are an assistant in a terminal chat. Answer concisely.';
+// Each trial is a conversation, so each has a plan of its own.
+let trialPlan = createPlan();
+const todoSnapshot = () => trialPlan.snapshot();
 const planBlock = () => {
   const plan = todoSnapshot();
   return plan.length ? `\n\n## Current task plan\n${plan.map((t) => `${t.id} · ${t.text} (${t.status})`).join('\n')}` : '';
@@ -78,14 +81,14 @@ const fakeRound = async (messages: ChatMessage[]): Promise<ChatRoundResult> => {
 type TurnResult = { turn: number; expected: string; called: boolean; stateOk: boolean; claimed: boolean; reply: string };
 
 async function trial(model: string, variant: Variant, show = false): Promise<TurnResult[]> {
-  await execChatTool('todo', { action: 'clear' }, {});
+  trialPlan = createPlan();
   // `api` keeps what was really exchanged; `display` keeps what the old chat kept.
   let history: ChatMessage[] = [];
   const results: TurnResult[] = [];
 
   const say = async (text: string) => {
     const messages: ChatMessage[] = [{ role: 'system', content: SYSTEM + planBlock() }, ...apiHistory(history), { role: 'user', content: text }];
-    const res = await agentChat(messages, { baseUrl, model, token: token || 'fake', maxRounds: 8, onLive: () => {}, onLiveCommit: () => {}, ...(FAKE ? { chatRound: fakeRound } : {}) });
+    const res = await agentChat(messages, { baseUrl, model, token: token || 'fake', maxRounds: 8, toolCtx: { plan: trialPlan }, onLive: () => {}, onLiveCommit: () => {}, ...(FAKE ? { chatRound: fakeRound } : {}) });
     history = [...history, { role: 'user', content: text }, ...(variant === 'api' ? res.transcript : [{ role: 'assistant', content: res.content }])];
     if (show) {
       console.log(`    you   › ${text.length > 90 ? `${text.slice(0, 90)}…` : text}`);

@@ -8,7 +8,7 @@
 
 import { TestBackend, flush } from '@flowtty/core/testing';
 import { loadPlugins } from '../../loader/build.ts';
-import { assembleToolRegistry, execChatTool } from '../../loader/tools.ts';
+import { assembleToolRegistry } from '../../loader/tools.ts';
 import { renderApp } from '../../runtime/app.tsx';
 import { renderChatModal, renderHelp, renderLogModal, renderReminder } from '../../views/modals.ts';
 
@@ -58,8 +58,6 @@ export async function bootApp(model: ScriptedModel, cols = 100, rows = 28) {
   const renders = { chat: renderChatModal, help: renderHelp, log: renderLogModal, reminder: renderReminder };
   const plugins = await loadPlugins({ config, repo, renders: renders as never });
   const tools = assembleToolRegistry({ plugins, config, repo });
-  // The plan is module-level state: every boot starts from an empty one.
-  await execChatTool('todo', { action: 'clear' }, {}).catch(() => {});
   const backend = new TestBackend(cols, rows);
   const app = await renderApp(backend, { plugins, config, tools, onExit: () => {} });
   await settle();

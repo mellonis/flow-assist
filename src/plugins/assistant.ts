@@ -9,7 +9,8 @@
 //   - the chat's language is `ai.assistantLanguage` (chatLanguage).
 
 import { addTrigger, chatUser } from '../loader/registry.js';
-import { bgActiveCount, todoSnapshot } from '../loader/tools-core.js';
+import { bgActiveCount } from '../loader/tools-core.js';
+import { createPlan, todoGlyph } from '../assistant/plan.js';
 import { apiHistory, compactConversation, chatLanguage } from '../assistant/agent.js';
 import type { ChatMessage } from '../assistant/agent.js';
 import { editorReducer } from '@flowtty/core';
@@ -144,6 +145,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             const store = f.store as Record<string, any>;
             store.chat = { ...(store.chat ?? {}), ...patch };
           };
+          // The plan is this conversation's: made here, handed to the `todo` tool through
+          // the tool context, emptied by /clear. It used to be module state and so
+          // outlived the conversation it described.
+          const planRef = f.useRef(createPlan());
           const [messages, setMessages] = f.useState<ChatMsg[]>([]);
           const [input, setInput] = f.useState('');
           const [streaming, setStreaming] = f.useState(false);
@@ -298,13 +303,12 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // prose (the bug it hits: it narrates "42 → done" in chat but the block never
           // moves because `todo complete` was never called). Empty → '' (no block).
           const planBlock = () => {
-            const plan = todoSnapshot();
+            const plan = planRef.current.snapshot();
             if (!plan.length) return '';
             const order = { in_progress: 0, pending: 1, done: 2 };
             const lines = [...plan].sort((a, b) => order[a.status] - order[b.status]).map((t) => {
-              const g = t.status === 'done' ? '☑' : t.status === 'in_progress' ? '◐' : '☐';
               const w = t.status === 'done' ? 'done' : t.status === 'in_progress' ? 'in progress' : 'pending';
-              return `${g} ${t.id} · ${t.text} (${w})`;
+              return `${todoGlyph(t.status)} ${t.id} · ${t.text} (${w})`;
             });
             return `## Current task plan (the \`todo\` tool)\nYou maintain it through \`todo\`; it changes only when you call the tool.\n${lines.join('\n')}`;
           };
@@ -376,6 +380,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // Plugin ai-tools (aiTools): agentChat runs their own run(args, toolCtx).
                 extraTools: (f.services as Record<string, any>).pluginAiTools ?? [],
                 toolCtx: {
+                  plan: planRef.current,
                   // buildFeatureContext is NOT set here: get_feature_context returns
                   // «unavailable» until a plugin supplies ctx.buildFeatureContext (a
                   // tracker/feature plugin may provide it via ...ft.services).
@@ -644,6 +649,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 bgQueueRef.current = [];
                 clearFlush();
                 apiRef.current = []; summaryRef.current = ''; queueRef.current = []; setQueued([]);
+                // A new conversation starts with no plan: the old one described work the
+                // model no longer remembers.
+                planRef.current.reset();
                 setMessages([]);
                 setInput(''); inputRef.current = '';
                 setCursor(0);
@@ -911,7 +919,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // The assistant's task plan (todo tool): a snapshot so the render never
             // mutates the tool's module state. Re-read every render, so a plan the
             // LLM edits (via notify()) shows up immediately.
-            todo: todoSnapshot(),
+            todo: planRef.current.snapshot(),
           });
         };
       },

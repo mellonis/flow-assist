@@ -56,7 +56,7 @@ interface ToolRun {
 // block above the chat: active items (in-progress ◐ first, then pending ☐), up to
 // MAX_VISIBLE, with done items condensed to a "+N pending · M done" count. Purely
 // presentational — the render never mutates it (the plugin hands over a snapshot
-// from todoSnapshot()).
+// of its own plan, `planRef.current.snapshot()`).
 interface PlanItem {
   id: number;
   text: string;

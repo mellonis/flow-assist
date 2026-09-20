@@ -15,6 +15,7 @@ import { openInBrowser } from '../runtime/services.js';
 import { resolveIdentityToken } from '../runtime/plugin-identity.js';
 import { DEFAULT_THEME } from '../playback/theme.js';
 import { writtenKey } from '../playback/keys.js';
+import { createPlan, type Plan } from '../assistant/plan.js';
 import type { ToolGroup, ToolDef } from './tools.js';
 import { parseAskArgs, askResult, type AskQuestion, type AskState } from '../assistant/ask.js';
 
@@ -209,80 +210,14 @@ export function bgActiveCount(): number {
   return bgActive;
 }
 
-// ─── The assistant's todo plan (session-only) ─────────────────────────────────
-// A small checkbox task-plan the assistant maintains via the `todo` tool and the
-// chat renders (open items first, ≤5 visible, plus a "+N pending · M done"
-// summary). SESSION-only, in-memory (cleared on restart) — like the log buffer,
-// NOT the cross-session `memory` file. Module-level like bgActive so both the
-// tool and the render accessor share one source of truth without threading state
-// through the registry. Reserved for a first item = 1; `clear` resets it so a
-// fresh plan renumbers from 1 (a cleared plan has no stale ids to reference).
-export type TodoStatus = 'pending' | 'in_progress' | 'done';
-export interface TodoItem {
-  id: number;
-  text: string;
-  status: TodoStatus;
-}
-const MAX_VISIBLE_TODO = 5;
-let todoItems: TodoItem[] = [];
-let todoNextId = 1;
-
-// The checkbox glyph + a status tag, so both the tool output and the render speak
-// the same vocabulary. pending → ☐, in_progress → ◐ (half-filled — "working on
-// it"), done → ☑.
-const todoGlyph = (s: TodoStatus) => (s === 'done' ? '☑' : s === 'in_progress' ? '◐' : '☐');
-const todoWord = (s: TodoStatus) => (s === 'done' ? 'done' : s === 'in_progress' ? 'in progress' : 'pending');
-
-// Normalizes a status string from the `todo` tool (and engines that say
-// "completed" like Claude Code's TodoWrite) into the trio the model uses.
-function normalizeTodoStatus(v: unknown): TodoStatus {
-  const s = String(v ?? '').trim().toLowerCase();
-  if (s === 'done' || s === 'completed' || s === 'complete') return 'done';
-  if (s === 'in_progress' || s === 'in-progress' || s === 'inprogress' || s === 'working' || s === 'running') return 'in_progress';
-  return 'pending';
-}
-
-// A defensive copy for the chat render (the plugin never mutates the tool's state).
-export function todoSnapshot(): TodoItem[] {
-  return todoItems.map((t) => ({ ...t }));
-}
-
-// Renders the plan for the LLM: in-progress items first (the active work), then
-// pending, then done, each with its id so `todo <start|complete|uncomplete>
-// <id>` targets precisely. Unlike the capped visual block, `list` shows EVERY
-// item — the model needs the full set to reason about the plan, not just the 5
-// visible rows.
-function renderTodoList(): string {
-  if (!todoItems.length) return 'Plan is empty — add items with todo action=add.';
-  const order: TodoStatus[] = ['in_progress', 'pending', 'done'];
-  const sorted = [...todoItems].sort((a, b) => order.indexOf(a.status) - order.indexOf(b.status));
-  return sorted.map((t) => `${todoGlyph(t.status)} ${t.id} · ${t.text}`).join('\n');
-}
-
-// Resolves which plan item a mutating action targets. Accepts `id` (a small int)
-// OR `text` — the model thinks about items by their content (e.g. the number
-// "73"), not by the internal id, so targeting by text removes the list→match→id
-// hop that otherwise pushes it to narrate the status in prose instead of calling
-// the tool. Text matches exact, then case-insensitive, then a substring
-// (so "73" ↔ "№ 73" / "item 73"). Returns { idx, label } or a friendly error.
-function resolveTodoItem(args: Record<string, unknown>): { idx: number; label: string } | { error: string } {
-  if (args.id != null && args.id !== '') {
-    const id = Number(args.id);
-    if (!Number.isNaN(id)) {
-      const idx = todoItems.findIndex((t) => t.id === id);
-      if (idx === -1) return { error: `Plan item ${id} not found.` };
-      return { idx, label: String(id) };
-    }
-  }
-  const text = String(args.text ?? '').trim();
-  if (!text) return { error: 'id or text is required — which plan item.' };
-  const cmp = (t: TodoItem) => t.text.trim();
-  let idx = todoItems.findIndex((t) => cmp(t) === text);
-  if (idx === -1) idx = todoItems.findIndex((t) => cmp(t).toLowerCase() === text.toLowerCase());
-  if (idx === -1) idx = todoItems.findIndex((t) => cmp(t).toLowerCase().includes(text.toLowerCase()));
-  if (idx === -1) return { error: `Plan item "${text}" not found.` };
-  return { idx, label: text };
-}
+// ─── The assistant's task plan ────────────────────────────────────────────────
+// The plan is the CONVERSATION's (`src/assistant/plan.ts`): whoever owns one — the
+// chat, a background run, an eval — creates it and passes it as `ctx.plan`. A caller
+// with no conversation of its own (the one-shot CLI, a bare `execChatTool`) gets
+// `processPlan`, which lives as long as the process — for a one-shot that IS the
+// conversation.
+export type { TodoItem, TodoStatus } from '../assistant/plan.js';
+const processPlan = createPlan();
 
 export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record<string, string[]>, pluginConfigs?: Record<string, unknown>): ToolGroup => ({
   id: 'core',
@@ -592,7 +527,9 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
         // else, and a question popping up would seize every key mid-sentence. With
         // no hook, `ask_user` answers "nobody to ask" and the task proceeds on a
         // stated assumption.
-        const toolCtx = { ...(ctx as Record<string, unknown>), _bgDepth: depth + 1, askUser: undefined };
+        // A background run is a conversation of its own: it plans on its own plan and
+        // never touches the checkboxes of the chat that started it.
+        const toolCtx = { ...(ctx as Record<string, unknown>), _bgDepth: depth + 1, askUser: undefined, plan: createPlan() };
         // The nested run needs its OWN LLM credentials — the same way the chat's
         // send() derives them (`ai.baseUrl`, `ai.model`, `process.env[tokenEnv]`).
         // `ctx` is the chat's toolCtx (config + host services), so read ai.* from it;
@@ -636,96 +573,11 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
         return `Background task started (${label}) — will report when done${ms ? ` in ${Math.round(ms / 1000)}s` : ''}.`;
       }
       case 'todo': {
-        // The assistant's checkbox plan. Session-only, in-memory — NOT write-
-        // confirmed (like memory/log): a y/n pause on every `todo add` would make
-        // the plan unusable, and the plan is a low-stakes reversible scratchpad.
-        // Every mutation calls ctx.notify() so the chat re-renders the block.
-        const action = String(args.action ?? '').trim();
-        const notify = (ctx as { notify?: () => void }).notify;
-        if (action === 'list') return renderTodoList();
-        if (action === 'set') {
-          // Full-replace (like TodoWrite): the model passes the ENTIRE desired list
-          // and we rewrite the plan wholesale — not a delta, so the plan always
-          // reflects the complete state the model intends. Existing items keep their
-          // id (matched by exact text) so targeting stays stable across updates; new
-          // texts get fresh ids; texts dropped from the list vanish. An EMPTY list is
-          // a valid plan — "no remaining plan": same as `clear`, so a finished task
-          // doesn't leave a stale `▾ plan`. The state is the model's to own; the tool
-          // just renders it.
-          const arr = Array.isArray(args.todos) ? (args.todos as Array<Record<string, unknown>>) : [];
-          const prev = new Map(todoItems.map((t) => [t.text, t.id]));
-          const next: TodoItem[] = [];
-          for (const raw of arr) {
-            const text = String(raw?.text ?? '').trim();
-            if (!text) continue;
-            const id = prev.get(text) ?? todoNextId++;
-            next.push({ id, text, status: normalizeTodoStatus(raw?.status) });
-          }
-          todoItems = next;
-          if (!next.length) todoNextId = 1; // an emptied plan renumbers from 1
-          notify?.();
-          if (!next.length) return 'Plan cleared.';
-          return `Plan set to ${next.length} items: ${renderTodoList().split('\n').join(', ')}`;
-        }
-        if (action === 'add') {
-          // A whole batch may be added in ONE call (`items` — an array of texts), so
-          // the model plans a 20-item plan as one `todo add` rather than 20 separate
-          // parallel calls. Falls back to a single `text` when no `items` are given.
-          // Each item gets its own id/status; the result lists them (with ids) so the
-          // model knows what to target later.
-          const texts: string[] = Array.isArray(args.items)
-            ? (args.items as unknown[]).map((s) => String(s).trim()).filter(Boolean)
-            : [];
-          if (!texts.length) {
-            const t = String(args.text ?? '').trim();
-            if (!t) return 'text is required — the plan item to add.';
-            texts.push(t);
-          }
-          const created = texts.map((text) => {
-            const item: TodoItem = { id: todoNextId++, text, status: 'pending' };
-            todoItems.push(item);
-            return item;
-          });
-          notify?.();
-          const act = todoItems.filter((t) => t.status !== 'done').length;
-          if (created.length === 1) return `Plan: ${created[0].id} · ${created[0].text} (${act} active).`;
-          return `Added ${created.length}: ${created.map((i) => `${i.id} · ${i.text}`).join(', ')} (${act} active).`;
-        }
-        if (action === 'start' || action === 'complete' || action === 'uncomplete') {
-          const hit = resolveTodoItem(args);
-          if ('error' in hit) return hit.error;
-          // Work proceeds through the three states: start → in_progress,
-          // complete → done, uncomplete → reopen to pending.
-          todoItems[hit.idx].status = action === 'start' ? 'in_progress' : action === 'complete' ? 'done' : 'pending';
-          notify?.();
-          const t = todoItems[hit.idx];
-          return `${todoGlyph(t.status)} ${t.id} · ${t.text} (${todoWord(t.status)}).`;
-        }
-        if (action === 'update') {
-          const id = Number(args.id);
-          const text = String(args.text ?? '').trim();
-          if (!text) return 'text is required — the new item text.';
-          const idx = todoItems.findIndex((t) => t.id === id);
-          if (idx === -1) return `Plan item ${id} not found.`;
-          todoItems[idx].text = text;
-          notify?.();
-          return `Plan ${id} updated: ${text}.`;
-        }
-        if (action === 'remove') {
-          const hit = resolveTodoItem(args);
-          if ('error' in hit) return hit.error;
-          const removed = todoItems[hit.idx];
-          todoItems = todoItems.filter((t) => t.id !== removed.id);
-          notify?.();
-          return `Plan item ${removed.id} (${removed.text}) removed.`;
-        }
-        if (action === 'clear') {
-          todoItems = [];
-          todoNextId = 1; // a fresh plan renumbers from 1 — no stale ids to target
-          notify?.();
-          return 'Plan cleared.';
-        }
-        return 'action is required — list|add|complete|uncomplete|update|remove|clear.';
+        // Not write-confirmed (like memory): a y/n pause on every `todo add` would
+        // make the plan unusable, and it is a low-stakes reversible scratchpad. Every
+        // change calls ctx.notify() so the chat redraws the block.
+        const c = ctx as { plan?: Plan; notify?: () => void };
+        return (c.plan ?? processPlan).exec(args, c.notify);
       }
       default:
         throw new Error(`Unknown tool: ${name}`);

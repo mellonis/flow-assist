@@ -4,13 +4,13 @@
 import { afterEach, expect, test } from 'bun:test';
 import { TestBackend, flush } from '@flowtty/core/testing';
 import { loadPlugins } from '../loader/build';
-import { assembleToolRegistry, execChatTool } from '../loader/tools';
+import { assembleToolRegistry } from '../loader/tools';
 import { renderApp } from '../runtime/app';
 import { renderChatModal, renderHelp, renderLogModal, renderReminder } from '../views/modals';
 
 const realFetch = globalThis.fetch;
 // The plan is module-level state: leave none behind for the suites that follow.
-afterEach(async () => { globalThis.fetch = realFetch; await execChatTool('todo', { action: 'clear' }, {}).catch(() => {}); });
+afterEach(() => { globalThis.fetch = realFetch; });
 
 const sse = (...chunks: unknown[]) =>
   new Response([...chunks.map((c) => `data: ${JSON.stringify(c)}\n\n`), 'data: [DONE]\n\n'].join(''), { headers: { 'content-type': 'text/event-stream' } });
@@ -28,7 +28,10 @@ test.each([[110, 40], [100, 22]])('the model asks, the person picks with the key
     if (bodies.length === 1) {
       const args = JSON.stringify({ questions: [{ question: 'Rebase or merge?', header: 'Strategy', options: [{ label: 'rebase (Recommended)', description: 'Linear history' }, { label: 'merge', description: 'Keeps the branch shape' }] }] });
       return sse(
-        { choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_ask', function: { name: 'ask_user', arguments: args } }] }, finish_reason: null }] },
+        // The plan is the chat's own now, so it is the MODEL that puts one there — in
+        // the same round, before it asks.
+        { choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_plan', function: { name: 'todo', arguments: JSON.stringify({ action: 'set', todos: [{ text: 'one' }, { text: 'two' }, { text: 'three' }] }) } }] }, finish_reason: null }] },
+        { choices: [{ delta: { tool_calls: [{ index: 1, id: 'call_ask', function: { name: 'ask_user', arguments: args } }] }, finish_reason: null }] },
         { choices: [{ delta: {}, finish_reason: 'tool_calls' }] },
       );
     }
@@ -40,7 +43,6 @@ test.each([[110, 40], [100, 22]])('the model asks, the person picks with the key
   const renders = { chat: renderChatModal, help: renderHelp, log: renderLogModal, reminder: renderReminder };
   const plugins = await loadPlugins({ config, repo, renders: renders as any });
   const tools = assembleToolRegistry({ plugins, config, repo });
-  await execChatTool('todo', { action: 'set', todos: [{ text: 'one' }, { text: 'two' }, { text: 'three' }] }, {});
   const backend = new TestBackend(cols, rows);
   const handle = await renderApp(backend, { plugins, config, tools, onExit: () => {} });
   await settle();
@@ -64,7 +66,7 @@ test.each([[110, 40], [100, 22]])('the model asks, the person picks with the key
   await settle();
 
   expect(bodies).toHaveLength(2);
-  const toolResult = bodies[1].messages.find((m: any) => m.role === 'tool');
+  const toolResult = bodies[1].messages.find((m: any) => m.role === 'tool' && m.tool_call_id === 'call_ask');
   expect(toolResult).toMatchObject({ tool_call_id: 'call_ask' });
   expect(toolResult.content).toContain('Rebase or merge? → merge');
   expect(backend.lastFrame).toContain('Merging then.');
