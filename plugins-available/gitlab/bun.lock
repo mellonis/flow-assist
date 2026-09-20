@@ -1,0 +1,27 @@
+{
+  "lockfileVersion": 1,
+  "configVersion": 1,
+  "workspaces": {
+    "": {
+      "name": "@local/gitlab-plugin",
+      "devDependencies": {
+        "@flowtty/react": "^1.0.0-alpha.2",
+        "@flowtty/tty-backend": "^1.0.0-alpha.2",
+        "zod": "^4.6.5",
+      },
+    },
+  },
+  "packages": {
+    "@flowtty/core": ["@flowtty/core@1.0.0-alpha.3", "", { "dependencies": { "yoga-layout": "^3.2.1" } }, "sha512-+uoXNAqn8nZfllvEEVflm04aPLvVPEUFkjxueImVteJ8vZTep6VGjXf7LKpbL5U6uYRdAIEfJWvv2P/7nsEnaQ=="],
+
+    "@flowtty/react": ["@flowtty/react@1.0.0-alpha.3", "", { "dependencies": { "@flowtty/core": "1.0.0-alpha.3" }, "peerDependencies": { "react": "^19.3.0" } }, "sha512-s4DLZ5MQG48pLtphA5IGRQ2Kn9lViWNb4/ms/GFZQPzbAFTct6EYUI5t85inCKb+ZYufOjvQrv24T0CZOuiG0A=="],
+
+    "@flowtty/tty-backend": ["@flowtty/tty-backend@1.0.0-alpha.3", "", { "dependencies": { "@flowtty/core": "1.0.0-alpha.3" } }, "sha512-eJABj92OmP5RI6N9c4YB0Uq0ookADrKJQ2Pq0UVQVjAOq3ZJe6kMlINg6wiAzKCiJmNM6YRIDG+3s/Ft29BeNw=="],
+
+    "react": ["react@19.3.0", "", {}, "sha512-E8LUcbtBWt20bbl2YoHfx4ZDBdxVTfOKtCZn9cDSJ4l6/nuoApcpIBcj47t2wZoVX8g2ZHuMHbiShgCR1T5Sog=="],
+
+    "yoga-layout": ["yoga-layout@3.2.1", "", {}, "sha512-0LPOt3AxKqMdFBZA3HBAt/t/8vIKq7VaQYbuA8WxCgung+p9TVyKRYdpvCb80HcdTN2NkbIKbhNwKUfm3tQywQ=="],
+
+    "zod": ["zod@4.6.5", "", {}, "sha512-v5l/aFXZQeai4awLbOpSoHecE9UiMrnfx75tEXLjNonXVARxQ5mOeipTjROUchszUNCqnE+hqAMujRsRHsut2Q=="],
+  }
+}

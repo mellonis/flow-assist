@@ -1,0 +1,49 @@
+import { expect, test } from 'bun:test';
+import { loadPlugins } from '../build';
+import { createPluginRepo } from '../repo';
+import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+test('loads an enabled runtime plugin; skips broken/missing-deps plugin with a warn', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'da-buildrt-'));
+  const avail = join(root, 'plugins-available');
+  const enabled = join(root, 'plugins-enabled');
+  mkdirSync(avail, { recursive: true });
+  mkdirSync(enabled, { recursive: true });
+  // A real plugin dir whose default builder throws — linked into plugins-enabled
+  // via symlink so the symlink-only `enabledPlugins()` filter picks it up.
+  const badDir = join(avail, 'bad');
+  mkdirSync(badDir, { recursive: true });
+  writeFileSync(join(badDir, 'index.ts'), 'export default function build(){ throw new Error("bad build"); }');
+  symlinkSync(badDir, join(enabled, 'bad'));
+  const repo = createPluginRepo({ availableDir: avail, enabledDir: enabled, projectRoot: root });
+  const plugins = await loadPlugins({ config: {}, repo, enabledDir: enabled });
+  // bad plugin is skipped; built-ins still load
+  expect(plugins.some((p) => p.name === 'bad')).toBe(false);
+  expect(plugins.some((p) => p.name === 'core')).toBe(true);
+});
+
+test('loads a plugin dir via its package.json main and a single-file plugin (entry-file resolution)', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'da-entry-'));
+  const avail = join(root, 'plugins-available');
+  const enabled = join(root, 'plugins-enabled');
+  mkdirSync(avail, { recursive: true });
+  mkdirSync(enabled, { recursive: true });
+  // A directory plugin whose entry is a nested `package.json` `main` — the shape the
+  // tracker/gitlab/repo plugins all use. The OLD loader imported the directory,
+  // which the compiled binary cannot resolve; it must import the entry FILE.
+  const dirPlug = join(avail, 'dirplug');
+  mkdirSync(join(dirPlug, 'src'), { recursive: true });
+  writeFileSync(join(dirPlug, 'package.json'), JSON.stringify({ name: 'dirplug', main: './src/index.ts' }));
+  writeFileSync(join(dirPlug, 'src', 'index.ts'), 'export default function build(){ return { name: "dirplug" }; }');
+  symlinkSync(dirPlug, join(enabled, 'dirplug'));
+  // A single-file plugin (a symlink straight to a .ts, no directory).
+  const filePlug = join(avail, 'fileplug.ts');
+  writeFileSync(filePlug, 'export default function build(){ return { name: "fileplug" }; }');
+  symlinkSync(filePlug, join(enabled, 'fileplug'));
+  const repo = createPluginRepo({ availableDir: avail, enabledDir: enabled, projectRoot: root });
+  const plugins = await loadPlugins({ config: {}, repo, enabledDir: enabled });
+  expect(plugins.some((p) => p.name === 'dirplug')).toBe(true);
+  expect(plugins.some((p) => p.name === 'fileplug')).toBe(true);
+});

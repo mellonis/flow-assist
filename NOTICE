@@ -1,0 +1,18 @@
+developer-assistant
+Copyright (C) 2026 developer-assistant contributors
+
+This product is licensed under the GNU General Public License, version
+3 or (at your option) any later version. See LICENSE.
+
+This product contains software ported from an earlier private terminal
+client by the same author, restructured into a domain-agnostic host plus
+a plugin architecture. The host core and the generic services (cache,
+log, memory, config, chatLLM, openBrowser) are reimplemented from that
+codebase.
+
+TypeScript is a trademark of Microsoft Corporation. React is a
+trademark of Meta Platforms, Inc. Bun and @flowtty are trademarks of
+their respective owners. Trademarks and names of other products are the
+property of their respective owners.
+
+Report bugs and contribute at the repository home page.

@@ -1,0 +1,424 @@
+// Assistant agent loop (LLM client), with its own independently-configured model.
+// It knows no plugin's domain: the chat's language is `config.ai.assistantLanguage`
+// / `config.ai.language`, and a plugin that writes in a language of its own keeps
+// that setting in its own config.
+//
+// One round is `chatRound` (POSTs `{baseUrl}/chat/completions`, streams content
+// via onDelta, accumulates tool_calls fragments); `agentChat` is the loop
+// "round → run tools → again" until a final text round; `compactConversation`
+// is a one-shot non-streaming call for /compact. Tokens/baseUrl/model are read
+// ONLY here, from opts (wired by the runtime from config).
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+import type { ToolDef, ToolCtx } from '../loader/tools.js';
+import { chatTools, execChatTool, chatToolDefs } from '../loader/tools.js';
+import type { ToolRunEntry } from '../runtime/services/log.js';
+
+// A single chat message. `role` is the OpenAI role; `content` may be null when a
+// message carries tool_calls. Extra fields (tool_calls, tool_call_id) ride along.
+export interface ChatMessage {
+  role: string;
+  content: string | null;
+  [key: string]: unknown;
+}
+
+// One (possibly still-assembling) function call returned by a round.
+export interface ToolCall {
+  id?: string;
+  name: string;
+  arguments: string;
+}
+
+export interface ChatRoundResult {
+  content: string;
+  reasoning: string;
+  finishReason: string;
+  toolCalls: ToolCall[];
+}
+
+// A trace of one executed tool call — what actually ran, so the chat UI can show
+// a persistent trail and distinguish a real write from a narrator's retelling.
+export interface ToolRun {
+  name: string;
+  args: Record<string, unknown>;
+  write?: boolean;
+  outcome: string;
+  detail: unknown;
+}
+
+export interface AgentResult {
+  content: string;
+  process: string;
+  toolRuns: ToolRun[];
+}
+
+// Injectable tool-run logger (see the logToolRun reconciliation comment below).
+export type ToolLogger = (entry: ToolRunEntry) => void;
+
+export interface AgentOpts {
+  onTool?: (name: string, args: string) => void;
+  toolCtx?: ToolCtx;
+  maxRounds?: number;
+  onProcess?: (chunk: string) => void;
+  extraTools?: ToolDef[];
+  logTools?: boolean;
+  logToolsPath?: string | null;
+  logToolRun?: ToolLogger;
+  baseUrl?: string;
+  model?: string;
+  token?: string;
+  onLive?: (delta: string) => void;
+  onLiveCommit?: (content: string, isFinal: boolean) => void;
+  onReasoning?: (chunk: string) => void;
+  confirmWrite?: (name: string, args: string) => boolean | Promise<boolean>;
+  chatRound?: (messages: ChatMessage[], opts: Record<string, unknown>) => Promise<ChatRoundResult>;
+  // Diagnostic hook, fired once per round with what the model actually emitted in
+  // THAT round — finish_reason + the count of tool_calls it streamed. Lets a caller
+  // (the chat's log) distinguish "the model narrated a status change without
+  // calling the tool" from "the model DID emit tool_calls but our loop dropped
+  // them": a round with `finishReason === 'tool_calls'` must have toolCalls > 0; if
+  // it is 0, the streaming accumulation failed (a real bug). Optional — background
+  // tasks simply omit it.
+  onRound?: (info: { index: number; finishReason: string; toolCalls: number; contentLen: number }) => void;
+  // Any remaining OpenAI-ish options (tools, signal, …) — spread into the round.
+  [key: string]: unknown;
+}
+
+// ─── AI preconditions & headers ───────────────────────────────────────────────
+function requireAiOpts({ baseUrl, model, token }: { baseUrl?: string; model?: string; token?: string }): void {
+  if (!token) throw new Error('LLM_TOKEN is not set — add it to .env');
+  if (!baseUrl) throw new Error('config ai.baseUrl is not set');
+  if (!model) throw new Error('config ai.model is not set');
+}
+
+const LLM_HEADERS = (token: string): Record<string, string> => ({
+  Authorization: `Bearer ${token}`,
+  'Content-Type': 'application/json',
+});
+
+// ─── Assistant language (config ai.*) ─────────────────────────────────────────
+// Two keys with a fallback chain: assistantLanguage → language → 'en' (a two-letter
+// code). Prompts and tool descriptions stay English; the language only controls
+// the ASSISTANT's reply language.
+function langCode(v: unknown): string | undefined {
+  return typeof v === 'string' && /^[a-z]{2}$/i.test(v.trim()) ? v.trim().toLowerCase() : undefined;
+}
+
+export function chatLanguage(ai: { assistantLanguage?: unknown; language?: unknown } | undefined | null): string {
+  return langCode(ai?.assistantLanguage) ?? langCode(ai?.language) ?? 'en';
+}
+
+// Clips a long tool result so it does not bloat the context.
+function clip(s: unknown, n = 6000): string {
+  if (s == null) return '';
+  const str = typeof s === 'string' ? s : JSON.stringify(s, null, 1);
+  return str.length > n ? `${str.slice(0, n)}\n… (truncated)` : str;
+}
+
+// One round `POST {baseUrl}/chat/completions`. SSE chunks: `choices[0].delta.content`
+// — incremental text (calls onDelta); `choices[0].delta.reasoning_content` — the
+// model's "thinking" stream (calls onReasoning, not shown in the reply);
+// `choices[0].delta.tool_calls[i]` — function fragments (id/name/arguments split
+// across chunks, accumulated by index); `finish_reason: 'tool_calls'` returns the
+// accumulated list.
+async function realChatRound(
+  messages: ChatMessage[],
+  {
+    baseUrl,
+    model,
+    token,
+    tools,
+    onDelta = () => {},
+    onReasoning = () => {},
+    signal,
+  }: {
+    baseUrl?: string;
+    model?: string;
+    token?: string;
+    tools?: ToolDef[];
+    onDelta?: (d: string) => void;
+    onReasoning?: (d: string) => void;
+    signal?: AbortSignal;
+  },
+): Promise<ChatRoundResult> {
+  requireAiOpts({ baseUrl, model, token });
+  const res = await fetch(`${baseUrl}/chat/completions`, {
+    method: 'POST',
+    signal,
+    headers: LLM_HEADERS(token as string),
+    body: JSON.stringify({ model, messages, stream: true, ...(tools?.length ? { tools } : {}) }),
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`LLM ${res.status}: ${body || res.statusText}`);
+  }
+  const reader = res.body?.getReader();
+  if (!reader) throw new Error('LLM: no response body');
+  const decoder = new TextDecoder();
+  let buf = '';
+  let content = '';
+  let reasoning = '';
+  let finishReason = '';
+  const toolCalls = new Map<number, { id: string; name: string; arguments: string }>();
+  let done = false;
+  while (!done) {
+    const { value, done: readDone } = await reader.read();
+    if (readDone) break;
+    buf += decoder.decode(value, { stream: true });
+    let nl: number;
+    while ((nl = buf.indexOf('\n')) !== -1) {
+      const line = buf.slice(0, nl).trim();
+      buf = buf.slice(nl + 1);
+      if (!line.startsWith('data:')) continue;
+      const data = line.slice(5).trim();
+      if (data === '[DONE]') {
+        done = true;
+        break;
+      }
+      let obj: { choices?: Array<{ finish_reason?: string; delta?: Record<string, unknown> }> } | undefined;
+      try {
+        obj = JSON.parse(data);
+      } catch {
+        continue;
+      }
+      const ch = obj?.choices?.[0];
+      if (ch?.finish_reason) finishReason = ch.finish_reason;
+      const delta = ch?.delta as {
+        reasoning_content?: string;
+        content?: string;
+        tool_calls?: Array<{ index: number; id?: string; function?: { name?: string; arguments?: string } }>;
+      };
+      if (delta?.reasoning_content) {
+        reasoning += delta.reasoning_content;
+        onReasoning(delta.reasoning_content);
+      }
+      if (delta?.content) {
+        content += delta.content;
+        onDelta(delta.content);
+      }
+      for (const tc of delta?.tool_calls ?? []) {
+        const slot = toolCalls.get(tc.index) ?? { id: '', name: '', arguments: '' };
+        if (tc.id) slot.id = tc.id;
+        if (tc.function?.name) slot.name = tc.function.name;
+        if (tc.function?.arguments) slot.arguments += tc.function.arguments;
+        toolCalls.set(tc.index, slot);
+      }
+    }
+  }
+  return {
+    content,
+    reasoning,
+    finishReason,
+    toolCalls: [...toolCalls.values()].map((c) => ({ id: c.id, name: c.name, arguments: c.arguments })),
+  };
+}
+
+// Parses a tool's argv (a JSON string) into an object; invalid → {}.
+function parseToolArgs(s: unknown): Record<string, unknown> {
+  try {
+    return s ? JSON.parse(String(s)) : {};
+  } catch {
+    return {};
+  }
+}
+
+// The model-facing tool result. The raw detail (success output, or an error message
+// the catch block already prefixed "Error: ") is tagged with an unambiguous status so
+// the model decides from a clear OK / ERROR / DECLINED, not by sniffing the prose —
+// it can't read a failure as a success. The UI/log keep the raw `detail` + `outcome`
+// separately, so this only shapes what the MODEL sees.
+function modelToolResult(outcome: string, detail: unknown): string {
+  const d = typeof detail === 'string' ? detail : JSON.stringify(detail);
+  if (outcome === 'declined') return `DECLINED: ${d}`;
+  if (outcome === 'error') return `ERROR: ${d.replace(/^Error:\s*/i, '')}`;
+  return `OK: ${d}`;
+}
+
+// ─── Agent loop ───────────────────────────────────────────────────────────────
+// Agentoid loop: content streams, tool_calls run through execChatTool, the result
+// is pushed back as `role: tool`, and the loop runs until a final text round (or
+// `maxRounds`, to guard against an infinite loop). `onTool(name, args)` reports the
+// call to the host (for a status line). `toolCtx` is the runtime context the
+// plugin/tool consumer hands through (current issue/report for get_feature_context).
+//
+// Note on chat content: a "chatty" model's narration of its moves ("Let's try…")
+// arrives in a round's `content` that ALSO carries tool_calls — before, that landed
+// in the reply (full += r.content). Now it is folded into `process` (onProcess),
+// and only the final no-tool_calls round is the answer (content → onDelta/onLive).
+// Returns { content, process, toolRuns }.
+export async function agentChat(
+  messages: ChatMessage[],
+  {
+    onTool = () => {},
+    toolCtx = {},
+    maxRounds = 64,
+    onProcess = () => {},
+    extraTools = [],
+    logTools = false,
+    logToolsPath = null,
+    logToolRun: logRun = () => {},
+    ...opts
+  }: AgentOpts = {},
+): Promise<AgentResult> {
+  // logToolRun reconciliation: the source called a free `logToolRun(file, entry)`
+  // with a host-computed file path. The host exposes `createLogService(config)` whose
+  // `.logToolRun(entry)` takes no file arg. The host agent therefore accepts an
+  // INJECTABLE `logToolRun(entry)` (default no-op) wired by the runtime to the log
+  // service; `logTools`/`logToolsPath` are kept for source compatibility but are
+  // NOT used for the actual write (no toolsLogFile computed here).
+  let current: ChatMessage[] = messages.slice();
+  const baseTools = chatTools(); // active groups; already tree-shaken (write/run stripped)
+  // Writing tools (write flag: true or a predicate (args) => boolean) ask for
+  // confirmation via opts.confirmWrite (a y/n pause in chat) before running. In the
+  // API we send tools WITHOUT the service fields write/run (a strict server may
+  // reject them), but keep the full defs in toolByName for the confirmation check.
+  // Plugin ai-tools (aiTools) sit on top of group tools: override by name and carry
+  // their own `run(args, ctx)` instead of execChatTool.
+  // `toolByName` is built from the UNSTRIPPED defs (`chatToolDefs()`) so a
+  // `write`-flagged tool is present and `needsConfirm` fires — the stripped
+  // `baseTools` have no `write`, so confirmation would otherwise never trigger.
+  const toolByName = new Map<string, ToolDef>();
+  for (const t of chatToolDefs()) toolByName.set(t.function.name, t);
+  for (const et of extraTools) toolByName.set(et.function.name, et);
+  const apiTools: ToolDef[] = [
+    ...baseTools,
+    ...extraTools.map(({ write, run, ...rest }) => rest),
+  ];
+  let content = ''; // final answer (last round without tool_calls)
+  let process = ''; // narration of moves from rounds WITH tool_calls — folded
+  const toolRuns: ToolRun[] = []; // trace of executed tools
+
+  const chatRoundFn = ((opts as { chatRound?: AgentOpts['chatRound'] }).chatRound) ?? realChatRound;
+
+  for (let i = 0; i < maxRounds; i++) {
+    let roundContent = '';
+    const r = await chatRoundFn(current, {
+      ...opts,
+      tools: apiTools,
+      // Round content streams LIVE via onLive while accumulating into roundContent.
+      // Which shelf it belongs to (answer vs. narration fold) is decided at the end
+      // of the round, when tool_calls arrive (or not).
+      onDelta: (d: string) => {
+        roundContent += d;
+        (opts.onLive as AgentOpts['onLive'])?.(d);
+      },
+    } as Record<string, unknown>);
+    // Diagnostic: what did THIS round actually emit? `finish_reason === 'tool_calls'`
+    // promises tool_calls; if toolCalls is 0 the SSE accumulation silently dropped
+    // them (a bug we'd want to catch). Distinguishes "the model narrated a status
+    // change without calling the tool" from "the model DID call, we lost it".
+    opts.onRound?.({
+      index: i,
+      finishReason: r.finishReason || (r.toolCalls.length ? 'tool_calls' : 'stop'),
+      toolCalls: r.toolCalls.length,
+      contentLen: r.content.length,
+    });
+    if (!r.toolCalls.length) {
+      // Final round — the answer: already shown live via onLive, fix it as the
+      // content. If the caller does not use onLiveCommit, fall back to chunked
+      // onDelta (old behavior) so the agentic API stays compatible.
+      content = roundContent;
+      if (opts.onLiveCommit) opts.onLiveCommit(roundContent, true);
+      else if (typeof opts.onDelta === 'function') {
+        for (const p of roundContent.match(/.{1,8}/gs) ?? []) {
+          (opts.onDelta as (d: string) => void)(p);
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        }
+      }
+      break;
+    }
+    // Round with tool_calls: its content is the narration of moves. Already shown
+    // live (onLive), now pin it in `process` (the folded plaque), not the answer.
+    process += roundContent;
+    if (opts.onLiveCommit) opts.onLiveCommit(roundContent, false);
+    else if (roundContent) onProcess?.(roundContent);
+    current.push({
+      role: 'assistant',
+      content: (r as ChatRoundResult).content || null,
+      tool_calls: r.toolCalls.map((tc) => ({
+        id: tc.id,
+        type: 'function',
+        function: { name: tc.name, arguments: tc.arguments },
+      })),
+    });
+    for (const tc of r.toolCalls) {
+      onTool(tc.name, tc.arguments);
+      const def = toolByName.get(tc.name);
+      const parsed = parseToolArgs(tc.arguments);
+      // `write` is a flag/predicate on the tool def. A `true` write stays true; a
+      // predicate write is evaluated against the actual parsed args (so a READ
+      // action on a write-capable tool like `memory action:"list"` is NOT labeled
+      // a write); a tool with no write is false.
+      const write =
+        def?.write === true
+          ? true
+          : typeof def?.write === 'function'
+            ? !!def?.write?.(parsed)
+            : false;
+      const confirm = opts.confirmWrite;
+      const needsConfirm =
+        typeof confirm === 'function' &&
+        !!def?.write &&
+        (def.write === true ? true : (def.write as (a: Record<string, unknown>) => boolean)(parsed));
+      // outcome: applied — write really happened; declined — the user rejected it
+      // (y/n); error — the tool threw (incl. Unknown tool if the name is not in the
+      // registry); ok — a non-writing tool ran. detail — the result string to the model.
+      let outcome = 'ok';
+      let detail: unknown = '';
+      if (needsConfirm && confirm) {
+        const ok = await confirm(tc.name, tc.arguments);
+        if (!ok) {
+          outcome = 'declined';
+          detail = 'This write operation was declined — the user must explicitly confirm before it runs.';
+          current.push({ role: 'tool', tool_call_id: tc.id, content: modelToolResult('declined', detail) });
+          logRun({ name: tc.name, write, outcome, detail, args: parsed });
+          toolRuns.push({ name: tc.name, args: parsed, write, outcome, detail });
+          continue;
+        }
+      }
+      try {
+        // Plugin ai-tool → its own `run(args, toolCtx)`; group tool → execChatTool
+        // (lookup by name in the registry). `def.run` exists only on extraTools.
+        detail = def?.run
+          ? await (def.run as (args: Record<string, unknown>, ctx: ToolCtx) => unknown)(parsed, toolCtx)
+          : await execChatTool(tc.name, parsed, toolCtx);
+        outcome = write ? 'applied' : 'ok';
+      } catch (e) {
+        detail = `Error: ${e instanceof Error ? e.message : String(e)}`;
+        outcome = 'error';
+      }
+      const detailStr = typeof detail === 'string' ? detail : JSON.stringify(detail);
+      current.push({ role: 'tool', tool_call_id: tc.id, content: modelToolResult(outcome, detailStr) });
+      logRun({ name: tc.name, write, outcome, detail: detailStr, args: parsed });
+      toolRuns.push({ name: tc.name, args: parsed, write, outcome, detail: detailStr });
+    }
+  }
+  return { content, process, toolRuns };
+}
+
+// One-shot non-streaming call for /compact: compresses the history into a compact
+// system context (key facts, decisions, open questions). No tools.
+export async function compactConversation(
+  messages: ChatMessage[],
+  { baseUrl, model, token }: { baseUrl?: string; model?: string; token?: string },
+): Promise<string> {
+  requireAiOpts({ baseUrl, model, token });
+  const res = await fetch(`${baseUrl}/chat/completions`, {
+    method: 'POST',
+    headers: LLM_HEADERS(token as string),
+    body: JSON.stringify({
+      model,
+      messages: [
+        {
+          role: 'system',
+          content:
+            'Compress the chat history below into a compact system context (up to ~400 words). Keep the key facts, decisions made and open questions. Return only the compressed text.',
+        },
+        ...messages.filter((m) => m.role !== 'system').slice(-30),
+      ],
+    }),
+  });
+  if (!res.ok) throw new Error(`LLM ${res.status}`);
+  const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
+  return data?.choices?.[0]?.message?.content ?? '';
+}

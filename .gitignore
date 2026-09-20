@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Superpowers SDD scratch area
+.superpowers/
+
+# Enabled plugin symlinks (created from plugins-available/*)
+plugins-enabled/
+
+# Environment
+.env
+.env.local
+
+# Local config overrides
+*.local.json
+
+# macOS
+.DS_Store
+# Plugins that live in their own repositories are dropped in here and stay
+# untracked; only the bundled tool-group plugins are part of this repo.
+/plugins-available/*
+!/plugins-available/gitlab/
+!/plugins-available/repo/

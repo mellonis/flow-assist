@@ -1,0 +1,818 @@
+// Core tool group: memory, config, and the current-feature context. Always on
+// (not gated by config.ai.disabledTools). The host config/memory modules are
+// imported directly (there is no import cycle — this module only pulls from
+// config and runtime/services).
+//
+// Contract of a group: { id, alwaysOn, tools, exec(name, args, ctx) } where
+// `args` is an already-parsed object and `ctx` is the runtime context
+// ({ buildFeatureContext, memoryFile, configLocalPath }). Each writing tool is
+// flagged `write` (true or a predicate `(args) => boolean`).
+
+import { hostConfigSchema } from '../config/schema.js';
+import {
+  loadConfig, saveConfigSetting, saveConfigUnset,
+  editConfigArray, getDeep, getSchemaAtPath, describeSchema, unwrapNode, parseValue,
+} from '../config/load.js';
+import { loadMemories, saveMemories, memoryFilePath, DEFAULT_MEMORY_PATH } from '../runtime/services/memory.js';
+import { openInBrowser } from '../runtime/services.js';
+import { resolveIdentityToken } from '../runtime/plugin-identity.js';
+import { DEFAULT_THEME } from '../playback/theme.js';
+import type { ToolGroup, ToolDef } from './tools.js';
+
+// Runtime context handed to core tools by the caller: the issue-context builder
+// (absent when the chat is not opened from an issue detail), the resolved memory
+// file (absent → resolved from config), the config.local.json path, and the active
+// plugin's identity token (a `plugin` memory scope resolves to the plugin it was
+// issued to — the host maps the token to the name; a caller cannot forge one).
+export interface CoreCtx {
+  buildFeatureContext?: (issueCode?: string) => Promise<string> | string;
+  memoryFile?: string;
+  configLocalPath?: string;
+  pluginToken?: symbol;
+}
+
+// Resolves the memory `plugin` scope to the owning plugin name from the host-issued
+// identity token. Only a Symbol the host actually issued maps to a name — a
+// caller-injected raw string or a foreign token resolves to undefined.
+function pluginScopeName(ctx: CoreCtx): string | undefined {
+  return ctx.pluginToken !== undefined ? resolveIdentityToken(ctx.pluginToken) : undefined;
+}
+
+// Predicate "is this call a write": the listed actions mutate state (config
+// set/unset/push/insert/remove and memory add/update/forget) and require a
+// y/n pause in the chat; the others are read-only.
+const coreIsWrite = (actionSet: string[]) => {
+  return (a: Record<string, unknown>) => actionSet.includes(String(a?.action ?? ''));
+};
+
+// Renders a resolved hotkey map ({ action: [keys] }) compactly for tool output:
+// a single-key action renders as the bare name, multiple as `a/b`. Used by the
+// config tool so `config get/explain keys` reports the effective bindings.
+function prettyKeys(map: Record<string, string[]>): string {
+  const parts = Object.entries(map).map(([action, ks]) => (ks.length === 1 ? ks[0] : ks.join('/')));
+  return `{ ${Object.keys(map).map((a, i) => `${a}: ${parts[i]}`).join(', ')} }`;
+}
+
+// An ACTIVE default for a top-level config key, reported when the config value is
+// unset so the LLM can explain the key accurately instead of guessing (it once
+// claimed cache is off by default — it is actually ON unless config.cache.enabled
+// is false). These mirror the consuming modules; keep in sync. Most are constants
+// (the "unset" default), since a set key needs no default note.
+const KEY_DEFAULTS: Record<string, string> = {
+  cache: 'enabled: true; ON unless config.cache.enabled = false',
+  theme: `${JSON.stringify(DEFAULT_THEME)}; flowtty default theme`,
+  debug: 'logTools: false',
+  memory: `file: ${DEFAULT_MEMORY_PATH}; empty to start`,
+  fs: 'roots: []; no fs tool in the tracker-agnostic host',
+  // "always LOADED", not always visible: each built-in is configured via its own
+  // config.plugins.<name>.* namespace. keycaps is OFF by default — its panel shows
+  // only when config.plugins.keycaps.enabled = true. Saying "always active" made the
+  // LLM conclude "already on, nothing to enable" and refuse the request.
+  plugins: 'built-in core, assistant, keycaps, log are always LOADED; each is configured via config.plugins.<name>.* (keycaps shows its panel only when config.plugins.keycaps.enabled = true — it is OFF by default)',
+};
+
+// A "(note)" appended to a config key's output: the effective-hotkeys note for
+// `keys`, or the ACTIVE default for an unset key that has one. Empty when the key
+// is set (its real value already describes itself) or has no known default.
+function keyNote(key: string, cfg: Record<string, unknown>, resolvedKeys?: Record<string, string[]>): string {
+  if (key === 'keys' && resolvedKeys) {
+    return `effective: ${Object.keys(resolvedKeys).length} bindings — config set keys.<action> <key> to remap`;
+  }
+  const raw = getDeep(cfg, key);
+  const d = KEY_DEFAULTS[key];
+  if (raw != null || !d) return '';
+  return `default: ${d}`;
+}
+
+// Resolves the zod node for a config key, falling back to a plugin's own
+// configSchema for `plugins.<name>.*` paths. The host schema sees `plugins` only as
+// an opaque `record(string, unknown)`, so it cannot describe a flag a plugin
+// declares (e.g. config.plugins.keycaps.enabled) — without this fallback the config
+// tool would report the flag as an "unknown key" and config set plugins.keycaps.enabled
+// would fail, which is exactly the dead-end the LLM hit.
+function schemaAt(key: string, pluginConfigs?: Record<string, unknown>): any {
+  const hostNode = getSchemaAtPath(hostConfigSchema, key);
+  if (hostNode) return hostNode;
+  const m = /^plugins\.([^.]+)(?:\.(.*))?$/.exec(key);
+  const pluginSchema = m?.[1] && pluginConfigs?.[m[1]];
+  if (pluginSchema) return getSchemaAtPath(pluginSchema, m[2] ?? '');
+  return null;
+}
+
+// Comma-joined "flag (type)" list for a plugin's configSchema, so `config list`
+// tells the LLM which config.plugins.<name>.<flag> keys exist (and their types).
+function pluginFlags(node: unknown): string {
+  const shape = unwrapNode(node)?.shape;
+  if (!shape) return 'config.plugins.<name>.<flag>';
+  return Object.keys(shape)
+    .map(f => `${f} (${describeSchema(shape[f])})`)
+    .join(', ');
+}
+
+// Normalizes a memory scope to the host scope-model. Only two literals are accepted:
+// 'host' (host-wide) and 'plugin' (the current plugin's memory — the host resolves it
+// to the plugin name via the host-issued identity token; without a valid token it
+// errors rather than silently writing an unattributed entry). 'global' is a legacy
+// alias for 'host'. Empty → 'host' (the default). Anything else is rejected, so the
+// memory tool stops accepting ad-hoc values (e.g. an obsolete "issue:TRK-1") that
+// orphan entries.
+function normalizeScope(raw: string | undefined, ctx: CoreCtx): { scope: string; error?: string } {
+  const s = String(raw ?? 'host').trim();
+  const scope = s === 'global' ? 'host' : s;
+  if (!scope) return { scope: 'host' };
+  if (scope === 'plugin') {
+    const name = pluginScopeName(ctx);
+    if (name) return { scope: name };
+    return { scope, error: "scope 'plugin' needs a plugin context (no valid plugin identity token attached) — use 'host' for host-wide memory" };
+  }
+  if (scope !== 'host') return { scope, error: `invalid scope '${scope}' — expected 'host' or 'plugin'` };
+  return { scope: 'host' };
+}
+
+// Renders the current date/time in a given IANA zone (default: the host local
+// zone), plus epoch seconds and the UTC ISO timestamp. Lets the LLM answer
+// time-sensitive questions — LLMs do not reliably know "now". An invalid zone
+// returns a friendly error instead of throwing (the tool must never crash).
+function describeDatetime(zone: string): string {
+  const now = new Date();
+  let parts: Record<string, string>;
+  try {
+    parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: zone,
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+      hour12: false, weekday: 'long', timeZoneName: 'longOffset',
+    }).formatToParts(now).reduce((m, p) => {
+      if (p.type !== 'literal') m[p.type] = p.value;
+      return m;
+    }, {} as Record<string, string>);
+  } catch {
+    return `Invalid timezone '${zone}' — use an IANA name like 'Europe/Moscow' or 'UTC'.`;
+  }
+  return [
+    `timezone: ${zone} (${parts.timeZoneName})`,
+    `epoch: ${Math.floor(now.getTime() / 1000)}`,
+    `iso-utc: ${now.toISOString()}`,
+    `local: ${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second} (${parts.weekday})`,
+  ].join('\n');
+}
+
+// Duration-word → milliseconds map for the `remind` tool's `in` argument.
+const DURATION_MS: Record<string, number> = {
+  s: 1000, sec: 1000, secs: 1000, second: 1000, seconds: 1000,
+  m: 60000, min: 60000, mins: 60000, minute: 60000, minutes: 60000,
+  h: 3600000, hr: 3600000, hrs: 3600000, hour: 3600000, hours: 3600000, d: 86400000,
+  day: 86400000, days: 86400000,
+};
+
+// Parses the `remind` tool's time spec to a delay in ms. `in` is a duration from
+// now ("3 minutes"); `at` is a wall-clock time today ("14:30", past → tomorrow).
+// Exactly one must be provided; an unparseable value returns a friendly error.
+function parseReminderMs(inArg: string, atArg: string): { ms: number } | { error: string } {
+  const inStr = inArg.trim().toLowerCase();
+  if (inStr) {
+    const m = /^(\d+(?:\.\d+)?)\s*([a-z]+)$/.exec(inStr);
+    const unit = m ? DURATION_MS[m[2]] : undefined;
+    if (!m || !unit) return { error: `Unparseable duration '${inArg}' — use e.g. "90 seconds", "3 minutes", "2 hours".` };
+    return { ms: parseFloat(m[1]) * unit };
+  }
+  const atStr = atArg.trim();
+  if (atStr) {
+    const t = /^(\d{1,2}):(\d{2})(?::(\d{2}))?$/.exec(atStr);
+    if (!t) return { error: `Unparseable time '${atArg}' — use "HH:MM" or "HH:MM:SS" (24h).` };
+    const now = new Date();
+    const target = new Date(now);
+    target.setHours(Number(t[1]), Number(t[2]), Number(t[3] ?? 0), 0);
+    if (target.getTime() <= now.getTime()) target.setDate(target.getDate() + 1);
+    return { ms: Math.max(0, target.getTime() - now.getTime()) };
+  }
+  return { error: '`in` (a duration) or `at` (a clock time) is required.' };
+}
+
+// Background-task concurrency: a module-level counter + FIFO queue so a runaway
+// agent cannot spawn unbounded CONCURRENT detached agent runs (each is a live LLM
+// call). Schedule is unbounded — a task is just a timer until it fires — but at
+// most MAX run at once. Overflow is QUEUED, not dropped: when a running task frees
+// a slot the next queued one is promoted. (Dropping silently turned a burst — e.g.
+// several "run X in 1s" — into tasks that "didn't start" from the user's view.)
+let bgRunning = 0;
+const MAX_BG_TASKS = 3;
+const bgQueue: Array<() => void> = [];
+// A background task may chain follow-up background tasks (a task whose subtask
+// needs further work — e.g. "build, then fix and rebuild on failure"). But an
+// agent must NOT recurse `background` forever: this caps how deep a chain may go
+// (0 = the main chat's task · 1 = a task it spawned · 2 = deepest, no further).
+const MAX_BG_DEPTH = 2;
+// In-flight background work — what the chat's «N in background» indicator counts. A task
+// is counted from the moment it is SCHEDULED (its `in`/`at` delay armed) until it
+// fully completes: armed-but-delayed + queued-for-a-slot + running. `bgRunning` is
+// the execution cap; `bgActive` is the user-facing count.
+let bgActive = 0;
+
+// Runs `run` under the concurrency cap: start immediately if a slot is free,
+// otherwise enqueue and start when the next slot frees. The counter covers only
+// RUNNING tasks (not merely-scheduled ones), so delayed tasks don't hold a slot.
+function runBg(run: () => Promise<void>): void {
+  const start = () => {
+    bgRunning++;
+    void run().finally(() => {
+      bgRunning--;
+      const next = bgQueue.shift();
+      if (next) next(); // promote the next queued task into the freed slot
+    });
+  };
+  if (bgRunning < MAX_BG_TASKS) start();
+  else bgQueue.push(start);
+}
+
+// Live count of IN-FLIGHT background tasks (armed / queued / running), for the
+// chat's «N in background» indicator. The host's notify() drives the re-render that
+// updates it — called when a task is armed, when it starts, and when it completes.
+export function bgActiveCount(): number {
+  return bgActive;
+}
+
+// ─── The assistant's todo plan (session-only) ─────────────────────────────────
+// A small checkbox task-plan the assistant maintains via the `todo` tool and the
+// chat renders (open items first, ≤5 visible, plus a "+N pending · M done"
+// summary). SESSION-only, in-memory (cleared on restart) — like the log buffer,
+// NOT the cross-session `memory` file. Module-level like bgActive so both the
+// tool and the render accessor share one source of truth without threading state
+// through the registry. Reserved for a first item = 1; `clear` resets it so a
+// fresh plan renumbers from 1 (a cleared plan has no stale ids to reference).
+export type TodoStatus = 'pending' | 'in_progress' | 'done';
+export interface TodoItem {
+  id: number;
+  text: string;
+  status: TodoStatus;
+}
+const MAX_VISIBLE_TODO = 5;
+let todoItems: TodoItem[] = [];
+let todoNextId = 1;
+
+// The checkbox glyph + a status tag, so both the tool output and the render speak
+// the same vocabulary. pending → ☐, in_progress → ◐ (half-filled — "working on
+// it"), done → ☑.
+const todoGlyph = (s: TodoStatus) => (s === 'done' ? '☑' : s === 'in_progress' ? '◐' : '☐');
+const todoWord = (s: TodoStatus) => (s === 'done' ? 'done' : s === 'in_progress' ? 'in progress' : 'pending');
+
+// Normalizes a status string from the `todo` tool (and engines that say
+// "completed" like Claude Code's TodoWrite) into the trio the model uses.
+function normalizeTodoStatus(v: unknown): TodoStatus {
+  const s = String(v ?? '').trim().toLowerCase();
+  if (s === 'done' || s === 'completed' || s === 'complete') return 'done';
+  if (s === 'in_progress' || s === 'in-progress' || s === 'inprogress' || s === 'working' || s === 'running') return 'in_progress';
+  return 'pending';
+}
+
+// A defensive copy for the chat render (the plugin never mutates the tool's state).
+export function todoSnapshot(): TodoItem[] {
+  return todoItems.map((t) => ({ ...t }));
+}
+
+// Renders the plan for the LLM: in-progress items first (the active work), then
+// pending, then done, each with its id so `todo <start|complete|uncomplete>
+// <id>` targets precisely. Unlike the capped visual block, `list` shows EVERY
+// item — the model needs the full set to reason about the plan, not just the 5
+// visible rows.
+function renderTodoList(): string {
+  if (!todoItems.length) return 'Plan is empty — add items with todo action=add.';
+  const order: TodoStatus[] = ['in_progress', 'pending', 'done'];
+  const sorted = [...todoItems].sort((a, b) => order.indexOf(a.status) - order.indexOf(b.status));
+  return sorted.map((t) => `${todoGlyph(t.status)} ${t.id} · ${t.text}`).join('\n');
+}
+
+// Resolves which plan item a mutating action targets. Accepts `id` (a small int)
+// OR `text` — the model thinks about items by their content (e.g. the number
+// "73"), not by the internal id, so targeting by text removes the list→match→id
+// hop that otherwise pushes it to narrate the status in prose instead of calling
+// the tool. Text matches exact, then case-insensitive, then a substring
+// (so "73" ↔ "№ 73" / "item 73"). Returns { idx, label } or a friendly error.
+function resolveTodoItem(args: Record<string, unknown>): { idx: number; label: string } | { error: string } {
+  if (args.id != null && args.id !== '') {
+    const id = Number(args.id);
+    if (!Number.isNaN(id)) {
+      const idx = todoItems.findIndex((t) => t.id === id);
+      if (idx === -1) return { error: `Plan item ${id} not found.` };
+      return { idx, label: String(id) };
+    }
+  }
+  const text = String(args.text ?? '').trim();
+  if (!text) return { error: 'id or text is required — which plan item.' };
+  const cmp = (t: TodoItem) => t.text.trim();
+  let idx = todoItems.findIndex((t) => cmp(t) === text);
+  if (idx === -1) idx = todoItems.findIndex((t) => cmp(t).toLowerCase() === text.toLowerCase());
+  if (idx === -1) idx = todoItems.findIndex((t) => cmp(t).toLowerCase().includes(text.toLowerCase()));
+  if (idx === -1) return { error: `Plan item "${text}" not found.` };
+  return { idx, label: text };
+}
+
+export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record<string, string[]>, pluginConfigs?: Record<string, unknown>): ToolGroup => ({
+  id: 'core',
+  alwaysOn: true,
+  tools: [
+    {
+      type: 'function',
+      function: {
+        name: 'get_feature_context',
+        description: 'Full context of the CURRENT issue (the one the chat is opened on): the gathered analysis report — status, relations, tags, comments, attachments, etc. Call when you need the whole feature context. Do not pass issueCode — the tool works with the current issue.',
+        parameters: { type: 'object', properties: { issueCode: { type: 'string' } }, required: [] },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'memory',
+        description: 'Persistent cross-session memory. Facts the user asks you to remember are stored here and injected into the system prompt (re-read on every message, so edits take effect immediately). action: "list" — show stored memories (optional scope and/or label filter); "add" — store a new one (text, optional label to classify it, scope: "host" for host-wide memory or "plugin" for the current plugin\'s memory, default "host"); "update" — edit an existing one (id + text and/or scope and/or label); "forget" — delete by id. This writes only a local JSON file on this machine, not the tracker.',
+        parameters: {
+          type: 'object',
+          properties: {
+            action: { type: 'string', enum: ['list', 'add', 'update', 'forget'], description: 'list — read stored memories; add — store a new one; update — edit an existing one; forget — delete by id.' },
+            text: { type: 'string', description: 'Memory text (for add/update).' },
+            scope: { type: 'string', description: 'Optional scope: "host" (host-wide, default) or "plugin" (the current plugin\'s memory — the host resolves the plugin).' },
+            label: { type: 'string', description: 'Optional label to classify a memory, e.g. the name of the tool a fact relates to (config, host:plugins_list, memory …). Use it to filter memories by topic: prefix the label with the tool name, then list with the same label to recall only that tool\'s facts.' },
+            id: { type: 'string', description: 'Memory id (for update/forget; from action=list).' },
+          },
+          required: ['action'],
+        },
+      },
+      // Memory is intentionally NOT write-confirmed: it is a low-stakes, local,
+      // reversible scratchpad (a JSON file on this machine). A confirm on every
+      // add/update/forget would break the transparent persistence the tool exists
+      // for — the assistant should record/update/drop facts quietly. (config
+      // set/unset/… stays confirmed — it changes hotkeys/model/cache, real behavior.)
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'log',
+        description: 'Append a line to the host log (the `l` panel) — an append-only activity trail, distinct from cross-session `memory` facts. Call when the user asks to LOG something («log X»): log lines are an audit trail the user can open with `l`; `memory` is for facts to remember across sessions. action: "append" — add a log line (text required); "read" — show the recent log lines; "clear" — empty the in-memory log. Log lines are session-only (in-memory, cleared on restart) — use `memory` to persist.',
+        parameters: { type: 'object', properties: {
+          action: { type: 'string', enum: ['append', 'read', 'clear'], description: 'append — add a line to the log (text required); read — show recent lines; clear — empty the in-memory log.' },
+          text: { type: 'string', description: 'The log line to append (for action=append).' },
+        }, required: ['action'] },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'config',
+        description: 'Read and modify the assistant configuration. action: "list" — show known config keys with their current values; "get" — read one key by dot path (e.g. ai.model); "explain" — describe one key (its type and current value); "set" — set a key (WRITE: writes to config.local.json, overriding config.json; for array keys the whole array is replaced — covers reordering/clearing); "push" — append an element to an array key (WRITE); "insert" — insert an element at index into an array key (WRITE, needs index + value); "remove" — remove by value (all occurrences) or by index (value or index). "unset" — remove a key (WRITE). For set/push/insert/remove the value must match the key\'s type from the schema. Inspect or adjust settings like ai.model, ai.language, ai.assistantLanguage, ai.disabledTools, keys.*, memory.file, cache.enabled, plugins.<ns>.*. CAUTION: set/unset/push/insert/remove change the running app\'s configuration — use deliberately, only on explicit user request.',
+        parameters: {
+          type: 'object',
+          properties: {
+            action: { type: 'string', enum: ['list', 'get', 'explain', 'set', 'unset', 'push', 'insert', 'remove'], description: 'list — show keys+values; get — read one key; explain — describe one key; set — write one key (whole array for array keys); unset — remove one key; push — append to an array key; insert — insert into an array key; remove — remove from an array key.' },
+            key: { type: 'string', description: 'Dot path of the config key (for get/explain/set/unset/push/insert/remove), e.g. ai.disabledTools.' },
+            value: { description: 'New value for set; element for push/insert; element-or-index for remove (must match the key type).' },
+            index: { type: 'number', description: 'Position for insert (0-based); for remove, use value OR index (whichever given).' },
+          },
+          required: ['action'],
+        },
+      },
+      write: coreIsWrite(['set', 'unset', 'push', 'insert', 'remove']),
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'datetime',
+        description: 'The CURRENT date and time (LLMs do not reliably know "now"). Read-only, no side effects. Call this before answering anything time-sensitive — today\'s date, what weekday it is, deadlines, relative dates, schedules, "how long since/as of when". Returns the timezone, epoch seconds, UTC ISO timestamp and the set local clock time. Optional `zone`: an IANA timezone (e.g. "Europe/Moscow", "UTC") to report that zone\'s time instead of the host local one.',
+        parameters: { type: 'object', properties: { zone: { type: 'string', description: 'Optional IANA timezone (e.g. "Europe/Moscow", "UTC") — default: the host local timezone.' } }, required: [] },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'remind',
+        description: 'Schedule a timed reminder that pops a centered, top-most banner in the TUI after a delay (dismiss with Esc). Call when the user asks to be reminded of something later — e.g. "remind me in 3 minutes to blink". `in`: a duration from now ("90 seconds", "3 minutes", "2 hours"); OR `at`: a wall-clock time today ("14:30" / "17:00:00", 24h; if already past, tomorrow). Exactly one of `in`/`at` is required, plus `text`. The reminder is ephemeral (session-only) and fires once; dismissed by Esc, confirmed by the banner.',
+        parameters: { type: 'object', properties: {
+          text: { type: 'string', description: 'The reminder content to fire (e.g. "blink").' },
+          in: { type: 'string', description: 'A duration from now, e.g. "90 seconds", "3 minutes", "2 hours".' },
+          at: { type: 'string', description: 'A wall-clock time today, "HH:MM" or "HH:MM:SS" (24h); if already past, tomorrow.' },
+        }, required: ['text'] },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'background',
+        description: 'Run a task in the BACKGROUND: offload a self-contained job to a separate agent run that has tool access, return immediately (the chat stays usable), and report the result when it completes — as a toast + log entry AND a message returned into the chat (the assistant opens it and, when idle, analyzes it in the conversation). Call when the user wants something done later without blocking the conversation — e.g. "запусти сборку в фоне и скажи когда готово", "посмотри что в репо и отчитайся позже". `task` (required): the work to do, in natural language. `label`: a short name for the task/notification (default: the task, clipped). `in`/`at`: an optional delay before it starts (a duration like "10 seconds", or a clock time). The task runs read-only (write tools are declined) and bounded (up to 12 tool rounds). You may spawn a follow-up `background` task for a further step, but keep the chain to ONE level. The chat shows how many background tasks are in flight.',
+        parameters: { type: 'object', properties: {
+          task: { type: 'string', description: 'The work to do in the background, in natural language — e.g. "count the tests in src and report the number".' },
+          label: { type: 'string', description: 'Optional short name for the task/notification (default: the task, clipped to ~40 chars).' },
+          in: { type: 'string', description: 'Optional delay before it starts, e.g. "10 seconds", "2 minutes".' },
+          at: { type: 'string', description: 'Optional clock time to start, "HH:MM" or "HH:MM:SS" (24h); if already past, tomorrow.' },
+        }, required: ['task'] },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'todo',
+        description: 'The task plan is a LIVE object — it renders in the chat as `▾ plan` with checkboxes, and it ONLY changes when you call this tool. Maintain it as a WHOLE, the way TodoWrite works: when the plan or any item\'s status should change, call `todo` with action="set" and pass the ENTIRE updated list as `todos` (each item { text, status }) — do not just describe a change, rewrite the plan from that call. Use "list" to read the current plan. action targets an item by `id` OR by `text` (whichever is easier — e.g. the user names "73", call `todo start/complete 73`; the tool finds the item whose text is 73). Actions: "list" — read the current plan (all items, in-progress first, with ids); "set" — replace the WHOLE plan with `todos` (full list, each with text and optional status pending|in_progress|done) — the recommended way to update; "add" — append pending item(s): a single `text` or a whole `items` array; "start"/"complete"/"uncomplete" — set in-progress / done / pending; "update" — replace an item\'s text (id required, text = the new text); "remove" — delete an item; "clear" — empty the plan. Session-only (in-memory), low-stakes, no confirmation needed.',
+        parameters: { type: 'object', properties: {
+          action: { type: 'string', enum: ['list', 'set', 'add', 'start', 'complete', 'uncomplete', 'update', 'remove', 'clear'], description: 'list — read the plan; set — replace the WHOLE plan with todos (full-replace, like TodoWrite); add — append pending item(s); start — mark in-progress; complete — mark done; uncomplete — reopen to pending; update — replace text (id required); remove — delete an item; clear — empty the plan.' },
+          todos: { type: 'array', items: { type: 'object', properties: { text: { type: 'string' }, status: { type: 'string', enum: ['pending', 'in_progress', 'done'] } }, required: ['text'] }, description: 'For action=set ONLY: the FULL plan to replace the current one with — each item { text, status? } (status defaults to pending). Pass the whole list, not a delta, so the plan always reflects the complete state. An empty array is valid and empties the plan (same as action="clear") — send it when there is no remaining plan.' },
+          items: { type: 'array', items: { type: 'string' }, description: 'For action=add ONLY: add several items in one call (a batch). Each becomes a pending item with its own id. Use it when you plan multiple steps at once (e.g. a 20-item plan) — instead of emitting many separate `todo` calls. Ignored for other actions.' },
+          text: { type: 'string', description: 'For add/update: the item text. For start/complete/uncomplete/remove: the item text to target (alternative to id — matches exact, then case-insensitive, then substring).' },
+          id: { type: 'number', description: 'Type the item id to target (from action=list); alternative to text.' },
+        }, required: ['action'] },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'open_url',
+        description: 'NAVIGATION ONLY — open a URL in the system browser. It does NOT fetch the page content — it only opens the URL in the user\'s browser. Use it when the user asks to OPEN a page, not to read data (use a read tool for that). Pass a FULL URL; when a tool result carries a ready web link for an entity (a `webUrl` field), pass that link as-is rather than assembling one by hand.',
+        parameters: { type: 'object', properties: { url: { type: 'string', description: 'Full URL to open in the browser (e.g. "https://example.com"), or a `webUrl` taken from a tool result.' } }, required: ['url'] },
+      },
+    },
+  ],
+  exec: async (name, args, ctx: CoreCtx) => {
+    switch (name) {
+      case 'open_url': {
+        // Universal browser opener: the host owns the primitive (openInBrowser).
+        // The tool takes a FULL URL — a plugin that knows an entity's web address
+        // hands it over as `webUrl` in its own tool results.
+        const url = String(args.url ?? '').trim();
+        if (!url) return 'No URL provided';
+        openInBrowser(url);
+        return `Opened ${url} in the browser`;
+      }
+      case 'get_feature_context': {
+        if (typeof ctx.buildFeatureContext !== 'function') {
+          return 'Feature context is unavailable: chat is not opened from an issue detail.';
+        }
+        return await ctx.buildFeatureContext(args.issueCode as string | undefined);
+      }
+      case 'memory': {
+        // The assistant's memory lives in a local JSON file (ctx.memoryFile from
+        // the caller, or resolved from config.memory.file, or the default).
+        // `list` reads, `add` appends, `update` edits an existing entry by id
+        // (text and/or scope), `forget` deletes by id. The contents are injected
+        // into the system prompt (re-read on every message — edits take effect
+        // immediately). Writes only a file on this machine, not the tracker.
+        const action = String(args.action ?? '').trim();
+        const memFile = ctx.memoryFile ?? memoryFilePath(config);
+        const list = loadMemories(memFile);
+        if (action === 'list') {
+          const raw = String(args.scope ?? '').trim();
+          // Empty filter → all memories; a given scope is normalized (global→host,
+          // plugin→resolved name) and filtered exactly, so legacy entries still match.
+          const filter = raw ? (raw === 'global' ? 'host' : raw === 'plugin' ? (pluginScopeName(ctx) ?? raw) : raw) : '';
+          const label = String(args.label ?? '').trim();
+          const filtered = list.filter(m => (!filter || m.scope === filter) && (!label || m.label === label));
+          if (!filtered.length) return 'No memories stored yet.';
+          return filtered.map(m => `[${m.id}] (${m.scope})${m.label ? ` [${m.label}]` : ''} ${m.text}`).join('\n');
+        }
+        if (action === 'add') {
+          const text = String(args.text ?? '').trim();
+          if (!text) return 'text is required — the memory text to store.';
+          const { scope, error } = normalizeScope(args.scope as string | undefined, ctx);
+          if (error) return error;
+          const label = String(args.label ?? '').trim() || undefined;
+          const id = `m-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+          list.push({ id, text, scope, label, ts: Date.now() });
+          saveMemories(list, memFile);
+          return `Memory stored (${id}, scope ${scope}). It will be injected into subsequent messages.`;
+        }
+        if (action === 'update') {
+          const id = String(args.id ?? '').trim();
+          if (!id) return 'id is required — memory id (from memory action=list).';
+          const idx = list.findIndex(m => m.id === id);
+          if (idx === -1) return `Memory ${id} not found.`;
+          const hasText = args.text != null && String(args.text).trim() !== '';
+          const hasScope = args.scope != null && String(args.scope).trim() !== '';
+          // Present-but-empty label clears it (|| undefined), so update can drop a label.
+          const hasLabel = args.label != null;
+          if (!hasText && !hasScope && !hasLabel) return 'text, scope and/or label is required — the memory fields to update (id must exist).';
+          const next = { ...list[idx], ts: Date.now() };
+          if (hasText) next.text = String(args.text).trim();
+          if (hasLabel) next.label = String(args.label).trim() || undefined;
+          if (hasScope) {
+            const { scope, error } = normalizeScope(args.scope as string | undefined, ctx);
+            if (error) return error;
+            next.scope = scope;
+          }
+          list[idx] = next;
+          saveMemories(list, memFile);
+          return `Memory ${id} updated. It will be injected into subsequent messages.`;
+        }
+        if (action === 'forget') {
+          const id = String(args.id ?? '').trim();
+          if (!id) return 'id is required — memory id (from memory action=list).';
+          const kept = list.filter(m => m.id !== id);
+          if (kept.length === list.length) return `Memory ${id} not found.`;
+          saveMemories(kept, memFile);
+          return `Memory ${id} deleted.`;
+        }
+        return 'action is required — list|add|update|forget.';
+      }
+      case 'log': {
+        // Append to the host's log buffer (the `l` panel) — the append-only audit
+        // trail. Distinct from `memory` (cross-session facts): a log entry is an
+        // activity trail, not a fact to remember. The buffer is session-only
+        // (in-memory, cleared on restart) — that is what the `l` panel reads. A
+        // LOGICAL write, but deliberately NOT write-confirmed (like memory): the
+        // user asked to log it, and a y/n pause on a trivial append is noise.
+        const action = String(args.action ?? '').trim();
+        if (action === 'append') {
+          const text = String(args.text ?? '').trim();
+          if (!text) return 'text is required — the log line to append.';
+          (ctx as { pushLog?: (line: string) => void }).pushLog?.(text);
+          return `Logged: ${text}`;
+        }
+        if (action === 'read') {
+          const lines = (ctx as { log?: { read(): string[] } }).log?.read() ?? [];
+          return lines.length ? lines.slice(-20).join('\n') : '(log is empty)';
+        }
+        if (action === 'clear') {
+          (ctx as { log?: { clear(): void } }).log?.clear();
+          (ctx as { pushLog?: (line: string) => void }).pushLog?.('(log cleared)');
+          return 'Log cleared.';
+        }
+        return 'action is required — append|read|clear.';
+      }
+      case 'config': {
+        // The application config: read/describe need no write; set/unset/push/
+        // insert/remove write config.local.json (as the :config command), not the
+        // committed config.json. Values are validated against the schema BEFORE
+        // writing (and for an array, the whole resulting array). ctx.configLocalPath
+        // is passed by the caller to point at a temp file (undefined → default).
+        const action = String(args.action ?? '').trim();
+        const key = String(args.key ?? '').trim();
+        const cfg = loadConfig();
+        const localPath = ctx.configLocalPath;
+        if (action === 'list') {
+          const shape = unwrapNode(hostConfigSchema)?.shape ?? {};
+          const rows = Object.keys(shape).map(k => {
+            const val = getDeep(cfg, k);
+            const shown = JSON.stringify(val ?? null);
+            const note = keyNote(k, cfg, resolvedKeys);
+            return note ? `- ${k}: ${shown} (${note})` : `- ${k}: ${shown}`;
+          });
+          // Per-plugin config namespaces (config.plugins.<name>.*), so the LLM sees
+          // the flags a plugin actually declares — e.g. keycaps.enabled — rather than
+          // being told plugins is an opaque record and left guessing.
+          for (const name of Object.keys(pluginConfigs ?? {})) {
+            const val = getDeep(cfg, `plugins.${name}`) ?? null;
+            rows.push(`- plugins.${name}: ${JSON.stringify(val)} (config.plugins.${name}.<flag> — ${pluginFlags(pluginConfigs![name])})`);
+          }
+          return rows.length ? rows.join('\n') : 'No known config keys.';
+        }
+        if (action === 'get') {
+          if (!key) return 'key is required — dot path of the config key (e.g. ai.model).';
+          if (key === 'keys' && resolvedKeys) {
+            const override = getDeep(cfg, 'keys');
+            const note = override == null ? 'no override — host defaults + plugin keys are active' : `override: ${JSON.stringify(override)}`;
+            return `config.keys — ${note}. Effective bindings:\n${prettyKeys(resolvedKeys)}\nRemap with config set keys.<action> <key> (e.g. config set keys.chat c).`;
+          }
+          if (key.startsWith('keys.') && resolvedKeys) {
+            const actionName = key.slice('keys.'.length);
+            if (actionName in resolvedKeys) return `config.${key} = ${JSON.stringify(resolvedKeys[actionName])} (effective binding for '${actionName}').`;
+          }
+          const note = keyNote(key, cfg, resolvedKeys);
+          const value = JSON.stringify(getDeep(cfg, key));
+          return note ? `config.${key} = ${value} (${note})` : `config.${key} = ${value}`;
+        }
+        if (action === 'explain') {
+          if (!key) return 'key is required — dot path of the config key (e.g. ai.model).';
+          if (key === 'keys' && resolvedKeys) {
+            const node = getSchemaAtPath(hostConfigSchema, 'keys');
+            const want = node ? describeSchema(node) : 'record of action->key';
+            return `config.keys: type ${want}; it is an OVERRIDE map — when unset, host defaults + plugin keys apply. Current effective bindings:\n${prettyKeys(resolvedKeys)}\nRemap with config set keys.<action> <key>.`;
+          }
+          const node = schemaAt(key, pluginConfigs);
+          const want = node ? describeSchema(node) : 'unknown key (not in the schema — use get to inspect)';
+          const note = keyNote(key, cfg, resolvedKeys);
+          const value = JSON.stringify(getDeep(cfg, key));
+          return note
+            ? `config.${key}: type ${want}; current value ${value}. ${note}`
+            : `config.${key}: type ${want}; current value ${value}.`;
+        }
+        if (action === 'set') {
+          if (!key) return 'key is required — dot path of the config key (e.g. ai.model).';
+          const v = typeof args.value === 'string' ? parseValue(args.value) : args.value;
+          // Validate against the plugin's configSchema for config.plugins.<name>.*
+          // (schemaAt falls back to it), so config set plugins.keycaps.enabled works.
+          const node = schemaAt(key, pluginConfigs);
+          if (!node) return `config: unknown key ${key}`;
+          const res = node.safeParse(v);
+          if (!res.success) return `config: ${key} — expected ${describeSchema(node)}, got ${JSON.stringify(v)}`;
+          saveConfigSetting(key, res.data, localPath);
+          return `config.${key} = ${JSON.stringify(res.data)} (saved to config.local.json).`;
+        }
+        if (action === 'unset') {
+          if (!key) return 'key is required — dot path of the config key (e.g. ai.model).';
+          saveConfigUnset(key, localPath);
+          return `config.${key} removed (config.local.json updated).`;
+        }
+        if (action === 'push' || action === 'insert' || action === 'remove') {
+          if (!key) return 'key is required — dot path of the array config key (e.g. ai.disabledTools).';
+          const res = editConfigArray(key, action, { value: args.value, index: args.index as number | undefined }, hostConfigSchema, localPath);
+          if (!res.ok) return res.error;
+          return `config.${key} = ${JSON.stringify(res.value)} (saved to config.local.json).`;
+        }
+        return 'action is required — list|get|explain|set|unset|push|insert|remove.';
+      }
+      case 'datetime': {
+        // Current date/time in the requested zone (or the host local one). LLMs
+        // do not reliably know "now", so this grounds time-sensitive answers.
+        const zone = String(args.zone ?? '').trim() || Intl.DateTimeFormat().resolvedOptions().timeZone;
+        return describeDatetime(zone);
+      }
+      case 'remind': {
+        // A timed reminder: parse the delay, then delegate to the host's
+        // setReminder service (which owns the timer + banner/log delivery). The
+        // tool is a thin parser — the host runtime does the scheduling, so it
+        // stays alive across the agent turn and fires even on later re-renders.
+        // Banner-only: a reminder cannot run a host action (that scope is the
+        // `background` tool, which offloads work and reports the result).
+        const text = String(args.text ?? '').trim();
+        if (!text) return 'text is required — the reminder content to fire.';
+        const parsed = parseReminderMs(String(args.in ?? ''), String(args.at ?? ''));
+        if ('error' in parsed) return parsed.error;
+        const set = (ctx as { setReminder?: (text: string, ms: number) => void }).setReminder;
+        if (typeof set !== 'function') return 'Reminder unavailable: no reminder service (the host must be interactive).';
+        set(text, parsed.ms);
+        return `Reminder set: "${text}" in ${Math.round(parsed.ms / 1000)}s — a banner will pop here (Esc dismisses).`;
+      }
+      case 'background': {
+        // Offload a self-contained task to a DETACHED agent run: parse the task,
+        // schedule a nested agentChat (via ctx.chatLLM — the same agent loop with
+        // tool access) that runs autonomously, and deliver the result when it
+        // completes. The tool returns immediately, so the chat stays usable while
+        // the task works. Read-only by default (confirmWrite declines writes): an
+        // autonomous task has no human to answer a y/n, and a hidden write is a
+        // side effect — so writes are declined, not silently applied.
+        const task = String(args.task ?? '').trim();
+        if (!task) return 'task is required — the work to do in the background.';
+        const label = String(args.label ?? '').trim() || task.slice(0, 40);
+        // Start delay: `in`/`at` (like remind), or immediately when neither is given.
+        let ms = 0;
+        const inStr = String(args.in ?? '').trim();
+        const atStr = String(args.at ?? '').trim();
+        if (inStr || atStr) {
+          const parsed = parseReminderMs(inStr, atStr);
+          if ('error' in parsed) return parsed.error;
+          ms = parsed.ms;
+        }
+        const chatLLM = (ctx as { chatLLM?: (messages: unknown[], opts: Record<string, unknown>) => Promise<{ content?: string }> }).chatLLM;
+        if (typeof chatLLM !== 'function') return 'Background tasks unavailable: no LLM service (the host must be interactive).';
+        // Chaining depth: a background task may spawn follow-up background tasks
+        // (the nested agent has `background` in its tool set and it is read-only,
+        // so it is always allowed). But a chain must not recurse forever — cap how
+        // deep it may go. `_bgDepth` is threaded through toolCtx by the caller.
+        const depth = Number((ctx as { _bgDepth?: number })._bgDepth ?? 0);
+        if (depth >= MAX_BG_DEPTH) return `Background chaining depth exceeded (max ${MAX_BG_DEPTH}) — finish this task; do not spawn further background tasks.`;
+        // A focused one-shot agent: autonomous, tool-using, returns a concise result.
+        // Grounding rule: the agent is FRESH (no conversation context), so a time/date
+        // question is answered from stale or absent memory unless it calls `datetime`.
+        // Demand the tool for anything "now"-sensitive — that is what makes the result
+        // the ACTUAL time at fire-time, not a guess.
+        const prompt = 'You are a background worker. Complete the task below autonomously using the available tools, then return ONLY a concise result (a few sentences). Do not ask questions or wait for the user — act. You may spawn a follow-up `background` task if the work needs a further step (e.g. "build, then fix and rebuild on failure"), but keep the chain at most ONE level and only if it is genuinely needed. IMPORTANT: if the task asks for the current time, date, weekday, or a relative duration, you MUST call the `datetime` tool to get it (never answer from memory — it will be stale).\n\nTask: ' + task;
+        const extraTools = (ctx as { pluginAiTools?: ToolDef[] }).pluginAiTools ?? [];
+        // Spread the live toolCtx so the nested run's tools resolve config, memory
+        // plugin scope, and host services the same way the chat's do. Thread the
+        // chain depth so a follow-up background task knows how deep it is.
+        const toolCtx = { ...(ctx as Record<string, unknown>), _bgDepth: depth + 1 };
+        // The nested run needs its OWN LLM credentials — the same way the chat's
+        // send() derives them (`ai.baseUrl`, `ai.model`, `process.env[tokenEnv]`).
+        // `ctx` is the chat's toolCtx (config + host services), so read ai.* from it;
+        // without these agentChat throws "LLM_TOKEN is not set" and the task fails
+        // even though the chat itself authenticates fine.
+        const ai = ((ctx as { config?: { ai?: Record<string, unknown> } }).config?.ai ?? {}) as Record<string, unknown>;
+        const token = process.env[(ai.tokenEnv as string) ?? 'LLM_TOKEN'];
+        // Count the task as in-flight from the moment it is ARMED (its delay starts),
+        // so the chat's «N in background» indicator reflects a scheduled-but-not-yet-firing
+        // task too — and re-render NOW so the count appears during the wait.
+        bgActive++;
+        (ctx as { notify?: () => void }).notify?.();
+        setTimeout(() => {
+          void runBg(async () => {
+            try {
+              const res = await chatLLM(
+                [{ role: 'system', content: prompt }, { role: 'user', content: task }],
+                { extraTools: extraTools as ToolDef[], toolCtx, maxRounds: 12, confirmWrite: () => false,
+                  baseUrl: ai.baseUrl as string | undefined, model: ai.model as string | undefined, token },
+              );
+              const result = String(res?.content ?? '').trim() || '(no output)';
+              (ctx as { showMessage?: (m: string) => void }).showMessage?.(`⏳ ${label} done`);
+              (ctx as { pushLog?: (e: string) => void }).pushLog?.(`[bg] ${label}: ${result}`);
+              // Return the result to the chat too (the assistant registers `postToChat`):
+              // it opens the chat and, when idle, feeds the result through `send`, so the
+              // assistant analyzes it in the conversation rather than only toasting it.
+              // The `Background` role label (render) already marks it as a background
+              // result, so the text itself does NOT repeat the "[background]" prefix.
+              (ctx as { postToChat?: (t: string) => void }).postToChat?.(`${label} finished:\n${result}`);
+            } catch (e) {
+              const msg = e instanceof Error ? e.message : String(e);
+              (ctx as { showMessage?: (m: string) => void }).showMessage?.(`⚠ ${label} failed: ${msg}`);
+              (ctx as { pushLog?: (e: string) => void }).pushLog?.(`[bg] ${label} error: ${msg}`);
+              (ctx as { postToChat?: (t: string) => void }).postToChat?.(`${label} failed:\n${msg}`);
+            } finally {
+              bgActive--;
+              (ctx as { notify?: () => void }).notify?.();
+            }
+          });
+        }, ms);
+        return `Background task started (${label}) — will report when done${ms ? ` in ${Math.round(ms / 1000)}s` : ''}.`;
+      }
+      case 'todo': {
+        // The assistant's checkbox plan. Session-only, in-memory — NOT write-
+        // confirmed (like memory/log): a y/n pause on every `todo add` would make
+        // the plan unusable, and the plan is a low-stakes reversible scratchpad.
+        // Every mutation calls ctx.notify() so the chat re-renders the block.
+        const action = String(args.action ?? '').trim();
+        const notify = (ctx as { notify?: () => void }).notify;
+        if (action === 'list') return renderTodoList();
+        if (action === 'set') {
+          // Full-replace (like TodoWrite): the model passes the ENTIRE desired list
+          // and we rewrite the plan wholesale — not a delta, so the plan always
+          // reflects the complete state the model intends. Existing items keep their
+          // id (matched by exact text) so targeting stays stable across updates; new
+          // texts get fresh ids; texts dropped from the list vanish. An EMPTY list is
+          // a valid plan — "no remaining plan": same as `clear`, so a finished task
+          // doesn't leave a stale `▾ plan`. The state is the model's to own; the tool
+          // just renders it.
+          const arr = Array.isArray(args.todos) ? (args.todos as Array<Record<string, unknown>>) : [];
+          const prev = new Map(todoItems.map((t) => [t.text, t.id]));
+          const next: TodoItem[] = [];
+          for (const raw of arr) {
+            const text = String(raw?.text ?? '').trim();
+            if (!text) continue;
+            const id = prev.get(text) ?? todoNextId++;
+            next.push({ id, text, status: normalizeTodoStatus(raw?.status) });
+          }
+          todoItems = next;
+          if (!next.length) todoNextId = 1; // an emptied plan renumbers from 1
+          notify?.();
+          if (!next.length) return 'Plan cleared.';
+          return `Plan set to ${next.length} items: ${renderTodoList().split('\n').join(', ')}`;
+        }
+        if (action === 'add') {
+          // A whole batch may be added in ONE call (`items` — an array of texts), so
+          // the model plans a 20-item plan as one `todo add` rather than 20 separate
+          // parallel calls. Falls back to a single `text` when no `items` are given.
+          // Each item gets its own id/status; the result lists them (with ids) so the
+          // model knows what to target later.
+          const texts: string[] = Array.isArray(args.items)
+            ? (args.items as unknown[]).map((s) => String(s).trim()).filter(Boolean)
+            : [];
+          if (!texts.length) {
+            const t = String(args.text ?? '').trim();
+            if (!t) return 'text is required — the plan item to add.';
+            texts.push(t);
+          }
+          const created = texts.map((text) => {
+            const item: TodoItem = { id: todoNextId++, text, status: 'pending' };
+            todoItems.push(item);
+            return item;
+          });
+          notify?.();
+          const act = todoItems.filter((t) => t.status !== 'done').length;
+          if (created.length === 1) return `Plan: ${created[0].id} · ${created[0].text} (${act} active).`;
+          return `Added ${created.length}: ${created.map((i) => `${i.id} · ${i.text}`).join(', ')} (${act} active).`;
+        }
+        if (action === 'start' || action === 'complete' || action === 'uncomplete') {
+          const hit = resolveTodoItem(args);
+          if ('error' in hit) return hit.error;
+          // Work proceeds through the three states: start → in_progress,
+          // complete → done, uncomplete → reopen to pending.
+          todoItems[hit.idx].status = action === 'start' ? 'in_progress' : action === 'complete' ? 'done' : 'pending';
+          notify?.();
+          const t = todoItems[hit.idx];
+          return `${todoGlyph(t.status)} ${t.id} · ${t.text} (${todoWord(t.status)}).`;
+        }
+        if (action === 'update') {
+          const id = Number(args.id);
+          const text = String(args.text ?? '').trim();
+          if (!text) return 'text is required — the new item text.';
+          const idx = todoItems.findIndex((t) => t.id === id);
+          if (idx === -1) return `Plan item ${id} not found.`;
+          todoItems[idx].text = text;
+          notify?.();
+          return `Plan ${id} updated: ${text}.`;
+        }
+        if (action === 'remove') {
+          const hit = resolveTodoItem(args);
+          if ('error' in hit) return hit.error;
+          const removed = todoItems[hit.idx];
+          todoItems = todoItems.filter((t) => t.id !== removed.id);
+          notify?.();
+          return `Plan item ${removed.id} (${removed.text}) removed.`;
+        }
+        if (action === 'clear') {
+          todoItems = [];
+          todoNextId = 1; // a fresh plan renumbers from 1 — no stale ids to target
+          notify?.();
+          return 'Plan cleared.';
+        }
+        return 'action is required — list|add|complete|uncomplete|update|remove|clear.';
+      }
+      default:
+        throw new Error(`Unknown tool: ${name}`);
+    }
+  },
+});
+
+export default coreTools;

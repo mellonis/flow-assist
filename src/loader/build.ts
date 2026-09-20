@@ -1,0 +1,126 @@
+// Plugin loader. The host is NOT fs-scanned for built-ins (they live in
+// `src/plugins/`) and DOES fs-resolve the enabled plugin set at startup. `loadPlugins`
+// always builds the four built-ins (core/assistant/keycaps/log), then loads every
+// enabled plugin from `plugins-enabled/` (import its default builder, call it with
+// `{ renders, config, make }`). A broken plugin is skipped with `console.warn`.
+//
+// `renders` is the renderer bundle ({ help, chat, log }) that the runtime
+// supplies at startup — the built-in `core.views.help` / `assistant.views.chat` /
+// `log.views.log` reference `renders.help` / `renders.chat` / `renders.log`. `make`
+// is injectable too (tests can supply a custom factory); it defaults to
+// `makeFactory(config)`.
+//
+// NOTE: `PluginRepo` exposes only methods, not its `enabledDir`, so
+// `loadPlugins` also accepts an optional `enabledDir` to resolve
+// `plugins-enabled/<name>` for dynamic import. When it is absent (and an enabled
+// plugin exists), that plugin is skipped with a warning — the test uses an empty
+// enabled set, so this never triggers there.
+
+import { makeFactory } from './plugin.js';
+import type { Make, MakeFactoryConfig, Plugin } from './plugin.js';
+import type { PluginRepo } from './repo.js';
+import { buildCorePlugin } from '../plugins/core.js';
+import { buildAssistantPlugin } from '../plugins/assistant.js';
+import { buildKeycapsPlugin } from '../plugins/keycaps.js';
+import { buildLogPlugin } from '../plugins/log.js';
+import { existsSync, readFileSync, statSync } from 'node:fs';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+
+// A plugin builder: `build<X>Plugin({ renders, config, make })` → Plugin.
+type BuiltinBuilder = (ctx: { renders: Record<string, unknown>; config: Record<string, unknown>; make: Make }) => Plugin;
+
+const BUILTINS: BuiltinBuilder[] = [buildCorePlugin, buildAssistantPlugin, buildKeycapsPlugin, buildLogPlugin];
+
+// Resolves a plugin's entry FILE so the loader imports a concrete module, not a
+// directory. The compiled binary can `import()` an on-disk `.ts` FILE (and follow
+// its relative + node_modules imports), but it CANNOT `import()` an on-disk
+// DIRECTORY — even with a `package.json` `main` — because bun resolves the dir
+// against the embedded `/$bunfs` virtual FS. That mismatch is what made the binary
+// skip every enabled plugin (`Cannot find module '.../plugins-enabled/tracker'`),
+// while `bun src/cli.ts` worked only by luck of the runtime's directory resolution.
+// Importing the entry FILE makes both paths resolve identically.
+function resolvePluginEntry(pluginDir: string): string {
+  // A single-file plugin (a symlink to a .ts): import the file directly.
+  if (statSync(pluginDir).isFile()) return pluginDir;
+  // A plugin directory: honour `package.json` `main`, else try the conventional
+  // entry paths. `main` may be `./src/index.ts` or `src/index.ts`; `join`
+  // normalizes both against the plugin dir.
+  const pkgFile = join(pluginDir, 'package.json');
+  if (existsSync(pkgFile)) {
+    try {
+      const pkg = JSON.parse(readFileSync(pkgFile, 'utf8')) as { main?: unknown };
+      if (typeof pkg.main === 'string' && pkg.main) {
+        const entry = join(pluginDir, pkg.main);
+        if (existsSync(entry)) return entry;
+      }
+    } catch {
+      // Malformed package.json — fall through to the conventional paths.
+    }
+  }
+  for (const candidate of ['./src/index.ts', './index.ts']) {
+    const entry = join(pluginDir, candidate);
+    if (existsSync(entry)) return entry;
+  }
+  throw new Error('no resolvable entry file (package.json main or ./src/index.ts)');
+}
+
+export interface LoadPluginsOptions {
+  config: Record<string, unknown>;
+  repo: PluginRepo;
+  renders?: Record<string, unknown>;
+  make?: Make;
+  // The `plugins-enabled/` dir, needed only to dynamically import enabled plugins.
+  // Omitted → enabled plugins are skipped (built-ins still load).
+  enabledDir?: string;
+}
+
+export async function loadPlugins({
+  config,
+  repo,
+  renders = {},
+  make = makeFactory(config as MakeFactoryConfig),
+  enabledDir,
+}: LoadPluginsOptions): Promise<Plugin[]> {
+  const plugins: Plugin[] = [];
+
+  // Built-ins: always present and not removable (they are not part of the enabled
+  // symlink set).
+  for (const build of BUILTINS) {
+    try {
+      plugins.push(build({ renders, config, make }));
+    } catch (e) {
+      console.warn(`[plugins] builtin skipped: ${(e as Error).message}`);
+    }
+  }
+
+  // Enabled plugins: import each default builder from `plugins-enabled/<name>`.
+  const enabled = await repo.enabledPlugins();
+  for (const name of enabled) {
+    if (!enabledDir) {
+      console.warn(`[plugins] skip ${name}: no enabledDir provided`);
+      continue;
+    }
+    try {
+      // Import the entry FILE (not the symlinked directory), so the compiled binary
+      // and the runtime resolve plugins the same way — see resolvePluginEntry.
+      const entry = resolvePluginEntry(join(enabledDir, name));
+      const mod = (await import(pathToFileURL(entry).href)) as {
+        default?: unknown;
+        build?: unknown;
+      };
+      const build = (mod.default ?? mod.build) as unknown;
+      if (typeof build === 'function') {
+        plugins.push((build as BuiltinBuilder)({ renders, config, make }));
+      } else {
+        console.warn(`[plugins] skip ${name}: default export is not a builder function`);
+      }
+    } catch (e) {
+      console.warn(`[plugins] skip ${name}: ${(e as Error).message}`);
+    }
+  }
+
+  return plugins;
+}
+
+export default loadPlugins;

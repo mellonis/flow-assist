@@ -1,0 +1,29 @@
+{
+  "name": "@local/developer-assistant",
+  "version": "0.0.1",
+  "type": "module",
+  "bin": {
+    "developer-assistant": "src/cli.ts"
+  },
+  "scripts": {
+    "build": "tsc",
+    "build:binary": "echo 'build:binary retired: bun build --compile produces a binary that CANNOT runtime-load on-disk plugins with scoped package deps (a plugin's own dependency resolves against the embedded bunfs, not the OS node_modules, so `import()` of a plugins-enabled entry fails). Run the TUI via `bun src/cli.ts`.' && bun run typecheck",
+    "plugin:publish": "bun run scripts/publish.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@flowtty/react": "^1.0.0-alpha.3",
+    "@flowtty/tty-backend": "^1.0.0-alpha.3",
+    "react": "^19.2.8",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "typescript": "^7.0.2"
+  },
+  "engines": {
+    "bun": ">=1.3.0"
+  }
+}

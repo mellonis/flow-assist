@@ -1,0 +1,156 @@
+// Host services container. `createServices` wires the generic host services into
+// a single `HostServices` object that plugins read via `ft.services`. The generic
+// slice (cache/log/memory/config/chatLLM/compactChat/openBrowser/copyToClipboard)
+// is initialized here, BEFORE plugins load; the React-bound slice
+// (showMessage/pushLog/notify/logs/view) is bound by the App on every render
+// (they need the render loop) — see app.tsx.
+
+import { spawn } from 'node:child_process';
+import { createCacheService } from './services/cache.js';
+import { createLogService } from './services/log.js';
+import { loadMemories, saveMemories, memoryFilePath } from './services/memory.js';
+import { agentChat } from '../assistant/agent.js';
+import type { AgentResult, AgentOpts, ChatMessage, ToolLogger } from '../assistant/agent.js';
+import type { AiToolDef, ToolRegistry } from '../loader/tools.js';
+import type { PluginRepo } from '../loader/repo.js';
+import type { CacheService } from './services/cache.js';
+import type { LogService } from './services/log.js';
+import type { Memory } from './services/memory.js';
+
+// The assistant memory: a plugin reads/updates the memory file. `filePath` is
+// resolved from config.memory.file (default under the host config dir).
+export interface MemoryService {
+  load(): Memory[];
+  save(list: Memory[]): void;
+  filePath(): string;
+}
+
+// The service bundle handed to plugins as `ft.services`. The React-bound members
+// (showMessage/pushLog/notify/logs/view) are mutable — the App reassigns them
+// each render so they stay fresh; the rest is stable.
+export interface HostServices {
+  cache: CacheService;
+  log: LogService;
+  memory: MemoryService;
+  config: Record<string, unknown>;
+  chatLLM: (messages: ChatMessage[], opts?: AgentOpts & Record<string, unknown>) => Promise<AgentResult>;
+  pluginAiTools: AiToolDef[];
+  openBrowser: (url: string) => void;
+  copyToClipboard: (text: string) => void;
+  showMessage: (msg: string) => void;
+  onExit: () => void;
+  clearCache: () => void;
+  pushLog: (entry: string) => void;
+  notify: () => void;
+  logs: string[];
+  // Schedules a timed reminder that fires in the TUI after `ms` milliseconds: it
+  // presents the reminder as a centered top-most banner (`showReminder`) plus a
+  // log entry. The delivery reads the LIVE React-bound channels at fire time (they
+  // are reassigned each render), so a reminder still lands if the App re-rendered
+  // after it was scheduled.
+  setReminder: (text: string, ms: number) => void;
+  // The reminder currently shown (the core plugin's `reminder` component reads
+  // this — null/undefined means none is showing). Set by `showReminder`, cleared
+  // by `dismissReminder` (bound by the App; the component's Esc/Enter handler
+  // calls it).
+  reminder: string | null;
+  showReminder: (text: string) => void;
+  dismissReminder: () => void;
+  // Opens a plugin surface as a favored overlay: the value names the surface
+  // (plugin-defined), and while set the input race gives that surface the key.
+  // The default is a no-op; the App rebinds it (app.tsx) so it mutates the shared
+  // `ui.overlay` and re-renders. Generic — the tracker uses it for its detail view.
+  setOverlay: (overlay: string | null) => void;
+}
+
+export interface CreateServicesOptions {
+  config: Record<string, unknown>;
+  tools?: ToolRegistry;
+  repo?: PluginRepo;
+  onExit: () => void;
+}
+
+// Opens a URL in the system browser (the generic primitive). The tracker builds
+// `issueUrl(target)`; the host only opens. `spawn` is detached + unref'd so the
+// TUI is not tied to the browser process.
+export function openInBrowser(url: string): void {
+  const command = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open';
+  const child = spawn(command, [url], { detached: true, stdio: 'ignore' });
+  child.unref();
+}
+
+// Copies text to the system clipboard. Best-effort: a failure (no clipboard
+// tool) is silently ignored so it never breaks the host. The tracker keeps its
+// own copyToClipboard too; the host exposes it as a generic primitive.
+export function copyToClipboard(text: string): void {
+  try {
+    const proc = process.platform === 'darwin'
+      ? spawn('pbcopy')
+      : process.platform === 'win32'
+        ? spawn('clip')
+        : spawn('xclip', ['-selection', 'clipboard']);
+    proc.stdin.write(text);
+    proc.stdin.end();
+  } catch {
+    // Clipboard is a nice-to-have; a failure must not throw.
+  }
+}
+
+// Assembles the HostServices container. The generic slice is fully wired here;
+// the React-bound slice (showMessage/pushLog/notify/logs/view) defaults to
+// no-ops/stubs and is rebound by the App on every render. `tools` (the assembled
+// ToolRegistry) is the source of plugin ai-tools: the synthetic
+// `<plugin>:aiTools` groups carry the run-bearing defs the agent loop needs as
+// `extraTools`. `repo` is accepted (the registry already owns it) but is not
+// consumed directly.
+export function createServices({ config, tools, repo, onExit }: CreateServicesOptions): HostServices {
+  const cache = createCacheService(config);
+  const log = createLogService(config);
+  const memory: MemoryService = {
+    load: () => loadMemories(memoryFilePath(config)),
+    save: (list) => saveMemories(list, memoryFilePath(config)),
+    filePath: () => memoryFilePath(config),
+  };
+  const pluginAiTools = (tools?.groups ?? [])
+    .filter((g) => g.id.endsWith(':aiTools'))
+    .flatMap((g) => g.tools as AiToolDef[]);
+
+  const services: HostServices = {
+    cache,
+    log,
+    memory,
+    config,
+    // `logToolRun` is wired from the log service so config.debug.logTools
+    // (which `log.logToolRun` gates on) actually logs tool calls — the agent's
+    // no-op default would otherwise leave it inert. A caller-supplied
+    // `logToolRun` wins over ours.
+    chatLLM: (messages, opts) => agentChat(messages, { ...opts, logToolRun: (opts?.logToolRun as ToolLogger | undefined) ?? log.logToolRun }),
+    pluginAiTools,
+    openBrowser: openInBrowser,
+    copyToClipboard,
+    showMessage: () => {},
+    onExit,
+    clearCache: () => { cache.clear(); },
+    pushLog: () => {},
+    notify: () => {},
+    logs: log.read(),
+    setReminder: () => {},
+    reminder: null,
+    showReminder: () => {},
+    dismissReminder: () => {},
+    setOverlay: () => {},
+  };
+  // Read the LIVE channels at fire time (the App reassigns showMessage/pushLog/
+  // notify each render), so the reminder is delivered even if a render happened
+  // after scheduling. setTimeout keeps the host alive for it — the interactive
+  // TUI is long-running; a one-shot CLI exits before it fires. The banner is the
+  // visual (the core `reminder` component reads services.reminder); the log line
+  // keeps the audit trail.
+  services.setReminder = (text, ms) => {
+    setTimeout(() => {
+      services.showReminder(text);
+      services.pushLog(`⏰ Reminder: ${text}`);
+    }, ms);
+  };
+  return services;
+}
