@@ -123,7 +123,7 @@ same reason: a display-only system message never reaches the model.
   that layout is fixed in flowtty, not papered over here.
 - **⏎** sends; while an answer is coming it **queues** instead (sent in order when
   the turn ends). **Esc**: clear the field → take the last queued message back →
-  stop the answer → arm/close. **Alt+⏎** is a newline (`NEWLINE_KEY` in
+  stop the answer → arm/close. **Alt+⏎** (drawn `⌥⏎` on macOS) is a newline (`NEWLINE_KEY` in
   `src/views/modals.ts` — the one spelling every hint uses); a blank line is kept.
   ⇧⏎ works too where the terminal sends it (decoded since flowtty 1.0.0-alpha.7),
   but the hint names the key that works in every terminal that has an Alt.
@@ -140,10 +140,17 @@ same reason: a display-only system message never reaches the model.
   - What is DRAWN for a key is the **third** vocabulary: `keyGlyph` in the same file
     — `⏎ ␣ ⇥ ⌫ ↑`, `^r`, `⌥⏎`, `⇧⇥`; one code point per glyph, a short word where no
     glyph exists. The keycaps panel draws pressed keys with it (the raw name read
-    `return`, and `' '` drew an empty cap). A hint that shows a key as a symbol
-    should go through it too, so one key never looks two ways on a screen — the
-    hand-written `⏎` / `⇥` in the chat hints and the plugins' `keycaps(ft)` labels
-    do not yet.
+    `return`, and `' '` drew an empty cap). Alt is `⌥` on macOS and `Alt+` elsewhere
+    (`META_CAP`).
+  - **Never write a key's symbol by hand in a hint.** Two cases:
+    - the action is BOUND (it is in `ft.keys`, so the person can remap it) → draw
+      `ft.keyCap(action)`; it is `''` when the action is unbound, and then the hint is
+      not shown at all. The host footer (`composeFooterHints`) and the chat's
+      `A chat` hint do this. Host-side code uses `bindingGlyph(keys[action])`.
+    - the key is fixed (the chat's own Enter / Esc / Tab) → `keyGlyph(…)`, as the
+      `CAP` table in `src/views/modals.ts` does.
+    A bundled plugin that still spells caps by hand in its `keycaps(ft)` (acme-tracker)
+    shows the default key after a remap — that is the bug this rule prevents.
 - **↑/↓** walk the prompt history, only while the field is empty or still shows a
   history entry untouched. The **wheel** and **PgUp/PgDn** scroll. **^r** unfolds
   thinking, notes and the tool calls behind the one-line `▸ N tools` summary.

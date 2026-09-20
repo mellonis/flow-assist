@@ -45,6 +45,10 @@ export interface FTRuntime {
   config: Record<string, unknown>;
   // Resolved hotkeys (HOST_DEFAULT_KEYS + plugin keys + config overrides).
   keys: Record<string, string[]>;
+  // The CAP of an action's binding, as drawn: `keyCap('open')` → `⏎`, `z/␣` for two
+  // keys, '' when the action is unbound. A hint a plugin shows for one of its keys
+  // goes through this, so a key the person remapped is the key the hint names.
+  keyCap: (action: string) => string;
   // Surface registry: '<plugin>:<surface>' and the unqualified surface names.
   viewRegistry: Record<string, unknown>;
   // Command registry (base + plugin commands, merged by short name).
@@ -80,6 +84,7 @@ export interface CreateFtInput {
   services: Record<string, unknown>;
   config: Record<string, unknown>;
   keys: Record<string, string[]>;
+  keyCap: (action: string) => string;
   viewRegistry: Record<string, unknown>;
   commandRegistry: unknown;
   helpFor: (registry: unknown) => string;

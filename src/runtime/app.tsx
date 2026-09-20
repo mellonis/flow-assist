@@ -43,7 +43,7 @@ import {
   saveConfigSetting,
   saveConfigUnset,
 } from '../config/load.js';
-import { isKey } from '../playback/keys.js';
+import { bindingGlyph, isKey } from '../playback/keys.js';
 import { resolveAppTheme } from '../playback/theme.js';
 import type { Theme } from '../playback/theme.js';
 import type { Command } from '../loader/plugin.js';
@@ -204,6 +204,7 @@ export function renderApp(
         services: services as unknown as Record<string, unknown>,
         config,
         keys,
+        keyCap: (action: string) => bindingGlyph(keys[action]),
         viewRegistry,
         commandRegistry,
         helpFor,

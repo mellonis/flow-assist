@@ -26,6 +26,10 @@ export type PluginShape = {
   // hints for the plugin's CURRENT context, or `[]` when its surface is inactive.
   // The host footer = its base (`: commands · q quit`) + concat of each plugin's
   // non-empty `keycaps(ft)`. Optional — absent/null means `() => []`.
+  // The key in a hint is `ft.keyCap('<action>')` — the cap of what the action is
+  // bound to NOW — never a letter written in the plugin: the person can remap it,
+  // and the hint would then name a key that does nothing. `''` means unbound: show
+  // no hint for it.
   keycaps?: (ft: unknown) => string[];
   // Whether the plugin keeps data in `services.cache` (default true). The footer
   // offers "flush cache" only while such a plugin is showing hints; a plugin with

@@ -5,7 +5,7 @@
 // set. Key bindings are merged BY ACTION NAME (not namespaced).
 
 import { z } from 'zod';
-import { HOST_DEFAULT_KEYS, canonicalBinding, isKey } from '../playback/keys.js';
+import { HOST_DEFAULT_KEYS, bindingGlyph, canonicalBinding, isKey } from '../playback/keys.js';
 import { hostConfigSchema } from '../config/schema.js';
 import { BASE_COMMANDS, helpText } from '../config/commands.js';
 import type { Command as BaseCommand } from '../config/commands.js';
@@ -150,8 +150,14 @@ export function composeFooterHints(
   pFtMap: Record<string, unknown> = {},
   keys: Record<string, string[]> = {},
 ): string[] {
-  const keyStr = (action: string): string => (keys[action] ?? []).join('/');
-  const hints: string[] = [': commands', `${keyStr('quit') || 'q'} quit`];
+  // Bindings are drawn as CAPS (`bindingGlyph`), and an unbound action (config can
+  // set `[]`) gets no hint at all — it used to fall back to the default letter and so
+  // advertise a key that did nothing.
+  const hint = (action: string, label: string): string[] => {
+    const cap = bindingGlyph(keys[action]);
+    return cap ? [`${cap} ${label}`] : [];
+  };
+  const hints: string[] = [...hint('commandLine', 'commands'), ...hint('quit', 'quit')];
   const shown = plugins
     .map((p) => {
       const kc = (p as Plugin).keycaps;
@@ -161,7 +167,7 @@ export function composeFooterHints(
     .filter((s) => s.hints.length);
   // "flush cache" is offered only while a plugin that keeps something in the cache
   // is on screen — the chat's own hint must not advertise a cache it never fills.
-  if (shown.some((s) => s.caches)) hints.push(`${keyStr('clearCache') || 'x'} flush cache`);
+  if (shown.some((s) => s.caches)) hints.push(...hint('clearCache', 'flush cache'));
   return [...hints, ...shown.flatMap((s) => s.hints)];
 }
 

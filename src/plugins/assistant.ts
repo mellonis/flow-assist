@@ -115,11 +115,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
     // chat says its own keys inside its frame.
     usesCache: false,
     keycaps: (ft) => {
-      const p = ft as { keys?: Record<string, string | string[]>; store?: { chat?: { open?: boolean; unread?: number } } };
+      const p = ft as { keyCap?: (action: string) => string; store?: { chat?: { open?: boolean; unread?: number } } };
       const chat = p.store?.chat;
       if (chat?.open) return [];
-      const key = [p.keys?.chat ?? 'A'].flat()[0];
-      return [`${key} chat${chat?.unread ? ` · ◆ ${chat.unread} new` : ''}`];
+      // The cap of whatever `chat` is bound to now — not a letter written here.
+      const cap = p.keyCap?.('chat') ?? '';
+      if (!cap) return [];
+      return [`${cap} chat${chat?.unread ? ` · ◆ ${chat.unread} new` : ''}`];
     },
     views: { chat: renders.chat },
     components: {

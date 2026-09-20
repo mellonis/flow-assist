@@ -263,7 +263,7 @@ test('reminder banner shows the text and the dismiss hint, centered', async () =
   );
   expect(backend.lastFrame).toContain('reminder');
   expect(backend.lastFrame).toContain('stand up and stretch');
-  expect(backend.lastFrame).toContain('Esc / Enter — dismiss');
+  expect(backend.lastFrame).toContain('Esc / ⏎ — dismiss'); // keys are named by their caps, everywhere
   handle.unmount();
 });
 test('the input keeps a blank line, and the caret can stand on it', () => {

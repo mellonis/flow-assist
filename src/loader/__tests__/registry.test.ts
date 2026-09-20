@@ -174,14 +174,14 @@ test('commandContextFor returns the base ctx for a plugin with no mounted pFt', 
 // Note: this file uses `test`, not `describe` — the cases are flat.
 
 test('composeFooterHints collapses to host base when no plugin is active', () => {
-  const keys = { quit: ['q'], clearCache: ['x'] };
+  const keys = { commandLine: [':'], quit: ['q'], clearCache: ['x'] };
   const hints = composeFooterHints([], {}, keys);
   // No content → no `x flush cache`, no plugin hints.
   expect(hints).toEqual([': commands', 'q quit']);
 });
 
 test('composeFooterHints appends a plugin that returns hints and gates x flush cache', () => {
-  const keys = { quit: ['q'], clearCache: ['x'] };
+  const keys = { commandLine: [':'], quit: ['q'], clearCache: ['x'] };
   const plugin: PluginShape = {
     name: 'tracker',
     keycaps: () => ['f: filters', 'c: board', 'b: browser'],
@@ -191,7 +191,7 @@ test('composeFooterHints appends a plugin that returns hints and gates x flush c
 });
 
 test('composeFooterHints omits a plugin whose keycaps() returns [] (inactive context)', () => {
-  const keys = { quit: ['q'], clearCache: ['x'] };
+  const keys = { commandLine: [':'], quit: ['q'], clearCache: ['x'] };
   const plugin: PluginShape = { name: 'tracker', keycaps: () => [] };
   const hints = composeFooterHints([plugin], { tracker: {} }, keys);
   // No content → also no `x flush cache`.
@@ -199,16 +199,26 @@ test('composeFooterHints omits a plugin whose keycaps() returns [] (inactive con
 });
 
 test('composeFooterHints omits a plugin that declares no keycaps (default inactive)', () => {
-  const keys = { quit: ['q'], clearCache: ['x'] };
+  const keys = { commandLine: [':'], quit: ['q'], clearCache: ['x'] };
   const plugin: PluginShape = { name: 'plain' };
   const hints = composeFooterHints([plugin], { plain: {} }, keys);
   expect(hints).toEqual([': commands', 'q quit']);
 });
 
 test('composeFooterHints omits a plugin whose pFt is not mounted yet', () => {
-  const keys = { quit: ['q'], clearCache: ['x'] };
+  const keys = { commandLine: [':'], quit: ['q'], clearCache: ['x'] };
   const plugin: PluginShape = { name: 'tracker', keycaps: () => ['f: filters'] };
   // No pFt entry → the keycaps fn is never called.
   const hints = composeFooterHints([plugin], {}, keys);
   expect(hints).toEqual([': commands', 'q quit']);
+});
+
+test('the footer names the key the action is bound to NOW, as its cap', () => {
+  // The person remapped quit to Enter-or-space and turned the command line off.
+  const keys = buildKeys([], { keys: { quit: ['enter', 'space'], commandLine: [] } });
+  const hints = composeFooterHints([], {}, keys);
+  // Drawn as caps, not as the terminal's names ('return', ' ') — and an unbound
+  // action gets no hint: it used to fall back to its default letter, advertising a
+  // key that did nothing.
+  expect(hints).toEqual(['⏎/␣ quit']);
 });

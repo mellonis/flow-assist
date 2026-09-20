@@ -122,12 +122,22 @@ const KEY_GLYPHS: Record<string, string> = {
 // (a resolved binding). Modifiers are part of what was pressed: `^r` is not `r`.
 // Shift is shown only with a named key (⇧⇥): for a character the character already
 // says it ('A'), and the decoder reports 'A', not shift+'a'.
-export function keyGlyph(key: string | { name?: string; ctrl?: boolean; meta?: boolean; shift?: boolean }): string {
+// The Alt key is printed ⌥ on a Mac keyboard and "Alt" everywhere else; a cap names
+// what the person will look for on THEIR keyboard.
+export const META_CAP = process.platform === 'darwin' ? '⌥' : 'Alt+';
+export type KeyLike = string | { name?: string; ctrl?: boolean; meta?: boolean; shift?: boolean };
+export function keyGlyph(key: KeyLike): string {
   const k = typeof key === 'string' ? { name: key } : key;
   const name = k.name ?? '';
   const named = Array.from(name).length !== 1;
   const cap = KEY_GLYPHS[name] ?? (/^f\d{1,2}$/.test(name) ? name.toUpperCase() : name);
-  return `${k.ctrl ? '^' : ''}${k.meta ? '⌥' : ''}${k.shift && (named || name === ' ') ? '⇧' : ''}${cap}`;
+  return `${k.ctrl ? '^' : ''}${k.meta ? META_CAP : ''}${k.shift && (named || name === ' ') ? '⇧' : ''}${cap}`;
+}
+// A whole binding as caps: `['return']` → `⏎`, `['z', ' ']` → `z/␣`. Empty when the
+// action is unbound (config may disable one with `[]`) — a hint for it must not be
+// shown at all, which is the caller's business.
+export function bindingGlyph(binding: string | string[] | null | undefined): string {
+  return canonicalBinding(binding).map((k) => keyGlyph(k)).join('/');
 }
 
 // Host base of key bindings: only the shared/navigation actions the host keeps.

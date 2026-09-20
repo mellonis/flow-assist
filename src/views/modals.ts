@@ -20,6 +20,7 @@
 
 import { askRows, type AskRow, type AskState } from '../assistant/ask.js';
 import { createElement as h, useEffect, useRef, useState } from 'react';
+import { keyGlyph } from '../playback/keys.js';
 import {
   Box,
   ScrollBox,
@@ -207,7 +208,22 @@ export const ASSISTANT_MARK = 'ƒ';
 // without the kitty keyboard protocol most terminals send a bare CR for it, and
 // when one does send CSI-u, flowtty's decoder (alpha.6) names it 'csi-u', not
 // `return` + `shift`. The handler still accepts `shift`, for the day that lands.
-export const NEWLINE_KEY = 'Alt+⏎';
+// The caps the chat's hints name. They come from the one glyph dictionary
+// (`keyGlyph`), so a key reads the same here, in the footer and on the keycaps panel
+// — the hints used to mix `⏎`, `Enter` and `Space` for keys drawn elsewhere as ⏎ ␣.
+// These keys are the chat's own and are not remappable; an action that IS bound
+// through `config.keys` must be drawn with `ft.keyCap(action)` instead.
+const CAP = {
+  enter: keyGlyph('return'),
+  esc: keyGlyph('escape'),
+  tab: keyGlyph('tab'),
+  space: keyGlyph(' '),
+  upDown: `${keyGlyph('up')}${keyGlyph('down')}`,
+  page: `${keyGlyph('pageup')}/${keyGlyph('pagedown')}`,
+  details: keyGlyph({ name: 'r', ctrl: true }),
+} as const;
+// Alt+Enter: ⌥⏎ on a Mac, Alt+⏎ elsewhere.
+export const NEWLINE_KEY = keyGlyph({ name: 'return', meta: true });
 
 // `todo ×2, memory` — the tools of a turn, in the order first used.
 function toolSummary(runs: ToolRun[]): string {
@@ -337,7 +353,7 @@ function ChatMessages({ messages, wrap, showReasoning, palette: m, errorColor }:
   return h(ScrollBox, { ref: box, anchor: 'bottom', flexGrow: 1, flexShrink: 1, flexDirection: 'column', onScroll: (_o: number, x: ScrollMetrics) => see(x), onMetrics: see },
     rows.length
       ? null
-      : h(Text, { dim: true }, `Ask anything. ⏎ sends, ${NEWLINE_KEY} starts a new line, / opens the commands.`),
+      : h(Text, { dim: true }, `Ask anything. ${CAP.enter} sends, ${NEWLINE_KEY} starts a new line, / opens the commands.`),
     rows.map((row, i) => {
       const key = `chat-${i}`;
       if (row.gap) return h(Box, { key, height: 1, flexShrink: 0 });
@@ -356,7 +372,7 @@ function ChatMessages({ messages, wrap, showReasoning, palette: m, errorColor }:
           h(Text, null, ' '.repeat(GUTTER)),
           row.duration ? h(Text, { dim: true }, `${fmtSec(row.duration)}${runs.length ? ' · ' : ''}`) : null,
           runs.length ? h(Text, { dim: !failed, color: failed ? errorColor : wrote ? m.warn : m.ok }, `${showReasoning ? '▾' : '▸'} ${runs.length} tool${runs.length === 1 ? '' : 's'}${wrote ? ' ✎' : ''}: `) : null,
-          runs.length ? h(Text, { dim: true }, `${toolSummary(runs)}${showReasoning ? '' : ' · ^r'}`) : null);
+          runs.length ? h(Text, { dim: true }, `${toolSummary(runs)}${showReasoning ? '' : ` · ${CAP.details}`}`) : null);
       }
       const ground = groundOf(row.role);
       const groundStyle = ground ? { width: '100%', backgroundColor: ground } : {};
@@ -504,12 +520,12 @@ export function renderChatModal({
       error ? h(Text, { color: 'red' }, `⚠ ${error}`) : null,
       h(Text, (emptyNotice && !streaming && !toolLabel && !escArmed) ? { color: 'yellow' } : { dim: true },
         escArmed
-          ? 'Enter Esc again to exit'
+          ? `${CAP.esc} again to exit`
           : (streaming || toolLabel)
-            ? `${spin(elapsed)} ${fmtSec(elapsed)}${toolCount ? ` · ${toolCount} tool call${toolCount === 1 ? '' : 's'}` : ''}${toolLabel ? ` · ${toolLabel}` : ''} · Esc stops`
+            ? `${spin(elapsed)} ${fmtSec(elapsed)}${toolCount ? ` · ${toolCount} tool call${toolCount === 1 ? '' : 's'}` : ''}${toolLabel ? ` · ${toolLabel}` : ''} · ${CAP.esc} stops`
             : emptyNotice
               ? `⚠ ${emptyNotice}`
-              : (`↑↓ history · wheel or PgUp/PgDn scroll · ^r details · / commands${bgCount > 0 ? ` · ${bgCount} in background` : ''}`)),
+              : (`${CAP.upDown} history · wheel or ${CAP.page} scroll · ${CAP.details} details · / commands${bgCount > 0 ? ` · ${bgCount} in background` : ''}`)),
       // The task plan sits ABOVE the input (not above the messages) — the newest
       // answer stays pinned just above it, so a growing plan never hides it. Its
       // height (todoH) is accounted for in `available`.
@@ -527,9 +543,9 @@ export function renderChatModal({
         : null,
       queued.length
         ? h(Box, { flexDirection: 'row', width: '100%' },
-            h(Text, { bold: true, color: m.warn }, `⏎ queued${queued.length > 1 ? ` (${queued.length})` : ''}: `),
+            h(Text, { bold: true, color: m.warn }, `${CAP.enter} queued${queued.length > 1 ? ` (${queued.length})` : ''}: `),
             h(Text, { wrap: 'truncate', color: m.warn }, `${queued[0]!.replace(/\s+/g, ' ').slice(0, Math.max(10, wrap - 40))}${queued.length > 1 ? ' …' : ''}`),
-            h(Text, { dim: true }, ' · Esc takes it back'))
+            h(Text, { dim: true }, ` · ${CAP.esc} takes it back`))
         : null,
       // The input field group (the y/n confirm block or the multiline input box).
       h(Box, { flexDirection: 'column', width: '100%' },
@@ -539,7 +555,7 @@ export function renderChatModal({
           ? h(Box, { flexDirection: 'column', width: '100%', gap: 1, border: 'round', paddingX: 1, borderColor: 'yellow', backgroundColor: m.bg },
               h(Text, { bold: true, color: 'yellow' }, `⚠ Confirm write: ${confirmAsk.name}`),
               h(Text, { dim: true, wrap: 'truncate' }, confirmAsk.args),
-              h(Text, { color: theme?.error }, 'Press y to confirm · n to decline · Esc to cancel'))
+              h(Text, { color: theme?.error }, `Press y to confirm · n to decline · ${CAP.esc} to cancel`))
           : h(Box, { flexDirection: 'column', width: '100%', backgroundColor: m.fieldBg },
               visible.map((row, i) => {
                 // The prompt marks the field's first line; it dims while an answer is
@@ -560,9 +576,9 @@ export function renderChatModal({
                   prompt,
                   row.before ? h(Text, { wrap: 'truncate' }, row.before) : null,
                   ...offer,
-                  others.length ? h(Text, { wrap: 'truncate', dim: true }, `  ⇥ ${others.join(' · ')}`) : null,
+                  others.length ? h(Text, { wrap: 'truncate', dim: true }, `  ${CAP.tab} ${others.join(' · ')}`) : null,
                   input === ''
-                    ? h(Text, { wrap: 'truncate', dim: true }, streaming ? ' an answer is coming — ⏎ queues your next message' : ` ⏎ send · ${NEWLINE_KEY} new line · Esc Esc close`)
+                    ? h(Text, { wrap: 'truncate', dim: true }, streaming ? ` an answer is coming — ${CAP.enter} queues your next message` : ` ${CAP.enter} send · ${NEWLINE_KEY} new line · ${CAP.esc} ${CAP.esc} close`)
                     // Text after the caret is the person's own text — drawn like the rest
                     // of it. It used to take the placeholder's dim and went grey whenever
                     // the caret moved back.
@@ -579,10 +595,10 @@ function renderAsk(state: AskState, bg: string | undefined, wrap: number) {
   const rows = askRows(state);
   const mark = (r: AskRow) => (q.multiSelect && !r.other ? (r.picked ? '[x]' : '[ ]') : r.active ? ' ❯ ' : '   ');
   const hint = state.typing
-    ? '⏎ submit · Esc back to the list'
+    ? `${CAP.enter} submit · ${CAP.esc} back to the list`
     : q.multiSelect
-      ? '↑↓ move · Space toggle · ⏎ confirm · Esc dismiss'
-      : '↑↓ move · ⏎ or a digit to answer · Esc dismiss';
+      ? `${CAP.upDown} move · ${CAP.space} toggle · ${CAP.enter} confirm · ${CAP.esc} dismiss`
+      : `${CAP.upDown} move · ${CAP.enter} or a digit to answer · ${CAP.esc} dismiss`;
   return h(Box, { flexDirection: 'column', width: '100%', border: 'round', paddingX: 1, borderColor: 'cyan', backgroundColor: bg },
     h(Text, { bold: true, color: 'cyan', wrap: 'wrap' }, `? ${many}${q.header ? `${q.header} — ` : ''}${q.question}`),
     ...rows.map((r, i) => h(Box, { key: i, flexDirection: 'column' },
@@ -690,7 +706,7 @@ export function renderHelp({
       gap: 1,
     },
       helpText.split('\n').map((line, i) => h(Text, { key: i, dim: true }, line)),
-      h(Text, { dim: true }, 'Esc / Enter / q — close'),
+      h(Text, { dim: true }, `${CAP.esc} / ${CAP.enter} / q — close`),
     ),
   );
 }
@@ -740,7 +756,7 @@ export function renderReminder({
       gap: 1,
     },
       h(Text, { wrap: 'wrap' }, text ?? ''),
-      h(Text, { dim: true }, 'Esc / Enter — dismiss'),
+      h(Text, { dim: true }, `${CAP.esc} / ${CAP.enter} — dismiss`),
     ),
   );
 }
