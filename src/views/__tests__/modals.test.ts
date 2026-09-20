@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { createElement as h } from 'react';
 import { render } from '@flowtty/react';
 import { TestBackend } from '@flowtty/core/testing';
+import { MODAL_COLOR_DEFAULTS } from '../../playback/theme.js';
 import { inputVisualRows, renderChatModal, renderHelp, renderLogModal, renderReminder } from '../modals.js';
 
 // Task #20: the built-in modal renderers were deferred to an "empty-shell"
@@ -20,7 +21,7 @@ const baseChat = {
   streaming: false,
 };
 
-test('chat renders the You/Assistant role labels for a conversation', async () => {
+test('chat marks who is speaking with a gutter marker, not a role label', async () => {
   const backend = new TestBackend(80, 24);
   const handle = await render(
     h(renderChatModal, {
@@ -32,26 +33,37 @@ test('chat renders the You/Assistant role labels for a conversation', async () =
     }),
     backend,
   );
-  expect(backend.lastFrame).toContain('You');
-  expect(backend.lastFrame).toContain('Assistant');
+  // The person's message carries the input field's own prompt; the answer sits
+  // under it in the same gutter, so the text lines up whoever speaks.
+  expect(backend.lastFrame).toContain('› hello');
+  expect(backend.lastFrame).toMatch(/ {2}hi there/);
+  expect(backend.lastFrame).not.toMatch(/\bYou\b|\bAssistant\b/);
   handle.unmount();
 });
 
-test('chat renders a background-result message under a Background label, not as You', async () => {
+test('chat marks a background result with its own marker and ground, never as the person', async () => {
   const backend = new TestBackend(80, 24);
   const handle = await render(
     h(renderChatModal, {
       ...baseChat,
-      // The text a `background` task posts (no "[background]" prefix — the label
-      // carries it), so only the Background role marker distinguishes it.
+      // The text a `background` task posts carries no "[background]" prefix: the ◆
+      // marker and its own ground are what set it apart from the person's messages.
+      // The colours a real app resolves from the theme (baseChat carries none).
+      theme: { modals: { chat: MODAL_COLOR_DEFAULTS.chat } },
       messages: [{ role: 'bg', content: 'hello world finished:\nhello world' }],
     }),
     backend,
   );
-  // The result is NOT a user message — it is marked Background, never You.
-  expect(backend.lastFrame).not.toContain('You');
-  expect(backend.lastFrame).toContain('Background');
+  const rows = backend.lastFrame.split('\n');
+  const y = rows.findIndex((r) => r.includes('◆ hello world finished:'));
+  expect(y).toBeGreaterThanOrEqual(0);
+  expect(backend.lastFrame).not.toContain('› hello world');
   expect(backend.lastFrame).not.toContain('[background]');
+  // Its ground differs from the person's, so the two are told apart at a glance.
+  const cell = backend.lastBuffer!.get(rows[y]!.indexOf('◆'), y).style;
+  expect(cell.fg).toBe('magenta');
+  expect(cell.bg).toBe('#2a2438');
+  expect(cell.bg).not.toBe('#2b2b40');
   handle.unmount();
 });
 
@@ -168,7 +180,6 @@ test('chat footer shows the live background-task count when bg tasks are running
     }),
     backend,
   );
-  // The status/tip line appends «· N in background».
   expect(backend.lastFrame).toContain('2 in background');
   handle.unmount();
 });

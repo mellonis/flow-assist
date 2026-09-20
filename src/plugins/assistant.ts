@@ -160,6 +160,19 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // handler reads a fresh value.
           const [cursor, setCursor] = f.useState(0);
           const cursorRef = f.useRef(cursor); cursorRef.current = cursor;
+          // Messages sent while an answer was coming. They go out in order when the
+          // turn ends; Esc takes the last one back into the field. queueRef is what
+          // the handlers act on, `queued` mirrors it for the render.
+          const queueRef = f.useRef<string[]>([]);
+          const [queued, setQueued] = f.useState<string[]>([]);
+          const syncQueue = () => { setQueued(queueRef.current.slice()); f.notify(); };
+          // Prompt history for ↑/↓. `histAt` is the entry on screen (null = the draft),
+          // `histShown` is its text — an arrow only replaces the field while it still
+          // shows exactly that, so a draft being typed is never lost to a keypress.
+          const historyRef = f.useRef<string[]>([]);
+          const histAt = f.useRef<number | null>(null);
+          const histShown = f.useRef<string>('');
+          const setField = (t: string) => { setInput(t); inputRef.current = t; setCursor(Array.from(t).length); f.notify(); };
           // Exit «arming» by Esc: 0 — not armed; else ms when the first Esc was pressed.
           // A second Esc within the window closes the chat; any other key disarms.
           const [escArmAt, setEscArmAt] = f.useState(0);
@@ -289,6 +302,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             const apiMsgs: ChatMessage[] = apiHistory(apiRef.current);
             const displayMsgs = [...history];
             if (sys) { displayMsgs.unshift({ role: 'system', content: sys }); apiMsgs.unshift({ role: 'system', content: sys }); }
+            if (!opts.fromBackground && historyRef.current.at(-1) !== q) historyRef.current.push(q);
+            histAt.current = null;
+            histShown.current = '';
             displayMsgs.push({ role: opts.fromBackground ? 'bg' : 'user', content: q });
             apiMsgs.push({ role: 'user', content: q });
             // The question joins the model's history now, so a failed or cancelled
@@ -482,6 +498,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               setStreaming(false);
               setToolLabel('');
               abortRef.current = null;
+              // The person's queued messages go first, in order; a cancelled turn
+              // keeps them queued rather than firing into a conversation just stopped.
+              if (!aborted && queueRef.current.length) {
+                const nextQueued = queueRef.current.shift() as string;
+                syncQueue();
+                setTimeout(() => { void send(nextQueued); }, 0);
+              }
             }
             return true;
           };
@@ -580,7 +603,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // legitimate result; only already-queued pending ones are stale.)
                 bgQueueRef.current = [];
                 clearFlush();
-                apiRef.current = []; summaryRef.current = '';
+                apiRef.current = []; summaryRef.current = ''; queueRef.current = []; setQueued([]);
                 setMessages([]);
                 setInput(''); inputRef.current = '';
                 setCursor(0);
@@ -621,7 +644,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // continues the history, nothing is cleared.
             if (issueId !== ctxIssueIdRef.current) {
               ctxIssueIdRef.current = issueId;
-              apiRef.current = []; summaryRef.current = '';
+              apiRef.current = []; summaryRef.current = ''; queueRef.current = []; setQueued([]);
               setMessages([]);
               // Task change — a new session: reset the status fields too, else the
               // «limit of steps» warning / tool name from the old task moves into the new.
@@ -650,7 +673,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // renders — and unlike setting it HERE, it doesn't trip send()'s own
           // `if (streamRef.current) return false` guard (which dropped the result).
           flushPending = () => {
-            if (streamRef.current || inputRef.current) return;
+            if (streamRef.current || inputRef.current || queueRef.current.length) return;
             const q = bgQueueRef.current.shift();
             if (q == null) { clearFlush(); return; }
             setOpen(true);
@@ -705,6 +728,11 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   disarmEsc();
                   return true;
                 }
+                if (queueRef.current.length) {
+                  setField(queueRef.current.pop() as string);
+                  syncQueue();
+                  return true;
+                }
                 if (streamRef.current) { abortRef.current?.abort(); return true; }
                 if (escArmed) { closeChat(); return true; }
                 armEsc();
@@ -753,11 +781,29 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               if (key.name === 'enter' || key.name === 'return') {
                 const cmd = inputRef.current.trim();
                 disarmEsc();
-                if (cmd.startsWith('/')) runChatCommand(cmd.slice(1)); else send();
+                if (cmd.startsWith('/')) runChatCommand(cmd.slice(1));
+                else if (streamRef.current) {
+                  // An answer is coming: queue instead of dropping the keypress.
+                  if (cmd) { queueRef.current.push(cmd); setField(''); syncQueue(); }
+                } else send();
                 return true;
               }
-              if (key.name === 'up') { setScroll(s => Math.min(s + 1, 1e6)); return true; }
-              if (key.name === 'down') { setScroll(s => Math.max(0, s - 1)); return true; }
+              // ── ↑/↓ — prompt history. Only while the field is empty or still shows
+              // the history entry untouched; a draft is never replaced.
+              if (key.name === 'up' || key.name === 'down') {
+                const hist = historyRef.current;
+                const untouched = inputRef.current === '' || (histAt.current != null && inputRef.current === histShown.current);
+                if (!hist.length || !untouched) return true;
+                const at = histAt.current;
+                const next = key.name === 'up' ? (at == null ? hist.length - 1 : Math.max(0, at - 1)) : (at == null ? null : at + 1 >= hist.length ? null : at + 1);
+                histAt.current = next;
+                histShown.current = next == null ? '' : hist[next]!;
+                setField(histShown.current);
+                return true;
+              }
+              // ── PgUp/PgDn — scroll the conversation (the arrows belong to history).
+              if (key.name === 'pageup') { setScroll(s => Math.min(s + 8, 1e6)); return true; }
+              if (key.name === 'pagedown') { setScroll(s => Math.max(0, s - 8)); return true; }
               // Ctrl+r — fold/unfold the model's «thinking».
               if (key.name === 'r' && key.ctrl) { setShowReasoning(v => !v); return true; }
               // ── caret movement in the input field (codepoint index) ──
@@ -822,6 +868,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             width, height, theme: f.config.theme, messages, input, streaming, error, scroll, toolLabel, showReasoning, cursor, escArmed,
             pendingConfirm: pendingAsk,
             pendingQuestion,
+            queued,
             currentIssueId: (f.services as Record<string, any>).currentIssue?.id,
             elapsed: elapsedMs, emptyNotice, toolCount, completions,
             // Live count of IN-FLIGHT background tasks (the host re-renders via

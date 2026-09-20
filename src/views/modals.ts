@@ -79,6 +79,11 @@ interface ChatRow {
   // `label` is overloaded in the source: `true` marks the role-label row, or a
   // string is the reason/fold-header text (`reasoning`, `reasoning + tools`).
   label?: boolean | string;
+  // The first content row of a message: it carries the speaker's marker.
+  first?: boolean;
+  // The quiet line under an answer: how long it took and which tools ran.
+  meta?: boolean;
+  runs?: ToolRun[];
   duration?: number;
   reasonHeader?: boolean;
   open?: boolean;
@@ -107,14 +112,6 @@ interface Theme {
 const SPINNER = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 const spin = (ms: number) => SPINNER[Math.floor(ms / 120) % SPINNER.length];
 const fmtSec = (ms: number) => `${(ms / 1000).toFixed(1)}s`;
-// A plural for the counters: the one / few / many forms.
-const pluralNs = (n: number, one: string, few: string, many: string): string => {
-  const m10 = n % 10;
-  const m100 = n % 100;
-  if (m10 === 1 && m100 !== 11) return `${n} ${one}`;
-  if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return `${n} ${few}`;
-  return `${n} ${many}`;
-};
 
 // ─── Markdown → styled lines (GFM tables handled before layoutMarkdown) ────────
 // layoutMarkdown does not understand GFM pipe tables (their rows collapse into one
@@ -298,8 +295,21 @@ function toolRunText(run: ToolRun, wrap: number): Span {
   return { text: text.slice(0, Math.max(20, (wrap || 80) - 1)), dim: true };
 }
 
+// Every content row is indented by a two-cell gutter: the speaker's marker sits in
+// it on a message's first row (`› ` for the person, `◆ ` for a background result),
+// so text lines up whoever is speaking and no role label is needed.
+const GUTTER = 2;
+
+// `todo ×2, memory` — the tools of a turn, in the order first used.
+function toolSummary(runs: ToolRun[]): string {
+  const count = new Map<string, number>();
+  for (const r of runs) count.set(r.name, (count.get(r.name) ?? 0) + 1);
+  return [...count].map(([name, n]) => (n > 1 ? `${name} ×${n}` : name)).join(', ');
+}
+
 function chatRows(messages: ChatMsg[], wrap: number, showReasoning: boolean): ChatRow[] {
   const rows: ChatRow[] = [];
+  const inner = Math.max(10, wrap - GUTTER);
   for (let mi = 0; mi < messages.length; mi++) {
     const m = messages[mi];
     const role = m.role;
@@ -314,22 +324,25 @@ function chatRows(messages: ChatMsg[], wrap: number, showReasoning: boolean): Ch
     const hasR = !!reasoning;
     const hasP = !!process;
     const hasL = !!live;
-    if (role === 'assistant' && (hasR || hasP || hasL)) {
-      const label = (hasR && hasP) ? 'reasoning + tools' : (hasR ? 'reasoning' : 'tool calls');
+    // Text streaming with no reasoning and no tool round behind it IS the answer
+    // arriving: it is drawn as content, not folded under a "tool calls" header.
+    const liveIsAnswer = hasL && !hasR && !hasP;
+    if (role === 'assistant' && (hasR || hasP)) {
+      // What the model said on the way: its thinking, and its notes between tool calls.
+      const label = (hasR && hasP) ? 'thinking + notes' : (hasR ? 'thinking' : 'notes');
       rows.push({ role, reasonHeader: true, open: !!showReasoning, label });
-      const bodyLines = mdLines([reasoning, process, live].filter(Boolean).join('\n\n'), wrap);
+      const bodyLines = mdLines([reasoning, process, live].filter(Boolean).join('\n\n'), inner);
       const shown = showReasoning ? bodyLines : bodyLines.slice(-2);
       for (const line of shown) rows.push({ role, reason: true, spans: line.spans });
       rows.push({ gap: true });
     }
-    rows.push({ role, label: true, duration: role === 'assistant' ? m.duration : undefined });
-    const text = String(m.content ?? '');
-    for (const line of mdLines(text, wrap)) rows.push({ role, spans: line.spans });
-    const runs = Array.isArray(m.toolRuns) ? m.toolRuns : [];
-    if (runs.length) {
-      rows.push({ role, toolRunsHdr: true });
-      for (const run of runs) rows.push({ role, toolRun: true, spans: [toolRunText(run as ToolRun, wrap)] });
-    }
+    const text = String(m.content ?? '') || (liveIsAnswer ? live : '');
+    mdLines(text, inner).forEach((line, li) => rows.push({ role, spans: line.spans, first: li === 0 }));
+    const runs = (Array.isArray(m.toolRuns) ? m.toolRuns : []) as ToolRun[];
+    const duration = role === 'assistant' && Number(m.duration) >= 1000 ? m.duration : undefined;
+    // One quiet line under the answer; ^r unfolds the calls themselves.
+    if (runs.length || duration) rows.push({ role, meta: true, duration, runs });
+    if (runs.length && showReasoning) for (const run of runs) rows.push({ role, toolRun: true, spans: [toolRunText(run, inner)] });
     if (mi < messages.length - 1) rows.push({ gap: true });
   }
   return rows;
@@ -359,6 +372,7 @@ export function renderChatModal({
   escArmed = false,
   pendingConfirm = null,
   pendingQuestion = null,
+  queued = [],
   elapsed = 0,
   emptyNotice = '',
   toolCount = 0,
@@ -381,6 +395,8 @@ export function renderChatModal({
   escArmed?: boolean;
   pendingConfirm?: { name: string; args?: string | unknown } | null;
   pendingQuestion?: AskState | null;
+  // Messages sent while an answer was coming; they go out, in order, when the turn ends.
+  queued?: string[];
   elapsed?: number;
   emptyNotice?: string;
   toolCount?: number;
@@ -392,13 +408,9 @@ export function renderChatModal({
   const boxH = Math.min(Math.floor(height * 0.82), height - 4);
   const wrap = Math.max(20, boxW - 6);
   const m = (theme?.modals?.chat ?? {}) as Record<string, string | undefined>;
-  // `bg` = a background-task result injected into the chat (postToChat) — it is NOT
-  // the user's own message, so render it under a dim "Background" label (no bubble).
-  const labelOf = (msg: ChatMsg) => (msg.role === 'user' ? 'You' : msg.role === 'system' ? 'Context' : msg.role === 'bg' ? 'Background' : 'Assistant');
-  const colorOf = (msg: ChatMsg) => (msg.role === 'user' ? 'green' : msg.role === 'system' ? 'dim' : msg.role === 'bg' ? 'dim' : 'cyan');
   const errorH = error ? 1 : 0;
   const statusH = 1;
-  const fieldW = Math.max(20, boxW - 4);
+  const fieldW = Math.max(20, boxW - 4 - GUTTER); // the prompt lives in the gutter
   const fieldRows = inputVisualRows(input, cursor, fieldW);
   const caretLi = Math.max(0, fieldRows.findIndex((r) => r.caret !== ''));
   const MAX_INPUT_LINES = 5;
@@ -432,12 +444,13 @@ export function renderChatModal({
   // Before, the plan's gap was not counted, so `available` was one row too generous
   // and the newest message row slid under the plan block.
   const completionsH = completions && completions.matches.length ? 1 : 0;
-  const gaps = (error ? 1 : 0) + completionsH + (planList.length ? 1 : 0) + 2;
-  const available = Math.max(2, boxH - 2 - 2 - errorH - statusH - completionsH - inputH - todoH - gaps);
+  const queuedH = queued.length ? 1 : 0;
+  const gaps = (error ? 1 : 0) + completionsH + queuedH + (planList.length ? 1 : 0) + 2;
+  const available = Math.max(2, boxH - 2 - 2 - errorH - statusH - completionsH - queuedH - inputH - todoH - gaps);
   const rows = chatRows(messages, wrap, showReasoning);
   const total = rows.length;
   let lastUserKey = -1;
-  for (let i = 0; i < rows.length; i++) if (rows[i].role === 'user' && rows[i].label) lastUserKey = i;
+  for (let i = 0; i < rows.length; i++) if (rows[i].role === 'user' && rows[i].first) lastUserKey = i;
   let lastUserText = '';
   for (let mi = messages.length - 1; mi >= 0; mi--) {
     if (messages[mi]?.role === 'user') { lastUserText = String(messages[mi].content ?? '').trim(); break; }
@@ -452,8 +465,15 @@ export function renderChatModal({
   const scr = Math.min(Math.max(0, scroll), maxScroll);
   const start = Math.max(0, total - viewN - scr);
   const win = rows.slice(start, start + viewN);
-  const userBg = m.userBg;
-  const userStyle = userBg ? { width: '100%', backgroundColor: userBg } : null;
+  // Who is speaking is said by a marker in the gutter and by the ground under the
+  // message — not by a label. The person's marker is the input field's own prompt.
+  const groundOf = (role?: string) => (role === 'user' ? m.userBg : role === 'bg' ? m.bgBg : undefined);
+  const gutter = (row: ChatRow) => {
+    if (row.first && row.role === 'user') return h(Text, { bold: true, color: m.accent }, '› ');
+    if (row.first && row.role === 'bg') return h(Text, { bold: true, color: m.bgAccent }, '◆ ');
+    return h(Text, null, ' '.repeat(GUTTER));
+  };
+  const userStyle = m.userBg ? { width: '100%', backgroundColor: m.userBg } : null;
   const confirmAsk = pendingConfirm
     ? {
         name: pendingConfirm.name,
@@ -480,11 +500,11 @@ export function renderChatModal({
     h(
       Box,
       {
-        border: 'double',
+        border: 'round',
         backgroundColor: m.bg,
         borderBackgroundColor: m.borderBg,
         borderColor: m.border,
-        borderTitle: `Chat about ${currentIssueId ?? ''}`.replace(/\s+$/, ''),
+        borderTitle: currentIssueId ? `Flow Assist · ${currentIssueId}` : 'Flow Assist',
         width: boxW,
         height: boxH,
         padding: 1,
@@ -495,32 +515,40 @@ export function renderChatModal({
       h(Box, { flexGrow: 1, flexShrink: 1, flexDirection: 'column', overflow: 'hidden' },
         win.length
           ? null
-          : h(Text, { dim: true }, 'Ask about this task — /compact compresses the history, /refresh-context shows the context.'),
+          : h(Text, { dim: true }, 'Ask anything. ⏎ sends, ⇧⏎ starts a new line, / opens the commands.'),
         pinned
-          ? h(Box, { key: 'chat-sticky', ...(userStyle || { backgroundColor: undefined, width: '100%' }) },
-              h(Text, { dim: true }, `You: ${lastUserText.length > 40 ? `${lastUserText.slice(0, 40)}…` : lastUserText || '…'}`))
+          ? h(Box, { key: 'chat-sticky', flexDirection: 'row', ...(userStyle || { backgroundColor: undefined, width: '100%' }) },
+              h(Text, { bold: true, dim: true, color: m.accent }, '› '),
+              h(Text, { dim: true }, lastUserText.length > 60 ? `${lastUserText.slice(0, 60)}…` : lastUserText || '…'))
           : null,
         win.map((row, i) => {
           const key = `chat-${start + i}`;
           if (row.gap) return h(Box, { key, height: 1 });
-          if (row.reasonHeader) return h(Text, { key, dim: true, color: 'magenta' }, row.open ? `▾ ${row.label}` : `▸ ${row.label} · ^r`);
+          if (row.reasonHeader) return h(Text, { key, dim: true, color: 'magenta' }, `${' '.repeat(GUTTER)}${row.open ? '▾' : '▸'} ${row.label}`);
           if (row.reason) return h(Box, { key, flexDirection: 'row' },
+            h(Text, null, ' '.repeat(GUTTER)),
             (row.spans || []).map((s, j) => h(Text, { key: j, dim: true, bold: s.bold, underline: s.underline, color: s.color }, String(s.text ?? ''))));
-          if (row.toolRunsHdr) return h(Text, { key, dim: true, color: 'magenta' }, '▾ tool calls');
           if (row.toolRun) return h(Box, { key, flexDirection: 'row' },
+            h(Text, null, ' '.repeat(GUTTER)),
             (row.spans || []).map((s, j) => h(Text, { key: j, dim: true }, String(s.text ?? ''))));
-          if (row.label) {
-            const label = h(Text, { bold: true, color: colorOf(row as ChatMsg) }, labelOf(row as ChatMsg));
-            if (row.role === 'assistant' && row.duration) {
-              return h(Box, { key, flexDirection: 'row' }, label, h(Text, { dim: true }, ` · ${fmtSec(row.duration)}`));
-            }
-            return (row.role === 'user' && userStyle) ? h(Box, { key, ...userStyle }, label) : h(Text, { key, bold: true, color: colorOf(row as ChatMsg) }, labelOf(row as ChatMsg));
+          if (row.meta) {
+            const runs = row.runs ?? [];
+            const wrote = runs.some((r) => r.outcome === 'applied');
+            const failed = runs.some((r) => r.outcome === 'error' || r.outcome === 'declined');
+            return h(Box, { key, flexDirection: 'row' },
+              h(Text, null, ' '.repeat(GUTTER)),
+              row.duration ? h(Text, { dim: true }, `${fmtSec(row.duration)}${runs.length ? ' · ' : ''}`) : null,
+              runs.length ? h(Text, { dim: !failed, color: failed ? theme?.error : wrote ? m.warn : m.ok }, `${showReasoning ? '▾' : '▸'} ${runs.length} tool${runs.length === 1 ? '' : 's'}${wrote ? ' ✎' : ''}: `) : null,
+              runs.length ? h(Text, { dim: true }, `${toolSummary(runs)}${showReasoning ? '' : ' · ^r'}`) : null);
           }
+          const ground = groundOf(row.role);
+          const groundStyle = ground ? { width: '100%', backgroundColor: ground } : {};
           if (row.spans && row.spans.length) {
             const inner = row.spans.map((s, j) => h(Text, { key: j, bold: s.bold, dim: s.dim, underline: s.underline, color: s.color }, String(s.text ?? '')));
-            return h(Box, { key, flexDirection: 'row', ...((row.role === 'user' && userStyle) ? userStyle : {}) }, inner);
+            return h(Box, { key, flexDirection: 'row', ...groundStyle }, gutter(row), inner);
           }
-          return h(Box, { key, height: 1 });
+          // A blank line inside a message keeps the message's ground.
+          return h(Box, { key, height: 1, ...groundStyle });
         }),
       ),
       error ? h(Text, { color: 'red' }, `⚠ ${error}`) : null,
@@ -528,10 +556,10 @@ export function renderChatModal({
         escArmed
           ? 'Enter Esc again to exit'
           : (streaming || toolLabel)
-            ? `${spin(elapsed)} ${fmtSec(elapsed)}${toolCount ? ` · ${toolCount} tool call${toolCount === 1 ? '' : 's'}` : ''}${toolLabel ? ` · ${toolLabel}` : ''}`
+            ? `${spin(elapsed)} ${fmtSec(elapsed)}${toolCount ? ` · ${toolCount} tool call${toolCount === 1 ? '' : 's'}` : ''}${toolLabel ? ` · ${toolLabel}` : ''} · Esc stops`
             : emptyNotice
               ? `⚠ ${emptyNotice}`
-              : (`↑↓ scroll · ^r reasoning · /refresh-context · /compact · /clear${bgCount > 0 ? ` · ${bgCount} in background` : ''}`)),
+              : (`↑↓ history · PgUp/PgDn scroll · ^r details · / commands${bgCount > 0 ? ` · ${bgCount} in background` : ''}`)),
       // Slash-command autocomplete (Task #20): the `/`-candidate row, highlighted at
       // `sel`. Tab cycles the highlight (handled in the plugin); a new prefix restarts.
       completions && completions.matches.length
@@ -554,29 +582,37 @@ export function renderChatModal({
             planSummary ? h(Text, { dim: true, color: 'yellow' }, planSummary) : null,
           )
         : null,
+      queued.length
+        ? h(Box, { flexDirection: 'row', width: '100%' },
+            h(Text, { bold: true, color: m.warn }, `⏎ queued${queued.length > 1 ? ` (${queued.length})` : ''}: `),
+            h(Text, { wrap: 'truncate', color: m.warn }, `${queued[0]!.replace(/\s+/g, ' ').slice(0, Math.max(10, wrap - 40))}${queued.length > 1 ? ' …' : ''}`),
+            h(Text, { dim: true }, ' · Esc takes it back'))
+        : null,
       // The input field group (the y/n confirm block or the multiline input box).
       h(Box, { flexDirection: 'column', width: '100%' },
         pendingQuestion
           ? renderAsk(pendingQuestion, m.bg, wrap)
           : confirmAsk
-          ? h(Box, { flexDirection: 'column', width: '100%', gap: 1, border: 'single', paddingX: 1, borderColor: 'yellow', backgroundColor: m.bg },
+          ? h(Box, { flexDirection: 'column', width: '100%', gap: 1, border: 'round', paddingX: 1, borderColor: 'yellow', backgroundColor: m.bg },
               h(Text, { bold: true, color: 'yellow' }, `⚠ Confirm write: ${confirmAsk.name}`),
               h(Text, { dim: true, wrap: 'truncate' }, confirmAsk.args),
               h(Text, { color: theme?.error }, 'Press y to confirm · n to decline · Esc to cancel'))
-          : (streaming && !input)
-            ? h(Text, { dim: true }, '…')
-            : visible.map((row, i) => {
+          : h(Box, { flexDirection: 'column', width: '100%', backgroundColor: m.fieldBg },
+              visible.map((row, i) => {
+                // The prompt marks the field's first line; it dims while an answer is
+                // coming, when ⏎ queues instead of sending.
+                const prompt = h(Text, { bold: !streaming, dim: streaming, color: m.accent }, visible[i] === fieldRows[0] ? '› ' : ' '.repeat(GUTTER));
                 // A blank line still takes a row: an empty Text has no height and the
                 // line would vanish, which is how "two newlines" used to collapse.
-                if (row.caret === '') return h(Text, { key: i, wrap: 'truncate' }, row.before || ' ');
-                const isEmpty = input === '';
+                if (row.caret === '') return h(Box, { key: i, flexDirection: 'row' }, prompt, h(Text, { wrap: 'truncate' }, row.before || ' '));
                 return h(Box, { key: i, flexDirection: 'row' },
+                  prompt,
                   row.before ? h(Text, { wrap: 'truncate' }, row.before) : null,
                   h(Text, { inverse: true }, row.caret),
-                  isEmpty
-                    ? h(Text, { wrap: 'truncate', dim: true }, 'Type a question · ⏎ send · /cmd · Esc Esc exit')
+                  input === ''
+                    ? h(Text, { wrap: 'truncate', dim: true }, streaming ? ' an answer is coming — ⏎ queues your next message' : ' ⏎ send · ⇧⏎ new line · Esc Esc close')
                     : row.after ? h(Text, { wrap: 'truncate', dim: true }, row.after) : null);
-              }),
+              })),
       ),
     ),
   );
@@ -601,7 +637,7 @@ function renderAsk(state: AskState, bg: string | undefined, wrap: number) {
     : q.multiSelect
       ? '↑↓ move · Space toggle · ⏎ confirm · Esc dismiss'
       : '↑↓ move · ⏎ or a digit to answer · Esc dismiss';
-  return h(Box, { flexDirection: 'column', width: '100%', border: 'single', paddingX: 1, borderColor: 'cyan', backgroundColor: bg },
+  return h(Box, { flexDirection: 'column', width: '100%', border: 'round', paddingX: 1, borderColor: 'cyan', backgroundColor: bg },
     h(Text, { bold: true, color: 'cyan', wrap: 'wrap' }, `? ${many}${q.header ? `${q.header} — ` : ''}${q.question}`),
     ...rows.map((r, i) => h(Box, { key: i, flexDirection: 'column' },
       h(Text, { bold: r.active, inverse: r.active && !state.typing, wrap: 'truncate' }, `${mark(r)} ${i + 1}. ${r.label}`),

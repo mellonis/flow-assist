@@ -76,7 +76,13 @@ export const MODAL_COLOR_DEFAULTS: Record<string, Record<string, string>> = {
   // no background; the full-width Box wrappers in the render carry it). Overridable
   // via config.plugins.chat.colors.userBg. If removed the background disappears,
   // leaving only the separators and the sticky dump without a background.
-  chat: { userBg: '#2b2b40' },
+  // The chat's own colours, every one overridable via config.plugins.assistant.colors:
+  //   accent   — the `›` prompt, shared by the input field and the person's messages
+  //   userBg   — the ground under the person's messages
+  //   fieldBg  — the ground under the input field
+  //   bgAccent / bgBg — the `◆` marker and ground of a background-task result
+  //   warn     — things waiting on the person (the queue); ok — finished work
+  chat: { userBg: '#2b2b40', accent: 'cyan', fieldBg: '#1f1f2e', bgAccent: 'magenta', bgBg: '#2a2438', warn: 'yellow', ok: 'green' },
   relation: { border: 'blue' },
   delete: { border: 'red' },
   story: { border: 'green', selected: 'yellow' },

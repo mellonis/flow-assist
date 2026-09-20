@@ -9,10 +9,10 @@ dropped into `plugins-available/`, which ignores everything not bundled.
 
 ## Language rule
 
-Specs, implementation plans, and **code comments are written in English**. Help
-strings shown to the user may stay in the session language. Russian comments
-from ported source are translated during the port and are never left in the new
-tree.
+Specs, implementation plans, and **code comments are written in English**. Russian
+comments from ported source are translated during the port and are never left in
+the new tree. The host's own UI — the chat, its hints, its status line — is
+English throughout; a half-translated screen is worse than either language.
 
 ## Stack
 
@@ -47,10 +47,66 @@ A plugin module default-exports `build<Name>Plugin({ renders, config, make })`.
 `make(name, shape)` injects `config.plugins.<name>` and qualified keys. The
 returned `shape` has optional: `commands`, `keys`, `keyActions`, `views`,
 `surface`, `modals`, `colors`, `configSchema`, `components`, `tools`, `services`,
-`aiTools`. `components[slot] = (ft) => Component`; `services` expose host
-services through `ft.services`. Tool groups are delivered by plugins — there is
+`aiTools`, `keycaps(ft)`, `setup(ft)`. `components[slot] = (ft) => Component`;
+`services` expose host services through `ft.services` — the host wins on every
+key it owns, a plugin's same-named key never clobbers it. `setup(ft)` runs once,
+before any of the plugin's components mount (it is where a plugin seeds its store). Tool groups are delivered by plugins — there is
 **no** `tools-available/` → `tools-enabled/` repository; `ai.disabledTools` is
 the blacklist.
+
+## What the model can do (the `core` tool group)
+
+`memory`, `config_schema`, `datetime`, `remind`, `background`, `todo`, `ask_user`,
+`open_url`, plus `host:plugins_list`. Three rules hold this set together:
+
+- **Config is the person's.** The model gets `config_schema` — keys, types,
+  set/unset, active defaults, effective key bindings, each plugin's flags — and
+  **no values and no write**. Config is the model's own leash (`disabledTools`,
+  `baseUrl`, `tokenEnv`, plugin roots) and the assistant reads other people's text,
+  so even a y/n-confirmed write is one prompt injection plus one tired keypress
+  away. The model answers with the `config set <key> <value>` command to run.
+- **The log is the person's too.** No log tool; `/log [N]` shares the tail of the
+  host log as the person's own message.
+- **`ask_user`** (1–4 questions, 2–4 options each, optional multi-select, an
+  "Other…" row the UI always adds) is a pure state machine in
+  `src/assistant/ask.ts`; the chat owns only the pause and the render. A
+  background task is never given the hook — a question popping up would seize the
+  keyboard mid-sentence — so there the tool answers "nobody to ask".
+
+A qualified tool name (`plugin:tool`) is translated to a provider-safe wire name
+(`plugin__tool`) in `src/assistant/agent.ts` and nowhere else: providers validate
+names against `^[a-zA-Z0-9_-]{1,128}$`.
+
+## The conversation the model sees
+
+**The chat's display list is never the model's history.** `agentChat` returns the
+turn's `transcript` (assistant messages with `tool_calls`, every tool result, the
+final answer) and the chat keeps it in a model-side history (`apiRef`) beside the
+display list; `apiHistory()` sends API fields only and never half of a
+call/result pair. Replaying only each turn's final text shows the model a
+conversation in which state changed with no tool call in sight, and it imitates
+that: it narrates the change and guesses at state. `scripts/eval-tool-use.ts`
+measured it — 1 tool call in 15 turns with 14 false claims, against 15 in 15 with
+none. `/compact`'s summary rides in the system context of every later turn for the
+same reason: a display-only system message never reaches the model.
+
+## The chat
+
+- Who speaks is said by a **gutter marker and a ground**, not a label: `›` on the
+  user ground for the person (the input field's own prompt), `◆` on its own ground
+  for a background result, nothing for the answer. Colours come from
+  `theme.modals.chat` (`accent`, `userBg`, `fieldBg`, `bgAccent`, `bgBg`, `warn`,
+  `ok`) and are overridable via `config.plugins.assistant.colors`.
+- **⏎** sends; while an answer is coming it **queues** instead (sent in order when
+  the turn ends). **Esc**: clear the field → take the last queued message back →
+  stop the answer → arm/close. **⇧⏎** is a newline; a blank line is kept.
+- **↑/↓** walk the prompt history, only while the field is empty or still shows a
+  history entry untouched. **PgUp/PgDn** scroll. **^r** unfolds thinking, notes
+  and the tool calls behind the one-line `▸ N tools` summary.
+- The view sums the heights of everything under the message list by hand
+  (`available` in `renderChatModal`): a new block there must add its own height,
+  or it is clipped. Moving this to flex (`flexGrow` + `overflow` + `onLayout`) is
+  the intended fix.
 
 ## CLI
 
@@ -69,9 +125,24 @@ the blacklist.
 
 ## Testing
 
-From the host root: `bun run build && bun run typecheck && bun test`.
+From the host root: `bun run typecheck && bun test ./src ./scripts` (the path
+filter keeps a locally dropped-in plugin's suite out of the host run).
 Plugin tests: `cd plugins-available/<name> && bun test`.
 The host suite must pass with `plugins-available/` empty — a host test never loads a real plugin.
+
+- `src/__tests__/helpers/scripted.ts` — a scripted model and a booted app: the
+  REAL TUI on a test backend with only the network replaced. Steps are text,
+  a tool call, or a `hold` that freezes the stream until `release()`. End-to-end
+  tests drive the app through it; assert on the frame AND on cell styles
+  (`backend.lastBuffer`).
+- `bun scripts/ui-frames.ts [--size WxH] [--color|--styles] [scenario…]` — the same
+  rig for eyes: frames at named checkpoints, no network. Look at a display change
+  before and after with it.
+- `bun scripts/eval-tool-use.ts` — a behavioural eval against a LIVE model (costs
+  money; `--fake` checks the harness): rates by turn, false claims, `--history
+  display|api` as an A/B, `--show` prints the dialogue.
+- A fake for a validating route must reject what the real one rejects; prove a
+  new test fails on the bug before trusting it.
 
 ## Git
 

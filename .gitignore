@@ -1,5 +1,8 @@
 # Dependencies
 node_modules/
+# …and as a symlink: a worktree links the main checkout's copy, and a trailing
+# slash matches directories only.
+node_modules
 
 # Build output
 dist/
