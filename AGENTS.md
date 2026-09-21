@@ -471,6 +471,12 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   Only with the caret at the end of a one-line `/word`. In the field, dim means
   "offered, not yours yet" — the person's own text is never dimmed, on either side
   of the caret.
+- The **status line** while a turn runs says what happens NOW: a running tool's label
+  (`⚙ name(args)…`, `$ command`) pulses through bright colours; once the model writes
+  again the label goes and the line says `writing…`. The stream callbacks are
+  closures made when the message was sent, so anything they READ (the tool label
+  they clear) is kept in a ref beside the state — reading the state there saw its
+  send-time value, and a finished tool's label stayed up for the rest of the turn.
 - A **background result** (the `background` tool's nested run finishing) is SHOWN as
   soon as no turn is being written — a half-typed draft does not hold it back. It
   does not open the chat and does not spend a model turn: it joins the model's

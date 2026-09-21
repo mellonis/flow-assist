@@ -136,6 +136,9 @@ const overlay = (width: number, height: number, zIndex = 10) => ({
 
 const SPINNER = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 const spin = (ms: number) => SPINNER[Math.floor(ms / 120) % SPINNER.length];
+// The running tool's label cycles through these — movement says "still working" where
+// a static label read as "stuck".
+const TOOL_PULSE = (m: Record<string, string | undefined>) => [m.accent ?? 'cyan', 'cyanBright', 'white', 'cyanBright'];
 const fmtSec = (ms: number) => `${(ms / 1000).toFixed(1)}s`;
 
 // ─── Markdown → styled lines ──────────────────────────────────────────────────
@@ -557,12 +560,20 @@ export function renderChatModal({
       // put while the hint changes, and turns yellow when it is time to /compact.
       h(Box, { flexDirection: 'row', width: '100%', flexShrink: 0 },
       h(Box, { flexGrow: 1, flexShrink: 1, overflow: 'hidden' },
-      h(Text, (emptyNotice && !streaming && !toolLabel && !escArmed) ? { color: 'yellow', wrap: 'truncate' } : { dim: true, wrap: 'truncate' },
+      (!escArmed && (streaming || toolLabel))
+        // Working: what is happening NOW is the bright part. A tool that is running
+        // pulses through the accent colours; with none running the model is writing
+        // (its notes fold above), and the line says so instead of naming the last tool.
+        ? h(Box, { flexDirection: 'row', overflow: 'hidden' },
+            h(Text, { dim: true, wrap: 'truncate' }, `${spin(elapsed)} ${fmtSec(elapsed)}${toolCount ? ` · ${toolCount} tool call${toolCount === 1 ? '' : 's'}` : ''} · `),
+            toolLabel
+              ? h(Text, { color: TOOL_PULSE(m)[Math.floor(elapsed / 300) % 4], bold: true, wrap: 'truncate' }, toolLabel)
+              : h(Text, { color: m.assistantAccent ?? 'green', wrap: 'truncate' }, 'writing…'),
+            h(Text, { dim: true, wrap: 'truncate' }, ` · ${CAP.esc} stops`))
+        : h(Text, (emptyNotice && !streaming && !toolLabel && !escArmed) ? { color: 'yellow', wrap: 'truncate' } : { dim: true, wrap: 'truncate' },
         escArmed
           ? `${CAP.esc} again to exit`
-          : (streaming || toolLabel)
-            ? `${spin(elapsed)} ${fmtSec(elapsed)}${toolCount ? ` · ${toolCount} tool call${toolCount === 1 ? '' : 's'}` : ''}${toolLabel ? ` · ${toolLabel}` : ''} · ${CAP.esc} stops`
-            : emptyNotice
+          : emptyNotice
               ? `⚠ ${emptyNotice}`
               : (`${CAP.upDown} history · wheel or ${CAP.page} scroll · ${CAP.details} details · / commands${bgCount > 0 ? ` · ${bgCount} in background` : ''}`))),
       contextBadge ? h(Text, contextWarn ? { color: 'yellow' } : { dim: true }, `  ${contextBadge}`) : null),

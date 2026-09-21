@@ -188,7 +188,14 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const [input, setInput] = f.useState('');
           const [streaming, setStreaming] = f.useState(false);
           const [error, setError] = f.useState<string | null>(null);
-          const [toolLabel, setToolLabel] = f.useState(''); // «⚙ calling get_issue…» during tool rounds
+          const [toolLabelState, setToolLabelState] = f.useState(''); // «⚙ calling get_issue…» during tool rounds
+          // Mirrored in a ref: the stream callbacks are closures made when the message was
+          // sent, and they read the label to clear it. Reading the state there saw the
+          // value at send time — empty — so the label of a finished tool never cleared and
+          // the chat looked stuck on it while the model was already writing.
+          const toolLabelRef = f.useRef('');
+          const toolLabel = toolLabelState;
+          const setToolLabel = (v: string) => { toolLabelRef.current = v; setToolLabelState(v); };
           // Show the model's «thinking» (reasoning_content): folded by default (one
           // dim-line «▸ reasoning»), Ctrl+r unfolds/folds all.
           const [showReasoning, setShowReasoning] = f.useState(false);
@@ -557,7 +564,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // on commit it goes to `process` (retelling) or `content` (answer).
                 onLive: (delta: string) => {
                   if (!delta) return;
-                  if (toolLabel) setToolLabel('');
+                  if (toolLabelRef.current) setToolLabel(''); // the tool is done: the model is writing
                   setMessages(cur => {
                     const next = cur.slice();
                     const last = next[next.length - 1];
@@ -569,7 +576,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // reasoning and content arrive in one chunk as parallel streams: we
                 // accumulate reasoning in a separate message field (not content!).
                 onReasoning: (delta: string) => {
-                  if (toolLabel) setToolLabel('');
+                  if (toolLabelRef.current) setToolLabel(''); // the tool is done: the model is writing
                   setMessages(cur => {
                     const next = cur.slice();
                     const last = next[next.length - 1];
