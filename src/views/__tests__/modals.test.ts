@@ -390,6 +390,7 @@ test('a long line of fenced code wraps to the width — every chat row is one te
   const lines = mdLines(`Look:\n\n\`\`\`ts\n${long}\n\`\`\`\n`, 40);
   const widths = lines.map((l) => Array.from(l.spans.map((s) => s.text).join('')).length);
   expect(Math.max(...widths)).toBeLessThanOrEqual(40);
-  // Nothing was dropped on the way.
-  expect(lines.map((l) => l.spans.map((s) => s.text).join('')).join('').replace(/\s/g, '')).toContain('x'.repeat(120));
+  // Nothing was dropped on the way (since alpha.14 every code row, a wrapped one too,
+  // starts with the fence's `│ ` bar).
+  expect(lines.map((l) => l.spans.map((s) => s.text).join('')).join('').replace(/[\s│]/g, '')).toContain('x'.repeat(120));
 });

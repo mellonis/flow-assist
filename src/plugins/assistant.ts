@@ -783,6 +783,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               unreadRef.current += 1;
               setUnread(unreadRef.current);
               publish({ unread: unreadRef.current });
+              // Nobody is looking at the chat: say so beyond the footer counter.
+              (f.services as { alert?: (title: string, body?: string) => void }).alert?.('flow-assist', String(q).split('\n')[0].slice(0, 120));
             }
             f.notify();
           };

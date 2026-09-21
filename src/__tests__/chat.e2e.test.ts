@@ -338,6 +338,9 @@ test('a background result shows at once — a half-typed draft does not hold it 
   expect(frame).toContain('There are 14 TODO comments.');
   expect(frame).toContain('› meanwhile, half a th');
   expect(model.requests).toHaveLength(3);
+  // The chat is open — the result is in front of the person, the terminal stays quiet.
+  expect(ui.backend.notifications).toEqual([]);
+  expect(ui.backend.bells).toBe(0);
 
   // The model still learns of it: the result rides in the history of the next turn.
   model.script([{ text: 'Noted: 14.' }]);
@@ -347,6 +350,25 @@ test('a background result shows at once — a half-typed draft does not hold it 
   await settle(20);
   const sent = model.requests.at(-1)!.messages as { role: string; content: string }[];
   expect(sent.some((m) => m.role === 'user' && String(m.content).includes('There are 14 TODO comments.'))).toBe(true);
+  ui.app.unmount();
+});
+
+test('a fired reminder asks the terminal for attention as well as drawing its banner', async () => {
+  const model = new ScriptedModel();
+  model.script(
+    [{ tool: 'remind', args: { in: '0.2 seconds', text: 'blink' } }],
+    [{ text: 'Will do.' }],
+  );
+  const ui = await bootApp(model, 100, 28);
+  await ui.press('A');
+  await ui.type('remind me to blink');
+  await ui.press('return');
+  await settle(20);
+  expect(ui.backend.notifications).toEqual([]);
+  await new Promise((r) => setTimeout(r, 300));
+  await settle(4);
+  expect(ui.backend.lastFrame).toContain('blink');
+  expect(ui.backend.notifications).toEqual([{ title: '⏰ Reminder', body: 'blink' }]);
   ui.app.unmount();
 });
 
@@ -376,6 +398,8 @@ test('a background result does not open the chat — the footer says it is waiti
   // footer's place for four seconds — and the count is what remains once it is gone.
   expect(ui.backend.lastFrame).not.toContain('Flow Assist');
   expect(ui.backend.lastFrame).toContain('count the TODO comments done');
+  // Nobody is looking at the chat, so the terminal is asked to say so too.
+  expect(ui.backend.notifications).toEqual([{ title: 'flow-assist', body: 'count the TODO comments finished:' }]);
   await new Promise((r) => setTimeout(r, 4100));
   await settle(4);
   expect(ui.backend.lastFrame).not.toContain('Flow Assist');

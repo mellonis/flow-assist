@@ -296,7 +296,10 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   shifts the row in terminals that draw it two cells wide.
 - Markdown in answers — tables included — is laid out by flowtty's
   `layoutMarkdown`. The host adds nothing but the soft `▍` heading marker; a gap in
-  that layout is fixed in flowtty, not papered over here.
+  that layout is fixed in flowtty, not papered over here. Since flowtty
+  1.0.0-alpha.14 fenced code is highlighted in ~25 languages, ```diff is coloured,
+  and a block is a dim language label over rows prefixed with a dim `│ ` (no
+  backtick rows) — a test that joins a block's text must strip that bar.
 - **⏎** sends; while an answer is coming it **queues** instead (sent in order when
   the turn ends). **Esc**: clear the field → take the last queued message back →
   stop the answer → arm/close. **Alt+⏎** (drawn `⌥⏎` on macOS) is a newline (`NEWLINE_KEY` in
@@ -372,7 +375,11 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   does not open the chat and does not spend a model turn: it joins the model's
   history and is read with the person's next message. Landing while the chat is
   closed, it is counted as unread; the host footer shows `A chat · ◆ N new` through
-  the chat plugin's `keycaps`, and opening the chat clears the count.
+  the chat plugin's `keycaps`, and opening the chat clears the count. It also calls
+  `services.alert(title, body)` — flowtty's `notify`: a desktop notification, or the
+  bell where none reaches the terminal (tmux, a bare console), at most one a second.
+  A fired reminder alerts the same way, chat open or not. The App binds `alert` from
+  `useApp()`; tests read `TestBackend.notifications` / `bells`.
   `ai.backgroundFollowUp: true` opts back into a turn per result, and then only
   with the chat open, the field empty and nothing queued.
 - What the footer reads from a plugin (`ft.store.<x>`) must be patched

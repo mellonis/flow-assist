@@ -14,7 +14,7 @@
 // ordering, and how plugin components mount over the shell.
 
 import { pluginConfigs } from '../loader/tools.js';
-import { Box, Text, Markdown, Table, Link, render, useInput, useTerminalSize } from '@flowtty/react';
+import { Box, Text, Markdown, Table, Link, render, useApp, useInput, useTerminalSize } from '@flowtty/react';
 import type { Backend } from '@flowtty/core';
 import { createElement as h, useEffect, useMemo, useRef, useState } from 'react';
 import { createFt } from './ft.js';
@@ -157,6 +157,7 @@ export function renderApp(
     const inputRegistryRef = useRef<LazyInputEntry[]>([]);
     const [, setTick] = useState(0);
     const toast = useToast();
+    const app = useApp();
     const notify = () => setTick((t) => t + 1);
 
     // React-bound services rebound on every render (merged into the shared
@@ -183,6 +184,7 @@ export function renderApp(
       (services as unknown as ReactBoundServices).reminder = null;
       notify();
     };
+    (services as unknown as HostServices).alert = (title, body) => app.notify(title, body);
     // Overlay channel: a plugin opens its overlay surface (e.g. a tracker's
     // detail view) by calling `services.setOverlay(name)`; it mutates the shared
     // `ui.overlay` the input race reads and re-renders so the surface repaints.

@@ -61,6 +61,12 @@ export interface HostServices {
   reminder: string | null;
   showReminder: (text: string) => void;
   dismissReminder: () => void;
+  // Gets the person's attention when they may not be looking: a desktop
+  // notification, or the terminal bell where none reaches the terminal (flowtty's
+  // `notify` decides, and rings at most once a second). The App binds it; the
+  // default is a no-op. Used by a fired reminder and by a background result that
+  // lands while the chat is closed.
+  alert: (title: string, body?: string) => void;
   // Opens a plugin surface as a favored overlay: the value names the surface
   // (plugin-defined), and while set the input race gives that surface the key.
   // The default is a no-op; the App rebinds it (app.tsx) so it mutates the shared
@@ -144,6 +150,7 @@ export function createServices({ config, tools, repo, onExit }: CreateServicesOp
     reminder: null,
     showReminder: () => {},
     dismissReminder: () => {},
+    alert: () => {},
     setOverlay: () => {},
   };
   // Read the LIVE channels at fire time (the App reassigns showMessage/pushLog/
@@ -156,6 +163,7 @@ export function createServices({ config, tools, repo, onExit }: CreateServicesOp
     setTimeout(() => {
       services.showReminder(text);
       services.pushLog(`⏰ Reminder: ${text}`);
+      services.alert('⏰ Reminder', text);
     }, ms);
   };
   return services;
