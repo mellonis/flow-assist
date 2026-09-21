@@ -242,6 +242,7 @@ const CAP = {
   upDown: `${keyGlyph('up')}${keyGlyph('down')}`,
   page: `${keyGlyph('pageup')}/${keyGlyph('pagedown')}`,
   details: keyGlyph({ name: 'r', ctrl: true }),
+  backspace: keyGlyph('backspace'),
 } as const;
 // Alt+Enter: ⌥⏎ on a Mac, Alt+⏎ elsewhere.
 export const NEWLINE_KEY = keyGlyph({ name: 'return', meta: true });
@@ -356,7 +357,9 @@ function ChatMessages({ messages, wrap, showReasoning, palette: m, errorColor }:
   const groundOf = (role?: string) => (role === 'user' || role === 'shell' ? m.userBg : role === 'bg' ? m.bgBg : undefined);
   const gutter = (row: ChatRow) => {
     if (row.first && row.role === 'user') return h(Text, { bold: true, color: m.accent }, '› ');
-    if (row.first && row.role === 'shell') return h(Text, { bold: true, color: m.accent }, '$ ');
+    // Same colour as the shell-mode prompt below — a command reads as one thing
+    // from the `! ` it was typed with to the `$ ` its result appears under.
+    if (row.first && row.role === 'shell') return h(Text, { bold: true, color: m.shell }, '$ ');
     if (row.first && row.role === 'bg') return h(Text, { bold: true, color: m.bgAccent }, '◆ ');
     // A note is the HOST speaking to the person (what /memory found, what /clear kept).
     // It is not part of the conversation and is never sent to the model.
@@ -434,6 +437,7 @@ export function renderChatModal({
   showReasoning = false,
   cursor = 0,
   escArmed = false,
+  shellMode = false,
   pendingConfirm = null,
   pendingQuestion = null,
   queued = [],
@@ -459,6 +463,9 @@ export function renderChatModal({
   showReasoning?: boolean;
   cursor?: number;
   escArmed?: boolean;
+  // The field is in shell mode: the prompt reads `! ` in the shell colour and
+  // Enter runs its text as a command (assistant.ts owns the state machine).
+  shellMode?: boolean;
   // `command`: a run_command call — shown whole and wrapped, since the person is
   // deciding on exactly that line.
   pendingConfirm?: { name: string; args?: string | unknown; command?: string } | null;
@@ -596,8 +603,10 @@ export function renderChatModal({
           : h(Box, { flexDirection: 'column', width: '100%', backgroundColor: m.fieldBg },
               visible.map((row, i) => {
                 // The prompt marks the field's first line; it dims while an answer is
-                // coming, when ⏎ queues instead of sending.
-                const prompt = h(Text, { bold: !streaming, dim: streaming, color: m.accent }, visible[i] === fieldRows[0] ? '› ' : ' '.repeat(GUTTER));
+                // coming, when ⏎ queues instead of sending. Shell mode swaps both the
+                // glyph and the colour — `! ` in m.shell — so the field itself says
+                // what Enter will do, the way Claude Code's bash mode does.
+                const prompt = h(Text, { bold: !streaming, dim: streaming, color: shellMode ? m.shell : m.accent }, visible[i] === fieldRows[0] ? (shellMode ? '! ' : '› ') : ' '.repeat(GUTTER));
                 // A blank line is a real '' — flowtty ≥ 1.0.0-alpha.5 gives an empty Text
                 // its row (it used to collapse, which is how "two newlines" vanished).
                 if (row.caret === '') return h(Box, { key: i, flexDirection: 'row' }, prompt, h(Text, { wrap: 'truncate' }, row.before));
@@ -615,7 +624,9 @@ export function renderChatModal({
                   ...offer,
                   others.length ? h(Text, { wrap: 'truncate', dim: true }, `  ${CAP.tab} ${others.join(' · ')}`) : null,
                   input === ''
-                    ? h(Text, { wrap: 'truncate', dim: true }, streaming ? ` an answer is coming — ${CAP.enter} queues your next message` : ` ${CAP.enter} send · ${NEWLINE_KEY} new line · ${CAP.esc} ${CAP.esc} close`)
+                    ? h(Text, { wrap: 'truncate', dim: true }, shellMode
+                        ? ` ${CAP.enter} run · ${CAP.backspace} on empty leaves ! mode`
+                        : streaming ? ` an answer is coming — ${CAP.enter} queues your next message` : ` ${CAP.enter} send · ${NEWLINE_KEY} new line · ${CAP.esc} ${CAP.esc} close`)
                     // Text after the caret is the person's own text — drawn like the rest
                     // of it. It used to take the placeholder's dim and went grey whenever
                     // the caret moved back.

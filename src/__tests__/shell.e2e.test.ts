@@ -122,11 +122,14 @@ test('a !command is part of the session: after a restart the model still has it'
   await b.press('return');
   await settle(20);
   expect(sentTo(model).some((m) => m.role === 'user' && String(m.content).includes('remembered-output'))).toBe(true);
-  // ↑ brings the command back.
+  // ↑ brings the command back — in shell mode now (shell-mode.e2e.test.ts covers the
+  // mode itself in depth): the prompt reads `! `, not `› !`, and the field holds the
+  // command with the `!` stripped, the way it was typed.
   await b.press('escape');
   await b.press('up');
   await b.press('up');
-  expect(b.backend.lastFrame).toContain('› !echo remembered-output');
+  expect(b.backend.lastFrame).toContain('! echo remembered-output');
+  expect(b.backend.lastFrame).not.toContain('› !echo remembered-output');
   b.app.unmount();
 });
 

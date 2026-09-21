@@ -426,25 +426,45 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   (`src/assistant/copy.ts`); Apple Terminal has no OSC 52. Copy-on-select itself
   waits for flowtty.
 - **`!command` runs a shell command** — the person's own, typed into the field
-  (`!bun test src/features`); the model never reaches this path. It runs through
-  `/bin/sh -c` in its own process group (a timeout, `shell.timeoutMs` 120 s, or Esc
-  kills the whole group), stdin closed, `PAGER`/`GIT_PAGER=cat`,
-  `GIT_TERMINAL_PROMPT=0`; stdout and stderr merged; the output keeps its TAIL
-  (`shell.maxChars` 20000) and says how much was cut. While it runs the chat is busy
-  exactly as while an answer is written (`streamRef`, the spinner, `$ cmd` as the tool
-  label, Esc stops it); a `!` meanwhile is refused, not queued. The result is a message
-  of role `shell` — `$ ` in the accent on the person's ground, a ```console block and
-  one line (`exit 0 · 1.2 s · ~/dir`) — and, like a background result, it joins
-  `apiRef` (`apiHistory` maps `shell` → `user`) and is read with the next message; no
-  turn is spent. It is saved with the session and its line goes into ↑/↓; a `!…` in the
-  field is not a draft. **The directory is remembered** between commands, as in a
-  terminal, and shared with `run_command`: it starts at the first `fs.roots` directory
-  (else the process's), a `cd` moves it only within the roots by real path (the shell
-  writes `pwd -P` to a private temp file after the command — a 4th stdio pipe under
-  Bun lost the report now and then), `exit N` or a kill keeps
-  it, run_command's `cwd` argument is a `cd` that stays, `/clear` and a change of task
-  go back to the root, `/resume` and a restart bring it back. Variables and functions
-  are not kept — every command is a fresh shell.
+  (`!bun test src/features`); the model never reaches this path. `!` typed into an
+  EMPTY field switches the field into **shell mode** instead of being inserted (like
+  Claude Code's bash mode): the prompt glyph reads `! ` instead of `› `, in
+  `theme.modals.chat.shell` (a colour of its own, distinct from `accent` — pick it
+  from `MODAL_COLOR_DEFAULTS.chat` in `src/playback/theme.ts`, checked against
+  flowtty's `NAMED_COLORS` by the theme test). Enter then runs the field text as the
+  command and the mode reverts right after — one command per `!`, even on an empty
+  submit (leaving it engaged would silently redirect the next thing typed into the
+  shell too). Backspace on an empty shell-mode field leaves the mode without deleting
+  anything else; Esc on an empty shell-mode field leaves the mode before the usual
+  double-Esc exit arms (the same "closest thing first" order as Esc's own field-
+  clearing step). `!` after other text, or already in the mode, is just a character —
+  a shell command may itself start with one. A paste is never decoded into a mode
+  switch (pasted text, letters included, fires no binding), so pasting a whole
+  `!command` into an empty field inserts it literally and runs the legacy way: typed
+  or pasted text starting with `!` still runs as a command even outside shell mode
+  (also how ↑/↓ recall worked before shell mode existed, and how a session saved by an
+  older build could still replay one). It runs through `/bin/sh -c` in its own process
+  group (a timeout, `shell.timeoutMs` 120 s, or Esc kills the whole group), stdin
+  closed, `PAGER`/`GIT_PAGER=cat`, `GIT_TERMINAL_PROMPT=0`; stdout and stderr merged;
+  the output keeps its TAIL (`shell.maxChars` 20000) and says how much was cut. While
+  it runs the chat is busy exactly as while an answer is written (`streamRef`, the
+  spinner, `$ cmd` as the tool label, Esc stops it); a `!` meanwhile is refused, not
+  queued. The result is a message of role `shell` — `$ ` in the SAME shell colour as
+  the mode's prompt (a command reads as one thing from typing to result) on the
+  person's ground, a ```console block and one line (`exit 0 · 1.2 s · ~/dir`) — and,
+  like a background result, it joins `apiRef` (`apiHistory` maps `shell` → `user`) and
+  is read with the next message; no turn is spent. It is saved with the session and
+  its line goes into ↑/↓ as `!cmd`; recalling one with ↑ shows it the way it was
+  typed — shell mode on, the field holding `cmd` with the `!` stripped. Shell mode
+  itself is UI state of the field only, never saved and never restored across a
+  restart; a `!…` or a shell-mode field is not a draft. **The directory is remembered**
+  between commands, as in a terminal, and shared with `run_command`: it starts at the
+  first `fs.roots` directory (else the process's), a `cd` moves it only within the
+  roots by real path (the shell writes `pwd -P` to a private temp file after the
+  command — a 4th stdio pipe under Bun lost the report now and then), `exit N` or a
+  kill keeps it, run_command's `cwd` argument is a `cd` that stays, `/clear` and a
+  change of task go back to the root, `/resume` and a restart bring it back. Variables
+  and functions are not kept — every command is a fresh shell.
 - A `/command` **completes inline**, like a shell's autosuggestion: the part not
   typed yet is drawn after the caret in the dimmed accent colour, the other
   candidates follow as `⇥ a · b`, **Tab** takes the offer and then walks the rest.

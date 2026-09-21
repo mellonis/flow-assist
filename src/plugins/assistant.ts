@@ -249,6 +249,15 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const histAt = f.useRef<number | null>(null);
           const histShown = f.useRef<string>('');
           const setField = (t: string) => { setInput(t); inputRef.current = t; setCursor(t.length); f.notify(); };
+          // Shell MODE — `!` typed into an EMPTY field flips it (`! ` in the shell
+          // colour replaces `› `, see src/views/modals.ts); Enter then runs the field
+          // text exactly as the legacy `!<text>` path always has, and the mode reverts
+          // right after — one command per `!`, like Claude Code's bash mode. It is UI
+          // state of the field only: never saved with the session (snapshotSession's
+          // draft rule below) and never restored on a restart.
+          const [shellMode, setShellModeState] = f.useState(false);
+          const shellModeRef = f.useRef(shellMode);
+          const setShellMode = (v: boolean) => { shellModeRef.current = v; setShellModeState(v); };
 
           // ── Sessions (src/assistant/sessions.ts) ───────────────────────────────
           // The conversation is written to disk after every change, so a restart
@@ -265,8 +274,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               version: SESSION_VERSION, id: sessionIdRef.current, title: '', createdAt: createdAtRef.current, updatedAt: new Date().toISOString(),
               messages: msgsRef.current as Record<string, unknown>[], api: apiRef.current as unknown as Record<string, unknown>[],
               summary: summaryRef.current, plan: planRef.current.snapshot(), usage: usageRef.current,
-              // A /command or !command in the field is being run, not drafted (it was "/clear" itself).
-              prompts: historyRef.current.slice(-100), draft: /^\s*[/!]/.test(inputRef.current) ? '' : inputRef.current, issue: ctxIssueIdRef.current,
+              // A /command or !command in the field is being run, not drafted (it was
+              // "/clear" itself); a shell-mode field has no leading `!` left to catch by
+              // that regex, so its own flag is checked too — it is not a draft either.
+              prompts: historyRef.current.slice(-100), draft: (shellModeRef.current || /^\s*[/!]/.test(inputRef.current)) ? '' : inputRef.current, issue: ctxIssueIdRef.current,
               shellCwd: shellRef.current.saved(),
               closed: false, // written means in use — a resumed cleared session is open again
             };
@@ -296,6 +307,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             histAt.current = null;
             msgsRef.current = s.messages as ChatMsg[];
             setMessages(s.messages as ChatMsg[]);
+            setShellMode(false); // the mode is never saved — a restored draft is plain text
             setField(s.draft);
           };
           const startedRef = f.useRef(false);
@@ -878,6 +890,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 }
                 setInput(''); inputRef.current = '';
                 setCursor(0);
+                setShellMode(false); // a fresh conversation opens on a plain prompt
                 setError(null);
                 setEmptyNotice('');
                 setToolCount(0);
@@ -1045,12 +1058,33 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               }
               // Any key except the second Esc disarms the exit.
               if (key.name !== 'escape' && escArmAt > 0) disarmEsc();
-              // ── Esc: non-empty field → clear; streaming → abort; armed → exit;
-              // otherwise arm + hint «Enter Esc again to exit».
+              // ── Shell mode: `!` on an EMPTY, non-shell field switches the prompt
+              // instead of being typed — the field never holds the `!` itself, unlike
+              // the legacy path below. After other text, or already in the mode, `!`
+              // falls through to the editor as a plain character (a shell command may
+              // start with one). Backspace on an empty shell-mode field leaves the mode
+              // without deleting anything else — there is nothing there to delete.
+              if (key.name === '!' && !key.ctrl && !key.meta && !shellMode && inputRef.current === '') {
+                setShellMode(true);
+                return true;
+              }
+              if (key.name === 'backspace' && shellMode && inputRef.current === '') {
+                setShellMode(false);
+                return true;
+              }
+              // ── Esc: non-empty field → clear; empty shell-mode field → leave the
+              // mode (closest thing first, before Esc starts arming a chat-wide exit —
+              // the same order as the field-clearing step above); streaming → abort;
+              // armed → exit; otherwise arm + hint «Enter Esc again to exit».
               if (key.name === 'escape') {
                 if (inputRef.current.length > 0) {
                   setInput(''); inputRef.current = '';
                   setCursor(0);
+                  disarmEsc();
+                  return true;
+                }
+                if (shellMode) {
+                  setShellMode(false);
                   disarmEsc();
                   return true;
                 }
@@ -1094,7 +1128,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               }
               // ── ↑/↓ — prompt history, but only while the field is empty or still shows
               // the history entry untouched; in a draft they move the caret between its
-              // rows (the editor below), so a draft is never replaced.
+              // rows (the editor below), so a draft is never replaced. A `!cmd` entry
+              // (how a shell command is stored, see runShellCommand) is shown the way it
+              // was typed: shell mode on, the field holding `cmd` with the `!` stripped.
               if (key.name === 'up' || key.name === 'down') {
                 const hist = historyRef.current;
                 const untouched = inputRef.current === '' || (histAt.current != null && inputRef.current === histShown.current);
@@ -1103,7 +1139,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   const at = histAt.current;
                   const next = key.name === 'up' ? (at == null ? hist.length - 1 : Math.max(0, at - 1)) : (at == null ? null : at + 1 >= hist.length ? null : at + 1);
                   histAt.current = next;
-                  histShown.current = next == null ? '' : hist[next]!;
+                  const raw = next == null ? '' : hist[next]!;
+                  const isShell = raw.startsWith('!');
+                  histShown.current = isShell ? raw.slice(1) : raw;
+                  setShellMode(isShell);
                   setField(histShown.current);
                   return true;
                 }
@@ -1126,9 +1165,23 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               if (act.kind === 'submit') {
                 const cmd = inputRef.current.trim();
                 disarmEsc();
-                if (cmd.startsWith('/')) runChatCommand(cmd.slice(1));
-                // A `!command` is refused while something runs rather than queued: a
-                // command fired later, into a state nobody is looking at, is a surprise.
+                if (shellMode) {
+                  // One command per `!`, like Claude Code's bash mode — but only once
+                  // it actually SUBMITS: while something else is still running,
+                  // runShellCommand refuses without touching the field (the same
+                  // "refused, not queued" contract `!command` always had), and a
+                  // retried Enter must go through that same refusal again, not fall
+                  // into a mode-less field where the text queues as a chat message
+                  // instead. An empty command still exits the mode — it did submit,
+                  // runShellCommand's own check just has nothing to run.
+                  if (!streamRef.current) setShellMode(false);
+                  void runShellCommand(cmd);
+                } else if (cmd.startsWith('/')) runChatCommand(cmd.slice(1));
+                // A `!command` typed as plain text (not via shell mode — e.g. pasted
+                // whole into an empty field, since a paste is never decoded into a
+                // mode switch) still runs, the legacy way. Refused while something
+                // runs rather than queued: a command fired later, into a state nobody
+                // is looking at, is a surprise.
                 else if (cmd.startsWith('!')) void runShellCommand(cmd.slice(1).trim());
                 else if (streamRef.current) {
                   // An answer is coming: queue instead of dropping the keypress.
@@ -1167,6 +1220,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           }
           return (f.viewRegistry.chat as (p: Record<string, unknown>) => unknown)({
             width, height, theme: f.config.theme, messages, input, streaming, error, toolLabel, showReasoning, cursor, escArmed,
+            shellMode,
             pendingConfirm: pendingAsk,
             pendingQuestion,
             queued,
