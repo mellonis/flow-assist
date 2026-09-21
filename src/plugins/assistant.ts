@@ -11,6 +11,7 @@ import { bgActiveCount } from '../loader/tools-core.js';
 import { createPlan, todoGlyph } from '../assistant/plan.js';
 import { apiHistory, compactConversation, chatLanguage } from '../assistant/agent.js';
 import { copyTarget, copyToClipboard } from '../assistant/copy.js';
+import { KEEP_SESSIONS, SESSION_VERSION, closeSession, flushOnExit, listSessions, loadSession, newSessionId, pruneSessions, saveSession, sessionToContinue, sessionWhen, sessionsDir, type Session } from '../assistant/sessions.js';
 import type { ChatMessage } from '../assistant/agent.js';
 import { editorReducer } from '@flowtty/core';
 import { chatFieldWidth } from '../views/modals.js';
@@ -24,7 +25,7 @@ import type { Plugin } from '../loader/plugin.js';
 
 // Slash-commands of the chat — a single source for runChatCommand and Tab-completion.
 // `/analyze` is a tracker slash command and is removed.
-const CHAT_COMMANDS = ['compact', 'context', 'copy', 'clear', 'memory', 'log', 'exit'];
+const CHAT_COMMANDS = ['compact', 'context', 'copy', 'resume', 'clear', 'memory', 'log', 'exit'];
 
 // A plain object holding every enumerable service, inherited ones included.
 // `for…in` walks the prototype chain, which is exactly what a spread does not.
@@ -226,6 +227,69 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const histAt = f.useRef<number | null>(null);
           const histShown = f.useRef<string>('');
           const setField = (t: string) => { setInput(t); inputRef.current = t; setCursor(t.length); f.notify(); };
+
+          // ── Sessions (src/assistant/sessions.ts) ───────────────────────────────
+          // The conversation is written to disk after every change, so a restart
+          // continues it. A session gets its id when it first has something to keep;
+          // `/clear` starts a new one and leaves the old for `/resume`.
+          const sessDir = sessionsDir(f.config);
+          const sessConf = (f.config.sessions ?? {}) as { resume?: unknown; keep?: unknown };
+          const sessionIdRef = f.useRef('');
+          const createdAtRef = f.useRef('');
+          const saveTimer = f.useRef<ReturnType<typeof setTimeout> | null>(null);
+          const snapshotSession = (): Session => {
+            if (!sessionIdRef.current) { sessionIdRef.current = newSessionId(); createdAtRef.current = new Date().toISOString(); }
+            return {
+              version: SESSION_VERSION, id: sessionIdRef.current, title: '', createdAt: createdAtRef.current, updatedAt: new Date().toISOString(),
+              messages: msgsRef.current as Record<string, unknown>[], api: apiRef.current as unknown as Record<string, unknown>[],
+              summary: summaryRef.current, plan: planRef.current.snapshot(), usage: usageRef.current,
+              // A /command in the field is being run, not drafted (it was "/clear" itself).
+              prompts: historyRef.current.slice(-100), draft: inputRef.current.startsWith('/') ? '' : inputRef.current, issue: ctxIssueIdRef.current,
+              closed: false, // written means in use — a resumed cleared session is open again
+            };
+          };
+          const writeSession = () => {
+            if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null; }
+            if (!sessDir || !msgsRef.current.some((m) => m.role === 'user')) return; // nothing said yet
+            try { saveSession(sessDir, snapshotSession()); } catch (e) {
+              (f.services as Record<string, any>).pushLog?.(`[session] not saved: ${(e as Error).message}`);
+            }
+          };
+          // After the render that carries the change — the screen list is read from msgsRef.
+          const persist = () => {
+            if (saveTimer.current) clearTimeout(saveTimer.current);
+            saveTimer.current = setTimeout(() => { saveTimer.current = null; writeSession(); }, 250);
+          };
+          const writeRef = f.useRef(writeSession); writeRef.current = writeSession;
+          const applySession = (s: Session) => {
+            sessionIdRef.current = s.id; createdAtRef.current = s.createdAt;
+            ctxIssueIdRef.current = s.issue ?? null;
+            apiRef.current = s.api as unknown as ChatMessage[];
+            summaryRef.current = s.summary;
+            planRef.current.load(s.plan);
+            usageRef.current = s.usage;
+            historyRef.current = s.prompts.slice();
+            histAt.current = null;
+            msgsRef.current = s.messages as ChatMsg[];
+            setMessages(s.messages as ChatMsg[]);
+            setField(s.draft);
+          };
+          const startedRef = f.useRef(false);
+          if (!startedRef.current && sessDir) {
+            startedRef.current = true;
+            // Whatever happens at exit, the last change is written (a pending
+            // debounced save would otherwise be lost with the process).
+            flushOnExit(() => writeRef.current());
+            setTimeout(() => {
+              try { pruneSessions(sessDir, Number.isInteger(sessConf.keep) ? Number(sessConf.keep) : KEEP_SESSIONS); } catch { /* not fatal */ }
+              if (sessConf.resume === false || msgsRef.current.length) return;
+              const s = sessionToContinue(sessDir);
+              if (!s) return;
+              applySession(s);
+              (f.services as Record<string, any>).showMessage?.(`Continued «${s.title || 'the last session'}» — /clear starts a new one, /resume lists others`);
+              f.notify();
+            }, 0);
+          }
           // Exit «arming» by Esc: 0 — not armed; else ms when the first Esc was pressed.
           // A second Esc within the window closes the chat; any other key disarms.
           const [escArmAt, setEscArmAt] = f.useState(0);
@@ -375,6 +439,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // turn still leaves it on record; the turn's transcript follows on success.
             apiRef.current = [...apiRef.current, { role: 'user', content: q }];
             setMessages(displayMsgs);
+            persist(); // the question survives a restart even if the answer does not
             setInput('');
             inputRef.current = '';
             setCursor(0);
@@ -564,6 +629,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // streamRef now mirrors the stream lifecycle synchronously: true
               // from its top guard (line ~225), false again when the stream ends.
               streamRef.current = false;
+              persist();
               setStreaming(false);
               setToolLabel('');
               abortRef.current = null;
@@ -632,6 +698,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // the last message, which read as /clear.) A note marks where the model's
               // view now begins and shows the summary it was given.
               setMessages((cur) => [...cur, { role: 'note', content: `── compacted ── the model now sees a summary of everything above, not the messages themselves:\n${summary}` }]);
+              persist();
               setInput('');
               inputRef.current = '';
               setCursor(0);
@@ -661,10 +728,42 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 f.notify();
                 return;
               }
+              case 'resume': {
+                // The saved sessions; with a number — go back to that one. The session
+                // being left is written first, so it is on the list to come back to.
+                if (!sessDir) { setError('sessions are not saved here (no sessions directory)'); return; }
+                writeSession();
+                const list = listSessions(sessDir);
+                const n = Number(arg.trim());
+                if (!arg.trim()) {
+                  const lines = list.slice(0, 15).map((s, i) => `${i + 1}. ${s.title || '(untitled)'} — ${sessionWhen(s.updatedAt)}, ${s.turns} message${s.turns === 1 ? '' : 's'}${s.id === sessionIdRef.current ? ' · this one' : ''}`);
+                  setMessages((cur) => [...cur, { role: 'note', content: lines.length ? `Sessions (newest first) — /resume <number> opens one:\n${lines.join('\n')}` : 'No saved sessions yet.' }]);
+                  setField('');
+                  f.notify();
+                  return;
+                }
+                const pick = Number.isInteger(n) && n >= 1 ? list[n - 1] : undefined;
+                if (!pick) { setError(`/resume takes a number from the list (1–${list.length})`); return; }
+                if (streamRef.current) { setError('an answer is still coming — stop it (Esc) before switching sessions'); return; }
+                const s = loadSession(sessDir, pick.id);
+                if (!s) { setError('that session file cannot be read'); return; }
+                dismissAsk();
+                queueRef.current = []; setQueued([]); bgQueueRef.current = [];
+                setError(null); setEmptyNotice(''); setToolLabel(''); setToolCount(0);
+                applySession(s);
+                (f.services as Record<string, any>).showMessage?.(`Resumed «${s.title || 'session'}»`);
+                f.notify();
+                return;
+              }
               case 'clear':
                 // Full session reset: clear not only messages but everything that would
                 // survive a rebuild — emptyNotice, the tool name/counter, the time, the
-                // stream/tick, the context.
+                // stream/tick, the context. The session is written and left for /resume
+                // — closed, so a restart does not bring back what was just cleared;
+                // what follows is a new one.
+                writeSession();
+                if (sessDir && sessionIdRef.current) { try { closeSession(sessDir, sessionIdRef.current); } catch { /* not fatal */ } }
+                sessionIdRef.current = ''; createdAtRef.current = '';
                 if (tickRef.current) { clearInterval(tickRef.current); tickRef.current = null; }
                 abortRef.current?.abort(); abortRef.current = null;
                 if (pendingRef.current) settleConfirm(false);
@@ -731,6 +830,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // confirmWrite promise would hang and the stream never finish.
             if (pendingRef.current) settleConfirm(false);
             dismissAsk();
+            writeSession(); // the draft too
             setOpen(false);
             openRef.current = false; // the background flush may fire before the next render
             publish({ open: false });
@@ -742,9 +842,16 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // Task change — a new session (fresh context); re-opening the same task
             // continues the history, nothing is cleared.
             if (issueId !== ctxIssueIdRef.current) {
+              // The conversation about the other task is saved and stays on /resume.
+              const had = msgsRef.current.some((m) => m.role === 'user');
+              writeSession();
+              sessionIdRef.current = ''; createdAtRef.current = '';
+              if (had) (f.services as Record<string, any>).showMessage?.(`A new session for ${issueId ?? 'no task'} — /resume goes back to the previous one`);
               ctxIssueIdRef.current = issueId;
               apiRef.current = []; summaryRef.current = ''; queueRef.current = []; setQueued([]);
               usageRef.current = null;
+              planRef.current.reset();
+              msgsRef.current = [];
               setMessages([]);
               // Task change — a new session: reset the status fields too, else the
               // «limit of steps» warning / tool name from the old task moves into the new.
@@ -794,6 +901,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             bgQueueRef.current.shift();
             setMessages((cur) => [...cur, { role: 'bg', content: q }]);
             apiRef.current = [...apiRef.current, { role: 'bg', content: q }];
+            persist();
             if (!openRef.current) {
               unreadRef.current += 1;
               setUnread(unreadRef.current);

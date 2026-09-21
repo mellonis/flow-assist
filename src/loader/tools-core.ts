@@ -66,6 +66,7 @@ const KEY_DEFAULTS: Record<string, string> = {
   // "why can't I select text with the mouse?"
   ui: 'mouse: true — the wheel scrolls the chat; while it is on, selecting text with the mouse needs the terminal\'s bypass: Option held in iTerm2, Shift in most Linux terminals, fn in Apple Terminal (fn+Option there selects a rectangle — to keep a panel\'s borders and the next panel out; View → Allow Mouse Reporting, ⌘R, also toggles reporting). config set ui.mouse false turns it off for good (takes effect on restart). In the chat, /copy copies the last answer\'s code block (/copy answer — the whole answer) to the clipboard without the mouse',
   memory: 'file: memory.json in the config directory; empty to start',
+  sessions: 'dir: sessions/ in the config directory; resume: true — the chat continues the latest session on start (a restart or an update loses nothing); keep: 50 sessions. In the chat, /resume lists the saved sessions and /resume <n> opens one; /clear starts a new session and keeps the old one',
   fs: 'roots: []; no file tools unless a plugin adds them',
   web: `allowlist: [] — every web_fetch asks the person first (a background task cannot fetch at all); a host on the list is fetched without asking, even a local one. maxBytes: ${WEB_DEFAULTS.maxBytes}, timeoutMs: ${WEB_DEFAULTS.timeoutMs}. The web_fetch tool is its own group: config set ai.disabledTools ["web"] turns it off`,
   // "always LOADED", not always visible: each built-in is configured via its own

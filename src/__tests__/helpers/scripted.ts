@@ -6,6 +6,9 @@
 // `hold` that freezes the stream until `release()` — which is how a test acts, or a
 // frame is taken, "while the answer is still coming".
 
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { TestBackend, flush } from '@flowtty/core/testing';
 import { loadPlugins } from '../../loader/build.ts';
 import { makeFactory, type Make, type Plugin } from '../../loader/plugin.ts';
@@ -77,7 +80,10 @@ export const settle = async (n = 10) => { for (let i = 0; i < n; i++) { await fl
 export async function bootApp(model: ScriptedModel, cols = 100, rows = 28, guests?: (make: Make) => Plugin[], extra: Record<string, unknown> = {}) {
   process.env.LLM_TOKEN = 'scripted';
   model.install();
-  const config: Record<string, unknown> = { ai: { baseUrl: 'http://scripted.model', model: 'scripted' }, ...extra };
+  // Sessions go to a fresh temp dir unless a test names one: a test must never write
+  // into, or continue, the person's own saved chats.
+  const sessions = { dir: fs.mkdtempSync(path.join(os.tmpdir(), 'fa-sessions-')) };
+  const config: Record<string, unknown> = { ai: { baseUrl: 'http://scripted.model', model: 'scripted' }, sessions, ...extra };
   const repo = { enabledPlugins: async () => [], list: async () => [] } as never;
   const renders = { chat: renderChatModal, help: renderHelp, log: renderLogModal, reminder: renderReminder };
   const plugins = await loadPlugins({ config, repo, renders: renders as never });

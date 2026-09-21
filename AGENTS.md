@@ -194,6 +194,23 @@ assistant nobody had asked for a board.
   **Tool state that describes a conversation is never module-level** — as a module
   variable the plan outlived `/clear`, was shared with background runs, and leaked
   from one test into the next.
+- **Sessions survive a restart** (`src/assistant/sessions.ts`, one JSON per session
+  in `<config dir>/sessions/`, dir 700 / files 600 — they hold tracker and MR text).
+  A session is ONE object: the screen list, `apiRef` (what the model is sent),
+  `summaryRef`, the plan, the usage reading, the ↑/↓ prompts and the unsent draft —
+  three views of one conversation, saved together or not at all. Not saved: an answer
+  in progress (`live`), a pending y/n or question, the queues. Saves: 250 ms after a
+  question, an answer's end, `/compact`, a background result; at once on closing the
+  chat, `/clear`, `/resume`, a task change, and at process exit (`flushOnExit`). A
+  write is temp file + rename; a file that does not parse is skipped. On start the
+  newest session is continued unless `/clear` closed it (`sessions.resume: false`
+  turns this off); `/clear` and a change of task start a new one and keep the old on
+  `/resume` (`/resume <n>` opens it). The last 400 messages are kept, 50 sessions.
+  **Under `bun test` with no `sessions.dir` nothing touches disk** (`sessionsDir` →
+  null): `bootApp` gives every test a temp dir, and a test that renders the app
+  directly must not write into, or continue, the person's own chats. A restored
+  screen over an empty `apiRef` looks right and is the bug — the e2e tests assert on
+  what the model is SENT after a restart.
 
 A qualified tool name (`plugin:tool`) is translated to a provider-safe wire name
 (`plugin__tool`) in `src/assistant/agent.ts` and nowhere else: providers validate

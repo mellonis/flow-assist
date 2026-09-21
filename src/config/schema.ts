@@ -26,6 +26,9 @@ export const hostConfigSchema = z.object({
   // everywhere, and `/copy` in the chat copies an answer without the mouse.
   ui: z.object({ mouse: z.boolean().optional() }).optional(),
   memory: z.object({ file: z.string() }).optional(),
+  // Chat sessions on disk (src/assistant/sessions.ts): where, whether the app
+  // continues the latest one on start, how many are kept.
+  sessions: z.object({ dir: z.string(), resume: z.boolean(), keep: z.number().int().positive() }).partial().optional(),
   fs: z.object({ roots: z.array(z.string()) }).optional(),
   // web_fetch: hosts fetched without asking (`*.example.com` for subdomains), and limits.
   web: z.object({ allowlist: z.array(z.string()).optional(), maxBytes: z.number().int().positive().optional(), timeoutMs: z.number().int().positive().optional() }).optional(),

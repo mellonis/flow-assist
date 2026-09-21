@@ -26,6 +26,12 @@ bun run src/cli.ts plugins ls                 # enabled plugins
 bun run src/cli.ts "summarize ABC-123"        # one-shot prompt
 ```
 
+The chat is saved as you go and continued on the next start, so a restart or an
+update loses nothing. `/clear` starts a new session and keeps the old one;
+`/resume` lists the saved sessions and `/resume <n>` opens one. Sessions live in
+`sessions/` in the config directory, readable by you only (`sessions.resume: false`
+starts every run empty; `sessions.keep` — how many are kept, 50 by default).
+
 ## Plugins
 
 Source lives in `plugins-available/<name>/`. Enable a plugin with

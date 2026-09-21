@@ -20,6 +20,8 @@ export interface Plan {
   snapshot(): TodoItem[];
   // Empties the plan; ids start again from 1 (a fresh plan has no stale ids).
   reset(): void;
+  // Puts back a plan saved with a session (a restart must not lose it).
+  load(items: { id: number; text: string; status: string }[]): void;
   // The `todo` tool. Returns the text the model reads; calls `notify` after a change.
   exec(args: Record<string, unknown>, notify?: () => void): string;
 }
@@ -81,6 +83,12 @@ export function createPlan(): Plan {
   return {
     snapshot: () => items.map((t) => ({ ...t })),
     reset,
+    load(saved) {
+      items = (Array.isArray(saved) ? saved : [])
+        .filter((t) => t && Number.isInteger(t.id) && typeof t.text === 'string')
+        .map((t) => ({ id: t.id, text: t.text, status: normalizeTodoStatus(t.status) }));
+      nextId = items.reduce((m, t) => Math.max(m, t.id), 0) + 1;
+    },
     exec(args, notify) {
       const action = String(args.action ?? '').trim();
       if (action === 'list') return render();
