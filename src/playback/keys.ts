@@ -4,48 +4,6 @@
 // "Two vocabularies" below): bindings here and in config say 'enter' / 'space'; the
 // terminal says 'return' / ' '.
 
-// Full reference map of default key bindings. This is the tracker plugin's
-// complete map: it includes tracker-domain actions (storyPoints, createSprint,
-// foldSwimlane, filters, tags, comments, subissues, analysisJson, ...) that the
-// host does not own or resolve.
-export const DEFAULT_KEYS: Record<string, string | string[]> = {
-  // command line
-  commandLine: ':',
-  // global
-  log: 'L',
-  bookmarks: 'M',          // opens the bookmarks popup; also Shift+m
-  quit: [],                // the `:quit` command; see HOST_DEFAULT_KEYS
-  search: '/',
-  back: ['escape'],
-  // navigation
-  prev: 'up',
-  next: 'down',
-  open: ['enter', 'return'],
-  openBrowser: 'b',
-  // sprints
-  createSprint: 'c',
-  // task list
-  bookmark: 'm',           // mark/unmark a bookmark (without Shift)
-  filters: 'f',
-  toggleBoard: 'g',
-  clearCache: 'x',
-  // board
-  foldSwimlane: ['space', 'z'],
-  boardPicker: 'c',
-  // detail
-  infoPanel: 'i',
-  relations: 'r',
-  addRelation: 'R',        // also Shift+r
-  storyPoints: 'p',
-  tags: 't',
-  comments: 'c',
-  subissues: 's',
-  analyze: 'a',
-  analysisJson: 'j',
-  chat: 'F',               // opens the chat with the LLM (Shift+f; lowercase 'f' is filters)
-  attachment: 'o',
-};
-
 // ─── Two vocabularies, and the one place they meet ─────────────────────────────
 // A key has a name in two different languages:
 //   - what the TERMINAL says — the `key.name` flowtty's decoder produces: 'return',
@@ -156,9 +114,7 @@ export function bindingGlyph(binding: string | string[] | null | undefined): str
 // its own `keys` field instead — the plugin registers its own hotkeys, with a
 // default or `[]` (disabled). The builder assembles the final map from
 // HOST_DEFAULT_KEYS + plugin keys + config.plugins.<name>.keys + config.keys
-// (config wins). Note: HOST_DEFAULT_KEYS is the resolvable base for the host —
-// DEFAULT_KEYS above is the full reference map for the tracker plugin, and is NOT
-// the host's base.
+// (config wins).
 export const HOST_DEFAULT_KEYS: Record<string, string | string[]> = {
   commandLine: ':',
   // Quitting is the `:quit` (`:q`) command, or Ctrl+C — not a letter: a stray `q`
@@ -176,8 +132,7 @@ export const HOST_DEFAULT_KEYS: Record<string, string | string[]> = {
 // Normalizes a hotkey map: an action's value is always reduced to an array of
 // names (string -> [string], missing -> []). Defaults are merged with user
 // overrides, so config.keys can override only the keys it needs. The host base is
-// HOST_DEFAULT_KEYS (host-only actions), keeping the host tracker-agnostic;
-// DEFAULT_KEYS is the full reference map for the tracker plugin.
+// HOST_DEFAULT_KEYS (host-only actions), keeping the host tracker-agnostic.
 export function resolveKeys(
   userKeys: Record<string, string | string[] | undefined> = {},
 ): Record<string, string[]> {

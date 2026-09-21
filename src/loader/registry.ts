@@ -30,39 +30,6 @@ type InputEntry = {
 // A registry entry: either the resolved handler, or a lazy `{ get }` wrapper
 // (the runtime stores handlers behind `get: () => ref.current`).
 type LazyInputEntry = InputEntry | { get: () => InputEntry };
-// Navigation state (what the base-view predicates read).
-type Nav = { view?: string; boardView?: boolean; searchMode?: boolean; welcome?: boolean };
-
-// ─── Predicates (the host keeps them; the tracker uses them) ────────────────
-// Is the board active as the base view (nav part): the issues list is shown but
-// board mode is on and global search is not. Fold/unfold, card navigation and
-// opening an issue are only possible in this state; in list/sprints/search the
-// board is not drawn and does not intercept input.
-export function boardNavActive(nav: Nav): boolean {
-  return nav.view === 'issues' && !!nav.boardView && !nav.searchMode;
-}
-
-// Sprints — the default top-level view (view === 'sprints'). Unlike the board
-// (whose boardView is off during the welcome bootstrap), sprints may be "active"
-// UNDER the welcome overlay and search, so the predicate accounts for that: if
-// welcome or search is open, sprints are not drawn and do not intercept input.
-export function sprintsNavActive(nav: Nav): boolean {
-  return nav.view === 'sprints' && !nav.searchMode && !nav.welcome;
-}
-
-// Issues list — view === 'issues' when the board is not active and not in search.
-// Search draws its surface over issues (renderView), and the board draws its own
-// view (boardView); in both cases the issues list is not drawn/intercepts input.
-export function issuesListActive(nav: Nav): boolean {
-  return nav.view === 'issues' && !nav.boardView && !nav.searchMode && !nav.welcome;
-}
-
-// Search — a mode layered over the base view (`searchMode`). While searching, it
-// draws its own surface and consumes ALL input. With search on, the base view
-// underneath is not drawn (issues-list/board/sprints are off via searchMode).
-export function searchActive(nav: Nav): boolean {
-  return !!nav.searchMode && !nav.welcome;
-}
 
 // Adds a plugin to a list (convenient for composition/tests).
 export function registerPlugin<T>(list: T[], plugin: T): T[] {
@@ -240,49 +207,6 @@ export function runConsumers(consumers: InputEntry[], key: InputKey, ui: UiState
     if (c.handler(key, ui) === true) return true;
   }
   return false;
-}
-
-// Pure calculation of the next bookmarks array for a toggle (m on list/board/
-// detail). A mirror of useBookmarks.toggleBookmark without writing host state:
-// the result is published into ft.store.bookmarks SYNCHRONOUSLY (see
-// applyBookmarkMutation).
-export function nextBookmarksOnToggle(bookmarks: string[], id: string): string[] {
-  return bookmarks.includes(id) ? bookmarks.filter(c => c !== id) : [...bookmarks, id];
-}
-
-// Same, for removing a bookmark from the bookmarks popup (its list renders
-// separately).
-export function nextBookmarksOnRemove(bookmarks: string[], id: string): string[] {
-  return bookmarks.filter(c => c !== id);
-}
-
-type BookmarkStore = { bookmarks?: string[] };
-type ApplyBookmarkArgs = {
-  bookmarks: string[];
-  store?: BookmarkStore | null;
-  setBookmarks: (b: string[]) => void;
-  persist: (b: string[]) => void;
-  notify: () => void;
-  computeNext: (b: string[]) => string[];
-};
-
-// A bookmark mutation affecting the ★ marker of the base views (board/list/
-// detail). Returns the new array and GUARANTEES a synchronous publish into
-// store.bookmarks BEFORE calling notify. Why this matters: the bookmarks state
-// lives in a descendant component (App) while the base views read
-// ft.store.bookmarks.bookmarks in their OWN render. React commits in tree order
-// — App (and the board under it) renders EARLIER than the owning component would
-// re-publish the store, so a deferred publish would leave the board the old list
-// and ★ would only appear after the next re-render. setBookmarks/persist/notify
-// are the component's callbacks; store is the current ft.store.bookmarks (we
-// mutate the field).
-export function applyBookmarkMutation({ bookmarks, store, setBookmarks, persist, notify, computeNext }: ApplyBookmarkArgs): string[] {
-  const next = computeNext(bookmarks);
-  setBookmarks(next);
-  persist(next);
-  if (store) store.bookmarks = next;
-  notify();
-  return next;
 }
 
 // Pure gate for a trigger that opens a plugin modal on its own key: when the
