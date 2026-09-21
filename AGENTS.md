@@ -141,14 +141,20 @@ assistant nobody had asked for a board.
   person this way is a display-only message of role `note`; `apiHistory` drops it, and
   the model's history (`apiRef`) never holds it.
 - **How full the context is, is shown — and says where the number came from.** The
-  chat's hint line ends in `ctx N%` (yellow from 80%), and `/context` prints a bar and
-  a breakdown by part as a `note` (`src/assistant/context-meter.ts`, pure). The total
+  chat's hint line ends in `ctx N%` (yellow from 80%), and `/context` opens a PANEL in
+  the field's place, like a write confirmation — a look at the conversation, not a
+  message in it: the window as a field of cells (`⛁` full, `⛀` part, `⛶` free; a part
+  that exists at all gets a cell) beside a legend; Esc, ⏎ or q close it, and it holds
+  the keys while up (`src/assistant/context-meter.ts`, pure; the view owns colours). The total
   is the provider's `prompt_tokens + completion_tokens` of the last round when it
   reports usage (`stream_options.include_usage`; a server that refuses the field by
   name is retried once without it and not asked again); until then it is characters/4
   and drawn `~N%`. The split between parts is always an estimate, scaled to the total.
   The window is `ai.contextWindow` (default 200000) — the API cannot be asked for it.
-  `/compact`, `/clear` and a change of conversation drop the measurement. There is no
+  `/compact`, `/clear` and a change of conversation drop the measurement. `/compact`
+  shrinks what the MODEL sees (`apiRef` → a summary in the system context) and leaves
+  the screen alone — the display list keeps the conversation and gains a `note` marking
+  where the model's view now begins; wiping the screen read as `/clear`. There is no
   `/refresh-context`: the system prompt is assembled anew for every message, so the
   command had nothing to refresh.
 - **The plan (`todo`) belongs to a conversation, not to the process.**

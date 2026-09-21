@@ -19,6 +19,7 @@
 //     `theme.modals.<name>.<prop>` read is guarded (`m = theme?.modals?.chat ?? {}`).
 
 import { askRows, type AskRow, type AskState } from '../assistant/ask.js';
+import { CELL_FREE, CELL_FULL, CONTEXT_WARN_AT, GRID_COLS, GRID_ROWS, contextFootnote, contextGrid, contextHeading, contextLegend, type ContextReading, type GridCell } from '../assistant/context-meter.js';
 import { createElement as h, useEffect, useRef, useState } from 'react';
 import { bindingGlyph, keyGlyph } from '../playback/keys.js';
 import {
@@ -437,6 +438,7 @@ export function renderChatModal({
   bgCount = 0,
   contextBadge = '',
   contextWarn = false,
+  contextPanel = null,
   todo = null,
 }: {
   width: number;
@@ -463,6 +465,8 @@ export function renderChatModal({
   // `ctx 12%` (assistant/context-meter.ts); yellow once it is time to /compact.
   contextBadge?: string;
   contextWarn?: boolean;
+  // `/context`: the reading to draw as a panel in the field's place (null — closed).
+  contextPanel?: ContextReading | null;
   todo?: PlanItem[] | null;
 }) {
   const boxW = chatBoxWidth(width);
@@ -571,6 +575,8 @@ export function renderChatModal({
       h(Box, { flexDirection: 'column', width: '100%' },
         pendingQuestion
           ? renderAsk(pendingQuestion, m.bg, wrap)
+          : contextPanel
+          ? renderContextPanel(contextPanel, m.bg, wrap)
           : confirmAsk
           ? h(Box, { flexDirection: 'column', width: '100%', gap: 1, border: 'round', paddingX: 1, borderColor: 'yellow', backgroundColor: m.bg },
               h(Text, { bold: true, color: 'yellow' }, `⚠ Confirm write: ${confirmAsk.name}`),
@@ -607,6 +613,35 @@ export function renderChatModal({
       ),
     ),
   );
+}
+
+// `/context` — the window as a field of cells beside a legend, in the field's place
+// like a write confirmation: a look at the conversation, not a message in it. The
+// colours only tell the parts apart; the legend carries the same glyph in the same
+// colour, so it reads without them too (each row names its part).
+const PART_COLORS: Record<string, string> = {
+  instructions: 'cyan', tools: 'magenta', memory: 'yellow', plan: 'green', summary: 'blue', messages: 'white',
+};
+function renderContextPanel(r: ContextReading, bg: string | undefined, wrap: number) {
+  const cells = contextGrid(r);
+  const warn = r.ratio >= CONTEXT_WARN_AT;
+  const gridRows = Array.from({ length: GRID_ROWS }, (_, y) => cells.slice(y * GRID_COLS, (y + 1) * GRID_COLS));
+  const cell = (c: GridCell, i: number) => h(Text, c.label ? { key: i, color: PART_COLORS[c.label] } : { key: i, dim: true }, `${c.glyph} `);
+  const grid = h(Box, { flexDirection: 'column', flexShrink: 0 },
+    gridRows.map((row, y) => h(Box, { key: y, flexDirection: 'row' }, row.map(cell))));
+  const legend = h(Box, { flexDirection: 'column', flexShrink: 1 },
+    contextLegend(r).map((l, i) => h(Box, { key: i, flexDirection: 'row' },
+      h(Text, l.label ? { color: PART_COLORS[l.label] } : { dim: true }, `${l.label ? CELL_FULL : CELL_FREE} `),
+      h(Text, { wrap: 'truncate' }, l.text))));
+  // The grid is 40 cells wide; beside it the legend needs ~26. Narrower — stack them.
+  const sideBySide = wrap >= GRID_COLS * 2 + 30;
+  return h(Box, { flexDirection: 'column', width: '100%', gap: 1, border: 'round', paddingX: 1, borderColor: warn ? 'yellow' : undefined, backgroundColor: bg },
+    h(Box, { flexDirection: 'row' },
+      h(Text, { bold: true }, 'Context  '),
+      h(Text, warn ? { color: 'yellow' } : {}, contextHeading(r))),
+    h(Box, { flexDirection: sideBySide ? 'row' : 'column', gap: sideBySide ? 3 : 1 }, grid, legend),
+    h(Text, { dim: true, wrap: 'truncate' }, contextFootnote(r)),
+    h(Text, { dim: true, wrap: 'truncate' }, `/compact summarises · /clear starts over · window: ai.contextWindow · ${CAP.esc} closes`));
 }
 
 function renderAsk(state: AskState, bg: string | undefined, wrap: number) {

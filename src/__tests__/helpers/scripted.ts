@@ -31,6 +31,11 @@ export class ScriptedModel {
     globalThis.fetch = (async (_url: unknown, init: RequestInit) => {
       this.requests.push(JSON.parse(String(init.body)));
       const turn = this.turns.shift() ?? [{ text: '(the script has no more turns)' }];
+      // A request that does not ask for a stream (/compact's one-shot) gets plain JSON.
+      if (!(this.requests.at(-1) as { stream?: boolean }).stream) {
+        const text = turn.map((st) => ('text' in st ? st.text : '')).join('');
+        return new Response(JSON.stringify({ choices: [{ message: { content: text } }] }), { headers: { 'content-type': 'application/json' } });
+      }
       const enc = new TextEncoder();
       const send = (c: ReadableStreamDefaultController, o: unknown) => c.enqueue(enc.encode(`data: ${JSON.stringify(o)}\n\n`));
       const self = this;

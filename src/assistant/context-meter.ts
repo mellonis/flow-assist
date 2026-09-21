@@ -67,22 +67,48 @@ export function contextBadge(r: ContextReading): string {
   return `ctx ${r.measured ? '' : '~'}${percent(r.ratio)}`;
 }
 
-const BAR = 30;
-export function contextNote(r: ContextReading): string {
-  const filled = Math.round(r.ratio * BAR);
-  const bar = `${'█'.repeat(filled)}${'░'.repeat(BAR - filled)}`;
+// The panel's picture: the window as a field of cells, each part filling its share.
+// A part that is there at all gets a cell, however small — tools at 0.4% are still
+// sent with every request, and a field that hides them lies about what is in it.
+// The last cell of a part is drawn half-full when the part does not fill it.
+export const GRID_COLS = 20;
+export const GRID_ROWS = 5;
+export const CELL_FULL = '⛁';
+export const CELL_PART = '⛀';
+export const CELL_FREE = '⛶';
+
+export interface GridCell { label: string | null; glyph: string } // label null — free
+
+export function contextGrid(r: ContextReading, cells = GRID_COLS * GRID_ROWS): GridCell[] {
+  const per = r.window / cells;
+  const out: GridCell[] = [];
+  for (const part of r.parts) {
+    if (part.tokens <= 0) continue;
+    const exact = part.tokens / per;
+    const whole = Math.floor(exact);
+    const n = Math.max(1, Math.ceil(exact - 0.05)); // a hair over a cell is not a new cell
+    for (let i = 0; i < n && out.length < cells; i++) {
+      out.push({ label: part.label, glyph: i < whole ? CELL_FULL : CELL_PART });
+    }
+  }
+  while (out.length < cells) out.push({ label: null, glyph: CELL_FREE });
+  return out;
+}
+
+// The panel's heading and legend, as data: the view owns colours and layout.
+export function contextHeading(r: ContextReading): string {
+  return `${percent(r.ratio)} — ${short(r.used)} of ${short(r.window)} tokens${r.measured ? '' : ' (estimated)'}`;
+}
+export function contextLegend(r: ContextReading): Array<{ label: string | null; text: string }> {
   const widest = Math.max(...r.parts.map((p) => p.label.length), 'free'.length);
-  const row = (label: string, tokens: number) => `  ${label.padEnd(widest)}  ${short(tokens).padStart(6)}  ${percent(tokens / r.window).padStart(4)}`;
-  const free = Math.max(0, r.window - r.used);
+  const row = (label: string, tokens: number) => `${label.padEnd(widest)}  ${short(tokens).padStart(6)}  ${percent(tokens / r.window).padStart(4)}`;
   return [
-    `Context  ${bar}  ${percent(r.ratio)} — ${short(r.used)} of ${short(r.window)} tokens${r.measured ? '' : ' (estimated)'}`,
-    ...r.parts.map((p) => row(p.label, p.tokens)),
-    row('free', free),
-    r.measured
-      ? 'The total is what the provider reported for the last request; the split between parts is an estimate.'
-      : 'Estimated from the text (about 4 characters a token): the provider has not reported usage yet.',
-    r.ratio >= CONTEXT_WARN_AT
-      ? '/compact replaces the conversation with a summary; /clear starts over (memory is kept — /memory).'
-      : '/compact shrinks the conversation to a summary · /clear starts over · the window is `ai.contextWindow`.',
-  ].join('\n');
+    ...r.parts.map((p) => ({ label: p.label as string | null, text: row(p.label, p.tokens) })),
+    { label: null, text: row('free', Math.max(0, r.window - r.used)) },
+  ];
+}
+export function contextFootnote(r: ContextReading): string {
+  return r.measured
+    ? 'Total: reported by the provider for the last request. The split is an estimate.'
+    : 'Estimated from the text (about 4 characters a token) until the provider reports usage.';
 }

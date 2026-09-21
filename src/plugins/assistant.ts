@@ -16,7 +16,7 @@ import { chatFieldWidth } from '../views/modals.js';
 import { askKey, askStart, type AskQuestion, type AskState } from '../assistant/ask.js';
 import { loadMemories, memoryFilePath, saveMemories } from '../runtime/services/memory.js';
 import { keptAfterClear, memoryCommand } from '../assistant/memory-command.js';
-import { CONTEXT_WARN_AT, DEFAULT_CONTEXT_WINDOW, contextBadge, contextNote, readContext } from '../assistant/context-meter.js';
+import { CONTEXT_WARN_AT, DEFAULT_CONTEXT_WINDOW, contextBadge, readContext } from '../assistant/context-meter.js';
 import { chatTools } from '../loader/tools.js';
 import type { Make } from '../loader/plugin.js';
 import type { Plugin } from '../loader/plugin.js';
@@ -153,6 +153,12 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // What the provider reported for the last turn: its prompt plus the answer it
           // produced is, to a close approximation, the size of the NEXT request.
           const usageRef = f.useRef<{ promptTokens: number; completionTokens: number } | null>(null);
+          // `/context` opens a panel in the field's place, like a write confirmation — it
+          // is a look at the conversation, not a line of it. The ref is for the key
+          // handler; the state is for the render.
+          const contextOpenRef = f.useRef(false);
+          const [contextOpen, setContextOpenState] = f.useState(false);
+          const setContextOpen = (v: boolean) => { contextOpenRef.current = v; setContextOpenState(v); f.notify(); };
           const [messages, setMessages] = f.useState<ChatMsg[]>([]);
           const [input, setInput] = f.useState('');
           const [streaming, setStreaming] = f.useState(false);
@@ -421,6 +427,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // input-handler to resolve the promise ('y'/Enter — yes, 'n'/Esc — no).
                 confirmWrite: (name: string, argsStr: unknown) => new Promise<boolean>((resolve) => {
                   const args = typeof argsStr === 'string' ? argsStr : JSON.stringify(argsStr ?? '');
+                  if (contextOpenRef.current) setContextOpen(false);
                   pendingRef.current = { name, args, resolve };
                   setPendingAsk({ name, args });
                   f.notify();
@@ -602,7 +609,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           };
 
           const compactNow = () => {
-            if (streamRef.current || msgsRef.current.length < 2) return;
+            if (streamRef.current || apiRef.current.length < 2) return;
             // The command body; the spinner/label/elapsed-tick live in
             // runAsyncCommand, which clears streaming/toolLabel on completion.
             runAsyncCommand('compact', async () => {
@@ -613,11 +620,14 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 model: ai.model,
                 token: process.env[ai.tokenEnv ?? 'LLM_TOKEN'],
               });
-              const last = msgsRef.current[msgsRef.current.length - 1];
               summaryRef.current = summaryRef.current ? `${summaryRef.current}\n\n${summary}` : summary;
               usageRef.current = null; // the measured size was of the history just replaced
               apiRef.current = [];
-              setMessages([{ role: 'system', content: summary }, ...(last ? [last] : [])]);
+              // What the MODEL sees shrank to the summary; what the PERSON sees stays —
+              // the conversation above is theirs to scroll. (It used to be wiped down to
+              // the last message, which read as /clear.) A note marks where the model's
+              // view now begins and shows the summary it was given.
+              setMessages((cur) => [...cur, { role: 'note', content: `── compacted ── the model now sees a summary of everything above, not the messages themselves:\n${summary}` }]);
               setInput('');
               inputRef.current = '';
               setCursor(0);
@@ -686,13 +696,11 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 disarmEsc();
                 f.notify();
                 return;
-              case 'context': {
-                // For the person; never sent to the model.
-                setMessages((cur) => [...cur, { role: 'note', content: contextNote(contextReading()) }]);
+              case 'context':
+                // For the person; nothing is sent and nothing joins the conversation.
                 setField('');
-                f.notify();
+                setContextOpen(true);
                 return;
-              }
               case 'compact': compactNow(); return;
               case 'exit': closeChat(); return;
               default: setError(`unknown command /${name} — available: ${CHAT_COMMANDS.map(c => `/${c}`).join(', ')}`); return;
@@ -808,6 +816,11 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 const next = askKey(askRef.current.state, key);
                 if (next.done) settleAsk(next);
                 else { askRef.current.state = next; setPendingQuestion(next); f.notify(); }
+                return true;
+              }
+              // The context panel holds the keys while it is up; Esc, ⏎ or q put it away.
+              if (contextOpenRef.current) {
+                if (key.name === 'escape' || key.name === 'return' || key.name === 'q') setContextOpen(false);
                 return true;
               }
               if (pendingRef.current) {
@@ -944,7 +957,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // Live count of IN-FLIGHT background tasks (the host re-renders via
             // notify() when one is armed or completes).
             bgCount: bgActiveCount(),
-            ...(() => { const r = contextReading(); return { contextBadge: contextBadge(r), contextWarn: r.ratio >= CONTEXT_WARN_AT }; })(),
+            ...(() => { const r = contextReading(); return { contextBadge: contextBadge(r), contextWarn: r.ratio >= CONTEXT_WARN_AT, contextPanel: contextOpen ? r : null }; })(),
             // The assistant's task plan (todo tool): a snapshot so the render never
             // mutates the tool's module state. Re-read every render, so a plan the
             // LLM edits (via notify()) shows up immediately.
