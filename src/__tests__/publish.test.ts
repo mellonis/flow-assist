@@ -99,6 +99,9 @@ test('a dependency-free plugin ships its sources as they are', () => {
   const files = listTar(tar);
   expect(files).toContain('demo/src/index.ts');
   expect(files.some((f) => f.includes('node_modules'))).toBe(false);
+  // Its tests live INSIDE src/ — out of reach of the top-level filter — and are not
+  // part of the plugin either.
+  expect(files.filter((f) => /__tests__|\.test\.ts$/.test(f))).toEqual([]);
 });
 
 test('dependencies without a build script are refused: nothing would carry them', () => {

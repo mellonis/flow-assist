@@ -104,7 +104,9 @@ export function packPlugin(pluginDir: string, tarPath: string, run: (cmd: string
   const shipped = readdirSync(pluginDir).filter((entry) => !entry.startsWith('.') && !skip.includes(entry)).sort();
   const name = basename(pluginDir);
   try {
-    execSync(`tar -czf ${shq(tarPath)} -C ${shq(dirname(pluginDir))} ${shipped.map((e) => shq(join(name, e))).join(' ')}`);
+    // `--exclude` reaches what the top-level filter cannot: a source-shipped plugin
+    // keeps its tests under `src/__tests__`, and they are not part of the plugin.
+    execSync(`tar -czf ${shq(tarPath)} --exclude='__tests__' --exclude='*.test.ts' --exclude='.DS_Store' -C ${shq(dirname(pluginDir))} ${shipped.map((e) => shq(join(name, e))).join(' ')}`);
   } catch (e) {
     return { ok: false, error: (e as Error).message };
   }
