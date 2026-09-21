@@ -129,6 +129,24 @@ A qualified tool name (`plugin:tool`) is translated to a provider-safe wire name
 (`plugin__tool`) in `src/assistant/agent.ts` and nowhere else: providers validate
 names against `^[a-zA-Z0-9_-]{1,128}$`.
 
+### How a tool gets its name
+
+A plugin delivers tools two ways, and the loader names them differently — which is why
+the model sees both `get_issue` and `acme-tracker__open_issue`:
+
+- `shape.tools` — tool GROUPS. Names are used **as the plugin wrote them**; nobody
+  adds a prefix (the loader's comment says the author namespaces them; no plugin does).
+  Hence the bare `list_boards`, `glab_api`, `read_file`.
+- `shape.aiTools` — standalone tools with their own `run`. The loader qualifies these
+  itself as `<plugin>:<tool>`, which goes to the provider as `<plugin>__<tool>`.
+- The host's own: `core` is bare (`memory`, `todo`), `host` is qualified.
+
+It is history, not design. Until group tools are qualified by the host too, **a name
+is claimed once**: the registry keeps the first claimant, drops the second from its
+group and says so (`[tools] "search" is declared by both …`). Without that a clash is
+silent — the provider's "Duplicate tool name" 400 no longer fires, since `agentChat`
+sends one declaration per name. A new bundled plugin should qualify its names.
+
 ### A tool argument is hostile input
 
 The model writes every argument, and what it read a minute ago (a ticket, a README,

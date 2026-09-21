@@ -604,3 +604,35 @@ test('a background task cannot put a question to the person', async () => {
   const args = { questions: [{ question: 'q?', options: [{ label: 'a' }, { label: 'b' }] }] };
   expect(await reg.exec('ask_user', args, nested as any)).toMatch(/nobody to ask/i);
 });
+
+test('a tool name is claimed once: the first plugin keeps it, the second is dropped and named', async () => {
+  const make = makeFactory({});
+  const group = (id: string, answer: string) => ({
+    id,
+    tools: [
+      { type: 'function', function: { name: 'search', description: '', parameters: { type: 'object', properties: {} } } },
+      { type: 'function', function: { name: `${id}_only`, description: '', parameters: { type: 'object', properties: {} } } },
+    ],
+    exec: async () => answer,
+  });
+  const warned: string[] = [];
+  const realWarn = console.warn;
+  console.warn = (m: unknown) => { warned.push(String(m)); };
+  try {
+    const reg = assembleToolRegistry({
+      plugins: [make('repo', { tools: [group('repo', 'from repo')] }), make('notes', { tools: [group('notes', 'from notes')] })],
+      config: {},
+      repo: { list: async () => [] } as any,
+    });
+    const names = reg.groups.flatMap((g) => g.tools.map((t) => t.function.name));
+    // Offered once — and the other tools of the losing group are untouched.
+    expect(names.filter((n) => n === 'search')).toHaveLength(1);
+    expect(names).toContain('notes_only');
+    // It is said, with both owners and the way out.
+    expect(warned.join('\n')).toMatch(/"search" is declared by both repo and notes/);
+    expect(warned.join('\n')).toContain('notes:search');
+    expect(String(await reg.exec('search', {}, {}))).toBe('from repo');
+  } finally {
+    console.warn = realWarn;
+  }
+});

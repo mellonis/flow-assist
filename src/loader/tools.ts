@@ -110,8 +110,23 @@ export function assembleToolRegistry({ plugins, config, repo }: AssembledToolReg
 
   const groups: ToolGroup[] = [core, host];
   const nameToGroup = new Map<string, ToolGroup>();
+  // A tool name is claimed ONCE. Group tools keep the bare names their plugin gives
+  // them (`get_issue`, `read_file`), so two plugins can pick the same word. The later
+  // one used to take the name silently — the model called `search` and got the other
+  // plugin's — and the provider's "Duplicate tool name" 400, which at least was loud,
+  // is gone now that agentChat sends one declaration per name. The first claimant
+  // keeps the name; the loser is dropped from its group and named in a warning.
   const register = (group: ToolGroup) => {
-    for (const t of group.tools) nameToGroup.set(t.function.name, group);
+    group.tools = group.tools.filter((t) => {
+      const name = t.function.name;
+      const owner = nameToGroup.get(name);
+      if (owner && owner !== group) {
+        console.warn(`[tools] "${name}" is declared by both ${owner.id} and ${group.id} — ${owner.id} keeps it; ${group.id}'s is not offered. Qualify the name (${group.id}:${name}).`);
+        return false;
+      }
+      nameToGroup.set(name, group);
+      return true;
+    });
   };
   register(core);
   register(host);
