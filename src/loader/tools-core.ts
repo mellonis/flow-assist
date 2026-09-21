@@ -46,7 +46,9 @@ function pluginScopeName(ctx: CoreCtx): string | undefined {
 // Shown as a person WRITES a key ("enter", "space"), since this is what the model
 // repeats to them in a `config set keys.…` command.
 function prettyKeys(map: Record<string, string[]>): string {
-  const parts = Object.values(map).map((ks) => ks.map(writtenKey).join('/'));
+  // An action with no key says so — `quit:` with nothing after it read as a gap in
+  // the listing. (quit is unbound by default: it is the `:quit` command.)
+  const parts = Object.values(map).map((ks) => (ks.length ? ks.map(writtenKey).join('/') : '(unbound)'));
   return `{ ${Object.keys(map).map((a, i) => `${a}: ${parts[i]}`).join(', ')} }`;
 }
 

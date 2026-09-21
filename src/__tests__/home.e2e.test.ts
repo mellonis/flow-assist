@@ -154,3 +154,54 @@ test('a long description wraps under its own first line, and the block stays cen
   expect(notes.indexOf('Plain notes')).toBe(x);
   ui.app.unmount();
 });
+
+// Quitting is a command, not a letter: a stray `q` closed the whole app. No lower-case
+// letter does anything on the start screen — each is pressed and the screen, the
+// footer and the process are as they were.
+test('no letter acts on the start screen — q included; :q quits', async () => {
+  const ui = await bootApp(new ScriptedModel(), 100, 26);
+  const before = ui.backend.lastFrame;
+  expect(before).not.toMatch(/\bq quit\b/); // the footer no longer offers it
+  expect(before).toMatch(/:q\s+quit/); // the start screen says how to leave instead
+  for (const letter of 'abcdefghijklmnopqrstuvwxyz') {
+    await ui.press(letter);
+    expect(ui.exits()).toBe(0);
+    expect(ui.backend.lastFrame).toBe(before);
+  }
+  await ui.press(':');
+  await ui.type('q');
+  await ui.press('return');
+  expect(ui.exits()).toBe(1);
+  ui.app.unmount();
+});
+
+// The keycaps panel floats at the bottom right, over the row the footer uses. It is
+// drawn ABOVE the footer: the footer, a later sibling one level up, used to run its
+// text across the panel's frame whatever the panel's own zIndex.
+test('the keycaps panel is drawn over the footer, not under it', async () => {
+  const state = { open: false };
+  const wide = (make: any) => [make('boards', {
+    name: 'boards', description: 'Boards and cards', keys: { boardPicker: 'c' }, entry: ['boardPicker'], surface: 'board',
+    // Enough hints to run the footer under the panel.
+    keycaps: () => (state.open ? ['c board', 'f filters', 'e expand', 'm bookmark', 'b browser', '␣ fold', 'i info', 'r relations', 'x more'] : []),
+    components: {
+      furniture: (ft: any) => function Furniture() {
+        ft.useInputHandler({ mode: 'consume', priority: () => 10, handler: (key: { name: string }) => {
+          if (key.name === 'c') { state.open = !state.open; ft.notify(); return true; }
+          return false;
+        } });
+        return null;
+      },
+      view: (ft: any) => function View() { return ft.h(ft.Text, null, 'BOARD-101'); },
+    },
+  })];
+  const ui = await bootApp(new ScriptedModel(), 90, 24, wide, { plugins: { keycaps: { enabled: true } } });
+  await ui.press('c');
+  const rows = ui.backend.lastFrame.split('\n');
+  const footer = rows.findIndex((r) => r.includes(': commands'));
+  expect(footer).toBeGreaterThan(-1);
+  // The panel's bottom frame sits on the footer row, and it is whole there.
+  expect(rows[footer]).toMatch(/╰─+╯/);
+  expect(rows.slice(0, footer).join('\n')).toMatch(/╭─ key/); // its title (shortened when narrow)
+  ui.app.unmount();
+});

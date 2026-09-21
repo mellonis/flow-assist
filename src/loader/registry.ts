@@ -137,10 +137,10 @@ export function helpFor(registry: Command[]): string {
 }
 
 // The host footer composition (spec: plugin footer hints + universal openBrowser).
-// The footer = host base (`: commands` + `q quit`, derived from `keys` so a user
-// remap is respected) + each plugin's non-empty `keycaps(ft)`. A plugin's
-// `keycaps` returns `[]` when its surface is inactive, so an empty screen
-// collapses to `: commands · q quit`. `x flush cache` joins only when a plugin
+// The footer = host base (`: commands`, and `quit` only if config binds it to a
+// key — by default it is the `:quit` command; derived from `keys` so a user remap is
+// respected) + each plugin's non-empty `keycaps(ft)`. A plugin's `keycaps` returns
+// `[]` when its surface is inactive, so an empty screen collapses to `: commands`. `x flush cache` joins only when a plugin
 // context is active (content present). `pFtMap[plugin.name]` is each plugin's
 // runtime (from the App's overlayComps), which `keycaps` reads for live state;
 // a plugin whose `pFt` is not mounted yet (or that declares no keycaps) simply

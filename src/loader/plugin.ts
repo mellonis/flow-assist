@@ -24,7 +24,7 @@ export type PluginShape = {
   aiTools?: unknown[];
   // Context-aware footer hints: a function of `ft` returning the `<key>: <label>`
   // hints for the plugin's CURRENT context, or `[]` when its surface is inactive.
-  // The host footer = its base (`: commands · q quit`) + concat of each plugin's
+  // The host footer = its base (`: commands`) + concat of each plugin's
   // non-empty `keycaps(ft)`. Optional — absent/null means `() => []`.
   // The key in a hint is `ft.keyCap('<action>')` — the cap of what the action is
   // bound to NOW — never a letter written in the plugin: the person can remap it,

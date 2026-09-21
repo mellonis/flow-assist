@@ -5,7 +5,7 @@
 // closed modals return null), and a bottom line (command line / toast message /
 // footer hints). Input is dispatched two-phase: observers never consume, then
 // the consumer race (`partitionInput`/`runConsumers` from Task 4), then the host
-// fallback (command line `:`, `q`/Ctrl+c quit, Esc back, `x` clear cache).
+// fallback (command line `:`, Esc back, `x` clear cache; quitting is `:quit` or Ctrl+C).
 //
 // React rendering is only smoke-tested here — the brief says the real render
 // wiring (the assembled tool registry, full command line completion/submit UX,
@@ -538,9 +538,9 @@ export function renderApp(
     // placeholder the overlay may sit over), the plugin overlay, and the bottom
     // line (command line / toast message / footer hints).
     // Footer hints (spec: plugin footer hints + universal openBrowser): host base
-    // (`: commands` + `q quit`) + each plugin's non-empty `keycaps(ft)`. A plugin
-    // returns `[]` when its surface is inactive, so an empty screen collapses to
-    // `: commands · q quit`. `x flush cache` joins only when a plugin context is
+    // (`: commands`, plus `quit` if config binds it to a key) + each plugin's
+    // non-empty `keycaps(ft)`. A plugin returns `[]` when its surface is inactive,
+    // so an empty screen collapses to `: commands`. `x flush cache` joins only when a plugin context is
     // active (content present). The per-plugin `pFt` comes from `pFtMap`, built
     // by `overlayComps`; the plugin's services/store are mutated live, so reading
     // them here each render stays fresh.
@@ -574,7 +574,12 @@ export function renderApp(
       // contract ("returns [] when its surface is inactive"). Until then the screen
       // is the host's own. A plugin with no `keycaps` cannot say, and keeps the old
       // behaviour of being shown always.
-      h(Box, { flexGrow: 1 },
+      // `zIndex: 1` — the content is a layer ABOVE the footer. flowtty stacks by
+      // zIndex only among siblings, so a floating panel inside it (the keycaps, at the
+      // bottom right) lost to the footer — drawn later, one level up — whatever its
+      // own zIndex, and the footer's text ran over the panel's frame. It also puts
+      // the footer under a modal's dimmed backdrop, like everything else behind it.
+      h(Box, { flexGrow: 1, zIndex: 1 },
         overlayComps.filter((c) => !c.surface || surfaceActive(c.plugin)).map(({ Comp, key }) => h(Comp as any, { key })),
         atHome ? renderHome({ title, plugins, keys, builtins: BUILTIN_PLUGINS, width: termWidth }) : null),
       h(Box, { padding: 1, flexDirection: 'column' },

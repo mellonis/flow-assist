@@ -5,8 +5,10 @@ import { buildKeys } from '../../loader/registry';
 
 test('resolveKeys folds string to array and defaults to [] when missing', () => {
   const k = resolveKeys({});
-  expect(Array.isArray(k.quit)).toBe(true);
-  expect(k.quit).toEqual(['q']);
+  // Unbound by default — quitting is the `:quit` command — but still an action a
+  // config can bind.
+  expect(k.quit).toEqual([]);
+  expect(resolveKeys({ quit: 'q' }).quit).toEqual(['q']);
   // Written as ['enter', 'return']; both are the one key the terminal calls 'return'.
   expect(k.open).toEqual(['return']);
 });

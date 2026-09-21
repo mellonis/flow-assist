@@ -818,9 +818,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 else { askRef.current.state = next; setPendingQuestion(next); f.notify(); }
                 return true;
               }
-              // The context panel holds the keys while it is up; Esc, ⏎ or q put it away.
+              // The context panel holds the keys while it is up; Esc or ⏎ put it away.
               if (contextOpenRef.current) {
-                if (key.name === 'escape' || key.name === 'return' || key.name === 'q') setContextOpen(false);
+                if (key.name === 'escape' || key.name === 'return') setContextOpen(false);
                 return true;
               }
               if (pendingRef.current) {

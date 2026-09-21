@@ -39,7 +39,8 @@ export function renderHome({ title, plugins, keys, builtins, width = 80, accent 
   const doors: Array<[string, string]> = [
     [cap('chat'), 'talk to the assistant'],
     [cap('commandLine'), 'commands — try :help'],
-    [cap('quit'), 'quit'],
+    // No key quits by default — then the way out is the command, and the screen says so.
+    [cap('quit') || (cap('commandLine') ? `${cap('commandLine')}q` : ''), 'quit'],
   ].filter(([key]) => key) as Array<[string, string]>;
   const pad = Math.max(...doors.map(([key]) => Array.from(key).length), 1);
 

@@ -144,7 +144,7 @@ assistant nobody had asked for a board.
   chat's hint line ends in `ctx N%` (yellow from 80%), and `/context` opens a PANEL in
   the field's place, like a write confirmation — a look at the conversation, not a
   message in it: the window as a field of cells (`⛁` full, `⛀` part, `⛶` free; a part
-  that exists at all gets a cell) beside a legend; Esc, ⏎ or q close it, and it holds
+  that exists at all gets a cell) beside a legend; Esc or ⏎ close it, and it holds
   the keys while up (`src/assistant/context-meter.ts`, pure; the view owns colours). The total
   is the provider's `prompt_tokens + completion_tokens` of the last round when it
   reports usage (`stream_options.include_usage`; a server that refuses the field by
@@ -311,7 +311,12 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     no longer handles it. `openBrowser`, `prev`, `next` and `open` stay in
     `HOST_DEFAULT_KEYS` only as a shared vocabulary for plugins (a plugin reads
     `ft.keys.open`); the host acts on none of them.
-  - A test presses every lower-case letter on the start screen and expects silence.
+  - A test presses every lower-case letter on the start screen and expects silence
+    (`home.e2e.test.ts`) — `q` included. **No key quits by default**: a stray `q`
+    closed the whole app. Quitting is the `:quit` (`:q`) command or Ctrl+C; the action
+    stays in `HOST_DEFAULT_KEYS` unbound (`[]`) so `config.keys.quit` can bind it, and
+    the start screen then names the key instead of `:q`. Plugins leave their screens
+    on Esc (`keys.back`) only.
 - **A capital opens something big**: `A` the assistant, `L` the log; a plugin's main
   screen should follow (`B` for a board). Lower case is for what is INSIDE a screen.
   A modal is closed by the key it is bound to (`f.keys.<action>`), never by a letter

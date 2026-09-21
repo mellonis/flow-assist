@@ -425,7 +425,7 @@ test('config_schema reports EFFECTIVE key bindings and a plugin\'s own flags', a
   // Bindings are not personal data and are exactly what "how do I remap X" needs:
   // host defaults + plugin keys, not the (empty) override map.
   expect(out).toMatch(/chat: A/);
-  expect(out).toMatch(/quit: q/);
+  expect(out).toMatch(/quit: \(unbound\)/); // the :quit command, not a key — and said, not blank
   expect(out).toMatch(/open: enter[,} ]/); // shown as a person writes it, not as "return"
   // The host sees `plugins` as an opaque record; the plugin's configSchema fills it in.
   expect(out).toMatch(/- plugins\.keycaps\.enabled: true\|false — unset/);

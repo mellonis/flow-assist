@@ -14,7 +14,7 @@ export const DEFAULT_KEYS: Record<string, string | string[]> = {
   // global
   log: 'L',
   bookmarks: 'M',          // opens the bookmarks popup; also Shift+m
-  quit: 'q',
+  quit: [],                // the `:quit` command; see HOST_DEFAULT_KEYS
   search: '/',
   back: ['escape'],
   // navigation
@@ -150,7 +150,10 @@ export function bindingGlyph(binding: string | string[] | null | undefined): str
 // the host's base.
 export const HOST_DEFAULT_KEYS: Record<string, string | string[]> = {
   commandLine: ':',
-  quit: 'q',
+  // Quitting is the `:quit` (`:q`) command, or Ctrl+C — not a letter: a stray `q`
+  // closed the whole app. The action stays, unbound, so `config.keys.quit` can
+  // still put it on a key for a person who wants one.
+  quit: [],
   back: ['escape'],
   prev: 'up',
   next: 'down',
