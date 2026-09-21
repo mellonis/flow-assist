@@ -183,6 +183,15 @@ second row of candidates made the whole screen jump with every keystroke. Tab
 replaces the WORD being completed (`stem + candidate`), a command name or a
 `config get|set|unset` argument alike.
 
+- **A command is its first word**; the rest of the line is its argument. The whole
+  line used to be looked up, so every plugin command given an argument was not found
+  and did nothing — `:ask hi`, a tracker's `:open ABC-1`. Without an argument they
+  worked, which is how it went unnoticed.
+- **Nothing is silent.** An unknown command answers `Unknown command: x — try :help`.
+  A command that is listed does something: `view` and `back` set a state nothing in
+  the host reads and were removed. The host's commands are `clear`, `quit`, `config`,
+  `cache`, `help`; everything else is a plugin's.
+
 ## The chat
 
 - Who speaks is said by a **gutter marker and a ground**, not a label: `›` on the

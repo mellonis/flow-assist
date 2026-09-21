@@ -335,17 +335,14 @@ export function renderApp(
     // its own `run`).
     const runHostCommand = (name: string, arg: string): void => {
       switch (name) {
-        case 'view':
-          if (arg) { ui.view = arg; notify(); }
-          else toast.showMessage('view: <surface>');
-          break;
         case 'quit': case 'q': onExit(); break;
-        case 'back': ui.view = undefined; notify(); break;
         case 'clear': case 'clear-cache': services.clearCache(); toast.showMessage('Cache cleared'); break;
         case 'config': runConfigCmd(arg); break;
         case 'cache': runCacheCmd(arg); break;
         case 'help': case '?': setHelpModalOpen(true); break;
         case 'keycaps': toggleKeycaps(arg); break;
+        // A typo is answered, not swallowed: silence after Enter reads as a hang.
+        default: if (name) toast.showMessage(`Unknown command: ${name} — try :help`);
       }
     };
 
@@ -398,8 +395,13 @@ export function renderApp(
         // directly.
         if (name === 'enter' || name === 'return') {
           const input = cmdline.current.input.trim();
-          const cmd = findIn(commandRegistry, input);
-          const arg = input.split(' ').slice(1).join(' ');
+          // The command is the FIRST WORD; the rest is its argument. The whole line
+          // used to be looked up, so a plugin command with an argument was never
+          // found — `:ask hi`, a tracker's `:open ABC-1` — and fell through to the
+          // host's own dispatch, which knew nothing of it and said nothing.
+          const [head = '', ...rest] = input.split(/\s+/);
+          const cmd = findIn(commandRegistry, head);
+          const arg = rest.join(' ');
           // The command context carries the REAL closures (F1): setView/back
           // mutate ui state + notify, setHelpModal opens core's help modal via
           // ft.store.help, runConfigCommand/runCacheCommand route to the
@@ -438,7 +440,7 @@ export function renderApp(
             }
           } else {
             // Base commands (BASE_COMMANDS) have no `run` — dispatch by name.
-            runHostCommand(cmd?.name ?? input.split(' ')[0], arg);
+            runHostCommand(cmd?.name ?? head, arg);
           }
           // Remember the executed command (no empty lines) and CLEAR the buffer so
           // the next `:` opens fresh — before, the leftover input was shown again

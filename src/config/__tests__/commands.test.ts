@@ -3,7 +3,12 @@ import { BASE_COMMANDS, parseCommand, validateCommand, argCount, findCommand } f
 
 test('BASE_COMMANDS has only generic host commands', () => {
   const names = BASE_COMMANDS.map(c => c.name);
-  expect(names).toEqual(expect.arrayContaining(['view', 'quit', 'back', 'clear', 'config', 'cache', 'help']));
+  expect(names.sort()).toEqual(['cache', 'clear', 'config', 'help', 'quit']);
+  // `view` and `back` set a state nothing in the host reads: listed, and silent.
+  expect(names).not.toContain('view');
+  expect(names).not.toContain('back');
+  // The host's UI is English throughout.
+  for (const c of BASE_COMMANDS) expect(c.description).not.toMatch(/[а-яё]/i);
   expect(names).not.toContain('open');
   expect(names).not.toContain('search');
 });

@@ -22,10 +22,11 @@ export type Command = {
 };
 
 // Basic host command set. `maxArgs = -1` means an unlimited argument count.
+// The host's own commands. Every entry DOES something: `view` and `back` used to be
+// here, setting a view state nothing in the host reads — listed in :help, and silent
+// when run. (A plugin that wants navigation commands declares its own.)
 export const BASE_COMMANDS: Command[] = [
-  { name: 'view', aliases: [], usage: 'view <mode>', minArgs: 1, maxArgs: 1, description: 'Switch the view' },
   { name: 'clear', aliases: ['clear-cache'], usage: 'clear', minArgs: 0, maxArgs: 0, description: 'Flush the cache' },
-  { name: 'back', aliases: [], usage: 'back', minArgs: 0, maxArgs: 0, description: 'Back' },
   { name: 'quit', aliases: ['q'], usage: 'quit', minArgs: 0, maxArgs: 0, description: 'Quit' },
   { name: 'config', aliases: [], usage: 'config [get <key>|set <key> <value>|unset <key>|help]', minArgs: 0, maxArgs: -1, description: 'Show the whole config; get/set/unset a key (writes config.local.json); help — what the keys are' },
   { name: 'cache', aliases: [], usage: 'cache [on|off]', minArgs: 0, maxArgs: 1, description: 'Turn the cache on or off (config.cache.enabled)' },
