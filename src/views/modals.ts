@@ -852,7 +852,8 @@ export function renderReminder({
   // Above the other modals: a reminder may fire while the chat is open.
   return h(Box, overlay(width, height, 20),
     h(Box, {
-      border: 'double',
+      // Round, like every other window — it was the one double frame on screen.
+      border: 'round',
       backgroundColor: m.bg,
       borderBackgroundColor: m.borderBg,
       borderColor: m.border,

@@ -327,6 +327,9 @@ test('reminder banner shows the text and the dismiss hint, centered', async () =
   expect(backend.lastFrame).toContain('reminder');
   expect(backend.lastFrame).toContain('stand up and stretch');
   expect(backend.lastFrame).toContain('Esc / ⏎ — dismiss'); // keys are named by their caps, everywhere
+  // The one frame every window wears — round, like the chat, the log and the help.
+  expect(backend.lastFrame).toMatch(/╭─ reminder/);
+  expect(backend.lastFrame).not.toMatch(/[╔╗╚╝║═]/);
   handle.unmount();
 });
 test('the input keeps a blank line, and the caret can stand on it', () => {
