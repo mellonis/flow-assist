@@ -70,6 +70,22 @@ before any of the plugin's components mount (it is where a plugin seeds its stor
 **no** `tools-available/` → `tools-enabled/` repository; `ai.disabledTools` is
 the blacklist.
 
+### A handled key is followed by a redraw
+
+A plugin usually keeps its state in ONE component (a workspace that publishes it on
+`ft.services`) and draws it in a SIBLING. A React `setState` in the first re-renders
+the first only; the sibling redraws when the host re-renders. That used to require an
+explicit `ft.notify()` in every setter, and a setter without one — the tracker's info
+panel cursor, `setPanelIdx` — changed the state and froze on screen. It looked
+intermittent: while related issues were still loading, each arriving name called
+`notify()` and so "showed" the pending key presses; once loading finished, the cursor
+stopped moving.
+
+The host guarantees it: `useInput` in `runtime/app.tsx` calls `notify()` after every
+key that was handled (`twoPhaseDispatch` returned true). React batches it with
+whatever the handler set. A plugin still calls `ft.notify()` for changes that do NOT
+come from a key — a fetch that finished, a timer.
+
 ### A plugin is a guest: whose screen it is
 
 The app opens on the HOST's start screen (`src/views/home.ts`: the ƒ mark drawn

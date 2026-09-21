@@ -524,7 +524,14 @@ export function renderApp(
 
     useInput((key) => {
       const k = key as unknown as InputKey;
-      twoPhaseDispatch(inputRegistryRef.current, ui, k, () => hostFallback(k));
+      // A handled key is followed by a redraw. A plugin keeps its state in one component
+      // and draws it in a sibling; a React setState in the first re-renders only the
+      // first, and the sibling redraws when the HOST does. That took an explicit
+      // `ft.notify()` in every setter — and a setter without one (the tracker's panel
+      // cursor) froze on screen until something else happened to notify. The host
+      // guarantees it instead: one re-render per handled key, batched by React with
+      // whatever the handler set.
+      if (twoPhaseDispatch(inputRegistryRef.current, ui, k, () => hostFallback(k))) notify();
     });
 
     // The header, the content slot (host has no single base surface yet — a
