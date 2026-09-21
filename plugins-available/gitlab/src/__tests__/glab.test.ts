@@ -52,6 +52,6 @@ describe('the glab runner', () => {
   it('the tool group says glab is missing instead of calling it', async () => {
     const glab = createGlab({ bin: '/nonexistent/glab' });
     const group = buildGitlabGroup({ clip: (x: unknown) => x, glabAvailable: glab.available, runGlab: glab.run });
-    expect(String(await group.exec('glab_api', { path: 'user' }, {}))).toContain('glab is not installed');
+    await expect(group.exec('glab_api', { path: 'user' }, {})).rejects.toThrow(/glab is not installed/);
   });
 });

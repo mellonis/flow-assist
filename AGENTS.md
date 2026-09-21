@@ -236,6 +236,20 @@ hardest. Rules the `repo` and `gitlab` plugins hold, each with a test that tries
 - **No "magic" flags**: glab's `--field` reads `@path` from disk; strings go through
   `--raw-field`. Check the same before wrapping any other CLI (`gh api -F` is alike —
   this applies to the planned `github` plugin).
+- **A write tool refuses by throwing.** The host counts whatever a write tool
+  RETURNS as done (✎ under the answer); "path is required" returned as a string
+  read as a change made. Every refusal and every failed CLI call of a write throws.
+- **The git writes follow the person's workflow** (`repo/src/git-write.ts`, tested
+  on real repos with a bare origin): a branch starts from a freshly fetched
+  `origin/<default>` (the default is asked of git — `origin/HEAD`, then probes —
+  never guessed); nothing is committed or pushed to the default branch or to
+  main / master / develop / trunk; a push is always the current branch to origin
+  under its own name — no refspec or remote from the model; no plain force, only
+  `--force-with-lease` after a rebase; a sync is a rebase, and a conflict is
+  aborted and named, never resolved; a commit without `paths` takes changed tracked
+  files only, and its message goes as written. Branch names are checked by
+  `git check-ref-format`. git runs with no prompt (`GIT_TERMINAL_PROMPT=0`, SSH in
+  batch mode) and a time limit, so a missing credential fails instead of hanging.
 
 ### A tool's result is what the model will tell the person
 

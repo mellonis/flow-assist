@@ -15,6 +15,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { spawn } from 'node:child_process';
+import { makeGitRun, branchCreate, switchBranch, commit, push, sync } from './git-write.ts';
+
+const GIT_WRITES = ['git_branch_create', 'git_switch', 'git_commit', 'git_push', 'git_sync'];
 
 type Clip = (value: unknown) => unknown;
 
@@ -385,6 +388,66 @@ export function buildRepoGroup({ clip, roots, homeDir = os.homedir() }: RepoDeps
       {
         type: 'function',
         function: {
+          name: 'git_branch_create',
+          description: 'WRITE: create a feature branch from the freshly fetched origin/<default branch> and switch to it (uncommitted changes come along). name — the new branch, e.g. "feature/ABC-341-date-filter". repo — optional repo dir. Refuses a name git rejects or one that exists (then git_switch). The chat asks y/n first.',
+          parameters: { type: 'object', properties: {
+            name: { type: 'string', description: 'New branch name.' },
+            repo: { type: 'string', description: 'Repo directory (absolute or root-relative, default a root).' },
+          }, required: ['name'] },
+        },
+        write: true,
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'git_switch',
+          description: 'WRITE: switch to an existing branch (a branch only on origin is checked out tracking it). name — the branch; repo — optional repo dir. The chat asks y/n first.',
+          parameters: { type: 'object', properties: {
+            name: { type: 'string', description: 'Branch to switch to.' },
+            repo: { type: 'string', description: 'Repo directory (absolute or root-relative, default a root).' },
+          }, required: ['name'] },
+        },
+        write: true,
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'git_commit',
+          description: 'WRITE: commit on the current branch. message — the commit message, used as written (no trailers are added). paths — optional files to stage (absolute or root-relative); without them only CHANGED TRACKED files are committed — a new file must be named. Refuses on the default branch (create a feature branch first) and when nothing changed. Returns the commit and its files. The chat asks y/n first.',
+          parameters: { type: 'object', properties: {
+            message: { type: 'string', description: 'Commit message.' },
+            paths: { type: 'array', items: { type: 'string' }, description: 'Files to stage (optional).' },
+            repo: { type: 'string', description: 'Repo directory (absolute or root-relative, default a root).' },
+          }, required: ['message'] },
+        },
+        write: true,
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'git_push',
+          description: 'WRITE: push the CURRENT branch to origin under the same name and set its upstream. Never the default branch; no plain force. forceWithLease: true — only after git_sync rebased a branch that was pushed before: it fails if someone else pushed to the branch meanwhile. Returns what GitLab answered (the merge request link) and the project path for the gitlab tools. The chat asks y/n first.',
+          parameters: { type: 'object', properties: {
+            forceWithLease: { type: 'boolean', description: 'Push a rebased branch with --force-with-lease.' },
+            repo: { type: 'string', description: 'Repo directory (absolute or root-relative, default a root).' },
+          }, required: [] },
+        },
+        write: true,
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'git_sync',
+          description: 'WRITE: fetch origin and rebase the current branch onto origin/<default branch> (on the default branch itself: fast-forward only). Refuses with uncommitted changes. A conflict aborts the rebase and names the files — resolving is for the person. The chat asks y/n first.',
+          parameters: { type: 'object', properties: {
+            repo: { type: 'string', description: 'Repo directory (absolute or root-relative, default a root).' },
+          }, required: [] },
+        },
+        write: true,
+      },
+      {
+        type: 'function',
+        function: {
           name: 'git_status',
           description: 'Git status of a repository under the configured roots: current branch + changed/untracked files (git status --short --branch). path — optional repo dir (default: a root that is a git repo). start/end — window over status lines, annotated [start–end/total]. Read-only.',
           parameters: { type: 'object', properties: {
@@ -467,7 +530,9 @@ export function buildRepoGroup({ clip, roots, homeDir = os.homedir() }: RepoDeps
     exec: async (name: string, args: any, ctx: any) => {
       const all = await readRoots();
       if (!all.length && !['write_file', 'edit_file', 'delete_file'].includes(name)) {
-        return 'repo: no read roots configured — add config.fs.roots (array of absolute clone dirs).';
+        const msg = 'repo: no read roots configured — add config.fs.roots (array of absolute clone dirs).';
+        if (GIT_WRITES.includes(name)) throw new Error(msg);
+        return msg;
       }
       switch (name) {
         case 'list_dir': return clip(listDir(args, all));
@@ -476,6 +541,28 @@ export function buildRepoGroup({ clip, roots, homeDir = os.homedir() }: RepoDeps
         case 'write_file': return clip(writeFile(args, all));
         case 'edit_file': return clip(editFile(args, all));
         case 'delete_file': return clip(deleteFile(args, all));
+        // Writes refuse by THROWING — a returned string counts as done (✎).
+        case 'git_branch_create': case 'git_switch': case 'git_commit': case 'git_push': case 'git_sync': {
+          const gr = await gitRepo(args.repo ?? '.', all);
+          if (gr.error) throw new Error(`${gr.error}. Nothing was changed.`);
+          const repo: string = gr.repo;
+          const run = makeGitRun();
+          if (name === 'git_branch_create') return clip(await branchCreate(run, repo, args.name));
+          if (name === 'git_switch') return clip(await switchBranch(run, repo, args.name));
+          if (name === 'git_push') return clip(await push(run, repo, args.forceWithLease === true));
+          if (name === 'git_sync') return clip(await sync(run, repo));
+          // git_commit: every named path must resolve under a root AND inside this clone.
+          const rels: string[] = [];
+          const named = (Array.isArray(args.paths) ? args.paths : args.paths ? [args.paths] : []).map((x: unknown) => String(x).trim()).filter(Boolean);
+          for (const p of named) {
+            const rr = resolveRead(path.isAbsolute(p) ? p : path.join(repo, p), all);
+            if (rr.error) throw new Error(`${rr.error}. Nothing was committed.`);
+            const rel = path.relative(repo, realOf(rr.abs));
+            if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) throw new Error(`«${p}» is not inside the clone ${repo}. Nothing was committed.`);
+            rels.push(rel);
+          }
+          return clip(await commit(run, repo, args.message, rels));
+        }
         case 'git_status': case 'git_branches': case 'git_log':
         case 'git_ls_tree': case 'git_show': case 'git_diff': {
           // Whether `path` picks the REPOSITORY (status/branches/log) rather than a
