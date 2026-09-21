@@ -704,3 +704,7 @@ The host suite must pass with `plugins-available/` empty — a host test never l
 - **Never** append a `Co-Authored-By: Claude` trailer (or any Claude
   `Co-Authored-By`) to a commit message.
 - Branch from `master`; the default branch here is `master`.
+- **Versions**: semver, `0.x` while the plugin contract may still change. The version
+  lives in `package.json` and `src/version.ts` (a test keeps them equal); each release
+  gets a `CHANGELOG.md` entry and a `vX.Y.Z` tag. A release is what is handed out —
+  a build of the host that someone installs — so bump the version before building one.
