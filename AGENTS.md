@@ -364,8 +364,10 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
 - The wheel is reported because the TTY backend is opened with `{ mouse }`, on
   unless `ui.mouse` is `false`. The cost is the terminal's own drag-to-select,
   which then needs the terminal's bypass — Option in iTerm2, Shift in most Linux
-  terminals, NONE in Apple Terminal (View → Allow Mouse Reporting, ⌘R, turns it off
-  there); the active default in `config_schema` says so, because "why can't I select
+  terminals, fn in Apple Terminal (tried: Option and Shift do NOT work there; ⌘R,
+  View → Allow Mouse Reporting, turns reporting off). A native selection takes whole
+  screen rows, borders and the next panel included — fn+Option (a rectangle) keeps
+  them out in Apple Terminal; a real in-app selection waits for flowtty; the active default in `config_schema` says so, because "why can't I select
   text" is asked of the assistant. Without the mouse, `/copy` in the chat copies the
   last answer's code block (`/copy answer` — all of it) with pbcopy / wl-copy / xclip
   (`src/assistant/copy.ts`); Apple Terminal has no OSC 52. Copy-on-select itself
