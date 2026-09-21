@@ -334,6 +334,16 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
 
 ## CLI
 
+- **The interactive screen needs a terminal on both ends** (it draws on stdout, reads
+  keys from stdin). `runInteractive` checks first (`interactiveRefusal`, on flowtty's
+  `isInteractive`) and answers a pipe / CI / redirected input with a sentence, the
+  one-shot form that does work there, and exit code 1. Since flowtty 1.0.0-alpha.12
+  `new TtyBackend()` THROWS without an interactive stdout, so the backend is built on
+  the interactive path ONLY — never before a subcommand has been ruled out, or
+  `flow-assist config get x | jq` dies.
+- flowtty restores the terminal on SIGINT / SIGTERM / SIGHUP itself and honours
+  `NO_COLOR` / `FORCE_COLOR`; the host adds no handler or colour flag of its own.
+
 `flow-assist` with subcommands:
 
 - (default) `interactive` — the TUI.

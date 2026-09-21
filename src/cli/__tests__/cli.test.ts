@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { mouseEnabled, parseCli } from '../../cli';
+import { interactiveRefusal, mouseEnabled, parseCli } from '../../cli';
 import { hostConfigSchema } from '../../config/schema';
 import { validateConfigWriteValue } from '../../config/load';
 
@@ -19,4 +19,17 @@ test('parseCli maps argv to a subcommand', () => {
   expect(parseCli(['plugins', 'update', 'tracker'])).toEqual({ cmd: 'plugins', args: ['update', 'tracker'] });
   expect(parseCli([])).toEqual({ cmd: 'interactive', args: [] });
   expect(parseCli(['what is the status of ABC-123'])).toEqual({ cmd: 'prompt', args: ['what is the status of ABC-123'] });
+});
+test('the interactive screen is refused without a terminal, in a sentence — not a stack trace', () => {
+  const yes = () => true;
+  const no = () => false;
+  // A terminal on both ends: go ahead.
+  expect(interactiveRefusal({ isTTY: true }, { isTTY: true }, yes)).toBeNull();
+  // stdout is a pipe / CI / TERM=dumb: flowtty's TtyBackend would throw.
+  const piped = interactiveRefusal({ isTTY: false }, { isTTY: true }, no)!;
+  expect(piped).toContain('needs a terminal');
+  // The way that DOES work without one is named.
+  expect(piped).toContain('flow-assist "your question"');
+  // stdin redirected: keys cannot arrive, and the app used to quit at once, silently.
+  expect(interactiveRefusal({ isTTY: true }, { isTTY: false }, yes)).toContain('needs a terminal');
 });

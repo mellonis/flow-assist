@@ -11,7 +11,7 @@
 
 import { resolve, join } from 'node:path';
 import { existsSync } from 'node:fs';
-import { TtyBackend } from '@flowtty/tty-backend';
+import { TtyBackend, isInteractive } from '@flowtty/tty-backend';
 import { loadConfig } from './config/load.js';
 import { hostConfigSchema } from './config/schema.js';
 import {
@@ -270,7 +270,26 @@ export function mouseEnabled(config: Record<string, unknown>): boolean {
   return (config.ui as { mouse?: unknown } | undefined)?.mouse !== false;
 }
 
+// The TUI needs a terminal on BOTH ends: it draws on stdout and reads keys from
+// stdin. Started in a pipe, in CI or with its input redirected, it used to write
+// escape codes into the pipe (and, with stdin piped, quit at once with nothing said);
+// flowtty ≥ 1.0.0-alpha.12 throws instead. Either way the person deserves a sentence
+// and the way that does work without a terminal.
+export function interactiveRefusal(stdout: { isTTY?: boolean }, stdin: { isTTY?: boolean }, interactive = isInteractive): string | null {
+  if (interactive(stdout as never) && stdin.isTTY) return null;
+  return [
+    'flow-assist: the interactive screen needs a terminal (stdin and stdout).',
+    'Without one, ask in one shot:  flow-assist "your question"',
+    'Config and plugins work anywhere:  flow-assist config get <key> · flow-assist plugins ls',
+  ].join('\n');
+}
+
 async function runInteractive(config: Record<string, unknown>, repo: PluginRepo): Promise<void> {
+  const refusal = interactiveRefusal(process.stdout, process.stdin);
+  if (refusal) {
+    console.error(refusal);
+    process.exit(1);
+  }
   const plugins = await loadPlugins({ config, repo, renders, enabledDir });
   const registry = assembleToolRegistry({ plugins, config, repo: repo as unknown as RepoShape });
   const backend = new TtyBackend(process.stdout, process.stdin, { mouse: mouseEnabled(config) });
