@@ -5,6 +5,9 @@ import { ScriptedModel, bootApp, settle } from './helpers/scripted';
 const realFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 
+// Settles until `ok` holds (or `n` rounds of a few ms pass) — for a wait on a timer.
+const settleUntil = async (ok: () => boolean, n = 100) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
+
 // The style of the cell where `text` starts (plus `offset` cells).
 function styleAt(backend: { lastBuffer: any; lastFrame: string }, text: string, offset = 0) {
   const rows = backend.lastFrame.split('\n');
@@ -441,7 +444,9 @@ test('a background result does not open the chat — the footer says it is waiti
     [{ text: 'Started it in the background.' }],
     [{ hold: true }, { text: 'There are 14 TODO comments.' }],
   );
-  const ui = await bootApp(model, 100, 28);
+  // The toast is shortened: this test waits for one to go, and at the real four
+  // seconds that wait alone ran the test into bun's 5 s timeout under a full suite.
+  const ui = await bootApp(model, 100, 28, undefined, {}, { toastMs: 600 });
   // Closed, the chat is reachable from the footer at all — and a chat hint alone
   // does not drag in the cache hint, which belongs to plugins that cache.
   expect(ui.backend.lastFrame).toMatch(/F chat/);
@@ -453,16 +458,15 @@ test('a background result does not open the chat — the footer says it is waiti
   await settle(20);
   await ui.press('escape', 'escape'); // close while the task is still running
   model.release();
-  await settle(40);
+  await settleUntil(() => ui.backend.lastFrame.includes('count the TODO comments done'));
 
   // Still closed. The host's toast announces the result first — it takes the
-  // footer's place for four seconds — and the count is what remains once it is gone.
+  // footer's place for a while — and the count is what remains once it is gone.
   expect(ui.backend.lastFrame).not.toContain('Flow Assist');
   expect(ui.backend.lastFrame).toContain('count the TODO comments done');
   // Nobody is looking at the chat, so the terminal is asked to say so too.
   expect(ui.backend.notifications).toEqual([{ title: 'flow-assist', body: 'count the TODO comments finished:' }]);
-  await new Promise((r) => setTimeout(r, 4100));
-  await settle(4);
+  await settleUntil(() => /◆ 1 new/.test(ui.backend.lastFrame), 400);
   expect(ui.backend.lastFrame).not.toContain('Flow Assist');
   expect(ui.backend.lastFrame).toMatch(/F chat · ◆ 1 new/);
 

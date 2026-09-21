@@ -120,6 +120,8 @@ export interface RenderAppInput {
   // synthetic `<plugin>:aiTools` groups populate `pluginAiTools`. Optional for
   // Task 11; Task 13 passes it.
   tools?: import('../loader/tools.js').ToolRegistry;
+  // How long a toast stays, in ms (default `TOAST_MS`, 4 s). Only tests change it.
+  toastMs?: number;
 }
 
 // Command-line state lives in a single stable `{ current }` object created in
@@ -141,7 +143,7 @@ interface CommandLineState {
 
 export function renderApp(
   root: Backend,
-  { plugins, config, onExit, renders: _renders = {}, tools }: RenderAppInput,
+  { plugins, config, onExit, renders: _renders = {}, tools, toastMs }: RenderAppInput,
 ) {
   // Resolve config.theme into the full per-modal palette BEFORE anything reads it
   // (createServices/ft and every renderer read `f.config.theme`). Mirrors the
@@ -164,7 +166,7 @@ export function renderApp(
   function App() {
     const inputRegistryRef = useRef<LazyInputEntry[]>([]);
     const [, setTick] = useState(0);
-    const toast = useToast();
+    const toast = useToast(toastMs);
     const app = useApp();
     const notify = () => setTick((t) => t + 1);
 

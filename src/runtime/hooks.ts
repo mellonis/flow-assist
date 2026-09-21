@@ -50,20 +50,23 @@ export function registerInputHandler(
 // ─── Transient message (bottom line toast) ────────────────────────────────────
 // The bottom line shows either the command line, a transient notification, or the
 // footer hints. `useToast` provides the transient message: it auto-clears after
-// 4 seconds (a single pending timer, cleared on the next show / unmount).
+// `TOAST_MS` (a single pending timer, cleared on the next show / unmount). The
+// duration is a parameter so a test can watch a toast go without waiting seconds.
+export const TOAST_MS = 4000;
+
 export interface Toast {
   message: string | null;
   setMessage: (msg: string | null) => void;
   showMessage: (msg: string) => void;
 }
 
-export function useToast(): Toast {
+export function useToast(ms: number = TOAST_MS): Toast {
   const [message, setMessage] = useState<string | null>(null);
   const messageRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const showMessage: (msg: string) => void = (text) => {
     setMessage(text);
     if (messageRef.current) clearTimeout(messageRef.current);
-    messageRef.current = setTimeout(() => setMessage(null), 4000);
+    messageRef.current = setTimeout(() => setMessage(null), ms);
   };
   useEffect(() => () => {
     if (messageRef.current) clearTimeout(messageRef.current);

@@ -80,8 +80,9 @@ export const settle = async (n = 10) => { for (let i = 0; i < n; i++) { await fl
 // `guests` adds plugins that are not the host's own — built with the same `make` the
 // loader uses, so they are namespaced exactly as an installed plugin is.
 // `extra` is merged into the config — e.g. `{ memory: { file } }` to keep a test off the
-// person's real memory file.
-export async function bootApp(model: ScriptedModel, cols = 100, rows = 28, guests?: (make: Make) => Plugin[], extra: Record<string, unknown> = {}) {
+// person's real memory file. `opts.toastMs` shortens the toast, for a test that waits
+// for one to go.
+export async function bootApp(model: ScriptedModel, cols = 100, rows = 28, guests?: (make: Make) => Plugin[], extra: Record<string, unknown> = {}, opts: { toastMs?: number } = {}) {
   process.env.LLM_TOKEN = 'scripted';
   model.install();
   // Sessions go to a fresh temp dir unless a test names one: a test must never write
@@ -96,7 +97,7 @@ export async function bootApp(model: ScriptedModel, cols = 100, rows = 28, guest
   const backend = new TestBackend(cols, rows);
   // How many times the app asked to exit — a key that quits is visible to a test.
   let exits = 0;
-  const app = await renderApp(backend, { plugins, config, tools, onExit: () => { exits++; } });
+  const app = await renderApp(backend, { plugins, config, tools, onExit: () => { exits++; }, toastMs: opts.toastMs });
   await settle();
   const press = async (...names: string[]) => { for (const name of names) backend.press({ name }); await settle(); };
   const type = async (text: string) => { backend.type(text); await settle(); };
