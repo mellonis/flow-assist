@@ -38,7 +38,9 @@ export function buildLogPlugin({ renders, config, make }: BuildLogParams): Plugi
   return make('log', {
     name: 'log',
     commands: [],
-    keys: { log: 'l' },
+    // A capital opens something big: `A` the assistant, `L` the log (a plugin's board
+    // would be `B`). Lower-case letters stay free for what is inside a screen.
+    keys: { log: 'L' },
     // `l` opened the log and nothing on screen said so. The footer names it while
     // the log is closed — by the cap of whatever `log` is bound to now.
     usesCache: false,
@@ -83,7 +85,10 @@ export function buildLogPlugin({ renders, config, make }: BuildLogParams): Plugi
             handler: (key) => {
               if (!logModal) return false;
               const maxScroll = Math.max(0, (logs ?? []).length - logModalRows);
-              if (key.name === 'l' || key.name === 'q' || key.name === 'escape') setLogModal(false);
+              // Closed by the key that opened it — whatever `log` is bound to now, not a
+              // letter written here — and by q / Esc.
+              const mine = ([] as string[]).concat(f.keys.log ?? []);
+              if (mine.includes(key.name) || key.name === 'q' || key.name === 'escape') setLogModal(false);
               if (key.name === 'up') setLogScroll(s => Math.min(s + 1, maxScroll));
               if (key.name === 'down') setLogScroll(s => Math.max(0, s - 1));
               if (key.name === 'pageup') setLogScroll(s => Math.min(s + logModalRows, maxScroll));

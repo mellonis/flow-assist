@@ -147,9 +147,24 @@ function depTargetExists(spec: string, baseDir: string): boolean {
   return false;
 }
 
+function isBuiltDistribution(pluginDir: string): boolean {
+  try {
+    const pkg = JSON.parse(readFileSync(join(pluginDir, 'package.json'), 'utf8')) as { main?: unknown };
+    if (typeof pkg.main !== 'string' || !pkg.main) return false;
+    return existsSync(join(pluginDir, pkg.main)) && !existsSync(join(pluginDir, 'src'));
+  } catch {
+    return false;
+  }
+}
+
 // Computes a plugin's missing deps from its manifest (a pure helper shared by the
 // exported `resolveDeps` and the `list` method, which closes over the real dirs).
 function missingDepsFor(pluginDir: string): string[] {
+  // A BUILT plugin (as `plugin:publish` ships it: the bundle named by package.json's
+  // `main`, and no `src/`) carries its dependencies inside the bundle. Its manifest
+  // still lists them — for whoever builds it — but none can be missing, and saying
+  // "missing: @acme/client" about a plugin that loads and works is a false alarm.
+  if (isBuiltDistribution(pluginDir)) return [];
   const manifest = readManifest(pluginDir);
   const missing: string[] = [];
   for (const [dep, spec] of Object.entries(manifest.deps ?? {})) {

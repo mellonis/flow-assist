@@ -236,6 +236,19 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
       `CAP` table in `src/views/modals.ts` does.
     A bundled plugin that still spells caps by hand in its `keycaps(ft)` (acme-tracker)
     shows the default key after a remap — that is the bug this rule prevents.
+- **A key acts where it is shown, and is shown where it acts.** Audited 2026-09-21:
+  - `x` flushed the cache from the start screen, where the footer did not offer it.
+    The hint and the key now read ONE predicate, `cacheInPlay` (`loader/registry.ts`):
+    a plugin that keeps data in the cache is on screen. `:clear` works from anywhere.
+  - `b` was answered by the host with "no target (tracker supplies the URL)". The host
+    no longer handles it. `openBrowser`, `prev`, `next` and `open` stay in
+    `HOST_DEFAULT_KEYS` only as a shared vocabulary for plugins (a plugin reads
+    `ft.keys.open`); the host acts on none of them.
+  - A test presses every lower-case letter on the start screen and expects silence.
+- **A capital opens something big**: `A` the assistant, `L` the log; a plugin's main
+  screen should follow (`B` for a board). Lower case is for what is INSIDE a screen.
+  A modal is closed by the key it is bound to (`f.keys.<action>`), never by a letter
+  written in the handler — the log used to close on a hard-coded `l`.
 - **↑/↓** walk the prompt history, only while the field is empty or still shows a
   history entry untouched. The **wheel** and **PgUp/PgDn** scroll. **^r** unfolds
   thinking, notes and the tool calls behind the one-line `▸ N tools` summary.
@@ -298,7 +311,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     instruction, so a key that does nothing here is not listed as if it did.
     `helpEntries` gives one entry per word a person types: a plugin's `core:quit` and
     the host's `quit` are the same word, and the described one wins.
-  - A modal opened by a key names that key in the footer through `keycaps` (`l log`),
+  - A modal opened by a key names that key in the footer through `keycaps` (`L log`),
     and the flag the footer reads is patched synchronously AND followed by `notify()`
     on close as well as on open — the host draws the footer before the plugin re-renders.
 - Every host modal is centred on one full-screen layer, `overlay()` in

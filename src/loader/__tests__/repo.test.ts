@@ -75,3 +75,23 @@ test('list reports requiredSettings missing from the environment', async () => {
   expect(list.find(e => e.name === 'tracker')?.missingSettings).not.toContain('FLOW_ASSIST_TEST_REQUIRED_VAR');
   delete process.env.FLOW_ASSIST_TEST_REQUIRED_VAR;
 });
+test('a built plugin carries its dependencies inside: none of them is reported missing', async () => {
+  const { repo, avail } = fakeRepo();
+  const dir = join(avail, 'tracker');
+  const manifest = { name: 'tracker', version: '1.0.0', deps: { '@acme/client': 'file:../client' } };
+  writeFileSync(join(dir, 'manifest.json'), JSON.stringify(manifest));
+  // From source, with the dependency not there: it IS missing, and said so.
+  mkdirSync(join(dir, 'src'), { recursive: true });
+  writeFileSync(join(dir, 'src', 'index.ts'), '');
+  writeFileSync(join(dir, 'package.json'), JSON.stringify({ main: './dist/index.mjs' }));
+  expect((await repo.list()).find((e) => e.name === 'tracker')?.missingDeps).toEqual(['@acme/client']);
+
+  // As `plugin:publish` ships it — the bundle, and no src/ — nothing can be missing:
+  // "missing: @acme/client" beside a plugin that loads and works is a false alarm.
+  const built = join(avail, 'built');
+  mkdirSync(join(built, 'dist'), { recursive: true });
+  writeFileSync(join(built, 'manifest.json'), JSON.stringify({ ...manifest, name: 'built' }));
+  writeFileSync(join(built, 'package.json'), JSON.stringify({ main: './dist/index.mjs' }));
+  writeFileSync(join(built, 'dist', 'index.mjs'), 'export default 1;');
+  expect((await repo.list()).find((e) => e.name === 'built')?.missingDeps).toEqual([]);
+});

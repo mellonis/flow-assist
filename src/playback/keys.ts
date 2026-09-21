@@ -12,7 +12,7 @@ export const DEFAULT_KEYS: Record<string, string | string[]> = {
   // command line
   commandLine: ':',
   // global
-  log: 'l',
+  log: 'L',
   bookmarks: 'M',          // opens the bookmarks popup; also Shift+m
   quit: 'q',
   search: '/',

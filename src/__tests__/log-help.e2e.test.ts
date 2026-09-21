@@ -7,16 +7,20 @@ afterEach(() => { globalThis.fetch = realFetch; });
 
 const footer = (ui: { backend: { lastFrame: string } }) => ui.backend.lastFrame.split('\n').filter((r) => r.trim()).at(-1) ?? '';
 
-test('the footer says `l` opens the log — and stops saying it while the log is open', async () => {
+test('the footer says `L` opens the log — and stops saying it while the log is open', async () => {
   const ui = await bootApp(new ScriptedModel(), 100, 26);
-  // `l` opened the log and nothing on screen said so.
-  expect(footer(ui)).toContain('l log');
-  await ui.press('l');
+  // The key opened the log and nothing on screen said so.
+  expect(footer(ui)).toContain('L log');
+  await ui.press('L');
   expect(ui.backend.lastFrame).toContain('╭─ Log');
-  expect(footer(ui)).not.toContain('l log');
+  expect(footer(ui)).not.toContain('L log');
+  // The key that opened it closes it too.
+  await ui.press('L');
+  expect(ui.backend.lastFrame).not.toContain('╭─ Log');
+  await ui.press('L');
   await ui.press('escape');
   expect(ui.backend.lastFrame).not.toContain('╭─ Log');
-  expect(footer(ui)).toContain('l log');
+  expect(footer(ui)).toContain('L log');
   ui.app.unmount();
 });
 
@@ -29,7 +33,7 @@ test('what happened is in the log, with the time it happened', async () => {
   await ui.press('return');
   await settle(16);
   await ui.press('escape', 'escape');
-  await ui.press('l');
+  await ui.press('L');
   expect(ui.backend.lastFrame).toMatch(/\d\d:\d\d:\d\d \[chat\]/);
   ui.app.unmount();
 });

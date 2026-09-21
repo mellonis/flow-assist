@@ -720,7 +720,7 @@ const ACTION_LABELS: Record<string, string> = {
 // plugin's own screen (`prev`/`next`/`open`/`openBrowser` are shared bindings the host
 // merely defines a default for) — listed separately, because on the start screen they
 // do nothing and a key in a help list is an instruction.
-const HOST_ACTIONS = ['chat', 'commandLine', 'log', 'clearCache', 'back', 'quit'];
+const HOST_ACTIONS = ['chat', 'commandLine', 'log', 'back', 'quit'];
 const actionLabel = (action: string) => ACTION_LABELS[action] ?? action.replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase();
 
 export function renderHelp({

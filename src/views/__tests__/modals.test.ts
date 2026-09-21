@@ -288,7 +288,7 @@ test('help fits the screen, names the keys, and wraps what it says', async () =>
       theme: { modals: { bg: undefined } },
       helpOpen: true,
       commands: COMMANDS,
-      keys: { commandLine: [':'], quit: ['q'], chat: ['A'], log: ['l'], open: ['return'], disabled: [] },
+      keys: { commandLine: [':'], quit: ['q'], chat: ['A'], log: ['L'], open: ['return'], disabled: [] },
     }),
     backend,
   );
@@ -300,7 +300,7 @@ test('help fits the screen, names the keys, and wraps what it says', async () =>
   expect(frame).toContain('Esc close');
   // The keys — which used to be nowhere — by what they do, drawn as caps.
   expect(frame).toMatch(/A\s+talk to the assistant/);
-  expect(frame).toMatch(/l\s+the log/);
+  expect(frame).toMatch(/L\s+the log/);
   // A key the host does not act on is not listed as if it worked anywhere.
   const anywhere = rows.findIndex((r) => r.includes('Keys — anywhere'));
   const plugins = rows.findIndex((r) => r.includes("on a plugin's own screen"));

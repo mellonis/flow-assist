@@ -28,6 +28,7 @@ import {
   buildKeys,
   buildViewRegistry,
   commandContextFor,
+  cacheInPlay,
   composeFooterHints,
   findIn,
   helpFor as helpForRegistry,
@@ -360,7 +361,7 @@ export function renderApp(
       // than discarding what was typed); closing the box is ESC's job. The old
       // toggle behaviour made `:help` close the line you had just typed — a real
       // runtime defect.
-      if ((isKey(keys.commandLine, name) || name === 'colon') && !cmdline.current.open) {
+      if (isKey(keys.commandLine, name) && !cmdline.current.open) {
         cmdline.current.open = true;
         ui.cmdOpen = true;
         notify();
@@ -384,7 +385,7 @@ export function renderApp(
         // already open, so it must neither toggle it closed nor print itself into
         // the buffer (a command token stays clean — `:help` remains `help`, not
         // `help:`). Closing the line is ESC's job.
-        if (isKey(keys.commandLine, name) || name === 'colon') return true;
+        if (isKey(keys.commandLine, name)) return true;
         // Enter/Return runs a command. This is a HOST concern — it must not depend on
         // the plugin-namespaced `open` action: tracker defines `open:'enter'`
         // (open an issue), which overrides the host's `open:['enter','return']`
@@ -393,7 +394,7 @@ export function renderApp(
         // there made `:help`/`:ask` silently dead on Enter in a real terminal
         // while working in a headless probe that pressed `enter`. Check the key
         // directly.
-        if (name === 'enter' || name === 'return') {
+        if (name === 'return') {
           const input = cmdline.current.input.trim();
           // The command is the FIRST WORD; the rest is its argument. The whole line
           // used to be looked up, so a plugin command with an argument was never
@@ -490,11 +491,6 @@ export function renderApp(
           notify();
           return true;
         }
-        if (name === 'space') {
-          cmdline.current.input += ' ';
-          notify();
-          return true;
-        }
         if (name.length === 1) {
           cmdline.current.input += name;
           notify();
@@ -512,15 +508,17 @@ export function renderApp(
         notify();
         return true;
       }
-      if (isKey(keys.clearCache, name)) {
+      // `x` flushes the cache only while the footer offers it — while a plugin that
+      // keeps something there is on screen. `:clear` works from anywhere.
+      if (isKey(keys.clearCache, name) && cacheInPlay(plugins, pFtMap)) {
         services.clearCache();
-        toast.showMessage('cache cleared');
+        toast.showMessage('Cache cleared');
         return true;
       }
-      if (isKey(keys.openBrowser, name)) {
-        toast.showMessage('open browser: no target (tracker supplies the URL)');
-        return true;
-      }
+      // `openBrowser` (b), `prev`, `next` and `open` are NOT handled here: the host only
+      // gives them a default so plugins share one vocabulary. The host used to answer
+      // `b` with "no target (tracker supplies the URL)" — a key that did nothing but
+      // say so.
       return false;
     };
 

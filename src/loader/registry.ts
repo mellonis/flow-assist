@@ -145,6 +145,18 @@ export function helpFor(registry: Command[]): string {
 // runtime (from the App's overlayComps), which `keycaps` reads for live state;
 // a plugin whose `pFt` is not mounted yet (or that declares no keycaps) simply
 // contributes nothing. Pure — no imports beyond the plugin shape.
+// Is a plugin that keeps data in the cache on screen right now? One answer for the
+// footer's `x flush cache` hint AND for the key itself: a key acts where it is shown
+// and nowhere else. (`x` used to flush the cache from the start screen too, where
+// nothing said it would.)
+export function cacheInPlay(plugins: PluginShape[] = [], pFtMap: Record<string, unknown> = {}): boolean {
+  return plugins.some((p) => {
+    const kc = (p as Plugin).keycaps;
+    const pFt = pFtMap[p.name];
+    return (p as Plugin).usesCache !== false && !!kc && !!pFt && kc(pFt).length > 0;
+  });
+}
+
 export function composeFooterHints(
   plugins: PluginShape[] = [],
   pFtMap: Record<string, unknown> = {},
@@ -167,7 +179,7 @@ export function composeFooterHints(
     .filter((s) => s.hints.length);
   // "flush cache" is offered only while a plugin that keeps something in the cache
   // is on screen — the chat's own hint must not advertise a cache it never fills.
-  if (shown.some((s) => s.caches)) hints.push(...hint('clearCache', 'flush cache'));
+  if (cacheInPlay(plugins, pFtMap)) hints.push(...hint('clearCache', 'flush cache'));
   return [...hints, ...shown.flatMap((s) => s.hints)];
 }
 
