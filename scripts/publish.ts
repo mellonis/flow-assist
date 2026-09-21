@@ -84,7 +84,7 @@ export interface PackResult { ok: boolean; error?: string; built?: boolean; ship
 export function packPlugin(pluginDir: string, tarPath: string, run: (cmd: string, cwd: string) => void = (cmd, cwd) => { execSync(cmd, { cwd, stdio: 'inherit' }); }): PackResult {
   const pkgFile = join(pluginDir, 'package.json');
   const pkg = existsSync(pkgFile)
-    ? (JSON.parse(readFileSync(pkgFile, 'utf8')) as { main?: string; scripts?: Record<string, string>; dependencies?: Record<string, string> })
+    ? (JSON.parse(readFileSync(pkgFile, 'utf8')) as { main?: string; files?: unknown[]; scripts?: Record<string, string>; dependencies?: Record<string, string> })
     : {};
   const deps = Object.keys(pkg.dependencies ?? {});
   const hasBuild = !!pkg.scripts?.build;
@@ -100,8 +100,14 @@ export function packPlugin(pluginDir: string, tarPath: string, run: (cmd: string
   // A built plugin ships its build, not the sources it was built from — with both
   // present an install would work by accident if the build were broken.
   const skip = [...NEVER_SHIPPED, ...(hasBuild ? ['src'] : [])];
+  // `files` in package.json, as npm reads it, names what ships — for a plugin whose
+  // directory holds neighbours it builds from (a client package in a workspace).
+  // The manifest and package.json always go.
+  const listed = Array.isArray(pkg.files) ? ['manifest.json', 'package.json', ...pkg.files.map(String)] : null;
   // Dotfiles (.gitignore, .env, editor folders) are the author's, not the plugin's.
-  const shipped = readdirSync(pluginDir).filter((entry) => !entry.startsWith('.') && !skip.includes(entry)).sort();
+  const shipped = (listed ? [...new Set(listed)].filter((entry) => existsSync(join(pluginDir, entry))) : readdirSync(pluginDir))
+    .filter((entry) => !entry.startsWith('.') && !skip.includes(entry))
+    .sort();
   const name = basename(pluginDir);
   try {
     // `--exclude` reaches what the top-level filter cannot: a source-shipped plugin

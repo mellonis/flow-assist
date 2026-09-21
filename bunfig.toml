@@ -1,0 +1,6 @@
+[test]
+# plugins-enabled/ holds links to plugins, and a plugin kept in a repository of its
+# own is linked from outside this tree: its tests run in its own repository, where
+# they are isolated from one another. The bundled plugins' tests run from
+# plugins-available/.
+pathIgnorePatterns = ["plugins-enabled/**"]

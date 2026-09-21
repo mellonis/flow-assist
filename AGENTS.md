@@ -33,7 +33,16 @@ English throughout; a half-translated screen is worse than either language.
   them); publishing runs it and ships the build without `src/`. No dependencies →
   the sources ship as they are. Dependencies and no `build` → publishing refuses. The
   loader takes `main` first and falls back to `src/` only when it is missing, which
-  is what a working copy in `plugins-available/` relies on.
+  is what a working copy in `plugins-available/` relies on — so a `dist/` left behind
+  by a local build is what the host loads, and a test that mocks one of the plugin's
+  dependencies no longer reaches it. `files` in `package.json` (as npm reads it)
+  names what ships, beside the manifest and `package.json` — for a plugin whose
+  directory also holds what it is built from (a client package of a workspace).
+- **A plugin kept in a repository of its own** is linked into `plugins-enabled/` from
+  wherever it lives, and it takes React, flowtty and the host's sources for its tests
+  through links to this checkout's packages (one React, never two). `bunfig.toml`
+  keeps `bun test` here out of `plugins-enabled/`: such a plugin's tests run in its
+  own repository.
 - React 19 + `@flowtty/react` / `@flowtty/tty-backend`, zod 4.
 
 ## Repos

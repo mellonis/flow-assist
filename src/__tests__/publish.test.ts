@@ -86,6 +86,29 @@ test('a plugin with dependencies is built, and ships its build — no node_modul
   expect(files.filter((f) => /node_modules|\/src\/|__tests__|bun\.lock|tsconfig|\/\./.test(f))).toEqual([]);
 });
 
+// A plugin inside a workspace keeps neighbours in its directory (a client package it
+// builds from); `files` in package.json names what ships, as npm reads it.
+test('package.json "files" names what ships — a neighbouring package stays out', () => {
+  const { dir, tar } = makePlugin({
+    'manifest.json': '{"name":"demo","version":"1.0.0"}',
+    'package.json': JSON.stringify({ main: './dist/index.mjs', files: ['dist', 'README.md', 'LICENSE'], scripts: { build: 'x' }, dependencies: { '@local/api': 'workspace:*' } }),
+    'README.md': 'demo',
+    'LICENSE': 'GPL',
+    'src/index.ts': 'export default 1;',
+    'api/package.json': '{"name":"@local/api"}',
+    'api/openapi-spec.yaml': 'openapi: 3.1.0',
+    'CHANGELOG.md': 'not listed',
+  });
+  const r = packPlugin(dir, tar, () => {
+    mkdirSync(join(dir, 'dist'), { recursive: true });
+    writeFileSync(join(dir, 'dist/index.mjs'), 'export default 1;');
+  });
+  expect(r).toMatchObject({ ok: true, built: true });
+  const files = listTar(tar);
+  for (const f of ['demo/LICENSE', 'demo/README.md', 'demo/dist/index.mjs', 'demo/manifest.json', 'demo/package.json']) expect(files).toContain(f);
+  expect(files.filter((f) => /\/api(\/|$)|CHANGELOG|\/src(\/|$)/.test(f))).toEqual([]);
+});
+
 test('a dependency-free plugin ships its sources as they are', () => {
   const { dir, tar } = makePlugin({
     'manifest.json': '{"name":"demo","version":"1.0.0"}',
