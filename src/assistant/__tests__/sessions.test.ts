@@ -32,6 +32,20 @@ test('a session is saved whole and read back; only the person can read it', () =
   expect(fs.readdirSync(dir).filter((n) => n.endsWith('.tmp'))).toEqual([]); // no temp file left
 });
 
+test("a session keeps what the chat was about; one saved as `issue` still reads", () => {
+  const dir = tmp();
+  const s = session({ subject: 'DOC-7' });
+  saveSession(dir, s);
+  expect(loadSession(dir, s.id)!.subject).toBe('DOC-7');
+  // Saved by an older build under its old name — a number, even.
+  const old = session({ id: newSessionId() });
+  saveSession(dir, { ...old, issue: 42 } as Session);
+  expect(loadSession(dir, old.id)!.subject).toBe('42');
+  const none = session({ id: newSessionId() });
+  saveSession(dir, none);
+  expect(loadSession(dir, none.id)!.subject).toBeNull();
+});
+
 test('an answer still being written is not saved as a message', () => {
   const dir = tmp();
   const s = session({ messages: [{ role: 'user', content: 'q' }, { role: 'assistant', content: '', live: 'полови' }] });

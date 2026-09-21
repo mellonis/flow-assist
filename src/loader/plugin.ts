@@ -47,6 +47,15 @@ export type PluginShape = {
   // channel (e.g. tracker's `createTrackerStore(ft)`), so hooks that read the
   // store during render never see an uninitialized one.
   setup?: (ft: unknown) => unknown;
+  // What the plugin's screen is about right now, as a short id the chat can show
+  // (a document, a ticket) — `null` when nothing is. The chat's title carries it,
+  // and opening the chat on a different one starts a new conversation (the old one
+  // stays on /resume). The host asks every plugin in order; the first answer wins.
+  chatSubject?: (ft: unknown) => string | null | undefined;
+  // Called after a chat turn in which a write tool was confirmed and applied, so a
+  // plugin reloads what it shows — otherwise the screen keeps the text from before
+  // the write. May return a promise; a failure is logged.
+  afterWrite?: (ft: unknown) => unknown;
 };
 
 // A plugin command. The host prefixes the command name at load time; the base
@@ -83,6 +92,8 @@ export interface Plugin {
   description?: string;
   usesCache?: boolean;
   setup?: (ft: unknown) => unknown;
+  chatSubject?: (ft: unknown) => string | null | undefined;
+  afterWrite?: (ft: unknown) => unknown;
 }
 
 export type MakeFactoryConfig = {

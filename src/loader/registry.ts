@@ -78,11 +78,11 @@ export function findIn(registry: Command[], name: string): Command | null {
 // A plugin command is namespaced (`tracker:open`), and its `run` body is a thin
 // forward into a plugin-specific ctx (the tracker's TrackerCommandCtx). The
 // base `ctx` carries only host-owned closures (showMessage/setView/back/…), so a
-// plugin command that forwards to, say, `ctx.openIssue(arg)` would find no such
+// plugin command that forwards to one of its own services would find no such
 // method and silently no-op. Here we extend the base ctx with the OWNING
 // plugin's own-key services (the per-plugin `pFt.services` the plugin's own
-// mount mutates: openIssue/openBoard/openBrowser/toggleBookmark/…). The host
-// stays agnostic — it never names a plugin method; it just spreads them.
+// mount mutates). The host stays agnostic — it never names a plugin method; it
+// just spreads them.
 //
 // Precedence: base ctx wins over plugin services (`...services, ...baseCtx`), so
 // a plugin's no-op `showMessage` never shadows the host's real toast. A base

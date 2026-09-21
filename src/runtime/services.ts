@@ -79,6 +79,12 @@ export interface HostServices {
   // The default is a no-op; the App rebinds it (app.tsx) so it mutates the shared
   // `ui.overlay` and re-renders. Generic — the tracker uses it for its detail view.
   setOverlay: (overlay: string | null) => void;
+  // The chat's side of two plugin hooks (`chatSubject` / `afterWrite` in the plugin
+  // shape): what the screen is about now — the first plugin that names something —
+  // and "a write was applied, reload what you show", sent to every plugin. The App
+  // binds both over the mounted plugins; the defaults answer nothing and do nothing.
+  chatSubject: () => string | null;
+  afterWrite: () => Promise<void>;
 }
 
 export interface CreateServicesOptions {
@@ -160,6 +166,8 @@ export function createServices({ config, tools, repo, onExit }: CreateServicesOp
     alert: () => {},
     copy: (text) => platformCopy(text),
     setOverlay: () => {},
+    chatSubject: () => null,
+    afterWrite: async () => {},
   };
   // Read the LIVE channels at fire time (the App reassigns showMessage/pushLog/
   // notify each render), so the reminder is delivered even if a render happened

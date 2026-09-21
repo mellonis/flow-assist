@@ -10,8 +10,8 @@
 //
 // Host adaptations vs. the tracker source:
 //   - tracker-agnostic: `/analyze` stripped from the hints/empty-state; `analysisAttached`
-//     dropped; the title falls back to `Chat` when `currentIssueId` is null (the host
-//     never sets it).
+//     dropped; the title names the chat's `subject` (what a plugin's screen is about,
+//     `services.chatSubject`) when there is one.
 //   - THE AUTOCOMPLETE LIST (Task #20): `renderChatModal` accepts `completions
 //     { matches, sel }` and draws the allowed `/`-candidate row above the input —
 //     the feature the tracker renderer never had (the tracker completed in-place only).
@@ -481,7 +481,7 @@ export function renderChatModal({
   input,
   streaming,
   error,
-  currentIssueId,
+  subject,
   toolLabel = '',
   phase = 'writing',
   showReasoning = false,
@@ -508,7 +508,7 @@ export function renderChatModal({
   input: string;
   streaming: boolean;
   error?: string | null;
-  currentIssueId?: unknown;
+  subject?: string | null;
   toolLabel?: string;
   // What the model is doing while no tool runs — see the status line.
   phase?: 'thinking' | 'writing';
@@ -595,7 +595,7 @@ export function renderChatModal({
         backgroundColor: m.bg,
         borderBackgroundColor: m.borderBg,
         borderColor: m.border,
-        borderTitle: currentIssueId ? `${ASSISTANT_MARK} Flow Assist · ${currentIssueId}` : `${ASSISTANT_MARK} Flow Assist`,
+        borderTitle: subject ? `${ASSISTANT_MARK} Flow Assist · ${subject}` : `${ASSISTANT_MARK} Flow Assist`,
         width: boxW,
         height: boxH,
         padding: 1,

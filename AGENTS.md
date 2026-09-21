@@ -68,12 +68,28 @@ cannot import a package from disk), still declares its `configSchema` with it.
 `make(name, shape)` injects `config.plugins.<name>` and qualified keys. The
 returned `shape` has optional: `commands`, `keys`, `keyActions`, `views`,
 `surface`, `modals`, `colors`, `configSchema`, `components`, `tools`, `services`,
-`aiTools`, `keycaps(ft)`, `entry`, `setup(ft)`. `components[slot] = (ft) => Component`;
+`aiTools`, `keycaps(ft)`, `entry`, `setup(ft)`, `chatSubject(ft)`, `afterWrite(ft)`. `components[slot] = (ft) => Component`;
 `services` expose host services through `ft.services` — the host wins on every
 key it owns, a plugin's same-named key never clobbers it. `setup(ft)` runs once,
 before any of the plugin's components mount (it is where a plugin seeds its store). Tool groups are delivered by plugins — there is
 **no** `tools-available/` → `tools-enabled/` repository; `ai.disabledTools` is
 the blacklist.
+
+- **The chat asks the plugins; it knows no plugin's data.** Each plugin's
+  `services` are its own (a per-plugin view over the host's), so the chat cannot
+  read another plugin's state — which is why two hooks are part of the shape, called
+  with the plugin's own `ft`:
+  - `chatSubject(ft)` → a short id of what the plugin's screen is about now (the
+    tracker: the open issue), or `null`. The first plugin to name something wins. The
+    chat's title shows it (`ƒ Flow Assist · ABC-1`), and opening the chat on a
+    different subject starts a new session (the old one stays on `/resume`); the
+    session saves it as `subject` (older sessions wrote `issue`, still read).
+  - `afterWrite(ft)` → called, for every plugin, after a chat turn in which a write
+    tool was confirmed and APPLIED (not declined, not failed): reload what you show,
+    or an open document keeps its text from before the write. It may return a
+    promise; a rejection is logged as `[<plugin>] refresh after a write failed: …`.
+  The host reaches them as `services.chatSubject()` / `services.afterWrite()`
+  (bound in `runtime/app.tsx`).
 
 ### A handled key is followed by a redraw
 

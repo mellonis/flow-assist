@@ -38,7 +38,7 @@ export interface Session {
   usage: { promptTokens: number; completionTokens: number } | null;
   prompts: string[];                   // ↑/↓ history of the field
   draft: string;                       // what was typed and not sent
-  issue?: string | number | null;      // the task the chat was opened on, if any
+  subject?: string | null;             // what the screen was about when the chat began (`chatSubject`), if anything
   shellCwd?: string | null;            // where `!command` / run_command were last left (null — the default)
   closed?: boolean;                    // left with /clear — listed, never continued on start
 }
@@ -97,6 +97,9 @@ export function saveSession(dir: string, s: Session): void {
   fs.renameSync(tmp, file);
 }
 
+// A saved subject; an old session may hold a number there.
+const subjectOf = (v: unknown): string | null => (typeof v === 'string' || typeof v === 'number' ? String(v) : null);
+
 export function loadSession(dir: string, id: string): Session | null {
   try {
     const s = JSON.parse(fs.readFileSync(fileOf(dir, id), 'utf8')) as Session;
@@ -108,7 +111,8 @@ export function loadSession(dir: string, id: string): Session | null {
       usage: s.usage ?? null,
       prompts: Array.isArray(s.prompts) ? s.prompts.map(String) : [],
       draft: typeof s.draft === 'string' ? s.draft : '',
-      issue: typeof s.issue === 'string' || typeof s.issue === 'number' ? s.issue : null,
+      // Saved before the rename as `issue`; read either spelling, write the new one.
+      subject: subjectOf(s.subject ?? (s as { issue?: unknown }).issue),
       // Checked again when it is used: a directory that has gone or left the roots
       // since reads as the default (`createShellState`).
       shellCwd: typeof s.shellCwd === 'string' ? s.shellCwd : null,

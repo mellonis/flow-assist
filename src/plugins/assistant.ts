@@ -2,8 +2,9 @@
 // modal: owns the messages, input, streaming and scroll. THE HOST does the network
 // (ft.services.chatLLM) — the plugin never touches it; config read from
 // ft.config.ai (baseUrl/model/tokenEnv), token from process.env[tokenEnv].
-//   - `ft.services.currentIssue`/`currentComments`/`openIssue` are tracker-specific
-//     → referenced as possibly-undefined (a tracker plugin may supply them later).
+//   - what the chat is about and the refresh after a write are asked of the plugins
+//     through two generic hooks (`services.chatSubject` / `services.afterWrite`,
+//     see AGENTS.md, plugin contract) — the chat names no plugin's data.
 //   - the chat's language is `ai.assistantLanguage` (chatLanguage).
 
 import { addTrigger, chatUser } from '../loader/registry.js';
@@ -220,7 +221,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const [emptyNotice, setEmptyNotice] = f.useState('');
           const [toolCount, setToolCount] = f.useState(0); // tool calls in this turn (for the status)
           const abortRef = f.useRef<AbortController | null>(null);
-          const ctxIssueIdRef = f.useRef<string | number | null>(null); // the task the context/session was built for
+          const ctxSubjectRef = f.useRef<string | null>(null); // what the screen was about when this session began
           // Tab-completion cycle: { base, idx, cmd } — by which prefix the matches were
           // built, the last selected command in that list and its text. Repeat Tab cycles;
           // changing the prefix (typed/deleted) restarts.
@@ -292,7 +293,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // A /command or !command in the field is being run, not drafted (it was
               // "/clear" itself); a shell-mode field has no leading `!` left to catch by
               // that regex, so its own flag is checked too — it is not a draft either.
-              prompts: historyRef.current.slice(-100), draft: (shellModeRef.current || /^\s*[/!]/.test(inputRef.current)) ? '' : inputRef.current, issue: ctxIssueIdRef.current,
+              prompts: historyRef.current.slice(-100), draft: (shellModeRef.current || /^\s*[/!]/.test(inputRef.current)) ? '' : inputRef.current, subject: ctxSubjectRef.current,
               shellCwd: shellRef.current.saved(),
               closed: false, // written means in use — a resumed cleared session is open again
             };
@@ -312,7 +313,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const writeRef = f.useRef(writeSession); writeRef.current = writeSession;
           const applySession = (s: Session) => {
             sessionIdRef.current = s.id; createdAtRef.current = s.createdAt;
-            ctxIssueIdRef.current = s.issue ?? null;
+            ctxSubjectRef.current = s.subject ?? null;
             apiRef.current = s.api as unknown as ChatMessage[];
             summaryRef.current = s.summary;
             planRef.current.load(s.plan);
@@ -657,12 +658,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   return next;
                 });
               }
-              // After a real write, refresh the detail/cache — otherwise an open ticket and
-              // a subsequent context show the pre-write text. openIssue intentionally does
-              // not close the chat.
+              // After a real write the plugins reload what they show — otherwise an open
+              // document keeps the text from before the write. It does not close the chat.
               if (runs.some(r => (r as { write?: boolean; outcome?: string }).write && (r as { outcome?: string }).outcome === 'applied')) {
-                const id = (f.services as Record<string, any>).currentIssue?.id;
-                if (id) (f.services as Record<string, any>).openIssue?.(id).catch((e: Error) => (f.services as Record<string, any>).pushLog?.(`[chat] refresh failed: ${e.message}`));
+                void (f.services as { afterWrite?: () => Promise<void> }).afterWrite?.();
               }
             } catch (e) {
               // Esc during a stream is an expected cancel (AbortError) — not shown as an
@@ -911,7 +910,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 abortRef.current?.abort(); abortRef.current = null;
                 if (pendingRef.current) settleConfirm(false);
                 dismissAsk();
-                ctxIssueIdRef.current = null;
+                ctxSubjectRef.current = null;
                 contentRef.current = '';
                 // A cleared session must not have a pre-clear background result surface in
                 // the fresh chat: drop any queued-but-unsent delivery and stop the flush
@@ -985,16 +984,16 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           };
 
           const openChat = (initialText?: string) => {
-            const issueId = (f.services as Record<string, any>).currentIssue?.id ?? null;
-            // Task change — a new session (fresh context); re-opening the same task
-            // continues the history, nothing is cleared.
-            if (issueId !== ctxIssueIdRef.current) {
+            const subject = (f.services as { chatSubject?: () => string | null }).chatSubject?.() ?? null;
+            // A change of subject — a new session (fresh context); re-opening on the same
+            // subject continues the history, nothing is cleared.
+            if (subject !== ctxSubjectRef.current) {
               // The conversation about the other task is saved and stays on /resume.
               const had = msgsRef.current.some((m) => m.role === 'user');
               writeSession();
               sessionIdRef.current = ''; createdAtRef.current = '';
-              if (had) (f.services as Record<string, any>).showMessage?.(`A new session for ${issueId ?? 'no task'} — /resume goes back to the previous one`);
-              ctxIssueIdRef.current = issueId;
+              if (had) (f.services as Record<string, any>).showMessage?.(`A new session for ${subject ?? 'no task'} — /resume goes back to the previous one`);
+              ctxSubjectRef.current = subject;
               apiRef.current = []; summaryRef.current = ''; queueRef.current = []; setQueued([]);
               usageRef.current = null;
               planRef.current.reset();
@@ -1269,7 +1268,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             pendingConfirm: pendingAsk,
             pendingQuestion,
             queued,
-            currentIssueId: (f.services as Record<string, any>).currentIssue?.id,
+            subject: (f.services as { chatSubject?: () => string | null }).chatSubject?.() ?? null,
             elapsed: elapsedMs, emptyNotice, toolCount, completions,
             // Live count of IN-FLIGHT background tasks (the host re-renders via
             // notify() when one is armed or completes).

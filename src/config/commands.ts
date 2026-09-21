@@ -1,6 +1,6 @@
 // TUI command line (neovim-style `:`). Only pure parsing logic and command
-// metadata live here — no state/setter reading. Handlers that drive
-// openIssue/back/search and the like live in App(): commands hand back a parsed
+// metadata live here — no state/setter reading. Handlers live in App() and in the
+// plugins that own the commands: commands hand back a parsed
 // name + arguments, and App() dispatches against the command registry.
 //
 // `minArgs`/`maxArgs` (maxArgs = -1 — unlimited) validate the argument count.

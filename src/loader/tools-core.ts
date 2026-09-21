@@ -22,8 +22,7 @@ import { SHELL_DEFAULTS, createShellState } from '../assistant/shell.js';
 import { parseAskArgs, askResult, type AskQuestion, type AskState } from '../assistant/ask.js';
 import type { Change } from '../assistant/diff.js';
 
-// Runtime context handed to core tools by the caller: the issue-context builder
-// (absent when the chat is not opened from an issue detail), the resolved memory
+// Runtime context handed to core tools by the caller: the resolved memory
 // file (absent → resolved from config), the config.local.json path, and the active
 // plugin's identity token (a `plugin` memory scope resolves to the plugin it was
 // issued to — the host maps the token to the name; a caller cannot forge one).

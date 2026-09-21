@@ -295,6 +295,31 @@ export function renderApp(
       [plugins, ft],
     );
 
+    // The chat's two plugin hooks (AGENTS.md, plugin contract). Each plugin is asked
+    // with its OWN runtime — the one its services and store live on; the chat's
+    // runtime cannot see another plugin's services.
+    (services as unknown as HostServices).chatSubject = () => {
+      for (const p of plugins) {
+        const pFt = pFtMap[p.name];
+        let subject: string | null | undefined = null;
+        // Asked on every draw of the chat: a plugin that throws names nothing.
+        try { subject = pFt ? (p as Plugin).chatSubject?.(pFt) : null; } catch { subject = null; }
+        if (subject) return String(subject);
+      }
+      return null;
+    };
+    (services as unknown as HostServices).afterWrite = async () => {
+      for (const p of plugins) {
+        const pFt = pFtMap[p.name];
+        if (!pFt || !(p as Plugin).afterWrite) continue;
+        try {
+          await (p as Plugin).afterWrite!(pFt);
+        } catch (e) {
+          (services as unknown as ReactBoundServices).pushLog(`[${p.name}] refresh after a write failed: ${(e as Error).message}`);
+        }
+      }
+    };
+
     // ── Host command-line handlers (F1) ─────────────────────────────────────
     // The `:config`/`:cache` commands route to the same config-write modules
     // the CLI `config` subcommand uses; `:view`/`:back` just record the active

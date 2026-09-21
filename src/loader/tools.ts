@@ -172,10 +172,10 @@ export function assembleToolRegistry({ plugins, config, repo }: AssembledToolReg
     const aiTools = (p.aiTools ?? []) as unknown as AiToolDef[];
     if (aiTools.length) {
       // Self-bind the owning plugin's OWN services into each ai-tool's `run`, so a
-      // nav ai-tool (open_issue/open_board/open_browser) resolves its ctx service
-      // even when the caller's toolCtx doesn't carry the tracker's services — the
-      // assistant's toolCtx (`{ ...f.services }` in assistant.ts) is the ASSISTANT's
-      // host bundle, which lacks openIssue/openBoard, and one-shot passes `{}`.
+      // navigation ai-tool resolves its ctx service even when the caller's toolCtx
+      // doesn't carry that plugin's services — the assistant's toolCtx is the
+      // ASSISTANT's host bundle, which lacks another plugin's services, and one-shot
+      // passes `{}`.
       // Agent dispatch calls `def.run(parsed, toolCtx)` directly (bypassing this
       // group's exec), so the bind must live on the run closure, not just the exec.
       // The caller's ctx still wins on shared keys (`...ctx` overrides), so a real
