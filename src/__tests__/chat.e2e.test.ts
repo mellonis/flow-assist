@@ -353,6 +353,37 @@ test('a background result shows at once — a half-typed draft does not hold it 
   ui.app.unmount();
 });
 
+test('an answer stopped with Esc says so under it — a cut-off «В» is not a whole answer', async () => {
+  const model = new ScriptedModel();
+  model.script([{ text: 'В' }, { hold: true }, { text: 'от подсветка.' }]);
+  const ui = await bootApp(model, 100, 28);
+  await ui.press('F');
+  await ui.type('подсвети синтаксис');
+  await ui.press('return');
+  await settle(20);
+  await ui.press('escape'); // the field is empty: Esc stops the answer
+  await settle(20);
+  const frame = ui.backend.lastFrame;
+  expect(frame).toContain('ƒ В');
+  expect(frame).toContain('stopped (Esc)');
+  expect(frame).not.toContain('от подсветка');
+  model.release();
+  ui.app.unmount();
+});
+
+test('an answer that ran to the end carries no stop mark', async () => {
+  const model = new ScriptedModel();
+  model.script([{ text: 'Вот подсветка.' }]);
+  const ui = await bootApp(model, 100, 28);
+  await ui.press('F');
+  await ui.type('подсвети синтаксис');
+  await ui.press('return');
+  await settle(20);
+  expect(ui.backend.lastFrame).toContain('Вот подсветка.');
+  expect(ui.backend.lastFrame).not.toContain('stopped');
+  ui.app.unmount();
+});
+
 test('a fired reminder asks the terminal for attention as well as drawing its banner', async () => {
   const model = new ScriptedModel();
   model.script(

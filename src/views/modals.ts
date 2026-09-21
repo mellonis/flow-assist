@@ -44,6 +44,7 @@ interface ChatMsg {
   process?: string;
   toolRuns?: ToolRun[];
   duration?: number;
+  stopped?: boolean;
   [k: string]: unknown;
 }
 // One executed tool in a turn, for the persistent `▸ name (args) → outcome` trace.
@@ -90,6 +91,7 @@ interface ChatRow {
   meta?: boolean;
   runs?: ToolRun[];
   duration?: number;
+  stopped?: boolean;
   reasonHeader?: boolean;
   open?: boolean;
   reason?: boolean;
@@ -303,7 +305,8 @@ function buildMessageRows(m: ChatMsg, last: boolean, wrap: number, showReasoning
     const runs = (Array.isArray(m.toolRuns) ? m.toolRuns : []) as ToolRun[];
     const duration = role === 'assistant' && Number(m.duration) >= 1000 ? m.duration : undefined;
     // One quiet line under the answer; ^r unfolds the calls themselves.
-    if (runs.length || duration) rows.push({ role, meta: true, duration, runs });
+    const stopped = role === 'assistant' && m.stopped === true;
+    if (runs.length || duration || stopped) rows.push({ role, meta: true, duration, runs, stopped });
     if (runs.length && showReasoning) for (const run of runs) rows.push({ role, toolRun: true, spans: [toolRunText(run, inner)] });
     if (!last) rows.push({ gap: true });
   }
@@ -392,7 +395,8 @@ function ChatMessages({ messages, wrap, showReasoning, palette: m, errorColor }:
         const failed = runs.some((r) => r.outcome === 'error' || r.outcome === 'declined');
         return h(Box, { key, flexDirection: 'row', flexShrink: 0 },
           h(Text, null, ' '.repeat(GUTTER)),
-          row.duration ? h(Text, { dim: true }, `${fmtSec(row.duration)}${runs.length ? ' · ' : ''}`) : null,
+          row.duration ? h(Text, { dim: true }, `${fmtSec(row.duration)}${runs.length || row.stopped ? ' · ' : ''}`) : null,
+          row.stopped ? h(Text, { color: m.warn }, `stopped (Esc)${runs.length ? ' · ' : ''}`) : null,
           runs.length ? h(Text, { dim: !failed, color: failed ? errorColor : wrote ? m.warn : m.ok }, `${showReasoning ? '▾' : '▸'} ${runs.length} tool${runs.length === 1 ? '' : 's'}${wrote ? ' ✎' : ''}: `) : null,
           runs.length ? h(Text, { dim: true }, `${toolSummary(runs)}${showReasoning ? '' : ` · ${CAP.details}`}`) : null);
       }

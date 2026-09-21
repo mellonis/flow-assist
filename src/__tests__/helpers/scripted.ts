@@ -41,12 +41,22 @@ export class ScriptedModel {
       const self = this;
       const body = new ReadableStream({
         async start(c) {
+          // Like a real fetch: aborting the request errors its body with an AbortError
+          // (and lets a held step go), so Esc stops a scripted answer as it stops a real one.
+          let stopped = false;
+          init.signal?.addEventListener('abort', () => {
+            stopped = true;
+            c.error(new DOMException('The operation was aborted.', 'AbortError'));
+            self.gate?.();
+          });
           let calls = 0;
           for (const step of turn) {
+            if (stopped) return;
             if ('hold' in step) await new Promise<void>((r) => { self.gate = r; });
             else if ('text' in step) for (const piece of step.text.match(/.{1,12}/gs) ?? []) send(c, { choices: [{ delta: { content: piece }, finish_reason: null }] });
             else send(c, { choices: [{ delta: { tool_calls: [{ index: calls, id: `call_${calls++}`, function: { name: step.tool, arguments: JSON.stringify(step.args) } }] }, finish_reason: null }] });
           }
+          if (stopped) return;
           send(c, { choices: [{ delta: {}, finish_reason: calls ? 'tool_calls' : 'stop' }] });
           if (self.usage) send(c, { choices: [], usage: self.usage });
           c.enqueue(enc.encode('data: [DONE]\n\n'));

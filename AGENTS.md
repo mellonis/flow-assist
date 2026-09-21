@@ -302,7 +302,8 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   backtick rows) — a test that joins a block's text must strip that bar.
 - **⏎** sends; while an answer is coming it **queues** instead (sent in order when
   the turn ends). **Esc**: clear the field → take the last queued message back →
-  stop the answer → arm/close. **Alt+⏎** (drawn `⌥⏎` on macOS) is a newline (`NEWLINE_KEY` in
+  stop the answer (the line under what came so far says `stopped (Esc)` — a cut-off
+  «В» must not read as a whole answer) → arm/close. **Alt+⏎** (drawn `⌥⏎` on macOS) is a newline (`NEWLINE_KEY` in
   `src/views/modals.ts` — the one spelling every hint uses); a blank line is kept.
   ⇧⏎ works too where the terminal sends it (decoded since flowtty 1.0.0-alpha.7),
   but the hint names the key that works in every terminal that has an Alt.
@@ -487,7 +488,9 @@ The host suite must pass with `plugins-available/` empty — a host test never l
 
 - `src/__tests__/helpers/scripted.ts` — a scripted model and a booted app: the
   REAL TUI on a test backend with only the network replaced. Steps are text,
-  a tool call, or a `hold` that freezes the stream until `release()`. End-to-end
+  a tool call, or a `hold` that freezes the stream until `release()`. Like a real
+  fetch it honours the request's `signal`: an abort errors the body with an
+  AbortError, so Esc stops a scripted answer. End-to-end
   tests drive the app through it; assert on the frame AND on cell styles
   (`backend.lastBuffer`).
 - `bun scripts/ui-frames.ts [--size WxH] [--color|--styles] [scenario…]` — the same

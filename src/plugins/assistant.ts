@@ -56,6 +56,7 @@ interface ChatMsg {
   process?: string;
   toolRuns?: unknown[];
   duration?: number;
+  stopped?: boolean;
   [k: string]: unknown;
 }
 
@@ -538,11 +539,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               if (tickRef.current) { clearInterval(tickRef.current); tickRef.current = null; }
               const finalMs = Date.now() - t0Ref.current;
               setElapsedMs(finalMs);
-              // Bind the duration to the last assistant message (persistent «· 12.4s»).
+              // Bind the duration to the last assistant message (persistent «· 12.4s»),
+              // and mark an answer stopped with Esc: cut short, «The» reads like a whole
+              // (and odd) answer unless the line under it says it was stopped.
               setMessages(cur => {
                 const next = cur.slice();
                 const last = next[next.length - 1];
-                if (last?.role === 'assistant' && last.duration == null) next[next.length - 1] = { ...last, duration: finalMs };
+                if (last?.role === 'assistant' && last.duration == null) next[next.length - 1] = { ...last, duration: finalMs, ...(aborted ? { stopped: true } : {}) };
                 return next;
               });
               // Empty answer: the model gave only reasoning (it is in the «reasoning» fold)
