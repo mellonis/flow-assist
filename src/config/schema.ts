@@ -20,8 +20,10 @@ export const hostConfigSchema = z.object({
   }).optional(),
   user: z.object({ name: z.string().optional(), login: z.string().optional() }).optional(),
   // `mouse` reports the wheel to the app (it scrolls the conversation). On by
-  // default; the cost is the terminal's own drag-to-select, which then needs
-  // Shift (or Option on macOS) held — `config set ui.mouse false` gives it back.
+  // default; the cost is the terminal's own drag-to-select. iTerm2 selects with Option
+  // held, most Linux terminals with Shift; Apple Terminal with neither — there, View →
+  // Allow Mouse Reporting (⌘R) turns it off. `config set ui.mouse false` gives it back
+  // everywhere, and `/copy` in the chat copies an answer without the mouse.
   ui: z.object({ mouse: z.boolean().optional() }).optional(),
   memory: z.object({ file: z.string() }).optional(),
   fs: z.object({ roots: z.array(z.string()) }).optional(),

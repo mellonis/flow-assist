@@ -10,6 +10,7 @@ import { addTrigger, chatUser } from '../loader/registry.js';
 import { bgActiveCount } from '../loader/tools-core.js';
 import { createPlan, todoGlyph } from '../assistant/plan.js';
 import { apiHistory, compactConversation, chatLanguage } from '../assistant/agent.js';
+import { copyTarget, copyToClipboard } from '../assistant/copy.js';
 import type { ChatMessage } from '../assistant/agent.js';
 import { editorReducer } from '@flowtty/core';
 import { chatFieldWidth } from '../views/modals.js';
@@ -23,7 +24,7 @@ import type { Plugin } from '../loader/plugin.js';
 
 // Slash-commands of the chat — a single source for runChatCommand and Tab-completion.
 // `/analyze` is a tracker slash command and is removed.
-const CHAT_COMMANDS = ['compact', 'context', 'clear', 'memory', 'log', 'exit'];
+const CHAT_COMMANDS = ['compact', 'context', 'copy', 'clear', 'memory', 'log', 'exit'];
 
 // A plain object holding every enumerable service, inherited ones included.
 // `for…in` walks the prototype chain, which is exactly what a spread does not.
@@ -704,6 +705,17 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 setField('');
                 setContextOpen(true);
                 return;
+              case 'copy': {
+                // For the person; nothing is sent and nothing joins the conversation.
+                const target = copyTarget(messages as { role?: string; content?: unknown }[], arg);
+                if ('error' in target) { setError(target.error); return; }
+                const done = copyToClipboard(target.text);
+                if (!done.ok) { setError(`/copy: ${done.error}`); return; }
+                setField('');
+                (f.services as Record<string, any>).showMessage?.(`Copied ${target.what} — ${Array.from(target.text).length} chars`);
+                f.notify();
+                return;
+              }
               case 'compact': compactNow(); return;
               case 'exit': closeChat(); return;
               default: setError(`unknown command /${name} — available: ${CHAT_COMMANDS.map(c => `/${c}`).join(', ')}`); return;

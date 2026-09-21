@@ -363,8 +363,13 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   pasted text).
 - The wheel is reported because the TTY backend is opened with `{ mouse }`, on
   unless `ui.mouse` is `false`. The cost is the terminal's own drag-to-select,
-  which then needs Shift (Option on macOS); the active default in `config_schema`
-  says so, because "why can't I select text" is asked of the assistant.
+  which then needs the terminal's bypass — Option in iTerm2, Shift in most Linux
+  terminals, NONE in Apple Terminal (View → Allow Mouse Reporting, ⌘R, turns it off
+  there); the active default in `config_schema` says so, because "why can't I select
+  text" is asked of the assistant. Without the mouse, `/copy` in the chat copies the
+  last answer's code block (`/copy answer` — all of it) with pbcopy / wl-copy / xclip
+  (`src/assistant/copy.ts`); Apple Terminal has no OSC 52. Copy-on-select itself
+  waits for flowtty.
 - A `/command` **completes inline**, like a shell's autosuggestion: the part not
   typed yet is drawn after the caret in the dimmed accent colour, the other
   candidates follow as `⇥ a · b`, **Tab** takes the offer and then walks the rest.
