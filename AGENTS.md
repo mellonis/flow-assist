@@ -522,8 +522,11 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   "offered, not yours yet" — the person's own text is never dimmed, on either side
   of the caret.
 - The **status line** while a turn runs says what happens NOW: a running tool's label
-  (`⚙ name(args)…`, `$ command`) pulses through bright colours; once the model writes
-  again the label goes and the line says `writing…`. The stream callbacks are
+  (`⚙ name(args)…`, `$ command`) pulses through bright colours; once the tool ends
+  (`onToolRun`) the label goes. With no tool running the line says `writing…` only
+  while the model's text arrives, and `thinking…` otherwise — before the first token,
+  while it reasons, and between tools while it works out the next call (it said
+  `writing…` there, and nothing appeared). The stream callbacks are
   closures made when the message was sent, so anything they READ (the tool label
   they clear) is kept in a ref beside the state — reading the state there saw its
   send-time value, and a finished tool's label stayed up for the rest of the turn.

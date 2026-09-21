@@ -483,6 +483,7 @@ export function renderChatModal({
   error,
   currentIssueId,
   toolLabel = '',
+  phase = 'writing',
   showReasoning = false,
   cursor = 0,
   escArmed = false,
@@ -509,6 +510,8 @@ export function renderChatModal({
   error?: string | null;
   currentIssueId?: unknown;
   toolLabel?: string;
+  // What the model is doing while no tool runs — see the status line.
+  phase?: 'thinking' | 'writing';
   showReasoning?: boolean;
   cursor?: number;
   escArmed?: boolean;
@@ -613,13 +616,16 @@ export function renderChatModal({
       h(Box, { flexGrow: 1, flexShrink: 1, overflow: 'hidden' },
       (!escArmed && (streaming || toolLabel))
         // Working: what is happening NOW is the bright part. A tool that is running
-        // pulses through the accent colours; with none running the model is writing
-        // (its notes fold above), and the line says so instead of naming the last tool.
+        // pulses through the accent colours; with none running the model is either
+        // thinking (waiting for its first token, reasoning, working out the next tool
+        // call) or writing (its text is arriving) — never the name of the last tool.
         ? h(Box, { flexDirection: 'row', overflow: 'hidden' },
             h(Text, { dim: true, wrap: 'truncate' }, `${spin(elapsed)} ${fmtSec(elapsed)}${toolCount ? ` · ${toolCount} tool call${toolCount === 1 ? '' : 's'}` : ''} · `),
             toolLabel
               ? h(Text, { color: TOOL_PULSE(m)[Math.floor(elapsed / 300) % 4], bold: true, wrap: 'truncate' }, toolLabel)
-              : h(Text, { color: m.assistantAccent ?? 'green', wrap: 'truncate' }, 'writing…'),
+              : phase === 'thinking'
+                ? h(Text, { color: 'magenta', wrap: 'truncate' }, 'thinking…')
+                : h(Text, { color: m.assistantAccent ?? 'green', wrap: 'truncate' }, 'writing…'),
             h(Text, { dim: true, wrap: 'truncate' }, ` · ${CAP.esc} stops`))
         : h(Text, (emptyNotice && !streaming && !toolLabel && !escArmed) ? { color: 'yellow', wrap: 'truncate' } : { dim: true, wrap: 'truncate' },
         escArmed

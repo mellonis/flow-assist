@@ -32,6 +32,44 @@ test('once the tool is done and the model writes, the line says "writing", not t
   ui.app.unmount();
 });
 
+// Between tools nothing is being written: the model is working out its next call.
+// The line used to say "writing…" there, which read as text that never appeared.
+test('between tools, before any text, the line says "thinking", not "writing" or the last tool', async () => {
+  const model = new ScriptedModel();
+  model.script(
+    [{ tool: 'datetime', args: {} }],
+    [{ hold: true }, { tool: 'datetime', args: {} }],
+    [{ text: 'готово.' }],
+  );
+  const ui = await bootApp(model, 110, 28);
+  await ui.press('F');
+  await ui.type('который час?');
+  await ui.press('return');
+  await settle(20);
+  const row = statusRow(ui.backend.lastFrame);
+  expect(row).toContain('1 tool call');
+  expect(row).toContain('thinking…');
+  expect(row).not.toContain('writing…');
+  expect(row).not.toContain('⚙');
+  model.release();
+  await settle(20);
+  ui.app.unmount();
+});
+
+test('before the first token the line says "thinking"', async () => {
+  const model = new ScriptedModel();
+  model.script([{ hold: true }, { text: 'ответ' }]);
+  const ui = await bootApp(model, 110, 28);
+  await ui.press('F');
+  await ui.type('привет');
+  await ui.press('return');
+  await settle(10);
+  expect(statusRow(ui.backend.lastFrame)).toContain('thinking…');
+  model.release();
+  await settle(20);
+  ui.app.unmount();
+});
+
 test('a running tool is drawn bright, not dim — it moves', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-toolstatus-'));
   const ui = await bootApp(new ScriptedModel(), 110, 28, undefined, { fs: { roots: [dir] } });

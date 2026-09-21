@@ -199,6 +199,11 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const toolLabelRef = f.useRef('');
           const toolLabel = toolLabelState;
           const setToolLabel = (v: string) => { toolLabelRef.current = v; setToolLabelState(v); };
+          // What the model is doing when no tool runs: 'writing' only while its text
+          // arrives; before the first token, while it reasons, and between tools (it is
+          // working out the next call) it is 'thinking'. One word for all of it read
+          // "writing…" while nothing was being written.
+          const [phase, setPhase] = f.useState<'thinking' | 'writing'>('thinking');
           // Show the model's «thinking» (reasoning_content): folded by default (one
           // dim-line «▸ reasoning»), Ctrl+r unfolds/folds all.
           const [showReasoning, setShowReasoning] = f.useState(false);
@@ -491,6 +496,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             setCursor(0);
             setError(null);
             setStreaming(true);
+            setPhase('thinking');
             t0Ref.current = Date.now();
             setElapsedMs(0);
             contentRef.current = '';
@@ -551,7 +557,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // write lands — a block of its own that stays in the chat. Only on the
                 // display message: `apiRef` gets the transcript, which never holds it.
                 onToolRun: (run: { changes?: ChangeView[] }) => {
-                  if (!run.changes?.length) return;
+                  // The tool is done: until the model's next token it is thinking.
+                  if (toolLabelRef.current) setToolLabel('');
+                  setPhase('thinking');
+                  if (!run.changes?.length) { f.notify(); return; }
                   const added = run.changes;
                   setMessages(cur => {
                     const next = cur.slice();
@@ -583,6 +592,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 onLive: (delta: string) => {
                   if (!delta) return;
                   if (toolLabelRef.current) setToolLabel(''); // the tool is done: the model is writing
+                  setPhase('writing');
                   setMessages(cur => {
                     const next = cur.slice();
                     const last = next[next.length - 1];
@@ -594,7 +604,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // reasoning and content arrive in one chunk as parallel streams: we
                 // accumulate reasoning in a separate message field (not content!).
                 onReasoning: (delta: string) => {
-                  if (toolLabelRef.current) setToolLabel(''); // the tool is done: the model is writing
+                  if (toolLabelRef.current) setToolLabel(''); // the tool is done: the model is thinking
+                  setPhase('thinking');
                   setMessages(cur => {
                     const next = cur.slice();
                     const last = next[next.length - 1];
@@ -1253,7 +1264,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             if (matches.length) completions = { matches, sel: walking ? Math.min(walking.idx, matches.length - 1) : 0 };
           }
           return (f.viewRegistry.chat as (p: Record<string, unknown>) => unknown)({
-            width, height, theme: f.config.theme, messages, input, streaming, error, toolLabel, showReasoning, cursor, escArmed,
+            width, height, theme: f.config.theme, messages, input, streaming, error, toolLabel, phase, showReasoning, cursor, escArmed,
             shellMode,
             pendingConfirm: pendingAsk,
             pendingQuestion,
