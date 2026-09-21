@@ -126,6 +126,9 @@ assistant nobody had asked for a board.
   away. The model answers with the `config set <key> <value>` command to run.
 - **`web_fetch` reads the web — and the web is both a way out and a way in**
   (`src/assistant/web-fetch.ts`, pure; resolver and fetch injected, tests offline).
+  It is a tool group of its own, `web` (`src/loader/tools-web.ts`), on by default and
+  turned off with `ai.disabledTools: ["web"]` — `core` is always on, so a tool that
+  must be switchable per machine cannot live there.
   Out: a URL can carry anything the model has seen, so a host not on `web.allowlist`
   is a y/n through the `write` predicate — the chat's existing pause — and a
   background task, which has nobody to ask, cannot fetch it. The host is RESOLVED and

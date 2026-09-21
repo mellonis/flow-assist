@@ -53,6 +53,7 @@ is no separate tools repo.
   on `web.allowlist` (`example.com`, or `*.example.com` for its subdomains); a
   background task cannot fetch a host you have not listed. Local and private
   addresses are refused unless listed. `web.maxBytes` / `web.timeoutMs` set the limits.
+  The tool is on by default; `config set ai.disabledTools '["web"]'` turns it off.
 
 ## Building a single binary (retired)
 

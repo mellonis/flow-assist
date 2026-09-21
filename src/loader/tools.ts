@@ -18,6 +18,7 @@ import type { Plugin } from './plugin.js';
 import { coreTools } from './tools-core.js';
 import type { CoreCtx } from './tools-core.js';
 import { hostGroupTools } from './host-group.js';
+import { webTools } from './tools-web.js';
 import type { PluginRepo } from './host-group.js';
 import { buildKeys } from './registry.js';
 import { purgePluginMemories } from '../runtime/services/memory.js';
@@ -109,7 +110,9 @@ export function assembleToolRegistry({ plugins, config, repo }: AssembledToolReg
   const toolNamesRef: { names: string[] } = { names: [] };
   const host = hostGroupTools(repo, () => toolNamesRef.names, plugins.map(p => p.name), purgePluginMemory);
 
-  const groups: ToolGroup[] = [core, host];
+  // web_fetch is a group of its own so it can be turned off (core cannot be).
+  const web = disabled.includes('web') ? null : webTools(config);
+  const groups: ToolGroup[] = [core, host, ...(web ? [web] : [])];
   const nameToGroup = new Map<string, ToolGroup>();
   // ─── How a tool gets its name ───────────────────────────────────────────────
   // The model sees the name the plugin gave: `get_issue`, `open_issue`, `read_file`.
@@ -144,6 +147,7 @@ export function assembleToolRegistry({ plugins, config, repo }: AssembledToolReg
   };
   register(core);
   register(host);
+  if (web) register(web);
 
   for (const p of plugins) {
     // Plugin-supplied tool groups — used as-is (the plugin author namespaces the

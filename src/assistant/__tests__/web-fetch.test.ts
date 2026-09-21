@@ -2,7 +2,8 @@
 // the resolver and fetch are fakes that record what they were asked.
 import { describe, expect, test } from 'bun:test';
 import { WEB_DEFAULTS, checkUrl, hostAllowed, htmlToText, isPrivateAddress, webFetch, type WebFetchOptions } from '../web-fetch';
-import { coreTools } from '../../loader/tools-core';
+import { webTools } from '../../loader/tools-web';
+import { assembleToolRegistry } from '../../loader/tools';
 
 type Route = { status?: number; type?: string; body?: string | Uint8Array; location?: string };
 
@@ -138,7 +139,7 @@ describe('allowlist', () => {
 });
 
 describe('the tool', () => {
-  const tool = (config: Record<string, unknown>) => coreTools(config).tools.find((t) => t.function.name === 'web_fetch')!;
+  const tool = (config: Record<string, unknown>) => webTools(config).tools.find((t) => t.function.name === 'web_fetch')!;
 
   test('is registered, and asks the person for a host not on the allowlist', () => {
     const write = tool({ web: { allowlist: ['docs.example.com'] } }).write as (a: Record<string, unknown>) => boolean;
@@ -149,6 +150,17 @@ describe('the tool', () => {
 
   test('with no config every fetch asks', () => {
     expect((tool({}).write as (a: Record<string, unknown>) => boolean)({ url: 'https://example.com/' })).toBe(true);
+  });
+
+  // A group of its own, so the person can turn it off — `core` cannot be.
+  test('on by default; ai.disabledTools: ["web"] takes it away', () => {
+    const names = (config: Record<string, unknown>) => {
+      const reg = assembleToolRegistry({ plugins: [], config, repo: { list: async () => [] } as never });
+      return reg.tools.map((t: { function: { name: string } }) => t.function.name);
+    };
+    expect(names({})).toContain('web_fetch');
+    expect(names({ ai: { disabledTools: ['web'] } })).not.toContain('web_fetch');
+    expect(names({ ai: { disabledTools: ['web'] } })).toContain('open_url'); // core stays
   });
 
   test('checkUrl keeps the parsed URL', () => {
