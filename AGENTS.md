@@ -67,14 +67,21 @@ zod: a plugin with no bundler, and so no runtime dependencies (the compiled bina
 cannot import a package from disk), still declares its `configSchema` with it.
 `make(name, shape)` injects `config.plugins.<name>` and qualified keys. The
 returned `shape` has optional: `commands`, `keys`, `keyActions`, `views`,
-`surface`, `modals`, `colors`, `configSchema`, `components`, `tools`, `services`,
-`aiTools`, `keycaps(ft)`, `entry`, `setup(ft)`, `chatSubject(ft)`, `afterWrite(ft)`. `components[slot] = (ft) => Component`;
+`surface`, `modals`, `colors`, `modalColors`, `configSchema`, `components`, `tools`,
+`services`, `aiTools`, `keycaps(ft)`, `entry`, `setup(ft)`, `chatSubject(ft)`,
+`afterWrite(ft)`. `components[slot] = (ft) => Component`;
 `services` expose host services through `ft.services` — the host wins on every
 key it owns, a plugin's same-named key never clobbers it. `setup(ft)` runs once,
 before any of the plugin's components mount (it is where a plugin seeds its store). Tool groups are delivered by plugins — there is
 **no** `tools-available/` → `tools-enabled/` repository; `ai.disabledTools` is
 the blacklist.
 
+- **`modalColors`** — per modal the plugin draws, what its palette differs in from
+  the host's modal base (`{ relation: { border: 'blue' } }`). `resolveModalPalettes`
+  (`src/playback/theme.ts`) lays it on the base into `theme.modals.<modal>`; the
+  person overrides it with `config.plugins.<modal>.colors`. The host's own palettes
+  (`MODAL_COLOR_DEFAULTS`) cover only the modals the host draws, and a plugin's
+  same-named palette never replaces one.
 - **The chat asks the plugins; it knows no plugin's data.** Each plugin's
   `services` are its own (a per-plugin view over the host's), so the chat cannot
   read another plugin's state — which is why two hooks are part of the shape, called

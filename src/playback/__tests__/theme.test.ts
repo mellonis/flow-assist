@@ -36,11 +36,25 @@ test('resolveModalPalettes lays the base palette + MODAL_COLOR_DEFAULTS down on 
   expect(out.modals.chat.border).toBe('cyan');
   expect(out.modals.chat.bg).toBe('black');
   expect(out.modals.chat.userBg).toBe('#2b2b40');
-  // domain modals get their colored border by default.
-  expect(out.modals.relation.border).toBe('blue');
-  expect(out.modals.delete.border).toBe('red');
-  expect(out.modals.story.border).toBe('green');
-  expect(out.modals.sprint.border).toBe('magenta');
+  // The host ships no palette for a modal it does not draw.
+  expect(out.modals.relation).toBeUndefined();
+});
+
+test("a plugin's modals take their palettes from its `modalColors`, over the base, under the person's override", () => {
+  const boards = { name: 'boards', modalColors: { move: { border: 'blue' }, drop: { border: 'red', selected: 'yellow' } } };
+  const out = resolveModalPalettes(DEFAULT_THEME, [boards], { plugins: { drop: { colors: { border: '${success}' } } } });
+  expect(out.modals.move).toEqual({ ...DEFAULT_THEME.modals, border: 'blue' });
+  expect(out.modals.drop.selected).toBe('yellow');
+  expect(out.modals.drop.border).toBe('green'); // the override, its `${success}` resolved
+  expect(out.modals.drop.bg).toBe('black');
+});
+
+test("a plugin's `modalColors` never restyles a host modal, and the first plugin to name a modal keeps it", () => {
+  const a = { name: 'a', modalColors: { chat: { userBg: '#ffffff' }, pick: { border: 'blue' } } };
+  const b = { name: 'b', modalColors: { pick: { border: 'red' } } };
+  const out = resolveModalPalettes(DEFAULT_THEME, [a, b], {});
+  expect(out.modals.chat.userBg).toBe('#2b2b40');
+  expect(out.modals.pick.border).toBe('blue');
 });
 
 test('resolveAppTheme merges the user theme over the base and resolves palettes + plugin colors', () => {

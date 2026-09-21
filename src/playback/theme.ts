@@ -6,9 +6,9 @@
 
 // The default theme the modals resolver builds on. `modals` is the ABSTRACT base
 // any modal can reuse (bg/border/borderBg/text/selected/fieldBg/fieldBorder) — a
-// plugin modal (log/tags/...) takes it as-is. Per-modal differences (the colored
-// border of relation/delete/story/sprint, chat.userBg) live in MODAL_COLOR_DEFAULTS
-// and per-plugin colors; the user's config.theme overrides on top.
+// plugin modal (log/tags/...) takes it as-is. Per-modal differences live in
+// MODAL_COLOR_DEFAULTS for the host's own modals (chat.userBg, …) and in a plugin's
+// `modalColors` for its modals; the user's config.theme overrides on top.
 export interface Theme {
   [key: string]: unknown;
   // `modals` carries BOTH the flat abstract base props (bg/border/borderBg/text/
@@ -66,10 +66,10 @@ export function resolvePluginColors(
   return out;
 }
 
-// Appearance of specific modals on top of the abstract base (DEFAULT_THEME).
-// The base is shared; here is only what differs (usually the border color,
-// sometimes selected). Plugin modals (log/tags/...) take the base as-is.
-// Overrides come from config.plugins.<name>.colors (with ${} support).
+// Appearance of the HOST's own modals on top of the abstract base (DEFAULT_THEME).
+// The base is shared; here is only what differs. A plugin's modals bring their own
+// palettes (`modalColors` in the plugin shape); a modal without one takes the base
+// as-is. Overrides come from config.plugins.<modal>.colors (with ${} support).
 export const MODAL_COLOR_DEFAULTS: Record<string, Record<string, string>> = {
   log: {},
   // userBg — the background of the user-message bubble in the chat (Text carries
@@ -87,26 +87,37 @@ export const MODAL_COLOR_DEFAULTS: Record<string, Record<string, string>> = {
   //   bgAccent / bgBg — the `◆` marker and ground of a background-task result
   //   warn     — things waiting on the person (the queue); ok — finished work
   chat: { userBg: '#2b2b40', accent: 'cyan', shell: 'magentaBright', assistantAccent: 'green', fieldBg: '#1f1f2e', bgAccent: 'magenta', bgBg: '#2a2438', warn: 'yellow', ok: 'green' },
-  relation: { border: 'blue' },
-  delete: { border: 'red' },
-  story: { border: 'green', selected: 'yellow' },
-  sprint: { border: 'magenta' },
 };
 
+// What a plugin may bring for the palettes: its flat `colors` and, per modal it
+// draws, what that modal's palette differs in from the base (`modalColors`).
+export interface ThemePlugin {
+  name?: string;
+  colors?: Record<string, string>;
+  modalColors?: Record<string, Record<string, string>>;
+}
+
 // Resolves the abstract modal base into concrete palettes by name: base + modal
-// default (MODAL_COLOR_DEFAULTS) + plugin colors + config.plugins.<name>.colors
-// override — all with ${token} expansion. Modal renders keep reading
-// theme.modals.<name>.<prop>, so they do not need to change.
+// default (MODAL_COLOR_DEFAULTS, or the `modalColors` of the plugin that draws the
+// modal) + plugin colors + config.plugins.<name>.colors override — all with
+// ${token} expansion. Modal renders keep reading theme.modals.<name>.<prop>, so
+// they do not need to change. A host modal's palette is never replaced by a plugin's
+// same-named one, and between plugins the first to name a modal keeps it.
 export function resolveModalPalettes(
   theme: Theme = DEFAULT_THEME,
-  plugins: { name?: string; colors?: Record<string, string> }[] = [],
+  plugins: ThemePlugin[] = [],
   config: ResolveConfig = {},
 ): Theme {
   const base = theme.modals ?? {};
   const modals: Record<string, string | Record<string, string>> = { ...base };
-  for (const name of Object.keys(MODAL_COLOR_DEFAULTS)) {
+  const palettes: Record<string, Record<string, string>> = {};
+  for (const p of plugins) {
+    for (const [name, palette] of Object.entries(p.modalColors ?? {})) palettes[name] ??= palette;
+  }
+  Object.assign(palettes, MODAL_COLOR_DEFAULTS);
+  for (const name of Object.keys(palettes)) {
     const plugin = plugins.find((p) => p.name === name);
-    const defaults = { ...(MODAL_COLOR_DEFAULTS[name] ?? {}), ...(plugin?.colors ?? {}) };
+    const defaults = { ...(palettes[name] ?? {}), ...(plugin?.colors ?? {}) };
     const override = config.plugins?.[name]?.colors ?? {};
     const merged = { ...base, ...defaults, ...override };
     modals[name] = Object.fromEntries(
@@ -118,7 +129,8 @@ export function resolveModalPalettes(
 
 // Resolves the config.theme the renderers read: the abstract base (DEFAULT_THEME)
 // merged with the user's config.theme on top, then resolveModalPalettes lays the per-modal palettes down (base +
-// MODAL_COLOR_DEFAULTS + plugin colors + config.plugins.<name>.colors), and
+// MODAL_COLOR_DEFAULTS / plugin modalColors + plugin colors +
+// config.plugins.<name>.colors), and
 // resolvePluginColors adds any non-modal plugin palette (keycaps/bg, board).
 // Returns the resolved theme the caller folds back into config.theme, so
 // ft.config.theme carries the full palette and the renders get borders/colors
@@ -126,7 +138,7 @@ export function resolveModalPalettes(
 // plugin.colors sources; `config` the config.plugins.<name>.colors overrides.
 export function resolveAppTheme(
   configTheme: Theme | undefined,
-  plugins: { name?: string; colors?: Record<string, string> }[] = [],
+  plugins: ThemePlugin[] = [],
   config: ResolveConfig = {},
 ): Theme {
   const merged: Theme = { ...DEFAULT_THEME, ...(configTheme ?? {}) };

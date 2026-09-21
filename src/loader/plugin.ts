@@ -17,6 +17,10 @@ export type PluginShape = {
   surface?: string;
   modals?: string[];
   colors?: Record<string, string>;
+  // Per modal the plugin draws, what its palette differs in from the modal base
+  // (`{ relation: { border: 'blue' } }`); resolved into `theme.modals.<modal>`, and
+  // overridable by the person via config.plugins.<modal>.colors.
+  modalColors?: Record<string, Record<string, string>>;
   configSchema?: unknown;
   components?: Record<string, (ft: unknown) => unknown>;
   tools?: unknown[];
@@ -82,6 +86,7 @@ export interface Plugin {
   views?: Record<string, unknown>;
   surface?: string;
   colors?: Record<string, string>;
+  modalColors?: Record<string, Record<string, string>>;
   configSchema?: unknown;
   components?: Record<string, (ft: unknown) => unknown>;
   tools?: unknown[];
