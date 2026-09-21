@@ -16,12 +16,14 @@ import { chatFieldWidth } from '../views/modals.js';
 import { askKey, askStart, type AskQuestion, type AskState } from '../assistant/ask.js';
 import { loadMemories, memoryFilePath, saveMemories } from '../runtime/services/memory.js';
 import { keptAfterClear, memoryCommand } from '../assistant/memory-command.js';
+import { CONTEXT_WARN_AT, DEFAULT_CONTEXT_WINDOW, contextBadge, contextNote, readContext } from '../assistant/context-meter.js';
+import { chatTools } from '../loader/tools.js';
 import type { Make } from '../loader/plugin.js';
 import type { Plugin } from '../loader/plugin.js';
 
 // Slash-commands of the chat — a single source for runChatCommand and Tab-completion.
 // `/analyze` is a tracker slash command and is removed.
-const CHAT_COMMANDS = ['refresh-context', 'compact', 'clear', 'memory', 'log', 'exit'];
+const CHAT_COMMANDS = ['compact', 'context', 'clear', 'memory', 'log', 'exit'];
 
 // A plain object holding every enumerable service, inherited ones included.
 // `for…in` walks the prototype chain, which is exactly what a spread does not.
@@ -148,6 +150,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // the tool context, emptied by /clear. It used to be module state and so
           // outlived the conversation it described.
           const planRef = f.useRef(createPlan());
+          // What the provider reported for the last turn: its prompt plus the answer it
+          // produced is, to a close approximation, the size of the NEXT request.
+          const usageRef = f.useRef<{ promptTokens: number; completionTokens: number } | null>(null);
           const [messages, setMessages] = f.useState<ChatMsg[]>([]);
           const [input, setInput] = f.useState('');
           const [streaming, setStreaming] = f.useState(false);
@@ -314,6 +319,18 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // The full system context of a message = the «cheap» base (directive+identity)
           // + fresh memory + the current plan. No network: the base is synchronous,
           // memory a local file, the plan the tool's module state.
+          // How full the model's context is (assistant/context-meter.ts).
+          const contextReading = () => {
+            const summary = summaryRef.current ? `Summary of the conversation so far (older turns were compacted):\n${summaryRef.current}` : '';
+            const window = Number((f.config.ai as { contextWindow?: unknown } | undefined)?.contextWindow) || DEFAULT_CONTEXT_WINDOW;
+            const u = usageRef.current;
+            return readContext(
+              { system: baseStatic(), memory: memoryBlock(), plan: planBlock(), summary, tools: [...chatTools(), ...(((f.services as Record<string, any>).pluginAiTools ?? []) as unknown[])], messages: apiHistory(apiRef.current) },
+              window,
+              u ? u.promptTokens + u.completionTokens : undefined,
+            );
+          };
+
           const assembleSystem = () => {
             const summary = summaryRef.current ? `Summary of the conversation so far (older turns were compacted):\n${summaryRef.current}` : '';
             const parts = [baseStatic(), memoryBlock(), planBlock(), summary].filter(Boolean);
@@ -477,6 +494,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // A persistent trail of executed tools: put it on the last assistant message
               // so the render shows «▸ update_issue … → applied/declined/error».
               const turn = (chatResult as { transcript?: ChatMessage[]; content?: string } | undefined);
+              const reported = (chatResult as { usage?: { promptTokens: number; completionTokens: number } } | undefined)?.usage;
+              if (reported) usageRef.current = reported;
               apiRef.current = [
                 ...apiRef.current,
                 ...(turn?.transcript?.length ? turn.transcript : [{ role: 'assistant', content: turn?.content ?? '' }]),
@@ -552,23 +571,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             return true;
           };
 
-          // ── in-chat commands: `/refresh-context`, `/compact`, `/clear` ──
-          // (like /compact and /clear in Claude Code): `/refresh-context` shows the
-          // current system-context WITHOUT network, `/compact` compresses the history
-          // into one sys-memo (a one-shot non-streaming call), `/clear` fully resets.
-          const refreshContext = (show: boolean) => {
-            setError(null);
-            const sys = assembleSystem();
-            if (!sys) return;
-            if (show) {
-              setMessages(cur => [{ role: 'system', content: sys }, ...cur.filter(m => m.role !== 'system')]);
-              setInput('');
-              inputRef.current = '';
-              setCursor(0);
-              (f.services as Record<string, any>).showMessage?.('Context refreshed');
-            }
-            f.notify();
-          };
+          // ── in-chat commands ── `/context` says how full the model's context is,
+          // `/compact` replaces the history with a summary (a one-shot non-streaming
+          // call), `/clear` starts over. There is no `/refresh-context`: the system
+          // prompt is assembled anew for every message, so there was nothing to refresh.
 
           // ── generic async slash command ──────────────────────────────────────────
           // Runs a slash command asynchronously, NON-BLOCKING, using the SAME live
@@ -609,6 +615,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               });
               const last = msgsRef.current[msgsRef.current.length - 1];
               summaryRef.current = summaryRef.current ? `${summaryRef.current}\n\n${summary}` : summary;
+              usageRef.current = null; // the measured size was of the history just replaced
               apiRef.current = [];
               setMessages([{ role: 'system', content: summary }, ...(last ? [last] : [])]);
               setInput('');
@@ -660,6 +667,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // A new conversation starts with no plan: the old one described work the
                 // model no longer remembers.
                 planRef.current.reset();
+                usageRef.current = null; // measured for a conversation that is gone
                 // /clear ends the conversation, not the memory — and says so, or the
                 // assistant "still knowing" an earlier prompt reads as /clear failing.
                 {
@@ -678,7 +686,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 disarmEsc();
                 f.notify();
                 return;
-              case 'refresh-context': refreshContext(true); return;
+              case 'context': {
+                // For the person; never sent to the model.
+                setMessages((cur) => [...cur, { role: 'note', content: contextNote(contextReading()) }]);
+                setField('');
+                f.notify();
+                return;
+              }
               case 'compact': compactNow(); return;
               case 'exit': closeChat(); return;
               default: setError(`unknown command /${name} — available: ${CHAT_COMMANDS.map(c => `/${c}`).join(', ')}`); return;
@@ -707,6 +721,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             if (issueId !== ctxIssueIdRef.current) {
               ctxIssueIdRef.current = issueId;
               apiRef.current = []; summaryRef.current = ''; queueRef.current = []; setQueued([]);
+              usageRef.current = null;
               setMessages([]);
               // Task change — a new session: reset the status fields too, else the
               // «limit of steps» warning / tool name from the old task moves into the new.
@@ -821,7 +836,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 armEsc();
                 return true;
               }
-              // ── Tab: slash-command autocomplete (refresh-context/compact/clear/exit).
+              // ── Tab: slash-command autocomplete (CHAT_COMMANDS).
               if (key.name === 'tab' && !key.meta && !key.ctrl) {
                 const text = inputRef.current;
                 if (text.startsWith('/')) {
@@ -929,6 +944,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // Live count of IN-FLIGHT background tasks (the host re-renders via
             // notify() when one is armed or completes).
             bgCount: bgActiveCount(),
+            ...(() => { const r = contextReading(); return { contextBadge: contextBadge(r), contextWarn: r.ratio >= CONTEXT_WARN_AT }; })(),
             // The assistant's task plan (todo tool): a snapshot so the render never
             // mutates the tool's module state. Re-read every render, so a plan the
             // LLM edits (via notify()) shows up immediately.

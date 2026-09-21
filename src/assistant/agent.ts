@@ -29,11 +29,18 @@ export interface ToolCall {
   arguments: string;
 }
 
+// What the provider says a request cost. `promptTokens` is the size of EVERYTHING sent
+// — system prompt, tool definitions, the whole history — which is what "how full is the
+// context" means.
+export interface TokenUsage { promptTokens: number; completionTokens: number }
+
 export interface ChatRoundResult {
   content: string;
   reasoning: string;
   finishReason: string;
   toolCalls: ToolCall[];
+  // Present when the provider reported it (see `realChatRound`).
+  usage?: TokenUsage;
 }
 
 // A trace of one executed tool call — what actually ran, so the chat UI can show
@@ -165,6 +172,9 @@ function clip(s: unknown, n = 6000): string {
 // `choices[0].delta.tool_calls[i]` — function fragments (id/name/arguments split
 // across chunks, accumulated by index); `finish_reason: 'tool_calls'` returns the
 // accumulated list.
+// Base URLs that refused `stream_options` — not asked again in this process.
+const noUsage = new Set<string>();
+
 async function realChatRound(
   messages: ChatMessage[],
   {
@@ -186,15 +196,30 @@ async function realChatRound(
   },
 ): Promise<ChatRoundResult> {
   requireAiOpts({ baseUrl, model, token });
-  const res = await fetch(`${baseUrl}/chat/completions`, {
+  // A streamed response carries token usage only when asked (`stream_options`). Most
+  // OpenAI-compatible servers know the field; one that does not may answer 400 — so a
+  // refusal that NAMES the field is retried once without it, and that base URL is not
+  // asked again. Usage is a nicety; a chat that stops working over it is not.
+  const post = (withUsage: boolean) => fetch(`${baseUrl}/chat/completions`, {
     method: 'POST',
     signal,
     headers: LLM_HEADERS(token as string),
-    body: JSON.stringify({ model, messages, stream: true, ...(tools?.length ? { tools } : {}) }),
+    body: JSON.stringify({ model, messages, stream: true, ...(withUsage ? { stream_options: { include_usage: true } } : {}), ...(tools?.length ? { tools } : {}) }),
   });
+  const askUsage = !noUsage.has(String(baseUrl));
+  let res = await post(askUsage);
   if (!res.ok) {
     const body = await res.text().catch(() => '');
-    throw new Error(`LLM ${res.status}: ${body || res.statusText}`);
+    if (askUsage && res.status === 400 && /stream_options|include_usage/i.test(body)) {
+      noUsage.add(String(baseUrl));
+      res = await post(false);
+      if (!res.ok) {
+        const again = await res.text().catch(() => '');
+        throw new Error(`LLM ${res.status}: ${again || res.statusText}`);
+      }
+    } else {
+      throw new Error(`LLM ${res.status}: ${body || res.statusText}`);
+    }
   }
   const reader = res.body?.getReader();
   if (!reader) throw new Error('LLM: no response body');
@@ -204,6 +229,7 @@ async function realChatRound(
   let reasoning = '';
   let finishReason = '';
   const toolCalls = new Map<number, { id: string; name: string; arguments: string }>();
+  let usage: TokenUsage | undefined;
   let done = false;
   while (!done) {
     const { value, done: readDone } = await reader.read();
@@ -219,11 +245,15 @@ async function realChatRound(
         done = true;
         break;
       }
-      let obj: { choices?: Array<{ finish_reason?: string; delta?: Record<string, unknown> }> } | undefined;
+      let obj: { choices?: Array<{ finish_reason?: string; delta?: Record<string, unknown> }>; usage?: { prompt_tokens?: number; completion_tokens?: number } | null } | undefined;
       try {
         obj = JSON.parse(data);
       } catch {
         continue;
+      }
+      // Usage arrives in a chunk of its own, usually the last, with no choices.
+      if (obj?.usage && typeof obj.usage.prompt_tokens === 'number') {
+        usage = { promptTokens: obj.usage.prompt_tokens, completionTokens: Number(obj.usage.completion_tokens ?? 0) };
       }
       const ch = obj?.choices?.[0];
       if (ch?.finish_reason) finishReason = ch.finish_reason;
@@ -254,6 +284,7 @@ async function realChatRound(
     reasoning,
     finishReason,
     toolCalls: [...toolCalls.values()].map((c) => ({ id: c.id, name: c.name, arguments: c.arguments })),
+    ...(usage ? { usage } : {}),
   };
 }
 
@@ -352,6 +383,8 @@ export async function agentChat(
 
   const chatRoundFn = ((opts as { chatRound?: AgentOpts['chatRound'] }).chatRound) ?? realChatRound;
 
+  // The LAST round's usage is the one that counts: its prompt is the whole turn so far.
+  let usage: TokenUsage | undefined;
   for (let i = 0; i < maxRounds; i++) {
     let roundContent = '';
     const r = await chatRoundFn(current, {
@@ -365,6 +398,7 @@ export async function agentChat(
         (opts.onLive as AgentOpts['onLive'])?.(d);
       },
     } as Record<string, unknown>);
+    if (r.usage) usage = r.usage;
     // Diagnostic: what did THIS round actually emit? `finish_reason === 'tool_calls'`
     // promises tool_calls; if toolCalls is 0 the SSE accumulation silently dropped
     // them (a bug we'd want to catch). Distinguishes "the model narrated a status
@@ -457,7 +491,7 @@ export async function agentChat(
       toolRuns.push({ name: tc.name, args: parsed, write, outcome, detail: detailStr });
     }
   }
-  return { content, process, toolRuns, transcript: current.slice(turnStart) };
+  return { content, process, toolRuns, transcript: current.slice(turnStart), ...(usage ? { usage } : {}) };
 }
 
 // One-shot non-streaming call for /compact: compresses the history into a compact

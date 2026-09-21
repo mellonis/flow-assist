@@ -276,8 +276,8 @@ function buildMessageRows(m: ChatMsg, last: boolean, wrap: number, showReasoning
     const role = m.role;
     // The system prompt (instructions + task context) is CONTEXT, not conversation —
     // it is not drawn in history (as a system prompt in Claude Code). It stays
-    // role:'system' in the API; here it is just not rendered. See/replace via
-    // /refresh-context.
+    // role:'system' in the API; here it is just not rendered. `/context` says how
+    // much room it takes.
     if (role === 'system') return rows;
     const reasoning = String(m.reasoning ?? '').trim();
     const process = String(m.process ?? '').trim();
@@ -435,6 +435,8 @@ export function renderChatModal({
   toolCount = 0,
   completions = null,
   bgCount = 0,
+  contextBadge = '',
+  contextWarn = false,
   todo = null,
 }: {
   width: number;
@@ -458,6 +460,9 @@ export function renderChatModal({
   toolCount?: number;
   completions?: Completions | null;
   bgCount?: number;
+  // `ctx 12%` (assistant/context-meter.ts); yellow once it is time to /compact.
+  contextBadge?: string;
+  contextWarn?: boolean;
   todo?: PlanItem[] | null;
 }) {
   const boxW = chatBoxWidth(width);
@@ -528,14 +533,19 @@ export function renderChatModal({
       },
       h(ChatMessages, { messages, wrap, showReasoning, palette: m, errorColor: theme?.error }),
       error ? h(Text, { color: 'red' }, `⚠ ${error}`) : null,
-      h(Text, (emptyNotice && !streaming && !toolLabel && !escArmed) ? { color: 'yellow' } : { dim: true },
+      // The hint on the left, how full the model's context is on the right — it stays
+      // put while the hint changes, and turns yellow when it is time to /compact.
+      h(Box, { flexDirection: 'row', width: '100%', flexShrink: 0 },
+      h(Box, { flexGrow: 1, flexShrink: 1, overflow: 'hidden' },
+      h(Text, (emptyNotice && !streaming && !toolLabel && !escArmed) ? { color: 'yellow', wrap: 'truncate' } : { dim: true, wrap: 'truncate' },
         escArmed
           ? `${CAP.esc} again to exit`
           : (streaming || toolLabel)
             ? `${spin(elapsed)} ${fmtSec(elapsed)}${toolCount ? ` · ${toolCount} tool call${toolCount === 1 ? '' : 's'}` : ''}${toolLabel ? ` · ${toolLabel}` : ''} · ${CAP.esc} stops`
             : emptyNotice
               ? `⚠ ${emptyNotice}`
-              : (`${CAP.upDown} history · wheel or ${CAP.page} scroll · ${CAP.details} details · / commands${bgCount > 0 ? ` · ${bgCount} in background` : ''}`)),
+              : (`${CAP.upDown} history · wheel or ${CAP.page} scroll · ${CAP.details} details · / commands${bgCount > 0 ? ` · ${bgCount} in background` : ''}`))),
+      contextBadge ? h(Text, contextWarn ? { color: 'yellow' } : { dim: true }, `  ${contextBadge}`) : null),
       // The task plan sits ABOVE the input (not above the messages) — the newest
       // answer stays pinned just above it, so a growing plan never hides it. Its
       // height (todoH) is accounted for in `available`.

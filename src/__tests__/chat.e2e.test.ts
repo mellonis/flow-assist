@@ -159,7 +159,7 @@ test('a slash command completes inline: the rest of it is shown in the field, Ta
   // With several candidates the others are named beside it, and Tab walks them.
   await ui.press('escape');
   await ui.type('/');
-  expect(fieldRow()).toMatch(/› \/refresh-context|› \/clear|› \/compact|› \/log|› \/exit/);
+  expect(fieldRow()).toMatch(/› \/context|› \/clear|› \/compact|› \/log|› \/exit/);
   expect(fieldRow()).toMatch(/⇥/);
   await ui.press('tab');
   const first = fieldRow();

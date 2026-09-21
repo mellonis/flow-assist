@@ -21,6 +21,9 @@ export class ScriptedModel {
   private turns: Turn[] = [];
   private gate: (() => void) | null = null;
   requests: { messages: { role: string }[] }[] = [];
+  // When set, every response ends with a usage chunk — as a provider asked for
+  // `stream_options.include_usage` sends it.
+  usage: { prompt_tokens: number; completion_tokens: number } | null = null;
   script(...turns: Turn[]) { this.turns.push(...turns); }
   release() { this.gate?.(); this.gate = null; }
 
@@ -40,6 +43,7 @@ export class ScriptedModel {
             else send(c, { choices: [{ delta: { tool_calls: [{ index: calls, id: `call_${calls++}`, function: { name: step.tool, arguments: JSON.stringify(step.args) } }] }, finish_reason: null }] });
           }
           send(c, { choices: [{ delta: {}, finish_reason: calls ? 'tool_calls' : 'stop' }] });
+          if (self.usage) send(c, { choices: [], usage: self.usage });
           c.enqueue(enc.encode('data: [DONE]\n\n'));
           c.close();
         },

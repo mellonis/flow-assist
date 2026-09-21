@@ -11,6 +11,9 @@ export const hostConfigSchema = z.object({
     model: z.string().optional(),
     tokenEnv: z.string().optional(),
     stream: z.boolean().optional(),
+    // The model's context window in tokens — the API cannot be asked for it. The
+    // chat's `ctx N%` and `/context` measure against it (default 200000).
+    contextWindow: z.number().int().positive().optional(),
     language: z.string().optional(),
     assistantLanguage: z.string().optional(),
     disabledTools: z.array(z.string()).optional(),

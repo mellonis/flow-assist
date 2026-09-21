@@ -140,6 +140,17 @@ assistant nobody had asked for a board.
   going through the model (`src/assistant/memory-command.ts`). What the host tells the
   person this way is a display-only message of role `note`; `apiHistory` drops it, and
   the model's history (`apiRef`) never holds it.
+- **How full the context is, is shown — and says where the number came from.** The
+  chat's hint line ends in `ctx N%` (yellow from 80%), and `/context` prints a bar and
+  a breakdown by part as a `note` (`src/assistant/context-meter.ts`, pure). The total
+  is the provider's `prompt_tokens + completion_tokens` of the last round when it
+  reports usage (`stream_options.include_usage`; a server that refuses the field by
+  name is retried once without it and not asked again); until then it is characters/4
+  and drawn `~N%`. The split between parts is always an estimate, scaled to the total.
+  The window is `ai.contextWindow` (default 200000) — the API cannot be asked for it.
+  `/compact`, `/clear` and a change of conversation drop the measurement. There is no
+  `/refresh-context`: the system prompt is assembled anew for every message, so the
+  command had nothing to refresh.
 - **The plan (`todo`) belongs to a conversation, not to the process.**
   `createPlan()` in `src/assistant/plan.ts` makes one; its owner passes it to the
   tool as `ctx.plan`. The chat holds its own (`planRef`), and `/clear` resets it; a
