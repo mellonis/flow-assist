@@ -67,6 +67,15 @@ of MCP servers over Streamable HTTP, each call asked about first
   `FLOW_ASSIST_PLUGIN_REGISTRY_PROJECT` / `FLOW_ASSIST_PLUGIN_REGISTRY_TOKEN` — see `.env.example`.
   A plugin documents its own variables and declares them in its manifest's
   `requiredSettings`. Secrets belong in env, not in the config file.
+- **Where `.env` is read from**: Bun loads `.env` from the **directory you start
+  the app in** — the current working directory, which is the install directory
+  only when you start it from there (and never the config directory). This holds
+  for `bun run src/cli.ts`, the linked `flow-assist` command and a compiled binary
+  alike. So a `.env` in the install directory (next to `.env.example`) is found
+  only when you start the app from there; started from a project, the app sees no
+  `LLM_TOKEN` and no plugin token (a tracker's, say). To have the tokens wherever
+  you start it, export them in your shell profile instead (`export LLM_TOKEN=…` in
+  `~/.zshrc`), or start the app from the directory that holds the `.env`.
 - **Who you are**: `config set user.name <name>` (and optionally `user.login`)
   lets the assistant address you. Unset, nothing about you is sent to the LLM.
 - **Reading the web** (`web_fetch`): every fetch asks you first, unless the host is
