@@ -10,6 +10,7 @@ import { createCacheService } from './services/cache.js';
 import { createLogService } from './services/log.js';
 import { loadMemories, saveMemories, memoryFilePath } from './services/memory.js';
 import { agentChat } from '../assistant/agent.js';
+import { copyToClipboard as platformCopy } from '../assistant/copy.js';
 import type { AgentResult, AgentOpts, ChatMessage, ToolLogger } from '../assistant/agent.js';
 import type { AiToolDef, ToolRegistry } from '../loader/tools.js';
 import type { PluginRepo } from '../loader/repo.js';
@@ -67,6 +68,12 @@ export interface HostServices {
   // default is a no-op. Used by a fired reminder and by a background result that
   // lands while the chat is closed.
   alert: (title: string, body?: string) => void;
+  // Puts text on the person's clipboard and says whether it got there: the terminal's
+  // own clipboard sequence (OSC 52, through flowtty) where one went out, else the
+  // platform's tool (`copyToClipboard` in assistant/copy.ts — pbcopy, wl-copy, xclip,
+  // xsel). Apple Terminal has no OSC 52, so there it is always the tool. The App binds
+  // it; the default, with no terminal at all, goes straight to the tool.
+  copy: (text: string) => { ok: true } | { ok: false; error: string };
   // Opens a plugin surface as a favored overlay: the value names the surface
   // (plugin-defined), and while set the input race gives that surface the key.
   // The default is a no-op; the App rebinds it (app.tsx) so it mutates the shared
@@ -151,6 +158,7 @@ export function createServices({ config, tools, repo, onExit }: CreateServicesOp
     showReminder: () => {},
     dismissReminder: () => {},
     alert: () => {},
+    copy: (text) => platformCopy(text),
     setOverlay: () => {},
   };
   // Read the LIVE channels at fire time (the App reassigns showMessage/pushLog/

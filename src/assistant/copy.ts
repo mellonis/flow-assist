@@ -1,8 +1,8 @@
 // `/copy` in the chat: the last answer, or a code block of it, onto the system
-// clipboard. The mouse cannot do it while the app holds mouse reporting (the wheel
-// scrolls the chat), and Apple Terminal has no bypass modifier and no OSC 52 — so the
-// clipboard is written by the platform's own tool: pbcopy on macOS, wl-copy, xclip or
-// xsel on Linux.
+// clipboard — without the mouse. And the platform's own clipboard tool (pbcopy on
+// macOS, wl-copy, xclip or xsel on Linux), for every copy the terminal cannot take:
+// the host tries the terminal's clipboard sequence (OSC 52, through flowtty) first,
+// and Apple Terminal has none (`services.copy`, `onCopySelection` in runtime/app.tsx).
 import { spawnSync } from 'node:child_process';
 import { layoutMarkdownDetailed } from '@flowtty/react';
 

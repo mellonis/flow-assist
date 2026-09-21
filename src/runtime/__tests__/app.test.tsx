@@ -50,6 +50,22 @@ test('twoPhaseDispatch invites the fallback only when no consumer consumes', () 
   expect(consumed).toBe(true);
 });
 
+test('twoPhaseDispatch never hands a mouse button to a handler or the fallback — it is the drag-selection\'s', () => {
+  const seen: string[] = [];
+  const registry = [
+    { mode: 'observe', priority: () => 1000, handler: (k: { name?: string }) => { seen.push(`obs:${k.name}`); } },
+    // A consumer that takes every key, as the y/n pause and an open question do.
+    { mode: 'consume', priority: () => 100, handler: (k: { name?: string }) => { seen.push(`cons:${k.name}`); return true; } },
+  ];
+  for (const name of ['mousedown', 'mousedrag', 'mouseup']) {
+    expect(twoPhaseDispatch(registry, {}, { name, x: 3, y: 4, button: 'left' }, () => { seen.push('fallback'); return true; })).toBe(false);
+  }
+  expect(seen).toEqual([]);
+  // The wheel is still a key: scroll boxes hear it themselves, and a handler may too.
+  twoPhaseDispatch(registry, {}, { name: 'wheelup', x: 3, y: 4 });
+  expect(seen).toEqual(['obs:wheelup', 'cons:wheelup']);
+});
+
 test('runConsumers stops at the first strict-true handler (host-race semantics)', () => {
   let hits = 0;
   const consumers = [

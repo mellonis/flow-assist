@@ -5,7 +5,7 @@
 import { z } from 'zod';
 import type { Make } from '../loader/plugin.js';
 import type { Plugin } from '../loader/plugin.js';
-import { keyGlyph } from '../playback/keys.js';
+import { isMouseButton, keyGlyph } from '../playback/keys.js';
 
 // The app-glue dispatched to by the :keycaps command.
 interface KeycapsCtx {
@@ -64,7 +64,9 @@ export function buildKeycapsPlugin({ renders, config, make }: BuildKeycapsParams
             // for it: 'return' reads as a word, and ' ' drew an EMPTY cap. The panel is
             // for someone watching a screen, who knows keys by their caps.
             // The wheel is not a key: one flick is a dozen events and would flush the panel.
-            handler: (key) => { if (enabled && !key.name.startsWith('wheel')) setRecent(r => [...r, keyGlyph(key)].slice(-6)); },
+            // Nor is a drag, one event per cell crossed (the host stops mouse buttons
+            // before dispatch; this says so where the panel is).
+            handler: (key) => { if (enabled && !key.name.startsWith('wheel') && !isMouseButton(key.name)) setRecent(r => [...r, keyGlyph(key)].slice(-6)); },
           });
           // API for the :keycaps command — toggles/enables/disables the panel. Reads
           // `enabled` from the latest render (the toggle is recreated each render).
@@ -94,6 +96,8 @@ export function buildKeycapsPlugin({ renders, config, make }: BuildKeycapsParams
           return (f.h as (...args: unknown[]) => unknown)(f.Box, {
             position: 'absolute', bottom: 1, right: 1, flexDirection: 'column',
             border: 'round', borderTitle: 'keycaps', paddingX: 1, zIndex: 10, backgroundColor: panelBg,
+            // Floats over whatever is on screen: a drag across it copies no cap.
+            selectable: false,
           },
             (f.h as (...args: unknown[]) => unknown)(f.Box, { flexDirection: 'row' }, caps),
           );

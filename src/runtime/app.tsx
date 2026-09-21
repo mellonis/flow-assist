@@ -14,7 +14,7 @@
 // ordering, and how plugin components mount over the shell.
 
 import { pluginConfigs } from '../loader/tools.js';
-import { Box, Text, Markdown, Table, Link, render, useApp, useInput, useTerminalSize } from '@flowtty/react';
+import { Box, Text, Markdown, Table, Link, render, useApp, useInput, useTerminalSize, type CopyEvent } from '@flowtty/react';
 import type { Backend } from '@flowtty/core';
 import { createElement as h, useEffect, useMemo, useRef, useState } from 'react';
 import { createFt } from './ft.js';
@@ -46,7 +46,8 @@ import {
   saveConfigSetting,
   saveConfigUnset,
 } from '../config/load.js';
-import { bindingGlyph, isKey, keyGlyph } from '../playback/keys.js';
+import { bindingGlyph, isKey, isMouseButton, keyGlyph } from '../playback/keys.js';
+import { copyToClipboard } from '../assistant/copy.js';
 import { resolveAppTheme } from '../playback/theme.js';
 import type { Theme } from '../playback/theme.js';
 import type { Command } from '../loader/plugin.js';
@@ -78,6 +79,13 @@ export function twoPhaseDispatch(
   key: InputKey = {},
   fallback?: () => boolean,
 ): boolean {
+  // A mouse button (press / drag / release) is flowtty's drag-selection, which runs
+  // on its own path whatever a handler returns. No handler here is written for one,
+  // and several read an unknown key as "any key": the y/n pause and an open question
+  // swallow every key, the command line's catch-all consumes it, the keycaps panel
+  // would draw a cap per dragged cell — and every consumed key costs a re-render.
+  // So none of them ever sees one.
+  if (isMouseButton(key.name)) return false;
   const { observers, consumers } = partitionInput(registry, ui);
   for (const o of observers) o.handler(key, ui); // observers never consume
   if (runConsumers(consumers, key, ui)) return true;
@@ -185,6 +193,10 @@ export function renderApp(
       notify();
     };
     (services as unknown as HostServices).alert = (title, body) => app.notify(title, body);
+    // The terminal's clipboard first; the platform's tool where no sequence went out.
+    // `app.copy` fires `onCopy` too (source 'api'), which leaves an api copy alone —
+    // the caller says what it copied, so the toast is not shown twice.
+    (services as unknown as HostServices).copy = (text) => (app.copy(text) ? { ok: true } : copyToClipboard(text));
     // Overlay channel: a plugin opens its overlay surface (e.g. a tracker's
     // detail view) by calling `services.setOverlay(name)`; it mutates the shared
     // `ui.overlay` the input race reads and re-renders so the surface repaints.
@@ -571,7 +583,9 @@ export function renderApp(
       Box,
       { flexDirection: 'column' },
       // The title bar names the app over a guest's screen; the start screen says it itself.
-      atHome ? h(Box, { height: 1 }) : h(Box, { padding: 1 }, h(Text, { bold: true }, title)),
+      // Chrome, not text: a drag that runs over the title bar or the footer copies
+      // nothing from them.
+      atHome ? h(Box, { height: 1 }) : h(Box, { padding: 1, selectable: false }, h(Text, { bold: true }, title)),
       // A plugin is a guest: its surface takes the screen only while the plugin says
       // its context is active — `keycaps(ft)` non-empty, which is already the
       // contract ("returns [] when its surface is inactive"). Until then the screen
@@ -585,7 +599,7 @@ export function renderApp(
       h(Box, { flexGrow: 1, zIndex: 1 },
         overlayComps.filter((c) => !c.surface || surfaceActive(c.plugin)).map(({ Comp, key }) => h(Comp as any, { key })),
         atHome ? renderHome({ title, plugins, keys, builtins: BUILTIN_PLUGINS, width: termWidth }) : null),
-      h(Box, { padding: 1, flexDirection: 'column' },
+      h(Box, { padding: 1, flexDirection: 'column', selectable: false },
         // `dim`, not `dimColor` — the latter is another library's prop; flowtty does
         // not know it, and an `as any` had been hiding that the footer was never dimmed.
         line
@@ -602,5 +616,32 @@ export function renderApp(
     );
   }
 
-  return render(h(App), root);
+  // A drag over the screen selects and, on release, copies (flowtty's copy-on-select;
+  // the backend has the mouse on unless `ui.mouse` is false). `onCopy` is read through
+  // `services`, whose toast the App rebinds on every render.
+  return render(h(App), root, {
+    onCopy: (event) => onCopySelection(event, {
+      say: (msg) => (services as unknown as ReactBoundServices).showMessage(msg),
+      fallback: (text) => copyToClipboard(text),
+    }),
+  });
+}
+
+// What a finished copy does beyond flowtty's own clipboard write. It fires for every
+// copy, delivered or not; only a DRAG is handled here — an api copy
+// (`services.copy`) already ran the fallback and its caller says what it copied.
+// Where no clipboard sequence went out (Apple Terminal has no OSC 52) the platform's
+// tool takes the text. It never throws: flowtty calls it on the key path, and a throw
+// would take the app down through its error path.
+export function onCopySelection(
+  { text, delivered, source }: CopyEvent,
+  { say, fallback }: { say: (msg: string) => void; fallback: (text: string) => { ok: boolean; error?: string } },
+): void {
+  if (source !== 'selection') return;
+  try {
+    const done = delivered ? { ok: true } : fallback(text);
+    say(done.ok ? `Copied ${Array.from(text).length} chars` : `Copy failed — ${done.error ?? 'no clipboard'}`);
+  } catch (err) {
+    try { say(`Copy failed — ${err instanceof Error ? err.message : String(err)}`); } catch { /* nothing left to tell */ }
+  }
 }

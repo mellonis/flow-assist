@@ -20,7 +20,7 @@
 
 import { askRows, type AskRow, type AskState } from '../assistant/ask.js';
 import { CELL_FREE, CELL_FULL, CONTEXT_WARN_AT, GRID_COLS, GRID_ROWS, contextFootnote, contextGrid, contextHeading, contextLegend, type ContextReading, type GridCell } from '../assistant/context-meter.js';
-import { createElement as h, useEffect, useRef, useState } from 'react';
+import { createElement as h, useEffect, useRef, useState, type ReactNode } from 'react';
 import { bindingGlyph, keyGlyph } from '../playback/keys.js';
 import {
   Box,
@@ -32,6 +32,7 @@ import {
   windowAround,
   type ScrollBoxHandle,
   type ScrollMetrics,
+  type WrapContinuation,
 } from '@flowtty/react';
 
 // ─── Shapes ────────────────────────────────────────────────────────────────────
@@ -76,8 +77,17 @@ interface Span {
   color?: string;
   [k: string]: unknown;
 }
+// A laid-out row as flowtty's `layoutMarkdown` gives it. Besides the spans it says
+// what a drag-selection needs (flowtty ≥ 1.0.0-alpha.15): `continues` — the row's text
+// carries on in the row below (a soft wrap), so a copy rejoins them into the line that
+// was written; `chrome` — how many leading spans are frame (a code block's `│ `, a
+// quote's bar), painted but never copied; `frame` — the whole row is frame (a fence
+// label).
 interface Line {
   spans: Span[];
+  continues?: WrapContinuation;
+  chrome?: number;
+  frame?: true;
 }
 // A flattened chat row (one visual line / a label / a fold header / a gap).
 interface ChatRow {
@@ -99,6 +109,10 @@ interface ChatRow {
   toolRun?: boolean;
   spans?: Span[];
   gap?: boolean;
+  // What a drag-selection needs of a content row — see `Line`.
+  continues?: WrapContinuation;
+  chrome?: number;
+  frame?: true;
 }
 // The slash-command autocomplete state the assistant plugin computes.
 interface Completions {
@@ -155,7 +169,12 @@ export function mdLines(text: string | null | undefined, wrap: number): Line[] {
       const isHeading = sp.length >= 1 && /^#{1,6}\s*$/.test(sp[0].text || '') && sp.some((s) => s.bold);
       if (!isHeading) return r;
       const rest = sp.slice(1).filter((s) => (s.text ?? '') !== '');
-      return { spans: [{ text: '▍ ', dim: true, color: rest[0]?.color }, ...rest] };
+      // The marker is decoration — out of a copy (`chrome`), where `##` would have been
+      // copied. It is narrower than the hashes, so the row's `textWidth` now overshoots
+      // its text by a cell or two; that is harmless, because the chat draws a row's
+      // text in a box exactly as wide as the spans, and flowtty keeps the join inside
+      // the box (a wrapped heading's copy is tested).
+      return { ...r, spans: [{ text: '▍ ', dim: true, color: rest[0]?.color }, ...rest], chrome: 1 };
     });
   } catch {
     return [{ spans: [{ text }] }];
@@ -301,11 +320,11 @@ function buildMessageRows(m: ChatMsg, last: boolean, wrap: number, showReasoning
       rows.push({ role, reasonHeader: true, open: !!showReasoning, label });
       const bodyLines = mdLines([reasoning, process, live].filter(Boolean).join('\n\n'), inner);
       const shown = showReasoning ? bodyLines : bodyLines.slice(-2);
-      for (const line of shown) rows.push({ role, reason: true, spans: line.spans });
+      for (const line of shown) rows.push({ role, reason: true, spans: line.spans, continues: line.continues, chrome: line.chrome, frame: line.frame });
       rows.push({ gap: true });
     }
     const text = String(m.content ?? '') || (liveIsAnswer ? live : '');
-    mdLines(text, inner).forEach((line, li) => rows.push({ role, spans: line.spans, first: li === 0 }));
+    mdLines(text, inner).forEach((line, li) => rows.push({ role, spans: line.spans, first: li === 0, continues: line.continues, chrome: line.chrome, frame: line.frame }));
     const runs = (Array.isArray(m.toolRuns) ? m.toolRuns : []) as ToolRun[];
     const duration = role === 'assistant' && Number(m.duration) >= 1000 ? m.duration : undefined;
     // One quiet line under the answer; ^r unfolds the calls themselves.
@@ -358,7 +377,10 @@ function ChatMessages({ messages, wrap, showReasoning, palette: m, errorColor }:
   // message — not by a label. The person's marker is the input field's own prompt.
   // A `!command` is the person's own action, so it sits on the person's ground.
   const groundOf = (role?: string) => (role === 'user' || role === 'shell' ? m.userBg : role === 'bg' ? m.bgBg : undefined);
-  const gutter = (row: ChatRow) => {
+  // The gutter is frame, never copied: a drag across an answer returns its text
+  // without the `ƒ ` (or `› `, `$ `, `◆ `) in front of it.
+  const gutter = (row: ChatRow) => h(Box, { selectable: false, flexShrink: 0 }, marker(row));
+  const marker = (row: ChatRow) => {
     if (row.first && row.role === 'user') return h(Text, { bold: true, color: m.accent }, '› ');
     // Same colour as the shell-mode prompt below — a command reads as one thing
     // from the `! ` it was typed with to the `$ ` its result appears under.
@@ -374,26 +396,38 @@ function ChatMessages({ messages, wrap, showReasoning, palette: m, errorColor }:
     return h(Text, null, ' '.repeat(GUTTER));
   };
 
+  // A row's text in a box of its own, beside the gutter — the box flowtty's
+  // `<Markdown>` draws a row as, so the layout's selection marks mean the same here:
+  // `wrapContinues` rejoins a soft-wrapped paragraph into one line on copy (without
+  // it every row pastes as its own line), and the leading `chrome` spans (a code
+  // block's bar) are painted but never copied.
+  const content = (row: ChatRow, span: (s: Span, j: number) => ReactNode) =>
+    h(Box, { flexDirection: 'row', flexShrink: 0, wrapContinues: row.continues }, (row.spans || []).map(span));
+  // A row that is frame from edge to edge (a fence label) leaves the selection WHOLE —
+  // its blank cells to the right included, or a copy returns it as an empty line.
+  const frameRow = (row: ChatRow) => (row.frame === true ? { selectable: false } : {});
+
   // An absolute child of a scroll box is an overlay: it stays put while the rows move
   // under it, so pinning does not shift what the person is reading. Needs flowtty
   // ≥ 1.0.0-alpha.9 — before it an overlay vanished under a padded ancestor (this
   // modal has padding).
   const sticky = pinned
-    ? h(Box, { key: 'chat-sticky', position: 'absolute', top: 0, left: 0, width: '100%', flexDirection: 'row', backgroundColor: m.userBg ?? m.bg },
+    // Painted over the rows, so a drag would pick it up in place of the row under it.
+    ? h(Box, { key: 'chat-sticky', position: 'absolute', top: 0, left: 0, width: '100%', flexDirection: 'row', backgroundColor: m.userBg ?? m.bg, selectable: false },
         h(Text, { bold: true, dim: true, color: m.accent }, '› '),
         h(Text, { dim: true, wrap: 'truncate' }, lastUserText.length > 60 ? `${lastUserText.slice(0, 60)}…` : lastUserText || '…'))
     : null;
   return h(ScrollBox, { ref: box, anchor: 'bottom', flexGrow: 1, flexShrink: 1, flexDirection: 'column', onScroll: (_o: number, x: ScrollMetrics) => see(x), onMetrics: see },
     rows.length
       ? null
-      : h(Text, { dim: true }, `Ask anything. ${CAP.enter} sends, ${NEWLINE_KEY} starts a new line, / opens the commands, !command runs one in the shell.`),
+      : h(Text, { dim: true, selectable: false }, `Ask anything. ${CAP.enter} sends, ${NEWLINE_KEY} starts a new line, / opens the commands, !command runs one in the shell.`),
     rows.map((row, i) => {
       const key = `chat-${i}`;
       if (row.gap) return h(Box, { key, height: 1, flexShrink: 0 });
-      if (row.reasonHeader) return h(Text, { key, dim: true, color: 'magenta' }, `${' '.repeat(GUTTER)}${row.open ? '▾' : '▸'} ${row.label}`);
-      if (row.reason) return h(Box, { key, flexDirection: 'row', flexShrink: 0 },
-        h(Text, null, ' '.repeat(GUTTER)),
-        (row.spans || []).map((s, j) => h(Text, { key: j, dim: true, bold: s.bold, underline: s.underline, color: s.color }, String(s.text ?? ''))));
+      if (row.reasonHeader) return h(Text, { key, dim: true, color: 'magenta', selectable: false }, `${' '.repeat(GUTTER)}${row.open ? '▾' : '▸'} ${row.label}`);
+      if (row.reason) return h(Box, { key, flexDirection: 'row', flexShrink: 0, ...frameRow(row) },
+        gutter(row),
+        content(row, (s, j) => h(Text, { key: j, dim: true, bold: s.bold, underline: s.underline, color: s.color, selectable: j < (row.chrome ?? 0) ? false : undefined }, String(s.text ?? ''))));
       if (row.toolRun) return h(Box, { key, flexDirection: 'row', flexShrink: 0 },
         h(Text, null, ' '.repeat(GUTTER)),
         (row.spans || []).map((s, j) => h(Text, { key: j, dim: true }, String(s.text ?? ''))));
@@ -401,7 +435,8 @@ function ChatMessages({ messages, wrap, showReasoning, palette: m, errorColor }:
         const runs = row.runs ?? [];
         const wrote = runs.some((r) => r.outcome === 'applied');
         const failed = runs.some((r) => r.outcome === 'error' || r.outcome === 'declined');
-        return h(Box, { key, flexDirection: 'row', flexShrink: 0 },
+        // How long it took and which tools ran — about the answer, not part of it.
+        return h(Box, { key, flexDirection: 'row', flexShrink: 0, selectable: false },
           h(Text, null, ' '.repeat(GUTTER)),
           row.duration ? h(Text, { dim: true }, `${fmtSec(row.duration)}${runs.length || row.stopped ? ' · ' : ''}`) : null,
           row.stopped ? h(Text, { color: m.warn }, `stopped (Esc)${runs.length ? ' · ' : ''}`) : null,
@@ -411,8 +446,8 @@ function ChatMessages({ messages, wrap, showReasoning, palette: m, errorColor }:
       const ground = groundOf(row.role);
       const groundStyle = ground ? { width: '100%', backgroundColor: ground } : {};
       if (row.spans && row.spans.length) {
-        const inner = row.spans.map((s, j) => h(Text, { key: j, bold: s.bold, dim: s.dim || row.role === 'note', underline: s.underline, color: s.color }, String(s.text ?? '')));
-        return h(Box, { key, flexDirection: 'row', flexShrink: 0, ...groundStyle }, gutter(row), inner);
+        return h(Box, { key, flexDirection: 'row', flexShrink: 0, ...groundStyle, ...frameRow(row) }, gutter(row),
+          content(row, (s, j) => h(Text, { key: j, bold: s.bold, dim: s.dim || row.role === 'note', underline: s.underline, color: s.color, selectable: j < (row.chrome ?? 0) ? false : undefined }, String(s.text ?? ''))));
       }
       // A blank line inside a message keeps the message's ground.
       return h(Box, { key, height: 1, flexShrink: 0, ...groundStyle });
@@ -553,12 +588,17 @@ export function renderChatModal({
         flexDirection: 'column',
         gap: 1,
         overflow: 'hidden',
+        // A drag that starts in the chat stays in it — inside the frame, never onto the
+        // border or the screen behind. The conversation is a scope of its own (a
+        // <ScrollBox> is one), so a drag there stays in the conversation.
+        selectionScope: true,
       },
       h(ChatMessages, { messages, wrap, showReasoning, palette: m, errorColor: theme?.error }),
       error ? h(Text, { color: 'red' }, `⚠ ${error}`) : null,
       // The hint on the left, how full the model's context is on the right — it stays
       // put while the hint changes, and turns yellow when it is time to /compact.
-      h(Box, { flexDirection: 'row', width: '100%', flexShrink: 0 },
+      // Chrome, not conversation: out of every selection.
+      h(Box, { flexDirection: 'row', width: '100%', flexShrink: 0, selectable: false },
       h(Box, { flexGrow: 1, flexShrink: 1, overflow: 'hidden' },
       (!escArmed && (streaming || toolLabel))
         // Working: what is happening NOW is the bright part. A tool that is running
@@ -610,8 +650,10 @@ export function renderChatModal({
               confirmAsk.command != null
                 ? h(Text, { wrap: 'wrap' }, `$ ${confirmAsk.command.length > 1000 ? `${confirmAsk.command.slice(0, 1000)}…` : confirmAsk.command}`)
                 : h(Text, { dim: true, wrap: 'truncate' }, confirmAsk.args),
-              h(Text, { color: theme?.error }, `Press y to confirm · n to decline · ${CAP.esc} to cancel`))
-          : h(Box, { flexDirection: 'column', width: '100%', backgroundColor: m.fieldBg },
+              h(Text, { color: theme?.error, selectable: false }, `Press y to confirm · n to decline · ${CAP.esc} to cancel`))
+          // The field is where the person types — its caret, prompt and placeholder are
+          // not text to copy, and a drag over it must not pick them up.
+          : h(Box, { flexDirection: 'column', width: '100%', backgroundColor: m.fieldBg, selectable: false },
               visible.map((row, i) => {
                 // The prompt marks the field's first line; it dims while an answer is
                 // coming, when ⏎ queues instead of sending. Shell mode swaps both the
@@ -674,7 +716,7 @@ function renderContextPanel(r: ContextReading, bg: string | undefined, wrap: num
       h(Text, warn ? { color: 'yellow' } : {}, contextHeading(r))),
     h(Box, { flexDirection: sideBySide ? 'row' : 'column', gap: sideBySide ? 3 : 1 }, grid, legend),
     h(Text, { dim: true, wrap: 'truncate' }, contextFootnote(r)),
-    h(Text, { dim: true, wrap: 'truncate' }, `/compact summarises · /clear starts over · window: ai.contextWindow · ${CAP.esc} / ${CAP.enter} close`));
+    h(Text, { dim: true, wrap: 'truncate', selectable: false }, `/compact summarises · /clear starts over · window: ai.contextWindow · ${CAP.esc} / ${CAP.enter} close`));
 }
 
 function renderAsk(state: AskState, bg: string | undefined, wrap: number) {
@@ -695,7 +737,7 @@ function renderAsk(state: AskState, bg: string | undefined, wrap: number) {
     state.typing
       ? h(Box, { flexDirection: 'row' }, h(Text, null, '     › '), h(Text, { wrap: 'truncate' }, state.text), h(Text, { inverse: true }, ' '))
       : null,
-    h(Text, { dim: true }, hint));
+    h(Text, { dim: true, selectable: false }, hint));
 }
 
 // One look for every host modal: the chat's — a round frame in the modal palette, a
@@ -710,6 +752,9 @@ const frame = (m: Record<string, string | undefined>, title: string, extra: Reco
   paddingX: 1,
   flexDirection: 'column' as const,
   overflow: 'hidden' as const,
+  // A drag inside the window stays inside it: never onto its border, never onto the
+  // dimmed screen behind.
+  selectionScope: true,
   ...extra,
 });
 
@@ -760,7 +805,7 @@ export function renderLogModal({
         visible.length
           ? visible.map((line, index) => h(Box, { key: start + index, flexDirection: 'row' }, logLine(line, m, theme?.error)))
           : h(Text, { dim: true }, 'Nothing has happened yet — tool calls, background tasks and errors land here.')),
-      h(Text, { dim: true }, `${more ? `${CAP.upDown} ${CAP.page} scroll · Home/End · ` : ''}${CAP.esc} close`),
+      h(Text, { dim: true, selectable: false }, `${more ? `${CAP.upDown} ${CAP.page} scroll · Home/End · ` : ''}${CAP.esc} close`),
     ),
   );
 }
@@ -856,7 +901,7 @@ export function renderHelp({
           : h(Box, { key: `c-${e.usage}`, flexDirection: 'row', flexShrink: 0 },
               h(Text, { bold: true }, `  ${e.usage.padEnd(usageW)}  `),
               h(Box, { width: descW }, h(Text, { dim: true, wrap: 'wrap' }, e.description)))))),
-      h(Text, { dim: true }, `${CAP.page} or the wheel scroll · ${CAP.esc} close`),
+      h(Text, { dim: true, selectable: false }, `${CAP.page} or the wheel scroll · ${CAP.esc} close`),
     ),
   );
 }
@@ -895,9 +940,10 @@ export function renderReminder({
       padding: 1,
       flexDirection: 'column',
       gap: 1,
+      selectionScope: true,
     },
       h(Text, { wrap: 'wrap' }, text ?? ''),
-      h(Text, { dim: true }, `${CAP.esc} / ${CAP.enter} — dismiss`),
+      h(Text, { dim: true, selectable: false }, `${CAP.esc} / ${CAP.enter} — dismiss`),
     ),
   );
 }

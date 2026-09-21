@@ -266,9 +266,10 @@ async function runPrompt(args: string[], config: Record<string, unknown>, repo: 
 }
 
 // ─── interactive TUI ──────────────────────────────────────────────────────────
-// Whether the terminal reports the wheel to the app. On unless `ui.mouse` is
-// explicitly false: while it is on, the terminal's own drag-to-select needs Shift
-// (or Option) held, and some people will rather have that than the wheel.
+// Whether the terminal reports the mouse to the app — the wheel, and the drag that
+// selects and copies (flowtty's copy-on-select, wired in runtime/app.tsx). On unless
+// `ui.mouse` is explicitly false: some people will rather have the terminal's own
+// selection back.
 export function mouseEnabled(config: Record<string, unknown>): boolean {
   return (config.ui as { mouse?: unknown } | undefined)?.mouse !== false;
 }

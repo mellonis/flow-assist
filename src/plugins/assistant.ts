@@ -924,7 +924,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // For the person; nothing is sent and nothing joins the conversation.
                 const target = copyTarget(messages as { role?: string; content?: unknown }[], arg);
                 if ('error' in target) { setError(target.error); return; }
-                const done = copyToClipboard(target.text);
+                // The terminal's clipboard sequence where there is one, the platform's tool
+                // where not (`services.copy`); what was copied is said here, once.
+                const done = (f.services as { copy?: (t: string) => { ok: boolean; error?: string } }).copy?.(target.text) ?? copyToClipboard(target.text);
                 if (!done.ok) { setError(`/copy: ${done.error}`); return; }
                 setField('');
                 (f.services as Record<string, any>).showMessage?.(`Copied ${target.what} — ${Array.from(target.text).length} chars`);

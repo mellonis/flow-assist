@@ -19,11 +19,12 @@ export const hostConfigSchema = z.object({
     disabledTools: z.array(z.string()).optional(),
   }).optional(),
   user: z.object({ name: z.string().optional(), login: z.string().optional() }).optional(),
-  // `mouse` reports the wheel to the app (it scrolls the conversation). On by
-  // default; the cost is the terminal's own drag-to-select. iTerm2 selects with Option
-  // held, most Linux terminals with Shift, Apple Terminal with fn (not Option or Shift;
-  // View → Allow Mouse Reporting, ⌘R, turns reporting off there). `config set ui.mouse false` gives it back
-  // everywhere, and `/copy` in the chat copies an answer without the mouse.
+  // `mouse` reports the mouse to the app: the wheel scrolls the conversation, and a drag
+  // selects text inside one pane and copies it on release (flowtty's copy-on-select —
+  // the terminal's clipboard sequence, else pbcopy / wl-copy / xclip / xsel). On by
+  // default. `config set ui.mouse false` gives the mouse back to the terminal, whose own
+  // selection takes whole screen rows, borders included; `/copy` in the chat copies an
+  // answer with no mouse at all.
   ui: z.object({ mouse: z.boolean().optional() }).optional(),
   memory: z.object({ file: z.string() }).optional(),
   // Chat sessions on disk (src/assistant/sessions.ts): where, whether the app

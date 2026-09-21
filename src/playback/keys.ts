@@ -117,7 +117,18 @@ const KEY_GLYPHS: Record<string, string> = {
   paste: 'paste',
   wheelup: 'wheel↑',
   wheeldown: 'wheel↓',
+  // Mouse buttons (flowtty ≥ 1.0.0-alpha.15). They drive the drag-selection and no
+  // handler here acts on them (`isMouseButton`), but a cap must still be short.
+  mousedown: 'btn↓',
+  mousedrag: 'drag',
+  mouseup: 'btn↑',
 };
+// A mouse button key — press, drag or release. These belong to flowtty's
+// drag-selection: nothing in the host or a plugin treats one as text, a dismissal or
+// "any key", and the host stops them before its own dispatch (`runtime/app.tsx`).
+export function isMouseButton(name: string | undefined): boolean {
+  return name === 'mousedown' || name === 'mousedrag' || name === 'mouseup';
+}
 // The cap for a key as the terminal reported it — or for a terminal-side NAME alone
 // (a resolved binding). Modifiers are part of what was pressed: `^r` is not `r`.
 // Shift is shown only with a named key (⇧⇥): for a character the character already

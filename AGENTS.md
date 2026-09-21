@@ -350,7 +350,8 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   so an East-Asian-ambiguous glyph (`∮`, `≈`, most of Mathematical Operators)
   shifts the row in terminals that draw it two cells wide.
 - Markdown in answers — tables included — is laid out by flowtty's
-  `layoutMarkdown`. The host adds nothing but the soft `▍` heading marker; a gap in
+  `layoutMarkdown`. The host adds nothing but the soft `▍` heading marker (and keeps
+  the selection marks each row carries — see the drag below); a gap in
   that layout is fixed in flowtty, not papered over here. Since flowtty
   1.0.0-alpha.14 fenced code is highlighted in ~25 languages, ```diff is coloured,
   and a block is a dim language label over rows prefixed with a dim `│ ` (no
@@ -416,17 +417,50 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   a pasted newline does not send and pasted letters fire no binding — any new
   key handler must keep it that way (match on `key.name`, never on characters of
   pasted text).
-- The wheel is reported because the TTY backend is opened with `{ mouse }`, on
-  unless `ui.mouse` is `false`. The cost is the terminal's own drag-to-select,
-  which then needs the terminal's bypass — Option in iTerm2, Shift in most Linux
-  terminals, fn in Apple Terminal (tried: Option and Shift do NOT work there; ⌘R,
-  View → Allow Mouse Reporting, turns reporting off). A native selection takes whole
-  screen rows, borders and the next panel included — fn+Option (a rectangle) keeps
-  them out in Apple Terminal; a real in-app selection waits for flowtty; the active default in `config_schema` says so, because "why can't I select
-  text" is asked of the assistant. Without the mouse, `/copy` in the chat copies the
-  last answer's code block (`/copy answer` — all of it) with pbcopy / wl-copy / xclip
-  (`src/assistant/copy.ts`); Apple Terminal has no OSC 52. Copy-on-select itself
-  waits for flowtty.
+- The mouse is reported because the TTY backend is opened with `{ mouse }`, on
+  unless `ui.mouse` is `false`: the wheel scrolls, and a **drag selects and copies**
+  (flowtty ≥ 1.0.0-alpha.15 copy-on-select — no host code draws the band or reads the
+  cells). The terminal's own selection still works with its bypass held (Option in
+  iTerm2, Shift in most Linux terminals, fn in Apple Terminal) and takes whole screen
+  rows, borders included. The active default in `config_schema` describes all this,
+  because "how do I copy text" is asked of the assistant. Without the mouse, `/copy`
+  copies the last answer's code block (`/copy answer` — all of it).
+- **What a drag copies is decided by two props** — read the whole of it before
+  adding a pane:
+  - `selectionScope` on every pane and window: a drag that starts inside stays in its
+    content rect — never onto the border, never into the neighbour. The chat's frame,
+    `frame()` (log, help) and the reminder carry it; a `<ScrollBox>` (the
+    conversation, the help's list) and a `<Table>` are scopes already. A plugin's
+    panes carry it too (the tracker: the board, each column cell, the issue, the info
+    panel, every modal window).
+  - `selectable: false` on chrome: the gutter marker (`ƒ `, `› `, `$ `, `◆ `), the
+    pinned question, the `N tools` line, the hint rows, the input field, the title bar
+    and footer, the keycaps panel.
+  - The chat lays markdown out itself (`mdLines`), so it keeps what `layoutMarkdown`
+    marks on each row: a row is the gutter box + a content box carrying
+    `wrapContinues` (a wrapped paragraph copies as one line — without it every row
+    pastes as its own), the leading `chrome` spans (a code block's `│ `) are
+    `selectable: false`, and a `frame` row (a fence label) is taken out WHOLE, row
+    box and all — otherwise its blank cells come back as an empty line. The `▍ `
+    heading marker is chrome.
+  - **The clipboard**: flowtty writes OSC 52 and calls `onCopy` (`renderApp` passes
+    it) whether or not a sequence went out. `onCopySelection` handles a DRAG: where
+    nothing was delivered (Apple Terminal has no OSC 52) the platform's tool takes the
+    text (`copyToClipboard` in `src/assistant/copy.ts` — pbcopy / wl-copy / xclip /
+    xsel), then the toast says `Copied N chars` (or why not). It never throws —
+    flowtty calls it on the key path. Copies the app makes go through
+    `services.copy(text)` (`useApp().copy`, then the tool), and `onCopy` leaves those
+    (source `'api'`) to their caller, so `/copy` says what it copied once.
+  - **Mouse buttons are not keys.** `mousedown` / `mousedrag` / `mouseup` reach every
+    `useInput` subscriber; `twoPhaseDispatch` drops them before any handler or the
+    host fallback (`isMouseButton` in `src/playback/keys.ts`). Handlers were written
+    for keys: the y/n pause and an open question swallow every key, Esc Esc is
+    disarmed by "any key", the command line's catch-all consumes, keycaps would draw a
+    cap per dragged cell, and every consumed key costs a re-render. A new handler
+    needs no guard of its own; one that bypasses the registry (a raw `useInput`) does.
+  - Tests: `backend.mouse('down' | 'drag' | 'up', x, y)`, then read
+    `backend.clipboard`; `backend.clipboardAvailable = false` stands for Apple
+    Terminal (`src/__tests__/copy.e2e.test.ts`).
 - **`!command` runs a shell command** — the person's own, typed into the field
   (`!bun test src/features`); the model never reaches this path. `!` typed into an
   EMPTY field switches the field into **shell mode** instead of being inserted (like
