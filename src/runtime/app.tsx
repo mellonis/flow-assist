@@ -35,6 +35,7 @@ import {
   runConsumers,
 } from '../loader/registry.js';
 import { completeCommand, flattenConfigPaths } from '../config/commands.js';
+import { lineTab, lineView, type TabWalk } from '../config/commandline.js';
 import { hostConfigSchema } from '../config/schema.js';
 import {
   getDeep,
@@ -43,7 +44,7 @@ import {
   saveConfigSetting,
   saveConfigUnset,
 } from '../config/load.js';
-import { bindingGlyph, isKey } from '../playback/keys.js';
+import { bindingGlyph, isKey, keyGlyph } from '../playback/keys.js';
 import { resolveAppTheme } from '../playback/theme.js';
 import type { Theme } from '../playback/theme.js';
 import type { Command } from '../loader/plugin.js';
@@ -124,6 +125,8 @@ interface CommandLineState {
   // buffer. Reloaded from the persisted log on restart (below).
   history: string[];
   historyIdx: number;
+  // A Tab walk through the completion candidates (see config/commandline.ts).
+  walk: TabWalk | null;
 }
 
 export function renderApp(
@@ -146,7 +149,7 @@ export function renderApp(
   // Shared per-app mutable state (created ONCE; read by the App and the
   // fallback handler so a re-render never resets them).
   const ui: UiState = { cmdOpen: false, welcome: false, searchMode: false, modalActive: false };
-  const cmdline = { current: { open: false, input: '', history: [], historyIdx: -1 } as CommandLineState };
+  const cmdline = { current: { open: false, input: '', history: [], historyIdx: -1, walk: null } as CommandLineState };
 
   function App() {
     const inputRegistryRef = useRef<LazyInputEntry[]>([]);
@@ -350,6 +353,8 @@ export function renderApp(
     // line, Enter runs the command, Esc closes it, arrow/type edits it, `q`/Ctrl+c
     // exits, `x` clears the cache, `b` opens the browser (no target in a
     // tracker-agnostic host — consumes the key, defers the URL to a tracker).
+    // One completer for what is drawn and for what Tab does, so they cannot disagree.
+    const completeLine = (text: string) => completeCommand(text, commandRegistry as never, config, hostConfigSchema);
     const hostFallback = (key: InputKey): boolean => {
       const name = key.name ?? '';
       // `:` OPENS the command line (when it is closed). It must NOT toggle it
@@ -468,25 +473,14 @@ export function renderApp(
           }
           return true;
         }
-        // Tab: command-line autocomplete. Uses the host's shared completeCommand
-        // (name/alias completion, plus `config get|set|unset <key>` argument
-        // completion). Inserts the best candidate over the first word (or the
-        // config argument head), keeping any typed remainder. `best` is '' when
-        // nothing longer matches — then Tab is a no-op (cycles are not yet
-        // supported; the hint list shows the alternatives).
+        // Tab takes the completion offered inline, then walks the other candidates
+        // (config/commandline.ts). It replaces the WORD being completed — a command
+        // name, or a `config get|set|unset` argument.
         if (name === 'tab') {
-          const input = cmdline.current.input;
-          if (input.trim()) {
-            const comp = completeCommand(input, commandRegistry as never, config, hostConfigSchema);
-            if (comp.best) {
-              // Replace the word being completed with `best`, keep the rest (an
-              // already-typed argument after the space, if any).
-              const sp = input.indexOf(' ');
-              const rest = sp >= 0 ? input.slice(sp) : '';
-              cmdline.current.input = comp.best + rest;
-              notify();
-            }
-          }
+          const next = lineTab(cmdline.current.input, cmdline.current.walk, completeLine);
+          cmdline.current.input = next.input;
+          cmdline.current.walk = next.walk;
+          notify();
           return true;
         }
         if (name === 'backspace') {
@@ -543,6 +537,7 @@ export function renderApp(
     // active (content present). The per-plugin `pFt` comes from `pFtMap`, built
     // by `overlayComps`; the plugin's services/store are mutated live, so reading
     // them here each render stays fresh.
+    const { width: termWidth } = useTerminalSize();
     const hints = composeFooterHints(plugins, pFtMap, keys).join(' · ');
     const surfaceActive = (p: PluginShape): boolean => {
       const kc = (p as Plugin).keycaps;
@@ -555,19 +550,12 @@ export function renderApp(
     // `bottom` is the command-line buffer (with a leading `: `), the active toast,
     // or the footer hints — which START with `: commands` (part of the host base),
     // so no extra `: ` literal is prepended here.
-    const bottom = cmdline.current.open
-      ? `: ${cmdline.current.input}▌`
-      : toast.message || hints;
-    // Command-line autocomplete hints: the candidate list from the host's
-    // completeCommand, shown as a dim line under the buffer. Only when the line
-    // is open and something is typed (an empty buffer returns candidates=[] —
-    // deliberately not the full command list, too noisy).
-    const comp = cmdline.current.open && cmdline.current.input.trim()
-      ? completeCommand(cmdline.current.input, commandRegistry as never, config, hostConfigSchema)
-      : null;
-    const hintText = comp?.candidates?.length
-      ? comp.candidates.slice(0, 10).join('  ')
-      : '';
+    const bottom = toast.message || hints;
+    // The command line completes INLINE, on its own one row: the untyped rest of the
+    // suggestion after the caret, the other candidates beside it. A second row of
+    // candidates used to appear and vanish under the line with every keystroke, and
+    // the whole screen jumped by a row each time.
+    const line = cmdline.current.open ? lineView(cmdline.current.input, cmdline.current.walk, completeLine) : null;
 
     return h(
       Box,
@@ -581,12 +569,20 @@ export function renderApp(
       // behaviour of being shown always.
       h(Box, { flexGrow: 1 },
         overlayComps.filter((c) => !c.surface || surfaceActive(c.plugin)).map(({ Comp, key }) => h(Comp as any, { key })),
-        atHome ? renderHome({ title, plugins, keys, builtins: BUILTIN_PLUGINS }) : null),
+        atHome ? renderHome({ title, plugins, keys, builtins: BUILTIN_PLUGINS, width: termWidth }) : null),
       h(Box, { padding: 1, flexDirection: 'column' },
         // `dim`, not `dimColor` — the latter is another library's prop; flowtty does
         // not know it, and an `as any` had been hiding that the footer was never dimmed.
-        h(Text, { dim: true }, bottom),
-        hintText ? h(Text, { dim: true }, `  ${hintText}`) : null,
+        line
+          ? h(Box, { flexDirection: 'row' },
+              h(Text, { bold: true, color: 'cyan' }, ': '),
+              h(Text, null, cmdline.current.input),
+              // The caret sits ON the first offered character, as in the chat's field.
+              line.ghost
+                ? [h(Text, { key: 'g0', inverse: true, dim: true, color: 'cyan' }, line.ghost[0]), h(Text, { key: 'g1', dim: true, color: 'cyan' }, line.ghost.slice(1))]
+                : h(Text, { inverse: true }, ' '),
+              line.others.length ? h(Text, { dim: true, wrap: 'truncate' }, `  ${keyGlyph('tab')} ${line.others.slice(0, 12).join(' · ')}`) : null)
+          : h(Text, { dim: true }, bottom),
       ),
     );
   }

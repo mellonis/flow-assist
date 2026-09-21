@@ -219,7 +219,7 @@ function pluginSchemaPaths(configSchema: any): { path: string; schema: unknown }
   return out;
 }
 
-type CompleteResult = {
+export type CompleteResult = {
   head: string;
   hasSpace: boolean;
   best: string;

@@ -35,6 +35,9 @@ export type PluginShape = {
   // `['boardPicker']`). The start screen names these beside the plugin; without
   // `entry` it lists every key the plugin binds.
   entry?: string[];
+  // One line saying what the plugin is — shown on the start screen. Taken from the
+  // plugin's manifest.json when the shape does not set it.
+  description?: string;
   // Whether the plugin keeps data in `services.cache` (default true). The footer
   // offers "flush cache" only while such a plugin is showing hints; a plugin with
   // nothing in the cache says `false`, so its hint does not advertise one.
@@ -76,6 +79,8 @@ export interface Plugin {
   services?: Record<string, unknown>;
   aiTools?: unknown[];
   keycaps?: (ft: unknown) => string[];
+  entry?: string[];
+  description?: string;
   usesCache?: boolean;
   setup?: (ft: unknown) => unknown;
 }

@@ -87,9 +87,13 @@ assistant nobody had asked for a board.
   when its surface is inactive"), so a plugin needs no new API to be a good guest. A
   plugin with a surface and no `keycaps` cannot say, and is shown always.
 - Over a guest's surface the host keeps its title bar; on the start screen it does not.
-- `shape.entry?: string[]` names the key actions that lead INTO the plugin; the start
-  screen shows those beside the plugin's name. Without it, every key the plugin binds
-  is listed — including ones that only mean something inside.
+- The start screen lists guests in three aligned columns: name · the key that leads
+  in · what it is. The key comes ONLY from `shape.entry?: string[]` (action names) —
+  a key on screen is an instruction, and listing every key a plugin binds put
+  "⏎ open" beside a tracker with nothing open, where Enter did nothing. The
+  description is `shape.description`, filled by the loader from the plugin's
+  `manifest.json`; a long one wraps inside its column.
+- The block is centred on both axes; inside it rows keep a common left edge.
 - The start screen draws keys with `bindingGlyph(keys[action])` and offers nothing
   that is unbound.
 
@@ -167,6 +171,17 @@ that: it narrates the change and guesses at state. `scripts/eval-tool-use.ts`
 measured it — 1 tool call in 15 turns with 14 false claims, against 15 in 15 with
 none. `/compact`'s summary rides in the system context of every later turn for the
 same reason: a display-only system message never reaches the model.
+
+## The command line
+
+`:` opens it. It completes **inline, on its one row**, as the chat's field does: the
+untyped rest of the suggestion after the caret, the other candidates beside it as
+`⇥ a · b`; Tab takes the offer and then walks the rest. The logic is pure —
+`lineView` / `lineTab` in `src/config/commandline.ts` — and both the drawing and Tab go
+through the one `completeLine`. Never add a row that appears while typing: the old
+second row of candidates made the whole screen jump with every keystroke. Tab
+replaces the WORD being completed (`stem + candidate`), a command name or a
+`config get|set|unset` argument alike.
 
 ## The chat
 

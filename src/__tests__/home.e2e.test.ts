@@ -11,7 +11,9 @@ afterEach(() => { globalThis.fetch = realFetch; });
 // `keycaps` that is [] until the person opens something.
 const guest = (state: { open: boolean }) => (make: any) => [make('boards', {
   name: 'boards',
+  description: 'Boards and cards',
   keys: { boardPicker: 'c' },
+  entry: ['boardPicker'],
   surface: 'board',
   keycaps: () => (state.open ? ['c board'] : []),
   components: {
@@ -41,8 +43,8 @@ test('the app opens on the host\'s own screen — a guest plugin does not take i
   for (const row of LOGO) expect(frame).toContain(row.trimEnd());
   expect(frame).toContain('talk to the assistant');
   expect(frame).toMatch(/A\s+talk to the assistant/);
-  // The guest is named, with the key that leads into it.
-  expect(frame).toMatch(/boards\s+c boardPicker/);
+  // The guest is named, with the key that leads into it and what it is.
+  expect(frame).toMatch(/boards\s+c\s+Boards and cards/);
   ui.app.unmount();
 });
 
@@ -87,16 +89,24 @@ test('a remapped key is the key the start screen names', async () => {
   (app as { unmount?: () => void }).unmount?.();
 });
 
-test('a guest that names its entry is shown with that key only', async () => {
+test('guests are listed as name · way in · what it is, in aligned columns', async () => {
   const guests = (make: any) => [make('boards', {
     name: 'boards',
+    description: 'Boards and cards',
     keys: { open: 'enter', filters: 'f', boardPicker: 'c' },
     entry: ['boardPicker'],
-  })];
+  }), make('notes', { name: 'notes', description: 'Plain notes', keys: { open: 'enter' } })];
   const ui = await bootApp(new ScriptedModel(), 100, 26, guests);
-  expect(ui.backend.lastFrame).toMatch(/boards\s+c boardPicker/);
-  // Keys that only mean something inside the plugin are not advertised from outside.
+  const rows = ui.backend.lastFrame.split('\n');
+  expect(ui.backend.lastFrame).toMatch(/boards\s+c\s+Boards and cards/);
+  // A key is an instruction. A plugin that names no entry gets NONE listed: "⏎ open"
+  // beside a plugin with nothing open read as "press Enter", and Enter did nothing.
+  const notes = rows.find((r) => r.includes('Plain notes'))!;
+  expect(notes).not.toContain('⏎');
   expect(ui.backend.lastFrame).not.toContain('filters');
+  // The descriptions start on one vertical line.
+  const boards = rows.find((r) => r.includes('Boards and cards'))!;
+  expect(boards.indexOf('Boards and cards')).toBe(notes.indexOf('Plain notes'));
   ui.app.unmount();
 });
 
@@ -119,5 +129,28 @@ test('the start screen is centred, as one block with a common left edge', async 
   // Inside the block the three doors share one left edge.
   const xs = ['talk to the assistant', 'commands — try', 'quit'].map((t) => at(t).x);
   expect(new Set(xs).size).toBe(1);
+  ui.app.unmount();
+});
+
+test('a long description wraps under its own first line, and the block stays centred', async () => {
+  const long = 'Boards and cards for a team tracker: swimlanes, filters, sprints, bookmarks and a detail view of every issue';
+  const guests = (make: any) => [
+    make('boards', { name: 'boards', description: long, keys: { boardPicker: 'c' }, entry: ['boardPicker'] }),
+    make('notes', { name: 'notes', description: 'Plain notes' }),
+  ];
+  const ui = await bootApp(new ScriptedModel(), 100, 28, guests);
+  const rows = ui.backend.lastFrame.split('\n');
+  const first = rows.findIndex((r) => r.includes('Boards and cards'));
+  const x = rows[first]!.indexOf('Boards and cards');
+  // Nothing is lost, and nothing runs to the edge of the screen.
+  const flat = rows.slice(first, first + 4).map((r) => r.slice(x).trim()).join(' ');
+  expect(flat.replace(/\s+/g, ' ')).toContain(long);
+  expect(Math.max(...rows.map((r) => r.trimEnd().length))).toBeLessThan(96);
+  // The continuation starts in the description's own column…
+  expect(rows[first + 1]!.slice(0, x).trim()).toBe('');
+  expect(rows[first + 1]!.slice(x, x + 1)).not.toBe(' ');
+  // …and the next plugin's description is in the same column.
+  const notes = rows.find((r) => r.includes('Plain notes'))!;
+  expect(notes.indexOf('Plain notes')).toBe(x);
   ui.app.unmount();
 });

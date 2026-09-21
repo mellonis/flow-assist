@@ -65,6 +65,16 @@ function resolvePluginEntry(pluginDir: string): string {
   throw new Error('no resolvable entry file (package.json main or ./src/index.ts)');
 }
 
+// `description` from a plugin's manifest.json; undefined when there is none.
+function manifestDescription(pluginDir: string): string | undefined {
+  try {
+    const m = JSON.parse(readFileSync(join(pluginDir, 'manifest.json'), 'utf8')) as { description?: unknown };
+    return typeof m.description === 'string' && m.description.trim() ? m.description.trim() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export interface LoadPluginsOptions {
   config: Record<string, unknown>;
   repo: PluginRepo;
@@ -111,7 +121,11 @@ export async function loadPlugins({
       };
       const build = (mod.default ?? mod.build) as unknown;
       if (typeof build === 'function') {
-        plugins.push((build as BuiltinBuilder)({ renders, config, make }));
+        const plugin = (build as BuiltinBuilder)({ renders, config, make });
+        // What the plugin IS, in its author's words, for the start screen — from its
+        // manifest, unless the shape says it itself.
+        plugin.description ??= manifestDescription(join(enabledDir, name));
+        plugins.push(plugin);
       } else {
         console.warn(`[plugins] skip ${name}: default export is not a builder function`);
       }

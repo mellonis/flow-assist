@@ -144,7 +144,7 @@ test('command line: ESC-only close, buffer clear, and up/down history', async ()
   backend.press({ name: ':' });
   await flush();
   // The line is still open (`help` in the buffer), not collapsed to the base shell.
-  expect(backend.lastFrame).toContain('help▌');
+  expect(backend.lastFrame).toContain(': help');
 
   // 2. Enter executes and clears the buffer for the next open.
   backend.press({ name: 'return' });
@@ -155,7 +155,7 @@ test('command line: ESC-only close, buffer clear, and up/down history', async ()
   backend.press({ name: ':' });
   await flush();
   // The buffer is empty on reopen (no leftover `help`).
-  expect(backend.lastFrame).not.toContain('help▌');
+  expect(backend.lastFrame).not.toContain(': help');
 
   // 3. Up recalls the executed command; Down returns to the empty buffer.
   backend.type('clear');
@@ -171,7 +171,7 @@ test('command line: ESC-only close, buffer clear, and up/down history', async ()
   backend.press({ name: 'down' });
   await flush();
   // Down past the newest entry lands on the empty buffer.
-  expect(backend.lastFrame).not.toContain('help▌');
+  expect(backend.lastFrame).not.toContain(': help');
 
   handle.unmount();
 });
