@@ -59,7 +59,12 @@ labels keep short names.
 
 ## Plugin contract (`shape`)
 
-A plugin module default-exports `build<Name>Plugin({ renders, config, make })`.
+A plugin module default-exports `build<Name>Plugin({ renders, config, make, z })`.
+The builder may be **async** — the loader awaits it — for a plugin whose tools are known
+only after it has asked someone (the `mcp` plugin connects to its servers first); it is
+the plugin's job to bound that wait, since the app starts after it. `z` is the host's
+zod: a plugin with no bundler, and so no runtime dependencies (the compiled binary
+cannot import a package from disk), still declares its `configSchema` with it.
 `make(name, shape)` injects `config.plugins.<name>` and qualified keys. The
 returned `shape` has optional: `commands`, `keys`, `keyActions`, `views`,
 `surface`, `modals`, `colors`, `configSchema`, `components`, `tools`, `services`,

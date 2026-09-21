@@ -2,7 +2,8 @@
 // `src/plugins/`) and DOES fs-resolve the enabled plugin set at startup. `loadPlugins`
 // always builds the four built-ins (core/assistant/keycaps/log), then loads every
 // enabled plugin from `plugins-enabled/` (import its default builder, call it with
-// `{ renders, config, make }`). A broken plugin is skipped with `console.warn`.
+// `{ renders, config, make, z }` and await it — a builder may be async). A broken
+// plugin is skipped with `console.warn`.
 //
 // `renders` is the renderer bundle ({ help, chat, log }) that the runtime
 // supplies at startup — the built-in `core.views.help` / `assistant.views.chat` /
@@ -26,9 +27,13 @@ import { buildLogPlugin } from '../plugins/log.js';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { z } from 'zod';
 
-// A plugin builder: `build<X>Plugin({ renders, config, make })` → Plugin.
-type BuiltinBuilder = (ctx: { renders: Record<string, unknown>; config: Record<string, unknown>; make: Make }) => Plugin;
+// A plugin builder: `build<X>Plugin({ renders, config, make, z })` → Plugin (or a promise of one).
+// `z` is the host's zod, handed to every builder: a plugin with no bundler (and so no
+// runtime dependencies — the compiled binary cannot import a package from disk) still
+// declares its `configSchema`, and it is the same zod the host validates with.
+type BuiltinBuilder = (ctx: { renders: Record<string, unknown>; config: Record<string, unknown>; make: Make; z: typeof z }) => Plugin;
 
 const BUILTINS: BuiltinBuilder[] = [buildCorePlugin, buildAssistantPlugin, buildKeycapsPlugin, buildLogPlugin];
 
@@ -98,7 +103,7 @@ export async function loadPlugins({
   // symlink set).
   for (const build of BUILTINS) {
     try {
-      plugins.push(build({ renders, config, make }));
+      plugins.push(build({ renders, config, make, z }));
     } catch (e) {
       console.warn(`[plugins] builtin skipped: ${(e as Error).message}`);
     }
@@ -121,7 +126,10 @@ export async function loadPlugins({
       };
       const build = (mod.default ?? mod.build) as unknown;
       if (typeof build === 'function') {
-        const plugin = (build as BuiltinBuilder)({ renders, config, make });
+        // A builder may be async: a plugin whose tools are known only after it has asked
+        // someone (an MCP server lists its tools once connected) returns a promise. It is
+        // the plugin's job to bound that wait — the app starts only after it.
+        const plugin = await (build as (ctx: Parameters<BuiltinBuilder>[0]) => Plugin | Promise<Plugin>)({ renders, config, make, z });
         // What the plugin IS, in its author's words, for the start screen — from its
         // manifest, unless the shape says it itself.
         plugin.description ??= manifestDescription(join(enabledDir, name));

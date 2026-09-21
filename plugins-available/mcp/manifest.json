@@ -1,0 +1,6 @@
+{
+  "name": "mcp",
+  "version": "1.0.0",
+  "description": "MCP servers — their tools, as the assistant's tools",
+  "tools": ["mcp"]
+}

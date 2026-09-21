@@ -27,3 +27,4 @@ plugins-enabled/
 /plugins-available/*
 !/plugins-available/gitlab/
 !/plugins-available/repo/
+!/plugins-available/mcp/

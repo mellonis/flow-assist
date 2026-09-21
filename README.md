@@ -38,6 +38,11 @@ Each plugin ships a `manifest.json` and a `shape` (commands/keys/views/surfaces/
 aiTools/services/tools/configSchema). Tool groups are delivered by plugins; there
 is no separate tools repo.
 
+Plugins here: `gitlab` (glab CLI), `repo` (local clones and git) and `mcp` — the tools
+of MCP servers over Streamable HTTP, each call asked about first
+(`plugins-available/mcp/README.md`). A plugin's settings are set like the host's:
+`config set plugins.<name>.<key> <value>`.
+
 ## Config & environment
 
 - **Config**: `~/.config/flow-assist/config.json` — schema comes from each
