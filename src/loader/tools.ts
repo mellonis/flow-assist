@@ -4,9 +4,10 @@
 // `shape.tools` groups + `shape.aiTools`. There is NO filesystem scan and no
 // `scripts/tools/` import.
 //
-// Namespacing: plugin tool names are prefixed `<plugin.name>:` by the
-// plugin author (shape.tools is used as-is) and host tools are prefixed `host:`;
-// core tools are unprefixed. config.ai.disabledTools is a BLACKLIST — any group
+// Naming: a tool is offered under the name its plugin gave it — group tools and
+// aiTools alike — and gets a `<plugin>:` prefix from the loader only when that name
+// is already claimed (see `register`). Host tools are `host:`-prefixed by the host
+// group itself; core tools are bare. config.ai.disabledTools is a BLACKLIST — any group
 // whose id is listed is withheld (core, alwaysOn, is never withheld).
 //
 // The registry exposes `tools` as the LLM-facing array with `write`/`run`
@@ -110,22 +111,35 @@ export function assembleToolRegistry({ plugins, config, repo }: AssembledToolReg
 
   const groups: ToolGroup[] = [core, host];
   const nameToGroup = new Map<string, ToolGroup>();
-  // A tool name is claimed ONCE. Group tools keep the bare names their plugin gives
-  // them (`get_issue`, `read_file`), so two plugins can pick the same word. The later
-  // one used to take the name silently — the model called `search` and got the other
-  // plugin's — and the provider's "Duplicate tool name" 400, which at least was loud,
-  // is gone now that agentChat sends one declaration per name. The first claimant
-  // keeps the name; the loser is dropped from its group and named in a warning.
-  const register = (group: ToolGroup) => {
-    group.tools = group.tools.filter((t) => {
+  // ─── How a tool gets its name ───────────────────────────────────────────────
+  // The model sees the name the plugin gave: `get_issue`, `open_issue`, `read_file`.
+  // No plugin prefix — it is shorter, costs fewer tokens on every request, and the
+  // model has no use for which plugin stands behind a tool. (aiTools used to be
+  // qualified by this loader and group tools not, so the model saw both `get_issue`
+  // and `acme-tracker__open_issue` from one plugin.)
+  //
+  // A prefix appears only when it is NEEDED: a name already claimed by another group
+  // is registered as `<owner>:<name>` instead, and said so. The first claimant keeps
+  // the bare word. `ownName` remembers what the group itself calls the tool, since
+  // that is the name its `exec` understands.
+  const ownName = new Map<string, string>();
+  const register = (group: ToolGroup, owner: string = group.id) => {
+    group.tools = group.tools.flatMap((t) => {
       const name = t.function.name;
-      const owner = nameToGroup.get(name);
-      if (owner && owner !== group) {
-        console.warn(`[tools] "${name}" is declared by both ${owner.id} and ${group.id} — ${owner.id} keeps it; ${group.id}'s is not offered. Qualify the name (${group.id}:${name}).`);
-        return false;
+      const holder = nameToGroup.get(name);
+      if (!holder || holder === group) {
+        nameToGroup.set(name, group);
+        return [t];
       }
-      nameToGroup.set(name, group);
-      return true;
+      const qualified = `${owner}:${name}`;
+      if (nameToGroup.has(qualified)) {
+        console.warn(`[tools] "${name}" is declared by both ${holder.id} and ${group.id}, and "${qualified}" is taken too — ${group.id}'s is not offered.`);
+        return [];
+      }
+      console.warn(`[tools] "${name}" is declared by both ${holder.id} and ${group.id} — ${holder.id} keeps the name, ${group.id}'s is offered as "${qualified}".`);
+      nameToGroup.set(qualified, group);
+      ownName.set(qualified, name);
+      return [{ ...t, function: { ...t.function, name: qualified } }];
     });
   };
   register(core);
@@ -142,11 +156,11 @@ export function assembleToolRegistry({ plugins, config, repo }: AssembledToolReg
       if (disabled.includes(group.id) && !group.alwaysOn) continue;
       const wrapped = { ...group, exec: (name: string, args: Record<string, unknown>, ctx: ToolCtx) => group.exec(name, args, { ...ctx, pluginToken: identityToken(p.name) }) };
       groups.push(wrapped);
-      register(wrapped);
+      register(wrapped, p.name);
     }
     // Plugin aiTools — standalone `run`-bearing tools. Wrapped in a synthetic
-    // group so they appear in the flattened registry and dispatch; names are
-    // prefixed `<plugin.name>:` for consistency (doubling-proof).
+    // group so they appear in the flattened registry and dispatch. Named as the
+    // plugin named them, like group tools; `register` qualifies one only on a clash.
     const aiTools = (p.aiTools ?? []) as unknown as AiToolDef[];
     if (aiTools.length) {
       // Self-bind the owning plugin's OWN services into each ai-tool's `run`, so a
@@ -164,7 +178,9 @@ export function assembleToolRegistry({ plugins, config, repo }: AssembledToolReg
           ...t,
           function: {
             ...t.function,
-            name: t.function.name.startsWith(`${p.name}:`) ? t.function.name : `${p.name}:${t.function.name}`,
+            // As the plugin wrote it. A plugin that qualified a name itself meant to;
+            // the loader neither adds a prefix nor takes one away.
+            name: t.function.name,
           },
           run: (args: Record<string, unknown>, ctx: ToolCtx) =>
             run(args, { ...p.services, ...ctx, pluginToken: identityToken(p.name) }),
@@ -186,7 +202,7 @@ export function assembleToolRegistry({ plugins, config, repo }: AssembledToolReg
         },
       };
       groups.push(aiGroup);
-      register(aiGroup);
+      register(aiGroup, p.name);
     }
   }
 
@@ -203,7 +219,7 @@ export function assembleToolRegistry({ plugins, config, repo }: AssembledToolReg
     exec: async (name, args, ctx) => {
       const group = nameToGroup.get(name);
       if (!group) throw new Error(`Unknown tool: ${name}`);
-      return group.exec(name, args ?? {}, ctx);
+      return group.exec(ownName.get(name) ?? name, args ?? {}, ctx);
     },
   };
   currentRegistry = registry;

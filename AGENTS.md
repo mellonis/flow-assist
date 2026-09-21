@@ -131,21 +131,24 @@ names against `^[a-zA-Z0-9_-]{1,128}$`.
 
 ### How a tool gets its name
 
-A plugin delivers tools two ways, and the loader names them differently — which is why
-the model sees both `get_issue` and `acme-tracker__open_issue`:
+**The model sees the name the plugin gave** — `get_issue`, `open_issue`, `read_file` —
+for group tools (`shape.tools`) and standalone ones (`shape.aiTools`) alike. No plugin
+prefix: it is shorter, costs fewer tokens on every request, and the model has no use
+for which plugin stands behind a tool. (The loader used to qualify aiTools and not
+group tools, so one plugin's tools arrived as both `get_issue` and
+`acme-tracker__open_issue`.) The loader neither adds a prefix nor takes one away: a
+plugin that wrote `x:tool` itself gets exactly that.
 
-- `shape.tools` — tool GROUPS. Names are used **as the plugin wrote them**; nobody
-  adds a prefix (the loader's comment says the author namespaces them; no plugin does).
-  Hence the bare `list_boards`, `glab_api`, `read_file`.
-- `shape.aiTools` — standalone tools with their own `run`. The loader qualifies these
-  itself as `<plugin>:<tool>`, which goes to the provider as `<plugin>__<tool>`.
-- The host's own: `core` is bare (`memory`, `todo`), `host` is qualified.
+A prefix appears only when it is NEEDED. **A name is claimed once**: the first group to
+declare it keeps the bare word; a later group's tool is registered as `<plugin>:<name>`
+instead and the clash is said (`[tools] "search" is declared by both …`). The registry
+remembers the tool's own name (`ownName`) because that is what the group's `exec`
+understands. Without this a clash is silent — the provider's "Duplicate tool name" 400
+no longer fires, since `agentChat` sends one declaration per name.
 
-It is history, not design. Until group tools are qualified by the host too, **a name
-is claimed once**: the registry keeps the first claimant, drops the second from its
-group and says so (`[tools] "search" is declared by both …`). Without that a clash is
-silent — the provider's "Duplicate tool name" 400 no longer fires, since `agentChat`
-sends one declaration per name. A new bundled plugin should qualify its names.
+The host's own groups: `core` is bare (`memory`, `todo`), `host` qualifies its names
+itself (`host:plugins_list`). Names reach the provider through the wire translation in
+`agent.ts` (`:` → `__`).
 
 ### A tool argument is hostile input
 

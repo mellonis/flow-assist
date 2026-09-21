@@ -483,7 +483,9 @@ test('ai-tool run fuses the OWNING plugin services + preserves caller ctx + host
   // caller passes ONLY a real host openBrowser (no plugin services, no token).
   const reg = assembleToolRegistry({ plugins: [maker], config: {}, repo: { list: async () => [] } as any });
   const hostOpenBrowser = (u: string) => `REAL openBrowser ${u}`;
-  await reg.exec('tracker:open_issue', {}, { openBrowser: hostOpenBrowser });
+  // Offered under the name the plugin gave it — no prefix added by the loader.
+  expect(reg.tools.map((t) => t.function.name)).toContain('open_issue');
+  await reg.exec('open_issue', {}, { openBrowser: hostOpenBrowser });
   // The plugin's own services are fused into the run ctx (openIssue stub present).
   expect(typeof seen.ctx.openIssue).toBe('function');
   expect(seen.ctx.openIssue('ABC-1')).toContain('STUB openIssue ABC-1');
@@ -605,7 +607,7 @@ test('a background task cannot put a question to the person', async () => {
   expect(await reg.exec('ask_user', args, nested as any)).toMatch(/nobody to ask/i);
 });
 
-test('a tool name is claimed once: the first plugin keeps it, the second is dropped and named', async () => {
+test('a tool name is claimed once: the first plugin keeps the bare word, the second is offered qualified', async () => {
   const make = makeFactory({});
   const group = (id: string, answer: string) => ({
     id,
@@ -625,13 +627,16 @@ test('a tool name is claimed once: the first plugin keeps it, the second is drop
       repo: { list: async () => [] } as any,
     });
     const names = reg.groups.flatMap((g) => g.tools.map((t) => t.function.name));
-    // Offered once — and the other tools of the losing group are untouched.
+    // The bare word once; the second claimant under its plugin's name — nothing is lost.
     expect(names.filter((n) => n === 'search')).toHaveLength(1);
+    expect(names).toContain('notes:search');
     expect(names).toContain('notes_only');
     // It is said, with both owners and the way out.
     expect(warned.join('\n')).toMatch(/"search" is declared by both repo and notes/);
     expect(warned.join('\n')).toContain('notes:search');
     expect(String(await reg.exec('search', {}, {}))).toBe('from repo');
+    // The qualified one reaches ITS group, under the name that group knows.
+    expect(String(await reg.exec('notes:search', {}, {}))).toBe('from notes');
   } finally {
     console.warn = realWarn;
   }

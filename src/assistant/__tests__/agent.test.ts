@@ -226,7 +226,9 @@ test('a plugin ai-tool is sent to the provider ONCE, though it reaches agentChat
     },
   });
   const names = sent.map((t) => t.function.name);
-  expect(names.filter((n) => n === 'acme-tracker__open_issue')).toEqual(['acme-tracker__open_issue']);
+  // …under the name the plugin gave it: the model sees `open_issue`, not
+  // `acme-tracker__open_issue`.
+  expect(names.filter((n) => n.endsWith('open_issue'))).toEqual(['open_issue']);
   // …and no name at all is declared twice.
   expect(new Set(names).size).toBe(names.length);
 });
