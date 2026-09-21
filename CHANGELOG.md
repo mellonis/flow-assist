@@ -3,23 +3,17 @@
 What each version of flow-assist brought, newest first. The version is the one in
 `package.json` (and `hostVersion()`, which a test keeps equal to it).
 
-## Unreleased
-
-- **A plugin from a file**: `plugins install ./notes-0.1.0.tar.gz` (or an https URL)
-  installs the archive `plugin:publish` packs, so a plugin can travel without a
-  registry — attached to a release, handed over. The archive is checked before it is
-  unpacked, a newer one updates the plugin, and a checked-out plugin is never
-  overwritten. `plugins ls` marks such a plugin `(archive)`.
-
-## 0.1.0 — 2026-09-21
+## 0.1.0 — 2026-09-22
 
 The first version: a terminal assistant host that knows no company and no system,
 with everything specific delivered by plugins.
 
 - **Plugins** register surfaces, commands, keys, tool groups for the model, config
   schema, and the two chat hooks — what the screen is about, and a reload after a
-  write. Installed from a package registry or linked from a repository of their own;
-  a published plugin ships its build (`files` in its package.json names what goes).
+  write. Installed from a package registry, from an archive (`plugins install
+  ./notes-0.1.0.tar.gz` or its https URL — checked before it is unpacked, and never
+  over a checked-out plugin), or linked from a repository of their own; a published
+  plugin ships its build (`files` in its package.json names what goes).
   Bundled: `repo` (read the configured clones; branch, commit, push), `gitlab`
   (merge requests through `glab`), `mcp` (tools from MCP servers).
 - **The chat**: an LLM agent loop over an OpenAI-format API, with a y/n pause before
