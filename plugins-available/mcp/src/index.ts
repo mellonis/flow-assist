@@ -23,7 +23,7 @@
 
 import { createMcpClient, resultText, type Fetcher, type McpClient, type McpTool } from './client.ts';
 
-export type ServerSpec = { url: string; headers?: Record<string, string>; trusted?: boolean; enabled?: boolean; timeoutMs?: number };
+export type ServerSpec = { url: string; headers?: Record<string, string>; trusted?: boolean; enabled?: boolean; timeoutMs?: number; connectTimeoutMs?: number };
 export type ServerStatus = { name: string; ok: boolean; tools: number; detail: string };
 
 const MAX_RESULT = 20_000;
@@ -93,7 +93,7 @@ export async function connectServers(
   const env = deps.env ?? process.env;
   const results = await Promise.all(servers.map(async ({ name, spec }) => {
     const headers = Object.fromEntries(Object.entries(spec.headers ?? {}).map(([k, v]) => [k, expand(String(v), env)]));
-    const client = createMcpClient({ url: expand(spec.url, env), headers, timeoutMs: spec.timeoutMs ?? 5_000, fetch: deps.fetch });
+    const client = createMcpClient({ url: expand(spec.url, env), headers, timeoutMs: spec.timeoutMs, connectTimeoutMs: spec.connectTimeoutMs, fetch: deps.fetch });
     try {
       const info = await client.initialize();
       const tools = await client.listTools();
@@ -117,6 +117,7 @@ function configSchema(z: any) {
     trusted: z.boolean().optional(),
     enabled: z.boolean().optional(),
     timeoutMs: z.number().int().positive().optional(),
+    connectTimeoutMs: z.number().int().positive().optional(),
   });
   return z.object({ servers: z.record(z.string(), server).optional() }).optional();
 }

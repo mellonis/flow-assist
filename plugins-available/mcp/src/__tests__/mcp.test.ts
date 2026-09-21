@@ -71,7 +71,7 @@ describe('the client', () => {
     await expect(createMcpClient({ url: 'http://x', fetch: fakeServer({ fail: 'http' }).fetch }).initialize()).rejects.toThrow(/HTTP 503/);
     await expect(createMcpClient({ url: 'http://x', fetch: fakeServer({ fail: 'rpc' }).fetch }).initialize()).rejects.toThrow(McpError);
     const hang: Fetcher = (_u, init) => new Promise((_, reject) => init.signal?.addEventListener('abort', () => reject(new Error('aborted'))));
-    await expect(createMcpClient({ url: 'http://x', fetch: hang, timeoutMs: 30 }).initialize()).rejects.toThrow(/no answer in 30 ms/);
+    await expect(createMcpClient({ url: 'http://x', fetch: hang, connectTimeoutMs: 30 }).initialize()).rejects.toThrow(/no answer in 30 ms/);
   });
 
   test('results as text: text kept, images and resources named', () => {
@@ -145,4 +145,24 @@ describe('connecting', () => {
     expect(shape.tools).toEqual([]);
     expect(shape.description).toContain('none configured');
   });
+});
+
+// A server that is down must not hold the app's start for long, and a tool the IDE takes
+// its time over must not be cut short: two timeouts.
+test('connecting gives up quickly; a call may take long', async () => {
+  const s = fakeServer();
+  const slowCall: Fetcher = async (url, init) => {
+    const body = JSON.parse(String(init.body));
+    if (body.method === 'tools/call') await new Promise((r) => setTimeout(r, 120));
+    return s.fetch(url, init);
+  };
+  const c = createMcpClient({ url: 'http://x', fetch: slowCall, connectTimeoutMs: 50 });
+  await c.initialize();
+  expect(resultText(await c.callTool('get_file_text', {}))).toContain('called get_file_text'); // 120 ms > 50: the call has its own timeout
+
+  const hang: Fetcher = (_u, init) => new Promise((_, reject) => init.signal?.addEventListener('abort', () => reject(new Error('aborted'))));
+  const t0 = Date.now();
+  const { status } = await connectServers(parseServers({ ide: { url: 'http://x', connectTimeoutMs: 80 } }), { fetch: hang });
+  expect(Date.now() - t0).toBeLessThan(1000);
+  expect(status[0]).toMatchObject({ ok: false, detail: 'no answer in 80 ms' });
 });

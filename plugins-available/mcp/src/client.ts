@@ -29,6 +29,10 @@ export type Fetcher = (url: string, init: RequestInit) => Promise<Response>;
 export interface McpClientOptions {
   url: string;
   headers?: Record<string, string>;
+  // Per request: `connectTimeoutMs` for the handshake and the tool list (the app waits
+  // for them at start — a closed IDE must not hold it up), `timeoutMs` for a tool call
+  // (an IDE running the tests takes its time).
+  connectTimeoutMs?: number;
   timeoutMs?: number;
   fetch?: Fetcher;
   clientVersion?: string;
@@ -38,12 +42,13 @@ export class McpError extends Error {}
 
 export function createMcpClient(opts: McpClientOptions) {
   const doFetch: Fetcher = opts.fetch ?? ((u, i) => fetch(u, i));
-  const timeoutMs = opts.timeoutMs ?? 10_000;
+  const callTimeoutMs = opts.timeoutMs ?? 60_000;
+  const connectTimeoutMs = opts.connectTimeoutMs ?? 1_500;
   let session: string | undefined;
   let protocol = PROTOCOL_VERSION;
   let nextId = 1;
 
-  async function post(body: unknown, expectResponse: boolean): Promise<unknown> {
+  async function post(body: unknown, expectResponse: boolean, timeoutMs: number): Promise<unknown> {
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), timeoutMs);
     try {
@@ -77,8 +82,8 @@ export function createMcpClient(opts: McpClientOptions) {
     }
   }
 
-  const request = (method: string, params?: unknown) => post({ jsonrpc: '2.0', id: nextId++, method, ...(params === undefined ? {} : { params }) }, true);
-  const notify = (method: string) => post({ jsonrpc: '2.0', method }, false);
+  const request = (method: string, params: unknown, timeoutMs: number) => post({ jsonrpc: '2.0', id: nextId++, method, ...(params === undefined ? {} : { params }) }, true, timeoutMs);
+  const notify = (method: string) => post({ jsonrpc: '2.0', method }, false, connectTimeoutMs);
 
   return {
     get session() { return session; },
@@ -87,7 +92,7 @@ export function createMcpClient(opts: McpClientOptions) {
         protocolVersion: PROTOCOL_VERSION,
         capabilities: {},
         clientInfo: { name: 'flow-assist', version: opts.clientVersion ?? '0' },
-      })) as { protocolVersion?: string; serverInfo?: { name?: string; version?: string } };
+      }, connectTimeoutMs)) as { protocolVersion?: string; serverInfo?: { name?: string; version?: string } };
       protocol = r?.protocolVersion ?? PROTOCOL_VERSION;
       await notify('notifications/initialized');
       return { serverName: r?.serverInfo?.name, serverVersion: r?.serverInfo?.version, protocolVersion: protocol };
@@ -96,7 +101,7 @@ export function createMcpClient(opts: McpClientOptions) {
       const tools: McpTool[] = [];
       let cursor: string | undefined;
       for (let page = 0; page < 50; page++) {
-        const r = (await request('tools/list', cursor ? { cursor } : {})) as { tools?: McpTool[]; nextCursor?: string };
+        const r = (await request('tools/list', cursor ? { cursor } : {}, connectTimeoutMs)) as { tools?: McpTool[]; nextCursor?: string };
         tools.push(...(r?.tools ?? []));
         cursor = r?.nextCursor;
         if (!cursor) break;
@@ -104,7 +109,7 @@ export function createMcpClient(opts: McpClientOptions) {
       return tools;
     },
     async callTool(name: string, args: Record<string, unknown>): Promise<McpCallResult> {
-      return ((await request('tools/call', { name, arguments: args })) ?? {}) as McpCallResult;
+      return ((await request('tools/call', { name, arguments: args }, callTimeoutMs)) ?? {}) as McpCallResult;
     },
   };
 }

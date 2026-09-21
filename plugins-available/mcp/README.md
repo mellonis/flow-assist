@@ -17,7 +17,8 @@ says what each one answered — `webstorm: WebStorm 2026.2, 23 tools`, or why it
 | `headers` | extra request headers; `${VAR}` is taken from the environment, so a token stays in env: `{"Authorization": "Bearer ${MCP_TOKEN}"}` |
 | `trusted` | `true` — the server's read-only tools run without asking |
 | `enabled` | `false` — keep the entry, do not connect |
-| `timeoutMs` | per request, default 5000 |
+| `connectTimeoutMs` | the handshake and the tool list, default 1500 — the assistant waits for them at start, so a server that is down costs at most this much |
+| `timeoutMs` | a tool call, default 60000 |
 
 ## What the model sees
 
