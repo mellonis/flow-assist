@@ -99,3 +99,25 @@ test('a guest that names its entry is shown with that key only', async () => {
   expect(ui.backend.lastFrame).not.toContain('filters');
   ui.app.unmount();
 });
+
+test('the start screen is centred, as one block with a common left edge', async () => {
+  const ui = await bootApp(new ScriptedModel(), 100, 26);
+  const rows = ui.backend.lastFrame.split('\n');
+  const at = (text: string) => { const y = rows.findIndex((r) => r.includes(text)); return { y, x: rows[y]!.indexOf(text) }; };
+  const top = at(LOGO[0]!.trim());
+  const last = at('quit');
+  // Vertically: about as much empty space above the block as below it (the footer
+  // takes the bottom rows, so allow a few).
+  const above = top.y;
+  const below = rows.length - 1 - last.y;
+  expect(above).toBeGreaterThan(3);
+  expect(Math.abs(above - below)).toBeLessThanOrEqual(4);
+  // Horizontally: the block sits in the middle third, not against the left edge.
+  const door = at('talk to the assistant');
+  expect(door.x).toBeGreaterThan(30);
+  expect(door.x).toBeLessThan(60);
+  // Inside the block the three doors share one left edge.
+  const xs = ['talk to the assistant', 'commands — try', 'quit'].map((t) => at(t).x);
+  expect(new Set(xs).size).toBe(1);
+  ui.app.unmount();
+});

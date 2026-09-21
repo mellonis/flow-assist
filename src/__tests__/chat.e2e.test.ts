@@ -543,7 +543,15 @@ test('a background task plans on its own plan, not on the chat\'s', async () => 
 });
 
 test('an open modal pushes the screen behind it back, and stays bright itself', async () => {
-  const ui = await bootApp(new ScriptedModel(), 100, 24);
+  // Something bright has to be BEHIND the chat and outside its frame. The start
+  // screen is centred, so the chat covers all of it; an active guest's surface gets
+  // the host's title bar in the top-left corner, which the chat does not reach.
+  const guest = (make: any) => [make('boards', {
+    name: 'boards',
+    keycaps: () => ['c board'],
+    components: { view: (ft: any) => function View() { return ft.h(ft.Text, null, 'a guest surface'); } },
+  })];
+  const ui = await bootApp(new ScriptedModel(), 100, 24, guest);
   // The host's own title, before anything is open.
   expect(styleAt(ui.backend, 'flow-assist').dim).toBeFalsy();
   await ui.press('A');

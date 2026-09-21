@@ -54,7 +54,10 @@ export function renderHome({ title, plugins, keys, builtins, accent = 'green' }:
     return { name: p.name, bound, tools };
   });
 
-  return h(Box, { flexDirection: 'column', paddingX: 2, gap: 1 },
+  // Centred on the screen as ONE block; inside it the rows keep a common left edge,
+  // so the column of keys reads as a column.
+  return h(Box, { flexGrow: 1, width: '100%', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' },
+    h(Box, { flexDirection: 'column', gap: 1 },
     h(Box, { flexDirection: 'row', gap: 3 },
       h(Box, { flexDirection: 'column', flexShrink: 0 }, LOGO.map((row, i) => h(Text, { key: i, bold: true, color: accent }, row))),
       h(Box, { flexDirection: 'column', justifyContent: 'center' },
@@ -72,5 +75,5 @@ export function renderHome({ title, plugins, keys, builtins, accent = 'green' }:
             h(Text, { dim: true, wrap: 'truncate' }, g.bound.length
               ? `   ${g.bound.map((b) => `${b.key} ${b.action}`).join(' · ')}`
               : g.tools ? '   tools for the assistant' : ''))))
-      : null);
+      : null));
 }
