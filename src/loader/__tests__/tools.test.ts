@@ -417,14 +417,14 @@ test('config_schema reports EFFECTIVE key bindings and a plugin\'s own flags', a
   const make = makeFactory({});
   const keycapsSchema = z.object({ enabled: z.boolean().optional(), colors: z.record(z.string(), z.unknown()).optional() }).optional();
   const plugins = [
-    make('assistant', { keys: { chat: 'A' } }),
+    make('assistant', { keys: { chat: 'F' } }),
     make('keycaps', { configSchema: keycapsSchema, keys: {} }),
   ];
   const reg = assembleToolRegistry({ plugins, config: {}, repo: { list: async () => [] } as any });
   const out = await reg.exec('config_schema', {}, {});
   // Bindings are not personal data and are exactly what "how do I remap X" needs:
   // host defaults + plugin keys, not the (empty) override map.
-  expect(out).toMatch(/chat: A/);
+  expect(out).toMatch(/chat: F/);
   expect(out).toMatch(/quit: \(unbound\)/); // the :quit command, not a key — and said, not blank
   expect(out).toMatch(/open: enter[,} ]/); // shown as a person writes it, not as "return"
   // The host sees `plugins` as an opaque record; the plugin's configSchema fills it in.

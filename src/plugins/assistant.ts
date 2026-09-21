@@ -111,7 +111,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
         description: 'Open the chat; with text, send it',
       },
     ],
-    keys: { chat: 'A' },
+    keys: { chat: 'F' },
     // The footer's word for the chat while it is closed: the key that opens it and,
     // when background results landed meanwhile, how many are waiting. Open, the
     // chat says its own keys inside its frame.
@@ -141,7 +141,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // The host draws its footer BEFORE this component re-renders, so what the
           // footer reads (`ft.store.chat.open` / `.unread`) is patched synchronously at
           // the moment it changes — otherwise the footer runs one render behind and
-          // "A chat" vanishes on close.
+          // "F chat" vanishes on close.
           const publish = (patch: { open?: boolean; unread?: number }) => {
             const store = f.store as Record<string, any>;
             store.chat = { ...(store.chat ?? {}), ...patch };
@@ -929,9 +929,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               return true;
             },
           });
-          // Trigger-open: `A` (Shift+a) opens the chat from any base state (a tracker-
+          // Trigger-open: `F` (Shift+f) opens the chat from any base state (a tracker-
           // agnostic host has no task-detail overlay, so the old `overlay === 'detail'`
-          // gate was always false and `A` never fired). triggerOpenable still guards the
+          // gate was always false and the key never fired). triggerOpenable still guards the
           // command line / welcome / global search / open modal and when the chat is
           // already open; closed is not handled by the base consumer (priority 0).
           addTrigger({ ft: f, action: 'chat', isOpen: () => open, open: () => openChat() });

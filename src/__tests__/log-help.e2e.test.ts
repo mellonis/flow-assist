@@ -49,7 +49,7 @@ test(':help shows keys and commands, inside the screen, each command once', asyn
   // It used to be taller than the terminal, with its title cut off the top.
   expect(rows.some((r) => r.includes('╭─ Help'))).toBe(true);
   expect(frame).toContain('Keys — anywhere');
-  expect(frame).toMatch(/A\s+talk to the assistant/);
+  expect(frame).toMatch(/F\s+talk to the assistant/);
   // The host's commands were listed twice, the second time as "undefined".
   expect(frame).not.toContain('undefined');
   // …and `view` / `back`, which did nothing, are gone from it.

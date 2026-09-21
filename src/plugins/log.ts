@@ -38,7 +38,7 @@ export function buildLogPlugin({ renders, config, make }: BuildLogParams): Plugi
   return make('log', {
     name: 'log',
     commands: [],
-    // A capital opens something big: `A` the assistant, `L` the log (a plugin's board
+    // A capital opens something big: `F` the assistant (Flow Assist), `L` the log (a plugin's board
     // would be `B`). Lower-case letters stay free for what is inside a screen.
     keys: { log: 'L' },
     // `l` opened the log and nothing on screen said so. The footer names it while

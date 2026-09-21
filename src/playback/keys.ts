@@ -42,7 +42,7 @@ export const DEFAULT_KEYS: Record<string, string | string[]> = {
   subissues: 's',
   analyze: 'a',
   analysisJson: 'j',
-  chat: 'A',               // opens the chat with the LLM (Shift+a; lowercase 'a' is analyze)
+  chat: 'F',               // opens the chat with the LLM (Shift+f; lowercase 'f' is filters)
   attachment: 'o',
 };
 

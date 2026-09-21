@@ -325,7 +325,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     - the action is BOUND (it is in `ft.keys`, so the person can remap it) → draw
       `ft.keyCap(action)`; it is `''` when the action is unbound, and then the hint is
       not shown at all. The host footer (`composeFooterHints`) and the chat's
-      `A chat` hint do this. Host-side code uses `bindingGlyph(keys[action])`.
+      `F chat` hint do this. Host-side code uses `bindingGlyph(keys[action])`.
     - the key is fixed (the chat's own Enter / Esc / Tab) → `keyGlyph(…)`, as the
       `CAP` table in `src/views/modals.ts` does.
     A bundled plugin that still spells caps by hand in its `keycaps(ft)` (acme-tracker)
@@ -348,7 +348,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     stays in `HOST_DEFAULT_KEYS` unbound (`[]`) so `config.keys.quit` can bind it, and
     the start screen then names the key instead of `:q`. Plugins leave their screens
     on Esc (`keys.back`) only.
-- **A capital opens something big**: `A` the assistant, `L` the log; a plugin's main
+- **A capital opens something big**: `F` the assistant (Flow Assist), `L` the log; a plugin's main
   screen should follow (`B` for a board). Lower case is for what is INSIDE a screen.
   A modal is closed by the key it is bound to (`f.keys.<action>`), never by a letter
   written in the handler — the log used to close on a hard-coded `l`.
@@ -374,7 +374,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   soon as no turn is being written — a half-typed draft does not hold it back. It
   does not open the chat and does not spend a model turn: it joins the model's
   history and is read with the person's next message. Landing while the chat is
-  closed, it is counted as unread; the host footer shows `A chat · ◆ N new` through
+  closed, it is counted as unread; the host footer shows `F chat · ◆ N new` through
   the chat plugin's `keycaps`, and opening the chat clears the count. It also calls
   `services.alert(title, body)` — flowtty's `notify`: a desktop notification, or the
   bell where none reaches the terminal (tmux, a bare console), at most one a second.

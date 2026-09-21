@@ -19,7 +19,7 @@ test('after /clear the assistant still has its memory — and the chat says so, 
     [{ text: 'third' }],
   );
   const ui = await bootApp(model, 110, 30, undefined, { memory: { file } });
-  await ui.press('A');
+  await ui.press('F');
   await ui.type('think of 7 numbers');
   await ui.press('return');
   await settle(24);
@@ -71,7 +71,7 @@ test('/clear with an empty memory says nothing extra', async () => {
   const model = new ScriptedModel();
   model.script([{ text: 'hi' }]);
   const ui = await bootApp(model, 110, 26, undefined, { memory: { file } });
-  await ui.press('A');
+  await ui.press('F');
   await ui.type('hello');
   await ui.press('return');
   await settle(16);

@@ -58,8 +58,8 @@ test('b is a plugin\'s key: the host does not answer it with a message about not
 
 test('every key the footer names does something, and nothing else is bound on the start screen', async () => {
   const ui = await bootApp(new ScriptedModel(), 100, 24);
-  // Named in the footer: `:`, `q`, `A`, `L`. Each changes the screen (q is not pressed).
-  for (const [key, shows] of [[':', ': '], ['A', 'ƒ Flow Assist'], ['L', '╭─ Log']] as const) {
+  // Named in the footer: `:`, `F`, `L`. Each changes the screen (q is not pressed).
+  for (const [key, shows] of [[':', ': '], ['F', 'ƒ Flow Assist'], ['L', '╭─ Log']] as const) {
     expect(footer(ui)).toContain(`${key} `);
     await ui.press(key);
     expect(ui.backend.lastFrame).toContain(shows);

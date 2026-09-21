@@ -17,7 +17,7 @@ test('messages carry a marker and colour instead of a role label', async () => {
   const model = new ScriptedModel();
   model.script([{ text: 'Three commits ahead of master.' }]);
   const ui = await bootApp(model, 100, 24);
-  await ui.press('A');
+  await ui.press('F');
 
   // The input reads as a field: a prompt in the accent colour, on its own ground.
   expect(ui.backend.lastFrame).toContain('› ');
@@ -56,7 +56,7 @@ test('Enter while an answer is streaming queues the message, and it is sent when
   const model = new ScriptedModel();
   model.script([{ text: 'Looking, ' }, { hold: true }, { text: 'three ahead.' }], [{ text: 'CI is green.' }]);
   const ui = await bootApp(model, 100, 26);
-  await ui.press('A');
+  await ui.press('F');
   await ui.type('how far is my branch');
   await ui.press('return');
 
@@ -85,7 +85,7 @@ test('Esc takes the last queued message back into the field instead of cancellin
   const model = new ScriptedModel();
   model.script([{ text: 'Looking, ' }, { hold: true }, { text: 'done.' }]);
   const ui = await bootApp(model, 100, 26);
-  await ui.press('A');
+  await ui.press('F');
   await ui.type('first');
   await ui.press('return');
   await ui.type('second thoughts');
@@ -108,7 +108,7 @@ test('↑/↓ walk the prompt history; the draft in progress is not lost', async
   const model = new ScriptedModel();
   model.script([{ text: 'one.' }], [{ text: 'two.' }]);
   const ui = await bootApp(model, 100, 26);
-  await ui.press('A');
+  await ui.press('F');
   await ui.type('first prompt');
   await ui.press('return');
   await settle(14);
@@ -137,7 +137,7 @@ test('↑/↓ walk the prompt history; the draft in progress is not lost', async
 
 test('a slash command completes inline: the rest of it is shown in the field, Tab takes it', async () => {
   const ui = await bootApp(new ScriptedModel(), 100, 24);
-  await ui.press('A');
+  await ui.press('F');
   const fieldRow = () => ui.backend.lastFrame.split('\n').filter((r) => r.includes('› ')).at(-1) ?? '';
 
   // The continuation appears IN the field, after what was typed — not on a row of
@@ -172,7 +172,7 @@ test('text to the right of the caret is drawn like the text to its left', async 
   // It used to be dimmed — the placeholder's style had leaked onto real text, so
   // moving the caret back greyed out everything after it.
   const ui = await bootApp(new ScriptedModel(), 100, 24);
-  await ui.press('A');
+  await ui.press('F');
   await ui.type('hello world');
   await ui.press('left', 'left', 'left', 'left', 'left');
   const left = styleAt(ui.backend, '› hello world', 2); // "h"
@@ -185,7 +185,7 @@ test('text to the right of the caret is drawn like the text to its left', async 
 
 test('a blank line between two thoughts is a row of the field on screen', async () => {
   const ui = await bootApp(new ScriptedModel(), 100, 24);
-  await ui.press('A');
+  await ui.press('F');
   await ui.type('first thought');
   ui.backend.press({ name: 'return', shift: true });
   ui.backend.press({ name: 'return', shift: true });
@@ -212,7 +212,7 @@ test('the plan lists what is in progress first, and re-orders live without a cra
     [{ text: 'Started the summary.' }],
   );
   const ui = await bootApp(model, 100, 30);
-  await ui.press('A');
+  await ui.press('F');
   await ui.type('plan it');
   await ui.press('return');
   await settle(20);
@@ -237,7 +237,7 @@ test('a multi-line paste lands in the field as text — it sends nothing and fir
   // sent and the rest arrived as keystrokes, single-letter bindings included.
   const model = new ScriptedModel();
   const ui = await bootApp(model, 100, 26);
-  await ui.press('A');
+  await ui.press('F');
   await ui.type('see: ');
   paste(ui, 'TypeError: x is undefined\n    at run (a.ts:3)\n\nq y n A');
   await settle();
@@ -279,7 +279,7 @@ test('the wheel scrolls the conversation', async () => {
   const model = new ScriptedModel();
   model.script([{ text: Array.from({ length: 40 }, (_, i) => `line ${i + 1}`).join('\n\n') }]);
   const ui = await bootApp(model, 100, 22);
-  await ui.press('A');
+  await ui.press('F');
   await ui.type('print forty lines');
   await ui.press('return');
   await settle(20);
@@ -327,7 +327,7 @@ test('a background result shows at once — a half-typed draft does not hold it 
   const model = new ScriptedModel();
   backgroundScript(model, 'There are 14 TODO comments.');
   const ui = await bootApp(model, 100, 28);
-  await ui.press('A');
+  await ui.press('F');
   await ui.type('count the TODOs in the background');
   await ui.press('return');
   await ui.type('meanwhile, half a th');
@@ -360,7 +360,7 @@ test('a fired reminder asks the terminal for attention as well as drawing its ba
     [{ text: 'Will do.' }],
   );
   const ui = await bootApp(model, 100, 28);
-  await ui.press('A');
+  await ui.press('F');
   await ui.type('remind me to blink');
   await ui.press('return');
   await settle(20);
@@ -383,10 +383,10 @@ test('a background result does not open the chat — the footer says it is waiti
   const ui = await bootApp(model, 100, 28);
   // Closed, the chat is reachable from the footer at all — and a chat hint alone
   // does not drag in the cache hint, which belongs to plugins that cache.
-  expect(ui.backend.lastFrame).toMatch(/A chat/);
+  expect(ui.backend.lastFrame).toMatch(/F chat/);
   expect(ui.backend.lastFrame).not.toContain('flush cache');
 
-  await ui.press('A');
+  await ui.press('F');
   await ui.type('count the TODOs in the background');
   await ui.press('return');
   await settle(20);
@@ -403,13 +403,13 @@ test('a background result does not open the chat — the footer says it is waiti
   await new Promise((r) => setTimeout(r, 4100));
   await settle(4);
   expect(ui.backend.lastFrame).not.toContain('Flow Assist');
-  expect(ui.backend.lastFrame).toMatch(/A chat · ◆ 1 new/);
+  expect(ui.backend.lastFrame).toMatch(/F chat · ◆ 1 new/);
 
   // Opening it shows the result and clears the count.
-  await ui.press('A');
+  await ui.press('F');
   expect(ui.backend.lastFrame).toContain('There are 14 TODO comments.');
   await ui.press('escape', 'escape');
-  expect(ui.backend.lastFrame).toMatch(/A chat/);
+  expect(ui.backend.lastFrame).toMatch(/F chat/);
   expect(ui.backend.lastFrame).not.toMatch(/◆ \d+ new/);
   ui.app.unmount();
 });
@@ -424,7 +424,7 @@ test('an emoji is one character: the caret steps over it and backspace removes i
   const model = new ScriptedModel();
   model.script([{ text: 'ok' }]);
   const ui = await bootApp(model, 100, 24);
-  await ui.press('A');
+  await ui.press('F');
   paste(ui, 'a😀b');
   await settle();
   await ui.press('left'); // before "b"
@@ -441,7 +441,7 @@ test('an emoji can be typed, and a pasted CR never reaches the message', async (
   const model = new ScriptedModel();
   model.script([{ text: 'ok' }]);
   const ui = await bootApp(model, 100, 24);
-  await ui.press('A');
+  await ui.press('F');
   await ui.press('😀');
   paste(ui, 'one\r\ntwo\rthree');
   await settle();
@@ -455,7 +455,7 @@ test('every newline key starts a new line, and none of them sends', async () => 
   const model = new ScriptedModel();
   model.script([{ text: 'ok' }]);
   const ui = await bootApp(model, 100, 24);
-  await ui.press('A');
+  await ui.press('F');
   await ui.type('a');
   ui.backend.press({ name: 'return', meta: true }); // Alt+Enter — what the hint names
   await settle();
@@ -476,7 +476,7 @@ test('in a draft ↑/↓ move the caret between its rows; history is for an empt
   const model = new ScriptedModel();
   model.script([{ text: 'one.' }], [{ text: 'two.' }]);
   const ui = await bootApp(model, 100, 26);
-  await ui.press('A');
+  await ui.press('F');
   await ui.type('earlier prompt');
   await ui.press('return');
   await settle(14);
@@ -496,7 +496,7 @@ test('readline keys work in the field: word delete, kill to the line start', asy
   const model = new ScriptedModel();
   model.script([{ text: 'ok' }]);
   const ui = await bootApp(model, 100, 24);
-  await ui.press('A');
+  await ui.press('F');
   await ui.type('keep this drop');
   ui.backend.press({ name: 'w', ctrl: true }); // delete the word before the caret
   await settle();
@@ -515,7 +515,7 @@ test('/clear starts a conversation with no plan, and a new chat does not inherit
   const model = new ScriptedModel();
   model.script([{ tool: 'todo', args: { action: 'add', items: ['alpha item', 'beta item'] } }], [{ text: 'Planned.' }]);
   const ui = await bootApp(model, 100, 28);
-  await ui.press('A');
+  await ui.press('F');
   await ui.type('plan it');
   await ui.press('return');
   await settle(20);
@@ -540,7 +540,7 @@ test('/clear starts a conversation with no plan, and a new chat does not inherit
 
   // A second chat in the same process — what every test after this one is.
   const other = await bootApp(new ScriptedModel(), 100, 28);
-  await other.press('A');
+  await other.press('F');
   expect(other.backend.lastFrame).not.toContain('▾ plan');
   other.app.unmount();
 });
@@ -555,7 +555,7 @@ test('a background task plans on its own plan, not on the chat\'s', async () => 
     [{ text: 'Swept.' }],
   );
   const ui = await bootApp(model, 100, 28);
-  await ui.press('A');
+  await ui.press('F');
   await ui.type('sweep it in the background');
   await ui.press('return');
   await settle(40);
@@ -578,7 +578,7 @@ test('an open modal pushes the screen behind it back, and stays bright itself', 
   const ui = await bootApp(new ScriptedModel(), 100, 24, guest);
   // The host's own title, before anything is open.
   expect(styleAt(ui.backend, 'flow-assist').dim).toBeFalsy();
-  await ui.press('A');
+  await ui.press('F');
   // Behind the chat: same characters, dimmed. (A flag on the cell, not a repaint.)
   expect(ui.backend.lastFrame).toContain('flow-assist');
   expect(styleAt(ui.backend, 'flow-assist').dim).toBe(true);

@@ -75,7 +75,7 @@ test('a call through the chat: asked first, sent with the session, answered as d
   );
   const app = await bootApp(model, 110, 30, () => [shape as never], config);
 
-  await app.press('A');
+  await app.press('F');
   await app.type('what does answer.ts export?');
   await app.press('return');
   expect(app.backend.lastFrame).toContain('Confirm write: webstorm:get_file_text');

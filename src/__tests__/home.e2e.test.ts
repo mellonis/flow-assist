@@ -42,7 +42,7 @@ test('the app opens on the host\'s own screen — a guest plugin does not take i
   // The host says who it is — the mark, drawn large — and what can be done from here.
   for (const row of LOGO) expect(frame).toContain(row.trimEnd());
   expect(frame).toContain('talk to the assistant');
-  expect(frame).toMatch(/A\s+talk to the assistant/);
+  expect(frame).toMatch(/F\s+talk to the assistant/);
   // The guest is named, with the key that leads into it and what it is.
   expect(frame).toMatch(/boards\s+c\s+Boards and cards/);
   ui.app.unmount();
@@ -68,7 +68,7 @@ test('a guest takes the screen when it becomes active, and gives it back', async
 
 test('the chat opens over the start screen, and the start screen steps back', async () => {
   const ui = await bootApp(new ScriptedModel(), 100, 26);
-  await ui.press('A');
+  await ui.press('F');
   expect(ui.backend.lastFrame).toContain('ƒ Flow Assist');
   await ui.press('escape', 'escape');
   expect(ui.backend.lastFrame).toContain('talk to the assistant');

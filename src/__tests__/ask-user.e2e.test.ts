@@ -47,7 +47,7 @@ test.each([[110, 40], [100, 22]])('the model asks, the person picks with the key
   const handle = await renderApp(backend, { plugins, config, tools, onExit: () => {} });
   await settle();
 
-  backend.press({ name: 'A', shift: true });
+  backend.press({ name: 'F', shift: true });
   await settle();
   backend.type('how should I integrate this branch');
   backend.press({ name: 'return' });

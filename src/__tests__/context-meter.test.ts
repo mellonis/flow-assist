@@ -59,7 +59,7 @@ test('the chat shows the estimate first and the measured figure after an answer;
   model.usage = { prompt_tokens: 58_000, completion_tokens: 2_000 };
   model.script([{ text: 'hello' }]);
   const ui = await bootApp(model, 110, 30, undefined, { ai: { baseUrl: 'http://scripted.model', model: 'scripted', contextWindow: 100_000 } });
-  await ui.press('A');
+  await ui.press('F');
   expect(ui.backend.lastFrame).toMatch(/ctx ~\d+%/);
 
   await ui.type('hi');
@@ -101,7 +101,7 @@ test('/compact shrinks what the model sees and leaves the screen alone', async (
   const model = new ScriptedModel();
   model.script([{ text: 'The first answer.' }], [{ text: 'SUMMARY: they greeted each other.' }], [{ text: 'The second answer.' }]);
   const ui = await bootApp(model, 110, 30);
-  await ui.press('A');
+  await ui.press('F');
   await ui.type('the first question');
   await ui.press('return');
   expect(ui.backend.lastFrame).toContain('The first answer.');
@@ -130,7 +130,7 @@ test('past 80% the figure is drawn as a warning', async () => {
   model.usage = { prompt_tokens: 85_000, completion_tokens: 0 };
   model.script([{ text: 'ok' }]);
   const ui = await bootApp(model, 110, 30, undefined, { ai: { baseUrl: 'http://scripted.model', model: 'scripted', contextWindow: 100_000 } });
-  await ui.press('A');
+  await ui.press('F');
   await ui.type('hi');
   await ui.press('return');
   const row = ui.backend.lastFrame.split('\n').findIndex((r) => r.includes('ctx 85%'));
