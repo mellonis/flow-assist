@@ -674,6 +674,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // streamRef now mirrors the stream lifecycle synchronously: true
               // from its top guard (line ~225), false again when the stream ends.
               streamRef.current = false;
+              // A plan finished in this turn has nothing left to show: all it would say is
+              // "N done", hanging over the next question. It goes when the answer ends (as
+              // in Claude Code); a plan with anything still open stays.
+              {
+                const items = planRef.current.snapshot();
+                if (items.length && items.every((t) => t.status === 'done')) planRef.current.reset();
+              }
               persist();
               setStreaming(false);
               setToolLabel('');

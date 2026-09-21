@@ -228,6 +228,36 @@ test('the plan lists what is in progress first, and re-orders live without a cra
   ui.app.unmount();
 });
 
+test('a plan finished in the turn goes when the answer ends; one with work left stays', async () => {
+  // It used to hang over the chat as "· 2 done" until the next plan replaced it.
+  const model = new ScriptedModel();
+  model.script(
+    [{ tool: 'todo', args: { action: 'add', items: ['read the diff', 'run the tests'] } }],
+    [{ tool: 'todo', args: { action: 'complete', text: 'read the diff' } }],
+    [{ tool: 'todo', args: { action: 'complete', text: 'run the tests' } }],
+    [{ text: 'All done.' }],
+    [{ tool: 'todo', args: { action: 'add', items: ['write the summary', 'send it'] } }],
+    [{ tool: 'todo', args: { action: 'complete', text: 'write the summary' } }],
+    [{ text: 'Half way.' }],
+  );
+  const ui = await bootApp(model, 100, 30);
+  await ui.press('F');
+  await ui.type('do it');
+  await ui.press('return');
+  await settle(30);
+  expect(ui.backend.lastFrame).toContain('All done.');
+  expect(ui.backend.lastFrame).not.toMatch(/\d+ done/);
+  expect(ui.backend.lastFrame).not.toMatch(/[☐◐☑] \d+ · /);
+
+  await ui.type('next');
+  await ui.press('return');
+  await settle(30);
+  expect(ui.backend.lastFrame).toContain('Half way.');
+  expect(ui.backend.lastFrame).toMatch(/☐ \d+ · send it/);
+  expect(ui.backend.lastFrame).toMatch(/1 done/);
+  ui.app.unmount();
+});
+
 // A paste arrives as ONE key, { name: 'paste', text } (flowtty ≥ 1.0.0-alpha.6,
 // bracketed paste); the test backend delivers it the way a terminal would.
 const paste = (ui: { backend: { paste(text: string): void } }, text: string) => ui.backend.paste(text);

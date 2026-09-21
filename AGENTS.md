@@ -200,7 +200,9 @@ assistant nobody had asked for a board.
   command had nothing to refresh.
 - **The plan (`todo`) belongs to a conversation, not to the process.**
   `createPlan()` in `src/assistant/plan.ts` makes one; its owner passes it to the
-  tool as `ctx.plan`. The chat holds its own (`planRef`), and `/clear` resets it; a
+  tool as `ctx.plan`. The chat holds its own (`planRef`), and `/clear` resets it —
+  so does the end of a turn that left every item done (a finished plan otherwise hung
+  over the chat as "· N done"); a
   background run gets a fresh one, so its checkboxes never appear among the chat's;
   an eval trial makes one per trial. Only a caller with no conversation of its own
   (the one-shot CLI, a bare `execChatTool`) falls back to the process-wide plan.
