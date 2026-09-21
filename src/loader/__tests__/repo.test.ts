@@ -22,6 +22,20 @@ test('list shows available, active, and built-in exclusion', async () => {
   expect(list.find(e => e.name === 'tracker')?.active).toBe(false);
 });
 
+// plugins-enabled/ is gitignored, so a fresh checkout has none: the first install made it
+// fail with ENOENT.
+test('install works in a fresh checkout — plugins-enabled/ is created', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'fa-repo-fresh-'));
+  const avail = join(root, 'plugins-available');
+  const enabled = join(root, 'plugins-enabled');
+  mkdirSync(join(avail, 'mcp'), { recursive: true });
+  writeFileSync(join(avail, 'mcp', 'manifest.json'), JSON.stringify({ name: 'mcp', version: '1.0.0' }));
+  const repo = createPluginRepo({ availableDir: avail, enabledDir: enabled, projectRoot: root });
+  expect(existsSync(enabled)).toBe(false);
+  expect(await repo.install('mcp')).toEqual({ ok: true });
+  expect(existsSync(join(enabled, 'mcp'))).toBe(true);
+});
+
 test('install symlinks into enabled; remove unlinks', async () => {
   const { repo, enabled } = fakeRepo();
   expect((await repo.install('tracker')).ok).toBe(true);

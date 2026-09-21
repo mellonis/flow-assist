@@ -229,6 +229,7 @@ export function createPluginRepo({ availableDir, enabledDir, projectRoot, fetchP
       await fetchPlugin(n);
       writeSourceMarker(pluginDir);
       const enabledLink = join(enabledDir, n);
+      mkdirSync(enabledDir, { recursive: true });
       if (!existsSync(enabledLink)) symlinkSync(pluginDir, enabledLink);
       return { ok: true };
     } catch (e) {
@@ -249,6 +250,9 @@ export function createPluginRepo({ availableDir, enabledDir, projectRoot, fetchP
       }
       if (existsSync(join(pluginDir, 'manifest.json'))) {
         try {
+          // plugins-enabled/ is gitignored: a fresh checkout has none, and the first
+          // install used to fail with ENOENT.
+          mkdirSync(enabledDir, { recursive: true });
           symlinkSync(pluginDir, enabledLink);
           return { ok: true };
         } catch (e) {
