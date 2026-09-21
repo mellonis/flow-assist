@@ -39,6 +39,15 @@ export function buildLogPlugin({ renders, config, make }: BuildLogParams): Plugi
     name: 'log',
     commands: [],
     keys: { log: 'l' },
+    // `l` opened the log and nothing on screen said so. The footer names it while
+    // the log is closed — by the cap of whatever `log` is bound to now.
+    usesCache: false,
+    keycaps: (ft) => {
+      const p = ft as { keyCap?: (action: string) => string; store?: { log?: { open?: boolean } } };
+      if (p.store?.log?.open) return [];
+      const cap = p.keyCap?.('log') ?? '';
+      return cap ? [`${cap} log`] : [];
+    },
     views: { log: renders.log },
     components: {
       // The log modal — fully self-sufficient: owns its state (open/closed, scroll)
@@ -54,7 +63,17 @@ export function buildLogPlugin({ renders, config, make }: BuildLogParams): Plugi
           // it reads `ft.useState` instead. `pushLog` is the host's (ft.services), so
           // the log-tick re-render channel lives on the host side — here we keep only
           // the modal/scroll state.
-          const [logModal, setLogModal] = f.useState(false);
+          const [logModal, setLogModalState] = f.useState(false);
+          // What the footer reads (`store.log.open`) is patched HERE, synchronously: the
+          // host draws its footer before this component re-renders, so a value assigned
+          // during render is one frame stale — `l log` would stay up over the open log.
+          const setLogModal = (open: boolean) => {
+            const store = f.store as Record<string, any>;
+            store.log = { ...(store.log ?? {}), open };
+            setLogModalState(open);
+            // …and the host is told, or its footer keeps the hint of the state before.
+            f.notify();
+          };
           const [logScroll, setLogScroll] = f.useState(0);
           const logs = ((f.services as Record<string, { length: number } | undefined>).logs ?? []) as { length: number }[];
           const logModalRows = Math.max(3, Math.floor(height * 0.7) - 4);
@@ -76,6 +95,7 @@ export function buildLogPlugin({ renders, config, make }: BuildLogParams): Plugi
           });
           // Publish the API to the host so it can open the modal from the monolith.
           (f.store as Record<string, any>).log = {
+            ...((f.store as Record<string, any>).log ?? {}),
             openLog: () => { setLogScroll(0); setLogModal(true); f.notify(); },
           };
           // Trigger-open: the plugin itself knows `l` opens the log, not the host.

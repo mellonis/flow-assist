@@ -60,7 +60,10 @@ export function createLogService(config: Record<string, unknown> | undefined): L
 
   return {
     append(entry: string): void {
-      buffer.push(entry);
+      // When it happened is half of what a log line says; the buffer had none.
+      const t = new Date();
+      const stamp = [t.getHours(), t.getMinutes(), t.getSeconds()].map((n) => String(n).padStart(2, '0')).join(':');
+      buffer.push(`${stamp} ${entry}`);
     },
 
     read(): string[] {

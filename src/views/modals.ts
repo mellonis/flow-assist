@@ -20,7 +20,7 @@
 
 import { askRows, type AskRow, type AskState } from '../assistant/ask.js';
 import { createElement as h, useEffect, useRef, useState } from 'react';
-import { keyGlyph } from '../playback/keys.js';
+import { bindingGlyph, keyGlyph } from '../playback/keys.js';
 import {
   Box,
   ScrollBox,
@@ -617,7 +617,38 @@ function renderAsk(state: AskState, bg: string | undefined, wrap: number) {
     h(Text, { dim: true }, hint));
 }
 
+// One look for every host modal: the chat's — a round frame in the modal palette, a
+// plain title, a quiet hint line at the bottom. The log and the help used to wear a
+// double frame of their own, so one product looked like two.
+const frame = (m: Record<string, string | undefined>, title: string, extra: Record<string, unknown>) => ({
+  border: 'round' as const,
+  backgroundColor: m.bg,
+  borderBackgroundColor: m.borderBg,
+  borderColor: m.border,
+  borderTitle: title,
+  paddingX: 1,
+  flexDirection: 'column' as const,
+  overflow: 'hidden' as const,
+  ...extra,
+});
+
 // ─── Log modal (pure render) ───────────────────────────────────────────────────
+// What a line is decides how loud it is: a failure is red, a background task's line
+// carries the background's colour, the model-round bookkeeping is dim, and the time
+// stamp is always quiet so the message is what the eye lands on.
+function logLine(line: string, m: Record<string, string | undefined>, errorColor?: string) {
+  const at = /^(\d\d:\d\d:\d\d) ([\s\S]*)$/.exec(line);
+  const stamp = at ? at[1] : '';
+  const text = at ? at[2]! : line;
+  const failed = /error|failed|⚠|denied|declined/i.test(text);
+  const quiet = /^\[round \d+\]/.test(text);
+  const color = failed ? errorColor ?? 'red' : /^\[bg\]/.test(text) ? 'magenta' : text.startsWith('⏰') ? 'yellow' : m.text;
+  return [
+    stamp ? h(Text, { key: 's', dim: true }, `${stamp} `) : null,
+    h(Text, { key: 't', wrap: 'truncate', dim: quiet, color }, text),
+  ];
+}
+
 export function renderLogModal({
   width,
   height,
@@ -639,59 +670,112 @@ export function renderLogModal({
   const scroll = Math.min(logScroll, maxScroll);
   const start = Math.max(0, total - logModalRows - scroll);
   const visible = logs.slice(start, start + logModalRows);
-  const title = total
-    ? `Session log (${start + 1}–${start + visible.length} / ${total})`
-    : 'Session log';
+  const more = total > visible.length;
+  const title = more ? `Log · ${start + 1}–${start + visible.length} of ${total}` : total ? `Log · ${total}` : 'Log';
   return h(Box, overlay(width, height),
-    h(Box, {
-      border: 'double',
-      backgroundColor: m.bg,
-      borderBackgroundColor: m.borderBg,
-      borderColor: m.border,
-      borderTitle: title,
-      width: Math.floor(width * 0.7),
-      height: Math.floor(height * 0.7),
-      padding: 1,
-      flexDirection: 'column',
-      overflow: 'hidden',
-    },
-      visible.length
-        ? visible.map((line, index) => h(Text, { key: start + index, wrap: 'truncate', color: m.text }, line))
-        : h(Text, { color: m.text }, 'No actions yet'),
+    // As tall as what it holds — two lines no longer sit in a frame made for forty.
+    h(Box, frame(m, title, { width: Math.max(40, Math.floor(width * 0.7)), paddingY: 1, gap: 1 }),
+      h(Box, { flexDirection: 'column' },
+        visible.length
+          ? visible.map((line, index) => h(Box, { key: start + index, flexDirection: 'row' }, logLine(line, m, theme?.error)))
+          : h(Text, { dim: true }, 'Nothing has happened yet — tool calls, background tasks and errors land here.')),
+      h(Text, { dim: true }, `${more ? `${CAP.upDown} ${CAP.page} scroll · Home/End · ` : ''}${CAP.esc} close`),
     ),
   );
 }
 
 // ─── Help modal (pure render) ──────────────────────────────────────────────────
+// Two things a person asks of :help — which KEYS work, and which COMMANDS exist. It
+// listed commands only (the keys were nowhere), listed the host's commands twice (the
+// second time with `undefined` for a description), truncated what it said, put a
+// blank row under every entry, and on an ordinary terminal ran off both ends of the
+// screen with no way to scroll.
+interface HelpCommand { name: string; usage?: string; aliases?: string[]; description?: string }
+
+// One entry per command a person can TYPE: keyed by the bare name (a plugin's
+// `core:quit` and the host's `quit` are the same word), the described one winning.
+export function helpEntries(commands: HelpCommand[]): { usage: string; description: string }[] {
+  const byName = new Map<string, HelpCommand>();
+  for (const c of commands) {
+    const bare = c.name.includes(':') ? c.name.slice(c.name.lastIndexOf(':') + 1) : c.name;
+    const had = byName.get(bare);
+    if (!had || (!had.description && c.description)) byName.set(bare, { ...c, name: bare });
+  }
+  return [...byName.values()]
+    .filter((c) => c.description)
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((c) => {
+      const alias = (c.aliases ?? []).filter((a) => a !== c.name).join(', ');
+      return { usage: `${c.usage ?? c.name}${alias ? `  (${alias})` : ''}`, description: String(c.description) };
+    });
+}
+
+// What an action does, in words. The host's own are named here; a plugin's action is
+// read from its name (`boardPicker` → "board picker").
+const ACTION_LABELS: Record<string, string> = {
+  commandLine: 'command line', quit: 'quit', back: 'back / close', prev: 'previous', next: 'next',
+  open: 'open', openBrowser: 'open in the browser', clearCache: 'flush the cache', chat: 'talk to the assistant', log: 'the log',
+};
+// Keys the HOST acts on from anywhere. Everything else in the key map belongs to a
+// plugin's own screen (`prev`/`next`/`open`/`openBrowser` are shared bindings the host
+// merely defines a default for) — listed separately, because on the start screen they
+// do nothing and a key in a help list is an instruction.
+const HOST_ACTIONS = ['chat', 'commandLine', 'log', 'clearCache', 'back', 'quit'];
+const actionLabel = (action: string) => ACTION_LABELS[action] ?? action.replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase();
+
 export function renderHelp({
   width,
   height,
   theme,
   helpOpen,
-  helpText,
+  commands = [],
+  keys = {},
 }: {
   width: number;
   height: number;
   theme: Theme | undefined;
   helpOpen: boolean;
-  helpText: string;
+  commands?: HelpCommand[];
+  keys?: Record<string, string[]>;
 }) {
   if (!helpOpen) return null;
   const m = (theme?.modals ?? {}) as unknown as Record<string, string | undefined>;
+  const boxW = Math.min(84, width - 8);
+  const inner = boxW - 4;
+  const bound = Object.entries(keys).map(([action, binding]) => ({ action, cap: bindingGlyph(binding), label: actionLabel(action) })).filter((k) => k.cap);
+  const capW = Math.max(0, ...bound.map((k) => Array.from(k.cap).length));
+  const anywhere = HOST_ACTIONS.map((a) => bound.find((k) => k.action === a)).filter((k): k is (typeof bound)[number] => !!k);
+  const inPlugins = bound.filter((k) => !HOST_ACTIONS.includes(k.action));
+  const keyRow = (k: (typeof bound)[number]) => h(Box, { key: `k-${k.action}`, flexDirection: 'row', flexShrink: 0 },
+    h(Text, { bold: true, color: 'cyan' }, `  ${k.cap.padEnd(capW)}  `),
+    h(Text, null, k.label));
+  const entries = helpEntries(commands);
+  // The usage column is as wide as most usages need; one longer than that (`config
+  // [get <key>|set …]`) takes a row of its own and its description goes beneath.
+  const usageW = Math.min(26, Math.max(0, ...entries.map((e) => e.usage.length)));
+  // −2: the scrollbar takes the last column, and a space keeps the text off it.
+  const descW = Math.max(20, inner - usageW - 5);
+  const heading = (text: string) => h(Text, { key: `h-${text}`, bold: true, color: m.border }, text);
   return h(Box, overlay(width, height),
-    h(Box, {
-      border: 'double',
-      backgroundColor: m.bg,
-      borderBackgroundColor: m.borderBg,
-      borderColor: m.border,
-      borderTitle: 'Help — commands',
-      width: Math.min(60, width - 8),
-      padding: 1,
-      flexDirection: 'column',
-      gap: 1,
-    },
-      helpText.split('\n').map((line, i) => h(Text, { key: i, dim: true }, line)),
-      h(Text, { dim: true }, `${CAP.esc} / ${CAP.enter} / q — close`),
+    h(Box, frame(m, 'Help', { width: boxW, maxHeight: height - 4, paddingY: 1, gap: 1 }),
+      // Everything scrolls as one page: PgUp/PgDn and the wheel are the scroll box's own.
+      // The scrollbar is how a person learns the list goes on below the frame.
+      h(ScrollBox, { flexGrow: 1, flexShrink: 1, flexDirection: 'column', scrollbar: true },
+        heading('Keys — anywhere'),
+        anywhere.map(keyRow),
+        h(Box, { key: 'gap0', height: 1, flexShrink: 0 }),
+        inPlugins.length ? heading("Keys — on a plugin's own screen") : null,
+        inPlugins.map(keyRow),
+        inPlugins.length ? h(Box, { key: 'gap1', height: 1, flexShrink: 0 }) : null,
+        heading('Commands — type : first'),
+        entries.map((e) => (e.usage.length > usageW
+          ? h(Box, { key: `c-${e.usage}`, flexDirection: 'column', flexShrink: 0 },
+              h(Text, { bold: true, wrap: 'truncate' }, `  ${e.usage}`),
+              h(Box, { marginLeft: usageW + 4, width: descW }, h(Text, { dim: true, wrap: 'wrap' }, e.description)))
+          : h(Box, { key: `c-${e.usage}`, flexDirection: 'row', flexShrink: 0 },
+              h(Text, { bold: true }, `  ${e.usage.padEnd(usageW)}  `),
+              h(Box, { width: descW }, h(Text, { dim: true, wrap: 'wrap' }, e.description)))))),
+      h(Text, { dim: true }, `${CAP.page} or the wheel scroll · ${CAP.esc} close`),
     ),
   );
 }

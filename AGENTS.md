@@ -281,6 +281,26 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     row's index as its line. A row that wraps would break it. Long lines of fenced
     code are hard-wrapped by `layoutMarkdown` since flowtty 1.0.0-alpha.11 (before,
     one ran out of its box as a single over-wide row); a test holds it.
+- **One look for every host modal** — the chat's: `frame()` in `src/views/modals.ts`
+  (round border, the modal palette, a plain title) and a quiet hint line at the bottom
+  saying how to move and how to get out. The log and the help wore a double frame of
+  their own, so one product looked like two.
+  - A modal is **as tall as what it holds** and never taller than the screen; what does
+    not fit scrolls (`<ScrollBox scrollbar>` — the bar is how a person learns there is
+    more). The help used to run off both ends of the terminal with no way to scroll.
+  - **The log** stamps each entry with its time (`services/log.ts`), and what a line IS
+    decides how loud it is: a failure red, `[bg]` the background's colour, the
+    model-round bookkeeping and the stamp dim.
+  - **The help** answers two questions — which keys, which commands. Keys are drawn
+    with `bindingGlyph` and split in two: the ones the HOST acts on anywhere
+    (`HOST_ACTIONS`), and the ones that belong to a plugin's own screen (`prev`, `next`,
+    `open`, … — the host only gives them a default). A key in a help list is an
+    instruction, so a key that does nothing here is not listed as if it did.
+    `helpEntries` gives one entry per word a person types: a plugin's `core:quit` and
+    the host's `quit` are the same word, and the described one wins.
+  - A modal opened by a key names that key in the footer through `keycaps` (`l log`),
+    and the flag the footer reads is patched synchronously AND followed by `notify()`
+    on close as well as on open — the host draws the footer before the plugin re-renders.
 - Every host modal is centred on one full-screen layer, `overlay()` in
   `src/views/modals.ts`, which carries `backdrop: 'dim'`: the screen behind a modal
   keeps its characters and colours and steps back. A new modal uses `overlay()` —

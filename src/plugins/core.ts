@@ -36,6 +36,7 @@ interface CoreFT {
   services: Record<string, unknown>;
   helpFor(cmd: unknown): string;
   commandRegistry: unknown;
+  keys: Record<string, string[]>;
 }
 
 type BuildCoreParams = {
@@ -50,20 +51,7 @@ export function buildCorePlugin({ renders, config, make }: BuildCoreParams): Plu
   return make('core', {
     name: 'core',
     commands: [
-      {
-        name: 'view',
-        run: (ctx, arg) => {
-          const c = ctx as CoreCtx;
-          const v = String(arg ?? '').toLowerCase();
-          if (!v) {
-            c.showMessage?.('view: <surface>');
-            return;
-          }
-          c.setView?.(v);
-        },
-      },
       { name: 'quit', run: (ctx) => (ctx as CoreCtx).onExit?.() },
-      { name: 'back', run: (ctx) => (ctx as CoreCtx).back?.() },
       { name: 'clear', run: (ctx) => { (ctx as CoreCtx).clearCache?.(); (ctx as CoreCtx).showMessage?.('Cache cleared'); } },
       { name: 'config', run: (ctx, arg) => (ctx as CoreCtx).runConfigCommand?.(arg ?? '') },
       { name: 'cache', run: (ctx, arg) => (ctx as CoreCtx).runCacheCommand?.(arg ?? '') },
@@ -91,13 +79,14 @@ export function buildCorePlugin({ renders, config, make }: BuildCoreParams): Plu
             priority: (ui) => (ui.cmdOpen || ui.welcome) ? 0 : (helpModal ? 100 : 0),
             handler: (key) => {
               if (!helpModal) return false;
-              if (key.name === 'escape' || key.name === 'return' || key.name === 'q' || key.name === 'l') setHelpModal(false);
+              // PgUp/PgDn and the wheel are the scroll box's; everything else is swallowed.
+              if (key.name === 'escape' || key.name === 'q') setHelpModal(false);
               return true;
             },
           });
           f.store.help = { setHelpModal, helpModal };
           if (!helpModal) return null;
-          return (f.viewRegistry.help as (p: Record<string, unknown>) => unknown)({ width, height, theme: f.config.theme, helpOpen: helpModal, helpText: f.helpFor(f.commandRegistry) });
+          return (f.viewRegistry.help as (p: Record<string, unknown>) => unknown)({ width, height, theme: f.config.theme, helpOpen: helpModal, commands: f.commandRegistry, keys: f.keys });
         };
       },
       // Reminder — a centered, top-most NON-blocking banner (like keycaps), driven

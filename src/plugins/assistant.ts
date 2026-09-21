@@ -105,7 +105,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
         name: 'ask', aliases: ['chat'],
         run: (ctx, arg) => (ctx as AssistantCtx).openChat?.(arg),
         usage: 'ask [text]', minArgs: 0, maxArgs: -1,
-        description: 'Open a chat with the LLM about the current issue (and send the text if provided)',
+        description: 'Open the chat; with text, send it',
       },
     ],
     keys: { chat: 'A' },

@@ -3,7 +3,7 @@ import { createElement as h } from 'react';
 import { render } from '@flowtty/react';
 import { TestBackend } from '@flowtty/core/testing';
 import { MODAL_COLOR_DEFAULTS } from '../../playback/theme.js';
-import { inputVisualRows, mdLines, renderChatModal, renderHelp, renderLogModal, renderReminder } from '../modals.js';
+import { helpEntries, inputVisualRows, mdLines, renderChatModal, renderHelp, renderLogModal, renderReminder } from '../modals.js';
 
 // Task #20: the built-in modal renderers were deferred to an "empty-shell"
 // integration test; here we drive them directly so the chat/help/log surfaces are
@@ -215,38 +215,101 @@ test('chat footer omits the bg-count indicator when none are running', async () 
   handle.unmount();
 });
 
-test('log modal shows the session log entries', async () => {
-  const backend = new TestBackend(80, 24);
+test('the log is as tall as what it holds, says when, and makes a failure stand out', async () => {
+  const backend = new TestBackend(90, 30);
   const handle = await render(
     h(renderLogModal, {
-      width: 80,
-      height: 24,
-      theme: { modals: { log: { bg: undefined } } },
-      logs: ['a', 'b'],
-      logModalRows: 10,
+      width: 90,
+      height: 30,
+      theme: { error: 'red', modals: { log: { bg: undefined } } },
+      logs: ['10:00:01 [chat] hi → 2 chars', '10:00:02 ⚠ glab failed: not installed', '10:00:03 [round 0] finish=stop'],
+      logModalRows: 17,
       logScroll: 0,
     }),
     backend,
   );
-  expect(backend.lastFrame).toContain('Session log');
-  expect(backend.lastFrame).toContain('a');
+  const frame = backend.lastFrame;
+  const rows = frame.split('\n').filter((r) => r.trim());
+  expect(frame).toContain('Log · 3');
+  // The chat's frame, not a double one of its own.
+  expect(frame).toContain('╭─ Log');
+  expect(frame).not.toContain('╔');
+  // Three entries do not sit in a frame made for seventeen.
+  expect(rows.length).toBeLessThan(12);
+  // How to get out is on the modal itself.
+  expect(frame).toContain('Esc close');
+  const cell = (text: string, offset = 0) => {
+    const all = frame.split('\n');
+    const y = all.findIndex((r) => r.includes(text));
+    return backend.lastBuffer.get(all[y]!.indexOf(text) + offset, y).style as { fg?: string; dim?: boolean };
+  };
+  expect(cell('⚠ glab failed').fg).toBe('red');
+  expect(cell('10:00:02').dim).toBe(true); // the stamp is quiet
+  expect(cell('[round 0]').dim).toBe(true); // bookkeeping is quiet
+  expect(cell('[chat] hi').dim).toBeFalsy();
   handle.unmount();
 });
 
-test('help modal shows the command list', async () => {
-  const backend = new TestBackend(80, 24);
+test('an empty log says what will land in it', async () => {
+  const backend = new TestBackend(90, 24);
+  const handle = await render(h(renderLogModal, { width: 90, height: 24, theme: {}, logs: [], logModalRows: 10, logScroll: 0 }), backend);
+  expect(backend.lastFrame).toContain('Nothing has happened yet');
+  handle.unmount();
+});
+
+test('a long log says where you are and how to move', async () => {
+  const backend = new TestBackend(90, 24);
+  const logs = Array.from({ length: 40 }, (_, i) => `10:00:${String(i).padStart(2, '0')} line ${i + 1}`);
+  const handle = await render(h(renderLogModal, { width: 90, height: 24, theme: {}, logs, logModalRows: 10, logScroll: 0 }), backend);
+  expect(backend.lastFrame).toContain('Log · 31–40 of 40');
+  expect(backend.lastFrame).toMatch(/scroll · Home\/End · Esc close/);
+  handle.unmount();
+});
+
+const COMMANDS = [
+  { name: 'quit', aliases: ['q'], usage: 'quit', description: 'Quit' },
+  { name: 'core:quit' }, // a plugin's handler for the same word: no description of its own
+  { name: 'assistant:ask', aliases: ['chat'], usage: 'ask [text]', description: 'Open the chat; with text, send it' },
+  { name: 'config', usage: 'config [get <key>|set <key> <value>|unset <key>|help]', description: 'Show the whole config; get/set/unset a key (writes config.local.json); help — what the keys are' },
+];
+
+test('help entries: one per word a person types, never "undefined"', () => {
+  const entries = helpEntries(COMMANDS);
+  expect(entries.map((e) => e.usage)).toEqual(['ask [text]  (chat)', COMMANDS[3]!.usage, 'quit  (q)']);
+  for (const e of entries) expect(e.description).not.toMatch(/undefined/);
+});
+
+test('help fits the screen, names the keys, and wraps what it says', async () => {
+  const backend = new TestBackend(90, 20);
   const handle = await render(
     h(renderHelp, {
-      width: 80,
-      height: 24,
-      theme: { modals: { help: { bg: undefined } } },
+      width: 90,
+      height: 20,
+      theme: { modals: { bg: undefined } },
       helpOpen: true,
-      helpText: 'a\nb',
+      commands: COMMANDS,
+      keys: { commandLine: [':'], quit: ['q'], chat: ['A'], log: ['l'], open: ['return'], disabled: [] },
     }),
     backend,
   );
-  expect(backend.lastFrame).toContain('commands');
-  expect(backend.lastFrame).toContain('a');
+  const frame = backend.lastFrame;
+  const rows = frame.split('\n');
+  // Inside the screen, top and bottom: the frame's first and last rows are both drawn.
+  expect(rows.some((r) => r.includes('╭─ Help'))).toBe(true);
+  expect(rows.some((r) => r.includes('╰'))).toBe(true);
+  expect(frame).toContain('Esc close');
+  // The keys — which used to be nowhere — by what they do, drawn as caps.
+  expect(frame).toMatch(/A\s+talk to the assistant/);
+  expect(frame).toMatch(/l\s+the log/);
+  // A key the host does not act on is not listed as if it worked anywhere.
+  const anywhere = rows.findIndex((r) => r.includes('Keys — anywhere'));
+  const plugins = rows.findIndex((r) => r.includes("on a plugin's own screen"));
+  const open = rows.findIndex((r) => /⏎\s+open/.test(r));
+  expect(anywhere).toBeGreaterThanOrEqual(0);
+  expect(open).toBeGreaterThan(plugins);
+  // An unbound action is not offered at all.
+  expect(frame).not.toContain('disabled');
+  expect(frame).not.toContain('undefined');
   handle.unmount();
 });
 
