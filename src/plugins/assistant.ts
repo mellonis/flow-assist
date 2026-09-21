@@ -14,6 +14,7 @@ import { copyTarget, copyToClipboard } from '../assistant/copy.js';
 import { createShellState, formatShell, nextCwd, runShell, shellLimits } from '../assistant/shell.js';
 import { KEEP_SESSIONS, SESSION_VERSION, closeSession, flushOnExit, listSessions, loadSession, newSessionId, pruneSessions, saveSession, sessionToContinue, sessionWhen, sessionsDir, type Session } from '../assistant/sessions.js';
 import type { ChatMessage } from '../assistant/agent.js';
+import type { ChangeView } from '../assistant/diff.js';
 import { editorReducer } from '@flowtty/core';
 import { chatFieldWidth } from '../views/modals.js';
 import { askKey, askStart, type AskQuestion, type AskState } from '../assistant/ask.js';
@@ -77,6 +78,8 @@ interface ChatMsg {
   toolRuns?: unknown[];
   duration?: number;
   stopped?: boolean;
+  // What the turn's writes changed — drawn as diff blocks above the answer.
+  changes?: ChangeView[];
   [k: string]: unknown;
 }
 
@@ -544,6 +547,21 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   setPendingAsk({ name, args, ...(command != null ? { command } : {}) });
                   f.notify();
                 }),
+                // What a write changed goes on the answer being written the moment the
+                // write lands — a block of its own that stays in the chat. Only on the
+                // display message: `apiRef` gets the transcript, which never holds it.
+                onToolRun: (run: { changes?: ChangeView[] }) => {
+                  if (!run.changes?.length) return;
+                  const added = run.changes;
+                  setMessages(cur => {
+                    const next = cur.slice();
+                    const last = next[next.length - 1];
+                    if (last?.role === 'assistant') next[next.length - 1] = { ...last, changes: [...((last.changes as ChangeView[] | undefined) ?? []), ...added] };
+                    else next.push({ role: 'assistant', content: '', changes: added });
+                    return next;
+                  });
+                  f.notify();
+                },
                 onTool: (name: string, args: unknown) => {
                   setToolLabel(`⚙ ${name}(${String(args ?? '').slice(0, 40)})…`);
                   setToolCount(c => c + 1); // call counter for the turn — in the status line

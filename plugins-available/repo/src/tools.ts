@@ -221,17 +221,37 @@ export function buildRepoGroup({ clip, roots, homeDir = os.homedir() }: RepoDeps
   };
 
   // ── FILES (write): write-flagged, so the chat pauses for a y/n ──────────────
-  const writeFile = (args: any, all: string[]) => {
+  // What a file write changed goes to the chat as a diff (`ctx.reportChange`, which
+  // the host supplies to every call): the person sees the effect, not the model's
+  // arguments. Reported only once the write succeeded; the model's result stays short.
+  const MAX_DIFFED = 2 * 1024 * 1024;
+  const fileTitle = (abs: string, root: string) => `${path.basename(root)}/${path.relative(root, abs) || path.basename(abs)}`;
+  // null: no diff to show (too big, not a file, unreadable); '' — the file is new.
+  const textBefore = (abs: string): string | null => {
+    if (!fs.existsSync(abs)) return '';
+    try {
+      const st = fs.statSync(abs);
+      if (!st.isFile() || st.size > MAX_DIFFED) return null;
+      return fs.readFileSync(abs, 'utf8');
+    } catch { return null; }
+  };
+  const report = (ctx: any, abs: string, root: string, before: string | null, after: string) => {
+    if (before != null && after.length <= MAX_DIFFED) ctx?.reportChange?.({ title: fileTitle(abs, root), before, after });
+  };
+
+  const writeFile = (args: any, all: string[], ctx?: any) => {
     const r = resolveRead(args.path, all);
     if (r.error) return r.error;
     const abs = r.abs;
     try { fs.mkdirSync(path.dirname(abs), { recursive: true }); } catch (e: any) { return `write_file: mkdir failed: ${e.message}`; }
     const content = String(args.content ?? '');
+    const before = textBefore(abs);
     try { fs.writeFileSync(abs, content, 'utf8'); } catch (e: any) { return `write_file: ${e.message}`; }
+    report(ctx, abs, r.root, before, content);
     return `write_file: wrote ${abs} (${content.length} chars)`;
   };
 
-  const editFile = (args: any, all: string[]) => {
+  const editFile = (args: any, all: string[], ctx?: any) => {
     const r = resolveRead(args.path, all);
     if (r.error) return r.error;
     const abs = r.abs;
@@ -245,10 +265,11 @@ export function buildRepoGroup({ clip, roots, homeDir = os.homedir() }: RepoDeps
     if (idx === -1) return `edit_file: «${oldStr.slice(0, 40)}…» not found in ${abs}`;
     const next = text.slice(0, idx) + newStr + text.slice(idx + oldStr.length);
     try { fs.writeFileSync(abs, next, 'utf8'); } catch (e: any) { return `edit_file: ${e.message}`; }
+    report(ctx, abs, r.root, text, next);
     return `edit_file: replaced in ${abs} (${oldStr.length}→${newStr.length} chars)`;
   };
 
-  const deleteFile = (args: any, all: string[]) => {
+  const deleteFile = (args: any, all: string[], ctx?: any) => {
     const r = resolveRead(args.path, all);
     if (r.error) return r.error;
     const abs = r.abs;
@@ -266,7 +287,9 @@ export function buildRepoGroup({ clip, roots, homeDir = os.homedir() }: RepoDeps
       return `delete_file: removed directory ${abs}`;
     }
     if (!st.isFile()) return `delete_file: «${abs}» is not a file or directory`;
+    const before = textBefore(abs);
     try { fs.unlinkSync(abs); } catch (e: any) { return `delete_file: ${e.message}`; }
+    report(ctx, abs, r.root, before, '');
     return `delete_file: removed ${abs}`;
   };
 
@@ -538,9 +561,9 @@ export function buildRepoGroup({ clip, roots, homeDir = os.homedir() }: RepoDeps
         case 'list_dir': return clip(listDir(args, all));
         case 'read_file': return clip(readFile(args, all));
         case 'search': return clip(search(args, all));
-        case 'write_file': return clip(writeFile(args, all));
-        case 'edit_file': return clip(editFile(args, all));
-        case 'delete_file': return clip(deleteFile(args, all));
+        case 'write_file': return clip(writeFile(args, all, ctx));
+        case 'edit_file': return clip(editFile(args, all, ctx));
+        case 'delete_file': return clip(deleteFile(args, all, ctx));
         // Writes refuse by THROWING — a returned string counts as done (✎).
         case 'git_branch_create': case 'git_switch': case 'git_commit': case 'git_push': case 'git_sync': {
           const gr = await gitRepo(args.repo ?? '.', all);

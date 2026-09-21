@@ -269,6 +269,20 @@ hardest. Rules the `repo` and `gitlab` plugins hold, each with a test that tries
   symlink out of the root (`realOf` in `repo`, which also handles a path that does
   not exist yet and a dangling link).
 - **A configured root is never deleted**, confirmed or not.
+- **A write shows what it changed.** A tool that edits text calls
+  `ctx.reportChange({ title, before, after })` once the write has succeeded — the
+  host gives every call that function (`agentChat`); a caller with no chat (the
+  one-shot CLI, a test's bare ctx) gives none, so call it as `ctx?.reportChange?.(…)`.
+  The host diffs the two (`src/assistant/diff.ts`, pure: LCS over what is left
+  between the common head and tail, 3 lines of context, 80 diff lines drawn and the
+  rest counted, a text with a NUL named and not drawn) and the chat keeps a
+  `✎ title · +N −M` block with a ```diff fence above the answer, open, not under ^r.
+  It is DISPLAY only: it rides on the display message (`changes`), never on the
+  tool's result, so the model's history does not grow by a copy of every edit — the
+  e2e test asserts on what the model is sent next. A tool that threw has its reports
+  dropped. Only the tool knows what "before" is (a file, an issue's description, a
+  comment), so the host never guesses it: `repo`'s write_file / edit_file /
+  delete_file report (a directory delete and a file over 2 MiB do not).
 - **A shell command is seen before it runs.** `run_command`'s guard is the y/n, not a
   filter on the command; its directory is checked anyway — inside a root by the REAL
   path (`dirAllowed`), a `cd` that leads out is not remembered. `runShell` has exactly

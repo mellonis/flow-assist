@@ -19,6 +19,7 @@
 //     `theme.modals.<name>.<prop>` read is guarded (`m = theme?.modals?.chat ?? {}`).
 
 import { askRows, type AskRow, type AskState } from '../assistant/ask.js';
+import { changeMarkdown, type ChangeView } from '../assistant/diff.js';
 import { CELL_FREE, CELL_FULL, CONTEXT_WARN_AT, GRID_COLS, GRID_ROWS, contextFootnote, contextGrid, contextHeading, contextLegend, type ContextReading, type GridCell } from '../assistant/context-meter.js';
 import { createElement as h, useEffect, useRef, useState, type ReactNode } from 'react';
 import { bindingGlyph, keyGlyph } from '../playback/keys.js';
@@ -46,6 +47,8 @@ interface ChatMsg {
   toolRuns?: ToolRun[];
   duration?: number;
   stopped?: boolean;
+  // What the turn's writes changed — drawn as diff blocks above the answer.
+  changes?: ChangeView[];
   [k: string]: unknown;
 }
 // One executed tool in a turn, for the persistent `▸ name (args) → outcome` trace.
@@ -321,6 +324,14 @@ function buildMessageRows(m: ChatMsg, last: boolean, wrap: number, showReasoning
       const bodyLines = mdLines([reasoning, process, live].filter(Boolean).join('\n\n'), inner);
       const shown = showReasoning ? bodyLines : bodyLines.slice(-2);
       for (const line of shown) rows.push({ role, reason: true, spans: line.spans, continues: line.continues, chrome: line.chrome, frame: line.frame });
+      rows.push({ gap: true });
+    }
+    // What the turn's writes changed: one block per change, always open (not under
+    // ^r) — it is the part of the turn the person most needs to see. Laid out as
+    // markdown, so the ```diff fence is coloured, wrapped and copied like any other.
+    const changes = (role === 'assistant' && Array.isArray(m.changes) ? m.changes : []) as ChangeView[];
+    for (const change of changes) {
+      for (const line of mdLines(changeMarkdown(change), inner)) rows.push({ role, spans: line.spans, continues: line.continues, chrome: line.chrome, frame: line.frame });
       rows.push({ gap: true });
     }
     const text = String(m.content ?? '') || (liveIsAnswer ? live : '');

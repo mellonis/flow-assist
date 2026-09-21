@@ -13,6 +13,7 @@
 import type { ToolDef, ToolCtx } from '../loader/tools.js';
 import { chatTools, execChatTool, chatToolDefs } from '../loader/tools.js';
 import type { ToolRunEntry } from '../runtime/services/log.js';
+import { changeView, type Change, type ChangeView } from './diff.js';
 
 // A single chat message. `role` is the OpenAI role; `content` may be null when a
 // message carries tool_calls. Extra fields (tool_calls, tool_call_id) ride along.
@@ -51,6 +52,9 @@ export interface ToolRun {
   write?: boolean;
   outcome: string;
   detail: unknown;
+  // What the write changed, as the tool reported it (`ctx.reportChange`) — drawn in
+  // the chat, never sent to the model.
+  changes?: ChangeView[];
 }
 
 export interface AgentResult {
@@ -83,6 +87,9 @@ export interface AgentOpts {
   onLiveCommit?: (content: string, isFinal: boolean) => void;
   onReasoning?: (chunk: string) => void;
   confirmWrite?: (name: string, args: string) => boolean | Promise<boolean>;
+  // Fired as each tool call ends (declined ones too), so the chat can show what a
+  // write changed while the turn goes on.
+  onToolRun?: (run: ToolRun) => void;
   chatRound?: (messages: ChatMessage[], opts: Record<string, unknown>) => Promise<ChatRoundResult>;
   // Diagnostic hook, fired once per round with what the model actually emitted in
   // THAT round — finish_reason + the count of tool_calls it streamed. Lets a caller
@@ -471,14 +478,25 @@ export async function agentChat(
           detail = 'This write operation was declined — the user must explicitly confirm before it runs.';
           current.push({ role: 'tool', tool_call_id: tc.id, content: modelToolResult('declined', detail) });
           logRun({ name: tc.name, write, outcome, detail, args: parsed });
-          toolRuns.push({ name: tc.name, args: parsed, write, outcome, detail });
+          const run: ToolRun = { name: tc.name, args: parsed, write, outcome, detail };
+          toolRuns.push(run);
+          opts.onToolRun?.(run);
           continue;
         }
       }
+      const changes: ChangeView[] = [];
       try {
         // The turn's signal rides in the ctx, so a tool that waits on something long
         // (run_command) stops with the answer when the person presses Esc.
-        const callCtx: ToolCtx = opts.signal ? { ...toolCtx, signal: opts.signal } : toolCtx;
+        // `reportChange` collects what this call changed; a tool that throws after
+        // reporting changed nothing the person should be shown as done.
+        const callCtx: ToolCtx = {
+          ...toolCtx,
+          ...(opts.signal ? { signal: opts.signal } : {}),
+          reportChange: (c: Change) => {
+            try { const v = changeView(c); if (v) changes.push(v); } catch { /* a bad report never fails the write */ }
+          },
+        };
         // Plugin ai-tool → its own `run(args, toolCtx)`; group tool → execChatTool
         // (lookup by name in the registry). `def.run` exists only on extraTools.
         detail = def?.run
@@ -492,7 +510,10 @@ export async function agentChat(
       const detailStr = typeof detail === 'string' ? detail : JSON.stringify(detail);
       current.push({ role: 'tool', tool_call_id: tc.id, content: modelToolResult(outcome, detailStr) });
       logRun({ name: tc.name, write, outcome, detail: detailStr, args: parsed });
-      toolRuns.push({ name: tc.name, args: parsed, write, outcome, detail: detailStr });
+      const run: ToolRun = { name: tc.name, args: parsed, write, outcome, detail: detailStr };
+      if (outcome !== 'error' && changes.length) run.changes = changes;
+      toolRuns.push(run);
+      opts.onToolRun?.(run);
     }
   }
   return { content, process, toolRuns, transcript: current.slice(turnStart), ...(usage ? { usage } : {}) };

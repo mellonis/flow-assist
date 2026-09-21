@@ -90,3 +90,54 @@ describe('repo tool group: the ways round the allowlist', () => {
     expect(String(await group.exec('git_ls_tree', { ref: 'HEAD' }, {}))).toContain('a.txt');
   });
 });
+
+// The chat shows what a file write changed as a diff; the tool is the one that knows
+// the text before, so it reports both sides through `ctx.reportChange`.
+describe('repo tool group: a file write reports what it changed', () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const setup = () => {
+    const root = path.join(fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'repo-diff-'))), 'clone');
+    fs.mkdirSync(root);
+    const group = buildRepoGroup({ clip: (x: unknown) => x, roots: [root] });
+    const changes: { title: string; before: string; after: string }[] = [];
+    return { root, group, changes, ctx: { reportChange: (c: any) => changes.push(c) } };
+  };
+
+  it('write_file: a new file is reported with an empty before; an overwrite with the old text', async () => {
+    const { root, group, changes, ctx } = setup();
+    await group.exec('write_file', { path: 'src/a.ts', content: 'one\n' }, ctx);
+    await group.exec('write_file', { path: 'src/a.ts', content: 'two\n' }, ctx);
+    expect(changes).toEqual([
+      { title: 'clone/src/a.ts', before: '', after: 'one\n' },
+      { title: 'clone/src/a.ts', before: 'one\n', after: 'two\n' },
+    ]);
+    expect(fs.readFileSync(path.join(root, 'src/a.ts'), 'utf8')).toBe('two\n');
+  });
+
+  it('edit_file reports the whole file before and after; a miss reports nothing', async () => {
+    const { root, group, changes, ctx } = setup();
+    fs.writeFileSync(path.join(root, 'b.txt'), 'a\nb\nc\n');
+    await group.exec('edit_file', { path: 'b.txt', old: 'b', new: 'B' }, ctx);
+    expect(changes).toEqual([{ title: 'clone/b.txt', before: 'a\nb\nc\n', after: 'a\nB\nc\n' }]);
+    expect(String(await group.exec('edit_file', { path: 'b.txt', old: 'zzz', new: 'y' }, ctx))).toContain('not found');
+    expect(changes).toHaveLength(1);
+  });
+
+  it('delete_file reports a file going; a directory is not diffed', async () => {
+    const { root, group, changes, ctx } = setup();
+    fs.writeFileSync(path.join(root, 'gone.txt'), 'bye\n');
+    fs.mkdirSync(path.join(root, 'dir'));
+    fs.writeFileSync(path.join(root, 'dir', 'x'), 'x');
+    await group.exec('delete_file', { path: 'gone.txt' }, ctx);
+    await group.exec('delete_file', { path: 'dir', recursive: true }, ctx);
+    expect(changes).toEqual([{ title: 'clone/gone.txt', before: 'bye\n', after: '' }]);
+  });
+
+  it('a ctx without reportChange (the one-shot CLI) writes all the same', async () => {
+    const { root, group } = setup();
+    expect(String(await group.exec('write_file', { path: 'c.txt', content: 'c' }, {}))).toContain('wrote');
+    expect(fs.readFileSync(path.join(root, 'c.txt'), 'utf8')).toBe('c');
+  });
+});

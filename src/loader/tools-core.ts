@@ -20,6 +20,7 @@ import type { ToolGroup, ToolDef } from './tools.js';
 import { WEB_DEFAULTS } from '../assistant/web-fetch.js';
 import { SHELL_DEFAULTS, createShellState } from '../assistant/shell.js';
 import { parseAskArgs, askResult, type AskQuestion, type AskState } from '../assistant/ask.js';
+import type { Change } from '../assistant/diff.js';
 
 // Runtime context handed to core tools by the caller: the issue-context builder
 // (absent when the chat is not opened from an issue detail), the resolved memory
@@ -33,6 +34,10 @@ export interface CoreCtx {
   // Supplied by an interactive chat: shows the questions and resolves once the
   // person has answered or dismissed them. Absent where there is nobody to ask.
   askUser?: (questions: AskQuestion[]) => Promise<Pick<AskState, 'answers' | 'cancelled'>>;
+  // Supplied by `agentChat` to every call: a tool that edits something reports what
+  // it looked like before and after, and the chat shows the diff under the answer.
+  // Display only — the model never gets it. Report only a change that was made.
+  reportChange?: (change: Change) => void;
 }
 
 // Resolves the memory `plugin` scope to the owning plugin name from the host-issued
