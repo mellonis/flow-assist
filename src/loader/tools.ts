@@ -71,7 +71,7 @@ export interface AssembledToolRegistryInput {
 // ─── Assembly ─────────────────────────────────────────────────────────────────
 // Collects the plugins' own configSchemas (name → schema) for the config tool.
 // Only plugins that declare one are included (today that is keycaps).
-function pluginConfigs(plugins: Plugin[]): Record<string, unknown> {
+export function pluginConfigs(plugins: Plugin[]): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const p of plugins) if (p.configSchema != null) out[p.name] = p.configSchema;
   return out;

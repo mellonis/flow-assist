@@ -13,6 +13,7 @@
 // Task 11 pins down is the ENGINE: the stable `ft` object, the two-phase
 // ordering, and how plugin components mount over the shell.
 
+import { pluginConfigs } from '../loader/tools.js';
 import { Box, Text, Markdown, Table, Link, render, useInput, useTerminalSize } from '@flowtty/react';
 import type { Backend } from '@flowtty/core';
 import { createElement as h, useEffect, useMemo, useRef, useState } from 'react';
@@ -303,7 +304,7 @@ export function renderApp(
       }
       if (sub === 'set' && key && parts.length >= 3) {
         const parsed = parseValue(parts.slice(2).join(' '));
-        const check = validateConfigWriteValue(hostConfigSchema, key, parsed);
+        const check = validateConfigWriteValue(hostConfigSchema, key, parsed, pluginConfigs(plugins));
         if (!check.ok) { toast.showMessage(check.error); return; }
         saveConfigSetting(key, check.value);
         toast.showMessage(JSON.stringify(check.value));

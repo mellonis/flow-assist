@@ -27,7 +27,7 @@ import { fetchPluginFromRegistry } from './loader/registry-download.js';
 import type { PluginRepo } from './loader/repo.js';
 import type { PluginRepo as RepoShape } from './loader/host-group.js';
 import { loadPlugins } from './loader/build.js';
-import { assembleToolRegistry } from './loader/tools.js';
+import { assembleToolRegistry, pluginConfigs } from './loader/tools.js';
 import { renderApp } from './runtime/app.js';
 import { agentChat } from './assistant/agent.js';
 import { createLogService } from './runtime/services/log.js';
@@ -114,7 +114,7 @@ export async function main(argv: string[]): Promise<void> {
       console.log(hostVersion());
       return;
     case 'config':
-      await runConfig(parsed.args, config);
+      await runConfig(parsed.args, config, repo);
       return;
     case 'plugins':
       await runPlugins(parsed.args, config, repo);
@@ -131,7 +131,7 @@ export async function main(argv: string[]): Promise<void> {
 }
 
 // ─── config subcommand ────────────────────────────────────────────────────────
-async function runConfig(args: string[], config: Record<string, unknown>): Promise<void> {
+async function runConfig(args: string[], config: Record<string, unknown>, repo?: PluginRepo): Promise<void> {
   const sub = (args[0] ?? '').toLowerCase();
   const key = args[1];
 
@@ -144,7 +144,10 @@ async function runConfig(args: string[], config: Record<string, unknown>): Promi
 
   if (sub === 'set' && key && args.length >= 3) {
     const parsed = parseValue(args.slice(2).join(' '));
-    const check = validateConfigWriteValue(hostConfigSchema, key, parsed);
+    // A plugin's key is validated by the plugin's own schema — so the plugins are loaded
+    // (only for such a key: everything else needs none of them).
+    const schemas = key.startsWith('plugins.') && repo ? pluginConfigs(await loadPlugins({ config, repo, renders, enabledDir })) : undefined;
+    const check = validateConfigWriteValue(hostConfigSchema, key, parsed, schemas);
     if (!check.ok) {
       console.log(check.error);
       process.exitCode = 1;

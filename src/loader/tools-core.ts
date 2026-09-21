@@ -9,7 +9,7 @@
 // flagged `write` (true or a predicate `(args) => boolean`).
 
 import { hostConfigSchema } from '../config/schema.js';
-import { loadConfig, getDeep, getSchemaAtPath, describeSchema, unwrapNode } from '../config/load.js';
+import { loadConfig, getDeep, getSchemaAtPath, describeSchema, unwrapNode, configSchemaAt } from '../config/load.js';
 import { loadMemories, saveMemories, memoryFilePath } from '../runtime/services/memory.js';
 import { openInBrowser } from '../runtime/services.js';
 import { resolveIdentityToken } from '../runtime/plugin-identity.js';
@@ -82,12 +82,7 @@ const KEY_DEFAULTS: Record<string, string> = {
 // tool would report the flag as an "unknown key" and config set plugins.keycaps.enabled
 // would fail, which is exactly the dead-end the LLM hit.
 function schemaAt(key: string, pluginConfigs?: Record<string, unknown>): any {
-  const hostNode = getSchemaAtPath(hostConfigSchema, key);
-  if (hostNode) return hostNode;
-  const m = /^plugins\.([^.]+)(?:\.(.*))?$/.exec(key);
-  const pluginSchema = m?.[1] && pluginConfigs?.[m[1]];
-  if (pluginSchema) return getSchemaAtPath(pluginSchema, m[2] ?? '');
-  return null;
+  return configSchemaAt(hostConfigSchema, key, pluginConfigs);
 }
 
 // Normalizes a memory scope to the host scope-model. Only two literals are accepted:

@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
 import { hostConfigSchema } from '../schema';
+import { z } from 'zod';
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -77,4 +78,18 @@ test('the config directory is a flow-assist folder under XDG_CONFIG_HOME, never 
   expect(configDir({ XDG_CONFIG_HOME: '/x/cfg' }, '/home/me')).toBe('/x/cfg/flow-assist');
   expect(configDir({}, '/home/me')).toBe('/home/me/.config/flow-assist');
   expect(configDir({ XDG_CONFIG_HOME: '' }, '/home/me')).toBe('/home/me/.config/flow-assist');
+});
+
+// A plugin's key is checked by the plugin's own schema — `config set` used to know only
+// the host's, so every `plugins.<name>.<key>` was "unknown key" (the assistant, whose
+// config tool did know the plugins, kept recommending exactly that command).
+test('a plugin key is written through the plugin\'s schema', () => {
+  const plugins = { keycaps: z.object({ enabled: z.boolean().optional() }).optional(), 'acme-tracker': z.object({ storyPointsField: z.string().optional() }).optional() };
+  expect(validateConfigWriteValue(hostConfigSchema, 'plugins.keycaps.enabled', true, plugins)).toEqual({ ok: true, value: true });
+  expect(validateConfigWriteValue(hostConfigSchema, 'plugins.acme-tracker.storyPointsField', 'SP', plugins)).toEqual({ ok: true, value: 'SP' });
+  const wrong = validateConfigWriteValue(hostConfigSchema, 'plugins.keycaps.enabled', 'yes', plugins);
+  expect(wrong.ok).toBe(false);
+  const unknown = validateConfigWriteValue(hostConfigSchema, 'plugins.nope.x', 1, plugins);
+  expect(unknown).toEqual({ ok: false, error: 'config: unknown key plugins.nope.x — the plugin «nope» is not loaded or declares no settings' });
+  expect(validateConfigWriteValue(hostConfigSchema, 'plugins.keycaps.bogus', 1, plugins).ok).toBe(false);
 });

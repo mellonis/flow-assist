@@ -115,9 +115,29 @@ export function describeSchema(node: any): string {
 // Validates a value for writing under a dot key. Returns { ok: true, value }
 // (the value coerced by the schema if needed) or { ok: false, error } with a
 // human-readable message. An unknown key is also an error.
-export function validateConfigWriteValue(rootSchema: any, key: string, value: unknown): WriteResult {
-  const node = getSchemaAtPath(rootSchema, key);
-  if (!node) return { ok: false, error: `config: unknown key ${key}` };
+// The zod node for a key — the host's own schema first, then, for `plugins.<name>.*`, the
+// plugin's `configSchema`. The host sees `plugins` as an opaque record, so a plugin's
+// flag (plugins.keycaps.enabled, plugins.acme-tracker.storyPointsField) is known only to
+// the plugin: without this every `config set plugins.<name>.<key>` was "unknown key" —
+// while the assistant, whose config tool did look into the plugins, kept telling people
+// to run exactly that command.
+export function configSchemaAt(rootSchema: any, key: string, pluginConfigs?: Record<string, unknown>): any {
+  const hostNode = getSchemaAtPath(rootSchema, key);
+  const m = /^plugins\.([^.]+)(?:\.(.*))?$/.exec(key);
+  if (hostNode && !(m && m[2])) return hostNode;
+  const pluginSchema = m?.[1] && pluginConfigs?.[m[1]];
+  if (pluginSchema) return m?.[2] ? getSchemaAtPath(pluginSchema, m[2]) : pluginSchema;
+  return hostNode ?? null;
+}
+
+export function validateConfigWriteValue(rootSchema: any, key: string, value: unknown, pluginConfigs?: Record<string, unknown>): WriteResult {
+  const node = configSchemaAt(rootSchema, key, pluginConfigs);
+  if (!node) {
+    const plugin = /^plugins\.([^.]+)\./.exec(key)?.[1];
+    return { ok: false, error: plugin && !pluginConfigs?.[plugin]
+      ? `config: unknown key ${key} — the plugin «${plugin}» is not loaded or declares no settings`
+      : `config: unknown key ${key}` };
+  }
   const res = node.safeParse(value);
   if (!res.success) {
     const want = describeSchema(node);

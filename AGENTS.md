@@ -118,6 +118,13 @@ assistant nobody had asked for a board.
 `memory`, `config_schema`, `datetime`, `remind`, `background`, `todo`, `ask_user`,
 `open_url`, plus `host:plugins_list`. Three rules hold this set together:
 
+- **A plugin's config key is validated by the plugin's schema — everywhere.**
+  `configSchemaAt` (`src/config/load.ts`) resolves a key through the host schema and,
+  for `plugins.<name>.*`, through the plugin's `configSchema`; `config set` in the CLI
+  (which loads the plugins only for a `plugins.*` key), `:config set` in the app and
+  the model's config tool all use it. They used to disagree: the tool knew the
+  plugins, the commands did not, so the assistant recommended
+  `config set plugins.keycaps.enabled true` and the command answered "unknown key".
 - **Config is the person's.** The model gets `config_schema` — keys, types,
   set/unset, active defaults, effective key bindings, each plugin's flags — and
   **no values and no write**. Config is the model's own leash (`disabledTools`,
