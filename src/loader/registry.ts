@@ -18,7 +18,7 @@ import type { Command, Make, MakeFactoryConfig, Plugin, PluginShape } from './pl
 // a tracker's detail view): while set, the input race must give that surface the
 // key (see detailPriority). Generic — any plugin may open an overlay via the
 // host's `setOverlay` service; the value is plugin-defined.
-type UiState = { cmdOpen?: boolean; welcome?: boolean; searchMode?: boolean; modalActive?: boolean; overlay?: string };
+type UiState = { cmdOpen?: boolean; modalActive?: boolean; overlay?: string };
 // A keyboard event (flowtty reports a `name` plus raw fields).
 type InputKey = { name?: string; [k: string]: unknown };
 // A resolved input handler — the shape flowtty's `useInputHandler` receives.
@@ -210,14 +210,14 @@ export function runConsumers(consumers: InputEntry[], key: InputKey, ui: UiState
 }
 
 // Pure gate for a trigger that opens a plugin modal on its own key: when the
-// plugin may open itself via its key. We stay silent in the command line /
-// welcome / global search and with monolith modals open — there the same letter
+// plugin may open itself via its key. We stay silent in the command line and
+// with monolith modals open — there the same letter
 // means something else (an input field/confirmation). Also silent when the plugin
 // is already open: its input is handled by the base consumer (priority 100), not
 // the trigger. `extraGate(ui)` is extra context (only on the board / only on the
 // detail and so on) where the key means exactly this plugin opening.
 export function triggerOpenable(ui: UiState, isOpen: boolean, extraGate: (ui: UiState) => boolean = () => true): boolean {
-  if (ui.cmdOpen || ui.welcome || ui.searchMode || ui.modalActive) return false;
+  if (ui.cmdOpen || ui.modalActive) return false;
   if (isOpen) return false;
   return extraGate(ui);
 }

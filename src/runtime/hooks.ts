@@ -10,7 +10,7 @@ import { useEffect, useRef, useState } from 'react';
 // The shape of a handler as the host registry stores it. `mode` is either
 // 'observe' (sees every key without consuming) or 'consume' (joins the race).
 type InputKey = { name?: string; [k: string]: unknown };
-type UiState = { cmdOpen?: boolean; welcome?: boolean; searchMode?: boolean; modalActive?: boolean };
+type UiState = { cmdOpen?: boolean; modalActive?: boolean };
 type InputEntry = {
   mode: string;
   priority?: (ui: UiState) => number;

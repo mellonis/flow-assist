@@ -65,8 +65,6 @@ const BUILTIN_PLUGINS = ['core', 'assistant', 'keycaps', 'log'];
 // wrappers or resolved entries; `partitionInput` unwraps lazily either way.
 type UiState = {
   cmdOpen?: boolean;
-  welcome?: boolean;
-  searchMode?: boolean;
   modalActive?: boolean;
   view?: string;
   overlay?: string;
@@ -160,7 +158,7 @@ export function renderApp(
 
   // Shared per-app mutable state (created ONCE; read by the App and the
   // fallback handler so a re-render never resets them).
-  const ui: UiState = { cmdOpen: false, welcome: false, searchMode: false, modalActive: false };
+  const ui: UiState = { cmdOpen: false, modalActive: false };
   const cmdline = { current: { open: false, input: '', history: [], historyIdx: -1, walk: null } as CommandLineState };
 
   function App() {

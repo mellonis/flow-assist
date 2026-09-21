@@ -1077,7 +1077,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // 100) does not contend for 'r'/'c' etc.
           f.useInputHandler({
             mode: 'consume',
-            priority: (ui) => (ui.cmdOpen || ui.welcome) ? 0 : (open ? 100 : 0),
+            priority: (ui) => ui.cmdOpen ? 0 : (open ? 100 : 0),
             handler: (key) => {
               if (!open) return false;
               // While awaiting a write confirmation (y/n pause), the chat consumes ALL
@@ -1245,7 +1245,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // Trigger-open: `F` (Shift+f) opens the chat from any base state (a tracker-
           // agnostic host has no task-detail overlay, so the old `overlay === 'detail'`
           // gate was always false and the key never fired). triggerOpenable still guards the
-          // command line / welcome / global search / open modal and when the chat is
+          // command line / an open modal and when the chat is
           // already open; closed is not handled by the base consumer (priority 0).
           addTrigger({ ft: f, action: 'chat', isOpen: () => open, open: () => openChat() });
           if (!open) return null;

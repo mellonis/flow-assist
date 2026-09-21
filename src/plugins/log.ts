@@ -81,7 +81,7 @@ export function buildLogPlugin({ renders, config, make }: BuildLogParams): Plugi
           const logModalRows = Math.max(3, Math.floor(height * 0.7) - 4);
           f.useInputHandler({
             mode: 'consume',
-            priority: (ui) => (ui.cmdOpen || ui.welcome) ? 0 : (logModal ? 100 : 0),
+            priority: (ui) => ui.cmdOpen ? 0 : (logModal ? 100 : 0),
             handler: (key) => {
               if (!logModal) return false;
               const maxScroll = Math.max(0, (logs ?? []).length - logModalRows);

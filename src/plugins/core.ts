@@ -1,7 +1,7 @@
 // Plugin «core»: base commands (view/quit/back/clear/config/cache/help) and the
 // help modal (components.help). Commands are a bare dispatcher over the app-glue
-// (ctx); there are almost no view components. The host keeps only the `help`
-// modal and `views.help`; a plugin supplies views of its own.
+// (ctx); there are almost no view components: the host keeps only the `help`
+// modal and `views.help` — a plugin brings its own views.
 
 import type { Make } from '../loader/plugin.js';
 import type { Plugin } from '../loader/plugin.js';
@@ -27,7 +27,7 @@ interface CoreFT {
   useState<T>(init: T): [T, (v: T | ((prev: T) => T)) => void];
   useInputHandler(opts: {
     mode: 'consume';
-    priority: (ui: { cmdOpen?: boolean; welcome?: boolean }) => number;
+    priority: (ui: { cmdOpen?: boolean }) => number;
     handler: (key: { name: string }) => boolean;
   }): void;
   store: Record<string, unknown>;
@@ -60,7 +60,7 @@ export function buildCorePlugin({ renders, config, make }: BuildCoreParams): Plu
     // The host's hotkeys (commandLine/quit/back/…) live in HOST_DEFAULT_KEYS — core
     // keeps its own `keys` field empty.
     keys: {},
-    // The host's base views. `issues`/`welcome` are tracker/placeholder and CUT.
+    // The host's base views.
     views: {
       help: renders.help,
       reminder: renders.reminder,
@@ -76,7 +76,7 @@ export function buildCorePlugin({ renders, config, make }: BuildCoreParams): Plu
           const [helpModal, setHelpModal] = f.useState(false);
           f.useInputHandler({
             mode: 'consume',
-            priority: (ui) => (ui.cmdOpen || ui.welcome) ? 0 : (helpModal ? 100 : 0),
+            priority: (ui) => ui.cmdOpen ? 0 : (helpModal ? 100 : 0),
             handler: (key) => {
               if (!helpModal) return false;
               // PgUp/PgDn and the wheel are the scroll box's; everything else is swallowed.

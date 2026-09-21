@@ -14,7 +14,7 @@ import type { ReactElement } from 'react';
 // The key shapes plugins/types use. We keep them loose (spec is a runtime blob —
 // the real source of truth is what the plugins read).
 type InputKey = { name?: string; [k: string]: unknown };
-type UiState = { cmdOpen?: boolean; welcome?: boolean; searchMode?: boolean; modalActive?: boolean };
+type UiState = { cmdOpen?: boolean; modalActive?: boolean };
 
 // The `ft` runtime object. Every field is the shape the built-in plugins consume
 // (typed by shape in the plugin modules; the runtime is the real source).

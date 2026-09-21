@@ -1,6 +1,5 @@
-// Built-in modal renderers: chat, help, log — `renderChatModal`/`renderHelp`/
-// `renderLogModal` and their helpers live in the HOST; a plugin's own modals stay
-// in the plugin.
+// Built-in modal renderers: chat, help, log — the host's own. A plugin's modals
+// (a tracker's relation, tags, filters…) are the plugin's.
 //
 // Each renderer is a PURE function `(props) => ReactElement` — the owning plugin
 // modal (assistant.chat / core.help / log.log) computes state and passes it here as
