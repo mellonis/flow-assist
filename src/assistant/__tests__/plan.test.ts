@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { createPlan } from '../plan';
-import { execChatTool } from '../../loader/tools';
+import { assembleToolRegistry, execChatTool } from '../../loader/tools';
 
 test('a plan is its own: two of them never see each other', () => {
   const a = createPlan();
@@ -40,6 +40,9 @@ test('notify fires on a change and not on a read', () => {
 });
 
 test('the todo tool writes to the plan in its context, not to a shared one', async () => {
+  // `execChatTool` dispatches through the registry singleton: assemble it HERE. The
+  // test used to lean on some earlier test file having done so, and failed alone.
+  assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as never });
   const mine = createPlan();
   const theirs = createPlan();
   await execChatTool('todo', { action: 'add', text: 'mine' }, { plan: mine });

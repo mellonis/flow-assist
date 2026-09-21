@@ -14,13 +14,14 @@ import type { ChatMessage } from '../assistant/agent.js';
 import { editorReducer } from '@flowtty/core';
 import { chatFieldWidth } from '../views/modals.js';
 import { askKey, askStart, type AskQuestion, type AskState } from '../assistant/ask.js';
-import { loadMemories, memoryFilePath } from '../runtime/services/memory.js';
+import { loadMemories, memoryFilePath, saveMemories } from '../runtime/services/memory.js';
+import { keptAfterClear, memoryCommand } from '../assistant/memory-command.js';
 import type { Make } from '../loader/plugin.js';
 import type { Plugin } from '../loader/plugin.js';
 
 // Slash-commands of the chat — a single source for runChatCommand and Tab-completion.
 // `/analyze` is a tracker slash command and is removed.
-const CHAT_COMMANDS = ['refresh-context', 'compact', 'clear', 'log', 'exit'];
+const CHAT_COMMANDS = ['refresh-context', 'compact', 'clear', 'memory', 'log', 'exit'];
 
 // A plain object holding every enumerable service, inherited ones included.
 // `for…in` walks the prototype chain, which is exactly what a spread does not.
@@ -627,6 +628,18 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 if (shared) void send(shared); else setError('the log is empty — nothing to share');
                 return;
               }
+              case 'memory': {
+                // The person's own view of the model's memory; nothing here reaches the
+                // model. A `note` is a display-only message: `apiRef` — the model's
+                // history — is not touched.
+                const file = memoryFilePath(f.config);
+                const res = memoryCommand(arg, loadMemories(file));
+                if (res.next) saveMemories(res.next, file);
+                setMessages((cur) => [...cur, { role: 'note', content: res.note }]);
+                setField('');
+                f.notify();
+                return;
+              }
               case 'clear':
                 // Full session reset: clear not only messages but everything that would
                 // survive a rebuild — emptyNotice, the tool name/counter, the time, the
@@ -647,7 +660,12 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // A new conversation starts with no plan: the old one described work the
                 // model no longer remembers.
                 planRef.current.reset();
-                setMessages([]);
+                // /clear ends the conversation, not the memory — and says so, or the
+                // assistant "still knowing" an earlier prompt reads as /clear failing.
+                {
+                  const kept = keptAfterClear(loadMemories(memoryFilePath(f.config)));
+                  setMessages(kept ? [{ role: 'note', content: kept }] : []);
+                }
                 setInput(''); inputRef.current = '';
                 setCursor(0);
                 setError(null);

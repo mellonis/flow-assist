@@ -115,6 +115,15 @@ assistant nobody had asked for a board.
   `src/assistant/ask.ts`; the chat owns only the pause and the render. A
   background task is never given the hook — a question popping up would seize the
   keyboard mid-sentence — so there the tool answers "nobody to ask".
+- **The memory is the person's too.** The `memory` tool is the model's: a stored fact
+  goes into the system prompt of EVERY later request — across `/clear`, across
+  restarts. That is its purpose, and it is also why "after /clear the assistant still
+  knew my earlier prompt" looked like `/clear` failing: the conversation was gone, the
+  memory was not, and nothing said so. So `/clear` reports what it kept
+  (`keptAfterClear`), and `/memory` lists and `/memory forget <n|all>` removes — without
+  going through the model (`src/assistant/memory-command.ts`). What the host tells the
+  person this way is a display-only message of role `note`; `apiHistory` drops it, and
+  the model's history (`apiRef`) never holds it.
 - **The plan (`todo`) belongs to a conversation, not to the process.**
   `createPlan()` in `src/assistant/plan.ts` makes one; its owner passes it to the
   tool as `ctx.plan`. The chat holds its own (`planRef`), and `/clear` resets it; a

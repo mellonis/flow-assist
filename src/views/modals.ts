@@ -352,6 +352,9 @@ function ChatMessages({ messages, wrap, showReasoning, palette: m, errorColor }:
   const gutter = (row: ChatRow) => {
     if (row.first && row.role === 'user') return h(Text, { bold: true, color: m.accent }, '› ');
     if (row.first && row.role === 'bg') return h(Text, { bold: true, color: m.bgAccent }, '◆ ');
+    // A note is the HOST speaking to the person (what /memory found, what /clear kept).
+    // It is not part of the conversation and is never sent to the model.
+    if (row.first && row.role === 'note') return h(Text, { dim: true }, '· ');
     // ƒ — F for Flow, and a function. A narrow code point every monospace font has;
     // ∮ reads well as "a loop" but is East-Asian-ambiguous width, and flowtty counts
     // one cell per code point, so it would shift the row in some terminals.
@@ -395,7 +398,7 @@ function ChatMessages({ messages, wrap, showReasoning, palette: m, errorColor }:
       const ground = groundOf(row.role);
       const groundStyle = ground ? { width: '100%', backgroundColor: ground } : {};
       if (row.spans && row.spans.length) {
-        const inner = row.spans.map((s, j) => h(Text, { key: j, bold: s.bold, dim: s.dim, underline: s.underline, color: s.color }, String(s.text ?? '')));
+        const inner = row.spans.map((s, j) => h(Text, { key: j, bold: s.bold, dim: s.dim || row.role === 'note', underline: s.underline, color: s.color }, String(s.text ?? '')));
         return h(Box, { key, flexDirection: 'row', flexShrink: 0, ...groundStyle }, gutter(row), inner);
       }
       // A blank line inside a message keeps the message's ground.

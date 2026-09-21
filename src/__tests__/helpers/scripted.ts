@@ -53,10 +53,12 @@ export const settle = async (n = 10) => { for (let i = 0; i < n; i++) { await fl
 
 // `guests` adds plugins that are not the host's own — built with the same `make` the
 // loader uses, so they are namespaced exactly as an installed plugin is.
-export async function bootApp(model: ScriptedModel, cols = 100, rows = 28, guests?: (make: Make) => Plugin[]) {
+// `extra` is merged into the config — e.g. `{ memory: { file } }` to keep a test off the
+// person's real memory file.
+export async function bootApp(model: ScriptedModel, cols = 100, rows = 28, guests?: (make: Make) => Plugin[], extra: Record<string, unknown> = {}) {
   process.env.LLM_TOKEN = 'scripted';
   model.install();
-  const config: Record<string, unknown> = { ai: { baseUrl: 'http://scripted.model', model: 'scripted' } };
+  const config: Record<string, unknown> = { ai: { baseUrl: 'http://scripted.model', model: 'scripted' }, ...extra };
   const repo = { enabledPlugins: async () => [], list: async () => [] } as never;
   const renders = { chat: renderChatModal, help: renderHelp, log: renderLogModal, reminder: renderReminder };
   const plugins = await loadPlugins({ config, repo, renders: renders as never });

@@ -105,7 +105,8 @@ export interface AgentOpts {
 export function apiHistory(messages: ChatMessage[]): ChatMessage[] {
   const clean: ChatMessage[] = [];
   for (const m of messages) {
-    if (m.role === 'system') continue;
+    // 'note' is the host speaking to the person (/memory, what /clear kept): display only.
+    if (m.role === 'system' || m.role === 'note') continue;
     const out: ChatMessage = { role: m.role === 'bg' ? 'user' : m.role, content: m.content ?? null };
     if (Array.isArray(m.tool_calls) && m.tool_calls.length) out.tool_calls = m.tool_calls;
     if (typeof m.tool_call_id === 'string') out.tool_call_id = m.tool_call_id;
