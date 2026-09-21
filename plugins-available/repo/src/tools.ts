@@ -239,56 +239,67 @@ export function buildRepoGroup({ clip, roots, homeDir = os.homedir() }: RepoDeps
     if (before != null && after.length <= MAX_DIFFED) ctx?.reportChange?.({ title: fileTitle(abs, root), before, after });
   };
 
+  // A write refuses by THROWING (AGENTS.md, "A write tool refuses by throwing"): the
+  // host counts whatever a write tool returns as done. `refuse` is for a refusal made
+  // before anything was touched, and says so; `failed` passes on what the filesystem
+  // said, which may have happened half-way, so it claims nothing about the disk.
+  const refuse = (msg: string): never => {
+    throw new Error(`${msg}${/[.!?]$/.test(msg) ? '' : '.'} Nothing was changed.`);
+  };
+  const failed = (msg: string): never => {
+    throw new Error(msg);
+  };
+
   const writeFile = (args: any, all: string[], ctx?: any) => {
     const r = resolveRead(args.path, all);
-    if (r.error) return r.error;
+    if (r.error) refuse(r.error);
     const abs = r.abs;
-    try { fs.mkdirSync(path.dirname(abs), { recursive: true }); } catch (e: any) { return `write_file: mkdir failed: ${e.message}`; }
+    try { fs.mkdirSync(path.dirname(abs), { recursive: true }); } catch (e: any) { failed(`write_file: mkdir failed: ${e.message}`); }
     const content = String(args.content ?? '');
     const before = textBefore(abs);
-    try { fs.writeFileSync(abs, content, 'utf8'); } catch (e: any) { return `write_file: ${e.message}`; }
+    try { fs.writeFileSync(abs, content, 'utf8'); } catch (e: any) { failed(`write_file: ${e.message}`); }
     report(ctx, abs, r.root, before, content);
     return `write_file: wrote ${abs} (${content.length} chars)`;
   };
 
   const editFile = (args: any, all: string[], ctx?: any) => {
     const r = resolveRead(args.path, all);
-    if (r.error) return r.error;
+    if (r.error) refuse(r.error);
     const abs = r.abs;
     const oldStr = String(args.old ?? '');
     const newStr = String(args.new ?? '');
-    if (!oldStr) return 'edit_file: old is required — the exact substring to replace.';
-    if (!fs.existsSync(abs)) return `edit_file: no such file «${abs}»`;
-    let text;
-    try { text = fs.readFileSync(abs, 'utf8'); } catch (e: any) { return `edit_file: ${e.message}`; }
+    if (!oldStr) refuse('edit_file: old is required — the exact substring to replace.');
+    if (!fs.existsSync(abs)) refuse(`edit_file: no such file «${abs}»`);
+    let text = '';
+    try { text = fs.readFileSync(abs, 'utf8'); } catch (e: any) { failed(`edit_file: ${e.message}`); }
     const idx = text.indexOf(oldStr);
-    if (idx === -1) return `edit_file: «${oldStr.slice(0, 40)}…» not found in ${abs}`;
+    if (idx === -1) refuse(`edit_file: «${oldStr.slice(0, 40)}…» not found in ${abs}`);
     const next = text.slice(0, idx) + newStr + text.slice(idx + oldStr.length);
-    try { fs.writeFileSync(abs, next, 'utf8'); } catch (e: any) { return `edit_file: ${e.message}`; }
+    try { fs.writeFileSync(abs, next, 'utf8'); } catch (e: any) { failed(`edit_file: ${e.message}`); }
     report(ctx, abs, r.root, text, next);
     return `edit_file: replaced in ${abs} (${oldStr.length}→${newStr.length} chars)`;
   };
 
   const deleteFile = (args: any, all: string[], ctx?: any) => {
     const r = resolveRead(args.path, all);
-    if (r.error) return r.error;
+    if (r.error) refuse(r.error);
     const abs = r.abs;
     // A configured root is the clone itself. One confirmed y/n must never be the
     // whole repository with its unpushed work, so the root is not deletable at all.
-    if (abs === r.root) return `delete_file: «${abs}» is a configured root — it is not deleted from here.`;
-    if (!fs.existsSync(abs)) return `delete_file: no such path «${abs}»`;
+    if (abs === r.root) refuse(`delete_file: «${abs}» is a configured root — it is not deleted from here.`);
+    if (!fs.existsSync(abs)) refuse(`delete_file: no such path «${abs}»`);
     const st = fs.statSync(abs);
     const recursive = args.recursive === true;
     // A directory goes only with an explicit recursive: true, so the model cannot
     // wipe a tree by accident (an empty one needs it too — one rule for all).
     if (st.isDirectory()) {
-      if (!recursive) return `delete_file: «${abs}» is a directory — pass recursive: true to remove it and its contents`;
-      try { fs.rmSync(abs, { recursive: true, force: true }); } catch (e: any) { return `delete_file: ${e.message}`; }
+      if (!recursive) refuse(`delete_file: «${abs}» is a directory — pass recursive: true to remove it and its contents`);
+      try { fs.rmSync(abs, { recursive: true, force: true }); } catch (e: any) { failed(`delete_file: ${e.message}`); }
       return `delete_file: removed directory ${abs}`;
     }
-    if (!st.isFile()) return `delete_file: «${abs}» is not a file or directory`;
+    if (!st.isFile()) refuse(`delete_file: «${abs}» is not a file or directory`);
     const before = textBefore(abs);
-    try { fs.unlinkSync(abs); } catch (e: any) { return `delete_file: ${e.message}`; }
+    try { fs.unlinkSync(abs); } catch (e: any) { failed(`delete_file: ${e.message}`); }
     report(ctx, abs, r.root, before, '');
     return `delete_file: removed ${abs}`;
   };

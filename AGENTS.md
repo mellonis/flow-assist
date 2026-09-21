@@ -293,7 +293,12 @@ hardest. Rules the `repo` and `gitlab` plugins hold, each with a test that tries
   this applies to the planned `github` plugin).
 - **A write tool refuses by throwing.** The host counts whatever a write tool
   RETURNS as done (✎ under the answer); "path is required" returned as a string
-  read as a change made. Every refusal and every failed CLI call of a write throws.
+  read as a change made. Every refusal and every failed CLI call of a write throws —
+  `repo`'s write_file / edit_file / delete_file included (an `old` not found, a path
+  outside the roots, a directory without `recursive`): a refusal the tool makes
+  itself, before touching anything, ends in "Nothing was changed."; an error the
+  filesystem throws is passed on in its own words and claims nothing about the disk.
+  The read-only tools keep answering with a string.
 - **The git writes follow the person's workflow** (`repo/src/git-write.ts`, tested
   on real repos with a bare origin): a branch starts from a freshly fetched
   `origin/<default>` (the default is asked of git — `origin/HEAD`, then probes —

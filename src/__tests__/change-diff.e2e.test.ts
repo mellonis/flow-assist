@@ -83,6 +83,37 @@ test('a declined edit changes nothing and shows no diff', async () => {
   ui.app.unmount();
 });
 
+test('a confirmed edit that fails is an error, not a change made', async () => {
+  // The host counts what a write RETURNS as done; `edit_file` used to return its
+  // refusal ("not found"), so the chat marked the turn ✎ as if the file had changed.
+  const model = new ScriptedModel();
+  model.script(
+    [{ tool: 'edit_file', args: { path: 'app.ts', old: 'const z = 9;', new: 'const z = 10;' } }],
+    [{ text: 'It is not there.' }],
+  );
+  const { ui, root } = await boot(model);
+  await ui.type('set z to 10');
+  await ui.press('return');
+  await settle(10);
+  await ui.press('y');
+  await settleUntil(() => model.requests.length === 2);
+  await settle(10);
+  expect(fs.readFileSync(path.join(root, 'app.ts'), 'utf8')).toBe('const a = 1;\nconst b = 2;\nconst c = 3;\n');
+  // What the model is told: an error, in the tool's words.
+  const result = (model.requests[1]!.messages as { role: string; content?: string }[]).find((m) => m.role === 'tool');
+  expect(result?.content).toStartWith('ERROR: edit_file:');
+  expect(result?.content).toContain('not found in');
+  expect(result?.content).toContain('Nothing was changed.');
+  // What the person sees: no ✎, and under ^r the run is an error.
+  expect(ui.backend.lastFrame).toContain('1 tool: ');
+  expect(ui.backend.lastFrame).not.toContain('✎');
+  ui.backend.press({ name: 'r', ctrl: true });
+  await settle(5);
+  expect(ui.backend.lastFrame).toMatch(/▸ edit_file.*→ error/);
+  expect(ui.backend.lastFrame).not.toContain('→ applied');
+  ui.app.unmount();
+});
+
 test('after a restart the diff is still in the chat, and still not in what the model is sent', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-diff-sess-'));
   const first = new ScriptedModel();
