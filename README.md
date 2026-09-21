@@ -49,6 +49,10 @@ is no separate tools repo.
   `requiredSettings`. Secrets belong in env, not in the config file.
 - **Who you are**: `config set user.name <name>` (and optionally `user.login`)
   lets the assistant address you. Unset, nothing about you is sent to the LLM.
+- **Reading the web** (`web_fetch`): every fetch asks you first, unless the host is
+  on `web.allowlist` (`example.com`, or `*.example.com` for its subdomains); a
+  background task cannot fetch a host you have not listed. Local and private
+  addresses are refused unless listed. `web.maxBytes` / `web.timeoutMs` set the limits.
 
 ## Building a single binary (retired)
 

@@ -25,5 +25,7 @@ export const hostConfigSchema = z.object({
   ui: z.object({ mouse: z.boolean().optional() }).optional(),
   memory: z.object({ file: z.string() }).optional(),
   fs: z.object({ roots: z.array(z.string()) }).optional(),
+  // web_fetch: hosts fetched without asking (`*.example.com` for subdomains), and limits.
+  web: z.object({ allowlist: z.array(z.string()).optional(), maxBytes: z.number().int().positive().optional(), timeoutMs: z.number().int().positive().optional() }).optional(),
   plugins: z.record(z.string(), z.unknown()).optional(),
 }).passthrough();
