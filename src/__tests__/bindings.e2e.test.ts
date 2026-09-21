@@ -74,3 +74,28 @@ test('every key the footer names does something, and nothing else is bound on th
   }
   ui.app.unmount();
 });
+
+test('x flushes the cache AND what is on screen is loaded again', async () => {
+  // A flush that leaves the open board as it was reads as a key that does nothing.
+  // The host counts flushes (`services.cacheEpoch`); a plugin watches the number.
+  const guests = (make: any) => [make('boards', {
+    name: 'boards',
+    keycaps: () => ['c board'],
+    components: {
+      view: (ft: any) => function View() {
+        const [loads, setLoads] = ft.useState(0);
+        const epoch = (ft.services as { cacheEpoch: number }).cacheEpoch;
+        ft.useEffect(() => { setLoads((n: number) => n + 1); }, [epoch]);
+        return ft.h(ft.Text, null, `board loaded ${loads}×`);
+      },
+    },
+  })];
+  const ui = await bootApp(new ScriptedModel(), 100, 24, guests);
+  await settle();
+  expect(ui.backend.lastFrame).toContain('board loaded 1×');
+  await ui.press('x');
+  await settle();
+  expect(ui.backend.lastFrame).toMatch(/Cache cleared/);
+  expect(ui.backend.lastFrame).toContain('board loaded 2×');
+  ui.app.unmount();
+});

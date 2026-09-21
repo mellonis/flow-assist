@@ -40,6 +40,11 @@ export interface HostServices {
   showMessage: (msg: string) => void;
   onExit: () => void;
   clearCache: () => void;
+  // Counts cache flushes. A flush empties the cache but changes nothing on screen — the
+  // board and the issue that are open keep showing what they loaded — so `x` looked
+  // like it did nothing. A plugin that draws cached data watches this number
+  // (`useEffect(..., [ft.services.cacheEpoch])`) and reloads what it is showing.
+  cacheEpoch: number;
   pushLog: (entry: string) => void;
   notify: () => void;
   logs: string[];
@@ -130,7 +135,8 @@ export function createServices({ config, tools, repo, onExit }: CreateServicesOp
     copyToClipboard,
     showMessage: () => {},
     onExit,
-    clearCache: () => { cache.clear(); },
+    clearCache: () => { cache.clear(); services.cacheEpoch += 1; },
+    cacheEpoch: 0,
     pushLog: () => {},
     notify: () => {},
     logs: log.read(),

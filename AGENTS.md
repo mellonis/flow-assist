@@ -286,6 +286,10 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   - `x` flushed the cache from the start screen, where the footer did not offer it.
     The hint and the key now read ONE predicate, `cacheInPlay` (`loader/registry.ts`):
     a plugin that keeps data in the cache is on screen. `:clear` works from anywhere.
+  - Flushing the cache (`x`, `:clear`) also **reloads what is on screen**: the host
+    counts flushes in `services.cacheEpoch`, and a plugin that draws cached data
+    reloads when the number changes (`useEffect(..., [ft.services.cacheEpoch])`). A
+    flush that left the open board as it was read as a key that does nothing.
   - `b` was answered by the host with "no target (tracker supplies the URL)". The host
     no longer handles it. `openBrowser`, `prev`, `next` and `open` stay in
     `HOST_DEFAULT_KEYS` only as a shared vocabulary for plugins (a plugin reads
