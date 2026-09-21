@@ -1,0 +1,6 @@
+{
+  "name": "notes",
+  "version": "0.1.0",
+  "description": "A notebook the assistant reads and writes",
+  "tools": ["notes"]
+}

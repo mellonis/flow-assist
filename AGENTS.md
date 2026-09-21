@@ -54,11 +54,22 @@ English throughout; a half-translated screen is worse than either language.
 ```
 flow-assist/
 ├── package.json               # host; workspace root for plugins-available/*
+├── docs/
+│   ├── plugins.md             # "Writing a plugin" — the contract for plugin authors
+│   └── demo/                  # the README's GIFs
+├── examples/
+│   └── notes/                 # the plugin docs/plugins.md builds; run by the host's tests
 ├── plugins-available/
 │   ├── gitlab/                # glab_api tool group (no UI)
+│   ├── mcp/                   # tools of MCP servers (no UI)
 │   └── repo/                  # list_dir/read_file/search/git_* tool group (no UI)
 └── plugins-enabled/           # symlinks → plugins-available/*, gitignored
 ```
+
+`docs/plugins.md` is the plugin contract as its authors read it, and
+`examples/notes` is the code it walks through
+(`src/__tests__/example-notes.e2e.test.ts` runs it). A change to the contract below
+updates the page and the example in the same commit.
 
 A plugin lives in `plugins-available/<name>/`, ships a `manifest.json` (name,
 version, description, `deps`, `surfaces`, `tools`), and is enabled by symlinking

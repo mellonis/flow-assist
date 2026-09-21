@@ -4,6 +4,12 @@ A standalone, domain-agnostic TUI/CLI assistant host. It ships no domain logic
 of its own — plugins (the bundled `gitlab` and `repo`, or your own) deliver
 surfaces, commands, and LLM tool groups.
 
+![The chat reads a repository, edits its README behind a y/n, and leaves the diff in the conversation](docs/demo/host.gif)
+
+The assistant can change things only after you say yes, and what a change did stays
+in the chat as a diff. (A scripted model and an invented repository; nothing leaves
+the machine.)
+
 ## Requirements
 
 - Bun 1.3.x — `curl -fsSL https://bun.sh/install | bash`
@@ -58,6 +64,17 @@ of MCP servers over Streamable HTTP, each call asked about first
 (`plugins-available/mcp/README.md`). A plugin's settings are set like the host's:
 `config set plugins.<name>.<key> <value>`.
 
+**Writing a plugin**: [docs/plugins.md](docs/plugins.md) builds one step by step — a
+notebook the assistant reads and writes ([examples/notes](examples/notes), run by the
+host's tests) — and lists the rest of the contract: tools, commands, keys, screens.
+
+What a plugin with screens can do — a tracker plugin (it is not part of this
+repository), recorded against a mock tracker:
+
+![A tracker plugin: the board, a filter by the person the chat says you are, an issue's card](docs/demo/tracker-board.gif)
+
+![The same plugin in the chat: an epic reviewed, a description fixed and an estimate set behind the y/n, a failed pipeline explained and retried](docs/demo/tracker-chat.gif)
+
 ## Config & environment
 
 - **Config**: `~/.config/flow-assist/config.json` — schema comes from each
@@ -84,18 +101,18 @@ of MCP servers over Streamable HTTP, each call asked about first
   addresses are refused unless listed. `web.maxBytes` / `web.timeoutMs` set the limits.
   The tool is on by default; `config set ai.disabledTools '["web"]'` turns it off.
 
-## Building a single binary (retired)
+## Building a single binary
 
 ```sh
-bun run build:binary                          # prints a notice + type-checks; no binary is produced
+bun run build:binary                          # dist/flow-assist
 ```
 
-`bun build --compile` is **retired**: the bundler emits a broken artifact with
-**two React instances** ("Invalid hook call") — an upstream @flowtty 1.0.0-alpha
-+ Bun bundler bug that app code cannot fix. The host therefore ships and runs as
-a **Bun-executable** via `bun src/cli.ts`. The `bin` entry (`flow-assist`)
-points at `src/cli.ts`, whose `#!/usr/bin/env bun` shebang makes npm link and
-run it under bun. `bun run build:binary` now only explains this and type-checks.
+The compiled host runs without Bun installed. It loads plugins from
+`plugins-enabled/` in the directory it starts in, and they must be shipped **built**:
+inside a compiled binary a plugin cannot import a package from disk, so a plugin
+with dependencies bundles them into its `main` (docs/plugins.md, "Shipping it").
+`bun src/cli.ts` — or the `flow-assist` command, whose shebang runs it under Bun —
+works as well.
 
 ## Repository
 
