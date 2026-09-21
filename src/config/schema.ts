@@ -32,5 +32,8 @@ export const hostConfigSchema = z.object({
   fs: z.object({ roots: z.array(z.string()) }).optional(),
   // web_fetch: hosts fetched without asking (`*.example.com` for subdomains), and limits.
   web: z.object({ allowlist: z.array(z.string()).optional(), maxBytes: z.number().int().positive().optional(), timeoutMs: z.number().int().positive().optional() }).optional(),
+  // Shell commands — `!command` in the chat and the model's run_command
+  // (src/assistant/shell.ts): the time limit and how much of the output is kept.
+  shell: z.object({ timeoutMs: z.number().int().positive(), maxChars: z.number().int().positive() }).partial().optional(),
   plugins: z.record(z.string(), z.unknown()).optional(),
 }).passthrough();

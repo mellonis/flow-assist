@@ -114,7 +114,8 @@ export function apiHistory(messages: ChatMessage[]): ChatMessage[] {
   for (const m of messages) {
     // 'note' is the host speaking to the person (/memory, what /clear kept): display only.
     if (m.role === 'system' || m.role === 'note') continue;
-    const out: ChatMessage = { role: m.role === 'bg' ? 'user' : m.role, content: m.content ?? null };
+    // A background result and a `!command` the person ran reach the model as the user's.
+    const out: ChatMessage = { role: m.role === 'bg' || m.role === 'shell' ? 'user' : m.role, content: m.content ?? null };
     if (Array.isArray(m.tool_calls) && m.tool_calls.length) out.tool_calls = m.tool_calls;
     if (typeof m.tool_call_id === 'string') out.tool_call_id = m.tool_call_id;
     clean.push(out);
@@ -475,11 +476,14 @@ export async function agentChat(
         }
       }
       try {
+        // The turn's signal rides in the ctx, so a tool that waits on something long
+        // (run_command) stops with the answer when the person presses Esc.
+        const callCtx: ToolCtx = opts.signal ? { ...toolCtx, signal: opts.signal } : toolCtx;
         // Plugin ai-tool → its own `run(args, toolCtx)`; group tool → execChatTool
         // (lookup by name in the registry). `def.run` exists only on extraTools.
         detail = def?.run
-          ? await (def.run as (args: Record<string, unknown>, ctx: ToolCtx) => unknown)(parsed, toolCtx)
-          : await execChatTool(tc.name, parsed, toolCtx);
+          ? await (def.run as (args: Record<string, unknown>, ctx: ToolCtx) => unknown)(parsed, callCtx)
+          : await execChatTool(tc.name, parsed, callCtx);
         outcome = write ? 'applied' : 'ok';
       } catch (e) {
         detail = `Error: ${e instanceof Error ? e.message : String(e)}`;

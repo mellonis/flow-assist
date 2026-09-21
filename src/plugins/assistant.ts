@@ -11,6 +11,7 @@ import { bgActiveCount } from '../loader/tools-core.js';
 import { createPlan, todoGlyph } from '../assistant/plan.js';
 import { apiHistory, compactConversation, chatLanguage } from '../assistant/agent.js';
 import { copyTarget, copyToClipboard } from '../assistant/copy.js';
+import { createShellState, formatShell, nextCwd, runShell, shellLimits } from '../assistant/shell.js';
 import { KEEP_SESSIONS, SESSION_VERSION, closeSession, flushOnExit, listSessions, loadSession, newSessionId, pruneSessions, saveSession, sessionToContinue, sessionWhen, sessionsDir, type Session } from '../assistant/sessions.js';
 import type { ChatMessage } from '../assistant/agent.js';
 import { editorReducer } from '@flowtty/core';
@@ -46,6 +47,23 @@ export function logShareMessage(lines: readonly string[], arg = ''): string | nu
   const tail = lines.slice(-n);
   if (!tail.length) return null;
   return `Host log, last ${tail.length} line${tail.length === 1 ? '' : 's'}:\n\`\`\`\n${tail.join('\n')}\n\`\`\``;
+}
+
+// Something the person said or did: a message, or a `!command` they ran. A session
+// with neither is not worth saving.
+const personSpoke = (role: string) => role === 'user' || role === 'shell';
+
+// The command of a `run_command` call, so the y/n block can show the line itself
+// rather than its JSON. null — some other tool, or arguments that do not parse.
+export function shellCommandOf(name: string, args: string): string | null {
+  if (name !== 'run_command' && !name.endsWith(':run_command')) return null;
+  try {
+    const a = JSON.parse(args) as { command?: unknown; cwd?: unknown };
+    if (typeof a.command !== 'string') return null;
+    return typeof a.cwd === 'string' && a.cwd.trim() ? `${a.command}   # in ${a.cwd}` : a.command;
+  } catch {
+    return null;
+  }
 }
 
 // A chat message. `role` is the OpenAI role; `content` may be null when a message
@@ -153,6 +171,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // the tool context, emptied by /clear. It used to be module state and so
           // outlived the conversation it described.
           const planRef = f.useRef(createPlan());
+          // Where this conversation's shell commands run — `!command` and the model's
+          // run_command share it; `cd` moves it. The conversation's, like the plan: a
+          // background run gets its own, /clear and a change of task reset it.
+          const shellRef = f.useRef(createShellState(() => f.config as Record<string, unknown>));
           // What the provider reported for the last turn: its prompt plus the answer it
           // produced is, to a close approximation, the size of the NEXT request.
           const usageRef = f.useRef<{ promptTokens: number; completionTokens: number } | null>(null);
@@ -243,14 +265,15 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               version: SESSION_VERSION, id: sessionIdRef.current, title: '', createdAt: createdAtRef.current, updatedAt: new Date().toISOString(),
               messages: msgsRef.current as Record<string, unknown>[], api: apiRef.current as unknown as Record<string, unknown>[],
               summary: summaryRef.current, plan: planRef.current.snapshot(), usage: usageRef.current,
-              // A /command in the field is being run, not drafted (it was "/clear" itself).
-              prompts: historyRef.current.slice(-100), draft: inputRef.current.startsWith('/') ? '' : inputRef.current, issue: ctxIssueIdRef.current,
+              // A /command or !command in the field is being run, not drafted (it was "/clear" itself).
+              prompts: historyRef.current.slice(-100), draft: /^\s*[/!]/.test(inputRef.current) ? '' : inputRef.current, issue: ctxIssueIdRef.current,
+              shellCwd: shellRef.current.saved(),
               closed: false, // written means in use — a resumed cleared session is open again
             };
           };
           const writeSession = () => {
             if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null; }
-            if (!sessDir || !msgsRef.current.some((m) => m.role === 'user')) return; // nothing said yet
+            if (!sessDir || !msgsRef.current.some((m) => personSpoke(m.role))) return; // nothing said or run yet
             try { saveSession(sessDir, snapshotSession()); } catch (e) {
               (f.services as Record<string, any>).pushLog?.(`[session] not saved: ${(e as Error).message}`);
             }
@@ -267,6 +290,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             apiRef.current = s.api as unknown as ChatMessage[];
             summaryRef.current = s.summary;
             planRef.current.load(s.plan);
+            shellRef.current.setCwd(s.shellCwd ?? null);
             usageRef.current = s.usage;
             historyRef.current = s.prompts.slice();
             histAt.current = null;
@@ -299,7 +323,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // block renders. pendingRef holds { name, args, resolve } — read by the
           // input-handler (a ref, always current); pendingAsk is only for render.
           const pendingRef = f.useRef<{ name: string; args: string; resolve: (ok: boolean) => void } | null>(null);
-          const [pendingAsk, setPendingAsk] = f.useState<{ name: string; args: string } | null>(null);
+          const [pendingAsk, setPendingAsk] = f.useState<{ name: string; args: string; command?: string } | null>(null);
           // `ask_user`: the same kind of pause, but the person picks among options.
           // askRef is what the input handler steps key by key (a ref, always current);
           // pendingQuestion mirrors it for the render.
@@ -470,6 +494,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 extraTools: (f.services as Record<string, any>).pluginAiTools ?? [],
                 toolCtx: {
                   plan: planRef.current,
+                  shell: shellRef.current,
                   memoryFile: memoryFilePath(f.config),
                   // The plugin's OWN host-issued token. The CALLER never supplies a
                   // name here — a raw plugin-name string is ignored by the memory
@@ -494,9 +519,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // input-handler to resolve the promise ('y'/Enter — yes, 'n'/Esc — no).
                 confirmWrite: (name: string, argsStr: unknown) => new Promise<boolean>((resolve) => {
                   const args = typeof argsStr === 'string' ? argsStr : JSON.stringify(argsStr ?? '');
+                  const command = shellCommandOf(name, args);
                   if (contextOpenRef.current) setContextOpen(false);
                   pendingRef.current = { name, args, resolve };
-                  setPendingAsk({ name, args });
+                  setPendingAsk({ name, args, ...(command != null ? { command } : {}) });
                   f.notify();
                 }),
                 onTool: (name: string, args: unknown) => {
@@ -648,6 +674,68 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             return true;
           };
 
+          // ── `!command` — the person runs a shell command (src/assistant/shell.ts) ──
+          // The chat is busy exactly as while an answer is written — the same spinner,
+          // and Esc stops it — but no model turn is spent: the result joins the model's
+          // history and is read with the person's next message, as a background result is.
+          const runShellCommand = async (cmd: string) => {
+            if (streamRef.current) { setError('an answer or a command is still running — wait, or stop it with Esc'); return; }
+            if (!cmd) { setError('! runs a shell command — e.g. !git status'); return; }
+            streamRef.current = true; // closed synchronously, as in send()
+            const line = `!${cmd}`;
+            if (historyRef.current.at(-1) !== line) historyRef.current.push(line);
+            histAt.current = null;
+            histShown.current = '';
+            // The field is emptied now: Esc clears a non-empty field before it stops anything.
+            setInput(''); inputRef.current = ''; setCursor(0);
+            setError(null);
+            setEmptyNotice('');
+            setToolCount(0);
+            setStreaming(true);
+            setToolLabel(`$ ${cmd.length > 60 ? `${cmd.slice(0, 60)}…` : cmd}`);
+            t0Ref.current = Date.now();
+            setElapsedMs(0);
+            if (tickRef.current) clearInterval(tickRef.current);
+            tickRef.current = setInterval(() => setElapsedMs(Date.now() - t0Ref.current), 120);
+            disarmEsc();
+            const abort = new AbortController();
+            abortRef.current = abort;
+            const cwd = shellRef.current.cwd();
+            const { timeoutMs, maxChars } = shellLimits(f.config as { shell?: unknown });
+            let stopped = false;
+            try {
+              const r = await runShell(cmd, { cwd, timeoutMs, maxChars, signal: abort.signal });
+              stopped = r.stopped;
+              // `cd` sticks, as in a terminal — within the roots.
+              const move = nextCwd(f.config as Record<string, unknown>, cwd, r.pwd);
+              if (move.cwd !== cwd) shellRef.current.setCwd(move.cwd);
+              const { display, forModel } = formatShell(cmd, r, cwd, timeoutMs, { after: move.cwd, note: move.note });
+              setMessages((cur) => [...cur, { role: 'shell', content: display, command: cmd }]);
+              apiRef.current = [...apiRef.current, { role: 'shell', content: forModel }];
+              (f.services as Record<string, any>).pushLog?.(`[shell] ${cmd.slice(0, 60)} → ${r.error ? `error: ${r.error}` : r.stopped ? 'stopped' : r.timedOut ? 'timed out' : `exit ${r.code}`}`);
+            } catch (e) {
+              setError(`!: ${(e as Error).message}`);
+            } finally {
+              if (tickRef.current) { clearInterval(tickRef.current); tickRef.current = null; }
+              setElapsedMs(Date.now() - t0Ref.current);
+              streamRef.current = false;
+              persist();
+              setStreaming(false);
+              setToolLabel('');
+              abortRef.current = null;
+              // What the person queued meanwhile goes out now — unless they stopped the
+              // command, as a stopped answer keeps the queue.
+              if (!stopped && queueRef.current.length) {
+                const nextQueued = queueRef.current.shift() as string;
+                syncQueue();
+                setTimeout(() => { void send(nextQueued); }, 0);
+              } else {
+                setTimeout(() => flushPending(), 0);
+              }
+              f.notify();
+            }
+          };
+
           // ── in-chat commands ── `/context` says how full the model's context is,
           // `/compact` replaces the history with a summary (a one-shot non-streaming
           // call), `/clear` starts over. There is no `/refresh-context`: the system
@@ -780,6 +868,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // A new conversation starts with no plan: the old one described work the
                 // model no longer remembers.
                 planRef.current.reset();
+                shellRef.current.setCwd(null); // back to the first root
                 usageRef.current = null; // measured for a conversation that is gone
                 // /clear ends the conversation, not the memory — and says so, or the
                 // assistant "still knowing" an earlier prompt reads as /clear failing.
@@ -851,6 +940,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               apiRef.current = []; summaryRef.current = ''; queueRef.current = []; setQueued([]);
               usageRef.current = null;
               planRef.current.reset();
+              shellRef.current.setCwd(null);
               msgsRef.current = [];
               setMessages([]);
               // Task change — a new session: reset the status fields too, else the
@@ -1037,6 +1127,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 const cmd = inputRef.current.trim();
                 disarmEsc();
                 if (cmd.startsWith('/')) runChatCommand(cmd.slice(1));
+                // A `!command` is refused while something runs rather than queued: a
+                // command fired later, into a state nobody is looking at, is a surprise.
+                else if (cmd.startsWith('!')) void runShellCommand(cmd.slice(1).trim());
                 else if (streamRef.current) {
                   // An answer is coming: queue instead of dropping the keypress.
                   if (cmd) { queueRef.current.push(cmd); setField(''); syncQueue(); }

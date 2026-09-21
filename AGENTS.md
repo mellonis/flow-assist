@@ -152,6 +152,19 @@ assistant nobody had asked for a board.
   confirmation is what actually stops a page from steering `update_issue` or
   `glab_api`, so never give web_fetch a path where confirmation is bypassed. NOT
   closed: DNS rebinding between our lookup and fetch's own (documented in the module).
+- **`run_command` runs a shell command — only after the person says yes**
+  (`src/loader/tools-shell.ts` on the runner in `src/assistant/shell.ts`). A group of
+  its own, `shell`, off with `ai.disabledTools: ["shell"]`. It is `write: true`, so
+  EVERY call pauses for the y/n, and the y/n block shows the command line itself
+  (`$ …`, wrapped, not its JSON); a background task declines it. What the model knows
+  of the machine is in the tool's description, built at load: platform (with the BSD
+  userland note on macOS), the starting directory, which of the usual programs are on
+  PATH (one `command -v` probe per process, never throws), and "read package.json /
+  Makefile / README before guessing a build command". Keep that description short — it
+  rides on every request. A non-zero exit is a RESULT (the model needs the failing
+  test), framed as data; a refusal (cwd outside the roots) or a shell that cannot start
+  throws. The turn's AbortSignal reaches tools as `ctx.signal` (`agentChat`), so Esc
+  kills the command's process group with the answer.
 - **The log is the person's too.** No log tool; `/log [N]` shares the tail of the
   host log as the person's own message.
 - **`ask_user`** (1–4 questions, 2–4 options each, optional multi-select, an
@@ -191,13 +204,17 @@ assistant nobody had asked for a board.
   background run gets a fresh one, so its checkboxes never appear among the chat's;
   an eval trial makes one per trial. Only a caller with no conversation of its own
   (the one-shot CLI, a bare `execChatTool`) falls back to the process-wide plan.
+  The shell's directory is the same kind of state: `createShellState` in
+  `src/assistant/shell.ts`, held by the chat (`shellRef`), handed to run_command as
+  `ctx.shell`; a background run gets a fresh one.
   **Tool state that describes a conversation is never module-level** — as a module
   variable the plan outlived `/clear`, was shared with background runs, and leaked
   from one test into the next.
 - **Sessions survive a restart** (`src/assistant/sessions.ts`, one JSON per session
   in `<config dir>/sessions/`, dir 700 / files 600 — they hold tracker and MR text).
   A session is ONE object: the screen list, `apiRef` (what the model is sent),
-  `summaryRef`, the plan, the usage reading, the ↑/↓ prompts and the unsent draft —
+  `summaryRef`, the plan, the usage reading, the ↑/↓ prompts, the unsent draft and the
+  shell's directory (`shellCwd`, re-checked against the roots when used) —
   three views of one conversation, saved together or not at all. Not saved: an answer
   in progress (`live`), a pending y/n or question, the queues. Saves: 250 ms after a
   question, an answer's end, `/compact`, a background result; at once on closing the
@@ -250,6 +267,11 @@ hardest. Rules the `repo` and `gitlab` plugins hold, each with a test that tries
   symlink out of the root (`realOf` in `repo`, which also handles a path that does
   not exist yet and a dangling link).
 - **A configured root is never deleted**, confirmed or not.
+- **A shell command is seen before it runs.** `run_command`'s guard is the y/n, not a
+  filter on the command; its directory is checked anyway — inside a root by the REAL
+  path (`dirAllowed`), a `cd` that leads out is not remembered. `runShell` has exactly
+  two callers, `!command` (the person typed it) and `run_command` (the person
+  confirmed it); a new caller keeps one of those guards.
 - **No "magic" flags**: glab's `--field` reads `@path` from disk; strings go through
   `--raw-field`. Check the same before wrapping any other CLI (`gh api -F` is alike —
   this applies to the planned `github` plugin).
@@ -403,6 +425,26 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   last answer's code block (`/copy answer` — all of it) with pbcopy / wl-copy / xclip
   (`src/assistant/copy.ts`); Apple Terminal has no OSC 52. Copy-on-select itself
   waits for flowtty.
+- **`!command` runs a shell command** — the person's own, typed into the field
+  (`!bun test src/features`); the model never reaches this path. It runs through
+  `/bin/sh -c` in its own process group (a timeout, `shell.timeoutMs` 120 s, or Esc
+  kills the whole group), stdin closed, `PAGER`/`GIT_PAGER=cat`,
+  `GIT_TERMINAL_PROMPT=0`; stdout and stderr merged; the output keeps its TAIL
+  (`shell.maxChars` 20000) and says how much was cut. While it runs the chat is busy
+  exactly as while an answer is written (`streamRef`, the spinner, `$ cmd` as the tool
+  label, Esc stops it); a `!` meanwhile is refused, not queued. The result is a message
+  of role `shell` — `$ ` in the accent on the person's ground, a ```console block and
+  one line (`exit 0 · 1.2 s · ~/dir`) — and, like a background result, it joins
+  `apiRef` (`apiHistory` maps `shell` → `user`) and is read with the next message; no
+  turn is spent. It is saved with the session and its line goes into ↑/↓; a `!…` in the
+  field is not a draft. **The directory is remembered** between commands, as in a
+  terminal, and shared with `run_command`: it starts at the first `fs.roots` directory
+  (else the process's), a `cd` moves it only within the roots by real path (the shell
+  writes `pwd -P` to a private temp file after the command — a 4th stdio pipe under
+  Bun lost the report now and then), `exit N` or a kill keeps
+  it, run_command's `cwd` argument is a `cd` that stays, `/clear` and a change of task
+  go back to the root, `/resume` and a restart bring it back. Variables and functions
+  are not kept — every command is a fresh shell.
 - A `/command` **completes inline**, like a shell's autosuggestion: the part not
   typed yet is drawn after the caret in the dimmed accent colour, the other
   candidates follow as `⇥ a · b`, **Tab** takes the offer and then walks the rest.
@@ -528,7 +570,8 @@ The host suite must pass with `plugins-available/` empty — a host test never l
   REAL TUI on a test backend with only the network replaced. Steps are text,
   a tool call, or a `hold` that freezes the stream until `release()`. Like a real
   fetch it honours the request's `signal`: an abort errors the body with an
-  AbortError, so Esc stops a scripted answer. End-to-end
+  AbortError, so Esc stops a scripted answer, and a request made with a signal already
+  aborted rejects before it is recorded. End-to-end
   tests drive the app through it; assert on the frame AND on cell styles
   (`backend.lastBuffer`).
 - `bun scripts/ui-frames.ts [--size WxH] [--color|--styles] [scenario…]` — the same

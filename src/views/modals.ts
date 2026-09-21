@@ -334,7 +334,7 @@ function ChatMessages({ messages, wrap, showReasoning, palette: m, errorColor }:
   const see = (x: ScrollMetrics) => setView((v) => (v && v.top === x.scrollTop && v.height === x.viewportHeight ? v : { top: x.scrollTop, height: x.viewportHeight }));
   // A message the person sends brings the view back to the bottom, wherever they had
   // scrolled to: they want to see the answer to what they just asked.
-  const asked = messages.reduce((n, x) => n + (x.role === 'user' ? 1 : 0), 0);
+  const asked = messages.reduce((n, x) => n + (x.role === 'user' || x.role === 'shell' ? 1 : 0), 0);
   useEffect(() => { box.current?.scrollToEnd(); }, [asked]);
 
   const rows = chatRows(messages, wrap, showReasoning);
@@ -352,9 +352,11 @@ function ChatMessages({ messages, wrap, showReasoning, palette: m, errorColor }:
 
   // Who is speaking is said by a marker in the gutter and by the ground under the
   // message — not by a label. The person's marker is the input field's own prompt.
-  const groundOf = (role?: string) => (role === 'user' ? m.userBg : role === 'bg' ? m.bgBg : undefined);
+  // A `!command` is the person's own action, so it sits on the person's ground.
+  const groundOf = (role?: string) => (role === 'user' || role === 'shell' ? m.userBg : role === 'bg' ? m.bgBg : undefined);
   const gutter = (row: ChatRow) => {
     if (row.first && row.role === 'user') return h(Text, { bold: true, color: m.accent }, '› ');
+    if (row.first && row.role === 'shell') return h(Text, { bold: true, color: m.accent }, '$ ');
     if (row.first && row.role === 'bg') return h(Text, { bold: true, color: m.bgAccent }, '◆ ');
     // A note is the HOST speaking to the person (what /memory found, what /clear kept).
     // It is not part of the conversation and is never sent to the model.
@@ -378,7 +380,7 @@ function ChatMessages({ messages, wrap, showReasoning, palette: m, errorColor }:
   return h(ScrollBox, { ref: box, anchor: 'bottom', flexGrow: 1, flexShrink: 1, flexDirection: 'column', onScroll: (_o: number, x: ScrollMetrics) => see(x), onMetrics: see },
     rows.length
       ? null
-      : h(Text, { dim: true }, `Ask anything. ${CAP.enter} sends, ${NEWLINE_KEY} starts a new line, / opens the commands.`),
+      : h(Text, { dim: true }, `Ask anything. ${CAP.enter} sends, ${NEWLINE_KEY} starts a new line, / opens the commands, !command runs one in the shell.`),
     rows.map((row, i) => {
       const key = `chat-${i}`;
       if (row.gap) return h(Box, { key, height: 1, flexShrink: 0 });
@@ -457,7 +459,9 @@ export function renderChatModal({
   showReasoning?: boolean;
   cursor?: number;
   escArmed?: boolean;
-  pendingConfirm?: { name: string; args?: string | unknown } | null;
+  // `command`: a run_command call — shown whole and wrapped, since the person is
+  // deciding on exactly that line.
+  pendingConfirm?: { name: string; args?: string | unknown; command?: string } | null;
   pendingQuestion?: AskState | null;
   // Messages sent while an answer was coming; they go out, in order, when the turn ends.
   queued?: string[];
@@ -515,6 +519,7 @@ export function renderChatModal({
   const confirmAsk = pendingConfirm
     ? {
         name: pendingConfirm.name,
+        command: pendingConfirm.command,
         args: typeof pendingConfirm.args === 'string'
           ? (pendingConfirm.args.length > 120 ? `${pendingConfirm.args.slice(0, 120)}…` : pendingConfirm.args)
           : JSON.stringify(pendingConfirm.args ?? ''),
@@ -584,7 +589,9 @@ export function renderChatModal({
           : confirmAsk
           ? h(Box, { flexDirection: 'column', width: '100%', gap: 1, border: 'round', paddingX: 1, borderColor: 'yellow', backgroundColor: m.bg },
               h(Text, { bold: true, color: 'yellow' }, `⚠ Confirm write: ${confirmAsk.name}`),
-              h(Text, { dim: true, wrap: 'truncate' }, confirmAsk.args),
+              confirmAsk.command != null
+                ? h(Text, { wrap: 'wrap' }, `$ ${confirmAsk.command.length > 1000 ? `${confirmAsk.command.slice(0, 1000)}…` : confirmAsk.command}`)
+                : h(Text, { dim: true, wrap: 'truncate' }, confirmAsk.args),
               h(Text, { color: theme?.error }, `Press y to confirm · n to decline · ${CAP.esc} to cancel`))
           : h(Box, { flexDirection: 'column', width: '100%', backgroundColor: m.fieldBg },
               visible.map((row, i) => {

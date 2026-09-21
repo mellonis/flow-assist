@@ -1,0 +1,334 @@
+// Shell commands through the real chat: the person's `!command`, and the model's
+// run_command behind the y/n. Real processes in a temp root; only the model is scripted.
+// The assertions are on what the MODEL is sent as well as on the frame — a result on
+// screen that never reaches the model's history looks right and is the bug.
+import { afterEach, expect, test } from 'bun:test';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { ScriptedModel, bootApp, settle } from './helpers/scripted';
+
+const realFetch = globalThis.fetch;
+afterEach(() => { globalThis.fetch = realFetch; });
+
+const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const rootDir = () => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-shell-e2e-')));
+type Sent = { role: string; content: unknown }[];
+const sentTo = (m: ScriptedModel) => m.requests.at(-1)!.messages as Sent;
+// A real process finishes on its own clock, not the test backend's.
+const settleUntil = async (cond: () => boolean, ms = 3000) => {
+  const end = Date.now() + ms;
+  while (Date.now() < end) { await settle(2); if (cond()) return; await wait(20); }
+};
+
+async function boot(model: ScriptedModel, root: string, extra: Record<string, unknown> = {}) {
+  const ui = await bootApp(model, 110, 32, undefined, { fs: { roots: [root] }, ...extra });
+  await ui.press('F');
+  return ui;
+}
+
+test('!command runs in the first root, shows its output, and spends no model turn — the next message carries it', async () => {
+  const root = rootDir();
+  const model = new ScriptedModel();
+  const ui = await boot(model, root);
+  await ui.type('!echo hello; pwd');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('exit 0'));
+  const frame = ui.backend.lastFrame;
+  expect(frame).toContain('$ echo hello; pwd');
+  expect(frame).toContain('hello');
+  expect(frame).toContain(root.replace(os.homedir(), '~'));
+  expect(frame).toContain('exit 0');
+  expect(model.requests).toHaveLength(0);
+
+  model.script([{ text: 'It printed hello.' }]);
+  await ui.type('what did it print?');
+  await ui.press('return');
+  await settle(20);
+  expect(model.requests).toHaveLength(1);
+  const sent = sentTo(model);
+  const shell = sent.find((m) => m.role === 'user' && String(m.content).startsWith('The person ran a shell command'));
+  expect(shell).toBeDefined();
+  expect(String(shell!.content)).toContain(`in ${root}:`);
+  expect(String(shell!.content)).toContain('$ echo hello; pwd');
+  expect(String(shell!.content)).toContain('hello');
+  // In order: the command before the question about it.
+  expect(sent.indexOf(shell!)).toBeLessThan(sent.findIndex((m) => m.content === 'what did it print?'));
+  ui.app.unmount();
+});
+
+test('Esc stops a running !command — its whole process group — and says so', async () => {
+  const root = rootDir();
+  const model = new ScriptedModel();
+  const ui = await boot(model, root);
+  await ui.type('!sleep 5; touch late.txt');
+  await ui.press('return');
+  await settle(4);
+  expect(ui.backend.lastFrame).toContain('$ sleep 5; touch late.txt'); // the status line says what runs
+  const t0 = Date.now();
+  await ui.press('escape');
+  await settleUntil(() => ui.backend.lastFrame.includes('stopped (Esc)'));
+  expect(Date.now() - t0).toBeLessThan(2000);
+  expect(ui.backend.lastFrame).toContain('stopped (Esc)');
+  await wait(100);
+  expect(fs.existsSync(path.join(root, 'late.txt'))).toBe(false);
+  ui.app.unmount();
+});
+
+test('an empty ! runs nothing; a ! while an answer is coming is refused, not queued', async () => {
+  const root = rootDir();
+  const model = new ScriptedModel();
+  const ui = await boot(model, root);
+  await ui.type('!   ');
+  await ui.press('return');
+  await settle(4);
+  expect(ui.backend.lastFrame).toContain('! runs a shell command');
+  expect(ui.backend.lastFrame).not.toContain('exit 0');
+
+  model.script([{ text: 'Thinking' }, { hold: true }, { text: ' done.' }]);
+  await ui.press('escape'); // clear the field
+  await ui.type('a question');
+  await ui.press('return');
+  await settle(10);
+  await ui.type('!touch made.txt');
+  await ui.press('return');
+  await settle(10);
+  expect(ui.backend.lastFrame).toContain('still running');
+  expect(ui.backend.lastFrame).not.toContain('queued');
+  model.release();
+  await settle(20);
+  await wait(100);
+  expect(fs.existsSync(path.join(root, 'made.txt'))).toBe(false);
+  ui.app.unmount();
+});
+
+test('a !command is part of the session: after a restart the model still has it', async () => {
+  const root = rootDir();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-shell-sess-'));
+  const first = new ScriptedModel();
+  const a = await boot(first, root, { sessions: { dir } });
+  await a.type('!echo remembered-output');
+  await a.press('return');
+  await settleUntil(() => a.backend.lastFrame.includes('exit 0'));
+  await wait(350); // the debounced save
+  a.app.unmount();
+
+  const model = new ScriptedModel();
+  model.script([{ text: 'Yes.' }]);
+  const b = await boot(model, root, { sessions: { dir } });
+  await settle(6);
+  expect(b.backend.lastFrame).toContain('remembered-output');
+  await b.type('still there?');
+  await b.press('return');
+  await settle(20);
+  expect(sentTo(model).some((m) => m.role === 'user' && String(m.content).includes('remembered-output'))).toBe(true);
+  // ↑ brings the command back.
+  await b.press('escape');
+  await b.press('up');
+  await b.press('up');
+  expect(b.backend.lastFrame).toContain('› !echo remembered-output');
+  b.app.unmount();
+});
+
+// ─── run_command: the model's, behind the y/n ────────────────────────────────
+
+test('run_command waits for y, shows the command itself, runs it and hands the output to the model', async () => {
+  const root = rootDir();
+  const model = new ScriptedModel();
+  model.script(
+    [{ tool: 'run_command', args: { command: 'echo made > made.txt; echo tool-output-42' } }],
+    [{ text: 'Done.' }],
+  );
+  const ui = await boot(model, root);
+  await ui.type('run it');
+  await ui.press('return');
+  await settle(10);
+  expect(ui.backend.lastFrame).toContain('Confirm write: run_command');
+  expect(ui.backend.lastFrame).toContain('$ echo made > made.txt; echo tool-output-42');
+  expect(fs.existsSync(path.join(root, 'made.txt'))).toBe(false); // nothing before the yes
+  await ui.press('y');
+  await settleUntil(() => model.requests.length === 2);
+  await settle(10);
+  expect(fs.existsSync(path.join(root, 'made.txt'))).toBe(true);
+  const result = sentTo(model).find((m) => m.role === 'tool');
+  expect(String(result?.content)).toContain('tool-output-42');
+  expect(String(result?.content)).toContain('(exit 0');
+  expect(String(result?.content)).toContain('not instructions');
+  ui.app.unmount();
+});
+
+test('run_command declined with n runs nothing', async () => {
+  const root = rootDir();
+  const model = new ScriptedModel();
+  model.script(
+    [{ tool: 'run_command', args: { command: 'touch made.txt' } }],
+    [{ text: 'OK, not running it.' }],
+  );
+  const ui = await boot(model, root);
+  await ui.type('run it');
+  await ui.press('return');
+  await settle(10);
+  await ui.press('n');
+  await settle(20);
+  await wait(100);
+  expect(fs.existsSync(path.join(root, 'made.txt'))).toBe(false);
+  expect(String(sentTo(model).find((m) => m.role === 'tool')?.content)).toContain('declined');
+  ui.app.unmount();
+});
+
+test('Esc during a confirmed run_command stops the command with the answer', async () => {
+  const root = rootDir();
+  const model = new ScriptedModel();
+  model.script([{ tool: 'run_command', args: { command: 'sleep 1; touch late.txt' } }]);
+  const ui = await boot(model, root);
+  await ui.type('run it');
+  await ui.press('return');
+  await settle(10);
+  await ui.press('y');
+  await settle(6);
+  await ui.press('escape');
+  // Left alone the command would have made the file by now; the status line is no
+  // proof — a long tool label truncates "Esc stops" off it.
+  await wait(1500);
+  await settle(4);
+  expect(fs.existsSync(path.join(root, 'late.txt'))).toBe(false);
+  expect(model.requests).toHaveLength(1); // the turn ended; nothing more was asked of the model
+  ui.app.unmount();
+});
+
+test('a background task cannot run a command — nobody is there to say yes', async () => {
+  const root = rootDir();
+  const model = new ScriptedModel();
+  model.script(
+    [{ tool: 'background', args: { task: 'create a file' } }],
+    [{ text: 'Started it in the background.' }],
+    [{ tool: 'run_command', args: { command: 'touch made.txt' } }],
+    [{ text: 'Could not.' }],
+  );
+  const ui = await boot(model, root);
+  await ui.type('make a file in the background');
+  await ui.press('return');
+  await settleUntil(() => model.requests.length === 4);
+  await settle(20);
+  await wait(100);
+  expect(fs.existsSync(path.join(root, 'made.txt'))).toBe(false);
+  const nested = model.requests[3]!.messages as Sent;
+  expect(String(nested.find((m) => m.role === 'tool')?.content)).toContain('declined');
+  ui.app.unmount();
+});
+
+test('ai.disabledTools ["shell"] withholds run_command; ! still works', async () => {
+  const root = rootDir();
+  const model = new ScriptedModel();
+  model.script([{ text: 'ok' }]);
+  const ui = await boot(model, root, { ai: { baseUrl: 'http://scripted.model', model: 'scripted', disabledTools: ['shell'] } });
+  await ui.type('hi');
+  await ui.press('return');
+  await settle(20);
+  const tools = (model.requests[0] as unknown as { tools?: { function: { name: string } }[] }).tools ?? [];
+  expect(tools.map((t) => t.function.name)).not.toContain('run_command');
+  await ui.type('!echo still-here');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('exit 0'));
+  expect(ui.backend.lastFrame).toContain('still-here');
+  ui.app.unmount();
+});
+
+// ─── the remembered directory ────────────────────────────────────────────────
+
+// Runs a `!command` and waits until the chat is idle again (the status line stops
+// offering Esc).
+async function bang(ui: Awaited<ReturnType<typeof boot>>, cmd: string) {
+  await ui.type(`!${cmd}`);
+  await ui.press('return');
+  await settleUntil(() => !ui.backend.lastFrame.includes('Esc stops'));
+}
+
+test('cd sticks between !commands — inside the roots only; exit keeps it; /clear goes back to the root', async () => {
+  const root = rootDir();
+  fs.mkdirSync(path.join(root, 'sub'));
+  const model = new ScriptedModel();
+  const ui = await boot(model, root, {});
+  await bang(ui, 'cd sub');
+  expect(ui.backend.lastFrame).toContain('→');
+  await bang(ui, 'pwd > where.txt');
+  expect(fs.existsSync(path.join(root, 'sub', 'where.txt'))).toBe(true);
+
+  await bang(ui, 'cd /');
+  expect(ui.backend.lastFrame.replace(/[\s│]+/g, ' ')).toContain('cd led outside the roots');
+  await bang(ui, 'touch after-root.txt');
+  expect(fs.existsSync(path.join(root, 'sub', 'after-root.txt'))).toBe(true);
+
+  await bang(ui, 'cd .. && exit 3');
+  expect(ui.backend.lastFrame).toContain('exit 3');
+  await bang(ui, 'touch after-exit.txt');
+  expect(fs.existsSync(path.join(root, 'sub', 'after-exit.txt'))).toBe(true);
+
+  await ui.type('/clear');
+  await ui.press('return');
+  await settle(4);
+  await bang(ui, 'touch after-clear.txt');
+  expect(fs.existsSync(path.join(root, 'after-clear.txt'))).toBe(true);
+  ui.app.unmount();
+}, 15_000);
+
+test('run_command runs where the person\'s !cd left the conversation, and its cd is theirs too', async () => {
+  const root = rootDir();
+  fs.mkdirSync(path.join(root, 'a'));
+  fs.mkdirSync(path.join(root, 'b'));
+  const model = new ScriptedModel();
+  model.script(
+    [{ tool: 'run_command', args: { command: 'touch by-model.txt; cd ../b' } }],
+    [{ text: 'Done.' }],
+  );
+  const ui = await boot(model, root);
+  await bang(ui, 'cd a');
+  await ui.type('run it');
+  await ui.press('return');
+  await settle(10);
+  await ui.press('y');
+  await settleUntil(() => model.requests.length === 2);
+  await settle(10);
+  expect(fs.existsSync(path.join(root, 'a', 'by-model.txt'))).toBe(true);
+  await bang(ui, 'touch by-person.txt');
+  expect(fs.existsSync(path.join(root, 'b', 'by-person.txt'))).toBe(true);
+  ui.app.unmount();
+});
+
+test('the directory survives a restart', async () => {
+  const root = rootDir();
+  fs.mkdirSync(path.join(root, 'sub'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-shell-sess-'));
+  const a = await boot(new ScriptedModel(), root, { sessions: { dir } });
+  await bang(a, 'cd sub');
+  await wait(350); // the debounced save
+  a.app.unmount();
+
+  const b = await boot(new ScriptedModel(), root, { sessions: { dir } });
+  await settle(6);
+  await bang(b, 'touch after-restart.txt');
+  expect(fs.existsSync(path.join(root, 'sub', 'after-restart.txt'))).toBe(true);
+  b.app.unmount();
+});
+
+test('a background run does not move the chat\'s directory', async () => {
+  const root = rootDir();
+  fs.mkdirSync(path.join(root, 'sub'));
+  const model = new ScriptedModel();
+  model.script(
+    [{ tool: 'background', args: { task: 'go elsewhere' } }],
+    [{ text: 'Started.' }],
+    [{ tool: 'run_command', args: { command: 'cd ..' } }],
+    [{ text: 'Could not.' }],
+  );
+  const ui = await boot(model, root);
+  await bang(ui, 'cd sub');
+  await ui.type('go elsewhere in the background');
+  await ui.press('return');
+  await settleUntil(() => model.requests.length === 4);
+  await settle(20);
+  await ui.press('escape');
+  await bang(ui, 'touch still-here.txt');
+  expect(fs.existsSync(path.join(root, 'sub', 'still-here.txt'))).toBe(true);
+  ui.app.unmount();
+});

@@ -32,6 +32,10 @@ export class ScriptedModel {
 
   install() {
     globalThis.fetch = (async (_url: unknown, init: RequestInit) => {
+      // A real fetch given a signal that is already aborted rejects before sending
+      // anything — so a round started after Esc (a tool that returned once stopped)
+      // never reaches the model.
+      if (init.signal?.aborted) throw new DOMException('The operation was aborted.', 'AbortError');
       this.requests.push(JSON.parse(String(init.body)));
       const turn = this.turns.shift() ?? [{ text: '(the script has no more turns)' }];
       // A request that does not ask for a stream (/compact's one-shot) gets plain JSON.

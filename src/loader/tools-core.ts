@@ -18,6 +18,7 @@ import { writtenKey } from '../playback/keys.js';
 import { createPlan, type Plan } from '../assistant/plan.js';
 import type { ToolGroup, ToolDef } from './tools.js';
 import { WEB_DEFAULTS } from '../assistant/web-fetch.js';
+import { SHELL_DEFAULTS, createShellState } from '../assistant/shell.js';
 import { parseAskArgs, askResult, type AskQuestion, type AskState } from '../assistant/ask.js';
 
 // Runtime context handed to core tools by the caller: the issue-context builder
@@ -69,6 +70,7 @@ const KEY_DEFAULTS: Record<string, string> = {
   sessions: 'dir: sessions/ in the config directory; resume: true — the chat continues the latest session on start (a restart or an update loses nothing); keep: 50 sessions. In the chat, /resume lists the saved sessions and /resume <n> opens one; /clear starts a new session and keeps the old one',
   fs: 'roots: []; no file tools unless a plugin adds them',
   web: `allowlist: [] — every web_fetch asks the person first (a background task cannot fetch at all); a host on the list is fetched without asking, even a local one. maxBytes: ${WEB_DEFAULTS.maxBytes}, timeoutMs: ${WEB_DEFAULTS.timeoutMs}. The web_fetch tool is its own group: config set ai.disabledTools ["web"] turns it off`,
+  shell: `timeoutMs: ${SHELL_DEFAULTS.timeoutMs} (the whole process group is killed after it), maxChars: ${SHELL_DEFAULTS.maxChars} (the END of the output is kept). Two ways to run a command: the person types !command in the chat (e.g. !bun test) — it runs in the first fs.roots directory (else the app's own), the directory is remembered between commands like a terminal's (cd moves it, only within the roots; variables are not kept; /clear goes back to the first root), Esc stops it, and the output joins the conversation without spending a model turn; and the model's run_command tool, which asks the person y/n before every command and is never run by a background task. config set ai.disabledTools ["shell"] turns run_command off (! stays)`,
   // "always LOADED", not always visible: each built-in is configured via its own
   // config.plugins.<name>.* namespace. keycaps is OFF by default — its panel shows
   // only when config.plugins.keycaps.enabled = true. Saying "always active" made the
@@ -514,7 +516,10 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
         // stated assumption.
         // A background run is a conversation of its own: it plans on its own plan and
         // never touches the checkboxes of the chat that started it.
-        const toolCtx = { ...(ctx as Record<string, unknown>), _bgDepth: depth + 1, askUser: undefined, plan: createPlan() };
+        // Its shell directory is its own too, starting at the default: whatever it runs
+        // (and run_command is declined there anyway) never moves the chat's.
+        const bgConfig = ((ctx as { config?: Record<string, unknown> }).config ?? {}) as Record<string, unknown>;
+        const toolCtx = { ...(ctx as Record<string, unknown>), _bgDepth: depth + 1, askUser: undefined, plan: createPlan(), shell: createShellState(() => bgConfig) };
         // The nested run needs its OWN LLM credentials — the same way the chat's
         // send() derives them (`ai.baseUrl`, `ai.model`, `process.env[tokenEnv]`).
         // `ctx` is the chat's toolCtx (config + host services), so read ai.* from it;

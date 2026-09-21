@@ -6,7 +6,8 @@
 // A session is ONE object: what is on screen, what the model sees, the summary a
 // `/compact` left, the plan and the last usage reading. They are three views of one
 // conversation (`/compact` moves the history into the summary), so they are saved
-// together or not at all. Not saved: an answer being written, a pending y/n or
+// together or not at all — and the directory the conversation's shell commands were
+// left in. Not saved: an answer being written, a pending y/n or
 // question, queued messages — restored, they would resolve into nothing.
 //
 // The files hold whatever the conversation held (tracker text, MR text), so they are
@@ -38,6 +39,7 @@ export interface Session {
   prompts: string[];                   // ↑/↓ history of the field
   draft: string;                       // what was typed and not sent
   issue?: string | number | null;      // the task the chat was opened on, if any
+  shellCwd?: string | null;            // where `!command` / run_command were last left (null — the default)
   closed?: boolean;                    // left with /clear — listed, never continued on start
 }
 
@@ -64,15 +66,20 @@ const fileOf = (dir: string, id: string) => {
   return path.join(dir, `${id}.json`);
 };
 
-// The first thing the person asked — what the list shows.
+// Something the person said, or a `!command` they ran.
+const bySomeone = (m: Record<string, unknown>) => m.role === 'user' || m.role === 'shell';
+
+// The first thing the person asked — what the list shows; a session that holds only
+// `!commands` is named by the first of them.
 export function sessionTitle(messages: Record<string, unknown>[]): string {
   const first = messages.find((m) => m.role === 'user' && String(m.content ?? '').trim());
-  const t = String(first?.content ?? '').replace(/\s+/g, ' ').trim();
+  const ran = first ? undefined : messages.find((m) => m.role === 'shell' && typeof m.command === 'string');
+  const t = (first ? String(first.content ?? '') : ran ? `$ ${String(ran.command)}` : '').replace(/\s+/g, ' ').trim();
   return t.length > 70 ? `${t.slice(0, 69)}…` : t;
 }
 
-// A session worth keeping has something the person said in it.
-export const isEmpty = (s: Pick<Session, 'messages'>) => !s.messages.some((m) => m.role === 'user');
+// A session worth keeping has something the person said or ran in it.
+export const isEmpty = (s: Pick<Session, 'messages'>) => !s.messages.some(bySomeone);
 
 export function saveSession(dir: string, s: Session): void {
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -102,6 +109,9 @@ export function loadSession(dir: string, id: string): Session | null {
       prompts: Array.isArray(s.prompts) ? s.prompts.map(String) : [],
       draft: typeof s.draft === 'string' ? s.draft : '',
       issue: typeof s.issue === 'string' || typeof s.issue === 'number' ? s.issue : null,
+      // Checked again when it is used: a directory that has gone or left the roots
+      // since reads as the default (`createShellState`).
+      shellCwd: typeof s.shellCwd === 'string' ? s.shellCwd : null,
     };
   } catch {
     return null;
@@ -117,7 +127,7 @@ export function listSessions(dir: string): SessionInfo[] {
     const id = n.replace(/\.json$/, '');
     if (!n.endsWith('.json') || !ID.test(id)) continue;
     const s = loadSession(dir, id);
-    if (s) out.push({ id, title: s.title || sessionTitle(s.messages), updatedAt: s.updatedAt, turns: s.messages.filter((m) => m.role === 'user').length, closed: s.closed === true });
+    if (s) out.push({ id, title: s.title || sessionTitle(s.messages), updatedAt: s.updatedAt, turns: s.messages.filter(bySomeone).length, closed: s.closed === true });
   }
   return out.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0));
 }

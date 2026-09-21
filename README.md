@@ -32,6 +32,15 @@ update loses nothing. `/clear` starts a new session and keeps the old one;
 `sessions/` in the config directory, readable by you only (`sessions.resume: false`
 starts every run empty; `sessions.keep` — how many are kept, 50 by default).
 
+`!command` in the chat runs a shell command yourself (`!bun test src/features`):
+the output lands in the conversation and the assistant sees it with your next
+message, without spending a turn on it. Esc stops it. Commands start in the first
+`fs.roots` directory and the directory is remembered between them, as in a
+terminal (`!cd pkg`; only within the roots; variables are not kept). The assistant
+can run commands too — `run_command`, in the same directory, and only after you
+confirm each one (`ai.disabledTools: ["shell"]` turns it off). Limits:
+`shell.timeoutMs` (120 s) and `shell.maxChars` (20000; the end of the output is kept).
+
 ## Plugins
 
 Source lives in `plugins-available/<name>/`. Enable a plugin with
