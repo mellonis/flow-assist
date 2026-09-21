@@ -45,7 +45,7 @@ export interface RepoEntry {
   active: boolean;
   missingDeps: string[];
   missingSettings?: string[];
-  source?: 'git' | 'registry';
+  source?: PluginSource;
   surfaces?: string[];
   tools?: string[];
 }
@@ -121,13 +121,18 @@ function writeSourceMarker(pluginDir: string): void {
   writeFileSync(join(pluginDir, SOURCE_MARKER), `${REGISTRY_SOURCE}\n`, 'utf8');
 }
 
-// Provenance for a plugin dir: 'registry' if a `.flow-assist-source` marker says so,
-// otherwise 'git' (locally checked out / unmarked).
-function sourceFor(pluginDir: string): 'git' | 'registry' {
+// Where a plugin came from: 'registry' (downloaded by name), 'archive' (installed
+// from a .tar.gz file or URL — archive-install.ts), 'git' (checked out, or unmarked).
+export type PluginSource = 'git' | 'registry' | 'archive';
+
+// Provenance for a plugin dir, read from its `.flow-assist-source` marker; 'git' when
+// there is none.
+function sourceFor(pluginDir: string): PluginSource {
   const marker = join(pluginDir, SOURCE_MARKER);
   if (existsSync(marker)) {
     const content = readFileSync(marker, 'utf8');
     if (content.includes(REGISTRY_SOURCE)) return REGISTRY_SOURCE;
+    if (content.includes('archive')) return 'archive';
   }
   return 'git';
 }
@@ -299,7 +304,11 @@ export function createPluginRepo({ availableDir, enabledDir, projectRoot, fetchP
         if (!existsSync(join(pluginDir, 'manifest.json'))) {
           return { ok: false, error: `plugin '${name}' is not installed` };
         }
-        if (sourceFor(pluginDir) !== REGISTRY_SOURCE) {
+        const source = sourceFor(pluginDir);
+        if (source === 'archive') {
+          return { ok: false, error: `plugin '${name}' was installed from an archive — install the newer archive to update it` };
+        }
+        if (source !== REGISTRY_SOURCE) {
           return { ok: false, error: `plugin '${name}' is a git checkout — use 'git pull' to update` };
         }
         return fetchAndLink(n!);

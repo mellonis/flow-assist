@@ -24,6 +24,7 @@ import {
 } from './config/load.js';
 import { createPluginRepo } from './loader/repo.js';
 import { fetchPluginFromRegistry } from './loader/registry-download.js';
+import { installPluginArchive, isArchiveSource } from './loader/archive-install.js';
 import type { PluginRepo } from './loader/repo.js';
 import type { PluginRepo as RepoShape } from './loader/host-group.js';
 import { loadPlugins } from './loader/build.js';
@@ -186,11 +187,22 @@ async function runPlugins(args: string[], config: Record<string, unknown>, repo:
     const entries = await repo.list();
     for (const e of entries) {
       const state = e.active ? 'active' : 'inactive';
-      const source = e.source === 'registry' ? ' (registry)' : '';
+      const source = e.source === 'registry' || e.source === 'archive' ? ` (${e.source})` : '';
       const missing = e.missingDeps.length ? `  missing: ${e.missingDeps.join(',')}` : '';
       const settingMiss = e.missingSettings?.length ? `  missing settings: ${e.missingSettings.join(',')}` : '';
       console.log(`${e.name}  v${e.version || '-'}  [${state}]${source}${missing}${settingMiss}`);
     }
+    return;
+  }
+
+  // An archive (a .tar.gz path or an https URL) is unpacked into plugins-available/
+  // and enabled; a name is linked from there or fetched from the registry.
+  if (sub === 'install' && name && isArchiveSource(name)) {
+    const res = await installPluginArchive(name, { availableDir, enabledDir });
+    console.log(res.ok
+      ? `plugin '${res.name}'${res.version ? ` v${res.version}` : ''} ${res.replaced ? 'replaced' : 'installed'} — restart the assistant for the change to take effect`
+      : `plugins install: ${res.error}`);
+    if (!res.ok) process.exitCode = 1;
     return;
   }
 
@@ -344,8 +356,9 @@ function printPluginsHelp(): void {
       'plugins subcommands:',
       '  plugins ls                List available plugins',
       '  plugins install <name>    Install a plugin (symlink from plugins-available)',
+      '  plugins install <file>    Install a plugin archive (.tar.gz, a path or an https URL)',
       '  plugins remove <name>     Remove a plugin (unlink from plugins-enabled)',
-      '  plugins update [name]     Re-fetch registry-managed plugins',
+      '  plugins update [name]     Re-fetch registry-managed plugins (an archive: install the newer one)',
     ].join('\n'),
   );
 }

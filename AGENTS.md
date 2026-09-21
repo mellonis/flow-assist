@@ -677,7 +677,14 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
 
 - (default) `interactive` — the TUI.
 - `config get|set|unset|help` — host config.
-- `plugins ls|install|remove|update` — manage enabled plugins.
+- `plugins ls|install|remove|update` — manage enabled plugins. `install` takes a name
+  (linked from `plugins-available/`, else fetched from the registry) or an archive —
+  a `.tar.gz` path or an https URL (`loader/archive-install.ts`). An archive's member
+  list is checked before extraction (no links, no `..`, one top-level `<name>/`), it
+  is unpacked in a temporary directory, and it replaces only a plugin that came from
+  an archive (the `.flow-assist-source` marker says `archive`). The model's
+  `host:plugins_install` stays name-only: a URL in a tool argument may come from any
+  page the model has read.
 - any other arg — a one-shot `<prompt>` chat with the loaded tool registry.
 
 ## Config & environment

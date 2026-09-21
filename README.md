@@ -53,7 +53,15 @@ Source lives in `plugins-available/<name>/`. Enable a plugin with
 
 ```sh
 bun run src/cli.ts plugins install <name>     # symlinks plugins-enabled/<name>
+bun run src/cli.ts plugins install ./notes-0.1.0.tar.gz          # a plugin archive
+bun run src/cli.ts plugins install https://…/notes-0.1.0.tar.gz  # or its https URL
 ```
+
+An archive is what `plugin:publish` packs: one top-level `<name>/` with the plugin's
+`manifest.json`. It is unpacked into `plugins-available/` and enabled; one with a
+link, a `..` or anything outside that directory is refused before a byte is written.
+A newer archive replaces one installed from an archive; a plugin you checked out is
+never overwritten.
 
 Each plugin ships a `manifest.json` and a `shape` (commands/keys/views/surfaces/
 aiTools/services/tools/configSchema). Tool groups are delivered by plugins; there

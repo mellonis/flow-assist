@@ -75,6 +75,17 @@ test('rejects a path-traversal plugin name (defense-in-depth)', async () => {
   expect(existsSync(join(enabled, '..', 'escape'))).toBe(false);
 });
 
+// The model's `host:plugins_install` goes through `install(name)`: an archive URL is
+// the CLI's alone (archive-install.ts), so here it is not a name and nothing is fetched.
+test('install by name takes no archive URL', async () => {
+  const { root, avail, enabled } = fakeRepo();
+  const fetched: string[] = [];
+  const repo = createPluginRepo({ availableDir: avail, enabledDir: enabled, projectRoot: root, fetchPlugin: async (n) => { fetched.push(n); return { version: '1' }; } });
+  const res = await repo.install('https://example.com/notes-0.1.0.tar.gz');
+  expect(res.error).toMatch(/invalid name/);
+  expect(fetched).toEqual([]);
+});
+
 test('list reports requiredSettings missing from the environment', async () => {
   const { repo, avail } = fakeRepo();
   const pluginDir = join(avail, 'tracker');

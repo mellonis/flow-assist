@@ -187,6 +187,10 @@ setup: (ft) => { /* once, before any component mounts: seed a store */ },
   it is built from, say.
 - `bun run plugin:publish` packs a plugin and uploads it to the configured registry;
   `plugins install <name>` installs one from there.
+- Without a registry, the packed archive travels as a file — attached to a release,
+  handed over: `plugins install ./notes-0.1.0.tar.gz` (or its https URL) unpacks and
+  enables it, and installing a newer archive updates it. The archive must hold one
+  top-level `<name>/` whose `manifest.json` names the same plugin, and no links.
 
 A plugin kept in a repository of its own links the host's packages into its own
 `node_modules` for its tests (one React, never two), and must not leave a `dist/`

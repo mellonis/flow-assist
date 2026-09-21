@@ -3,6 +3,14 @@
 What each version of flow-assist brought, newest first. The version is the one in
 `package.json` (and `hostVersion()`, which a test keeps equal to it).
 
+## Unreleased
+
+- **A plugin from a file**: `plugins install ./notes-0.1.0.tar.gz` (or an https URL)
+  installs the archive `plugin:publish` packs, so a plugin can travel without a
+  registry — attached to a release, handed over. The archive is checked before it is
+  unpacked, a newer one updates the plugin, and a checked-out plugin is never
+  overwritten. `plugins ls` marks such a plugin `(archive)`.
+
 ## 0.1.0 — 2026-09-21
 
 The first version: a terminal assistant host that knows no company and no system,
