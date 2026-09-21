@@ -641,7 +641,7 @@ function renderContextPanel(r: ContextReading, bg: string | undefined, wrap: num
       h(Text, warn ? { color: 'yellow' } : {}, contextHeading(r))),
     h(Box, { flexDirection: sideBySide ? 'row' : 'column', gap: sideBySide ? 3 : 1 }, grid, legend),
     h(Text, { dim: true, wrap: 'truncate' }, contextFootnote(r)),
-    h(Text, { dim: true, wrap: 'truncate' }, `/compact summarises · /clear starts over · window: ai.contextWindow · ${CAP.esc} closes`));
+    h(Text, { dim: true, wrap: 'truncate' }, `/compact summarises · /clear starts over · window: ai.contextWindow · ${CAP.esc} / ${CAP.enter} close`));
 }
 
 function renderAsk(state: AskState, bg: string | undefined, wrap: number) {

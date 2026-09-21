@@ -78,6 +78,8 @@ test('the chat shows the estimate first and the measured figure after an answer;
   expect((frame.match(/⛶/g) ?? []).length).toBeGreaterThanOrEqual(38);
   expect(frame).toMatch(/instructions\s+[\d.k]+\s+\d+%/);
   expect(frame).toMatch(/free\s+40k\s+40%/);
+  // Both keys that close it are named — a key acts where it is shown.
+  expect(frame).toContain('Esc / ⏎ close');
   // The panel stands where the field was, and holds the keys: typing goes nowhere.
   expect(frame).not.toContain('new line'); // the field's own hint is gone with the field
   await ui.type('x');
