@@ -11,6 +11,10 @@ import { addTrigger, chatUser } from '../loader/registry.js';
 import { bgActiveCount } from '../loader/tools-core.js';
 import { autoBadge, autoCommand, autoConfirms, autoSaid, nextAutoMode, type AutoMode } from '../assistant/auto.js';
 import { createPlan, todoGlyph } from '../assistant/plan.js';
+import {
+  dueStep, emptyStep, joinNarration, notesCommand, notesMode, notesSaid, offerStep, stepWaitMs,
+  type NotesMode, type StepState,
+} from '../assistant/step.js';
 import { apiHistory, compactConversation, chatLanguage, requestTools, transcriptSoFar } from '../assistant/agent.js';
 import { createToolSet, toolLoadingMode } from '../assistant/tool-loading.js';
 import { copyTarget, copyToClipboard } from '../assistant/copy.js';
@@ -35,7 +39,7 @@ import type { Plugin } from '../loader/plugin.js';
 
 // Slash-commands of the chat — a single source for runChatCommand and Tab-completion.
 // `/analyze` is a tracker slash command and is removed.
-const CHAT_COMMANDS = ['compact', 'context', 'copy', 'image', 'resume', 'clear', 'memory', 'auto', 'fullscreen', 'log', 'exit'];
+const CHAT_COMMANDS = ['compact', 'context', 'copy', 'image', 'resume', 'clear', 'memory', 'auto', 'notes', 'fullscreen', 'log', 'exit'];
 
 // A plain object holding every enumerable service, inherited ones included.
 // `for…in` walks the prototype chain, which is exactly what a spread does not.
@@ -93,6 +97,9 @@ interface ChatMsg {
   reasoning?: string;
   process?: string;
   toolRuns?: unknown[];
+  // The step line: the last finished sentence of the narration this message carries
+  // (src/assistant/step.ts). Display only, like `process` itself.
+  step?: string;
   duration?: number;
   stopped?: boolean;
   // What the turn's writes changed — drawn as diff blocks above the answer.
@@ -112,6 +119,15 @@ function answerAt(list: ChatMsg[]): number {
     const m = list[i]!;
     if (m.role === 'assistant' && m.duration == null) return i;
   }
+  return -1;
+}
+
+// The message the narration belongs to — the last the assistant spoke in, stamped
+// with its duration or not. A step held back by the one-a-second floor lands after
+// the turn has ended as easily as during it, and it belongs to the message that was
+// narrating either way. −1 when the assistant has not spoken yet.
+function narratedAt(list: ChatMsg[]): number {
+  for (let i = list.length - 1; i >= 0; i--) if (list[i]!.role === 'assistant') return i;
   return -1;
 }
 
@@ -169,13 +185,15 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
     ],
     keys: { chat: 'F' },
     // config.plugins.assistant: `fullscreen` — the chat takes the whole terminal from
-    // the start (`/fullscreen on|off` switches it for the session); `colors` — the
-    // chat's palette override (src/playback/theme.ts); `runOutputLines` — how many
-    // lines of a command's output stand in the chat before ^r unfolds the rest (a
-    // display cap of its own, quite apart from `shell.maxChars`, which is how much the
-    // MODEL is given).
+    // the start (`/fullscreen on|off` switches it for the session); `notes` — how the
+    // model's narration between tool calls is drawn (`/notes` switches it for the
+    // conversation); `colors` — the chat's palette override
+    // (src/playback/theme.ts); `runOutputLines` — how many lines of a command's output
+    // stand in the chat before ^r unfolds the rest (a display cap of its own, quite
+    // apart from `shell.maxChars`, which is how much the MODEL is given).
     configSchema: z.object({
       fullscreen: z.boolean().optional(),
+      notes: z.enum(['step', 'fold', 'open', 'hidden']).optional(),
       runOutputLines: z.number().int().positive().optional(),
       colors: z.record(z.string(), z.unknown()).optional(),
     }).optional(),
@@ -353,6 +371,55 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const [autoMode, setAutoModeState] = f.useState<AutoMode>('ask');
           const autoModeRef = f.useRef<AutoMode>(autoMode);
           const setAutoMode = (m: AutoMode) => { autoModeRef.current = m; setAutoModeState(m); };
+          // ── The narration (src/assistant/step.ts) — how what the model says between
+          // tool calls is drawn. `plugins.assistant.notes` is where a conversation
+          // starts, `/notes` moves it for this one only, and `/clear` puts it back
+          // where the config says. The ref is for the key handler and the command,
+          // which are closures made before the state they would read.
+          const configNotes = (): NotesMode => notesMode((f.config.plugins as Record<string, { notes?: unknown }> | undefined)?.assistant?.notes);
+          const [notes, setNotesState] = f.useState<NotesMode>(configNotes());
+          const notesRef = f.useRef<NotesMode>(notes);
+          const setNotes = (m: NotesMode) => { notesRef.current = m; setNotesState(m); };
+          // The step line's own state: what it says, when it last changed, and a change
+          // waiting for the floor to pass. It is this CONVERSATION's — never module
+          // state — and every turn starts it again, so a turn's first step is never
+          // held back and the floor only ever guards the flicker within one turn.
+          // `narrationRef` accumulates the same text the message's `process` does, out
+          // here where it can be read without a render.
+          const stepRef = f.useRef<StepState>(emptyStep());
+          const narrationRef = f.useRef('');
+          const stepTimer = f.useRef<ReturnType<typeof setTimeout> | null>(null);
+          const clearStepTimer = () => { if (stepTimer.current) { clearTimeout(stepTimer.current); stepTimer.current = null; } };
+          const resetStep = () => { clearStepTimer(); stepRef.current = emptyStep(); narrationRef.current = ''; };
+          // A change the floor held back is not dropped: it lands on the message that
+          // was narrating as soon as the second is up, whether or not the turn is still
+          // running.
+          const scheduleStep = () => {
+            const wait = stepWaitMs(stepRef.current, Date.now());
+            if (!wait) return;
+            stepTimer.current = setTimeout(() => {
+              stepTimer.current = null;
+              stepRef.current = dueStep(stepRef.current, Date.now());
+              const shown = stepRef.current.shown;
+              setMessages((cur) => {
+                const next = cur.slice();
+                const at = narratedAt(next);
+                if (at >= 0) next[at] = { ...next[at]!, step: shown };
+                return next;
+              });
+              f.notify();
+            }, wait);
+          };
+          // One round of narration has arrived; what the line should say now comes back.
+          // Only rounds that carried tool calls reach here — the answer's own text never
+          // feeds the line, which is what made the first version of it flicker through
+          // the answer as it streamed.
+          const advanceStep = (narration: string): string => {
+            clearStepTimer();
+            stepRef.current = offerStep(stepRef.current, narration, Date.now());
+            scheduleStep();
+            return stepRef.current.shown;
+          };
           // ── Images (src/assistant/images.ts) ── what each `[Image #N]` of this
           // conversation stands for, and the last N given out. The conversation's, like
           // the plan: saved with the session, emptied by /clear and a change of task. The
@@ -425,6 +492,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             toolSetRef.current.load(s.tools);
             resetImages(s.images ?? [], s.imageSeq ?? 0);
             setAutoMode('ask'); // another conversation is another conversation's mode
+            setNotes(configNotes()); // and its own answer to how much narration is drawn
+            resetStep(); // the step line belonged to the turn that is being left
             usageRef.current = s.usage;
             historyRef.current = s.prompts.slice();
             histAt.current = null;
@@ -511,11 +580,14 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             const identity = who
               ? `You are talking to ${who.name}${who.login && who.login !== who.name ? ` (login ${who.login})` : ''}. Address the answer to them, not to an anonymous service account.`
               : '';
-            // The model narrates tool calls aloud in the answer — that is verbosity. Ask
-            // it to think silently and only output the result. Always answer in English,
-            // since this chat UI is English-only.
+            // Between tool calls the model writes prose, because it has nothing else to
+            // write there. Asking it not to narrate did not work — it narrated anyway,
+            // at whatever length. So it is asked for a SHAPE instead: one short `Next:`
+            // line before a call, which is exactly what the chat draws as the step line
+            // (src/assistant/step.ts), and nothing else. The final answer is not a
+            // step, so the line is asked for before a call only.
             const chatLang = chatLanguage((f.config as Record<string, unknown>).ai as Record<string, unknown>);
-            const directive = `Always respond in ${chatLang}. Answer concisely and to the point: only the outcome, no description of your actions, plans, attempts or searches («Let me try…», «Let me check…») — think silently, give the conclusion in the answer. Never claim you changed, created or deleted something unless a write tool actually returned success for it; if a write was declined or errored, say so instead. If the user asks why you did not run a tool, or says they do not see its result, do NOT just restate that the tool was already called («it’s already done», «it was scheduled»): actually re-run it now, or ask the user to confirm the repeat («run it again?»). Never claim a result you have not seen returned.`;
+            const directive = `Always respond in ${chatLang}. Answer concisely and to the point: only the outcome, and no retelling of your own moves in the final answer. Before you call a tool, write ONE short line that starts with "Next:" and says what you are about to do — nothing else between calls, no plans, no commentary, no repetition of what you already said. Do not begin the final answer with "Next:". Never claim you changed, created or deleted something unless a write tool actually returned success for it; if a write was declined or errored, say so instead. If the user asks why you did not run a tool, or says they do not see its result, do NOT just restate that the tool was already called («it’s already done», «it was scheduled»): actually re-run it now, or ask the user to confirm the repeat («run it again?»). Never claim a result you have not seen returned.`;
             // Write-language directive. The tracker named tracker tools here; the host is
             // tracker-agnostic, so it is generalized to any write/persist tool.
             const writeLangDirective = `When you write or persist content (a write tool: memory, config set/unset, fs, or any tool that writes), write in ${chatLang}.`;
@@ -647,6 +719,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             setEmptyNotice('');
             setToolCount(0);
             setTurnTokens(0); // what the last turn cost is not what this one costs
+            resetStep(); // this turn narrates for itself; its first step is immediate
             // Tick the indicator every 120ms: spinner frame + tenths of a second of
             // whatever is running now (`segRef`), not of the whole turn.
             beginSegment();
@@ -796,17 +869,28 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   // finally right after await — there it would still be empty, and the
                   // «limit of steps» warning popped even on a normal answer.
                   if (isAnswer) contentRef.current = text;
+                  // The rounds of narration are kept APART: appended with nothing
+                  // between them their sentences ran together ("…there are.Now I will
+                  // count them…"), in the fold and in the step line alike. The step is
+                  // worked out here rather than in the updater below, which react may
+                  // call more than once and which must stay a pure function of the list.
+                  const narration = isAnswer ? '' : joinNarration(narrationRef.current, text);
+                  if (!isAnswer) narrationRef.current = narration;
+                  const step = isAnswer ? '' : advanceStep(narration);
                   setMessages(cur => {
                     const next = cur.slice();
                     const last = next[next.length - 1];
                     if (last?.role !== 'assistant') {
-                      next.push({ role: 'assistant', content: isAnswer ? text : '', process: isAnswer ? '' : text });
+                      // A fresh message (a tool's view landed under the last one): it
+                      // carries this round's narration only, while the step line stays
+                      // the turn's — the last thing it said it is doing.
+                      next.push({ role: 'assistant', content: isAnswer ? text : '', process: isAnswer ? '' : text, ...(isAnswer ? {} : { step }) });
                       return next;
                     }
                     if (isAnswer) {
                       next[next.length - 1] = { ...last, content: text, live: '' };
                     } else {
-                      next[next.length - 1] = { ...last, process: (last.process || '') + text, live: '' };
+                      next[next.length - 1] = { ...last, process: joinNarration(last.process, text), live: '', step };
                     }
                     return next;
                   });
@@ -1135,6 +1219,21 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 f.notify();
                 return;
               }
+              case 'notes': {
+                // How the narration is drawn, for THIS conversation. The config key is
+                // where a conversation starts; this moves it from there and nothing is
+                // saved — /clear comes back to the config's own answer. The bare
+                // command says where things stand rather than guessing at a next rung:
+                // four modes have no obvious order to step through.
+                const want = notesCommand(arg);
+                if (!want) { setError('/notes takes step, fold, open or hidden — or nothing to say which is on'); return; }
+                const next = want === 'say' ? notesRef.current : want;
+                setNotes(next);
+                setField('');
+                (f.services as Record<string, any>).showMessage?.(notesSaid(next));
+                f.notify();
+                return;
+              }
               case 'fullscreen': {
                 // For the person; nothing is sent. `on`/`off`, or a toggle with no word.
                 const v = arg.trim().toLowerCase();
@@ -1230,6 +1329,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 setCursor(0);
                 setShellMode(false); // a fresh conversation opens on a plain prompt
                 setAutoMode('ask'); // and asks again: the mode was granted for the work just cleared
+                setNotes(configNotes()); // the narration goes back to what the config asks for
+                resetStep(); // the step line described work that is gone
                 setError(null);
                 setEmptyNotice('');
                 setToolCount(0);
@@ -1317,6 +1418,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               toolSetRef.current.reset();
               resetImages();
               setAutoMode('ask'); // the new task has not been given the old one's leeway
+              setNotes(configNotes()); // nor kept the narration the old one was set to
+              resetStep();
               msgsRef.current = [];
               setMessages([]);
               // Task change — a new session: reset the status fields too, else the
@@ -1643,6 +1746,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             turnTokens,
             // How many lines of a tool's console block stand before ^r unfolds it.
             viewLines: Number((f.config.plugins as Record<string, { runOutputLines?: unknown }> | undefined)?.assistant?.runOutputLines) || VIEW_CAPS.folded,
+            // How the narration between tool calls is drawn — one step line by default.
+            notes,
             // Live count of IN-FLIGHT background tasks (the host re-renders via
             // notify() when one is armed or completes).
             bgCount: bgActiveCount(),

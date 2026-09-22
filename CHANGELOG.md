@@ -5,6 +5,21 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **One line instead of the folded notes: what it is doing now.** Between tool calls
+  the assistant writes prose, and every answer carried a dim `▸ notes` header with the
+  last two lines of it — a header for text that is mostly noise, with the one thing
+  worth seeing, what it is about to do, hidden inside the fold. In its place there is
+  now one quiet line: the last thing it said it is doing, cut to the width. It changes
+  only on a finished sentence and at most once a second, so it settles instead of
+  flickering, and the answer's own text never appears in it. `^r` still shows
+  everything it said, word for word, and a drag over the answer copies the answer, not
+  the line. A turn that said nothing on the way draws no line at all. The assistant is
+  also asked for less: before a tool call, one short line starting `Next:` and nothing
+  else — so there is one sentence per step and far less to fold. If you preferred the
+  old look, `config set plugins.assistant.notes fold` brings it back, `open` shows the
+  narration unfolded and `hidden` puts none of it on the screen once it has been
+  written; `/notes [step|fold|open|hidden]` changes it for the conversation you are in.
+
 - **A command you confirmed shows what it printed.** You said yes to a `run_command`,
   it ran on your machine, and all you saw of it was one dim line under `^r` — while
   your own `!command` shows its whole output. It now leaves the same block in the chat:

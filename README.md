@@ -39,6 +39,15 @@ update loses nothing. `/clear` starts a new session and keeps the old one;
 `sessions/` in the config directory, readable by you only (`sessions.resume: false`
 starts every run empty; `sessions.keep` — how many are kept, 50 by default).
 
+Between tool calls the assistant says what it is about to do, and the chat shows one
+quiet line of it under the answer: the last thing it said it is doing. It changes
+only on a finished sentence, and at most once a second, so it settles rather than
+flickers; `^r` shows everything it said, word for word. `/notes fold` goes back to
+the older folded header, `/notes open` leaves the whole narration on screen and
+`/notes hidden` keeps it off the screen once it has been written — for the current
+conversation. To have it that way from the start:
+`config set plugins.assistant.notes fold`.
+
 `/fullscreen` gives the chat the whole terminal instead of a window over the
 screen — code, tables and diffs get every column; `/fullscreen off` brings the
 window back. To have it that way from the start:

@@ -16,6 +16,7 @@
 
 import { askRows, type AskRow, type AskState } from '../assistant/ask.js';
 import { autoBadge, type AutoMode } from '../assistant/auto.js';
+import { cutStep, type NotesMode } from '../assistant/step.js';
 import { imageTokenRanges, splitTokens } from '../assistant/images.js';
 import { changeMarkdown, type ChangeView } from '../assistant/diff.js';
 import { VIEW_CAPS, viewMarkdown, type ToolView } from '../assistant/views.js';
@@ -45,6 +46,10 @@ interface ChatMsg {
   reasoning?: string;
   process?: string;
   toolRuns?: ToolRun[];
+  // What the model last said it is doing, one finished sentence (src/assistant/step.ts).
+  // Written when a round of narration commits, so it is the message's own and stays
+  // with it once the turn has ended.
+  step?: string;
   duration?: number;
   stopped?: boolean;
   // What the turn's writes changed — drawn as diff blocks above the answer.
@@ -111,6 +116,9 @@ interface ChatRow {
   reasonHeader?: boolean;
   open?: boolean;
   reason?: boolean;
+  // The one dim line saying what the model last said it is doing. Chrome: never
+  // copied by a drag, and cut to one row rather than wrapped.
+  step?: boolean;
   toolRunsHdr?: boolean;
   toolRun?: boolean;
   spans?: Span[];
@@ -323,22 +331,24 @@ function toolSummary(runs: ToolRun[]): string {
 // changes and never mutates one (see the `setMessages` updaters), which makes the
 // object itself the right key: only the message that is streaming is laid out again.
 const rowCache = new WeakMap<ChatMsg, Map<string, ChatRow[]>>();
-function messageRows(m: ChatMsg, last: boolean, wrap: number, showReasoning: boolean, viewLines: number): ChatRow[] {
+function messageRows(m: ChatMsg, last: boolean, wrap: number, showReasoning: boolean, viewLines: number, notes: NotesMode): ChatRow[] {
   // Everything the rows depend on is in the key — the fold of a tool's block as much
-  // as the width — or a message would keep the rows it was first laid out with.
-  const key = `${wrap}:${showReasoning ? 1 : 0}:${last ? 1 : 0}:${viewLines}`;
+  // as the width, and how the narration is drawn — or a message would keep the rows
+  // it was first laid out with, and `/notes` would change only the message being
+  // written.
+  const key = `${wrap}:${showReasoning ? 1 : 0}:${last ? 1 : 0}:${viewLines}:${notes}`;
   let byKey = rowCache.get(m);
   if (!byKey) rowCache.set(m, (byKey = new Map()));
   let rows = byKey.get(key);
-  if (!rows) byKey.set(key, (rows = buildMessageRows(m, last, wrap, showReasoning, viewLines)));
+  if (!rows) byKey.set(key, (rows = buildMessageRows(m, last, wrap, showReasoning, viewLines, notes)));
   return rows;
 }
 
-function chatRows(messages: ChatMsg[], wrap: number, showReasoning: boolean, viewLines: number): ChatRow[] {
-  return messages.flatMap((m, mi) => messageRows(m, mi === messages.length - 1, wrap, showReasoning, viewLines));
+function chatRows(messages: ChatMsg[], wrap: number, showReasoning: boolean, viewLines: number, notes: NotesMode): ChatRow[] {
+  return messages.flatMap((m, mi) => messageRows(m, mi === messages.length - 1, wrap, showReasoning, viewLines, notes));
 }
 
-function buildMessageRows(m: ChatMsg, last: boolean, wrap: number, showReasoning: boolean, viewLines: number): ChatRow[] {
+function buildMessageRows(m: ChatMsg, last: boolean, wrap: number, showReasoning: boolean, viewLines: number, notes: NotesMode): ChatRow[] {
   const rows: ChatRow[] = [];
   const inner = Math.max(10, wrap - GUTTER);
   {
@@ -371,14 +381,27 @@ function buildMessageRows(m: ChatMsg, last: boolean, wrap: number, showReasoning
     // Text streaming with no reasoning and no tool round behind it IS the answer
     // arriving: it is drawn as content, not folded under a "tool calls" header.
     const liveIsAnswer = hasL && !hasR && !hasP;
-    if (role === 'assistant' && (hasR || hasP)) {
-      // What the model said on the way: its thinking, and its notes between tool calls.
-      const label = (hasR && hasP) ? 'thinking + notes' : (hasR ? 'thinking' : 'notes');
-      rows.push({ role, reasonHeader: true, open: !!showReasoning, label });
-      const bodyLines = mdLines([reasoning, process, live].filter(Boolean).join('\n\n'), inner);
-      const shown = showReasoning ? bodyLines : bodyLines.slice(-2);
-      for (const line of shown) rows.push({ role, reason: true, spans: line.spans, continues: line.continues, chrome: line.chrome, frame: line.frame });
-      rows.push({ gap: true });
+    if (role === 'assistant' && (hasR || hasP) && notes !== 'hidden') {
+      // What the model said on the way: its thinking, and its notes between tool
+      // calls. `step` draws one dim line instead — the last thing it said it is doing
+      // — and gives way to the whole of it under ^r, which is what ^r has always
+      // opened. `open` is that same unfolded view without asking.
+      const unfolded = showReasoning || notes === 'open';
+      const step = String(m.step ?? '').trim();
+      if (notes === 'step' && !unfolded) {
+        // A turn that narrated nothing draws no line at all.
+        if (step) {
+          rows.push({ role, step: true, spans: [{ text: cutStep(step, inner) }] });
+          rows.push({ gap: true });
+        }
+      } else {
+        const label = (hasR && hasP) ? 'thinking + notes' : (hasR ? 'thinking' : 'notes');
+        rows.push({ role, reasonHeader: true, open: unfolded, label });
+        const bodyLines = mdLines([reasoning, process, live].filter(Boolean).join('\n\n'), inner);
+        const shown = unfolded ? bodyLines : bodyLines.slice(-2);
+        for (const line of shown) rows.push({ role, reason: true, spans: line.spans, continues: line.continues, chrome: line.chrome, frame: line.frame });
+        rows.push({ gap: true });
+      }
     }
     // What the turn's writes changed: one block per change, always open (not under
     // ^r) — it is the part of the turn the person most needs to see. Laid out as
@@ -417,11 +440,12 @@ function buildMessageRows(m: ChatMsg, last: boolean, wrap: number, showReasoning
 // chat was one more term to forget, and twice was.
 // Below this many rows the conversation keeps every row for itself.
 const MIN_ROWS_TO_PIN = 4;
-function ChatMessages({ messages, wrap, showReasoning, viewLines, palette: m, errorColor }: {
+function ChatMessages({ messages, wrap, showReasoning, viewLines, notes, palette: m, errorColor }: {
   messages: ChatMsg[];
   wrap: number;
   showReasoning: boolean;
   viewLines: number;
+  notes: NotesMode;
   palette: Record<string, string | undefined>;
   errorColor?: string;
 }) {
@@ -433,7 +457,7 @@ function ChatMessages({ messages, wrap, showReasoning, viewLines, palette: m, er
   const asked = messages.reduce((n, x) => n + (x.role === 'user' || x.role === 'shell' ? 1 : 0), 0);
   useEffect(() => { box.current?.scrollToEnd(); }, [asked]);
 
-  const rows = chatRows(messages, wrap, showReasoning, viewLines);
+  const rows = chatRows(messages, wrap, showReasoning, viewLines, notes);
   let lastUserKey = -1;
   for (let i = 0; i < rows.length; i++) if (rows[i]!.role === 'user' && rows[i]!.first) lastUserKey = i;
   let lastUserText = '';
@@ -501,6 +525,12 @@ function ChatMessages({ messages, wrap, showReasoning, viewLines, palette: m, er
       const key = `chat-${i}`;
       if (row.gap) return h(Box, { key, height: 1, flexShrink: 0 });
       if (row.reasonHeader) return h(Text, { key, dim: true, color: 'magenta', selectable: false }, `${' '.repeat(GUTTER)}${row.open ? '▾' : '▸'} ${row.label}`);
+      // The step line. Chrome, like the `N tools` line and the gutter: a drag across
+      // the answer returns what the model SAID, never the host's account of what it
+      // was doing. It is cut to the width above, and truncated here as well so that
+      // it can never take a second row — the whole conversation is laid out one
+      // terminal line per row.
+      if (row.step) return h(Text, { key, dim: true, wrap: 'truncate', selectable: false }, `${' '.repeat(GUTTER)}${String(row.spans?.[0]?.text ?? '')}`);
       if (row.reason) return h(Box, { key, flexDirection: 'row', flexShrink: 0, ...frameRow(row) },
         gutter(row),
         content(row, (s, j) => h(Text, { key: j, dim: true, bold: s.bold, underline: s.underline, color: s.color, selectable: j < (row.chrome ?? 0) ? false : undefined }, String(s.text ?? ''))));
@@ -583,6 +613,7 @@ export function renderChatModal({
   toolCount = 0,
   turnTokens = 0,
   viewLines = VIEW_CAPS.folded,
+  notes = 'step',
   completions = null,
   bgCount = 0,
   contextBadge = '',
@@ -631,6 +662,10 @@ export function renderChatModal({
   // How many lines of a tool's console block stand before ^r unfolds the whole of it
   // (`plugins.assistant.runOutputLines`).
   viewLines?: number;
+  // How the narration between tool calls is drawn (`plugins.assistant.notes`,
+  // `/notes` for the conversation): one step line, folded behind its header, fully
+  // open, or not at all.
+  notes?: NotesMode;
   completions?: Completions | null;
   bgCount?: number;
   // `ctx 12%` (assistant/context-meter.ts); yellow once it is time to /compact.
@@ -730,7 +765,7 @@ export function renderChatModal({
         // <ScrollBox> is one), so a drag there stays in the conversation.
         selectionScope: true,
       },
-      h(ChatMessages, { messages, wrap, showReasoning, viewLines, palette: m, errorColor: theme?.error }),
+      h(ChatMessages, { messages, wrap, showReasoning, viewLines, notes, palette: m, errorColor: theme?.error }),
       error ? h(Text, { color: 'red' }, `⚠ ${error}`) : null,
       // The hint on the left, how full the model's context is on the right — it stays
       // put while the hint changes, and turns yellow when it is time to /compact.

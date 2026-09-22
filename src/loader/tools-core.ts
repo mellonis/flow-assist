@@ -94,6 +94,10 @@ const KEY_DEFAULTS: Record<string, string> = {
   // only when config.plugins.keycaps.enabled = true. Saying "always active" made the
   // LLM conclude "already on, nothing to enable" and refuse the request.
   plugins: 'built-in core, assistant, keycaps, log are always LOADED; each is configured via config.plugins.<name>.* (keycaps shows its panel only when config.plugins.keycaps.enabled = true — it is OFF by default)',
+  // Said in full: "what is that dim line under the answer?" and "where did the notes
+  // go?" are asked of the assistant. The full path, so the other assistant keys keep
+  // the `plugins` note above.
+  'plugins.assistant.notes': 'step — what the model says between tool calls is shown as ONE dim line under the answer, the last complete sentence of it ("the step"); Ctrl+r still unfolds all of it. fold — the older look: a ▸ header with the last two lines under it. open — the whole narration, unfolded. hidden — none of it is drawn (Ctrl+r still opens the tool calls). In the chat, /notes [step|fold|open|hidden] changes it for the current conversation only',
 };
 
 // Resolves the zod node for a config key, falling back to a plugin's own

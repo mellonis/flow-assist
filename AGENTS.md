@@ -652,7 +652,61 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   written in the handler — the log used to close on a hard-coded `l`.
 - **↑/↓** walk the prompt history, only while the field is empty or still shows a
   history entry untouched. The **wheel** and **PgUp/PgDn** scroll. **^r** unfolds
-  thinking, notes and the tool calls behind the one-line `▸ N tools` summary.
+  everything the model said on the way — its thinking and its narration — and the tool
+  calls behind the one-line `▸ N tools` summary.
+- **What it said between tool calls is ONE line: the step** (`src/assistant/step.ts`,
+  pure; the chat owns the state and the view draws the row). Every answer used to carry
+  a `▸ notes` header and the last two lines of prose under it, so the header was there
+  for text that is mostly noise while the one thing worth seeing — what it is about to
+  do — was inside the fold. It is now one dim row: the last thing the model SAID it is
+  doing. The naive version of that line flickered (six changes over one turn, growing
+  mid-sentence, and picking up the final answer as it streamed); what is drawn was
+  measured against a recording of a live turn, and three rules make the difference:
+  - **Only a complete sentence is shown** — one ending `.`/`!`/`?`. The narration is
+    read as a PREFIX of what is being written: every line but the last was closed by
+    its newline, the last only by its own punctuation. While a new sentence is being
+    written the previous one stays. The exception is a **`Next:` line**, which the
+    prompt asks for before a tool call and which a model often leaves unpunctuated: its
+    newline closes it, and the `Next:` itself is stripped — it is protocol, not
+    something to read.
+  - **At most one change a second.** A change that comes sooner waits and lands when
+    the second is up (`offerStep` / `dueStep` / `stepWaitMs`, with a timer in the chat);
+    nothing is lost and nothing flickers. The state is the CONVERSATION's — never
+    module-level — and every turn starts it again, so a turn's first step is immediate.
+  - **The answer's own text never feeds the line.** Only the narration of rounds that
+    carried tool calls does — what `onLiveCommit` commits to `process`, never a round's
+    `live` or the final content. That was the prototype's real bug. Reasoning does not
+    feed it either: the status line already says `thinking…`.
+  The line is chrome — `selectable: false`, so a drag over an answer copies what the
+  model wrote and not the host's account of it — and exactly ONE terminal row, cut with
+  `…` rather than wrapped. A turn that narrated nothing, or nothing finished, draws no
+  line at all.
+  - **The rounds are kept apart where `process` is accumulated** (`joinNarration`): two
+    chunks appended with nothing between them read as one broken sentence ("…how many
+    there are.Now I will count them…"), in the fold as much as in the line.
+  - **`plugins.assistant.notes` says how much is drawn, `/notes [step|fold|open|hidden]`
+    changes it for the conversation** — the pattern `/fullscreen` uses: the config is
+    where a conversation starts, the command moves it from there, nothing is saved, and
+    `/clear` comes back to the config's answer. `step` (the default) is the line;
+    `fold` is the older `▸ notes` header with the last two lines under it; `open` is
+    the whole narration unfolded; `hidden` draws none of it, in either ^r state (^r
+    still opens the tool calls and the views). Under ^r, `step` shows what `open` shows
+    — the line is a summary of what is then fully on screen. The mode is in the
+    `rowCache` key, or `/notes` would redraw only the message being written. It
+    belongs to the CONVERSATION, like the auto mode: nothing is saved, and `/clear`,
+    `/resume` and a change of task all go back to what the config says.
+  - **The mode decides how a round is KEPT, not how it arrives.** A round that has not
+    committed is not yet narration — the chat cannot tell what is streaming from the
+    answer itself (`liveIsAnswer`) — so its text is drawn as it arrives whatever the
+    mode is, and the mode applies the moment the round commits with its tool calls.
+    That is how the fold behaved too; it is what `hidden` means by "draws nothing".
+  - **The model is asked for the shape, not for silence.** `baseStatic()` used to tell
+    it not to narrate; it narrated anyway, having nothing else to write between calls.
+    It now asks for ONE short line starting `Next:` before a tool call and nothing else
+    between calls, and for the final answer not to start with one. So there is one
+    sentence per step and far less to fold. Whether the instruction holds over a long
+    turn, and that it costs no tool call, is a question for a live run
+    (`scripts/eval-tool-use.ts`); the e2e test only holds the host to SENDING it.
 - **⇧⇥ steps the auto mode** — how much of a turn runs without the y/n (the rules are
   under "What the model can do"). It is one of the chat's own fixed keys, like ⏎ and
   Esc, drawn with `keyGlyph` and NOT in `HOST_DEFAULT_KEYS`: the chat owns the keyboard
