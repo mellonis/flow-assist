@@ -27,6 +27,19 @@ English throughout; a half-translated screen is worse than either language.
   own `node_modules` is skipped by the binary; a plugin bundled into one file has no
   on-disk package left to resolve, and loads. It was never a two-React problem —
   plugins take hooks from `ft` and import only types from React.
+- **Where the program finds its plugins and `.env`** (`src/install.ts` on the pure
+  `src/loader/install-root.ts`). The root holding `plugins-available/` +
+  `plugins-enabled/` is the first of: a source checkout (one up from `src/`, never
+  the binary's virtual `bunfs`), `dirname(realpath(process.execPath))` — the directory
+  a compiled binary is installed in, through a link to it — and the working directory,
+  which is also what gets reported when nothing is found. Both plugin dirs must exist
+  for the first two. Bun reads `.env` from the working directory only, so when the
+  root is elsewhere `<root>/.env` is loaded too, never overriding a variable already
+  set (not under `NODE_ENV=test`). `install.ts` is `cli.ts`'s FIRST import: the config
+  directory is fixed when `config/load.ts` is evaluated, so a `.env` loaded from
+  `main` would reach only half of the program. No enabled plugin is never silent:
+  `noPluginsNote` says where the host looked — on the start screen (in the plugins'
+  place), in the log, after `plugins ls`, on stderr of a one-shot prompt.
 - **A published plugin ships no `node_modules`** (`packPlugin` in
   `scripts/publish.ts`). With dependencies it must have a `build` script that bundles
   them into `package.json`'s `main` (React and flowtty external — the host provides
@@ -263,7 +276,8 @@ assistant nobody had asked for a board.
   conversation has LOADED, and `tools_load`, whose description is the index — per
   group, `name — first sentence of the description`. The index does not change as
   tools load (a stable prefix). `tools_load({ names | group })` is the loop's own
-  tool, not the registry's; what is sent is worked out again for EVERY round, so a
+  tool, not the registry's; a group's name given in `names` loads the group (a tool of
+  the same name wins) — a model passes one there, and refusing it cost a round; what is sent is worked out again for EVERY round, so a
   load reaches the next round of the same turn. A call to a tool that is indexed but
   not loaded is an ERROR naming `tools_load`, refused BEFORE the y/n — the wire-name
   map covers every known tool, not only the sent ones, or that call would not even

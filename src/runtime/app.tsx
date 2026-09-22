@@ -118,6 +118,10 @@ export interface RenderAppInput {
   // Reads the image on the system clipboard into a file (`readClipboardImage`, the
   // platform's tools). Only tests pass one — a fake clipboard, no tools run.
   clipboardImage?: () => ClipboardImage;
+  // Where the host looked for plugins when it found none (`noPluginsNote`). It goes
+  // into the log and onto the start screen: a binary started from the wrong place
+  // otherwise just looks like an assistant with fewer tools.
+  pluginsNote?: string;
 }
 
 // Command-line state lives in a single stable `{ current }` object created in
@@ -152,7 +156,7 @@ export function useSurfaceSize(): { width: number; height: number } {
 
 export function renderApp(
   root: Backend,
-  { plugins, config, onExit, renders: _renders = {}, tools, toastMs, clipboardImage }: RenderAppInput,
+  { plugins, config, onExit, renders: _renders = {}, tools, toastMs, clipboardImage, pluginsNote }: RenderAppInput,
 ) {
   // Resolve config.theme into the full per-modal palette BEFORE anything reads it
   // (createServices/ft and every renderer read `f.config.theme`): the base of the
@@ -166,6 +170,7 @@ export function renderApp(
   config.theme = resolveAppTheme(userTheme, plugins, config, themeScheme);
   const services = createServices({ config, tools, onExit });
   (services as unknown as HostServices).clipboardImage = clipboardImage ?? (() => readClipboardImage());
+  if (pluginsNote) services.log.append(`[plugins] ${pluginsNote}`);
   const viewRegistry = buildViewRegistry(plugins);
   const commandRegistry = buildCommandRegistry(plugins);
   const keys = buildKeys(plugins, config);
@@ -650,7 +655,7 @@ export function renderApp(
       // the footer under a modal's dimmed backdrop, like everything else behind it.
       h(Box, { flexGrow: 1, zIndex: 1 },
         overlayComps.filter((c) => !c.surface || surfaceActive(c.plugin)).map(({ Comp, key }) => h(Comp as any, { key })),
-        atHome ? renderHome({ title, plugins, keys, builtins: BUILTIN_PLUGINS, width: termWidth }) : null),
+        atHome ? renderHome({ title, plugins, keys, builtins: BUILTIN_PLUGINS, width: termWidth, pluginsNote }) : null),
       h(Box, { padding: 1, flexDirection: 'column', selectable: false },
         // `dim`, not `dimColor` — the latter is another library's prop; flowtty does
         // not know it, and an `as any` had been hiding that the footer was never dimmed.

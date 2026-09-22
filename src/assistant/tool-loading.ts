@@ -140,15 +140,22 @@ export function runToolsLoad(args: Record<string, unknown>, catalog: CatalogEntr
   const wanted: string[] = [];
   const always: string[] = []; // sent in full on every request anyway
   const unknown: string[] = [];
+  const inGroup = (label: string) => [...deferred.values()].filter((e) => groupLabel(e.group) === label).map((e) => e.name);
   if (group) {
-    const inGroup = [...deferred.values()].filter((e) => groupLabel(e.group) === group).map((e) => e.name);
-    if (inGroup.length) wanted.push(...inGroup);
+    const tools = inGroup(group);
+    if (tools.length) wanted.push(...tools);
     else if (group === ALWAYS_LOADED_GROUP) always.push(`group "${group}"`);
     else unknown.push(`group "${group}"`);
   }
   for (const n of asked) {
     if (deferred.has(n)) wanted.push(n);
     else if (n === TOOLS_LOAD || catalog.some((e) => e.name === n)) always.push(n);
+    // A group's name in `names` is read as that group. The index shows the groups
+    // right beside the tools, so a model reasonably passes one there; refusing it
+    // with an error that lists it as a group cost a round for nothing. A tool of the
+    // same name wins, which the two branches above already decide.
+    else if (inGroup(n).length) wanted.push(...inGroup(n));
+    else if (n === ALWAYS_LOADED_GROUP) always.push(`group "${n}"`);
     else unknown.push(n);
   }
   if (!wanted.length && !always.length) throw new Error(`Not in the list: ${unknown.join(', ')}. Groups: ${groups.join(', ')}.`);

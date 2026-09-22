@@ -9,7 +9,9 @@
 // heavy lifting (config, plugins, registry, TUI, agent) is consumed from the
 // already-built modules; here we only wire them together and translate argv.
 
-import { resolve, join } from 'node:path';
+// First, before any module that reads the environment as it loads: where this
+// installation lives, and its `.env` (see install.ts).
+import { projectRoot, availableDir, enabledDir } from './install.js';
 import { existsSync } from 'node:fs';
 import { TtyBackend, isInteractive } from '@flowtty/tty-backend';
 import { loadConfig } from './config/load.js';
@@ -23,6 +25,7 @@ import {
   configWarnings,
 } from './config/load.js';
 import { createPluginRepo } from './loader/repo.js';
+import { noPluginsNote } from './loader/install-root.js';
 import { fetchPluginFromRegistry } from './loader/registry-download.js';
 import { installPluginArchive, isArchiveSource } from './loader/archive-install.js';
 import type { PluginRepo } from './loader/repo.js';
@@ -45,28 +48,15 @@ import { purgePluginMemories } from './runtime/services/memory.js';
 // NOOP_VIEW placeholder and render blank.
 const renders = { chat: renderChatModal, help: renderHelp, log: renderLogModal, reminder: renderReminder };
 
-// The project root is one directory up from this file (`src/cli.ts` → the repo
-// root; `dist/cli.js` → the same root). The plugin sources live in
-// `plugins-available/` (git-tracked) and the ACTIVE set is exposed through
-// `plugins-enabled/` (a symlink dir). Registry downloads are wired to the real
-// fetcher (`fetchPluginFromRegistry`): when a source is absent locally,
-// `plugins install/update` fetch it from a GitLab Generic Packages Registry,
-// which needs a FLOW_ASSIST_PLUGIN_REGISTRY_TOKEN (read-only). If the token is unset, the repo falls
+// The project root holds the plugin sources in `plugins-available/` and the ACTIVE
+// set in `plugins-enabled/` (a symlink dir): a source checkout's root, else the
+// directory the compiled binary is installed in, else the working directory — see
+// `resolveInstallRoot`, settled in install.ts. Registry downloads are wired to the
+// real fetcher (`fetchPluginFromRegistry`): when a source is absent locally, `plugins
+// install/update` fetch it from a GitLab Generic Packages Registry, which needs a
+// FLOW_ASSIST_PLUGIN_REGISTRY_TOKEN (read-only). If the token is unset, the repo falls
 // back to "not available locally" cleanly.
 //
-// Robustness guard: when the entry is bundle-wrapped the runtime dirname may
-// contain `bunfs` (the virtual filesystem), or the plugin dirs may simply not
-// exist next to the entry. In either case fall back to `process.cwd()` so the
-// plugin dirs resolve to a real, writable location.
-const candidateRoot = resolve(import.meta.dirname, '..');
-const candidateAvailable = join(candidateRoot, 'plugins-available');
-const candidateEnabled = join(candidateRoot, 'plugins-enabled');
-const projectRoot =
-  import.meta.dirname.includes('bunfs') || !(existsSync(candidateAvailable) && existsSync(candidateEnabled))
-    ? process.cwd()
-    : candidateRoot;
-const availableDir = join(projectRoot, 'plugins-available');
-const enabledDir = join(projectRoot, 'plugins-enabled');
 // The registry fetcher reads env defaults at construction (FLOW_ASSIST_PLUGIN_REGISTRY_URL /
 // FLOW_ASSIST_PLUGIN_REGISTRY_PROJECT / FLOW_ASSIST_PLUGIN_REGISTRY_TOKEN) so the CLI still runs `plugins ls`
 // without a token; a missing token only surfaces as an error at download time.
@@ -76,6 +66,11 @@ const fetchPlugin = fetchPluginFromRegistry({
   token: process.env.FLOW_ASSIST_PLUGIN_REGISTRY_TOKEN ?? process.env.GITLAB_TOKEN,
   availableDir,
 });
+
+// Where the host looked for plugins, when it found none; null when there are some.
+async function missingPluginsNote(repo: PluginRepo): Promise<string | null> {
+  return noPluginsNote(enabledDir, (await repo.enabledPlugins()).length, existsSync);
+}
 
 // The classified command. `prompt` keeps the full argv so `main` can join it into
 // the user's prompt text; `config`/`plugins` keep the subcommand args.
@@ -193,6 +188,8 @@ async function runPlugins(args: string[], config: Record<string, unknown>, repo:
       const settingMiss = e.missingSettings?.length ? `  missing settings: ${e.missingSettings.join(',')}` : '';
       console.log(`${e.name}  v${e.version || '-'}  [${state}]${source}${missing}${settingMiss}`);
     }
+    const note = await missingPluginsNote(repo);
+    if (note) console.log(note);
     return;
   }
 
@@ -255,6 +252,9 @@ async function runPrompt(args: string[], config: Record<string, unknown>, repo: 
   const plugins = await loadPlugins({ config, repo, renders, enabledDir });
   const registry = assembleToolRegistry({ plugins, config, repo: repo as unknown as RepoShape });
   const log = createLogService(config);
+  // On stderr, so an answer piped elsewhere stays clean.
+  const note = await missingPluginsNote(repo);
+  if (note) console.error(`[plugins] ${note}`);
 
   // Plugin ai-tools live in the assembled registry as synthetic groups whose id
   // ends with `:aiTools` — collect their tools for the agent's extraTools.
@@ -318,7 +318,8 @@ async function runInteractive(config: Record<string, unknown>, repo: PluginRepo)
     backend.dispose?.();
     process.exit(0);
   };
-  handle = await renderApp(backend, { plugins, config, renders: {}, tools: registry, onExit });
+  const pluginsNote = await missingPluginsNote(repo);
+  handle = await renderApp(backend, { plugins, config, renders: {}, tools: registry, onExit, pluginsNote: pluginsNote ?? undefined });
 }
 
 // ─── help text ────────────────────────────────────────────────────────────────

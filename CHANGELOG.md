@@ -5,6 +5,18 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **The installed binary finds its plugins from any directory.** Started as
+  `./kit/flow-assist` from somewhere else, it looked for `plugins-enabled/` in the
+  working directory, found none, and ran with the host's own tools only — saying
+  nothing. It now looks beside itself (following a link to the binary), and the
+  working directory is only the last resort. A `.env` beside the binary is read too,
+  and never overrides a variable already set in the environment. When no plugin is
+  enabled, the start screen, the log, `plugins ls` and a one-shot prompt say which
+  directory was searched.
+- **`tools_load` takes a group's name among `names`.** `tools_load({ names: ["web"] })`
+  was refused as "not in the list" by an error that listed `web` as a group; it now
+  loads the group. A tool of the same name still wins.
+
 - **Show the assistant an image.** Drag a screenshot onto the terminal (or paste its
   path — quoted, `\ `-escaped, several at once), type `/image <path>`, or press Ctrl+V
   for the image on the clipboard (an empty Cmd+V paste does the same; macOS uses

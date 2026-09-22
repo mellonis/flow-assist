@@ -23,7 +23,7 @@ export const LOGO = [
 
 interface HomePlugin { name: string; description?: string; entry?: string[]; tools?: unknown[]; aiTools?: unknown[] }
 
-export function renderHome({ title, plugins, keys, builtins, width = 80, accent = 'green' }: {
+export function renderHome({ title, plugins, keys, builtins, width = 80, accent = 'green', pluginsNote }: {
   title: string;
   plugins: HomePlugin[];
   // The resolved key map — so what is shown is what is bound NOW.
@@ -33,6 +33,9 @@ export function renderHome({ title, plugins, keys, builtins, width = 80, accent 
   // Terminal width, to size the column of descriptions.
   width?: number;
   accent?: string;
+  // Where the host looked for plugins and found none. Shown in the plugins' place, so
+  // an empty list says where it came from instead of just being missing.
+  pluginsNote?: string;
 }) {
   const cap = (action: string) => bindingGlyph(keys[action]);
   // What a person can do from here, each only if its key is bound.
@@ -88,5 +91,11 @@ export function renderHome({ title, plugins, keys, builtins, width = 80, accent 
             // its first — it neither runs off the screen nor stretches the block.
             h(Box, { width: descW, marginLeft: 2, flexShrink: 0 },
               h(Text, { dim: true, wrap: 'wrap' }, g.description ?? (g.tools ? 'tools for the assistant' : ''))))))
-      : null));
+      : pluginsNote
+        ? h(Box, { flexDirection: 'column' },
+            h(Text, { dim: true }, 'plugins'),
+            // A path can be longer than the screen; it wraps rather than running off.
+            h(Box, { width: Math.min(Array.from(pluginsNote).length, Math.max(16, width - 6)), marginLeft: 2, flexShrink: 0 },
+              h(Text, { dim: true, wrap: 'wrap' }, pluginsNote)))
+        : null));
 }

@@ -81,6 +81,26 @@ test('tools_load takes names or a group, says what it did, and refuses what is n
   expect(set.names()).toEqual(['read_file', 'list_dir', 'get_issue']);
 });
 
+test('a group name passed in names loads that group, as `group` would', () => {
+  const set = createToolSet();
+  expect(runToolsLoad({ names: ['repo'] }, catalog, set)).toBe('Loaded: read_file, list_dir — call them now.');
+  expect(set.names()).toEqual(['read_file', 'list_dir']);
+  // Mixed with tool names, and with a name that is neither.
+  const mixed = createToolSet();
+  expect(runToolsLoad({ names: ['get_issue', 'repo', 'nope'] }, catalog, mixed))
+    .toBe('Loaded: get_issue, read_file, list_dir — call them now. Not in the list: nope.');
+  // The always-sent group, named in names, is not an error either.
+  expect(runToolsLoad({ names: ['core'] }, catalog, createToolSet())).toBe('Already loaded: group "core".');
+  expect(() => runToolsLoad({ names: ['nope'] }, catalog, createToolSet())).toThrow('Not in the list: nope. Groups: repo, acme.');
+});
+
+test('a name that is both a tool and a group stays the tool', () => {
+  const clash: CatalogEntry[] = [...catalog, entry('repo', 'misc')];
+  const set = createToolSet();
+  expect(runToolsLoad({ names: ['repo'] }, clash, set)).toBe('Loaded: repo — call them now.');
+  expect(set.names()).toEqual(['repo']);
+});
+
 test('a loaded set is saved as names and put back from them; anything else reads as empty', () => {
   const set = createToolSet();
   set.add(['a', 'b', 'a']);

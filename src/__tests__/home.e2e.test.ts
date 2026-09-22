@@ -155,6 +155,21 @@ test('a long description wraps under its own first line, and the block stays cen
   ui.app.unmount();
 });
 
+// A binary started away from its plugins used to run with none and say nothing. With
+// no guest, the start screen and the log say where the host looked.
+test('with no plugins, the start screen and the log say where the host looked', async () => {
+  const note = 'no plugins in /opt/kit/plugins-enabled';
+  const ui = await bootApp(new ScriptedModel(), 100, 26, undefined, {}, { pluginsNote: note });
+  expect(ui.backend.lastFrame).toContain(note);
+  await ui.press('L');
+  expect(ui.backend.lastFrame).toContain(`[plugins] ${note}`);
+  ui.app.unmount();
+  // A guest on screen is the list; the note is not drawn beside it.
+  const withGuest = await bootApp(new ScriptedModel(), 100, 26, guest({ open: false }), {}, { pluginsNote: note });
+  expect(withGuest.backend.lastFrame).not.toContain(note);
+  withGuest.app.unmount();
+});
+
 // Quitting is a command, not a letter: a stray `q` closed the whole app. No lower-case
 // letter does anything on the start screen — each is pressed and the screen, the
 // footer and the process are as they were.
