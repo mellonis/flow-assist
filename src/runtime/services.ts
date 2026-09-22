@@ -39,6 +39,9 @@ export interface HostServices {
   pluginAiTools: AiToolDef[];
   openBrowser: (url: string) => void;
   copyToClipboard: (text: string) => void;
+  // The image on the system clipboard, written to a private temporary file (the chat's
+  // `/image`, Ctrl+V, an empty paste). Bound by `renderApp`; a test passes a fake.
+  clipboardImage?: () => import('../assistant/images.js').ClipboardImage;
   showMessage: (msg: string) => void;
   onExit: () => void;
   clearCache: () => void;

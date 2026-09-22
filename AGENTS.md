@@ -289,6 +289,8 @@ assistant nobody had asked for a board.
   newest session is continued unless `/clear` closed it (`sessions.resume: false`
   turns this off); `/clear` and a change of task start a new one and keep the old on
   `/resume` (`/resume <n>` opens it). The last 400 messages are kept, 50 sessions.
+  An image is saved as a ref (`images`, `imageSeq` — see "Images" under The chat),
+  never as its bytes; the e2e test asserts the file holds no base64.
   **Under `bun test` with no `sessions.dir` nothing touches disk** (`sessionsDir` →
   null): `bootApp` gives every test a temp dir, and a test that renders the app
   directly must not write into, or continue, the person's own chats. A restored
@@ -417,6 +419,26 @@ message is model-side only: the screen already says `stopped (Esc)` or shows the
 error. It is saved with the session like the rest of `apiRef`
 (`turn-end.e2e.test.ts` asserts on what the model is sent next).
 
+**An image is kept as a ref and sent as a part.** `ChatMessage.content` is
+`string | ContentPart[] | null`, but content PARTS exist only on the way to the
+provider: everywhere the host keeps a message (the display list, `apiRef`, the
+session) its content is a string, and a person's message with images carries them
+beside it as `images: ImageRef[]` (`{ n, name, path, sha256, mime, bytes, width,
+height }`, `src/assistant/images.ts`) — on the display message only their numbers.
+`apiHistory` passes a user message's `images` through; `send()` alone turns them into
+`[{type:'text'}, {type:'image_url', image_url:{url:'data:…'}}]` (`wireMessages`) right
+before `chatLLM`, from bytes read when the image was attached or, after a restart,
+read again from the path with the hash checked. A file gone or changed is a `note` in
+the chat (once per image) and the message goes as its text + `[image unavailable:
+name]`; with `ai.images.enabled` false every image goes as `[image not sent: name]`.
+So the session file never holds base64, and the context meter never counts it — it
+counts an image by its pixels (`imageTokens`: w×h/750 after the providers' scaling,
+1600 when the size is unknown), as a part of its own. `/compact` sends text with
+`[image: name]` and the image leaves with the history it replaced; `/clear` drops it.
+A provider 400 that talks about images is quoted once as a `note` naming
+`config set ai.images.enabled false` — the image stays in the history, so without
+that every later message fails too. A background task never gets images.
+
 ## The command line
 
 `:` opens it. It completes **inline, on its one row**, as the chat's field does: the
@@ -527,6 +549,32 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   a pasted newline does not send and pasted letters fire no binding — any new
   key handler must keep it that way (match on `key.name`, never on characters of
   pasted text).
+- **Images** (`src/assistant/images.ts`; the model's side is under "The conversation
+  the model sees"). The person attaches; the model can never make the host read a
+  file as an image. An attachment is a TOKEN in the field's text, `[Image #N]`, put
+  in at the caret with a space after it, drawn in `accent` (in the field and in the
+  sent message — not dim, which in the field means "offered"). N counts up for the
+  whole conversation (`imagesRef` N → ref, `imageSeqRef`; saved as the session's
+  `images` / `imageSeq`, reset by `/clear` and a change of task). The TEXT decides
+  what is sent — the tokens it holds that the map knows, in the order written, each
+  once — so a queued message, ↑/↓ recall and the draft carry their images by their
+  text alone; a token edited away is not sent, one typed by hand with nothing behind
+  it is text. Ways in, all refused the same way (`not attached: <why>` on the error
+  line — too big, too many, not an image, missing, `IMAGES_OFF`; nothing shrunk):
+  - a PASTE that is wholly paths of image files (a file dragged onto the terminal
+    arrives as its path; quoted, `\ `-escaped, several, `file://`), decided on the
+    paste key, never on characters; a refused one goes in as text. Not in shell mode
+    or a `/`/`!` field — there a path is the command's argument.
+  - `/image <path>` (any word is a path there, relative to the shell's directory);
+    `/image` alone, **Ctrl+V** (free in the editor reducer) and an EMPTY paste — the
+    only signal a terminal gives for Cmd+V with an image on the clipboard — take the
+    clipboard's image through `services.clipboardImage` (`readClipboardImage`:
+    pngpaste → osascript; wl-paste → xclip; a private temp file). From a key an empty
+    clipboard is only a toast. `bootApp`'s `opts.clipboardImage` fakes it; without
+    one a test's clipboard is empty.
+  - The file is taken by its real path, told by its magic bytes (png, jpeg, gif,
+    webp), its size read from the header. The chat's key handler runs first:
+    Backspace right after a token (Delete right before one) removes it whole.
 - The mouse is reported because the TTY backend is opened with `{ mouse }`, on
   unless `ui.mouse` is `false`: the wheel scrolls, and a **drag selects and copies**
   (flowtty ≥ 1.0.0-alpha.15 copy-on-select — no host code draws the band or reads the
@@ -752,6 +800,11 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
 
 - Config: `~/.config/flow-assist/config.json` (schema from each plugin's `configSchema`).
 - Environment: the host reads `LLM_TOKEN` (or `ai.tokenEnv`) and the optional `FLOW_ASSIST_PLUGIN_REGISTRY_URL` / `FLOW_ASSIST_PLUGIN_REGISTRY_PROJECT` / `FLOW_ASSIST_PLUGIN_REGISTRY_TOKEN`; host variables take the `FLOW_ASSIST_` prefix. A plugin owns its own variables and declares them in `requiredSettings`.
+- `ai.images` (`enabled` true, `maxBytes` 5 MB, `maxPerMessage` 4) — images in the
+  chat. On by default: the API cannot be asked whether a model takes images, so a
+  machine whose model cannot says `config set ai.images.enabled false`. Its
+  `config_schema` note (`KEY_DEFAULTS['ai.images']`; a leaf takes the note of its
+  nearest parent that has one) says how to attach and how to turn it off.
 - `config.user` (`name`, `login`) is the only source of the person's identity in the chat context — never the environment or the OS account.
 
 ## Testing

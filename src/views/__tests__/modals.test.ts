@@ -361,18 +361,18 @@ test('the input keeps a blank line, and the caret can stand on it', () => {
 
   const two = at('first\n\nsecond', 13);
   expect(two).toHaveLength(3);
-  expect(two[1]).toEqual({ before: '', caret: '', after: '' });
+  expect(two[1]).toEqual({ before: '', caret: '', after: '', start: 6 });
 
   // Caret ON the blank line (right after the first newline).
   const on = at('first\n\nsecond', 6);
   expect(caretRow(on)).toBe(1);
-  expect(on[1]).toEqual({ before: '', caret: ' ', after: '' });
-  expect(on[2]).toEqual({ before: 'second', caret: '', after: '' });
+  expect(on[1]).toEqual({ before: '', caret: ' ', after: '', start: 6 });
+  expect(on[2]).toEqual({ before: 'second', caret: '', after: '', start: 7 });
 
   // Caret at the END of a line that is followed by a newline stays on that line.
   const end = at('first\n\nsecond', 5);
   expect(caretRow(end)).toBe(0);
-  expect(end[0]).toEqual({ before: 'first', caret: ' ', after: '' });
+  expect(end[0]).toEqual({ before: 'first', caret: ' ', after: '', start: 0 });
 
   // Trailing blank lines: the caret is on the last one.
   const trailing = at('first\n\n', 7);

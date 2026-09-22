@@ -24,12 +24,16 @@ import { askKey, askStart, type AskQuestion, type AskState } from '../assistant/
 import { loadMemories, memoryFilePath, saveMemories } from '../runtime/services/memory.js';
 import { keptAfterClear, memoryCommand } from '../assistant/memory-command.js';
 import { CONTEXT_WARN_AT, DEFAULT_CONTEXT_WINDOW, contextBadge, readContext } from '../assistant/context-meter.js';
+import {
+  IMAGES_OFF, dataUrl, imageLimits, imagesInText, insertToken, isImageRefusal, loadImageFile, pastedPaths, readClipboardImage, readImageData, removeTokenAt, wireMessages,
+  type ClipboardImage, type ImageRef, type LoadedOk, type ResolvedImage,
+} from '../assistant/images.js';
 import type { Make } from '../loader/plugin.js';
 import type { Plugin } from '../loader/plugin.js';
 
 // Slash-commands of the chat — a single source for runChatCommand and Tab-completion.
 // `/analyze` is a tracker slash command and is removed.
-const CHAT_COMMANDS = ['compact', 'context', 'copy', 'resume', 'clear', 'memory', 'fullscreen', 'log', 'exit'];
+const CHAT_COMMANDS = ['compact', 'context', 'copy', 'image', 'resume', 'clear', 'memory', 'fullscreen', 'log', 'exit'];
 
 // A plain object holding every enumerable service, inherited ones included.
 // `for…in` walks the prototype chain, which is exactly what a spread does not.
@@ -297,6 +301,28 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const [shellMode, setShellModeState] = f.useState(false);
           const shellModeRef = f.useRef(shellMode);
           const setShellMode = (v: boolean) => { shellModeRef.current = v; setShellModeState(v); };
+          // ── Images (src/assistant/images.ts) ── what each `[Image #N]` of this
+          // conversation stands for, and the last N given out. The conversation's, like
+          // the plan: saved with the session, emptied by /clear and a change of task. The
+          // TEXT decides what a message sends — the tokens in it this map knows — so the
+          // field, a queued message, ↑/↓ and the draft need nothing beside their text.
+          const imagesRef = f.useRef(new Map<number, ImageRef>());
+          const imageSeqRef = f.useRef(0);
+          // The `data:` URL of an image, once read and found unchanged — built on the way to
+          // the provider, never kept in a message or written to disk. Keyed by path + hash.
+          const imageDataRef = f.useRef(new Map<string, string>());
+          // Images already said to be gone, so the note is not repeated with every message;
+          // and whether the provider's refusal of an image has been explained.
+          const imageNotedRef = f.useRef(new Set<string>());
+          const imageRefusalSaidRef = f.useRef(false);
+          const imageKey = (r: ImageRef) => `${r.path}\0${r.sha256}`;
+          const resetImages = (refs: ImageRef[] = [], seq = 0) => {
+            imagesRef.current = new Map(refs.map((r) => [r.n, r]));
+            imageSeqRef.current = Math.max(seq, 0, ...refs.map((r) => r.n));
+            imageDataRef.current = new Map();
+            imageNotedRef.current = new Set();
+            imageRefusalSaidRef.current = false;
+          };
 
           // ── Sessions (src/assistant/sessions.ts) ───────────────────────────────
           // The conversation is written to disk after every change, so a restart
@@ -319,6 +345,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               prompts: historyRef.current.slice(-100), draft: (shellModeRef.current || /^\s*[/!]/.test(inputRef.current)) ? '' : inputRef.current, subject: ctxSubjectRef.current,
               shellCwd: shellRef.current.saved(),
               tools: toolSetRef.current.names(),
+              // Refs only — a path and a hash per image, never its bytes.
+              images: [...imagesRef.current.values()], imageSeq: imageSeqRef.current,
               closed: false, // written means in use — a resumed cleared session is open again
             };
           };
@@ -343,6 +371,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             planRef.current.load(s.plan);
             shellRef.current.setCwd(s.shellCwd ?? null);
             toolSetRef.current.load(s.tools);
+            resetImages(s.images ?? [], s.imageSeq ?? 0);
             usageRef.current = s.usage;
             historyRef.current = s.prompts.slice();
             histAt.current = null;
@@ -488,6 +517,28 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             return parts.length ? parts.join('\n\n') : null;
           };
 
+          // An image on its way to the provider: the bytes read when it was attached, or —
+          // after a restart — read again from its path and checked against its hash. A file
+          // gone or changed is said once, in a note (`notes`); the message then goes as its
+          // text and `[image unavailable: name]`.
+          const resolveImage = (ref: ImageRef, notes: string[]): ResolvedImage => {
+            if (!imageLimits(f.config.ai).enabled) return { ok: false, why: 'off' };
+            const key = imageKey(ref);
+            const hit = imageDataRef.current.get(key);
+            if (hit) return { ok: true, url: hit };
+            const r = readImageData(ref);
+            if (r.ok) {
+              const url = dataUrl(ref.mime, r.data);
+              imageDataRef.current.set(key, url);
+              return { ok: true, url };
+            }
+            if (!imageNotedRef.current.has(key)) {
+              imageNotedRef.current.add(key);
+              notes.push(`Image #${ref.n} (${ref.name}) ${r.why === 'missing' ? `is no longer at ${ref.path}` : 'has changed on disk since it was attached'} — the model gets the text of that message without it.`);
+            }
+            return { ok: false, why: r.why };
+          };
+
           const send = async (text: string | null = null, opts: { fromBackground?: boolean } = {}) => {
             const q = (text ?? inputRef.current).trim();
             if (!q || streamRef.current) return false;
@@ -512,11 +563,23 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             if (!opts.fromBackground && historyRef.current.at(-1) !== q) historyRef.current.push(q);
             histAt.current = null;
             histShown.current = '';
-            displayMsgs.push({ role: opts.fromBackground ? 'bg' : 'user', content: q });
-            apiMsgs.push({ role: 'user', content: q });
+            // The images the text names, in the order it names them. A background result
+            // is the model's writing and carries none.
+            const images = opts.fromBackground ? [] : imagesInText(q, imagesRef.current);
+            const asked: ChatMessage = { role: 'user', content: q, ...(images.length ? { images } : {}) };
+            apiMsgs.push(asked);
+            // What goes to the provider: every image of the history as a part — read now,
+            // not kept in the history, which holds its ref.
+            const notes: string[] = [];
+            const wire = wireMessages(apiMsgs, (ref) => resolveImage(ref, notes));
+            const wireHasImages = wire.some((m) => Array.isArray(m.content));
+            for (const note of notes) displayMsgs.push({ role: 'note', content: note });
+            // On screen the message is its text, with the numbers of the images sent, so
+            // their tokens are drawn as attachments.
+            displayMsgs.push({ role: opts.fromBackground ? 'bg' : 'user', content: q, ...(images.length ? { images: images.map((r) => r.n) } : {}) });
             // The question joins the model's history now, so a failed or cancelled
             // turn still leaves it on record; the turn's transcript follows on success.
-            apiRef.current = [...apiRef.current, { role: 'user', content: q }];
+            apiRef.current = [...apiRef.current, asked];
             setMessages(displayMsgs);
             persist(); // the question survives a restart even if the answer does not
             setInput('');
@@ -539,7 +602,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             const ai = (f.config.ai ?? {}) as Record<string, any>;
             let failed = false, aborted = false;
             try {
-              const chatResult = await (f.services as Record<string, any>).chatLLM(apiMsgs, {
+              const chatResult = await (f.services as Record<string, any>).chatLLM(wire, {
                 baseUrl: ai.baseUrl,
                 model: ai.model,
                 token: process.env[ai.tokenEnv ?? 'LLM_TOKEN'],
@@ -669,7 +732,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   });
                 },
               });
-              (f.services as Record<string, any>).pushLog?.(`[chat] ${q.slice(0, 40)}… → ${(apiMsgs[apiMsgs.length - 1]?.content ?? '').length || 0} chars`);
+              (f.services as Record<string, any>).pushLog?.(`[chat] ${q.slice(0, 40)}… → ${q.length} chars${images.length ? ` + ${images.length} image${images.length === 1 ? '' : 's'}` : ''}`);
               // A persistent trail of executed tools: put it on the last assistant message
               // so the render shows «▸ update_issue … → applied/declined/error».
               const turn = (chatResult as { transcript?: ChatMessage[]; content?: string } | undefined);
@@ -703,6 +766,14 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 failed = true;
                 setError((e as Error).message);
                 (f.services as Record<string, any>).pushLog?.(`[chat] error: ${(e as Error).message}`);
+                // A model that cannot take images answers the first one with a 400. Said
+                // once, in the provider's words, with the one switch that stops it — the
+                // image stays in the history, so every later message would fail the same.
+                const why = String((e as Error)?.message ?? '');
+                if (wireHasImages && isImageRefusal(why) && !imageRefusalSaidRef.current) {
+                  imageRefusalSaidRef.current = true;
+                  setMessages((cur) => [...cur, { role: 'note', content: `The provider refused the image: ${why.slice(0, 300)}\nIf this model cannot take images: config set ai.images.enabled false — images already in the conversation then go as their names only.` }]);
+                }
               }
               // The question is already in the model's history; left there alone it is a
               // question still waiting, and the next request shows the model two in a row —
@@ -893,6 +964,76 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             });
           };
 
+          // ── Attaching an image ── a dropped or pasted path, `/image`, Ctrl+V. What the
+          // person attaches goes into the field as a token, `[Image #N]`, at `base` (the
+          // field as it stands, or an empty one for `/image`); a refusal says why, and
+          // nothing is attached — never a file shrunk or dropped quietly.
+          type ImagesRead = { images: false; error: string } | { images: true; loaded: LoadedOk[]; refusal: string | null };
+          const readImages = (paths: string[], base: string): ImagesRead => {
+            const lim = imageLimits(f.config.ai);
+            const loaded = paths.map((p) => loadImageFile(p, shellRef.current.cwd(), lim.maxBytes));
+            // A file that is not there, or not an image: these are not images being
+            // attached — a paste of them is text, `/image` names the first.
+            const other = loaded.find((l) => !l.ok && l.reason !== 'too-big');
+            if (other && !other.ok) return { images: false, error: other.error };
+            if (!lim.enabled) return { images: true, loaded: [], refusal: IMAGES_OFF };
+            const big = loaded.find((l) => !l.ok);
+            if (big && !big.ok) return { images: true, loaded: [], refusal: big.error };
+            const count = imagesInText(base, imagesRef.current).length + loaded.length;
+            if (count > lim.maxPerMessage) return { images: true, loaded: [], refusal: `a message carries at most ${lim.maxPerMessage} image${lim.maxPerMessage === 1 ? '' : 's'} (ai.images.maxPerMessage) — this one would have ${count}` };
+            return { images: true, loaded: loaded as LoadedOk[], refusal: null };
+          };
+          const attach = (loaded: LoadedOk[], base: { value: string; cursor: number }) => {
+            let at = base;
+            for (const l of loaded) {
+              const ref: ImageRef = { n: ++imageSeqRef.current, ...l.ref };
+              imagesRef.current.set(ref.n, ref);
+              // Read once, here: the bytes the person attached are the ones sent.
+              imageDataRef.current.set(imageKey(ref), dataUrl(ref.mime, l.data));
+              at = insertToken(at.value, at.cursor, ref.n);
+            }
+            tabRef.current = null;
+            histAt.current = null;
+            setInput(at.value); inputRef.current = at.value;
+            setCursor(at.cursor); cursorRef.current = at.cursor;
+            setError(null);
+            disarmEsc();
+            f.notify();
+          };
+          // A paste that is paths, all of them images, attaches them. true — handled; false
+          // — the paste is text and goes in as it is (after a refusal is said, too: the
+          // path stays in the field, nothing the person pasted is lost).
+          const pasteImages = (text: string): boolean => {
+            for (const paths of pastedPaths(text)) {
+              const r = readImages(paths, inputRef.current);
+              if (!r.images) continue;
+              if (r.refusal) { setError(`not attached: ${r.refusal}`); return false; }
+              attach(r.loaded, { value: inputRef.current, cursor: cursorRef.current });
+              return true;
+            }
+            return false;
+          };
+          // The image on the clipboard. From a key (Ctrl+V, an empty paste) an empty
+          // clipboard is a short hint and nothing else; from `/image` it is said in the chat.
+          const attachClipboard = (from: 'key' | 'command') => {
+            if (!imageLimits(f.config.ai).enabled) { setError(`not attached: ${IMAGES_OFF}`); return; }
+            const read = (f.services as { clipboardImage?: () => ClipboardImage }).clipboardImage ?? (() => readClipboardImage());
+            const clip = read();
+            if (!clip.ok) {
+              if (from === 'key' && clip.none) (f.services as Record<string, any>).showMessage?.(clip.error);
+              else setError(`not attached: ${clip.error}`);
+              return;
+            }
+            const base = from === 'command' ? { value: '', cursor: 0 } : { value: inputRef.current, cursor: cursorRef.current };
+            const r = readImages([clip.path], base.value);
+            if (!r.images) { setError('not attached: what the clipboard gave is not an image'); return; }
+            if (r.refusal) { setError(`not attached: ${r.refusal}`); return; }
+            attach(r.loaded, base);
+          };
+          // A field that is a /command or a !command, or in shell mode, is not a message:
+          // an image has nowhere to go there, and a pasted path is the command's argument.
+          const fieldTakesImages = () => !shellModeRef.current && !/^\s*[/!]/.test(inputRef.current);
+
           const runChatCommand = (cmd: string) => {
             const [name, ...rest] = cmd.split(/\s+/);
             const arg = rest.join(' ');
@@ -980,6 +1121,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 planRef.current.reset();
                 shellRef.current.setCwd(null); // back to the first root
                 toolSetRef.current.reset(); // a new conversation starts from the index
+                resetImages(); // numbering starts again at [Image #1]
                 usageRef.current = null; // measured for a conversation that is gone
                 // /clear ends the conversation, not the memory — and says so, or the
                 // assistant "still knowing" an earlier prompt reads as /clear failing.
@@ -1016,6 +1158,25 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 setField('');
                 (f.services as Record<string, any>).showMessage?.(`Copied ${target.what} — ${Array.from(target.text).length} chars`);
                 f.notify();
+                return;
+              }
+              case 'image': {
+                // `/image <path>` attaches a file; `/image` alone, the clipboard's image. The
+                // field held the command, so the token starts a fresh one.
+                const raw = cmd.slice('image'.length).trim();
+                if (!raw) { attachClipboard('command'); return; }
+                const readings = pastedPaths(raw, { anyPath: true });
+                let first: ImagesRead | null = null;
+                for (const paths of readings) {
+                  const r = readImages(paths, '');
+                  first ??= r;
+                  if (!r.images) continue;
+                  if (r.refusal) { setError(`not attached: ${r.refusal}`); return; }
+                  attach(r.loaded, { value: '', cursor: 0 });
+                  return;
+                }
+                const why = first && !first.images ? first.error : undefined;
+                setError(`not attached: ${why ?? `no image at ${raw}`}`);
                 return;
               }
               case 'compact': compactNow(); return;
@@ -1056,6 +1217,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               planRef.current.reset();
               shellRef.current.setCwd(null);
               toolSetRef.current.reset();
+              resetImages();
               msgsRef.current = [];
               setMessages([]);
               // Task change — a new session: reset the status fields too, else the
@@ -1173,6 +1335,33 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               if (key.name === 'backspace' && shellMode && inputRef.current === '') {
                 setShellMode(false);
                 return true;
+              }
+              // ── Images. A paste is ONE key and is matched as one — never decoded into
+              // characters. An empty paste is the only thing a terminal sends for Cmd+V
+              // when the clipboard holds an image and no text (most send nothing at all),
+              // so it means "the clipboard's image", as Ctrl+V does. A paste that is the
+              // path of an image file (a file dragged onto the terminal arrives as one)
+              // attaches it; any other paste goes to the editor below as text.
+              if (key.name === 'paste') {
+                const pasted = String(key.text ?? '');
+                if (!pasted.trim()) { if (fieldTakesImages()) attachClipboard('key'); return true; }
+                if (fieldTakesImages() && pasteImages(pasted)) return true;
+              }
+              if (key.name === 'v' && key.ctrl && !key.meta) {
+                if (fieldTakesImages()) attachClipboard('key');
+                return true;
+              }
+              // A token goes whole: Backspace right after it, Delete right before it.
+              if ((key.name === 'backspace' || key.name === 'delete') && !key.ctrl && !key.meta) {
+                const cut = removeTokenAt(inputRef.current, cursorRef.current, key.name === 'backspace' ? 'back' : 'forward', (n) => imagesRef.current.has(n));
+                if (cut) {
+                  tabRef.current = null;
+                  disarmEsc();
+                  setInput(cut.value); inputRef.current = cut.value;
+                  setCursor(cut.cursor); cursorRef.current = cut.cursor;
+                  f.notify();
+                  return true;
+                }
               }
               // ── Esc: non-empty field → clear; empty shell-mode field → leave the
               // mode (closest thing first, before Esc starts arming a chat-wide exit —
@@ -1323,6 +1512,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           return (f.viewRegistry.chat as (p: Record<string, unknown>) => unknown)({
             width, height, theme: f.config.theme, messages, input, streaming, error, toolLabel, phase, showReasoning, cursor, escArmed,
             shellMode,
+            // The numbers the conversation's images carry — their tokens are drawn as
+            // attachments — and whether attaching is on (the hint names Ctrl+V then).
+            imageNumbers: [...imagesRef.current.keys()],
+            imagesOn: imageLimits(f.config.ai).enabled,
             fullscreen,
             pendingConfirm: pendingAsk,
             pendingQuestion,

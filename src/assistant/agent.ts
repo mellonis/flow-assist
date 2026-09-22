@@ -14,6 +14,7 @@ import type { ToolDef, ToolCtx } from '../loader/tools.js';
 import { chatTools, execChatTool, chatToolDefs, chatToolGroupOf } from '../loader/tools.js';
 import type { ToolRunEntry } from '../runtime/services/log.js';
 import { changeView, type Change, type ChangeView } from './diff.js';
+import { contentText, type ContentPart, type ImageRef } from './images.js';
 import {
   TOOLS_LOAD, createToolSet, deferredTools, notLoadedError, runToolsLoad, toolsToSend,
   type CatalogEntry, type ToolLoading, type ToolSet,
@@ -21,9 +22,14 @@ import {
 
 // A single chat message. `role` is the OpenAI role; `content` may be null when a
 // message carries tool_calls. Extra fields (tool_calls, tool_call_id) ride along.
+// `content` is content PARTS only on the way to the provider — a message the person
+// sent with images (`wireMessages` in ./images.ts builds them). Everywhere the host
+// keeps a message, its content is a string and its images ride beside it as saved
+// refs (`images`), which never reach the wire.
 export interface ChatMessage {
   role: string;
-  content: string | null;
+  content: string | ContentPart[] | null;
+  images?: ImageRef[];
   [key: string]: unknown;
 }
 
@@ -143,6 +149,9 @@ export function apiHistory(messages: ChatMessage[]): ChatMessage[] {
     if (m.role === 'system' || m.role === 'note') continue;
     // A background result and a `!command` the person ran reach the model as the user's.
     const out: ChatMessage = { role: m.role === 'bg' || m.role === 'shell' ? 'user' : m.role, content: m.content ?? null };
+    // The images the person attached stay with their message for the rest of the
+    // conversation — as refs; `send` turns them into parts on the way out.
+    if (m.role === 'user' && Array.isArray(m.images) && m.images.length) out.images = m.images;
     if (Array.isArray(m.tool_calls) && m.tool_calls.length) out.tool_calls = m.tool_calls;
     if (typeof m.tool_call_id === 'string') out.tool_call_id = m.tool_call_id;
     clean.push(out);
@@ -577,6 +586,15 @@ export async function agentChat(
   return { content, process, toolRuns, transcript: current.slice(turnStart), ...(usage ? { usage } : {}) };
 }
 
+// What /compact sends of a message: its text, an image named in it and not sent — the
+// summary is text, and the images end with the history it replaces.
+function compactable(m: ChatMessage): ChatMessage {
+  const { images, ...rest } = m;
+  const named = (images ?? []).map((r) => `[image: ${r.name}]`).join(' ');
+  const text = contentText(m.content);
+  return { ...rest, content: named ? `${text}${text ? ' ' : ''}${named}` : Array.isArray(m.content) ? text : m.content };
+}
+
 // One-shot non-streaming call for /compact: compresses the history into a compact
 // system context (key facts, decisions, open questions). No tools.
 export async function compactConversation(
@@ -595,7 +613,7 @@ export async function compactConversation(
           content:
             'Compress the chat history below into a compact system context (up to ~400 words). Keep the key facts, decisions made and open questions. Return only the compressed text.',
         },
-        ...messages.filter((m) => m.role !== 'system').slice(-30),
+        ...messages.filter((m) => m.role !== 'system').slice(-30).map(compactable),
       ],
     }),
   });

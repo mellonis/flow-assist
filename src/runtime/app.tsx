@@ -42,6 +42,7 @@ import {
 } from '../config/load.js';
 import { bindingGlyph, isKey, isMouseButton, keyGlyph } from '../playback/keys.js';
 import { copyToClipboard } from '../assistant/copy.js';
+import { readClipboardImage, type ClipboardImage } from '../assistant/images.js';
 import { resolveAppTheme } from '../playback/theme.js';
 import type { ColorScheme, Theme } from '../playback/theme.js';
 import type { Command } from '../loader/plugin.js';
@@ -114,6 +115,9 @@ export interface RenderAppInput {
   tools?: import('../loader/tools.js').ToolRegistry;
   // How long a toast stays, in ms (default `TOAST_MS`, 4 s). Only tests change it.
   toastMs?: number;
+  // Reads the image on the system clipboard into a file (`readClipboardImage`, the
+  // platform's tools). Only tests pass one — a fake clipboard, no tools run.
+  clipboardImage?: () => ClipboardImage;
 }
 
 // Command-line state lives in a single stable `{ current }` object created in
@@ -148,7 +152,7 @@ export function useSurfaceSize(): { width: number; height: number } {
 
 export function renderApp(
   root: Backend,
-  { plugins, config, onExit, renders: _renders = {}, tools, toastMs }: RenderAppInput,
+  { plugins, config, onExit, renders: _renders = {}, tools, toastMs, clipboardImage }: RenderAppInput,
 ) {
   // Resolve config.theme into the full per-modal palette BEFORE anything reads it
   // (createServices/ft and every renderer read `f.config.theme`): the base of the
@@ -161,6 +165,7 @@ export function renderApp(
   let themeScheme: ColorScheme = root.colorScheme?.().scheme ?? 'unknown';
   config.theme = resolveAppTheme(userTheme, plugins, config, themeScheme);
   const services = createServices({ config, tools, onExit });
+  (services as unknown as HostServices).clipboardImage = clipboardImage ?? (() => readClipboardImage());
   const viewRegistry = buildViewRegistry(plugins);
   const commandRegistry = buildCommandRegistry(plugins);
   const keys = buildKeys(plugins, config);

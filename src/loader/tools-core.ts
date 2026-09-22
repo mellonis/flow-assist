@@ -22,6 +22,7 @@ import { SHELL_DEFAULTS, createShellState } from '../assistant/shell.js';
 import { parseAskArgs, askResult, type AskQuestion, type AskState } from '../assistant/ask.js';
 import type { Change } from '../assistant/diff.js';
 import { TOOLS_LOAD } from '../assistant/tool-loading.js';
+import { IMAGE_DEFAULTS } from '../assistant/images.js';
 
 // Runtime context handed to core tools by the caller: the resolved memory
 // file (absent → resolved from config), the config.local.json path, and the active
@@ -67,6 +68,9 @@ function prettyKeys(map: Record<string, string[]>): string {
 // (`ai.toolLoading`) is looked up before its top-level key.
 const KEY_DEFAULTS: Record<string, string> = {
   'ai.toolLoading': `onDemand — each request carries the core tools in full and only an index (name and one line) of the others; the model loads what it needs with ${TOOLS_LOAD}, and a loaded tool stays for the rest of the conversation (/clear empties the set). config set ai.toolLoading all sends every tool in full on every request — more tokens per request, for a model that does not load tools well`,
+  // Said in full: "can I show it a screenshot?" is asked of the assistant, and so is
+  // "why was my image refused?".
+  'ai.images': `enabled: true — the person can show the model images in the chat: drag a file onto the terminal or paste its path (the whole paste must be the path), /image <path>, or /image, Ctrl+V or Cmd+V for the image on the clipboard (macOS: pngpaste or osascript; Linux: wl-paste or xclip). Each becomes an [Image #N] token in the text; the file is read only when the person attaches it, and kept in the session as its path and hash, not its bytes. maxBytes: ${IMAGE_DEFAULTS.maxBytes} (a bigger file is refused, never shrunk), maxPerMessage: ${IMAGE_DEFAULTS.maxPerMessage}. A model that cannot take images: config set ai.images.enabled false — attaching is then refused, and images already in the conversation go as their names only`,
   cache: 'enabled: true; ON unless config.cache.enabled = false',
   theme: `${JSON.stringify(DEFAULT_THEME)}; flowtty default theme`,
   debug: 'logTools: false',
@@ -430,7 +434,10 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
         const leaf = (path: string, node: unknown) => {
           const top = path.split('.')[0]!;
           const state = getDeep(cfg, path) == null ? 'unset' : 'set';
-          const dflt = KEY_DEFAULTS[path] ?? KEY_DEFAULTS[top];
+          // The note of the key itself, else of the nearest parent that has one
+          // (`ai.images.enabled` → `ai.images`), else of its top-level section.
+          const parents = path.split('.').map((_, i, all) => all.slice(0, all.length - i).join('.'));
+          const dflt = parents.map((p) => KEY_DEFAULTS[p]).find(Boolean) ?? KEY_DEFAULTS[top];
           const note = state === 'unset' && dflt ? ` (default: ${dflt})` : '';
           rows.push(`- ${path}: ${describeSchema(node)} — ${state}${note}`);
         };
@@ -545,6 +552,9 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
         setTimeout(() => {
           void runBg(async () => {
             try {
+              // Text only: a background task never gets images. It has no person to have
+              // attached one, and the model's own words cannot make the host read a file
+              // as an image.
               const res = await chatLLM(
                 [{ role: 'system', content: prompt }, { role: 'user', content: task }],
                 { extraTools: extraTools as ToolDef[], toolCtx, maxRounds: 12, confirmWrite: () => false,

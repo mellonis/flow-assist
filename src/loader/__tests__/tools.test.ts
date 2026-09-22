@@ -410,6 +410,9 @@ test('config_schema shows structure, defaults and set/unset — never a value', 
   const ai = await reg.exec('config_schema', { key: 'ai' }, { configLocalPath: local });
   expect(ai).toMatch(/- ai\.model/);
   expect(ai).not.toMatch(/- cache/);
+  // A leaf takes the note of its nearest parent: images are on, and it says how to stop them.
+  expect(ai).toMatch(/- ai\.images\.enabled: true\|false — unset \(default: enabled: true — .*config set ai\.images\.enabled false/);
+  expect(ai).toMatch(/- ai\.images\.maxBytes: .* — unset \(default: enabled: true/);
   expect(await reg.exec('config_schema', { key: 'nope.nothing' }, {})).toMatch(/unknown key/);
 });
 

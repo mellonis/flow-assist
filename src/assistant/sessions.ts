@@ -10,6 +10,11 @@
 // left in, and the tools the model has loaded (the history calls them). Not saved: an answer being written, a pending y/n or
 // question, queued messages — restored, they would resolve into nothing.
 //
+// An image the person attached is saved as a ref — its path, hash, type and size
+// (./images.ts) — never as its bytes: a session is written after every turn, and a
+// screenshot in base64 would be most of every write. It is read again from the path
+// when it is next sent.
+//
 // The files hold whatever the conversation held (tracker text, MR text), so they are
 // the person's alone: directory 700, files 600. A write goes to a temp file and is
 // renamed over the old one — a kill mid-write never leaves a file that breaks the
@@ -18,6 +23,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { configDir } from '../config/load.js';
+import { isImageRef, type ImageRef } from './images.js';
 
 export const SESSION_VERSION = 1;
 // What is kept of a long conversation: the summary plus this many latest messages
@@ -41,6 +47,8 @@ export interface Session {
   subject?: string | null;             // what the screen was about when the chat began (`chatSubject`), if anything
   shellCwd?: string | null;            // where `!command` / run_command were last left (null — the default)
   tools?: string[];                    // the tools the model loaded (tools on demand); absent in older sessions
+  images?: ImageRef[];                 // what each `[Image #N]` of the conversation stands for; absent in older sessions
+  imageSeq?: number;                   // the last N given out — numbering goes on from it
   closed?: boolean;                    // left with /clear — listed, never continued on start
 }
 
@@ -120,6 +128,8 @@ export function loadSession(dir: string, id: string): Session | null {
       // A tool no longer offered (a plugin removed since) stays in the list and is
       // simply never sent — the request is built from what exists.
       tools: Array.isArray(s.tools) ? s.tools.filter((n): n is string => typeof n === 'string') : [],
+      images: Array.isArray(s.images) ? s.images.filter(isImageRef) : [],
+      imageSeq: Number.isInteger(s.imageSeq) && (s.imageSeq as number) > 0 ? s.imageSeq : 0,
     };
   } catch {
     return null;

@@ -5,6 +5,21 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **Show the assistant an image.** Drag a screenshot onto the terminal (or paste its
+  path — quoted, `\ `-escaped, several at once), type `/image <path>`, or press Ctrl+V
+  for the image on the clipboard (an empty Cmd+V paste does the same; macOS uses
+  pngpaste or osascript, Linux wl-paste or xclip). The image becomes an `[Image #N]`
+  token in your message: Backspace takes it away whole, the numbers go on for the
+  whole conversation, and ↑ brings a message back with its images. It is sent as an
+  image part (OpenAI-compatible) and stays in the model's view until `/compact` or
+  `/clear`. PNG, JPEG, GIF and WebP, told apart by their bytes; up to 5 MB and 4 a
+  message (`ai.images.maxBytes`, `ai.images.maxPerMessage`) — a larger one is refused
+  with the reason, never shrunk. The session keeps the file's path and hash, not the
+  picture; after a restart it is read again, and a file gone or changed is said in
+  the chat and the text goes without it. `ctx N%` counts an image by its pixels. A
+  model that cannot take images: `config set ai.images.enabled false`; when a provider
+  refuses one, the chat quotes it once and names that command.
+
 - **A turn stopped with Esc stays stopped.** The next message used to be answered
   together with the stopped one — the model went back to the work the person had
   interrupted, because to it the stopped question was still waiting. Now the model's

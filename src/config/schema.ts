@@ -21,6 +21,10 @@ export const hostConfigSchema = z.object({
     // the rest, which the model loads by name (src/assistant/tool-loading.ts). 'all':
     // every tool in full on every request.
     toolLoading: z.enum(['all', 'onDemand']).optional(),
+    // Images the person attaches in the chat (src/assistant/images.ts): on unless
+    // `enabled` is false (a model that cannot take them), the largest file sent as it
+    // is (5 MB — a bigger one is refused, never shrunk), how many one message carries (4).
+    images: z.object({ enabled: z.boolean(), maxBytes: z.number().int().positive(), maxPerMessage: z.number().int().positive() }).partial().optional(),
   }).optional(),
   user: z.object({ name: z.string().optional(), login: z.string().optional() }).optional(),
   // `mouse` reports the mouse to the app: the wheel scrolls the conversation, and a drag

@@ -8,8 +8,11 @@
 //     than English prose) but it moves the right way, and the breakdown by part is
 //     always an estimate — a provider reports one number, not where it came from.
 // The window is `ai.contextWindow`; nobody can ask a model for it over this API.
+// An image is counted by its pixels, as providers bill it (`imageTokens`), never by
+// the text of its saved form — and never by base64, which the history does not hold.
 //
 // Pure: numbers in, numbers and text out.
+import { imageTokens } from './images.js';
 
 export const DEFAULT_CONTEXT_WINDOW = 200_000;
 export const CONTEXT_WARN_AT = 0.8;
@@ -34,14 +37,29 @@ export interface ContextReading {
   parts: Array<{ label: string; tokens: number }>;
 }
 
+// The images the history carries, and the history without them.
+function splitImages(messages: unknown[]): { text: unknown[]; tokens: number } {
+  let tokens = 0;
+  const text = (messages ?? []).map((m) => {
+    const refs = (m as { images?: unknown } | null)?.images;
+    if (!Array.isArray(refs) || !refs.length) return m;
+    for (const r of refs) tokens += imageTokens(r as { width?: number; height?: number });
+    const { images: _images, ...rest } = m as Record<string, unknown>;
+    return rest;
+  });
+  return { text, tokens };
+}
+
 export function readContext(parts: ContextParts, window: number, measuredPromptTokens?: number): ContextReading {
+  const history = splitImages(parts.messages);
   const est = [
     { label: 'instructions', tokens: estimateTokens(parts.system) },
     { label: 'tools', tokens: estimateTokens(JSON.stringify(parts.tools ?? [])) },
     { label: 'memory', tokens: estimateTokens(parts.memory) },
     { label: 'plan', tokens: estimateTokens(parts.plan) },
     { label: 'summary', tokens: estimateTokens(parts.summary) },
-    { label: 'messages', tokens: estimateTokens(JSON.stringify(parts.messages ?? [])) },
+    { label: 'messages', tokens: estimateTokens(JSON.stringify(history.text)) },
+    { label: 'images', tokens: history.tokens },
   ];
   const estimated = est.reduce((n, p) => n + p.tokens, 0);
   const measured = typeof measuredPromptTokens === 'number' && measuredPromptTokens > 0;

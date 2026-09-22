@@ -43,6 +43,15 @@ screen — code, tables and diffs get every column; `/fullscreen off` brings the
 window back. To have it that way from the start:
 `config set plugins.assistant.fullscreen true`.
 
+To show the assistant an image — a screenshot, a mock, a diagram — drag the file onto
+the terminal (or paste its path), type `/image <path>`, or press Ctrl+V (Cmd+V where
+the terminal passes it on) for the image on the clipboard. It becomes an `[Image #1]`
+token in your message, and Backspace takes the token away whole. PNG, JPEG, GIF and
+WebP, up to 5 MB (`ai.images.maxBytes`) and 4 a message (`ai.images.maxPerMessage`);
+a bigger one is refused, never shrunk. The session keeps the file's path and hash, not
+the picture, and reads it again after a restart. A model that cannot take images:
+`config set ai.images.enabled false`.
+
 `!command` in the chat runs a shell command yourself (`!bun test src/features`):
 the output lands in the conversation and the assistant sees it with your next
 message, without spending a turn on it. Esc stops it. Commands start in the first

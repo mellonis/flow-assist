@@ -15,6 +15,7 @@
 //     `theme.modals.<name>.<prop>` read is guarded (`m = theme?.modals?.chat ?? {}`).
 
 import { askRows, type AskRow, type AskState } from '../assistant/ask.js';
+import { imageTokenRanges, splitTokens } from '../assistant/images.js';
 import { changeMarkdown, type ChangeView } from '../assistant/diff.js';
 import { CELL_FREE, CELL_FULL, CONTEXT_WARN_AT, GRID_COLS, GRID_ROWS, contextFootnote, contextGrid, contextHeading, contextLegend, type ContextReading, type GridCell } from '../assistant/context-meter.js';
 import { createElement as h, useEffect, useRef, useState, type ReactNode } from 'react';
@@ -189,10 +190,16 @@ export function mdLines(text: string | null | undefined, wrap: number): Line[] {
 // spaces too, a line wider than the chat cut at the column. A cut drops nothing, so
 // the row before it carries `continues` with `dropped: ''` — a drag rejoins the line
 // exactly — while a line break the person typed is left a line break in the copy.
-export function typedLines(text: string | null | undefined, wrap: number): Line[] {
-  const rows = inputRows(String(text ?? ''), Math.max(1, wrap));
+//
+// `images` — the numbers of the images the message carried: their `[Image #N]` tokens
+// are spans of their own marked `token`, which the view draws in the accent colour.
+// They are the person's text all the same, and copy as written.
+export function typedLines(text: string | null | undefined, wrap: number, images: readonly number[] = []): Line[] {
+  const value = String(text ?? '');
+  const rows = inputRows(value, Math.max(1, wrap));
+  const tokens = images.length ? imageTokenRanges(value, (n) => images.includes(n)) : [];
   return rows.map((row, i) => {
-    const line: Line = { spans: row.text ? [{ text: row.text }] : [] };
+    const line: Line = { spans: row.text ? splitTokens(row.text, row.start, tokens).map((p) => (p.token ? { text: p.text, token: true } : { text: p.text })) : [] };
     if (rows[i + 1]?.continuation) line.continues = { dropped: '', textWidth: Array.from(row.text).length };
     return line;
   });
@@ -215,14 +222,16 @@ export function chatBoxWidth(width: number, fullscreen = false): number {
 export function chatFieldWidth(width: number, fullscreen = false): number {
   return Math.max(CHAT_FIELD_MIN, chatBoxWidth(width, fullscreen) - 4 - GUTTER);
 }
-export function inputVisualRows(input: string, cur: number, fieldW: number): { before: string; caret: string; after: string }[] {
+// `start` — where the row begins in `input`, so a piece of it can be matched against
+// ranges of the whole value (the image tokens).
+export function inputVisualRows(input: string, cur: number, fieldW: number): { before: string; caret: string; after: string; start: number }[] {
   const w = Math.max(1, fieldW);
   const rows = inputRows(input || '', w, cur);
   const at = caretPosition(input || '', cur, w);
   return rows.map((r, i) => {
-    if (i !== at.row) return { before: r.text, caret: '', after: '' };
+    if (i !== at.row) return { before: r.text, caret: '', after: '', start: r.start };
     const chars = Array.from(r.text);
-    return { before: chars.slice(0, at.col).join(''), caret: chars[at.col] ?? ' ', after: chars.slice(at.col + 1).join('') };
+    return { before: chars.slice(0, at.col).join(''), caret: chars[at.col] ?? ' ', after: chars.slice(at.col + 1).join(''), start: r.start };
   });
 }
 
@@ -283,6 +292,7 @@ const CAP = {
   page: `${keyGlyph('pageup')}/${keyGlyph('pagedown')}`,
   details: keyGlyph({ name: 'r', ctrl: true }),
   backspace: keyGlyph('backspace'),
+  image: keyGlyph({ name: 'v', ctrl: true }),
 } as const;
 // Alt+Enter: ⌥⏎ on a Mac, Alt+⏎ elsewhere.
 export const NEWLINE_KEY = keyGlyph({ name: 'return', meta: true });
@@ -353,7 +363,8 @@ function buildMessageRows(m: ChatMsg, last: boolean, wrap: number, showReasoning
     // The person's message is drawn as typed. A background result and a `!command`'s
     // block keep markdown: the first is the model's writing, the second the host's own
     // (a ```console fence under the command).
-    (role === 'user' ? typedLines(text, inner) : mdLines(text, inner)).forEach((line, li) => rows.push({ role, spans: line.spans, first: li === 0, continues: line.continues, chrome: line.chrome, frame: line.frame }));
+    const images = Array.isArray(m.images) ? (m.images as unknown[]).filter((n): n is number => typeof n === 'number') : [];
+    (role === 'user' ? typedLines(text, inner, images) : mdLines(text, inner)).forEach((line, li) => rows.push({ role, spans: line.spans, first: li === 0, continues: line.continues, chrome: line.chrome, frame: line.frame }));
     const runs = (Array.isArray(m.toolRuns) ? m.toolRuns : []) as ToolRun[];
     const duration = role === 'assistant' && Number(m.duration) >= 1000 ? m.duration : undefined;
     // One quiet line under the answer; ^r unfolds the calls themselves.
@@ -477,7 +488,7 @@ function ChatMessages({ messages, wrap, showReasoning, palette: m, errorColor }:
       const groundStyle = ground ? { width: '100%', backgroundColor: ground } : {};
       if (row.spans && row.spans.length) {
         return h(Box, { key, flexDirection: 'row', flexShrink: 0, ...groundStyle, ...frameRow(row) }, gutter(row),
-          content(row, (s, j) => h(Text, { key: j, bold: s.bold, dim: s.dim || row.role === 'note', underline: s.underline, color: s.color, selectable: j < (row.chrome ?? 0) ? false : undefined }, String(s.text ?? ''))));
+          content(row, (s, j) => h(Text, { key: j, bold: s.bold, dim: s.dim || row.role === 'note', underline: s.underline, color: s.token ? m.accent : s.color, selectable: j < (row.chrome ?? 0) ? false : undefined }, String(s.text ?? ''))));
       }
       // A blank line inside a message keeps the message's ground.
       return h(Box, { key, height: 1, flexShrink: 0, ...groundStyle });
@@ -520,6 +531,8 @@ export function renderChatModal({
   contextPanel = null,
   todo = null,
   fullscreen = false,
+  imageNumbers = [],
+  imagesOn = false,
 }: {
   width: number;
   height: number;
@@ -559,6 +572,12 @@ export function renderChatModal({
   // centred 88% × 82% over the dimmed screen. The overlay already spans the
   // terminal from its first row, so the window only has to be as big.
   fullscreen?: boolean;
+  // The numbers of the conversation's images: an `[Image #N]` in the field with one of
+  // them behind it is an attachment, drawn in the accent colour. Typed by hand with
+  // nothing behind it, the same text is just text.
+  imageNumbers?: number[];
+  // Attaching is on (`ai.images.enabled`): the hint names the key that pastes an image.
+  imagesOn?: boolean;
 }) {
   const boxW = chatBoxWidth(width, fullscreen);
   const boxH = fullscreen ? height : Math.min(Math.floor(height * 0.82), height - 4);
@@ -566,6 +585,11 @@ export function renderChatModal({
   const m = (theme?.modals?.chat ?? {}) as Record<string, string | undefined>;
   const fieldW = chatFieldWidth(width, fullscreen); // the prompt lives in the gutter
   const fieldRows = inputVisualRows(input, cursor, fieldW);
+  const tokens = imageNumbers.length ? imageTokenRanges(input, (n) => imageNumbers.includes(n)) : [];
+  // The field's own text, a token among it drawn as an attachment. Not dim: in the field
+  // dim means "offered, not yours yet".
+  const typed = (text: string, from: number, key: string) =>
+    splitTokens(text, from, tokens).map((p, j) => h(Text, { key: `${key}${j}`, wrap: 'truncate', ...(p.token ? { color: m.accent } : {}) }, p.text));
   const caretLi = Math.max(0, fieldRows.findIndex((r) => r.caret !== ''));
   const MAX_INPUT_LINES = 5;
   const visible = windowAround(fieldRows, caretLi, MAX_INPUT_LINES).items;
@@ -660,7 +684,7 @@ export function renderChatModal({
           ? `${CAP.esc} again to exit`
           : emptyNotice
               ? `⚠ ${emptyNotice}`
-              : (`${CAP.upDown} history · wheel or ${CAP.page} scroll · ${CAP.details} details · / commands${bgCount > 0 ? ` · ${bgCount} in background` : ''}`))),
+              : (`${CAP.upDown} history · wheel or ${CAP.page} scroll · ${CAP.details} details · / commands${imagesOn ? ` · ${CAP.image} image` : ''}${bgCount > 0 ? ` · ${bgCount} in background` : ''}`))),
       contextBadge ? h(Text, contextWarn ? { color: 'yellow' } : { dim: true }, `  ${contextBadge}`) : null),
       // The task plan sits ABOVE the input (not above the messages) — the newest
       // answer stays pinned just above it, so a growing plan never hides it. Its
@@ -707,18 +731,19 @@ export function renderChatModal({
                 const prompt = h(Text, { bold: !streaming, dim: streaming, color: shellMode ? m.shell : m.accent }, visible[i] === fieldRows[0] ? (shellMode ? '! ' : '› ') : ' '.repeat(GUTTER));
                 // A blank line is a real '' — flowtty ≥ 1.0.0-alpha.5 gives an empty Text
                 // its row (it used to collapse, which is how "two newlines" vanished).
-                if (row.caret === '') return h(Box, { key: i, flexDirection: 'row' }, prompt, h(Text, { wrap: 'truncate' }, row.before));
+                if (row.caret === '') return h(Box, { key: i, flexDirection: 'row' }, prompt, row.before ? typed(row.before, row.start, 'b') : h(Text, { wrap: 'truncate' }, ''));
                 // The caret sits ON the first suggested character, as a shell's
                 // autosuggestion does, so what was typed and what is offered read as one
                 // word: `/co` + `mpact`. The offer is the accent colour, dimmed; the
                 // other candidates follow, and ⇥ says which key takes them.
+                const caretAt = row.start + row.before.length;
                 const offer = ghost
                   ? [h(Text, { key: 'g0', inverse: true, dim: true, color: m.accent }, ghost[0]),
                      h(Text, { key: 'g1', dim: true, color: m.accent }, ghost.slice(1))]
-                  : [h(Text, { key: 'c', inverse: true }, row.caret)];
+                  : [h(Text, { key: 'c', inverse: true, ...(tokens.some((t) => t.start <= caretAt && caretAt < t.end) ? { color: m.accent } : {}) }, row.caret)];
                 return h(Box, { key: i, flexDirection: 'row' },
                   prompt,
-                  row.before ? h(Text, { wrap: 'truncate' }, row.before) : null,
+                  ...(row.before ? typed(row.before, row.start, 'b') : []),
                   ...offer,
                   others.length ? h(Text, { wrap: 'truncate', dim: true }, `  ${CAP.tab} ${others.join(' · ')}`) : null,
                   input === ''
@@ -728,7 +753,7 @@ export function renderChatModal({
                     // Text after the caret is the person's own text — drawn like the rest
                     // of it. It used to take the placeholder's dim and went grey whenever
                     // the caret moved back.
-                    : row.after ? h(Text, { wrap: 'truncate' }, row.after) : null);
+                    : row.after ? typed(row.after, caretAt + row.caret.length, 'a') : null);
               })),
       ),
     ),
@@ -740,7 +765,7 @@ export function renderChatModal({
 // colours only tell the parts apart; the legend carries the same glyph in the same
 // colour, so it reads without them too (each row names its part).
 const PART_COLORS: Record<string, string> = {
-  instructions: 'cyan', tools: 'magenta', memory: 'yellow', plan: 'green', summary: 'blue', messages: 'white',
+  instructions: 'cyan', tools: 'magenta', memory: 'yellow', plan: 'green', summary: 'blue', messages: 'white', images: 'cyanBright',
 };
 function renderContextPanel(r: ContextReading, bg: string | undefined, wrap: number) {
   const cells = contextGrid(r);
