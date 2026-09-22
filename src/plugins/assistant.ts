@@ -9,6 +9,7 @@
 
 import { addTrigger, chatUser } from '../loader/registry.js';
 import { bgActiveCount } from '../loader/tools-core.js';
+import { autoBadge, autoCommand, autoConfirms, autoSaid, nextAutoMode, type AutoMode } from '../assistant/auto.js';
 import { createPlan, todoGlyph } from '../assistant/plan.js';
 import { apiHistory, compactConversation, chatLanguage, requestTools, transcriptSoFar } from '../assistant/agent.js';
 import { createToolSet, toolLoadingMode } from '../assistant/tool-loading.js';
@@ -33,7 +34,7 @@ import type { Plugin } from '../loader/plugin.js';
 
 // Slash-commands of the chat — a single source for runChatCommand and Tab-completion.
 // `/analyze` is a tracker slash command and is removed.
-const CHAT_COMMANDS = ['compact', 'context', 'copy', 'image', 'resume', 'clear', 'memory', 'fullscreen', 'log', 'exit'];
+const CHAT_COMMANDS = ['compact', 'context', 'copy', 'image', 'resume', 'clear', 'memory', 'auto', 'fullscreen', 'log', 'exit'];
 
 // A plain object holding every enumerable service, inherited ones included.
 // `for…in` walks the prototype chain, which is exactly what a spread does not.
@@ -301,6 +302,15 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const [shellMode, setShellModeState] = f.useState(false);
           const shellModeRef = f.useRef(shellMode);
           const setShellMode = (v: boolean) => { shellModeRef.current = v; setShellModeState(v); };
+          // ── The auto mode (src/assistant/auto.ts) — how much of a turn runs without
+          // the y/n. This conversation's and nothing else's: it is not in the session
+          // file, so a restart opens on `ask`, and `/clear`, `/resume` and a change of
+          // task put it back there too. The ref is what the confirmation closure reads
+          // (it was made when the message was sent, and would otherwise see the mode of
+          // that moment for the whole turn); the state is for the render.
+          const [autoMode, setAutoModeState] = f.useState<AutoMode>('ask');
+          const autoModeRef = f.useRef<AutoMode>(autoMode);
+          const setAutoMode = (m: AutoMode) => { autoModeRef.current = m; setAutoModeState(m); };
           // ── Images (src/assistant/images.ts) ── what each `[Image #N]` of this
           // conversation stands for, and the last N given out. The conversation's, like
           // the plan: saved with the session, emptied by /clear and a change of task. The
@@ -372,6 +382,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             shellRef.current.setCwd(s.shellCwd ?? null);
             toolSetRef.current.load(s.tools);
             resetImages(s.images ?? [], s.imageSeq ?? 0);
+            setAutoMode('ask'); // another conversation is another conversation's mode
             usageRef.current = s.usage;
             historyRef.current = s.prompts.slice();
             histAt.current = null;
@@ -640,6 +651,15 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // with a write-flag, we set pendingRef + pendingAsk and wait for the
                 // input-handler to resolve the promise ('y'/Enter — yes, 'n'/Esc — no).
                 confirmWrite: (name: string, argsStr: unknown) => new Promise<boolean>((resolve) => {
+                  // The one place a confirmation may be answered without the person:
+                  // the auto mode (src/assistant/auto.ts), which only `all` ever lets
+                  // say yes and never for run_command or an unlisted web_fetch. It
+                  // answers BEFORE anything on screen moves — a call that does not
+                  // pause must not close the `/context` panel the person is reading.
+                  // Nothing here relaxes what agentChat asks about: a tool with no
+                  // write flag never reaches this function, and the trail and the ✎
+                  // diff block still show what ran.
+                  if (autoConfirms(autoModeRef.current, name)) { resolve(true); return; }
                   const args = typeof argsStr === 'string' ? argsStr : JSON.stringify(argsStr ?? '');
                   const command = shellCommandOf(name, args);
                   if (contextOpenRef.current) setContextOpen(false);
@@ -1038,6 +1058,18 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             const [name, ...rest] = cmd.split(/\s+/);
             const arg = rest.join(' ');
             switch (name) {
+              case 'auto': {
+                // How much runs without a y/n, for this conversation. `reads`, `all` or
+                // `off`; the bare command takes the next rung, as the key does.
+                const want = autoCommand(arg);
+                if (!want) { setError('/auto takes reads, all or off — or nothing to step to the next one'); return; }
+                const next = want === 'cycle' ? nextAutoMode(autoModeRef.current) : want;
+                setAutoMode(next);
+                setField('');
+                (f.services as Record<string, any>).showMessage?.(autoSaid(next));
+                f.notify();
+                return;
+              }
               case 'fullscreen': {
                 // For the person; nothing is sent. `on`/`off`, or a toggle with no word.
                 const v = arg.trim().toLowerCase();
@@ -1132,6 +1164,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 setInput(''); inputRef.current = '';
                 setCursor(0);
                 setShellMode(false); // a fresh conversation opens on a plain prompt
+                setAutoMode('ask'); // and asks again: the mode was granted for the work just cleared
                 setError(null);
                 setEmptyNotice('');
                 setToolCount(0);
@@ -1218,6 +1251,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               shellRef.current.setCwd(null);
               toolSetRef.current.reset();
               resetImages();
+              setAutoMode('ask'); // the new task has not been given the old one's leeway
               msgsRef.current = [];
               setMessages([]);
               // Task change — a new session: reset the status fields too, else the
@@ -1389,6 +1423,18 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 armEsc();
                 return true;
               }
+              // ── Shift+Tab steps the auto mode (ask → reads → all → ask), the way
+              // Claude Code's auto-accept is stepped. It is the chat's own fixed key,
+              // not a bound action: the chat owns the keyboard while it is open, and
+              // Shift+Tab was doing the plain Tab's completion — a completion nobody
+              // asked for by holding Shift.
+              if (key.name === 'tab' && key.shift && !key.meta && !key.ctrl) {
+                const next = nextAutoMode(autoModeRef.current);
+                setAutoMode(next);
+                (f.services as Record<string, any>).showMessage?.(autoSaid(next));
+                f.notify();
+                return true;
+              }
               // ── Tab: slash-command autocomplete (CHAT_COMMANDS).
               if (key.name === 'tab' && !key.meta && !key.ctrl) {
                 const text = inputRef.current;
@@ -1512,6 +1558,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           return (f.viewRegistry.chat as (p: Record<string, unknown>) => unknown)({
             width, height, theme: f.config.theme, messages, input, streaming, error, toolLabel, phase, showReasoning, cursor, escArmed,
             shellMode,
+            // How much runs without a y/n — said on the hint line, so the mode is never
+            // a hidden state, while an answer is coming as much as between turns.
+            autoMode,
             // The numbers the conversation's images carry — their tokens are drawn as
             // attachments — and whether attaching is on (the hint names Ctrl+V then).
             imageNumbers: [...imagesRef.current.keys()],

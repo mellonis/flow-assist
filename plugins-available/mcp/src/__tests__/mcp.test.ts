@@ -2,7 +2,7 @@
 // the model gets, what is asked about. No network.
 import { describe, expect, test } from 'bun:test';
 import { McpError, PROTOCOL_VERSION, createMcpClient, resultText, type Fetcher } from '../client.ts';
-import { buildMcpPlugin, connectServers, parseServers, toolGroup, toolName } from '../index.ts';
+import { buildMcpPlugin, connectServers, parseServers, specProblem, toolGroup, toolName, unknownReadOnly } from '../index.ts';
 
 type Call = { url: string; headers: Record<string, string>; body: any };
 
@@ -98,6 +98,42 @@ describe('the tool group', () => {
     expect(plain.tools[0]!.function.description).toStartWith('[MCP webstorm] ');
   });
 
+  // The person's own claim about a server's tools — the one that works where the server
+  // says nothing at all, which is the case for every browser tool.
+  test('a tool on the person\'s readOnly list is not a write, whatever the server claims', async () => {
+    const s = fakeServer();
+    const c = createMcpClient({ url: 'http://x', fetch: s.fetch });
+    // No `trusted`: the list stands on its own.
+    const g = toolGroup('safari', { command: '/usr/bin/safaridriver', readOnly: ['replace_text'] }, c, tools);
+    expect(g.tools.map((t) => t.write)).toEqual([true, false]);
+    // A tool off the list still asks, even one the server itself calls read-only.
+    expect(g.tools[0]!.function.name).toBe('safari:get_file_text');
+    // And a call still goes out under the server's own name.
+    await c.initialize();
+    expect(await g.exec('safari:replace_text', {})).toContain('Result of safari:replace_text');
+  });
+
+  test('the list is matched against the name the SERVER gives, not the wire spelling', async () => {
+    const odd = [{ name: 'page.info', description: 'Read the page' }];
+    const s = fakeServer({ tools: odd });
+    const c = createMcpClient({ url: 'http://x', fetch: s.fetch });
+    const g = toolGroup('safari', { command: '/x', readOnly: ['page.info'] }, c, odd);
+    expect(g.tools[0]!.function.name).toBe('safari:page_info'); // the wire name is rewritten
+    expect(g.tools[0]!.write).toBe(false); // the list still matched
+    expect(toolGroup('safari', { command: '/x', readOnly: ['page_info'] }, c, odd).tools[0]!.write).toBe(true);
+  });
+
+  test('the two claims are independent, and a bad list is refused', () => {
+    const c = createMcpClient({ url: 'http://x', fetch: fakeServer().fetch });
+    // `trusted` alone still answers for a tool the server calls read-only…
+    expect(toolGroup('w', { url: 'http://x', trusted: true }, c, tools).tools.map((t) => t.write)).toEqual([false, true]);
+    // …and the two together cover both tools.
+    expect(toolGroup('w', { url: 'http://x', trusted: true, readOnly: ['replace_text'] }, c, tools).tools.map((t) => t.write)).toEqual([false, false]);
+    expect(unknownReadOnly({ url: 'http://x', readOnly: ['get_file_text', 'list_tabs'] }, tools)).toEqual(['list_tabs']);
+    expect(specProblem({ url: 'http://x', readOnly: ['ok'] })).toBeNull();
+    expect(specProblem({ url: 'http://x', readOnly: [1] as unknown as string[] })).toBe('"readOnly" must be a list of tool names');
+  });
+
   test('a call goes out under the server\'s own name, and comes back framed as data', async () => {
     const s = fakeServer();
     const c = createMcpClient({ url: 'http://x', fetch: s.fetch });
@@ -138,6 +174,38 @@ describe('connecting', () => {
       { name: 'webstorm', ok: true, tools: 2, detail: 'WebStorm 2026.2, 2 tools' },
       { name: 'rustrover', ok: false, tools: 0, detail: 'connect ECONNREFUSED' },
     ]);
+  });
+
+  // A name that the server does not offer is a setting that does nothing; it is said
+  // once, at start, where the person can see it — in the log, beside what each server
+  // answered. A server that never connected has no tool list, so nothing is claimed
+  // about its names.
+  test('a readOnly name the server does not offer is reported, once, and only for a server that answered', async () => {
+    const good = fakeServer();
+    const fetch: Fetcher = async (url, init) => (url.includes('dead') ? Promise.reject(new Error('down')) : good.fetch(url, init));
+    const { status } = await connectServers(
+      parseServers({
+        webstorm: { url: 'http://x/stream', readOnly: ['get_file_text', 'no_such_tool'] },
+        rustrover: { url: 'http://dead/stream', readOnly: ['whatever'] },
+      }),
+      { fetch },
+    );
+    expect(status[0]!.unknownReadOnly).toEqual(['no_such_tool']);
+    expect(status[1]!.unknownReadOnly).toBeUndefined();
+
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = ((u: string, i: RequestInit) => fetch(u, i)) as unknown as typeof globalThis.fetch;
+    try {
+      const shape = (await buildMcpPlugin({ make: (_n, s) => s, config: { plugins: { mcp: { servers: { webstorm: { url: 'http://x/stream', readOnly: ['no_such_tool'] } } } } } })) as { setup: (ft: unknown) => void };
+      const lines: string[] = [];
+      shape.setup({ services: { pushLog: (m: string) => lines.push(m) } });
+      expect(lines).toEqual([
+        '[mcp] webstorm: WebStorm 2026.2, 2 tools',
+        '[mcp] webstorm: readOnly names a tool this server does not offer — no_such_tool',
+      ]);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
   });
 
   test('no servers configured — a plugin with nothing to offer, and says why', async () => {

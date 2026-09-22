@@ -15,6 +15,7 @@
 //     `theme.modals.<name>.<prop>` read is guarded (`m = theme?.modals?.chat ?? {}`).
 
 import { askRows, type AskRow, type AskState } from '../assistant/ask.js';
+import { autoBadge, type AutoMode } from '../assistant/auto.js';
 import { imageTokenRanges, splitTokens } from '../assistant/images.js';
 import { changeMarkdown, type ChangeView } from '../assistant/diff.js';
 import { CELL_FREE, CELL_FULL, CONTEXT_WARN_AT, GRID_COLS, GRID_ROWS, contextFootnote, contextGrid, contextHeading, contextLegend, type ContextReading, type GridCell } from '../assistant/context-meter.js';
@@ -292,6 +293,7 @@ const CAP = {
   upDown: `${keyGlyph('up')}${keyGlyph('down')}`,
   page: `${keyGlyph('pageup')}/${keyGlyph('pagedown')}`,
   details: keyGlyph({ name: 'r', ctrl: true }),
+  auto: keyGlyph({ name: 'tab', shift: true }),
   backspace: keyGlyph('backspace'),
   image: keyGlyph({ name: 'v', ctrl: true }),
 } as const;
@@ -536,6 +538,7 @@ export function renderChatModal({
   cursor = 0,
   escArmed = false,
   shellMode = false,
+  autoMode = 'ask',
   pendingConfirm = null,
   pendingQuestion = null,
   queued = [],
@@ -569,6 +572,10 @@ export function renderChatModal({
   // The field is in shell mode: the prompt reads `! ` in the shell colour and
   // Enter runs its text as a command (assistant.ts owns the state machine).
   shellMode?: boolean;
+  // How much of a turn runs without a y/n (src/assistant/auto.ts). Drawn beside the
+  // context badge, in the warn colour, in every state the hint row can be in: the
+  // person must be able to see it while the answer they did not confirm is arriving.
+  autoMode?: AutoMode;
   // `command`: a run_command call — shown whole and wrapped, since the person is
   // deciding on exactly that line.
   pendingConfirm?: { name: string; args?: string | unknown; command?: string } | null;
@@ -702,7 +709,14 @@ export function renderChatModal({
           ? `${CAP.esc} again to exit`
           : emptyNotice
               ? `⚠ ${emptyNotice}`
-              : (`${CAP.upDown} history · wheel or ${CAP.page} scroll · ${CAP.details} details · / commands${imagesOn ? ` · ${CAP.image} image` : ''}${bgCount > 0 ? ` · ${bgCount} in background` : ''}`))),
+              // `⇧⇥ auto` goes LAST of the keys: the row is cut at the window's width,
+              // and a hint that has been there all along must not be the one to fall
+              // off for a newcomer. The mode itself is stated beside the row, not in
+              // it, so nothing about the mode is lost to the cut.
+              : (`${CAP.upDown} history · wheel or ${CAP.page} scroll · ${CAP.details} details · / commands${imagesOn ? ` · ${CAP.image} image` : ''} · ${CAP.auto} auto${bgCount > 0 ? ` · ${bgCount} in background` : ''}`))),
+      // A sibling of the hint, not part of it: the left cell is the hint OR the status
+      // of a running turn, and the mode has to stay on screen through both.
+      autoBadge(autoMode) ? h(Text, { color: m.warn, bold: true }, `  ${autoBadge(autoMode)}`) : null,
       contextBadge ? h(Text, contextWarn ? { color: 'yellow' } : { dim: true }, `  ${contextBadge}`) : null),
       // The task plan sits ABOVE the input (not above the messages) — the newest
       // answer stays pinned just above it, so a growing plan never hides it. Its

@@ -115,7 +115,8 @@ test('chat offers no completion while the caret is inside the word', async () =>
     backend,
   );
   expect(backend.lastFrame).not.toContain('/compact');
-  expect(backend.lastFrame).not.toContain('⇥');
+  // No row of candidates either — the hint line's own `⇧⇥ auto` is not one.
+  expect(backend.lastFrame).not.toContain('⇥ clear');
   handle.unmount();
 });
 

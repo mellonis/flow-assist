@@ -243,6 +243,35 @@ assistant nobody had asked for a board.
   test), framed as data; a refusal (cwd outside the roots) or a shell that cannot start
   throws. The turn's AbortSignal reaches tools as `ctx.signal` (`agentChat`), so Esc
   kills the command's process group with the answer.
+- **Whose claim excuses a y/n, and whose does not.** A tool pauses because its `write`
+  flag says so, and the flag is set by whoever is entitled to say it. The `mcp` plugin
+  keeps the two apart per server: `trusted` is "I believe THIS SERVER's own
+  `readOnlyHint`", `plugins.mcp.servers.<name>.readOnly` is the PERSON's own list of
+  that server's tools, named as the server names them, that they checked themselves —
+  each of those is not a write and runs without asking. Either claim alone is enough,
+  and the second is the only one that helps a server which makes no claims at all (a
+  browser's tools carry none). A listed name the server does not offer is said once, at
+  start, in the log: a typo would otherwise be a setting that quietly does nothing. A
+  rule scoped to an ARGUMENT is a different thing and does not exist yet — a "read"
+  that takes a URL can carry data out in it, so it stays on the ask path.
+- **How much is asked about at all is the person's lever: the auto mode**
+  (`src/assistant/auto.ts`, pure; the chat owns the state). `/auto [reads|all|off]` and
+  ⇧⇥ step ask → reads → all. `ask` is where every conversation starts. `reads` skips no
+  pause of its own on today's tool set — what the host considers a read (no `write`
+  flag, an MCP tool on the person's `readOnly` list) never reached the y/n anyway — it
+  is the rung the cycle passes THROUGH, so one keypress cannot land on "every write
+  runs", and it is what the hint line then says. `all` answers a write's y/n for the
+  person. The mode belongs to the CONVERSATION and is never saved: a restart, `/clear`,
+  `/resume` and a change of task all come back to `ask`, and the session file does not
+  hold it. Two calls are never automatic in ANY mode — `run_command` (the y/n is its
+  only guard, and the command may have been written from a page the model just read)
+  and `web_fetch` (one that reaches the confirmation at all is to a host outside
+  `web.allowlist`, which is exactly what its write flag tests). A background task is
+  untouched: it is handed a confirmation that always answers no, and the chat's mode
+  never reaches it; the person's own `!command` is untouched too. The decision lives in
+  the one place the chat already pauses — the `confirmWrite` closure — and it changes
+  nothing about what `agentChat` asks about: a tool never skips its own write flag.
+  What ran under the mode is still shown, the ✎ diff block and the tool trail as usual.
 - **The log is the person's too.** No log tool; `/log [N]` shares the tail of the
   host log as the person's own message.
 - **`ask_user`** (1–4 questions, 2–4 options each, optional multi-select, an
@@ -580,6 +609,16 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
 - **↑/↓** walk the prompt history, only while the field is empty or still shows a
   history entry untouched. The **wheel** and **PgUp/PgDn** scroll. **^r** unfolds
   thinking, notes and the tool calls behind the one-line `▸ N tools` summary.
+- **⇧⇥ steps the auto mode** — how much of a turn runs without the y/n (the rules are
+  under "What the model can do"). It is one of the chat's own fixed keys, like ⏎ and
+  Esc, drawn with `keyGlyph` and NOT in `HOST_DEFAULT_KEYS`: the chat owns the keyboard
+  while it is open. It used to fall into the plain Tab's completion, which is not what
+  anyone asks for by holding Shift. `/auto [reads|all|off]` does the same in words, and
+  a bare `/auto` takes the next rung. The mode is stated on the hint line in the warn
+  colour (`auto: writes`) as a SIBLING of the hint, not inside it: the left cell becomes
+  the running turn's status while an answer comes in, and a mode that disappeared
+  exactly while writes were running unasked would be the wrong half of the screen to
+  lose.
 - A **paste** is one key, `{ name: 'paste', text }` (flowtty's bracketed paste): it
   goes in at the caret with its line breaks kept. It is never decoded into keys, so
   a pasted newline does not send and pasted letters fire no binding — any new

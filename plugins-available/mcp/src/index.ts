@@ -3,7 +3,7 @@
 //   config.plugins.mcp.servers = {
 //     "webstorm": { "url": "http://127.0.0.1:64542/stream" },
 //     "tracker":  { "url": "https://mcp.example/…", "headers": { "Authorization": "Bearer ${MCP_TOKEN}" }, "trusted": true },
-//     "safari":   { "command": "/usr/bin/safaridriver", "args": ["--mcp"] }
+//     "safari":   { "command": "/usr/bin/safaridriver", "args": ["--mcp"], "readOnly": ["list_tabs", "page_info"] }
 //   }
 //
 // A server is reached one of two ways, and exactly one: `url` (Streamable HTTP, client.ts)
@@ -16,8 +16,12 @@
 //
 // A server's tools run arbitrary code on its side, and their `readOnlyHint` is the
 // server's own claim. So every call asks the person first (the chat's y/n; a background
-// task declines it) — except the read-only tools of a server the person marked
-// `trusted`. A result is framed as data from the server, not instructions.
+// task declines it) — except two kinds of tool, each excused by a claim of its own:
+// `trusted` says "I believe this server's own read-only claims", and `readOnly` is the
+// person's list of tools they checked themselves, by the name the server gives them.
+// The two are independent: a server that carries no hints at all (a browser's does not)
+// is served only by the second. A result is framed as data from the server, not
+// instructions.
 //
 // `${VAR}` in a url, a header or a stdio server's `env` is taken from the environment: a
 // token lives in env, never in the config file. A command and its arguments are taken
@@ -38,11 +42,15 @@ export type ServerSpec = {
   args?: string[];
   env?: Record<string, string>;
   trusted?: boolean;
+  readOnly?: string[];
   enabled?: boolean;
   timeoutMs?: number;
   connectTimeoutMs?: number;
 };
-export type ServerStatus = { name: string; ok: boolean; tools: number; detail: string };
+// `unknownReadOnly` — names on the person's `readOnly` list this server does not offer.
+// Present only when there are some, and only for a server that answered: a server that
+// never connected has no tool list to check them against.
+export type ServerStatus = { name: string; ok: boolean; tools: number; detail: string; unknownReadOnly?: string[] };
 
 // Said by the settings schema (`config set`) and, for a config.json written by hand, in
 // the log at start.
@@ -55,7 +63,22 @@ export function specProblem(spec: ServerSpec): string | null {
   if (spec.url !== undefined && typeof spec.url !== 'string') return '"url" must be a string';
   if (spec.command !== undefined && (typeof spec.command !== 'string' || !spec.command)) return '"command" must be a path or a program name';
   if (spec.args !== undefined && !(Array.isArray(spec.args) && spec.args.every((a) => typeof a === 'string'))) return '"args" must be a list of strings';
+  if (spec.readOnly !== undefined && !(Array.isArray(spec.readOnly) && spec.readOnly.every((a) => typeof a === 'string'))) return '"readOnly" must be a list of tool names';
   return null;
+}
+
+// The tools of this server the PERSON has called read-only, as they wrote them. The
+// name to match is the one the server gave (`t.name`), not the name the model sees:
+// `toolName` prefixes the server and rewrites whatever a provider would refuse, so a
+// tool called `page.info` would never be found under its wire spelling.
+const claimedReadOnly = (spec: ServerSpec): Set<string> =>
+  new Set(Array.isArray(spec.readOnly) ? spec.readOnly.filter((n) => typeof n === 'string') : []);
+
+// The names on that list the server does not offer — a typo is otherwise a setting that
+// silently does nothing.
+export function unknownReadOnly(spec: ServerSpec, tools: McpTool[]): string[] {
+  const offered = new Set(tools.map((t) => t.name));
+  return [...claimedReadOnly(spec)].filter((n) => !offered.has(n));
 }
 
 const MAX_RESULT = 20_000;
@@ -89,6 +112,7 @@ export function frame(server: string, tool: string, text: string, isError: boole
 
 export function toolGroup(name: string, spec: ServerSpec, client: McpClient, tools: McpTool[]) {
   const byWire = new Map<string, string>();
+  const personSays = claimedReadOnly(spec);
   const defs = tools.map((t) => {
     const wire = toolName(name, t.name);
     byWire.set(wire, t.name);
@@ -99,8 +123,11 @@ export function toolGroup(name: string, spec: ServerSpec, client: McpClient, too
         description: `[MCP ${name}] ${t.annotations?.title ? `${t.annotations.title}. ` : ''}${t.description ?? ''}`.slice(0, 1024),
         parameters: t.inputSchema && typeof t.inputSchema === 'object' ? t.inputSchema : { type: 'object', properties: {} },
       },
-      // Asked about unless the person trusts this server AND the tool says it only reads.
-      write: !(spec.trusted === true && t.annotations?.readOnlyHint === true),
+      // Asked about unless one of the two claims excuses it: the person trusts this
+      // server AND the tool says it only reads, or the person named this tool on the
+      // server's `readOnly` list. Either alone is enough — the second stands on its
+      // own, since a server may carry no hints for the first to believe.
+      write: !(spec.trusted === true && t.annotations?.readOnlyHint === true) && !personSays.has(t.name),
     };
   });
   return {
@@ -147,7 +174,15 @@ export async function connectServers(
       // Both steps are bounded by `connectTimeoutMs` each: the app starts only after this.
       const info = await client.initialize();
       const tools = await client.listTools();
-      return { group: toolGroup(name, spec, client, tools), status: { name, ok: true, tools: tools.length, detail: `${info.serverName ?? 'server'}${info.serverVersion ? ` ${info.serverVersion}` : ''}, ${tools.length} tools` } };
+      const unknown = unknownReadOnly(spec, tools);
+      return {
+        group: toolGroup(name, spec, client, tools),
+        status: {
+          name, ok: true, tools: tools.length,
+          detail: `${info.serverName ?? 'server'}${info.serverVersion ? ` ${info.serverVersion}` : ''}, ${tools.length} tools`,
+          ...(unknown.length ? { unknownReadOnly: unknown } : {}),
+        },
+      };
     } catch (e) {
       // A server started as a command that did not make it through the handshake is
       // stopped, not left running for a run that will never use it.
@@ -172,7 +207,11 @@ function configSchema(z: any) {
     command: z.string().min(1).optional(),
     args: z.array(z.string()).optional(),
     env: z.record(z.string(), z.string()).optional(),
+    // Two different claims, and the schema says whose each one is: `trusted` believes
+    // the SERVER's own `readOnlyHint`, `readOnly` is the PERSON's own list of tools
+    // they checked, by the name the server gives them.
     trusted: z.boolean().optional(),
+    readOnly: z.array(z.string()).optional(),
     enabled: z.boolean().optional(),
     timeoutMs: z.number().int().positive().optional(),
     connectTimeoutMs: z.number().int().positive().optional(),
@@ -186,7 +225,13 @@ export async function buildMcpPlugin({ make, config, z }: { make: (name: string,
   // (a test's scripted model is one) must not take the servers' traffic.
   const fetchAtBuild = globalThis.fetch.bind(globalThis);
   const { groups, status } = await connectServers(servers, { fetch: (u, i) => fetchAtBuild(u, i) });
-  const summary = status.map((s) => `${s.name}: ${s.ok ? s.detail : `not connected — ${s.detail}`}`);
+  // One line per server, plus — once, at start — a line for every name on a `readOnly`
+  // list the server turned out not to offer: a mistyped name is a setting that would
+  // otherwise do nothing at all, quietly.
+  const summary = status.flatMap((s) => [
+    `${s.name}: ${s.ok ? s.detail : `not connected — ${s.detail}`}`,
+    ...(s.unknownReadOnly?.length ? [`${s.name}: readOnly names ${s.unknownReadOnly.length === 1 ? 'a tool' : 'tools'} this server does not offer — ${s.unknownReadOnly.join(', ')}`] : []),
+  ]);
   return make('mcp', {
     name: 'mcp',
     tools: groups,

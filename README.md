@@ -6,9 +6,10 @@ surfaces, commands, and LLM tool groups.
 
 ![The chat reads a repository, edits its README behind a y/n, and leaves the diff in the conversation](docs/demo/host.gif)
 
-The assistant can change things only after you say yes, and what a change did stays
-in the chat as a diff. (A scripted model and an invented repository; nothing leaves
-the machine.)
+The assistant can change things only after you say yes — one write at a time, or a
+stretch of them at once if you turn the confirmations off for a while — and what a
+change did stays in the chat as a diff. (A scripted model and an invented repository;
+nothing leaves the machine.)
 
 ## Requirements
 
@@ -60,6 +61,14 @@ terminal (`!cd pkg`; only within the roots; variables are not kept). The assista
 can run commands too — `run_command`, in the same directory, and only after you
 confirm each one (`ai.disabledTools: ["shell"]` turns it off). Limits:
 `shell.timeoutMs` (120 s) and `shell.maxChars` (20000; the end of the output is kept).
+
+Shift+Tab — or `/auto reads|all|off` — says how much you want to confirm while you
+work: `auto: reads` leaves every write asking, `auto: writes` lets writes run without
+the y/n, and the chat's hint line says which is on for as long as it is. It belongs to
+the conversation you are in: a restart, `/clear`, `/resume` and a new task all go back
+to asking, and nothing about it is saved. Two things always ask, whatever you set —
+`run_command`, and reading a page from a host that is not on `web.allowlist`. What ran
+is still shown: the ✎ diff and the tool trail are the same either way.
 
 ## Plugins
 

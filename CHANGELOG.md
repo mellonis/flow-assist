@@ -5,6 +5,29 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **Stop confirming for a while: `⇧⇥` and `/auto`.** A long working session is a long
+  series of y/n. Shift+Tab steps the chat through three modes — ask (where every
+  conversation starts), `auto: reads` (only what the assistant itself reads runs
+  unasked, every write still stops) and `auto: writes` (a write runs too) — and
+  `/auto reads|all|off` says the same in words. The mode is on the hint line the whole
+  time it is on, while an answer is coming as much as between turns, and it belongs to
+  the conversation alone: a restart, `/clear`, `/resume` and a change of task all put it
+  back to asking, and it is never written to the session file. Two things are never
+  automatic, whatever the mode: `run_command`, whose y/n is its only guard, and a
+  `web_fetch` to a host that is not on `web.allowlist`. A background task declines
+  writes as before, and your own `!command` is unaffected. What ran without being asked
+  about is still shown — the `✎` diff block and the tool trail are unchanged.
+
+- **Tell the assistant which of a server's tools only read.** `config set
+  plugins.mcp.servers.safari.readOnly '["list_tabs","page_info"]'` — the tools of that
+  MCP server you have checked yourself, by the names the server uses; each of them runs
+  without a confirmation. It is your claim, and it stands on its own: `trusted` is the
+  other, narrower one ("I believe this server's own `readOnlyHint`"), and a server that
+  makes no claims at all — a browser's does not — could not be helped by it. Everything
+  else is unchanged: still a y/n, still declined in a background task. A name the server
+  does not offer is said once in the log at start, so a typo does not sit there quietly
+  doing nothing.
+
 - **The chat stays quick however long the conversation is.** Typing grew slower with
   every turn — a keystroke took 13 ms in a fresh chat, 75 ms after 40 questions and
   144 ms after 80, and an answer arriving paid the same for every word it wrote, so a

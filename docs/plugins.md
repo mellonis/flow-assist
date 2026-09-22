@@ -95,7 +95,11 @@ What the host does with it, and what it expects back:
 
 - **`write: true`** — the chat pauses with a y/n before the call runs; a declined call
   never reaches `exec`. `write` may also be a predicate over the arguments
-  (`(args) => args.action !== 'list'`) for a tool that only sometimes writes.
+  (`(args) => args.action !== 'list'`) for a tool that only sometimes writes. The flag
+  is what MARKS a call as a write; whether the person is asked each time is theirs to
+  decide — they can turn the confirmations off for a stretch of work — so the pause is
+  not a guard your tool may lean on. Check the arguments yourself, and refuse what the
+  plugin must not do whether or not anyone was asked.
 - **A write refuses by throwing.** Whatever a write tool *returns* counts as done — the
   chat marks the turn with ✎. A refusal or a failed call must throw, in words the
   model can repeat to the person ("…Nothing was changed.").
