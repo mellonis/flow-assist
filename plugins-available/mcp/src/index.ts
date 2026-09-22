@@ -2,8 +2,13 @@
 //
 //   config.plugins.mcp.servers = {
 //     "webstorm": { "url": "http://127.0.0.1:64542/stream" },
-//     "tracker":  { "url": "https://mcp.example/…", "headers": { "Authorization": "Bearer ${MCP_TOKEN}" }, "trusted": true }
+//     "tracker":  { "url": "https://mcp.example/…", "headers": { "Authorization": "Bearer ${MCP_TOKEN}" }, "trusted": true },
+//     "safari":   { "command": "/usr/bin/safaridriver", "args": ["--mcp"] }
 //   }
+//
+// A server is reached one of two ways, and exactly one: `url` (Streamable HTTP, client.ts)
+// or `command` (stdio — the plugin starts the process and stops it when the assistant
+// ends, stdio.ts).
 //
 // Each server becomes a tool group `mcp:<server>` (so `ai.disabledTools` can turn one
 // off) whose tools are named `<server>:<tool>` — two servers often offer the same tool
@@ -14,17 +19,44 @@
 // task declines it) — except the read-only tools of a server the person marked
 // `trusted`. A result is framed as data from the server, not instructions.
 //
-// `${VAR}` in a url or header is taken from the environment: a token lives in env, never
-// in the config file. A server that does not answer is skipped and said so in the log;
-// the rest of the app starts as usual.
+// `${VAR}` in a url, a header or a stdio server's `env` is taken from the environment: a
+// token lives in env, never in the config file. A command and its arguments are taken
+// literally — they are an argv, and a variable expanded into one could split or smuggle
+// an argument the person never wrote. A server that does not answer is skipped and said
+// so in the log; the rest of the app starts as usual.
 //
 // No runtime dependencies: a plugin loaded from source by the compiled binary cannot
 // import a package from disk. Its settings schema is built with the host's zod (`ctx.z`).
 
 import { createMcpClient, resultText, type Fetcher, type McpClient, type McpTool } from './client.ts';
+import { createStdioClient } from './stdio.ts';
 
-export type ServerSpec = { url: string; headers?: Record<string, string>; trusted?: boolean; enabled?: boolean; timeoutMs?: number; connectTimeoutMs?: number };
+export type ServerSpec = {
+  url?: string;
+  headers?: Record<string, string>;
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  trusted?: boolean;
+  enabled?: boolean;
+  timeoutMs?: number;
+  connectTimeoutMs?: number;
+};
 export type ServerStatus = { name: string; ok: boolean; tools: number; detail: string };
+
+// Said by the settings schema (`config set`) and, for a config.json written by hand, in
+// the log at start.
+export const ONE_TRANSPORT = 'a server takes either "url" (Streamable HTTP) or "command" (stdio) — exactly one';
+const hasOneTransport = (s: { url?: unknown; command?: unknown }) => (s.url !== undefined) !== (s.command !== undefined);
+
+// What is wrong with a server's entry, or null.
+export function specProblem(spec: ServerSpec): string | null {
+  if (!hasOneTransport(spec)) return ONE_TRANSPORT;
+  if (spec.url !== undefined && typeof spec.url !== 'string') return '"url" must be a string';
+  if (spec.command !== undefined && (typeof spec.command !== 'string' || !spec.command)) return '"command" must be a path or a program name';
+  if (spec.args !== undefined && !(Array.isArray(spec.args) && spec.args.every((a) => typeof a === 'string'))) return '"args" must be a list of strings';
+  return null;
+}
 
 const MAX_RESULT = 20_000;
 const expand = (s: string, env: Record<string, string | undefined>) => s.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (_, v: string) => env[v] ?? '');
@@ -40,7 +72,9 @@ export function toolName(server: string, tool: string): string {
 export function parseServers(raw: unknown): Array<{ name: string; spec: ServerSpec }> {
   if (!raw || typeof raw !== 'object') return [];
   return Object.entries(raw as Record<string, unknown>)
-    .filter(([, v]) => v && typeof v === 'object' && typeof (v as ServerSpec).url === 'string' && (v as ServerSpec).enabled !== false)
+    // An entry that names no way to reach it is kept: `connectServers` says in the log
+    // what is wrong with it, rather than the server silently never appearing.
+    .filter(([, v]) => v && typeof v === 'object' && (v as ServerSpec).enabled !== false)
     .map(([name, v]) => ({ name, spec: v as ServerSpec }));
 }
 
@@ -92,13 +126,32 @@ export async function connectServers(
 ): Promise<{ groups: ReturnType<typeof toolGroup>[]; status: ServerStatus[] }> {
   const env = deps.env ?? process.env;
   const results = await Promise.all(servers.map(async ({ name, spec }) => {
-    const headers = Object.fromEntries(Object.entries(spec.headers ?? {}).map(([k, v]) => [k, expand(String(v), env)]));
-    const client = createMcpClient({ url: expand(spec.url, env), headers, timeoutMs: spec.timeoutMs, connectTimeoutMs: spec.connectTimeoutMs, fetch: deps.fetch });
+    const problem = specProblem(spec);
+    if (problem) return { group: null, status: { name, ok: false, tools: 0, detail: problem } };
+    const timeouts = { timeoutMs: spec.timeoutMs, connectTimeoutMs: spec.connectTimeoutMs };
+    const client: McpClient = spec.command !== undefined
+      ? createStdioClient({
+        name,
+        command: spec.command,
+        args: spec.args,
+        env: Object.fromEntries(Object.entries(spec.env ?? {}).map(([k, v]) => [k, expand(String(v), env)])),
+        ...timeouts,
+      })
+      : createMcpClient({
+        url: expand(spec.url!, env),
+        headers: Object.fromEntries(Object.entries(spec.headers ?? {}).map(([k, v]) => [k, expand(String(v), env)])),
+        fetch: deps.fetch,
+        ...timeouts,
+      });
     try {
+      // Both steps are bounded by `connectTimeoutMs` each: the app starts only after this.
       const info = await client.initialize();
       const tools = await client.listTools();
       return { group: toolGroup(name, spec, client, tools), status: { name, ok: true, tools: tools.length, detail: `${info.serverName ?? 'server'}${info.serverVersion ? ` ${info.serverVersion}` : ''}, ${tools.length} tools` } };
     } catch (e) {
+      // A server started as a command that did not make it through the handshake is
+      // stopped, not left running for a run that will never use it.
+      client.close();
       return { group: null, status: { name, ok: false, tools: 0, detail: (e as Error).message } };
     }
   }));
@@ -111,14 +164,19 @@ export async function connectServers(
 // server's keys with it, and the model's config tool can describe them.
 function configSchema(z: any) {
   if (!z) return undefined;
+  // The refinement keeps the object's shape reachable (zod 4 adds a check, it does not
+  // wrap), which is how `config set plugins.mcp.servers.<name>.command …` finds its key.
   const server = z.object({
-    url: z.string(),
+    url: z.string().optional(),
     headers: z.record(z.string(), z.string()).optional(),
+    command: z.string().min(1).optional(),
+    args: z.array(z.string()).optional(),
+    env: z.record(z.string(), z.string()).optional(),
     trusted: z.boolean().optional(),
     enabled: z.boolean().optional(),
     timeoutMs: z.number().int().positive().optional(),
     connectTimeoutMs: z.number().int().positive().optional(),
-  });
+  }).refine(hasOneTransport, { message: ONE_TRANSPORT });
   return z.object({ servers: z.record(z.string(), server).optional() }).optional();
 }
 

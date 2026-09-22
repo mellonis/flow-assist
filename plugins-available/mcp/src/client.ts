@@ -1,11 +1,15 @@
-// A minimal MCP client over Streamable HTTP — enough to list a server's tools and call
-// them: `initialize` → `notifications/initialized` → `tools/list` (paged) → `tools/call`.
-// JSON-RPC 2.0; a response may come back as plain JSON or as an SSE stream, and the
-// session id the server hands out in `Mcp-Session-Id` travels with every later call.
+// A minimal MCP client — enough to list a server's tools and call them: `initialize` →
+// `notifications/initialized` → `tools/list` (paged) → `tools/call`, JSON-RPC 2.0.
+//
+// The protocol is written once (`createProtocol`) over a transport that only moves
+// messages: it sends one and, for a request, hands back the message that answers it.
+// Two transports exist. Streamable HTTP lives here: a response may come back as plain
+// JSON or as an SSE stream, and the session id the server hands out in
+// `Mcp-Session-Id` travels with every later call. stdio — a server started as a
+// command — lives in `stdio.ts`, with the child process it owns.
 //
 // No SDK: the official one brings a web server stack along (express, hono, jose, ajv…)
-// for a client that needs a few POSTs. Not here (yet): the stdio transport (it needs a
-// way to stop child processes on exit), OAuth, resources, prompts.
+// for a client that needs a few POSTs. Not here (yet): OAuth, resources, prompts.
 //
 // `fetch` is injected — the tests run against a fake with no network.
 
@@ -40,13 +44,72 @@ export interface McpClientOptions {
 
 export class McpError extends Error {}
 
-export function createMcpClient(opts: McpClientOptions) {
-  const doFetch: Fetcher = opts.fetch ?? ((u, i) => fetch(u, i));
+// What the protocol needs of a transport: send one JSON-RPC message and, when it is a
+// request (`expectResponse`), resolve with the raw message answering it — the protocol
+// unwraps `result` / `error` itself. A transport rejects with an McpError: `no answer in
+// N ms` when the time ran out, or its own words when the line is down.
+// `protocolVersion()` is read on every send (HTTP puts it in a header).
+export interface McpTransport {
+  send(message: { jsonrpc: '2.0'; id?: number; method: string; params?: unknown }, expectResponse: boolean, timeoutMs: number): Promise<unknown>;
+  // Lets go of the connection. HTTP has nothing to let go of; stdio stops its process.
+  close(): void;
+}
+
+export interface ProtocolOptions {
+  connectTimeoutMs?: number;
+  timeoutMs?: number;
+  clientVersion?: string;
+}
+
+// The protocol over a transport. `onProtocol` hears the version the server agreed to, for
+// a transport that has to carry it (HTTP's `mcp-protocol-version` header).
+export function createProtocol(transport: McpTransport, opts: ProtocolOptions, onProtocol?: (version: string) => void) {
   const callTimeoutMs = opts.timeoutMs ?? 60_000;
   const connectTimeoutMs = opts.connectTimeoutMs ?? 1_500;
+  let nextId = 1;
+
+  async function request(method: string, params: unknown, timeoutMs: number): Promise<unknown> {
+    const message = (await transport.send({ jsonrpc: '2.0', id: nextId++, method, ...(params === undefined ? {} : { params }) }, true, timeoutMs)) as { result?: unknown; error?: { code?: number; message?: string } } | undefined;
+    if (message?.error) throw new McpError(`${message.error.message ?? 'error'}${message.error.code !== undefined ? ` (${message.error.code})` : ''}`);
+    return message?.result;
+  }
+  const notify = (method: string) => transport.send({ jsonrpc: '2.0', method }, false, connectTimeoutMs);
+
+  return {
+    async initialize(): Promise<{ serverName?: string; serverVersion?: string; protocolVersion: string }> {
+      const r = (await request('initialize', {
+        protocolVersion: PROTOCOL_VERSION,
+        capabilities: {},
+        clientInfo: { name: 'flow-assist', version: opts.clientVersion ?? '0' },
+      }, connectTimeoutMs)) as { protocolVersion?: string; serverInfo?: { name?: string; version?: string } };
+      const protocol = r?.protocolVersion ?? PROTOCOL_VERSION;
+      onProtocol?.(protocol);
+      await notify('notifications/initialized');
+      return { serverName: r?.serverInfo?.name, serverVersion: r?.serverInfo?.version, protocolVersion: protocol };
+    },
+    async listTools(): Promise<McpTool[]> {
+      const tools: McpTool[] = [];
+      let cursor: string | undefined;
+      for (let page = 0; page < 50; page++) {
+        const r = (await request('tools/list', cursor ? { cursor } : {}, connectTimeoutMs)) as { tools?: McpTool[]; nextCursor?: string };
+        tools.push(...(r?.tools ?? []));
+        cursor = r?.nextCursor;
+        if (!cursor) break;
+      }
+      return tools;
+    },
+    async callTool(name: string, args: Record<string, unknown>): Promise<McpCallResult> {
+      return ((await request('tools/call', { name, arguments: args }, callTimeoutMs)) ?? {}) as McpCallResult;
+    },
+    close: () => transport.close(),
+  };
+}
+export type McpClient = ReturnType<typeof createProtocol>;
+
+export function createMcpClient(opts: McpClientOptions) {
+  const doFetch: Fetcher = opts.fetch ?? ((u, i) => fetch(u, i));
   let session: string | undefined;
   let protocol = PROTOCOL_VERSION;
-  let nextId = 1;
 
   async function post(body: unknown, expectResponse: boolean, timeoutMs: number): Promise<unknown> {
     const ctl = new AbortController();
@@ -70,10 +133,7 @@ export function createMcpClient(opts: McpClientOptions) {
       if (!expectResponse) return undefined;
       const id = (body as { id?: number }).id;
       const type = res.headers.get('content-type') ?? '';
-      const message = type.includes('text/event-stream') ? await fromSse(res, id) : await res.json();
-      const m = message as { result?: unknown; error?: { code?: number; message?: string } };
-      if (m?.error) throw new McpError(`${m.error.message ?? 'error'}${m.error.code !== undefined ? ` (${m.error.code})` : ''}`);
-      return m?.result;
+      return type.includes('text/event-stream') ? await fromSse(res, id) : await res.json();
     } catch (e) {
       if (ctl.signal.aborted) throw new McpError(`no answer in ${timeoutMs} ms`);
       throw e instanceof McpError ? e : new McpError((e as Error).message);
@@ -82,38 +142,12 @@ export function createMcpClient(opts: McpClientOptions) {
     }
   }
 
-  const request = (method: string, params: unknown, timeoutMs: number) => post({ jsonrpc: '2.0', id: nextId++, method, ...(params === undefined ? {} : { params }) }, true, timeoutMs);
-  const notify = (method: string) => post({ jsonrpc: '2.0', method }, false, connectTimeoutMs);
-
+  const protocolClient = createProtocol({ send: post, close: () => {} }, opts, (v) => { protocol = v; });
   return {
+    ...protocolClient,
     get session() { return session; },
-    async initialize(): Promise<{ serverName?: string; serverVersion?: string; protocolVersion: string }> {
-      const r = (await request('initialize', {
-        protocolVersion: PROTOCOL_VERSION,
-        capabilities: {},
-        clientInfo: { name: 'flow-assist', version: opts.clientVersion ?? '0' },
-      }, connectTimeoutMs)) as { protocolVersion?: string; serverInfo?: { name?: string; version?: string } };
-      protocol = r?.protocolVersion ?? PROTOCOL_VERSION;
-      await notify('notifications/initialized');
-      return { serverName: r?.serverInfo?.name, serverVersion: r?.serverInfo?.version, protocolVersion: protocol };
-    },
-    async listTools(): Promise<McpTool[]> {
-      const tools: McpTool[] = [];
-      let cursor: string | undefined;
-      for (let page = 0; page < 50; page++) {
-        const r = (await request('tools/list', cursor ? { cursor } : {}, connectTimeoutMs)) as { tools?: McpTool[]; nextCursor?: string };
-        tools.push(...(r?.tools ?? []));
-        cursor = r?.nextCursor;
-        if (!cursor) break;
-      }
-      return tools;
-    },
-    async callTool(name: string, args: Record<string, unknown>): Promise<McpCallResult> {
-      return ((await request('tools/call', { name, arguments: args }, callTimeoutMs)) ?? {}) as McpCallResult;
-    },
   };
 }
-export type McpClient = ReturnType<typeof createMcpClient>;
 
 // The JSON-RPC message answering `id` out of an SSE body (`data:` lines, events split by
 // a blank line). Other messages the server interleaves — notifications, progress — are

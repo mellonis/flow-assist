@@ -5,6 +5,17 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **An MCP server can be a command now, not only a URL.** `config set
+  plugins.mcp.servers.safari.command /usr/bin/safaridriver` and `… .args '["--mcp"]'`
+  give the assistant Safari's 17 tools — the tabs, the page, a screenshot — and any
+  other server that speaks MCP over stdin and stdout works the same way; `env` passes
+  it variables, `${VAR}` and all. The process starts with the assistant and is stopped
+  when it ends: on `:quit`, on Ctrl+C, on SIGTERM, and when a one-shot command has done
+  its work. One that does not answer the handshake in time is stopped and skipped, as
+  an unreachable URL is; one that dies is not restarted, and its calls then say which
+  server it was and what it last wrote to stderr. Tools a browser offers carry no
+  read-only claim, so even a `trusted` server asks before every call — Safari holds
+  your logged-in sessions.
 - **The installed binary finds its plugins from any directory.** Started as
   `./kit/flow-assist` from somewhere else, it looked for `plugins-enabled/` in the
   working directory, found none, and ran with the host's own tools only — saying

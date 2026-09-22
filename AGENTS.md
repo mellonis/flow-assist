@@ -74,7 +74,7 @@ flow-assist/
 │   └── notes/                 # the plugin docs/plugins.md builds; run by the host's tests
 ├── plugins-available/
 │   ├── gitlab/                # glab_api tool group (no UI)
-│   ├── mcp/                   # tools of MCP servers (no UI)
+│   ├── mcp/                   # tools of MCP servers, over HTTP or stdio (no UI)
 │   └── repo/                  # list_dir/read_file/search/git_* tool group (no UI)
 └── plugins-enabled/           # symlinks → plugins-available/*, gitignored
 ```
@@ -94,7 +94,8 @@ labels keep short names.
 
 A plugin module default-exports `build<Name>Plugin({ renders, config, make, z })`.
 The builder may be **async** — the loader awaits it — for a plugin whose tools are known
-only after it has asked someone (the `mcp` plugin connects to its servers first); it is
+only after it has asked someone (the `mcp` plugin connects to its servers first, over
+Streamable HTTP or, for a server that is a command, its stdin and stdout); it is
 the plugin's job to bound that wait, since the app starts after it. `z` is the host's
 zod: a plugin with no bundler, and so no runtime dependencies (the compiled binary
 cannot import a package from disk), still declares its `configSchema` with it.
@@ -130,6 +131,27 @@ the blacklist.
     promise; a rejection is logged as `[<plugin>] refresh after a write failed: …`.
   The host reaches them as `services.chatSubject()` / `services.afterWrite()`
   (bound in `runtime/app.tsx`).
+
+### A plugin that starts a process owns its life
+
+The `mcp` plugin starts a server given as a `command` and talks MCP over its stdin and
+stdout (`plugins-available/mcp/src/stdio.ts`). One process per server for the whole run —
+process-level state on purpose, unlike a conversation's — and the rules any plugin that
+spawns something long-lived follows:
+
+- **It never keeps the program alive.** The child and its pipes are unref'd, so
+  `config set plugins.…` and a one-shot prompt still exit when their own work is done
+  (`plugins ls` and `config get` load no plugins at all and spawn nothing; a
+  `plugins.*` key does, because a plugin's key is validated by the plugin's schema). A
+  request in flight holds the program through its ref'd timeout timer — without one a
+  one-shot prompt could exit in the middle of a call whose answer was on its way.
+- **It ends with the program.** `process.on('exit')` covers `:quit`, Ctrl+C in the app
+  and a command running out of work; a signal ends a program WITHOUT that event, so
+  SIGTERM/SIGHUP/SIGINT are heard too.
+- **A signal handler must not swallow the signal.** flowtty decides whether to re-raise
+  one by COUNTING listeners — with a second listener present it unmounts and leaves the
+  signal to the app, and the app would then live through Ctrl+C. So the handler stops
+  its processes, removes ITSELF, and re-raises only when no listener is left.
 
 ### A handled key is followed by a redraw
 
@@ -794,7 +816,9 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   the interactive path ONLY — never before a subcommand has been ruled out, or
   `flow-assist config get x | jq` dies.
 - flowtty restores the terminal on SIGINT / SIGTERM / SIGHUP itself and honours
-  `NO_COLOR` / `FORCE_COLOR`; the host adds no handler or colour flag of its own.
+  `NO_COLOR` / `FORCE_COLOR`; the host adds no handler or colour flag of its own. A
+  plugin with a child process to stop adds one — under the rules in "A plugin that
+  starts a process owns its life", which keep flowtty's own re-raise working.
 
 `flow-assist` with subcommands:
 

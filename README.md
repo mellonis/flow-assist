@@ -82,7 +82,8 @@ aiTools/services/tools/configSchema). Tool groups are delivered by plugins; ther
 is no separate tools repo.
 
 Plugins here: `gitlab` (glab CLI), `repo` (local clones and git) and `mcp` — the tools
-of MCP servers over Streamable HTTP, each call asked about first
+of MCP servers, reached over Streamable HTTP or started as a command (Safari's
+`safaridriver --mcp`), each call asked about first
 (`plugins-available/mcp/README.md`). A plugin's settings are set like the host's:
 `config set plugins.<name>.<key> <value>`.
 
