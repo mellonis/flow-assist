@@ -104,6 +104,55 @@ test('several questions are asked in turn; Esc cancels the whole ask', () => {
   expect(askResult(cancelled)).toMatch(/do not assume/i);
 });
 
+test('typing starts the answer: a printable key opens the field with it in, a digit still picks', () => {
+  // Walking to the "Other…" row before typing a word is a step nobody guessed at.
+  let s = type(askStart(one.questions), 'l');
+  expect(s.typing).toBe(true);
+  expect(s.text).toBe('l');
+  expect(s.caret).toBe(1);
+  expect(s.cursor).toBe(3); // the field belongs to the "Other…" row, and the list says so
+  expect(askRows(s).at(-1)!.picked).toBe(true);
+  s = type(s, 'uxon 2');
+  expect(s.text).toBe('luxon 2');
+  // A digit is the shortcut the list advertises, not the first letter of an answer.
+  expect(press(askStart(one.questions), '2').answers[0]!.labels).toEqual(['dayjs']);
+  expect(press(askStart(one.questions), '0').typing).toBe(false);
+  // The space bar toggles in a multi-select; it opens no field anywhere.
+  const multi = [{ question: 'Which checks?', multiSelect: true, options: [{ label: 'lint' }, { label: 'types' }] }];
+  expect(press(askStart(multi), 'space').typing).toBe(false);
+  expect(press(askStart(one.questions), 'space').typing).toBe(false);
+  // Ctrl+r (the chat's fold key) is not text either.
+  expect(askKey(askStart(one.questions), { name: 'r', ctrl: true }).typing).toBe(false);
+});
+
+test('the field is an editor: the caret moves, words are killed, and a paste goes in at it', () => {
+  // A paste arrives as ONE key and used to be dropped whole, so a pasted path could
+  // not be given as an answer at all.
+  let s = type(askStart(one.questions), 'see ');
+  s = askKey(s, { name: 'paste', text: '/tmp/a b/report.txt' });
+  expect(s.text).toBe('see /tmp/a b/report.txt');
+  expect(s.caret).toBe(s.text.length);
+  // The field is one line: a pasted line break is a space, and nothing in a paste submits.
+  s = askKey(s, { name: 'paste', text: '\nline two\nline three\n' });
+  expect(s.text).toBe('see /tmp/a b/report.txt line two line three ');
+  expect(s.done).toBe(false);
+  // Caret motion and the kill bindings are flowtty's, not this file's.
+  const home = askKey(s, { name: 'home' });
+  expect(home.caret).toBe(0);
+  const typedAtCaret = type(home, 'I ');
+  expect(typedAtCaret.text).toStartWith('I see ');
+  const killedWord = askKey(s, { name: 'w', ctrl: true });
+  expect(killedWord.text).toBe('see /tmp/a b/report.txt line two line ');
+  // A paste on the LIST starts the answer the same way a typed character does.
+  const fromList = askKey(askStart(one.questions), { name: 'paste', text: 'ABC-1\nsecond line' });
+  expect(fromList.typing).toBe(true);
+  expect(fromList.text).toBe('ABC-1 second line');
+  // Esc leaves the field for the list, the text kept; Esc on the list dismisses.
+  expect(press(s, 'escape').typing).toBe(false);
+  expect(press(s, 'escape').cancelled).toBe(false);
+  expect(press(press(s, 'escape'), 'escape').cancelled).toBe(true);
+});
+
 test('the result names free text as the person\'s own words', () => {
   const s = press(type(press(askStart(one.questions), '4'), 'use the platform'), 'return');
   expect(askResult(s)).toBe('The user answered:\n- Which library should we use for dates? → (their own words) use the platform');

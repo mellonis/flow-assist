@@ -5,6 +5,39 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **A command you confirmed shows what it printed.** You said yes to a `run_command`,
+  it ran on your machine, and all you saw of it was one dim line under `^r` — while
+  your own `!command` shows its whole output. It now leaves the same block in the chat:
+  the `$ command` line, what it printed, and `exit 0 · 1.2 s · ~/dir` under it. The
+  last 20 lines stand there (`config set plugins.assistant.runOutputLines 40` for
+  more), with `… N lines cut · ^r for all` when there was more and `^r` showing all of
+  it. A command you declined leaves nothing — it never ran; one that failed shows what
+  it printed before it died, with its exit code. The block is yours alone: the
+  assistant reads the output through the tool's own result and is never sent a copy of
+  it, so the conversation does not pay for it twice. Under it, a tool can now describe
+  how its result should be SHOWN and the host draws the block — the first of several
+  kinds to come.
+
+- **The status line times the thing that is running, and says what the turn costs.** A
+  turn that ran a build sat at `3m 12s`, which told you nothing about what was
+  happening. The seconds are now the running thing's: a tool's while it runs
+  (`⚙ run_command $ bun test… 8.1s`), the assistant's current round when none does, and
+  they start again with the next tool. The turn's own total stays where it is read
+  afterwards — the quiet line under the finished answer — and that line now also says
+  what the turn cost: `· 12.4 s · ▸ 3 tools · 3.1k tok`, the tokens the provider
+  reported for it, on the status line as it runs and under the answer when it is done.
+  A provider that reports nothing shows no figure, never a guess.
+
+- **Answering the assistant's question: just type, and the field is a real field.** A
+  question with options used to take typing only after you walked to its "Other…" row;
+  any printable character now opens the free-text field with that character already in
+  it, while `1`–`9` still pick an option (the hint line says so). And that field is the
+  chat's own editor at last: a visible caret, caret motion by character and word,
+  Home/End, the kill bindings — and a paste goes in at the caret, where it used to be
+  dropped entirely, so a path or a ticket's text can finally be given as an answer. It
+  is one line, so a pasted line break becomes a space. Esc still leaves the field for
+  the list, and Esc on the list still dismisses the question.
+
 - **Stop confirming for a while: `⇧⇥` and `/auto`.** A long working session is a long
   series of y/n. Shift+Tab steps the chat through three modes — ask (where every
   conversation starts), `auto: reads` (only what the assistant itself reads runs

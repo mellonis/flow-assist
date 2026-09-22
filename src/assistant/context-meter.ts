@@ -85,6 +85,12 @@ export function contextBadge(r: ContextReading): string {
   return `ctx ${r.measured ? '' : '~'}${percent(r.ratio)}`;
 }
 
+// What a TURN cost, in the same short form: every round's prompt plus its completion,
+// added up as the provider reported them. It sits beside `ctx N%` and means something
+// else — that one is how big the next request is, this one is what has been spent —
+// so both say what they are: `3.1k tok`, `ctx 12%`.
+export const tokensBadge = (tokens: number): string => `${short(Math.max(0, Math.round(tokens)))} tok`;
+
 // The panel's picture: the window as a field of cells, each part filling its share.
 // A part that is there at all gets a cell, however small — tools at 0.4% are still
 // sent with every request, and a field that hides them lies about what is in it.

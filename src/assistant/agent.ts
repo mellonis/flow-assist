@@ -14,6 +14,7 @@ import type { ToolDef, ToolCtx } from '../loader/tools.js';
 import { chatTools, execChatTool, chatToolDefs, chatToolGroupOf } from '../loader/tools.js';
 import type { ToolRunEntry } from '../runtime/services/log.js';
 import { changeView, type Change, type ChangeView } from './diff.js';
+import { toolView, type ToolView } from './views.js';
 import { contentText, type ContentPart, type ImageRef } from './images.js';
 import {
   TOOLS_LOAD, createToolSet, deferredTools, notLoadedError, runToolsLoad, toolsToSend,
@@ -65,6 +66,9 @@ export interface ToolRun {
   // What the write changed, as the tool reported it (`ctx.reportChange`) — drawn in
   // the chat, never sent to the model.
   changes?: ChangeView[];
+  // How the tool asked for its result to be SHOWN (`ctx.reportView`, ./views.ts) —
+  // the same rule: drawn in the chat, never sent to the model.
+  views?: ToolView[];
 }
 
 export interface AgentResult {
@@ -118,7 +122,11 @@ export interface AgentOpts {
   // them": a round with `finishReason === 'tool_calls'` must have toolCalls > 0; if
   // it is 0, the streaming accumulation failed (a real bug). Optional — background
   // tasks simply omit it.
-  onRound?: (info: { index: number; finishReason: string; toolCalls: number; contentLen: number }) => void;
+  // `usage` is what the provider said THIS round cost, when it reports usage at all.
+  // A turn is several rounds and is billed for each of them, so a caller that wants to
+  // say what the turn costs adds these up; the LAST round's figure is a different
+  // number — the size of the next request, which is what the context meter reads.
+  onRound?: (info: { index: number; finishReason: string; toolCalls: number; contentLen: number; usage?: TokenUsage }) => void;
   // Tools on demand (src/assistant/tool-loading.ts). 'all' — every tool in full on
   // every request, the default here, so a caller that does not say keeps what it had;
   // the chat, a background task and the one-shot CLI pass `ai.toolLoading`.
@@ -145,8 +153,11 @@ export interface AgentOpts {
 export function apiHistory(messages: ChatMessage[]): ChatMessage[] {
   const clean: ChatMessage[] = [];
   for (const m of messages) {
-    // 'note' is the host speaking to the person (/memory, what /clear kept): display only.
-    if (m.role === 'system' || m.role === 'note') continue;
+    // 'note' is the host speaking to the person (/memory, what /clear kept) and 'view'
+    // is a block a tool asked the host to draw (a command's output): display only,
+    // both of them. The model already has the tool's own result — a second copy of it
+    // in the conversation would cost the context twice.
+    if (m.role === 'system' || m.role === 'note' || m.role === 'view') continue;
     // A background result and a `!command` the person ran reach the model as the user's.
     const out: ChatMessage = { role: m.role === 'bg' || m.role === 'shell' ? 'user' : m.role, content: m.content ?? null };
     // The images the person attached stay with their message for the rest of the
@@ -468,6 +479,7 @@ export async function agentChat(
         finishReason: r.finishReason || (r.toolCalls.length ? 'tool_calls' : 'stop'),
         toolCalls: r.toolCalls.length,
         contentLen: r.content.length,
+        ...(r.usage ? { usage: r.usage } : {}),
       });
       if (!r.toolCalls.length) {
         // Final round — the answer: already shown live via onLive, fix it as the
@@ -541,6 +553,7 @@ export async function agentChat(
           }
         }
         const changes: ChangeView[] = [];
+        const views: ToolView[] = [];
         try {
           // The turn's signal rides in the ctx, so a tool that waits on something long
           // (run_command) stops with the answer when the person presses Esc.
@@ -551,6 +564,13 @@ export async function agentChat(
             ...(opts.signal ? { signal: opts.signal } : {}),
             reportChange: (c: Change) => {
               try { const v = changeView(c); if (v) changes.push(v); } catch { /* a bad report never fails the write */ }
+            },
+            // The same contract for how the result is SHOWN: what the tool describes
+            // is validated and capped here, so nothing unbounded — and nothing a
+            // command printed — reaches the chat as it stands. A kind this host does
+            // not know comes back null and is quietly ignored.
+            reportView: (v: ToolView) => {
+              try { const parsed = toolView(v); if (parsed) views.push(parsed); } catch { /* a bad report never fails the call */ }
             },
           };
           // Plugin ai-tool → its own `run(args, toolCtx)`; group tool → execChatTool
@@ -572,6 +592,9 @@ export async function agentChat(
         logRun({ name: tc.name, write, outcome, detail: detailStr, args: parsed });
         const run: ToolRun = { name: tc.name, args: parsed, write, outcome, detail: detailStr };
         if (outcome !== 'error' && changes.length) run.changes = changes;
+        // A tool that threw shows nothing: what it had reported describes work it did
+        // not finish — the same rule its reported changes follow.
+        if (outcome !== 'error' && views.length) run.views = views;
         toolRuns.push(run);
         opts.onToolRun?.(run);
       }

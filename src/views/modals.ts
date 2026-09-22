@@ -18,7 +18,8 @@ import { askRows, type AskRow, type AskState } from '../assistant/ask.js';
 import { autoBadge, type AutoMode } from '../assistant/auto.js';
 import { imageTokenRanges, splitTokens } from '../assistant/images.js';
 import { changeMarkdown, type ChangeView } from '../assistant/diff.js';
-import { CELL_FREE, CELL_FULL, CONTEXT_WARN_AT, GRID_COLS, GRID_ROWS, contextFootnote, contextGrid, contextHeading, contextLegend, type ContextReading, type GridCell } from '../assistant/context-meter.js';
+import { VIEW_CAPS, viewMarkdown, type ToolView } from '../assistant/views.js';
+import { CELL_FREE, CELL_FULL, CONTEXT_WARN_AT, GRID_COLS, GRID_ROWS, contextFootnote, contextGrid, contextHeading, contextLegend, tokensBadge, type ContextReading, type GridCell } from '../assistant/context-meter.js';
 import { createElement as h, useEffect, useRef, useState, type ReactNode } from 'react';
 import { bindingGlyph, keyGlyph } from '../playback/keys.js';
 import {
@@ -48,6 +49,8 @@ interface ChatMsg {
   stopped?: boolean;
   // What the turn's writes changed — drawn as diff blocks above the answer.
   changes?: ChangeView[];
+  // The blocks a tool asked the host to draw (role 'view'): a command's output.
+  views?: ToolView[];
   [k: string]: unknown;
 }
 // One executed tool in a turn, for the persistent `▸ name (args) → outcome` trace.
@@ -99,10 +102,11 @@ interface ChatRow {
   label?: boolean | string;
   // The first content row of a message: it carries the speaker's marker.
   first?: boolean;
-  // The quiet line under an answer: how long it took and which tools ran.
+  // The quiet line under an answer: how long it took, which tools ran, what it cost.
   meta?: boolean;
   runs?: ToolRun[];
   duration?: number;
+  tokens?: number;
   stopped?: boolean;
   reasonHeader?: boolean;
   open?: boolean;
@@ -224,6 +228,12 @@ export function chatBoxWidth(width: number, fullscreen = false): number {
 export function chatFieldWidth(width: number, fullscreen = false): number {
   return Math.max(CHAT_FIELD_MIN, chatBoxWidth(width, fullscreen) - 4 - GUTTER);
 }
+// The width everything inside the window is laid out in — the conversation's rows and
+// the blocks that take the field's place (the question, `/context`). Shared with the
+// key handler, which needs it for the question's own field.
+export function chatWrapWidth(width: number, fullscreen = false): number {
+  return Math.max(20, chatBoxWidth(width, fullscreen) - 6);
+}
 // `start` — where the row begins in `input`, so a piece of it can be matched against
 // ranges of the whole value (the image tokens).
 export function inputVisualRows(input: string, cur: number, fieldW: number): { before: string; caret: string; after: string; start: number }[] {
@@ -313,24 +323,40 @@ function toolSummary(runs: ToolRun[]): string {
 // changes and never mutates one (see the `setMessages` updaters), which makes the
 // object itself the right key: only the message that is streaming is laid out again.
 const rowCache = new WeakMap<ChatMsg, Map<string, ChatRow[]>>();
-function messageRows(m: ChatMsg, last: boolean, wrap: number, showReasoning: boolean): ChatRow[] {
-  const key = `${wrap}:${showReasoning ? 1 : 0}:${last ? 1 : 0}`;
+function messageRows(m: ChatMsg, last: boolean, wrap: number, showReasoning: boolean, viewLines: number): ChatRow[] {
+  // Everything the rows depend on is in the key — the fold of a tool's block as much
+  // as the width — or a message would keep the rows it was first laid out with.
+  const key = `${wrap}:${showReasoning ? 1 : 0}:${last ? 1 : 0}:${viewLines}`;
   let byKey = rowCache.get(m);
   if (!byKey) rowCache.set(m, (byKey = new Map()));
   let rows = byKey.get(key);
-  if (!rows) byKey.set(key, (rows = buildMessageRows(m, last, wrap, showReasoning)));
+  if (!rows) byKey.set(key, (rows = buildMessageRows(m, last, wrap, showReasoning, viewLines)));
   return rows;
 }
 
-function chatRows(messages: ChatMsg[], wrap: number, showReasoning: boolean): ChatRow[] {
-  return messages.flatMap((m, mi) => messageRows(m, mi === messages.length - 1, wrap, showReasoning));
+function chatRows(messages: ChatMsg[], wrap: number, showReasoning: boolean, viewLines: number): ChatRow[] {
+  return messages.flatMap((m, mi) => messageRows(m, mi === messages.length - 1, wrap, showReasoning, viewLines));
 }
 
-function buildMessageRows(m: ChatMsg, last: boolean, wrap: number, showReasoning: boolean): ChatRow[] {
+function buildMessageRows(m: ChatMsg, last: boolean, wrap: number, showReasoning: boolean, viewLines: number): ChatRow[] {
   const rows: ChatRow[] = [];
   const inner = Math.max(10, wrap - GUTTER);
   {
     const role = m.role;
+    // A block a tool asked the host to draw (src/assistant/views.ts): a message of its
+    // own, so it reads where it happened. The text in it was written by a command, a
+    // file or a page — never by the host — so it is drawn inside the fence the view
+    // built, which nothing in it can close early, and folded to its last lines until
+    // ^r asks for all of them.
+    if (role === 'view') {
+      const views = (Array.isArray(m.views) ? m.views : []) as ToolView[];
+      views.forEach((v, vi) => {
+        const md = viewMarkdown(v, { folded: !showReasoning, lines: viewLines, moreKey: CAP.details });
+        mdLines(md, inner).forEach((line, li) => rows.push({ role, spans: line.spans, first: vi === 0 && li === 0, continues: line.continues, chrome: line.chrome, frame: line.frame }));
+      });
+      if (!last) rows.push({ gap: true });
+      return rows;
+    }
     // The system prompt (instructions + task context) is CONTEXT, not conversation —
     // it is not drawn in history (as a system prompt in Claude Code). It stays
     // role:'system' in the API; here it is just not rendered. `/context` says how
@@ -370,9 +396,12 @@ function buildMessageRows(m: ChatMsg, last: boolean, wrap: number, showReasoning
     (role === 'user' ? typedLines(text, inner, images) : mdLines(text, inner)).forEach((line, li) => rows.push({ role, spans: line.spans, first: li === 0, continues: line.continues, chrome: line.chrome, frame: line.frame }));
     const runs = (Array.isArray(m.toolRuns) ? m.toolRuns : []) as ToolRun[];
     const duration = role === 'assistant' && Number(m.duration) >= 1000 ? m.duration : undefined;
+    // What the turn cost, where it is read after the fact — the status line said it
+    // while the turn ran.
+    const tokens = role === 'assistant' && Number(m.tokens) > 0 ? Number(m.tokens) : undefined;
     // One quiet line under the answer; ^r unfolds the calls themselves.
     const stopped = role === 'assistant' && m.stopped === true;
-    if (runs.length || duration || stopped) rows.push({ role, meta: true, duration, runs, stopped });
+    if (runs.length || duration || stopped || tokens) rows.push({ role, meta: true, duration, tokens, runs, stopped });
     if (runs.length && showReasoning) for (const run of runs) rows.push({ role, toolRun: true, spans: [toolRunText(run, inner)] });
     if (!last) rows.push({ gap: true });
   }
@@ -388,10 +417,11 @@ function buildMessageRows(m: ChatMsg, last: boolean, wrap: number, showReasoning
 // chat was one more term to forget, and twice was.
 // Below this many rows the conversation keeps every row for itself.
 const MIN_ROWS_TO_PIN = 4;
-function ChatMessages({ messages, wrap, showReasoning, palette: m, errorColor }: {
+function ChatMessages({ messages, wrap, showReasoning, viewLines, palette: m, errorColor }: {
   messages: ChatMsg[];
   wrap: number;
   showReasoning: boolean;
+  viewLines: number;
   palette: Record<string, string | undefined>;
   errorColor?: string;
 }) {
@@ -403,7 +433,7 @@ function ChatMessages({ messages, wrap, showReasoning, palette: m, errorColor }:
   const asked = messages.reduce((n, x) => n + (x.role === 'user' || x.role === 'shell' ? 1 : 0), 0);
   useEffect(() => { box.current?.scrollToEnd(); }, [asked]);
 
-  const rows = chatRows(messages, wrap, showReasoning);
+  const rows = chatRows(messages, wrap, showReasoning, viewLines);
   let lastUserKey = -1;
   for (let i = 0; i < rows.length; i++) if (rows[i]!.role === 'user' && rows[i]!.first) lastUserKey = i;
   let lastUserText = '';
@@ -427,8 +457,12 @@ function ChatMessages({ messages, wrap, showReasoning, palette: m, errorColor }:
   const marker = (row: ChatRow) => {
     if (row.first && row.role === 'user') return h(Text, { bold: true, color: m.accent }, '› ');
     // Same colour as the shell-mode prompt below — a command reads as one thing
-    // from the `! ` it was typed with to the `$ ` its result appears under.
-    if (row.first && row.role === 'shell') return h(Text, { bold: true, color: m.shell }, '$ ');
+    // from the `! ` it was typed with to the `$ ` its result appears under. A
+    // `view` is a command the MODEL ran and the person confirmed: the same `$ ` in
+    // the same colour, on no ground of its own, so whose command it was is still
+    // told apart at a glance. (The only view kind there is; a second one brings its
+    // own marker.)
+    if (row.first && (row.role === 'shell' || row.role === 'view')) return h(Text, { bold: true, color: m.shell }, '$ ');
     if (row.first && row.role === 'bg') return h(Text, { bold: true, color: m.bgAccent }, '◆ ');
     // A note is the HOST speaking to the person (what /memory found, what /clear kept).
     // It is not part of the conversation and is never sent to the model.
@@ -483,7 +517,9 @@ function ChatMessages({ messages, wrap, showReasoning, palette: m, errorColor }:
           row.duration ? h(Text, { dim: true }, `${fmtSec(row.duration)}${runs.length || row.stopped ? ' · ' : ''}`) : null,
           row.stopped ? h(Text, { color: m.warn }, `stopped (Esc)${runs.length ? ' · ' : ''}`) : null,
           runs.length ? h(Text, { dim: !failed, color: failed ? errorColor : wrote ? m.warn : m.ok }, `${showReasoning ? '▾' : '▸'} ${runs.length} tool${runs.length === 1 ? '' : 's'}${wrote ? ' ✎' : ''}: `) : null,
-          runs.length ? h(Text, { dim: true }, `${toolSummary(runs)}${showReasoning ? '' : ` · ${CAP.details}`}`) : null);
+          runs.length ? h(Text, { dim: true }, `${toolSummary(runs)}${showReasoning ? '' : ` · ${CAP.details}`}`) : null,
+          // What the turn cost the provider — the turn's, not the conversation's.
+          row.tokens ? h(Text, { dim: true }, `${row.duration || runs.length || row.stopped ? ' · ' : ''}${tokensBadge(row.tokens)}`) : null);
       }
       const ground = groundOf(row.role);
       const groundStyle = ground ? { width: '100%', backgroundColor: ground } : {};
@@ -545,6 +581,8 @@ export function renderChatModal({
   elapsed = 0,
   emptyNotice = '',
   toolCount = 0,
+  turnTokens = 0,
+  viewLines = VIEW_CAPS.folded,
   completions = null,
   bgCount = 0,
   contextBadge = '',
@@ -582,9 +620,17 @@ export function renderChatModal({
   pendingQuestion?: AskState | null;
   // Messages sent while an answer was coming; they go out, in order, when the turn ends.
   queued?: string[];
+  // The seconds of what is running NOW — a tool while one runs, the model's round
+  // otherwise. The turn's own total is on the finished answer's quiet line.
   elapsed?: number;
   emptyNotice?: string;
   toolCount?: number;
+  // What the provider has reported this TURN costing (0 — nothing reported, and no
+  // figure is drawn: an invented one would be worse than none).
+  turnTokens?: number;
+  // How many lines of a tool's console block stand before ^r unfolds the whole of it
+  // (`plugins.assistant.runOutputLines`).
+  viewLines?: number;
   completions?: Completions | null;
   bgCount?: number;
   // `ctx 12%` (assistant/context-meter.ts); yellow once it is time to /compact.
@@ -606,7 +652,7 @@ export function renderChatModal({
 }) {
   const boxW = chatBoxWidth(width, fullscreen);
   const boxH = fullscreen ? height : Math.min(Math.floor(height * 0.82), height - 4);
-  const wrap = Math.max(20, boxW - 6);
+  const wrap = chatWrapWidth(width, fullscreen);
   const m = (theme?.modals?.chat ?? {}) as Record<string, string | undefined>;
   const fieldW = chatFieldWidth(width, fullscreen); // the prompt lives in the gutter
   const fieldRows = inputVisualRows(input, cursor, fieldW);
@@ -684,7 +730,7 @@ export function renderChatModal({
         // <ScrollBox> is one), so a drag there stays in the conversation.
         selectionScope: true,
       },
-      h(ChatMessages, { messages, wrap, showReasoning, palette: m, errorColor: theme?.error }),
+      h(ChatMessages, { messages, wrap, showReasoning, viewLines, palette: m, errorColor: theme?.error }),
       error ? h(Text, { color: 'red' }, `⚠ ${error}`) : null,
       // The hint on the left, how full the model's context is on the right — it stays
       // put while the hint changes, and turns yellow when it is time to /compact.
@@ -696,8 +742,11 @@ export function renderChatModal({
         // pulses through the accent colours; with none running the model is either
         // thinking (waiting for its first token, reasoning, working out the next tool
         // call) or writing (its text is arriving) — never the name of the last tool.
+        // The seconds are that running thing's, not the turn's: a turn that runs a
+        // build sat at `3m 12s`, which says nothing about what is happening now. What
+        // the turn has cost so far stands beside them, when the provider says.
         ? h(Box, { flexDirection: 'row', overflow: 'hidden' },
-            h(Text, { dim: true, wrap: 'truncate' }, `${spin(elapsed)} ${fmtSec(elapsed)}${toolCount ? ` · ${toolCount} tool call${toolCount === 1 ? '' : 's'}` : ''} · `),
+            h(Text, { dim: true, wrap: 'truncate' }, `${spin(elapsed)} ${fmtSec(elapsed)}${toolCount ? ` · ${toolCount} tool call${toolCount === 1 ? '' : 's'}` : ''}${turnTokens ? ` · ${tokensBadge(turnTokens)}` : ''} · `),
             toolLabel
               ? h(Text, { color: TOOL_PULSE(m)[Math.floor(elapsed / 300) % 4], bold: true, wrap: 'truncate' }, toolLabel)
               : phase === 'thinking'
@@ -821,23 +870,40 @@ function renderContextPanel(r: ContextReading, bg: string | undefined, wrap: num
     h(Text, { dim: true, wrap: 'truncate', selectable: false }, `/compact summarises · /clear starts over · window: ai.contextWindow · ${CAP.esc} / ${CAP.enter} close`));
 }
 
+// The question's free-text row: its prompt, indented under the options, and the width
+// the field is drawn in. The key handler is given the same width, so what the caret
+// does and what is drawn cannot drift apart (the chat's field keeps `chatFieldWidth`
+// for the same reason).
+const ASK_PROMPT = '     › ';
+export const askFieldWidth = (wrap: number) => Math.max(10, wrap - ASK_PROMPT.length - 2);
+
 function renderAsk(state: AskState, bg: string | undefined, wrap: number) {
   const q = state.questions[state.index]!;
   const many = state.questions.length > 1 ? `${state.index + 1}/${state.questions.length} · ` : '';
   const rows = askRows(state);
   const mark = (r: AskRow) => (q.multiSelect && !r.other ? (r.picked ? '[x]' : '[ ]') : r.active ? ' ❯ ' : '   ');
+  // The hint says the rule the list itself cannot: the digits pick, and anything else
+  // typed starts an answer in the person's own words.
   const hint = state.typing
     ? `${CAP.enter} submit · ${CAP.esc} back to the list`
     : q.multiSelect
-      ? `${CAP.upDown} move · ${CAP.space} toggle · ${CAP.enter} confirm · ${CAP.esc} dismiss`
-      : `${CAP.upDown} move · ${CAP.enter} or a digit to answer · ${CAP.esc} dismiss`;
+      ? `${CAP.upDown} move · ${CAP.space} toggle · ${CAP.enter} confirm · type your own words · ${CAP.esc} dismiss`
+      : `${CAP.upDown} move · ${CAP.enter} or a digit to answer · type your own words · ${CAP.esc} dismiss`;
+  // The field is an editor, so it has a caret of its own to draw — wherever it is in
+  // the text, not always at the end.
+  const fieldRows = state.typing ? inputVisualRows(state.text, state.caret, askFieldWidth(wrap)) : [];
   return h(Box, { flexDirection: 'column', width: '100%', border: 'round', paddingX: 1, borderColor: 'cyan', backgroundColor: bg },
     h(Text, { bold: true, color: 'cyan', wrap: 'wrap' }, `? ${many}${q.header ? `${q.header} — ` : ''}${q.question}`),
     ...rows.map((r, i) => h(Box, { key: i, flexDirection: 'column' },
       h(Text, { bold: r.active, inverse: r.active && !state.typing, wrap: 'truncate' }, `${mark(r)} ${i + 1}. ${r.label}`),
       r.description ? h(Text, { dim: true, wrap: 'truncate' }, `       ${r.description.slice(0, Math.max(10, wrap - 8))}`) : null)),
     state.typing
-      ? h(Box, { flexDirection: 'row' }, h(Text, null, '     › '), h(Text, { wrap: 'truncate' }, state.text), h(Text, { inverse: true }, ' '))
+      ? h(Box, { flexDirection: 'column' }, fieldRows.map((row, i) =>
+          h(Box, { key: `f${i}`, flexDirection: 'row' },
+            h(Text, null, i === 0 ? ASK_PROMPT : ' '.repeat(ASK_PROMPT.length)),
+            h(Text, { wrap: 'truncate' }, row.before),
+            row.caret !== '' ? h(Text, { inverse: true }, row.caret) : null,
+            h(Text, { wrap: 'truncate' }, row.after))))
       : null,
     h(Text, { dim: true, selectable: false }, hint));
 }

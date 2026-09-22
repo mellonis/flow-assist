@@ -11,6 +11,14 @@ const realFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 
 const statusRow = (frame: string) => frame.split('\n').find((r) => /Esc stops/.test(r)) ?? '';
+// The seconds the status line is showing — of whatever is running now.
+const secondsOn = (frame: string) => Number(/(\d+\.\d)s/.exec(statusRow(frame))?.[1] ?? -1);
+const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+// A real process finishes on its own clock, not the test backend's.
+const settleUntil = async (cond: () => boolean, ms = 4000) => {
+  const end = Date.now() + ms;
+  while (Date.now() < end) { await settle(2); if (cond()) return; await wait(20); }
+};
 
 test('once the tool is done and the model writes, the line says "writing", not the tool', async () => {
   const model = new ScriptedModel();
@@ -85,5 +93,94 @@ test('a running tool is drawn bright, not dim — it moves', async () => {
   expect(style.fg).toBeTruthy();
   await ui.press('escape');
   await settle(6);
+  ui.app.unmount();
+});
+
+// ─── the seconds are the RUNNING thing's, and the line says what the turn costs ──
+
+test('the line times the running tool, not the turn, and the clock restarts with the next tool', async () => {
+  // One timer from the question to the answer sat at `3m 12s` through a build, which
+  // says nothing about what is happening now. The turn's own total stays on the quiet
+  // line under the finished answer.
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-clock-')));
+  const model = new ScriptedModel();
+  model.script(
+    [{ hold: true }, { tool: 'run_command', args: { command: 'sleep 1' } }, { tool: 'run_command', args: { command: 'echo second' } }],
+    [{ text: 'done.' }],
+  );
+  const ui = await bootApp(model, 110, 28, undefined, { fs: { roots: [root] } });
+  await ui.press('F');
+  await ui.type('run both');
+  await ui.press('return');
+  // Nothing is running but the model's round: the seconds are that round's, and they
+  // are the oldest number this turn will show.
+  await wait(1300);
+  await settle(3);
+  const round = secondsOn(ui.backend.lastFrame);
+  expect(statusRow(ui.backend.lastFrame)).toContain('thinking…');
+  expect(round).toBeGreaterThan(1);
+
+  model.release();
+  await settleUntil(() => ui.backend.lastFrame.includes('Confirm write: run_command'));
+  await ui.press('y');
+  // Long enough for the line to have ticked: a number read the moment a clock is set
+  // is 0 whichever clock it is, and would say nothing.
+  await wait(400);
+  await settle(3);
+  // The first command is running: the line is its, and its seconds are its own — far
+  // short of how long the turn has been going.
+  const first = secondsOn(ui.backend.lastFrame);
+  expect(statusRow(ui.backend.lastFrame)).toContain('run_command');
+  expect(first).toBeLessThan(round);
+
+  // The next call starts its own clock, rather than carrying the last one's on.
+  await settleUntil(() => ui.backend.lastFrame.includes('echo second'));
+  await wait(400);
+  await settle(3);
+  const second = secondsOn(ui.backend.lastFrame);
+  expect(second).toBeLessThan(round);
+  expect(second).toBeLessThan(first + 0.5);
+  await ui.press('y');
+  await settleUntil(() => model.requests.length === 2);
+  await settle(10);
+  // And the turn's own total is where it is read afterwards: under the answer.
+  expect(ui.backend.lastFrame).toMatch(/\d+\.\ds · ▸ 2 tools/);
+  ui.app.unmount();
+}, 20_000);
+
+test('what the turn costs is on the status line and under the answer — and nothing is invented', async () => {
+  const model = new ScriptedModel();
+  model.usage = { prompt_tokens: 1000, completion_tokens: 500 };
+  model.script(
+    [{ tool: 'datetime', args: {} }], // this round reports 1500 tokens
+    [{ hold: true }, { text: 'half past two.' }],
+  );
+  const ui = await bootApp(model, 110, 28);
+  await ui.press('F');
+  await ui.type('который час?');
+  await ui.press('return');
+  await settle(20);
+  // The second round is held: the figure on the line is what the first round cost.
+  expect(statusRow(ui.backend.lastFrame)).toContain('1.5k tok');
+  model.release();
+  await settle(20);
+  // The answer's quiet line carries the whole turn — both rounds.
+  expect(ui.backend.lastFrame).toContain('3.0k tok');
+  ui.app.unmount();
+});
+
+test('a provider that reports no usage shows no figure rather than a guess', async () => {
+  const model = new ScriptedModel(); // usage is null: the chunk is never sent
+  model.script([{ tool: 'datetime', args: {} }], [{ hold: true }, { text: 'half past two.' }]);
+  const ui = await bootApp(model, 110, 28);
+  await ui.press('F');
+  await ui.type('который час?');
+  await ui.press('return');
+  await settle(20);
+  expect(statusRow(ui.backend.lastFrame)).not.toContain('tok');
+  model.release();
+  await settle(20);
+  expect(ui.backend.lastFrame).toContain('half past two.');
+  expect(ui.backend.lastFrame).not.toContain('tok');
   ui.app.unmount();
 });

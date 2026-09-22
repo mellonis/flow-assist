@@ -8,6 +8,13 @@
 // description), optionally multi-select. The UI always adds an "Other…" row that
 // takes free text, so the person is never boxed into the model's framing — which
 // is also why the model may not spend one of its own options on "Other".
+//
+// Answering by TYPING starts that free-text field, and the field itself is flowtty's
+// editor — the same one the chat's own field is (see AGENTS.md, "The field's EDITING
+// is flowtty's editorReducer"), so caret motion, the kill bindings and paste are not
+// written here and cannot drift from the chat's.
+
+import { editorReducer } from '@flowtty/core';
 
 export interface AskOption { label: string; description?: string }
 export interface AskQuestion { question: string; header?: string; options: AskOption[]; multiSelect?: boolean }
@@ -51,13 +58,17 @@ export interface AskState {
   picked: number[]; // multi-select: option indices toggled on
   typing: boolean; // the "Other…" free-text field is open
   text: string;
+  // The caret in `text`: a UTF-16 index resting on a code-point boundary, flowtty's
+  // unit (`text.slice(0, caret)` is what is before it). Not to be confused with
+  // `cursor`, which is the ROW under the cursor in the list above.
+  caret: number;
   answers: AskAnswer[];
   done: boolean;
   cancelled: boolean;
 }
 
 export const askStart = (questions: AskQuestion[]): AskState =>
-  ({ questions, index: 0, cursor: 0, picked: [], typing: false, text: '', answers: [], done: false, cancelled: false });
+  ({ questions, index: 0, cursor: 0, picked: [], typing: false, text: '', caret: 0, answers: [], done: false, cancelled: false });
 
 export interface AskRow { label: string; description?: string; picked: boolean; active: boolean; other: boolean }
 export function askRows(state: AskState): AskRow[] {
@@ -74,10 +85,23 @@ function answer(state: AskState, labels: string[], other?: string): AskState {
   const q = state.questions[state.index]!;
   const answers = [...state.answers, { question: q.question, labels, ...(other ? { other } : {}) }];
   const last = state.index + 1 >= state.questions.length;
-  return { ...state, answers, index: last ? state.index : state.index + 1, cursor: 0, picked: [], typing: false, text: '', done: last };
+  return { ...state, answers, index: last ? state.index : state.index + 1, cursor: 0, picked: [], typing: false, text: '', caret: 0, done: last };
 }
 
-export function askKey(state: AskState, key: { name?: string; ctrl?: boolean; meta?: boolean }): AskState {
+// A key as the chat hands it over — flowtty's, with a paste's text on it.
+export type AskKey = { name?: string; ctrl?: boolean; meta?: boolean; shift?: boolean; text?: string };
+
+// The field is ONE line, so a pasted line break is a space: a path or a ticket's text
+// pasted from anywhere else still goes in whole, and nothing in it can submit.
+const onePasteLine = (text: string) => String(text ?? '').replace(/\s*\n\s*/g, ' ');
+
+// Opens the free-text field with `text` already in it, the caret after it. The row
+// cursor goes to "Other…" too: that is the row the field belongs to, and the list
+// shows it as the answer being given.
+const startTyping = (state: AskState, otherRow: number, text: string): AskState =>
+  ({ ...state, cursor: otherRow, typing: true, text, caret: text.length });
+
+export function askKey(state: AskState, key: AskKey, width = 60): AskState {
   if (state.done) return state;
   const q = state.questions[state.index]!;
   // Key names as flowtty's decoder produces them: Enter is 'return' and the space
@@ -88,16 +112,24 @@ export function askKey(state: AskState, key: { name?: string; ctrl?: boolean; me
   const enter = name === 'return';
   const otherRow = q.options.length;
 
-  // While typing, every printable key is text: `y`, `n` and digits are not shortcuts.
+  // While typing, the field is the chat's own field: flowtty's `editorReducer`, in its
+  // single-line mode. So the caret moves by character and by word, Home/End and the
+  // kill bindings work, and a PASTE goes in at the caret — it arrives as one key
+  // (`{ name: 'paste', text }`) and used to be dropped whole, which made a pasted path
+  // impossible to give as an answer. Every printable key is text here: `y`, `n` and
+  // the digits are not shortcuts while the person is writing.
   if (state.typing) {
+    // Esc leaves the field for the list; on the list it dismisses the question. The
+    // reducer would answer `cancel` — the closest thing first is this file's rule.
     if (name === 'escape') return { ...state, typing: false };
-    if (name === 'backspace' || name === 'delete') return { ...state, text: state.text.slice(0, -1) };
-    if (enter) {
+    const k = name === 'paste' ? { ...key, text: onePasteLine(key.text ?? '') } : key;
+    const act = editorReducer({ value: state.text, cursor: state.caret }, k as Parameters<typeof editorReducer>[1], { multiline: false, width });
+    if (act.kind === 'submit') {
       const other = state.text.trim();
-      if (!other) return state;
+      if (!other) return state; // an empty answer is not an answer
       return answer(state, q.multiSelect ? state.picked.map((i) => q.options[i]!.label) : [], other);
     }
-    if (name.length === 1 && !key.ctrl && !key.meta) return { ...state, text: state.text + name };
+    if (act.kind === 'edit') return { ...state, text: act.state.value, caret: act.state.cursor };
     return state;
   }
 
@@ -111,16 +143,28 @@ export function askKey(state: AskState, key: { name?: string; ctrl?: boolean; me
   if (/^[1-9]$/.test(name)) {
     const i = Number(name) - 1;
     if (i > otherRow) return state; // a digit beyond the list answers nothing
-    if (i === otherRow) return { ...state, cursor: otherRow, typing: true };
+    if (i === otherRow) return startTyping(state, otherRow, '');
     return q.multiSelect ? toggle(i) : answer(state, [q.options[i]!.label]);
   }
   if (name === ' ' && q.multiSelect && state.cursor < otherRow) return toggle(state.cursor);
   if (enter) {
-    if (state.cursor === otherRow) return { ...state, typing: true };
+    if (state.cursor === otherRow) return startTyping(state, otherRow, '');
     if (!q.multiSelect) return answer(state, [q.options[state.cursor]!.label]);
     if (!state.picked.length) return state; // nothing picked is not an answer
     return answer(state, state.picked.map((i) => q.options[i]!.label));
   }
+  // TYPING starts the answer, as it does in every other field in the app: the
+  // character opens the free-text field with itself already in it. Walking to the
+  // "Other…" row first was a step nobody guessed at. What does NOT start it: a digit
+  // (1–9 are the shortcuts the list advertises — a numeric answer is typed once the
+  // field is open) and the space bar (it toggles in a multi-select, and an answer
+  // that begins with a space is nobody's intent). Both branches above come first, so
+  // neither is stolen from.
+  if (name === 'paste') {
+    const pasted = onePasteLine(key.text ?? '').trim();
+    return pasted ? startTyping(state, otherRow, pasted) : state;
+  }
+  if (name.length === 1 && !key.ctrl && !key.meta && !/[0-9 ]/.test(name)) return startTyping(state, otherRow, name);
   return state;
 }
 

@@ -82,7 +82,7 @@ const scenarios: Record<string, () => Promise<void>> = {
     const model = new ScriptedModel();
     const ui = await boot(model);
     ui.frame('app started, chat closed');
-    await ui.press('A');
+    await ui.press('F');
     ui.frame('chat opened, field empty');
     await ui.type('a question being typed');
     ui.frame('text in the field');
@@ -92,7 +92,7 @@ const scenarios: Record<string, () => Promise<void>> = {
   // Slash-command completion inside the field, and the caret moved back into text.
   async completion() {
     const ui = await boot(new ScriptedModel());
-    await ui.press('A');
+    await ui.press('F');
     await ui.type('/');
     ui.frame('"/" typed: the first command is offered, the others are named');
     await ui.type('co');
@@ -109,7 +109,7 @@ const scenarios: Record<string, () => Promise<void>> = {
   // A multi-line draft: two thoughts separated by a blank line.
   async multiline() {
     const ui = await boot(new ScriptedModel());
-    await ui.press('A');
+    await ui.press('F');
     await ui.type('first thought');
     ui.backend.press({ name: 'return', shift: true });
     ui.backend.press({ name: 'return', shift: true });
@@ -123,7 +123,7 @@ const scenarios: Record<string, () => Promise<void>> = {
     const model = new ScriptedModel();
     model.script([{ text: 'Looking at the branch now, ' }, { hold: true }, { text: 'and it is three commits ahead of master.' }], [{ text: 'Second answer.' }]);
     const ui = await boot(model);
-    await ui.press('A');
+    await ui.press('F');
     await ui.type('how far is my branch from master');
     await ui.press('return');
     ui.frame('answer streaming, field idle');
@@ -147,7 +147,7 @@ const scenarios: Record<string, () => Promise<void>> = {
       [{ text: 'Plan is set and the first item is in progress.' }],
     );
     const ui = await boot(model);
-    await ui.press('A');
+    await ui.press('F');
     await ui.type('plan the review of this branch');
     await ui.press('return');
     await settle(20);
@@ -165,7 +165,7 @@ const scenarios: Record<string, () => Promise<void>> = {
       [{ text: 'The background task finished: 14 TODO comments.' }], // the reply to its result
     );
     const ui = await boot(model);
-    await ui.press('A');
+    await ui.press('F');
     await ui.type('count the TODOs in the background');
     await ui.press('return');
     await settle(12);
@@ -186,7 +186,7 @@ const scenarios: Record<string, () => Promise<void>> = {
       [{ text: 'Noted.' }],
     );
     const ui = await boot(model);
-    await ui.press('A');
+    await ui.press('F');
     await ui.type('how should I integrate this');
     await ui.press('return');
     await settle(12);
@@ -194,6 +194,49 @@ const scenarios: Record<string, () => Promise<void>> = {
     await ui.press('return');
     await settle(12);
     ui.frame('after the answer (a write may be asking for confirmation)');
+    ui.app.unmount();
+  },
+
+  // Answering a question in one's own words: typing opens the field, wherever the
+  // cursor was on the list.
+  async answer() {
+    const model = new ScriptedModel();
+    model.script(
+      [{ tool: 'ask_user', args: { questions: [{ question: 'Which branch?', options: [{ label: 'master' }, { label: 'develop' }] }] } }],
+      [{ text: 'Using it.' }],
+    );
+    const ui = await boot(model);
+    await ui.press('F');
+    await ui.type('which branch should I use');
+    await ui.press('return');
+    await settle(12);
+    ui.frame('the list, with the rule on its hint line');
+    await ui.type('feature/ABC-1');
+    ui.frame('typed: the field opened on the first character, caret at the end');
+    await ui.press('left', 'left', 'left');
+    ui.frame('the caret moves inside the text');
+    ui.app.unmount();
+  },
+
+  // What a confirmed run_command leaves in the chat.
+  async runOutput() {
+    const model = new ScriptedModel();
+    model.script(
+      [{ tool: 'run_command', args: { command: 'for i in $(seq 1 30); do echo "line $i of the output"; done' } }],
+      [{ text: 'Thirty lines, the last of them `line 30 of the output`.' }],
+    );
+    const ui = await boot(model);
+    await ui.press('F');
+    await ui.type('print thirty lines');
+    await ui.press('return');
+    await settle(12);
+    ui.frame('the y/n, with the command itself on it');
+    await ui.press('y');
+    await settle(40);
+    ui.frame('confirmed: the block, folded to its last lines');
+    ui.backend.press({ name: 'r', ctrl: true });
+    await settle(6);
+    ui.frame('^r unfolds the whole of it');
     ui.app.unmount();
   },
 };

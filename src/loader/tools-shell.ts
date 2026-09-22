@@ -12,7 +12,8 @@
 // conversation's (`ctx.shell`, shared with `!command`) and remembered between calls.
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
-import { createShellState, dirAllowed, formatShell, nextCwd, realOf, runShell, shellCwd, shellLimits, shellRoots, within, type ShellState } from '../assistant/shell.js';
+import { consoleView, createShellState, dirAllowed, formatShell, nextCwd, realOf, runShell, shellCwd, shellLimits, shellRoots, within, type ShellState } from '../assistant/shell.js';
+import type { ToolView } from '../assistant/views.js';
 import type { ToolGroup } from './tools.js';
 
 // Where a call runs. No `cwd` — the conversation's directory (`base`). A `cwd` is a
@@ -101,6 +102,10 @@ export const shellTools = (config: Record<string, unknown>): ToolGroup => ({
     const signal = (ctx as { signal?: AbortSignal }).signal;
     const r = await runShell(cmd, { cwd, timeoutMs, maxChars, signal });
     if (r.error) throw new Error(`run_command: could not start /bin/sh: ${r.error}`);
+    // The person confirmed this command, so they see what it printed — the same block
+    // their own `!command` leaves. It is DISPLAY only (src/assistant/views.ts): the
+    // model reads the output through the result below, and never a second copy of it.
+    (ctx as { reportView?: (v: ToolView) => void }).reportView?.(consoleView(cmd, r, cwd, timeoutMs));
     const move = nextCwd(config, cwd, r.pwd);
     if (move.cwd !== cwd) shell.setCwd(move.cwd);
     return formatShell(cmd, r, cwd, timeoutMs, { after: move.cwd, note: move.note }).forTool;

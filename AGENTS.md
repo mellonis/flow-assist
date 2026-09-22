@@ -243,6 +243,13 @@ assistant nobody had asked for a board.
   test), framed as data; a refusal (cwd outside the roots) or a shell that cannot start
   throws. The turn's AbortSignal reaches tools as `ctx.signal` (`agentChat`), so Esc
   kills the command's process group with the answer.
+  **A confirmed call SHOWS what it printed**, as the person's own `!command` does: the
+  tool reports a console view (`ctx.reportView`, see "A tool describes how its result is
+  shown") and the chat draws the `$ …` block. A declined call leaves none — nothing
+  ran; a failed one shows its output and its exit code. The block is folded to the last
+  `plugins.assistant.runOutputLines` lines (20) with `… N lines cut · ^r for all`, and
+  ^r unfolds it — a display cap of its own, quite apart from `shell.maxChars`, which is
+  how much the MODEL is given.
 - **Whose claim excuses a y/n, and whose does not.** A tool pauses because its `write`
   flag says so, and the flag is set by whoever is entitled to say it. The `mcp` plugin
   keeps the two apart per server: `trusted` is "I believe THIS SERVER's own
@@ -279,6 +286,16 @@ assistant nobody had asked for a board.
   `src/assistant/ask.ts`; the chat owns only the pause and the render. A
   background task is never given the hook — a question popping up would seize the
   keyboard mid-sentence — so there the tool answers "nobody to ask".
+  **Typing starts the answer**: any printable character opens the free-text field with
+  that character in it (walking to the "Other…" row first was a step nobody guessed
+  at), and a paste on the list opens it with its text. What does NOT open it: `1`–`9`,
+  the shortcuts the list advertises — a numeric answer is typed once the field is open
+  — and the space bar, which toggles in a multi-select. The hint line states that rule.
+  **The field is the chat's own editor**: flowtty's `editorReducer` in its single-line
+  mode, so the caret (`state.caret`, a UTF-16 index — `state.cursor` is the ROW in the
+  list) moves by character and word, Home/End and the kill bindings work, and a paste
+  goes in at the caret with its line breaks collapsed to spaces. Esc leaves the field
+  for the list; Esc on the list dismisses the question, as it always did.
 - **The memory is the person's too.** The `memory` tool is the model's: a stored fact
   goes into the system prompt of EVERY later request — across `/clear`, across
   restarts. That is its purpose, and it is also why "after /clear the assistant still
@@ -414,6 +431,31 @@ hardest. Rules the `repo` and `gitlab` plugins hold, each with a test that tries
   dropped. Only the tool knows what "before" is (a file, an issue's description, a
   comment), so the host never guesses it: `repo`'s write_file / edit_file /
   delete_file report (a directory delete and a file over 2 MiB do not).
+- **A tool describes how its RESULT is shown, and the host draws it**
+  (`ctx.reportView`, `src/assistant/views.ts`). Everything else a tool does collapsed
+  to one dim line under ^r unless host code knew that tool by name. So a tool may hand
+  over a VIEW — data, never rendering — and the host owns the frame, the colours, the
+  wrapping and every cap. One kind so far, a discriminated union on `kind`:
+  `{ kind: 'console', command, text, exitCode, ms, cwd, status? }`, which `run_command`
+  reports; `reportChange` stays the shorthand it is and becomes a kind of its own when
+  a second real case says what the kinds have in common. The rules a new kind keeps:
+  - **Display only.** A view rides on the display message (a message of role `view`,
+    which `apiHistory` drops) and never on the tool's result — the model already read
+    the result, and a copy of it in the conversation costs the context twice. A view
+    from a tool that then threw is dropped, as its reported changes are.
+  - **It is not the host speaking.** The text was written by a command, a file or a
+    page: escape sequences and control characters are stripped, `\r` counts as a line
+    break (a progress bar keeps its last state instead of gluing into one unreadable
+    row), and it is drawn inside a fence longer than any run of backticks in it — so
+    nothing in it can close the block and pass for a confirmation or a hint line.
+  - **Everything is capped where it is COLLECTED** (`toolView`), so a message, a
+    session file and the screen are bounded alike: each line, the number of lines, the
+    characters altogether, the command line itself. ^r therefore unfolds what the view
+    KEPT, not the raw capture.
+  - Every `ChatRow` stays one terminal line: a kind lays out to markdown the chat
+    already knows how to wrap, as the diff block does.
+  - A kind this host does not know comes back null and is ignored, so a plugin written
+    against a later host still runs in an older one.
 - **A shell command is seen before it runs.** `run_command`'s guard is the y/n, not a
   filter on the command; its directory is checked anyway — inside a root by the REAL
   path (`dirAllowed`), a `cd` that leads out is not remembered. `runShell` has exactly
@@ -529,7 +571,9 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
 - Who speaks is said by a **gutter marker and a ground**, not a label: `›` on the
   user ground for the person (the input field's own prompt), `ƒ` for the
   assistant's answer (also signing the frame, `ƒ Flow Assist`), `◆` on its own
-  ground for a background result. Colours come from `theme.modals.chat` (`accent`,
+  ground for a background result, `$` on the user ground for the person's own
+  `!command` and on none for a command the MODEL ran and they confirmed (a `view`
+  message) — the same marker in the same colour, the ground saying whose it was. Colours come from `theme.modals.chat` (`accent`,
   `assistantAccent`, `userBg`, `fieldBg`, `bgAccent`, `bgBg`, `warn`, `ok`) and are
   overridable via `config.plugins.assistant.colors`.
 - A marker is ONE narrow code point: flowtty's grid counts one cell per code point,
@@ -750,6 +794,19 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   closures made when the message was sent, so anything they READ (the tool label
   they clear) is kept in a ref beside the state — reading the state there saw its
   send-time value, and a finished tool's label stayed up for the rest of the turn.
+  - **The seconds are the running THING's, not the turn's.** They start again whenever
+    the line changes hands: a tool the moment it is called (`onTool`), the model's
+    round the moment the tool ends (`segRef`, `beginSegment` in the chat; `t0Ref` still
+    times the turn). One timer from the question to the answer sat at `3m 12s` through
+    a build, which says nothing about what is happening. The TURN's total, and what it
+    cost, stay on the quiet line under the finished answer (`· 12.4 s · ▸ 3 tools ·
+    3.1k tok`), where they are read afterwards and distract nobody.
+  - **What the turn costs is said** (`3.1k tok`, `tokensBadge`): every round's prompt
+    plus its completion as the provider reports them (`onRound`'s `usage`), added up
+    for the turn. It is not `ctx N%` beside it — that one is how big the NEXT request
+    is, from the last round alone (`usageRef`, the context meter). A provider that
+    reports nothing shows no figure: an estimate that moved on its own would be worse
+    than none, and nothing here is estimated.
 - A **background result** (the `background` tool's nested run finishing) is SHOWN as
   soon as no turn is being written — a half-typed draft does not hold it back. It
   does not open the chat and does not spend a model turn: it joins the model's
@@ -845,7 +902,10 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   rows in `inputVisualRows`. So caret motion by character / word / visual row,
   Home/End and the kill bindings per line, paste and the newline keys are NOT host
   code — do not re-add branches for them. The reducer answers `submit` for a plain
-  Enter; what submit means (send, queue, run a `/command`) stays here.
+  Enter; what submit means (send, queue, run a `/command`) stays here. A field the
+  host draws elsewhere takes the same reducer rather than a little editor of its own:
+  the `ask_user` block's free-text row does (single-line, `askFieldWidth` shared with
+  its render the way `chatFieldWidth` is with this one).
   - `<TextArea>` itself is not mounted: the host has ONE key dispatcher
     (`useInputHandler`), and a mounted field would be a second listener.
   - The caret (`cursor`) is a **UTF-16 index into the value, resting on a code-point

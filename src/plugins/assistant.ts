@@ -18,9 +18,10 @@ import { createShellState, formatShell, nextCwd, runShell, shellLimits } from '.
 import { KEEP_SESSIONS, SESSION_VERSION, closeSession, flushOnExit, listSessions, loadSession, newSessionId, pruneSessions, saveSession, sessionToContinue, sessionWhen, sessionsDir, type Session } from '../assistant/sessions.js';
 import type { ChatMessage } from '../assistant/agent.js';
 import type { ChangeView } from '../assistant/diff.js';
+import { VIEW_CAPS, type ToolView } from '../assistant/views.js';
 import { editorReducer } from '@flowtty/core';
 import { z } from 'zod';
-import { chatFieldWidth } from '../views/modals.js';
+import { askFieldWidth, chatFieldWidth, chatWrapWidth } from '../views/modals.js';
 import { askKey, askStart, type AskQuestion, type AskState } from '../assistant/ask.js';
 import { loadMemories, memoryFilePath, saveMemories } from '../runtime/services/memory.js';
 import { keptAfterClear, memoryCommand } from '../assistant/memory-command.js';
@@ -96,7 +97,22 @@ interface ChatMsg {
   stopped?: boolean;
   // What the turn's writes changed — drawn as diff blocks above the answer.
   changes?: ChangeView[];
+  // A block a tool asked the host to draw (role 'view') — a command's output so far.
+  views?: ToolView[];
   [k: string]: unknown;
+}
+
+// The message this turn's answer is being written into: the last assistant message
+// the turn has not yet stamped with its duration. It is looked up rather than assumed
+// to be the last one, because a tool's view (a command's output) is a message of its
+// own and may well sit after it — and the turn's seconds and its tool trail belong on
+// the answer whatever landed below it. −1 when the turn has no answer message yet.
+function answerAt(list: ChatMsg[]): number {
+  for (let i = list.length - 1; i >= 0; i--) {
+    const m = list[i]!;
+    if (m.role === 'assistant' && m.duration == null) return i;
+  }
+  return -1;
 }
 
 // The app-glue dispatched to by the :ask command.
@@ -154,8 +170,15 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
     keys: { chat: 'F' },
     // config.plugins.assistant: `fullscreen` — the chat takes the whole terminal from
     // the start (`/fullscreen on|off` switches it for the session); `colors` — the
-    // chat's palette override (src/playback/theme.ts).
-    configSchema: z.object({ fullscreen: z.boolean().optional(), colors: z.record(z.string(), z.unknown()).optional() }).optional(),
+    // chat's palette override (src/playback/theme.ts); `runOutputLines` — how many
+    // lines of a command's output stand in the chat before ^r unfolds the rest (a
+    // display cap of its own, quite apart from `shell.maxChars`, which is how much the
+    // MODEL is given).
+    configSchema: z.object({
+      fullscreen: z.boolean().optional(),
+      runOutputLines: z.number().int().positive().optional(),
+      colors: z.record(z.string(), z.unknown()).optional(),
+    }).optional(),
     // The footer's word for the chat while it is closed: the key that opens it and,
     // when background results landed meanwhile, how many are waiting. Open, the
     // chat says its own keys inside its frame.
@@ -236,12 +259,31 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // Show the model's «thinking» (reasoning_content): folded by default (one
           // dim-line «▸ reasoning»), Ctrl+r unfolds/folds all.
           const [showReasoning, setShowReasoning] = f.useState(false);
-          // Process indicator: spinner + elapsed request time. t0Ref — send start,
-          // tickRef — setInterval ticking elapsedMs. On completion the time «freezes»
-          // and binds to the last assistant message («· 12.4s»).
+          // Process indicator: spinner + the seconds of whatever is running NOW.
+          // t0Ref — when the turn started, which is what the finished answer's quiet
+          // line says (`· 12.4s`). segRef — when the thing on the status line started:
+          // a tool the moment it was called, the model's round the moment the tool
+          // ended. A turn that runs a build sat at `3m 12s`, which says nothing about
+          // what is happening; the number a person wants there is how long the RUNNING
+          // thing has taken. tickRef ticks elapsedMs off segRef.
           const [elapsedMs, setElapsedMs] = f.useState(0);
           const t0Ref = f.useRef(0);
+          const segRef = f.useRef(0);
           const tickRef = f.useRef<ReturnType<typeof setInterval> | null>(null);
+          // What is on the status line now starts its own clock.
+          const beginSegment = () => { segRef.current = Date.now(); setElapsedMs(0); };
+          // A tool has ended: its label goes, and the clock on the line is the model's
+          // round from here. Only when one was actually running — the callbacks below
+          // all report the end of a tool, and the first of them to fire owns it.
+          const endToolSegment = () => { if (toolLabelRef.current) { setToolLabel(''); beginSegment(); } };
+          // What the provider said this TURN has cost: every round's prompt plus its
+          // completion, added up as the rounds report (`onRound`). A different number
+          // from `usageRef` above, which is the last round alone — the size of the next
+          // request, and so how full the context is. Nothing is estimated here: a
+          // provider that reports no usage leaves this at 0 and no figure is drawn.
+          const [turnTokens, setTurnTokensState] = f.useState(0);
+          const turnTokensRef = f.useRef(0);
+          const setTurnTokens = (n: number) => { turnTokensRef.current = n; setTurnTokensState(n); };
           // Empty answer: the model output only reasoning (goes to the fold) but no
           // final text. contentRef accumulates the final content (onDelta) — by it we
           // decide «empty?» and show an amber status message.
@@ -604,9 +646,12 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             contentRef.current = '';
             setEmptyNotice('');
             setToolCount(0);
-            // Tick the indicator every 120ms: spinner frame + tenths of a second.
+            setTurnTokens(0); // what the last turn cost is not what this one costs
+            // Tick the indicator every 120ms: spinner frame + tenths of a second of
+            // whatever is running now (`segRef`), not of the whole turn.
+            beginSegment();
             if (tickRef.current) clearInterval(tickRef.current);
-            tickRef.current = setInterval(() => setElapsedMs(Date.now() - t0Ref.current), 120);
+            tickRef.current = setInterval(() => setElapsedMs(Date.now() - segRef.current), 120);
             disarmEsc();
             const abort = new AbortController();
             abortRef.current = abort;
@@ -670,17 +715,26 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // What a write changed goes on the answer being written the moment the
                 // write lands — a block of its own that stays in the chat. Only on the
                 // display message: `apiRef` gets the transcript, which never holds it.
-                onToolRun: (run: { changes?: ChangeView[] }) => {
-                  // The tool is done: until the model's next token it is thinking.
-                  if (toolLabelRef.current) setToolLabel('');
+                onToolRun: (run: { changes?: ChangeView[]; views?: ToolView[] }) => {
+                  // The tool is done: until the model's next token it is thinking, and
+                  // the seconds on the line are the round's from here.
+                  endToolSegment();
                   setPhase('thinking');
-                  if (!run.changes?.length) { f.notify(); return; }
-                  const added = run.changes;
+                  const added = run.changes ?? [];
+                  const shown = run.views ?? [];
+                  if (!added.length && !shown.length) { f.notify(); return; }
                   setMessages(cur => {
                     const next = cur.slice();
-                    const last = next[next.length - 1];
-                    if (last?.role === 'assistant') next[next.length - 1] = { ...last, changes: [...((last.changes as ChangeView[] | undefined) ?? []), ...added] };
-                    else next.push({ role: 'assistant', content: '', changes: added });
+                    if (added.length) {
+                      const last = next[next.length - 1];
+                      if (last?.role === 'assistant') next[next.length - 1] = { ...last, changes: [...((last.changes as ChangeView[] | undefined) ?? []), ...added] };
+                      else next.push({ role: 'assistant', content: '', changes: added });
+                    }
+                    // A block the tool asked for is a message of its own, so it reads
+                    // in the order things happened and carries its own marker — the
+                    // way a `!command`'s result does. Display only: `apiRef` never
+                    // gets it, and `apiHistory` drops the role even if it somehow did.
+                    if (shown.length) next.push({ role: 'view', content: '', views: shown });
                     return next;
                   });
                   f.notify();
@@ -688,6 +742,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 onTool: (name: string, args: unknown) => {
                   setToolLabel(`⚙ ${name}(${String(args ?? '').slice(0, 40)})…`);
                   setToolCount(c => c + 1); // call counter for the turn — in the status line
+                  beginSegment(); // the seconds on the line are this tool's now
                   f.notify();
                 },
                 // Diagnostic trace of what EACH round emitted: finish_reason + how many
@@ -696,8 +751,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // toolCalls=1`) or just narrated a status change without calling
                 // (`finish=stop toolCalls=0`). The missing "▸ tool calls" fold in the
                 // chat was AMBIGUOUS — this disambiguates it.
-                onRound: (info: { index: number; finishReason: string; toolCalls: number; contentLen: number }) => {
-                  (f.services as Record<string, any>).pushLog?.(`[round ${info.index}] finish=${info.finishReason} toolCalls=${info.toolCalls} content=${info.contentLen}ch`);
+                onRound: (info: { index: number; finishReason: string; toolCalls: number; contentLen: number; usage?: { promptTokens: number; completionTokens: number } }) => {
+                  // What the turn costs: a round is billed for its prompt and its
+                  // answer, and a turn is several rounds. Only what the provider
+                  // actually reported is counted — one that reports nothing leaves the
+                  // figure off the screen rather than putting a guess there.
+                  if (info.usage) setTurnTokens(turnTokensRef.current + info.usage.promptTokens + info.usage.completionTokens);
+                  (f.services as Record<string, any>).pushLog?.(`[round ${info.index}] finish=${info.finishReason} toolCalls=${info.toolCalls} content=${info.contentLen}ch${info.usage ? ` tokens=${info.usage.promptTokens + info.usage.completionTokens}` : ''}`);
                 },
                 // Round content streams LIVE (the agent calls onLive per token). Which this
                 // is — a retelling of moves or the answer — onLiveCommit decides at the end
@@ -705,7 +765,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // on commit it goes to `process` (retelling) or `content` (answer).
                 onLive: (delta: string) => {
                   if (!delta) return;
-                  if (toolLabelRef.current) setToolLabel(''); // the tool is done: the model is writing
+                  endToolSegment(); // the tool is done: the model is writing
                   setPhase('writing');
                   setMessages(cur => {
                     const next = cur.slice();
@@ -718,7 +778,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // reasoning and content arrive in one chunk as parallel streams: we
                 // accumulate reasoning in a separate message field (not content!).
                 onReasoning: (delta: string) => {
-                  if (toolLabelRef.current) setToolLabel(''); // the tool is done: the model is thinking
+                  endToolSegment(); // the tool is done: the model is thinking
                   setPhase('thinking');
                   setMessages(cur => {
                     const next = cur.slice();
@@ -766,8 +826,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               if (runs.length) {
                 setMessages(cur => {
                   const next = cur.slice();
-                  const last = next[next.length - 1];
-                  if (last?.role === 'assistant') next[next.length - 1] = { ...last, toolRuns: runs };
+                  const at = answerAt(next);
+                  if (at >= 0) next[at] = { ...next[at]!, toolRuns: runs };
                   return next;
                 });
               }
@@ -810,15 +870,19 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               ];
             } finally {
               if (tickRef.current) { clearInterval(tickRef.current); tickRef.current = null; }
+              // The TURN's seconds — what the answer's quiet line keeps. The status
+              // line's own number was the last running thing's and is gone with it.
               const finalMs = Date.now() - t0Ref.current;
-              setElapsedMs(finalMs);
-              // Bind the duration to the last assistant message (persistent «· 12.4s»),
-              // and mark an answer stopped with Esc: cut short, «The» reads like a whole
-              // (and odd) answer unless the line under it says it was stopped.
+              // Bind the TURN's duration and what it cost to this turn's answer (the
+              // persistent «· 12.4 s · 3.1k tok» — read after the fact, where the
+              // status line was about what was running), and mark an answer stopped
+              // with Esc: cut short, «The» reads like a whole (and odd) answer unless
+              // the line under it says it was stopped.
+              const spent = turnTokensRef.current;
               setMessages(cur => {
                 const next = cur.slice();
-                const last = next[next.length - 1];
-                if (last?.role === 'assistant' && last.duration == null) next[next.length - 1] = { ...last, duration: finalMs, ...(aborted ? { stopped: true } : {}) };
+                const at = answerAt(next);
+                if (at >= 0) next[at] = { ...next[at]!, duration: finalMs, ...(spent ? { tokens: spent } : {}), ...(aborted ? { stopped: true } : {}) };
                 return next;
               });
               // Empty answer: the model gave only reasoning (it is in the «reasoning» fold)
@@ -882,9 +946,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             setStreaming(true);
             setToolLabel(`$ ${cmd.length > 60 ? `${cmd.slice(0, 60)}…` : cmd}`);
             t0Ref.current = Date.now();
-            setElapsedMs(0);
+            // The command is the only thing running, so the segment is the whole of it.
+            beginSegment();
             if (tickRef.current) clearInterval(tickRef.current);
-            tickRef.current = setInterval(() => setElapsedMs(Date.now() - t0Ref.current), 120);
+            tickRef.current = setInterval(() => setElapsedMs(Date.now() - segRef.current), 120);
             disarmEsc();
             const abort = new AbortController();
             abortRef.current = abort;
@@ -941,9 +1006,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             setStreaming(true);
             setToolLabel(`⚙ ${label}…`);
             t0Ref.current = Date.now();
-            setElapsedMs(0);
+            beginSegment(); // the command is the one thing running
             if (tickRef.current) clearInterval(tickRef.current);
-            tickRef.current = setInterval(() => setElapsedMs(Date.now() - t0Ref.current), 120);
+            tickRef.current = setInterval(() => setElapsedMs(Date.now() - segRef.current), 120);
             fn()
               .catch((e) => setError((e as Error).message))
               .finally(() => {
@@ -1339,7 +1404,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // An open question consumes every key too: arrows/digits/Space/⏎ answer it,
               // Esc dismisses it, and in the free-text field every printable key is text.
               if (askRef.current) {
-                const next = askKey(askRef.current.state, key);
+                // The same width the block draws its field in, so the caret moves the
+                // way it is shown to move.
+                const next = askKey(askRef.current.state, key, askFieldWidth(chatWrapWidth(width, fullscreenRef.current)));
                 if (next.done) settleAsk(next);
                 else { askRef.current.state = next; setPendingQuestion(next); f.notify(); }
                 return true;
@@ -1571,6 +1638,11 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             queued,
             subject: (f.services as { chatSubject?: () => string | null }).chatSubject?.() ?? null,
             elapsed: elapsedMs, emptyNotice, toolCount, completions,
+            // What the turn has cost so far, as the provider reported it (0 — nothing
+            // reported, and nothing is drawn).
+            turnTokens,
+            // How many lines of a tool's console block stand before ^r unfolds it.
+            viewLines: Number((f.config.plugins as Record<string, { runOutputLines?: unknown }> | undefined)?.assistant?.runOutputLines) || VIEW_CAPS.folded,
             // Live count of IN-FLIGHT background tasks (the host re-renders via
             // notify() when one is armed or completes).
             bgCount: bgActiveCount(),

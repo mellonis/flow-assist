@@ -59,7 +59,9 @@ message, without spending a turn on it. Esc stops it. Commands start in the firs
 `fs.roots` directory and the directory is remembered between them, as in a
 terminal (`!cd pkg`; only within the roots; variables are not kept). The assistant
 can run commands too — `run_command`, in the same directory, and only after you
-confirm each one (`ai.disabledTools: ["shell"]` turns it off). Limits:
+confirm each one (`ai.disabledTools: ["shell"]` turns it off); a command you confirm
+leaves the same block in the chat, its last 20 lines
+(`plugins.assistant.runOutputLines`) with `^r` for the whole of it. Limits:
 `shell.timeoutMs` (120 s) and `shell.maxChars` (20000; the end of the output is kept).
 
 Shift+Tab — or `/auto reads|all|off` — says how much you want to confirm while you

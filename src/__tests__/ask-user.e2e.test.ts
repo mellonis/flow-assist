@@ -7,6 +7,7 @@ import { loadPlugins } from '../loader/build';
 import { assembleToolRegistry } from '../loader/tools';
 import { renderApp } from '../runtime/app';
 import { renderChatModal, renderHelp, renderLogModal, renderReminder } from '../views/modals';
+import { ScriptedModel, bootApp, settle as settleUi } from './helpers/scripted';
 
 const realFetch = globalThis.fetch;
 // The plan is module-level state: leave none behind for the suites that follow.
@@ -72,4 +73,36 @@ test.each([[110, 40], [100, 22]])('the model asks, the person picks with the key
   expect(backend.lastFrame).toContain('Merging then.');
   expect(backend.lastFrame).not.toContain('Rebase or merge?');
   handle.unmount();
+});
+
+test('typing starts the answer, the field takes a paste, and the model is sent the whole text', async () => {
+  // Answering in one's own words meant walking to the "Other…" row first, and the
+  // field there dropped a paste entirely — so a pasted path could not be an answer.
+  const model = new ScriptedModel();
+  model.script(
+    [{ tool: 'ask_user', args: { questions: [{ question: 'Which branch?', options: [{ label: 'master' }, { label: 'develop' }] }] } }],
+    [{ text: 'Using it.' }],
+  );
+  const ui = await bootApp(model, 110, 30);
+  await ui.press('F');
+  await ui.type('which branch should I use?');
+  await ui.press('return');
+  await settleUi(15);
+  expect(ui.backend.lastFrame).toContain('Which branch?');
+  expect(ui.backend.lastFrame).toContain('type your own words');
+
+  await ui.type('use ');
+  expect(ui.backend.lastFrame).toContain('› use'); // the field opened on the first letter
+  ui.backend.paste('feature/ABC-1\nplease');
+  await settleUi(4);
+  await ui.type(' now');
+  await ui.press('return');
+  await settleUi(20);
+
+  expect(model.requests).toHaveLength(2);
+  const result = (model.requests[1]!.messages as { role: string; content?: string }[]).find((m) => m.role === 'tool');
+  // The paste went in whole — its line break a space, since the field is one line —
+  // and it neither answered the question by itself nor fired a binding.
+  expect(String(result?.content)).toContain('use feature/ABC-1 please now');
+  ui.app.unmount();
 });
