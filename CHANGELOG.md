@@ -5,6 +5,19 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **A turn stopped with Esc stays stopped.** The next message used to be answered
+  together with the stopped one — the model went back to the work the person had
+  interrupted, because to it the stopped question was still waiting. Now the model's
+  history records the turn as stopped and not to be resumed unless asked, and keeps
+  the tool calls that finished before Esc (a write that landed is no longer forgotten).
+  A turn that fails is recorded the same way, as a failure, so asking to try again
+  works as expected.
+- **Your message is shown as you typed it.** A message written over several lines
+  (⌥⏎, ⇧⏎ or `\`⏎) was drawn as one line, an indent was lost and `- a` became a
+  bullet; now every line, blank line and leading space is kept, nothing is read as
+  markdown, and a drag copies it back with its line breaks. What the model was sent
+  never changed.
+
 - **Tools on demand.** A request no longer carries the full definition of every
   enabled tool. It carries the core tools (`todo`, `ask_user`, `memory`, …) in full and
   an index of the rest — each tool's name and one line, grouped by plugin — and the

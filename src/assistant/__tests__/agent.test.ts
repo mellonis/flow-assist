@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { chatLanguage } from '../agent';
-import { agentChat, apiHistory } from '../agent';
+import { agentChat, apiHistory, transcriptSoFar } from '../agent';
 import { assembleToolRegistry } from '../../loader/tools';
 import { makeFactory } from '../../loader/plugin';
 
@@ -265,4 +265,25 @@ test('on demand, a write tool that is not loaded is refused before any y/n, and 
   expect(ran).toBe(1);
   expect(sentTools[0]).not.toContain('save_it');
   expect(sentTools[2]).toContain('save_it');
+});
+
+// A turn that throws — Esc, a provider error — has still done what it did before. The
+// error that comes out is the one thrown (an AbortError stays an AbortError), carrying
+// the transcript so far for the caller's history.
+test('agentChat rethrows the same error with the turn so far on it', async () => {
+  assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
+  const stop = new DOMException('The operation was aborted.', 'AbortError');
+  let n = 0;
+  const fakeRound = async () => {
+    if (n++ === 0) return { content: '', reasoning: '', finishReason: 'tool_calls', toolCalls: [{ id: 'c1', name: 'memory', arguments: '{"action":"list"}' }] };
+    throw stop;
+  };
+  const thrown = await agentChat([{ role: 'user', content: 'hi' }], { onLiveCommit: () => {}, chatRound: fakeRound }).catch((e) => e);
+  expect(thrown).toBe(stop);
+  expect(thrown.name).toBe('AbortError');
+  expect(transcriptSoFar(thrown).map((m) => m.role)).toEqual(['assistant', 'tool']);
+  expect(transcriptSoFar(thrown)[1]!.tool_call_id).toBe('c1');
+  // The question the caller passed in is its own, not part of the turn.
+  expect(transcriptSoFar(thrown).some((m) => m.role === 'user')).toBe(false);
+  expect(transcriptSoFar(new Error('no turn'))).toEqual([]);
 });

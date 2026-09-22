@@ -72,6 +72,16 @@ export interface AgentResult {
   transcript: ChatMessage[];
 }
 
+// What a turn that THREW had done by then: `agentChat` hangs the transcript so far on
+// the error it rethrows — the same error object, so its `name` (`'AbortError'` for Esc)
+// still says what happened. A turn stopped or failed after a tool call ran still made
+// that call (a write may have landed), and the model must be told; `apiHistory` drops
+// the half of a pair a round left unfinished. Empty for an error that carries none.
+export function transcriptSoFar(e: unknown): ChatMessage[] {
+  const t = (e as { transcript?: unknown } | null)?.transcript;
+  return Array.isArray(t) ? (t as ChatMessage[]) : [];
+}
+
 // Injectable tool-run logger (see the logToolRun reconciliation comment below).
 export type ToolLogger = (entry: ToolRunEntry) => void;
 
@@ -425,136 +435,144 @@ export async function agentChat(
 
   // The LAST round's usage is the one that counts: its prompt is the whole turn so far.
   let usage: TokenUsage | undefined;
-  for (let i = 0; i < maxRounds; i++) {
-    let roundContent = '';
-    const r = await chatRoundFn(current, {
-      ...opts,
-      tools: roundTools(),
-      // Round content streams LIVE via onLive while accumulating into roundContent.
-      // Which shelf it belongs to (answer vs. narration fold) is decided at the end
-      // of the round, when tool_calls arrive (or not).
-      onDelta: (d: string) => {
-        roundContent += d;
-        (opts.onLive as AgentOpts['onLive'])?.(d);
-      },
-    } as Record<string, unknown>);
-    if (r.usage) usage = r.usage;
-    // Diagnostic: what did THIS round actually emit? `finish_reason === 'tool_calls'`
-    // promises tool_calls; if toolCalls is 0 the SSE accumulation silently dropped
-    // them (a bug we'd want to catch). Distinguishes "the model narrated a status
-    // change without calling the tool" from "the model DID call, we lost it".
-    opts.onRound?.({
-      index: i,
-      finishReason: r.finishReason || (r.toolCalls.length ? 'tool_calls' : 'stop'),
-      toolCalls: r.toolCalls.length,
-      contentLen: r.content.length,
-    });
-    if (!r.toolCalls.length) {
-      // Final round — the answer: already shown live via onLive, fix it as the
-      // content. If the caller does not use onLiveCommit, fall back to chunked
-      // onDelta (old behavior) so the agentic API stays compatible.
-      content = roundContent;
-      current.push({ role: 'assistant', content: roundContent });
-      if (opts.onLiveCommit) opts.onLiveCommit(roundContent, true);
-      else if (typeof opts.onDelta === 'function') {
-        for (const p of roundContent.match(/.{1,8}/gs) ?? []) {
-          (opts.onDelta as (d: string) => void)(p);
-          await new Promise((resolve) => setTimeout(resolve, 0));
+  try {
+    for (let i = 0; i < maxRounds; i++) {
+      let roundContent = '';
+      const r = await chatRoundFn(current, {
+        ...opts,
+        tools: roundTools(),
+        // Round content streams LIVE via onLive while accumulating into roundContent.
+        // Which shelf it belongs to (answer vs. narration fold) is decided at the end
+        // of the round, when tool_calls arrive (or not).
+        onDelta: (d: string) => {
+          roundContent += d;
+          (opts.onLive as AgentOpts['onLive'])?.(d);
+        },
+      } as Record<string, unknown>);
+      if (r.usage) usage = r.usage;
+      // Diagnostic: what did THIS round actually emit? `finish_reason === 'tool_calls'`
+      // promises tool_calls; if toolCalls is 0 the SSE accumulation silently dropped
+      // them (a bug we'd want to catch). Distinguishes "the model narrated a status
+      // change without calling the tool" from "the model DID call, we lost it".
+      opts.onRound?.({
+        index: i,
+        finishReason: r.finishReason || (r.toolCalls.length ? 'tool_calls' : 'stop'),
+        toolCalls: r.toolCalls.length,
+        contentLen: r.content.length,
+      });
+      if (!r.toolCalls.length) {
+        // Final round — the answer: already shown live via onLive, fix it as the
+        // content. If the caller does not use onLiveCommit, fall back to chunked
+        // onDelta (old behavior) so the agentic API stays compatible.
+        content = roundContent;
+        current.push({ role: 'assistant', content: roundContent });
+        if (opts.onLiveCommit) opts.onLiveCommit(roundContent, true);
+        else if (typeof opts.onDelta === 'function') {
+          for (const p of roundContent.match(/.{1,8}/gs) ?? []) {
+            (opts.onDelta as (d: string) => void)(p);
+            await new Promise((resolve) => setTimeout(resolve, 0));
+          }
         }
+        break;
       }
-      break;
-    }
-    // Round with tool_calls: its content is the narration of moves. Already shown
-    // live (onLive), now pin it in `process` (the folded plaque), not the answer.
-    process += roundContent;
-    if (opts.onLiveCommit) opts.onLiveCommit(roundContent, false);
-    else if (roundContent) onProcess?.(roundContent);
-    current.push({
-      role: 'assistant',
-      content: (r as ChatRoundResult).content || null,
-      tool_calls: r.toolCalls.map((tc) => ({
-        id: tc.id,
-        type: 'function',
-        function: { name: tc.name, arguments: tc.arguments },
-      })),
-    });
-    for (const called of r.toolCalls) {
-      const tc = { ...called, name: realName.get(called.name) ?? called.name };
-      onTool(tc.name, tc.arguments);
-      const def = toolByName.get(tc.name);
-      const parsed = parseToolArgs(tc.arguments);
-      // `write` is a flag/predicate on the tool def. A `true` write stays true; a
-      // predicate write is evaluated against the actual parsed args (so a READ
-      // action on a write-capable tool like `memory action:"list"` is NOT labeled
-      // a write); a tool with no write is false.
-      const write =
-        def?.write === true
-          ? true
-          : typeof def?.write === 'function'
-            ? !!def?.write?.(parsed)
-            : false;
-      // Known from the index, not loaded: refused before anything else — a write is
-      // not put to the person for a call that will not run.
-      const notLoaded = onDemand && deferred.has(tc.name) && !toolSet.has(tc.name);
-      const confirm = opts.confirmWrite;
-      const needsConfirm =
-        !notLoaded &&
-        typeof confirm === 'function' &&
-        !!def?.write &&
-        (def.write === true ? true : (def.write as (a: Record<string, unknown>) => boolean)(parsed));
-      // outcome: applied — write really happened; declined — the user rejected it
-      // (y/n); error — the tool threw (incl. Unknown tool if the name is not in the
-      // registry); ok — a non-writing tool ran. detail — the result string to the model.
-      let outcome = 'ok';
-      let detail: unknown = '';
-      if (needsConfirm && confirm) {
-        const ok = await confirm(tc.name, tc.arguments);
-        if (!ok) {
-          outcome = 'declined';
-          detail = 'This write operation was declined — the user must explicitly confirm before it runs.';
-          current.push({ role: 'tool', tool_call_id: tc.id, content: modelToolResult('declined', detail) });
-          logRun({ name: tc.name, write, outcome, detail, args: parsed });
-          const run: ToolRun = { name: tc.name, args: parsed, write, outcome, detail };
-          toolRuns.push(run);
-          opts.onToolRun?.(run);
-          continue;
+      // Round with tool_calls: its content is the narration of moves. Already shown
+      // live (onLive), now pin it in `process` (the folded plaque), not the answer.
+      process += roundContent;
+      if (opts.onLiveCommit) opts.onLiveCommit(roundContent, false);
+      else if (roundContent) onProcess?.(roundContent);
+      current.push({
+        role: 'assistant',
+        content: (r as ChatRoundResult).content || null,
+        tool_calls: r.toolCalls.map((tc) => ({
+          id: tc.id,
+          type: 'function',
+          function: { name: tc.name, arguments: tc.arguments },
+        })),
+      });
+      for (const called of r.toolCalls) {
+        const tc = { ...called, name: realName.get(called.name) ?? called.name };
+        onTool(tc.name, tc.arguments);
+        const def = toolByName.get(tc.name);
+        const parsed = parseToolArgs(tc.arguments);
+        // `write` is a flag/predicate on the tool def. A `true` write stays true; a
+        // predicate write is evaluated against the actual parsed args (so a READ
+        // action on a write-capable tool like `memory action:"list"` is NOT labeled
+        // a write); a tool with no write is false.
+        const write =
+          def?.write === true
+            ? true
+            : typeof def?.write === 'function'
+              ? !!def?.write?.(parsed)
+              : false;
+        // Known from the index, not loaded: refused before anything else — a write is
+        // not put to the person for a call that will not run.
+        const notLoaded = onDemand && deferred.has(tc.name) && !toolSet.has(tc.name);
+        const confirm = opts.confirmWrite;
+        const needsConfirm =
+          !notLoaded &&
+          typeof confirm === 'function' &&
+          !!def?.write &&
+          (def.write === true ? true : (def.write as (a: Record<string, unknown>) => boolean)(parsed));
+        // outcome: applied — write really happened; declined — the user rejected it
+        // (y/n); error — the tool threw (incl. Unknown tool if the name is not in the
+        // registry); ok — a non-writing tool ran. detail — the result string to the model.
+        let outcome = 'ok';
+        let detail: unknown = '';
+        if (needsConfirm && confirm) {
+          const ok = await confirm(tc.name, tc.arguments);
+          if (!ok) {
+            outcome = 'declined';
+            detail = 'This write operation was declined — the user must explicitly confirm before it runs.';
+            current.push({ role: 'tool', tool_call_id: tc.id, content: modelToolResult('declined', detail) });
+            logRun({ name: tc.name, write, outcome, detail, args: parsed });
+            const run: ToolRun = { name: tc.name, args: parsed, write, outcome, detail };
+            toolRuns.push(run);
+            opts.onToolRun?.(run);
+            continue;
+          }
         }
+        const changes: ChangeView[] = [];
+        try {
+          // The turn's signal rides in the ctx, so a tool that waits on something long
+          // (run_command) stops with the answer when the person presses Esc.
+          // `reportChange` collects what this call changed; a tool that throws after
+          // reporting changed nothing the person should be shown as done.
+          const callCtx: ToolCtx = {
+            ...toolCtx,
+            ...(opts.signal ? { signal: opts.signal } : {}),
+            reportChange: (c: Change) => {
+              try { const v = changeView(c); if (v) changes.push(v); } catch { /* a bad report never fails the write */ }
+            },
+          };
+          // Plugin ai-tool → its own `run(args, toolCtx)`; group tool → execChatTool
+          // (lookup by name in the registry). `def.run` exists only on extraTools.
+          // `tools_load` is the loop's own: it changes what the next round sends.
+          if (notLoaded) throw new Error(notLoadedError(tc.name));
+          detail = onDemand && tc.name === TOOLS_LOAD
+            ? runToolsLoad(parsed, catalog, toolSet)
+            : def?.run
+              ? await (def.run as (args: Record<string, unknown>, ctx: ToolCtx) => unknown)(parsed, callCtx)
+              : await execChatTool(tc.name, parsed, callCtx);
+          outcome = write ? 'applied' : 'ok';
+        } catch (e) {
+          detail = `Error: ${e instanceof Error ? e.message : String(e)}`;
+          outcome = 'error';
+        }
+        const detailStr = typeof detail === 'string' ? detail : JSON.stringify(detail);
+        current.push({ role: 'tool', tool_call_id: tc.id, content: modelToolResult(outcome, detailStr) });
+        logRun({ name: tc.name, write, outcome, detail: detailStr, args: parsed });
+        const run: ToolRun = { name: tc.name, args: parsed, write, outcome, detail: detailStr };
+        if (outcome !== 'error' && changes.length) run.changes = changes;
+        toolRuns.push(run);
+        opts.onToolRun?.(run);
       }
-      const changes: ChangeView[] = [];
-      try {
-        // The turn's signal rides in the ctx, so a tool that waits on something long
-        // (run_command) stops with the answer when the person presses Esc.
-        // `reportChange` collects what this call changed; a tool that throws after
-        // reporting changed nothing the person should be shown as done.
-        const callCtx: ToolCtx = {
-          ...toolCtx,
-          ...(opts.signal ? { signal: opts.signal } : {}),
-          reportChange: (c: Change) => {
-            try { const v = changeView(c); if (v) changes.push(v); } catch { /* a bad report never fails the write */ }
-          },
-        };
-        // Plugin ai-tool → its own `run(args, toolCtx)`; group tool → execChatTool
-        // (lookup by name in the registry). `def.run` exists only on extraTools.
-        // `tools_load` is the loop's own: it changes what the next round sends.
-        if (notLoaded) throw new Error(notLoadedError(tc.name));
-        detail = onDemand && tc.name === TOOLS_LOAD
-          ? runToolsLoad(parsed, catalog, toolSet)
-          : def?.run
-            ? await (def.run as (args: Record<string, unknown>, ctx: ToolCtx) => unknown)(parsed, callCtx)
-            : await execChatTool(tc.name, parsed, callCtx);
-        outcome = write ? 'applied' : 'ok';
-      } catch (e) {
-        detail = `Error: ${e instanceof Error ? e.message : String(e)}`;
-        outcome = 'error';
-      }
-      const detailStr = typeof detail === 'string' ? detail : JSON.stringify(detail);
-      current.push({ role: 'tool', tool_call_id: tc.id, content: modelToolResult(outcome, detailStr) });
-      logRun({ name: tc.name, write, outcome, detail: detailStr, args: parsed });
-      const run: ToolRun = { name: tc.name, args: parsed, write, outcome, detail: detailStr };
-      if (outcome !== 'error' && changes.length) run.changes = changes;
-      toolRuns.push(run);
-      opts.onToolRun?.(run);
     }
+  } catch (e) {
+    // Stopped (Esc) or failed mid-turn: what ran so far goes with the error, for the
+    // caller's history (`transcriptSoFar`). A frozen error cannot carry it and is
+    // rethrown as it is.
+    if (e && typeof e === 'object' && Object.isExtensible(e)) Object.assign(e, { transcript: current.slice(turnStart) });
+    throw e;
   }
   return { content, process, toolRuns, transcript: current.slice(turnStart), ...(usage ? { usage } : {}) };
 }

@@ -10,7 +10,7 @@
 import { addTrigger, chatUser } from '../loader/registry.js';
 import { bgActiveCount } from '../loader/tools-core.js';
 import { createPlan, todoGlyph } from '../assistant/plan.js';
-import { apiHistory, compactConversation, chatLanguage, requestTools } from '../assistant/agent.js';
+import { apiHistory, compactConversation, chatLanguage, requestTools, transcriptSoFar } from '../assistant/agent.js';
 import { createToolSet, toolLoadingMode } from '../assistant/tool-loading.js';
 import { copyTarget, copyToClipboard } from '../assistant/copy.js';
 import { createShellState, formatShell, nextCwd, runShell, shellLimits } from '../assistant/shell.js';
@@ -50,6 +50,15 @@ export function logShareMessage(lines: readonly string[], arg = ''): string | nu
   const tail = lines.slice(-n);
   if (!tail.length) return null;
   return `Host log, last ${tail.length} line${tail.length === 1 ? '' : 's'}:\n\`\`\`\n${tail.join('\n')}\n\`\`\``;
+}
+
+// How a turn that did not finish ends in the MODEL's history — an assistant message,
+// read as the model's own previous turn. A question left there unanswered was answered
+// with the next one: the model went back to what the person had stopped.
+export const STOPPED_TURN = '(Stopped by the person before I finished. I am not resuming this request unless they ask me to.)';
+export function failedTurn(message: unknown): string {
+  const why = String(message ?? '').replace(/\s+/g, ' ').trim().slice(0, 200);
+  return `(This turn failed before I could finish${why ? `: ${why}` : ''}.)`;
 }
 
 // Something the person said or did: a message, or a `!command` they ran. A session
@@ -695,6 +704,19 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 setError((e as Error).message);
                 (f.services as Record<string, any>).pushLog?.(`[chat] error: ${(e as Error).message}`);
               }
+              // The question is already in the model's history; left there alone it is a
+              // question still waiting, and the next request shows the model two in a row —
+              // it answers both, and goes back to the work the person stopped. So the
+              // turn is closed in the model's own voice, after the tool calls that did
+              // run (a write that landed before Esc happened; `apiHistory` drops a call
+              // left without its result). Stopped: not to be picked up again unless
+              // asked. Failed: said as a failure, so a retry the person asks for reads as
+              // one. Model-side only — the screen says `stopped (Esc)` or the error.
+              apiRef.current = [
+                ...apiRef.current,
+                ...transcriptSoFar(e),
+                { role: 'assistant', content: aborted ? STOPPED_TURN : failedTurn((e as Error)?.message) },
+              ];
             } finally {
               if (tickRef.current) { clearInterval(tickRef.current); tickRef.current = null; }
               const finalMs = Date.now() - t0Ref.current;

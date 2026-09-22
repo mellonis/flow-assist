@@ -181,6 +181,23 @@ export function mdLines(text: string | null | undefined, wrap: number): Line[] {
   }
 }
 
+// ─── The person's own text, as typed ───────────────────────────────────────────
+// What the person wrote is not markdown written for rendering: in markdown a single
+// line break is a soft one, so two typed lines were drawn as one, an indented command
+// lost its indent and `- a` became a bullet. It is laid out as the field laid it out
+// while they typed (`inputRows`): every line break kept, blank lines and leading
+// spaces too, a line wider than the chat cut at the column. A cut drops nothing, so
+// the row before it carries `continues` with `dropped: ''` — a drag rejoins the line
+// exactly — while a line break the person typed is left a line break in the copy.
+export function typedLines(text: string | null | undefined, wrap: number): Line[] {
+  const rows = inputRows(String(text ?? ''), Math.max(1, wrap));
+  return rows.map((row, i) => {
+    const line: Line = { spans: row.text ? [{ text: row.text }] : [] };
+    if (rows[i + 1]?.continuation) line.continues = { dropped: '', textWidth: Array.from(row.text).length };
+    return line;
+  });
+}
+
 // ─── Multiline input field with caret ─────────────────────────────────────────
 // The field's visual rows, exactly one of them carrying the caret as
 // `{ before, caret, after }`. The geometry is flowtty's (`inputRows` +
@@ -333,7 +350,10 @@ function buildMessageRows(m: ChatMsg, last: boolean, wrap: number, showReasoning
       rows.push({ gap: true });
     }
     const text = String(m.content ?? '') || (liveIsAnswer ? live : '');
-    mdLines(text, inner).forEach((line, li) => rows.push({ role, spans: line.spans, first: li === 0, continues: line.continues, chrome: line.chrome, frame: line.frame }));
+    // The person's message is drawn as typed. A background result and a `!command`'s
+    // block keep markdown: the first is the model's writing, the second the host's own
+    // (a ```console fence under the command).
+    (role === 'user' ? typedLines(text, inner) : mdLines(text, inner)).forEach((line, li) => rows.push({ role, spans: line.spans, first: li === 0, continues: line.continues, chrome: line.chrome, frame: line.frame }));
     const runs = (Array.isArray(m.toolRuns) ? m.toolRuns : []) as ToolRun[];
     const duration = role === 'assistant' && Number(m.duration) >= 1000 ? m.duration : undefined;
     // One quiet line under the answer; ^r unfolds the calls themselves.
@@ -374,7 +394,8 @@ function ChatMessages({ messages, wrap, showReasoning, palette: m, errorColor }:
   for (let i = 0; i < rows.length; i++) if (rows[i]!.role === 'user' && rows[i]!.first) lastUserKey = i;
   let lastUserText = '';
   for (let mi = messages.length - 1; mi >= 0; mi--) {
-    if (messages[mi]?.role === 'user') { lastUserText = String(messages[mi]!.content ?? '').trim(); break; }
+    // The pin is one row: a question typed over several lines is shown on one there.
+    if (messages[mi]?.role === 'user') { lastUserText = String(messages[mi]!.content ?? '').replace(/\s+/g, ' ').trim(); break; }
   }
   // Every row is one terminal line, so a row's index is its line in the content. The
   // last question is pinned over the box's top row while it is scrolled out of view —

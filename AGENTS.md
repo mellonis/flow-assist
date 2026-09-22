@@ -401,6 +401,22 @@ measured it — 1 tool call in 15 turns with 14 false claims, against 15 in 15 w
 none. `/compact`'s summary rides in the system context of every later turn for the
 same reason: a display-only system message never reaches the model.
 
+**A turn that did not finish is closed in the model's history too.** The question
+joins `apiRef` before the request, so it stays on record whatever happens. Left there
+alone after Esc, it read to the model as a question still waiting: the next request
+showed two user messages in a row, and the model answered both — going back to the
+work the person had stopped. So when `agentChat` throws it hangs the turn's
+transcript so far on the SAME error (`transcriptSoFar(e)`; the `name` still says
+`AbortError`), and the chat appends it — the tool calls that completed, a write that
+landed included; `apiHistory` drops a call left without its result — and then an
+assistant message in the model's own voice: `STOPPED_TURN` after Esc (stopped by the
+person, not to be resumed unless they ask), `failedTurn(message)` after an error
+(it failed, with the error's first 200 characters — a retry the person asks for then
+reads as one). The text of the round that was cut off is not kept. The closing
+message is model-side only: the screen already says `stopped (Esc)` or shows the
+error. It is saved with the session like the rest of `apiRef`
+(`turn-end.e2e.test.ts` asserts on what the model is sent next).
+
 ## The command line
 
 `:` opens it. It completes **inline, on its one row**, as the chat's field does: the
@@ -439,10 +455,21 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   1.0.0-alpha.14 fenced code is highlighted in ~25 languages, ```diff is coloured,
   and a block is a dim language label over rows prefixed with a dim `│ ` (no
   backtick rows) — a test that joins a block's text must strip that bar.
+- **The person's own message is drawn as typed, not as markdown** (`typedLines` in
+  `src/views/modals.ts`). In markdown a single line break is soft: two typed lines
+  were drawn as one, `  npm test` lost its indent, `- a` became a bullet. Their text
+  is laid out by `inputRows`, as the field showed it — every line break, blank line
+  and leading space kept, a wide line cut at the column (character wrap, like the
+  field). A cut drops nothing, so the row before it carries `continues` with
+  `dropped: ''` and a drag rejoins the line exactly; a typed line break copies as a
+  line break. Only role `user`: a background result (`bg`) is the model's writing and
+  a `!command`'s block (`shell`) is the host's own ```console fence — both stay
+  markdown. The pinned question folds a multi-line message onto its one row.
 - **⏎** sends; while an answer is coming it **queues** instead (sent in order when
   the turn ends). **Esc**: clear the field → take the last queued message back →
   stop the answer (the line under what came so far says `stopped (Esc)` — a cut-off
-  «В» must not read as a whole answer) → arm/close. **Alt+⏎** (drawn `⌥⏎` on macOS) is a newline (`NEWLINE_KEY` in
+  «В» must not read as a whole answer; the model's history gets a closing message of
+  its own, see "The conversation the model sees") → arm/close. **Alt+⏎** (drawn `⌥⏎` on macOS) is a newline (`NEWLINE_KEY` in
   `src/views/modals.ts` — the one spelling every hint uses); a blank line is kept.
   ⇧⏎ works too where the terminal sends it (decoded since flowtty 1.0.0-alpha.7),
   but the hint names the key that works in every terminal that has an Alt.
@@ -519,7 +546,8 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   - `selectable: false` on chrome: the gutter marker (`ƒ `, `› `, `$ `, `◆ `), the
     pinned question, the `N tools` line, the hint rows, the input field, the title bar
     and footer, the keycaps panel.
-  - The chat lays markdown out itself (`mdLines`), so it keeps what `layoutMarkdown`
+  - The chat lays markdown out itself (`mdLines`; the person's own text through
+    `typedLines`, which sets the same `continues`), so it keeps what `layoutMarkdown`
     marks on each row: a row is the gutter box + a content box carrying
     `wrapContinues` (a wrapped paragraph copies as one line — without it every row
     pastes as its own), the leading `chrome` spans (a code block's `│ `) are

@@ -132,6 +132,28 @@ test('a wrapped heading copies as one line, without the ▍ marker', async () =>
   ui.app.unmount();
 });
 
+// The person's message is drawn as typed: a line break they typed copies as a line
+// break, and a line the chat had to wrap copies as the one line it was.
+test('a drag over the person\'s message copies it as typed — its line breaks kept, a wrapped line whole', async () => {
+  const model = new ScriptedModel();
+  model.script([{ text: 'Ok.' }]);
+  const ui = await bootApp(model, 60, 28);
+  await ui.press('F');
+  const long = 'this line is typed long enough that the chat has to wrap it twice over, at least';
+  for (const [i, line] of ['line one', 'line two', long].entries()) {
+    if (i) ui.backend.press({ name: 'return', meta: true });
+    await ui.type(line);
+  }
+  await ui.press('return');
+  await settle(20);
+  expect(ui.backend.lastFrame).not.toContain(long);
+  const start = cellOf(ui, 'line one');
+  const end = cellOf(ui, 'at least');
+  await drag(ui, start, { x: end.x + 'at least'.length, y: end.y });
+  expect(ui.backend.clipboard).toEqual([`line one\nline two\n${long}`]);
+  ui.app.unmount();
+});
+
 test('a drag that runs past the conversation stays in it: nothing of the hint line or the field', async () => {
   const { ui } = await chatWithAnswer();
   const start = cellOf(ui, 'hills far away.');
