@@ -267,6 +267,33 @@ test('a click does not answer or dismiss an ask_user question', async () => {
   ui.app.unmount();
 });
 
+// The windows set their own ink (`color: m.text`), so every glyph under a drag has an
+// explicit colour — and a selection that painted the band in the terminal's default
+// foreground with that ink on it drew dark on dark on a light terminal. Held mid-drag:
+// what is on screen while the person is still selecting.
+test('text being selected stays readable on a light terminal', async () => {
+  const model = new ScriptedModel();
+  model.script([{ text: 'Readable when selected.' }]);
+  const ui = await bootApp(model, 80, 28, undefined, {}, { scheme: 'light' });
+  await ui.press('F');
+  await ui.type('hello');
+  await ui.press('return');
+  await settle(20);
+  const from = cellOf(ui, 'Readable');
+  ui.backend.mouse('down', from.x, from.y);
+  ui.backend.mouse('drag', from.x + 8, from.y);
+  await settle(4);
+  const cell = (ui.backend as unknown as { lastBuffer: { get(x: number, y: number): { style: { fg?: string; bg?: string; inverse?: boolean } } } }).lastBuffer.get(from.x + 2, from.y);
+  expect(cell.style.inverse).toBe(true);
+  // A band and a glyph of two different colours, both named — not one of them left to
+  // the terminal's foreground, which is the colour the other one already has.
+  expect(cell.style.fg).toBeDefined();
+  expect(cell.style.bg).toBeDefined();
+  expect(cell.style.fg).not.toBe(cell.style.bg);
+  ui.backend.mouse('up', from.x + 8, from.y);
+  ui.app.unmount();
+});
+
 test('a click does not dismiss the reminder banner or close the log', async () => {
   const model = new ScriptedModel();
   model.script([{ tool: 'remind', args: { in: '0.1 seconds', text: 'blink' } }], [{ text: 'Will do.' }]);

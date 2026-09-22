@@ -35,6 +35,9 @@ What each version of flow-assist brought, newest first. The version is the one i
   the keycaps panel paint a dark ground of their own; their text now takes the
   palette's `text` colour instead of the terminal's foreground, which on a light theme
   was black on black. Needs flowtty 1.0.0-alpha.16.
+- **Text being selected with the mouse is readable on a light theme.** The selection
+  used to vanish there: dark text on a dark band. The band now takes the colour of the
+  text under it. Needs flowtty 1.0.0-alpha.18.
 - **Follows the terminal between light and dark, while it runs.** The windows, the
   chat and the keycaps panel take a light or a dark palette by the terminal's scheme
   and repaint when it switches (macOS does at sunset and sunrise); a terminal that
