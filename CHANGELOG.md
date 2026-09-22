@@ -5,6 +5,17 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **The command line can be copied at last.** A drag over `:` picked up nothing: the
+  whole bottom row was marked "not text", which is right for the prompt and the
+  completion offered after the caret and wrong for the command you typed — so a long
+  `config set plugins.mcp.servers.safari.readOnly …` could not be taken out to be
+  fixed or shared. Dragging over it now copies exactly what you typed: no `: ` in
+  front of it, nothing of the greyed-out offer after the caret, nothing of the `⇥ a · b`
+  candidates beside it, and nothing of the hints or the message that have that row when
+  the line is closed. The drag stays on its row, so it picks up nothing of the screen
+  above either. The chat's own field is unchanged for now — its caret and placeholder
+  sit in the middle of the text, which needs its own answer.
+
 - **One line instead of the folded notes: what it is doing now.** Between tool calls
   the assistant writes prose, and every answer carried a dim `▸ notes` header with the
   last two lines of it — a header for text that is mostly noise, with the one thing

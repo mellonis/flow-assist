@@ -565,6 +565,20 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   A command that is listed does something: `view` and `back` set a state nothing in
   the host reads and were removed. The host's commands are `clear`, `quit`, `config`,
   `cache`, `help`; everything else is a plugin's.
+- **The typed command is text; everything drawn around it is chrome.** A drag over
+  the line copies what was typed and nothing else — not the `: ` prompt, not the
+  inline offer after the caret, not the `⇥ a · b` candidates — so a long
+  `config set plugins.mcp.servers.safari.readOnly …` can be taken out to be fixed or
+  shared. It follows the rule the chat's rows follow (the gutter is chrome, the text
+  is not): the bottom box used to be `selectable: false` whole and swallowed the
+  command with its chrome; only the spans carry the flag now, and the box carries
+  `selectionScope` instead — a drag that starts there stays on its row and inside the
+  padding, so the layout's own blank cells never come back as spaces around the
+  command. The footer hints and the toast, which have that row whenever the line is
+  closed, are chrome as they were. A command wider than the terminal is not wrapped
+  (the rule above), so a drag copies the part that is on the screen. The chat's input
+  field is NOT this: its caret and placeholder sit in the middle of its text, so it
+  stays unselectable whole until that is thought through.
 
 ## The chat
 
@@ -760,13 +774,16 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   adding a pane:
   - `selectionScope` on every pane and window: a drag that starts inside stays in its
     content rect — never onto the border, never into the neighbour. The chat's frame,
-    `frame()` (log, help) and the reminder carry it; a `<ScrollBox>` (the
-    conversation, the help's list) and a `<Table>` are scopes already. A plugin's
-    panes carry it too (the tracker: the board, each column cell, the issue, the info
-    panel, every modal window).
+    `frame()` (log, help), the reminder and the host's bottom box (the command line)
+    carry it; a `<ScrollBox>` (the conversation, the help's list) and a `<Table>` are
+    scopes already. A plugin's panes carry it too (the tracker: the board, each column
+    cell, the issue, the info panel, every modal window).
   - `selectable: false` on chrome: the gutter marker (`ƒ `, `› `, `$ `, `◆ `), the
-    pinned question, the `N tools` line, the hint rows, the input field, the title bar
-    and footer, the keycaps panel.
+    pinned question, the `N tools` line, the hint rows, the input field, the title bar,
+    the keycaps panel, and everything the bottom box draws around the typed command —
+    the `: ` prompt, the inline offer, the candidate list, the footer hints and the
+    toast. The command itself is the one thing down there a drag copies (see "The
+    command line").
   - The chat lays markdown out itself (`mdLines`; the person's own text through
     `typedLines`, which sets the same `continues`), so it keeps what `layoutMarkdown`
     marks on each row: a row is the gutter box + a content box carrying

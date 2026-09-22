@@ -656,19 +656,32 @@ export function renderApp(
       h(Box, { flexGrow: 1, zIndex: 1 },
         overlayComps.filter((c) => !c.surface || surfaceActive(c.plugin)).map(({ Comp, key }) => h(Comp as any, { key })),
         atHome ? renderHome({ title, plugins, keys, builtins: BUILTIN_PLUGINS, width: termWidth, pluginsNote }) : null),
-      h(Box, { padding: 1, flexDirection: 'column', selectable: false },
+      // The bottom row, and the one place on this screen a drag has something to
+      // copy: the command the person typed. The box used to be `selectable: false`
+      // whole, which is right for what surrounds the command — and swallowed the
+      // command with it, so a long `:config set …` could not be copied out to be
+      // fixed or shared. It follows the rule the chat's rows follow instead (the
+      // gutter is chrome, the text is not): the typed text is the only selectable
+      // thing here, everything drawn around it says `selectable: false`.
+      // `selectionScope` keeps a drag that starts here on this row and inside the
+      // padding — it never runs up into the screen above, and the padding cells never
+      // come back as spaces around what was copied.
+      h(Box, { padding: 1, flexDirection: 'column', selectionScope: true },
         // `dim`, not `dimColor` — the latter is another library's prop; flowtty does
         // not know it, and an `as any` had been hiding that the footer was never dimmed.
         line
           ? h(Box, { flexDirection: 'row' },
-              h(Text, { bold: true, color: 'cyan' }, ': '),
+              // The prompt, the inline offer and the candidate list are the host
+              // speaking, not text anyone asked for: a copy of the command line is
+              // what was typed and nothing else.
+              h(Text, { bold: true, color: 'cyan', selectable: false }, ': '),
               h(Text, null, cmdline.current.input),
               // The caret sits ON the first offered character, as in the chat's field.
               line.ghost
-                ? [h(Text, { key: 'g0', inverse: true, dim: true, color: 'cyan' }, line.ghost[0]), h(Text, { key: 'g1', dim: true, color: 'cyan' }, line.ghost.slice(1))]
-                : h(Text, { inverse: true }, ' '),
-              line.others.length ? h(Text, { dim: true, wrap: 'truncate' }, `  ${keyGlyph('tab')} ${line.others.slice(0, 12).join(' · ')}`) : null)
-          : h(Text, { dim: true }, bottom),
+                ? [h(Text, { key: 'g0', inverse: true, dim: true, color: 'cyan', selectable: false }, line.ghost[0]), h(Text, { key: 'g1', dim: true, color: 'cyan', selectable: false }, line.ghost.slice(1))]
+                : h(Text, { inverse: true, selectable: false }, ' '),
+              line.others.length ? h(Text, { dim: true, wrap: 'truncate', selectable: false }, `  ${keyGlyph('tab')} ${line.others.slice(0, 12).join(' · ')}`) : null)
+          : h(Text, { dim: true, selectable: false }, bottom),
       ),
     );
   }

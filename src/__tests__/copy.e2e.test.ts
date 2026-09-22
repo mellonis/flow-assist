@@ -166,6 +166,43 @@ test('a drag that runs past the conversation stays in it: nothing of the hint li
   ui.app.unmount();
 });
 
+// The command line. Everything on its row but the command itself is the host
+// speaking — the `: ` prompt, the inline offer after the caret, the `⇥ a · b`
+// candidates — and so is the footer that takes the row when the line is closed.
+test('a drag over the command line copies the command as typed — no prompt, no offer, no candidates', async () => {
+  const ui = await bootApp(new ScriptedModel(), 80, 20);
+  await ui.press(':');
+  const typed = 'config set plugins.mcp.servers.safari.readOnly';
+  await ui.type(typed);
+  const at = cellOf(ui, typed);
+  // From the prompt, past the right edge and on down: the footer is a scope of its
+  // own, so the drag stays on the row it started on.
+  await drag(ui, { x: 0, y: at.y }, { x: 79, y: at.y + 1 });
+  expect(ui.backend.clipboard).toEqual([typed]);
+  ui.app.unmount();
+});
+
+test('a drag over a half-typed command copies what was typed, not what is offered', async () => {
+  const ui = await bootApp(new ScriptedModel(), 80, 20);
+  await ui.press(':');
+  await ui.type('c');
+  // `cache` is offered after the caret and the rest of the commands beside it.
+  expect(ui.backend.lastFrame).toContain(': cache');
+  expect(ui.backend.lastFrame).toContain('clear-cache');
+  const at = cellOf(ui, ': cache');
+  await drag(ui, { x: at.x, y: at.y }, { x: 79, y: at.y });
+  expect(ui.backend.clipboard).toEqual(['c']);
+  ui.app.unmount();
+});
+
+test('a drag over the hint row picks up nothing: the footer is chrome', async () => {
+  const ui = await bootApp(new ScriptedModel(), 80, 20);
+  const at = cellOf(ui, ': commands');
+  await drag(ui, { x: 0, y: at.y }, { x: 79, y: at.y });
+  expect(ui.backend.clipboard).toEqual([]);
+  ui.app.unmount();
+});
+
 test('no clipboard sequence (Apple Terminal) → the platform tool takes the text, and the toast says so', async () => {
   const { ui } = await chatWithAnswer();
   ui.backend.clipboardAvailable = false;
