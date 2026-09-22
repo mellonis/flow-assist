@@ -613,6 +613,10 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   (round border, the modal palette, a plain title) and a quiet hint line at the bottom
   saying how to move and how to get out. The log and the help wore a double frame of
   their own, so one product looked like two.
+  - **A window that paints its own ground sets its own ink**: `color: m.text` on the
+    window box (the chat, `frame()`, the reminder, the keycaps panel), which every text
+    with no colour of its own inherits (flowtty ≥ 1.0.0-alpha.16). Left to the
+    terminal's foreground, a light terminal theme drew black on the black window.
   - A modal is **as tall as what it holds** and never taller than the screen; what does
     not fit scrolls (`<ScrollBox scrollbar>` — the bar is how a person learns there is
     more). The help used to run off both ends of the terminal with no way to scroll.

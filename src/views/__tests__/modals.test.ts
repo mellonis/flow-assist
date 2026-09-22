@@ -67,6 +67,27 @@ test('chat marks a background result with its own marker and ground, never as th
   handle.unmount();
 });
 
+test('a window paints its own ink on its own ground, not the terminal foreground', async () => {
+  // On a light terminal theme the default foreground is black: text with no colour of
+  // its own drew black on the black window. The window's `text` reaches it now.
+  const theme = { modals: { bg: 'black', text: 'white', chat: { ...MODAL_COLOR_DEFAULTS.chat, bg: 'black', text: 'white' }, help: { bg: 'black', text: 'white' } } };
+  const inkOf = (backend: TestBackend, text: string) => {
+    const rows = backend.lastFrame.split('\n');
+    const y = rows.findIndex((r) => r.includes(text));
+    expect(y).toBeGreaterThanOrEqual(0);
+    return backend.lastBuffer!.get(rows[y]!.indexOf(text), y).style.fg;
+  };
+  const chat = new TestBackend(100, 24);
+  const chatHandle = await render(h(renderChatModal, { ...baseChat, width: 100, theme }), chat);
+  expect(inkOf(chat, 'Ask anything.')).toBe('white');
+  chatHandle.unmount();
+  const help = new TestBackend(100, 30);
+  const helpHandle = await render(h(renderHelp, { width: 100, height: 30, theme, helpOpen: true, keys: { quit: ['q'] } }), help);
+  // The help's hint line carries no colour of its own.
+  expect(inkOf(help, 'Esc close')).toBe('white');
+  helpHandle.unmount();
+});
+
 test('chat draws a slash-command completion inside the field, not on a row of its own', async () => {
   const backend = new TestBackend(80, 24);
   const handle = await render(

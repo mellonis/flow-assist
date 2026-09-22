@@ -3,6 +3,13 @@
 What each version of flow-assist brought, newest first. The version is the one in
 `package.json` (and `hostVersion()`, which a test keeps equal to it).
 
+## Unreleased
+
+- **Readable on a light terminal theme.** The chat, the log, the help, the reminder and
+  the keycaps panel paint a dark ground of their own; their text now takes the
+  palette's `text` colour instead of the terminal's foreground, which on a light theme
+  was black on black. Needs flowtty 1.0.0-alpha.16.
+
 ## 0.1.0 — 2026-09-22
 
 The first version: a terminal assistant host that knows no company and no system,

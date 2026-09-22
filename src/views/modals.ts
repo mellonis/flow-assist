@@ -592,6 +592,10 @@ export function renderChatModal({
       {
         border: 'round',
         backgroundColor: m.bg,
+        // The window paints its own ground, so it sets its own ink too: text with no
+        // color of its own inherits it (flowtty ≥ 1.0.0-alpha.16). Left to the
+        // terminal's foreground, a light terminal theme drew black on black.
+        color: m.text,
         borderBackgroundColor: m.borderBg,
         borderColor: m.border,
         borderTitle: subject ? `${ASSISTANT_MARK} Flow Assist · ${subject}` : `${ASSISTANT_MARK} Flow Assist`,
@@ -762,6 +766,8 @@ function renderAsk(state: AskState, bg: string | undefined, wrap: number) {
 const frame = (m: Record<string, string | undefined>, title: string, extra: Record<string, unknown>) => ({
   border: 'round' as const,
   backgroundColor: m.bg,
+  // Its own ink on its own ground, as in the chat.
+  color: m.text,
   borderBackgroundColor: m.borderBg,
   borderColor: m.border,
   borderTitle: title,
@@ -949,6 +955,7 @@ export function renderReminder({
       // Round, like every other window — it was the one double frame on screen.
       border: 'round',
       backgroundColor: m.bg,
+      color: m.text,
       borderBackgroundColor: m.borderBg,
       borderColor: m.border,
       borderTitle: 'reminder',

@@ -44,7 +44,8 @@ export function buildKeycapsPlugin({ renders, config, make }: BuildKeycapsParams
     views: {},
     // The panel's own palette (not a modal, so not MODAL_COLOR_DEFAULTS): via the
     // generic non-modal plugin pass-through it becomes theme.keycaps, like the board
-    // theme.board. Override — config.plugins.keycaps.colors.bg.
+    // theme.board. Override — config.plugins.keycaps.colors.bg (and .text for the ink;
+    // without it the modal base's text color).
     colors: { bg: '#1a1b26' },
     // Schema of the config.plugins.keycaps namespace: enabled — show the panel at
     // startup, colors — palette override (→ theme.keycaps).
@@ -87,6 +88,9 @@ export function buildKeycapsPlugin({ renders, config, make }: BuildKeycapsParams
           // frame is unreadable. Fallback — the abstract modal base theme.modals.bg.
           const cfg = f.config as Record<string, any>;
           const panelBg = cfg?.theme?.keycaps?.bg ?? cfg?.theme?.modals?.bg;
+          // The ink goes with the ground: the caps and the frame inherit it, so a light
+          // terminal theme does not draw them black on the dark fill.
+          const panelText = cfg?.theme?.keycaps?.text ?? cfg?.theme?.modals?.text;
           // flowtty frame prop is `border` (not borderStyle); 'round' is the default,
           // but we set it explicitly. Inner «keys» are also frames, single.
           const caps = recent.map((k, i) =>
@@ -95,7 +99,7 @@ export function buildKeycapsPlugin({ renders, config, make }: BuildKeycapsParams
           );
           return (f.h as (...args: unknown[]) => unknown)(f.Box, {
             position: 'absolute', bottom: 1, right: 1, flexDirection: 'column',
-            border: 'round', borderTitle: 'keycaps', paddingX: 1, zIndex: 10, backgroundColor: panelBg,
+            border: 'round', borderTitle: 'keycaps', paddingX: 1, zIndex: 10, backgroundColor: panelBg, color: panelText,
             // Floats over whatever is on screen: a drag across it copies no cap.
             selectable: false,
           },
