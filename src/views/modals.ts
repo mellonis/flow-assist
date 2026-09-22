@@ -151,7 +151,8 @@ const SPINNER = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', 
 const spin = (ms: number) => SPINNER[Math.floor(ms / 120) % SPINNER.length];
 // The running tool's label cycles through these — movement says "still working" where
 // a static label read as "stuck".
-const TOOL_PULSE = (m: Record<string, string | undefined>) => [m.accent ?? 'cyan', 'cyanBright', 'white', 'cyanBright'];
+// The window's own ink stands in for white, which vanished on a light ground.
+const TOOL_PULSE = (m: Record<string, string | undefined>) => [m.accent ?? 'cyan', 'cyanBright', m.text ?? 'white', 'cyanBright'];
 const fmtSec = (ms: number) => `${(ms / 1000).toFixed(1)}s`;
 
 // ─── Markdown → styled lines ──────────────────────────────────────────────────

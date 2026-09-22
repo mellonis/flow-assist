@@ -9,6 +9,12 @@ What each version of flow-assist brought, newest first. The version is the one i
   the keycaps panel paint a dark ground of their own; their text now takes the
   palette's `text` colour instead of the terminal's foreground, which on a light theme
   was black on black. Needs flowtty 1.0.0-alpha.16.
+- **Follows the terminal between light and dark, while it runs.** The windows, the
+  chat and the keycaps panel take a light or a dark palette by the terminal's scheme
+  and repaint when it switches (macOS does at sunset and sunrise); a terminal that
+  does not say gets its own background and ink. A plugin's colours written as
+  `${token}` follow too. The person's `config.theme` wins over every scheme. Needs
+  flowtty 1.0.0-alpha.17.
 - **`ft.useSurfaceSize()`** — the room a plugin's surface has between the title bar
   and the command line. A surface sized by the terminal was four rows too tall and
   pushed the command line off the screen.

@@ -617,6 +617,14 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     window box (the chat, `frame()`, the reminder, the keycaps panel), which every text
     with no colour of its own inherits (flowtty ≥ 1.0.0-alpha.16). Left to the
     terminal's foreground, a light terminal theme drew black on the black window.
+  - **The palette follows the terminal's scheme** (flowtty ≥ 1.0.0-alpha.17):
+    `themeFor(scheme)` and `modalColorDefaults(scheme)` in `src/playback/theme.ts` give
+    dark (DEFAULT_THEME), light and unknown (`'default'` grounds and ink). The App reads
+    `useColorScheme()` and, on a change, re-resolves the theme INTO the same
+    `config.theme` object — plugins hold it — before rendering; the person's
+    `config.theme` goes on top of every scheme. A new colour goes into all three
+    palettes, and a ground a plugin paints is a `${token}`, never a literal.
+    `bootApp` starts the e2e tests on a dark terminal (`opts.scheme` for another).
   - A modal is **as tall as what it holds** and never taller than the screen; what does
     not fit scrolls (`<ScrollBox scrollbar>` — the bar is how a person learns there is
     more). The help used to run off both ends of the terminal with no way to scroll.

@@ -170,6 +170,14 @@ setup: (ft) => { /* once, before any component mounts: seed a store */ },
   that finished, a timer) call `ft.notify()`.
 - `colors` and `modalColors` give the plugin's screens and modals their palettes;
   the person overrides them with `config.plugins.<name>.colors`.
+- **Write a ground as a theme token, not a literal:** `bg: '${panelBg}'`, not
+  `bg: '#1a1b26'`. The host follows the terminal between light and dark while it runs
+  (macOS switches by itself at sunset and sunrise), and resolves every `${token}`
+  against that scheme's theme; a literal stays the colour it was written for. The
+  tokens: `panelBg` (a floating panel), `highlightBg` (a highlighted row),
+  `accentBg` (a stronger highlight), `highlightText` (the ink on either), and the
+  modal base under `theme.modals` (`bg`, `text`, `border`, `fieldBg`, …). Where the
+  terminal has not said which it is, they are `'default'`: the terminal's own.
 
 ## The chat's two hooks
 

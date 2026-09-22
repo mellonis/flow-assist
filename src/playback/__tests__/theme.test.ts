@@ -81,7 +81,8 @@ test('every colour the host ships is one flowtty can paint', async () => {
   // so a colour in a default palette is checked against it — a name, a #hex or rgb().
   const { NAMED_COLORS } = await import('@flowtty/core');
   const { buildKeycapsPlugin } = await import('../../plugins/keycaps');
-  const paintable = (v: string) => (NAMED_COLORS as readonly string[]).includes(v) || /^#[0-9a-f]{3}([0-9a-f]{3})?$/i.test(v) || /^rgb\(/.test(v);
+  // `'default'` is the terminal's own colour — what an unknown scheme leaves to it.
+  const paintable = (v: string) => v === 'default' || (NAMED_COLORS as readonly string[]).includes(v) || /^#[0-9a-f]{3}([0-9a-f]{3})?$/i.test(v) || /^rgb\(/.test(v);
   const bad: string[] = [];
   const walk = (node: unknown, path: string) => {
     if (typeof node === 'string') { if (!paintable(node)) bad.push(`${path} = ${node}`); return; }
@@ -90,6 +91,23 @@ test('every colour the host ships is one flowtty can paint', async () => {
   // The resolved theme: the base palette, every modal's palette with its `${ref}`s
   // resolved, and a plugin's own palette on top.
   const keycaps = buildKeycapsPlugin({ renders: {}, config: {}, make: ((_: string, shape: unknown) => shape) as never });
-  walk(resolveAppTheme({}, [keycaps as never], {}), 'theme');
+  // Every scheme's palette — a `${token}` a scheme lacks would stay a literal string.
+  for (const scheme of ['dark', 'light', 'unknown'] as const) walk(resolveAppTheme({}, [keycaps as never], {}, scheme), scheme);
   expect(bad).toEqual([]);
+});
+
+test('each scheme has its own grounds, and the person\'s theme wins over every scheme', () => {
+  const dark = resolveAppTheme(undefined, [], {}, 'dark');
+  const light = resolveAppTheme(undefined, [], {}, 'light');
+  expect(dark.modals.chat.bg).toBe('black');
+  expect(light.modals.chat.bg).toBe('#f4f4f6');
+  expect(light.modals.chat.text).toBe('black');
+  expect(light.modals.chat.userBg).not.toBe(dark.modals.chat.userBg);
+  // A plugin palette written as `${token}` follows the scheme.
+  const panel = { name: 'panel', colors: { bg: '${panelBg}' } };
+  expect(resolveAppTheme(undefined, [panel], {}, 'dark').panel.bg).toBe('#1a1b26');
+  expect(resolveAppTheme(undefined, [panel], {}, 'light').panel.bg).toBe('#ececf2');
+  // A colour the person set stays theirs, on light as on dark.
+  const mine = resolveAppTheme({ error: 'magenta' }, [], {}, 'light');
+  expect(mine.error).toBe('magenta');
 });

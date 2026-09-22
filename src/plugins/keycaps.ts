@@ -45,8 +45,9 @@ export function buildKeycapsPlugin({ renders, config, make }: BuildKeycapsParams
     // The panel's own palette (not a modal, so not MODAL_COLOR_DEFAULTS): via the
     // generic non-modal plugin pass-through it becomes theme.keycaps, like the board
     // theme.board. Override — config.plugins.keycaps.colors.bg (and .text for the ink;
-    // without it the modal base's text color).
-    colors: { bg: '#1a1b26' },
+    // without it the modal base's text color). A `${token}`, not a literal: the
+    // panel follows the terminal between light and dark.
+    colors: { bg: '${panelBg}' },
     // Schema of the config.plugins.keycaps namespace: enabled — show the panel at
     // startup, colors — palette override (→ theme.keycaps).
     configSchema: z.object({ enabled: z.boolean().optional(), colors: z.record(z.string(), z.unknown()).optional() }).optional(),

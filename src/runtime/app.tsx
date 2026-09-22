@@ -8,7 +8,7 @@
 // Esc back, `x` clear cache; quitting is `:quit` or Ctrl+C).
 
 import { pluginConfigs } from '../loader/tools.js';
-import { Box, Text, Markdown, Table, Link, render, useApp, useInput, useTerminalSize, type CopyEvent } from '@flowtty/react';
+import { Box, Text, Markdown, Table, Link, render, useApp, useColorScheme, useInput, useTerminalSize, type CopyEvent } from '@flowtty/react';
 import type { Backend } from '@flowtty/core';
 import { createElement as h, useEffect, useMemo, useRef, useState } from 'react';
 import { createFt } from './ft.js';
@@ -43,7 +43,7 @@ import {
 import { bindingGlyph, isKey, isMouseButton, keyGlyph } from '../playback/keys.js';
 import { copyToClipboard } from '../assistant/copy.js';
 import { resolveAppTheme } from '../playback/theme.js';
-import type { Theme } from '../playback/theme.js';
+import type { ColorScheme, Theme } from '../playback/theme.js';
 import type { Command } from '../loader/plugin.js';
 import type { Plugin, PluginShape } from '../loader/plugin.js';
 import { renderHome } from '../views/home.js';
@@ -151,11 +151,15 @@ export function renderApp(
   { plugins, config, onExit, renders: _renders = {}, tools, toastMs }: RenderAppInput,
 ) {
   // Resolve config.theme into the full per-modal palette BEFORE anything reads it
-  // (createServices/ft and every renderer read `f.config.theme`): DEFAULT_THEME
-  // base + user config.theme on top, then resolveModalPalettes lays the per-modal palettes down and
-  // resolvePluginColors adds non-modal plugin palettes. Without this the modals
-  // degrade to empty Flowtty defaults — no borders, no colors.
-  config.theme = resolveAppTheme(config.theme as Theme | undefined, plugins, config);
+  // (createServices/ft and every renderer read `f.config.theme`): the base of the
+  // terminal's scheme + user config.theme on top, then resolveModalPalettes lays the
+  // per-modal palettes down and resolvePluginColors adds non-modal plugin palettes.
+  // Without this the modals degrade to empty Flowtty defaults — no borders, no colors.
+  // The person's own theme is kept apart: the scheme can change while the app runs
+  // (App re-resolves then), and their colours go on top of every scheme.
+  const userTheme = config.theme as Theme | undefined;
+  let themeScheme: ColorScheme = root.colorScheme?.().scheme ?? 'unknown';
+  config.theme = resolveAppTheme(userTheme, plugins, config, themeScheme);
   const services = createServices({ config, tools, onExit });
   const viewRegistry = buildViewRegistry(plugins);
   const commandRegistry = buildCommandRegistry(plugins);
@@ -173,6 +177,17 @@ export function renderApp(
     const toast = useToast(toastMs);
     const app = useApp();
     const notify = () => setTick((t) => t + 1);
+    // The terminal switched between light and dark (macOS does it by itself at
+    // sunset and sunrise): lay the other scheme's palette into the SAME theme object
+    // — a plugin may hold a reference to it — before anything below renders with it.
+    const { scheme } = useColorScheme();
+    if (scheme !== themeScheme) {
+      themeScheme = scheme;
+      const theme = config.theme as Theme;
+      const next = resolveAppTheme(userTheme, plugins, config, scheme);
+      for (const key of Object.keys(theme)) delete theme[key];
+      Object.assign(theme, next);
+    }
 
     // React-bound services rebound on every render (merged into the shared
     // `services` object so plugins see the live channels). `showMessage` uses

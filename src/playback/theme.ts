@@ -34,7 +34,69 @@ export const DEFAULT_THEME: Theme = {
   selected: 'green',
   error: 'red',
   success: 'green',
+  // Grounds a plugin's own screens reference by `${token}`, so they follow the
+  // terminal's scheme with the host's windows (a literal colour would not):
+  //   panelBg       — a floating panel (the keycaps)
+  //   highlightBg   — a highlighted row (the current one)
+  //   accentBg      — a stronger highlight (the current column)
+  //   highlightText — the ink on either
+  panelBg: '#1a1b26',
+  highlightBg: '#3c3c3c',
+  accentBg: '#20456b',
+  highlightText: 'white',
 };
+
+// Which scheme the terminal is on, as flowtty reports it (docs/app.md in flowtty —
+// the color scheme). It can change while the app runs: macOS switches its
+// appearance by itself, and the terminal follows.
+export type ColorScheme = 'light' | 'dark' | 'unknown';
+
+// The same palette for a light terminal: light grounds, dark ink.
+const LIGHT_THEME: Theme = {
+  modals: {
+    bg: '#f4f4f6',
+    border: 'blue',
+    borderBg: '#f4f4f6',
+    text: 'black',
+    selected: 'green',
+    fieldBg: '#e2e2e8',
+    fieldBorder: 'blue',
+  },
+  selected: 'green',
+  error: 'red',
+  success: 'green',
+  panelBg: '#ececf2',
+  highlightBg: '#e2e2e2',
+  accentBg: '#d4e3f5',
+  highlightText: 'black',
+};
+
+// While the terminal has not said (and for good where it never does): no grounds and
+// no ink of the app's own — the terminal's, which read right on either scheme.
+const UNKNOWN_THEME: Theme = {
+  modals: {
+    bg: 'default',
+    border: 'cyan',
+    borderBg: 'default',
+    text: 'default',
+    selected: 'green',
+    fieldBg: 'default',
+    fieldBorder: 'cyan',
+  },
+  selected: 'green',
+  error: 'red',
+  success: 'green',
+  panelBg: 'default',
+  highlightBg: 'default',
+  accentBg: 'default',
+  highlightText: 'default',
+};
+
+// The base palette for a scheme. Dark is DEFAULT_THEME — the look the host had
+// before it could tell.
+export function themeFor(scheme: ColorScheme): Theme {
+  return scheme === 'light' ? LIGHT_THEME : scheme === 'unknown' ? UNKNOWN_THEME : DEFAULT_THEME;
+}
 
 export function resolveColorRefs(value: unknown, theme: Theme = {}): string {
   if (typeof value !== 'string' || !value.includes('${')) return value as string;
@@ -89,6 +151,21 @@ export const MODAL_COLOR_DEFAULTS: Record<string, Record<string, string>> = {
   chat: { userBg: '#2b2b40', accent: 'cyan', shell: 'magentaBright', assistantAccent: 'green', fieldBg: '#1f1f2e', bgAccent: 'magenta', bgBg: '#2a2438', warn: 'yellow', ok: 'green' },
 };
 
+// The same for a light terminal (light grounds; accents dark enough to read on them),
+// and for an unknown one (no grounds of the chat's own).
+const LIGHT_MODAL_COLORS: Record<string, Record<string, string>> = {
+  log: {},
+  chat: { userBg: '#e4e4f0', accent: 'blue', shell: 'magenta', assistantAccent: 'green', fieldBg: '#eaeaf0', bgAccent: 'magenta', bgBg: '#efe4f2', warn: '#9a6700', ok: 'green' },
+};
+const UNKNOWN_MODAL_COLORS: Record<string, Record<string, string>> = {
+  log: {},
+  chat: { ...MODAL_COLOR_DEFAULTS.chat, userBg: 'default', fieldBg: 'default', bgBg: 'default' },
+};
+
+export function modalColorDefaults(scheme: ColorScheme): Record<string, Record<string, string>> {
+  return scheme === 'light' ? LIGHT_MODAL_COLORS : scheme === 'unknown' ? UNKNOWN_MODAL_COLORS : MODAL_COLOR_DEFAULTS;
+}
+
 // What a plugin may bring for the palettes: its flat `colors` and, per modal it
 // draws, what that modal's palette differs in from the base (`modalColors`).
 export interface ThemePlugin {
@@ -107,6 +184,7 @@ export function resolveModalPalettes(
   theme: Theme = DEFAULT_THEME,
   plugins: ThemePlugin[] = [],
   config: ResolveConfig = {},
+  scheme: ColorScheme = 'dark',
 ): Theme {
   const base = theme.modals ?? {};
   const modals: Record<string, string | Record<string, string>> = { ...base };
@@ -114,7 +192,7 @@ export function resolveModalPalettes(
   for (const p of plugins) {
     for (const [name, palette] of Object.entries(p.modalColors ?? {})) palettes[name] ??= palette;
   }
-  Object.assign(palettes, MODAL_COLOR_DEFAULTS);
+  Object.assign(palettes, modalColorDefaults(scheme));
   for (const name of Object.keys(palettes)) {
     const plugin = plugins.find((p) => p.name === name);
     const defaults = { ...(palettes[name] ?? {}), ...(plugin?.colors ?? {}) };
@@ -127,22 +205,24 @@ export function resolveModalPalettes(
   return { ...theme, modals };
 }
 
-// Resolves the config.theme the renderers read: the abstract base (DEFAULT_THEME)
-// merged with the user's config.theme on top, then resolveModalPalettes lays the per-modal palettes down (base +
-// MODAL_COLOR_DEFAULTS / plugin modalColors + plugin colors +
-// config.plugins.<name>.colors), and
+// Resolves the config.theme the renderers read: the scheme's base (themeFor)
+// merged with the user's config.theme on top, then resolveModalPalettes lays the
+// per-modal palettes down (base + the scheme's host modal colours / plugin
+// modalColors + plugin colors + config.plugins.<name>.colors), and
 // resolvePluginColors adds any non-modal plugin palette (keycaps/bg, board).
 // Returns the resolved theme the caller folds back into config.theme, so
 // ft.config.theme carries the full palette and the renders get borders/colors
 // instead of degrading to empty Flowtty defaults. `plugins` provides the
-// plugin.colors sources; `config` the config.plugins.<name>.colors overrides.
+// plugin.colors sources; `config` the config.plugins.<name>.colors overrides. The
+// user's theme wins over every scheme: a person who set a colour keeps it.
 export function resolveAppTheme(
   configTheme: Theme | undefined,
   plugins: ThemePlugin[] = [],
   config: ResolveConfig = {},
+  scheme: ColorScheme = 'dark',
 ): Theme {
-  const merged: Theme = { ...DEFAULT_THEME, ...(configTheme ?? {}) };
-  const resolved = resolveModalPalettes(merged, plugins, config);
+  const merged: Theme = { ...themeFor(scheme), ...(configTheme ?? {}) };
+  const resolved = resolveModalPalettes(merged, plugins, config, scheme);
   for (const p of plugins) {
     if (p.colors) resolved[p.name ?? ''] = resolvePluginColors(p, resolved, config);
   }

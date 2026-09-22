@@ -82,7 +82,7 @@ export const settle = async (n = 10) => { for (let i = 0; i < n; i++) { await fl
 // `extra` is merged into the config — e.g. `{ memory: { file } }` to keep a test off the
 // person's real memory file. `opts.toastMs` shortens the toast, for a test that waits
 // for one to go.
-export async function bootApp(model: ScriptedModel, cols = 100, rows = 28, guests?: (make: Make) => Plugin[], extra: Record<string, unknown> = {}, opts: { toastMs?: number } = {}) {
+export async function bootApp(model: ScriptedModel, cols = 100, rows = 28, guests?: (make: Make) => Plugin[], extra: Record<string, unknown> = {}, opts: { toastMs?: number; scheme?: 'light' | 'dark' | 'unknown' } = {}) {
   process.env.LLM_TOKEN = 'scripted';
   model.install();
   // Sessions go to a fresh temp dir unless a test names one: a test must never write
@@ -95,6 +95,10 @@ export async function bootApp(model: ScriptedModel, cols = 100, rows = 28, guest
   if (guests) plugins.push(...guests(makeFactory(config as never)));
   const tools = assembleToolRegistry({ plugins, config, repo });
   const backend = new TestBackend(cols, rows);
+  // A dark terminal unless a test says otherwise: the look every frame here was written
+  // against. `unknown` is the terminal that has not answered (TestBackend's own start).
+  const scheme = opts.scheme ?? 'dark';
+  if (scheme !== 'unknown') backend.setColorScheme(scheme, scheme === 'dark' ? '#000000' : '#ffffff');
   // How many times the app asked to exit — a key that quits is visible to a test.
   let exits = 0;
   const app = await renderApp(backend, { plugins, config, tools, onExit: () => { exits++; }, toastMs: opts.toastMs });
