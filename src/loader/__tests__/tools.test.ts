@@ -644,3 +644,34 @@ test('a tool name is claimed once: the first plugin keeps the bare word, the sec
     console.warn = realWarn;
   }
 });
+
+test('the memory tool says how an entry is written, and refuses a near-copy of one', async () => {
+  const reg = assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
+  // The rules ride in the description of every request; a drift out of the prompt is
+  // what this holds. The first sentence is the tools-on-demand index and stays put.
+  const description = reg.tools.find((t) => t.function.name === 'memory')!.function.description!;
+  expect(description.startsWith('Persistent cross-session memory.')).toBe(true);
+  for (const rule of ['ONE durable fact per entry', 'stands without the conversation', 'never a secret or a token', 'UPDATE the entry that already says it', '300 characters', '100 entries', '/memory']) {
+    expect(description).toContain(rule);
+  }
+
+  const memFile = join(mkdtempSync(join(tmpdir(), 'fa-mem-dup-')), 'memory.json');
+  const ctx = { memoryFile: memFile };
+  const first = String(await reg.exec('memory', { action: 'add', text: 'This repo prefers rebase over merge.' }, ctx));
+  expect(first).toContain('Memory stored');
+  const id = loadMemories(memFile)[0]!.id;
+  // The same fact in other spacing and case does not become a second entry — which is
+  // how one file came to hold 32 copies of this very sentence.
+  const again = String(await reg.exec('memory', { action: 'add', text: 'this repo prefers  rebase over merge' }, ctx));
+  expect(again).toContain(id);
+  expect(again).toContain('update');
+  expect(loadMemories(memFile)).toHaveLength(1);
+  // A paragraph is refused with its length, and nothing is stored.
+  const long = String(await reg.exec('memory', { action: 'add', text: 'y'.repeat(400) }, ctx));
+  expect(long).toContain('400');
+  expect(loadMemories(memFile)).toHaveLength(1);
+  // Updating the entry that already says it is the way through, and still works.
+  const updated = String(await reg.exec('memory', { action: 'update', id, text: 'This repo rebases; it never merges.' }, ctx));
+  expect(updated).toContain('updated');
+  expect(loadMemories(memFile)[0]!.text).toBe('This repo rebases; it never merges.');
+});

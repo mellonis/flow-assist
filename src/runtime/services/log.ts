@@ -1,13 +1,12 @@
 import fs from 'node:fs';
-import { configDir } from '../../config/load.js';
-import os from 'node:os';
+import { hostStateDir } from '../../config/load.js';
 import path from 'node:path';
 
-// Debug log for tool runs lives with the rest of the host state, under the
-// user's config dir (honoring the XDG override).
-const CONFIG_DIR =
-  configDir();
-const TOOLS_LOG_PATH = path.join(CONFIG_DIR, 'tools.log');
+// Debug log for tool runs lives with the rest of the host state (`hostStateDir`,
+// honouring the XDG override — a temporary directory under `bun test`, so a test that
+// turns `debug.logTools` on does not append to the person's own log). Resolved on
+// every call, never at import, or the guard would be fixed before a test could move it.
+const toolsLogPath = (): string => path.join(hostStateDir(), 'tools.log');
 
 // ~5 MB cap on the tool-call log file — a simple rotation: when the file grows
 // past this, it is renamed to `<file>.1` before the next append.
@@ -76,7 +75,7 @@ export function createLogService(config: Record<string, unknown> | undefined): L
 
     logToolRun(entry: ToolRunEntry): void {
       if (!logTools) return;
-      const file = TOOLS_LOG_PATH;
+      const file = toolsLogPath();
       try {
         if (fs.existsSync(file) && fs.statSync(file).size > LOG_TOOLS_MAX) {
           fs.renameSync(file, `${file}.1`);

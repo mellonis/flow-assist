@@ -16,6 +16,29 @@ What each version of flow-assist brought, newest first. The version is the one i
   above either. The chat's own field is unchanged for now — its caret and placeholder
   sit in the middle of the text, which needs its own answer.
 
+- **The tests no longer write into your memory, or empty your cache.** If you found
+  the same fact in `/memory` over and over — "This repo prefers rebase over merge",
+  thirty-odd times — nobody stored it thirty-odd times: the host's own test suite did,
+  once per run. A test that booted the assistant and let it use its `memory` tool named
+  no file of its own, so the entry landed in `~/.config/flow-assist/memory.json`, and
+  the same went for `cache.json`, which a test emptied and rewrote. Under a test run
+  the host now keeps what it writes for itself in a temporary directory, the cache
+  keeps its store in memory, and each booted test gets a memory file of its own.
+  Nothing already stored was touched: `/memory` lists what you have and
+  `/memory forget <number>` or `/memory forget all` removes it — your file, your call.
+
+- **The assistant is told how to write a memory, and the host holds it to it.** Every
+  stored fact is sent with every later request, across `/clear` and across restarts,
+  so a sloppy one is paid for forever. The `memory` tool now asks for one durable fact
+  per entry — a preference, a convention, a name — in a short sentence that stands on
+  its own, never the state of a task, a number that will change or a secret; and to
+  update the entry that already says it instead of adding a near-copy. Three of those
+  the host enforces rather than hopes for: the same fact in other spacing or case is
+  refused, naming the entry it duplicates; an entry over 300 characters is refused with
+  its length; and past 100 entries it refuses and names the oldest, so the memory
+  cannot quietly grow into every future request. Each refusal says what to do instead,
+  and `/memory` stays your own way to see and prune the list.
+
 - **One line instead of the folded notes: what it is doing now.** Between tool calls
   the assistant writes prose, and every answer carried a dim `▸ notes` header with the
   last two lines of it — a header for text that is mostly noise, with the one thing

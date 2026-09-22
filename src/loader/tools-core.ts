@@ -10,7 +10,7 @@
 
 import { hostConfigSchema } from '../config/schema.js';
 import { loadConfig, getDeep, getSchemaAtPath, describeSchema, unwrapNode, configSchemaAt } from '../config/load.js';
-import { loadMemories, saveMemories, memoryFilePath } from '../runtime/services/memory.js';
+import { loadMemories, saveMemories, memoryFilePath, refuseMemory } from '../runtime/services/memory.js';
 import { openInBrowser } from '../runtime/services.js';
 import { resolveIdentityToken } from '../runtime/plugin-identity.js';
 import { DEFAULT_THEME } from '../playback/theme.js';
@@ -250,7 +250,7 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
       type: 'function',
       function: {
         name: 'memory',
-        description: 'Persistent cross-session memory. Facts the user asks you to remember are stored here and injected into the system prompt (re-read on every message, so edits take effect immediately). action: "list" — show stored memories (optional scope and/or label filter); "add" — store a new one (text, optional label to classify it, scope: "host" for host-wide memory or "plugin" for the current plugin\'s memory, default "host"); "update" — edit an existing one (id + text and/or scope and/or label); "forget" — delete by id. This writes only a local JSON file on this machine, not the tracker.',
+        description: 'Persistent cross-session memory. Facts the user asks you to remember are stored here and injected into the system prompt (re-read on every message, so edits take effect immediately). action: "list" — show stored memories (optional scope and/or label filter); "add" — store a new one (text, optional label to classify it, scope: "host" for host-wide memory or "plugin" for the current plugin\'s memory, default "host"); "update" — edit an existing one (id + text and/or scope and/or label); "forget" — delete by id. This writes only a local JSON file on this machine, not the tracker. Every entry is sent with every later request, forever: store ONE durable fact per entry — a preference, a convention, a name — as a short sentence that stands without the conversation it came from. Never task state, a number that will change, or anything the session already holds; never a secret or a token. Before adding, list and UPDATE the entry that already says it rather than adding a near-copy. The host refuses a duplicate, an entry over 300 characters and more than 100 entries; the person sees and prunes the list with /memory.',
         parameters: {
           type: 'object',
           properties: {
@@ -394,6 +394,12 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
         if (action === 'add') {
           const text = String(args.text ?? '').trim();
           if (!text) return 'text is required — the memory text to store.';
+          // What the description asks for, the host holds it to: the model reads other
+          // people's text, so a rule it may ignore is not a rule. A near-copy of a
+          // fact already stored, a paragraph, or one entry past the cap is refused —
+          // and the refusal says what to do instead.
+          const refusal = refuseMemory(list, text);
+          if (refusal) return refusal;
           const { scope, error } = normalizeScope(args.scope as string | undefined, ctx);
           if (error) return error;
           const label = String(args.label ?? '').trim() || undefined;

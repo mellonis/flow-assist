@@ -1,15 +1,20 @@
 import fs from 'node:fs';
-import { configDir } from '../../config/load.js';
-import os from 'node:os';
+import { hostStateDir } from '../../config/load.js';
 import path from 'node:path';
 
-// Host cache lives outside the repo, under the user's config dir (same dir the
-// config layer uses, honoring the XDG override). The cache is a generic
+// Host cache lives outside the repo, beside the rest of what the host keeps for
+// itself (`hostStateDir`, which honours the XDG override). The cache is a generic
 // namespaced KV + TTL store; plugins (tracker, gitlab, …) each get their own
-// namespace so keys never collide.
-const CONFIG_DIR =
-  configDir();
-const DEFAULT_CACHE_PATH = path.join(CONFIG_DIR, 'cache.json');
+// namespace so keys never collide. Resolved on every call, never at import.
+const cacheFilePath = (): string => path.join(hostStateDir(), 'cache.json');
+
+// Under `bun test` the store stays in memory and no file is read or written.
+// `createCacheService` takes no path and there is no `cache.file` setting, so a test
+// has nothing of its own to name — and a run therefore read, rewrote and (on the `x`
+// that flushes the cache) emptied the person's own `cache.json`. An instance still
+// answers with whatever it was given, which is all a test asserts on, and the cache is
+// a best-effort luxury that already swallows every write error.
+const persisted = (env: Record<string, string | undefined> = process.env): boolean => env.NODE_ENV !== 'test';
 
 // Default TTL for an entry when `set` is called without an explicit ttl.
 // Mirrors the source tracker cache's 24-hour freshness window.
@@ -85,9 +90,11 @@ export interface CacheService {
 // namespaces are independent, so `tracker/issues` and `gitlab/issues` do not
 // collide.
 export function createCacheService(config: Record<string, unknown> | undefined): CacheService {
-  const filePath = DEFAULT_CACHE_PATH;
+  const onDisk = persisted();
+  const filePath = onDisk ? cacheFilePath() : '';
   const enabled = cacheEnabled(config);
-  let store = loadStore(filePath);
+  let store = onDisk ? loadStore(filePath) : {};
+  const save = (): void => { if (onDisk) persist(filePath, store); };
 
   return {
     get<Ns extends string, K extends string>(ns: Ns, key: K): unknown {
@@ -103,14 +110,14 @@ export function createCacheService(config: Record<string, unknown> | undefined):
       prune(store);
       store[ns] = store[ns] ?? {};
       store[ns][key] = { value, expiresAt };
-      persist(filePath, store);
+      save();
     },
 
     clear(ns?: string): void {
       prune(store);
       if (ns == null) store = {};
       else delete store[ns];
-      persist(filePath, store);
+      save();
     },
 
     enabled(): boolean {

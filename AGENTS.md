@@ -305,6 +305,26 @@ assistant nobody had asked for a board.
   going through the model (`src/assistant/memory-command.ts`). What the host tells the
   person this way is a display-only message of role `note`; `apiHistory` drops it, and
   the model's history (`apiRef`) never holds it.
+  - **A fact that rides on every request forever is worth writing well**, so the
+    tool's description asks for one durable fact per entry — a preference, a
+    convention, a name — as a short sentence that stands without the conversation it
+    came from; never task state, a number that will change, or a secret; and before
+    adding, list and UPDATE the entry that already says it. The model reads other
+    people's text, so a rule that lives only in a description is a rule it may ignore:
+    the host enforces the three that can be enforced (`refuseMemory` in
+    `runtime/services/memory.ts`, applied by the tool's `add`). A near-copy is refused
+    naming the entry it duplicates — text matched with case, runs of whitespace and
+    trailing punctuation taken out; an entry over `MEMORY_TEXT_MAX` (300) characters is
+    refused with its length; past `MEMORY_MAX_ENTRIES` (100) the tool refuses and names
+    the oldest. Every refusal says what to do instead and points at `/memory`. Only
+    `add` is guarded: `update` is the remedy the duplicate refusal names, so refusing
+    that too would leave nowhere to go (an entry added short and then updated long is
+    still open).
+  - **Where it is kept is the host's state, not the repo's**: `memoryFilePath(config)`
+    → `config.memory.file`, else `memory.json` under `hostStateDir()`. It is resolved
+    on every call and never at import — an import-time constant is fixed before a test
+    can move it, which is how every e2e test that reached the tool appended to the
+    person's own file, 32 copies of one fact.
 - **How full the context is, is shown — and says where the number came from.** The
   chat's hint line ends in `ctx N%` (yellow from 80%), and `/context` opens a PANEL in
   the field's place, like a write confirmation — a look at the conversation, not a
@@ -1035,6 +1055,25 @@ From the host root: `bun run typecheck && bun test ./src ./scripts` (the path
 filter keeps a locally dropped-in plugin's suite out of the host run).
 Plugin tests: `cd plugins-available/<name> && bun test`.
 The host suite must pass with `plugins-available/` empty — a host test never loads a real plugin.
+
+**A test never reaches the person's own files.** `hostStateDir()` (`src/config/load.ts`)
+is where the host keeps what it writes for itself: the config directory normally, a
+temporary directory of this process under `bun test`. The memory, the tool log and a
+setting `config set` saves all resolve through it, the cache keeps its store in memory
+and writes no file at all under a test, and the sessions have their own `null`
+(`sessionsDir`). Two rules hold it together, and a new file the host writes by default
+keeps both:
+
+- **Resolve the path on every call, never at import.** A `bun test` run shares its
+  module registry across every file, so an import-time constant is decided by whichever
+  file imports the module first — before any test can point the directory anywhere.
+  That is how `memory.json`, `cache.json` and `tools.log` all pointed at the person's
+  own directory for the whole suite: their memory grew a copy of the same fact per run,
+  and pressing `x` in an e2e test emptied their cache.
+- **A temp directory is the floor; a file of the test's own is the isolation.**
+  `bootApp` names both a sessions dir and a memory file of its own, so one test's
+  stored fact cannot ride into the next test's system prompt; a test that reads the
+  file back names it through `extra`.
 
 - `src/__tests__/helpers/scripted.ts` — a scripted model and a booted app: the
   REAL TUI on a test backend with only the network replaced. Steps are text,

@@ -1,6 +1,6 @@
 // What /clear clears, and what it does not — as a person meets it.
 import { afterEach, expect, test } from 'bun:test';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ScriptedModel, bootApp, settle } from './helpers/scripted';
@@ -64,6 +64,42 @@ test('after /clear the assistant still has its memory — and the chat says so, 
   await settle(20);
   expect(JSON.stringify(model.requests.at(-1)!.messages)).not.toContain('7 random numbers');
   ui.app.unmount();
+});
+
+test('a test that stores a memory leaves the config directory alone', async () => {
+  // The person's own `memory.json` held 32 copies of one fact, one per test run: the
+  // app boots, the model calls `memory`, and with no file named the write landed in
+  // the config directory. Point the config directory at a temp dir of this test's own
+  // and nothing may appear under it — not the memory, not the cache, not the log.
+  const cfgHome = mkdtempSync(join(tmpdir(), 'fa-xdg-'));
+  const before = process.env.XDG_CONFIG_HOME;
+  process.env.XDG_CONFIG_HOME = cfgHome;
+  try {
+    const model = new ScriptedModel();
+    model.script(
+      [{ tool: 'memory', args: { action: 'add', text: 'This repo prefers rebase over merge' } }],
+      [{ text: 'Noted.' }],
+      [{ text: 'and again' }],
+    );
+    // No `memory.file`: exactly the shape every other e2e test has.
+    const ui = await bootApp(model, 110, 30);
+    await ui.press('F');
+    await ui.type('remember how this repo works');
+    await ui.press('return');
+    await settle(24);
+    // The fact was stored — it is in the system prompt of the next request…
+    await ui.type('what do you know');
+    await ui.press('return');
+    await settle(20);
+    const sent = model.requests.at(-1)!.messages;
+    expect(JSON.stringify(sent.filter((m) => m.role === 'system'))).toContain('rebase over merge');
+    // …and nowhere near the config directory.
+    expect(existsSync(join(cfgHome, 'flow-assist'))).toBe(false);
+    ui.app.unmount();
+  } finally {
+    if (before === undefined) delete process.env.XDG_CONFIG_HOME;
+    else process.env.XDG_CONFIG_HOME = before;
+  }
 });
 
 test('/clear with an empty memory says nothing extra', async () => {

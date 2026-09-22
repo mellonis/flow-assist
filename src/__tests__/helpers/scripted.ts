@@ -80,8 +80,8 @@ export const settle = async (n = 10) => { for (let i = 0; i < n; i++) { await fl
 
 // `guests` adds plugins that are not the host's own — built with the same `make` the
 // loader uses, so they are namespaced exactly as an installed plugin is.
-// `extra` is merged into the config — e.g. `{ memory: { file } }` to keep a test off the
-// person's real memory file. `opts.toastMs` shortens the toast, for a test that waits
+// `extra` is merged into the config — e.g. `{ memory: { file } }` to name the memory
+// file a test then reads. `opts.toastMs` shortens the toast, for a test that waits
 // for one to go. `opts.clipboardImage` stands in for the system clipboard's image; a
 // test that does not give one has an empty clipboard — never the platform's real tools.
 export async function bootApp(model: ScriptedModel, cols = 100, rows = 28, guests?: (make: Make) => Plugin[], extra: Record<string, unknown> = {}, opts: { toastMs?: number; scheme?: 'light' | 'dark' | 'unknown'; clipboardImage?: () => ClipboardImage; pluginsNote?: string } = {}) {
@@ -90,10 +90,15 @@ export async function bootApp(model: ScriptedModel, cols = 100, rows = 28, guest
   // Sessions go to a fresh temp dir unless a test names one: a test must never write
   // into, or continue, the person's own saved chats.
   const sessions = { dir: fs.mkdtempSync(path.join(os.tmpdir(), 'fa-sessions-')) };
+  // And so does the memory, for the same reason and one more: a stored fact rides in
+  // every later request, so one test's memory read into the next test's system prompt.
+  // `memoryFilePath` already keeps a test off the person's file; a file per boot is
+  // what keeps the tests apart. A test that reads the file names its own through `extra`.
+  const memory = { file: path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-memory-')), 'memory.json') };
   // Every tool in full (`toolLoading: 'all'`): a script calls whatever tool its test is
   // about, as a model that sees the whole list would. Tools on demand are tested on
   // their own, with `extra` giving an `ai` that does not say 'all'.
-  const config: Record<string, unknown> = { ai: { baseUrl: 'http://scripted.model', model: 'scripted', toolLoading: 'all' }, sessions, ...extra };
+  const config: Record<string, unknown> = { ai: { baseUrl: 'http://scripted.model', model: 'scripted', toolLoading: 'all' }, sessions, memory, ...extra };
   const repo = { enabledPlugins: async () => [], list: async () => [] } as never;
   const renders = { chat: renderChatModal, help: renderHelp, log: renderLogModal, reminder: renderReminder };
   const plugins = await loadPlugins({ config, repo, renders: renders as never });

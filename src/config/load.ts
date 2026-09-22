@@ -12,6 +12,24 @@ import { hostConfigSchema } from './schema.js';
 export function configDir(env: Record<string, string | undefined> = process.env, home: string = os.homedir()): string {
   return path.join(env.XDG_CONFIG_HOME || path.join(home, '.config'), 'flow-assist');
 }
+
+// Where the host keeps what it writes FOR ITSELF — the memory, the cache, the tool
+// log, the settings `config set` saves. Normally that is the config directory. Under
+// `bun test` it is a temporary directory of this process instead, the same protection
+// the sessions already have (`sessionsDir` → null): a test that names no file of its
+// own must never add to the person's memory, empty their cache or rewrite their
+// settings. It is made once per process and never reused from a previous run, so
+// nothing a run writes is read back by the next one.
+//
+// Resolve it on every call. An import-time constant is fixed before a test can point
+// the directory anywhere, which is how every test that reached the `memory` tool wrote
+// into the person's own `memory.json` — 32 copies of one fact.
+let TEST_STATE_DIR: string | null = null;
+export function hostStateDir(env: Record<string, string | undefined> = process.env): string {
+  if (env.NODE_ENV !== 'test') return configDir(env);
+  return (TEST_STATE_DIR ??= fs.mkdtempSync(path.join(os.tmpdir(), 'flow-assist-test-state-')));
+}
+
 const CONFIG_DIR = configDir();
 const CONFIG_PATH = path.join(CONFIG_DIR, 'config.json');
 const CONFIG_LOCAL_PATH = path.join(CONFIG_DIR, 'config.local.json');
@@ -228,9 +246,16 @@ export function editConfigArray(
   return written ? { ok: true, value: check.value } : { ok: false, error: 'config: failed to write config.local.json.' };
 }
 
+// Where a SAVED setting goes when the caller names no file. Through `hostStateDir`,
+// so `:config set` and `:cache off` driven from a test write into the run's temporary
+// directory and not over the person's own overrides. Reading is left alone: a test
+// that builds its own config never reads this file anyway, and changing what the CLI
+// reads under test would change what the CLI does.
+const configLocalWritePath = (): string => path.join(hostStateDir(), 'config.local.json');
+
 // Saves a whole-object merge into config.local.json, on top of existing
 // overrides. Returns the resulting object (or null on a write error).
-export function saveConfig(merge: Record<string, unknown>, filePath: string = CONFIG_LOCAL_PATH): Record<string, unknown> | null {
+export function saveConfig(merge: Record<string, unknown>, filePath: string = configLocalWritePath()): Record<string, unknown> | null {
   try {
     const current = fs.existsSync(filePath) ? JSON.parse(fs.readFileSync(filePath, 'utf8')) : {};
     const next = { ...current, ...merge };
@@ -244,7 +269,7 @@ export function saveConfig(merge: Record<string, unknown>, filePath: string = CO
 
 // Writes a value at a dot path into config.local.json, on top of existing
 // overrides. Returns the resulting object or null.
-export function saveConfigSetting(key: string, value: unknown, filePath: string = CONFIG_LOCAL_PATH): Record<string, unknown> | null {
+export function saveConfigSetting(key: string, value: unknown, filePath: string = configLocalWritePath()): Record<string, unknown> | null {
   try {
     const current = fs.existsSync(filePath) ? JSON.parse(fs.readFileSync(filePath, 'utf8')) : {};
     const base: Record<string, unknown> = current && typeof current === 'object' ? current : {};
@@ -259,7 +284,7 @@ export function saveConfigSetting(key: string, value: unknown, filePath: string 
 
 // Removes a key at a dot path from config.local.json (for `config unset <key>`).
 // Returns the resulting object (even if the key was absent — a no-op) or null.
-export function saveConfigUnset(key: string, filePath: string = CONFIG_LOCAL_PATH): Record<string, unknown> | null {
+export function saveConfigUnset(key: string, filePath: string = configLocalWritePath()): Record<string, unknown> | null {
   try {
     const current = fs.existsSync(filePath) ? JSON.parse(fs.readFileSync(filePath, 'utf8')) : {};
     const base: Record<string, unknown> = current && typeof current === 'object' ? current : {};
