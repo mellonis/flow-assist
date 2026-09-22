@@ -127,15 +127,57 @@ export function changeView(c: Change, opts: DiffOpts = {}): ChangeView | null {
   return { title, ...unifiedDiff(before, after, opts) };
 }
 
-// The markdown the chat lays out for one change: a header line, then the hunks in a
-// ```diff fence (flowtty colours it). The fence is longer than any backtick run in the
-// diff, so a changed Markdown file cannot close it early.
+// What the `✎` line says after the path: how much went in and how much came out. The
+// path itself is not part of it — the chat draws the title as a title, the path in its
+// accent colour and this dim beside it, which is why the header is no longer markdown
+// (it used to be inline code, so a path took the code style instead of being read).
+export function changeCounts(v: ChangeView): string {
+  return v.diff || v.added || v.removed ? `· +${v.added} −${v.removed}` : '· binary, not shown';
+}
+
+// The markdown the chat lays out for one change: the hunks in a ```diff fence, which
+// is what colours a diff green and red. The fence is longer than any backtick run in
+// the diff, so a changed Markdown file cannot close it early. Empty for a change with
+// nothing to draw (a binary file) — the title line then stands alone.
 export function changeMarkdown(v: ChangeView): string {
-  const counts = v.diff || v.added || v.removed ? ` · +${v.added} −${v.removed}` : ' · binary, not shown';
-  const header = `✎ \`${v.title.replace(/`/g, "'")}\`${counts}`;
-  if (!v.diff) return header;
+  const rows = diffRows(v.diff);
+  if (!rows.length) return '';
   const longest = Math.max(0, ...(v.diff.match(/`+/g) ?? []).map((r) => r.length));
   const fence = '`'.repeat(Math.max(3, longest + 1));
   const more = v.hidden ? `\n… ${v.hidden} more line${v.hidden === 1 ? '' : 's'}` : '';
-  return `${header}\n${fence}diff\n${v.diff}\n${fence}${more}`;
+  return `${fence}diff\n${rows.map((r) => r.text).join('\n')}\n${fence}${more}`;
+}
+
+// The number each diff line carries in the FILE — the one thing a diff row is missing
+// when the reader wants to go and look at it. flowtty can number a fenced block's own
+// rows, but on a diff that counts diff lines (1, 2, 3…), which nobody wants to read;
+// the numbers have to come from the hunk header, and they are the reason the `@@` row
+// itself can go: it exists to say where in the file one is, and these say it per row.
+//
+// A context or an added row takes its number in the NEW file, a removed row its number
+// in the OLD one; every hunk starts counting again from its own header. A hunk header
+// gets '' — it is not a line of the file — and so does anything that is neither, which
+// is how a diff that could not be read line by line stays harmless.
+const HUNK_HEADER = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/;
+export function diffLineNumbers(diff: string): string[] {
+  let oldNo = 0, newNo = 0;
+  return (diff ? diff.split('\n') : []).map((line) => {
+    const at = HUNK_HEADER.exec(line);
+    if (at) { oldNo = Number(at[1]); newNo = Number(at[2]); return ''; }
+    if (line.startsWith('+')) return String(newNo++);
+    if (line.startsWith('-')) return String(oldNo++);
+    if (line.startsWith(' ')) { oldNo++; return String(newNo++); }
+    return '';
+  });
+}
+
+// The change as it is DRAWN: every line with the number it has in the file, and the
+// `@@` rows left out — they exist to say where in the file one is, and the numbers say
+// that per row. The hunks stay whole in `ChangeView.diff`, which is what a session
+// keeps and what these numbers are read from: the header is their only source.
+export function diffRows(diff: string): { text: string; no: string }[] {
+  const nums = diffLineNumbers(diff);
+  return (diff ? diff.split('\n') : [])
+    .map((text, i) => ({ text, no: nums[i] ?? '' }))
+    .filter((r) => !HUNK_HEADER.test(r.text));
 }

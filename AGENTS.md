@@ -247,9 +247,9 @@ assistant nobody had asked for a board.
   tool reports a console view (`ctx.reportView`, see "A tool describes how its result is
   shown") and the chat draws the `$ …` block. A declined call leaves none — nothing
   ran; a failed one shows its output and its exit code. The block is folded to the last
-  `plugins.assistant.runOutputLines` lines (20) with `… N lines cut · ^r for all`, and
-  ^r unfolds it — a display cap of its own, quite apart from `shell.maxChars`, which is
-  how much the MODEL is given.
+  `plugins.assistant.runOutputLines` lines (20) with `… N lines cut · ^o for all` — the
+  block's fold line, which a click opens as the key does — a display cap of its own,
+  quite apart from `shell.maxChars`, which is how much the MODEL is given.
 - **Whose claim excuses a y/n, and whose does not.** A tool pauses because its `write`
   flag says so, and the flag is set by whoever is entitled to say it. The `mcp` plugin
   keeps the two apart per server: `trusted` is "I believe THIS SERVER's own
@@ -444,7 +444,20 @@ hardest. Rules the `repo` and `gitlab` plugins hold, each with a test that tries
   The host diffs the two (`src/assistant/diff.ts`, pure: LCS over what is left
   between the common head and tail, 3 lines of context, 80 diff lines drawn and the
   rest counted, a text with a NUL named and not drawn) and the chat keeps a
-  `✎ title · +N −M` block with a ```diff fence above the answer, open, not under ^r.
+  `✎ title · +N −M` block with a ```diff fence above the answer, always open — never
+  foldable, it is the part of a turn the person most needs to see.
+  **How it is DRAWN** is the chat's (`changeLines` in `src/views/modals.ts`): the `✎`
+  line is a title, not markdown — plain text, the path in the chat's accent, the counts
+  dim — because `changeMarkdown` used to wrap the path in backticks and a path took the
+  code style. Each row carries the line it is in the FILE (`diffRows` / `diffLineNumbers`
+  in `diff.ts`: a context or added row its number in the new file, a removed row its
+  number in the old, counted again per hunk), which is why the `@@` row is left out of
+  what is drawn — it exists to say where in the file one is. The numbers are chrome:
+  dim, right-aligned in a gutter before the `│ `, and out of a selection, so a drag
+  copies the code alone; the block is laid out at the width LESS that gutter, or a row
+  would run past its box and stop being one terminal line. The hunks stay whole in
+  `ChangeView.diff` — that is what a session keeps, and the header is the numbers'
+  only source.
   It is DISPLAY only: it rides on the display message (`changes`), never on the
   tool's result, so the model's history does not grow by a copy of every edit — the
   e2e test asserts on what the model is sent next. A tool that threw has its reports
@@ -453,7 +466,7 @@ hardest. Rules the `repo` and `gitlab` plugins hold, each with a test that tries
   delete_file report (a directory delete and a file over 2 MiB do not).
 - **A tool describes how its RESULT is shown, and the host draws it**
   (`ctx.reportView`, `src/assistant/views.ts`). Everything else a tool does collapsed
-  to one dim line under ^r unless host code knew that tool by name. So a tool may hand
+  to one dim line in the fold unless host code knew that tool by name. So a tool may hand
   over a VIEW — data, never rendering — and the host owns the frame, the colours, the
   wrapping and every cap. One kind so far, a discriminated union on `kind`:
   `{ kind: 'console', command, text, exitCode, ms, cwd, status? }`, which `run_command`
@@ -470,8 +483,8 @@ hardest. Rules the `repo` and `gitlab` plugins hold, each with a test that tries
     nothing in it can close the block and pass for a confirmation or a hint line.
   - **Everything is capped where it is COLLECTED** (`toolView`), so a message, a
     session file and the screen are bounded alike: each line, the number of lines, the
-    characters altogether, the command line itself. ^r therefore unfolds what the view
-    KEPT, not the raw capture.
+    characters altogether, the command line itself. Opening the block therefore shows
+    what the view KEPT, not the raw capture.
   - Every `ChatRow` stays one terminal line: a kind lays out to markdown the chat
     already knows how to wrap, as the diff block does.
   - A kind this host does not know comes back null and is ignored, so a plugin written
@@ -653,11 +666,25 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     glyph exists. The keycaps panel draws pressed keys with it (the raw name read
     `return`, and `' '` drew an empty cap). Alt is `⌥` on macOS and `Alt+` elsewhere
     (`META_CAP`).
+  - **A modifier is part of the key, and so part of a binding.** A binding may name a
+    key that is held with Ctrl, Alt or Shift — the chat's `details` is `^o` — and a
+    person writes it as it is printed (`ctrl+o`, `^o`, `alt+enter`, `⇧⇥`). `keyId`
+    canonicalises both sides into ONE string (`ctrl+alt+shift+<terminal name>`, in
+    that order), which is what `canonicalKey` stores and what `isKey(binding, key)`
+    compares — so pass the whole key where an action may sit on a modified one, and
+    the bare `name` where every binding is a bare key and a modifier held with it
+    should not stop it firing (the host fallback in `app.tsx`). Shift on a CHARACTER
+    is left out: the decoder reports `'A'`, never shift+`'a'`. Without this an action
+    on a modified key had to be hard-coded in its handler — which is what `^r` was,
+    `key.name === 'r' && key.ctrl`: unremappable, and invisible to every hint.
   - **Never write a key's symbol by hand in a hint.** Two cases:
     - the action is BOUND (it is in `ft.keys`, so the person can remap it) → draw
       `ft.keyCap(action)`; it is `''` when the action is unbound, and then the hint is
       not shown at all. The host footer (`composeFooterHints`) and the chat's
-      `F chat` hint do this. Host-side code uses `bindingGlyph(keys[action])`.
+      `F chat` hint do this. Host-side code uses `bindingGlyph(keys[action])`, or
+      `firstGlyph(…)` where an action answers to several keys and the hint should
+      teach ONE (`details` takes `^o` and keeps `^r`; `^o/^r` in a line of hints reads
+      as two keys to learn).
     - the key is fixed (the chat's own Enter / Esc / Tab) → `keyGlyph(…)`, as the
       `CAP` table in `src/views/modals.ts` does.
     A bundled plugin that still spells caps by hand in its `keycaps(ft)` (acme-tracker)
@@ -685,9 +712,57 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   A modal is closed by the key it is bound to (`f.keys.<action>`), never by a letter
   written in the handler — the log used to close on a hard-coded `l`.
 - **↑/↓** walk the prompt history, only while the field is empty or still shows a
-  history entry untouched. The **wheel** and **PgUp/PgDn** scroll. **^r** unfolds
-  everything the model said on the way — its thinking and its narration — and the tool
-  calls behind the one-line `▸ N tools` summary.
+  history entry untouched. The **wheel** and **PgUp/PgDn** scroll.
+- **What is open and what is folded** (`src/assistant/folds.ts`, pure; the chat owns
+  the state, the view resolves it per block). Everything foldable used to answer to
+  one flag: `^r` opened the reasoning, the narration, every tool call of every turn
+  and every capped command block at once, so to read ONE command's output a person
+  unfolded the whole conversation and folded it back. The model, so that a click and
+  the key cannot disagree:
+  - **ONE global state** — everything folded (where a conversation starts) or
+    everything open — plus the blocks a CLICK has made an exception of. A click
+    toggles that block alone: opening one command's output must not become a sticky
+    "expand mode", which is the verbosity this is meant to remove.
+  - **`details` is the master switch and clears the exceptions**: with anything folded
+    it opens everything, pressed again it closes everything. After it the screen is
+    uniformly one or the other — there is always a way back to a state a person can
+    describe. It is `^o` (`^r` kept as an alias) and a BOUND action, so
+    `config.keys.details` moves it and every hint draws from the binding.
+  - **A block that did not exist yet follows the global state**: with everything open,
+    the next turn's tool calls and command output arrive open. `/clear`, `/resume` and
+    a change of task all go back to everything folded with no exceptions — the state
+    is the CONVERSATION's, like the auto mode, and is never saved.
+  - One block does NOT follow it (`isClicked`): the **cap on an open tool trail**. A
+    key meaning "open everything" is asking for the trail, not for sixty rows of it,
+    and the cap is what keeps an open trail readable.
+  - A block's id names its message by its place among the messages that are DRAWN
+    (`foldId`). Not by the message OBJECT — the chat replaces a message whenever it
+    changes, which is what makes `rowCache` correct — and not by its raw index: the
+    system prompt draws nothing and is unshifted onto the list again with every
+    question, which would move every id by one.
+  - **Which of a message's blocks are open is part of the `rowCache` key**, or a
+    message would keep the rows it was first laid out with and a click would move
+    nothing.
+- **A click opens the block under it.** `mousedown` + `mouseup` on the SAME cell, no
+  `mousedrag` between them, within ~250 ms; anything else stays a drag, so
+  copy-on-select is untouched. A click on a fold line opens THAT block, a click on any
+  row of an OPEN block closes it, and a click on anything else does nothing — in
+  particular it must not dismiss the reminder, close the log or answer a y/n (there
+  are tests for each). Mapping a click to a row: every `ChatRow` is one terminal line,
+  the conversation reports its rect (`onLayout`) and its scroll (`onMetrics`) through
+  `onViewport`, and the chat asks `chatRows(...)` — cached per message — which row
+  carries which `fold` id. The pinned question is painted over the top row, so a click
+  there is the pin's and not the row beneath it.
+  - **Where the eye is left.** Opening a block scrolls so its FIRST row is the top row
+    (a block taller than the window used to land on its LAST line — the end of the
+    thing the person opened it to read); closing keeps the clicked block's first row
+    where it was; the key, which has no one block to anchor on, keeps the message the
+    top row belongs to where it was. With the list resting at the END nothing scrolls
+    at all: the rows are added above the reader and the bottom is already their place.
+    The ask travels as `scrollTo: { row, n }` and is carried out inside the metrics
+    callback, where the box has just measured the rows the fold added or took away.
+  - Following the bottom belongs to a message ARRIVING (`scrollToEnd` on the count of
+    questions asked), never to rows appearing above the viewport.
 - **What it said between tool calls is ONE line: the step** (`src/assistant/step.ts`,
   pure; the chat owns the state and the view draws the row). Every answer used to carry
   a `▸ notes` header and the last two lines of prose under it, so the header was there
@@ -723,17 +798,29 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     where a conversation starts, the command moves it from there, nothing is saved, and
     `/clear` comes back to the config's answer. `step` (the default) is the line;
     `fold` is the older `▸ notes` header with the last two lines under it; `open` is
-    the whole narration unfolded; `hidden` draws none of it, in either ^r state (^r
-    still opens the tool calls and the views). Under ^r, `step` shows what `open` shows
+    the whole narration unfolded; `hidden` draws none of it, open or folded (the key
+    still opens the tool calls and the views). Opened, `step` shows what `open` shows
     — the line is a summary of what is then fully on screen. The mode is in the
     `rowCache` key, or `/notes` would redraw only the message being written. It
     belongs to the CONVERSATION, like the auto mode: nothing is saved, and `/clear`,
     `/resume` and a change of task all go back to what the config says.
-  - **The mode decides how a round is KEPT, not how it arrives.** A round that has not
-    committed is not yet narration — the chat cannot tell what is streaming from the
-    answer itself (`liveIsAnswer`) — so its text is drawn as it arrives whatever the
-    mode is, and the mode applies the moment the round commits with its tool calls.
-    That is how the fold behaved too; it is what `hidden` means by "draws nothing".
+  - **What a round's text IS, is decided as it ARRIVES — and what has been shown is
+    never taken away.** It used to be decided at the END of the round, when the tool
+    calls were in: until then the text was drawn as the ANSWER, and a round that turned
+    out to carry a call had the paragraph the person was reading reclassified and
+    collapsed into the line above. A blink, and a lost sentence. Three rules:
+    - A line starting `Next:` is narration from its first characters (`liveKind` in
+      `step.ts`) and is never drawn as answer text — the shape the prompt asks for is
+      what makes this cheap. `unknown` is the handful of characters that could still
+      become `Next:`; nothing is drawn for them, and that is a few tokens nobody sees.
+    - A model that ignores the shape is caught mid-round instead: `agentChat` reports
+      `onRoundKind('tools')` the moment the first `tool_calls` fragment arrives.
+    - A round that ends in tool calls and had already DRAWN its text keeps it where it
+      was, dimmed in place (`shown` on the message), as well as in the fold. The step
+      line is not drawn for a sentence that is standing there already — it is a summary
+      OF the narration, not a copy beside it. The answer is only ever added to
+      (`liveAs` says which shelf the streaming text is on); a commit that says "this
+      was the answer" just stops the dimming.
   - **The model is asked for the shape, not for silence.** `baseStatic()` used to tell
     it not to narrate; it narrated anyway, having nothing else to write between calls.
     It now asks for ONE short line starting `Next:` before a tool call and nothing else
@@ -827,6 +914,11 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     disarmed by "any key", the command line's catch-all consumes, keycaps would draw a
     cap per dragged cell, and every consumed key costs a re-render. A new handler
     needs no guard of its own; one that bypasses the registry (a raw `useInput`) does.
+    **One handler asks for them**, `mouse: true` on its registration: the chat's, the
+    only thing on screen that knows what is under the pointer (the click above). A
+    button reaches such a handler and nothing else — not another consumer, not the
+    host fallback — and that handler returns `false` unless it actually acted, so a
+    drag still costs no re-render a cell.
   - Tests: `backend.mouse('down' | 'drag' | 'up', x, y)`, then read
     `backend.clipboard`; `backend.clipboardAvailable = false` stands for Apple
     Terminal (`src/__tests__/copy.e2e.test.ts`).
@@ -898,6 +990,22 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     is, from the last round alone (`usageRef`, the context meter). A provider that
     reports nothing shows no figure: an estimate that moved on its own would be worse
     than none, and nothing here is estimated.
+- **The tool trail is condensed and capped** (`condenseRuns` / `TRAIL_ROWS` in
+  `src/views/modals.ts`). One dim line per call earns nothing past a handful: a turn
+  that ran to the round limit printed dozens of them and the screen was a sheet of
+  grey, with the end of the turn lost in the middle of it. Consecutive calls of the
+  same tool that ENDED the same way are one line with a count (`read_file ×12`) — a
+  different argument is not a different line, the arguments are in the log — while a
+  call that FAILED keeps a line of its own with its reason, which is how a person
+  knows why an answer is thin. An open trail shows its last `TRAIL_ROWS` (12) lines
+  over `… N earlier calls`, which only a click opens (see the fold model above). The
+  folded summary (`toolSummary`) carries the counts too and is cut to the width —
+  every `ChatRow` is one terminal line, and fifty tool names would take two.
+- **A turn that ran out of rounds says so where the answer would be.** `agentChat`
+  reports `roundLimit` when the loop ends with no round that was an answer, and the
+  chat draws `stopped after N rounds — no answer; say "continue" to carry on` in the
+  warn colour, in the conversation. It replaces the dim "ran out of steps" line under
+  the field, which the wall of grey above it hid.
 - A **background result** (the `background` tool's nested run finishing) is SHOWN as
   soon as no turn is being written — a half-typed draft does not hold it back. It
   does not open the chat and does not spend a model turn: it joins the model's
@@ -989,7 +1097,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     the box has fewer than `MIN_ROWS_TO_PIN` rows.
 - The field's EDITING is flowtty's `editorReducer` (`multiline`, ≥ 1.0.0-alpha.8),
   called from the chat's key handler after the chat's own keys (Esc ladder, Tab
-  completion, history, ^r); its geometry (`inputRows`, `caretPosition`) draws the
+  completion, history, `details`); its geometry (`inputRows`, `caretPosition`) draws the
   rows in `inputVisualRows`. So caret motion by character / word / visual row,
   Home/End and the kill bindings per line, paste and the newline keys are NOT host
   code — do not re-add branches for them. The reducer answers `submit` for a plain

@@ -26,6 +26,9 @@ type InputEntry = {
   mode: string;
   priority?: (ui: UiState) => number;
   handler: (key: InputKey, ui: UiState) => unknown;
+  // This handler asks for the mouse buttons as well, which are otherwise dropped
+  // before every handler (`twoPhaseDispatch`, runtime/app.tsx).
+  mouse?: boolean;
 };
 // A registry entry: either the resolved handler, or a lazy `{ get }` wrapper
 // (the runtime stores handlers behind `get: () => ref.current`).

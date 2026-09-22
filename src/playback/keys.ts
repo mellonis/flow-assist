@@ -28,12 +28,56 @@ const KEY_SPELLINGS: Record<string, string> = {
   pgdown: 'pagedown',
   bs: 'backspace',
 };
+// ─── A modifier is part of the key, and so part of a binding ───────────────────
+// An action may live on a key that is held with Ctrl or Alt — the chat's `details`
+// is `^o`. A person writes that the way it is printed (`ctrl+o`, `^o`, `alt+enter`),
+// and it meets the terminal's own report in the same place every other spelling does:
+// `keyId` gives both sides ONE string, the terminal's name with the modifiers that
+// were part of pressing it, in one fixed order. Without this a binding could only ever
+// name a bare key, and an action on a modified one had to be hard-coded in its handler
+// — which is exactly what `^r` was before it became an action.
+const MODIFIER_WORDS: Record<string, 'ctrl' | 'meta' | 'shift'> = {
+  ctrl: 'ctrl', control: 'ctrl', ctl: 'ctrl',
+  alt: 'meta', meta: 'meta', opt: 'meta', option: 'meta',
+  shift: 'shift',
+};
+// The caps a person may type instead of the word: ^ for Ctrl, ⌥/⌃ as macOS prints them.
+const MODIFIER_GLYPHS: Record<string, 'ctrl' | 'meta' | 'shift'> = { '^': 'ctrl', '⌃': 'ctrl', '⌥': 'meta', '⇧': 'shift' };
+interface KeyParts { name: string; ctrl?: boolean; meta?: boolean; shift?: boolean }
+// A binding as written, split into the key and what is held with it. A lone `^` or
+// `⇧` is a key in its own right, so a glyph is a modifier only with a key after it.
+function asKey(spelled: string): KeyParts {
+  if (Array.from(spelled).length === 1) return { name: spelled };
+  let rest = spelled.trim();
+  const held: { ctrl?: boolean; meta?: boolean; shift?: boolean } = {};
+  for (;;) {
+    const word = /^([A-Za-z]+)\s*\+\s*/.exec(rest);
+    const mod = word && MODIFIER_WORDS[word[1]!.toLowerCase()];
+    if (word && mod) { held[mod] = true; rest = rest.slice(word[0].length); continue; }
+    const glyph = MODIFIER_GLYPHS[Array.from(rest)[0] ?? ''];
+    if (glyph && Array.from(rest).length > 1) { held[glyph] = true; rest = rest.slice(Array.from(rest)[0]!.length); continue; }
+    break;
+  }
+  if (Array.from(rest).length === 1) return { name: rest, ...held };
+  const word = rest.toLowerCase();
+  return { name: KEY_SPELLINGS[word] ?? word, ...held };
+}
+// The one canonical form: what a binding is stored as, and what a pressed key is
+// compared as. Shift on a CHARACTER is already in the character — the decoder reports
+// 'A', not shift+'a' — so it is left off there, or `config.keys` and the terminal would
+// never agree about a capital.
+export function keyId(key: KeyLike): string {
+  if (typeof key === 'string') return keyId(asKey(key));
+  const name = key.name ?? '';
+  const named = Array.from(name).length !== 1;
+  return `${key.ctrl ? 'ctrl+' : ''}${key.meta ? 'alt+' : ''}${key.shift && named ? 'shift+' : ''}${name}`;
+}
+
 // A binding as written → the name the decoder gives that key. A single character is
-// itself (case matters: 'A' is Shift+a); a word is matched without regard to case.
+// itself (case matters: 'A' is Shift+a); a word is matched without regard to case; a
+// modifier written before it is kept, in the canonical spelling above.
 export function canonicalKey(spelled: string): string {
-  if (Array.from(spelled).length === 1) return spelled;
-  const word = spelled.trim().toLowerCase();
-  return KEY_SPELLINGS[word] ?? word;
+  return keyId(asKey(spelled));
 }
 // A whole binding (one spelling or several), canonical and without duplicates — so
 // the old `['enter', 'return']` is just `['return']`.
@@ -96,7 +140,7 @@ export function isMouseButton(name: string | undefined): boolean {
 export const META_CAP = process.platform === 'darwin' ? '⌥' : 'Alt+';
 export type KeyLike = string | { name?: string; ctrl?: boolean; meta?: boolean; shift?: boolean };
 export function keyGlyph(key: KeyLike): string {
-  const k = typeof key === 'string' ? { name: key } : key;
+  const k = typeof key === 'string' ? asKey(key) : key;
   const name = k.name ?? '';
   const named = Array.from(name).length !== 1;
   const cap = KEY_GLYPHS[name] ?? (/^f\d{1,2}$/.test(name) ? name.toUpperCase() : name);
@@ -107,6 +151,14 @@ export function keyGlyph(key: KeyLike): string {
 // shown at all, which is the caller's business.
 export function bindingGlyph(binding: string | string[] | null | undefined): string {
   return canonicalBinding(binding).map((k) => keyGlyph(k)).join('/');
+}
+// The cap of the FIRST spelling of a binding. An action may answer to more than one
+// key — `details` took `^o` and kept `^r`, which every hint written so far names — and
+// a hint teaches ONE key: `^o/^r` in the middle of a line of hints reads as two keys
+// to learn. Empty when the action is unbound, as `bindingGlyph` is.
+export function firstGlyph(binding: string | string[] | null | undefined): string {
+  const first = canonicalBinding(binding)[0];
+  return first === undefined ? '' : keyGlyph(first);
 }
 
 // Host base of key bindings: only the shared/navigation actions the host keeps.
@@ -144,7 +196,10 @@ export function resolveKeys(
 }
 
 // Did a key fire for an action? `binding` is the array of names (the result of
-// resolveKeys), `name` is the key.name from useInput.
-export function isKey(binding: string | string[], name: string): boolean {
-  return Array.isArray(binding) ? binding.includes(name) : binding === name;
+// resolveKeys); `key` is what `useInput` reported — the whole key where an action may
+// sit on a modified one (`^o`), or its `name` alone where every binding is a bare key
+// and a modifier held with it should not stop it firing.
+export function isKey(binding: string | string[], key: KeyLike): boolean {
+  const id = keyId(key);
+  return Array.isArray(binding) ? binding.includes(id) : binding === id;
 }

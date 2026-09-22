@@ -39,6 +39,54 @@ What each version of flow-assist brought, newest first. The version is the one i
   cannot quietly grow into every future request. Each refusal says what to do instead,
   and `/memory` stays your own way to see and prune the list.
 
+- **Click what you want to read.** Everything the chat folds answered to one key, and
+  it opened EVERYTHING at once: to read the output of one command you unfolded the
+  whole conversation and folded it back. Now a click opens the block under it — the
+  `▸ N tools` line of a turn, the quiet line of narration, a command's
+  `… N lines cut` — and a click anywhere inside an open block closes it again. A drag
+  is still a selection: only a press and a release on one cell, with no drag between
+  them, counts as a click, so copying text out of an open block never folds it. A
+  block opens at its FIRST row, where reading starts, instead of dropping you at its
+  end; closing one leaves the line you were on where it was. Nothing else on the
+  screen became clickable. The key is now **`^o`** and it is the master switch: with
+  anything folded it opens everything, pressed again it closes everything, and either
+  way the blocks you clicked go back to following it — so there is always one
+  keypress back to a screen you can describe. It is a bound action at last
+  (`config set keys.details <key>` moves it, and every hint draws the key you bound);
+  `^r`, which it used to be, still works and is in no hint any more.
+
+- **A long tool trail is no longer a sheet of grey.** A turn that ran to the round
+  limit printed one dim line per tool call — dozens of them — and what you needed,
+  that the turn had ended without an answer, was somewhere in the middle. Consecutive
+  calls of the same tool are now one line with a count (`read_file ×12`; the arguments
+  are in the log, `L`), an open trail shows its last twelve lines with
+  `… N earlier calls` above them (click that to see the rest), and the folded summary
+  says what each tool cost in calls. When a turn stops because it ran out of rounds,
+  it says so where the answer would be, in the warn colour:
+  `stopped after 64 rounds — no answer; say "continue" to carry on`. A write that
+  happened and a call that failed still each keep a line of their own — that is how
+  you know why an answer is thin.
+
+- **What a write changed reads like a diff again.** The block carried a dim `diff`
+  label row under a line that already said this was a change to a file (and a
+  `console` row under the `$ command` line that said it better) — both are gone, while
+  the fence keeps its language, which is what colours a diff green and red. The `✎`
+  title is a title now: plain text with the path in the chat's accent colour and
+  `· +N −M` quietly beside it, instead of a fragment of inline code. And every row
+  carries **the line it is in the FILE** — a context or added row its number in the
+  new file, a removed row its number in the old one, counted again per hunk — so the
+  `@@ -1,3 +1,3 @@` row could go. The numbers are chrome: dim, right-aligned, and out
+  of a selection, so a drag still copies the code alone.
+
+- **What you were reading is never taken away.** While a round streamed, its text was
+  drawn as the answer — the chat could not know yet whether the round would end with a
+  tool call — and when it did, the paragraph you were halfway through was
+  reclassified as narration and vanished into the line above. A blink, and a lost
+  sentence. A line that starts `Next:` is now narration from its first characters and
+  is never drawn as answer text; a round that turns out to carry tool calls keeps
+  whatever of its text was already on screen, dimmed where it stands, instead of
+  disappearing. The answer is only ever added to.
+
 - **One line instead of the folded notes: what it is doing now.** Between tool calls
   the assistant writes prose, and every answer carried a dim `▸ notes` header with the
   last two lines of it — a header for text that is mostly noise, with the one thing

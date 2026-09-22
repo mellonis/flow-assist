@@ -12,8 +12,8 @@ import { bgActiveCount } from '../loader/tools-core.js';
 import { autoBadge, autoCommand, autoConfirms, autoSaid, nextAutoMode, type AutoMode } from '../assistant/auto.js';
 import { createPlan, todoGlyph } from '../assistant/plan.js';
 import {
-  dueStep, emptyStep, joinNarration, notesCommand, notesMode, notesSaid, offerStep, stepWaitMs,
-  type NotesMode, type StepState,
+  dueStep, emptyStep, joinNarration, liveKind, notesCommand, notesMode, notesSaid, offerStep, stepWaitMs,
+  type LiveKind, type NotesMode, type StepState,
 } from '../assistant/step.js';
 import { apiHistory, compactConversation, chatLanguage, requestTools, transcriptSoFar } from '../assistant/agent.js';
 import { createToolSet, toolLoadingMode } from '../assistant/tool-loading.js';
@@ -25,7 +25,9 @@ import type { ChangeView } from '../assistant/diff.js';
 import { VIEW_CAPS, type ToolView } from '../assistant/views.js';
 import { editorReducer } from '@flowtty/core';
 import { z } from 'zod';
-import { askFieldWidth, chatFieldWidth, chatWrapWidth } from '../views/modals.js';
+import { anchorRow, askFieldWidth, chatFieldWidth, chatRows, chatWrapWidth, firstFoldRow, rowAnchor, type RowOpts, type Viewport } from '../views/modals.js';
+import { allFolded, flipFolds, isClicked, isOpen, toggleFold, type FoldState } from '../assistant/folds.js';
+import { firstGlyph, isKey, isMouseButton } from '../playback/keys.js';
 import { askKey, askStart, type AskQuestion, type AskState } from '../assistant/ask.js';
 import { loadMemories, memoryFilePath, saveMemories } from '../runtime/services/memory.js';
 import { keptAfterClear, memoryCommand } from '../assistant/memory-command.js';
@@ -152,6 +154,8 @@ interface AssistantFT {
     mode: string;
     priority: (ui: any) => number;
     handler: (key: any, ui: any) => boolean;
+    // The chat's conversation is the one handler that reads the mouse buttons.
+    mouse?: boolean;
   }): void;
   store: Record<string, unknown>;
   services: Record<string, unknown>;
@@ -183,7 +187,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
         description: 'Open the chat; with text, send it',
       },
     ],
-    keys: { chat: 'F' },
+    // `details` opens what the chat folds — the narration, a turn's tool calls, a
+    // command's capped output — and closes it again. It is an ACTION, not a key
+    // written into the handler, so `config.keys.details` moves it and every hint
+    // draws the cap of whatever it is bound to. `^r` stays beside `^o`: it is in
+    // every hint people have read so far, and a key that quietly stopped working
+    // would be the worst way to learn about the new one.
+    keys: { chat: 'F', details: ['ctrl+o', 'ctrl+r'] },
     // config.plugins.assistant: `fullscreen` — the chat takes the whole terminal from
     // the start (`/fullscreen on|off` switches it for the session); `notes` — how the
     // model's narration between tool calls is drawn (`/notes` switches it for the
@@ -274,9 +284,24 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // working out the next call) it is 'thinking'. One word for all of it read
           // "writing…" while nothing was being written.
           const [phase, setPhase] = f.useState<'thinking' | 'writing'>('thinking');
-          // Show the model's «thinking» (reasoning_content): folded by default (one
-          // dim-line «▸ reasoning»), Ctrl+r unfolds/folds all.
-          const [showReasoning, setShowReasoning] = f.useState(false);
+          // What is open and what is folded (src/assistant/folds.ts): one global
+          // state, plus the blocks a click has made an exception of. `details` (^o)
+          // is the master switch; a click opens the block under it alone. The
+          // conversation's, like the auto mode — never saved, and `/clear`, `/resume`
+          // and a change of task all come back to everything folded.
+          const [folds, setFoldsState] = f.useState<FoldState>(allFolded());
+          const foldsRef = f.useRef(folds);
+          const setFolds = (s: FoldState) => { foldsRef.current = s; setFoldsState(s); };
+          // What the conversation last said about where it is on the screen — the
+          // view reports it, and a click is turned into a row with it.
+          const viewportRef = f.useRef<Viewport | null>(null);
+          // A row the list should be put at the top of once the rows have changed, and
+          // the nonce that makes a repeat of the same row ask again.
+          const [scrollTo, setScrollTo] = f.useState<{ row: number; n: number } | null>(null);
+          const scrollSeq = f.useRef(0);
+          // The mouse press a click may still come out of: the cell it landed on and
+          // when. A drag clears it — a drag is a selection and never a fold.
+          const pressRef = f.useRef<{ x: number; y: number; at: number } | null>(null);
           // Process indicator: spinner + the seconds of whatever is running NOW.
           // t0Ref — when the turn started, which is what the finished answer's quiet
           // line says (`· 12.4s`). segRef — when the thing on the status line started:
@@ -388,9 +413,19 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // here where it can be read without a render.
           const stepRef = f.useRef<StepState>(emptyStep());
           const narrationRef = f.useRef('');
+          // What the round being streamed IS, and whether any of it was drawn as the
+          // answer before that was known. A round used to be classified at its END,
+          // and a round that turned out to carry a tool call had the paragraph the
+          // person was reading taken away again — so it is decided on arrival, from
+          // the `Next:` shape the prompt asks for and from the tool-call fragments the
+          // agent reports the moment they start arriving. `drawn` is what makes the
+          // difference between text that was never shown (nothing to keep) and text
+          // that was (kept where it is, dim).
+          const roundRef = f.useRef<{ kind: LiveKind; drawn: boolean }>({ kind: 'unknown', drawn: false });
+          const resetRound = () => { roundRef.current = { kind: 'unknown', drawn: false }; };
           const stepTimer = f.useRef<ReturnType<typeof setTimeout> | null>(null);
           const clearStepTimer = () => { if (stepTimer.current) { clearTimeout(stepTimer.current); stepTimer.current = null; } };
-          const resetStep = () => { clearStepTimer(); stepRef.current = emptyStep(); narrationRef.current = ''; };
+          const resetStep = () => { clearStepTimer(); stepRef.current = emptyStep(); narrationRef.current = ''; resetRound(); };
           // A change the floor held back is not dropped: it lands on the message that
           // was narrating as soon as the second is up, whether or not the turn is still
           // running.
@@ -420,6 +455,81 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             scheduleStep();
             return stepRef.current.shown;
           };
+          // ── Folds ── the rows a click lands on, and what opening one does to the
+          // scroll. The rows are laid out by the view and cached per message object,
+          // so asking for them here is a lookup, not a second layout.
+          // The display list as the view's own functions read it — the same objects,
+          // and so the same cached rows.
+          const drawn = () => msgsRef.current as Parameters<typeof chatRows>[0];
+          const rowOpts = (state: FoldState): RowOpts => ({
+            wrap: chatWrapWidth(width, fullscreenRef.current),
+            folds: state,
+            viewLines: Number((f.config.plugins as Record<string, { runOutputLines?: unknown }> | undefined)?.assistant?.runOutputLines) || VIEW_CAPS.folded,
+            notes: notesRef.current,
+            // Empty when the action is unbound — every hint that names it then
+            // leaves it out, rather than teaching a key that does nothing.
+            detailsKey: firstGlyph(f.keys.details),
+          });
+          // Put a row at the top of the conversation, once the rows have changed.
+          const askScroll = (row: number) => setScrollTo({ row: Math.max(0, row), n: ++scrollSeq.current });
+          // A fold changed. Opening a block puts its FIRST row at the top of the
+          // screen — a block taller than the window used to land on its last line,
+          // which is the end of what the person opened it to read. Anything else keeps
+          // the line they were on where it was: the rows a fold adds or takes away
+          // above the view would otherwise slide the whole conversation under them.
+          const applyFolds = (next: FoldState, opened: string | null) => {
+            const before = foldsRef.current;
+            const v = viewportRef.current;
+            const rows = opened ? chatRows(drawn(), rowOpts(next)) : [];
+            setFolds(next);
+            if (opened) {
+              const at = firstFoldRow(rows, opened);
+              if (at >= 0) askScroll(at);
+            } else if (v && v.atEnd) {
+              // Resting at the end of the conversation: the rows a fold adds or takes
+              // away are all above the reader, and the list follows the bottom by
+              // itself. Asking it to scroll would move exactly what is staying put.
+            } else if (v) {
+              const where = rowAnchor(drawn(), rowOpts(before), v.scrollTop);
+              askScroll(anchorRow(drawn(), rowOpts(next), where));
+            }
+            f.notify();
+          };
+          // The key: everything at once, and the exceptions go with it. There is no one
+          // block to anchor on, so the person keeps the text they were reading.
+          const flipAllFolds = () => applyFolds(flipFolds(foldsRef.current), null);
+          // Which block a click landed on — null for a cell that is not a fold line and
+          // not inside an open block, which is most of the screen and does nothing.
+          const foldAt = (x: number, y: number): string | null => {
+            const v = viewportRef.current;
+            if (!v || x < v.left || x >= v.left + v.width) return null;
+            const line = y - v.top;
+            if (line < 0 || line >= v.height) return null;
+            // The pinned question is painted over the top row: a click there is on the
+            // pin, not on the row beneath it.
+            if (v.pinned && line === 0) return null;
+            const rows = chatRows(drawn(), rowOpts(foldsRef.current));
+            return rows[v.scrollTop + line]?.fold ?? null;
+          };
+          // A click: a press and a release on the SAME cell, with no drag between them
+          // and inside the quarter second a finger takes. Anything else is a drag, and
+          // a drag is flowtty's selection — it copies, and it must never fold.
+          const CLICK_MS = 250;
+          const mouse = (key: { name?: string; x?: number; y?: number }): boolean => {
+            if (key.name === 'mousedrag') { pressRef.current = null; return false; }
+            if (key.name === 'mousedown') { pressRef.current = { x: Number(key.x), y: Number(key.y), at: Date.now() }; return false; }
+            const down = pressRef.current;
+            pressRef.current = null;
+            if (!down || down.x !== Number(key.x) || down.y !== Number(key.y) || Date.now() - down.at > CLICK_MS) return false;
+            const id = foldAt(down.x, down.y);
+            if (id == null) return false;
+            // Which way this click goes: for a block that follows the global state,
+            // away from it; for the trail's cap, which never does, simply on.
+            const opening = id.endsWith(':calls') ? !isClicked(foldsRef.current, id) : !isOpen(foldsRef.current, id);
+            applyFolds(toggleFold(foldsRef.current, id), opening ? id : null);
+            return true;
+          };
+
           // ── Images (src/assistant/images.ts) ── what each `[Image #N]` of this
           // conversation stands for, and the last N given out. The conversation's, like
           // the plan: saved with the session, emptied by /clear and a change of task. The
@@ -494,6 +604,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             setAutoMode('ask'); // another conversation is another conversation's mode
             setNotes(configNotes()); // and its own answer to how much narration is drawn
             resetStep(); // the step line belonged to the turn that is being left
+            setFolds(allFolded()); // and the exceptions pointed into a conversation that is gone
             usageRef.current = s.usage;
             historyRef.current = s.prompts.slice();
             histAt.current = null;
@@ -730,6 +841,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             abortRef.current = abort;
             const ai = (f.config.ai ?? {}) as Record<string, any>;
             let failed = false, aborted = false;
+            // The loop ran out of rounds with no answer. It is said where the answer
+            // would be, in the warn colour, and it replaces the dim line under the
+            // field that a wall of grey tool lines used to hide.
+            let roundLimit = 0;
             try {
               const chatResult = await (f.services as Record<string, any>).chatLLM(wire, {
                 baseUrl: ai.baseUrl,
@@ -836,6 +951,21 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // is — a retelling of moves or the answer — onLiveCommit decides at the end
                 // of the round. We accumulate in `live`; while alive it renders in the fold,
                 // on commit it goes to `process` (retelling) or `content` (answer).
+                // This round carries tool calls — heard the moment the first fragment
+                // of one arrives. A model that ignores the `Next:` shape is caught
+                // here instead of at the end of the round: whatever of its text is
+                // already on screen stays where it is, dim, and the rest of it is
+                // never drawn as the answer.
+                onRoundKind: () => {
+                  roundRef.current.kind = 'notes';
+                  setMessages(cur => {
+                    const next = cur.slice();
+                    const last = next[next.length - 1];
+                    if (last?.role === 'assistant' && last.live) next[next.length - 1] = { ...last, liveAs: roundRef.current.drawn ? 'notes' : '' };
+                    return next;
+                  });
+                  f.notify();
+                },
                 onLive: (delta: string) => {
                   if (!delta) return;
                   endToolSegment(); // the tool is done: the model is writing
@@ -843,8 +973,21 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   setMessages(cur => {
                     const next = cur.slice();
                     const last = next[next.length - 1];
-                    if (last?.role === 'assistant') next[next.length - 1] = { ...last, live: (last.live || '') + delta };
-                    else next.push({ role: 'assistant', content: '', live: delta });
+                    const live = (last?.role === 'assistant' ? (last.live || '') : '') + delta;
+                    // What this text is, worked out from the text itself. `unknown` is
+                    // the handful of characters that could still turn into `Next:`:
+                    // nothing is drawn for them, and that is a few tokens nobody sees
+                    // rather than a paragraph that appears and vanishes.
+                    const r = roundRef.current;
+                    if (r.kind !== 'notes') r.kind = liveKind(live);
+                    if (r.kind === 'answer') r.drawn = true;
+                    const liveAs: '' | 'answer' | 'notes' = r.kind === 'answer' ? 'answer' : r.drawn ? 'notes' : '';
+                    // The step line is NOT offered here: it is worked out when the
+                    // round commits (`onLiveCommit`). Offering it per token schedules
+                    // the floor's timer per token, and the line then lands on a
+                    // message the next token has already replaced.
+                    if (last?.role === 'assistant') next[next.length - 1] = { ...last, live, liveAs };
+                    else next.push({ role: 'assistant', content: '', live: delta, liveAs });
                     return next;
                   });
                 },
@@ -877,6 +1020,11 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   const narration = isAnswer ? '' : joinNarration(narrationRef.current, text);
                   if (!isAnswer) narrationRef.current = narration;
                   const step = isAnswer ? '' : advanceStep(narration);
+                  // Narration that was DRAWN before its round was known stays where it
+                  // was drawn: the commit moves it into the fold as it always did, and
+                  // keeps a copy here so the rows the person was reading do not go.
+                  const keep = !isAnswer && roundRef.current.drawn ? text : '';
+                  resetRound();
                   setMessages(cur => {
                     const next = cur.slice();
                     const last = next[next.length - 1];
@@ -884,13 +1032,18 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                       // A fresh message (a tool's view landed under the last one): it
                       // carries this round's narration only, while the step line stays
                       // the turn's — the last thing it said it is doing.
-                      next.push({ role: 'assistant', content: isAnswer ? text : '', process: isAnswer ? '' : text, ...(isAnswer ? {} : { step }) });
+                      next.push({ role: 'assistant', content: isAnswer ? text : '', process: isAnswer ? '' : text, ...(isAnswer ? {} : { step, ...(keep ? { shown: keep } : {}) }) });
                       return next;
                     }
                     if (isAnswer) {
-                      next[next.length - 1] = { ...last, content: text, live: '' };
+                      // The answer is only added to, never replaced: the rows stay
+                      // exactly as they were drawn and simply stop being provisional.
+                      next[next.length - 1] = { ...last, content: text, live: '', liveAs: '' };
                     } else {
-                      next[next.length - 1] = { ...last, process: joinNarration(last.process, text), live: '', step };
+                      next[next.length - 1] = {
+                        ...last, process: joinNarration(last.process, text), live: '', liveAs: '', step,
+                        ...(keep ? { shown: joinNarration(last.shown as string | undefined, keep) } : {}),
+                      };
                     }
                     return next;
                   });
@@ -899,6 +1052,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               (f.services as Record<string, any>).pushLog?.(`[chat] ${q.slice(0, 40)}… → ${q.length} chars${images.length ? ` + ${images.length} image${images.length === 1 ? '' : 's'}` : ''}`);
               // A persistent trail of executed tools: put it on the last assistant message
               // so the render shows «▸ update_issue … → applied/declined/error».
+              roundLimit = Number((chatResult as { roundLimit?: number } | undefined)?.roundLimit ?? 0);
               const turn = (chatResult as { transcript?: ChatMessage[]; content?: string } | undefined);
               const reported = (chatResult as { usage?: { promptTokens: number; completionTokens: number } } | undefined)?.usage;
               if (reported) usageRef.current = reported;
@@ -966,14 +1120,17 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               setMessages(cur => {
                 const next = cur.slice();
                 const at = answerAt(next);
-                if (at >= 0) next[at] = { ...next[at]!, duration: finalMs, ...(spent ? { tokens: spent } : {}), ...(aborted ? { stopped: true } : {}) };
+                if (at >= 0) next[at] = { ...next[at]!, duration: finalMs, ...(spent ? { tokens: spent } : {}), ...(aborted ? { stopped: true } : {}), ...(roundLimit ? { roundLimit } : {}) };
                 return next;
               });
-              // Empty answer: the model gave only reasoning (it is in the «reasoning» fold)
-              // but no final text — say so explicitly. Error and cancel (Esc) are not an
-              // empty answer — they already have their own indication (⚠ error / quiet log).
-              if (!contentRef.current.trim() && !failed && !aborted) {
-                setEmptyNotice('The turn ran out of steps before a final answer — only reasoning came back (^r shows it). Narrow the question, or say "continue".');
+              // Empty answer: the model gave only reasoning but no final text — say so
+              // explicitly. Error and cancel (Esc) are not an empty answer — they
+              // already have their own indication (⚠ error / quiet log); neither is a
+              // turn that ran out of rounds, which now says so in the conversation
+              // itself, where the answer would have been.
+              if (!contentRef.current.trim() && !failed && !aborted && !roundLimit) {
+                const opens = firstGlyph(f.keys.details);
+                setEmptyNotice(`The turn ended without a final answer — only reasoning came back${opens ? ` (${opens} shows it)` : ''}. Narrow the question, or say "continue".`);
               }
               // Sync streamRef to false HERE, not just via the render
               // (line ~128 streamRef.current = streaming). If a render is ever
@@ -1336,7 +1493,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 setToolCount(0);
                 setToolLabel('');
                 setElapsedMs(0);
-                setShowReasoning(false);
+                setFolds(allFolded()); // everything folded again, and no exceptions left over
                 setStreaming(false);
                 disarmEsc();
                 f.notify();
@@ -1420,6 +1577,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               setAutoMode('ask'); // the new task has not been given the old one's leeway
               setNotes(configNotes()); // nor kept the narration the old one was set to
               resetStep();
+              setFolds(allFolded()); // the blocks a click had opened belong to the other task
               msgsRef.current = [];
               setMessages([]);
               // Task change — a new session: reset the status fields too, else the
@@ -1500,8 +1658,17 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           f.useInputHandler({
             mode: 'consume',
             priority: (ui) => ui.cmdOpen ? 0 : (open ? 100 : 0),
+            // A mouse button reaches THIS handler and no other (`twoPhaseDispatch`
+            // drops one before every handler that was written for keys). It is read
+            // here alone because the conversation is the only thing on screen that
+            // knows what is under the pointer.
+            mouse: true,
             handler: (key) => {
               if (!open) return false;
+              // A press, a drag or a release. It is consumed only when it actually
+              // folded something: a drag that reported "handled" per dragged cell
+              // would cost a re-render a cell, and every other click must be free.
+              if (isMouseButton(key.name)) return mouse(key);
               // While awaiting a write confirmation (y/n pause), the chat consumes ALL
               // keys: 'y'/⏎ — confirm, 'n'/Esc — decline; normal field input is paused.
               // An open question consumes every key too: arrows/digits/Space/⏎ answer it,
@@ -1654,8 +1821,12 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   return true;
                 }
               }
-              // Ctrl+r — fold/unfold the model's «thinking».
-              if (key.name === 'r' && key.ctrl) { setShowReasoning(v => !v); return true; }
+              // `details` — the master switch: with anything folded it opens
+              // everything, pressed again it closes everything, and either way the
+              // blocks a click made an exception of go back to following it. A bound
+              // action, so `config.keys.details` moves it; it answers to ^o and still
+              // to ^r, which every hint written before it named.
+              if (isKey(f.keys.details ?? [], key)) { flipAllFolds(); return true; }
               // PgUp/PgDn and the wheel belong to the conversation's own scroll box (the
               // view's <ScrollBox> hears them itself).
               // ── Everything else is EDITING, and that is flowtty's editor reducer: caret
@@ -1726,7 +1897,14 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             if (matches.length) completions = { matches, sel: walking ? Math.min(walking.idx, matches.length - 1) : 0 };
           }
           return (f.viewRegistry.chat as (p: Record<string, unknown>) => unknown)({
-            width, height, theme: f.config.theme, messages, input, streaming, error, toolLabel, phase, showReasoning, cursor, escArmed,
+            width, height, theme: f.config.theme, messages, input, streaming, error, toolLabel, phase, cursor, escArmed,
+            // What is open and what is folded, the cap of the key that changes it, and
+            // the two channels a click needs: where the conversation is on the screen,
+            // and which row to put at the top once a fold has changed the rows.
+            folds,
+            detailsKey: firstGlyph(f.keys.details),
+            onViewport: (v: Viewport) => { viewportRef.current = v; },
+            scrollTo,
             shellMode,
             // How much runs without a y/n — said on the hint line, so the mode is never
             // a hidden state, while an answer is coming as much as between turns.

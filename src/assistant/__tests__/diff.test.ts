@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { changeMarkdown, changeView, unifiedDiff } from '../diff';
+import { changeCounts, changeMarkdown, changeView, diffLineNumbers, diffRows, unifiedDiff } from '../diff';
 
 const lines = (n: number, f = (i: number) => `line ${i}`) => Array.from({ length: n }, (_, i) => f(i + 1)).join('\n') + '\n';
 
@@ -54,14 +54,17 @@ test('nothing changed → no view', () => {
 test('a binary text is named, not drawn', () => {
   const v = changeView({ title: 'img.png', before: '', after: 'PNG\u0000\u0001' })!;
   expect(v.diff).toBe('');
-  expect(changeMarkdown(v)).toBe('✎ `img.png` · binary, not shown');
+  // The title is the chat's own row now — the path is drawn in the accent colour, not
+  // as inline code — so the markdown here is the fenced block alone, and a binary has none.
+  expect(changeMarkdown(v)).toBe('');
+  expect(changeCounts(v)).toBe('· binary, not shown');
 });
 
 test('the markdown fence outlasts any backtick run in the diff', () => {
   const v = changeView({ title: 'README.md', before: '', after: '```ts\nx\n```\n' })!;
   const md = changeMarkdown(v);
-  expect(md.split('\n')[0]).toBe('✎ `README.md` · +3 −0');
-  expect(md.split('\n')[1]).toBe('````diff');
+  expect(changeCounts(v)).toBe('· +3 −0');
+  expect(md.split('\n')[0]).toBe('````diff');
   expect(md.trimEnd().endsWith('\n````')).toBe(true);
 });
 
@@ -73,4 +76,54 @@ test('a two-thousand-line rewrite stays fast and exact in its counts', () => {
   expect(performance.now() - t0).toBeLessThan(2000);
   expect(d.added).toBe(1000);
   expect(d.removed).toBe(1000);
+});
+
+// ─── The file's own line numbers ──────────────────────────────────────────────
+// flowtty can number a fenced block's own rows, but on a diff that counts DIFF
+// lines — 1, 2, 3 — which is not a number anyone wants to read. They come from the
+// hunk header, and once they are there the `@@` row itself has nothing left to say.
+
+test('a context or added row takes its number in the new file, a removed row in the old', () => {
+  const before = 'const a = 1;\nconst b = 2;\nconst c = 3;\n';
+  const after = 'const a = 1;\nconst b = 42;\nconst c = 3;\n';
+  const v = changeView({ title: 'app.ts', before, after })!;
+  expect(v.diff.split('\n')).toEqual([
+    '@@ -1,3 +1,3 @@',
+    ' const a = 1;',
+    '-const b = 2;',
+    '+const b = 42;',
+    ' const c = 3;',
+  ]);
+  // The removed line is line 2 of the OLD file, the added one line 2 of the NEW.
+  expect(diffLineNumbers(v.diff)).toEqual(['', '1', '2', '2', '3']);
+  // Drawn, the header is gone and every row carries its number.
+  expect(diffRows(v.diff)).toEqual([
+    { text: ' const a = 1;', no: '1' },
+    { text: '-const b = 2;', no: '2' },
+    { text: '+const b = 42;', no: '2' },
+    { text: ' const c = 3;', no: '3' },
+  ]);
+  // …but the hunks stay whole in what a session keeps: they are the numbers' source.
+  expect(changeMarkdown(v)).not.toContain('@@');
+  expect(v.diff).toContain('@@');
+});
+
+test('a multi-hunk diff keeps counting per hunk', () => {
+  const before = Array.from({ length: 30 }, (_, i) => `line ${i + 1}`).join('\n') + '\n';
+  const after = before.replace('line 3\n', 'LINE 3\n').replace('line 25\n', 'LINE 25\n');
+  const v = changeView({ title: 'long.txt', before, after })!;
+  expect(v.diff.split('\n').filter((l) => l.startsWith('@@'))).toHaveLength(2);
+  // The second hunk starts again from its own header — not from where the first left off.
+  expect(diffRows(v.diff).map((r) => r.no)).toEqual([
+    '1', '2', '3', '3', '4', '5', '6',
+    '22', '23', '24', '25', '25', '26', '27', '28',
+  ]);
+});
+
+test('a line number is never invented for a line the diff does not have', () => {
+  expect(diffLineNumbers('')).toEqual([]);
+  expect(diffRows('')).toEqual([]);
+  // A text with a NUL is named and not drawn — no rows, and so no numbers.
+  const bin = changeView({ title: 'img.png', before: '', after: 'PNG\u0000' })!;
+  expect(diffRows(bin.diff)).toEqual([]);
 });

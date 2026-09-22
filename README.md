@@ -39,10 +39,18 @@ update loses nothing. `/clear` starts a new session and keeps the old one;
 `sessions/` in the config directory, readable by you only (`sessions.resume: false`
 starts every run empty; `sessions.keep` — how many are kept, 50 by default).
 
+**Click what you want to read.** Everything the chat folds — a turn's tool calls, the
+narration, a command's capped output — opens where you click it: on its fold line to
+open it, anywhere inside it to close it again. A block opens at its first row, so a
+long one starts where it starts; a drag is still a selection and never folds anything.
+`^o` is the same thing for the whole screen: with anything folded it opens everything,
+pressed again it closes everything (`config set keys.details <key>` moves it; `^r`,
+the key it used to be, still works).
+
 Between tool calls the assistant says what it is about to do, and the chat shows one
 quiet line of it under the answer: the last thing it said it is doing. It changes
 only on a finished sentence, and at most once a second, so it settles rather than
-flickers; `^r` shows everything it said, word for word. `/notes fold` goes back to
+flickers; `^o` shows everything it said, word for word. `/notes fold` goes back to
 the older folded header, `/notes open` leaves the whole narration on screen and
 `/notes hidden` keeps it off the screen once it has been written — for the current
 conversation. To have it that way from the start:
@@ -70,7 +78,8 @@ terminal (`!cd pkg`; only within the roots; variables are not kept). The assista
 can run commands too — `run_command`, in the same directory, and only after you
 confirm each one (`ai.disabledTools: ["shell"]` turns it off); a command you confirm
 leaves the same block in the chat, its last 20 lines
-(`plugins.assistant.runOutputLines`) with `^r` for the whole of it. Limits:
+(`plugins.assistant.runOutputLines`) — click the `… N lines cut` line, or press `^o`,
+for the whole of it. Limits:
 `shell.timeoutMs` (120 s) and `shell.maxChars` (20000; the end of the output is kept).
 
 Shift+Tab — or `/auto reads|all|off` — says how much you want to confirm while you

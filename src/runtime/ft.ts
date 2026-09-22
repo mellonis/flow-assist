@@ -38,7 +38,9 @@ export interface FTRuntime {
   // footer. A surface sizes itself by this, not by the terminal.
   useSurfaceSize: () => { width: number; height: number };
   // Host input hook (two-phase): register a handler into the App's registry.
-  useInputHandler: (opts: { mode?: string; priority?: (ui: UiState) => number; handler: (key: InputKey, ui: UiState) => unknown }) => void;
+  // `mouse: true` asks for the mouse BUTTONS too — see `twoPhaseDispatch`, which
+  // drops them before every handler that did not.
+  useInputHandler: (opts: { mode?: string; priority?: (ui: UiState) => number; handler: (key: InputKey, ui: UiState) => unknown; mouse?: boolean }) => void;
   // Cross-domain channel: ft.store.<pluginName>.{api}. Kept as a plain record so
   // plugins may publish anything; the App reads it for hints/modal flags.
   store: Record<string, unknown>;

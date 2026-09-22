@@ -299,7 +299,10 @@ test('a long output is cut to its last lines, and ^r shows all of it', async () 
   await settle(10);
 
   const folded = unfence(ui.backend.lastFrame);
-  expect(folded).toContain('… 35 lines cut · ^r for all');
+  expect(folded).toContain('… 35 lines cut · ^o for all');
+  // The fence's language row is the host's own label over a block the host wrote: the
+  // `$ command` line above it already says what this is.
+  expect(folded.split('\n').some((r) => r.trim() === 'console')).toBe(false);
   expect(folded).toContain('line 40');
   expect(folded).not.toContain('line 3 ');
   // The model still got the whole of it — the cap here is the screen's, not its.

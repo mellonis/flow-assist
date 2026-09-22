@@ -22,6 +22,15 @@ const settleUntil = async (cond: () => boolean, ms = 4000) => {
   await settle(2);
 };
 const times = (frame: string, needle: string) => frame.split(needle).length - 1;
+// The style of the cell a piece of text starts on, read from the buffer as it stands
+// NOW — `lastBuffer` is a snapshot, so it is taken again after every change.
+function cellOn(ui: Ui, needle: string): { dim?: boolean; fg?: string } {
+  const rows = ui.backend.lastFrame.split('\n');
+  const y = rows.findIndex((r) => r.includes(needle));
+  if (y < 0) throw new Error(`"${needle}" is not on screen:\n${ui.backend.lastFrame}`);
+  const x = Array.from(rows[y]!.slice(0, rows[y]!.indexOf(needle))).length;
+  return (ui.backend as unknown as { lastBuffer: { get(x: number, y: number): { style: { dim?: boolean; fg?: string } } } }).lastBuffer.get(x, y).style;
+}
 
 // Two rounds of narration, each ending in a tool call, then the answer.
 // No line break at the end of a round: a round IS a chunk, and two chunks put
@@ -140,32 +149,105 @@ test('a drag copies the answer, never the step line', async () => {
   ui.app.unmount();
 });
 
-// The mode decides how a round of narration is KEPT, and a round that has not ended
-// is not yet narration: until it commits, the chat cannot tell what is arriving from
-// the answer itself. So text on its way is drawn as it arrives, in every mode, and
-// the mode applies the moment the round is in. (That is how the fold behaved too.)
-test('a round still streaming is drawn as it arrives, whatever the mode; the mode applies when it commits', async () => {
+// ─── What has been shown is never taken away ─────────────────────────────────
+// A round used to be classified at its END, when its tool calls were in: until then
+// its text was drawn as the ANSWER, and a round that turned out to carry a call had
+// that paragraph reclassified and collapsed into the line above. The person watched
+// what they were reading appear and vanish — a blink, and a lost sentence.
+test('a Next: round never appears as answer text — not while it streams, not after it commits', async () => {
   const model = new ScriptedModel();
   model.script(
     [{ text: 'Next: read the notebook.' }, { hold: true }, { tool: 'datetime', args: {} }],
     [{ text: 'Three entries.' }],
   );
-  const ui = await bootApp(model, 100, 24, undefined, { ...ownMemory(), plugins: { assistant: { notes: 'hidden' } } });
+  const ui = await bootApp(model, 100, 24, undefined, ownMemory());
   await ui.press('F');
   await ui.type('how many?');
   await ui.press('return');
   await settle(20);
-  expect(ui.backend.lastFrame).toContain('Next: read the notebook.');
+  // Mid-round: the line says what it is doing, and no paragraph was drawn to take away.
+  expect(ui.backend.lastFrame).not.toContain('Next: read the notebook.');
   model.release();
   await settle(20);
-  // The round carried a tool call, so its text was narration after all — and `hidden`
-  // keeps it off the screen from here on.
-  const frame = ui.backend.lastFrame;
-  expect(frame).not.toContain('read the notebook');
-  expect(frame).toContain('Three entries.');
+  expect(ui.backend.lastFrame).toContain('read the notebook.'); // the step line, `Next:` stripped
+  expect(ui.backend.lastFrame).toContain('Three entries.');
   ui.app.unmount();
 });
 
+test('a round that ends in tool calls keeps the text it had already shown — dimmed, not gone', async () => {
+  const model = new ScriptedModel();
+  // No `Next:`: the chat cannot tell what this is until the tool calls arrive.
+  model.script(
+    [{ text: 'I will look in the notebook now. It should not take long.' }, { hold: true }, { tool: 'datetime', args: {} }],
+    [{ text: 'Three entries.' }],
+  );
+  const ui = await bootApp(model, 100, 24, undefined, ownMemory());
+  await ui.press('F');
+  await ui.type('how many?');
+  await ui.press('return');
+  await settle(20);
+  expect(ui.backend.lastFrame).toContain('I will look in the notebook now.');
+  // While it is arriving it is the answer, and the answer's own text is never dim.
+  expect(cellOn(ui, 'I will look in the notebook').dim).toBeFalsy();
+
+  model.release();
+  await settle(20);
+  // The round carried a tool call after all. The paragraph stays exactly where it was
+  // drawn — it steps back, it does not disappear.
+  const after = ui.backend.lastFrame;
+  // The WHOLE of it, not the one sentence the step line would have summarised it to.
+  expect(after).toContain('I will look in the notebook now.');
+  expect(after).toContain('It should not take long.');
+  expect(after).toContain('Three entries.');
+  expect(cellOn(ui, 'I will look in the notebook').dim).toBe(true);
+  // And it is said once: the line is a summary OF the narration, never a copy beside it.
+  expect(times(after, 'It should not take long.')).toBe(1);
+  // …and the answer that follows is not dim.
+  expect(cellOn(ui, 'Three entries.').dim).toBeFalsy();
+  ui.app.unmount();
+});
+
+test('the kept text is drawn once: the other notes modes draw the narration themselves', async () => {
+  const model = new ScriptedModel();
+  model.script(
+    [{ text: 'I will look in the notebook now. It should not take long.' }, { tool: 'datetime', args: {} }],
+    [{ text: 'Three entries.' }],
+  );
+  const ui = await bootApp(model, 100, 30, undefined, ownMemory());
+  await ui.press('F');
+  await ui.type('how many?');
+  await ui.press('return');
+  await settle(20);
+  expect(times(ui.backend.lastFrame, 'It should not take long.')).toBe(1);
+  // `fold` puts the narration under its own header — the kept copy must not be drawn
+  // beside it.
+  await ui.type('/notes fold');
+  await ui.press('return');
+  await settle(8);
+  expect(ui.backend.lastFrame).toContain('▸ notes');
+  expect(times(ui.backend.lastFrame, 'It should not take long.')).toBe(1);
+  await ui.type('/notes open');
+  await ui.press('return');
+  await settle(8);
+  expect(times(ui.backend.lastFrame, 'I will look in the notebook now.')).toBe(1);
+  ui.app.unmount();
+});
+
+test('a plain answer round is unchanged: it streams as the answer and stays the answer', async () => {
+  const model = new ScriptedModel();
+  model.script([{ text: 'There are three entries.' }, { hold: true }, { text: ' All of them are short.' }]);
+  const ui = await bootApp(model, 100, 24, undefined, ownMemory());
+  await ui.press('F');
+  await ui.type('how many?');
+  await ui.press('return');
+  await settle(20);
+  expect(ui.backend.lastFrame).toContain('There are three entries.');
+  model.release();
+  await settle(20);
+  expect(ui.backend.lastFrame).toContain('There are three entries. All of them are short.');
+  expect(cellOn(ui, 'There are three').dim).toBeFalsy();
+  ui.app.unmount();
+});
 test('/notes fold gives the older look, hidden draws nothing, open unfolds', async () => {
   const { ui } = await narratedTurn();
   await settleUntil(() => ui.backend.lastFrame.includes('count the entries.'));

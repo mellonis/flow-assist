@@ -15,6 +15,12 @@ type InputEntry = {
   mode: string;
   priority?: (ui: UiState) => number;
   handler: (key: InputKey, ui: UiState) => unknown;
+  // This handler asks for the mouse BUTTONS as well (press, drag, release), which
+  // `twoPhaseDispatch` otherwise drops before every handler: they are flowtty's
+  // drag-selection, and a handler written for keys reads one as "any key". Only a
+  // handler that knows what is under the pointer opts in — the chat's conversation,
+  // where a click opens the block it landed on.
+  mouse?: boolean;
 };
 // A registry entry: either a resolved handler, or a lazy `{ get }` wrapper (the
 // App stores handlers behind `get: () => ref.current` so the handler is always
@@ -25,6 +31,8 @@ export interface InputHandlerOpts {
   mode?: string;
   priority?: (ui: UiState) => number;
   handler: (key: InputKey, ui: UiState) => unknown;
+  // See `InputEntry.mouse`: this handler wants the mouse buttons too.
+  mouse?: boolean;
 }
 
 // Registers an input handler into the App's registry. A React hook: it keeps a
@@ -34,10 +42,10 @@ export interface InputHandlerOpts {
 // lifecycle. Registration is keyed-by-identity, not re-registered on re-render.
 export function registerInputHandler(
   inputRegistryRef: { current: LazyInputEntry[] },
-  { mode = 'consume', priority = () => 0, handler }: InputHandlerOpts,
+  { mode = 'consume', priority = () => 0, handler, mouse = false }: InputHandlerOpts,
 ): void {
-  const ref = useRef<InputEntry>({ mode, priority, handler });
-  ref.current = { mode, priority, handler };
+  const ref = useRef<InputEntry>({ mode, priority, handler, mouse });
+  ref.current = { mode, priority, handler, mouse };
   useEffect(() => {
     const entry: LazyInputEntry = { get: () => ref.current };
     inputRegistryRef.current.push(entry);

@@ -73,12 +73,17 @@ export function twoPhaseDispatch(
   fallback?: () => boolean,
 ): boolean {
   // A mouse button (press / drag / release) is flowtty's drag-selection, which runs
-  // on its own path whatever a handler returns. No handler here is written for one,
-  // and several read an unknown key as "any key": the y/n pause and an open question
-  // swallow every key, the command line's catch-all consumes it, the keycaps panel
-  // would draw a cap per dragged cell — and every consumed key costs a re-render.
-  // So none of them ever sees one.
-  if (isMouseButton(key.name)) return false;
+  // on its own path whatever a handler returns. Almost nothing here is written for
+  // one, and several read an unknown key as "any key": the y/n pause and an open
+  // question swallow every key, the command line's catch-all consumes it, the keycaps
+  // panel would draw a cap per dragged cell — and every consumed key costs a
+  // re-render. So a button reaches ONLY a handler that asked for it (`mouse: true`),
+  // and never the host fallback: a handler that opts in knows what is under the
+  // pointer, which is the whole of what a button means.
+  if (isMouseButton(key.name)) {
+    const { consumers } = partitionInput(registry, ui);
+    return runConsumers(consumers.filter((c) => c.mouse === true), key, ui);
+  }
   const { observers, consumers } = partitionInput(registry, ui);
   for (const o of observers) o.handler(key, ui); // observers never consume
   if (runConsumers(consumers, key, ui)) return true;

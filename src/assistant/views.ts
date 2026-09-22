@@ -126,22 +126,35 @@ export interface ViewDrawOpts {
   // says how many were left out and which key shows them all.
   folded?: boolean;
   lines?: number;
-  // What ^r is drawn as — the caps come from one dictionary (playback/keys.ts) and are
-  // never spelled by hand, so this is given rather than written here.
+  // What the key that opens the block is drawn as — the caps come from one dictionary
+  // (playback/keys.ts) and follow the binding, so this is given rather than written here.
   moreKey?: string;
+}
+
+// How many lines the block leaves out — 0 when all of it stands. The chat asks
+// separately because that marker row is the one a CLICK acts on: it is the block's
+// fold line, and a block that cut nothing has nothing to open.
+export function viewCut(view: ToolView, opts: ViewDrawOpts = {}): number {
+  const { folded = true, lines = VIEW_CAPS.folded } = opts;
+  const all = view.text ? view.text.split('\n') : [];
+  const max = Math.max(1, lines);
+  return folded && all.length > max ? all.length - max : 0;
 }
 
 // The markdown the chat lays out for one view. A console block reads exactly as the
 // person's own `!command` does: the command line and the output in a ```console fence,
 // and one quiet line under it.
 export function viewMarkdown(view: ToolView, opts: ViewDrawOpts = {}): string {
-  const { folded = true, lines = VIEW_CAPS.folded, moreKey = '^r' } = opts;
+  const { folded = true, lines = VIEW_CAPS.folded, moreKey = '^o' } = opts;
   const all = view.text ? view.text.split('\n') : [];
   const max = Math.max(1, lines);
-  const cut = folded && all.length > max ? all.length - max : 0;
+  const cut = viewCut(view, { folded, lines });
   const shown = cut ? all.slice(-max) : all;
-  // The marker sits where the lines are missing — above what is left of them.
-  const body = [...(cut ? [`… ${cut} line${cut === 1 ? '' : 's'} cut · ${moreKey} for all`] : []), ...shown];
+  // The marker sits where the lines are missing — above what is left of them. It is
+  // the block's fold line: a click on it asks for the rest, as the key does.
+  // A key nobody has bound is not named: `config.keys.details: []` disables it, and
+  // the block is then opened by a click alone.
+  const body = [...(cut ? [`… ${cut} line${cut === 1 ? '' : 's'} cut${moreKey ? ` · ${moreKey} for all` : ''}`] : []), ...shown];
   const inside = `$ ${view.command}${body.length ? `\n${body.join('\n')}` : ''}`;
   const f = fence(inside);
   const how = view.status ?? (view.exitCode == null ? 'no exit code' : `exit ${view.exitCode}`);

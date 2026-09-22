@@ -80,6 +80,13 @@ export interface AgentResult {
   // assistant answer. The caller appends it to its API-side history so the next
   // turn replays what really happened (see `apiHistory`).
   transcript: ChatMessage[];
+  // The loop ran out of rounds — `maxRounds` of them, every one carrying tool calls,
+  // and no round that was an answer. The number is how many it took, so the chat can
+  // say it where the answer would have been: a turn that ends with nothing said is
+  // otherwise only visible as a wall of grey tool lines with no answer under it.
+  roundLimit?: number;
+  // What the provider reported for the LAST round, when it reports usage at all.
+  usage?: TokenUsage;
 }
 
 // What a turn that THREW had done by then: `agentChat` hangs the transcript so far on
@@ -127,6 +134,10 @@ export interface AgentOpts {
   // say what the turn costs adds these up; the LAST round's figure is a different
   // number — the size of the next request, which is what the context meter reads.
   onRound?: (info: { index: number; finishReason: string; toolCalls: number; contentLen: number; usage?: TokenUsage }) => void;
+  // This round carries tool calls — fired the moment the first fragment of one
+  // arrives, so a caller drawing the round's text as it streams learns what that text
+  // is while it is still being written rather than after the round has ended.
+  onRoundKind?: (kind: 'tools') => void;
   // Tools on demand (src/assistant/tool-loading.ts). 'all' — every tool in full on
   // every request, the default here, so a caller that does not say keeps what it had;
   // the chat, a background task and the one-shot CLI pass `ai.toolLoading`.
@@ -232,6 +243,7 @@ async function realChatRound(
     tools,
     onDelta = () => {},
     onReasoning = () => {},
+    onToolCalls = () => {},
     signal,
   }: {
     baseUrl?: string;
@@ -240,6 +252,7 @@ async function realChatRound(
     tools?: ToolDef[];
     onDelta?: (d: string) => void;
     onReasoning?: (d: string) => void;
+    onToolCalls?: () => void;
     signal?: AbortSignal;
   },
 ): Promise<ChatRoundResult> {
@@ -318,6 +331,12 @@ async function realChatRound(
         content += delta.content;
         onDelta(delta.content);
       }
+      // A round says it carries tool calls the moment its first fragment arrives —
+      // long before the round ends, which is where the caller used to learn it. The
+      // chat needs it that early: until it knows, the text streaming beside these
+      // fragments is drawn as the answer, and a model that ignores the `Next:` shape
+      // would otherwise have its paragraph reclassified after the person read it.
+      if ((delta?.tool_calls ?? []).length && !toolCalls.size) onToolCalls();
       for (const tc of delta?.tool_calls ?? []) {
         const slot = toolCalls.get(tc.index) ?? { id: '', name: '', arguments: '' };
         if (tc.id) slot.id = tc.id;
@@ -455,12 +474,18 @@ export async function agentChat(
 
   // The LAST round's usage is the one that counts: its prompt is the whole turn so far.
   let usage: TokenUsage | undefined;
+  // Did a round come back as an ANSWER? Without one the loop ran out of rounds, and
+  // the caller has nothing to show for the turn but the trail.
+  let answered = false;
+  let rounds = 0;
   try {
     for (let i = 0; i < maxRounds; i++) {
+      rounds = i + 1;
       let roundContent = '';
       const r = await chatRoundFn(current, {
         ...opts,
         tools: roundTools(),
+        onToolCalls: () => opts.onRoundKind?.('tools'),
         // Round content streams LIVE via onLive while accumulating into roundContent.
         // Which shelf it belongs to (answer vs. narration fold) is decided at the end
         // of the round, when tool_calls arrive (or not).
@@ -486,6 +511,7 @@ export async function agentChat(
         // content. If the caller does not use onLiveCommit, fall back to chunked
         // onDelta (old behavior) so the agentic API stays compatible.
         content = roundContent;
+        answered = true;
         current.push({ role: 'assistant', content: roundContent });
         if (opts.onLiveCommit) opts.onLiveCommit(roundContent, true);
         else if (typeof opts.onDelta === 'function') {
@@ -606,7 +632,11 @@ export async function agentChat(
     if (e && typeof e === 'object' && Object.isExtensible(e)) Object.assign(e, { transcript: current.slice(turnStart) });
     throw e;
   }
-  return { content, process, toolRuns, transcript: current.slice(turnStart), ...(usage ? { usage } : {}) };
+  return {
+    content, process, toolRuns, transcript: current.slice(turnStart),
+    ...(answered ? {} : { roundLimit: rounds }),
+    ...(usage ? { usage } : {}),
+  };
 }
 
 // What /compact sends of a message: its text, an image named in it and not sent — the

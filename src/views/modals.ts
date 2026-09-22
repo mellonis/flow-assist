@@ -17,9 +17,10 @@
 import { askRows, type AskRow, type AskState } from '../assistant/ask.js';
 import { autoBadge, type AutoMode } from '../assistant/auto.js';
 import { cutStep, type NotesMode } from '../assistant/step.js';
+import { isClicked, isOpen, foldId, type FoldState } from '../assistant/folds.js';
 import { imageTokenRanges, splitTokens } from '../assistant/images.js';
-import { changeMarkdown, type ChangeView } from '../assistant/diff.js';
-import { VIEW_CAPS, viewMarkdown, type ToolView } from '../assistant/views.js';
+import { changeCounts, changeMarkdown, diffRows, type ChangeView } from '../assistant/diff.js';
+import { VIEW_CAPS, viewCut, viewMarkdown, type ToolView } from '../assistant/views.js';
 import { CELL_FREE, CELL_FULL, CONTEXT_WARN_AT, GRID_COLS, GRID_ROWS, contextFootnote, contextGrid, contextHeading, contextLegend, tokensBadge, type ContextReading, type GridCell } from '../assistant/context-meter.js';
 import { createElement as h, useEffect, useRef, useState, type ReactNode } from 'react';
 import { bindingGlyph, keyGlyph } from '../playback/keys.js';
@@ -30,6 +31,7 @@ import {
   Shimmer,
   Text,
   layoutMarkdown,
+  layoutMarkdownDetailed,
   caretPosition,
   inputRows,
   windowAround,
@@ -44,9 +46,18 @@ interface ChatMsg {
   role: string;
   content?: string | null;
   live?: string;
+  // What the text streaming now IS, decided as it arrives (src/assistant/step.ts):
+  // `answer` draws it as the answer, `notes` dim where it stands, `''` not at all —
+  // a `Next:` line is the step line's, and nothing is drawn twice.
+  liveAs?: '' | 'answer' | 'notes';
+  // Narration that was already DRAWN and so is never taken away again: it stays
+  // where it was, dim, once the round it belonged to turned out to carry tool calls.
+  shown?: string;
   reasoning?: string;
   process?: string;
   toolRuns?: ToolRun[];
+  // The turn ran out of rounds after this many, with no answer.
+  roundLimit?: number;
   // What the model last said it is doing, one finished sentence (src/assistant/step.ts).
   // Written when a round of narration commits, so it is the message's own and stays
   // with it once the turn has ended.
@@ -100,9 +111,40 @@ interface Line {
   chrome?: number;
   frame?: true;
 }
+// Where the conversation is on the terminal and how far it is scrolled: the cells a
+// mouse key is reported in, so a click can be turned into the row under it. `pinned`
+// says the last question is painted over the top row, which a click must not read as
+// the row beneath it.
+export interface Viewport {
+  top: number;
+  height: number;
+  left: number;
+  width: number;
+  scrollTop: number;
+  pinned: boolean;
+  // The list is resting at the END of the conversation, following it as it grows.
+  // Rows a fold adds are then all above the reader, and staying at the bottom IS
+  // keeping their place — nothing must scroll.
+  atEnd: boolean;
+}
+
 // A flattened chat row (one visual line / a label / a fold header / a gap).
 interface ChatRow {
   role?: string;
+  // The foldable block this row belongs to (src/assistant/folds.ts), when a click on
+  // it acts: the fold line of a folded block opens it, and any row of an OPEN block
+  // closes it. A row without one is not clickable — a plain answer, the person's own
+  // message, the chrome.
+  fold?: string;
+  // The turn ended because the loop ran out of rounds. It stands where the answer
+  // would be, in the warn colour: a wall of grey tool lines with nothing under it
+  // said nothing about why.
+  limit?: boolean;
+  // The `✎ path · +N −M` line over a change. Not markdown: the path is drawn in the
+  // chat's accent and the counts dim, which is what a title looks like.
+  changeTitle?: boolean;
+  // A content row the model wrote on the way, kept where it was drawn (see `shown`).
+  quiet?: boolean;
   // `label` is overloaded in the source: `true` marks the role-label row, or a
   // string is the reason/fold-header text (`reasoning`, `reasoning + tools`).
   label?: boolean | string;
@@ -200,6 +242,92 @@ export function mdLines(text: string | null | undefined, wrap: number): Line[] {
   }
 }
 
+// ─── A block the HOST built: the fence is ours, so its label row is noise ──────
+// flowtty draws a dim language label over every fenced block. Over a block the host
+// wrote itself that row says nothing: `diff` sits under a line that already says this
+// is a change to a file, `console` under the `$ command` line that says it better. The
+// language stays ON the fence — it is what colours a diff green and red — and the row
+// it produces is left out here, where the host's own markdown is laid out.
+//
+// `src` says, per row, which line of the fenced block it came from (−1 for a row that
+// is not code at all): a long line is hard-wrapped into several rows, and both the
+// line numbers of a diff and the click target of a folded console block have to know
+// where one source line ends and the next begins.
+function blockLines(md: string, width: number): { lines: Line[]; src: number[] } {
+  let laid: { lines: Line[]; codeBlocks: { startLine: number; endLine: number }[] };
+  try {
+    laid = layoutMarkdownDetailed(md, Math.max(1, width)) as unknown as typeof laid;
+  } catch {
+    return { lines: [{ spans: [{ text: md }] }], src: [-1] };
+  }
+  const block = laid.codeBlocks[0];
+  const lines: Line[] = [];
+  const src: number[] = [];
+  let at = 0;
+  laid.lines.forEach((line, i) => {
+    if (!block || i < block.startLine || i >= block.endLine) { lines.push(line); src.push(-1); return; }
+    if (i === block.startLine) return; // the label row: ours, and not worth a row
+    lines.push(line);
+    src.push(at);
+    // A row that says its text carries on below is the same source line as the next.
+    if (!line.continues) at++;
+  });
+  return { lines, src };
+}
+
+// A one-row title, cut from the LEFT when it does not fit: the end of a path is what
+// names the file, and the beginning of a long one is the part nobody reads.
+function cutHead(text: string, width: number): string {
+  const chars = Array.from(text);
+  if (width <= 0) return '';
+  if (chars.length <= width) return text;
+  return width === 1 ? '…' : `…${chars.slice(chars.length - width + 1).join('')}`;
+}
+
+// One change, as the chat draws it: a title of its own — plain text, the path in the
+// accent colour — over the hunks in a ```diff fence carrying the FILE's line numbers.
+// The numbers are chrome: dim, right-aligned in a narrow gutter before the `│ `, and
+// out of a selection, so a drag copies the code alone.
+function changeLines(v: ChangeView, inner: number): Line[] {
+  const title: Line = {
+    spans: [{ text: '✎ ' }, { text: cutHead(v.title, Math.max(8, inner - changeCounts(v).length - 3)), accent: true }, { text: ` ${changeCounts(v)}`, dim: true }],
+  };
+  const md = changeMarkdown(v);
+  if (!md) return [title];
+  const rows = diffRows(v.diff);
+  const width = Math.max(1, ...rows.map((r) => r.no.length));
+  const { lines, src } = blockLines(md, inner - width - 1);
+  const numbered = lines.map((line, i) => {
+    const at = src[i] ?? -1;
+    // Only the row a source line STARTS on takes its number; a wrapped continuation
+    // keeps the gutter's width and nothing in it.
+    const first = at >= 0 && (i === 0 || (src[i - 1] ?? -1) !== at);
+    const no = first ? (rows[at]?.no ?? '') : '';
+    if (at < 0) return line;
+    return { ...line, spans: [{ text: `${no.padStart(width)} `, dim: true }, ...line.spans], chrome: (line.chrome ?? 0) + 1 };
+  });
+  return [title, ...numbered];
+}
+
+// ─── The trail of tool calls ──────────────────────────────────────────────────
+// One line per call earns nothing once there are more than a handful: a turn that ran
+// to the round limit printed dozens of them and the screen was a sheet of grey. So
+// consecutive calls of the same tool that ENDED the same way are one line with a count
+// — a different argument is not a different line, the arguments are in the log. A call
+// that failed keeps a line of its own with its reason: that is how a person knows why
+// an answer is thin, and it is the one thing the grey was hiding.
+export function condenseRuns(runs: readonly ToolRun[]): { run: ToolRun; n: number }[] {
+  const out: { run: ToolRun; n: number }[] = [];
+  for (const run of runs) {
+    const last = out[out.length - 1];
+    if (last && last.run.name === run.name && last.run.outcome === run.outcome) last.n++;
+    else out.push({ run, n: 1 });
+  }
+  return out;
+}
+// How many lines of an open trail stand before the rest fold into `… N earlier calls`.
+export const TRAIL_ROWS = 12;
+
 // ─── The person's own text, as typed ───────────────────────────────────────────
 // What the person wrote is not markdown written for rendering: in markdown a single
 // line break is a soft one, so two typed lines were drawn as one, an indented command
@@ -264,7 +392,7 @@ export function inputVisualRows(input: string, cur: number, fieldW: number): { b
 // Flatten messages into one list of visual rows: a role label, markdown content
 // lines, a reasoning/tool fold, a persistent tool-run trace, and gaps. The chat then
 // scrolls line-by-line without pushing the input off-screen on a long answer.
-function toolRunText(run: ToolRun, wrap: number): Span {
+function toolRunText(run: ToolRun, wrap: number, n = 1): Span {
   const a = run.args && typeof run.args === 'object'
     ? Object.keys(run.args as Record<string, unknown>)
         .filter((k) => (run.args as Record<string, unknown>)[k] != null && (run.args as Record<string, unknown>)[k] !== '')
@@ -283,8 +411,13 @@ function toolRunText(run: ToolRun, wrap: number): Span {
         })
         .join(', ')
     : '';
-  const info = [run.name, a ? `(${a})` : ''].filter(Boolean).join(' ');
+  // A run that stands for several of its kind names the tool and the count and
+  // nothing else: the arguments differed, and it is the shape of the turn that the
+  // line is there to show.
+  const info = n > 1 ? `${run.name} ×${n}` : [run.name, a ? `(${a})` : ''].filter(Boolean).join(' ');
   let text = `▸ ${info} → ${run.outcome}`;
+  // A group shares its outcome, so one reason stands for all of it: a call that
+  // failed is how a person knows why an answer is thin, count or no count.
   if ((run.outcome === 'error' || run.outcome === 'declined') && run.detail) {
     text += ` — ${String(run.detail).slice(0, 60)}`;
   }
@@ -314,7 +447,9 @@ const CAP = {
   space: keyGlyph(' '),
   upDown: `${keyGlyph('up')}${keyGlyph('down')}`,
   page: `${keyGlyph('pageup')}/${keyGlyph('pagedown')}`,
-  details: keyGlyph({ name: 'r', ctrl: true }),
+  // `details` is NOT here: it is a bound action (`config.keys.details`), so its cap is
+  // drawn from the binding and handed in as a prop — the rule for every key a person
+  // can remap.
   auto: keyGlyph({ name: 'tab', shift: true }),
   backspace: keyGlyph('backspace'),
   image: keyGlyph({ name: 'v', ctrl: true }),
@@ -322,11 +457,25 @@ const CAP = {
 // Alt+Enter: ⌥⏎ on a Mac, Alt+⏎ elsewhere.
 export const NEWLINE_KEY = keyGlyph({ name: 'return', meta: true });
 
-// `todo ×2, memory` — the tools of a turn, in the order first used.
-function toolSummary(runs: ToolRun[]): string {
+// `todo ×2, memory` — the tools of a turn, in the order first used, with what each of
+// them cost in calls. The line is ONE terminal row like every other, so a turn of
+// fifty tools ends in `…` rather than wrapping: what is worth reading there is which
+// tools carried the turn, and those are the ones named first.
+function toolSummary(runs: ToolRun[], width = 0): string {
   const count = new Map<string, number>();
   for (const r of runs) count.set(r.name, (count.get(r.name) ?? 0) + 1);
-  return [...count].map(([name, n]) => (n > 1 ? `${name} ×${n}` : name)).join(', ');
+  const parts = [...count].map(([name, n]) => (n > 1 ? `${name} ×${n}` : name));
+  const all = parts.join(', ');
+  if (!width || Array.from(all).length <= width) return all;
+  const kept: string[] = [];
+  let used = 0;
+  for (const part of parts) {
+    const cost = Array.from(part).length + (kept.length ? 2 : 0);
+    if (used + cost > width - 3) break;
+    kept.push(part);
+    used += cost;
+  }
+  return `${kept.join(', ')}${kept.length ? ', ' : ''}…`;
 }
 
 // The rows of ONE message. Laying markdown out is the expensive part of drawing the
@@ -335,24 +484,88 @@ function toolSummary(runs: ToolRun[]): string {
 // changes and never mutates one (see the `setMessages` updaters), which makes the
 // object itself the right key: only the message that is streaming is laid out again.
 const rowCache = new WeakMap<ChatMsg, Map<string, ChatRow[]>>();
-function messageRows(m: ChatMsg, last: boolean, wrap: number, showReasoning: boolean, viewLines: number, notes: NotesMode): ChatRow[] {
-  // Everything the rows depend on is in the key — the fold of a tool's block as much
-  // as the width, and how the narration is drawn — or a message would keep the rows
-  // it was first laid out with, and `/notes` would change only the message being
-  // written.
-  const key = `${wrap}:${showReasoning ? 1 : 0}:${last ? 1 : 0}:${viewLines}:${notes}`;
+
+// What the rows of a message depend on besides the message itself. `at` is its place
+// among the messages that are DRAWN — the id of every block it owns (folds.ts).
+export interface RowOpts {
+  wrap: number;
+  folds: FoldState;
+  viewLines: number;
+  notes: NotesMode;
+  // The cap of whatever opens a block now, drawn from the binding and never spelled
+  // here (`^o`, or what `config.keys.details` says instead).
+  detailsKey: string;
+}
+
+function messageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): ChatRow[] {
+  // Everything the rows depend on is in the key — which of this message's blocks are
+  // open as much as the width, and how the narration is drawn — or a message would
+  // keep the rows it was first laid out with, and a click would move nothing.
+  const open = [
+    isOpen(o.folds, foldId(at, 'notes')) ? 1 : 0,
+    isOpen(o.folds, foldId(at, 'tools')) ? 1 : 0,
+    isClicked(o.folds, foldId(at, 'calls')) ? 1 : 0,
+    ...(Array.isArray(m.views) ? (m.views as ToolView[]).map((_v, vi) => (isOpen(o.folds, foldId(at, 'view', vi)) ? 1 : 0)) : []),
+  ].join('');
+  const key = `${o.wrap}:${open}:${last ? 1 : 0}:${o.viewLines}:${o.notes}:${o.detailsKey}:${at}`;
   let byKey = rowCache.get(m);
   if (!byKey) rowCache.set(m, (byKey = new Map()));
   let rows = byKey.get(key);
-  if (!rows) byKey.set(key, (rows = buildMessageRows(m, last, wrap, showReasoning, viewLines, notes)));
+  if (!rows) byKey.set(key, (rows = buildMessageRows(m, at, last, o)));
   return rows;
 }
 
-function chatRows(messages: ChatMsg[], wrap: number, showReasoning: boolean, viewLines: number, notes: NotesMode): ChatRow[] {
-  return messages.flatMap((m, mi) => messageRows(m, mi === messages.length - 1, wrap, showReasoning, viewLines, notes));
+// The whole conversation as rows. The system prompt is not drawn and is not counted
+// either: it is unshifted onto the list again with every question, and an id that
+// moved with it would carry a click's exception to another message.
+export function chatRows(messages: ChatMsg[], o: RowOpts): ChatRow[] {
+  let at = -1;
+  return messages.flatMap((m, mi) => {
+    if (m.role === 'system') return [];
+    at++;
+    return messageRows(m, at, mi === messages.length - 1, o);
+  });
 }
 
-function buildMessageRows(m: ChatMsg, last: boolean, wrap: number, showReasoning: boolean, viewLines: number, notes: NotesMode): ChatRow[] {
+// The first row of a block, so opening one can put it at the top of the screen: the
+// fold line itself, with its body under it. −1 when the block is not on the list.
+export function firstFoldRow(rows: readonly ChatRow[], id: string): number {
+  return rows.findIndex((r) => r.fold === id);
+}
+
+// Where a row sits, said in a way that survives a fold opening or closing: which
+// message it belongs to, and how far into that message's rows it is. The key is
+// clamped, so a row that a fold has taken away resolves to the nearest one left.
+export function rowAnchor(messages: ChatMsg[], o: RowOpts, row: number): { at: number; within: number } {
+  let at = -1, seen = 0;
+  for (let mi = 0; mi < messages.length; mi++) {
+    const m = messages[mi]!;
+    if (m.role === 'system') continue;
+    at++;
+    const n = messageRows(m, at, mi === messages.length - 1, o).length;
+    if (row < seen + n) return { at, within: row - seen };
+    seen += n;
+  }
+  return { at: Math.max(0, at), within: 0 };
+}
+
+// The same place, counted again over rows laid out with another fold state — what the
+// list has to be scrolled to for the person to keep reading the line they were on.
+export function anchorRow(messages: ChatMsg[], o: RowOpts, anchor: { at: number; within: number }): number {
+  let at = -1, seen = 0;
+  for (let mi = 0; mi < messages.length; mi++) {
+    const m = messages[mi]!;
+    if (m.role === 'system') continue;
+    at++;
+    const n = messageRows(m, at, mi === messages.length - 1, o).length;
+    if (at === anchor.at) return seen + Math.min(anchor.within, Math.max(0, n - 1));
+    seen += n;
+  }
+  return seen;
+}
+
+function buildMessageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): ChatRow[] {
+  const { wrap, folds, viewLines, notes, detailsKey } = o;
   const rows: ChatRow[] = [];
   const inner = Math.max(10, wrap - GUTTER);
   {
@@ -365,8 +578,18 @@ function buildMessageRows(m: ChatMsg, last: boolean, wrap: number, showReasoning
     if (role === 'view') {
       const views = (Array.isArray(m.views) ? m.views : []) as ToolView[];
       views.forEach((v, vi) => {
-        const md = viewMarkdown(v, { folded: !showReasoning, lines: viewLines, moreKey: CAP.details });
-        mdLines(md, inner).forEach((line, li) => rows.push({ role, spans: line.spans, first: vi === 0 && li === 0, continues: line.continues, chrome: line.chrome, frame: line.frame }));
+        const id = foldId(at, 'view', vi);
+        const open = isOpen(folds, id);
+        const md = viewMarkdown(v, { folded: !open, lines: viewLines, moreKey: detailsKey });
+        const cut = viewCut(v, { folded: !open, lines: viewLines });
+        const { lines, src } = blockLines(md, inner);
+        lines.forEach((line, li) => rows.push({
+          role, spans: line.spans, first: vi === 0 && li === 0, continues: line.continues, chrome: line.chrome, frame: line.frame,
+          // Open, every row of the block closes it; folded, only the marker row that
+          // says what was left out — the rest is output, and a click on output that
+          // shows nothing more would be a key that does nothing.
+          ...(open ? { fold: id } : cut && src[li] === 1 ? { fold: id } : {}),
+        }));
       });
       if (!last) rows.push({ gap: true });
       return rows;
@@ -379,43 +602,72 @@ function buildMessageRows(m: ChatMsg, last: boolean, wrap: number, showReasoning
     const reasoning = String(m.reasoning ?? '').trim();
     const process = String(m.process ?? '').trim();
     const live = String(m.live ?? '').trim();
+    // What the streaming text is was decided as it arrived (src/assistant/step.ts),
+    // not here: the chat used to guess "no reasoning and no round behind it, so this
+    // is the answer", and a round that turned out to carry a tool call had the
+    // paragraph the person was reading taken away again.
+    const liveAs = live ? (m.liveAs ?? 'answer') : '';
+    // Narration already drawn stays drawn, dim, where it was.
+    const kept = String(m.shown ?? '').trim();
     const hasR = !!reasoning;
     const hasP = !!process;
-    const hasL = !!live;
-    // Text streaming with no reasoning and no tool round behind it IS the answer
-    // arriving: it is drawn as content, not folded under a "tool calls" header.
-    const liveIsAnswer = hasL && !hasR && !hasP;
+    const notesId = foldId(at, 'notes');
     if (role === 'assistant' && (hasR || hasP) && notes !== 'hidden') {
       // What the model said on the way: its thinking, and its notes between tool
       // calls. `step` draws one dim line instead — the last thing it said it is doing
-      // — and gives way to the whole of it under ^r, which is what ^r has always
-      // opened. `open` is that same unfolded view without asking.
-      const unfolded = showReasoning || notes === 'open';
+      // — and gives way to the whole of it when the block is open, which is what the
+      // key has always opened. `open` is that same unfolded view without asking, and
+      // is the MODE's answer: a mode is not a fold, so nothing there is clickable.
+      const unfolded = notes === 'open' || isOpen(folds, notesId);
+      const foldable = notes !== 'open';
       const step = String(m.step ?? '').trim();
       if (notes === 'step' && !unfolded) {
-        // A turn that narrated nothing draws no line at all.
-        if (step) {
-          rows.push({ role, step: true, spans: [{ text: cutStep(step, inner) }] });
+        // A turn that narrated nothing draws no line at all — and neither does one
+        // whose sentence is already standing on screen, kept where it was drawn: the
+        // line is a summary OF the narration, not a second copy of it.
+        if (step && !String(m.shown ?? '').includes(step)) {
+          rows.push({ role, step: true, spans: [{ text: cutStep(step, inner) }], fold: notesId });
           rows.push({ gap: true });
         }
       } else {
         const label = (hasR && hasP) ? 'thinking + notes' : (hasR ? 'thinking' : 'notes');
-        rows.push({ role, reasonHeader: true, open: unfolded, label });
+        rows.push({ role, reasonHeader: true, open: unfolded, label, ...(foldable ? { fold: notesId } : {}) });
         const bodyLines = mdLines([reasoning, process, live].filter(Boolean).join('\n\n'), inner);
-        const shown = unfolded ? bodyLines : bodyLines.slice(-2);
-        for (const line of shown) rows.push({ role, reason: true, spans: line.spans, continues: line.continues, chrome: line.chrome, frame: line.frame });
+        const body = unfolded ? bodyLines : bodyLines.slice(-2);
+        for (const line of body) rows.push({ role, reason: true, spans: line.spans, continues: line.continues, chrome: line.chrome, frame: line.frame, ...(foldable ? { fold: notesId } : {}) });
         rows.push({ gap: true });
       }
     }
-    // What the turn's writes changed: one block per change, always open (not under
-    // ^r) — it is the part of the turn the person most needs to see. Laid out as
-    // markdown, so the ```diff fence is coloured, wrapped and copied like any other.
-    const changes = (role === 'assistant' && Array.isArray(m.changes) ? m.changes : []) as ChangeView[];
-    for (const change of changes) {
-      for (const line of mdLines(changeMarkdown(change), inner)) rows.push({ role, spans: line.spans, continues: line.continues, chrome: line.chrome, frame: line.frame });
+    // Narration that was already on screen when its round turned out to carry tool
+    // calls: it stays exactly where it was drawn, dim, rather than vanishing into the
+    // fold under it. The whole of it is in the fold too — this is the part the person
+    // had already started reading, and what has been shown is never taken away.
+    const quiet = [kept, liveAs === 'notes' ? live : ''].filter(Boolean).join('\n\n');
+    // Only in `step` mode, and only while the block is folded: `fold` and `open` both
+    // draw the narration themselves, and drawing it twice reads worse than the fold's
+    // own two-line cut on text that was already on screen.
+    if (role === 'assistant' && quiet && notes === 'step' && !isOpen(folds, notesId)) {
+      for (const line of mdLines(quiet, inner)) rows.push({ role, quiet: true, spans: line.spans, continues: line.continues, chrome: line.chrome, frame: line.frame });
       rows.push({ gap: true });
     }
-    const text = String(m.content ?? '') || (liveIsAnswer ? live : '');
+    // What the turn's writes changed: one block per change, always open (not foldable)
+    // — it is the part of the turn the person most needs to see. The hunks are laid
+    // out as markdown, so the ```diff fence is coloured, wrapped and copied like any
+    // other; the title and the line numbers are the chat's own.
+    const changes = (role === 'assistant' && Array.isArray(m.changes) ? m.changes : []) as ChangeView[];
+    for (const change of changes) {
+      changeLines(change, inner).forEach((line, li) => rows.push({
+        role, spans: line.spans, continues: line.continues, chrome: line.chrome, frame: line.frame,
+        ...(li === 0 ? { changeTitle: true } : {}),
+      }));
+      rows.push({ gap: true });
+    }
+    // A turn that ran out of rounds says so where the answer would be. Before this it
+    // was a dim line under the field, which a wall of grey tool lines hid.
+    if (role === 'assistant' && Number(m.roundLimit) > 0 && !String(m.content ?? '').trim()) {
+      rows.push({ role, limit: true, first: true, spans: [{ text: cutStep(`stopped after ${Number(m.roundLimit)} rounds — no answer; say "continue" to carry on`, inner) }] });
+    }
+    const text = String(m.content ?? '') || (liveAs === 'answer' ? live : '');
     // The person's message is drawn as typed. A background result and a `!command`'s
     // block keep markdown: the first is the model's writing, the second the host's own
     // (a ```console fence under the command).
@@ -426,10 +678,25 @@ function buildMessageRows(m: ChatMsg, last: boolean, wrap: number, showReasoning
     // What the turn cost, where it is read after the fact — the status line said it
     // while the turn ran.
     const tokens = role === 'assistant' && Number(m.tokens) > 0 ? Number(m.tokens) : undefined;
-    // One quiet line under the answer; ^r unfolds the calls themselves.
+    // One quiet line under the answer; opening the trail shows the calls themselves.
     const stopped = role === 'assistant' && m.stopped === true;
-    if (runs.length || duration || stopped || tokens) rows.push({ role, meta: true, duration, tokens, runs, stopped });
-    if (runs.length && showReasoning) for (const run of runs) rows.push({ role, toolRun: true, spans: [toolRunText(run, inner)] });
+    const toolsId = foldId(at, 'tools');
+    const trailOpen = runs.length > 0 && isOpen(folds, toolsId);
+    if (runs.length || duration || stopped || tokens) {
+      rows.push({ role, meta: true, duration, tokens, runs, stopped, open: trailOpen, ...(runs.length ? { fold: toolsId } : {}) });
+    }
+    if (trailOpen) {
+      const condensed = condenseRuns(runs);
+      // The open trail is capped: the LAST calls are the ones a person is looking for,
+      // and what came before them is one line that opens the rest. A turn of sixty
+      // calls is thirteen rows, not sixty.
+      const callsId = foldId(at, 'calls');
+      // The cap holds whatever the global state is: only a click on the line that
+      // stands for the earlier calls brings them out.
+      const earlier = isClicked(folds, callsId) ? 0 : Math.max(0, condensed.length - TRAIL_ROWS);
+      if (earlier) rows.push({ role, toolRun: true, fold: callsId, spans: [{ text: `… ${earlier} earlier call${earlier === 1 ? '' : 's'}`, dim: true }] });
+      for (const { run, n } of condensed.slice(earlier)) rows.push({ role, toolRun: true, fold: toolsId, spans: [toolRunText(run, inner, n)] });
+    }
     if (!last) rows.push({ gap: true });
   }
   return rows;
@@ -444,24 +711,55 @@ function buildMessageRows(m: ChatMsg, last: boolean, wrap: number, showReasoning
 // chat was one more term to forget, and twice was.
 // Below this many rows the conversation keeps every row for itself.
 const MIN_ROWS_TO_PIN = 4;
-function ChatMessages({ messages, wrap, showReasoning, viewLines, notes, palette: m, errorColor }: {
+function ChatMessages({ messages, rowOpts, palette: m, errorColor, onViewport, scrollTo }: {
   messages: ChatMsg[];
-  wrap: number;
-  showReasoning: boolean;
-  viewLines: number;
-  notes: NotesMode;
+  rowOpts: RowOpts;
   palette: Record<string, string | undefined>;
   errorColor?: string;
+  // Where the conversation is on the screen and how far it is scrolled, so the owner
+  // of the state can work out which ROW a click landed on. A callback, not a read of
+  // the render: the view reports its geometry, the chat does the arithmetic.
+  onViewport?: (v: Viewport) => void;
+  // A row the list should be scrolled to once the rows have changed — how a block
+  // that opens puts its first row at the top of the screen, and how one that closes
+  // leaves the eye on the line it was on. The nonce is what makes a repeat ask again.
+  scrollTo?: { row: number; n: number } | null;
 }) {
+  const { wrap, viewLines, notes } = rowOpts;
   const box = useRef<ScrollBoxHandle>(null);
   const [view, setView] = useState<{ top: number; height: number } | null>(null);
-  const see = (x: ScrollMetrics) => setView((v) => (v && v.top === x.scrollTop && v.height === x.viewportHeight ? v : { top: x.scrollTop, height: x.viewportHeight }));
+  // The ask that has not been carried out yet, and the last one that was: a ref, so
+  // asking again costs no render and a repaint never repeats an old ask.
+  const wanted = useRef<{ row: number; n: number } | null>(null);
+  const done = useRef(-1);
+  if (scrollTo && scrollTo.n !== done.current) wanted.current = scrollTo;
+  const rect = useRef<{ top: number; height: number; left: number; width: number } | null>(null);
+  const pinnedRef = useRef(false);
+  const tell = (scrollTop: number, atEnd: boolean) => {
+    const r = rect.current;
+    if (r) onViewport?.({ ...r, scrollTop, pinned: pinnedRef.current, atEnd });
+  };
+  const see = (x: ScrollMetrics) => {
+    setView((v) => (v && v.top === x.scrollTop && v.height === x.viewportHeight ? v : { top: x.scrollTop, height: x.viewportHeight }));
+    // The metrics are fresh HERE — the box has just measured the rows a fold added or
+    // took away — so this is where an ask can be turned into an offset the box
+    // understands (it counts from the bottom) without guessing at the new height.
+    const want = wanted.current;
+    if (want) {
+      wanted.current = null;
+      done.current = want.n;
+      box.current?.scrollTo(Math.max(0, x.maxScrollTop - want.row));
+      return;
+    }
+    tell(x.scrollTop, x.scrollTop >= x.maxScrollTop);
+  };
   // A message the person sends brings the view back to the bottom, wherever they had
-  // scrolled to: they want to see the answer to what they just asked.
+  // scrolled to: they want to see the answer to what they just asked. Rows appearing
+  // ABOVE the view — a block opening — is not that, and must never trip it.
   const asked = messages.reduce((n, x) => n + (x.role === 'user' || x.role === 'shell' ? 1 : 0), 0);
   useEffect(() => { box.current?.scrollToEnd(); }, [asked]);
 
-  const rows = chatRows(messages, wrap, showReasoning, viewLines, notes);
+  const rows = chatRows(messages, rowOpts);
   let lastUserKey = -1;
   for (let i = 0; i < rows.length; i++) if (rows[i]!.role === 'user' && rows[i]!.first) lastUserKey = i;
   let lastUserText = '';
@@ -474,6 +772,9 @@ function ChatMessages({ messages, wrap, showReasoning, viewLines, notes, palette
   // but only while the conversation has rows to spare: on a short screen the pin
   // would cover the one row the newest answer has.
   const pinned = !!view && view.height >= MIN_ROWS_TO_PIN && lastUserKey >= 0 && (lastUserKey < view.top || lastUserKey >= view.top + view.height);
+  // The pin is painted OVER the box's top row, so a click there lands on the pin and
+  // not on the row under it — what the chat is told, so it leaves that row alone.
+  pinnedRef.current = pinned;
 
   // Who is speaking is said by a marker in the gutter and by the ground under the
   // message — not by a label. The person's marker is the input field's own prompt.
@@ -541,6 +842,12 @@ function ChatMessages({ messages, wrap, showReasoning, viewLines, notes, palette
       if (row.toolRun) return h(Box, { key, flexDirection: 'row', flexShrink: 0 },
         h(Text, null, ' '.repeat(GUTTER)),
         (row.spans || []).map((s, j) => h(Text, { key: j, dim: true }, String(s.text ?? ''))));
+      // The turn ran out of rounds: said in the warn colour, where the answer it never
+      // wrote would have been. Chrome — it is the host's account of the turn, not
+      // something the model said.
+      if (row.limit) return h(Box, { key, flexDirection: 'row', flexShrink: 0, selectable: false },
+        h(Text, { bold: true, color: m.assistantAccent }, `${ASSISTANT_MARK} `),
+        h(Text, { color: m.warn, wrap: 'truncate' }, String(row.spans?.[0]?.text ?? '')));
       if (row.meta) {
         const runs = row.runs ?? [];
         const wrote = runs.some((r) => r.outcome === 'applied');
@@ -550,8 +857,11 @@ function ChatMessages({ messages, wrap, showReasoning, viewLines, notes, palette
           h(Text, null, ' '.repeat(GUTTER)),
           row.duration ? h(Text, { dim: true }, `${fmtSec(row.duration)}${runs.length || row.stopped ? ' · ' : ''}`) : null,
           row.stopped ? h(Text, { color: m.warn }, `stopped (Esc)${runs.length ? ' · ' : ''}`) : null,
-          runs.length ? h(Text, { dim: !failed, color: failed ? errorColor : wrote ? m.warn : m.ok }, `${showReasoning ? '▾' : '▸'} ${runs.length} tool${runs.length === 1 ? '' : 's'}${wrote ? ' ✎' : ''}: `) : null,
-          runs.length ? h(Text, { dim: true }, `${toolSummary(runs)}${showReasoning ? '' : ` · ${CAP.details}`}`) : null,
+          runs.length ? h(Text, { dim: !failed, color: failed ? errorColor : wrote ? m.warn : m.ok }, `${row.open ? '▾' : '▸'} ${runs.length} tool${runs.length === 1 ? '' : 's'}${wrote ? ' ✎' : ''}: `) : null,
+          // The summary is a row like any other: cut it to what is left of the width,
+          // or a turn of fifty tools takes a second line and the list's arithmetic
+          // (one terminal line per row) is wrong.
+          runs.length ? h(Text, { dim: true, wrap: 'truncate' }, `${toolSummary(runs, Math.max(10, wrap - 30))}${row.open || !rowOpts.detailsKey ? '' : ` · ${rowOpts.detailsKey}`}`) : null,
           // What the turn cost the provider — the turn's, not the conversation's.
           row.tokens ? h(Text, { dim: true }, `${row.duration || runs.length || row.stopped ? ' · ' : ''}${tokensBadge(row.tokens)}`) : null);
       }
@@ -559,13 +869,33 @@ function ChatMessages({ messages, wrap, showReasoning, viewLines, notes, palette
       const groundStyle = ground ? { width: '100%', backgroundColor: ground } : {};
       if (row.spans && row.spans.length) {
         return h(Box, { key, flexDirection: 'row', flexShrink: 0, ...groundStyle, ...frameRow(row) }, gutter(row),
-          content(row, (s, j) => h(Text, { key: j, bold: s.bold, dim: s.dim || row.role === 'note', underline: s.underline, color: s.token ? m.accent : s.color, selectable: j < (row.chrome ?? 0) ? false : undefined }, String(s.text ?? ''))));
+          content(row, (s, j) => h(Text, {
+            key: j,
+            bold: s.bold,
+            // A note is the host's; what the model wrote on the way stays where it
+            // was drawn but steps back, so the answer under it is what the eye lands on.
+            dim: s.dim || row.role === 'note' || row.quiet === true,
+            underline: s.underline,
+            color: s.token || s.accent ? m.accent : s.color,
+            selectable: j < (row.chrome ?? 0) ? false : undefined,
+          }, String(s.text ?? ''))));
       }
       // A blank line inside a message keeps the message's ground.
       return h(Box, { key, height: 1, flexShrink: 0, ...groundStyle });
   };
 
-  const scroll = { ref: box, anchor: 'bottom' as const, flexGrow: 1, flexShrink: 1, flexDirection: 'column' as const, onScroll: (_o: number, x: ScrollMetrics) => see(x), onMetrics: see };
+  const scroll = {
+    ref: box, anchor: 'bottom' as const, flexGrow: 1, flexShrink: 1, flexDirection: 'column' as const,
+    onScroll: (_o: number, x: ScrollMetrics) => see(x), onMetrics: see,
+    // Where the conversation sits on the terminal, in the coordinates a mouse key is
+    // reported in — so a click can be turned into the row under it.
+    onLayout: (r: { top: number; height: number; left: number; width: number }) => {
+      const had = rect.current;
+      if (had && had.top === r.top && had.height === r.height && had.left === r.left && had.width === r.width) return;
+      rect.current = { top: r.top, height: r.height, left: r.left, width: r.width };
+      tell(view?.top ?? 0, view === null);
+    },
+  };
   // Nothing said yet: the box holds the invitation instead of rows.
   if (!rows.length) {
     return h(ScrollBox, scroll,
@@ -604,7 +934,10 @@ export function renderChatModal({
   subject,
   toolLabel = '',
   phase = 'writing',
-  showReasoning = false,
+  folds = { open: false, except: new Set<string>() },
+  detailsKey = '^o',
+  onViewport,
+  scrollTo = null,
   cursor = 0,
   escArmed = false,
   shellMode = false,
@@ -639,7 +972,16 @@ export function renderChatModal({
   toolLabel?: string;
   // What the model is doing while no tool runs — see the status line.
   phase?: 'thinking' | 'writing';
-  showReasoning?: boolean;
+  // What is open and what is folded (src/assistant/folds.ts): the global state plus
+  // the blocks a click has made an exception of. The chat owns it.
+  folds?: FoldState;
+  // The cap of the key that opens a block, from its binding (`config.keys.details`).
+  detailsKey?: string;
+  // The conversation's place on the terminal and how far it is scrolled — what turns
+  // a click's cell into a row.
+  onViewport?: (v: Viewport) => void;
+  // Put this row at the top of the conversation once the rows have changed.
+  scrollTo?: { row: number; n: number } | null;
   cursor?: number;
   escArmed?: boolean;
   // The field is in shell mode: the prompt reads `! ` in the shell colour and
@@ -769,7 +1111,7 @@ export function renderChatModal({
         // <ScrollBox> is one), so a drag there stays in the conversation.
         selectionScope: true,
       },
-      h(ChatMessages, { messages, wrap, showReasoning, viewLines, notes, palette: m, errorColor: theme?.error }),
+      h(ChatMessages, { messages, rowOpts: { wrap, folds, viewLines, notes, detailsKey }, palette: m, errorColor: theme?.error, onViewport, scrollTo }),
       error ? h(Text, { color: 'red' }, `⚠ ${error}`) : null,
       // The hint on the left, how full the model's context is on the right — it stays
       // put while the hint changes, and turns yellow when it is time to /compact.
@@ -803,7 +1145,10 @@ export function renderChatModal({
               // and a hint that has been there all along must not be the one to fall
               // off for a newcomer. The mode itself is stated beside the row, not in
               // it, so nothing about the mode is lost to the cut.
-              : (`${CAP.upDown} history · wheel or ${CAP.page} scroll · ${CAP.details} details · / commands${imagesOn ? ` · ${CAP.image} image` : ''} · ${CAP.auto} auto${bgCount > 0 ? ` · ${bgCount} in background` : ''}`))),
+              // A hint for an action nobody has a key for is not shown at all — a key
+              // on screen is an instruction, and `config.keys.details: []` disables it.
+              : ([`${CAP.upDown} history`, `wheel or ${CAP.page} scroll`, detailsKey && `${detailsKey} details`, '/ commands',
+                  imagesOn && `${CAP.image} image`, `${CAP.auto} auto`, bgCount > 0 && `${bgCount} in background`].filter(Boolean).join(' · ')))),
       // A sibling of the hint, not part of it: the left cell is the hint OR the status
       // of a running turn, and the mode has to stay on screen through both.
       autoBadge(autoMode) ? h(Text, { color: m.warn, bold: true }, `  ${autoBadge(autoMode)}`) : null,

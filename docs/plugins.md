@@ -108,14 +108,15 @@ What the host does with it, and what it expects back:
   never gets it. `ctx` has no `reportChange` outside a chat (the one-shot CLI), so call
   it as `ctx?.reportChange?.(…)`.
 - **`ctx.reportView(view)`** — how the RESULT is shown. A tool's result is otherwise a
-  dim line under `^r`; a view is a block the host draws in the chat from data you hand
+  dim line the chat folds away; a view is a block the host draws in the chat from data you hand
   it. One kind so far: `{ kind: 'console', command, text, exitCode, ms, cwd, status? }`
   — what `run_command` shows. The same rules as a reported change: display only (the
   model reads your returned result and never a copy of the block), dropped if the call
   then throws, and `ctx?.reportView?.(…)` because there is no chat to draw it in a
   one-shot run. The host owns the frame, the colours and every cap — the text is
   stripped of escape sequences, each line and the whole of it are cut to a bound, and
-  the block is folded to its last lines until `^r`. A kind this host does not know is
+  the block is folded to its last lines until the person clicks it open (or presses
+  `^o`). A kind this host does not know is
   ignored, so a plugin written for a later one still runs here.
 - **An argument is hostile input.** The model writes every argument, and it may have
   read the words it writes in a web page or a ticket. Check paths against what the

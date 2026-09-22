@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { NAMED_KEYS } from '@flowtty/core';
-import { canonicalBinding, canonicalKey, isKey, keyGlyph, resolveKeys, writtenKey } from '../keys';
+import { bindingGlyph, canonicalBinding, canonicalKey, firstGlyph, isKey, keyGlyph, keyId, resolveKeys, writtenKey } from '../keys';
 import { buildKeys } from '../../loader/registry';
 
 test('resolveKeys folds string to array and defaults to [] when missing', () => {
@@ -86,4 +86,46 @@ test('drawn, a key is its cap — and the modifiers are part of what was pressed
   // The three vocabularies agree about which key they mean.
   expect(keyGlyph(canonicalKey('enter'))).toBe('⏎');
   expect(keyGlyph(canonicalKey('space'))).toBe('␣');
+});
+
+// ─── A modifier is part of the key, and so part of a binding ───────────────────
+// `details` lives on ^o. Before this, a binding could only name a bare key and an
+// action on a modified one had to be written into its handler — which is what `^r`
+// was: `key.name === 'r' && key.ctrl`, unremappable and invisible to every hint.
+
+test('a modifier can be written into a binding, however a person spells it', () => {
+  expect(canonicalKey('ctrl+o')).toBe('ctrl+o');
+  expect(canonicalKey('^o')).toBe('ctrl+o');
+  expect(canonicalKey('Ctrl+O')).toBe('ctrl+O'); // the character keeps its case
+  expect(canonicalKey('alt+enter')).toBe('alt+return');
+  expect(canonicalKey('shift+tab')).toBe('shift+tab');
+  expect(canonicalKey('ctrl+shift+pgup')).toBe('ctrl+shift+pageup');
+  // A lone glyph is a key in its own right, not a modifier with nothing after it.
+  expect(canonicalKey('^')).toBe('^');
+  // A binding of several spellings is one set, canonical and without duplicates.
+  expect(canonicalBinding(['ctrl+o', '^o', 'ctrl+r'])).toEqual(['ctrl+o', 'ctrl+r']);
+});
+
+test('a key is compared as it was PRESSED — modifiers and all', () => {
+  const binding = canonicalBinding(['ctrl+o', 'ctrl+r']);
+  expect(isKey(binding, { name: 'o', ctrl: true })).toBe(true);
+  expect(isKey(binding, { name: 'r', ctrl: true })).toBe(true);
+  // A bare `o` is not `^o`: the chat's field must still take the letter.
+  expect(isKey(binding, { name: 'o' })).toBe(false);
+  expect(isKey(binding, 'o')).toBe(false);
+  // Shift on a character is already in the character — the decoder says 'A'.
+  expect(keyId({ name: 'A', shift: true })).toBe('A');
+  expect(keyId({ name: 'tab', shift: true })).toBe('shift+tab');
+  // Where every binding is a bare key, the name alone still matches as it always did.
+  expect(isKey(['escape'], 'escape')).toBe(true);
+});
+
+test('a modified binding is drawn as its cap, and a hint names ONE key', () => {
+  expect(keyGlyph('ctrl+o')).toBe('^o');
+  expect(keyGlyph(canonicalKey('^o'))).toBe('^o');
+  const binding = canonicalBinding(['ctrl+o', 'ctrl+r']);
+  // The help lists every key that answers; a hint in a line of hints teaches the first.
+  expect(bindingGlyph(binding)).toBe('^o/^r');
+  expect(firstGlyph(binding)).toBe('^o');
+  expect(firstGlyph([])).toBe('');
 });

@@ -52,6 +52,20 @@ test('a confirmed edit leaves its diff in the chat, and the model is never sent 
   expect(shown).toContain(' const a = 1;');
   expect(shown).toContain('Changed b.');
 
+  // The fence's language row is flowtty's label for a block the HOST wrote, under a
+  // line that already says this is a change to a file. It is gone; the language stays
+  // on the fence, which is what colours the diff green and red.
+  expect(ui.backend.lastFrame.split('\n').some((r) => r.trim() === 'diff')).toBe(false);
+  // The `@@` row is gone too — the numbers beside each row say where in the file it is.
+  expect(shown).not.toContain('@@');
+  const rows = ui.backend.lastFrame.split('\n');
+  const numbered = (no: number, text: string) => rows.some((r) => new RegExp(`\\s${no} │ ${text.replace(/[+*.$]/g, '\\$&')}`).test(r));
+  expect(numbered(1, ' const a = 1;')).toBe(true);
+  // The removed line is line 2 of the OLD file, the added one line 2 of the NEW.
+  expect(numbered(2, '-const b = 2;')).toBe(true);
+  expect(numbered(2, '+const b = 42;')).toBe(true);
+  expect(numbered(3, ' const c = 3;')).toBe(true);
+
   // The next turn: what the model is SENT holds the tool's short result, not the diff.
   await ui.type('ok');
   await ui.press('return');
@@ -61,6 +75,53 @@ test('a confirmed edit leaves its diff in the chat, and the model is never sent 
   expect(sent).not.toContain('+const b = 42;');
   expect(sent).not.toContain('@@ -');
   expect(sent).not.toContain('✎');
+  ui.app.unmount();
+});
+
+test('the numbers are chrome: a drag copies the code alone, and the title is text, not code', async () => {
+  const model = new ScriptedModel();
+  model.script(
+    [{ tool: 'edit_file', args: { path: 'app.ts', old: 'const b = 2;', new: 'const b = 42;' } }],
+    [{ text: 'Changed b.' }],
+  );
+  // A light terminal, where the chat's accent is blue and flowtty's inline code is
+  // cyan: the ✎ title is drawn as a title — the path in the chat's own accent — and
+  // not as the fragment of code `changeMarkdown` used to wrap it in.
+  const root = path.join(fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-diff-'))), 'clone');
+  fs.mkdirSync(root);
+  fs.writeFileSync(path.join(root, 'app.ts'), 'const a = 1;\nconst b = 2;\nconst c = 3;\n');
+  const config = { fs: { roots: [root] } };
+  const ui = await bootApp(model, 110, 36, (make) => [buildRepoPlugin({ config, make })], config, { scheme: 'light' });
+  await ui.press('F');
+  await ui.type('set b to 42');
+  await ui.press('return');
+  await settle(10);
+  await ui.press('y');
+  await settleUntil(() => model.requests.length === 2);
+  await settle(10);
+
+  const rows = ui.backend.lastFrame.split('\n');
+  const titleAt = rows.findIndex((r) => r.includes('✎ clone/app.ts'));
+  expect(titleAt).toBeGreaterThan(-1);
+  const buf = (ui.backend as unknown as { lastBuffer: { get(x: number, y: number): { style: { fg?: string; dim?: boolean } } } }).lastBuffer;
+  const pathX = Array.from(rows[titleAt]!.slice(0, rows[titleAt]!.indexOf('clone/app.ts'))).length;
+  expect(buf.get(pathX, titleAt).style.fg).toBe('blue'); // the chat's accent, not code's cyan
+  const countsX = Array.from(rows[titleAt]!.slice(0, rows[titleAt]!.indexOf('· +1'))).length;
+  expect(buf.get(countsX, titleAt).style.dim).toBe(true);
+
+  // A drag down the block returns the code as it stands in the file — no numbers, no
+  // `│ ` bar. They are chrome, like the gutter marker.
+  const from = rows.findIndex((r) => r.includes('const a = 1;'));
+  const to = rows.findIndex((r) => r.includes('const c = 3;'));
+  // From the diff's own first column (the ` `/`-`/`+` is the author's, and a copied
+  // diff has to still apply) to past the pane's right edge.
+  const fromX = Array.from(rows[from]!.slice(0, rows[from]!.indexOf('const a = 1;'))).length - 1;
+  ui.backend.mouse('down', fromX, from);
+  for (let y = from; y <= to; y++) ui.backend.mouse('drag', 100, y);
+  ui.backend.mouse('up', 100, to);
+  await settle(4);
+  const [copied] = ui.backend.clipboard;
+  expect(copied).toBe(' const a = 1;\n-const b = 2;\n+const b = 42;\n const c = 3;');
   ui.app.unmount();
 });
 

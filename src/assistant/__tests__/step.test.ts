@@ -7,6 +7,7 @@ import {
   emptyStep,
   joinNarration,
   lastStep,
+  liveKind,
   notesCommand,
   notesMode,
   notesSaid,
@@ -117,4 +118,27 @@ test('a mode is read defensively and a command says what it did', () => {
   expect(notesCommand('louder')).toBe(null);
   expect(notesSaid('step')).toContain('one dim line');
   expect(notesSaid('hidden')).toContain('not drawn');
+});
+
+// ─── What a round's text IS, decided as it arrives ────────────────────────────
+// It used to be decided at the END of the round, so a round that turned out to carry
+// a tool call had the paragraph the person was reading reclassified and taken away.
+
+test('a line that starts Next: is narration from its first characters', () => {
+  expect(liveKind('Next: read the notebook.')).toBe('notes');
+  expect(liveKind('Next')).toBe('unknown'); // could still become `Next:`
+  expect(liveKind('Nex')).toBe('unknown');
+  expect(liveKind('N')).toBe('unknown');
+  expect(liveKind('Next :')).toBe('notes'); // the shape allows the space
+  expect(liveKind('next: counting')).toBe('notes');
+  expect(liveKind('\n\nNext: go on')).toBe('notes');
+});
+
+test('anything else is the answer, from its first characters too', () => {
+  expect(liveKind('There are three entries.')).toBe('answer');
+  expect(liveKind('T')).toBe('answer');
+  expect(liveKind('Nothing was found.')).toBe('answer'); // `No` is not on the way to `Next:`
+  // Nothing at all says nothing: no row is drawn for an empty round.
+  expect(liveKind('')).toBe('unknown');
+  expect(liveKind('   ')).toBe('unknown');
 });

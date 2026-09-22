@@ -113,6 +113,26 @@ export function lastStep(narration: string): string {
   return '';
 }
 
+// ─── Which shelf a round's text goes on, decided as it ARRIVES ────────────────
+// A round's text used to be classified at its END, when the tool calls were in: until
+// then it was drawn as the answer, and a round that turned out to carry a call had its
+// paragraph reclassified as narration and collapse into the line above — the person
+// watched what they were reading appear and vanish. The prompt asks for one line
+// starting `Next:` before a call (the same shape the step line reads), so the text says
+// what it is from its first characters and nothing has to be taken away again.
+//
+// `unknown` is the handful of characters that could still become `Next:` — nothing is
+// drawn for them, and that is a few tokens nobody sees, not a paragraph that blinks.
+export type LiveKind = 'answer' | 'notes' | 'unknown';
+// Still short enough to grow into `Next:` — `N`, `Ne`, `Nex`, `Next`, `Next ` .
+const MAYBE_NEXT = /^n(e(x(t\s*)?)?)?$/i;
+export function liveKind(text: string): LiveKind {
+  const head = String(text ?? '').replace(/^\s+/, '');
+  if (!head) return 'unknown';
+  if (NEXT_LINE.test(head)) return 'notes';
+  return MAYBE_NEXT.test(head) ? 'unknown' : 'answer';
+}
+
 // ─── One change a second ──────────────────────────────────────────────────────
 // The floor is on the CHANGE, not on the reading: a new sentence that arrives too
 // soon is held and shown when the second is up, so nothing is lost and nothing
