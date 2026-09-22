@@ -38,6 +38,11 @@ update loses nothing. `/clear` starts a new session and keeps the old one;
 `sessions/` in the config directory, readable by you only (`sessions.resume: false`
 starts every run empty; `sessions.keep` — how many are kept, 50 by default).
 
+`/fullscreen` gives the chat the whole terminal instead of a window over the
+screen — code, tables and diffs get every column; `/fullscreen off` brings the
+window back. To have it that way from the start:
+`config set plugins.assistant.fullscreen true`.
+
 `!command` in the chat runs a shell command yourself (`!bun test src/features`):
 the output lands in the conversation and the assistant sees it with your next
 message, without spending a turn on it. Esc stops it. Commands start in the first

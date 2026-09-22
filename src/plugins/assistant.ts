@@ -17,6 +17,7 @@ import { KEEP_SESSIONS, SESSION_VERSION, closeSession, flushOnExit, listSessions
 import type { ChatMessage } from '../assistant/agent.js';
 import type { ChangeView } from '../assistant/diff.js';
 import { editorReducer } from '@flowtty/core';
+import { z } from 'zod';
 import { chatFieldWidth } from '../views/modals.js';
 import { askKey, askStart, type AskQuestion, type AskState } from '../assistant/ask.js';
 import { loadMemories, memoryFilePath, saveMemories } from '../runtime/services/memory.js';
@@ -28,7 +29,7 @@ import type { Plugin } from '../loader/plugin.js';
 
 // Slash-commands of the chat — a single source for runChatCommand and Tab-completion.
 // `/analyze` is a tracker slash command and is removed.
-const CHAT_COMMANDS = ['compact', 'context', 'copy', 'resume', 'clear', 'memory', 'log', 'exit'];
+const CHAT_COMMANDS = ['compact', 'context', 'copy', 'resume', 'clear', 'memory', 'fullscreen', 'log', 'exit'];
 
 // A plain object holding every enumerable service, inherited ones included.
 // `for…in` walks the prototype chain, which is exactly what a spread does not.
@@ -137,6 +138,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
       },
     ],
     keys: { chat: 'F' },
+    // config.plugins.assistant: `fullscreen` — the chat takes the whole terminal from
+    // the start (`/fullscreen on|off` switches it for the session); `colors` — the
+    // chat's palette override (src/playback/theme.ts).
+    configSchema: z.object({ fullscreen: z.boolean().optional(), colors: z.record(z.string(), z.unknown()).optional() }).optional(),
     // The footer's word for the chat while it is closed: the key that opens it and,
     // when background results landed meanwhile, how many are waiting. Open, the
     // chat says its own keys inside its frame.
@@ -157,6 +162,11 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
         return function ChatModal() {
           const { width, height } = f.useTerminalSize();
           const [open, setOpen] = f.useState(false);
+          // The whole terminal instead of a centred window: config.plugins.assistant.
+          // fullscreen to start with, `/fullscreen [on|off]` for the session. The ref is
+          // for the key handler (the field's width decides up/down across wrapped rows).
+          const [fullscreen, setFullscreenState] = f.useState(Boolean((f.config.plugins as Record<string, { fullscreen?: boolean }> | undefined)?.assistant?.fullscreen));
+          const fullscreenRef = f.useRef(fullscreen); fullscreenRef.current = fullscreen;
           // `openRef` is what the detached background flush reads (a timer's closure
           // would see a stale `open`); `unread` counts results that landed while the
           // chat was closed — the footer shows it, opening the chat clears it.
@@ -852,6 +862,17 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             const [name, ...rest] = cmd.split(/\s+/);
             const arg = rest.join(' ');
             switch (name) {
+              case 'fullscreen': {
+                // For the person; nothing is sent. `on`/`off`, or a toggle with no word.
+                const v = arg.trim().toLowerCase();
+                if (v && v !== 'on' && v !== 'off') { setError('/fullscreen takes on or off, or nothing to toggle'); return; }
+                const next = v === 'on' ? true : v === 'off' ? false : !fullscreenRef.current;
+                fullscreenRef.current = next;
+                setFullscreenState(next);
+                setField('');
+                f.notify();
+                return;
+              }
               case 'log': {
                 const svc = f.services as Record<string, any>;
                 const shared = logShareMessage((svc.log?.read?.() ?? svc.logs ?? []) as string[], arg);
@@ -1204,7 +1225,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               const act = editorReducer(
                 { value: inputRef.current, cursor: cursorRef.current },
                 key as Parameters<typeof editorReducer>[1],
-                { multiline: true, width: chatFieldWidth(width) },
+                { multiline: true, width: chatFieldWidth(width, fullscreenRef.current) },
               );
               if (act.kind === 'submit') {
                 const cmd = inputRef.current.trim();
@@ -1265,6 +1286,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           return (f.viewRegistry.chat as (p: Record<string, unknown>) => unknown)({
             width, height, theme: f.config.theme, messages, input, streaming, error, toolLabel, phase, showReasoning, cursor, escArmed,
             shellMode,
+            fullscreen,
             pendingConfirm: pendingAsk,
             pendingQuestion,
             queued,

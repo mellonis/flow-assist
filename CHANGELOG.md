@@ -5,6 +5,10 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **`/fullscreen [on|off]`** — the chat takes the whole terminal instead of a
+  centred window, and its text wraps at the full width;
+  `config set plugins.assistant.fullscreen true` starts it that way.
+
 - **Readable on a light terminal theme.** The chat, the log, the help, the reminder and
   the keycaps panel paint a dark ground of their own; their text now takes the
   palette's `text` colour instead of the terminal's foreground, which on a light theme

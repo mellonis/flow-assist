@@ -190,12 +190,13 @@ export function mdLines(text: string | null | undefined, wrap: number): Line[] {
 // in characters, the grid's unit, so the caret cell holds a whole emoji.
 export const CHAT_FIELD_MIN = 20;
 // The field's width for a terminal `width` columns wide — shared with the key
-// handler, which needs it for up/down across wrapped rows.
-export function chatBoxWidth(width: number): number {
-  return Math.min(width - 4, Math.max(90, Math.floor(width * 0.88)));
+// handler, which needs it for up/down across wrapped rows. `fullscreen` (`/fullscreen`,
+// config.plugins.assistant.fullscreen): the window is the whole terminal, no margins.
+export function chatBoxWidth(width: number, fullscreen = false): number {
+  return fullscreen ? width : Math.min(width - 4, Math.max(90, Math.floor(width * 0.88)));
 }
-export function chatFieldWidth(width: number): number {
-  return Math.max(CHAT_FIELD_MIN, chatBoxWidth(width) - 4 - GUTTER);
+export function chatFieldWidth(width: number, fullscreen = false): number {
+  return Math.max(CHAT_FIELD_MIN, chatBoxWidth(width, fullscreen) - 4 - GUTTER);
 }
 export function inputVisualRows(input: string, cur: number, fieldW: number): { before: string; caret: string; after: string }[] {
   const w = Math.max(1, fieldW);
@@ -497,6 +498,7 @@ export function renderChatModal({
   contextWarn = false,
   contextPanel = null,
   todo = null,
+  fullscreen = false,
 }: {
   width: number;
   height: number;
@@ -532,12 +534,16 @@ export function renderChatModal({
   // `/context`: the reading to draw as a panel in the field's place (null — closed).
   contextPanel?: ContextReading | null;
   todo?: PlanItem[] | null;
+  // The window takes the whole terminal — title bar and footer too — instead of a
+  // centred 88% × 82% over the dimmed screen. The overlay already spans the
+  // terminal from its first row, so the window only has to be as big.
+  fullscreen?: boolean;
 }) {
-  const boxW = chatBoxWidth(width);
-  const boxH = Math.min(Math.floor(height * 0.82), height - 4);
+  const boxW = chatBoxWidth(width, fullscreen);
+  const boxH = fullscreen ? height : Math.min(Math.floor(height * 0.82), height - 4);
   const wrap = Math.max(20, boxW - 6);
   const m = (theme?.modals?.chat ?? {}) as Record<string, string | undefined>;
-  const fieldW = chatFieldWidth(width); // the prompt lives in the gutter
+  const fieldW = chatFieldWidth(width, fullscreen); // the prompt lives in the gutter
   const fieldRows = inputVisualRows(input, cursor, fieldW);
   const caretLi = Math.max(0, fieldRows.findIndex((r) => r.caret !== ''));
   const MAX_INPUT_LINES = 5;

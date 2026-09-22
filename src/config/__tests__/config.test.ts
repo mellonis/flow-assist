@@ -93,3 +93,11 @@ test('a plugin key is written through the plugin\'s schema', () => {
   expect(unknown).toEqual({ ok: false, error: 'config: unknown key plugins.nope.x — the plugin «nope» is not loaded or declares no settings' });
   expect(validateConfigWriteValue(hostConfigSchema, 'plugins.keycaps.bogus', 1, plugins).ok).toBe(false);
 });
+
+test('the chat\'s fullscreen is a setting `config set` writes', async () => {
+  const { buildAssistantPlugin } = await import('../../plugins/assistant');
+  const assistant = buildAssistantPlugin({ renders: {}, config: {}, make: ((_: string, shape: unknown) => shape) as never }) as { configSchema?: z.ZodTypeAny };
+  const plugins = { assistant: assistant.configSchema! };
+  expect(validateConfigWriteValue(hostConfigSchema, 'plugins.assistant.fullscreen', true, plugins)).toEqual({ ok: true, value: true });
+  expect(validateConfigWriteValue(hostConfigSchema, 'plugins.assistant.fullscreen', 'yes', plugins).ok).toBe(false);
+});
