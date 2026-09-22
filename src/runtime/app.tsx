@@ -1,17 +1,11 @@
-// Host App shell + two-phase input dispatch (spec §7). `renderApp` builds the
-// `ft` runtime once and hands it to every plugin's `components[slot]` factory,
-// then renders a minimal shell: a header, a content slot for the active view,
-// the plugin component overlay (each modal gates itself via its own state —
-// closed modals return null), and a bottom line (command line / toast message /
-// footer hints). Input is dispatched two-phase: observers never consume, then
-// the consumer race (`partitionInput`/`runConsumers` from Task 4), then the host
-// fallback (command line `:`, Esc back, `x` clear cache; quitting is `:quit` or Ctrl+C).
-//
-// React rendering is only smoke-tested here — the brief says the real render
-// wiring (the assembled tool registry, full command line completion/submit UX,
-// content-view selection) is owned by the integration task (Task 13). What
-// Task 11 pins down is the ENGINE: the stable `ft` object, the two-phase
-// ordering, and how plugin components mount over the shell.
+// Host App shell + two-phase input dispatch. `renderApp` builds the `ft` runtime
+// once and hands it to every plugin's `components[slot]` factory, then renders a
+// minimal shell: a title bar, a content slot for the active view, the plugin
+// component overlay (each modal gates itself via its own state — closed modals
+// return null), and a bottom line (command line / toast message / footer hints).
+// Input is dispatched two-phase: observers never consume, then the consumer race
+// (`partitionInput`/`runConsumers`), then the host fallback (command line `:`,
+// Esc back, `x` clear cache; quitting is `:quit` or Ctrl+C).
 
 import { pluginConfigs } from '../loader/tools.js';
 import { Box, Text, Markdown, Table, Link, render, useApp, useInput, useTerminalSize, type CopyEvent } from '@flowtty/react';
@@ -58,7 +52,7 @@ import { renderHome } from '../views/home.js';
 // among the guests.
 const BUILTIN_PLUGINS = ['core', 'assistant', 'keycaps', 'log'];
 
-// ─── Two-phase input dispatch (spec §7) ──────────────────────────────────────
+// ─── Two-phase input dispatch ────────────────────────────────────────────────
 // Observers (mode 'observe') always run, never consume; then the consumer race
 // (`partitionInput`/`runConsumers` — the first handler returning STRICT `true`
 // short-circuits); then the host fallback. `registry` may hold lazy `{ get }`
@@ -110,13 +104,13 @@ export interface RenderAppInput {
   plugins: Plugin[];
   config: Record<string, unknown>;
   onExit: () => void;
-  // The renders bundle the load step handed each plugin builder (Task 14 wires
-  // it at runtime); accepted here so runtime plugin loading can thread it
-  // through, unused by the App itself (components, not views, mount here).
+  // The renders bundle the load step handed each plugin builder; accepted here so
+  // runtime plugin loading can thread it through, unused by the App itself
+  // (components, not views, mount here).
   renders?: Record<string, unknown>;
-  // The assembled tool registry (Task 8) — passed to `createServices` so the
-  // synthetic `<plugin>:aiTools` groups populate `pluginAiTools`. Optional for
-  // Task 11; Task 13 passes it.
+  // The assembled tool registry — passed to `createServices` so the synthetic
+  // `<plugin>:aiTools` groups populate `pluginAiTools`. Optional: a test that
+  // needs no tools leaves it out.
   tools?: import('../loader/tools.js').ToolRegistry;
   // How long a toast stays, in ms (default `TOAST_MS`, 4 s). Only tests change it.
   toastMs?: number;
@@ -157,9 +151,8 @@ export function renderApp(
   { plugins, config, onExit, renders: _renders = {}, tools, toastMs }: RenderAppInput,
 ) {
   // Resolve config.theme into the full per-modal palette BEFORE anything reads it
-  // (createServices/ft and every renderer read `f.config.theme`). Mirrors the
-  // original tracker-tui assembly: DEFAULT_THEME base + user config.theme on top,
-  // then resolveModalPalettes lays the per-modal palettes down and
+  // (createServices/ft and every renderer read `f.config.theme`): DEFAULT_THEME
+  // base + user config.theme on top, then resolveModalPalettes lays the per-modal palettes down and
   // resolvePluginColors adds non-modal plugin palettes. Without this the modals
   // degrade to empty Flowtty defaults — no borders, no colors.
   config.theme = resolveAppTheme(config.theme as Theme | undefined, plugins, config);

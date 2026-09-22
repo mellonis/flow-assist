@@ -3,17 +3,14 @@
 //
 // Each renderer is a PURE function `(props) => ReactElement` — the owning plugin
 // modal (assistant.chat / core.help / log.log) computes state and passes it here as
-// props, so nothing reads or sets state from the render side. The port is written as
+// props, so nothing reads or sets state from the render side. The file is written as
 // `.ts` with explicit `h()` (createElement) calls — `tsconfig.json` includes `*.ts`
 // only, so a `.tsx` view would silently bypass `bun run typecheck`.
 //
-// Host adaptations vs. the tracker source:
-//   - tracker-agnostic: `/analyze` stripped from the hints/empty-state; `analysisAttached`
-//     dropped; the title names the chat's `subject` (what a plugin's screen is about,
+//   - The chat's title names its `subject` (what a plugin's screen is about,
 //     `services.chatSubject`) when there is one.
-//   - THE AUTOCOMPLETE LIST (Task #20): `renderChatModal` accepts `completions
-//     { matches, sel }` and draws the allowed `/`-candidate row above the input —
-//     the feature the tracker renderer never had (the tracker completed in-place only).
+//   - `renderChatModal` accepts `completions { matches, sel }` and completes a
+//     `/`-command inside the field.
 //   - `theme` may be undefined / lack a resolved `modals` map, so every
 //     `theme.modals.<name>.<prop>` read is guarded (`m = theme?.modals?.chat ?? {}`).
 

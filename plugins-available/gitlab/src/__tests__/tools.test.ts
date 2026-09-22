@@ -8,8 +8,8 @@ describe('gitlab tool group', () => {
     expect(glab.write({ method: 'POST' })).toBe(true);
     expect(glab.write({ method: 'GET' })).toBe(false);
   });
-  // R14-A: source's valid-method regex is GET/POST/PUT/PATCH/DELETE, so DELETE is
-  // VALID (the brief's literal case was wrong). Adapt to a genuinely-invalid method.
+  // The valid methods are GET/POST/PUT/PATCH/DELETE, so DELETE would pass: the
+  // invalid case is a method that is none of them.
   // A refusal throws: the host counts whatever a write tool returns as done (✎).
   it('validates method and path before running — by throwing', async () => {
     await expect(group.exec('glab_api', { method: 'FOO', path: '/x' }, {})).rejects.toThrow(/Invalid method/);

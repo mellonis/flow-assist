@@ -1,9 +1,8 @@
-// Task 11 — host two-phase input dispatch. The key unit is the host ordering
-// helper `twoPhaseDispatch` (observers first, never consume; then the consumer
-// race; then the host fallback). `partitionInput`/`runConsumers` are Task 4's
-// (src/loader/registry.ts) — the host dispatcher reuses them, so this test
-// exercises the wiring too. React rendering is NOT asserted here (covered by
-// the render smoke in Task 13).
+// Host two-phase input dispatch. The key unit is the host ordering helper
+// `twoPhaseDispatch` (observers first, never consume; then the consumer race; then
+// the host fallback). `partitionInput`/`runConsumers` live in
+// src/loader/registry.ts — the host dispatcher reuses them, so this test exercises
+// the wiring too. React rendering is not asserted here (the e2e tests draw it).
 
 import { expect, test } from 'bun:test';
 import { twoPhaseDispatch } from '../app';
@@ -15,7 +14,7 @@ test('twoPhaseDispatch runs observers first, never consuming; consumers short-ci
     { mode: 'observe', priority: () => 1000, handler: () => { order.push('obs'); } },
     { mode: 'consume', priority: () => 10, handler: () => { order.push('cons'); return true; } },
   ];
-  // partitionInput (Task 4) is still what governs the split; twoPhaseDispatch is
+  // partitionInput is still what governs the split; twoPhaseDispatch is
   // the host ordering: observers (never consume) → consumer race → fallback.
   const { observers, consumers } = partitionInput(registry, {});
   expect(observers).toHaveLength(1);

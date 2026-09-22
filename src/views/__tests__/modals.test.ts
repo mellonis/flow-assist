@@ -5,8 +5,7 @@ import { TestBackend } from '@flowtty/core/testing';
 import { MODAL_COLOR_DEFAULTS } from '../../playback/theme.js';
 import { helpEntries, inputVisualRows, mdLines, renderChatModal, renderHelp, renderLogModal, renderReminder } from '../modals.js';
 
-// Task #20: the built-in modal renderers were deferred to an "empty-shell"
-// integration test; here we drive them directly so the chat/help/log surfaces are
+// The built-in modal renderers, driven directly so the chat/help/log surfaces are
 // actually drawn. Each renderer is pure — it takes props and returns an element —
 // so render(h(view, props), TestBackend) and `lastFrame` assertions are enough.
 // `render` is async (it mounts the element into the backend), so every test awaits

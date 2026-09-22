@@ -37,7 +37,7 @@ import { hostVersion } from './version.js';
 import { renderChatModal, renderHelp, renderLogModal, renderReminder } from './views/modals.js';
 import { purgePluginMemories } from './runtime/services/memory.js';
 
-// The built-in modal renderers (Task #20). The host is tracker-agnostic: these
+// The built-in modal renderers. The host knows no domain: these
 // are the surfaces for the built-in chat/help/log modals, handed to plugins as
 // a `renders` bundle so core.ts reads viewRegistry.help, log.ts viewRegistry.log
 // and assistant.ts viewRegistry.chat. Without them the modals collapse to the
