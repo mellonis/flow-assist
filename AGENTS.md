@@ -730,12 +730,26 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   host services sit on the PROTOTYPE of the per-plugin services view, and a spread
   copies own properties only. The spread silently gave tools a ctx with no
   `chatLLM`/`config`/`showMessage`, and `background` answered "no LLM service".
-- The conversation is a flowtty **`<ScrollBox anchor="bottom">`** (`ChatMessages` in
-  `src/views/modals.ts`): it takes the rows the column leaves, follows new rows until
-  the person scrolls up, and hears PgUp/PgDn and the wheel ITSELF — the chat's key
-  handler must not. No heights are added up anywhere: a new block under the
-  conversation needs `flexShrink: 0` and nothing else. Sending a message calls
-  `scrollToEnd()`.
+- The conversation is a flowtty **`<ScrollList anchor="bottom" rowHeight={1}>`**
+  (`ChatMessages` in `src/views/modals.ts`): it takes the rows the column leaves,
+  follows new rows until the person scrolls up, and hears PgUp/PgDn and the wheel
+  ITSELF — the chat's key handler must not. No heights are added up anywhere: a new
+  block under the conversation needs `flexShrink: 0` and nothing else. Sending a
+  message calls `scrollToEnd()`. Needs flowtty ≥ 1.0.0-alpha.20.
+  - **Only the rows near the screen are laid out.** A `<ScrollBox>` lays out every row
+    of the conversation on every render, so a keystroke cost 1.7 ms more per turn of
+    the conversation — 13 ms on a fresh chat, 75 ms at 81 messages, 144 ms at 161, and
+    a session keeps 400. Every streamed token pays it too, which is what made a long
+    chat freeze while an answer came in. With the list it is flat at the fresh-chat
+    cost (`scripts`-free benchmark: boot the app over a restored session and time
+    `backend.type`). It is exact only because every `ChatRow` is ONE terminal line
+    (`rowHeight: 1`), the rule the pinned question already relied on.
+  - The rows are handed over as `items` with a stable `keyOf` and drawn by
+    `renderItem`; `children` are overlays only (the pinned question). A row keeps its
+    selection marks — `wrapContinues`, `chrome`, a whole `frame` row — exactly as it
+    carried them as a child (alpha.19 dropped them under the list: a wrapped paragraph
+    copied as several lines; `copy.e2e.test.ts` catches that).
+  - The empty conversation is still a `<ScrollBox>`: it holds the invitation, not rows.
   - The **wheel scrolls only while the pointer is over the box**. In a test pass
     coordinates — `backend.wheel('up', 20, 8)`; the default `(0, 0)` is the app title.
   - Every `ChatRow` is exactly one terminal line; the pinned-question check reads a

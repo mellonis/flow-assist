@@ -5,6 +5,13 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **The chat stays quick however long the conversation is.** Typing grew slower with
+  every turn — a keystroke took 13 ms in a fresh chat, 75 ms after 40 questions and
+  144 ms after 80, and an answer arriving paid the same for every word it wrote, so a
+  long conversation stuttered as it came in. The conversation now lays out only the
+  rows on screen, and a keystroke costs the same at any length. Needs flowtty
+  1.0.0-alpha.20.
+
 - **An MCP server can be a command now, not only a URL.** `config set
   plugins.mcp.servers.safari.command /usr/bin/safaridriver` and `… .args '["--mcp"]'`
   give the assistant Safari's 17 tools — the tabs, the page, a screenshot — and any
@@ -16,6 +23,7 @@ What each version of flow-assist brought, newest first. The version is the one i
   server it was and what it last wrote to stderr. Tools a browser offers carry no
   read-only claim, so even a `trusted` server asks before every call — Safari holds
   your logged-in sessions.
+
 - **The installed binary finds its plugins from any directory.** Started as
   `./kit/flow-assist` from somewhere else, it looked for `plugins-enabled/` in the
   working directory, found none, and ran with the host's own tools only — saying

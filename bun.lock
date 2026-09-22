@@ -5,8 +5,8 @@
     "": {
       "name": "flow-assist",
       "dependencies": {
-        "@flowtty/react": "^1.0.0-alpha.18",
-        "@flowtty/tty-backend": "^1.0.0-alpha.18",
+        "@flowtty/react": "^1.0.0-alpha.20",
+        "@flowtty/tty-backend": "^1.0.0-alpha.20",
         "react": "^19.2.8",
         "zod": "^4.6.5",
       },
@@ -18,11 +18,11 @@
     },
   },
   "packages": {
-    "@flowtty/core": ["@flowtty/core@1.0.0-alpha.18", "", { "dependencies": { "yoga-layout": "^3.2.1" } }, "sha512-zrc57skz1LfqsyqGwUwv/3nlQ0o3y5VKUioPeeT6TF/8RBX33Vvu1eRO4+AxQsYzdTPpfnexq6H1BcH1hJMltg=="],
+    "@flowtty/core": ["@flowtty/core@1.0.0-alpha.20", "", { "dependencies": { "yoga-layout": "^3.2.1" } }, "sha512-dw3BDA4qbn7/NOOZbr8EX5oDfwvkT13O0VIUmO9fZh3EtuLQX2O3pppwWHzRChDZUCIRFEl23EDvMWT2Lb4a+Q=="],
 
-    "@flowtty/react": ["@flowtty/react@1.0.0-alpha.18", "", { "dependencies": { "@flowtty/core": "1.0.0-alpha.18" }, "peerDependencies": { "react": "^19.3.0" } }, "sha512-lffy7VSmEMG0yZCwsxxqrdL3xI95VNTiyWfEV6HYuuDJeu+CaGGJz9w0c8NJGosWOgNtcMbQZHEtQqd38dMyrA=="],
+    "@flowtty/react": ["@flowtty/react@1.0.0-alpha.20", "", { "dependencies": { "@flowtty/core": "1.0.0-alpha.20" }, "peerDependencies": { "react": "^19.3.0" } }, "sha512-x66unmvCNWzU+EFs/IoDIhEoL6JcWhrUmJXn0FeQbDNe8qWnXx/9TXL04z3Gskd/J+AiuwJFVlXAusnxoOnPbg=="],
 
-    "@flowtty/tty-backend": ["@flowtty/tty-backend@1.0.0-alpha.18", "", { "dependencies": { "@flowtty/core": "1.0.0-alpha.18" } }, "sha512-SCrdsm3+99sbEb/qnKBl4NkjxEihnJqY7vptf6HtHN5Rx7CwAPxLQP5zBi5FfT9d5CR6TcMGWkmVJBsAj7JYew=="],
+    "@flowtty/tty-backend": ["@flowtty/tty-backend@1.0.0-alpha.20", "", { "dependencies": { "@flowtty/core": "1.0.0-alpha.20" } }, "sha512-D1IH881oTjLh5rGAc1FeAa6VUOA6KSlofr91hFf22I57riP00FdNhVxeI6aFWApeKavu/MoOVUQzR4ipIkzYFA=="],
 
     "@types/node": ["@types/node@22.20.4", "", { "dependencies": { "undici-types": "~6.21.0" } }, "sha512-zJRE40jpHtKqE/C4fgHrAKQLJuSpzEnP9ff9Y7YtoR3Wd2pwqzlekDeEuUQXjRd+QCYnVnNwuJYmhdk9XV8gvA=="],
 

@@ -23,6 +23,7 @@ import { bindingGlyph, keyGlyph } from '../playback/keys.js';
 import {
   Box,
   ScrollBox,
+  ScrollList,
   Text,
   layoutMarkdown,
   caretPosition,
@@ -458,11 +459,9 @@ function ChatMessages({ messages, wrap, showReasoning, palette: m, errorColor }:
         h(Text, { bold: true, dim: true, color: m.accent }, '› '),
         h(Text, { dim: true, wrap: 'truncate' }, lastUserText.length > 60 ? `${lastUserText.slice(0, 60)}…` : lastUserText || '…'))
     : null;
-  return h(ScrollBox, { ref: box, anchor: 'bottom', flexGrow: 1, flexShrink: 1, flexDirection: 'column', onScroll: (_o: number, x: ScrollMetrics) => see(x), onMetrics: see },
-    rows.length
-      ? null
-      : h(Text, { dim: true, selectable: false }, `Ask anything. ${CAP.enter} sends, ${NEWLINE_KEY} starts a new line, / opens the commands, !command runs one in the shell.`),
-    rows.map((row, i) => {
+  // One row of the conversation. `<ScrollList>` calls it only for the rows near the
+  // screen, so a long conversation costs what a short one costs.
+  const renderRow = (row: ChatRow, i: number) => {
       const key = `chat-${i}`;
       if (row.gap) return h(Box, { key, height: 1, flexShrink: 0 });
       if (row.reasonHeader) return h(Text, { key, dim: true, color: 'magenta', selectable: false }, `${' '.repeat(GUTTER)}${row.open ? '▾' : '▸'} ${row.label}`);
@@ -492,9 +491,28 @@ function ChatMessages({ messages, wrap, showReasoning, palette: m, errorColor }:
       }
       // A blank line inside a message keeps the message's ground.
       return h(Box, { key, height: 1, flexShrink: 0, ...groundStyle });
-    }),
-    sticky,
-  );
+  };
+
+  const scroll = { ref: box, anchor: 'bottom' as const, flexGrow: 1, flexShrink: 1, flexDirection: 'column' as const, onScroll: (_o: number, x: ScrollMetrics) => see(x), onMetrics: see };
+  // Nothing said yet: the box holds the invitation instead of rows.
+  if (!rows.length) {
+    return h(ScrollBox, scroll,
+      h(Text, { dim: true, selectable: false }, `Ask anything. ${CAP.enter} sends, ${NEWLINE_KEY} starts a new line, / opens the commands, !command runs one in the shell.`));
+  }
+  // Every chat row is exactly ONE terminal line (the pin's arithmetic relies on it),
+  // which is what lets the list lay out only the rows in view: the content is exactly
+  // as tall as the conversation, so anchoring, the scrollbar and the metrics the pin
+  // reads stay exact. Laying out every row of a long conversation on every keystroke
+  // was what made typing slower the longer the chat got.
+  return h(ScrollList<ChatRow>, {
+    ...scroll,
+    items: rows,
+    // Rows are rebuilt (and cached) per message; a row's place in the conversation is
+    // what identifies it, as it did when every row was a child with a `chat-i` key.
+    keyOf: (_row: ChatRow, i: number) => `chat-${i}`,
+    rowHeight: 1,
+    renderItem: renderRow,
+  }, sticky);
 }
 
 // ─── Chat modal (pure render) ──────────────────────────────────────────────────
