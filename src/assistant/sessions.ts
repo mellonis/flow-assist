@@ -7,7 +7,7 @@
 // `/compact` left, the plan and the last usage reading. They are three views of one
 // conversation (`/compact` moves the history into the summary), so they are saved
 // together or not at all — and the directory the conversation's shell commands were
-// left in. Not saved: an answer being written, a pending y/n or
+// left in, and the tools the model has loaded (the history calls them). Not saved: an answer being written, a pending y/n or
 // question, queued messages — restored, they would resolve into nothing.
 //
 // The files hold whatever the conversation held (tracker text, MR text), so they are
@@ -40,6 +40,7 @@ export interface Session {
   draft: string;                       // what was typed and not sent
   subject?: string | null;             // what the screen was about when the chat began (`chatSubject`), if anything
   shellCwd?: string | null;            // where `!command` / run_command were last left (null — the default)
+  tools?: string[];                    // the tools the model loaded (tools on demand); absent in older sessions
   closed?: boolean;                    // left with /clear — listed, never continued on start
 }
 
@@ -116,6 +117,9 @@ export function loadSession(dir: string, id: string): Session | null {
       // Checked again when it is used: a directory that has gone or left the roots
       // since reads as the default (`createShellState`).
       shellCwd: typeof s.shellCwd === 'string' ? s.shellCwd : null,
+      // A tool no longer offered (a plugin removed since) stays in the list and is
+      // simply never sent — the request is built from what exists.
+      tools: Array.isArray(s.tools) ? s.tools.filter((n): n is string => typeof n === 'string') : [],
     };
   } catch {
     return null;

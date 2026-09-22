@@ -5,6 +5,15 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **Tools on demand.** A request no longer carries the full definition of every
+  enabled tool. It carries the core tools (`todo`, `ask_user`, `memory`, …) in full and
+  an index of the rest — each tool's name and one line, grouped by plugin — and the
+  model loads what a task needs with `tools_load`, by name or by group. A loaded tool
+  stays for the rest of the conversation: it is saved with the session, kept through
+  `/compact`, and `/clear` empties the set. A call to a tool that was not loaded is
+  answered with an error that says how to load it. `ctx N%` and `/context` count
+  what is actually sent. `config set ai.toolLoading all` goes back to the full list.
+
 - **`/fullscreen [on|off]`** — the chat takes the whole terminal instead of a
   centred window, and its text wraps at the full width;
   `config set plugins.assistant.fullscreen true` starts it that way.

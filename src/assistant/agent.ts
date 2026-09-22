@@ -11,9 +11,13 @@
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 import type { ToolDef, ToolCtx } from '../loader/tools.js';
-import { chatTools, execChatTool, chatToolDefs } from '../loader/tools.js';
+import { chatTools, execChatTool, chatToolDefs, chatToolGroupOf } from '../loader/tools.js';
 import type { ToolRunEntry } from '../runtime/services/log.js';
 import { changeView, type Change, type ChangeView } from './diff.js';
+import {
+  TOOLS_LOAD, createToolSet, deferredTools, notLoadedError, runToolsLoad, toolsToSend,
+  type CatalogEntry, type ToolLoading, type ToolSet,
+} from './tool-loading.js';
 
 // A single chat message. `role` is the OpenAI role; `content` may be null when a
 // message carries tool_calls. Extra fields (tool_calls, tool_call_id) ride along.
@@ -99,6 +103,12 @@ export interface AgentOpts {
   // it is 0, the streaming accumulation failed (a real bug). Optional — background
   // tasks simply omit it.
   onRound?: (info: { index: number; finishReason: string; toolCalls: number; contentLen: number }) => void;
+  // Tools on demand (src/assistant/tool-loading.ts). 'all' — every tool in full on
+  // every request, the default here, so a caller that does not say keeps what it had;
+  // the chat, a background task and the one-shot CLI pass `ai.toolLoading`.
+  // `toolSet` is the conversation's loaded set; without one a turn starts empty.
+  toolLoading?: ToolLoading;
+  toolSet?: ToolSet;
   // Any remaining OpenAI-ish options (tools, signal, …) — spread into the round.
   [key: string]: unknown;
 }
@@ -317,6 +327,27 @@ function modelToolResult(outcome: string, detail: unknown): string {
   return `OK: ${d}`;
 }
 
+// ─── The tools a request may carry ────────────────────────────────────────────
+// One entry per name, with the group it comes from. A plugin's aiTools reach
+// `agentChat` TWICE: they are in the registry (the synthetic `<plugin>:aiTools` group)
+// and the chat passes them again as `extraTools` for their `run`. The list for the
+// provider used to concatenate both, and a provider answers a duplicate name with 400
+// before the model runs — so with a real plugin enabled, every message failed. The
+// extra wins, as in `agentChat`'s `toolByName`. `write`/`run` never go on the wire.
+export function toolCatalog(extraTools: ToolDef[] = []): CatalogEntry[] {
+  const sent = new Map<string, ToolDef>();
+  for (const t of chatTools()) sent.set(t.function.name, t);
+  for (const { write: _w, run: _r, ...rest } of extraTools) sent.set(rest.function.name, rest);
+  const groupOf = chatToolGroupOf();
+  return [...sent.values()].map((def) => ({ name: def.function.name, group: groupOf.get(def.function.name) ?? 'other', def }));
+}
+
+// What the NEXT request will carry — for the context meter, which must measure what
+// is sent, not everything that could be.
+export function requestTools(extraTools: ToolDef[], mode: ToolLoading = 'all', set: ToolSet = createToolSet()): ToolDef[] {
+  return toolsToSend(toolCatalog(extraTools), mode, set);
+}
+
 // ─── Agent loop ───────────────────────────────────────────────────────────────
 // Agentoid loop: content streams, tool_calls run through execChatTool, the result
 // is pushed back as `role: tool`, and the loop runs until a final text round (or
@@ -340,6 +371,8 @@ export async function agentChat(
     logTools = false,
     logToolsPath = null,
     logToolRun: logRun = () => {},
+    toolLoading = 'all',
+    toolSet = createToolSet(),
     ...opts
   }: AgentOpts = {},
 ): Promise<AgentResult> {
@@ -351,7 +384,6 @@ export async function agentChat(
   // NOT used for the actual write (no toolsLogFile computed here).
   let current: ChatMessage[] = messages.slice();
   const turnStart = current.length;
-  const baseTools = chatTools(); // active groups; already tree-shaken (write/run stripped)
   // Writing tools (write flag: true or a predicate (args) => boolean) ask for
   // confirmation via opts.confirmWrite (a y/n pause in chat) before running. In the
   // API we send tools WITHOUT the service fields write/run (a strict server may
@@ -360,7 +392,7 @@ export async function agentChat(
   // their own `run(args, ctx)` instead of execChatTool.
   // `toolByName` is built from the UNSTRIPPED defs (`chatToolDefs()`) so a
   // `write`-flagged tool is present and `needsConfirm` fires — the stripped
-  // `baseTools` have no `write`, so confirmation would otherwise never trigger.
+  // `chatTools()` have no `write`, so confirmation would otherwise never trigger.
   const toolByName = new Map<string, ToolDef>();
   for (const t of chatToolDefs()) toolByName.set(t.function.name, t);
   for (const et of extraTools) toolByName.set(et.function.name, et);
@@ -375,16 +407,16 @@ export async function agentChat(
     realName.set(wire, t.function.name);
     return wire === t.function.name ? t : { ...t, function: { ...t.function, name: wire } };
   };
-  // One entry per name. A plugin's aiTools reach this function TWICE: they are in the
-  // registry (the synthetic `<plugin>:aiTools` group, so they are in `baseTools`) and
-  // the chat passes them again as `extraTools` for their `run`. `toolByName` above
-  // takes the later one by name; the list for the provider used to concatenate both,
-  // and a provider answers a duplicate name with 400 before the model runs — so with
-  // a real plugin enabled, every message failed. The extra wins, as in `toolByName`.
-  const sent = new Map<string, ToolDef>();
-  for (const t of baseTools) sent.set(t.function.name, t);
-  for (const { write, run, ...rest } of extraTools) sent.set(rest.function.name, rest);
-  const apiTools: ToolDef[] = [...sent.values()].map(onWire);
+  const catalog = toolCatalog(extraTools);
+  // Tools on demand: what is sent is worked out again for EVERY round — a `tools_load`
+  // in one round puts the full definitions into the next. The wire names are mapped
+  // for every known tool, not only the ones sent: the model may call a tool it saw
+  // only in the index, and that call must still resolve to its real name to be told
+  // it is not loaded.
+  const deferred = deferredTools(catalog);
+  const onDemand = toolLoading === 'onDemand' && deferred.size > 0;
+  for (const e of catalog) onWire(e.def);
+  const roundTools = (): ToolDef[] => toolsToSend(catalog, toolLoading, toolSet).map(onWire);
   let content = ''; // final answer (last round without tool_calls)
   let process = ''; // narration of moves from rounds WITH tool_calls — folded
   const toolRuns: ToolRun[] = []; // trace of executed tools
@@ -397,7 +429,7 @@ export async function agentChat(
     let roundContent = '';
     const r = await chatRoundFn(current, {
       ...opts,
-      tools: apiTools,
+      tools: roundTools(),
       // Round content streams LIVE via onLive while accumulating into roundContent.
       // Which shelf it belongs to (answer vs. narration fold) is decided at the end
       // of the round, when tool_calls arrive (or not).
@@ -461,8 +493,12 @@ export async function agentChat(
           : typeof def?.write === 'function'
             ? !!def?.write?.(parsed)
             : false;
+      // Known from the index, not loaded: refused before anything else — a write is
+      // not put to the person for a call that will not run.
+      const notLoaded = onDemand && deferred.has(tc.name) && !toolSet.has(tc.name);
       const confirm = opts.confirmWrite;
       const needsConfirm =
+        !notLoaded &&
         typeof confirm === 'function' &&
         !!def?.write &&
         (def.write === true ? true : (def.write as (a: Record<string, unknown>) => boolean)(parsed));
@@ -499,9 +535,13 @@ export async function agentChat(
         };
         // Plugin ai-tool → its own `run(args, toolCtx)`; group tool → execChatTool
         // (lookup by name in the registry). `def.run` exists only on extraTools.
-        detail = def?.run
-          ? await (def.run as (args: Record<string, unknown>, ctx: ToolCtx) => unknown)(parsed, callCtx)
-          : await execChatTool(tc.name, parsed, callCtx);
+        // `tools_load` is the loop's own: it changes what the next round sends.
+        if (notLoaded) throw new Error(notLoadedError(tc.name));
+        detail = onDemand && tc.name === TOOLS_LOAD
+          ? runToolsLoad(parsed, catalog, toolSet)
+          : def?.run
+            ? await (def.run as (args: Record<string, unknown>, ctx: ToolCtx) => unknown)(parsed, callCtx)
+            : await execChatTool(tc.name, parsed, callCtx);
         outcome = write ? 'applied' : 'ok';
       } catch (e) {
         detail = `Error: ${e instanceof Error ? e.message : String(e)}`;

@@ -17,6 +17,10 @@ export const hostConfigSchema = z.object({
     language: z.string().optional(),
     assistantLanguage: z.string().optional(),
     disabledTools: z.array(z.string()).optional(),
+    // 'onDemand' (default): a request carries the core tools in full and an index of
+    // the rest, which the model loads by name (src/assistant/tool-loading.ts). 'all':
+    // every tool in full on every request.
+    toolLoading: z.enum(['all', 'onDemand']).optional(),
   }).optional(),
   user: z.object({ name: z.string().optional(), login: z.string().optional() }).optional(),
   // `mouse` reports the mouse to the app: the wheel scrolls the conversation, and a drag

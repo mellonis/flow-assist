@@ -112,6 +112,11 @@ What the host does with it, and what it expects back:
 - Names are the ones you give (`notes_read`, not `notes:notes_read`); two groups that
   declare the same name get the later one qualified, and the clash is logged.
 - `ai.disabledTools: ["notes"]` turns the group off per machine.
+- **The first sentence of a description is what the model sees first.** A request
+  carries a plugin's tools as an index — the group's name, then each tool's name and
+  its description up to the first full stop — and the model loads the ones it needs
+  (`tools_load`) before calling them. Make that sentence say what the tool is for;
+  put details after it. (`ai.toolLoading: "all"` sends every definition in full.)
 
 `aiTools` is the other shape: standalone tools, each with its own `run(args, ctx)`,
 for a plugin that has no group.

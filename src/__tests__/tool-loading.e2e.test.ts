@@ -1,0 +1,114 @@
+// Tools on demand, through the real chat: what the model is SENT, round by round.
+// A request carries the core tools and an index of the rest; a tool the model has not
+// loaded is refused by name; `tools_load` puts its full definition into the very next
+// round, and the loaded set is the conversation's — a restart keeps it, /clear empties it.
+import { afterEach, expect, test } from 'bun:test';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { ScriptedModel, bootApp, settle } from './helpers/scripted';
+import type { Make } from '../loader/plugin';
+
+const realFetch = globalThis.fetch;
+afterEach(() => { globalThis.fetch = realFetch; });
+
+const settleUntil = async (ok: () => boolean, n = 100) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
+
+type Sent = { messages: { role: string; content?: string | null }[]; tools?: { function: { name: string; description: string } }[] };
+const sent = (model: ScriptedModel, i: number) => model.requests[i] as unknown as Sent;
+const toolNames = (r: Sent) => (r.tools ?? []).map((t) => t.function.name);
+
+// A guest with a tool group of its own; the notebook is what `notes_read` answers.
+const notesPlugin = (make: Make) => make('notes', {
+  tools: [{
+    id: 'notes',
+    tools: [
+      { type: 'function', function: { name: 'notes_read', description: 'Read the notebook. Returns every note.', parameters: { type: 'object', properties: {} } } },
+      { type: 'function', function: { name: 'notes_count', description: 'Count the notes.', parameters: { type: 'object', properties: {} } } },
+    ],
+    exec: async (name: string) => (name === 'notes_read' ? 'water the plants' : '1'),
+  }],
+} as never);
+
+// No `toolLoading` in `ai`: the default, on demand.
+const boot = (model: ScriptedModel, sessions: { dir: string }) =>
+  bootApp(model, 100, 28, (make) => [notesPlugin(make)], { ai: { baseUrl: 'http://scripted.model', model: 'scripted' }, sessions });
+
+async function ask(ui: Awaited<ReturnType<typeof boot>>, model: ScriptedModel, text: string, requests: number) {
+  await ui.type(text);
+  await ui.press('return');
+  await settleUntil(() => model.requests.length >= requests);
+  await settle(5);
+}
+
+test('the model sees an index, is refused a tool it did not load, loads it, and gets it in the next round', async () => {
+  const model = new ScriptedModel();
+  model.script(
+    [{ tool: 'notes_read', args: {} }],
+    [{ tool: 'tools_load', args: { names: ['notes_read'] } }],
+    [{ tool: 'notes_read', args: {} }],
+    [{ text: 'Water the plants.' }],
+  );
+  const ui = await boot(model, { dir: fs.mkdtempSync(path.join(os.tmpdir(), 'fa-load-')) });
+  await ui.press('F');
+  await ask(ui, model, 'what is in my notes?', 4);
+
+  // Round 1: core in full, the notes only as lines of the index.
+  const first = sent(model, 0);
+  expect(toolNames(first)).toContain('todo');
+  expect(toolNames(first)).toContain('tools_load');
+  expect(toolNames(first)).not.toContain('notes_read');
+  const index = first.tools!.find((t) => t.function.name === 'tools_load')!.function.description;
+  expect(index).toContain('notes:\n- notes_read — Read the notebook.\n- notes_count — Count the notes.');
+  // Round 2: the call it made without loading was answered with what to do.
+  expect(JSON.stringify(sent(model, 1).messages)).toContain('ERROR: notes_read is not loaded — call tools_load with names [\\"notes_read\\"] first');
+  expect(toolNames(sent(model, 1))).not.toContain('notes_read');
+  // Round 3: loaded — the full definition is sent, and only the one asked for.
+  expect(toolNames(sent(model, 2))).toContain('notes_read');
+  expect(toolNames(sent(model, 2))).not.toContain('notes_count');
+  // Round 4: the call went through.
+  expect(JSON.stringify(sent(model, 3).messages)).toContain('OK: water the plants');
+  expect(ui.backend.lastFrame).toContain('Water the plants.');
+  ui.app.unmount();
+});
+
+test('the loaded set survives a restart and is emptied by /clear', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-load-sess-'));
+  const first = new ScriptedModel();
+  first.script(
+    [{ tool: 'tools_load', args: { group: 'notes' } }],
+    [{ text: 'Loaded.' }],
+  );
+  const one = await boot(first, { dir });
+  await one.press('F');
+  await ask(one, first, 'get the notes tools', 2);
+  expect(toolNames(sent(first, 1))).toEqual(expect.arrayContaining(['notes_read', 'notes_count']));
+  await one.press('escape', 'escape'); // closing the chat saves at once
+  one.app.unmount();
+
+  const model = new ScriptedModel();
+  model.script([{ text: 'Still here.' }], [{ text: 'Fresh.' }]);
+  const two = await boot(model, { dir });
+  await two.press('F');
+  await ask(two, model, 'and now?', 1);
+  expect(toolNames(sent(model, 0))).toEqual(expect.arrayContaining(['notes_read', 'notes_count']));
+
+  await two.type('/clear');
+  await two.press('return');
+  await settle(5);
+  await ask(two, model, 'hello', 2);
+  expect(toolNames(sent(model, 1))).not.toContain('notes_read');
+  expect(toolNames(sent(model, 1))).toContain('tools_load');
+  two.app.unmount();
+});
+
+test('ai.toolLoading all sends every tool in full and offers no tools_load', async () => {
+  const model = new ScriptedModel();
+  model.script([{ text: 'Hi.' }]);
+  const ui = await bootApp(model, 100, 28, (make) => [notesPlugin(make)], { ai: { baseUrl: 'http://scripted.model', model: 'scripted', toolLoading: 'all' } });
+  await ui.press('F');
+  await ask(ui, model, 'hi', 1);
+  expect(toolNames(sent(model, 0))).toEqual(expect.arrayContaining(['todo', 'notes_read', 'notes_count']));
+  expect(toolNames(sent(model, 0))).not.toContain('tools_load');
+  ui.app.unmount();
+});

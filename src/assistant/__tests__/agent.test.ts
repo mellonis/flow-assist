@@ -232,3 +232,37 @@ test('a plugin ai-tool is sent to the provider ONCE, though it reaches agentChat
   // …and no name at all is declared twice.
   expect(new Set(names).size).toBe(names.length);
 });
+
+test('on demand, a write tool that is not loaded is refused before any y/n, and runs once loaded', async () => {
+  const make = makeFactory({});
+  let ran = 0;
+  const plugins = [
+    make('t', {
+      aiTools: [
+        { type: 'function', function: { name: 'save_it', description: 'Save it.', parameters: { type: 'object', properties: {} } }, write: true, run: async () => { ran++; return 'saved'; } },
+      ],
+    }),
+  ];
+  assembleToolRegistry({ plugins, config: {}, repo: { list: async () => [] } as any });
+  const asked: string[] = [];
+  const sentTools: string[][] = [];
+  const script = [
+    { id: '1', name: 'save_it', arguments: '{}' },
+    { id: '2', name: 'tools_load', arguments: '{"names":["save_it"]}' },
+    { id: '3', name: 'save_it', arguments: '{}' },
+  ];
+  const fakeRound = async (_messages: any[], opts: any) => {
+    sentTools.push(opts.tools.map((t: any) => t.function.name));
+    const call = script.shift();
+    return call ? { content: '', reasoning: '', finishReason: 'tool_calls', toolCalls: [call] } : { content: 'done', reasoning: '', finishReason: 'stop', toolCalls: [] };
+  };
+  const res = await agentChat([{ role: 'user', content: 'save' }], {
+    baseUrl: 'http://x', model: 'm', token: 't', onLiveCommit: () => {}, onLive: () => {},
+    chatRound: fakeRound, toolLoading: 'onDemand', confirmWrite: (name) => { asked.push(name); return true; },
+  });
+  expect(res.toolRuns.map((r) => r.outcome)).toEqual(['error', 'ok', 'applied']);
+  expect(asked).toEqual(['save_it']); // once — for the call that ran
+  expect(ran).toBe(1);
+  expect(sentTools[0]).not.toContain('save_it');
+  expect(sentTools[2]).toContain('save_it');
+});

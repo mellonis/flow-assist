@@ -88,7 +88,10 @@ export async function bootApp(model: ScriptedModel, cols = 100, rows = 28, guest
   // Sessions go to a fresh temp dir unless a test names one: a test must never write
   // into, or continue, the person's own saved chats.
   const sessions = { dir: fs.mkdtempSync(path.join(os.tmpdir(), 'fa-sessions-')) };
-  const config: Record<string, unknown> = { ai: { baseUrl: 'http://scripted.model', model: 'scripted' }, sessions, ...extra };
+  // Every tool in full (`toolLoading: 'all'`): a script calls whatever tool its test is
+  // about, as a model that sees the whole list would. Tools on demand are tested on
+  // their own, with `extra` giving an `ai` that does not say 'all'.
+  const config: Record<string, unknown> = { ai: { baseUrl: 'http://scripted.model', model: 'scripted', toolLoading: 'all' }, sessions, ...extra };
   const repo = { enabledPlugins: async () => [], list: async () => [] } as never;
   const renders = { chat: renderChatModal, help: renderHelp, log: renderLogModal, reminder: renderReminder };
   const plugins = await loadPlugins({ config, repo, renders: renders as never });

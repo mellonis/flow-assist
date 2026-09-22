@@ -255,10 +255,31 @@ assistant nobody had asked for a board.
   **Tool state that describes a conversation is never module-level** — as a module
   variable the plan outlived `/clear`, was shared with background runs, and leaked
   from one test into the next.
+- **A request carries the core tools and an INDEX of the rest** (tools on demand,
+  `src/assistant/tool-loading.ts`, pure; wired in `agentChat`). Every tool's full
+  schema on every request was ~7k tokens with only the bundled plugins, a tracker
+  plugin doubles it, and a turn uses two or three. So with `ai.toolLoading: 'onDemand'`
+  (the config default) a request sends the `core` group in full, the tools this
+  conversation has LOADED, and `tools_load`, whose description is the index — per
+  group, `name — first sentence of the description`. The index does not change as
+  tools load (a stable prefix). `tools_load({ names | group })` is the loop's own
+  tool, not the registry's; what is sent is worked out again for EVERY round, so a
+  load reaches the next round of the same turn. A call to a tool that is indexed but
+  not loaded is an ERROR naming `tools_load`, refused BEFORE the y/n — the wire-name
+  map covers every known tool, not only the sent ones, or that call would not even
+  resolve. The loaded set is a `ToolSet` owned like the plan: the chat's `toolSetRef`
+  (saved as the session's `tools`, kept by `/compact`, emptied by `/clear` and a
+  change of task); a background run and the one-shot CLI start from an empty one.
+  `agentChat`'s own default is `'all'` — the mode is applied by `services.chatLLM`
+  and `runPrompt` from config — and `bootApp` pins `'all'` so an e2e script can call
+  the tool it tests; `tool-loading.e2e.test.ts` opts in. The context meter measures
+  `requestTools(...)`, what is really sent. `host:tools_list` still lists every name;
+  the index made it mostly redundant.
 - **Sessions survive a restart** (`src/assistant/sessions.ts`, one JSON per session
   in `<config dir>/sessions/`, dir 700 / files 600 — they hold tracker and MR text).
   A session is ONE object: the screen list, `apiRef` (what the model is sent),
-  `summaryRef`, the plan, the usage reading, the ↑/↓ prompts, the unsent draft and the
+  `summaryRef`, the plan, the usage reading, the ↑/↓ prompts, the unsent draft, the
+  loaded tools (`tools`) and the
   shell's directory (`shellCwd`, re-checked against the roots when used) —
   three views of one conversation, saved together or not at all. Not saved: an answer
   in progress (`live`), a pending y/n or question, the queues. Saves: 250 ms after a
@@ -726,6 +747,9 @@ The host suite must pass with `plugins-available/` empty — a host test never l
 - `bun scripts/eval-tool-use.ts` — a behavioural eval against a LIVE model (costs
   money; `--fake` checks the harness): rates by turn, false claims, `--history
   display|api` as an A/B, `--show` prints the dialogue.
+- `bun scripts/eval-tool-loading.ts` — the same kind of eval for tools on demand:
+  does the model find the one tool a task needs among a dozen, in how many rounds,
+  `--tools all|onDemand|both` as the A/B (live; `--fake` checks the harness).
 - A fake for a validating route must reject what the real one rejects; prove a
   new test fails on the bug before trusting it.
 

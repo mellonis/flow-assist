@@ -250,6 +250,13 @@ export function chatToolDefs(): ToolDef[] {
   return currentRegistry?.groups.flatMap((g) => g.tools) ?? [];
 }
 
+// Which group each tool of the last assembled registry belongs to (name → group id),
+// under the name the model sees. Tools on demand send the `core` group in full and
+// index the rest by group (src/assistant/tool-loading.ts).
+export function chatToolGroupOf(): Map<string, string> {
+  return new Map(currentRegistry?.groups.flatMap((g) => g.tools.map((t) => [t.function.name, g.id] as [string, string])) ?? []);
+}
+
 // Dispatches a tool call to the current registry (source-faithful, module-level).
 export async function execChatTool(name: string, args: Record<string, unknown>, ctx: ToolCtx): Promise<string> {
   if (!currentRegistry) throw new Error('No tool registry assembled');

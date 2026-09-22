@@ -21,6 +21,7 @@ import { WEB_DEFAULTS } from '../assistant/web-fetch.js';
 import { SHELL_DEFAULTS, createShellState } from '../assistant/shell.js';
 import { parseAskArgs, askResult, type AskQuestion, type AskState } from '../assistant/ask.js';
 import type { Change } from '../assistant/diff.js';
+import { TOOLS_LOAD } from '../assistant/tool-loading.js';
 
 // Runtime context handed to core tools by the caller: the resolved memory
 // file (absent → resolved from config), the config.local.json path, and the active
@@ -62,8 +63,10 @@ function prettyKeys(map: Record<string, string[]>): string {
 // unset so the LLM can explain the key accurately instead of guessing (it once
 // claimed cache is off by default — it is actually ON unless config.cache.enabled
 // is false). These mirror the consuming modules; keep in sync. Most are constants
-// (the "unset" default), since a set key needs no default note.
+// (the "unset" default), since a set key needs no default note. A full path
+// (`ai.toolLoading`) is looked up before its top-level key.
 const KEY_DEFAULTS: Record<string, string> = {
+  'ai.toolLoading': `onDemand — each request carries the core tools in full and only an index (name and one line) of the others; the model loads what it needs with ${TOOLS_LOAD}, and a loaded tool stays for the rest of the conversation (/clear empties the set). config set ai.toolLoading all sends every tool in full on every request — more tokens per request, for a model that does not load tools well`,
   cache: 'enabled: true; ON unless config.cache.enabled = false',
   theme: `${JSON.stringify(DEFAULT_THEME)}; flowtty default theme`,
   debug: 'logTools: false',
@@ -427,7 +430,8 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
         const leaf = (path: string, node: unknown) => {
           const top = path.split('.')[0]!;
           const state = getDeep(cfg, path) == null ? 'unset' : 'set';
-          const note = state === 'unset' && KEY_DEFAULTS[top] ? ` (default: ${KEY_DEFAULTS[top]})` : '';
+          const dflt = KEY_DEFAULTS[path] ?? KEY_DEFAULTS[top];
+          const note = state === 'unset' && dflt ? ` (default: ${dflt})` : '';
           rows.push(`- ${path}: ${describeSchema(node)} — ${state}${note}`);
         };
         const walk = (path: string, node: unknown) => {
@@ -522,6 +526,8 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
         // never touches the checkboxes of the chat that started it.
         // Its shell directory is its own too, starting at the default: whatever it runs
         // (and run_command is declined there anyway) never moves the chat's.
+        // So are its loaded tools: it is given no `toolSet`, so it starts from the index
+        // and loads what it needs, and nothing it loads reaches the chat's set.
         const bgConfig = ((ctx as { config?: Record<string, unknown> }).config ?? {}) as Record<string, unknown>;
         const toolCtx = { ...(ctx as Record<string, unknown>), _bgDepth: depth + 1, askUser: undefined, plan: createPlan(), shell: createShellState(() => bgConfig) };
         // The nested run needs its OWN LLM credentials — the same way the chat's

@@ -10,7 +10,8 @@
 import { addTrigger, chatUser } from '../loader/registry.js';
 import { bgActiveCount } from '../loader/tools-core.js';
 import { createPlan, todoGlyph } from '../assistant/plan.js';
-import { apiHistory, compactConversation, chatLanguage } from '../assistant/agent.js';
+import { apiHistory, compactConversation, chatLanguage, requestTools } from '../assistant/agent.js';
+import { createToolSet, toolLoadingMode } from '../assistant/tool-loading.js';
 import { copyTarget, copyToClipboard } from '../assistant/copy.js';
 import { createShellState, formatShell, nextCwd, runShell, shellLimits } from '../assistant/shell.js';
 import { KEEP_SESSIONS, SESSION_VERSION, closeSession, flushOnExit, listSessions, loadSession, newSessionId, pruneSessions, saveSession, sessionToContinue, sessionWhen, sessionsDir, type Session } from '../assistant/sessions.js';
@@ -23,7 +24,6 @@ import { askKey, askStart, type AskQuestion, type AskState } from '../assistant/
 import { loadMemories, memoryFilePath, saveMemories } from '../runtime/services/memory.js';
 import { keptAfterClear, memoryCommand } from '../assistant/memory-command.js';
 import { CONTEXT_WARN_AT, DEFAULT_CONTEXT_WINDOW, contextBadge, readContext } from '../assistant/context-meter.js';
-import { chatTools } from '../loader/tools.js';
 import type { Make } from '../loader/plugin.js';
 import type { Plugin } from '../loader/plugin.js';
 
@@ -189,6 +189,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // run_command share it; `cd` moves it. The conversation's, like the plan: a
           // background run gets its own, /clear and a change of task reset it.
           const shellRef = f.useRef(createShellState(() => f.config as Record<string, unknown>));
+          // The tools the model has loaded (tools on demand, src/assistant/tool-loading.ts).
+          // The conversation's, like the plan: its history calls them, so it is saved
+          // with the session, kept through /compact, emptied by /clear and a change of task.
+          const toolSetRef = f.useRef(createToolSet());
           // What the provider reported for the last turn: its prompt plus the answer it
           // produced is, to a close approximation, the size of the NEXT request.
           const usageRef = f.useRef<{ promptTokens: number; completionTokens: number } | null>(null);
@@ -305,6 +309,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // that regex, so its own flag is checked too — it is not a draft either.
               prompts: historyRef.current.slice(-100), draft: (shellModeRef.current || /^\s*[/!]/.test(inputRef.current)) ? '' : inputRef.current, subject: ctxSubjectRef.current,
               shellCwd: shellRef.current.saved(),
+              tools: toolSetRef.current.names(),
               closed: false, // written means in use — a resumed cleared session is open again
             };
           };
@@ -328,6 +333,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             summaryRef.current = s.summary;
             planRef.current.load(s.plan);
             shellRef.current.setCwd(s.shellCwd ?? null);
+            toolSetRef.current.load(s.tools);
             usageRef.current = s.usage;
             historyRef.current = s.prompts.slice();
             histAt.current = null;
@@ -459,7 +465,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             const window = Number((f.config.ai as { contextWindow?: unknown } | undefined)?.contextWindow) || DEFAULT_CONTEXT_WINDOW;
             const u = usageRef.current;
             return readContext(
-              { system: baseStatic(), memory: memoryBlock(), plan: planBlock(), summary, tools: [...chatTools(), ...(((f.services as Record<string, any>).pluginAiTools ?? []) as unknown[])], messages: apiHistory(apiRef.current) },
+              // The tools the next request will CARRY — with tools on demand, the core ones,
+              // what was loaded and the index; not every tool there is.
+              { system: baseStatic(), memory: memoryBlock(), plan: planBlock(), summary, tools: requestTools((f.services as Record<string, any>).pluginAiTools ?? [], toolLoadingMode(f.config.ai), toolSetRef.current), messages: apiHistory(apiRef.current) },
               window,
               u ? u.promptTokens + u.completionTokens : undefined,
             );
@@ -531,6 +539,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 logTools: !!((f.config as Record<string, any>)?.debug?.logTools),
                 // Plugin ai-tools (aiTools): agentChat runs their own run(args, toolCtx).
                 extraTools: (f.services as Record<string, any>).pluginAiTools ?? [],
+                // What this conversation has loaded; `tools_load` adds to it mid-turn.
+                // The mode (`ai.toolLoading`) is applied by the `chatLLM` service.
+                toolSet: toolSetRef.current,
                 toolCtx: {
                   plan: planRef.current,
                   shell: shellRef.current,
@@ -845,6 +856,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               summaryRef.current = summaryRef.current ? `${summaryRef.current}\n\n${summary}` : summary;
               usageRef.current = null; // the measured size was of the history just replaced
               apiRef.current = [];
+              // The loaded tools stay (`toolSetRef`): the work the summary describes goes on
+              // with them, and loading them again would spend a round for nothing.
               // What the MODEL sees shrank to the summary; what the PERSON sees stays —
               // the conversation above is theirs to scroll. (It used to be wiped down to
               // the last message, which read as /clear.) A note marks where the model's
@@ -944,6 +957,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // model no longer remembers.
                 planRef.current.reset();
                 shellRef.current.setCwd(null); // back to the first root
+                toolSetRef.current.reset(); // a new conversation starts from the index
                 usageRef.current = null; // measured for a conversation that is gone
                 // /clear ends the conversation, not the memory — and says so, or the
                 // assistant "still knowing" an earlier prompt reads as /clear failing.
@@ -1019,6 +1033,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               usageRef.current = null;
               planRef.current.reset();
               shellRef.current.setCwd(null);
+              toolSetRef.current.reset();
               msgsRef.current = [];
               setMessages([]);
               // Task change — a new session: reset the status fields too, else the

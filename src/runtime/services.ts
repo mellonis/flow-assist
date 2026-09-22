@@ -11,6 +11,7 @@ import { createLogService } from './services/log.js';
 import { loadMemories, saveMemories, memoryFilePath } from './services/memory.js';
 import { agentChat } from '../assistant/agent.js';
 import { copyToClipboard as platformCopy } from '../assistant/copy.js';
+import { toolLoadingMode } from '../assistant/tool-loading.js';
 import type { AgentResult, AgentOpts, ChatMessage, ToolLogger } from '../assistant/agent.js';
 import type { AiToolDef, ToolRegistry } from '../loader/tools.js';
 import type { PluginRepo } from '../loader/repo.js';
@@ -148,7 +149,13 @@ export function createServices({ config, tools, repo, onExit }: CreateServicesOp
     // (which `log.logToolRun` gates on) actually logs tool calls — the agent's
     // no-op default would otherwise leave it inert. A caller-supplied
     // `logToolRun` wins over ours.
-    chatLLM: (messages, opts) => agentChat(messages, { ...opts, logToolRun: (opts?.logToolRun as ToolLogger | undefined) ?? log.logToolRun }),
+    // `ai.toolLoading` is applied here, once, for the chat and a background task alike;
+    // a caller that names a mode keeps it.
+    chatLLM: (messages, opts) => agentChat(messages, {
+      toolLoading: toolLoadingMode(config.ai),
+      ...opts,
+      logToolRun: (opts?.logToolRun as ToolLogger | undefined) ?? log.logToolRun,
+    }),
     pluginAiTools,
     openBrowser: openInBrowser,
     copyToClipboard,
