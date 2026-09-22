@@ -153,6 +153,10 @@ setup: (ft) => { /* once, before any component mounts: seed a store */ },
 
 - The slot named `view` (or the one `surface` names) is the plugin's full screen,
   mounted only while `keycaps(ft)` is non-empty; every other slot is always mounted.
+- **Size a surface by `ft.useSurfaceSize()`, not `ft.useTerminalSize()`.** The host
+  keeps a title bar above the surface and the footer (the command line) below it;
+  `useSurfaceSize` is what is left between them. A surface sized by the terminal is
+  taller than its room, and the host cuts off what does not fit — its bottom rows.
 - **Take React and flowtty from `ft`, import only their types.** `ft.useState`,
   `ft.useEffect`, `ft.useRef`, the flowtty components — one React for the host and
   every plugin; a second copy breaks every hook.

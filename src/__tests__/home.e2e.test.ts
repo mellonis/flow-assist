@@ -205,3 +205,26 @@ test('the keycaps panel is drawn over the footer, not under it', async () => {
   expect(rows.slice(0, footer).join('\n')).toMatch(/╭─ key/); // its title (shortened when narrow)
   ui.app.unmount();
 });
+
+test('a surface as tall as useSurfaceSize says fits between the title bar and the command line', async () => {
+  // A surface sized by the terminal was four rows taller than its room: its bottom
+  // frame and the host's command line fell off the screen.
+  const tall = (make: any) => [make('boards', {
+    name: 'boards',
+    keycaps: () => ['c board'],
+    components: {
+      view: (ft: any) => function View() {
+        const { height } = ft.useSurfaceSize();
+        return ft.h(ft.Box, { height, border: 'round', flexDirection: 'column' }, ft.h(ft.Text, null, 'TOP ROW'));
+      },
+    },
+  })];
+  const ui = await bootApp(new ScriptedModel(), 100, 30, tall);
+  const rows = ui.backend.lastFrame.split('\n');
+  expect(rows.findIndex((r) => r.includes('TOP ROW'))).toBeGreaterThan(-1);
+  const bottom = rows.findIndex((r) => /╰─+╯/.test(r));
+  const footer = rows.findIndex((r) => r.includes(': commands'));
+  expect(bottom).toBeGreaterThan(-1);
+  expect(footer).toBeGreaterThan(bottom);
+  ui.app.unmount();
+});

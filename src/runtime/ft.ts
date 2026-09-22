@@ -34,6 +34,9 @@ export interface FTRuntime {
   useRef: <T>(init: T) => { current: T };
   useInput: (handler: (key: InputKey) => void, opts?: { isActive?: boolean }) => void;
   useTerminalSize: () => { width: number; height: number };
+  // The room a plugin's surface has: the terminal less the host's title bar and
+  // footer. A surface sizes itself by this, not by the terminal.
+  useSurfaceSize: () => { width: number; height: number };
   // Host input hook (two-phase): register a handler into the App's registry.
   useInputHandler: (opts: { mode?: string; priority?: (ui: UiState) => number; handler: (key: InputKey, ui: UiState) => unknown }) => void;
   // Cross-domain channel: ft.store.<pluginName>.{api}. Kept as a plain record so
@@ -79,6 +82,7 @@ export interface CreateFtInput {
   useRef: FTRuntime['useRef'];
   useInput: FTRuntime['useInput'];
   useTerminalSize: FTRuntime['useTerminalSize'];
+  useSurfaceSize: FTRuntime['useSurfaceSize'];
   useInputHandler: FTRuntime['useInputHandler'];
   store: Record<string, unknown>;
   services: Record<string, unknown>;

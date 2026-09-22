@@ -9,6 +9,9 @@ What each version of flow-assist brought, newest first. The version is the one i
   the keycaps panel paint a dark ground of their own; their text now takes the
   palette's `text` colour instead of the terminal's foreground, which on a light theme
   was black on black. Needs flowtty 1.0.0-alpha.16.
+- **`ft.useSurfaceSize()`** — the room a plugin's surface has between the title bar
+  and the command line. A surface sized by the terminal was four rows too tall and
+  pushed the command line off the screen.
 
 ## 0.1.0 — 2026-09-22
 

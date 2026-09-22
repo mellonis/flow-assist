@@ -139,6 +139,19 @@ interface CommandLineState {
   walk: TabWalk | null;
 }
 
+// The host's chrome around a plugin's surface: the title bar and the footer are one
+// row of text each inside `padding: 1` (the render below) — three rows apiece.
+export const TITLE_ROWS = 3;
+export const FOOTER_ROWS = 3;
+
+// The room a plugin's surface has: the terminal less the title bar and the footer.
+// A surface that sized itself by the terminal was four rows taller than its room and
+// pushed the command line off the screen.
+export function useSurfaceSize(): { width: number; height: number } {
+  const { width, height } = useTerminalSize();
+  return { width, height: Math.max(1, height - TITLE_ROWS - FOOTER_ROWS) };
+}
+
 export function renderApp(
   root: Backend,
   { plugins, config, onExit, renders: _renders = {}, tools, toastMs }: RenderAppInput,
@@ -223,6 +236,7 @@ export function renderApp(
         useRef,
         useInput: useInput as unknown as FTRuntime['useInput'],
         useTerminalSize,
+        useSurfaceSize,
         useInputHandler: (opts) => registerInputHandler(inputRegistryRef, opts),
         store: {},
         services: services as unknown as Record<string, unknown>,
