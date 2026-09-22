@@ -27,6 +27,7 @@ import {
   Box,
   ScrollBox,
   ScrollList,
+  Shimmer,
   Text,
   layoutMarkdown,
   caretPosition,
@@ -164,10 +165,13 @@ const overlay = (width: number, height: number, zIndex = 10) => ({
 
 const SPINNER = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 const spin = (ms: number) => SPINNER[Math.floor(ms / 120) % SPINNER.length];
-// The running tool's label cycles through these — movement says "still working" where
-// a static label read as "stuck".
-// The window's own ink stands in for white, which vanished on a light ground.
-const TOOL_PULSE = (m: Record<string, string | undefined>) => [m.accent ?? 'cyan', 'cyanBright', m.text ?? 'white', 'cyanBright'];
+// A band of light travels along the running tool's label — movement says "still
+// working" where a static label read as "stuck". It used to be the whole label
+// changing colour four times a second, which read as blinking; the band moves instead,
+// and the label keeps one colour. The gradient is the chat's own accents, brightest at
+// the band's leading edge; the window's own ink stands in for white, which vanished on
+// a light ground.
+const TOOL_PULSE = (m: Record<string, string | undefined>) => [m.text ?? 'white', 'cyanBright', m.accent ?? 'cyan'];
 const fmtSec = (ms: number) => `${(ms / 1000).toFixed(1)}s`;
 
 // ─── Markdown → styled lines ──────────────────────────────────────────────────
@@ -783,7 +787,9 @@ export function renderChatModal({
         ? h(Box, { flexDirection: 'row', overflow: 'hidden' },
             h(Text, { dim: true, wrap: 'truncate' }, `${spin(elapsed)} ${fmtSec(elapsed)}${toolCount ? ` · ${toolCount} tool call${toolCount === 1 ? '' : 's'}` : ''}${turnTokens ? ` · ${tokensBadge(turnTokens)}` : ''} · `),
             toolLabel
-              ? h(Text, { color: TOOL_PULSE(m)[Math.floor(elapsed / 300) % 4], bold: true, wrap: 'truncate' }, toolLabel)
+              // `Shimmer` takes the label as a string and colours it per character, so
+              // it is the label itself that is handed over, not a styled child.
+              ? h(Box, { overflow: 'hidden' }, h(Shimmer, { color: m.accent ?? 'cyan', highlight: TOOL_PULSE(m), width: 4, interval: 70, direction: 'ltr', running: true, children: toolLabel }))
               : phase === 'thinking'
                 ? h(Text, { color: 'magenta', wrap: 'truncate' }, 'thinking…')
                 : h(Text, { color: m.assistantAccent ?? 'green', wrap: 'truncate' }, 'writing…'),

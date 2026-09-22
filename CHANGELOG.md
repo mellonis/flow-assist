@@ -76,6 +76,10 @@ What each version of flow-assist brought, newest first. The version is the one i
   does not offer is said once in the log at start, so a typo does not sit there quietly
   doing nothing.
 
+- **The running tool's name carries a band of light**, instead of the whole word
+  changing colour four times a second, which read as blinking. Needs flowtty
+  1.0.0-alpha.21.
+
 - **The chat stays quick however long the conversation is.** Typing grew slower with
   every turn — a keystroke took 13 ms in a fresh chat, 75 ms after 40 questions and
   144 ms after 80, and an answer arriving paid the same for every word it wrote, so a
