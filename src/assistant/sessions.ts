@@ -37,7 +37,7 @@ import path from 'node:path';
 import { configDir } from '../config/load.js';
 import { isImageRef, type ImageRef } from './images.js';
 import { readLegacyView, type ViewRecord } from './views.js';
-import { readChange, readParts, type TurnPart } from './step.js';
+import { addCalls, callRun, readChange, readParts, type CallRun, type TurnPart } from './step.js';
 import type { ChangeView } from './diff.js';
 
 export const SESSION_VERSION = 1;
@@ -200,23 +200,26 @@ export function normalizeViews(messages: Record<string, unknown>[]): Record<stri
 // changes, in the order they happened. A session saved before the turn was drawn in
 // time order kept them by category instead — the text of its tool rounds (`process`;
 // `shown`, the part of it that had been on screen) and every change of the turn
-// (`changes`) — and reads as those parts in that old order: the text, then the
-// changes. `step` (the one-line summary that went with it) is dropped. A part that is
-// not one a renderer can draw is dropped too, and a "message" that is not an object at
-// all is not a message.
+// (`changes`) and the turn's whole trail of calls (`toolRuns`) — and reads as those
+// parts in that old order: the text, then the changes, then the calls (the trail was
+// drawn under the answer; as the last part it stands just before it). `step` (the
+// one-line summary that went with it) is dropped. A part that is not one a renderer
+// can draw is dropped too, and a "message" that is not an object at all is not a
+// message.
 export function normalizeParts(messages: unknown[]): Record<string, unknown>[] {
   return messages.filter((m): m is Record<string, unknown> => !!m && typeof m === 'object' && !Array.isArray(m)).map((m) => {
     if (m.role !== 'assistant') return m;
-    const { process, shown, changes, step: _step, liveAs: _liveAs, live: _live, liveQuiet: _quiet, parts, ...rest } = m;
+    const { process, shown, changes, toolRuns, step: _step, liveAs: _liveAs, live: _live, liveQuiet: _quiet, parts, ...rest } = m;
+    const calls = Array.isArray(toolRuns) ? toolRuns.map(callRun).filter((c): c is CallRun => c !== null) : [];
     if (Array.isArray(parts)) {
-      const kept = readParts(parts);
+      const kept = addCalls(readParts(parts), calls);
       return kept.length ? { ...rest, parts: kept } : rest;
     }
     const text = [process, shown].find((t): t is string => typeof t === 'string' && !!t.trim());
-    const old: TurnPart[] = [
+    const old: TurnPart[] = addCalls([
       ...(text ? [{ kind: 'text' as const, text }] : []),
       ...(Array.isArray(changes) ? changes.map(readChange).filter((c): c is ChangeView => c !== null).map((change) => ({ kind: 'change' as const, change })) : []),
-    ];
+    ], calls);
     return old.length ? { ...rest, parts: old } : rest;
   });
 }

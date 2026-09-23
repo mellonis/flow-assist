@@ -13,13 +13,17 @@ What each version of flow-assist brought, newest first. The version is the one i
   answer stand in the order they came, and a round's text stays where it was drawn:
   dim, with a spinner beside it, until it is known to be the answer, which then gets
   its `ƒ`. What it said between tool calls folds to one quiet line per stretch —
-  a diff or a command ends a stretch — showing the latest thing it said and how many
-  steps there were (`▸ Now the tests.  (3 steps)`, no count for one); a click opens
-  that stretch where it stands, `^o` opens them all. `/notes open` shows every step in
-  the normal colour. The `Next: …` lines the assistant writes before a tool call are
-  never shown. `/notes fold` and `/notes hidden` are gone — a config that still says
-  either reads as the default — and so is the separate step line above the answer.
-  Sessions keep the new order; older ones still open. A round whose text and tool call
+  a diff, a command or calls it made without a word end a stretch — showing the
+  latest thing it said and how many steps there were (`▸ Now the tests.  (3 steps)`,
+  no count for one); a click opens that stretch where it stands, with the calls each
+  step made, `^o` opens them all. The tool calls are where they were made too — the
+  one trail under the answer is gone; under the answer stay only the seconds and the
+  cost. `/notes open` shows every step in the normal colour. The `Next:` the assistant
+  writes before a tool call is never shown — the sentence after it is — while an answer
+  is shown exactly as written. `/notes fold` and `/notes hidden` are gone — a config
+  that still says either reads as the default — and so is the separate step line above
+  the answer. Sessions keep the new order; older ones still open, their trail as one
+  line before the answer. A round whose text and tool call
   arrived together could also be lost, depending on how the network split the reply;
   it is kept now.
 

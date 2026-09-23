@@ -52,7 +52,9 @@ file it changed, what it said next, the answer. Its text stays where it was writ
 dim, with a spinner beside it, until it is known to be the answer, which then gets the
 `ƒ`. What it said between tool calls folds to one quiet line per stretch, where that
 stretch began: the latest thing it said, and how many steps there were
-(`▸ Now the tests.  (3 steps)`); a click opens that stretch, `^o` opens them all.
+(`▸ Now the tests.  (3 steps)`); a click opens that stretch, with the calls each step
+made, `^o` opens them all. Calls made without a word are a line of their own, where
+they were made (`▸ 2 tools: read_file ×2`).
 `/notes open` leaves every step on screen in the normal colour — for the current
 conversation; `/notes step` goes back. To have it that way from the start:
 `config set plugins.assistant.notes open`.

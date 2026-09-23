@@ -2,7 +2,12 @@
 // what a folded run's one row says, and how the notes mode is read.
 import { expect, test } from 'bun:test';
 import {
+  addCalls,
+  answerText,
+  callRun,
   cutStep,
+  endRound,
+  isPlanOnly,
   notesCommand,
   notesMode,
   notesSaid,
@@ -18,12 +23,12 @@ const change = (title: string) => ({ kind: 'change' as const, change: { title, d
 const text = (t: string): TurnPart => ({ kind: 'text', text: t });
 
 // ─── What of a text is drawn ──────────────────────────────────────────────────
-test('a Next: line is never drawn, wherever it stands and however it is marked up', () => {
-  expect(shownText('Next: read the notebook.')).toBe('');
-  expect(shownText('next : counting')).toBe('');
-  expect(shownText('**Next:** open the board')).toBe('');
-  expect(shownText('I looked at it.\nNext: count the entries')).toBe('I looked at it.');
-  expect(shownText('Next: look\n\nThe file is short.')).toBe('The file is short.');
+test('a Next: line is drawn as its sentence — the token never', () => {
+  expect(shownText('Next: read the notebook.')).toBe('read the notebook.');
+  expect(shownText('next : counting')).toBe('counting');
+  expect(shownText('**Next:** open the board')).toBe('open the board');
+  expect(shownText('I looked at it.\nNext: count the entries')).toBe('I looked at it.\ncount the entries');
+  expect(shownText('Next:')).toBe('');
 });
 
 test('a last line that could still become Next: is held back until it says what it is', () => {
@@ -33,29 +38,65 @@ test('a last line that could still become Next: is held back until it says what 
   // `No` is not on the way to `Next:`, and a line that is not the last is closed.
   expect(shownText('No')).toBe('No');
   expect(shownText('N\nmore')).toBe('N\nmore');
-  // Everything else is drawn as written.
   expect(shownText('There are three entries.')).toBe('There are three entries.');
 });
 
+test('the answer is drawn exactly as written', () => {
+  expect(answerText('Fixed.\n\nNext: restart the server.\n')).toBe('Fixed.\n\nNext: restart the server.');
+});
+
+test('a plan is a step that is nothing but its Next: line', () => {
+  expect(isPlanOnly('Next: lint')).toBe(true);
+  expect(isPlanOnly('**Next:** lint\n')).toBe(true);
+  expect(isPlanOnly('I looked.\nNext: lint')).toBe(false);
+  expect(isPlanOnly('')).toBe(false);
+});
+
 // ─── Runs ─────────────────────────────────────────────────────────────────────
-test('consecutive steps are one run, and a change ends it', () => {
-  const segs = turnSegments([text('One.'), text('Two.'), change('a.ts'), text('Three.'), change('b.ts')]);
+const calls = (...names: string[]): TurnPart => ({ kind: 'tools', runs: names.map((name) => ({ name, outcome: 'ok' })) });
+
+test('consecutive steps are one run — each with the calls it made; a change ends it', () => {
+  const segs = turnSegments([text('One.'), calls('read'), text('Two.'), calls('edit'), change('a.ts'), text('Three.'), change('b.ts')]);
   expect(segs.map((s) => s.kind)).toEqual(['run', 'change', 'run', 'change']);
-  expect(segs[0]).toEqual({ kind: 'run', n: 0, steps: ['One.', 'Two.'] });
-  expect(segs[2]).toEqual({ kind: 'run', n: 1, steps: ['Three.'] });
+  expect(segs[0]).toEqual({ kind: 'run', n: 0, steps: ['One.', 'Two.'], calls: [{ n: 0, runs: [{ name: 'read', outcome: 'ok' }] }, { n: 1, runs: [{ name: 'edit', outcome: 'ok' }] }] });
+  expect(segs[2]).toEqual({ kind: 'run', n: 1, steps: ['Three.'], calls: [null] });
 });
 
-test('a step that is all Next: draws nothing and breaks no run', () => {
-  const segs = turnSegments([text('One.'), text('Next: look'), text('Two.')]);
-  expect(segs).toEqual([{ kind: 'run', n: 0, steps: ['One.', 'Two.'] }]);
-  expect(turnSegments([text('Next: look')])).toEqual([]);
+test('calls no step made are a block of their own, and end a run', () => {
+  const segs = turnSegments([calls('a'), text('One.'), calls('b'), text(''), calls('c'), text('Two.')]);
+  expect(segs.map((s) => s.kind)).toEqual(['tools', 'run', 'tools', 'run']);
+  expect(segs[0]).toMatchObject({ kind: 'tools', n: 0 });
+  expect(segs[1]).toMatchObject({ kind: 'run', n: 0, calls: [{ n: 1 }] });
+  expect(segs[2]).toMatchObject({ kind: 'tools', n: 2 });
+  expect(segs[3]).toMatchObject({ kind: 'run', n: 1 });
 });
 
-test('a run keeps its number as the turn grows — its fold id never moves', () => {
-  const before = turnSegments([text('One.'), change('a.ts'), text('Two.')]);
-  const after = turnSegments([text('One.'), change('a.ts'), text('Two.'), text('Three.'), change('b.ts'), text('Four.')]);
-  expect(before.filter((s) => s.kind === 'run').map((s) => (s as { n: number }).n)).toEqual([0, 1]);
-  expect(after.filter((s) => s.kind === 'run').map((s) => (s as { n: number }).n)).toEqual([0, 1, 2]);
+test('a round that wrote nothing after a step leaves an empty step, so its calls are not the step\'s', () => {
+  const after = endRound([text('One.'), calls('a')], '');
+  expect(after.at(-1)).toEqual({ kind: 'text', text: '' });
+  expect(addCalls(after, [{ name: 'b', outcome: 'ok' }]).at(-1)).toEqual(calls('b'));
+  // Two silent rounds in a row share one line.
+  const two = addCalls(endRound(addCalls(after, [{ name: 'b', outcome: 'ok' }]), ''), [{ name: 'c', outcome: 'ok' }]);
+  expect(two.at(-1)).toEqual(calls('b', 'c'));
+  expect(endRound([text('One.')], 'Two.').at(-1)).toEqual(text('Two.'));
+});
+
+test('a call is kept as the trail draws it — never its whole result', () => {
+  expect(callRun({ name: 'read_file', args: { p: 1 }, outcome: 'ok', detail: 'x'.repeat(1000), changes: [1], views: [2] })).toEqual({ name: 'read_file', args: { p: 1 }, outcome: 'ok', detail: 'x'.repeat(300) });
+  expect(callRun({ outcome: 'ok' })).toBe(null);
+  expect(callRun('junk')).toBe(null);
+});
+
+test('a step with nothing to draw breaks no run', () => {
+  expect(turnSegments([text('One.'), text('   '), text('Two.')])).toEqual([{ kind: 'run', n: 0, steps: ['One.', 'Two.'], calls: [null, null] }]);
+  expect(turnSegments([text('Next:')])).toEqual([]);
+});
+
+test('a run and a stretch of calls keep their numbers as the turn grows — their fold ids never move', () => {
+  const before = turnSegments([text('One.'), change('a.ts'), calls('x'), text('Two.')]);
+  const after = turnSegments([text('One.'), change('a.ts'), calls('x'), text('Two.'), calls('y'), change('b.ts'), calls('z'), text('Four.')]);
+  const ids = (segs: ReturnType<typeof turnSegments>) => segs.filter((s) => s.kind !== 'change').map((s) => `${s.kind}:${(s as { n: number }).n}`);
+  expect(ids(after).slice(0, ids(before).length)).toEqual(ids(before));
 });
 
 // ─── The row a folded run is ──────────────────────────────────────────────────

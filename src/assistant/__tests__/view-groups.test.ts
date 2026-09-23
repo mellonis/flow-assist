@@ -31,6 +31,8 @@ test('a between-message that draws anything breaks the group', () => {
   expect(viewGroups([v(0), { role: 'assistant', content: '', parts: [{ kind: 'text', text: 'Now the tests.' }] }, v(1)], 'step')).toEqual([]);
   expect(viewGroups([v(0), { role: 'assistant', content: '', parts: [{ kind: 'change', change: { title: 'a.ts', diff: '', added: 1, removed: 0, hidden: 0 } }] }, v(1)], 'step')).toEqual([]);
   expect(viewGroups([v(0), { role: 'assistant', content: '', reasoning: 'thinking about it' }, v(1)], 'step')).toEqual([]);
+  // A call a block does not show is drawn where it was made — not folded away.
+  expect(viewGroups([v(0), { role: 'assistant', content: '', parts: [{ kind: 'tools', runs: [{ name: 'read_file', outcome: 'ok' }] }] }, v(1)], 'step')).toEqual([]);
   // …while a step that was nothing but its `Next:` line is taken in, whatever the
   // markdown around it.
   expect(viewGroups([v(0), { role: 'assistant', content: '', parts: [{ kind: 'text', text: '**Next:** lint\n' }] }, v(1)], 'step')).toEqual([{ head: 0, members: [0, 2], hidden: [1] }]);

@@ -144,7 +144,9 @@ test('the line times the running tool, not the turn, and the clock restarts with
   await settleUntil(() => model.requests.length === 2);
   await settle(10);
   // And the turn's own total is where it is read afterwards: under the answer.
-  expect(ui.backend.lastFrame).toMatch(/\d+\.\ds · ▸ 2 tools/);
+  expect(ui.backend.lastFrame).toMatch(/│ {3}\d+\.\ds\s/);
+  // The two commands are shown by their blocks, and never a second time as calls.
+  expect(ui.backend.lastFrame).not.toContain('2 tools');
   ui.app.unmount();
 }, 20_000);
 

@@ -3,39 +3,42 @@
 // grey. Consecutive console views of one turn (no other call between them: their
 // `seq` are consecutive) are drawn as one line, `ƒ Ran 3 commands · ✓ 34 s`; opened,
 // the commands alone, each its own block. The messages before and between them that
-// draw nothing (a round whose only text was its `Next:` line) are taken in too. Groups
-// form only in the `step` notes mode, and a message that draws anything — a step's
-// text, a change, reasoning — is never folded into one: what has been shown is never
-// taken away.
+// hold only the plan of the next command (a round whose only text was its `Next:`
+// line) are taken in too — the head says what ran, which is what the plan said would.
+// Groups form only in the `step` notes mode, and a message that says more — a step of
+// its own, a call, a change, reasoning — is never folded into one.
 //
 // Pure: works on the DRAWN messages (the system prompt is not one), by index — the
 // same `at` fold ids are built from.
 import { clickedOpen, foldId, isOpen, type FoldState } from './folds.js';
-import { shownText, type NotesMode, type TurnPart } from './step.js';
+import { isPlanOnly, shownText, type NotesMode, type TurnPart } from './step.js';
 import { isConsoleKind, sanitizeViewText, type ViewRecord } from './views.js';
 
 export interface ViewGroup { head: number; members: number[]; hidden: number[] }
-export type GroupMsg = { role: string; content?: unknown; parts?: unknown; reasoning?: unknown; views?: unknown; toolRuns?: unknown; roundLimit?: unknown; stopped?: unknown };
+export type GroupMsg = { role: string; content?: unknown; parts?: unknown; reasoning?: unknown; views?: unknown; roundLimit?: unknown; stopped?: unknown };
 
 const consoleOf = (m: GroupMsg): ViewRecord | null => {
   if (m.role !== 'view' || !Array.isArray(m.views) || m.views.length !== 1) return null;
   const r = m.views[0] as ViewRecord;
   return isConsoleKind(r.kind) && typeof r.seq === 'number' && typeof r.turn === 'number' ? r : null;
 };
-// A part that draws something: a change, or a step with text left once its `Next:`
-// lines are taken out.
+// A part that stays out of a group: a change, a call (one a command's block does not
+// already show), or a step that says more than its plan — a step that is nothing but
+// the `Next:` line the prompt asks for before a call is the plan of the command the
+// group's head names, and goes under the head with it.
 const drawsPart = (p: unknown) => {
   const part = p as TurnPart | null;
   if (!part || typeof part !== 'object') return false;
-  return part.kind === 'change' || (part.kind === 'text' && !!shownText(String(part.text ?? '')));
+  if (part.kind === 'change' || part.kind === 'tools') return true;
+  const text = String((part as { text?: unknown }).text ?? '');
+  return part.kind === 'text' && !!shownText(text) && !isPlanOnly(text);
 };
-// A message a group may take in: the round of a call that drew nothing — nothing
-// answered, no step text, no change, no trail, nothing about how a turn ended, no
-// reasoning (its own block). What has been shown stays where it was drawn, never
-// folded away.
+// A message a group may take in: the round of a command that said nothing but its
+// plan — nothing answered, no step of its own, no call, no change, nothing about how a
+// turn ended, no reasoning (its own block).
 const passable = (m: GroupMsg | undefined) => !!m && m.role === 'assistant' && !String(m.content ?? '').trim()
   && !(Array.isArray(m.parts) && m.parts.some(drawsPart)) && !String(m.reasoning ?? '').trim()
-  && !(Array.isArray(m.toolRuns) && m.toolRuns.length) && !m.roundLimit && !m.stopped;
+  && !m.roundLimit && !m.stopped;
 
 // Groups form only in `step`: `open` draws everything in full and folds nothing.
 export function viewGroups(drawn: GroupMsg[], notes: NotesMode): ViewGroup[] {

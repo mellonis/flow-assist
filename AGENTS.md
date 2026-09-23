@@ -272,11 +272,13 @@ assistant nobody had asked for a board.
   view kept), which is what makes `^o for all` true rather than a second, still-capped
   state. Consecutive commands of a turn (no other call between them) fold under one
   `ƒ Ran N commands · ✓ 34.0 s` head — `Running N commands · $ cmd · 4 s` while one runs —
-  which also takes in the rounds between them that drew nothing (their text was only
-  a `Next:` line). Opened, they are the commands alone, each its own block
+  which also takes in the rounds between them that said nothing but their plan (a
+  step that is only its `Next:` line, `isPlanOnly`: the head says what ran, which is
+  what the plan said would). Opened, they are the commands alone, each its own block
   (`src/assistant/view-groups.ts`). Groups form only in the `step` notes mode, and a
-  message that draws anything — a step's text, a change, reasoning — is never folded
-  into one.
+  message that says more — a step of its own, a call, a change, reasoning — is never
+  folded into one. A call that left a view is shown by its view and never a second
+  time as a trail line.
 - **Whose claim excuses a y/n, and whose does not.** A tool pauses because its `write`
   flag says so, and the flag is set by whoever is entitled to say it. The `mcp` plugin
   keeps the two apart per server: `trusted` is "I believe THIS SERVER's own
@@ -872,9 +874,10 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     was clicked open before the group formed around it, so a group never folds away
     what the person opened.
   - The kinds (`FoldKind`): `thinking` (a message's reasoning), `steps` (one run of
-    steps — a message may hold several, numbered), `tools` / `calls` (the trail and
-    its cap), `view` (a command's block, numbered), `group` (a group's head). The
-    `▸ notes` fold is gone with the category layout.
+    steps — a message may hold several, numbered), `tools` / `calls` (one stretch of
+    calls and its trail's cap, numbered together), `view` (a command's block,
+    numbered), `group` (a group's head). The `▸ notes` fold is gone with the category
+    layout, and so is the one trail per turn.
   - A block's id names its message by its place among the messages that are DRAWN
     (`foldId`). Not by the message OBJECT — the chat replaces a message whenever it
     changes, which is what makes `rowCache` correct — and not by its raw index: the
@@ -913,13 +916,18 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   moved into the "shown" slot, above EVERY diff of the turn: with a tall diff it left
   the screen, and the ✎ block was the last thing on it again, as if a second write had
   happened. The message now carries its `parts` in order — the text of each round that
-  went on to call a tool (a STEP) and each change a write reported — then `live` (the
-  round being written) and `content` (the answer):
+  went on to call a tool (a STEP), the calls (`tools`, from `onToolRun` as each call
+  ends) and each change a write reported — then `live` (the round being written) and
+  `content` (the answer):
   ```
     ▸ I will change b to 42.
     ✎ clone/app.ts · +1 −1
     (diff)
     ▸ All clear, nothing else uses b.  (2 steps)
+    ▸ 2 tools: datetime ×2 · ^o
+    ▸ Now the test.
+    ✎ clone/app.test.ts · +1 −1
+    (diff)
   ƒ Done: b is now 42.
   ```
   - **A round's text never moves.** While it streams nobody knows what it is, so it is
@@ -927,11 +935,19 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     answer's `ƒ`. The moment a tool-call fragment arrives (`onRoundKind` — `agentChat`
     reports it on the first fragment, long before the round ends) it is a step, and it
     joins its run where it stands. A round that ends with no call is the answer: the
-    same rows, now under `ƒ` and in the normal colour. The same `shownText` lays out a
-    round streaming, a step and the answer, so nothing reflows when a round ends.
-  - **Steps come in runs.** Consecutive steps with nothing visible between them are one
-    RUN; a ✎ change ends it, and so does a command's block (a message of its own). The
-    trail line stays under the answer, where it always was.
+    same rows, now under `ƒ` and in the normal colour — drawn exactly as the model
+    wrote it (`answerText`), so a `Next:` it held reflows by a word there and nowhere
+    else.
+  - **Steps come in runs, and calls stand where they were made.** A step's own calls
+    — the calls of its round, right after it — are the step's: they sit inside its run
+    (opened, a line per call under the step) and do not end it, or no two steps could
+    ever share a run. Calls no step made (a round that wrote nothing, calls after a
+    change) are a trail of their own — `▸ 2 tools: read_file ×2`, opened to a line per
+    call — and end a run like a ✎ change or a command's block (a message of its own)
+    does. Consecutive silent rounds share one trail; a silent round after a step's
+    calls leaves an empty step first (`endRound`) so its calls are not taken for the
+    step's. Under the answer only the quiet line stays: how long the turn took,
+    `stopped (Esc)`, what it cost.
   - **`step` (the default) folds each run to ONE dim row** at the place the run began:
     `▸ ` + the newest step (its last finished sentence, else its first line) and, for
     more than one, `(N steps)` — no count for a run of one (`runRowText`). The row is
@@ -941,19 +957,23 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     `foldId(at, 'steps', n)` — `n` is the run's number within its message, which never
     changes as the turn grows because parts are only appended. A click opens that run
     alone: every step in full, dim, where it happened (a click on any of its rows
-    folds it again); `^o` opens and closes every run with everything else.
-  - **`open` draws every step in full, in the normal colour** — no folds, nothing there
-    is clickable. The mode is the CONVERSATION's: `plugins.assistant.notes` says where
+    folds it again); `^o` opens and closes every run with everything else. A trail is
+    numbered the same way (`foldId(at, 'tools', n)`, its cap `calls` with the same
+    `n`), a step's own calls included, so an id means the same in both modes.
+  - **`open` draws every step in full, in the normal colour** — steps do not fold, and
+    each step's calls are a trail line under it. The mode is the CONVERSATION's: `plugins.assistant.notes` says where
     a conversation starts, `/notes [step|open]` moves it, nothing is saved, and
     `/clear`, `/resume` and a change of task come back to the config's answer. The
     modes `fold` and `hidden` were dropped; a config file that still says either reads
     as `step` (`notesMode`), and `/notes fold` is refused. The mode is in the
     `rowCache` key, and so is every run's open bit.
-  - **A `Next:` line is never drawn** — not while it streams, not in a step, not
-    opened. A last line that could still grow into one (`N`, `Nex`…) is held back until
-    it says what it is: a few characters nobody sees, rather than a line that appears
-    and vanishes. A step that was nothing but its `Next:` line draws nothing, breaks no
-    run, and is what a group of commands may take in (`view-groups.ts`).
+  - **The `Next:` token is never drawn; its sentence is the step.** A model that keeps
+    to the prompt writes exactly one `Next: …` line before each call, so hiding the
+    line left every step empty. A line starting `Next:` (any case, any markup) is drawn
+    without the token — streaming, in a run's row, opened, in `open` (`shownText`). A
+    last line that could still grow into one (`N`, `Nex`…) is held back until it says
+    what it is. The answer is left as written: `Next: restart the server` there is
+    advice to the person.
   - **The reasoning is a block of its own** (`foldId(at, 'thinking')`): a `▸ thinking`
     header in `step` that a click or `^o` opens, always open in `open`.
   - **Round bookkeeping lives outside the state updaters.** Whether the round being
@@ -967,17 +987,19 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   - **A round cut off** by Esc or an error keeps its text where it was drawn: a round
     known to carry a call becomes a step, any other is what the answer had come to,
     under the `stopped (Esc)` line.
-  - **Sessions keep the parts in order.** A session saved before kept the text of the
-    tool rounds (`process`, or `shown`) and the turn's `changes`; it reads as those
-    parts in that old order — the text, then the changes (`normalizeParts`). A part a
+  - **Sessions keep the parts in order.** A call is kept as the trail draws it
+    (`callRun`: name, arguments, outcome, the first 300 characters of the result) —
+    never a file's whole contents. A session saved before kept the text of the tool
+    rounds (`process`, or `shown`), the turn's `changes` and its whole trail
+    (`toolRuns`); it reads as those parts in that old order — the text, the changes,
+    then the calls as one trail just before the answer (`normalizeParts`). A part a
     renderer cannot draw, or a "message" that is not an object, is dropped on load;
     `live` and `liveQuiet` are never saved.
   - **The model is asked for the shape, not for silence.** `baseStatic()` used to tell
     it not to narrate; it narrated anyway, having nothing else to write between calls.
     It now asks for ONE short line starting `Next:` before a tool call and nothing else
-    between calls, and for the final answer not to start with one. The chat never
-    draws that line, so a model that keeps to the shape leaves only what it did on
-    screen; one that writes prose anyway leaves steps. Whether the instruction holds over a long
+    between calls, and for the final answer not to start with one. The sentence after
+    the token is the step the chat draws. Whether the instruction holds over a long
     turn, and that it costs no tool call, is a question for a live run
     (`scripts/eval-tool-use.ts`); the e2e test only holds the host to SENDING it.
 - **⇧⇥ steps the auto mode** — how much of a turn runs without the y/n (the rules are
@@ -1142,8 +1164,8 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     round the moment the tool ends (`segRef`, `beginSegment` in the chat; `t0Ref` still
     times the turn). One timer from the question to the answer sat at `3m 12s` through
     a build, which says nothing about what is happening. The TURN's total, and what it
-    cost, stay on the quiet line under the finished answer (`· 12.4 s · ▸ 3 tools ·
-    3.1k tok`), where they are read afterwards and distract nobody.
+    cost, stay on the quiet line under the finished answer (`12.4 s · 3.1k tok`), where
+    they are read afterwards and distract nobody.
   - **What the turn costs is said** (`3.1k tok`, `tokensBadge`): every round's prompt
     plus its completion as the provider reports them (`onRound`'s `usage`), added up
     for the turn. It is not `ctx N%` beside it — that one is how big the NEXT request
@@ -1157,7 +1179,9 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   same tool that ENDED the same way are one line with a count (`read_file ×12`) — a
   different argument is not a different line, the arguments are in the log — while a
   call that FAILED keeps a line of its own with its reason, which is how a person
-  knows why an answer is thin. An open trail shows its last `TRAIL_ROWS` (12) lines
+  knows why an answer is thin. A turn has a trail wherever it made calls no step made
+  (see "A turn is drawn in the order it happened"); a step's own calls are drawn
+  condensed the same way inside its run. An open trail shows its last `TRAIL_ROWS` (12) lines
   over `… N earlier calls`, which only a click opens (see the fold model above). The
   folded summary (`toolSummary`) carries the counts too and is cut to the width —
   every `ChatRow` is one terminal line, and fifty tool names would take two.

@@ -96,7 +96,7 @@ const KEY_DEFAULTS: Record<string, string> = {
   // Said in full: "what is that dim ▸ line?" and "where did the text go?" are asked of
   // the assistant. The full path, so the other assistant keys keep the `plugins` note
   // above.
-  'plugins.assistant.notes': 'A turn is drawn in the order it happened: what the model said between tool calls (its steps), each diff, then the answer. step (the default) — each stretch of steps with nothing between them folds to ONE dim ▸ line where it began: the latest step and how many there were; a click opens that stretch, Ctrl+o opens all. open — every step in full, in the normal colour. Lines starting "Next:" are never shown. In the chat, /notes [step|open] changes it for the current conversation only. The older values fold and hidden are read as step',
+  'plugins.assistant.notes': 'A turn is drawn in the order it happened: what the model said between tool calls (its steps), the calls, each diff, then the answer. step (the default) — each stretch of steps (with the calls each made) folds to ONE dim ▸ line where it began: the latest step and how many there were; a click opens that stretch, Ctrl+o opens all. open — every step in full, in the normal colour. The "Next:" a step starts with is never shown, only the sentence after it. In the chat, /notes [step|open] changes it for the current conversation only. The older values fold and hidden are read as step',
 };
 
 // Resolves the zod node for a config key, falling back to a plugin's own

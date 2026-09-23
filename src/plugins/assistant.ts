@@ -11,7 +11,7 @@ import { addTrigger, chatUser } from '../loader/registry.js';
 import { bgActiveCount } from '../loader/tools-core.js';
 import { autoBadge, autoCommand, autoConfirms, autoSaid, nextAutoMode, type AutoMode } from '../assistant/auto.js';
 import { createPlan, todoGlyph } from '../assistant/plan.js';
-import { notesCommand, notesMode, notesSaid, type NotesMode, type TurnPart } from '../assistant/step.js';
+import { addCalls, callRun, endRound, notesCommand, notesMode, notesSaid, type CallRun, type NotesMode, type TurnPart } from '../assistant/step.js';
 import { apiHistory, compactConversation, chatLanguage, requestTools, transcriptSoFar } from '../assistant/agent.js';
 import { createToolSet, toolLoadingMode } from '../assistant/tool-loading.js';
 import { copyTarget, copyToClipboard } from '../assistant/copy.js';
@@ -94,7 +94,7 @@ export function shellCommandOf(name: string, args: string): string | null {
 }
 
 // A chat message. `role` is the OpenAI role; `content` may be null when a message
-// carries tool_calls. Extra fields ride along (live/reasoning/parts/toolRuns/…).
+// carries tool_calls. Extra fields ride along (live/reasoning/parts/duration/…).
 interface ChatMsg {
   role: string;
   content?: string | null;
@@ -106,7 +106,6 @@ interface ChatMsg {
   // The turn so far in the order it happened: the steps (the text of each round that
   // went on to call a tool) and the changes its writes reported. Display only.
   parts?: TurnPart[];
-  toolRuns?: unknown[];
   duration?: number;
   stopped?: boolean;
   // A block a tool asked the host to draw (role 'view') — a command's output so far.
@@ -368,7 +367,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const inputRef = f.useRef(input); inputRef.current = input;
           const msgsRef = f.useRef(messages); msgsRef.current = messages;
           // The MODEL's history, kept apart from the display list above. `messages`
-          // holds what the person reads (final text + process/toolRuns/live); this
+          // holds what the person reads (final text + parts/live); this
           // holds what was actually exchanged — tool calls and tool results included
           // — and is what every turn replays. See `apiHistory` for why the display
           // list must never stand in for it.
@@ -1072,7 +1071,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // What a write changed goes on the answer being written the moment the
                 // write lands — a block of its own that stays in the chat. Only on the
                 // display message: `apiRef` gets the transcript, which never holds it.
-                onToolRun: (run: { changes?: ChangeView[] }) => {
+                onToolRun: (run: { changes?: ChangeView[]; views?: unknown[] }) => {
                   // A call whose result arrives after a LATER reset (/clear mid-turn,
                   // most often): the conversation it ran in is gone from both the screen
                   // and `apiRef`, and every one of this callback's effects — the status
@@ -1087,16 +1086,19 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   // final phase included — flush now rather than waiting on the coalesce
                   // timer, so it is on screen before the next round's tool label appears.
                   flushLive();
-                  const added = run.changes ?? [];
-                  if (!added.length) { f.notify(); return; }
-                  // In the turn's own order: under the step that led to the write, above
-                  // whatever the model writes next.
-                  const changed: TurnPart[] = added.map((change) => ({ kind: 'change', change }));
+                  // The call and what it changed go into the turn in its own order: under
+                  // the step that led to it, above whatever the model writes next. A call
+                  // that left a view is shown by that view (a message of its own, placed
+                  // by `onToolLive`), so it is not drawn a second time as a trail line.
+                  const call = run.views?.length ? null : callRun(run);
+                  const calls: CallRun[] = call ? [call] : [];
+                  const changed: TurnPart[] = (run.changes ?? []).map((change) => ({ kind: 'change', change }));
+                  if (!calls.length && !changed.length) { f.notify(); return; }
                   setMessages(cur => {
                     const next = cur.slice();
                     const last = next[next.length - 1];
-                    if (last?.role === 'assistant') next[next.length - 1] = { ...last, parts: [...(last.parts ?? []), ...changed] };
-                    else next.push({ role: 'assistant', content: '', parts: changed });
+                    if (last?.role === 'assistant') next[next.length - 1] = { ...last, parts: [...addCalls(last.parts ?? [], calls), ...changed] };
+                    else next.push({ role: 'assistant', content: '', parts: [...addCalls([], calls), ...changed] });
                     return next;
                   });
                   f.notify();
@@ -1192,14 +1194,12 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                     // The answer is only added to, never replaced: the rows stay exactly
                     // as they were drawn and simply stop being provisional.
                     if (isAnswer) next[next.length - 1] = { ...last, content: text, live: '', liveQuiet: false };
-                    else next[next.length - 1] = { ...last, parts: [...(last.parts ?? []), ...step], live: '', liveQuiet: false };
+                    else next[next.length - 1] = { ...last, parts: endRound(last.parts ?? [], text), live: '', liveQuiet: false };
                     return next;
                   });
                 },
               });
               (f.services as Record<string, any>).pushLog?.(`[chat] ${q.slice(0, 40)}… → ${q.length} chars${images.length ? ` + ${images.length} image${images.length === 1 ? '' : 's'}` : ''}`);
-              // A persistent trail of executed tools: put it on the last assistant message
-              // so the render shows «▸ update_issue … → applied/declined/error».
               roundLimit = Number((chatResult as { roundLimit?: number } | undefined)?.roundLimit ?? 0);
               const turn = (chatResult as { transcript?: ChatMessage[]; content?: string } | undefined);
               const reported = (chatResult as { usage?: { promptTokens: number; completionTokens: number } } | undefined)?.usage;
@@ -1208,15 +1208,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 ...apiRef.current,
                 ...(turn?.transcript?.length ? turn.transcript : [{ role: 'assistant', content: turn?.content ?? '' }]),
               ];
+              // The calls are already in the turn, where they were made (`onToolRun`).
               const runs = (chatResult as { toolRuns?: unknown[] } | undefined)?.toolRuns ?? [];
-              if (runs.length) {
-                setMessages(cur => {
-                  const next = cur.slice();
-                  const at = answerAt(next);
-                  if (at >= 0) next[at] = { ...next[at]!, toolRuns: runs };
-                  return next;
-                });
-              }
               // After a real write the plugins reload what they show — otherwise an open
               // document keeps the text from before the write. It does not close the chat.
               if (runs.some(r => (r as { write?: boolean; outcome?: string }).write && (r as { outcome?: string }).outcome === 'applied')) {

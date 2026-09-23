@@ -182,23 +182,28 @@ test('a round whose text and tool call arrive in ONE chunk keeps its text — an
   ui.app.unmount();
 });
 
-test('a Next: line is never drawn — not while it streams, not after, not opened', async () => {
+test('a Next: line is its step without the token — streaming, folded, opened and in open', async () => {
   const model = new ScriptedModel();
   const ui = await ask(model, [
-    [{ text: 'Next: read the notebook.' }, { hold: true }, { tool: 'datetime', args: {} }],
+    [{ text: 'Next: read app.ts' }, { hold: true }, { tool: 'datetime', args: {} }],
     [{ text: 'Nex' }, { hold: true }, { text: 't: count the entries\nThe notebook has a header.' }, { tool: 'datetime', args: {} }],
     [{ text: 'Three entries.' }],
   ]);
   const seen: string[] = [ui.backend.lastFrame];
+  expect(ui.backend.lastFrame).toContain('read app.ts'); // streaming, the token already gone
   model.release();
   await settle(20);
   seen.push(ui.backend.lastFrame); // `Nex` held back until it says what it is
   model.release();
   await settle(20);
   seen.push(ui.backend.lastFrame);
+  // The run's row says the newest step; opened, both are there, token-less.
+  expect(ui.backend.lastFrame).toContain('▸ The notebook has a header.  (2 steps)');
   ui.backend.press({ name: 'o', ctrl: true });
   await settle(6);
   seen.push(ui.backend.lastFrame);
+  expect(ui.backend.lastFrame).toContain('read app.ts');
+  expect(ui.backend.lastFrame).toContain('count the entries');
   await ui.type('/notes open');
   await ui.press('return');
   await settle(6);
@@ -206,12 +211,22 @@ test('a Next: line is never drawn — not while it streams, not after, not opene
   for (const frame of seen) {
     expect(frame).not.toContain('Next');
     expect(frame).not.toContain('Nex');
-    expect(frame).not.toContain('read the notebook');
-    expect(frame).not.toContain('count the entries');
   }
-  // What the round said besides its `Next:` line is a step like any other.
-  expect(ui.backend.lastFrame).toContain('The notebook has a header.');
-  expect(ui.backend.lastFrame).toContain('Three entries.');
+  ui.app.unmount();
+});
+
+test('a step that is only its Next: line folds to that sentence', async () => {
+  const model = new ScriptedModel();
+  const ui = await ask(model, [[{ text: 'Next: read app.ts' }, { tool: 'datetime', args: {} }], [{ text: 'Read.' }]]);
+  expect(ui.backend.lastFrame).toContain('▸ read app.ts');
+  expect(ui.backend.lastFrame).not.toContain('Next:');
+  ui.app.unmount();
+});
+
+test('the answer is drawn as the model wrote it — its own Next: line included', async () => {
+  const model = new ScriptedModel();
+  const ui = await ask(model, [[{ text: 'The config is fixed.\n\nNext: restart the server.' }]]);
+  expect(ui.backend.lastFrame).toContain('Next: restart the server.');
   ui.app.unmount();
 });
 
@@ -275,6 +290,50 @@ test('a drag copies the answer, never a run\'s row', async () => {
   const [text] = ui.backend.clipboard;
   expect(text).toContain('Done.');
   expect(text).not.toContain('Then the tests.');
+  ui.app.unmount();
+});
+
+// ─── Calls, where they were made ─────────────────────────────────────────────
+// A step's own calls are in its run; calls no step made (a round that wrote nothing)
+// are a trail line of their own, where they happened — between the runs.
+const WITH_READS: Turn[] = [
+  [{ text: 'First I look.' }, { tool: 'datetime', args: {} }],
+  [{ text: 'Then I look again.' }, { tool: 'datetime', args: {} }],
+  [{ tool: 'config_schema', args: {} }, { tool: 'config_schema', args: {} }],
+  [{ text: 'Now I change it.' }, { tool: 'edit_app', args: { b: 42 } }],
+  [{ text: 'Done.' }],
+];
+
+test('calls no step made stand between the runs, in order; a click opens one, ^o all', async () => {
+  const model = new ScriptedModel();
+  const ui = await ask(model, WITH_READS);
+  const run = rowOf(ui, '▸ Then I look again.  (2 steps)');
+  const reads = rowOf(ui, '▸ 2 tools: config_schema ×2');
+  const change = rowOf(ui, '▸ Now I change it.');
+  expect(run).toBeGreaterThan(-1);
+  expect(reads).toBeGreaterThan(run);
+  expect(change).toBeGreaterThan(reads);
+  expect(rowOf(ui, '✎ clone/app.ts')).toBeGreaterThan(change);
+  expect(rowOf(ui, 'Done.')).toBeGreaterThan(rowOf(ui, '✎ clone/app.ts'));
+  // The trail is no longer under the answer: every call is where it was made.
+  expect(times(ui.backend.lastFrame, 'tools:')).toBe(1);
+
+  // A click on the calls opens them alone.
+  await click(ui, reads);
+  expect(ui.backend.lastFrame).toMatch(/▸ config_schema ×2 → ok/);
+  expect(ui.backend.lastFrame).toContain('(2 steps)');
+  expect(ui.backend.lastFrame).not.toMatch(/▸ datetime → ok/);
+  await click(ui, rowOf(ui, 'config_schema ×2 → ok'));
+  expect(ui.backend.lastFrame).not.toMatch(/config_schema ×2 → ok/);
+
+  // ^o: every run with its steps' own calls, and every trail.
+  ui.backend.press({ name: 'o', ctrl: true });
+  await settle(6);
+  const all = ui.backend.lastFrame;
+  expect(all).toMatch(/▸ config_schema ×2 → ok/);
+  expect(times(all, 'datetime → ok')).toBe(2);
+  expect(rowOf(ui, 'First I look.')).toBeLessThan(rowOf(ui, 'config_schema ×2 → ok'));
+  expect(rowOf(ui, 'edit_app')).toBeLessThan(rowOf(ui, '✎ clone/app.ts'));
   ui.app.unmount();
 });
 
@@ -390,8 +449,8 @@ test('a restart keeps the turn in the order it happened', async () => {
   const file = fs.readdirSync(dir).find((f) => f.endsWith('.json'))!;
   const saved = JSON.parse(fs.readFileSync(path.join(dir, file), 'utf8')) as Session;
   const turn = saved.messages.find((m) => Array.isArray(m.parts)) as { parts: { kind: string }[] } & Record<string, unknown>;
-  expect(turn.parts.map((p) => p.kind)).toEqual(['text', 'text', 'change', 'text', 'text', 'change']);
-  for (const old of ['shown', 'process', 'changes', 'step', 'live', 'liveQuiet']) expect(old in turn).toBe(false);
+  expect(turn.parts.map((p) => p.kind)).toEqual(['text', 'tools', 'text', 'tools', 'change', 'text', 'tools', 'text', 'tools', 'change']);
+  for (const old of ['shown', 'process', 'changes', 'toolRuns', 'step', 'live', 'liveQuiet']) expect(old in turn).toBe(false);
   two.app.unmount();
 });
 
@@ -406,7 +465,8 @@ test('a session saved before the time order still renders — and a malformed me
       { role: 'user', content: 'old question' },
       // The category layout: the narration of the tool rounds, the part of it that was
       // on screen, the one-line step, every change of the turn, the answer.
-      { role: 'assistant', content: 'Old answer.', process: 'Next: look\n\nI looked at the old file.', shown: 'I looked at the old file.', step: 'look', changes: [change, { title: 7 }], duration: 1200 },
+      { role: 'assistant', content: 'Old answer.', process: 'I looked at the old file.', shown: 'I looked at the old file.', step: 'look', changes: [change, { title: 7 }],
+        toolRuns: [{ name: 'read_file', args: { path: 'old.ts' }, outcome: 'ok', detail: 'const b = 2;' }, { name: 'edit_file', args: {}, write: true, outcome: 'applied', detail: 'ok', changes: [change] }, 'junk'], duration: 1200 },
       { role: 'user', content: 'second question' },
       { role: 'assistant', content: 'Second answer.', parts: 'garbage' },
       null as never,
@@ -427,7 +487,11 @@ test('a session saved before the time order still renders — and a malformed me
   const text = rowOf(ui, '▸ I looked at the old file.');
   expect(text).toBeGreaterThan(-1);
   expect(rowOf(ui, '✎ clone/old.ts')).toBeGreaterThan(text);
-  expect(rowOf(ui, 'Old answer.')).toBeGreaterThan(rowOf(ui, '✎ clone/old.ts'));
+  // The trail that was drawn under the answer is one line just before it — once.
+  const trail = rowOf(ui, '▸ 2 tools');
+  expect(trail).toBeGreaterThan(rowOf(ui, '✎ clone/old.ts'));
+  expect(rowOf(ui, 'Old answer.')).toBeGreaterThan(trail);
+  expect(times(ui.backend.lastFrame, 'read_file')).toBe(1);
   expect(ui.backend.lastFrame).not.toContain('Next:');
   expect(ui.backend.lastFrame).toContain('Second answer.');
   ui.app.unmount();

@@ -70,8 +70,9 @@ export function clickedOpen(state: FoldState, id: string): boolean {
 
 // The blocks a message can have. `thinking` is its reasoning, `steps` one run of the
 // text it wrote between tool calls (src/assistant/step.ts — a message can hold
-// several runs, `n` says which), `tools` the trail of calls behind the one-line
-// summary, `calls` the earlier calls an open trail caps away, `view` a command's output
+// several runs, `n` says which), `tools` one stretch of the calls it made, behind its
+// one-line summary (numbered the same way), `calls` the earlier calls that stretch's
+// open trail caps away (numbered with it), `view` a command's output
 // capped to its last lines, `group` the head consecutive commands fold under
 // (src/assistant/view-groups.ts).
 export type FoldKind = 'thinking' | 'steps' | 'tools' | 'calls' | 'view' | 'group';
@@ -82,7 +83,9 @@ export type FoldKind = 'thinking' | 'steps' | 'tools' | 'calls' | 'view' | 'grou
 // arrives. The place is counted over the messages that are DRAWN — the system prompt is
 // not one of them, and it is unshifted onto the list again with every question, which
 // would otherwise move every id by one. A kind a message can hold several of (`view`,
-// `steps`) adds which one; the count only grows as a turn goes on, so it never moves.
+// `steps`, `tools`, `calls`) adds which one; the count only grows as a turn goes on,
+// so it never moves.
+const NUMBERED: ReadonlySet<FoldKind> = new Set(['view', 'steps', 'tools', 'calls']);
 export function foldId(index: number, kind: FoldKind, n = 0): string {
-  return kind === 'view' || kind === 'steps' ? `${index}:${kind}:${n}` : `${index}:${kind}`;
+  return NUMBERED.has(kind) ? `${index}:${kind}:${n}` : `${index}:${kind}`;
 }

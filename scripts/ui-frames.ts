@@ -83,7 +83,7 @@ const editor = (make: Make) => [make('clone', {
     id: 'clone',
     tools: [{ type: 'function', function: { name: 'edit_app', description: 'Edit app.ts.', parameters: { type: 'object', properties: { b: { type: 'number' } } } } }],
     exec: async (_name: string, args: Record<string, unknown>, ctx: Record<string, unknown>) => {
-      (ctx as { reportChange?: (c: unknown) => void }).reportChange?.({ title: 'clone/app.ts', before: 'const a = 1;\nconst b = 2;\nconst c = 3;\n', after: `const a = 1;\nconst b = ${Number(args.b)};\nconst c = 3;\n` });
+      (ctx as { reportChange?: (c: unknown) => void }).reportChange?.({ title: `clone/app${String(args.file ?? '')}.ts`, before: 'const a = 1;\nconst b = 2;\nconst c = 3;\n', after: `const a = 1;\nconst b = ${Number(args.b)};\nconst c = 3;\n` });
       return 'edited';
     },
   }],
@@ -169,15 +169,19 @@ const scenarios: Record<string, () => Promise<void>> = {
     ui.app.unmount();
   },
 
-  // One turn in time order: text, a write, two more steps, the answer. In `step` each
-  // run of steps folds to one row where it began; `^o` opens them in place; `open`
-  // draws them all in the normal colour.
+  // One turn in time order: a step and its write, two more steps, two calls with no
+  // step of their own, a step and its write, the answer. In `step` each run of steps
+  // (with the calls each made) folds to one row where it began; the calls no step made
+  // are a trail line of their own; `^o` opens everything in place; `open` draws the
+  // steps in the normal colour.
   async turn() {
     const model = new ScriptedModel();
     const script = () => model.script(
       [{ text: 'I will change b to 42.' }, { tool: 'edit_app', args: { b: 42 } }],
       [{ text: 'Let me check the rest of the file.' }, { hold: true }, { tool: 'datetime', args: {} }],
       [{ text: 'All clear, nothing else uses b.' }, { tool: 'datetime', args: {} }],
+      [{ tool: 'datetime', args: {} }, { tool: 'datetime', args: {} }],
+      [{ text: 'Now the test.' }, { tool: 'edit_app', args: { b: 42, file: '.test' } }],
       [{ text: 'Done: b is now ' }, { hold: true }, { text: '42.' }],
     );
     script();

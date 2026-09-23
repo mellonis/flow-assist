@@ -16,7 +16,7 @@
 
 import { askRows, type AskRow, type AskState } from '../assistant/ask.js';
 import { autoBadge, type AutoMode } from '../assistant/auto.js';
-import { cutStep, readParts, runRowText, shownText, turnSegments, type NotesMode } from '../assistant/step.js';
+import { answerText, cutStep, readParts, runRowText, shownText, turnSegments, type NotesMode } from '../assistant/step.js';
 import { isClicked, isOpen, foldId, type FoldState } from '../assistant/folds.js';
 import { imageTokenRanges, splitTokens } from '../assistant/images.js';
 import { changeCounts, changeMarkdown, diffRows, type ChangeView } from '../assistant/diff.js';
@@ -55,7 +55,6 @@ interface ChatMsg {
   // on to call a tool) and the changes the writes reported (src/assistant/step.ts).
   parts?: unknown;
   reasoning?: string;
-  toolRuns?: ToolRun[];
   // The turn ran out of rounds after this many, with no answer.
   roundLimit?: number;
   duration?: number;
@@ -515,14 +514,15 @@ function messageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): ChatRow
   // Everything the rows depend on is in the key — which of this message's blocks are
   // open as much as the width, and how the narration is drawn — or a message would
   // keep the rows it was first laid out with, and a click would move nothing.
-  // A run of steps is numbered within its message, and a message may hold several —
-  // one bit for each, up to the number it could hold (one per part, and the live round).
-  const runs = (Array.isArray(m.parts) ? m.parts.length : 0) + 1;
+  // A run of steps and a stretch of calls are numbered within their message, and a
+  // message may hold several — bits for each, up to the number it could hold (one per
+  // part, and the live round).
+  const blocks = Array.from({ length: (Array.isArray(m.parts) ? m.parts.length : 0) + 1 }, (_b, n) => n);
   const open = [
     isOpen(o.folds, foldId(at, 'thinking')) ? 1 : 0,
-    ...Array.from({ length: runs }, (_r, n) => (isOpen(o.folds, foldId(at, 'steps', n)) ? 1 : 0)),
-    isOpen(o.folds, foldId(at, 'tools')) ? 1 : 0,
-    isClicked(o.folds, foldId(at, 'calls')) ? 1 : 0,
+    ...blocks.map((n) => (isOpen(o.folds, foldId(at, 'steps', n)) ? 1 : 0)),
+    ...blocks.map((n) => (isOpen(o.folds, foldId(at, 'tools', n)) ? 1 : 0)),
+    ...blocks.map((n) => (isClicked(o.folds, foldId(at, 'calls', n)) ? 1 : 0)),
     ...views.map((_v, vi) => (isOpen(o.folds, foldId(at, 'view', vi)) ? 1 : 0)),
   ].join('');
   // The global fold flag on its own: a view open because it was CLICKED and a view
@@ -683,6 +683,24 @@ function buildMessageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): Ch
       // joins its run where it stands rather than waiting for the round to end.
       const liveStep = m.liveQuiet === true && !!live;
       const parts = [...readParts(m.parts), ...(liveStep ? [{ kind: 'text' as const, text: live }] : [])];
+      // Calls: one quiet line (`▸ 2 tools: read_file ×2`) that opens to the trail, a
+      // line per call. A command a block already shows is not among them — its block
+      // is (the chat leaves it out).
+      const trail = (n: number, runs: ToolRun[]) => {
+        const toolsId = foldId(at, 'tools', n);
+        const opened = isOpen(folds, toolsId);
+        rows.push({ role, meta: true, runs, open: opened, fold: toolsId });
+        if (!opened) return;
+        const condensed = condenseRuns(runs);
+        // The open trail is capped: the LAST calls are the ones a person is looking
+        // for, and what came before them is one line that opens the rest. A stretch of
+        // sixty calls is thirteen rows, not sixty. The cap holds whatever the global
+        // state is: only a click on that line lifts it.
+        const callsId = foldId(at, 'calls', n);
+        const earlier = isClicked(folds, callsId) ? 0 : Math.max(0, condensed.length - TRAIL_ROWS);
+        if (earlier) rows.push({ role, toolRun: true, fold: callsId, spans: [{ text: `… ${earlier} earlier call${earlier === 1 ? '' : 's'}`, dim: true }] });
+        for (const { run, n: times } of condensed.slice(earlier)) rows.push({ role, toolRun: true, fold: toolsId, spans: [toolRunText(run, inner, times)] });
+      };
       for (const seg of turnSegments(parts)) {
         if (seg.kind === 'change') {
           // What a write changed: always open (not foldable) — it is the part of the
@@ -693,6 +711,11 @@ function buildMessageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): Ch
           rows.push({ gap: true });
           continue;
         }
+        if (seg.kind === 'tools') {
+          trail(seg.n, seg.runs);
+          rows.push({ gap: true });
+          continue;
+        }
         const id = foldId(at, 'steps', seg.n);
         if (notes === 'step' && !isOpen(folds, id)) {
           // The run folded: ONE dim row where it began, saying the newest step and
@@ -700,10 +723,16 @@ function buildMessageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): Ch
           rows.push({ role, step: true, fold: id, spans: [{ text: runRowText(seg.steps, inner) }] });
         } else {
           // Every step in full, where it happened: dim in `step` (a click on any of
-          // its rows folds the run again), the normal colour in `open`.
+          // its rows folds the run again), the normal colour in `open`. Under each,
+          // the calls it made: in `step` a line per call, part of the run; in `open`
+          // the trail line the calls have anywhere else.
           seg.steps.forEach((text, si) => {
             if (si) rows.push({ gap: true, ...(notes === 'step' ? { fold: id } : {}) });
             for (const line of mdLines(text, inner)) rows.push(row(line, notes === 'step' ? { quiet: true, fold: id } : {}));
+            const calls = seg.calls[si];
+            if (!calls) return;
+            if (notes === 'step') for (const { run, n } of condenseRuns(calls.runs)) rows.push({ role, toolRun: true, fold: id, spans: [toolRunText(run, inner, n)] });
+            else trail(calls.n, calls.runs);
           });
         }
         rows.push({ gap: true });
@@ -714,12 +743,13 @@ function buildMessageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): Ch
       if (live && !liveStep) mdLines(live, inner).forEach((line, li) => rows.push(row(line, { quiet: true, ...(li === 0 ? { liveMark: true } : {}) })));
       // A turn that ran out of rounds says so where the answer would be. Before this it
       // was a dim line under the field, which a wall of grey tool lines hid.
-      const answer = shownText(String(m.content ?? ''));
+      const answer = answerText(String(m.content ?? ''));
       if (Number(m.roundLimit) > 0 && !answer) {
         rows.push({ role, limit: true, first: true, spans: [{ text: cutStep(`stopped after ${Number(m.roundLimit)} rounds — no answer; say "continue" to carry on`, inner) }] });
       }
-      // The answer: the same rows the round was drawn with while it streamed (the
-      // same `shownText`, the same layout), now in the normal colour under `ƒ`.
+      // The answer, exactly as written — the rows the round was drawn with while it
+      // streamed (a `Next:` it held reflows by a word), now in the normal colour
+      // under `ƒ`.
       if (answer) mdLines(answer, inner).forEach((line, li) => rows.push(row(line, { first: li === 0 })));
     } else {
       const text = String(m.content ?? '');
@@ -729,30 +759,14 @@ function buildMessageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): Ch
       const images = Array.isArray(m.images) ? (m.images as unknown[]).filter((n): n is number => typeof n === 'number') : [];
       (role === 'user' ? typedLines(text, inner, images) : mdLines(text, inner)).forEach((line, li) => rows.push({ role, spans: line.spans, first: li === 0, continues: line.continues, chrome: line.chrome, frame: line.frame }));
     }
-    const runs = (Array.isArray(m.toolRuns) ? m.toolRuns : []) as ToolRun[];
     const duration = role === 'assistant' && Number(m.duration) >= 1000 ? m.duration : undefined;
     // What the turn cost, where it is read after the fact — the status line said it
     // while the turn ran.
     const tokens = role === 'assistant' && Number(m.tokens) > 0 ? Number(m.tokens) : undefined;
-    // One quiet line under the answer; opening the trail shows the calls themselves.
+    // One quiet line under the answer: how long the turn took, whether it was
+    // stopped, what it cost. The calls are in the turn, where they were made.
     const stopped = role === 'assistant' && m.stopped === true;
-    const toolsId = foldId(at, 'tools');
-    const trailOpen = runs.length > 0 && isOpen(folds, toolsId);
-    if (runs.length || duration || stopped || tokens) {
-      rows.push({ role, meta: true, duration, tokens, runs, stopped, open: trailOpen, ...(runs.length ? { fold: toolsId } : {}) });
-    }
-    if (trailOpen) {
-      const condensed = condenseRuns(runs);
-      // The open trail is capped: the LAST calls are the ones a person is looking for,
-      // and what came before them is one line that opens the rest. A turn of sixty
-      // calls is thirteen rows, not sixty.
-      const callsId = foldId(at, 'calls');
-      // The cap holds whatever the global state is: only a click on the line that
-      // stands for the earlier calls brings them out.
-      const earlier = isClicked(folds, callsId) ? 0 : Math.max(0, condensed.length - TRAIL_ROWS);
-      if (earlier) rows.push({ role, toolRun: true, fold: callsId, spans: [{ text: `… ${earlier} earlier call${earlier === 1 ? '' : 's'}`, dim: true }] });
-      for (const { run, n } of condensed.slice(earlier)) rows.push({ role, toolRun: true, fold: toolsId, spans: [toolRunText(run, inner, n)] });
-    }
+    if (duration || stopped || tokens) rows.push({ role, meta: true, duration, tokens, runs: [], stopped });
     // One blank row between messages — not two after a block that ends in its own,
     // and none for a message that drew nothing at all (a round whose only text was
     // its `Next:` line).
