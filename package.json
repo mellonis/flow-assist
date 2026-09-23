@@ -7,14 +7,15 @@
   },
   "scripts": {
     "build": "tsc",
-    "build:binary": "bun build --compile src/cli.ts --outfile dist/flow-assist",
+    "build:binary": "bun build --compile --define 'process.env.NODE_ENV=\"production\"' src/cli.ts --outfile dist/flow-assist",
     "plugin:publish": "bun run scripts/publish.ts",
     "typecheck": "tsc --noEmit",
-    "test": "bun test"
+    "test": "bun test",
+    "test:binary": "FLOW_ASSIST_BINARY_TEST=1 bun test src/__tests__/binary.test.ts"
   },
   "dependencies": {
-    "@flowtty/react": "^1.0.0-alpha.21",
-    "@flowtty/tty-backend": "^1.0.0-alpha.21",
+    "@flowtty/react": "^1.0.0-alpha.22",
+    "@flowtty/tty-backend": "^1.0.0-alpha.22",
     "react": "^19.2.8",
     "zod": "^4.6.5"
   },

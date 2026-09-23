@@ -5,6 +5,16 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **Scrolling the chat is about twice as fast.** The app ran React's development
+  build — Bun leaves `NODE_ENV` unset, and React takes that as "development", with
+  checks and bookkeeping on every render. `flow-assist` and `bun src/cli.ts` now run
+  the production build unless `NODE_ENV` says otherwise, and `bun run build:binary`
+  compiles only the production build into the binary.
+
+- **A scroll step redraws only what moved.** Every wheel step or PgUp used to
+  re-render every row near the screen and paint the scrollbar twice; now a small step
+  re-renders nothing and the bar moves with the rows. Needs flowtty 1.0.0-alpha.22.
+
 - **Two flow-assist processes no longer silently clobber one session.** A session
   held by a live chat now has an ownership lock: a second process starting up, or
   `/resume`, leaves a session another live instance holds alone (starts or stays on

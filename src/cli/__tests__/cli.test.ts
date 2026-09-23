@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { interactiveRefusal, mouseEnabled, parseCli } from '../../cli';
+import { interactiveRefusal, mouseEnabled, parseCli } from '../../main';
 import { hostConfigSchema } from '../../config/schema';
 import { validateConfigWriteValue } from '../../config/load';
 

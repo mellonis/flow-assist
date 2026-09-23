@@ -35,9 +35,25 @@ English throughout; a half-translated screen is worse than either language.
   which is also what gets reported when nothing is found. Both plugin dirs must exist
   for the first two. Bun reads `.env` from the working directory only, so when the
   root is elsewhere `<root>/.env` is loaded too, never overriding a variable already
-  set (not under `NODE_ENV=test`). `install.ts` is `cli.ts`'s FIRST import: the config
+  set (not under `NODE_ENV=test`). `install.ts` is `main.ts`'s FIRST import: the config
   directory is fixed when `config/load.ts` is evaluated, so a `.env` loaded from
-  `main` would reach only half of the program. No enabled plugin is never silent:
+  `main` would reach only half of the program.
+- **The entry is `src/cli.ts`, the CLI is `src/main.ts`, and React runs its
+  PRODUCTION build.** React and the reconciler inside `@flowtty/react` pick their
+  build by `NODE_ENV` when first loaded, and Bun leaves it unset — so the app ran the
+  development build, about twice as slow per scroll step. `cli.ts` sets
+  `NODE_ENV ??= 'production'` (`defaultToProduction`, `src/node-env.ts`: a value
+  already set wins — `test` under `bun test`, a person's `development`) and only THEN
+  imports `main.ts` dynamically; a static import would be evaluated before the
+  assignment. So nothing imports `cli.ts` (it runs the program) and `main.ts` is never
+  run directly; tests import `main.ts`. The compiled binary is settled at build time:
+  `build:binary` passes `--define process.env.NODE_ENV="production"`, and the bundle
+  holds no development React at all (`bun run test:binary` builds it and checks —
+  skipped by the regular `bun test`, as it compiles a ~60 MB binary; run it before
+  building a release) — a
+  `NODE_ENV` set when running the binary changes nothing. The scripts
+  (`ui-frames`, the evals) stay on the development build, like the tests they share
+  a rig with. No enabled plugin is never silent:
   `noPluginsNote` says where the host looked — on the start screen (in the plugins'
   place), in the log, after `plugins ls`, on stderr of a one-shot prompt.
 - **A published plugin ships no `node_modules`** (`packPlugin` in
@@ -1158,7 +1174,8 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   follows new rows until the person scrolls up, and hears PgUp/PgDn and the wheel
   ITSELF — the chat's key handler must not. No heights are added up anywhere: a new
   block under the conversation needs `flexShrink: 0` and nothing else. Sending a
-  message calls `scrollToEnd()`. Needs flowtty ≥ 1.0.0-alpha.20.
+  message calls `scrollToEnd()`. Needs flowtty ≥ 1.0.0-alpha.20; since alpha.22 the
+  rendered window snaps to a grid, so a small scroll step re-renders no row at all.
   - **Only the rows near the screen are laid out.** A `<ScrollBox>` lays out every row
     of the conversation on every render, so a keystroke cost 1.7 ms more per turn of
     the conversation — 13 ms on a fresh chat, 75 ms at 81 messages, 144 ms at 161, and

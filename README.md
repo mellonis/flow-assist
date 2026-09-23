@@ -166,7 +166,8 @@ The compiled host runs without Bun installed. It loads plugins from
 inside a compiled binary a plugin cannot import a package from disk, so a plugin
 with dependencies bundles them into its `main` (docs/plugins.md, "Shipping it").
 `bun src/cli.ts` — or the `flow-assist` command, whose shebang runs it under Bun —
-works as well.
+works as well. Both run React's production build, unless `NODE_ENV` is set to
+something else; the binary is built with it and always does.
 
 ## Repository
 

@@ -14,7 +14,7 @@ test('C1: host builds and type-checks (bun run build && bun run typecheck)', () 
 
 // C2 — CLI subcommands parse (interactive / config / plugins / one-shot prompt).
 test('C2: CLI subcommands classify correctly', async () => {
-  const { parseCli } = await import('../cli');
+  const { parseCli } = await import('../main');
   expect(parseCli([]).cmd).toBe('interactive');
   expect(parseCli(['config', 'set', 'ai.model', 'gpt']).cmd).toBe('config');
   expect(parseCli(['plugins', 'ls']).cmd).toBe('plugins');
