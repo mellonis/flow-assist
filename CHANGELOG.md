@@ -5,6 +5,14 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **A command shows its output while it runs: one line in the chat that a click opens to its last lines, and that stays — as you left it — once it ends.** The person's own `!command` too.
+
+- **A finished command, folded, is one line saying how it ended:** `✓ 4.2 s`, `✗ exit 1`, `stopped`, `timed out`.
+
+- **Consecutive commands fold under one line,** `Ran 3 commands · ✓ 34.0 s`, **and open into their own blocks.**
+
+- **Plugins: `viewRenderers` and `ctx.liveView`** — a tool can show a block of its own and update it while it runs. See `docs/plugins.md`.
+
 - **The command line can be copied at last.** A drag over `:` picked up nothing: the
   whole bottom row was marked "not text", which is right for the prompt and the
   completion offered after the caret and wrong for the command you typed — so a long

@@ -239,6 +239,30 @@ const scenarios: Record<string, () => Promise<void>> = {
     ui.frame('^r unfolds the whole of it');
     ui.app.unmount();
   },
+
+  // A command the model runs, while it runs and after: one line, opened by a click,
+  // still open when it ends.
+  async 'live-command'() {
+    const model = new ScriptedModel();
+    model.script([{ tool: 'run_command', args: { command: 'echo one; sleep 1; echo two' } }], [{ text: 'Both printed.' }]);
+    const ui = await boot(model);
+    const until = async (ok: () => boolean) => { for (let i = 0; i < 400 && !ok(); i++) await settle(1); };
+    await ui.press('F');
+    await ui.type('run it');
+    await ui.press('return');
+    await until(() => ui.backend.lastFrame.includes('Confirm write: run_command'));
+    await ui.press('y');
+    await until(() => ui.backend.lastFrame.includes('echo one; sleep 1; echo two ·'));
+    ui.frame('running, folded: one line and its clock');
+    const y = ui.backend.lastFrame.split('\n').findIndex((r) => r.includes('echo one; sleep 1'));
+    ui.backend.mouse('down', 12, y);
+    ui.backend.mouse('up', 12, y);
+    await settle(6);
+    ui.frame('running, opened: what it printed so far');
+    await until(() => ui.backend.lastFrame.includes('Both printed.'));
+    ui.frame('finished: still open, and how it ended');
+    ui.app.unmount();
+  },
 };
 
 const names = wanted.length ? wanted : Object.keys(scenarios);
