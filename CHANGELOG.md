@@ -5,7 +5,7 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
-- **A command shows its output while it runs: one line in the chat that a click opens to its last lines, and that stays — as you left it — once it ends.** The person's own `!command` too.
+- **A command shows its output while it runs: one line in the chat that a click opens to its last lines, and that stays — as you left it — once it ends.** The person's own `!command` too — its block still shows where it ran, and where a `cd` inside it left the conversation's directory.
 
 - **A finished command, folded, is one line saying how it ended:** `✓ 4.2 s`, `✗ exit 1`, `stopped`, `timed out`.
 

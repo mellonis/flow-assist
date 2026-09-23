@@ -126,8 +126,9 @@ What the host does with it, and what it expects back:
   - Display only: the model reads what your tool RETURNS, never the block. A call that
     throws keeps its block, marked failed — and so does a block still open when a
     restart finds it, since its process ended mid-call and no true ending was ever
-    recorded. With no chat (the one-shot CLI) there is no
-    `liveView` — call it as `ctx.liveView?.(…)`.
+    recorded. Where there is no chat to draw in (a caller that gives no `onToolLive`)
+    the view goes nowhere — call it as `ctx.liveView?.(…)` anyway, since a caller may
+    pass a `ctx` without one.
   - `console` is the host's own kind — `{ command, cwd, text, exitCode, ms, status }` —
     what `run_command` shows. A renderer that is missing (your plugin was disabled) or
     throws is drawn as one dim `▸ kind` line.

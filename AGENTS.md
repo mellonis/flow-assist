@@ -244,9 +244,10 @@ assistant nobody had asked for a board.
   throws. The turn's AbortSignal reaches tools as `ctx.signal` (`agentChat`), so Esc
   kills the command's process group with the answer.
   **A confirmed call SHOWS what it printed**, as the person's own `!command` does: the
-  tool reports a console view (`ctx.reportView`, see "A tool describes what it shows, a
-  renderer draws it, the host frames it") and the chat draws the `$ …` block. A declined
-  call leaves none — nothing ran; a failed one shows its output and its exit code.
+  tool opens a live view (`ctx.liveView`, see "A tool describes what it shows, a
+  renderer draws it, the host frames it") and fills it as the command prints, and the
+  chat draws the `$ …` block. A declined call leaves none — nothing ran; a failed one
+  shows its output and its exit code.
   Folded, the block is ONE line saying how it ended — `cmd · ✓ 4.2 s`, `✗ exit 1 · 4.2
   s`, `stopped`, `timed out`; a CLICK opens it to the last
   `plugins.assistant.runOutputLines` lines (20) with `… N lines cut · ^o for all` above
