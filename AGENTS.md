@@ -414,30 +414,47 @@ assistant nobody had asked for a board.
   nothing a renderer could draw and is dropped rather than reaching the screen.
   **Two processes on one session do not overwrite each other.** A session held by a
   live chat has an ownership lock beside the file, `<id>.lock` — `{ pid, host,
-  token, at }` (`acquireLock`/`releaseLock`/`makeLockToken` in sessions.ts).
-  `token` is one random id per chat INSTANCE, made once and kept for its life — not
-  per process, since two instances can live in one process (as the e2e tests do). A
-  lock is OURS when the token matches; otherwise it is HELD when its pid is alive on
-  this host or its host is not this one at all (a foreign host's pid cannot be
-  checked); anything else — the owning process is gone — is STALE and is taken over.
-  The lock is acquired when a session first gets its id (a fresh one, or the one a
+  token, at }` (`acquireLock`/`releaseLock`/`makeLockToken`/`lockPath` in
+  sessions.ts). `token` is one random id per chat INSTANCE, made once (a lazy init:
+  the ref starts empty and is filled in on the first render only, never
+  regenerated) and kept for its life — not per process, since two instances can
+  live in one process (as the e2e tests do). A lock is OURS when the token matches;
+  otherwise it is HELD when its pid is alive on this host or its host is not this
+  one at all (a foreign host's pid cannot be checked); a lock file that exists but
+  will not parse — a create racing its own write, or corruption — is also HELD, but
+  only while recent (under 5 s); anything else — the owning process is gone, or an
+  unreadable lock has sat there longer than that — is STALE and is taken over. The
+  lock is acquired when a session first gets its id (a fresh one, or the one a
   start-up/`/resume` continues) and released — after the final save — on exit
   (`flushOnExit`), `/clear`, `/resume` to another session, a change of task, and
-  component unmount. A session the host would continue that is HELD is left alone —
-  a new one starts instead — and `/resume` of a HELD session refuses; both say so
-  with a display note: `Session "<title or id>" is open in another flow-assist
-  process`, with `— started a new one.` appended for the start-up case. **A save
-  also checks the disk.** Every session file carries a `rev`, bumped by
-  `saveSession` on every write (absent — an older host — reads as 0); the chat
-  remembers the rev it last read or wrote (`sessionRev` peeks the disk copy without
-  loading the file). Before writing, if the disk's rev does not match what this
-  chat last saw — an older host with no lock, a hand edit, since the lock already
-  keeps two of THIS host's instances from colliding — the save does not overwrite
-  it: it saves this conversation as a brand NEW session (new id, new lock, the old
-  lock released), switches to it, and says so: `Session "<title or id>" was changed
-  elsewhere — saved this conversation as a new session.` The save at exit and at
-  unmount is silent (no note, no notify) — the screen is not going to be read again
-  — but still forks rather than overwrites, so the data is never lost even then.
+  component unmount. `pruneSessions` leaves a HELD session's file alone regardless
+  of the keep count (deleting it out from under a live process would be a second
+  way to lose data) and separately sweeps any `.lock` whose session file is already
+  gone, unless that lock is itself still held. A session the host would continue
+  that is HELD is left alone — a new one starts instead — and `/resume` of a HELD
+  session refuses; both say so with a display note naming the lock file so a person
+  can go clear it by hand: `Session "<title or id>" is open in another flow-assist
+  process (lock: <path>)`, with `— started a new one.` inserted before the
+  parenthetical for the start-up case. **A save also checks the disk — not only
+  the rev.** Every session file carries a `rev`, bumped by `saveSession` on every
+  write (absent — an older host — reads as 0) and returned together with the
+  file's own `mtimeMs`/`size` as one fingerprint (`sessionFingerprint`,
+  `sessionFingerprintsEqual`); the chat remembers the fingerprint it last read or
+  wrote (set at every load — start-up continue, `/resume` — and every write,
+  fork included). `rev` alone is not enough to catch everything the lock cannot
+  see: a hand edit that leaves the number untouched, or two different foreign
+  writes from hosts old enough to write no `rev` field at all (both then reading
+  as 0), would pass a rev-only check — `mtimeMs`/`size` catch those. Before
+  writing, if the disk's fingerprint does not match what this chat last saw in
+  any of the three, the save does not overwrite it: it saves this conversation as
+  a brand NEW session (new id, new lock, the old lock released), switches to it,
+  and says so: `Session "<title or id>" was changed elsewhere — saved this
+  conversation as a new session.` The save at exit and at unmount shows nothing
+  (the screen is not going to be read again) but still forks rather than
+  overwrites, so the data is never lost even then; the save on a change of task
+  folds the note into the one toast that branch already shows (replacing it, not
+  raising a second one) rather than suppressing it, since the screen it would
+  otherwise write into is cleared right after.
 
 A qualified tool name (`plugin:tool`) is translated to a provider-safe wire name
 (`plugin__tool`) in `src/assistant/agent.ts` and nowhere else: providers validate

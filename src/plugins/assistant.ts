@@ -20,9 +20,9 @@ import { createToolSet, toolLoadingMode } from '../assistant/tool-loading.js';
 import { copyTarget, copyToClipboard } from '../assistant/copy.js';
 import { createShellState, formatShell, nextCwd, runShell, shellLimits, tildePath } from '../assistant/shell.js';
 import {
-  KEEP_SESSIONS, SESSION_VERSION, acquireLock, closeSession, flushOnExit, listSessions, loadSession, makeLockToken,
-  newSessionId, pruneSessions, releaseLock, saveSession, sessionRev, sessionTitle, sessionToContinue, sessionWhen,
-  sessionsDir, type Session,
+  KEEP_SESSIONS, SESSION_VERSION, acquireLock, closeSession, flushOnExit, listSessions, loadSession, lockPath,
+  makeLockToken, newSessionId, pruneSessions, releaseLock, saveSession, sessionFingerprint, sessionFingerprintsEqual,
+  sessionTitle, sessionToContinue, sessionWhen, sessionsDir, type Session, type SessionFingerprint,
 } from '../assistant/sessions.js';
 import type { ChatMessage } from '../assistant/agent.js';
 import type { ChangeView } from '../assistant/diff.js';
@@ -634,15 +634,25 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const saveTimer = f.useRef<ReturnType<typeof setTimeout> | null>(null);
           // One token for this chat instance's whole life (not per process — see
           // sessions.ts, "Ownership lock"): what makes a lock this instance's own.
-          const lockTokenRef = f.useRef(makeLockToken());
-          // The rev this instance last read or wrote for the session it currently
-          // holds — what a save compares the disk against before overwriting it.
-          const sessionRevRef = f.useRef(0);
-          const releaseCurrentLock = () => { if (sessDir && sessionIdRef.current) releaseLock(sessDir, sessionIdRef.current, lockTokenRef.current); };
+          // `useRef`'s init runs on every render, so `makeLockToken()` (a UUID) would
+          // otherwise be generated and discarded on every one but the first; the ref
+          // starts empty and is filled in once, here, on the first render only.
+          const lockTokenRef = f.useRef('');
+          if (!lockTokenRef.current) lockTokenRef.current = makeLockToken();
+          const lockToken = lockTokenRef.current;
+          // The zero fingerprint: what a session with nothing written yet, or one this
+          // instance has not read or written at all, starts from — the same value
+          // `sessionFingerprint` reads back for a file that does not exist.
+          const NO_FILE: SessionFingerprint = { rev: 0, mtimeMs: 0, size: 0 };
+          // The fingerprint (rev + mtimeMs + size) this instance last read or wrote for
+          // the session it currently holds — what a save compares the disk against
+          // before overwriting it (sessions.ts, "sessionFingerprint").
+          const fingerprintRef = f.useRef<SessionFingerprint>(NO_FILE);
+          const releaseCurrentLock = () => { if (sessDir && sessionIdRef.current) releaseLock(sessDir, sessionIdRef.current, lockToken); };
           const snapshotSession = (): Session => {
             if (!sessionIdRef.current) {
-              sessionIdRef.current = newSessionId(); createdAtRef.current = new Date().toISOString(); sessionRevRef.current = 0;
-              if (sessDir) acquireLock(sessDir, sessionIdRef.current, lockTokenRef.current); // a fresh id — nothing else could hold it
+              sessionIdRef.current = newSessionId(); createdAtRef.current = new Date().toISOString(); fingerprintRef.current = NO_FILE;
+              if (sessDir) acquireLock(sessDir, sessionIdRef.current, lockToken); // a fresh id — nothing else could hold it
             }
             return {
               version: SESSION_VERSION, id: sessionIdRef.current, title: '', createdAt: createdAtRef.current, updatedAt: new Date().toISOString(),
@@ -659,33 +669,44 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               closed: false, // written means in use — a resumed cleared session is open again
             };
           };
-          // `silent` — no note, no notify — for the paths that write on the way out
-          // (exit, unmount): the screen is not going to be read again.
-          const writeSession = (opts: { silent?: boolean } = {}) => {
+          // The fork note's text, for whichever of the two places shows it decides how.
+          const forkNoteText = (messages: Record<string, unknown>[], id: string): string =>
+            `Session "${sessionTitle(messages) || id}" was changed elsewhere — saved this conversation as a new session.`;
+          // `silent` — nothing shown, no notify — for the paths that write on the way
+          // out (exit, unmount): the screen is not going to be read again, though the
+          // fork itself (never overwrite what changed) still happens even there.
+          // `forkNotice`, if given, receives the note's text instead of it becoming a
+          // chat message — the change-of-task site uses it to fold the note into the
+          // toast it already shows, rather than raising a second one.
+          const writeSession = (opts: { silent?: boolean; forkNotice?: (text: string) => void } = {}) => {
             if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null; }
             if (!sessDir || !msgsRef.current.some((m) => personSpoke(m.role))) return; // nothing said or run yet
             try {
               const snap = snapshotSession();
-              const diskRev = sessionRev(sessDir, snap.id);
-              if (diskRev !== sessionRevRef.current) {
+              const disk = sessionFingerprint(sessDir, snap.id);
+              if (!sessionFingerprintsEqual(disk, fingerprintRef.current)) {
                 // Someone else changed this file since we last read or wrote it — an
-                // older host with no lock, a hand edit. Never overwrite what we have
-                // not seen: fork this conversation into a new session instead.
+                // older host with no lock, a hand edit (rev alone would miss a hand
+                // edit that leaves the number untouched, or two foreign writes that
+                // both have no `rev` field at all). Never overwrite what we have not
+                // seen: fork this conversation into a new session instead.
                 const forkedId = newSessionId();
                 const now = new Date().toISOString();
                 releaseCurrentLock();
-                acquireLock(sessDir, forkedId, lockTokenRef.current);
+                acquireLock(sessDir, forkedId, lockToken);
                 const forked: Session = { ...snap, id: forkedId, createdAt: now, updatedAt: now };
-                const rev = saveSession(sessDir, forked);
-                sessionIdRef.current = forkedId; createdAtRef.current = now; sessionRevRef.current = rev;
-                if (!opts.silent) {
-                  const title = sessionTitle(snap.messages) || snap.id;
-                  setMessages((cur) => [...cur, { role: 'note', content: `Session "${title}" was changed elsewhere — saved this conversation as a new session.` }]);
+                const fp = saveSession(sessDir, forked);
+                sessionIdRef.current = forkedId; createdAtRef.current = now; fingerprintRef.current = fp;
+                const text = forkNoteText(snap.messages, snap.id);
+                if (opts.forkNotice) {
+                  opts.forkNotice(text);
+                } else if (!opts.silent) {
+                  setMessages((cur) => [...cur, { role: 'note', content: text }]);
                   f.notify();
                 }
                 return;
               }
-              sessionRevRef.current = saveSession(sessDir, snap);
+              fingerprintRef.current = saveSession(sessDir, snap);
             } catch (e) {
               (f.services as Record<string, any>).pushLog?.(`[session] not saved: ${(e as Error).message}`);
             }
@@ -697,7 +718,11 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           };
           const writeRef = f.useRef(writeSession); writeRef.current = writeSession;
           const applySession = (s: Session) => {
-            sessionIdRef.current = s.id; createdAtRef.current = s.createdAt; sessionRevRef.current = s.rev ?? 0;
+            sessionIdRef.current = s.id; createdAtRef.current = s.createdAt;
+            // Read fresh off the disk rather than trusted from `s.rev` alone: the
+            // fingerprint this instance now "has seen" is what is really there,
+            // mtimeMs/size included, not just the field the session JSON carries.
+            fingerprintRef.current = sessDir ? sessionFingerprint(sessDir, s.id) : NO_FILE;
             ctxSubjectRef.current = s.subject ?? null;
             apiRef.current = s.api as unknown as ChatMessage[];
             summaryRef.current = s.summary;
@@ -731,9 +756,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               if (sessConf.resume === false || msgsRef.current.length) return;
               const s = sessionToContinue(sessDir);
               if (!s) return;
-              const outcome = acquireLock(sessDir, s.id, lockTokenRef.current);
+              const outcome = acquireLock(sessDir, s.id, lockToken);
               if (outcome.status === 'held') {
-                setMessages((cur) => [...cur, { role: 'note', content: `Session "${s.title || s.id}" is open in another flow-assist process — started a new one.` }]);
+                setMessages((cur) => [...cur, { role: 'note', content: `Session "${s.title || s.id}" is open in another flow-assist process — started a new one. (lock: ${lockPath(sessDir, s.id)})` }]);
                 f.notify();
                 return;
               }
@@ -1683,9 +1708,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // lock already, or free/stale, and this acquires it — side-effect free
                 // when held, so nothing to undo on the refusal below.
                 if (pick.id !== sessionIdRef.current) {
-                  const outcome = acquireLock(sessDir, pick.id, lockTokenRef.current);
+                  const outcome = acquireLock(sessDir, pick.id, lockToken);
                   if (outcome.status === 'held') {
-                    setMessages((cur) => [...cur, { role: 'note', content: `Session "${pick.title || pick.id}" is open in another flow-assist process.` }]);
+                    setMessages((cur) => [...cur, { role: 'note', content: `Session "${pick.title || pick.id}" is open in another flow-assist process. (lock: ${lockPath(sessDir, pick.id)})` }]);
                     setField('');
                     f.notify();
                     return;
@@ -1709,7 +1734,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 writeSession();
                 if (sessDir && sessionIdRef.current) { try { closeSession(sessDir, sessionIdRef.current); } catch { /* not fatal */ } }
                 releaseCurrentLock();
-                sessionIdRef.current = ''; createdAtRef.current = ''; sessionRevRef.current = 0;
+                sessionIdRef.current = ''; createdAtRef.current = ''; fingerprintRef.current = NO_FILE;
                 if (tickRef.current) { clearInterval(tickRef.current); tickRef.current = null; }
                 abortRef.current?.abort(); abortRef.current = null;
                 if (pendingRef.current) settleConfirm(false);
@@ -1818,13 +1843,18 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // subject continues the history, nothing is cleared.
             if (subject !== ctxSubjectRef.current) {
               // The conversation about the other task is saved and stays on /resume.
-              // Silent: the screen is cleared right below, so a fork note about the
-              // conversation just left would only flash and vanish.
+              // A fork here (the file changed since this chat last saw it) must still
+              // be visible — captured instead of shown as a chat note (the screen is
+              // cleared right below, so a note in it would only flash and vanish) and
+              // folded into the one toast this branch shows, so a fork does not go
+              // unremarked and a stale "new session" toast never follows it.
               const had = msgsRef.current.some((m) => m.role === 'user');
-              writeSession({ silent: true });
+              let forkNote: string | null = null;
+              writeSession({ forkNotice: (text) => { forkNote = text; } });
               releaseCurrentLock();
-              sessionIdRef.current = ''; createdAtRef.current = ''; sessionRevRef.current = 0;
-              if (had) (f.services as Record<string, any>).showMessage?.(`A new session for ${subject ?? 'no task'} — /resume goes back to the previous one`);
+              sessionIdRef.current = ''; createdAtRef.current = ''; fingerprintRef.current = NO_FILE;
+              if (forkNote) (f.services as Record<string, any>).showMessage?.(forkNote);
+              else if (had) (f.services as Record<string, any>).showMessage?.(`A new session for ${subject ?? 'no task'} — /resume goes back to the previous one`);
               ctxSubjectRef.current = subject;
               apiRef.current = []; summaryRef.current = ''; queueRef.current = []; setQueued([]);
               usageRef.current = null;

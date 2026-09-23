@@ -23,9 +23,13 @@
 // Two more things guard against two processes on one session (see AGENTS.md,
 // "Sessions survive a restart"): an ownership LOCK beside the file
 // (`<id>.lock`) so a second process does not silently continue what a live one
-// still holds, and a `rev` counter in the file itself so a save that finds the
-// disk changed since it last read or wrote it never overwrites that — it forks
-// the conversation into a new session instead.
+// still holds, and a FINGERPRINT — the file's `rev` plus its `mtimeMs`/`size` on
+// disk — so a save that finds the disk changed since it last read or wrote it
+// never overwrites that. `rev` alone is not enough: a hand edit that leaves the
+// number untouched, or an older host that never wrote one at all (so two
+// different foreign writes both read as rev 0), would still read as unchanged —
+// `mtimeMs`/`size` catch what the counter cannot. A mismatch on any of the three
+// forks the conversation into a new session instead of overwriting what changed.
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -109,17 +113,44 @@ function readRev(file: string): number {
   } catch { return 0; }
 }
 
-// The rev currently on disk for a session, by id — what a save must compare its own
-// last-known rev against before writing, so it never overwrites a change it has not
-// seen (an older host with no lock, a hand edit).
+// The rev currently on disk for a session, by id — a plain peek at the counter
+// alone. `sessionFingerprint` below is what a save actually checks against; this
+// stays exported for callers (and tests) that want the counter on its own.
 export function sessionRev(dir: string, id: string): number {
   try { return readRev(fileOf(dir, id)); } catch { return 0; }
 }
 
-// Returns the rev this save was written with — always the disk's previous rev + 1,
-// regardless of what `s.rev` held coming in: rev is this function's own counter, not
-// the caller's to set.
-export function saveSession(dir: string, s: Session): number {
+// What a save compares the disk against before writing: the `rev` a save bumps,
+// plus the file's own `mtimeMs`/`size` — the two `rev` cannot see through (a hand
+// edit that leaves the number alone, or two different foreign writes that both
+// have no `rev` field and so both read as 0). A file that does not exist reads as
+// the same all-zero fingerprint a session with nothing written yet starts from, so
+// "nothing there" and "nothing seen yet" compare equal.
+export interface SessionFingerprint { rev: number; mtimeMs: number; size: number }
+const NO_FILE_FINGERPRINT: SessionFingerprint = { rev: 0, mtimeMs: 0, size: 0 };
+
+function fingerprintOf(file: string): SessionFingerprint {
+  try {
+    const stat = fs.statSync(file);
+    return { rev: readRev(file), mtimeMs: stat.mtimeMs, size: stat.size };
+  } catch { return NO_FILE_FINGERPRINT; }
+}
+
+// The fingerprint currently on disk for a session, by id — read at every load and
+// every successful write, and compared before every later write so a save never
+// overwrites a change it has not seen.
+export function sessionFingerprint(dir: string, id: string): SessionFingerprint {
+  try { return fingerprintOf(fileOf(dir, id)); } catch { return NO_FILE_FINGERPRINT; }
+}
+
+export const sessionFingerprintsEqual = (a: SessionFingerprint, b: SessionFingerprint): boolean =>
+  a.rev === b.rev && a.mtimeMs === b.mtimeMs && a.size === b.size;
+
+// Returns the fingerprint this save was written with — rev is always the disk's
+// previous rev + 1 regardless of what `s.rev` held coming in (rev is this
+// function's own counter, not the caller's to set), and mtimeMs/size are read back
+// off the renamed file so the caller's record matches the disk exactly.
+export function saveSession(dir: string, s: Session): SessionFingerprint {
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   const file = fileOf(dir, s.id);
   const rev = readRev(file) + 1;
@@ -135,7 +166,8 @@ export function saveSession(dir: string, s: Session): number {
   const tmp = `${file}.${process.pid}.tmp`;
   fs.writeFileSync(tmp, JSON.stringify(body), { mode: 0o600 });
   fs.renameSync(tmp, file);
-  return rev;
+  const stat = fs.statSync(file);
+  return { rev, mtimeMs: stat.mtimeMs, size: stat.size };
 }
 
 // A saved subject; an old session may hold a number there.
@@ -222,11 +254,29 @@ export function deleteSession(dir: string, id: string): void {
   try { fs.unlinkSync(fileOf(dir, id)); } catch { /* already gone */ }
 }
 
-// Keeps the newest `keep`; returns how many went.
+// Keeps the newest `keep`; returns how many session files went. A session whose
+// lock is currently HELD by a live process (this one or another) is left alone —
+// deleting its file out from under a process still writing it would be a second
+// way to lose data. A `.lock` whose session file is already gone (deleted just
+// above, or by hand) is swept too, unless it is itself still held.
 export function pruneSessions(dir: string, keep = KEEP_SESSIONS): number {
   const old = listSessions(dir).slice(keep);
-  for (const s of old) deleteSession(dir, s.id);
-  return old.length;
+  let removed = 0;
+  for (const s of old) {
+    if (isLockHeld(dir, s.id)) continue;
+    deleteSession(dir, s.id);
+    removed++;
+  }
+  let names: string[] = [];
+  try { names = fs.readdirSync(dir); } catch { /* nothing to sweep */ }
+  for (const n of names) {
+    if (!n.endsWith('.lock')) continue;
+    const id = n.slice(0, -'.lock'.length);
+    if (!ID.test(id) || fs.existsSync(path.join(dir, `${id}.json`))) continue;
+    if (isLockHeld(dir, id)) continue;
+    try { fs.unlinkSync(path.join(dir, n)); } catch { /* already gone */ }
+  }
+  return removed;
 }
 
 // The last change is written at exit even if its debounced save has not fired. One
@@ -258,6 +308,13 @@ export function flushOnExit(fn: () => void): () => void {
 // STALE and is taken over. `acquireLock` is side-effect free on a held lock, so a
 // caller that only wants to know (a `/resume` refusal, the start-up continue check)
 // can call it directly rather than peeking first.
+//
+// A lock file that exists but will not parse — a `wx` create racing its own
+// `writeFileSync` (the file exists with zero or partial bytes for an instant), or
+// genuine corruption — is HELD while it is recent (`UNREADABLE_HELD_MS`, the same
+// order of magnitude a create-then-write race could plausibly take) and STALE once
+// it has sat there longer than that: nothing still racing to finish writing it
+// would take this long, so it reads as abandoned rather than in-flight.
 export interface LockInfo { pid: number; host: string; token: string; at: string }
 export interface LockDeps {
   host?: string;                        // this machine's name; defaults to os.hostname()
@@ -267,7 +324,12 @@ export type LockOutcome =
   | { status: 'acquired' | 'ours' }
   | { status: 'held'; holder: LockInfo };
 
-const lockFile = (dir: string, id: string) => path.join(dir, `${id}.lock`);
+export const lockPath = (dir: string, id: string): string => path.join(dir, `${id}.lock`);
+
+const UNREADABLE_HELD_MS = 5000;
+// What an unreadable lock's `holder` reads as — there is nothing real to report,
+// but `LockOutcome`'s `held` case always carries one.
+const UNREADABLE_HOLDER: LockInfo = { pid: 0, host: '', token: '', at: '' };
 
 function readLock(file: string): LockInfo | null {
   try {
@@ -275,6 +337,10 @@ function readLock(file: string): LockInfo | null {
     if (raw && typeof raw.pid === 'number' && typeof raw.host === 'string' && typeof raw.token === 'string') return raw as LockInfo;
   } catch { /* missing or unreadable — the caller treats this like no lock at all */ }
   return null;
+}
+
+function statMtimeOrNull(file: string): number | null {
+  try { return fs.statSync(file).mtimeMs; } catch { return null; }
 }
 
 // `process.kill(pid, 0)` sends no signal; it throws ESRCH when the pid is gone and
@@ -294,32 +360,57 @@ function writeLock(file: string, info: LockInfo): boolean {
   }
 }
 
+// Classifies whatever is at `file` right now, without ever writing or unlinking.
+// `token`/`host`/`pidAlive` decide ours vs. held for a readable lock; a readable
+// lock with a dead pid on our own host, or an unreadable one old enough, reads as
+// `'stale'`, which the caller decides what to do with.
+function classifyLock(file: string, token: string, host: string, pidAlive: (pid: number) => boolean): LockOutcome | 'stale' {
+  const lock = readLock(file);
+  if (lock) {
+    if (lock.token === token) return { status: 'ours' };
+    if (lock.host !== host || pidAlive(lock.pid)) return { status: 'held', holder: lock };
+    return 'stale'; // a dead pid on our own host
+  }
+  const mtimeMs = statMtimeOrNull(file);
+  if (mtimeMs !== null && Date.now() - mtimeMs <= UNREADABLE_HELD_MS) return { status: 'held', holder: UNREADABLE_HOLDER };
+  return 'stale'; // gone, or unreadable and old enough to be abandoned
+}
+
 export function acquireLock(dir: string, id: string, token: string, deps: LockDeps = {}): LockOutcome {
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-  const file = lockFile(dir, id);
+  const file = lockPath(dir, id);
   const host = deps.host ?? os.hostname();
   const pidAlive = deps.pidAlive ?? defaultPidAlive;
   const info: LockInfo = { pid: process.pid, host, token, at: new Date().toISOString() };
 
   if (writeLock(file, info)) return { status: 'acquired' };
-  const lock = readLock(file);
-  if (lock?.token === token) return { status: 'ours' };
-  const held = lock !== null && (lock.host !== host || pidAlive(lock.pid));
-  if (held) return { status: 'held', holder: lock! };
+  const first = classifyLock(file, token, host, pidAlive);
+  if (first !== 'stale') return first;
 
-  // Stale (a dead pid on our own host) or unreadable — take over, once.
+  // Stale — take over, once.
   try { fs.unlinkSync(file); } catch { /* raced away already */ }
   if (writeLock(file, info)) return { status: 'acquired' };
-  const relock = readLock(file);
-  if (relock?.token === token) return { status: 'ours' };
-  return { status: 'held', holder: relock ?? info };
+  const second = classifyLock(file, token, host, pidAlive);
+  // A second race in the same call is vanishingly rare; never falsely report
+  // "acquired" when our own write did not actually land.
+  return second === 'stale' ? { status: 'held', holder: readLock(file) ?? UNREADABLE_HOLDER } : second;
 }
 
 // Unlinks only when the token is ours — releasing a lock we do not hold would tear
 // down someone else's ownership.
 export function releaseLock(dir: string, id: string, token: string): void {
-  const lock = readLock(lockFile(dir, id));
-  if (lock?.token === token) { try { fs.unlinkSync(lockFile(dir, id)); } catch { /* already gone */ } }
+  const lock = readLock(lockPath(dir, id));
+  if (lock?.token === token) { try { fs.unlinkSync(lockPath(dir, id)); } catch { /* already gone */ } }
+}
+
+// Read-only: whether a session's lock is currently held by a live process — ours or
+// another's, this host or (as far as it can tell) a foreign one. Never creates,
+// unlinks or otherwise touches the lock file; what `pruneSessions` uses to leave a
+// still-open session alone.
+function isLockHeld(dir: string, id: string): boolean {
+  // No token of our own to check against — `''` never matches a real one, so
+  // 'ours' reads the same as 'held' here: either way, something live owns it.
+  return classifyLock(lockPath(dir, id), '', os.hostname(), defaultPidAlive) !== 'stale';
 }
 
 // One per chat instance, made once and kept for its life — not per process (see the

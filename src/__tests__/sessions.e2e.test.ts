@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { SESSION_VERSION, newSessionId, saveSession, type Session } from '../assistant/sessions.ts';
+import type { Make } from '../loader/plugin.ts';
 import { ScriptedModel, bootApp, settle } from './helpers/scripted';
 
 const realFetch = globalThis.fetch;
@@ -13,6 +14,13 @@ afterEach(() => { globalThis.fetch = realFetch; });
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const dirOf = () => fs.mkdtempSync(path.join(os.tmpdir(), 'fa-sess-e2e-'));
+// A long note wraps inside the chat's fixed-width box, splitting even mid-word (a
+// session id's own hyphen can fall right on the wrap boundary) — and the box's own
+// border characters sit right at that boundary too (a row's closing `│` butts up
+// against the next row's opening one). Flattening both sides — whitespace and
+// border-drawing characters alike — before `toContain` makes the check care about
+// the text, not where the terminal happened to break the line.
+const flat = (s: string) => s.replace(/[\s│╭╮╰╯─]+/g, '');
 type Sent = { role: string; content: unknown }[];
 const sentTo = (m: ScriptedModel) => m.requests.at(-1)!.messages as Sent;
 
@@ -114,6 +122,8 @@ test('a second process avoids a session the first still holds — starts a new o
   expect(files1.filter((n) => n.endsWith('.lock'))).toHaveLength(1);
   const heldFile = files1.find((n) => n.endsWith('.json'))!;
 
+  const lockName = files1.find((n) => n.endsWith('.lock'))!;
+
   const model2 = new ScriptedModel();
   model2.script([{ text: 'второй ответ' }]);
   const ui2 = await bootApp(model2, 100, 28, undefined, { sessions: { dir } });
@@ -123,6 +133,7 @@ test('a second process avoids a session the first still holds — starts a new o
   expect(frame).not.toContain('первый ответ'); // the held conversation itself was not continued
   expect(frame).toContain('Session "первый вопрос" is open in another flow-assist process'); // wraps before "started a new one."
   expect(frame).toContain('started a new');
+  expect(flat(frame)).toContain(flat(`(lock: ${path.join(dir, lockName)})`)); // names the lock a person can go clear
 
   await ui2.type('второй вопрос');
   await ui2.press('return');
@@ -142,6 +153,7 @@ test('/resume of a session another live instance holds refuses with a note and s
   const dir = dirOf();
   const first = await talk(dir, 'held-vopros', 'held-otvet');
   await first.ui.press('escape', 'escape'); // held: saved and locked, the process stays alive
+  const lockName = fs.readdirSync(dir).find((n) => n.endsWith('.lock'))!;
 
   const model2 = new ScriptedModel();
   model2.script([{ text: 'own-otvet' }]);
@@ -166,6 +178,7 @@ test('/resume of a session another live instance holds refuses with a note and s
   await settle(4);
   const frame = ui2.backend.lastFrame!;
   expect(frame).toContain('Session "held-vopros" is open in another flow-assist process.');
+  expect(flat(frame)).toContain(flat(`(lock: ${path.join(dir, lockName)})`));
   expect(frame).not.toContain('held-otvet'); // stayed on its own session
 
   ui2.app.unmount();
@@ -221,7 +234,7 @@ test('a foreign write between two saves forks into a new session — both a bump
     await first.ui.press('F'); // reopen to see the note the closing save left
 
     const frame = first.ui.backend.lastFrame!;
-    expect(frame).toContain('was changed elsewhere — saved this conversation as a new session.');
+    expect(flat(frame)).toContain(flat('was changed elsewhere — saved this conversation as a new session.'));
 
     const files = fs.readdirSync(dir).filter((n) => n.endsWith('.json'));
     expect(files).toHaveLength(2);
@@ -236,6 +249,106 @@ test('a foreign write between two saves forks into a new session — both a bump
 
     first.ui.app.unmount();
   }
+});
+
+test('a hand edit that leaves rev untouched still forks — mtimeMs/size catch what rev alone misses', async () => {
+  const dir = dirOf();
+  const first = await talk(dir, 'q1', 'a1');
+  await first.ui.press('escape', 'escape'); // save #1 — establishes the fingerprint this instance knows
+  const name = fs.readdirSync(dir).find((n) => n.endsWith('.json'))!;
+  const file = path.join(dir, name);
+  const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+  await new Promise((r) => setTimeout(r, 5)); // a distinguishable mtime even on a coarse clock
+  // Same rev, different content — exactly what a rev-only check would miss.
+  fs.writeFileSync(file, JSON.stringify({ ...raw, messages: [...raw.messages, { role: 'user', content: 'HAND EDIT SAME REV' }] }));
+
+  await first.ui.press('F');
+  await first.ui.type('q2');
+  await first.ui.press('return');
+  await settle(20);
+  await first.ui.press('escape', 'escape'); // the next save — must fork, not overwrite
+  await first.ui.press('F');
+
+  const frame = first.ui.backend.lastFrame!;
+  expect(flat(frame)).toContain(flat('was changed elsewhere — saved this conversation as a new session.'));
+
+  const files = fs.readdirSync(dir).filter((n) => n.endsWith('.json'));
+  expect(files).toHaveLength(2);
+  const originalStill = JSON.parse(fs.readFileSync(file, 'utf8'));
+  expect(originalStill.rev).toBe(raw.rev); // untouched — the fork never overwrote it, rev included
+  expect(originalStill.messages.some((m: { content: unknown }) => m.content === 'HAND EDIT SAME REV')).toBe(true);
+  expect(originalStill.messages.some((m: { content: unknown }) => m.content === 'q2')).toBe(false);
+  first.ui.app.unmount();
+});
+
+test('a legacy session (no rev field) changed elsewhere by another legacy writer (still no rev) still forks', async () => {
+  const dir = dirOf();
+  const id = newSessionId();
+  const legacy = {
+    version: SESSION_VERSION, id, title: '', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    messages: [{ role: 'user', content: 'legacy q' }, { role: 'assistant', content: 'legacy a' }],
+    api: [{ role: 'user', content: 'legacy q' }, { role: 'assistant', content: 'legacy a' }],
+    summary: '', plan: [], usage: null, prompts: [], draft: '',
+    // No `rev` at all — an older host wrote this.
+  };
+  const file = path.join(dir, `${id}.json`);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(file, JSON.stringify(legacy));
+
+  const model = new ScriptedModel();
+  model.script([{ text: 'continued' }]);
+  const ui = await bootApp(model, 100, 28, undefined, { sessions: { dir } });
+  await settle(6);
+  await ui.press('F'); // continues the legacy session — nothing has a lock on it yet
+
+  await new Promise((r) => setTimeout(r, 5));
+  // Still no `rev` — another writer just as old as the first — but different content.
+  fs.writeFileSync(file, JSON.stringify({ ...legacy, messages: [...legacy.messages, { role: 'user', content: 'FOREIGN LEGACY EDIT' }] }));
+
+  await ui.type('q2');
+  await ui.press('return');
+  await settle(20);
+  await ui.press('escape', 'escape');
+  await ui.press('F');
+
+  const frame = ui.backend.lastFrame!;
+  expect(flat(frame)).toContain(flat('was changed elsewhere — saved this conversation as a new session.'));
+
+  const files = fs.readdirSync(dir).filter((n) => n.endsWith('.json'));
+  expect(files).toHaveLength(2);
+  const originalStill = JSON.parse(fs.readFileSync(file, 'utf8'));
+  expect(originalStill.rev).toBeUndefined(); // the foreign legacy write, still untouched
+  expect(originalStill.messages.some((m: { content: unknown }) => m.content === 'FOREIGN LEGACY EDIT')).toBe(true);
+  expect(originalStill.messages.some((m: { content: unknown }) => m.content === 'q2')).toBe(false);
+  ui.app.unmount();
+});
+
+test('a fork during a change of task shows the note as a toast, not a suppressed one', async () => {
+  const dir = dirOf();
+  const model = new ScriptedModel();
+  model.script([{ text: 'a1' }]);
+  const state = { subject: 'DOC-7' as string | null };
+  const guest = (make: Make) => [make('docs', { name: 'docs', chatSubject: () => state.subject })];
+  const ui = await bootApp(model, 100, 28, guest, { sessions: { dir } });
+  await ui.press('F');
+  await ui.type('q1');
+  await ui.press('return');
+  await settle(20);
+  await ui.press('escape', 'escape'); // save #1 under subject DOC-7
+
+  const name = fs.readdirSync(dir).find((n) => n.endsWith('.json'))!;
+  const file = path.join(dir, name);
+  const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+  fs.writeFileSync(file, JSON.stringify({ ...raw, messages: [...raw.messages, { role: 'user', content: 'FOREIGN' }] })); // same rev, different content
+
+  state.subject = 'DOC-8'; // a change of task — writeSession runs on the way out and must fork
+  await ui.press('F'); // opens on DOC-8; the fork happens here
+  await ui.press('escape', 'escape'); // close — the toast, set during the task change, is what the footer shows now
+
+  const frame = ui.backend.lastFrame!;
+  expect(flat(frame)).toContain(flat('was changed elsewhere — saved this conversation as a new session.'));
+  expect(frame).not.toContain('A new session for DOC-8'); // the fork note replaced the routine one, not both shown
+  ui.app.unmount();
 });
 
 test('the lock is released on unmount and on /clear', async () => {

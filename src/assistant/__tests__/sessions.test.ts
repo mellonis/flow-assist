@@ -1,11 +1,12 @@
 import { expect, test } from 'bun:test';
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  KEEP_MESSAGES, SESSION_VERSION, acquireLock, closeSession, listSessions, loadSession, makeLockToken,
-  newSessionId, normalizeViews, pruneSessions, releaseLock, saveSession, sessionRev, sessionToContinue,
-  sessionsDir, type Session,
+  KEEP_MESSAGES, SESSION_VERSION, acquireLock, closeSession, listSessions, loadSession, lockPath, makeLockToken,
+  newSessionId, normalizeViews, pruneSessions, releaseLock, saveSession, sessionFingerprint, sessionFingerprintsEqual,
+  sessionRev, sessionToContinue, sessionsDir, type Session,
 } from '../sessions.ts';
 
 const tmp = () => path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'sess-')), 'sessions');
@@ -130,17 +131,32 @@ test('a session with a live view, a legacy console view and a malformed entry re
 
 // ─── rev: a save that checks ───────────────────────────────────────────────────
 
-test('saveSession bumps rev on every write and returns it; sessionRev reads it without loading the file', () => {
+test('saveSession bumps rev on every write and returns the written fingerprint; sessionRev reads it without loading the file', () => {
   const dir = tmp();
   const s = session();
-  expect(saveSession(dir, s)).toBe(1);
+  expect(saveSession(dir, s)).toMatchObject({ rev: 1 });
   expect(sessionRev(dir, s.id)).toBe(1);
   expect(loadSession(dir, s.id)!.rev).toBe(1);
-  expect(saveSession(dir, { ...s, draft: 'x' })).toBe(2);
+  expect(saveSession(dir, { ...s, draft: 'x' })).toMatchObject({ rev: 2 });
   expect(sessionRev(dir, s.id)).toBe(2);
   expect(loadSession(dir, s.id)!.rev).toBe(2);
   // A session that was never written reads as rev 0, same as a missing file.
   expect(sessionRev(dir, newSessionId())).toBe(0);
+});
+
+test('sessionFingerprint carries mtimeMs/size alongside rev, and a missing file reads as the same all-zero fingerprint saveSession returned nothing for yet', () => {
+  const dir = tmp();
+  const s = session();
+  const written = saveSession(dir, s);
+  const fp = sessionFingerprint(dir, s.id);
+  expect(fp).toEqual(written);
+  expect(fp.size).toBeGreaterThan(0);
+  expect(fp.mtimeMs).toBeGreaterThan(0);
+  expect(sessionFingerprint(dir, newSessionId())).toEqual({ rev: 0, mtimeMs: 0, size: 0 });
+  expect(sessionFingerprintsEqual(fp, { ...fp })).toBe(true);
+  expect(sessionFingerprintsEqual(fp, { ...fp, size: fp.size + 1 })).toBe(false);
+  expect(sessionFingerprintsEqual(fp, { ...fp, mtimeMs: fp.mtimeMs + 1 })).toBe(false);
+  expect(sessionFingerprintsEqual(fp, { ...fp, rev: fp.rev + 1 })).toBe(false);
 });
 
 test('a session with no rev field — an older host — reads and peeks as rev 0', () => {
@@ -207,4 +223,80 @@ test('releaseLock only removes a lock this token owns', () => {
 
 test('makeLockToken makes a distinct token each time', () => {
   expect(makeLockToken()).not.toBe(makeLockToken());
+});
+
+test('lockPath names the lock beside the session file', () => {
+  const dir = tmp();
+  const id = newSessionId();
+  expect(lockPath(dir, id)).toBe(path.join(dir, `${id}.lock`));
+});
+
+test('acquireLock: an unreadable lock file is held while recent, and taken over once it is stale (older than 5s)', () => {
+  const dir = tmp();
+  const id = newSessionId();
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, `${id}.lock`);
+  fs.writeFileSync(file, 'not json{{{'); // a create racing its write, or corruption
+
+  const recent = acquireLock(dir, id, 'tok-a', { host: 'h1' });
+  expect(recent.status).toBe('held');
+  // Held is side-effect free: the corrupt bytes are still there, untouched.
+  expect(fs.readFileSync(file, 'utf8')).toBe('not json{{{');
+
+  const old = new Date(Date.now() - 6000);
+  fs.utimesSync(file, old, old);
+  const taken = acquireLock(dir, id, 'tok-a', { host: 'h1' });
+  expect(taken).toEqual({ status: 'acquired' });
+  expect(JSON.parse(fs.readFileSync(file, 'utf8')).token).toBe('tok-a');
+});
+
+test('acquireLock: an unreadable lock right at the 5s edge reads held just inside it and stale just past it', () => {
+  const dir = tmp();
+  const id = newSessionId();
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, `${id}.lock`);
+
+  fs.writeFileSync(file, 'garbage');
+  const justInside = new Date(Date.now() - 4000);
+  fs.utimesSync(file, justInside, justInside);
+  expect(acquireLock(dir, id, 'tok-a', { host: 'h1' }).status).toBe('held');
+
+  fs.writeFileSync(file, 'garbage');
+  const justPast = new Date(Date.now() - 5001);
+  fs.utimesSync(file, justPast, justPast);
+  expect(acquireLock(dir, id, 'tok-a', { host: 'h1' })).toEqual({ status: 'acquired' });
+});
+
+// ─── pruneSessions leaves a held session and its lock alone ────────────────────
+
+test('pruneSessions never deletes a session whose lock is currently held, but does remove it once released', () => {
+  const dir = tmp();
+  saveSession(dir, session({ id: '2026-09-01T09-00-00-0001', updatedAt: '2026-09-01T09:00:00.000Z' }));
+  saveSession(dir, session({ id: '2026-09-02T09-00-00-0002', updatedAt: '2026-09-02T09:00:00.000Z' }));
+  // Our own live lock on the older one (a real, definitely-alive pid) — still "held"
+  // as far as pruneSessions, which has no token of its own, can tell.
+  acquireLock(dir, '2026-09-01T09-00-00-0001', 'tok-a');
+
+  expect(pruneSessions(dir, 0)).toBe(1); // only the unlocked one goes
+  expect(listSessions(dir).map((s) => s.id)).toEqual(['2026-09-01T09-00-00-0001']);
+
+  releaseLock(dir, '2026-09-01T09-00-00-0001', 'tok-a');
+  expect(pruneSessions(dir, 0)).toBe(1);
+  expect(listSessions(dir)).toEqual([]);
+});
+
+test('pruneSessions sweeps a .lock file whose session is already gone, but leaves one that is still held', () => {
+  const dir = tmp();
+  fs.mkdirSync(dir, { recursive: true });
+  const orphanId = newSessionId();
+  const heldOrphanId = newSessionId();
+  // A dead process's lock, session file never existed (or was deleted by hand) — an orphan to sweep.
+  const dead = spawnSync('true');
+  fs.writeFileSync(lockPath(dir, orphanId), JSON.stringify({ pid: dead.pid, host: os.hostname(), token: 'tok-a', at: new Date().toISOString() }), { mode: 0o600 });
+  // A live process's lock, same situation otherwise — left alone.
+  acquireLock(dir, heldOrphanId, 'tok-b');
+
+  pruneSessions(dir, 0);
+  expect(fs.existsSync(lockPath(dir, orphanId))).toBe(false);
+  expect(fs.existsSync(lockPath(dir, heldOrphanId))).toBe(true);
 });
