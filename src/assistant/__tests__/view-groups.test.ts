@@ -41,10 +41,21 @@ test('the head says what runs now, then what ran', () => {
   const live: ViewRecord = { kind: 'console', data: { command: 'bun run lint' }, phase: 'live', startedAt: 10_000, seq: 1 };
   const done = (code: number): ViewRecord => ({ kind: 'console', data: { command: 'x', exitCode: code, ms: 17_000 }, phase: 'done', startedAt: 0 });
   expect(groupHeadText([done(0), live], 14_500).map((s) => s.text).join('')).toBe('Running 2 commands · $ bun run lint · 4 s');
-  expect(groupHeadText([done(0), done(0)], 0).map((s) => s.text).join('')).toBe('Ran 2 commands · ✓ 34.0 s');
+  const ok = groupHeadText([done(0), done(0)], 0);
+  expect(ok.map((s) => s.text).join('')).toBe('Ran 2 commands · ✓ 34.0 s');
+  // The success mark is in the `ok` colour (spec), same as a single block's own tail.
+  expect(ok.some((s) => s.text === '✓' && s.color === 'ok')).toBe(true);
   const failed = groupHeadText([done(0), done(2)], 0);
   expect(failed.map((s) => s.text).join('')).toBe('Ran 2 commands · ✗ 1 failed · 34.0 s');
   expect(failed.some((s) => s.color === 'warn')).toBe(true);
+});
+
+test('the head text is sanitized — an escape sequence or control character in the command never reaches the row', () => {
+  const done = (): ViewRecord => ({ kind: 'console', data: { command: 'y', exitCode: 0, ms: 0 }, phase: 'done', startedAt: 0 });
+  const live: ViewRecord = { kind: 'console', data: { command: 'echo \u001B[31mhi\u001B[0m\u0007' }, phase: 'live', startedAt: 0, seq: 1 };
+  const text = groupHeadText([done(), live], 0).map((s) => s.text).join('');
+  expect(text).not.toMatch(/\u001B|\u0007/);
+  expect(text).toBe('Running 2 commands · $ echo hi · 0 s');
 });
 
 test('a group that forms around a block the person opened is open', () => {
