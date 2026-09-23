@@ -14,13 +14,28 @@ const statusRow = (frame: string) => frame.split('\n').find((r) => /Esc stops/.t
 // The seconds the status line is showing — of whatever is running now.
 const secondsOn = (frame: string) => Number(/(\d+\.\d)s/.exec(statusRow(frame))?.[1] ?? -1);
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+// The word the line says while no tool runs, and what phase its colour says: magenta
+// while the model thinks, the assistant's accent (green) while its text arrives. The
+// shimmer's highlight passes over a few cells; the rest carry the phase's colour.
+type Ui = Awaited<ReturnType<typeof bootApp>>;
+function verbOn(ui: Ui): { word: string; phase: 'thinking' | 'writing' | '?' } {
+  const rows = ui.backend.lastFrame.split('\n');
+  const y = rows.findIndex((r) => /Esc stops/.test(r));
+  const m = /([A-Z][a-z]+)…/.exec(rows[y] ?? '');
+  if (!m) return { word: '', phase: '?' };
+  const x0 = Array.from(rows[y]!.slice(0, m.index)).length;
+  const buf = (ui.backend as unknown as { lastBuffer: { get(x: number, y: number): { style: { fg?: string } } } }).lastBuffer;
+  const fgs = Array.from(m[1]!).map((_c, i) => buf.get(x0 + i, y).style.fg);
+  const phase = fgs.includes('magenta') ? 'thinking' : fgs.includes('green') ? 'writing' : '?';
+  return { word: m[1]!, phase };
+}
 // A real process finishes on its own clock, not the test backend's.
 const settleUntil = async (cond: () => boolean, ms = 4000) => {
   const end = Date.now() + ms;
   while (Date.now() < end) { await settle(2); if (cond()) return; await wait(20); }
 };
 
-test('once the tool is done and the model writes, the line says "writing", not the tool', async () => {
+test('once the tool is done and the model writes, the line says a word in the writing colour, not the tool', async () => {
   const model = new ScriptedModel();
   model.script(
     [{ tool: 'datetime', args: {} }],
@@ -33,7 +48,7 @@ test('once the tool is done and the model writes, the line says "writing", not t
   await settle(20);
   const row = statusRow(ui.backend.lastFrame);
   expect(row).toContain('1 tool call');
-  expect(row).toContain('writing…');
+  expect(verbOn(ui).phase).toBe('writing');
   expect(row).not.toContain('⚙');
   model.release();
   await settle(20);
@@ -42,7 +57,7 @@ test('once the tool is done and the model writes, the line says "writing", not t
 
 // Between tools nothing is being written: the model is working out its next call.
 // The line used to say "writing…" there, which read as text that never appeared.
-test('between tools, before any text, the line says "thinking", not "writing" or the last tool', async () => {
+test('between tools, before any text, the line is in the thinking colour, not the writing one or the last tool', async () => {
   const model = new ScriptedModel();
   model.script(
     [{ tool: 'datetime', args: {} }],
@@ -56,15 +71,14 @@ test('between tools, before any text, the line says "thinking", not "writing" or
   await settle(20);
   const row = statusRow(ui.backend.lastFrame);
   expect(row).toContain('1 tool call');
-  expect(row).toContain('thinking…');
-  expect(row).not.toContain('writing…');
+  expect(verbOn(ui).phase).toBe('thinking');
   expect(row).not.toContain('⚙');
   model.release();
   await settle(20);
   ui.app.unmount();
 });
 
-test('before the first token the line says "thinking"', async () => {
+test('before the first token the line is in the thinking colour', async () => {
   const model = new ScriptedModel();
   model.script([{ hold: true }, { text: 'ответ' }]);
   const ui = await bootApp(model, 110, 28);
@@ -72,7 +86,7 @@ test('before the first token the line says "thinking"', async () => {
   await ui.type('привет');
   await ui.press('return');
   await settle(10);
-  expect(statusRow(ui.backend.lastFrame)).toContain('thinking…');
+  expect(verbOn(ui).phase).toBe('thinking');
   model.release();
   await settle(20);
   ui.app.unmount();
@@ -117,7 +131,7 @@ test('the line times the running tool, not the turn, and the clock restarts with
   await wait(1300);
   await settle(3);
   const round = secondsOn(ui.backend.lastFrame);
-  expect(statusRow(ui.backend.lastFrame)).toContain('thinking…');
+  expect(verbOn(ui).phase).toBe('thinking');
   expect(round).toBeGreaterThan(1);
 
   model.release();
@@ -184,5 +198,48 @@ test('a provider that reports no usage shows no figure rather than a guess', asy
   await settle(20);
   expect(ui.backend.lastFrame).toContain('half past two.');
   expect(ui.backend.lastFrame).not.toContain('tok');
+  ui.app.unmount();
+});
+
+// ─── The word ─────────────────────────────────────────────────────────────────
+test('the word is one per request: the same all through a round, another for the next, from ui.verbs when set', async () => {
+  const model = new ScriptedModel();
+  model.script(
+    [{ text: 'Looking' }, { hold: true }, { text: ' now.' }, { tool: 'datetime', args: {} }],
+    [{ text: 'Done' }, { hold: true }, { text: '.' }],
+  );
+  const verbs = ['Alphaing', 'Betaing'];
+  const ui = await bootApp(model, 110, 28, undefined, { ui: { verbs } });
+  await ui.press('F');
+  await ui.type('go');
+  await ui.press('return');
+  await settle(10);
+  const first = verbOn(ui).word;
+  expect(verbs).toContain(first);
+  // Re-rendered many times over (the spinner ticks): it never changes within a round.
+  for (let i = 0; i < 5; i++) { await wait(40); await settle(2); expect(verbOn(ui).word).toBe(first); }
+  model.release();
+  await settle(20);
+  const second = verbOn(ui).word;
+  expect(verbs).toContain(second);
+  expect(second).not.toBe(first);
+  model.release();
+  await settle(20);
+  ui.app.unmount();
+});
+
+test('without ui.verbs the word comes from the built-in list', async () => {
+  const { VERBS } = await import('../assistant/verbs.ts');
+  const model = new ScriptedModel();
+  model.script([{ hold: true }, { text: 'ok' }]);
+  const ui = await bootApp(model, 110, 28);
+  await ui.press('F');
+  await ui.type('go');
+  await ui.press('return');
+  await settle(10);
+  expect(VERBS).toContain(verbOn(ui).word);
+  expect(statusRow(ui.backend.lastFrame)).not.toMatch(/thinking…|writing…/);
+  model.release();
+  await settle(20);
   ui.app.unmount();
 });

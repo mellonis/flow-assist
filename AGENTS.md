@@ -1175,10 +1175,16 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   of the caret.
 - The **status line** while a turn runs says what happens NOW: a running tool's label
   (`⚙ name(args)…`, `$ command`) pulses through bright colours; once the tool ends
-  (`onToolRun`) the label goes. With no tool running the line says `writing…` only
-  while the model's text arrives, and `thinking…` otherwise — before the first token,
-  while it reasons, and between tools while it works out the next call (it said
-  `writing…` there, and nothing appeared). The stream callbacks are
+  (`onToolRun`) the label goes. With no tool running the line says a WORD — a gerund
+  picked at random for each model request (`Pondering…`, `Brewing…`;
+  `src/assistant/verbs.ts`, `ui.verbs` replaces the list) — with the same shimmer as
+  a tool's label. It is picked when the request goes out (`send`, then `onRound` for
+  the next one) and held in state, never in the render, so it never changes within a
+  round, and a new round never repeats the last word. The PHASE is the colour:
+  magenta while the model thinks — before the first token, while it reasons, between
+  tools while it works out the next call — and the assistant's accent only while its
+  text arrives. It used to say `thinking…`/`writing…`, and `writing…` read as a
+  promise of text that was not there. The stream callbacks are
   closures made when the message was sent, so anything they READ (the tool label
   they clear) is kept in a ref beside the state — reading the state there saw its
   send-time value, and a finished tool's label stayed up for the rest of the turn.

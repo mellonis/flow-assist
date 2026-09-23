@@ -5,6 +5,12 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **The status line says a word of its own while the model works** — `Pondering…`,
+  `Brewing…`, `Tinkering…` — one picked for each request and drawn with the same
+  shimmer as a running tool; magenta while it thinks, green while its text arrives.
+  `writing…` is gone: it read as a promise of text that was not there yet.
+  `config set ui.verbs '["Thinking"]'` puts your own words in.
+
 - **A provider's refusal reads as a sentence.** A failed request used to show the
   provider's raw JSON — `LLM 403: { "message":"model_access_denied", "request_id":… }`.
   It now says `LLM 403 · <model>: model_access_denied (request 2395f0a1)`, and for a

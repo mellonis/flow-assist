@@ -33,7 +33,9 @@ export const hostConfigSchema = z.object({
   // default. `config set ui.mouse false` gives the mouse back to the terminal, whose own
   // selection takes whole screen rows, borders included; `/copy` in the chat copies an
   // answer with no mouse at all.
-  ui: z.object({ mouse: z.boolean().optional() }).optional(),
+  // `verbs` — the words the chat's status line picks from while the model works (one
+  // per request, src/assistant/verbs.ts); an empty list keeps the built-in ones.
+  ui: z.object({ mouse: z.boolean().optional(), verbs: z.array(z.string()).optional() }).optional(),
   memory: z.object({ file: z.string() }).optional(),
   // Chat sessions on disk (src/assistant/sessions.ts): where, whether the app
   // continues the latest one on start, how many are kept.

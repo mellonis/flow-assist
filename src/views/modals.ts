@@ -16,6 +16,7 @@
 
 import { askRows, type AskRow, type AskState } from '../assistant/ask.js';
 import { autoBadge, type AutoMode } from '../assistant/auto.js';
+import { VERBS } from '../assistant/verbs.js';
 import { answerText, cellWidth, cutStep, readParts, runMarks, runRowText, shownText, turnSegments, type NotesMode } from '../assistant/step.js';
 import { isClicked, isOpen, foldId, type FoldState } from '../assistant/folds.js';
 import { imageTokenRanges, splitTokens } from '../assistant/images.js';
@@ -1036,6 +1037,7 @@ export function renderChatModal({
   subject,
   toolLabel = '',
   phase = 'writing',
+  verb = '',
   folds = { open: false, except: new Set<string>() },
   detailsKey = '^o',
   onViewport,
@@ -1077,6 +1079,8 @@ export function renderChatModal({
   toolLabel?: string;
   // What the model is doing while no tool runs — see the status line.
   phase?: 'thinking' | 'writing';
+  // The word the line says for it — one per model request (src/assistant/verbs.ts).
+  verb?: string;
   // What is open and what is folded (src/assistant/folds.ts): the global state plus
   // the blocks a click has made an exception of. The chat owns it.
   folds?: FoldState;
@@ -1244,9 +1248,14 @@ export function renderChatModal({
               // `Shimmer` takes the label as a string and colours it per character, so
               // it is the label itself that is handed over, not a styled child.
               ? h(Box, { overflow: 'hidden' }, h(Shimmer, { color: m.accent ?? 'cyan', highlight: TOOL_PULSE(m), width: 4, interval: 70, direction: 'ltr', running: true, children: toolLabel }))
-              : phase === 'thinking'
-                ? h(Text, { color: 'magenta', wrap: 'truncate' }, 'thinking…')
-                : h(Text, { color: m.assistantAccent ?? 'green', wrap: 'truncate' }, 'writing…'),
+              // No tool: the request's own word, with the tool's shimmer — the colour
+              // says which phase, magenta while the model thinks, the assistant's
+              // accent while its text arrives.
+              : h(Box, { overflow: 'hidden' }, h(Shimmer, {
+                  color: phase === 'thinking' ? 'magenta' : (m.assistantAccent ?? 'green'),
+                  highlight: TOOL_PULSE(m), width: 4, interval: 70, direction: 'ltr', running: true,
+                  children: `${verb || VERBS[0]}…`,
+                })),
             h(Text, { dim: true, wrap: 'truncate' }, ` · ${CAP.esc} stops`))
         : h(Text, (emptyNotice && !streaming && !toolLabel && !escArmed) ? { color: 'yellow', wrap: 'truncate' } : { dim: true, wrap: 'truncate' },
         escArmed

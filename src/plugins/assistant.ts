@@ -11,6 +11,7 @@ import { addTrigger, chatUser } from '../loader/registry.js';
 import { bgActiveCount } from '../loader/tools-core.js';
 import { autoBadge, autoCommand, autoConfirms, autoSaid, nextAutoMode, type AutoMode } from '../assistant/auto.js';
 import { createPlan, todoGlyph } from '../assistant/plan.js';
+import { pickVerb, verbList } from '../assistant/verbs.js';
 import { addCalls, callRun, endRound, startsWithNext, notesCommand, notesMode, notesSaid, type CallRun, type NotesMode, type TurnPart } from '../assistant/step.js';
 import { apiHistory, compactConversation, chatLanguage, requestTools, transcriptSoFar } from '../assistant/agent.js';
 import { createToolSet, toolLoadingMode } from '../assistant/tool-loading.js';
@@ -309,6 +310,17 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // working out the next call) it is 'thinking'. One word for all of it read
           // "writing…" while nothing was being written.
           const [phase, setPhase] = f.useState<'thinking' | 'writing'>('thinking');
+          // The word the line says for either phase (src/assistant/verbs.ts): one per
+          // model request, picked when the request goes out — never in the render, so it
+          // cannot change under the person within a round. The ref is what the next
+          // pick avoids repeating.
+          const [verb, setVerbState] = f.useState('');
+          const verbRef = f.useRef('');
+          const nextVerb = () => {
+            const word = pickVerb(verbList(f.config as { ui?: { verbs?: unknown } }), verbRef.current);
+            verbRef.current = word;
+            setVerbState(word);
+          };
           // What is open and what is folded (src/assistant/folds.ts): one global
           // state, plus the blocks a click has made an exception of. `details` (^o)
           // is the master switch; a click opens the block under it alone. The
@@ -988,6 +1000,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             setError(null);
             setStreaming(true);
             setPhase('thinking');
+            nextVerb(); // the turn's first request gets a word of its own
             t0Ref.current = Date.now();
             setElapsedMs(0);
             contentRef.current = '';
@@ -1116,6 +1129,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // (`finish=stop toolCalls=0`). The missing "▸ tool calls" fold in the
                 // chat was AMBIGUOUS — this disambiguates it.
                 onRound: (info: { index: number; finishReason: string; toolCalls: number; contentLen: number; usage?: { promptTokens: number; completionTokens: number } }) => {
+                  // This request is done: the next one — after its tools — says a new word.
+                  nextVerb();
                   // What the turn costs: a round is billed for its prompt and its
                   // answer, and a turn is several rounds. Only what the provider
                   // actually reported is counted — one that reports nothing leaves the
@@ -2131,7 +2146,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             if (matches.length) completions = { matches, sel: walking ? Math.min(walking.idx, matches.length - 1) : 0 };
           }
           return (f.viewRegistry.chat as (p: Record<string, unknown>) => unknown)({
-            width, height, theme: f.config.theme, messages, input, streaming, error, toolLabel, phase, cursor, escArmed,
+            width, height, theme: f.config.theme, messages, input, streaming, error, toolLabel, phase, verb, cursor, escArmed,
             // What is open and what is folded, the cap of the key that changes it, and
             // the two channels a click needs: where the conversation is on the screen,
             // and which row to put at the top once a fold has changed the rows.
