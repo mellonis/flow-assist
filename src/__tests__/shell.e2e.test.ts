@@ -293,7 +293,7 @@ test('a confirmed run_command folds to one line, and opened its output stands; t
   ui.app.unmount();
 });
 
-test('a long output stays one line folded; opened it shows its last lines, cut', async () => {
+test('a long output stays one line folded; a click shows its last lines, cut; ^o opens it in full', async () => {
   const root = rootDir();
   const model = new ScriptedModel();
   model.script(
@@ -313,14 +313,26 @@ test('a long output stays one line folded; opened it shows its last lines, cut',
   expect(folded).not.toContain('lines cut');
   expect(folded).not.toContain('line 40');
 
-  ui.backend.press({ name: 'r', ctrl: true }); // ^r is ^o's alias
-  await settle(5);
-  const opened = unfence(ui.backend.lastFrame);
+  // A click opens it capped to its last runOutputLines lines — the same cap the
+  // fold's own model ("… N lines cut · ^o for all") points past, at the global key.
+  const foldRow = ui.backend.lastFrame.split('\n').findIndex((r) => r.includes('for i in $(seq 1 40)'));
+  ui.backend.mouse('down', 12, foldRow);
+  ui.backend.mouse('up', 12, foldRow);
+  await settle(6);
+  let opened = unfence(ui.backend.lastFrame);
   expect(opened).toContain('… 35 lines cut · ^o for all');
   expect(opened).toContain('line 40');
   expect(opened).not.toContain('line 3 ');
   // The model still got the whole of it — the cap here is the screen's, not its.
   expect(String(sentTo(model).find((m) => m.role === 'tool')?.content)).toContain('line 3\n');
+
+  // ^o (the details key) opens every view in full — every line it kept, not the
+  // capped tail a click shows.
+  ui.backend.press({ name: 'r', ctrl: true }); // ^r is ^o's alias
+  await settle(5);
+  opened = unfence(ui.backend.lastFrame);
+  expect(opened).not.toContain('lines cut');
+  expect(opened).toContain('line 40');
   ui.app.unmount();
 });
 

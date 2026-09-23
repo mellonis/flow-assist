@@ -248,10 +248,12 @@ assistant nobody had asked for a board.
   renderer draws it, the host frames it") and the chat draws the `$ …` block. A declined
   call leaves none — nothing ran; a failed one shows its output and its exit code.
   Folded, the block is ONE line saying how it ended — `cmd · ✓ 4.2 s`, `✗ exit 1 · 4.2
-  s`, `stopped`, `timed out`; opened (a click on it, or `^o`) it shows the last
+  s`, `stopped`, `timed out`; a CLICK opens it to the last
   `plugins.assistant.runOutputLines` lines (20) with `… N lines cut · ^o for all` above
   them — a display cap of its own, quite apart from `shell.maxChars`, which is how much
-  the MODEL is given.
+  the MODEL is given; `^o` opens every block in full (`VIEW_CAPS.lines`, everything the
+  view kept), which is what makes `^o for all` true rather than a second, still-capped
+  state.
 - **Whose claim excuses a y/n, and whose does not.** A tool pauses because its `write`
   flag says so, and the flag is set by whoever is entitled to say it. The `mcp` plugin
   keeps the two apart per server: `trusted` is "I believe THIS SERVER's own

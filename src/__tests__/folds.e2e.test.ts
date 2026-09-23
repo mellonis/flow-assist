@@ -221,6 +221,26 @@ test('closing a block leaves its first row where it was on screen', async () => 
   ui.app.unmount();
 });
 
+test('a click opens a command capped to its last lines; ^o opens it in full', async () => {
+  const { ui } = await longOutput();
+  await click(ui, rowOf(ui, 'seq 1 60 ·'));
+  // A click shows the capped tail — the same 6 rows every open-by-click test sees.
+  expect(ui.backend.lastFrame).toContain('… 57 lines cut · ^o for all');
+  expect(ui.backend.lastFrame).toContain('│ 58');
+  expect(ui.backend.lastFrame).toContain('│ 60');
+  expect(ui.backend.lastFrame).not.toContain('│ 1');
+  // The GLOBAL key opens every view in full — every line it kept, not the capped tail
+  // a click shows — which is what makes the cut marker's own "^o for all" true.
+  ui.backend.press({ name: 'o', ctrl: true });
+  await settle(6);
+  expect(ui.backend.lastFrame).not.toContain('lines cut');
+  for (let i = 0; i < 6; i++) await ui.press('pageup');
+  expect(ui.backend.lastFrame).toContain('│ 1');
+  for (let i = 0; i < 6; i++) await ui.press('pagedown');
+  expect(ui.backend.lastFrame).toContain('│ 60');
+  ui.app.unmount();
+});
+
 test('a message sent after a block was opened still sticks to the bottom', async () => {
   const model = new ScriptedModel();
   model.script(

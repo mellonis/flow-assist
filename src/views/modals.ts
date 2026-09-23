@@ -522,7 +522,11 @@ function messageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): ChatRow
     isClicked(o.folds, foldId(at, 'calls')) ? 1 : 0,
     ...views.map((_v, vi) => (isOpen(o.folds, foldId(at, 'view', vi)) ? 1 : 0)),
   ].join('');
-  const key = `${o.wrap}:${open}:${last ? 1 : 0}:${o.viewLines}:${o.notes}:${o.detailsKey}:${at}:${clock}:${o.palette.ok ?? ''}:${o.palette.warn ?? ''}`;
+  // The global fold flag on its own: a view open because it was CLICKED and a view
+  // open because EVERYTHING is (`^o`) both read `isOpen` as open, but the two draw
+  // different amounts of text (a click's capped tail vs. `^o`'s "all of it kept") —
+  // without this bit in the key, whichever was cached first would stick.
+  const key = `${o.wrap}:${open}:${o.folds.open ? 1 : 0}:${last ? 1 : 0}:${o.viewLines}:${o.notes}:${o.detailsKey}:${at}:${clock}:${o.palette.ok ?? ''}:${o.palette.warn ?? ''}`;
   let byKey = rowCache.get(m);
   if (!byKey) rowCache.set(m, (byKey = new Map()));
   let rows = byKey.get(key);
@@ -594,9 +598,14 @@ function buildMessageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): Ch
       views.forEach((v, vi) => {
         const id = foldId(at, 'view', vi);
         const open = isOpen(folds, id);
+        // A block a CLICK opened shows its capped tail, same as any other click; the
+        // GLOBAL key (`^o`) means "open everything IN FULL" — every view kept its
+        // whole text (VIEW_CAPS.lines is the cap at collection, so this is never
+        // actually unbounded), so `^o for all` is true rather than a hint that opens
+        // a second, still-capped state.
         const framed = frameView(v, o.renderers, {
           width: inner, folded: !open, live: v.phase === 'live', failed: v.phase === 'failed',
-          elapsedMs: Math.max(0, o.now - v.startedAt), lines: viewLines, moreKey: detailsKey,
+          elapsedMs: Math.max(0, o.now - v.startedAt), lines: o.folds.open ? VIEW_CAPS.lines : viewLines, moreKey: detailsKey,
         }, o.palette, o.onViewFail);
         framed.forEach((line, li) => rows.push({
           role, spans: line.spans, first: vi === 0 && li === 0, fold: id,
