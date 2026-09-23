@@ -22,6 +22,7 @@ import {
   buildCommandRegistry,
   buildKeys,
   buildViewRegistry,
+  collectViewRenderers,
   commandContextFor,
   cacheInPlay,
   composeFooterHints,
@@ -329,6 +330,10 @@ export function renderApp(
       },
       [plugins, ft],
     );
+
+    // Every view renderer, the host's and each plugin's: the chat draws a tool's block
+    // with the renderer its kind names (src/loader/registry.ts).
+    (services as unknown as HostServices).viewRenderers = collectViewRenderers(plugins as never);
 
     // The chat's two plugin hooks (AGENTS.md, plugin contract). Each plugin is asked
     // with its OWN runtime — the one its services and store live on; the chat's

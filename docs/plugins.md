@@ -107,17 +107,28 @@ What the host does with it, and what it expects back:
   changed. The chat keeps a `✎ title · +N −M` diff block above the answer; the model
   never gets it. `ctx` has no `reportChange` outside a chat (the one-shot CLI), so call
   it as `ctx?.reportChange?.(…)`.
-- **`ctx.reportView(view)`** — how the RESULT is shown. A tool's result is otherwise a
-  dim line the chat folds away; a view is a block the host draws in the chat from data you hand
-  it. One kind so far: `{ kind: 'console', command, text, exitCode, ms, cwd, status? }`
-  — what `run_command` shows. The same rules as a reported change: display only (the
-  model reads your returned result and never a copy of the block), dropped if the call
-  then throws, and `ctx?.reportView?.(…)` because there is no chat to draw it in a
-  one-shot run. The host owns the frame, the colours and every cap — the text is
-  stripped of escape sequences, each line and the whole of it are cut to a bound, and
-  the block is folded to its last lines until the person clicks it open (or presses
-  `^o`). A kind this host does not know is
-  ignored, so a plugin written for a later one still runs here.
+- **Showing what a tool does — views.** A tool may hand the chat a block to draw, and
+  update it while it runs. The chat draws it as one line that a click opens; it stays
+  after the call, in whatever state the person left it.
+  - `const v = ctx.liveView?.('card', data)` opens it; `v.update(next)` replaces the
+    data (the chat redraws a few times a second); `v.discard()` removes the block once
+    the call ends. `ctx.reportView?.('card', data)` is a block that never changes.
+  - Draw it with a renderer in the shape — data in, lines out:
+    `viewRenderers: { card: (data, ctx) => [[{ text: '✎ ', color: 'accent' }, { text: data.title }]] }`.
+    `ctx` says `folded`, `live`, `failed`, `width`, `elapsedMs`, `lines`, `moreKey`;
+    draw both the folded and the open state. The host qualifies the kind by your
+    plugin's name (`notes:card`), so your tool names it bare.
+  - A colour is a token of the chat palette (`accent`, `ok`, `warn`, `shell`, `text`),
+    never a literal — right on a dark and a light terminal alike. A leading span
+    marked `chrome: true` is painted and never copied.
+  - The host frames what you return: one line is one row, cut to the width; text is
+    stripped of escape sequences; rows are capped. `data` must be JSON, 64 KB at most.
+  - Display only: the model reads what your tool RETURNS, never the block. A call that
+    throws keeps its block, marked failed. With no chat (the one-shot CLI) there is no
+    `liveView` — call it as `ctx.liveView?.(…)`.
+  - `console` is the host's own kind — `{ command, cwd, text, exitCode, ms, status }` —
+    what `run_command` shows. A renderer that is missing (your plugin was disabled) or
+    throws is drawn as one dim `▸ kind` line.
 - **An argument is hostile input.** The model writes every argument, and it may have
   read the words it writes in a web page or a ticket. Check paths against what the
   plugin may touch, never pass a value that starts with `-` to a command line, and

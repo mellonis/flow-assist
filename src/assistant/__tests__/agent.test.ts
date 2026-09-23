@@ -287,3 +287,61 @@ test('agentChat rethrows the same error with the turn so far on it', async () =>
   expect(transcriptSoFar(thrown).some((m) => m.role === 'user')).toBe(false);
   expect(transcriptSoFar(new Error('no turn'))).toEqual([]);
 });
+
+// One round that calls the tool `demo:show` (whose `run` is given), then an answer.
+async function runOneToolTurn(run: (args: unknown, ctx: any) => unknown, extra: Record<string, unknown> = {}) {
+  assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
+  const extraTools = [{ type: 'function', function: { name: 'demo:show', description: 'd', parameters: { type: 'object', properties: {} } }, run }] as any;
+  let round = 0;
+  const chatRound = async (_m: any[], opts: any) => {
+    round++;
+    if (round === 1) return { content: '', finishReason: 'tool_calls', toolCalls: [{ id: 'c1', name: 'demo__show', arguments: '{}' }] };
+    opts.onDelta?.('ok');
+    return { content: 'ok', finishReason: 'stop', toolCalls: [] };
+  };
+  return agentChat([{ role: 'user', content: 'go' }], { baseUrl: 'http://x', model: 'm', token: 't', onLive: () => {}, onLiveCommit: () => {}, extraTools, chatRound, ...extra } as any);
+}
+
+test('a live view reports every change, then its final phase, and nothing after', async () => {
+  const seen: { phase: string; data: unknown; callId?: string; seq?: number }[] = [];
+  let later: (() => void) | undefined;
+  const r = await runOneToolTurn(async (_a, ctx) => {
+    const v = ctx.liveView('console', { command: 'x', cwd: '~', text: '' });
+    v.update({ command: 'x', cwd: '~', text: 'a' });
+    later = () => v.update({ command: 'x', cwd: '~', text: 'late' });
+    return 'ok';
+  }, { onToolLive: (rec: any) => seen.push({ phase: rec.phase, data: rec.data, callId: rec.callId, seq: rec.seq }) });
+  later!();
+  expect(seen.map((s) => s.phase)).toEqual(['live', 'live', 'done']);
+  expect(seen.at(-1)!.data).toEqual({ command: 'x', cwd: '~', text: 'a' });
+  expect(seen.every((s) => s.callId === 'c1#0' && s.seq === 0)).toBe(true);
+  expect(r.toolRuns[0]!.views).toEqual([expect.objectContaining({ kind: 'console', phase: 'done' })]);
+});
+
+test('a tool that throws keeps its view, marked failed', async () => {
+  const phases: string[] = [];
+  const r = await runOneToolTurn(async (_a, ctx) => { ctx.liveView('console', { command: 'x' }); throw new Error('boom'); }, { onToolLive: (rec: any) => phases.push(rec.phase) });
+  expect(phases).toEqual(['live', 'failed']);
+  expect(r.toolRuns[0]!.views?.[0]?.phase).toBe('failed');
+});
+
+test('a discarded view goes, and a one-off reportView — old form included — lands as done', async () => {
+  const seen: string[] = [];
+  const r = await runOneToolTurn(async (_a, ctx) => {
+    ctx.liveView('console', { command: 'gone' }).discard();
+    ctx.reportView({ kind: 'console', command: 'old', text: 't', exitCode: 0, ms: 1, cwd: '~' });
+    return 'ok';
+  }, { onToolLive: (rec: any) => seen.push(`${rec.data.command}:${rec.phase}`) });
+  expect(seen).toEqual(['gone:live', 'old:live', 'gone:discarded', 'old:done']);
+  expect(r.toolRuns[0]!.views?.map((v) => (v.data as { command: string }).command)).toEqual(['old']);
+});
+
+test('data that is not JSON or too big is dropped and the previous state stays', async () => {
+  const datas: unknown[] = [];
+  await runOneToolTurn(async (_a, ctx) => {
+    const v = ctx.liveView('console', { n: 1 });
+    v.update({ big: 'x'.repeat(70_000) });
+    return 'ok';
+  }, { onToolLive: (rec: any) => datas.push(rec.data) });
+  expect(datas).toEqual([{ n: 1 }, { n: 1 }]);
+});

@@ -14,7 +14,7 @@ import type { ToolDef, ToolCtx } from '../loader/tools.js';
 import { chatTools, execChatTool, chatToolDefs, chatToolGroupOf } from '../loader/tools.js';
 import type { ToolRunEntry } from '../runtime/services/log.js';
 import { changeView, type Change, type ChangeView } from './diff.js';
-import { toolView, type ToolView } from './views.js';
+import { acceptData, readLegacyView, type ViewRecord } from './views.js';
 import { contentText, type ContentPart, type ImageRef } from './images.js';
 import {
   TOOLS_LOAD, createToolSet, deferredTools, notLoadedError, runToolsLoad, toolsToSend,
@@ -66,9 +66,9 @@ export interface ToolRun {
   // What the write changed, as the tool reported it (`ctx.reportChange`) — drawn in
   // the chat, never sent to the model.
   changes?: ChangeView[];
-  // How the tool asked for its result to be SHOWN (`ctx.reportView`, ./views.ts) —
-  // the same rule: drawn in the chat, never sent to the model.
-  views?: ToolView[];
+  // The views the call left — in their final phase, never a discarded one; drawn in
+  // the chat, never sent to the model.
+  views?: ViewRecord[];
 }
 
 export interface AgentResult {
@@ -144,9 +144,21 @@ export interface AgentOpts {
   // `toolSet` is the conversation's loaded set; without one a turn starts empty.
   toolLoading?: ToolLoading;
   toolSet?: ToolSet;
+  // Every change to a view a call opened (`ctx.liveView`): its first state, each
+  // update, and its final phase once the call ends. Display only — the chat draws it.
+  onToolLive?: (rec: ViewRecord) => void;
+  // The clock a view's start is read from; tests fix it.
+  now?: () => number;
   // Any remaining OpenAI-ish options (tools, signal, …) — spread into the round.
   [key: string]: unknown;
 }
+
+// What `ctx.liveView(kind, data)` hands the tool back: `update` replaces the data
+// (the chat redraws a few times a second, never faster than the round it runs in);
+// `discard` removes the block once the call ends, as if it had never opened one. An
+// update after the call has returned, or on a discarded view, is silently ignored —
+// the tool's own clock does not stop at the same moment the call does.
+export interface LiveView { update(data: unknown): void; discard(): void }
 
 // ─── API-side history ─────────────────────────────────────────────────────────
 // What a caller sends back on the next turn. The chat UI's own message list is a
@@ -469,6 +481,10 @@ export async function agentChat(
   let content = ''; // final answer (last round without tool_calls)
   let process = ''; // narration of moves from rounds WITH tool_calls — folded
   const toolRuns: ToolRun[] = []; // trace of executed tools
+  const now = opts.now ?? Date.now;
+  // Counts every call of the turn, declined ones included: another call between two
+  // commands is what separates them — a view's `callId` says which call it belongs to.
+  let seq = 0;
 
   const chatRoundFn = ((opts as { chatRound?: AgentOpts['chatRound'] }).chatRound) ?? realChatRound;
 
@@ -537,6 +553,9 @@ export async function agentChat(
         })),
       });
       for (const called of r.toolCalls) {
+        // Another call between two commands is what separates them — counted here,
+        // before the declined branch, so a declined call still takes its place.
+        const callSeq = seq++;
         const tc = { ...called, name: realName.get(called.name) ?? called.name };
         onTool(tc.name, tc.arguments);
         const def = toolByName.get(tc.name);
@@ -579,7 +598,24 @@ export async function agentChat(
           }
         }
         const changes: ChangeView[] = [];
-        const views: ToolView[] = [];
+        // The views this call opens: each a record the chat hears about on every change.
+        // `ended` closes them — an update after the call returned is ignored.
+        const opened: { rec: ViewRecord; discarded: boolean }[] = [];
+        let ended = false;
+        const emit = (rec: ViewRecord) => { try { opts.onToolLive?.(rec); } catch { /* the chat's trouble, not the tool's */ } };
+        const open = (kind: string, data: unknown): LiveView => {
+          const slot = { rec: { kind: String(kind), data: acceptData(data) ? data : null, phase: 'live', startedAt: now(), callId: `${tc.id}#${opened.length}`, seq: callSeq } as ViewRecord, discarded: false };
+          opened.push(slot);
+          emit(slot.rec);
+          return {
+            update: (next: unknown) => {
+              if (ended || slot.discarded || !acceptData(next)) return;
+              slot.rec = { ...slot.rec, data: next };
+              emit(slot.rec);
+            },
+            discard: () => { slot.discarded = true; },
+          };
+        };
         try {
           // The turn's signal rides in the ctx, so a tool that waits on something long
           // (run_command) stops with the answer when the person presses Esc.
@@ -591,12 +627,14 @@ export async function agentChat(
             reportChange: (c: Change) => {
               try { const v = changeView(c); if (v) changes.push(v); } catch { /* a bad report never fails the write */ }
             },
-            // The same contract for how the result is SHOWN: what the tool describes
-            // is validated and capped here, so nothing unbounded — and nothing a
-            // command printed — reaches the chat as it stands. A kind this host does
-            // not know comes back null and is quietly ignored.
-            reportView: (v: ToolView) => {
-              try { const parsed = toolView(v); if (parsed) views.push(parsed); } catch { /* a bad report never fails the call */ }
+            // A view the tool keeps open and updates while it runs.
+            liveView: (kind: string, data: unknown) => open(kind, data),
+            // A one-off view: opened and left; it becomes final with the call. The
+            // one-argument form is how a console block was reported before renderers.
+            reportView: (kind: unknown, data?: unknown) => {
+              if (typeof kind === 'string') { open(kind, data); return; }
+              const old = readLegacyView(kind);
+              if (old) open('console', old.data);
             },
           };
           // Plugin ai-tool → its own `run(args, toolCtx)`; group tool → execChatTool
@@ -613,14 +651,20 @@ export async function agentChat(
           detail = `Error: ${e instanceof Error ? e.message : String(e)}`;
           outcome = 'error';
         }
+        ended = true;
+        const final = outcome === 'error' ? 'failed' : 'done';
+        for (const s of opened) {
+          s.rec = { ...s.rec, phase: s.discarded ? 'discarded' : final };
+          emit(s.rec);
+        }
+        // A tool that threw keeps what it showed, marked failed: the person was reading it.
+        const views = opened.filter((s) => !s.discarded).map((s) => s.rec);
         const detailStr = typeof detail === 'string' ? detail : JSON.stringify(detail);
         current.push({ role: 'tool', tool_call_id: tc.id, content: modelToolResult(outcome, detailStr) });
         logRun({ name: tc.name, write, outcome, detail: detailStr, args: parsed });
         const run: ToolRun = { name: tc.name, args: parsed, write, outcome, detail: detailStr };
         if (outcome !== 'error' && changes.length) run.changes = changes;
-        // A tool that threw shows nothing: what it had reported describes work it did
-        // not finish — the same rule its reported changes follow.
-        if (outcome !== 'error' && views.length) run.views = views;
+        if (views.length) run.views = views;
         toolRuns.push(run);
         opts.onToolRun?.(run);
       }

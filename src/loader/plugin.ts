@@ -14,6 +14,9 @@ export type PluginShape = {
   keys?: Record<string, string | string[]>;
   keyActions?: Record<string, string | string[]>;
   views?: Record<string, unknown>;
+  // How the blocks this plugin's tools report are drawn: kind → renderer, qualified
+  // `<plugin>:<kind>` by the host (docs/plugins.md, "Showing what a tool does").
+  viewRenderers?: Record<string, (data: unknown, ctx: unknown) => unknown>;
   surface?: string;
   modals?: string[];
   colors?: Record<string, string>;
@@ -84,6 +87,9 @@ export interface Plugin {
   keys: Record<string, string[]>;
   commands?: Command[];
   views?: Record<string, unknown>;
+  // How the blocks this plugin's tools report are drawn: kind → renderer, qualified
+  // `<plugin>:<kind>` by the host (docs/plugins.md, "Showing what a tool does").
+  viewRenderers?: Record<string, (data: unknown, ctx: unknown) => unknown>;
   surface?: string;
   colors?: Record<string, string>;
   modalColors?: Record<string, Record<string, string>>;

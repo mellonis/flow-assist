@@ -24,6 +24,7 @@ import type { PluginRepo } from './host-group.js';
 import { buildKeys } from './registry.js';
 import { purgePluginMemories } from '../runtime/services/memory.js';
 import { identityToken } from '../runtime/plugin-identity.js';
+import { qualifyKind } from '../assistant/views.js';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 export type ToolParameters = Record<string, unknown>;
@@ -76,6 +77,24 @@ export function pluginConfigs(plugins: Plugin[]): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const p of plugins) if (p.configSchema != null) out[p.name] = p.configSchema;
   return out;
+}
+
+// A plugin's tool names its view kinds as its plugin named its renderers — bare — and
+// they are qualified here, on the way out of the plugin, so `card` from `notes` is
+// `notes:card` and never another plugin's `card`. The old one-argument
+// `reportView({ kind: 'console', … })` passes through as it is.
+export function scopeViews(ctx: ToolCtx, owner: string): ToolCtx {
+  const c = ctx as Record<string, unknown>;
+  const out: Record<string, unknown> = { ...c };
+  if (typeof c.liveView === 'function') {
+    const live = c.liveView as (k: string, d: unknown) => unknown;
+    out.liveView = (kind: string, data: unknown) => live(qualifyKind(owner, String(kind)), data);
+  }
+  if (typeof c.reportView === 'function') {
+    const report = c.reportView as (k: unknown, d?: unknown) => unknown;
+    out.reportView = (kind: unknown, data?: unknown) => (typeof kind === 'string' ? report(qualifyKind(owner, kind), data) : report(kind));
+  }
+  return out as ToolCtx;
 }
 
 // Module-level singleton registry so the agent loop can dispatch tools without
@@ -162,7 +181,7 @@ export function assembleToolRegistry({ plugins, config, repo }: AssembledToolReg
     // the host holds the token→name map).
     for (const group of (p.tools ?? []) as unknown as ToolGroup[]) {
       if (disabled.includes(group.id) && !group.alwaysOn) continue;
-      const wrapped = { ...group, exec: (name: string, args: Record<string, unknown>, ctx: ToolCtx) => group.exec(name, args, { ...ctx, pluginToken: identityToken(p.name) }) };
+      const wrapped = { ...group, exec: (name: string, args: Record<string, unknown>, ctx: ToolCtx) => group.exec(name, args, scopeViews({ ...ctx, pluginToken: identityToken(p.name) }, p.name)) };
       groups.push(wrapped);
       register(wrapped, p.name);
     }
@@ -191,7 +210,7 @@ export function assembleToolRegistry({ plugins, config, repo }: AssembledToolReg
             name: t.function.name,
           },
           run: (args: Record<string, unknown>, ctx: ToolCtx) =>
-            run(args, { ...p.services, ...ctx, pluginToken: identityToken(p.name) }),
+            run(args, scopeViews({ ...p.services, ...ctx, pluginToken: identityToken(p.name) } as ToolCtx, p.name)),
         };
       });
       const aiGroup: ToolGroup = {

@@ -8,7 +8,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-type Ctx = { reportChange?: (change: { title: string; before: string; after: string }) => void };
+type Ctx = {
+  reportChange?: (change: { title: string; before: string; after: string }) => void;
+  reportView?: (kind: string, data: unknown) => void;
+};
 
 export default function buildNotesPlugin({ config, make, z }: any) {
   const file = (): string => config?.plugins?.notes?.file ?? path.join(process.cwd(), 'notes.md');
@@ -53,11 +56,20 @@ export default function buildNotesPlugin({ config, make, z }: any) {
           fs.writeFileSync(file(), after);
           // What the write changed: the chat shows it as a diff; the model never gets it.
           ctx?.reportChange?.({ title: path.basename(file()), before, after });
+          // A block of this plugin's own, drawn by `viewRenderers.note` below. Display
+          // only — the model reads the returned text.
+          ctx?.reportView?.('note', { text });
           return `Added to ${path.basename(file())}.`;
         }
         throw new Error(`Unknown tool: ${name}`);
       },
     }],
+
+    // How this plugin's blocks are drawn: data in, lines of spans out. Colours are the
+    // chat palette's tokens; the host cuts each line to the width.
+    viewRenderers: {
+      note: (data: { text?: string }) => [[{ text: '✎ ', color: 'accent' }, { text: `note: ${String(data?.text ?? '')}` }]],
+    },
 
     // `:notes` — how many notes there are, in the host's message line.
     commands: [{

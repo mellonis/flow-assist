@@ -244,9 +244,10 @@ assistant nobody had asked for a board.
   throws. The turn's AbortSignal reaches tools as `ctx.signal` (`agentChat`), so Esc
   kills the command's process group with the answer.
   **A confirmed call SHOWS what it printed**, as the person's own `!command` does: the
-  tool reports a console view (`ctx.reportView`, see "A tool describes how its result is
-  shown") and the chat draws the `$ …` block. A declined call leaves none — nothing
-  ran; a failed one shows its output and its exit code. The block is folded to the last
+  tool reports a console view (`ctx.reportView`, see "A tool describes what it shows, a
+  renderer draws it, the host frames it") and the chat draws the `$ …` block. A declined
+  call leaves none — nothing ran; a failed one shows its output and its exit code. The
+  block is folded to the last
   `plugins.assistant.runOutputLines` lines (20) with `… N lines cut · ^o for all` — the
   block's fold line, which a click opens as the key does — a display cap of its own,
   quite apart from `shell.maxChars`, which is how much the MODEL is given.
@@ -464,31 +465,35 @@ hardest. Rules the `repo` and `gitlab` plugins hold, each with a test that tries
   dropped. Only the tool knows what "before" is (a file, an issue's description, a
   comment), so the host never guesses it: `repo`'s write_file / edit_file /
   delete_file report (a directory delete and a file over 2 MiB do not).
-- **A tool describes how its RESULT is shown, and the host draws it**
-  (`ctx.reportView`, `src/assistant/views.ts`). Everything else a tool does collapsed
-  to one dim line in the fold unless host code knew that tool by name. So a tool may hand
-  over a VIEW — data, never rendering — and the host owns the frame, the colours, the
-  wrapping and every cap. One kind so far, a discriminated union on `kind`:
-  `{ kind: 'console', command, text, exitCode, ms, cwd, status? }`, which `run_command`
-  reports; `reportChange` stays the shorthand it is and becomes a kind of its own when
-  a second real case says what the kinds have in common. The rules a new kind keeps:
-  - **Display only.** A view rides on the display message (a message of role `view`,
-    which `apiHistory` drops) and never on the tool's result — the model already read
-    the result, and a copy of it in the conversation costs the context twice. A view
-    from a tool that then threw is dropped, as its reported changes are.
-  - **It is not the host speaking.** The text was written by a command, a file or a
-    page: escape sequences and control characters are stripped, `\r` counts as a line
-    break (a progress bar keeps its last state instead of gluing into one unreadable
-    row), and it is drawn inside a fence longer than any run of backticks in it — so
-    nothing in it can close the block and pass for a confirmation or a hint line.
-  - **Everything is capped where it is COLLECTED** (`toolView`), so a message, a
-    session file and the screen are bounded alike: each line, the number of lines, the
-    characters altogether, the command line itself. Opening the block therefore shows
-    what the view KEPT, not the raw capture.
-  - Every `ChatRow` stays one terminal line: a kind lays out to markdown the chat
-    already knows how to wrap, as the diff block does.
-  - A kind this host does not know comes back null and is ignored, so a plugin written
-    against a later host still runs in an older one.
+- **A tool describes what it shows, a renderer draws it, the host frames it**
+  (`src/assistant/views.ts`). Everything else a tool does collapsed to one dim line in
+  the fold unless host code knew that tool by name. So a tool may hand over a VIEW —
+  data, never rendering — and a renderer turns that data into lines the host frames.
+  - `ctx.liveView(kind, data)` opens a block and returns `{ update, discard }`:
+    `update(next)` replaces the data while the call runs, `discard()` removes the
+    block once the call ends. `ctx.reportView(kind, data)` is the one-off form — opened
+    and left to become final with the call; its old one-argument shape,
+    `ctx.reportView({ kind: 'console', … })`, is still read, as the console block.
+  - `viewRenderers` in the shape maps a bare kind to a renderer (data in, lines of
+    spans out); `scopeViews` (`src/loader/tools.ts`) qualifies it `<plugin>:<kind>` on
+    the way out of the plugin, so a tool names its own kind bare and never collides
+    with another plugin's. `collectViewRenderers` gathers the host's own `console`
+    renderer plus every plugin's, bound once as `services.viewRenderers`.
+  - **The frame** (`frameView`) is what turns a renderer's lines into what actually
+    reaches the screen: one row is one line — cut to the width, never wrapped — capped
+    at `VIEW_CAPS.rows`, every span's text stripped of escape sequences and every
+    colour resolved from the chat palette (a token, never a literal), a leading span
+    marked `chrome: true` painted and never copied. A renderer that is missing (its
+    plugin was disabled) or throws costs one dim `▸ kind` line instead.
+  - `agentChat` reports every change through `onToolLive` — a view's first state, each
+    update, and its final phase once the call ends — so the chat can draw it live. A
+    tool that then throws keeps what it showed, marked failed: the person was reading
+    it, and a discarded view is the only one that goes. `data` must be JSON and no more
+    than 64 KB; anything else is dropped and the view keeps its last accepted state.
+  - **Display only**, as before: a view rides on the display message (a message of
+    role `view`, which `apiHistory` drops) and never on the tool's result — the model
+    already read the result, and a copy of it in the conversation costs the context
+    twice.
 - **A shell command is seen before it runs.** `run_command`'s guard is the y/n, not a
   filter on the command; its directory is checked anyway — inside a root by the REAL
   path (`dirAllowed`), a `cd` that leads out is not remembered. `runShell` has exactly

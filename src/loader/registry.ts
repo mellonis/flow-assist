@@ -11,6 +11,8 @@ import { BASE_COMMANDS, helpText } from '../config/commands.js';
 import type { Command as BaseCommand } from '../config/commands.js';
 import { makeFactory } from './plugin.js';
 import type { Command, Make, MakeFactoryConfig, Plugin, PluginShape } from './plugin.js';
+import { renderConsole } from '../assistant/console-view.js';
+import type { ViewRenderer, ViewRenderers } from '../assistant/views.js';
 
 // ─── Input types ────────────────────────────────────────────────────────────
 // `ui` is the host's input state — the fields the trigger gate cares about.
@@ -289,6 +291,18 @@ export function buildViewRegistry(plugins: PluginShape[] = []): Record<string, u
     }
   }
   return registry;
+}
+
+// Every renderer the chat can draw a view with: the host's own `console`, and each
+// plugin's, qualified by its name. Something that is not a function is not one.
+export function collectViewRenderers(plugins: { name: string; viewRenderers?: Record<string, unknown> }[]): ViewRenderers {
+  const table: ViewRenderers = { console: renderConsole };
+  for (const p of plugins) {
+    for (const [kind, fn] of Object.entries(p.viewRenderers ?? {})) {
+      if (typeof fn === 'function') table[`${p.name}:${kind}`] = fn as ViewRenderer;
+    }
+  }
+  return table;
 }
 
 // Who the assistant is talking to, for the chat system-context. Single source:

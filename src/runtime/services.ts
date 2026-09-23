@@ -18,6 +18,7 @@ import type { PluginRepo } from '../loader/repo.js';
 import type { CacheService } from './services/cache.js';
 import type { LogService } from './services/log.js';
 import type { Memory } from './services/memory.js';
+import type { ViewRenderers } from '../assistant/views.js';
 
 // The assistant memory: a plugin reads/updates the memory file. `filePath` is
 // resolved from config.memory.file (default under the host config dir).
@@ -89,6 +90,10 @@ export interface HostServices {
   // binds both over the mounted plugins; the defaults answer nothing and do nothing.
   chatSubject: () => string | null;
   afterWrite: () => Promise<void>;
+  // Every view renderer the chat can draw a tool's block with: the host's own
+  // `console` plus each plugin's, qualified `<plugin>:<kind>` (src/loader/registry.ts).
+  // Bound by the App from the mounted plugins; absent means only `console` renders.
+  viewRenderers?: ViewRenderers;
 }
 
 export interface CreateServicesOptions {

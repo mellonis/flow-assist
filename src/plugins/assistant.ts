@@ -22,7 +22,7 @@ import { createShellState, formatShell, nextCwd, runShell, shellLimits } from '.
 import { KEEP_SESSIONS, SESSION_VERSION, closeSession, flushOnExit, listSessions, loadSession, newSessionId, pruneSessions, saveSession, sessionToContinue, sessionWhen, sessionsDir, type Session } from '../assistant/sessions.js';
 import type { ChatMessage } from '../assistant/agent.js';
 import type { ChangeView } from '../assistant/diff.js';
-import { VIEW_CAPS, type ToolView } from '../assistant/views.js';
+import { VIEW_CAPS, isConsoleKind, toolView, type ToolView, type ViewRecord } from '../assistant/views.js';
 import { editorReducer } from '@flowtty/core';
 import { z } from 'zod';
 import { anchorRow, askFieldWidth, chatFieldWidth, chatRows, chatWrapWidth, firstFoldRow, rowAnchor, type RowOpts, type Viewport } from '../views/modals.js';
@@ -903,13 +903,18 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // What a write changed goes on the answer being written the moment the
                 // write lands — a block of its own that stays in the chat. Only on the
                 // display message: `apiRef` gets the transcript, which never holds it.
-                onToolRun: (run: { changes?: ChangeView[]; views?: ToolView[] }) => {
+                onToolRun: (run: { changes?: ChangeView[]; views?: ViewRecord[] }) => {
                   // The tool is done: until the model's next token it is thinking, and
                   // the seconds on the line are the round's from here.
                   endToolSegment();
                   setPhase('thinking');
                   const added = run.changes ?? [];
-                  const shown = run.views ?? [];
+                  // Until the chat draws through renderers: a console record is drawn as
+                  // the old console block; any other kind is not drawn yet.
+                  const shown = (run.views ?? []).flatMap((r) => {
+                    const v = isConsoleKind(r.kind) ? toolView({ kind: 'console', ...(r.data as object) }) : null;
+                    return v ? [v] : [];
+                  });
                   if (!added.length && !shown.length) { f.notify(); return; }
                   setMessages(cur => {
                     const next = cur.slice();
