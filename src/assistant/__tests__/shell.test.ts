@@ -168,3 +168,11 @@ test('a move is shown on the result line and told to the model', () => {
   expect(kept.display).toContain('cd led outside the roots');
   expect(kept.forModel).toContain('cd led outside the roots');
 });
+
+test('output is handed over as it arrives, before the command ends', async () => {
+  const seen: string[] = [];
+  const r = await runShell('printf a; sleep 0.2; printf b', { cwd: process.cwd(), onOutput: (c) => seen.push(c) });
+  expect(seen.join('')).toBe('ab');
+  expect(seen.length).toBeGreaterThanOrEqual(2);
+  expect(r.output).toBe('ab');
+});

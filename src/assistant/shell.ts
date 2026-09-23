@@ -48,6 +48,9 @@ export interface ShellOptions {
   timeoutMs?: number;
   maxChars?: number;
   signal?: AbortSignal;
+  // Every chunk as it arrives, in order — what a live view shows. Never called once
+  // the result is given.
+  onOutput?: (chunk: string) => void;
 }
 
 type RootsConfig = { fs?: { roots?: unknown } } | Record<string, unknown> | undefined;
@@ -137,11 +140,12 @@ export function runShell(cmd: string, opts: ShellOptions): Promise<ShellResult> 
     // `dropped` counts what went.
     let out = '';
     let dropped = 0;
+    let timedOut = false, stopped = false, done = false;
     const take = (chunk: string) => {
+      if (!done) { try { opts.onOutput?.(chunk); } catch { /* a listener never breaks the command */ } }
       out += chunk;
       if (out.length > maxChars * 2) { dropped += out.length - maxChars; out = out.slice(-maxChars); }
     };
-    let timedOut = false, stopped = false, done = false;
     // Where the shell ends up is written to a private temp file, so it never mixes
     // with the output. (A 4th stdio pipe was tried: under Bun it now and then closed
     // early — "pwd: write error: Broken pipe" — and the report was lost.) The newline
