@@ -23,6 +23,7 @@ import { KEEP_SESSIONS, SESSION_VERSION, closeSession, flushOnExit, listSessions
 import type { ChatMessage } from '../assistant/agent.js';
 import type { ChangeView } from '../assistant/diff.js';
 import { VIEW_CAPS, type ViewRecord, type ViewRenderers } from '../assistant/views.js';
+import { renderConsole } from '../assistant/console-view.js';
 import { editorReducer } from '@flowtty/core';
 import { z } from 'zod';
 import { anchorRow, askFieldWidth, chatFieldWidth, chatRows, chatWrapWidth, firstFoldRow, rowAnchor, type RowOpts, type Viewport } from '../views/modals.js';
@@ -468,6 +469,12 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             failedKinds.current.add(kind);
             (f.services as Record<string, any>).pushLog?.(`[view] ${kind}: ${why} — drawn as one line`);
           };
+          // Every renderer the chat can draw a view with — the host's own `console`
+          // (collected at boot, src/loader/registry.ts) plus each plugin's, qualified
+          // by its name; the same default the view's own `renderChatModal` falls back
+          // to, so a host that somehow boots with no `services.viewRenderers` draws
+          // views identically whichever of the two places below reads it.
+          const viewRenderers: ViewRenderers = (f.services as { viewRenderers?: ViewRenderers }).viewRenderers ?? { console: renderConsole };
           const rowOpts = (state: FoldState): RowOpts => ({
             wrap: chatWrapWidth(width, fullscreenRef.current),
             folds: state,
@@ -476,7 +483,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // Empty when the action is unbound — every hint that names it then
             // leaves it out, rather than teaching a key that does nothing.
             detailsKey: firstGlyph(f.keys.details),
-            renderers: (f.services as { viewRenderers?: ViewRenderers }).viewRenderers ?? {},
+            renderers: viewRenderers,
             now: Date.now(),
             palette: ((f.config.theme as { modals?: { chat?: Record<string, string | undefined> } } | undefined)?.modals?.chat ?? {}),
             onViewFail,
@@ -1932,13 +1939,15 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // What the turn has cost so far, as the provider reported it (0 — nothing
             // reported, and nothing is drawn).
             turnTokens,
-            // How many lines of a tool's console block stand before ^r unfolds it.
+            // How many lines a block a CLICK opens shows; `^o` opens it in full.
             viewLines: Number((f.config.plugins as Record<string, { runOutputLines?: unknown }> | undefined)?.assistant?.runOutputLines) || VIEW_CAPS.folded,
             // How the narration between tool calls is drawn — one step line by default.
             notes,
             // Every renderer the chat can draw a view with (the host's own `console`
-            // plus each plugin's, collected at boot — src/loader/registry.ts).
-            viewRenderers: (f.services as { viewRenderers?: ViewRenderers }).viewRenderers,
+            // plus each plugin's, collected at boot — src/loader/registry.ts). The
+            // same value `rowOpts` above reads, and the same fallback `renderChatModal`
+            // itself defaults to.
+            viewRenderers,
             now: Date.now(),
             onViewFail,
             // Live count of IN-FLIGHT background tasks (the host re-renders via

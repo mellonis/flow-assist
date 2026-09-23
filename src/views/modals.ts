@@ -526,7 +526,11 @@ function messageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): ChatRow
   // open because EVERYTHING is (`^o`) both read `isOpen` as open, but the two draw
   // different amounts of text (a click's capped tail vs. `^o`'s "all of it kept") —
   // without this bit in the key, whichever was cached first would stick.
-  const key = `${o.wrap}:${open}:${o.folds.open ? 1 : 0}:${last ? 1 : 0}:${o.viewLines}:${o.notes}:${o.detailsKey}:${at}:${clock}:${o.palette.ok ?? ''}:${o.palette.warn ?? ''}`;
+  // The whole palette, not just `ok`/`warn`: `frameView` resolves whatever token a
+  // renderer names (`accent`, `shell`, `text`, a plugin's own…), so a scheme change
+  // that moved any of them — not only the two console-tail colours — must still miss
+  // the cache.
+  const key = `${o.wrap}:${open}:${o.folds.open ? 1 : 0}:${last ? 1 : 0}:${o.viewLines}:${o.notes}:${o.detailsKey}:${at}:${clock}:${Object.values(o.palette).join(',')}`;
   let byKey = rowCache.get(m);
   if (!byKey) rowCache.set(m, (byKey = new Map()));
   let rows = byKey.get(key);
@@ -1030,8 +1034,8 @@ export function renderChatModal({
   // What the provider has reported this TURN costing (0 — nothing reported, and no
   // figure is drawn: an invented one would be worse than none).
   turnTokens?: number;
-  // How many lines of a tool's console block stand before ^r unfolds the whole of it
-  // (`plugins.assistant.runOutputLines`).
+  // How many lines a block a CLICK opens shows (`plugins.assistant.runOutputLines`);
+  // `^o` (the global fold key) opens every block in full, past this cap.
   viewLines?: number;
   // How the narration between tool calls is drawn (`plugins.assistant.notes`,
   // `/notes` for the conversation): one step line, folded behind its header, fully

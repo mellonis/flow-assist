@@ -156,19 +156,27 @@ test('with everything open a new turn arrives open, and /clear goes back to fold
 
 // The conversation's own top row: the frame's title, then its padding.
 const contentTop = (ui: Ui) => rowOf(ui, 'ƒ Flow Assist') + 2;
+// The block's own first row is the conversation's top row, where the pinned question
+// is painted over it whenever the block is taller than the window — so what a reader
+// sees first is the row under the pin.
+const underPin = (ui: Ui) => contentTop(ui) + 1;
 
 // A command whose output is far taller than the window, with plenty of conversation
 // under it — so the list can be scrolled to the block and the block is not the last
 // thing on it. PgUp is the scroll box's own key; it takes the view to the top.
+// `runOutputLines` — how many lines an OPENED block shows: most tests here want the
+// default 3 (a block a few rows tall, capped well under the window), but the test
+// that proves a click scrolls a genuinely tall block wants one far bigger than the
+// window (see below).
 const TAIL = Array.from({ length: 20 }, (_, i) => `Remark number ${i + 1}.`).join('\n\n');
-async function longOutput() {
+async function longOutput(runOutputLines = 3) {
   const model = new ScriptedModel();
   model.script(
     [{ tool: 'run_command', args: { command: 'seq 1 60' } }],
     [{ text: 'Sixty lines.' }],
     [{ text: TAIL }],
   );
-  const ui = await bootApp(model, 100, 24, undefined, { plugins: { assistant: { runOutputLines: 3 } }, shell: { timeoutMs: 20000 } });
+  const ui = await bootApp(model, 100, 24, undefined, { plugins: { assistant: { runOutputLines } }, shell: { timeoutMs: 20000 } });
   await ui.press('F');
   await ui.type('count to sixty');
   await ui.press('return');
@@ -192,20 +200,28 @@ test('a finished command, folded, is one line saying how it ended', async () => 
 });
 
 test('opening a block taller than the window starts at its FIRST row, not its last', async () => {
-  const { ui } = await longOutput();
-  await click(ui, rowOf(ui, 'seq 1 60 ·'));
+  // runOutputLines: 40 — a click opens a block of 42 rows (command, cut marker, 40
+  // lines, tail), genuinely taller than the 24-row window; runOutputLines: 3's 6-row
+  // block (used everywhere else in this file) never is, which is why THIS test needs
+  // its own, bigger cap to exercise the scroll at all.
+  const { ui } = await longOutput(40);
+  // Nudge the fold line away from the top before clicking — longOutput() itself ends
+  // scrolled there, and a pass that never leaves the top proves nothing about the
+  // click's own scroll-to-first-row behaviour (a prior version of this test did
+  // exactly that, and passed whether or not the click scrolled anything).
+  ui.backend.wheel('down', 20, 8);
+  await settle(4);
+  const foldRow = rowOf(ui, 'seq 1 60 ·');
+  expect(foldRow).not.toBe(contentTop(ui));
+  await click(ui, foldRow);
   // Reading starts at the beginning of the block, and the wheel takes it from there.
   // It used to land on the block's LAST line — the end of the very thing the person
-  // opened it to read. Opened with runOutputLines: 3, the last 3 lines stand under
-  // the cut marker. The open block is now only 6 rows (cut marker, 3 lines, tail) —
-  // far shorter than the old uncapped "show everything" open state — so it no longer
-  // pushes the pinned question out of view; the first row lands at the very top of
-  // the box rather than under a pin.
-  expect(rowOf(ui, 'seq 1 60')).toBe(contentTop(ui));
-  expect(ui.backend.lastFrame).toContain('lines cut');
-  expect(ui.backend.lastFrame).toContain('│ 58');
-  expect(ui.backend.lastFrame).toContain('│ 60');
-  expect(ui.backend.lastFrame).not.toContain('Remark number 1.');
+  // opened it to read. The block is far taller than the window, so it pushes the
+  // pinned last question back out of view — the block's own first row (the command
+  // line) sits behind the pin, and the cut marker is the first row a reader actually
+  // sees.
+  expect(rowOf(ui, 'lines cut')).toBe(underPin(ui));
+  expect(ui.backend.lastFrame).not.toContain('│ 60');
   ui.app.unmount();
 });
 
