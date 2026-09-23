@@ -348,6 +348,11 @@ test('a fork during a change of task shows the note as a toast, not a suppressed
   const frame = ui.backend.lastFrame!;
   expect(flat(frame)).toContain(flat('was changed elsewhere — saved this conversation as a new session.'));
   expect(frame).not.toContain('A new session for DOC-8'); // the fork note replaced the routine one, not both shown
+
+  const files = fs.readdirSync(dir).filter((n) => n.endsWith('.json'));
+  expect(files).toHaveLength(2); // the original session, plus the fork this task change made
+  const originalStill = JSON.parse(fs.readFileSync(file, 'utf8'));
+  expect(originalStill.messages.some((m: { content: unknown }) => m.content === 'FOREIGN')).toBe(true); // untouched
   ui.app.unmount();
 });
 

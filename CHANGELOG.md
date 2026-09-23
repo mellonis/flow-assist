@@ -15,7 +15,9 @@ What each version of flow-assist brought, newest first. The version is the one i
   no longer overwrites that change: it saves the conversation as a new session
   instead, so nothing is lost either way. The check is not the rev counter alone
   (a hand edit that leaves it untouched, or two rev-less writes from an old enough
-  host, would slip past that) but the file's own size and modified time too.
+  host, would slip past that) but the file's own size and modified time too — taken
+  with a stat before a resumed or continued session's content is read, never after,
+  so a write landing in between is caught rather than quietly recorded as seen.
 
 - **A tool call with broken arguments no longer breaks the conversation for good.** A
   reply cut off mid-argument used to be stored as it arrived and run as `{}` anyway —

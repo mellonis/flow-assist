@@ -22,7 +22,7 @@ import { createShellState, formatShell, nextCwd, runShell, shellLimits, tildePat
 import {
   KEEP_SESSIONS, SESSION_VERSION, acquireLock, closeSession, flushOnExit, listSessions, loadSession, lockPath,
   makeLockToken, newSessionId, pruneSessions, releaseLock, saveSession, sessionFingerprint, sessionFingerprintsEqual,
-  sessionTitle, sessionToContinue, sessionWhen, sessionsDir, type Session, type SessionFingerprint,
+  sessionTitle, sessionWhen, sessionsDir, type Session, type SessionFingerprint,
 } from '../assistant/sessions.js';
 import type { ChatMessage } from '../assistant/agent.js';
 import type { ChangeView } from '../assistant/diff.js';
@@ -717,12 +717,16 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             saveTimer.current = setTimeout(() => { saveTimer.current = null; writeSession(); }, 250);
           };
           const writeRef = f.useRef(writeSession); writeRef.current = writeSession;
-          const applySession = (s: Session) => {
+          // `fingerprint` is the caller's — taken with a stat BEFORE the content in
+          // `s` was read, never re-derived here. Reading it fresh off the disk at
+          // this point (after `s` was already loaded) would leave a window: a
+          // foreign write landing between the two reads would then be recorded as
+          // "seen" even though `s` never saw it, and the next save would silently
+          // overwrite it. Taking the fingerprint first means a write in that window
+          // is instead caught — the next save finds the disk has moved and forks.
+          const applySession = (s: Session, fingerprint: SessionFingerprint) => {
             sessionIdRef.current = s.id; createdAtRef.current = s.createdAt;
-            // Read fresh off the disk rather than trusted from `s.rev` alone: the
-            // fingerprint this instance now "has seen" is what is really there,
-            // mtimeMs/size included, not just the field the session JSON carries.
-            fingerprintRef.current = sessDir ? sessionFingerprint(sessDir, s.id) : NO_FILE;
+            fingerprintRef.current = fingerprint;
             ctxSubjectRef.current = s.subject ?? null;
             apiRef.current = s.api as unknown as ChatMessage[];
             summaryRef.current = s.summary;
@@ -754,7 +758,12 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             setTimeout(() => {
               try { pruneSessions(sessDir, Number.isInteger(sessConf.keep) ? Number(sessConf.keep) : KEEP_SESSIONS); } catch { /* not fatal */ }
               if (sessConf.resume === false || msgsRef.current.length) return;
-              const s = sessionToContinue(sessDir);
+              const last = listSessions(sessDir)[0];
+              if (!last || last.closed) return;
+              // The fingerprint first, stat before the content read just below — see
+              // applySession's own comment for why the order matters.
+              const fp = sessionFingerprint(sessDir, last.id);
+              const s = loadSession(sessDir, last.id);
               if (!s) return;
               const outcome = acquireLock(sessDir, s.id, lockToken);
               if (outcome.status === 'held') {
@@ -762,7 +771,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 f.notify();
                 return;
               }
-              applySession(s);
+              applySession(s, fp);
               (f.services as Record<string, any>).showMessage?.(`Continued «${s.title || 'the last session'}» — /clear starts a new one, /resume lists others`);
               f.notify();
             }, 0);
@@ -1702,6 +1711,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 const pick = Number.isInteger(n) && n >= 1 ? list[n - 1] : undefined;
                 if (!pick) { setError(`/resume takes a number from the list (1–${list.length})`); return; }
                 if (streamRef.current) { setError('an answer is still coming — stop it (Esc) before switching sessions'); return; }
+                // The fingerprint first, stat before the content read just below — see
+                // applySession's own comment for why the order matters.
+                const fp = sessionFingerprint(sessDir, pick.id);
                 const s = loadSession(sessDir, pick.id);
                 if (!s) { setError('that session file cannot be read'); return; }
                 // Held by another live flow-assist process: refuse and stay put. Own
@@ -1720,7 +1732,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 queueRef.current = []; setQueued([]); bgQueueRef.current = [];
                 setError(null); setEmptyNotice(''); setToolLabel(''); setToolCount(0);
                 if (pick.id !== sessionIdRef.current) releaseCurrentLock(); // leaving the old one for /resume
-                applySession(s);
+                applySession(s, fp);
                 (f.services as Record<string, any>).showMessage?.(`Resumed «${s.title || 'session'}»`);
                 f.notify();
                 return;

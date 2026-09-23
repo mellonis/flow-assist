@@ -159,6 +159,41 @@ test('sessionFingerprint carries mtimeMs/size alongside rev, and a missing file 
   expect(sessionFingerprintsEqual(fp, { ...fp, rev: fp.rev + 1 })).toBe(false);
 });
 
+// A caller (applySession, src/plugins/assistant.ts) must take the fingerprint
+// BEFORE reading a session's content, never after — otherwise a write landing in
+// the gap between the two reads is recorded as "seen" even though the content read
+// never saw it, and the next save silently overwrites it. This is not something
+// loadSession/sessionFingerprint enforce on their own (both are unchanged, simple
+// primitives); it is a calling-convention property. What is deterministically
+// testable here is the shape of the guarantee: a fingerprint taken before a write
+// differs from the disk's fingerprint afterward — so recording the BEFORE value (as
+// applySession now does, per the caller's own comment) means the next save's
+// compare against the disk's CURRENT state disagrees and forks, rather than
+// matching and silently overwriting. Taking it AFTER the write — the bug — would
+// instead record exactly that current state, indistinguishable from "nothing
+// changed."
+test('a fingerprint taken before a write differs from the disk afterward — recording the before value is what makes the next save fork', () => {
+  const dir = tmp();
+  const s = session();
+  saveSession(dir, s);
+
+  // The safe order applySession now follows: stat/fingerprint first...
+  const before = sessionFingerprint(dir, s.id);
+  // ...then, before (or during) the content read, a foreign write lands.
+  saveSession(dir, { ...s, messages: [...s.messages, { role: 'user', content: 'RACED IN' }] });
+  const loaded = loadSession(dir, s.id)!; // reads whatever is on disk now — the raced-in content
+  expect(loaded.messages.some((m) => m.content === 'RACED IN')).toBe(true);
+
+  // Recording `before` (taken ahead of the race) leaves the next save's compare
+  // against the disk's current fingerprint disagreeing — a fork, not an overwrite.
+  const diskNow = sessionFingerprint(dir, s.id);
+  expect(sessionFingerprintsEqual(before, diskNow)).toBe(false);
+  // Had the fingerprint instead been taken AFTER the content read (the bug this
+  // fixes), it would equal `diskNow` exactly — indistinguishable from "unchanged".
+  const afterTheBuggyWay = sessionFingerprint(dir, s.id);
+  expect(sessionFingerprintsEqual(afterTheBuggyWay, diskNow)).toBe(true);
+});
+
 test('a session with no rev field — an older host — reads and peeks as rev 0', () => {
   const dir = tmp();
   const id = newSessionId();

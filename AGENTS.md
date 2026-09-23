@@ -441,11 +441,18 @@ assistant nobody had asked for a board.
   file's own `mtimeMs`/`size` as one fingerprint (`sessionFingerprint`,
   `sessionFingerprintsEqual`); the chat remembers the fingerprint it last read or
   wrote (set at every load — start-up continue, `/resume` — and every write,
-  fork included). `rev` alone is not enough to catch everything the lock cannot
-  see: a hand edit that leaves the number untouched, or two different foreign
-  writes from hosts old enough to write no `rev` field at all (both then reading
-  as 0), would pass a rev-only check — `mtimeMs`/`size` catch those. Before
-  writing, if the disk's fingerprint does not match what this chat last saw in
+  fork included). At a load, the fingerprint is taken with a stat BEFORE the
+  content is read, never re-derived after (`applySession` takes it as a
+  caller-supplied argument, not something it looks up itself): a write landing in
+  that gap is then a fingerprint this instance never actually saw, so the next
+  save finds the disk has moved and forks. Taking it AFTER the content read
+  instead would record exactly what a same-moment write left, indistinguishable
+  from "nothing changed", and silently lose it on the next save. `rev` alone is not
+  enough to catch everything the lock cannot see either: a hand edit that leaves
+  the number untouched, or two
+  different foreign writes from hosts old enough to write no `rev` field at all
+  (both then reading as 0), would pass a rev-only check — `mtimeMs`/`size` catch
+  those. Before writing, if the disk's fingerprint does not match what this chat last saw in
   any of the three, the save does not overwrite it: it saves this conversation as
   a brand NEW session (new id, new lock, the old lock released), switches to it,
   and says so: `Session "<title or id>" was changed elsewhere — saved this
