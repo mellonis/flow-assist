@@ -54,6 +54,8 @@ export const VIEW_CAPS = {
   command: 300,
   // How many lines of the block stand in the chat before ^r unfolds the rest.
   folded: 20,
+  // How many rows any block may take, whatever its renderer returns.
+  rows: 400,
 } as const;
 
 // A fence longer than any run of backticks in the text, so a text that prints a fence
@@ -160,4 +162,128 @@ export function viewMarkdown(view: ToolView, opts: ViewDrawOpts = {}): string {
   const how = view.status ?? (view.exitCode == null ? 'no exit code' : `exit ${view.exitCode}`);
   const under = [how, fmtSecs(view.ms), view.cwd].filter(Boolean).join(' · ');
   return `${f}console\n${inside}\n${f}\n${under}`;
+}
+
+// ─── Renderers ────────────────────────────────────────────────────────────────
+// A view is what a tool DESCRIBES; a renderer — the host's own `console`
+// (./console-view.ts) or a plugin's, from its shape's `viewRenderers` — DRAWS it;
+// the host FRAMES what the renderer returns. What a session keeps is the record:
+// the kind, the tool's data, where the view is in its life, when it began. Never
+// drawn rows — those depend on the width and the theme, and are drawn again.
+export type ViewPhase = 'live' | 'done' | 'failed' | 'discarded';
+export interface ViewRecord {
+  kind: string;
+  data: unknown;
+  phase: ViewPhase;
+  startedAt: number;
+  // Which call reported it (`<tool_call id>#<n>`), its place among the turn's calls,
+  // and which turn — what the chat finalises by and groups by.
+  callId?: string;
+  seq?: number;
+  turn?: number;
+}
+
+// A colour is a TOKEN of the chat palette (`ok`, `warn`, `accent`, `shell`, `text`,
+// …), never a literal, so one renderer is right on a dark, a light and an unknown
+// terminal. A leading `chrome` span (a gutter bar) is painted and never copied.
+export interface ViewSpan { text: string; color?: string; dim?: boolean; bold?: boolean; chrome?: boolean }
+export type ViewLine = ViewSpan[];
+export interface ViewRenderCtx {
+  width: number;     // columns for the block's content
+  folded: boolean;   // the renderer draws both states
+  live: boolean;     // the tool is still running
+  failed: boolean;   // the tool threw
+  elapsedMs: number; // host clock since the view began — meaningful only while live
+  lines: number;     // how many lines of output an open block shows (runOutputLines)
+  moreKey: string;   // the cap of the key that opens everything, from its binding
+}
+export type ViewRenderer = (data: unknown, ctx: ViewRenderCtx) => ViewLine[];
+export type ViewRenderers = Record<string, ViewRenderer>;
+export interface FramedLine { spans: { text: string; color?: string; dim?: boolean; bold?: boolean }[]; chrome?: number }
+
+export const VIEW_DATA_MAX = 65_536;
+
+export const isConsoleKind = (kind: string) => kind === 'console' || kind.endsWith(':console');
+
+// `notes` + `card` → `notes:card`. A kind the plugin qualified itself is left alone.
+export function qualifyKind(owner: string, kind: string): string {
+  return kind.includes(':') ? kind : `${owner}:${kind}`;
+}
+
+// The plugin's own renderer first; failing that, the host's kind of the same name
+// (a plugin's tool reporting `console` gets `notes:console`, which is the host's).
+export function resolveRenderer(table: ViewRenderers, kind: string): ViewRenderer | null {
+  const own = table[kind];
+  if (typeof own === 'function') return own;
+  const bare = kind.slice(kind.indexOf(':') + 1);
+  const host = bare !== kind ? table[bare] : undefined;
+  return typeof host === 'function' ? host : null;
+}
+
+// Data a view may carry: JSON, and small enough that a session file stays bounded.
+export function acceptData(data: unknown): boolean {
+  try {
+    const s = JSON.stringify(data);
+    return typeof s === 'string' && s.length <= VIEW_DATA_MAX;
+  } catch {
+    return false;
+  }
+}
+
+const cutTo = (s: string, width: number) => {
+  const cps = Array.from(s);
+  return cps.length > width ? `${cps.slice(0, Math.max(0, width - 1)).join('')}…` : s;
+};
+
+// What reaches the screen, whatever the renderer returned: one row per line — a line
+// break inside a span is a space, and a line wider than the block is cut with `…` (a
+// wrapped row would be two terminal lines, and the list counts one) — at most
+// `VIEW_CAPS.rows` rows, every text stripped, every colour resolved from the palette.
+// A renderer that is missing, throws or returns something else costs ONE dim row
+// naming the kind; `onFail` hears why, and the caller says it once.
+export function frameView(
+  rec: ViewRecord,
+  table: ViewRenderers,
+  ctx: ViewRenderCtx,
+  palette: Record<string, string | undefined>,
+  onFail?: (kind: string, why: string) => void,
+): FramedLine[] {
+  const fallback = (why: string): FramedLine[] => {
+    onFail?.(rec.kind, why);
+    return [{ spans: [{ text: cutTo(`▸ ${rec.kind}`, ctx.width), dim: true }] }];
+  };
+  const render = resolveRenderer(table, rec.kind);
+  if (!render) return fallback('no renderer');
+  let lines: unknown;
+  try {
+    lines = render(rec.data, ctx);
+  } catch (e) {
+    return fallback(e instanceof Error ? e.message : String(e));
+  }
+  if (!Array.isArray(lines) || lines.some((l) => !Array.isArray(l))) return fallback('not a list of lines');
+  return (lines as ViewLine[]).slice(0, VIEW_CAPS.rows).map((line) => {
+    let room = ctx.width;
+    let chrome = 0;
+    let leading = true;
+    const spans: FramedLine['spans'] = [];
+    for (const s of line) {
+      if (room <= 0) break;
+      const t = cutTo(sanitizeViewText(s?.text).replace(/\n/g, ' '), room);
+      room -= Array.from(t).length;
+      if (leading && s?.chrome) chrome++; else leading = false;
+      const color = typeof s?.color === 'string' ? palette[s.color] : undefined;
+      spans.push({ text: t, ...(color ? { color } : {}), ...(s?.dim ? { dim: true } : {}), ...(s?.bold ? { bold: true } : {}) });
+    }
+    return { spans, ...(chrome ? { chrome } : {}) };
+  });
+}
+
+// A view as it was reported and saved before renderers — `{ kind: 'console', command,
+// text, exitCode, ms, cwd, status }` — read as the console renderer's data. A record
+// (it has `phase`) or any other kind is not one.
+export function readLegacyView(raw: unknown): ViewRecord | null {
+  const v = raw as Record<string, unknown> | null;
+  if (!v || typeof v !== 'object' || v.kind !== 'console' || 'phase' in v) return null;
+  const { kind: _kind, ...data } = v;
+  return { kind: 'console', data, phase: 'done', startedAt: 0 };
 }

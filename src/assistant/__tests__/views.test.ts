@@ -2,7 +2,7 @@
 // part that keeps it safe to draw: the text comes from a command, a file or a page,
 // so it is stripped, capped and fenced before anything of it reaches the screen.
 import { expect, test } from 'bun:test';
-import { VIEW_CAPS, sanitizeViewText, toolView, viewMarkdown, type ConsoleView } from '../views';
+import { VIEW_CAPS, VIEW_DATA_MAX, acceptData, fence, frameView, isConsoleKind, qualifyKind, readLegacyView, resolveRenderer, sanitizeViewText, toolView, viewMarkdown, type ConsoleView, type ViewRecord, type ViewRenderCtx } from '../views';
 
 const of = (text: string, over: Partial<ConsoleView> = {}) =>
   toolView({ kind: 'console', command: 'bun test', text, exitCode: 0, ms: 1234, cwd: '~/src/app', ...over })!;
@@ -73,4 +73,81 @@ test('output cannot close the fence and write outside it', () => {
   expect(md.trimEnd().split('\n').filter((l) => l === '````')).toHaveLength(1);
   // Everything the command printed is inside the one block.
   expect(md.indexOf('Press y to confirm')).toBeLessThan(md.lastIndexOf('````'));
+});
+
+// ── renderers: a renderer draws, the host frames ─────────────────────────────
+const rctx: ViewRenderCtx = { width: 20, folded: true, live: false, failed: false, elapsedMs: 0, lines: 20, moreKey: '^o' };
+const rec = (kind: string, data: unknown = {}): ViewRecord => ({ kind, data, phase: 'done', startedAt: 0 });
+const palette = { ok: 'green', warn: 'yellow', accent: 'cyan' };
+const texts = (lines: { spans: { text: string }[] }[]) => lines.map((l) => l.spans.map((s) => s.text).join(''));
+
+test('whatever a renderer returns is stripped of escapes before it is drawn', () => {
+  expect(texts(frameView(rec('k'), { k: () => [[{ text: '\u001B[2Kbuild\u0007ing' }]] }, rctx, palette))).toEqual(['building']);
+});
+
+test('a line is cut to the width, never wrapped: one line is one row', () => {
+  const out = frameView(rec('k'), { k: () => [[{ text: 'x'.repeat(30) }], [{ text: 'a\nb' }]] }, rctx, palette);
+  expect(texts(out)).toEqual([`${'x'.repeat(19)}…`, 'a b']);
+});
+
+test('the number of rows is capped', () => {
+  const many = Array.from({ length: 410 }, (_, i) => [{ text: `r${i}` }]);
+  expect(frameView(rec('k'), { k: () => many }, rctx, palette)).toHaveLength(400);
+});
+
+test('a colour is a palette token; an unknown token draws plain', () => {
+  const [line] = frameView(rec('k'), { k: () => [[{ text: 'a', color: 'ok' }, { text: 'b', color: '#ff0000' }]] }, rctx, palette);
+  expect(line!.spans[0]!.color).toBe('green');
+  expect(line!.spans[1]!.color).toBeUndefined();
+});
+
+test('leading chrome spans are counted, so a drag never copies them', () => {
+  const [line] = frameView(rec('k'), { k: () => [[{ text: '│ ', chrome: true }, { text: 'out' }]] }, rctx, palette);
+  expect(line!.chrome).toBe(1);
+});
+
+test('a missing or broken renderer is one dim row naming the kind, and says why', () => {
+  const said: string[] = [];
+  const onFail = (k: string, why: string) => said.push(`${k}: ${why}`);
+  expect(texts(frameView(rec('tracker:issue'), {}, rctx, palette, onFail))).toEqual(['▸ tracker:issue']);
+  expect(texts(frameView(rec('k'), { k: () => { throw new Error('boom'); } }, rctx, palette, onFail))).toEqual(['▸ k']);
+  expect(texts(frameView(rec('k'), { k: () => 'nope' as never }, rctx, palette, onFail))).toEqual(['▸ k']);
+  expect(said).toEqual(['tracker:issue: no renderer', 'k: boom', 'k: not a list of lines']);
+});
+
+test('a kind is qualified by its plugin, and resolved back to the host kind when the plugin has none', () => {
+  expect(qualifyKind('notes', 'card')).toBe('notes:card');
+  expect(qualifyKind('notes', 'x:card')).toBe('x:card');
+  const host = () => [];
+  const card = () => [];
+  expect(resolveRenderer({ console: host }, 'notes:console')).toBe(host);
+  expect(resolveRenderer({ 'notes:card': card, card: host }, 'notes:card')).toBe(card);
+  expect(resolveRenderer({}, 'notes:card')).toBeNull();
+});
+
+test('a console kind is the host\'s console, bare or qualified — not any kind ending in the word', () => {
+  expect(isConsoleKind('console')).toBe(true);
+  expect(isConsoleKind('notes:console')).toBe(true);
+  expect(isConsoleKind('x:myconsole')).toBe(false);
+});
+
+test('data must be JSON and bounded', () => {
+  expect(acceptData({ a: 1 })).toBe(true);
+  expect(acceptData({ a: 'x'.repeat(VIEW_DATA_MAX) })).toBe(false);
+  const loop: Record<string, unknown> = {};
+  loop.self = loop;
+  expect(acceptData(loop)).toBe(false);
+  expect(acceptData(undefined)).toBe(false);
+});
+
+test('a fence is longer than any run of backticks in the text', () => {
+  expect(fence('plain')).toBe('```');
+  expect(fence('a ````` b')).toBe('``````');
+});
+
+test('an old console view is read as the console renderer\'s data', () => {
+  const r = readLegacyView({ kind: 'console', command: 'bun test', text: 'ok', exitCode: 0, ms: 1200, cwd: '~/a', status: 'exit 0' });
+  expect(r).toEqual({ kind: 'console', data: { command: 'bun test', text: 'ok', exitCode: 0, ms: 1200, cwd: '~/a', status: 'exit 0' }, phase: 'done', startedAt: 0 });
+  expect(readLegacyView({ kind: 'console', data: {}, phase: 'done', startedAt: 1 })).toBeNull(); // already a record
+  expect(readLegacyView({ kind: 'table' })).toBeNull();
 });
