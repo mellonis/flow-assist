@@ -36,6 +36,26 @@ const oneLine = (s: string, max: number) => {
   return t.length > max ? `${t.slice(0, max)}…` : t;
 };
 
+// What a tool reports is capped where it is COLLECTED, so a message, a session file
+// and the screen are bounded alike — the same rule `consoleData` already applies to a
+// confirmed `run_command`, held here so every path that hands over console data (a
+// live view's first state, an update, the old one-argument `reportView`) goes through
+// it too. Fields are read defensively: a wrong shape yields the empty/absent form of
+// each field rather than throwing, and a field this shape does not know is dropped.
+export function capConsoleData(raw: unknown): ConsoleData {
+  const v = (raw ?? {}) as Partial<ConsoleData>;
+  const ms = Number(v.ms);
+  return {
+    command: oneLine(String(v.command ?? ''), VIEW_CAPS.command),
+    cwd: oneLine(String(v.cwd ?? ''), VIEW_CAPS.command),
+    text: capConsoleText(String(v.text ?? '')),
+    ...(v.exitCode === undefined ? {} : { exitCode: typeof v.exitCode === 'number' ? v.exitCode : null }),
+    ...(v.ms === undefined ? {} : Number.isFinite(ms) && ms >= 0 ? { ms } : {}),
+    ...(v.status ? { status: oneLine(String(v.status), 80) } : {}),
+    ...(v.showCwd === true ? { showCwd: true } : {}),
+  };
+}
+
 // A finished command as the view keeps it.
 export function consoleData(cmd: string, r: ShellResult, cwd: string, timeoutMs: number, showCwd = false): ConsoleData {
   return {

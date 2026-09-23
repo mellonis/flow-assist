@@ -3,6 +3,7 @@ import { chatLanguage } from '../agent';
 import { agentChat, apiHistory, transcriptSoFar } from '../agent';
 import { assembleToolRegistry } from '../../loader/tools';
 import { makeFactory } from '../../loader/plugin';
+import { VIEW_CAPS } from '../views';
 
 test('assistant language fallback: assistantLanguage ?? language ?? en', () => {
   expect(chatLanguage({})).toBe('en');
@@ -339,9 +340,21 @@ test('a discarded view goes, and a one-off reportView — old form included — 
 test('data that is not JSON or too big is dropped and the previous state stays', async () => {
   const datas: unknown[] = [];
   await runOneToolTurn(async (_a, ctx) => {
-    const v = ctx.liveView('console', { n: 1 });
+    const v = ctx.liveView('card', { n: 1 });
     v.update({ big: 'x'.repeat(70_000) });
     return 'ok';
   }, { onToolLive: (rec: any) => datas.push(rec.data) });
   expect(datas).toEqual([{ n: 1 }, { n: 1 }]);
+});
+
+// A console view's data is capped where it is collected, so a session file stays
+// bounded whichever path handed the data over — including the legacy one-argument form.
+test('a legacy console reportView is capped like any other console view', async () => {
+  let captured: { command: string } | undefined;
+  const r = await runOneToolTurn(async (_a, ctx) => {
+    ctx.reportView({ kind: 'console', command: 'c'.repeat(VIEW_CAPS.command + 50), text: 'x', exitCode: 0, ms: 1, cwd: '~' });
+    return 'ok';
+  }, { onToolLive: (rec: any) => { captured = rec.data; } });
+  expect(captured!.command).toHaveLength(VIEW_CAPS.command + 1);
+  expect((r.toolRuns[0]!.views?.[0]!.data as { command: string }).command).toHaveLength(VIEW_CAPS.command + 1);
 });

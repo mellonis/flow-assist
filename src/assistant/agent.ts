@@ -14,7 +14,8 @@ import type { ToolDef, ToolCtx } from '../loader/tools.js';
 import { chatTools, execChatTool, chatToolDefs, chatToolGroupOf } from '../loader/tools.js';
 import type { ToolRunEntry } from '../runtime/services/log.js';
 import { changeView, type Change, type ChangeView } from './diff.js';
-import { acceptData, readLegacyView, type ViewRecord } from './views.js';
+import { acceptData, isConsoleKind, readLegacyView, type ViewRecord } from './views.js';
+import { capConsoleData } from './console-view.js';
 import { contentText, type ContentPart, type ImageRef } from './images.js';
 import {
   TOOLS_LOAD, createToolSet, deferredTools, notLoadedError, runToolsLoad, toolsToSend,
@@ -603,14 +604,22 @@ export async function agentChat(
         const opened: { rec: ViewRecord; discarded: boolean }[] = [];
         let ended = false;
         const emit = (rec: ViewRecord) => { try { opts.onToolLive?.(rec); } catch { /* the chat's trouble, not the tool's */ } };
+        // A console view's data is capped where it is COLLECTED (as a confirmed
+        // run_command's already was, src/assistant/console-view.ts), so a session file
+        // stays bounded whichever path handed the data over — a live view's first
+        // state, an update, or the legacy one-argument reportView below.
+        const capIfConsole = (kind: string, data: unknown): unknown => (isConsoleKind(kind) ? capConsoleData(data) : data);
         const open = (kind: string, data: unknown): LiveView => {
-          const slot = { rec: { kind: String(kind), data: acceptData(data) ? data : null, phase: 'live', startedAt: now(), callId: `${tc.id}#${opened.length}`, seq: callSeq } as ViewRecord, discarded: false };
+          const capped = capIfConsole(kind, data);
+          const slot = { rec: { kind: String(kind), data: acceptData(capped) ? capped : null, phase: 'live', startedAt: now(), callId: `${tc.id}#${opened.length}`, seq: callSeq } as ViewRecord, discarded: false };
           opened.push(slot);
           emit(slot.rec);
           return {
             update: (next: unknown) => {
-              if (ended || slot.discarded || !acceptData(next)) return;
-              slot.rec = { ...slot.rec, data: next };
+              if (ended || slot.discarded) return;
+              const cappedNext = capIfConsole(slot.rec.kind, next);
+              if (!acceptData(cappedNext)) return;
+              slot.rec = { ...slot.rec, data: cappedNext };
               emit(slot.rec);
             },
             discard: () => { slot.discarded = true; },

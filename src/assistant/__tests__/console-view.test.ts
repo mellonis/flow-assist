@@ -1,6 +1,6 @@
 // The host's own renderer: a command, folded to one line, opened to its last lines.
 import { expect, test } from 'bun:test';
-import { capConsoleText, consoleTail, renderConsole, type ConsoleData } from '../console-view';
+import { capConsoleData, capConsoleText, consoleTail, renderConsole, type ConsoleData } from '../console-view';
 import { VIEW_CAPS, type ViewRenderCtx } from '../views';
 
 const base: ViewRenderCtx = { width: 60, folded: true, live: false, failed: false, elapsedMs: 0, lines: 3, moreKey: '^o' };
@@ -46,4 +46,15 @@ test('what a console view keeps is the capped tail', () => {
   expect(kept).toHaveLength(VIEW_CAPS.lines);
   expect(kept.at(-1)).toBe(`l${VIEW_CAPS.lines + 4}`);
   expect(capConsoleText('x'.repeat(VIEW_CAPS.lineChars + 9))).toHaveLength(VIEW_CAPS.lineChars + 1);
+});
+
+// A view's data is capped where it is COLLECTED, whichever path hands it over — a
+// live view's first state, an update, or the old one-argument reportView — so a
+// session file stays bounded whichever way the data arrived.
+test('capConsoleData caps a console view like a confirmed run_command does', () => {
+  const long = Array.from({ length: VIEW_CAPS.lines + 5 }, (_, i) => `l${i}`).join('\n');
+  const capped = capConsoleData({ command: 'c'.repeat(VIEW_CAPS.command + 50), text: long, exitCode: 0, ms: 1, cwd: '~', weird: 'nope' } as unknown);
+  expect(capped.command).toHaveLength(VIEW_CAPS.command + 1);
+  expect(capped.text.split('\n')).toHaveLength(VIEW_CAPS.lines);
+  expect((capped as Record<string, unknown>).weird).toBeUndefined();
 });
