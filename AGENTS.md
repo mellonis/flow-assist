@@ -509,10 +509,26 @@ hardest. Rules the `repo` and `gitlab` plugins hold, each with a test that tries
     live view's whole seconds are part of the row cache's key (`chatRows`' `RowOpts.now`,
     read once per render), or a cached `12 s` would stand still through a silent
     `sleep 30`. Live updates never call `persist()` — only the turn ending, or the
-    `!command` runner's own `finally`, does; the buffer (`turnRef`/`liveBuf`/`liveSeen`)
-    is cleared on `/clear`, `/resume` and a change of task, the same places `planRef`
-    resets, since a stale `callId` from the conversation being left must never be
-    found again by a later one's records.
+    `!command` runner's own `finally`, does.
+  - **A view's `callId` is `${turnKey}.${callSeq}#${n}`** (`src/assistant/agent.ts`) —
+    `turnKey` a random id made once per `agentChat` CALL (one per model turn),
+    `callSeq` the turn's own call counter, `n` which view this call opened. Never the
+    provider's own tool-call id alone: that id is not guaranteed unique across the
+    rounds of one turn (a test double restarts at `call_0` every round; some real
+    servers send `''` or reuse ids), and two commands whose ids collided used to
+    overwrite one another's block.
+  - **A reset — `/clear`, `/resume`, a change of task, the same places `planRef`
+    resets — clears `liveBuf`, `liveSeen` and any pending `liveTimer`, and bumps an
+    `epochRef`** (`resetLiveViews` in `src/plugins/assistant.ts`); `turnRef` is NOT
+    reset there, it belongs to the conversation's whole history, not one turn.
+    `send()` and the `!command` runner each capture `epochRef.current` when they
+    START; every one of their callbacks that could still fire after a LATER reset —
+    a tool's own view (`offerLive`), its `changes` (`onToolRun`), the turn's own
+    final `flushLive()`, `!command`'s own completion — compares its captured value
+    against the ref's CURRENT one and drops the update if they differ, rather than
+    finding no message for the old `callId` (the buffer forgot it) and pushing a NEW
+    one into the fresh conversation — reproduced: a command still running when
+    `/clear` fires used to reappear, with its final phase, in the cleared chat.
 - **A shell command is seen before it runs.** `run_command`'s guard is the y/n, not a
   filter on the command; its directory is checked anyway — inside a root by the REAL
   path (`dirAllowed`), a `cd` that leads out is not remembered. `runShell` has exactly

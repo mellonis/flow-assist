@@ -49,8 +49,14 @@ test('`!` on an empty field enters shell mode — `! ` in the shell colour, no `
   await settleUntil(() => ui.backend.lastFrame.includes('✓'));
   const frame = ui.backend.lastFrame;
   expect(frame).toContain('$ echo hi');
-  expect(frame).toContain('hi');
   expect(frame).toContain('✓');
+  // The command's own text already contains "hi" — a click opens the block to
+  // check the OUTPUT actually printed, not just the command naming it.
+  const row = ui.backend.lastFrame.split('\n').findIndex((r) => r.includes('echo hi'));
+  ui.backend.mouse('down', 12, row);
+  ui.backend.mouse('up', 12, row);
+  await settle(6);
+  expect(ui.backend.lastFrame).toContain('│ hi');
   expect(model.requests).toHaveLength(0); // no turn spent — same as the legacy `!command`
   // The result's `$ ` gutter marker (the live block's first row) shares the
   // shell-mode prompt's colour — a command reads as one thing end to end.

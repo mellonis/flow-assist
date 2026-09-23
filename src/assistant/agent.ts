@@ -10,6 +10,7 @@
 // ONLY here, from opts (wired by the runtime from config).
 
 // ─── Types ────────────────────────────────────────────────────────────────────
+import crypto from 'node:crypto';
 import type { ToolDef, ToolCtx } from '../loader/tools.js';
 import { chatTools, execChatTool, chatToolDefs, chatToolGroupOf } from '../loader/tools.js';
 import type { ToolRunEntry } from '../runtime/services/log.js';
@@ -486,6 +487,15 @@ export async function agentChat(
   // Counts every call of the turn, declined ones included: another call between two
   // commands is what separates them — a view's `callId` says which call it belongs to.
   let seq = 0;
+  // A view's `callId` used to be `${tc.id}#${n}` alone — a provider's own tool-call
+  // id, which is NOT guaranteed unique across rounds of one turn (a test double
+  // restarts at `call_0` every round; some real servers send '' or reuse ids). Two
+  // commands whose ids collided overwrote one another's block. `turnKey` is random
+  // per `agentChat` CALL (one per model turn), so `${turnKey}.${callSeq}#${n}` is
+  // unique across the whole turn whatever the provider's ids do; `callSeq` alone
+  // (this turn's own call counter, unique within it) would already be enough, but
+  // keeping the provider's id absent from the key means it can never matter again.
+  const turnKey = crypto.randomUUID();
 
   const chatRoundFn = ((opts as { chatRound?: AgentOpts['chatRound'] }).chatRound) ?? realChatRound;
 
@@ -611,7 +621,7 @@ export async function agentChat(
         const capIfConsole = (kind: string, data: unknown): unknown => (isConsoleKind(kind) ? capConsoleData(data) : data);
         const open = (kind: string, data: unknown): LiveView => {
           const capped = capIfConsole(kind, data);
-          const slot = { rec: { kind: String(kind), data: acceptData(capped) ? capped : null, phase: 'live', startedAt: now(), callId: `${tc.id}#${opened.length}`, seq: callSeq } as ViewRecord, discarded: false };
+          const slot = { rec: { kind: String(kind), data: acceptData(capped) ? capped : null, phase: 'live', startedAt: now(), callId: `${turnKey}.${callSeq}#${opened.length}`, seq: callSeq } as ViewRecord, discarded: false };
           opened.push(slot);
           emit(slot.rec);
           return {

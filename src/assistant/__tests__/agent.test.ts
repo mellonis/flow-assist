@@ -315,8 +315,36 @@ test('a live view reports every change, then its final phase, and nothing after'
   later!();
   expect(seen.map((s) => s.phase)).toEqual(['live', 'live', 'done']);
   expect(seen.at(-1)!.data).toEqual({ command: 'x', cwd: '~', text: 'a' });
-  expect(seen.every((s) => s.callId === 'c1#0' && s.seq === 0)).toBe(true);
+  // The shape, not the provider's own tool-call id verbatim: `callId` is
+  // `${turnKey}.${callSeq}#${n}`, random per turn, so two turns never share one —
+  // this call is the turn's first (`callSeq` 0) and this view is its first (`n` 0).
+  expect(seen.every((s) => /\.0#0$/.test(s.callId ?? '') && s.seq === 0)).toBe(true);
   expect(r.toolRuns[0]!.views).toEqual([expect.objectContaining({ kind: 'console', phase: 'done' })]);
+});
+
+test('two calls in one turn never collide, even when the provider\'s own ids do', async () => {
+  // A test double (ScriptedModel) restarts its tool-call ids at `call_0` every
+  // round, and some real servers send '' or reuse ids too — `callId` must not
+  // depend on that id being unique across the turn.
+  assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
+  const extraTools = [{ type: 'function', function: { name: 'demo:show', description: 'd', parameters: { type: 'object', properties: {} } }, run: async (_a: unknown, ctx: any) => { ctx.liveView('console', { command: 'x' }); return 'ok'; } }] as any;
+  let round = 0;
+  const chatRound = async () => {
+    round++;
+    if (round <= 2) return { content: '', finishReason: 'tool_calls', toolCalls: [{ id: 'call_0', name: 'demo__show', arguments: '{}' }] };
+    return { content: 'ok', finishReason: 'stop', toolCalls: [] };
+  };
+  const ids: string[] = [];
+  await agentChat([{ role: 'user', content: 'go' }], { baseUrl: 'http://x', model: 'm', token: 't', onLive: () => {}, onLiveCommit: () => {}, extraTools, chatRound, onToolLive: (rec: any) => ids.push(rec.callId) } as any);
+  // Each call reports live then done — same id both times, the two calls' own ids differ.
+  expect(ids).toHaveLength(4);
+  expect(ids[0]).toBe(ids[1]);
+  expect(ids[2]).toBe(ids[3]);
+  expect(ids[0]).not.toBe(ids[2]);
+  expect(ids[0]).toMatch(/\.0#0$/);
+  expect(ids[2]).toMatch(/\.1#0$/);
+  // Same turn key on both — only the call's own sequence tells them apart.
+  expect(ids[0]!.split('.')[0]).toBe(ids[2]!.split('.')[0]);
 });
 
 test('a tool that throws keeps its view, marked failed', async () => {

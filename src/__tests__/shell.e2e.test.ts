@@ -43,12 +43,15 @@ test('!command runs in the first root, shows its output, and spends no model tur
   expect(folded).toMatch(/echo hello; pwd · ✓ \d+\.\d s/);
   expect(model.requests).toHaveLength(0);
 
-  // Folded by default, like the model's own commands — a click opens it to what it printed.
+  // Folded by default, like the model's own commands — a click opens it to what it
+  // printed. The command's own text already contains "hello" (even open, the
+  // command's own row is still on screen), so the bar-prefixed OUTPUT row is what
+  // actually proves it printed, not a bare substring match.
   const row = ui.backend.lastFrame.split('\n').findIndex((r) => r.includes('echo hello; pwd'));
   ui.backend.mouse('down', 12, row);
   ui.backend.mouse('up', 12, row);
   await settle(6);
-  expect(ui.backend.lastFrame).toContain('hello');
+  expect(ui.backend.lastFrame).toContain('│ hello');
 
   model.script([{ text: 'It printed hello.' }]);
   await ui.type('what did it print?');
@@ -127,7 +130,14 @@ test('a !command is part of the session: after a restart the model still has it'
   model.script([{ text: 'Yes.' }]);
   const b = await boot(model, root, { sessions: { dir } });
   await settle(6);
-  expect(b.backend.lastFrame).toContain('remembered-output');
+  // Restored folded (a restart's own folds always start closed) — the command's own
+  // text already contains "remembered-output", so a click opens it to check the
+  // OUTPUT actually survived the restart, not just the command line naming it.
+  const row = b.backend.lastFrame.split('\n').findIndex((r) => r.includes('echo remembered-output'));
+  b.backend.mouse('down', 12, row);
+  b.backend.mouse('up', 12, row);
+  await settle(6);
+  expect(b.backend.lastFrame).toContain('│ remembered-output');
   await b.type('still there?');
   await b.press('return');
   await settle(20);
@@ -244,7 +254,13 @@ test('ai.disabledTools ["shell"] withholds run_command; ! still works', async ()
   await ui.press('return');
   await settleUntil(() => ui.backend.lastFrame.includes('✓'));
   expect(ui.backend.lastFrame).toContain('✓');
-  expect(ui.backend.lastFrame).toContain('still-here');
+  // The command's own text already contains "still-here" — a click opens the block
+  // to check the OUTPUT actually printed, not just the command naming it.
+  const row = ui.backend.lastFrame.split('\n').findIndex((r) => r.includes('echo still-here'));
+  ui.backend.mouse('down', 12, row);
+  ui.backend.mouse('up', 12, row);
+  await settle(6);
+  expect(ui.backend.lastFrame).toContain('│ still-here');
   ui.app.unmount();
 });
 
@@ -456,7 +472,9 @@ test('cd sticks between !commands — inside the roots only; exit keeps it; /cle
   expect(ui.backend.lastFrame).toContain(path.join(root, 'sub'));
   await bang(ui, 'pwd > where.txt');
   expect(fs.existsSync(path.join(root, 'sub', 'where.txt'))).toBe(true);
-  expect(ui.backend.lastFrame).toContain(path.join(root, 'sub'));
+  // Its OWN block, not the `cd sub` block's still-on-screen arrow above it.
+  const pwdRow = ui.backend.lastFrame.split('\n').find((r) => r.includes('pwd > where.txt'));
+  expect(pwdRow).toContain(path.join(root, 'sub'));
 
   await bang(ui, 'cd /');
   // The block for `cd /` itself says the refusal, not just the filesystem.

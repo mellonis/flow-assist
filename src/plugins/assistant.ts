@@ -23,7 +23,7 @@ import { KEEP_SESSIONS, SESSION_VERSION, closeSession, flushOnExit, listSessions
 import type { ChatMessage } from '../assistant/agent.js';
 import type { ChangeView } from '../assistant/diff.js';
 import { VIEW_CAPS, type ViewRecord, type ViewRenderers } from '../assistant/views.js';
-import { capConsoleText, consoleData, renderConsole } from '../assistant/console-view.js';
+import { capConsoleData, consoleData, renderConsole } from '../assistant/console-view.js';
 import { editorReducer } from '@flowtty/core';
 import { z } from 'zod';
 import { anchorRow, askFieldWidth, chatFieldWidth, chatRows, chatWrapWidth, firstFoldRow, rowAnchor, type RowOpts, type Viewport } from '../views/modals.js';
@@ -151,6 +151,7 @@ interface AssistantFT {
   useTerminalSize(): { width: number; height: number };
   useState<T>(init: T): [T, (v: T | ((prev: T) => T)) => void];
   useRef<T>(init: T): { current: T };
+  useEffect(fn: () => void | (() => void), deps?: unknown[]): void;
   // `key`/`ui` are typed `any` so the same interface is structurally compatible with
   // the host's `TriggerFT` (used by `addTrigger`) AND accepts the direct
   // `(key) => boolean` handlers the component passes — the runtime is the
@@ -269,6 +270,20 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const liveBuf = f.useRef(new Map<string, ViewRecord>());
           const liveSeen = f.useRef(new Set<string>());
           const liveTimer = f.useRef<ReturnType<typeof setTimeout> | null>(null);
+          // Bumped at every reset (/clear, /resume, a change of task — the same places
+          // liveSeen/liveBuf are cleared), never at anything else — turnRef is NOT reset
+          // there, it belongs to the conversation's whole history. `send()` and the
+          // `!command` runner each capture it when they START; every callback of theirs
+          // that could still fire after a LATER reset (a tool's final phase, a change
+          // report) compares its own captured value against the ref's CURRENT one and
+          // drops the update if they differ — the turn it was for no longer exists, in
+          // either the display or `apiRef`, and writing into the fresh one would be
+          // exactly the "a stopped command from before /clear reappears in the cleared
+          // chat" bug this guards.
+          const epochRef = f.useRef(0);
+          // A pending coalesce timer must not fire into whatever the chat looks like by
+          // then — unmounting is a reset the timer itself cannot observe.
+          f.useEffect(() => () => { if (liveTimer.current) clearTimeout(liveTimer.current); }, []);
           // The tools the model has loaded (tools on demand, src/assistant/tool-loading.ts).
           // The conversation's, like the plan: its history calls them, so it is saved
           // with the session, kept through /compact, emptied by /clear and a change of task.
@@ -632,7 +647,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             planRef.current.load(s.plan);
             shellRef.current.setCwd(s.shellCwd ?? null);
             toolSetRef.current.load(s.tools);
-            liveSeen.current.clear(); liveBuf.current.clear(); // the calls they tracked belong to the conversation being left
+            resetLiveViews(); // the calls they tracked belong to the conversation being left
             resetImages(s.images ?? [], s.imageSeq ?? 0);
             setAutoMode('ask'); // another conversation is another conversation's mode
             setNotes(configNotes()); // and its own answer to how much narration is drawn
@@ -832,12 +847,31 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             liveBuf.current.clear();
             if (recs.length) { placeViews(recs); f.notify(); }
           };
-          const offerLive = (rec: ViewRecord) => {
-            liveBuf.current.set(rec.callId!, rec);
-            const first = !liveSeen.current.has(rec.callId!);
-            liveSeen.current.add(rec.callId!);
+          // `epoch` is the caller's own — captured when the turn or the `!command` that
+          // opened this view STARTED, so a change that arrives after a LATER reset
+          // (/clear, /resume, a change of task) is dropped here, before it ever touches
+          // `liveBuf`/`liveSeen` or triggers a flush into the fresh conversation.
+          const offerLive = (rec: ViewRecord, epoch: number) => {
+            if (epoch !== epochRef.current) return;
+            if (!rec.callId) return; // nothing to find this record by again
+            liveBuf.current.set(rec.callId, rec);
+            const first = !liveSeen.current.has(rec.callId);
+            liveSeen.current.add(rec.callId);
             if (first || rec.phase !== 'live') { flushLive(); return; }
             liveTimer.current ??= setTimeout(flushLive, LIVE_REDRAW_MS);
+          };
+          // /clear, /resume and a change of task all call this: the calls liveSeen/
+          // liveBuf tracked belong to the conversation being left, and the pending
+          // coalesce timer (if any) is for a view that conversation drew — cancelled,
+          // not left to fire into whatever replaces it. The epoch bump is what actually
+          // stops anything already in flight for the old conversation (a tool's own
+          // final phase, `!command`'s own completion) from landing in the new one; it is
+          // the one thing here that is never reset itself.
+          const resetLiveViews = () => {
+            liveSeen.current.clear();
+            liveBuf.current.clear();
+            if (liveTimer.current) { clearTimeout(liveTimer.current); liveTimer.current = null; }
+            epochRef.current += 1;
           };
 
           const send = async (text: string | null = null, opts: { fromBackground?: boolean } = {}) => {
@@ -883,6 +917,11 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             apiRef.current = [...apiRef.current, asked];
             setMessages(displayMsgs);
             turnRef.current += 1; // views this turn opens are its own, never the last turn's
+            // This turn's own conversation identity — captured now, compared against
+            // `epochRef.current` by every one of this turn's async callbacks that could
+            // still fire after a LATER reset (a tool's view, its changes, the turn's own
+            // final flush): a mismatch means the conversation it was for is gone.
+            const epoch = epochRef.current;
             persist(); // the question survives a restart even if the answer does not
             setInput('');
             inputRef.current = '';
@@ -969,11 +1008,17 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // A view a tool opened, and every change to it. Its message is pushed on
                 // the FIRST change, so it has its place — and its fold id — from the
                 // start: a block opened while it ran is still open when it ends.
-                onToolLive: (rec: ViewRecord) => offerLive(rec),
+                onToolLive: (rec: ViewRecord) => offerLive(rec, epoch),
                 // What a write changed goes on the answer being written the moment the
                 // write lands — a block of its own that stays in the chat. Only on the
                 // display message: `apiRef` gets the transcript, which never holds it.
                 onToolRun: (run: { changes?: ChangeView[] }) => {
+                  // A call whose result arrives after a LATER reset (/clear mid-turn,
+                  // most often): the conversation it ran in is gone from both the screen
+                  // and `apiRef`, and every one of this callback's effects — the status
+                  // line, the flush, the ✎ diff block — belongs to it, never to whatever
+                  // is on screen now.
+                  if (epoch !== epochRef.current) return;
                   // The tool is done: until the model's next token it is thinking, and
                   // the seconds on the line are the round's from here.
                   endToolSegment();
@@ -1214,7 +1259,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 const items = planRef.current.snapshot();
                 if (items.length && items.every((t) => t.status === 'done')) planRef.current.reset();
               }
-              flushLive();
+              // A reset mid-turn already cleared liveBuf/liveSeen/liveTimer — this is
+              // for the ordinary case, and a stale one finds nothing to flush regardless.
+              if (epoch === epochRef.current) flushLive();
               persist();
               setStreaming(false);
               setToolLabel('');
@@ -1264,47 +1311,74 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             const cwd = shellRef.current.cwd();
             const { timeoutMs, maxChars } = shellLimits(f.config as { shell?: unknown });
             let stopped = false;
+            // The person's command gets the same live block as the model's. The message
+            // is still role `shell`: it joins apiRef and ↑/↓ as it always did. Declared
+            // OUTSIDE the try so the catch below can still find the message by `callId`
+            // if something throws after it was pushed; `epoch` is this command's own
+            // conversation identity, captured now — a completion that arrives after a
+            // LATER /clear (or /resume, or a change of task) must not touch the fresh
+            // conversation's messages, session-facing history or shell directory.
+            const startedAt = Date.now();
+            const callId = `shell#${startedAt}`;
+            const liveRec = (data: unknown, phase: ViewRecord['phase'] = 'live'): ViewRecord => ({ kind: 'console', data, phase, startedAt, callId });
+            const epoch = epochRef.current;
             try {
-              // The person's command gets the same live block as the model's. The
-              // message is still role `shell`: it joins apiRef and ↑/↓ as it always did.
-              const startedAt = Date.now();
-              const callId = `shell#${startedAt}`;
-              const liveRec = (data: unknown, phase: ViewRecord['phase'] = 'live'): ViewRecord => ({ kind: 'console', data, phase, startedAt, callId });
               liveSeen.current.add(callId);
-              setMessages((cur) => [...cur, { role: 'shell', content: '', command: cmd, views: [{ ...liveRec({ command: cmd, cwd: tildePath(cwd), text: '', showCwd: true }), turn: turnRef.current }] }]);
+              setMessages((cur) => [...cur, { role: 'shell', content: '', command: cmd, views: [{ ...liveRec(capConsoleData({ command: cmd, cwd: tildePath(cwd), text: '', showCwd: true })), turn: turnRef.current }] }]);
               let raw = '';
               const onOutput = (chunk: string) => {
                 raw += chunk;
                 if (raw.length > maxChars * 2) raw = raw.slice(-maxChars);
-                offerLive(liveRec({ command: cmd, cwd: tildePath(cwd), text: capConsoleText(raw), showCwd: true }));
+                offerLive(liveRec(capConsoleData({ command: cmd, cwd: tildePath(cwd), text: raw, showCwd: true })), epoch);
               };
               const r = await runShell(cmd, { cwd, timeoutMs, maxChars, signal: abort.signal, onOutput });
               stopped = r.stopped;
-              // `cd` sticks, as in a terminal — within the roots.
               const move = nextCwd(f.config as Record<string, unknown>, cwd, r.pwd);
-              if (move.cwd !== cwd) shellRef.current.setCwd(move.cwd);
               const { display, forModel } = formatShell(cmd, r, cwd, timeoutMs, { after: move.cwd, note: move.note });
-              flushLive();
-              // The block says where a `cd` inside the command left the directory — or
-              // that one tried to leave the roots and stayed — the same facts the old
-              // markdown line carried, now on the live view instead.
-              const data = consoleData(cmd, r, cwd, timeoutMs, true, { movedTo: tildePath(move.cwd), note: move.note });
-              setMessages((cur) => {
-                const next = cur.slice();
-                const at = next.findLastIndex((m) => callOf(m) === callId);
-                const done = { role: 'shell', content: display, command: cmd, views: [{ ...liveRec(data, 'done'), turn: turnRef.current }] };
-                if (at >= 0) next[at] = done; else next.push(done);
-                return next;
-              });
-              apiRef.current = [...apiRef.current, { role: 'shell', content: forModel }];
+              // Everything from here on is display/model-facing state for THIS
+              // conversation — skipped whole for a stale epoch (a /clear mid-command,
+              // reproduced: the command still finishes, and without this its block used
+              // to land in the fresh, cleared chat).
+              if (epoch === epochRef.current) {
+                // `cd` sticks, as in a terminal — within the roots.
+                if (move.cwd !== cwd) shellRef.current.setCwd(move.cwd);
+                flushLive();
+                // The block says where a `cd` inside the command left the directory — or
+                // that one tried to leave the roots and stayed — the same facts the old
+                // markdown line carried, now on the live view instead.
+                const data = consoleData(cmd, r, cwd, timeoutMs, true, { movedTo: tildePath(move.cwd), note: move.note });
+                setMessages((cur) => {
+                  const next = cur.slice();
+                  const at = next.findLastIndex((m) => callOf(m) === callId);
+                  const done = { role: 'shell', content: display, command: cmd, views: [{ ...liveRec(data, 'done'), turn: turnRef.current }] };
+                  if (at >= 0) next[at] = done; else next.push(done);
+                  return next;
+                });
+                apiRef.current = [...apiRef.current, { role: 'shell', content: forModel }];
+              }
               (f.services as Record<string, any>).pushLog?.(`[shell] ${cmd.slice(0, 60)} → ${r.error ? `error: ${r.error}` : r.stopped ? 'stopped' : r.timedOut ? 'timed out' : `exit ${r.code}`}`);
             } catch (e) {
               setError(`!: ${(e as Error).message}`);
+              // The block stops ticking rather than waiting forever for a completion
+              // that is never coming — marked failed in place, keeping whatever it had
+              // already shown (the way a tool's own thrown view does, agent.ts).
+              if (epoch === epochRef.current) {
+                setMessages((cur) => {
+                  const next = cur.slice();
+                  const at = next.findLastIndex((m) => callOf(m) === callId);
+                  if (at < 0) return cur;
+                  const target = next[at]!;
+                  const views = (target.views as ViewRecord[] | undefined) ?? [];
+                  if (!views.length) return cur;
+                  next[at] = { ...target, views: [{ ...views[0]!, phase: 'failed', turn: turnRef.current }] };
+                  return next;
+                });
+              }
             } finally {
               if (tickRef.current) { clearInterval(tickRef.current); tickRef.current = null; }
               setElapsedMs(Date.now() - t0Ref.current);
               streamRef.current = false;
-              flushLive();
+              if (epoch === epochRef.current) flushLive();
               persist();
               setStreaming(false);
               setToolLabel('');
@@ -1566,7 +1640,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 planRef.current.reset();
                 shellRef.current.setCwd(null); // back to the first root
                 toolSetRef.current.reset(); // a new conversation starts from the index
-                liveSeen.current.clear(); liveBuf.current.clear(); // the calls they tracked are gone with the conversation
+                resetLiveViews(); // the calls they tracked are gone with the conversation
                 resetImages(); // numbering starts again at [Image #1]
                 usageRef.current = null; // measured for a conversation that is gone
                 // /clear ends the conversation, not the memory — and says so, or the
@@ -1666,7 +1740,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               planRef.current.reset();
               shellRef.current.setCwd(null);
               toolSetRef.current.reset();
-              liveSeen.current.clear(); liveBuf.current.clear(); // the calls they tracked belong to the other task
+              resetLiveViews(); // the calls they tracked belong to the other task
               resetImages();
               setAutoMode('ask'); // the new task has not been given the old one's leeway
               setNotes(configNotes()); // nor kept the narration the old one was set to

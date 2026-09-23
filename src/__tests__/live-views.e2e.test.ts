@@ -89,6 +89,59 @@ test('the person\'s own !command is live too, and says where it ran', async () =
   ui.app.unmount();
 });
 
+test('two run_command calls in one turn never collide, even when the provider\'s own ids repeat', async () => {
+  // ScriptedModel restarts its tool-call ids at `call_0` every round (some real
+  // servers send '' or reuse ids too) — a view's callId must not depend on that id
+  // being unique across the whole turn, only within its own call.
+  const model = new ScriptedModel();
+  model.script(
+    [{ tool: 'run_command', args: { command: 'echo AAA-first' } }],
+    [{ tool: 'run_command', args: { command: 'echo BBB-second' } }],
+    [{ text: 'Done.' }],
+  );
+  const ui = await bootApp(model, 100, 24, undefined, { shell: { timeoutMs: 20000 } });
+  await ui.press('F');
+  await ui.type('go');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('Confirm write: run_command') && ui.backend.lastFrame.includes('echo AAA-first'));
+  expect(ui.backend.lastFrame).toContain('echo AAA-first');
+  await ui.press('y');
+  await settleUntil(() => ui.backend.lastFrame.includes('Confirm write: run_command') && ui.backend.lastFrame.includes('echo BBB-second'));
+  expect(ui.backend.lastFrame).toContain('echo BBB-second');
+  await ui.press('y');
+  await settleUntil(() => ui.backend.lastFrame.includes('Done.'));
+  expect(ui.backend.lastFrame).toContain('Done.');
+  // Both blocks stand — the second round's call never overwrote the first's.
+  expect(ui.backend.lastFrame).toMatch(/echo AAA-first · ✓/);
+  expect(ui.backend.lastFrame).toMatch(/echo BBB-second · ✓/);
+  ui.app.unmount();
+});
+
+test('/clear during a running command: its eventual completion never lands in the fresh conversation', async () => {
+  const model = new ScriptedModel();
+  model.script([{ tool: 'run_command', args: { command: 'echo XYZ; sleep 1.5' } }], [{ text: 'Done.' }]);
+  const ui = await bootApp(model, 100, 24, undefined, { shell: { timeoutMs: 20000 } });
+  await ui.press('F');
+  await ui.type('go');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('Confirm write: run_command'));
+  expect(ui.backend.lastFrame).toContain('Confirm write: run_command');
+  await ui.press('y');
+  await settleUntil(() => rowOf(ui, 'echo XYZ; sleep 1.5') >= 0);
+  expect(rowOf(ui, 'echo XYZ; sleep 1.5')).toBeGreaterThanOrEqual(0);
+  await ui.type('/clear');
+  await ui.press('return');
+  await settle(6);
+  // Cleared at once.
+  expect(ui.backend.lastFrame).not.toContain('echo XYZ');
+  // Wait well past the command's own end (1.5s) — whether /clear's abort actually
+  // killed it or it ran to completion regardless, its arrival must still not reach
+  // the fresh, cleared conversation the person is now looking at.
+  await settle(500);
+  expect(ui.backend.lastFrame).not.toContain('XYZ');
+  ui.app.unmount();
+}, 10_000);
+
 test('the model is sent a !command\'s output as before, and never a view', async () => {
   const model = new ScriptedModel();
   model.script([{ text: 'Seen.' }]);
