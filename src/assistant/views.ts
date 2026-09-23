@@ -213,10 +213,10 @@ export function qualifyKind(owner: string, kind: string): string {
 // The plugin's own renderer first; failing that, the host's kind of the same name
 // (a plugin's tool reporting `console` gets `notes:console`, which is the host's).
 export function resolveRenderer(table: ViewRenderers, kind: string): ViewRenderer | null {
-  const own = table[kind];
+  const own = Object.hasOwn(table, kind) ? table[kind] : undefined;
   if (typeof own === 'function') return own;
   const bare = kind.slice(kind.indexOf(':') + 1);
-  const host = bare !== kind ? table[bare] : undefined;
+  const host = bare !== kind && Object.hasOwn(table, bare) ? table[bare] : undefined;
   return typeof host === 'function' ? host : null;
 }
 
@@ -250,7 +250,7 @@ export function frameView(
 ): FramedLine[] {
   const fallback = (why: string): FramedLine[] => {
     onFail?.(rec.kind, why);
-    return [{ spans: [{ text: cutTo(`▸ ${rec.kind}`, ctx.width), dim: true }] }];
+    return [{ spans: [{ text: cutTo(`▸ ${sanitizeViewText(rec.kind).replace(/\n/g, ' ')}`, ctx.width), dim: true }] }];
   };
   const render = resolveRenderer(table, rec.kind);
   if (!render) return fallback('no renderer');
@@ -271,7 +271,7 @@ export function frameView(
       const t = cutTo(sanitizeViewText(s?.text).replace(/\n/g, ' '), room);
       room -= Array.from(t).length;
       if (leading && s?.chrome) chrome++; else leading = false;
-      const color = typeof s?.color === 'string' ? palette[s.color] : undefined;
+      const color = typeof s?.color === 'string' && Object.hasOwn(palette, s.color) ? palette[s.color] : undefined;
       spans.push({ text: t, ...(color ? { color } : {}), ...(s?.dim ? { dim: true } : {}), ...(s?.bold ? { bold: true } : {}) });
     }
     return { spans, ...(chrome ? { chrome } : {}) };

@@ -91,8 +91,8 @@ test('a line is cut to the width, never wrapped: one line is one row', () => {
 });
 
 test('the number of rows is capped', () => {
-  const many = Array.from({ length: 410 }, (_, i) => [{ text: `r${i}` }]);
-  expect(frameView(rec('k'), { k: () => many }, rctx, palette)).toHaveLength(400);
+  const many = Array.from({ length: VIEW_CAPS.rows + 10 }, (_, i) => [{ text: `r${i}` }]);
+  expect(frameView(rec('k'), { k: () => many }, rctx, palette)).toHaveLength(VIEW_CAPS.rows);
 });
 
 test('a colour is a palette token; an unknown token draws plain', () => {
@@ -150,4 +150,20 @@ test('an old console view is read as the console renderer\'s data', () => {
   expect(r).toEqual({ kind: 'console', data: { command: 'bun test', text: 'ok', exitCode: 0, ms: 1200, cwd: '~/a', status: 'exit 0' }, phase: 'done', startedAt: 0 });
   expect(readLegacyView({ kind: 'console', data: {}, phase: 'done', startedAt: 1 })).toBeNull(); // already a record
   expect(readLegacyView({ kind: 'table' })).toBeNull();
+});
+
+test('a kind with escape sequences and newlines in the fallback row is sanitised', () => {
+  const out = frameView(rec('\u001b[2Jx\ny'), {}, rctx, palette);
+  expect(texts(out)).toEqual(['▸ x y']);
+});
+
+test('prototype property lookups are prevented in resolveRenderer', () => {
+  expect(resolveRenderer({}, 'x:constructor')).toBeNull();
+  expect(resolveRenderer({}, 'toString')).toBeNull();
+});
+
+test('prototype property lookups are prevented in palette resolution', () => {
+  const [line] = frameView(rec('k'), { k: () => [[{ text: 'a', color: 'constructor' }, { text: 'b', color: 'toString' }]] }, rctx, palette);
+  expect(line!.spans[0]!.color).toBeUndefined();
+  expect(line!.spans[1]!.color).toBeUndefined();
 });
