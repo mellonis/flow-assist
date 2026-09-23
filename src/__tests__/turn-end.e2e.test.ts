@@ -109,3 +109,17 @@ test('a turn that failed keeps what it did and says it failed — a retry is the
   noUserPairs(sent);
   ui.app.unmount();
 });
+
+test('a provider\'s refusal is read, not pasted: the line names the model, the reason and the request', async () => {
+  const model = new ScriptedModel();
+  const ui = await bootApp(model, 120, 28);
+  globalThis.fetch = (async () => new Response('{ "message":"model_access_denied", "request_id":"2395f0a1-77aa-4b" }', { status: 403 })) as unknown as typeof fetch;
+  await ui.press('F');
+  await ui.type('hello');
+  await ui.press('return');
+  await settle(20);
+  const frame = ui.backend.lastFrame;
+  expect(frame).toContain('LLM 403 · scripted: model_access_denied (request 2395f0a1)');
+  expect(frame).not.toContain('"message"');
+  ui.app.unmount();
+});

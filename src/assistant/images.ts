@@ -331,7 +331,8 @@ export function contentText(content: unknown): string {
 export const IMAGES_OFF = 'images are off on this machine (ai.images.enabled is false) — config set ai.images.enabled true turns them on';
 
 // Does a provider's refusal talk about the image? Then the model most likely cannot
-// take one — `realChatRound` throws `LLM <status>: <body>`.
+// take one — `realChatRound` throws `LLM <status>[ · <model>]: <the provider's
+// message>` (./llm-error.ts).
 export const isImageRefusal = (message: string) => /^LLM 4\d\d\b/.test(message) && /image|content part|multimodal|vision/i.test(message);
 
 // ─── The clipboard ────────────────────────────────────────────────────────────

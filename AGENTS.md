@@ -693,6 +693,17 @@ message is model-side only: the screen already says `stopped (Esc)` or shows the
 error. It is saved with the session like the rest of `apiRef`
 (`turn-end.e2e.test.ts` asserts on what the model is sent next).
 
+**A provider's refusal is read, not pasted** (`llmErrorMessage` in
+`src/assistant/llm-error.ts`, pure). The raw body used to be the error — the chat
+showed `LLM 403: { "message":"model_access_denied", "request_id":"2395…" }`. The body is
+read for the provider's own words in the shapes providers answer with (OpenAI's
+`{error:{message,code,type}}`, a flat `{message}`, `{detail}` as text or a list of
+`{msg}`, else the text collapsed and cut to 200) and the line is `LLM 403 · <model>:
+model_access_denied (request 2395f0a1)` — the request id cut to 8 characters, from the
+body or the `x-request-id` header; a 401/403 adds a generic hint about the token and
+`config set ai.model`. It starts `LLM <status>` so `isImageRefusal` still reads it.
+The streamed round and `/compact`'s one-shot both use it.
+
 **An image is kept as a ref and sent as a part.** `ChatMessage.content` is
 `string | ContentPart[] | null`, but content PARTS exist only on the way to the
 provider: everywhere the host keeps a message (the display list, `apiRef`, the

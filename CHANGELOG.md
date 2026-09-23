@@ -5,6 +5,12 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **A provider's refusal reads as a sentence.** A failed request used to show the
+  provider's raw JSON — `LLM 403: { "message":"model_access_denied", "request_id":… }`.
+  It now says `LLM 403 · <model>: model_access_denied (request 2395f0a1)`, and for a
+  refused token or model adds what to check. `/compact` failing says why too, where it
+  used to say only the status.
+
 - **A turn reads in the order it happened, and nothing it wrote jumps away.** A turn
   used to be laid out by kind — what the assistant said, then every diff, then the
   answer — so text that turned out to come before a tool call moved up above all the

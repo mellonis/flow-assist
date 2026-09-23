@@ -18,6 +18,7 @@ import { changeView, type Change, type ChangeView } from './diff.js';
 import { acceptData, isConsoleKind, readLegacyView, type ViewRecord } from './views.js';
 import { capConsoleData } from './console-view.js';
 import { contentText, type ContentPart, type ImageRef } from './images.js';
+import { llmErrorMessage } from './llm-error.js';
 import {
   TOOLS_LOAD, createToolSet, deferredTools, notLoadedError, runToolsLoad, toolsToSend,
   type CatalogEntry, type ToolLoading, type ToolSet,
@@ -298,10 +299,10 @@ async function realChatRound(
       res = await post(false);
       if (!res.ok) {
         const again = await res.text().catch(() => '');
-        throw new Error(`LLM ${res.status}: ${again || res.statusText}`);
+        throw new Error(llmErrorMessage(res.status, again, { model, requestId: res.headers.get('x-request-id'), statusText: res.statusText }));
       }
     } else {
-      throw new Error(`LLM ${res.status}: ${body || res.statusText}`);
+      throw new Error(llmErrorMessage(res.status, body, { model, requestId: res.headers.get('x-request-id'), statusText: res.statusText }));
     }
   }
   const reader = res.body?.getReader();
@@ -790,7 +791,10 @@ export async function compactConversation(
       ],
     }),
   });
-  if (!res.ok) throw new Error(`LLM ${res.status}`);
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(llmErrorMessage(res.status, body, { model, requestId: res.headers.get('x-request-id'), statusText: res.statusText }));
+  }
   const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
   return data?.choices?.[0]?.message?.content ?? '';
 }
