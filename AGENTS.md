@@ -256,7 +256,9 @@ assistant nobody had asked for a board.
   state. Consecutive commands of a turn (no other call between them) fold under one
   `ƒ Ran N commands · ✓ 34 s` head — `Running N commands · $ cmd · 4 s` while one runs —
   which takes the place of their step lines. Opened, they are the commands alone, each
-  its own block (`src/assistant/view-groups.ts`).
+  its own block (`src/assistant/view-groups.ts`). Groups form only in the `step`/
+  `hidden` notes modes, and a message whose narration was already shown is never
+  folded into one.
 - **Whose claim excuses a y/n, and whose does not.** A tool pauses because its `write`
   flag says so, and the flag is set by whoever is entitled to say it. The `mcp` plugin
   keeps the two apart per server: `trusted` is "I believe THIS SERVER's own

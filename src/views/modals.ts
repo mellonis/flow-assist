@@ -549,7 +549,7 @@ function messageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): ChatRow
 function rowsPerDrawn(messages: ChatMsg[], o: RowOpts): ChatRow[][] {
   const drawn = messages.filter((m) => m.role !== 'system');
   const byAt = new Map<number, { g: ViewGroup; open: boolean }>();
-  for (const g of viewGroups(drawn as GroupMsg[])) {
+  for (const g of viewGroups(drawn as GroupMsg[], o.notes)) {
     const open = groupOpen(o.folds, g);
     for (const at of [...g.members, ...g.hidden]) byAt.set(at, { g, open });
   }

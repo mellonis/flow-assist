@@ -9,19 +9,32 @@ const user = { role: 'user', content: 'go' };
 
 test('consecutive commands of one turn group — the narration before and between them folds in', () => {
   const msgs = [user, narration, v(0), narration, v(1), narration, v(2), { role: 'assistant', content: 'Done.' }];
-  expect(viewGroups(msgs)).toEqual([{ head: 2, members: [2, 4, 6], hidden: [1, 3, 5] }]);
+  expect(viewGroups(msgs, 'step')).toEqual([{ head: 2, members: [2, 4, 6], hidden: [1, 3, 5] }]);
 });
 
 test('another tool between them, a new turn, an answer or a lone command is not a group', () => {
-  expect(viewGroups([v(0), narration, v(2)])).toEqual([]); // seq 1 was another tool
-  expect(viewGroups([v(0, 1), user, v(1, 2)])).toEqual([]);
-  expect(viewGroups([v(0), { role: 'assistant', content: 'Here is why.' }, v(1)])).toEqual([]);
-  expect(viewGroups([narration, v(0)])).toEqual([]);
+  expect(viewGroups([v(0), narration, v(2)], 'step')).toEqual([]); // seq 1 was another tool
+  expect(viewGroups([v(0, 1), user, v(1, 2)], 'step')).toEqual([]);
+  expect(viewGroups([v(0), { role: 'assistant', content: 'Here is why.' }, v(1)], 'step')).toEqual([]);
+  expect(viewGroups([narration, v(0)], 'step')).toEqual([]);
 });
 
 test('a !command and a discarded view are never members', () => {
-  expect(viewGroups([v(0), { role: 'shell', content: '', views: v(1).views }])).toEqual([]);
-  expect(viewGroups([v(0), { role: 'view', content: '', views: [] }, v(2)])).toEqual([]);
+  expect(viewGroups([v(0), { role: 'shell', content: '', views: v(1).views }], 'step')).toEqual([]);
+  expect(viewGroups([v(0), { role: 'view', content: '', views: [] }, v(2)], 'step')).toEqual([]);
+});
+
+test('a between-message whose narration was already shown breaks the group', () => {
+  expect(viewGroups([v(0), { role: 'assistant', content: '', shown: 'already drawn' }, v(1)], 'step')).toEqual([]);
+  expect(viewGroups([v(0), { role: 'assistant', content: '', reasoning: 'thinking about it' }, v(1)], 'step')).toEqual([]);
+});
+
+test('groups form only in the step and hidden notes modes', () => {
+  const msgs = [narration, v(0), narration, v(1), narration, v(2)];
+  expect(viewGroups(msgs, 'step')).toEqual([{ head: 1, members: [1, 3, 5], hidden: [0, 2, 4] }]);
+  expect(viewGroups(msgs, 'hidden')).toEqual([{ head: 1, members: [1, 3, 5], hidden: [0, 2, 4] }]);
+  expect(viewGroups(msgs, 'fold')).toEqual([]);
+  expect(viewGroups(msgs, 'open')).toEqual([]);
 });
 
 test('the head says what runs now, then what ran', () => {

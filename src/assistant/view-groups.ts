@@ -4,15 +4,18 @@
 // other call between them: their `seq` are consecutive) are drawn as one line,
 // `ƒ Ran 3 commands · ✓ 34 s`, which takes the place of their step lines; opened, the
 // commands alone, each its own block. The narration-only messages before and between
-// them are not drawn, open or folded.
+// them are not drawn, open or folded. Groups form only in the `step`/`hidden` notes
+// modes, and a message whose narration was already shown (`shown`, `reasoning`) is
+// never folded into one — what has been shown is never taken away.
 //
 // Pure: works on the DRAWN messages (the system prompt is not one), by index — the
 // same `at` fold ids are built from.
 import { clickedOpen, foldId, isOpen, type FoldState } from './folds.js';
+import { type NotesMode } from './step.js';
 import { isConsoleKind, type ViewRecord } from './views.js';
 
 export interface ViewGroup { head: number; members: number[]; hidden: number[] }
-export type GroupMsg = { role: string; content?: unknown; views?: unknown; toolRuns?: unknown; changes?: unknown; roundLimit?: unknown; stopped?: unknown };
+export type GroupMsg = { role: string; content?: unknown; shown?: unknown; reasoning?: unknown; views?: unknown; toolRuns?: unknown; changes?: unknown; roundLimit?: unknown; stopped?: unknown };
 
 const consoleOf = (m: GroupMsg): ViewRecord | null => {
   if (m.role !== 'view' || !Array.isArray(m.views) || m.views.length !== 1) return null;
@@ -20,11 +23,19 @@ const consoleOf = (m: GroupMsg): ViewRecord | null => {
   return isConsoleKind(r.kind) && typeof r.seq === 'number' && typeof r.turn === 'number' ? r : null;
 };
 // A message a group may take in: the narration of a round that went on to a call —
-// nothing answered, nothing changed, no trail, nothing about how a turn ended.
+// nothing answered, nothing changed, no trail, nothing about how a turn ended, and
+// nothing already shown (`shown`, kept narration; `reasoning`, its own block) — what
+// has been shown stays where it was drawn, never folded away.
 const passable = (m: GroupMsg | undefined) => !!m && m.role === 'assistant' && !String(m.content ?? '').trim()
+  && !String(m.shown ?? '').trim() && !String(m.reasoning ?? '').trim()
   && !(Array.isArray(m.toolRuns) && m.toolRuns.length) && !(Array.isArray(m.changes) && m.changes.length) && !m.roundLimit && !m.stopped;
 
-export function viewGroups(drawn: GroupMsg[]): ViewGroup[] {
+// Groups form only where the narration itself is already reduced to a step line or
+// nothing (`step`, `hidden`): in `fold` a message keeps its own clickable header and
+// in `open` its narration is always drawn in full, and grouping either would fold
+// away text the person can already see.
+export function viewGroups(drawn: GroupMsg[], notes: NotesMode): ViewGroup[] {
+  if (notes !== 'step' && notes !== 'hidden') return [];
   const groups: ViewGroup[] = [];
   let cur: { g: ViewGroup; last: ViewRecord; between: number[] } | null = null;
   const close = () => { if (cur && cur.g.members.length > 1) groups.push(cur.g); cur = null; };
