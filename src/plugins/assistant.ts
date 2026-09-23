@@ -18,12 +18,12 @@ import {
 import { apiHistory, compactConversation, chatLanguage, requestTools, transcriptSoFar } from '../assistant/agent.js';
 import { createToolSet, toolLoadingMode } from '../assistant/tool-loading.js';
 import { copyTarget, copyToClipboard } from '../assistant/copy.js';
-import { createShellState, formatShell, nextCwd, runShell, shellLimits } from '../assistant/shell.js';
+import { createShellState, formatShell, nextCwd, runShell, shellLimits, tildePath } from '../assistant/shell.js';
 import { KEEP_SESSIONS, SESSION_VERSION, closeSession, flushOnExit, listSessions, loadSession, newSessionId, pruneSessions, saveSession, sessionToContinue, sessionWhen, sessionsDir, type Session } from '../assistant/sessions.js';
 import type { ChatMessage } from '../assistant/agent.js';
 import type { ChangeView } from '../assistant/diff.js';
 import { VIEW_CAPS, type ViewRecord, type ViewRenderers } from '../assistant/views.js';
-import { renderConsole } from '../assistant/console-view.js';
+import { capConsoleText, consoleData, renderConsole } from '../assistant/console-view.js';
 import { editorReducer } from '@flowtty/core';
 import { z } from 'zod';
 import { anchorRow, askFieldWidth, chatFieldWidth, chatRows, chatWrapWidth, firstFoldRow, rowAnchor, type RowOpts, type Viewport } from '../views/modals.js';
@@ -109,6 +109,10 @@ interface ChatMsg {
   changes?: ChangeView[];
   // A block a tool asked the host to draw (role 'view') — a command's output so far.
   views?: ViewRecord[];
+  // The call a DISCARDED view belonged to — kept on the message so a later final for
+  // the same call still finds it (ids are places among drawn messages; removing the
+  // message would move every fold id after it).
+  discardedCallId?: string;
   [k: string]: unknown;
 }
 
@@ -255,6 +259,16 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // run_command share it; `cd` moves it. The conversation's, like the plan: a
           // background run gets its own, /clear and a change of task reset it.
           const shellRef = f.useRef(createShellState(() => f.config as Record<string, unknown>));
+          // Which turn a view belongs to — groups never span two.
+          const turnRef = f.useRef(0);
+          // Live views, coalesced: the latest record per view waits here at most
+          // LIVE_REDRAW_MS, so a command printing thousands of lines a second costs a few
+          // redraws, not thousands. A view's first state and its final phase are placed at
+          // once — the block must appear when the call starts, and its end must not wait.
+          const LIVE_REDRAW_MS = 200;
+          const liveBuf = f.useRef(new Map<string, ViewRecord>());
+          const liveSeen = f.useRef(new Set<string>());
+          const liveTimer = f.useRef<ReturnType<typeof setTimeout> | null>(null);
           // The tools the model has loaded (tools on demand, src/assistant/tool-loading.ts).
           // The conversation's, like the plan: its history calls them, so it is saved
           // with the session, kept through /compact, emptied by /clear and a change of task.
@@ -618,6 +632,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             planRef.current.load(s.plan);
             shellRef.current.setCwd(s.shellCwd ?? null);
             toolSetRef.current.load(s.tools);
+            liveSeen.current.clear(); liveBuf.current.clear(); // the calls they tracked belong to the conversation being left
             resetImages(s.images ?? [], s.imageSeq ?? 0);
             setAutoMode('ask'); // another conversation is another conversation's mode
             setNotes(configNotes()); // and its own answer to how much narration is drawn
@@ -793,6 +808,38 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             return { ok: false, why: r.why };
           };
 
+          // ── Live views (src/assistant/views.ts) ── placing what `turnRef`/`liveBuf`/
+          // `liveSeen` (declared with the other refs above) collect.
+          const callOf = (m: ChatMsg) => (m.views as ViewRecord[] | undefined)?.[0]?.callId ?? m.discardedCallId;
+          const placeViews = (recs: ViewRecord[]) => setMessages((cur) => {
+            const next = cur.slice();
+            for (const rec of recs) {
+              const at = next.findLastIndex((m) => callOf(m) === rec.callId);
+              // A discarded view keeps its message, drawing nothing: removing it would move
+              // the fold id of every message after it.
+              const gone = rec.phase === 'discarded';
+              const views = gone ? [] : [{ ...rec, turn: turnRef.current }];
+              // A new object every time — the row cache is keyed by the message object — and
+              // the role it already has (a `!command` stays `shell`).
+              if (at >= 0) next[at] = { ...next[at]!, views, ...(gone ? { discardedCallId: rec.callId } : {}) };
+              else if (!gone) next.push({ role: 'view', content: '', views });
+            }
+            return next;
+          });
+          const flushLive = () => {
+            if (liveTimer.current) { clearTimeout(liveTimer.current); liveTimer.current = null; }
+            const recs = [...liveBuf.current.values()];
+            liveBuf.current.clear();
+            if (recs.length) { placeViews(recs); f.notify(); }
+          };
+          const offerLive = (rec: ViewRecord) => {
+            liveBuf.current.set(rec.callId!, rec);
+            const first = !liveSeen.current.has(rec.callId!);
+            liveSeen.current.add(rec.callId!);
+            if (first || rec.phase !== 'live') { flushLive(); return; }
+            liveTimer.current ??= setTimeout(flushLive, LIVE_REDRAW_MS);
+          };
+
           const send = async (text: string | null = null, opts: { fromBackground?: boolean } = {}) => {
             const q = (text ?? inputRef.current).trim();
             if (!q || streamRef.current) return false;
@@ -835,6 +882,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // turn still leaves it on record; the turn's transcript follows on success.
             apiRef.current = [...apiRef.current, asked];
             setMessages(displayMsgs);
+            turnRef.current += 1; // views this turn opens are its own, never the last turn's
             persist(); // the question survives a restart even if the answer does not
             setInput('');
             inputRef.current = '';
@@ -918,28 +966,29 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   setPendingAsk({ name, args, ...(command != null ? { command } : {}) });
                   f.notify();
                 }),
+                // A view a tool opened, and every change to it. Its message is pushed on
+                // the FIRST change, so it has its place — and its fold id — from the
+                // start: a block opened while it ran is still open when it ends.
+                onToolLive: (rec: ViewRecord) => offerLive(rec),
                 // What a write changed goes on the answer being written the moment the
                 // write lands — a block of its own that stays in the chat. Only on the
                 // display message: `apiRef` gets the transcript, which never holds it.
-                onToolRun: (run: { changes?: ChangeView[]; views?: ViewRecord[] }) => {
+                onToolRun: (run: { changes?: ChangeView[] }) => {
                   // The tool is done: until the model's next token it is thinking, and
                   // the seconds on the line are the round's from here.
                   endToolSegment();
                   setPhase('thinking');
+                  // Any view this call opened has already been placed by `onToolLive`,
+                  // final phase included — flush now rather than waiting on the coalesce
+                  // timer, so it is on screen before the next round's tool label appears.
+                  flushLive();
                   const added = run.changes ?? [];
-                  if (!added.length && !run.views?.length) { f.notify(); return; }
+                  if (!added.length) { f.notify(); return; }
                   setMessages(cur => {
                     const next = cur.slice();
-                    if (added.length) {
-                      const last = next[next.length - 1];
-                      if (last?.role === 'assistant') next[next.length - 1] = { ...last, changes: [...((last.changes as ChangeView[] | undefined) ?? []), ...added] };
-                      else next.push({ role: 'assistant', content: '', changes: added });
-                    }
-                    // A block the tool asked for is a message of its own, so it reads
-                    // in the order things happened and carries its own marker — the
-                    // way a `!command`'s result does. Display only: `apiRef` never
-                    // gets it, and `apiHistory` drops the role even if it somehow did.
-                    if (run.views?.length) next.push({ role: 'view', content: '', views: run.views });
+                    const last = next[next.length - 1];
+                    if (last?.role === 'assistant') next[next.length - 1] = { ...last, changes: [...((last.changes as ChangeView[] | undefined) ?? []), ...added] };
+                    else next.push({ role: 'assistant', content: '', changes: added });
                     return next;
                   });
                   f.notify();
@@ -1165,6 +1214,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 const items = planRef.current.snapshot();
                 if (items.length && items.every((t) => t.status === 'done')) planRef.current.reset();
               }
+              flushLive();
               persist();
               setStreaming(false);
               setToolLabel('');
@@ -1215,13 +1265,33 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             const { timeoutMs, maxChars } = shellLimits(f.config as { shell?: unknown });
             let stopped = false;
             try {
-              const r = await runShell(cmd, { cwd, timeoutMs, maxChars, signal: abort.signal });
+              // The person's command gets the same live block as the model's. The
+              // message is still role `shell`: it joins apiRef and ↑/↓ as it always did.
+              const startedAt = Date.now();
+              const callId = `shell#${startedAt}`;
+              const liveRec = (data: unknown, phase: ViewRecord['phase'] = 'live'): ViewRecord => ({ kind: 'console', data, phase, startedAt, callId });
+              liveSeen.current.add(callId);
+              setMessages((cur) => [...cur, { role: 'shell', content: '', command: cmd, views: [{ ...liveRec({ command: cmd, cwd: tildePath(cwd), text: '', showCwd: true }), turn: turnRef.current }] }]);
+              let raw = '';
+              const onOutput = (chunk: string) => {
+                raw += chunk;
+                if (raw.length > maxChars * 2) raw = raw.slice(-maxChars);
+                offerLive(liveRec({ command: cmd, cwd: tildePath(cwd), text: capConsoleText(raw), showCwd: true }));
+              };
+              const r = await runShell(cmd, { cwd, timeoutMs, maxChars, signal: abort.signal, onOutput });
               stopped = r.stopped;
               // `cd` sticks, as in a terminal — within the roots.
               const move = nextCwd(f.config as Record<string, unknown>, cwd, r.pwd);
               if (move.cwd !== cwd) shellRef.current.setCwd(move.cwd);
               const { display, forModel } = formatShell(cmd, r, cwd, timeoutMs, { after: move.cwd, note: move.note });
-              setMessages((cur) => [...cur, { role: 'shell', content: display, command: cmd }]);
+              flushLive();
+              setMessages((cur) => {
+                const next = cur.slice();
+                const at = next.findLastIndex((m) => callOf(m) === callId);
+                const done = { role: 'shell', content: display, command: cmd, views: [{ ...liveRec(consoleData(cmd, r, cwd, timeoutMs, true), 'done'), turn: turnRef.current }] };
+                if (at >= 0) next[at] = done; else next.push(done);
+                return next;
+              });
               apiRef.current = [...apiRef.current, { role: 'shell', content: forModel }];
               (f.services as Record<string, any>).pushLog?.(`[shell] ${cmd.slice(0, 60)} → ${r.error ? `error: ${r.error}` : r.stopped ? 'stopped' : r.timedOut ? 'timed out' : `exit ${r.code}`}`);
             } catch (e) {
@@ -1230,6 +1300,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               if (tickRef.current) { clearInterval(tickRef.current); tickRef.current = null; }
               setElapsedMs(Date.now() - t0Ref.current);
               streamRef.current = false;
+              flushLive();
               persist();
               setStreaming(false);
               setToolLabel('');
@@ -1491,6 +1562,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 planRef.current.reset();
                 shellRef.current.setCwd(null); // back to the first root
                 toolSetRef.current.reset(); // a new conversation starts from the index
+                liveSeen.current.clear(); liveBuf.current.clear(); // the calls they tracked are gone with the conversation
                 resetImages(); // numbering starts again at [Image #1]
                 usageRef.current = null; // measured for a conversation that is gone
                 // /clear ends the conversation, not the memory — and says so, or the
@@ -1590,6 +1662,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               planRef.current.reset();
               shellRef.current.setCwd(null);
               toolSetRef.current.reset();
+              liveSeen.current.clear(); liveBuf.current.clear(); // the calls they tracked belong to the other task
               resetImages();
               setAutoMode('ask'); // the new task has not been given the old one's leeway
               setNotes(configNotes()); // nor kept the narration the old one was set to

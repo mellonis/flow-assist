@@ -497,6 +497,22 @@ hardest. Rules the `repo` and `gitlab` plugins hold, each with a test that tries
     role `view`, which `apiHistory` drops) and never on the tool's result — the model
     already read the result, and a copy of it in the conversation costs the context
     twice.
+  - **The chat's half of `onToolLive`** (`src/plugins/assistant.ts`): the message a
+    view rides on is pushed on the view's FIRST change, so it has its place — and its
+    fold id — from the start, and a block opened (by a click) while it ran is still
+    open when it ends. Every later change replaces that same message (`views`, a new
+    array each time — the row cache is keyed by the message object), coalesced to at
+    most `LIVE_REDRAW_MS` (200 ms) so a command printing fast costs a few redraws, not
+    thousands; a view's first state and its final phase are always placed at once,
+    never held for the timer. A discarded view's message STAYS, drawing nothing
+    (`views: []`) — removing it would move the fold id of every message after it. A
+    live view's whole seconds are part of the row cache's key (`chatRows`' `RowOpts.now`,
+    read once per render), or a cached `12 s` would stand still through a silent
+    `sleep 30`. Live updates never call `persist()` — only the turn ending, or the
+    `!command` runner's own `finally`, does; the buffer (`turnRef`/`liveBuf`/`liveSeen`)
+    is cleared on `/clear`, `/resume` and a change of task, the same places `planRef`
+    resets, since a stale `callId` from the conversation being left must never be
+    found again by a later one's records.
 - **A shell command is seen before it runs.** `run_command`'s guard is the y/n, not a
   filter on the command; its directory is checked anyway — inside a root by the REAL
   path (`dirAllowed`), a `cd` that leads out is not remembered. `runShell` has exactly
@@ -957,9 +973,10 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   spinner, `$ cmd` as the tool label, Esc stops it); a `!` meanwhile is refused, not
   queued. The result is a message of role `shell` — `$ ` in the SAME shell colour as
   the mode's prompt (a command reads as one thing from typing to result) on the
-  person's ground, a ```console block and one line (`exit 0 · 1.2 s · ~/dir`) — and,
-  like a background result, it joins `apiRef` (`apiHistory` maps `shell` → `user`) and
-  is read with the next message; no turn is spent. It is saved with the session and
+  person's ground, the same live block as the model's commands (one line while it
+  runs; `✓ 1.2 s · ~/dir` when it ends, opened by a click to its last lines) — the
+  message is still role `shell` and still joins `apiRef` (`apiHistory` maps `shell` →
+  `user`) and is read with the next message; no turn is spent. It is saved with the session and
   its line goes into ↑/↓ as `!cmd`; recalling one with ↑ shows it the way it was
   typed — shell mode on, the field holding `cmd` with the `!` stripped. Shell mode
   itself is UI state of the field only, never saved and never restored across a
@@ -970,7 +987,11 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   command — a 4th stdio pipe under Bun lost the report now and then), `exit N` or a
   kill keeps it, run_command's `cwd` argument is a `cd` that stays, `/clear` and a
   change of task go back to the root, `/resume` and a restart bring it back. Variables
-  and functions are not kept — every command is a fresh shell.
+  and functions are not kept — every command is a fresh shell. **The live block says
+  where the command RAN**, not where a `cd` inside it moved to or a refused one stayed
+  (the old markdown line's move-arrow / "cd led outside the roots" note is gone from
+  the screen with it) — the model still gets both in the message it reads after the
+  command, and the NEXT command's own block shows the moved directory.
 - A `/command` **completes inline**, like a shell's autosuggestion: the part not
   typed yet is drawn after the caret in the dimmed accent colour, the other
   candidates follow as `⇥ a · b`, **Tab** takes the offer and then walks the rest.

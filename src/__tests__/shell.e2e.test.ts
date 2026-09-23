@@ -21,8 +21,8 @@ const settleUntil = async (cond: () => boolean, ms = 3000) => {
   while (Date.now() < end) { await settle(2); if (cond()) return; await wait(20); }
 };
 
-async function boot(model: ScriptedModel, root: string, extra: Record<string, unknown> = {}) {
-  const ui = await bootApp(model, 110, 32, undefined, { fs: { roots: [root] }, ...extra });
+async function boot(model: ScriptedModel, root: string, extra: Record<string, unknown> = {}, cols = 110) {
+  const ui = await bootApp(model, cols, 32, undefined, { fs: { roots: [root] }, ...extra });
   await ui.press('F');
   return ui;
 }
@@ -30,16 +30,25 @@ async function boot(model: ScriptedModel, root: string, extra: Record<string, un
 test('!command runs in the first root, shows its output, and spends no model turn — the next message carries it', async () => {
   const root = rootDir();
   const model = new ScriptedModel();
-  const ui = await boot(model, root);
+  // Wide enough that the folded line's own cwd tail — sharing its one row with the
+  // command and its outcome, unlike the old markdown's dedicated line — is not cut
+  // by the frame regardless of how long the OS's real temp path is.
+  const ui = await boot(model, root, {}, root.length + 60);
   await ui.type('!echo hello; pwd');
   await ui.press('return');
-  await settleUntil(() => ui.backend.lastFrame.includes('exit 0'));
-  const frame = ui.backend.lastFrame;
-  expect(frame).toContain('$ echo hello; pwd');
-  expect(frame).toContain('hello');
-  expect(frame).toContain(root.replace(os.homedir(), '~'));
-  expect(frame).toContain('exit 0');
+  await settleUntil(() => /echo hello; pwd · ✓/.test(ui.backend.lastFrame));
+  const folded = ui.backend.lastFrame;
+  expect(folded).toContain('$ echo hello; pwd');
+  expect(folded).toContain(root.replace(os.homedir(), '~'));
+  expect(folded).toMatch(/echo hello; pwd · ✓ \d+\.\d s/);
   expect(model.requests).toHaveLength(0);
+
+  // Folded by default, like the model's own commands — a click opens it to what it printed.
+  const row = ui.backend.lastFrame.split('\n').findIndex((r) => r.includes('echo hello; pwd'));
+  ui.backend.mouse('down', 12, row);
+  ui.backend.mouse('up', 12, row);
+  await settle(6);
+  expect(ui.backend.lastFrame).toContain('hello');
 
   model.script([{ text: 'It printed hello.' }]);
   await ui.type('what did it print?');
@@ -67,9 +76,9 @@ test('Esc stops a running !command — its whole process group — and says so',
   expect(ui.backend.lastFrame).toContain('$ sleep 5; touch late.txt'); // the status line says what runs
   const t0 = Date.now();
   await ui.press('escape');
-  await settleUntil(() => ui.backend.lastFrame.includes('stopped (Esc)'));
+  await settleUntil(() => /sleep 5; touch late\.txt · stopped/.test(ui.backend.lastFrame));
   expect(Date.now() - t0).toBeLessThan(2000);
-  expect(ui.backend.lastFrame).toContain('stopped (Esc)');
+  expect(ui.backend.lastFrame).toMatch(/sleep 5; touch late\.txt · stopped/);
   await wait(100);
   expect(fs.existsSync(path.join(root, 'late.txt'))).toBe(false);
   ui.app.unmount();
@@ -83,7 +92,7 @@ test('an empty ! runs nothing; a ! while an answer is coming is refused, not que
   await ui.press('return');
   await settle(4);
   expect(ui.backend.lastFrame).toContain('! runs a shell command');
-  expect(ui.backend.lastFrame).not.toContain('exit 0');
+  expect(ui.backend.lastFrame).not.toContain('✓');
 
   model.script([{ text: 'Thinking' }, { hold: true }, { text: ' done.' }]);
   await ui.press('escape'); // clear the field
@@ -109,7 +118,7 @@ test('a !command is part of the session: after a restart the model still has it'
   const a = await boot(first, root, { sessions: { dir } });
   await a.type('!echo remembered-output');
   await a.press('return');
-  await settleUntil(() => a.backend.lastFrame.includes('exit 0'));
+  await settleUntil(() => a.backend.lastFrame.includes('✓'));
   await wait(350); // the debounced save
   a.app.unmount();
 
@@ -232,7 +241,7 @@ test('ai.disabledTools ["shell"] withholds run_command; ! still works', async ()
   expect(tools.map((t) => t.function.name)).not.toContain('run_command');
   await ui.type('!echo still-here');
   await ui.press('return');
-  await settleUntil(() => ui.backend.lastFrame.includes('exit 0'));
+  await settleUntil(() => ui.backend.lastFrame.includes('✓'));
   expect(ui.backend.lastFrame).toContain('still-here');
   ui.app.unmount();
 });
@@ -434,14 +443,17 @@ test('cd sticks between !commands — inside the roots only; exit keeps it; /cle
   const root = rootDir();
   fs.mkdirSync(path.join(root, 'sub'));
   const model = new ScriptedModel();
-  const ui = await boot(model, root, {});
+  // Wide enough for a folded block's own cwd tail (root + 'sub') to stand unbroken —
+  // the move-arrow / "cd led outside the roots" note the old markdown line carried
+  // is gone (the live block only ever says where a command RAN, like run_command's
+  // own view); the cd sticking is what the next block's cwd and the filesystem show.
+  const ui = await boot(model, root, {}, root.length + 80);
   await bang(ui, 'cd sub');
-  expect(ui.backend.lastFrame).toContain('→');
   await bang(ui, 'pwd > where.txt');
   expect(fs.existsSync(path.join(root, 'sub', 'where.txt'))).toBe(true);
+  expect(ui.backend.lastFrame).toContain(path.join(root, 'sub'));
 
   await bang(ui, 'cd /');
-  expect(ui.backend.lastFrame.replace(/[\s│]+/g, ' ')).toContain('cd led outside the roots');
   await bang(ui, 'touch after-root.txt');
   expect(fs.existsSync(path.join(root, 'sub', 'after-root.txt'))).toBe(true);
 

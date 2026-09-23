@@ -46,15 +46,15 @@ test('`!` on an empty field enters shell mode — `! ` in the shell colour, no `
 
   await ui.type('echo hi');
   await ui.press('return');
-  await settleUntil(() => ui.backend.lastFrame.includes('exit 0'));
+  await settleUntil(() => ui.backend.lastFrame.includes('✓'));
   const frame = ui.backend.lastFrame;
   expect(frame).toContain('$ echo hi');
   expect(frame).toContain('hi');
-  expect(frame).toContain('exit 0');
+  expect(frame).toContain('✓');
   expect(model.requests).toHaveLength(0); // no turn spent — same as the legacy `!command`
-  // The result's `$ ` gutter marker (on the fence label row, `$ console`) shares the
+  // The result's `$ ` gutter marker (the live block's first row) shares the
   // shell-mode prompt's colour — a command reads as one thing end to end.
-  expect(styleAt(ui.backend, '$ console').fg).toBe('magentaBright');
+  expect(styleAt(ui.backend, '$ echo hi').fg).toBe('magentaBright');
 
   // Back to the normal prompt: one command per `!`.
   expect(ui.backend.lastFrame).toContain('› ');
@@ -116,7 +116,7 @@ test('↑ recalling a previous `!` command shows it in shell mode', async () => 
 
   await ui.type('!echo hi');
   await ui.press('return');
-  await settleUntil(() => ui.backend.lastFrame.includes('exit 0'));
+  await settleUntil(() => ui.backend.lastFrame.includes('✓'));
   await ui.press('up');
   // Shown the way it was typed: shell mode on, `!` stripped from the text.
   expect(ui.backend.lastFrame).toContain('! echo hi');
