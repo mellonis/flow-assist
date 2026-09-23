@@ -299,3 +299,31 @@ test('a head click closes a group that is open only through a member, and a seco
   expect(ui.backend.lastFrame).toContain('echo right-out ·');
   ui.app.unmount();
 });
+
+test('a session keeps what a view IS, not how it was drawn, and a restart draws it again', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-live-sess-'));
+  const model = new ScriptedModel();
+  model.script([{ tool: 'run_command', args: { command: 'echo saved' } }], [{ text: 'Saved.' }]);
+  const ui = await bootApp(model, 100, 24, undefined, { sessions: { dir }, shell: { timeoutMs: 20000 } });
+  await ui.press('F');
+  await ui.type('go');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('Confirm write: run_command'));
+  await ui.press('y');
+  await settleUntil(() => ui.backend.lastFrame.includes('Saved.'));
+  await new Promise((r) => setTimeout(r, 350)); // the debounced save
+  ui.app.unmount();
+
+  const file = fs.readdirSync(dir).find((n) => n.endsWith('.json'))!;
+  const saved = fs.readFileSync(path.join(dir, file), 'utf8');
+  expect(saved).toContain('"kind":"console"');
+  expect(saved).toContain('"command":"echo saved"');
+  expect(saved).not.toContain('│ '); // no drawn rows
+  expect(saved).not.toContain('✓');
+
+  const again = await bootApp(new ScriptedModel(), 100, 24, undefined, { sessions: { dir } });
+  await settle(6);
+  await again.press('F');
+  await settleUntil(() => /echo saved · ✓ \d+\.\d s/.test(again.backend.lastFrame));
+  again.app.unmount();
+});

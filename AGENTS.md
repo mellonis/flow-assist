@@ -254,7 +254,7 @@ assistant nobody had asked for a board.
   the MODEL is given; `^o` opens every block in full (`VIEW_CAPS.lines`, everything the
   view kept), which is what makes `^o for all` true rather than a second, still-capped
   state. Consecutive commands of a turn (no other call between them) fold under one
-  `ƒ Ran N commands · ✓ 34 s` head — `Running N commands · $ cmd · 4 s` while one runs —
+  `ƒ Ran N commands · ✓ 34.0 s` head — `Running N commands · $ cmd · 4 s` while one runs —
   which takes the place of their step lines. Opened, they are the commands alone, each
   its own block (`src/assistant/view-groups.ts`). Groups form only in the `step`/
   `hidden` notes modes, and a message whose narration was already shown is never
@@ -406,7 +406,9 @@ assistant nobody had asked for a board.
   null): `bootApp` gives every test a temp dir, and a test that renders the app
   directly must not write into, or continue, the person's own chats. A restored
   screen over an empty `apiRef` looks right and is the bug — the e2e tests assert on
-  what the model is SENT after a restart.
+  what the model is SENT after a restart. A view is saved as its record — kind, data,
+  phase — never as drawn rows. One saved while it ran reads back as `failed`, and a
+  console view from before renderers reads as a record (`normalizeViews`).
 
 A qualified tool name (`plugin:tool`) is translated to a provider-safe wire name
 (`plugin__tool`) in `src/assistant/agent.ts` and nowhere else: providers validate
@@ -797,11 +799,14 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   copy-on-select is untouched. A click on a fold line opens THAT block, a click on any
   row of an OPEN block closes it, and a click on anything else does nothing — in
   particular it must not dismiss the reminder, close the log or answer a y/n (there
-  are tests for each). Mapping a click to a row: every `ChatRow` is one terminal line,
-  the conversation reports its rect (`onLayout`) and its scroll (`onMetrics`) through
-  `onViewport`, and the chat asks `chatRows(...)` — cached per message — which row
-  carries which `fold` id. The pinned question is painted over the top row, so a click
-  there is the pin's and not the row beneath it.
+  are tests for each). A click on a group's own head (`Ran N commands`) folds or
+  reopens the WHOLE group, not just its own exception — closing it also forgets any
+  member the person had opened, so the group reopens folded (`toggleGroup`,
+  `src/assistant/view-groups.ts`). Mapping a click to a row: every `ChatRow` is one
+  terminal line, the conversation reports its rect (`onLayout`) and its scroll
+  (`onMetrics`) through `onViewport`, and the chat asks `chatRows(...)` — cached per
+  message — which row carries which `fold` id. The pinned question is painted over
+  the top row, so a click there is the pin's and not the row beneath it.
   - **Where the eye is left.** Opening a block scrolls so its FIRST row is the top row
     (a block taller than the window used to land on its LAST line — the end of the
     thing the person opened it to read); closing keeps the clicked block's first row

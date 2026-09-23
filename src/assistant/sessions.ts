@@ -24,6 +24,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { configDir } from '../config/load.js';
 import { isImageRef, type ImageRef } from './images.js';
+import { readLegacyView, type ViewRecord } from './views.js';
 
 export const SESSION_VERSION = 1;
 // What is kept of a long conversation: the summary plus this many latest messages
@@ -109,12 +110,30 @@ export function saveSession(dir: string, s: Session): void {
 // A saved subject; an old session may hold a number there.
 const subjectOf = (v: unknown): string | null => (typeof v === 'string' || typeof v === 'number' ? String(v) : null);
 
+// Views as a session keeps them: records — the renderer's kind and the tool's data —
+// never drawn rows. Two readings on the way in: a view saved while its tool still ran
+// (the process ended mid-command) is `failed`, or its clock would tick forever after
+// a restart; and a console view saved before renderers is read as a record.
+export function normalizeViews(messages: Record<string, unknown>[]): Record<string, unknown>[] {
+  return messages.map((m) => {
+    if (!Array.isArray(m.views)) return m;
+    const views = (m.views as unknown[]).map((v) => {
+      const old = readLegacyView(v);
+      if (old) return old;
+      const r = v as ViewRecord;
+      return r && r.phase === 'live' ? { ...r, phase: 'failed' } : r;
+    }).filter(Boolean);
+    return { ...m, views };
+  });
+}
+
 export function loadSession(dir: string, id: string): Session | null {
   try {
     const s = JSON.parse(fs.readFileSync(fileOf(dir, id), 'utf8')) as Session;
     if (!s || s.version !== SESSION_VERSION || !Array.isArray(s.messages) || !Array.isArray(s.api)) return null;
     return {
       ...s,
+      messages: normalizeViews(s.messages),
       summary: typeof s.summary === 'string' ? s.summary : '',
       plan: Array.isArray(s.plan) ? s.plan : [],
       usage: s.usage ?? null,
