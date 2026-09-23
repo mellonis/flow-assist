@@ -117,6 +117,7 @@ test('↑ recalling a previous `!` command shows it in shell mode', async () => 
   await ui.type('!echo hi');
   await ui.press('return');
   await settleUntil(() => ui.backend.lastFrame.includes('✓'));
+  expect(ui.backend.lastFrame).toContain('✓');
   await ui.press('up');
   // Shown the way it was typed: shell mode on, `!` stripped from the text.
   expect(ui.backend.lastFrame).toContain('! echo hi');

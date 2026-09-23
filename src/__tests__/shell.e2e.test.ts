@@ -119,6 +119,7 @@ test('a !command is part of the session: after a restart the model still has it'
   await a.type('!echo remembered-output');
   await a.press('return');
   await settleUntil(() => a.backend.lastFrame.includes('✓'));
+  expect(a.backend.lastFrame).toContain('✓');
   await wait(350); // the debounced save
   a.app.unmount();
 
@@ -242,6 +243,7 @@ test('ai.disabledTools ["shell"] withholds run_command; ! still works', async ()
   await ui.type('!echo still-here');
   await ui.press('return');
   await settleUntil(() => ui.backend.lastFrame.includes('✓'));
+  expect(ui.backend.lastFrame).toContain('✓');
   expect(ui.backend.lastFrame).toContain('still-here');
   ui.app.unmount();
 });
@@ -443,17 +445,22 @@ test('cd sticks between !commands — inside the roots only; exit keeps it; /cle
   const root = rootDir();
   fs.mkdirSync(path.join(root, 'sub'));
   const model = new ScriptedModel();
-  // Wide enough for a folded block's own cwd tail (root + 'sub') to stand unbroken —
-  // the move-arrow / "cd led outside the roots" note the old markdown line carried
-  // is gone (the live block only ever says where a command RAN, like run_command's
-  // own view); the cd sticking is what the next block's cwd and the filesystem show.
-  const ui = await boot(model, root, {}, root.length + 80);
+  // Wide enough for a folded block's own cwd tail — command, outcome, cwd, and (for
+  // the two cd commands below) the arrow or the outside-the-roots note, all sharing
+  // one row unlike the old markdown's dedicated line — to stand unbroken regardless
+  // of how long the OS's real temp path is.
+  const ui = await boot(model, root, {}, root.length + 160);
   await bang(ui, 'cd sub');
+  // The block for `cd sub` itself says where it moved to.
+  expect(ui.backend.lastFrame).toContain('→');
+  expect(ui.backend.lastFrame).toContain(path.join(root, 'sub'));
   await bang(ui, 'pwd > where.txt');
   expect(fs.existsSync(path.join(root, 'sub', 'where.txt'))).toBe(true);
   expect(ui.backend.lastFrame).toContain(path.join(root, 'sub'));
 
   await bang(ui, 'cd /');
+  // The block for `cd /` itself says the refusal, not just the filesystem.
+  expect(ui.backend.lastFrame).toContain('cd led outside the roots — stayed');
   await bang(ui, 'touch after-root.txt');
   expect(fs.existsSync(path.join(root, 'sub', 'after-root.txt'))).toBe(true);
 

@@ -22,6 +22,7 @@ async function running(command: string) {
   await ui.type('go');
   await ui.press('return');
   await settleUntil(() => ui.backend.lastFrame.includes('Confirm write: run_command'));
+  expect(ui.backend.lastFrame).toContain('Confirm write: run_command');
   await ui.press('y');
   return { ui, model };
 }
@@ -29,12 +30,15 @@ async function running(command: string) {
 test('the command is a line in the chat before it ends, and a click shows what it printed so far', async () => {
   const { ui } = await running('echo first; sleep 1.5; echo second');
   await settleUntil(() => rowOf(ui, 'echo first; sleep') >= 0);
+  expect(rowOf(ui, 'echo first; sleep')).toBeGreaterThanOrEqual(0);
   expect(ui.backend.lastFrame).not.toContain('Done.');
   expect(ui.backend.lastFrame).toMatch(/echo first; sleep 1\.5; echo second · \d+ s/);
   await click(ui, rowOf(ui, 'echo first; sleep'));
   await settleUntil(() => ui.backend.lastFrame.includes('│ first'));
+  expect(ui.backend.lastFrame).toContain('│ first');
   expect(ui.backend.lastFrame).not.toContain('│ second');
   await settleUntil(() => ui.backend.lastFrame.includes('Done.'));
+  expect(ui.backend.lastFrame).toContain('Done.');
   // Opened while it ran, it is still open now that it has ended.
   expect(ui.backend.lastFrame).toContain('│ second');
   expect(ui.backend.lastFrame).toMatch(/✓ \d+\.\d s/);
@@ -44,6 +48,7 @@ test('the command is a line in the chat before it ends, and a click shows what i
 test('left folded, it ends folded — one line with its outcome', async () => {
   const { ui } = await running('echo hi; exit 3');
   await settleUntil(() => ui.backend.lastFrame.includes('Done.'));
+  expect(ui.backend.lastFrame).toContain('Done.');
   expect(ui.backend.lastFrame).toMatch(/echo hi; exit 3 · ✗ exit 3 · \d+\.\d s/);
   expect(ui.backend.lastFrame).not.toContain('│ hi');
   ui.app.unmount();
@@ -52,16 +57,21 @@ test('left folded, it ends folded — one line with its outcome', async () => {
 test('the clock moves while nothing is printed', async () => {
   const { ui } = await running('sleep 2.5');
   await settleUntil(() => /sleep 2\.5 · 0 s/.test(ui.backend.lastFrame));
+  expect(ui.backend.lastFrame).toMatch(/sleep 2\.5 · 0 s/);
   await settleUntil(() => /sleep 2\.5 · [12] s/.test(ui.backend.lastFrame));
+  expect(ui.backend.lastFrame).toMatch(/sleep 2\.5 · [12] s/);
   await settleUntil(() => ui.backend.lastFrame.includes('Done.'));
+  expect(ui.backend.lastFrame).toContain('Done.');
   ui.app.unmount();
 });
 
 test('Esc stops it, and the block stays, saying so', async () => {
   const { ui } = await running('sleep 5');
   await settleUntil(() => rowOf(ui, 'sleep 5 ·') >= 0);
+  expect(rowOf(ui, 'sleep 5 ·')).toBeGreaterThanOrEqual(0);
   await ui.press('escape');
   await settleUntil(() => /sleep 5 · stopped/.test(ui.backend.lastFrame));
+  expect(ui.backend.lastFrame).toMatch(/sleep 5 · stopped/);
   ui.app.unmount();
 });
 
@@ -87,9 +97,11 @@ test('the model is sent a !command\'s output as before, and never a view', async
   await ui.type('!echo marker-42');
   await ui.press('return');
   await settleUntil(() => /✓ \d/.test(ui.backend.lastFrame));
+  expect(ui.backend.lastFrame).toMatch(/✓ \d/);
   await ui.type('what did it print');
   await ui.press('return');
   await settleUntil(() => ui.backend.lastFrame.includes('Seen.'));
+  expect(ui.backend.lastFrame).toContain('Seen.');
   const sent = JSON.stringify(model.requests.at(-1)!.messages);
   expect(sent).toContain('marker-42');
   expect(sent).not.toContain('"views"');

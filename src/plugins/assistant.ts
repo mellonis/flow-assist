@@ -1285,10 +1285,14 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               if (move.cwd !== cwd) shellRef.current.setCwd(move.cwd);
               const { display, forModel } = formatShell(cmd, r, cwd, timeoutMs, { after: move.cwd, note: move.note });
               flushLive();
+              // The block says where a `cd` inside the command left the directory — or
+              // that one tried to leave the roots and stayed — the same facts the old
+              // markdown line carried, now on the live view instead.
+              const data = consoleData(cmd, r, cwd, timeoutMs, true, { movedTo: tildePath(move.cwd), note: move.note });
               setMessages((cur) => {
                 const next = cur.slice();
                 const at = next.findLastIndex((m) => callOf(m) === callId);
-                const done = { role: 'shell', content: display, command: cmd, views: [{ ...liveRec(consoleData(cmd, r, cwd, timeoutMs, true), 'done'), turn: turnRef.current }] };
+                const done = { role: 'shell', content: display, command: cmd, views: [{ ...liveRec(data, 'done'), turn: turnRef.current }] };
                 if (at >= 0) next[at] = done; else next.push(done);
                 return next;
               });

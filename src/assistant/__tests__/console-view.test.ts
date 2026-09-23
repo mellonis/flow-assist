@@ -29,6 +29,22 @@ test('a person\'s own command also says where it ran', () => {
   expect(renderConsole(d({ showCwd: true }), base).map(plain)).toEqual(['bun test · ✓ 4.2 s · ~/app']);
 });
 
+test('a cd inside the command is an arrow to where it left the directory', () => {
+  expect(plain(consoleTail(d({ showCwd: true, movedTo: '~/app/sub' }), base))).toBe('✓ 4.2 s · ~/app → ~/app/sub');
+  // Unchanged (or not set at all): no arrow.
+  expect(plain(consoleTail(d({ showCwd: true, movedTo: '~/app' }), base))).toBe('✓ 4.2 s · ~/app');
+  expect(plain(consoleTail(d({ showCwd: true }), base))).toBe('✓ 4.2 s · ~/app');
+  // Never drawn without showCwd — a tool's run_command view never sets it.
+  expect(plain(consoleTail(d({ movedTo: '~/app/sub' }), base))).toBe('✓ 4.2 s');
+});
+
+test('a cd refused outside the roots says so, and stays fixed wording whatever the note holds', () => {
+  expect(plain(consoleTail(d({ showCwd: true, note: 'cd led outside the roots — staying in /tmp/x' }), base)))
+    .toBe('✓ 4.2 s · ~/app · cd led outside the roots — stayed');
+  // Never drawn without showCwd.
+  expect(plain(consoleTail(d({ note: 'cd led outside the roots — staying in /tmp/x' }), base))).toBe('✓ 4.2 s');
+});
+
 test('open, the last lines stand under a bar that a drag does not copy', () => {
   const lines = renderConsole(d({ text: '1\n2\n3\n4\n5' }), { ...base, folded: false });
   expect(lines.map(plain)).toEqual(['bun test', '│ … 2 lines cut · ^o for all', '│ 3', '│ 4', '│ 5', '✓ 4.2 s']);
@@ -57,4 +73,13 @@ test('capConsoleData caps a console view like a confirmed run_command does', () 
   expect(capped.command).toHaveLength(VIEW_CAPS.command + 1);
   expect(capped.text.split('\n')).toHaveLength(VIEW_CAPS.lines);
   expect((capped as Record<string, unknown>).weird).toBeUndefined();
+});
+
+test('capConsoleData caps movedTo and note the way it caps every other field', () => {
+  const capped = capConsoleData({ command: 'cd sub', cwd: '~', movedTo: 'm'.repeat(VIEW_CAPS.command + 50), note: 'n'.repeat(200) } as unknown);
+  expect(capped.movedTo).toHaveLength(VIEW_CAPS.command + 1);
+  expect(capped.note).toHaveLength(81);
+  // Absent stays absent — no field a session file has to carry for every command.
+  expect(capConsoleData({ command: 'x', cwd: '~' }).movedTo).toBeUndefined();
+  expect(capConsoleData({ command: 'x', cwd: '~' }).note).toBeUndefined();
 });

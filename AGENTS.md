@@ -987,11 +987,14 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   command — a 4th stdio pipe under Bun lost the report now and then), `exit N` or a
   kill keeps it, run_command's `cwd` argument is a `cd` that stays, `/clear` and a
   change of task go back to the root, `/resume` and a restart bring it back. Variables
-  and functions are not kept — every command is a fresh shell. **The live block says
-  where the command RAN**, not where a `cd` inside it moved to or a refused one stayed
-  (the old markdown line's move-arrow / "cd led outside the roots" note is gone from
-  the screen with it) — the model still gets both in the message it reads after the
-  command, and the NEXT command's own block shows the moved directory.
+  and functions are not kept — every command is a fresh shell. **The live block still
+  says where a `cd` moved to, or that one was refused** (`ConsoleData`'s `movedTo`/
+  `note`, `src/assistant/console-view.ts`), the same facts the old markdown line's
+  arrow and "cd led outside the roots" carried, drawn only alongside `showCwd`:
+  `~/a → ~/b` when the command's own `cd` actually moved the directory, `cd led
+  outside the roots — stayed` (fixed wording, dim) when one tried to leave the roots
+  and was refused. `run_command`'s own view never sets `showCwd` and so never draws
+  either.
 - A `/command` **completes inline**, like a shell's autosuggestion: the part not
   typed yet is drawn after the caret in the dimmed accent colour, the other
   candidates follow as `⇥ a · b`, **Tab** takes the offer and then walks the rest.

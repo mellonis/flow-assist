@@ -18,6 +18,13 @@ export interface ConsoleData {
   ms?: number;
   status?: string; // shellOutcome's words
   showCwd?: boolean; // the person's own !command says where it ran — its `cd` sticks
+  // Where a `cd` inside the command left the conversation's directory — shown as
+  // `cwd → movedTo` when it differs from `cwd`; drawn only alongside `showCwd`.
+  movedTo?: string;
+  // Set when a `cd` tried to leave the configured roots and stayed put — drawn as
+  // the fixed "cd led outside the roots — stayed" note; its own text is unused,
+  // only its presence (kept anyway, so a session file records the WHY too).
+  note?: string;
 }
 
 // The tail of a text, capped in every direction: each line, the number of lines, the
@@ -53,11 +60,15 @@ export function capConsoleData(raw: unknown): ConsoleData {
     ...(v.ms === undefined ? {} : Number.isFinite(ms) && ms >= 0 ? { ms } : {}),
     ...(v.status ? { status: oneLine(String(v.status), 80) } : {}),
     ...(v.showCwd === true ? { showCwd: true } : {}),
+    ...(v.movedTo ? { movedTo: oneLine(String(v.movedTo), VIEW_CAPS.command) } : {}),
+    ...(v.note ? { note: oneLine(String(v.note), 80) } : {}),
   };
 }
 
-// A finished command as the view keeps it.
-export function consoleData(cmd: string, r: ShellResult, cwd: string, timeoutMs: number, showCwd = false): ConsoleData {
+// A finished command as the view keeps it. `opts` carries what a `cd` inside the
+// command did to the conversation's directory (`!command`'s own — `run_command`'s
+// call sites pass neither and stay exactly as they were).
+export function consoleData(cmd: string, r: ShellResult, cwd: string, timeoutMs: number, showCwd = false, opts: { movedTo?: string; note?: string } = {}): ConsoleData {
   return {
     command: oneLine(cmd, VIEW_CAPS.command),
     cwd: tildePath(cwd),
@@ -66,6 +77,8 @@ export function consoleData(cmd: string, r: ShellResult, cwd: string, timeoutMs:
     ms: r.ms,
     status: shellOutcome(r, timeoutMs),
     ...(showCwd ? { showCwd: true } : {}),
+    ...(opts.movedTo ? { movedTo: opts.movedTo } : {}),
+    ...(opts.note ? { note: opts.note } : {}),
   };
 }
 
@@ -76,7 +89,15 @@ export function consoleTail(d: ConsoleData, ctx: Pick<ViewRenderCtx, 'live' | 'f
   if (ctx.live) return [{ text: `${Math.floor(ctx.elapsedMs / 1000)} s`, dim: true }];
   const ms = Number(d.ms ?? 0);
   const status = String(d.status ?? '');
-  const where: ViewSpan[] = d.showCwd && d.cwd ? [{ text: ` · ${d.cwd}`, dim: true }] : [];
+  // Where it ran — and, for the person's own command (showCwd), where a `cd` inside
+  // it left the directory, or that one tried to leave the roots and stayed. Never
+  // drawn for a tool's run_command view, which never sets showCwd.
+  const where: ViewSpan[] = [];
+  if (d.showCwd && d.cwd) {
+    const moved = !!d.movedTo && d.movedTo !== d.cwd;
+    where.push({ text: ` · ${d.cwd}${moved ? ` → ${d.movedTo}` : ''}`, dim: true });
+  }
+  if (d.showCwd && d.note) where.push({ text: ' · cd led outside the roots — stayed', dim: true });
   if (d.exitCode === 0) return [{ text: '✓', color: 'ok' }, { text: ` ${secs(ms)}`, dim: true }, ...where];
   if (typeof d.exitCode === 'number') return [{ text: `✗ exit ${d.exitCode}`, color: 'warn' }, { text: ` · ${secs(ms)}`, dim: true }, ...where];
   const word = status.startsWith('stopped') ? 'stopped' : status.startsWith('timed out') ? 'timed out' : status || 'no exit code';
