@@ -206,8 +206,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
     // model's narration between tool calls is drawn (`/notes` switches it for the
     // conversation); `colors` — the chat's palette override
     // (src/playback/theme.ts); `runOutputLines` — how many lines of a command's output
-    // stand in the chat before ^r unfolds the rest (a display cap of its own, quite
-    // apart from `shell.maxChars`, which is how much the MODEL is given).
+    // a click on its block shows (a display cap of its own, quite apart from
+    // `shell.maxChars`, which is how much the MODEL is given); `^o` opens it in full.
     configSchema: z.object({
       fullscreen: z.boolean().optional(),
       notes: z.enum(['step', 'fold', 'open', 'hidden']).optional(),
@@ -492,12 +492,19 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // The display list as the view's own functions read it — the same objects,
           // and so the same cached rows.
           const drawn = () => msgsRef.current as Parameters<typeof chatRows>[0];
-          // A renderer that cannot draw is said once per kind in the log, not once per frame.
+          // A renderer that cannot draw is said once per kind in the log, not once per
+          // frame. `onViewFail` fires from INSIDE `ChatMessages`' render (`frameView`,
+          // called while laying out a message's rows) — `pushLog` ends in `notify()`
+          // (App's own setState), and calling that while a different component is
+          // still rendering is exactly what React refuses ("Cannot update a component
+          // … while rendering a different component"). The set is updated synchronously
+          // (so the next render in the same pass still sees the kind as said), and the
+          // log write itself is pushed past the current render/commit with a microtask.
           const failedKinds = f.useRef(new Set<string>());
           const onViewFail = (kind: string, why: string) => {
             if (failedKinds.current.has(kind)) return;
             failedKinds.current.add(kind);
-            (f.services as Record<string, any>).pushLog?.(`[view] ${kind}: ${why} — drawn as one line`);
+            queueMicrotask(() => (f.services as Record<string, any>).pushLog?.(`[view] ${kind}: ${why} — drawn as one line`));
           };
           // Every renderer the chat can draw a view with — the host's own `console`
           // (collected at boot, src/loader/registry.ts) plus each plugin's, qualified

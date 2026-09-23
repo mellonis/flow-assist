@@ -1,11 +1,13 @@
 // A command the model runs is shown WHILE it runs: one line in the chat that a click
 // opens to its last lines, still there — in the state the person left it — once it
 // ends. The real app on a test backend, a real /bin/sh.
-import { afterEach, expect, test } from 'bun:test';
+import { afterEach, expect, spyOn, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { ScriptedModel, bootApp, settle } from './helpers/scripted';
+import { SESSION_VERSION, newSessionId } from '../assistant/sessions.ts';
+import type { Make } from '../loader/plugin.ts';
 
 const realFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = realFetch; });
@@ -330,4 +332,85 @@ test('a session keeps what a view IS, not how it was drawn, and a restart draws 
   await settleUntil(() => /echo saved · ✓ \d+\.\d s/.test(again.backend.lastFrame));
   expect(again.backend.lastFrame).toMatch(/echo saved · ✓ \d+\.\d s/);
   again.app.unmount();
+});
+
+test('a view with an unknown kind is drawn as a fallback line, never a "Cannot update a component" warning', async () => {
+  // A saved view whose kind no renderer answers to — a plugin disabled since it was
+  // drawn, or (as here) a kind that never had one — reaches `frameView` on the very
+  // first render of a restored session, straight from `ChatMessages`' own render
+  // pass. `onViewFail` used to call `pushLog` synchronously there, which ends in the
+  // App's `notify()` (a setState) — updating a different component while this one is
+  // still rendering, which React refuses loudly.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-live-sess-'));
+  const id = newSessionId();
+  const raw = {
+    version: SESSION_VERSION, id, title: '', createdAt: '2026-09-23T10:00:00.000Z', updatedAt: '2026-09-23T10:00:00.000Z',
+    messages: [
+      { role: 'user', content: 'what happened here' },
+      { role: 'view', content: '', views: [{ kind: 'gone:card', data: {}, phase: 'done', startedAt: 0 }] },
+    ],
+    api: [], summary: '', plan: [], usage: null, prompts: [], draft: '',
+  };
+  fs.writeFileSync(path.join(dir, `${id}.json`), JSON.stringify(raw));
+
+  const errors: unknown[][] = [];
+  const errSpy = spyOn(console, 'error').mockImplementation((...args: unknown[]) => { errors.push(args); });
+  try {
+    const ui = await bootApp(new ScriptedModel(), 100, 24, undefined, { sessions: { dir } });
+    await settle(6);
+    await ui.press('F');
+    await settleUntil(() => ui.backend.lastFrame.includes('▸ gone:card'));
+    expect(ui.backend.lastFrame).toContain('▸ gone:card');
+    // The line is written to the log, off the render path.
+    await ui.press('escape', 'escape');
+    await ui.press('L');
+    await settleUntil(() => ui.backend.lastFrame.includes('[view] gone:card'));
+    const logged = ui.backend.lastFrame.split('\n').filter((r) => r.includes('[view] gone:card'));
+    expect(logged.length).toBe(1);
+    expect(logged[0]).toContain('[view] gone:card: no renderer — drawn as one line');
+    ui.app.unmount();
+  } finally {
+    errSpy.mockRestore();
+  }
+  const bad = errors.filter((args) => args.some((a) => String(a).includes('Cannot update a component')));
+  expect(bad).toEqual([]);
+});
+
+test('a tool that opens a live view, updates it and discards it: on screen while live, gone once the call ends', async () => {
+  const model = new ScriptedModel();
+  model.script([{ tool: 'show_card', args: {} }], [{ text: 'Card done.' }]);
+  const guests = (make: Make) => [make('cardtool', {
+    name: 'cardtool',
+    tools: [{
+      id: 'cardtool',
+      tools: [{
+        type: 'function',
+        function: { name: 'show_card', description: 'Show a card while it works.', parameters: { type: 'object', properties: {}, required: [] } },
+      }],
+      async exec(name: string, _args: Record<string, unknown>, ctx: { liveView?: (kind: string, data: unknown) => { update(d: unknown): void; discard(): void } }) {
+        const v = ctx.liveView?.('card', { title: 'one' });
+        await new Promise((r) => setTimeout(r, 30));
+        v?.update({ title: 'two' });
+        // Past the 200ms live-redraw coalesce (src/plugins/assistant.ts, LIVE_REDRAW_MS),
+        // so the update is actually on screen — still live — before it is discarded.
+        await new Promise((r) => setTimeout(r, 260));
+        v?.discard();
+        return 'card shown and discarded';
+      },
+    }],
+    viewRenderers: { card: (data: { title?: string }) => [[{ text: `card: ${String(data?.title ?? '')}` }]] },
+  })];
+  const ui = await bootApp(model, 100, 24, guests, {});
+  await ui.press('F');
+  await ui.type('go');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('card: one'));
+  expect(ui.backend.lastFrame).toContain('card: one');
+  await settleUntil(() => ui.backend.lastFrame.includes('card: two'));
+  expect(ui.backend.lastFrame).toContain('card: two');
+  await settleUntil(() => ui.backend.lastFrame.includes('Card done.'));
+  expect(ui.backend.lastFrame).toContain('Card done.');
+  // Discarded before the call returned: gone from the screen once it ends.
+  expect(ui.backend.lastFrame).not.toContain('card:');
+  ui.app.unmount();
 });
