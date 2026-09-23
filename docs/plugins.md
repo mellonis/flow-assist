@@ -124,7 +124,9 @@ What the host does with it, and what it expects back:
   - The host frames what you return: one line is one row, cut to the width; text is
     stripped of escape sequences; rows are capped. `data` must be JSON, 64 KB at most.
   - Display only: the model reads what your tool RETURNS, never the block. A call that
-    throws keeps its block, marked failed. With no chat (the one-shot CLI) there is no
+    throws keeps its block, marked failed — and so does a block still open when a
+    restart finds it, since its process ended mid-call and no true ending was ever
+    recorded. With no chat (the one-shot CLI) there is no
     `liveView` — call it as `ctx.liveView?.(…)`.
   - `console` is the host's own kind — `{ command, cwd, text, exitCode, ms, status }` —
     what `run_command` shows. A renderer that is missing (your plugin was disabled) or

@@ -102,6 +102,16 @@ test('prototype property lookups are prevented in resolveRenderer', () => {
   expect(resolveRenderer({}, 'toString')).toBeNull();
 });
 
+test('a non-string kind never throws — resolveRenderer and frameView both fall back', () => {
+  expect(resolveRenderer({ k: () => [] }, undefined as unknown as string)).toBeNull();
+  expect(resolveRenderer({ k: () => [] }, 42 as unknown as string)).toBeNull();
+  expect(resolveRenderer({ k: () => [] }, null as unknown as string)).toBeNull();
+  expect(texts(frameView(42 as unknown as ViewRecord, { k: () => [] }, rctx, palette))).toEqual(['▸ view']);
+  expect(texts(frameView('a-string' as unknown as ViewRecord, { k: () => [] }, rctx, palette))).toEqual(['▸ view']);
+  expect(texts(frameView(null as unknown as ViewRecord, { k: () => [] }, rctx, palette))).toEqual(['▸ view']);
+  expect(texts(frameView({ phase: 'done' } as unknown as ViewRecord, { k: () => [] }, rctx, palette))).toEqual(['▸ view']);
+});
+
 test('prototype property lookups are prevented in palette resolution', () => {
   const [line] = frameView(rec('k'), { k: () => [[{ text: 'a', color: 'constructor' }, { text: 'b', color: 'toString' }]] }, rctx, palette);
   expect(line!.spans[0]!.color).toBeUndefined();

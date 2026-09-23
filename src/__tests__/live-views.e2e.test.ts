@@ -309,13 +309,16 @@ test('a session keeps what a view IS, not how it was drawn, and a restart draws 
   await ui.type('go');
   await ui.press('return');
   await settleUntil(() => ui.backend.lastFrame.includes('Confirm write: run_command'));
+  expect(ui.backend.lastFrame).toContain('Confirm write: run_command');
   await ui.press('y');
   await settleUntil(() => ui.backend.lastFrame.includes('Saved.'));
+  expect(ui.backend.lastFrame).toContain('Saved.');
   await new Promise((r) => setTimeout(r, 350)); // the debounced save
   ui.app.unmount();
 
-  const file = fs.readdirSync(dir).find((n) => n.endsWith('.json'))!;
-  const saved = fs.readFileSync(path.join(dir, file), 'utf8');
+  const file = fs.readdirSync(dir).find((n) => n.endsWith('.json'));
+  expect(file).toBeDefined();
+  const saved = fs.readFileSync(path.join(dir, file!), 'utf8');
   expect(saved).toContain('"kind":"console"');
   expect(saved).toContain('"command":"echo saved"');
   expect(saved).not.toContain('│ '); // no drawn rows
@@ -325,5 +328,6 @@ test('a session keeps what a view IS, not how it was drawn, and a restart draws 
   await settle(6);
   await again.press('F');
   await settleUntil(() => /echo saved · ✓ \d+\.\d s/.test(again.backend.lastFrame));
+  expect(again.backend.lastFrame).toMatch(/echo saved · ✓ \d+\.\d s/);
   again.app.unmount();
 });

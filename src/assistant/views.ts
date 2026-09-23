@@ -98,7 +98,7 @@ export interface ViewRenderCtx {
   width: number;     // columns for the block's content
   folded: boolean;   // the renderer draws both states
   live: boolean;     // the tool is still running
-  failed: boolean;   // the tool threw
+  failed: boolean;   // the tool threw, or the view was still live when its session was saved and a restart caught it mid-run
   elapsedMs: number; // host clock since the view began — meaningful only while live
   lines: number;     // how many lines of output an open block shows (runOutputLines)
   moreKey: string;   // the cap of the key that opens everything, from its binding
@@ -119,6 +119,7 @@ export function qualifyKind(owner: string, kind: string): string {
 // The plugin's own renderer first; failing that, the host's kind of the same name
 // (a plugin's tool reporting `console` gets `notes:console`, which is the host's).
 export function resolveRenderer(table: ViewRenderers, kind: string): ViewRenderer | null {
+  if (typeof kind !== 'string') return null; // a session file may hold anything
   const own = Object.hasOwn(table, kind) ? table[kind] : undefined;
   if (typeof own === 'function') return own;
   const bare = kind.slice(kind.indexOf(':') + 1);
@@ -146,7 +147,9 @@ const cutTo = (s: string, width: number) => {
 // wrapped row would be two terminal lines, and the list counts one) — at most
 // `VIEW_CAPS.rows` rows, every text stripped, every colour resolved from the palette.
 // A renderer that is missing, throws or returns something else costs ONE dim row
-// naming the kind; `onFail` hears why, and the caller says it once.
+// naming the kind; `onFail` hears why, and the caller says it once. `rec` itself is
+// display-only input the chat did not build (a session file, another process) — not
+// an object, or a `kind` that is not a string, draws `▸ view` rather than throwing.
 export function frameView(
   rec: ViewRecord,
   table: ViewRenderers,
@@ -154,19 +157,20 @@ export function frameView(
   palette: Record<string, string | undefined>,
   onFail?: (kind: string, why: string) => void,
 ): FramedLine[] {
-  const fallback = (why: string): FramedLine[] => {
-    onFail?.(rec.kind, why);
-    return [{ spans: [{ text: cutTo(`▸ ${sanitizeViewText(rec.kind).replace(/\n/g, ' ')}`, ctx.width), dim: true }] }];
+  const fallback = (kind: string, why: string): FramedLine[] => {
+    onFail?.(kind, why);
+    return [{ spans: [{ text: cutTo(`▸ ${sanitizeViewText(kind).replace(/\n/g, ' ')}`, ctx.width), dim: true }] }];
   };
+  if (!rec || typeof rec !== 'object' || typeof rec.kind !== 'string') return fallback('view', 'not a view');
   const render = resolveRenderer(table, rec.kind);
-  if (!render) return fallback('no renderer');
+  if (!render) return fallback(rec.kind, 'no renderer');
   let lines: unknown;
   try {
     lines = render(rec.data, ctx);
   } catch (e) {
-    return fallback(e instanceof Error ? e.message : String(e));
+    return fallback(rec.kind, e instanceof Error ? e.message : String(e));
   }
-  if (!Array.isArray(lines) || lines.some((l) => !Array.isArray(l))) return fallback('not a list of lines');
+  if (!Array.isArray(lines) || lines.some((l) => !Array.isArray(l))) return fallback(rec.kind, 'not a list of lines');
   return (lines as ViewLine[]).slice(0, VIEW_CAPS.rows).map((line) => {
     let room = ctx.width;
     let chrome = 0;

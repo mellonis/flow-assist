@@ -6,7 +6,8 @@
 // Open, it is the command, the last `ctx.lines` lines of output under a bar a drag
 // never copies, and the same tail. The tail says how it ended in words a person reads
 // without decoding: ✓, ✗ with the code (1 and 127 mean different things), stopped,
-// timed out, or — the tool threw — ✗ failed.
+// timed out, or ✗ failed — the tool threw, or a restart found this block still live
+// (the process ended mid-command, so its own true ending was never recorded).
 import { VIEW_CAPS, sanitizeViewText, type ViewLine, type ViewRenderCtx, type ViewRenderer, type ViewSpan } from './views.js';
 import { shellOutcome, tildePath, type ShellResult } from './shell.js';
 

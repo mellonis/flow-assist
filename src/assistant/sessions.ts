@@ -113,16 +113,20 @@ const subjectOf = (v: unknown): string | null => (typeof v === 'string' || typeo
 // Views as a session keeps them: records — the renderer's kind and the tool's data —
 // never drawn rows. Two readings on the way in: a view saved while its tool still ran
 // (the process ended mid-command) is `failed`, or its clock would tick forever after
-// a restart; and a console view saved before renderers is read as a record.
+// a restart; and a console view saved before renderers is read as a record. Anything
+// else — a stray string or number in the array, an object with no `kind` string — is
+// not a view a renderer can draw (`frameView`/`resolveRenderer` need `kind` to be a
+// string) and is dropped rather than reaching the screen and throwing.
 export function normalizeViews(messages: Record<string, unknown>[]): Record<string, unknown>[] {
   return messages.map((m) => {
     if (!Array.isArray(m.views)) return m;
     const views = (m.views as unknown[]).map((v) => {
       const old = readLegacyView(v);
       if (old) return old;
-      const r = v as ViewRecord;
-      return r && r.phase === 'live' ? { ...r, phase: 'failed' } : r;
-    }).filter(Boolean);
+      const r = v as ViewRecord | null;
+      if (!r || typeof r !== 'object' || typeof r.kind !== 'string') return null;
+      return r.phase === 'live' ? { ...r, phase: 'failed' } : r;
+    }).filter((v): v is ViewRecord => v !== null);
     return { ...m, views };
   });
 }

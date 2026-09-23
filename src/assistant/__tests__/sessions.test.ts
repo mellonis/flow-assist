@@ -99,3 +99,30 @@ test('a view saved while it ran is read back as failed, and an old console view 
   expect(b!.views[0]).toEqual({ kind: 'console', data: { command: 'y', text: 't', exitCode: 0, ms: 1, cwd: '~' }, phase: 'done', startedAt: 0 });
   expect(normalizeViews([{ role: 'user', content: 'hi' }])).toEqual([{ role: 'user', content: 'hi' }]);
 });
+
+test('normalizeViews drops a view that has nothing a renderer could draw', () => {
+  const good = { kind: 'console', data: { command: 'x' }, phase: 'done', startedAt: 0 };
+  const m = { role: 'view', content: '', views: ['a-string', 42, { phase: 'done' }, good] };
+  expect(normalizeViews([m])).toEqual([{ role: 'view', content: '', views: [good] }]);
+});
+
+test('a session with a live view, a legacy console view and a malformed entry reads back correct and drops the last', () => {
+  const dir = tmp();
+  const id = newSessionId();
+  const file = path.join(dir, `${id}.json`);
+  fs.mkdirSync(dir, { recursive: true });
+  const raw = {
+    version: SESSION_VERSION, id, title: '', createdAt: '2026-09-21T10:00:00.000Z', updatedAt: '2026-09-21T10:00:00.000Z',
+    messages: [
+      { role: 'view', content: '', views: [{ kind: 'console', data: { command: 'a' }, phase: 'live', startedAt: 5 }] },
+      { role: 'view', content: '', views: [{ kind: 'console', command: 'b', text: 't', exitCode: 0, ms: 1, cwd: '~' }] },
+      { role: 'view', content: '', views: [{ phase: 'done' }, 7] },
+    ],
+    api: [], summary: '', plan: [], usage: null, prompts: [], draft: '',
+  };
+  fs.writeFileSync(file, JSON.stringify(raw));
+  const loaded = loadSession(dir, id)! as unknown as { messages: { views: unknown[] }[] };
+  expect((loaded.messages[0]!.views[0] as { phase: string }).phase).toBe('failed');
+  expect(loaded.messages[1]!.views[0]).toEqual({ kind: 'console', data: { command: 'b', text: 't', exitCode: 0, ms: 1, cwd: '~' }, phase: 'done', startedAt: 0 });
+  expect(loaded.messages[2]!.views).toEqual([]);
+});

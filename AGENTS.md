@@ -408,7 +408,9 @@ assistant nobody had asked for a board.
   screen over an empty `apiRef` looks right and is the bug — the e2e tests assert on
   what the model is SENT after a restart. A view is saved as its record — kind, data,
   phase — never as drawn rows. One saved while it ran reads back as `failed`, and a
-  console view from before renderers reads as a record (`normalizeViews`).
+  console view from before renderers reads as a record (`normalizeViews`); an entry
+  with no string `kind` — a stray value, a session file hand-edited or corrupted — has
+  nothing a renderer could draw and is dropped rather than reaching the screen.
 
 A qualified tool name (`plugin:tool`) is translated to a provider-safe wire name
 (`plugin__tool`) in `src/assistant/agent.ts` and nowhere else: providers validate
@@ -500,6 +502,9 @@ hardest. Rules the `repo` and `gitlab` plugins hold, each with a test that tries
     tool that then throws keeps what it showed, marked failed: the person was reading
     it, and a discarded view is the only one that goes. `data` must be JSON and no more
     than 64 KB; anything else is dropped and the view keeps its last accepted state.
+    A view still `live` when a session was SAVED (the process ended mid-call) reads
+    the same way on load — `failed`, never a clock ticking forever (`normalizeViews`,
+    `src/assistant/sessions.ts`).
   - **Display only**, as before: a view rides on the display message (a message of
     role `view`, which `apiHistory` drops) and never on the tool's result — the model
     already read the result, and a copy of it in the conversation costs the context
