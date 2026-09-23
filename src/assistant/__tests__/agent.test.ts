@@ -386,3 +386,90 @@ test('a legacy console reportView is capped like any other console view', async 
   expect(captured!.command).toHaveLength(VIEW_CAPS.command + 1);
   expect((r.toolRuns[0]!.views?.[0]!.data as { command: string }).command).toHaveLength(VIEW_CAPS.command + 1);
 });
+
+// A model can send a tool call whose function.arguments is not valid JSON (seen in
+// practice: a stream that ended mid-arguments). Stored as it arrived, that poisons
+// every later request with a 400 from the provider — forever. So a call that does not
+// parse to a JSON object must not run, and must leave the history syntactically valid.
+test('a tool call with truncated (invalid) JSON arguments is refused, not run, and the history stays valid', async () => {
+  assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
+  let ran = 0;
+  const extraTools = [{ type: 'function', function: { name: 'demo:show', description: 'd', parameters: { type: 'object', properties: {} } }, run: async () => { ran++; return 'shown'; } }] as any;
+  let round = 0;
+  let nextRoundMessages: any[] = [];
+  const chatRound = async (messages: any[], opts: any) => {
+    round++;
+    if (round === 1) return { content: '', finishReason: 'tool_calls', toolCalls: [{ id: 'c1', name: 'demo__show', arguments: '{"a": "x' }] };
+    nextRoundMessages = messages;
+    opts.onDelta?.('ok');
+    return { content: 'ok', finishReason: 'stop', toolCalls: [] };
+  };
+  const res = await agentChat([{ role: 'user', content: 'go' }], { baseUrl: 'http://x', model: 'm', token: 't', onLive: () => {}, onLiveCommit: () => {}, extraTools, chatRound });
+
+  expect(ran).toBe(0);
+  const toolMsg = nextRoundMessages.find((m) => m.role === 'tool');
+  expect(toolMsg.content).toContain('not valid JSON');
+  const asstMsg = nextRoundMessages.find((m) => m.role === 'assistant' && Array.isArray(m.tool_calls) && m.tool_calls.length);
+  expect(asstMsg.tool_calls[0].function.arguments).toBe('{}');
+  expect(res.toolRuns[0]!.outcome).toBe('error');
+});
+
+// Valid JSON that is not an object (an array here) is just as unusable to a tool as
+// invalid JSON — same refusal.
+test('a tool call whose arguments parse to a JSON array (not an object) is refused the same way', async () => {
+  let ran = 0;
+  const r = await runOneToolTurnWithArgs('[1,2]', async () => { ran++; return 'shown'; });
+  expect(ran).toBe(0);
+  expect(r.toolRuns[0]!.outcome).toBe('error');
+  expect(String(r.toolRuns[0]!.detail)).toContain('not valid JSON');
+});
+
+// Empty arguments keep today's meaning: {} and the tool runs — some providers send ''
+// for a tool with no parameters. But '' itself is not valid JSON (apiHistory would
+// rewrite it on the NEXT turn) — so the call stored in history must already carry
+// "{}", or a strict provider could reject THIS turn's own history on a later round.
+test('empty arguments still mean {} and the tool still runs, and history gets "{}" too', async () => {
+  let receivedArgs: unknown;
+  const r = await runOneToolTurnWithArgs('', async (args) => { receivedArgs = args; return 'shown'; });
+  expect(receivedArgs).toEqual({});
+  expect(r.toolRuns[0]!.outcome).toBe('ok');
+  const asstMsg = r.transcript.find((m) => m.role === 'assistant' && Array.isArray((m as any).tool_calls) && (m as any).tool_calls.length) as any;
+  expect(asstMsg.tool_calls[0].function.arguments).toBe('{}');
+});
+
+// Same one-tool-call-then-answer shape as runOneToolTurn, but with the call's raw
+// arguments string under the test's control.
+async function runOneToolTurnWithArgs(rawArguments: string, run: (args: unknown, ctx: any) => unknown) {
+  assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
+  const extraTools = [{ type: 'function', function: { name: 'demo:show', description: 'd', parameters: { type: 'object', properties: {} } }, run }] as any;
+  let round = 0;
+  const chatRound = async (_m: any[], opts: any) => {
+    round++;
+    if (round === 1) return { content: '', finishReason: 'tool_calls', toolCalls: [{ id: 'c1', name: 'demo__show', arguments: rawArguments }] };
+    opts.onDelta?.('ok');
+    return { content: 'ok', finishReason: 'stop', toolCalls: [] };
+  };
+  return agentChat([{ role: 'user', content: 'go' }], { baseUrl: 'http://x', model: 'm', token: 't', onLive: () => {}, onLiveCommit: () => {}, extraTools, chatRound } as any);
+}
+
+// apiHistory repairs a session saved BEFORE this fix existed (or hand-edited): any
+// stored tool_calls[].function.arguments that is not a string parsing to JSON becomes
+// "{}", a good call is untouched, and the input array/messages are never mutated.
+test('apiHistory repairs a stored tool call whose arguments are not valid JSON', () => {
+  const badCall = { id: 'bad', type: 'function', function: { name: 'x', arguments: '{"path": "a", "ref": "f' } };
+  const goodCall = { id: 'good', type: 'function', function: { name: 'y', arguments: '{"ok":true}' } };
+  const input = [
+    { role: 'user', content: 'hi' },
+    { role: 'assistant', content: null, tool_calls: [badCall, goodCall] } as any,
+    { role: 'tool', tool_call_id: 'bad', content: 'ERROR: …' } as any,
+    { role: 'tool', tool_call_id: 'good', content: 'OK: …' } as any,
+  ];
+  const before = JSON.parse(JSON.stringify(input));
+
+  const history = apiHistory(input);
+
+  const asst = history.find((m) => m.role === 'assistant' && Array.isArray((m as any).tool_calls)) as any;
+  expect(asst.tool_calls.find((c: any) => c.id === 'bad').function.arguments).toBe('{}');
+  expect(asst.tool_calls.find((c: any) => c.id === 'good').function.arguments).toBe('{"ok":true}');
+  expect(input).toEqual(before); // never mutated
+});

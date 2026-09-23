@@ -188,7 +188,15 @@ export function apiHistory(messages: ChatMessage[]): ChatMessage[] {
     // The images the person attached stay with their message for the rest of the
     // conversation — as refs; `send` turns them into parts on the way out.
     if (m.role === 'user' && Array.isArray(m.images) && m.images.length) out.images = m.images;
-    if (Array.isArray(m.tool_calls) && m.tool_calls.length) out.tool_calls = m.tool_calls;
+    // A call stored before this fix existed (or hand-edited) may carry arguments
+    // that never parse — the same 400 a malformed call at the wire produces, forever,
+    // since this is the history sent on every later request. Repaired here too, so an
+    // old session recovers on its next request; never mutates `m` itself.
+    if (Array.isArray(m.tool_calls) && m.tool_calls.length) {
+      out.tool_calls = (m.tool_calls as Array<{ function?: { arguments?: unknown } }>).map((c) =>
+        parsesAsJson(c?.function?.arguments) ? c : { ...c, function: { ...c.function, arguments: '{}' } },
+      );
+    }
     if (typeof m.tool_call_id === 'string') out.tool_call_id = m.tool_call_id;
     clean.push(out);
   }
@@ -369,12 +377,38 @@ async function realChatRound(
   };
 }
 
-// Parses a tool's argv (a JSON string) into an object; invalid → {}.
-function parseToolArgs(s: unknown): Record<string, unknown> {
+// A call's arguments must parse to a JSON object to run. A stream that ends mid-
+// argument (`{"path": "…", "ref": "f`) or a model that emits something that isn't an
+// object at all (an array, a bare string, null) must not run silently as `{}` — the
+// tool never asked for that, and `{}` hides the failure from the model instead of
+// telling it what happened. Empty string keeps its old meaning, "no
+// arguments": some providers send '' for a tool with no parameters.
+function parseCallArgs(raw: string): { ok: true; args: Record<string, unknown> } | { ok: false; error: string } {
+  if (raw === '' || raw == null) return { ok: true, args: {} };
+  let parsed: unknown;
   try {
-    return s ? JSON.parse(String(s)) : {};
+    parsed = JSON.parse(String(raw));
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    const kind = Array.isArray(parsed) ? 'an array' : parsed === null ? 'null' : typeof parsed;
+    return { ok: false, error: `expected a JSON object, got ${kind}` };
+  }
+  return { ok: true, args: parsed as Record<string, unknown> };
+}
+
+// Whether a stored `function.arguments` string is one apiHistory can leave as it is:
+// a string that itself parses as JSON, of whatever shape (unlike parseCallArgs above,
+// this does not require an object — apiHistory only has to keep the provider from
+// answering "arguments must be valid JSON", not decide whether a tool could run).
+function parsesAsJson(v: unknown): boolean {
+  if (typeof v !== 'string') return false;
+  try {
+    JSON.parse(v);
+    return true;
   } catch {
-    return {};
+    return false;
   }
 }
 
@@ -554,23 +588,46 @@ export async function agentChat(
       process += roundContent;
       if (opts.onLiveCommit) opts.onLiveCommit(roundContent, false);
       else if (roundContent) onProcess?.(roundContent);
+      // Parsed once per call, up front: the assistant message pushed into history
+      // needs to know NOW whether each call's arguments will run, because a call
+      // that won't run still has to leave the history syntactically valid — the
+      // history plays back `"{}"` in place of `tc.arguments` for anything that did
+      // not itself arrive as JSON: a malformed call (parseCallArgs above), and an
+      // empty string too, since `''` is what the model actually sent but is not
+      // itself valid JSON — only `parseCallArgs`'s READING of it as "no arguments"
+      // is.
+      const callParses = r.toolCalls.map((tc) => parseCallArgs(tc.arguments));
       current.push({
         role: 'assistant',
         content: (r as ChatRoundResult).content || null,
-        tool_calls: r.toolCalls.map((tc) => ({
+        tool_calls: r.toolCalls.map((tc, idx) => ({
           id: tc.id,
           type: 'function',
-          function: { name: tc.name, arguments: tc.arguments },
+          function: { name: tc.name, arguments: callParses[idx]!.ok && tc.arguments !== '' ? tc.arguments : '{}' },
         })),
       });
-      for (const called of r.toolCalls) {
+      for (let idx = 0; idx < r.toolCalls.length; idx++) {
+        const called = r.toolCalls[idx]!;
+        const callParse = callParses[idx]!;
         // Another call between two commands is what separates them — counted here,
-        // before the declined branch, so a declined call still takes its place.
+        // before the declined/refused branches, so either still takes its place.
         const callSeq = seq++;
         const tc = { ...called, name: realName.get(called.name) ?? called.name };
         onTool(tc.name, tc.arguments);
         const def = toolByName.get(tc.name);
-        const parsed = parseToolArgs(tc.arguments);
+        if (!callParse.ok) {
+          // Arguments that don't parse to a JSON object: not run, no y/n — the tool
+          // never asked for what arrived and opens no view. The model is told plainly
+          // rather than handed a silent {} that hides the failure.
+          const detail = `Error: the arguments were not valid JSON (${callParse.error.slice(0, 120)}) — nothing was run; call ${tc.name} again with a JSON object.`;
+          current.push({ role: 'tool', tool_call_id: tc.id, content: modelToolResult('error', detail) });
+          logRun({ name: tc.name, write: false, outcome: 'error', detail, args: {} });
+          const run: ToolRun = { name: tc.name, args: {}, write: false, outcome: 'error', detail };
+          toolRuns.push(run);
+          opts.onToolRun?.(run);
+          continue;
+        }
+        const parsed = callParse.args;
         // `write` is a flag/predicate on the tool def. A `true` write stays true; a
         // predicate write is evaluated against the actual parsed args (so a READ
         // action on a write-capable tool like `memory action:"list"` is NOT labeled

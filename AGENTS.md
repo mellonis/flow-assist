@@ -596,6 +596,16 @@ measured it — 1 tool call in 15 turns with 14 false claims, against 15 in 15 w
 none. `/compact`'s summary rides in the system context of every later turn for the
 same reason: a display-only system message never reaches the model.
 
+**A call whose arguments do not parse to a JSON object is refused at the call, not
+stored as it arrived.** A stream that ends mid-argument (`{"path": "…", "ref": "f`), or
+valid JSON that isn't an object (an array, a bare string, `null`), used to go into
+`current` raw and run as `{}`; every later request then carried that malformed call and
+an OpenAI-compatible provider answered 400 on all of them, forever — `/clear` was the
+only way out. Now the call does not run, the model gets an error naming the parse
+failure, and the history keeps `"{}"` in the call's place so it stays valid JSON.
+`apiHistory()` repairs the same shape found in an older session, so one saved before
+this fix recovers on its next request.
+
 **A turn that did not finish is closed in the model's history too.** The question
 joins `apiRef` before the request, so it stays on record whatever happens. Left there
 alone after Esc, it read to the model as a question still waiting: the next request
