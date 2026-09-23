@@ -257,7 +257,9 @@ const scenarios: Record<string, () => Promise<void>> = {
     const y = ui.backend.lastFrame.split('\n').findIndex((r) => r.includes('echo one; sleep 1'));
     ui.backend.mouse('down', 12, y);
     ui.backend.mouse('up', 12, y);
-    await settle(6);
+    // Not `settle(6)` — the click opens the block at once, but its first printed
+    // line only lands once the live view's own 200ms coalesce flush runs.
+    await until(() => ui.backend.lastFrame.includes('│ one'));
     ui.frame('running, opened: what it printed so far');
     await until(() => ui.backend.lastFrame.includes('Both printed.'));
     ui.frame('finished: still open, and how it ended');

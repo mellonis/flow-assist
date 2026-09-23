@@ -63,7 +63,10 @@ test('!command runs in the first root, shows its output, and spends no model tur
   expect(shell).toBeDefined();
   expect(String(shell!.content)).toContain(`in ${root}:`);
   expect(String(shell!.content)).toContain('$ echo hello; pwd');
-  expect(String(shell!.content)).toContain('hello');
+  // Not `String(…).toContain('hello')` — the command text itself is "echo hello;
+  // pwd", so that substring check passed even with the output missing entirely. A
+  // line that is EXACTLY "hello" can only be the command's own printed output.
+  expect(String(shell!.content).split('\n')).toContain('hello');
   // In order: the command before the question about it.
   expect(sent.indexOf(shell!)).toBeLessThan(sent.findIndex((m) => m.content === 'what did it print?'));
   ui.app.unmount();
