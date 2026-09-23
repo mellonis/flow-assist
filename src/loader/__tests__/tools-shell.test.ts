@@ -90,3 +90,19 @@ test('the probe finds programs on PATH and does not throw on an empty PATH', () 
   expect(probePrograms()).toContain('git');
   expect(probePrograms({ PATH: '' })).toEqual([]);
 });
+
+test('run_command opens its view and fills it as the command prints', async () => {
+  const states: { text: string; exitCode?: number | null }[] = [];
+  const ctx = {
+    liveView: (kind: string, data: { text: string }) => {
+      expect(kind).toBe('console');
+      states.push(data);
+      return { update: (d: { text: string; exitCode?: number | null }) => states.push(d), discard() {} };
+    },
+  };
+  const out = await shellTools({}).exec('run_command', { command: 'printf a; sleep 0.2; printf b' }, ctx as never);
+  expect(states[0]!.text).toBe('');
+  expect(states.some((s) => s.text === 'a')).toBe(true);
+  expect(states.at(-1)).toMatchObject({ text: 'ab', exitCode: 0 });
+  expect(out).toContain('ab');
+});

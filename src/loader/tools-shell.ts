@@ -12,8 +12,8 @@
 // conversation's (`ctx.shell`, shared with `!command`) and remembered between calls.
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
-import { consoleView, createShellState, dirAllowed, formatShell, nextCwd, realOf, runShell, shellCwd, shellLimits, shellRoots, within, type ShellState } from '../assistant/shell.js';
-import type { ToolView } from '../assistant/views.js';
+import { capConsoleText, consoleData } from '../assistant/console-view.js';
+import { createShellState, dirAllowed, formatShell, nextCwd, realOf, runShell, shellCwd, shellLimits, shellRoots, tildePath, within, type ShellState } from '../assistant/shell.js';
 import type { ToolGroup } from './tools.js';
 
 // Where a call runs. No `cwd` — the conversation's directory (`base`). A `cwd` is a
@@ -100,12 +100,17 @@ export const shellTools = (config: Record<string, unknown>): ToolGroup => ({
     const { timeoutMs, maxChars } = shellLimits(config);
     // The turn's signal: Esc stops the answer, and with it the command it is waiting on.
     const signal = (ctx as { signal?: AbortSignal }).signal;
-    const r = await runShell(cmd, { cwd, timeoutMs, maxChars, signal });
+    // The person said yes, so they see what it prints — AS it prints (a live view,
+    // src/assistant/views.ts): a line in the chat that a click opens. Display only:
+    // the model reads the output through the result below, never a second copy.
+    const live = (ctx as { liveView?: (k: string, d: unknown) => { update(d: unknown): void } }).liveView?.('console', { command: cmd, cwd: tildePath(cwd), text: '' });
+    let raw = '';
+    const onOutput = live
+      ? (chunk: string) => { raw += chunk; if (raw.length > maxChars * 2) raw = raw.slice(-maxChars); live.update({ command: cmd, cwd: tildePath(cwd), text: capConsoleText(raw) }); }
+      : undefined;
+    const r = await runShell(cmd, { cwd, timeoutMs, maxChars, signal, ...(onOutput ? { onOutput } : {}) });
     if (r.error) throw new Error(`run_command: could not start /bin/sh: ${r.error}`);
-    // The person confirmed this command, so they see what it printed — the same block
-    // their own `!command` leaves. It is DISPLAY only (src/assistant/views.ts): the
-    // model reads the output through the result below, and never a second copy of it.
-    (ctx as { reportView?: (v: ToolView) => void }).reportView?.(consoleView(cmd, r, cwd, timeoutMs));
+    live?.update(consoleData(cmd, r, cwd, timeoutMs));
     const move = nextCwd(config, cwd, r.pwd);
     if (move.cwd !== cwd) shell.setCwd(move.cwd);
     return formatShell(cmd, r, cwd, timeoutMs, { after: move.cwd, note: move.note }).forTool;

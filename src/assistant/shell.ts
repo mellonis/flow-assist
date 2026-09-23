@@ -22,7 +22,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fence, type ConsoleView } from './views.js';
+import { fence } from './views.js';
 
 export const SHELL_DEFAULTS = { timeoutMs: 120_000, maxChars: 20_000 };
 // After the shell exits, how long its pipes may stay open. A job it left running with
@@ -237,18 +237,3 @@ export function formatShell(cmd: string, r: ShellResult, cwd: string, timeoutMs 
   return { display, forModel, forTool };
 }
 
-// The same block, as a VIEW the model's `run_command` hands to the chat (./views.ts):
-// the person confirmed the command, so they see what it printed, as they see their own
-// `!command`'s output. Display only — the tool's result carries it to the model, and
-// the view never does.
-export function consoleView(cmd: string, r: ShellResult, cwd: string, timeoutMs = SHELL_DEFAULTS.timeoutMs): ConsoleView {
-  return {
-    kind: 'console',
-    command: cmd,
-    text: r.output,
-    exitCode: r.code,
-    ms: r.ms,
-    cwd: tildePath(cwd),
-    status: shellOutcome(r, timeoutMs),
-  };
-}
