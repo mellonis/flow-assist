@@ -253,3 +253,49 @@ test('a command opened before a second one starts stays open inside the group', 
   expect(ui.backend.lastFrame).toContain('│ first-out');
   ui.app.unmount();
 });
+
+test('a head click closes a group that is open only through a member, and a second click reopens it', async () => {
+  const model = new ScriptedModel();
+  model.script(
+    [{ tool: 'run_command', args: { command: 'echo left-out' } }],
+    [{ hold: true }, { tool: 'run_command', args: { command: 'echo right-out' } }],
+    [{ text: 'Both ran.' }],
+  );
+  const ui = await bootApp(model, 100, 30, undefined, { shell: { timeoutMs: 20000 } });
+  await ui.press('F');
+  await ui.type('go');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('Confirm write: run_command'));
+  expect(ui.backend.lastFrame).toContain('Confirm write: run_command');
+  await ui.press('y');
+  await settleUntil(() => /echo left-out · ✓/.test(ui.backend.lastFrame));
+  expect(ui.backend.lastFrame).toMatch(/echo left-out · ✓/);
+  // Open the lone command's block — no group exists yet (one member only) — before
+  // the second command arrives and the group forms around it: the group is then open
+  // only because THIS member was clicked, not because its own head id was.
+  await click(ui, rowOf(ui, 'echo left-out ·'));
+  await settleUntil(() => ui.backend.lastFrame.includes('│ left-out'));
+  expect(ui.backend.lastFrame).toContain('│ left-out');
+  model.release();
+  await settleUntil(() => ui.backend.lastFrame.includes('Confirm write: run_command'));
+  expect(ui.backend.lastFrame).toContain('Confirm write: run_command');
+  await ui.press('y');
+  await settleUntil(() => ui.backend.lastFrame.includes('Both ran.'));
+  expect(ui.backend.lastFrame).toContain('Both ran.');
+  expect(ui.backend.lastFrame).toMatch(/Ran 2 commands · ✓/);
+  expect(ui.backend.lastFrame).toContain('│ left-out');
+  // The head click must fold the WHOLE group, not just re-toggle its own (already
+  // "closed", from its own naive perspective) exception on top of the member's.
+  await click(ui, rowOf(ui, 'Ran 2 commands'));
+  await settleUntil(() => !ui.backend.lastFrame.includes('│ left-out'));
+  expect(ui.backend.lastFrame).not.toContain('│ left-out');
+  expect(ui.backend.lastFrame).not.toContain('echo left-out ·');
+  expect(ui.backend.lastFrame).not.toContain('echo right-out ·');
+  expect(ui.backend.lastFrame).toMatch(/Ran 2 commands · ✓/);
+  // Click the head again: both commands' blocks are back.
+  await click(ui, rowOf(ui, 'Ran 2 commands'));
+  await settleUntil(() => ui.backend.lastFrame.includes('echo left-out ·'));
+  expect(ui.backend.lastFrame).toContain('echo left-out ·');
+  expect(ui.backend.lastFrame).toContain('echo right-out ·');
+  ui.app.unmount();
+});

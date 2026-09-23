@@ -84,3 +84,26 @@ export function groupHeadText(recs: ViewRecord[], now: number): { text: string; 
 export function groupOpen(folds: FoldState, g: ViewGroup): boolean {
   return isOpen(folds, foldId(g.head, 'group')) || g.members.some((at) => clickedOpen(folds, foldId(at, 'view', 0)));
 }
+
+// A head click's effect on the WHOLE group — never a plain `toggleFold` on the
+// group's own id alone, which cannot see a member's own exception and so cannot
+// reliably flip what `groupOpen` reads (the same `FoldState` is reachable by two
+// click orders that need opposite answers; only the group's own current reading,
+// not a fold id in isolation, can decide which way this click goes). Closing drops
+// every member's own exception too — a reopened group starts folded, not reopening
+// whatever a person had individually clicked before it closed. Only the group's own
+// id and its members' view ids are ever touched; every other block's exception
+// stands exactly as it was.
+export function toggleGroup(folds: FoldState, g: ViewGroup): FoldState {
+  const except = new Set(folds.except);
+  const groupId = foldId(g.head, 'group');
+  // Add or remove `id` from the exception set so `isOpen` reads it as `open`.
+  const setId = (id: string, open: boolean) => { if (open === folds.open) except.delete(id); else except.add(id); };
+  if (groupOpen(folds, g)) {
+    for (const at of g.members) except.delete(foldId(at, 'view', 0));
+    setId(groupId, false);
+  } else {
+    setId(groupId, true);
+  }
+  return { open: folds.open, except };
+}

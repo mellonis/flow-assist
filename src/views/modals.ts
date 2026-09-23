@@ -576,6 +576,19 @@ export function chatRows(messages: ChatMsg[], o: RowOpts): ChatRow[] {
   return rowsPerDrawn(messages, o).flat();
 }
 
+// The `ViewGroup` a `…:group` fold id names — built from the SAME `viewGroups` call
+// `rowsPerDrawn` makes (the drawn messages, the current notes mode), so the click
+// handler that resolves a head's id and the render that drew it can never disagree
+// about which members that click folds. `undefined` for anything else, group ids
+// that no longer form one included (a message arriving mid-click, say).
+export function viewGroupFor(messages: ChatMsg[], o: RowOpts, id: string): ViewGroup | undefined {
+  const m = /^(\d+):group$/.exec(id);
+  if (!m) return undefined;
+  const at = Number(m[1]);
+  const drawn = messages.filter((msg) => msg.role !== 'system');
+  return viewGroups(drawn as GroupMsg[], o.notes).find((g) => g.head === at);
+}
+
 // The first row of a block, so opening one can put it at the top of the screen: the
 // fold line itself, with its body under it. −1 when the block is not on the list.
 export function firstFoldRow(rows: readonly ChatRow[], id: string): number {

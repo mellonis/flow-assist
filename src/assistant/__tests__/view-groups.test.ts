@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
-import { groupHeadText, groupOpen, viewGroups } from '../view-groups';
-import { allFolded, foldId, toggleFold } from '../folds';
+import { groupHeadText, groupOpen, toggleGroup, viewGroups } from '../view-groups';
+import { allFolded, foldId, isClicked, toggleFold, type FoldState } from '../folds';
 import type { ViewRecord } from '../views';
 
 const v = (seq: number, turn = 1) => ({ role: 'view', content: '', views: [{ kind: 'console', data: { command: `c${seq}`, exitCode: 0, ms: 1000 }, phase: 'done', startedAt: 0, seq, turn, callId: `t${seq}#0` }] });
@@ -52,4 +52,40 @@ test('a group that forms around a block the person opened is open', () => {
   expect(groupOpen(allFolded(), g)).toBe(false);
   expect(groupOpen(toggleFold(allFolded(), foldId(2, 'view', 0)), g)).toBe(true);
   expect(groupOpen(toggleFold(allFolded(), foldId(2, 'group')), g)).toBe(true);
+});
+
+test('toggleGroup: a member clicked open first — the head click closes the group and clears that exception', () => {
+  const g = { head: 2, members: [2, 4], hidden: [1, 3] };
+  const memberOpen = toggleFold(allFolded(), foldId(2, 'view', 0));
+  expect(groupOpen(memberOpen, g)).toBe(true);
+  const closed = toggleGroup(memberOpen, g);
+  expect(groupOpen(closed, g)).toBe(false);
+  expect(isClicked(closed, foldId(2, 'view', 0))).toBe(false);
+});
+
+test('toggleGroup again reopens it', () => {
+  const g = { head: 2, members: [2, 4], hidden: [1, 3] };
+  const closed = toggleGroup(toggleFold(allFolded(), foldId(2, 'view', 0)), g);
+  const reopened = toggleGroup(closed, g);
+  expect(groupOpen(reopened, g)).toBe(true);
+});
+
+test('toggleGroup opens a closed group with no exceptions', () => {
+  const g = { head: 2, members: [2, 4], hidden: [1, 3] };
+  expect(groupOpen(allFolded(), g)).toBe(false);
+  expect(groupOpen(toggleGroup(allFolded(), g), g)).toBe(true);
+});
+
+test('toggleGroup closes a group that reads open only via the global ^o state', () => {
+  const g = { head: 2, members: [2, 4], hidden: [1, 3] };
+  const globalOpen: FoldState = { open: true, except: new Set<string>() };
+  expect(groupOpen(globalOpen, g)).toBe(true);
+  expect(groupOpen(toggleGroup(globalOpen, g), g)).toBe(false);
+});
+
+test('toggleGroup never touches another block\'s exception', () => {
+  const g = { head: 2, members: [2, 4], hidden: [1, 3] };
+  const withOther = toggleFold(toggleFold(allFolded(), foldId(2, 'view', 0)), foldId(9, 'notes'));
+  const closed = toggleGroup(withOther, g);
+  expect(isClicked(closed, foldId(9, 'notes'))).toBe(true);
 });
