@@ -5,6 +5,14 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **Two flow-assist processes no longer silently clobber one session.** A session
+  held by a live chat now has an ownership lock: a second process starting up, or
+  `/resume`, leaves a session another live instance holds alone (starts or stays on
+  its own, with a note) instead of continuing it and racing the first process's
+  saves. And a save that finds the file changed on disk since it last read or wrote
+  it — an older host with no lock, a hand edit — no longer overwrites that change:
+  it saves the conversation as a new session instead, so nothing is lost either way.
+
 - **A tool call with broken arguments no longer breaks the conversation for good.** A
   reply cut off mid-argument used to be stored as it arrived and run as `{}` anyway —
   every later message then failed the same way, since the provider rejects a history

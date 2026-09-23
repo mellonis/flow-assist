@@ -19,6 +19,14 @@
 // the person's alone: directory 700, files 600. A write goes to a temp file and is
 // renamed over the old one — a kill mid-write never leaves a file that breaks the
 // next start; a file that does not parse is skipped, never fatal.
+//
+// Two more things guard against two processes on one session (see AGENTS.md,
+// "Sessions survive a restart"): an ownership LOCK beside the file
+// (`<id>.lock`) so a second process does not silently continue what a live one
+// still holds, and a `rev` counter in the file itself so a save that finds the
+// disk changed since it last read or wrote it never overwrites that — it forks
+// the conversation into a new session instead.
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -51,6 +59,7 @@ export interface Session {
   images?: ImageRef[];                 // what each `[Image #N]` of the conversation stands for; absent in older sessions
   imageSeq?: number;                   // the last N given out — numbering goes on from it
   closed?: boolean;                    // left with /clear — listed, never continued on start
+  rev?: number;                        // bumped by every saveSession; absent (an older host) reads as 0
 }
 
 export interface SessionInfo { id: string; title: string; updatedAt: string; turns: number; closed: boolean }
@@ -91,13 +100,34 @@ export function sessionTitle(messages: Record<string, unknown>[]): string {
 // A session worth keeping has something the person said or ran in it.
 export const isEmpty = (s: Pick<Session, 'messages'>) => !s.messages.some(bySomeone);
 
-export function saveSession(dir: string, s: Session): void {
+// The rev already on disk for a session file — 0 for one that does not exist, does
+// not parse, or was written by a host old enough to have no `rev` field at all.
+function readRev(file: string): number {
+  try {
+    const raw = JSON.parse(fs.readFileSync(file, 'utf8')) as { rev?: unknown };
+    return Number.isInteger(raw?.rev) ? (raw.rev as number) : 0;
+  } catch { return 0; }
+}
+
+// The rev currently on disk for a session, by id — what a save must compare its own
+// last-known rev against before writing, so it never overwrites a change it has not
+// seen (an older host with no lock, a hand edit).
+export function sessionRev(dir: string, id: string): number {
+  try { return readRev(fileOf(dir, id)); } catch { return 0; }
+}
+
+// Returns the rev this save was written with — always the disk's previous rev + 1,
+// regardless of what `s.rev` held coming in: rev is this function's own counter, not
+// the caller's to set.
+export function saveSession(dir: string, s: Session): number {
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   const file = fileOf(dir, s.id);
+  const rev = readRev(file) + 1;
   const body: Session = {
     ...s,
     version: SESSION_VERSION,
     title: s.title || sessionTitle(s.messages),
+    rev,
     // `live` is the half-written text of an answer in progress — not a message yet.
     messages: s.messages.slice(-KEEP_MESSAGES).map(({ live: _live, ...m }) => m),
     api: s.api.slice(-KEEP_MESSAGES),
@@ -105,6 +135,7 @@ export function saveSession(dir: string, s: Session): void {
   const tmp = `${file}.${process.pid}.tmp`;
   fs.writeFileSync(tmp, JSON.stringify(body), { mode: 0o600 });
   fs.renameSync(tmp, file);
+  return rev;
 }
 
 // A saved subject; an old session may hold a number there.
@@ -153,6 +184,7 @@ export function loadSession(dir: string, id: string): Session | null {
       tools: Array.isArray(s.tools) ? s.tools.filter((n): n is string => typeof n === 'string') : [],
       images: Array.isArray(s.images) ? s.images.filter(isImageRef) : [],
       imageSeq: Number.isInteger(s.imageSeq) && (s.imageSeq as number) > 0 ? s.imageSeq : 0,
+      rev: Number.isInteger(s.rev) ? (s.rev as number) : 0,
     };
   } catch {
     return null;
@@ -198,12 +230,102 @@ export function pruneSessions(dir: string, keep = KEEP_SESSIONS): number {
 }
 
 // The last change is written at exit even if its debounced save has not fired. One
-// process listener for every chat (a test boots the app many times).
+// process listener for every chat (a test boots the app many times) — `exitHooked`,
+// not `atExit.size`, gates the `process.once`: a chat that unregisters (component
+// unmount) brings the set back to empty, and re-arming on the next boot would add a
+// second `process.once('exit', …)` listener that fires everything twice.
 const atExit = new Set<() => void>();
+let exitHooked = false;
 export function flushOnExit(fn: () => void): () => void {
-  if (!atExit.size) process.once('exit', () => { for (const f of atExit) { try { f(); } catch { /* exiting */ } } });
+  if (!exitHooked) {
+    exitHooked = true;
+    process.once('exit', () => { for (const f of atExit) { try { f(); } catch { /* exiting */ } } });
+  }
   atExit.add(fn);
   return () => { atExit.delete(fn); };
+}
+
+// ─── Ownership lock ─────────────────────────────────────────────────────────────
+// A session held by a live chat has a lock beside it, `<id>.lock` — `{ pid, host,
+// token, at }`. `token` names a CHAT INSTANCE, not a process: two instances can live
+// in one process (as the e2e tests do), so `process.pid` alone cannot tell them
+// apart — the caller makes one token per chat (`makeLockToken`) and keeps it for the
+// chat's life.
+//
+// A lock is OURS when its token matches. Otherwise it is HELD when its pid is alive
+// on this host, or its host is not this one at all (a foreign host's pid cannot be
+// checked, so it counts as held). Anything else — the owning process is gone — is
+// STALE and is taken over. `acquireLock` is side-effect free on a held lock, so a
+// caller that only wants to know (a `/resume` refusal, the start-up continue check)
+// can call it directly rather than peeking first.
+export interface LockInfo { pid: number; host: string; token: string; at: string }
+export interface LockDeps {
+  host?: string;                        // this machine's name; defaults to os.hostname()
+  pidAlive?: (pid: number) => boolean;  // injectable for tests
+}
+export type LockOutcome =
+  | { status: 'acquired' | 'ours' }
+  | { status: 'held'; holder: LockInfo };
+
+const lockFile = (dir: string, id: string) => path.join(dir, `${id}.lock`);
+
+function readLock(file: string): LockInfo | null {
+  try {
+    const raw = JSON.parse(fs.readFileSync(file, 'utf8')) as Partial<LockInfo>;
+    if (raw && typeof raw.pid === 'number' && typeof raw.host === 'string' && typeof raw.token === 'string') return raw as LockInfo;
+  } catch { /* missing or unreadable — the caller treats this like no lock at all */ }
+  return null;
+}
+
+// `process.kill(pid, 0)` sends no signal; it throws ESRCH when the pid is gone and
+// EPERM when it exists but belongs to someone else — EPERM still means alive.
+function defaultPidAlive(pid: number): boolean {
+  try { process.kill(pid, 0); return true; }
+  catch (e) { return (e as NodeJS.ErrnoException).code === 'EPERM'; }
+}
+
+function writeLock(file: string, info: LockInfo): boolean {
+  try {
+    fs.writeFileSync(file, JSON.stringify(info), { mode: 0o600, flag: 'wx' });
+    return true;
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'EEXIST') return false;
+    throw e;
+  }
+}
+
+export function acquireLock(dir: string, id: string, token: string, deps: LockDeps = {}): LockOutcome {
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const file = lockFile(dir, id);
+  const host = deps.host ?? os.hostname();
+  const pidAlive = deps.pidAlive ?? defaultPidAlive;
+  const info: LockInfo = { pid: process.pid, host, token, at: new Date().toISOString() };
+
+  if (writeLock(file, info)) return { status: 'acquired' };
+  const lock = readLock(file);
+  if (lock?.token === token) return { status: 'ours' };
+  const held = lock !== null && (lock.host !== host || pidAlive(lock.pid));
+  if (held) return { status: 'held', holder: lock! };
+
+  // Stale (a dead pid on our own host) or unreadable — take over, once.
+  try { fs.unlinkSync(file); } catch { /* raced away already */ }
+  if (writeLock(file, info)) return { status: 'acquired' };
+  const relock = readLock(file);
+  if (relock?.token === token) return { status: 'ours' };
+  return { status: 'held', holder: relock ?? info };
+}
+
+// Unlinks only when the token is ours — releasing a lock we do not hold would tear
+// down someone else's ownership.
+export function releaseLock(dir: string, id: string, token: string): void {
+  const lock = readLock(lockFile(dir, id));
+  if (lock?.token === token) { try { fs.unlinkSync(lockFile(dir, id)); } catch { /* already gone */ } }
+}
+
+// One per chat instance, made once and kept for its life — not per process (see the
+// section comment above).
+export function makeLockToken(): string {
+  return crypto.randomUUID();
 }
 
 // "16:05" for today, "2026-09-20 16:05" for any other day.

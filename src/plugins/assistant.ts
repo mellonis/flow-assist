@@ -19,7 +19,11 @@ import { apiHistory, compactConversation, chatLanguage, requestTools, transcript
 import { createToolSet, toolLoadingMode } from '../assistant/tool-loading.js';
 import { copyTarget, copyToClipboard } from '../assistant/copy.js';
 import { createShellState, formatShell, nextCwd, runShell, shellLimits, tildePath } from '../assistant/shell.js';
-import { KEEP_SESSIONS, SESSION_VERSION, closeSession, flushOnExit, listSessions, loadSession, newSessionId, pruneSessions, saveSession, sessionToContinue, sessionWhen, sessionsDir, type Session } from '../assistant/sessions.js';
+import {
+  KEEP_SESSIONS, SESSION_VERSION, acquireLock, closeSession, flushOnExit, listSessions, loadSession, makeLockToken,
+  newSessionId, pruneSessions, releaseLock, saveSession, sessionRev, sessionTitle, sessionToContinue, sessionWhen,
+  sessionsDir, type Session,
+} from '../assistant/sessions.js';
 import type { ChatMessage } from '../assistant/agent.js';
 import type { ChangeView } from '../assistant/diff.js';
 import { VIEW_CAPS, type ViewRecord, type ViewRenderers } from '../assistant/views.js';
@@ -620,15 +624,26 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
 
           // ── Sessions (src/assistant/sessions.ts) ───────────────────────────────
           // The conversation is written to disk after every change, so a restart
-          // continues it. A session gets its id when it first has something to keep;
-          // `/clear` starts a new one and leaves the old for `/resume`.
+          // continues it. A session gets its id — and its ownership lock — when it
+          // first has something to keep; `/clear` starts a new one and leaves the old
+          // for `/resume`.
           const sessDir = sessionsDir(f.config);
           const sessConf = (f.config.sessions ?? {}) as { resume?: unknown; keep?: unknown };
           const sessionIdRef = f.useRef('');
           const createdAtRef = f.useRef('');
           const saveTimer = f.useRef<ReturnType<typeof setTimeout> | null>(null);
+          // One token for this chat instance's whole life (not per process — see
+          // sessions.ts, "Ownership lock"): what makes a lock this instance's own.
+          const lockTokenRef = f.useRef(makeLockToken());
+          // The rev this instance last read or wrote for the session it currently
+          // holds — what a save compares the disk against before overwriting it.
+          const sessionRevRef = f.useRef(0);
+          const releaseCurrentLock = () => { if (sessDir && sessionIdRef.current) releaseLock(sessDir, sessionIdRef.current, lockTokenRef.current); };
           const snapshotSession = (): Session => {
-            if (!sessionIdRef.current) { sessionIdRef.current = newSessionId(); createdAtRef.current = new Date().toISOString(); }
+            if (!sessionIdRef.current) {
+              sessionIdRef.current = newSessionId(); createdAtRef.current = new Date().toISOString(); sessionRevRef.current = 0;
+              if (sessDir) acquireLock(sessDir, sessionIdRef.current, lockTokenRef.current); // a fresh id — nothing else could hold it
+            }
             return {
               version: SESSION_VERSION, id: sessionIdRef.current, title: '', createdAt: createdAtRef.current, updatedAt: new Date().toISOString(),
               messages: msgsRef.current as Record<string, unknown>[], api: apiRef.current as unknown as Record<string, unknown>[],
@@ -644,10 +659,34 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               closed: false, // written means in use — a resumed cleared session is open again
             };
           };
-          const writeSession = () => {
+          // `silent` — no note, no notify — for the paths that write on the way out
+          // (exit, unmount): the screen is not going to be read again.
+          const writeSession = (opts: { silent?: boolean } = {}) => {
             if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null; }
             if (!sessDir || !msgsRef.current.some((m) => personSpoke(m.role))) return; // nothing said or run yet
-            try { saveSession(sessDir, snapshotSession()); } catch (e) {
+            try {
+              const snap = snapshotSession();
+              const diskRev = sessionRev(sessDir, snap.id);
+              if (diskRev !== sessionRevRef.current) {
+                // Someone else changed this file since we last read or wrote it — an
+                // older host with no lock, a hand edit. Never overwrite what we have
+                // not seen: fork this conversation into a new session instead.
+                const forkedId = newSessionId();
+                const now = new Date().toISOString();
+                releaseCurrentLock();
+                acquireLock(sessDir, forkedId, lockTokenRef.current);
+                const forked: Session = { ...snap, id: forkedId, createdAt: now, updatedAt: now };
+                const rev = saveSession(sessDir, forked);
+                sessionIdRef.current = forkedId; createdAtRef.current = now; sessionRevRef.current = rev;
+                if (!opts.silent) {
+                  const title = sessionTitle(snap.messages) || snap.id;
+                  setMessages((cur) => [...cur, { role: 'note', content: `Session "${title}" was changed elsewhere — saved this conversation as a new session.` }]);
+                  f.notify();
+                }
+                return;
+              }
+              sessionRevRef.current = saveSession(sessDir, snap);
+            } catch (e) {
               (f.services as Record<string, any>).pushLog?.(`[session] not saved: ${(e as Error).message}`);
             }
           };
@@ -658,7 +697,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           };
           const writeRef = f.useRef(writeSession); writeRef.current = writeSession;
           const applySession = (s: Session) => {
-            sessionIdRef.current = s.id; createdAtRef.current = s.createdAt;
+            sessionIdRef.current = s.id; createdAtRef.current = s.createdAt; sessionRevRef.current = s.rev ?? 0;
             ctxSubjectRef.current = s.subject ?? null;
             apiRef.current = s.api as unknown as ChatMessage[];
             summaryRef.current = s.summary;
@@ -680,21 +719,38 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             setField(s.draft);
           };
           const startedRef = f.useRef(false);
+          const unhookExitRef = f.useRef<(() => void) | null>(null);
           if (!startedRef.current && sessDir) {
             startedRef.current = true;
             // Whatever happens at exit, the last change is written (a pending
-            // debounced save would otherwise be lost with the process).
-            flushOnExit(() => writeRef.current());
+            // debounced save would otherwise be lost with the process) and the lock
+            // released, in that order — AFTER the final save.
+            unhookExitRef.current = flushOnExit(() => { writeRef.current({ silent: true }); releaseCurrentLock(); });
             setTimeout(() => {
               try { pruneSessions(sessDir, Number.isInteger(sessConf.keep) ? Number(sessConf.keep) : KEEP_SESSIONS); } catch { /* not fatal */ }
               if (sessConf.resume === false || msgsRef.current.length) return;
               const s = sessionToContinue(sessDir);
               if (!s) return;
+              const outcome = acquireLock(sessDir, s.id, lockTokenRef.current);
+              if (outcome.status === 'held') {
+                setMessages((cur) => [...cur, { role: 'note', content: `Session "${s.title || s.id}" is open in another flow-assist process — started a new one.` }]);
+                f.notify();
+                return;
+              }
               applySession(s);
               (f.services as Record<string, any>).showMessage?.(`Continued «${s.title || 'the last session'}» — /clear starts a new one, /resume lists others`);
               f.notify();
             }, 0);
           }
+          // Component unmount is the other leaving-the-session trigger (exit, /clear,
+          // /resume and a change of task are handled at their own sites below): a
+          // last, silent save and the lock's release.
+          f.useEffect(() => () => {
+            unhookExitRef.current?.();
+            if (!sessDir) return;
+            writeRef.current({ silent: true });
+            releaseCurrentLock();
+          }, []);
           // Exit «arming» by Esc: 0 — not armed; else ms when the first Esc was pressed.
           // A second Esc within the window closes the chat; any other key disarms.
           const [escArmAt, setEscArmAt] = f.useState(0);
@@ -1623,9 +1679,22 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 if (streamRef.current) { setError('an answer is still coming — stop it (Esc) before switching sessions'); return; }
                 const s = loadSession(sessDir, pick.id);
                 if (!s) { setError('that session file cannot be read'); return; }
+                // Held by another live flow-assist process: refuse and stay put. Own
+                // lock already, or free/stale, and this acquires it — side-effect free
+                // when held, so nothing to undo on the refusal below.
+                if (pick.id !== sessionIdRef.current) {
+                  const outcome = acquireLock(sessDir, pick.id, lockTokenRef.current);
+                  if (outcome.status === 'held') {
+                    setMessages((cur) => [...cur, { role: 'note', content: `Session "${pick.title || pick.id}" is open in another flow-assist process.` }]);
+                    setField('');
+                    f.notify();
+                    return;
+                  }
+                }
                 dismissAsk();
                 queueRef.current = []; setQueued([]); bgQueueRef.current = [];
                 setError(null); setEmptyNotice(''); setToolLabel(''); setToolCount(0);
+                if (pick.id !== sessionIdRef.current) releaseCurrentLock(); // leaving the old one for /resume
                 applySession(s);
                 (f.services as Record<string, any>).showMessage?.(`Resumed «${s.title || 'session'}»`);
                 f.notify();
@@ -1639,7 +1708,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // what follows is a new one.
                 writeSession();
                 if (sessDir && sessionIdRef.current) { try { closeSession(sessDir, sessionIdRef.current); } catch { /* not fatal */ } }
-                sessionIdRef.current = ''; createdAtRef.current = '';
+                releaseCurrentLock();
+                sessionIdRef.current = ''; createdAtRef.current = ''; sessionRevRef.current = 0;
                 if (tickRef.current) { clearInterval(tickRef.current); tickRef.current = null; }
                 abortRef.current?.abort(); abortRef.current = null;
                 if (pendingRef.current) settleConfirm(false);
@@ -1748,9 +1818,12 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // subject continues the history, nothing is cleared.
             if (subject !== ctxSubjectRef.current) {
               // The conversation about the other task is saved and stays on /resume.
+              // Silent: the screen is cleared right below, so a fork note about the
+              // conversation just left would only flash and vanish.
               const had = msgsRef.current.some((m) => m.role === 'user');
-              writeSession();
-              sessionIdRef.current = ''; createdAtRef.current = '';
+              writeSession({ silent: true });
+              releaseCurrentLock();
+              sessionIdRef.current = ''; createdAtRef.current = ''; sessionRevRef.current = 0;
               if (had) (f.services as Record<string, any>).showMessage?.(`A new session for ${subject ?? 'no task'} — /resume goes back to the previous one`);
               ctxSubjectRef.current = subject;
               apiRef.current = []; summaryRef.current = ''; queueRef.current = []; setQueued([]);

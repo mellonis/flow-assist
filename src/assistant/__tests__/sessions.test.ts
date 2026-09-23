@@ -3,8 +3,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  KEEP_MESSAGES, SESSION_VERSION, closeSession, listSessions, loadSession, newSessionId,
-  normalizeViews, pruneSessions, saveSession, sessionToContinue, sessionsDir, type Session,
+  KEEP_MESSAGES, SESSION_VERSION, acquireLock, closeSession, listSessions, loadSession, makeLockToken,
+  newSessionId, normalizeViews, pruneSessions, releaseLock, saveSession, sessionRev, sessionToContinue,
+  sessionsDir, type Session,
 } from '../sessions.ts';
 
 const tmp = () => path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'sess-')), 'sessions');
@@ -125,4 +126,85 @@ test('a session with a live view, a legacy console view and a malformed entry re
   expect((loaded.messages[0]!.views[0] as { phase: string }).phase).toBe('failed');
   expect(loaded.messages[1]!.views[0]).toEqual({ kind: 'console', data: { command: 'b', text: 't', exitCode: 0, ms: 1, cwd: '~' }, phase: 'done', startedAt: 0 });
   expect(loaded.messages[2]!.views).toEqual([]);
+});
+
+// ─── rev: a save that checks ───────────────────────────────────────────────────
+
+test('saveSession bumps rev on every write and returns it; sessionRev reads it without loading the file', () => {
+  const dir = tmp();
+  const s = session();
+  expect(saveSession(dir, s)).toBe(1);
+  expect(sessionRev(dir, s.id)).toBe(1);
+  expect(loadSession(dir, s.id)!.rev).toBe(1);
+  expect(saveSession(dir, { ...s, draft: 'x' })).toBe(2);
+  expect(sessionRev(dir, s.id)).toBe(2);
+  expect(loadSession(dir, s.id)!.rev).toBe(2);
+  // A session that was never written reads as rev 0, same as a missing file.
+  expect(sessionRev(dir, newSessionId())).toBe(0);
+});
+
+test('a session with no rev field — an older host — reads and peeks as rev 0', () => {
+  const dir = tmp();
+  const id = newSessionId();
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, `${id}.json`), JSON.stringify({
+    version: SESSION_VERSION, id, title: '', createdAt: '', updatedAt: '',
+    messages: [], api: [], summary: '', plan: [], usage: null, prompts: [], draft: '',
+  }));
+  expect(sessionRev(dir, id)).toBe(0);
+  expect(loadSession(dir, id)!.rev).toBe(0);
+});
+
+// ─── ownership lock ────────────────────────────────────────────────────────────
+
+test('acquireLock: free becomes ours, a re-acquire with the same token reads ours', () => {
+  const dir = tmp();
+  const id = newSessionId();
+  expect(acquireLock(dir, id, 'tok-a', { host: 'h1' })).toEqual({ status: 'acquired' });
+  expect(acquireLock(dir, id, 'tok-a', { host: 'h1' })).toEqual({ status: 'ours' });
+  expect(JSON.parse(fs.readFileSync(path.join(dir, `${id}.lock`), 'utf8'))).toMatchObject({ host: 'h1', token: 'tok-a' });
+});
+
+test('acquireLock: a different token on the same host is held while the pid reads alive', () => {
+  const dir = tmp();
+  const id = newSessionId();
+  acquireLock(dir, id, 'tok-a', { host: 'h1', pidAlive: () => true });
+  const held = acquireLock(dir, id, 'tok-b', { host: 'h1', pidAlive: () => true });
+  expect(held.status).toBe('held');
+  expect(held.status === 'held' && held.holder.token).toBe('tok-a');
+  // Held is side-effect free: the lock still says tok-a.
+  expect(JSON.parse(fs.readFileSync(path.join(dir, `${id}.lock`), 'utf8')).token).toBe('tok-a');
+});
+
+test('acquireLock: a dead pid on our own host is stale and is taken over', () => {
+  const dir = tmp();
+  const id = newSessionId();
+  acquireLock(dir, id, 'tok-a', { host: 'h1', pidAlive: () => true });
+  const taken = acquireLock(dir, id, 'tok-b', { host: 'h1', pidAlive: () => false });
+  expect(taken).toEqual({ status: 'acquired' });
+  expect(JSON.parse(fs.readFileSync(path.join(dir, `${id}.lock`), 'utf8')).token).toBe('tok-b');
+});
+
+test('acquireLock: a lock from another host is held even if this host would say the pid is dead', () => {
+  const dir = tmp();
+  const id = newSessionId();
+  acquireLock(dir, id, 'tok-a', { host: 'h1' });
+  const held = acquireLock(dir, id, 'tok-b', { host: 'h2', pidAlive: () => false });
+  expect(held.status).toBe('held');
+  expect(held.status === 'held' && held.holder.host).toBe('h1');
+});
+
+test('releaseLock only removes a lock this token owns', () => {
+  const dir = tmp();
+  const id = newSessionId();
+  acquireLock(dir, id, 'tok-a', { host: 'h1' });
+  releaseLock(dir, id, 'tok-b'); // not ours — no-op
+  expect(acquireLock(dir, id, 'tok-c', { host: 'h1', pidAlive: () => true }).status).toBe('held');
+  releaseLock(dir, id, 'tok-a');
+  expect(acquireLock(dir, id, 'tok-c', { host: 'h1' })).toEqual({ status: 'acquired' });
+  releaseLock(dir, id, 'nope'); // an already-gone file — still a no-op, never throws
+});
+
+test('makeLockToken makes a distinct token each time', () => {
+  expect(makeLockToken()).not.toBe(makeLockToken());
 });
