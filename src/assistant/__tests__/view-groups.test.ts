@@ -4,7 +4,8 @@ import { allFolded, foldId, isClicked, toggleFold, type FoldState } from '../fol
 import type { ViewRecord } from '../views';
 
 const v = (seq: number, turn = 1) => ({ role: 'view', content: '', views: [{ kind: 'console', data: { command: `c${seq}`, exitCode: 0, ms: 1000 }, phase: 'done', startedAt: 0, seq, turn, callId: `t${seq}#0` }] });
-const narration = { role: 'assistant', content: '', process: 'Next: lint', step: 'lint.' };
+// A round whose only text was its `Next:` line: it draws nothing, so a group takes it in.
+const narration = { role: 'assistant', content: '', parts: [{ kind: 'text', text: 'Next: lint' }] };
 const user = { role: 'user', content: 'go' };
 
 test('consecutive commands of one turn group — the narration before and between them folds in', () => {
@@ -24,16 +25,20 @@ test('a !command and a discarded view are never members', () => {
   expect(viewGroups([v(0), { role: 'view', content: '', views: [] }, v(2)], 'step')).toEqual([]);
 });
 
-test('a between-message whose narration was already shown breaks the group', () => {
-  expect(viewGroups([v(0), { role: 'assistant', content: '', shown: 'already drawn' }, v(1)], 'step')).toEqual([]);
+test('a between-message that draws anything breaks the group', () => {
+  // A step with text of its own, a change, reasoning: what has been shown is never
+  // folded away.
+  expect(viewGroups([v(0), { role: 'assistant', content: '', parts: [{ kind: 'text', text: 'Now the tests.' }] }, v(1)], 'step')).toEqual([]);
+  expect(viewGroups([v(0), { role: 'assistant', content: '', parts: [{ kind: 'change', change: { title: 'a.ts', diff: '', added: 1, removed: 0, hidden: 0 } }] }, v(1)], 'step')).toEqual([]);
   expect(viewGroups([v(0), { role: 'assistant', content: '', reasoning: 'thinking about it' }, v(1)], 'step')).toEqual([]);
+  // …while a step that was nothing but its `Next:` line is taken in, whatever the
+  // markdown around it.
+  expect(viewGroups([v(0), { role: 'assistant', content: '', parts: [{ kind: 'text', text: '**Next:** lint\n' }] }, v(1)], 'step')).toEqual([{ head: 0, members: [0, 2], hidden: [1] }]);
 });
 
-test('groups form only in the step and hidden notes modes', () => {
+test('groups form only in the step notes mode', () => {
   const msgs = [narration, v(0), narration, v(1), narration, v(2)];
   expect(viewGroups(msgs, 'step')).toEqual([{ head: 1, members: [1, 3, 5], hidden: [0, 2, 4] }]);
-  expect(viewGroups(msgs, 'hidden')).toEqual([{ head: 1, members: [1, 3, 5], hidden: [0, 2, 4] }]);
-  expect(viewGroups(msgs, 'fold')).toEqual([]);
   expect(viewGroups(msgs, 'open')).toEqual([]);
 });
 
@@ -96,7 +101,7 @@ test('toggleGroup closes a group that reads open only via the global ^o state', 
 
 test('toggleGroup never touches another block\'s exception', () => {
   const g = { head: 2, members: [2, 4], hidden: [1, 3] };
-  const withOther = toggleFold(toggleFold(allFolded(), foldId(2, 'view', 0)), foldId(9, 'notes'));
+  const withOther = toggleFold(toggleFold(allFolded(), foldId(2, 'view', 0)), foldId(9, 'steps', 0));
   const closed = toggleGroup(withOther, g);
-  expect(isClicked(closed, foldId(9, 'notes'))).toBe(true);
+  expect(isClicked(closed, foldId(9, 'steps', 0))).toBe(true);
 });

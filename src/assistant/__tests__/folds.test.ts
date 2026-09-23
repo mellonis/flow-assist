@@ -50,7 +50,9 @@ test('a block that did not exist yet follows the global state', () => {
 });
 
 test('the blocks of one message are told apart, and so are two messages', () => {
-  const ids = [foldId(0, 'notes'), foldId(0, 'tools'), foldId(0, 'calls'), foldId(0, 'view'), foldId(0, 'view', 1), foldId(1, 'notes')];
+  const ids = [foldId(0, 'thinking'), foldId(0, 'steps'), foldId(0, 'steps', 1), foldId(0, 'tools'), foldId(0, 'calls'), foldId(0, 'view'), foldId(0, 'view', 1), foldId(1, 'steps')];
+  // A run keeps its number as the turn grows: an id never names another run later.
+  expect(foldId(3, 'steps', 2)).toBe('3:steps:2');
   expect(new Set(ids).size).toBe(ids.length);
 });
 

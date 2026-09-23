@@ -104,8 +104,8 @@ What the host does with it, and what it expects back:
   chat marks the turn with ✎. A refusal or a failed call must throw, in words the
   model can repeat to the person ("…Nothing was changed.").
 - **`ctx.reportChange({ title, before, after })`** — once the write succeeded, what it
-  changed. The chat keeps a `✎ title · +N −M` diff block above the answer; the model
-  never gets it. `ctx` has no `reportChange` outside a chat (the one-shot CLI), so call
+  changed. The chat keeps a `✎ title · +N −M` diff block in the turn, where the write
+  happened; the model never gets it. `ctx` has no `reportChange` outside a chat (the one-shot CLI), so call
   it as `ctx?.reportChange?.(…)`.
 - **Showing what a tool does — views.** A tool may hand the chat a block to draw, and
   update it while it runs. The chat draws it as one line that a click opens; it stays

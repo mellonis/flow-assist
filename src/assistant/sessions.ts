@@ -37,6 +37,8 @@ import path from 'node:path';
 import { configDir } from '../config/load.js';
 import { isImageRef, type ImageRef } from './images.js';
 import { readLegacyView, type ViewRecord } from './views.js';
+import { readChange, readParts, type TurnPart } from './step.js';
+import type { ChangeView } from './diff.js';
 
 export const SESSION_VERSION = 1;
 // What is kept of a long conversation: the summary plus this many latest messages
@@ -159,8 +161,8 @@ export function saveSession(dir: string, s: Session): SessionFingerprint {
     version: SESSION_VERSION,
     title: s.title || sessionTitle(s.messages),
     rev,
-    // `live` is the half-written text of an answer in progress — not a message yet.
-    messages: s.messages.slice(-KEEP_MESSAGES).map(({ live: _live, ...m }) => m),
+    // `live` is the half-written text of a round in progress — not a message yet.
+    messages: s.messages.slice(-KEEP_MESSAGES).map(({ live: _live, liveQuiet: _quiet, ...m }) => m),
     api: s.api.slice(-KEEP_MESSAGES),
   };
   const tmp = `${file}.${process.pid}.tmp`;
@@ -194,13 +196,38 @@ export function normalizeViews(messages: Record<string, unknown>[]): Record<stri
   });
 }
 
+// A turn's parts as a session keeps them (src/assistant/step.ts): the steps and the
+// changes, in the order they happened. A session saved before the turn was drawn in
+// time order kept them by category instead — the text of its tool rounds (`process`;
+// `shown`, the part of it that had been on screen) and every change of the turn
+// (`changes`) — and reads as those parts in that old order: the text, then the
+// changes. `step` (the one-line summary that went with it) is dropped. A part that is
+// not one a renderer can draw is dropped too, and a "message" that is not an object at
+// all is not a message.
+export function normalizeParts(messages: unknown[]): Record<string, unknown>[] {
+  return messages.filter((m): m is Record<string, unknown> => !!m && typeof m === 'object' && !Array.isArray(m)).map((m) => {
+    if (m.role !== 'assistant') return m;
+    const { process, shown, changes, step: _step, liveAs: _liveAs, live: _live, liveQuiet: _quiet, parts, ...rest } = m;
+    if (Array.isArray(parts)) {
+      const kept = readParts(parts);
+      return kept.length ? { ...rest, parts: kept } : rest;
+    }
+    const text = [process, shown].find((t): t is string => typeof t === 'string' && !!t.trim());
+    const old: TurnPart[] = [
+      ...(text ? [{ kind: 'text' as const, text }] : []),
+      ...(Array.isArray(changes) ? changes.map(readChange).filter((c): c is ChangeView => c !== null).map((change) => ({ kind: 'change' as const, change })) : []),
+    ];
+    return old.length ? { ...rest, parts: old } : rest;
+  });
+}
+
 export function loadSession(dir: string, id: string): Session | null {
   try {
     const s = JSON.parse(fs.readFileSync(fileOf(dir, id), 'utf8')) as Session;
     if (!s || s.version !== SESSION_VERSION || !Array.isArray(s.messages) || !Array.isArray(s.api)) return null;
     return {
       ...s,
-      messages: normalizeViews(s.messages),
+      messages: normalizeViews(normalizeParts(s.messages)),
       summary: typeof s.summary === 'string' ? s.summary : '',
       plan: Array.isArray(s.plan) ? s.plan : [],
       usage: s.usage ?? null,

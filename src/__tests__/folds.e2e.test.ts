@@ -209,8 +209,12 @@ test('opening a block taller than the window starts at its FIRST row, not its la
   // scrolled there, and a pass that never leaves the top proves nothing about the
   // click's own scroll-to-first-row behaviour (a prior version of this test did
   // exactly that, and passed whether or not the click scrolled anything).
-  ui.backend.wheel('down', 20, 8);
-  await settle(4);
+  // (Only when it IS at the top: a wheel step is several rows, and a fold line already
+  // a row or two down would be scrolled out of the window altogether.)
+  if (rowOf(ui, 'seq 1 60 ·') === contentTop(ui)) {
+    ui.backend.wheel('down', 20, 8);
+    await settle(4);
+  }
   const foldRow = rowOf(ui, 'seq 1 60 ·');
   expect(foldRow).not.toBe(contentTop(ui));
   await click(ui, foldRow);

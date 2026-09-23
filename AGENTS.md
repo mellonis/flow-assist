@@ -272,10 +272,11 @@ assistant nobody had asked for a board.
   view kept), which is what makes `^o for all` true rather than a second, still-capped
   state. Consecutive commands of a turn (no other call between them) fold under one
   `ƒ Ran N commands · ✓ 34.0 s` head — `Running N commands · $ cmd · 4 s` while one runs —
-  which takes the place of their step lines. Opened, they are the commands alone, each
-  its own block (`src/assistant/view-groups.ts`). Groups form only in the `step`/
-  `hidden` notes modes, and a message whose narration was already shown is never
-  folded into one.
+  which also takes in the rounds between them that drew nothing (their text was only
+  a `Next:` line). Opened, they are the commands alone, each its own block
+  (`src/assistant/view-groups.ts`). Groups form only in the `step` notes mode, and a
+  message that draws anything — a step's text, a change, reasoning — is never folded
+  into one.
 - **Whose claim excuses a y/n, and whose does not.** A tool pauses because its `write`
   flag says so, and the flag is set by whoever is entitled to say it. The `mcp` plugin
   keeps the two apart per server: `trusted` is "I believe THIS SERVER's own
@@ -524,8 +525,10 @@ hardest. Rules the `repo` and `gitlab` plugins hold, each with a test that tries
   The host diffs the two (`src/assistant/diff.ts`, pure: LCS over what is left
   between the common head and tail, 3 lines of context, 80 diff lines drawn and the
   rest counted, a text with a NUL named and not drawn) and the chat keeps a
-  `✎ title · +N −M` block with a ```diff fence above the answer, always open — never
-  foldable, it is the part of a turn the person most needs to see.
+  `✎ title · +N −M` block with a ```diff fence in the turn, where the write happened
+  (after the step that led to it, before whatever the model wrote next — see "A turn
+  is drawn in the order it happened"), always open — never foldable, it is the part
+  of a turn the person most needs to see.
   **How it is DRAWN** is the chat's (`changeLines` in `src/views/modals.ts`): the `✎`
   line is a title, not markdown — plain text, the path in the chat's accent, the counts
   dim — because `changeMarkdown` used to wrap the path in backticks and a path took the
@@ -538,7 +541,7 @@ hardest. Rules the `repo` and `gitlab` plugins hold, each with a test that tries
   would run past its box and stop being one terminal line. The hunks stay whole in
   `ChangeView.diff` — that is what a session keeps, and the header is the numbers'
   only source.
-  It is DISPLAY only: it rides on the display message (`changes`), never on the
+  It is DISPLAY only: it rides on the display message (a `change` in its `parts`), never on the
   tool's result, so the model's history does not grow by a copy of every edit — the
   e2e test asserts on what the model is sent next. A tool that threw has its reports
   dropped. Only the tool knows what "before" is (a file, an issue's description, a
@@ -868,6 +871,10 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   - A group's open state is DERIVED: open when its own id says so, or when a member
     was clicked open before the group formed around it, so a group never folds away
     what the person opened.
+  - The kinds (`FoldKind`): `thinking` (a message's reasoning), `steps` (one run of
+    steps — a message may hold several, numbered), `tools` / `calls` (the trail and
+    its cap), `view` (a command's block, numbered), `group` (a group's head). The
+    `▸ notes` fold is gone with the category layout.
   - A block's id names its message by its place among the messages that are DRAWN
     (`foldId`). Not by the message OBJECT — the chat replaces a message whenever it
     changes, which is what makes `rowCache` correct — and not by its raw index: the
@@ -899,69 +906,78 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     callback, where the box has just measured the rows the fold added or took away.
   - Following the bottom belongs to a message ARRIVING (`scrollToEnd` on the count of
     questions asked), never to rows appearing above the viewport.
-- **What it said between tool calls is ONE line: the step** (`src/assistant/step.ts`,
-  pure; the chat owns the state and the view draws the row). Every answer used to carry
-  a `▸ notes` header and the last two lines of prose under it, so the header was there
-  for text that is mostly noise while the one thing worth seeing — what it is about to
-  do — was inside the fold. It is now one dim row: the last thing the model SAID it is
-  doing. The naive version of that line flickered (six changes over one turn, growing
-  mid-sentence, and picking up the final answer as it streamed); what is drawn was
-  measured against a recording of a live turn, and three rules make the difference:
-  - **Only a complete sentence is shown** — one ending `.`/`!`/`?`. The narration is
-    read as a PREFIX of what is being written: every line but the last was closed by
-    its newline, the last only by its own punctuation. While a new sentence is being
-    written the previous one stays. The exception is a **`Next:` line**, which the
-    prompt asks for before a tool call and which a model often leaves unpunctuated: its
-    newline closes it, and the `Next:` itself is stripped — it is protocol, not
-    something to read.
-  - **At most one change a second.** A change that comes sooner waits and lands when
-    the second is up (`offerStep` / `dueStep` / `stepWaitMs`, with a timer in the chat);
-    nothing is lost and nothing flickers. The state is the CONVERSATION's — never
-    module-level — and every turn starts it again, so a turn's first step is immediate.
-  - **The answer's own text never feeds the line.** Only the narration of rounds that
-    carried tool calls does — what `onLiveCommit` commits to `process`, never a round's
-    `live` or the final content. That was the prototype's real bug. Reasoning does not
-    feed it either: the status line already says `thinking…`.
-  The line is chrome — `selectable: false`, so a drag over an answer copies what the
-  model wrote and not the host's account of it — and exactly ONE terminal row, cut with
-  `…` rather than wrapped. A turn that narrated nothing, or nothing finished, draws no
-  line at all.
-  - **The rounds are kept apart where `process` is accumulated** (`joinNarration`): two
-    chunks appended with nothing between them read as one broken sentence ("…how many
-    there are.Now I will count them…"), in the fold as much as in the line.
-  - **`plugins.assistant.notes` says how much is drawn, `/notes [step|fold|open|hidden]`
-    changes it for the conversation** — the pattern `/fullscreen` uses: the config is
-    where a conversation starts, the command moves it from there, nothing is saved, and
-    `/clear` comes back to the config's answer. `step` (the default) is the line;
-    `fold` is the older `▸ notes` header with the last two lines under it; `open` is
-    the whole narration unfolded; `hidden` draws none of it, open or folded (the key
-    still opens the tool calls and the views). Opened, `step` shows what `open` shows
-    — the line is a summary of what is then fully on screen. The mode is in the
-    `rowCache` key, or `/notes` would redraw only the message being written. It
-    belongs to the CONVERSATION, like the auto mode: nothing is saved, and `/clear`,
-    `/resume` and a change of task all go back to what the config says.
-  - **What a round's text IS, is decided as it ARRIVES — and what has been shown is
-    never taken away.** It used to be decided at the END of the round, when the tool
-    calls were in: until then the text was drawn as the ANSWER, and a round that turned
-    out to carry a call had the paragraph the person was reading reclassified and
-    collapsed into the line above. A blink, and a lost sentence. Three rules:
-    - A line starting `Next:` is narration from its first characters (`liveKind` in
-      `step.ts`) and is never drawn as answer text — the shape the prompt asks for is
-      what makes this cheap. `unknown` is the handful of characters that could still
-      become `Next:`; nothing is drawn for them, and that is a few tokens nobody sees.
-    - A model that ignores the shape is caught mid-round instead: `agentChat` reports
-      `onRoundKind('tools')` the moment the first `tool_calls` fragment arrives.
-    - A round that ends in tool calls and had already DRAWN its text keeps it where it
-      was, dimmed in place (`shown` on the message), as well as in the fold. The step
-      line is not drawn for a sentence that is standing there already — it is a summary
-      OF the narration, not a copy beside it. The answer is only ever added to
-      (`liveAs` says which shelf the streaming text is on); a commit that says "this
-      was the answer" just stops the dimming.
+- **A turn is drawn in the order it happened** (`src/assistant/step.ts`, pure; the chat
+  owns the parts and the view lays them out). A whole turn is one assistant message, and
+  it used to be laid out by CATEGORY — a step line, the text already shown, every ✎ diff
+  of the turn, then the answer. A round's text that turned out to carry a tool call was
+  moved into the "shown" slot, above EVERY diff of the turn: with a tall diff it left
+  the screen, and the ✎ block was the last thing on it again, as if a second write had
+  happened. The message now carries its `parts` in order — the text of each round that
+  went on to call a tool (a STEP) and each change a write reported — then `live` (the
+  round being written) and `content` (the answer):
+  ```
+    ▸ I will change b to 42.
+    ✎ clone/app.ts · +1 −1
+    (diff)
+    ▸ All clear, nothing else uses b.  (2 steps)
+  ƒ Done: b is now 42.
+  ```
+  - **A round's text never moves.** While it streams nobody knows what it is, so it is
+    drawn in full, DIM, with a live mark (the spinner) in the gutter — never the
+    answer's `ƒ`. The moment a tool-call fragment arrives (`onRoundKind` — `agentChat`
+    reports it on the first fragment, long before the round ends) it is a step, and it
+    joins its run where it stands. A round that ends with no call is the answer: the
+    same rows, now under `ƒ` and in the normal colour. The same `shownText` lays out a
+    round streaming, a step and the answer, so nothing reflows when a round ends.
+  - **Steps come in runs.** Consecutive steps with nothing visible between them are one
+    RUN; a ✎ change ends it, and so does a command's block (a message of its own). The
+    trail line stays under the answer, where it always was.
+  - **`step` (the default) folds each run to ONE dim row** at the place the run began:
+    `▸ ` + the newest step (its last finished sentence, else its first line) and, for
+    more than one, `(N steps)` — no count for a run of one (`runRowText`). The row is
+    chrome (`selectable: false`) and exactly one terminal row, the summary cut so the
+    count always fits. When a new step joins a run the row stays where it is and only
+    says more; the step's own streaming rows go into it. Each run is a fold of its own,
+    `foldId(at, 'steps', n)` — `n` is the run's number within its message, which never
+    changes as the turn grows because parts are only appended. A click opens that run
+    alone: every step in full, dim, where it happened (a click on any of its rows
+    folds it again); `^o` opens and closes every run with everything else.
+  - **`open` draws every step in full, in the normal colour** — no folds, nothing there
+    is clickable. The mode is the CONVERSATION's: `plugins.assistant.notes` says where
+    a conversation starts, `/notes [step|open]` moves it, nothing is saved, and
+    `/clear`, `/resume` and a change of task come back to the config's answer. The
+    modes `fold` and `hidden` were dropped; a config file that still says either reads
+    as `step` (`notesMode`), and `/notes fold` is refused. The mode is in the
+    `rowCache` key, and so is every run's open bit.
+  - **A `Next:` line is never drawn** — not while it streams, not in a step, not
+    opened. A last line that could still grow into one (`N`, `Nex`…) is held back until
+    it says what it is: a few characters nobody sees, rather than a line that appears
+    and vanishes. A step that was nothing but its `Next:` line draws nothing, breaks no
+    run, and is what a group of commands may take in (`view-groups.ts`).
+  - **The reasoning is a block of its own** (`foldId(at, 'thinking')`): a `▸ thinking`
+    header in `step` that a click or `^o` opens, always open in `open`.
+  - **Round bookkeeping lives outside the state updaters.** Whether the round being
+    streamed carries a call is a ref (`roundToolsRef`), set by `onRoundKind`, read by
+    `onLive` when it FIRES and handed to its updater, reset by `onLiveCommit`. The
+    updaters are pure functions of the list. They used to mutate round state that
+    `onLiveCommit` read synchronously, so a round whose tokens and call arrived in one
+    batch could be read before its own updater had run — its text lost and the next
+    round taken for it. Which rounds survived depended on how the network cut the
+    stream.
+  - **A round cut off** by Esc or an error keeps its text where it was drawn: a round
+    known to carry a call becomes a step, any other is what the answer had come to,
+    under the `stopped (Esc)` line.
+  - **Sessions keep the parts in order.** A session saved before kept the text of the
+    tool rounds (`process`, or `shown`) and the turn's `changes`; it reads as those
+    parts in that old order — the text, then the changes (`normalizeParts`). A part a
+    renderer cannot draw, or a "message" that is not an object, is dropped on load;
+    `live` and `liveQuiet` are never saved.
   - **The model is asked for the shape, not for silence.** `baseStatic()` used to tell
     it not to narrate; it narrated anyway, having nothing else to write between calls.
     It now asks for ONE short line starting `Next:` before a tool call and nothing else
-    between calls, and for the final answer not to start with one. So there is one
-    sentence per step and far less to fold. Whether the instruction holds over a long
+    between calls, and for the final answer not to start with one. The chat never
+    draws that line, so a model that keeps to the shape leaves only what it did on
+    screen; one that writes prose anyway leaves steps. Whether the instruction holds over a long
     turn, and that it costs no tool call, is a question for a live run
     (`scripts/eval-tool-use.ts`); the e2e test only holds the host to SENDING it.
 - **⇧⇥ steps the auto mode** — how much of a turn runs without the y/n (the rules are

@@ -11,10 +11,7 @@ import { addTrigger, chatUser } from '../loader/registry.js';
 import { bgActiveCount } from '../loader/tools-core.js';
 import { autoBadge, autoCommand, autoConfirms, autoSaid, nextAutoMode, type AutoMode } from '../assistant/auto.js';
 import { createPlan, todoGlyph } from '../assistant/plan.js';
-import {
-  dueStep, emptyStep, joinNarration, liveKind, notesCommand, notesMode, notesSaid, offerStep, stepWaitMs,
-  type LiveKind, type NotesMode, type StepState,
-} from '../assistant/step.js';
+import { notesCommand, notesMode, notesSaid, type NotesMode, type TurnPart } from '../assistant/step.js';
 import { apiHistory, compactConversation, chatLanguage, requestTools, transcriptSoFar } from '../assistant/agent.js';
 import { createToolSet, toolLoadingMode } from '../assistant/tool-loading.js';
 import { copyTarget, copyToClipboard } from '../assistant/copy.js';
@@ -97,21 +94,21 @@ export function shellCommandOf(name: string, args: string): string | null {
 }
 
 // A chat message. `role` is the OpenAI role; `content` may be null when a message
-// carries tool_calls. Extra fields ride along (live/reasoning/process/toolRuns/…).
+// carries tool_calls. Extra fields ride along (live/reasoning/parts/toolRuns/…).
 interface ChatMsg {
   role: string;
   content?: string | null;
+  // The round being written now, and whether it is known to carry a tool call — then
+  // it is a step, not the answer (src/assistant/step.ts).
   live?: string;
+  liveQuiet?: boolean;
   reasoning?: string;
-  process?: string;
+  // The turn so far in the order it happened: the steps (the text of each round that
+  // went on to call a tool) and the changes its writes reported. Display only.
+  parts?: TurnPart[];
   toolRuns?: unknown[];
-  // The step line: the last finished sentence of the narration this message carries
-  // (src/assistant/step.ts). Display only, like `process` itself.
-  step?: string;
   duration?: number;
   stopped?: boolean;
-  // What the turn's writes changed — drawn as diff blocks above the answer.
-  changes?: ChangeView[];
   // A block a tool asked the host to draw (role 'view') — a command's output so far.
   views?: ViewRecord[];
   // The call a DISCARDED view belonged to — kept on the message so a later final for
@@ -134,14 +131,6 @@ function answerAt(list: ChatMsg[]): number {
   return -1;
 }
 
-// The message the narration belongs to — the last the assistant spoke in, stamped
-// with its duration or not. A step held back by the one-a-second floor lands after
-// the turn has ended as easily as during it, and it belongs to the message that was
-// narrating either way. −1 when the assistant has not spoken yet.
-function narratedAt(list: ChatMsg[]): number {
-  for (let i = list.length - 1; i >= 0; i--) if (list[i]!.role === 'assistant') return i;
-  return -1;
-}
 
 // The app-glue dispatched to by the :ask command.
 interface AssistantCtx {
@@ -198,8 +187,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
         description: 'Open the chat; with text, send it',
       },
     ],
-    // `details` opens what the chat folds — the narration, a turn's tool calls, a
-    // command's capped output — and closes it again. It is an ACTION, not a key
+    // `details` opens what the chat folds — the runs of steps, the reasoning, a turn's
+    // tool calls, a command's capped output — and closes it again. It is an ACTION, not a key
     // written into the handler, so `config.keys.details` moves it and every hint
     // draws the cap of whatever it is bound to. `^r` stays beside `^o`: it is in
     // every hint people have read so far, and a key that quietly stopped working
@@ -207,14 +196,16 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
     keys: { chat: 'F', details: ['ctrl+o', 'ctrl+r'] },
     // config.plugins.assistant: `fullscreen` — the chat takes the whole terminal from
     // the start (`/fullscreen on|off` switches it for the session); `notes` — how the
-    // model's narration between tool calls is drawn (`/notes` switches it for the
+    // text the model writes between tool calls is drawn (`/notes` switches it for the
     // conversation); `colors` — the chat's palette override
     // (src/playback/theme.ts); `runOutputLines` — how many lines of a command's output
     // a click on its block shows (a display cap of its own, quite apart from
     // `shell.maxChars`, which is how much the MODEL is given); `^o` opens it in full.
     configSchema: z.object({
       fullscreen: z.boolean().optional(),
-      notes: z.enum(['step', 'fold', 'open', 'hidden']).optional(),
+      // `fold` and `hidden` were dropped; a config file that still says one is read as
+      // `step` (`notesMode`) — the plugin's config is checked only when it is written.
+      notes: z.enum(['step', 'open']).optional(),
       runOutputLines: z.number().int().positive().optional(),
       colors: z.record(z.string(), z.unknown()).optional(),
     }).optional(),
@@ -431,7 +422,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const [autoMode, setAutoModeState] = f.useState<AutoMode>('ask');
           const autoModeRef = f.useRef<AutoMode>(autoMode);
           const setAutoMode = (m: AutoMode) => { autoModeRef.current = m; setAutoModeState(m); };
-          // ── The narration (src/assistant/step.ts) — how what the model says between
+          // ── The steps (src/assistant/step.ts) — how the text the model writes between
           // tool calls is drawn. `plugins.assistant.notes` is where a conversation
           // starts, `/notes` moves it for this one only, and `/clear` puts it back
           // where the config says. The ref is for the key handler and the command,
@@ -440,56 +431,16 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const [notes, setNotesState] = f.useState<NotesMode>(configNotes());
           const notesRef = f.useRef<NotesMode>(notes);
           const setNotes = (m: NotesMode) => { notesRef.current = m; setNotesState(m); };
-          // The step line's own state: what it says, when it last changed, and a change
-          // waiting for the floor to pass. It is this CONVERSATION's — never module
-          // state — and every turn starts it again, so a turn's first step is never
-          // held back and the floor only ever guards the flicker within one turn.
-          // `narrationRef` accumulates the same text the message's `process` does, out
-          // here where it can be read without a render.
-          const stepRef = f.useRef<StepState>(emptyStep());
-          const narrationRef = f.useRef('');
-          // What the round being streamed IS, and whether any of it was drawn as the
-          // answer before that was known. A round used to be classified at its END,
-          // and a round that turned out to carry a tool call had the paragraph the
-          // person was reading taken away again — so it is decided on arrival, from
-          // the `Next:` shape the prompt asks for and from the tool-call fragments the
-          // agent reports the moment they start arriving. `drawn` is what makes the
-          // difference between text that was never shown (nothing to keep) and text
-          // that was (kept where it is, dim).
-          const roundRef = f.useRef<{ kind: LiveKind; drawn: boolean }>({ kind: 'unknown', drawn: false });
-          const resetRound = () => { roundRef.current = { kind: 'unknown', drawn: false }; };
-          const stepTimer = f.useRef<ReturnType<typeof setTimeout> | null>(null);
-          const clearStepTimer = () => { if (stepTimer.current) { clearTimeout(stepTimer.current); stepTimer.current = null; } };
-          const resetStep = () => { clearStepTimer(); stepRef.current = emptyStep(); narrationRef.current = ''; resetRound(); };
-          // A change the floor held back is not dropped: it lands on the message that
-          // was narrating as soon as the second is up, whether or not the turn is still
-          // running.
-          const scheduleStep = () => {
-            const wait = stepWaitMs(stepRef.current, Date.now());
-            if (!wait) return;
-            stepTimer.current = setTimeout(() => {
-              stepTimer.current = null;
-              stepRef.current = dueStep(stepRef.current, Date.now());
-              const shown = stepRef.current.shown;
-              setMessages((cur) => {
-                const next = cur.slice();
-                const at = narratedAt(next);
-                if (at >= 0) next[at] = { ...next[at]!, step: shown };
-                return next;
-              });
-              f.notify();
-            }, wait);
-          };
-          // One round of narration has arrived; what the line should say now comes back.
-          // Only rounds that carried tool calls reach here — the answer's own text never
-          // feeds the line, which is what made the first version of it flicker through
-          // the answer as it streamed.
-          const advanceStep = (narration: string): string => {
-            clearStepTimer();
-            stepRef.current = offerStep(stepRef.current, narration, Date.now());
-            scheduleStep();
-            return stepRef.current.shown;
-          };
+          // Whether the round being streamed carries a tool call — heard the moment
+          // its first fragment arrives (`onRoundKind`), and from then on its text is a
+          // step, not the answer. Kept HERE, beside the state and never inside a
+          // `setMessages` updater: an updater runs when React gets to it, and a round
+          // whose tokens and tool call arrived in one batch used to be read before its
+          // own updater had run — its text was lost and the NEXT round was taken for
+          // it. Every updater is a pure function of the list; what it needs to know is
+          // read here, when the callback fires, and handed to it.
+          const roundToolsRef = f.useRef(false);
+          const resetRound = () => { roundToolsRef.current = false; };
           // ── Folds ── the rows a click lands on, and what opening one does to the
           // scroll. The rows are laid out by the view and cached per message object,
           // so asking for them here is a lookup, not a second layout.
@@ -736,8 +687,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             resetLiveViews(); // the calls they tracked belong to the conversation being left
             resetImages(s.images ?? [], s.imageSeq ?? 0);
             setAutoMode('ask'); // another conversation is another conversation's mode
-            setNotes(configNotes()); // and its own answer to how much narration is drawn
-            resetStep(); // the step line belonged to the turn that is being left
+            setNotes(configNotes()); // and its own answer to how the steps are drawn
+            resetRound(); // the round being written belonged to the conversation being left
             setFolds(allFolded()); // and the exceptions pointed into a conversation that is gone
             usageRef.current = s.usage;
             historyRef.current = s.prompts.slice();
@@ -850,9 +801,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // Between tool calls the model writes prose, because it has nothing else to
             // write there. Asking it not to narrate did not work — it narrated anyway,
             // at whatever length. So it is asked for a SHAPE instead: one short `Next:`
-            // line before a call, which is exactly what the chat draws as the step line
-            // (src/assistant/step.ts), and nothing else. The final answer is not a
-            // step, so the line is asked for before a call only.
+            // line before a call and nothing else — the chat never draws that line
+            // (src/assistant/step.ts), so a model that keeps to it leaves nothing but
+            // what it did on screen. The final answer is not a step, so the line is
+            // asked for before a call only.
             const chatLang = chatLanguage((f.config as Record<string, unknown>).ai as Record<string, unknown>);
             const directive = `Always respond in ${chatLang}. Answer concisely and to the point: only the outcome, and no retelling of your own moves in the final answer. Before you call a tool, write ONE short line that starts with "Next:" and says what you are about to do — nothing else between calls, no plans, no commentary, no repetition of what you already said. Do not begin the final answer with "Next:". Never claim you changed, created or deleted something unless a write tool actually returned success for it; if a write was declined or errored, say so instead. If the user asks why you did not run a tool, or says they do not see its result, do NOT just restate that the tool was already called («it’s already done», «it was scheduled»): actually re-run it now, or ask the user to confirm the repeat («run it again?»). Never claim a result you have not seen returned.`;
             // Write-language directive. The tracker named tracker tools here; the host is
@@ -1043,7 +995,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             setEmptyNotice('');
             setToolCount(0);
             setTurnTokens(0); // what the last turn cost is not what this one costs
-            resetStep(); // this turn narrates for itself; its first step is immediate
+            resetRound(); // the turn starts with a round nobody knows anything about yet
             // Tick the indicator every 120ms: spinner frame + tenths of a second of
             // whatever is running now (`segRef`), not of the whole turn.
             beginSegment();
@@ -1137,11 +1089,14 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   flushLive();
                   const added = run.changes ?? [];
                   if (!added.length) { f.notify(); return; }
+                  // In the turn's own order: under the step that led to the write, above
+                  // whatever the model writes next.
+                  const changed: TurnPart[] = added.map((change) => ({ kind: 'change', change }));
                   setMessages(cur => {
                     const next = cur.slice();
                     const last = next[next.length - 1];
-                    if (last?.role === 'assistant') next[next.length - 1] = { ...last, changes: [...((last.changes as ChangeView[] | undefined) ?? []), ...added] };
-                    else next.push({ role: 'assistant', content: '', changes: added });
+                    if (last?.role === 'assistant') next[next.length - 1] = { ...last, parts: [...(last.parts ?? []), ...changed] };
+                    else next.push({ role: 'assistant', content: '', parts: changed });
                     return next;
                   });
                   f.notify();
@@ -1166,21 +1121,19 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   if (info.usage) setTurnTokens(turnTokensRef.current + info.usage.promptTokens + info.usage.completionTokens);
                   (f.services as Record<string, any>).pushLog?.(`[round ${info.index}] finish=${info.finishReason} toolCalls=${info.toolCalls} content=${info.contentLen}ch${info.usage ? ` tokens=${info.usage.promptTokens + info.usage.completionTokens}` : ''}`);
                 },
-                // Round content streams LIVE (the agent calls onLive per token). Which this
-                // is — a retelling of moves or the answer — onLiveCommit decides at the end
-                // of the round. We accumulate in `live`; while alive it renders in the fold,
-                // on commit it goes to `process` (retelling) or `content` (answer).
+                // Round content streams LIVE (the agent calls onLive per token) into `live`,
+                // drawn in full and dim with a live mark until the round says what it is:
+                // `onRoundKind` — it carries a tool call, so it is a step — or the round
+                // ending without one (`onLiveCommit(…, true)`) — the answer.
                 // This round carries tool calls — heard the moment the first fragment
-                // of one arrives. A model that ignores the `Next:` shape is caught
-                // here instead of at the end of the round: whatever of its text is
-                // already on screen stays where it is, dim, and the rest of it is
-                // never drawn as the answer.
+                // of one arrives. Whatever of its text is on screen stays exactly where
+                // it is: in `step` it joins its run's row, in `open` it keeps its rows.
                 onRoundKind: () => {
-                  roundRef.current.kind = 'notes';
+                  roundToolsRef.current = true;
                   setMessages(cur => {
                     const next = cur.slice();
                     const last = next[next.length - 1];
-                    if (last?.role === 'assistant' && last.live) next[next.length - 1] = { ...last, liveAs: roundRef.current.drawn ? 'notes' : '' };
+                    if (last?.role === 'assistant' && last.live) next[next.length - 1] = { ...last, liveQuiet: true };
                     return next;
                   });
                   f.notify();
@@ -1189,24 +1142,14 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   if (!delta) return;
                   endToolSegment(); // the tool is done: the model is writing
                   setPhase('writing');
+                  // Read now, not in the updater (see `roundToolsRef`): a tool call that
+                  // came before the text makes the text a step from its first character.
+                  const quiet = roundToolsRef.current;
                   setMessages(cur => {
                     const next = cur.slice();
                     const last = next[next.length - 1];
-                    const live = (last?.role === 'assistant' ? (last.live || '') : '') + delta;
-                    // What this text is, worked out from the text itself. `unknown` is
-                    // the handful of characters that could still turn into `Next:`:
-                    // nothing is drawn for them, and that is a few tokens nobody sees
-                    // rather than a paragraph that appears and vanishes.
-                    const r = roundRef.current;
-                    if (r.kind !== 'notes') r.kind = liveKind(live);
-                    if (r.kind === 'answer') r.drawn = true;
-                    const liveAs: '' | 'answer' | 'notes' = r.kind === 'answer' ? 'answer' : r.drawn ? 'notes' : '';
-                    // The step line is NOT offered here: it is worked out when the
-                    // round commits (`onLiveCommit`). Offering it per token schedules
-                    // the floor's timer per token, and the line then lands on a
-                    // message the next token has already replaced.
-                    if (last?.role === 'assistant') next[next.length - 1] = { ...last, live, liveAs };
-                    else next.push({ role: 'assistant', content: '', live: delta, liveAs });
+                    if (last?.role === 'assistant') next[next.length - 1] = { ...last, live: (last.live || '') + delta, liveQuiet: quiet || last.liveQuiet === true };
+                    else next.push({ role: 'assistant', content: '', live: delta, liveQuiet: quiet });
                     return next;
                   });
                 },
@@ -1223,47 +1166,33 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                     return next;
                   });
                 },
-                // End of a round: where to put the live content. isAnswer=true — the final
-                // answer (in content), false — the retelling of moves (in process).
+                // End of a round: where its text goes. isAnswer=true — the final answer
+                // (`content`), false — a step, appended to the turn's parts in its place.
+                // Either way the rows it was drawn with stay where they are.
                 onLiveCommit: (text: string, isAnswer: boolean) => {
                   // contentRef is fixed SYNCHRONOUSLY (not in the setMessages updater):
                   // react defers the updater to render, while send() reads contentRef in
                   // finally right after await — there it would still be empty, and the
                   // «limit of steps» warning popped even on a normal answer.
                   if (isAnswer) contentRef.current = text;
-                  // The rounds of narration are kept APART: appended with nothing
-                  // between them their sentences ran together ("…there are.Now I will
-                  // count them…"), in the fold and in the step line alike. The step is
-                  // worked out here rather than in the updater below, which react may
-                  // call more than once and which must stay a pure function of the list.
-                  const narration = isAnswer ? '' : joinNarration(narrationRef.current, text);
-                  if (!isAnswer) narrationRef.current = narration;
-                  const step = isAnswer ? '' : advanceStep(narration);
-                  // Narration that was DRAWN before its round was known stays where it
-                  // was drawn: the commit moves it into the fold as it always did, and
-                  // keeps a copy here so the rows the person was reading do not go.
-                  const keep = !isAnswer && roundRef.current.drawn ? text : '';
+                  // The next round starts knowing nothing — reset here, where the
+                  // callback fires, never in the updater below.
                   resetRound();
+                  const step: TurnPart[] = !isAnswer && text.trim() ? [{ kind: 'text', text }] : [];
                   setMessages(cur => {
                     const next = cur.slice();
                     const last = next[next.length - 1];
                     if (last?.role !== 'assistant') {
-                      // A fresh message (a tool's view landed under the last one): it
-                      // carries this round's narration only, while the step line stays
-                      // the turn's — the last thing it said it is doing.
-                      next.push({ role: 'assistant', content: isAnswer ? text : '', process: isAnswer ? '' : text, ...(isAnswer ? {} : { step, ...(keep ? { shown: keep } : {}) }) });
+                      // A fresh message (a tool's view landed under the last one). It is
+                      // pushed even for a round that said nothing, as it always was: the
+                      // turn's trail and how it ended go on the message after the view.
+                      next.push({ role: 'assistant', content: isAnswer ? text : '', ...(step.length ? { parts: step } : {}) });
                       return next;
                     }
-                    if (isAnswer) {
-                      // The answer is only added to, never replaced: the rows stay
-                      // exactly as they were drawn and simply stop being provisional.
-                      next[next.length - 1] = { ...last, content: text, live: '', liveAs: '' };
-                    } else {
-                      next[next.length - 1] = {
-                        ...last, process: joinNarration(last.process, text), live: '', liveAs: '', step,
-                        ...(keep ? { shown: joinNarration(last.shown as string | undefined, keep) } : {}),
-                      };
-                    }
+                    // The answer is only added to, never replaced: the rows stay exactly
+                    // as they were drawn and simply stop being provisional.
+                    if (isAnswer) next[next.length - 1] = { ...last, content: text, live: '', liveQuiet: false };
+                    else next[next.length - 1] = { ...last, parts: [...(last.parts ?? []), ...step], live: '', liveQuiet: false };
                     return next;
                   });
                 },
@@ -1337,7 +1266,17 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // the line under it says it was stopped.
               const spent = turnTokensRef.current;
               setMessages(cur => {
-                const next = cur.slice();
+                // A round cut off by Esc or an error never said what it was. Its text
+                // stays where it was drawn: a round known to carry a tool call is a
+                // step; any other is what the answer had come to (and the line under
+                // it says it was stopped).
+                const next = cur.map((m): ChatMsg => {
+                  if (m.role !== 'assistant' || !m.live) return m;
+                  const { live, liveQuiet, ...rest } = m;
+                  return liveQuiet
+                    ? { ...rest, parts: [...(rest.parts ?? []), { kind: 'text', text: live }] }
+                    : { ...rest, content: `${rest.content ?? ''}${live}` };
+                });
                 const at = answerAt(next);
                 if (at >= 0) next[at] = { ...next[at]!, duration: finalMs, ...(spent ? { tokens: spent } : {}), ...(aborted ? { stopped: true } : {}), ...(roundLimit ? { roundLimit } : {}) };
                 return next;
@@ -1651,13 +1590,12 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 return;
               }
               case 'notes': {
-                // How the narration is drawn, for THIS conversation. The config key is
-                // where a conversation starts; this moves it from there and nothing is
-                // saved — /clear comes back to the config's own answer. The bare
-                // command says where things stand rather than guessing at a next rung:
-                // four modes have no obvious order to step through.
+                // How the steps are drawn, for THIS conversation. The config key is where
+                // a conversation starts; this moves it from there and nothing is saved —
+                // /clear comes back to the config's own answer. The bare command says
+                // where things stand rather than toggling.
                 const want = notesCommand(arg);
-                if (!want) { setError('/notes takes step, fold, open or hidden — or nothing to say which is on'); return; }
+                if (!want) { setError('/notes takes step or open — or nothing to say which is on'); return; }
                 const next = want === 'say' ? notesRef.current : want;
                 setNotes(next);
                 setField('');
@@ -1778,8 +1716,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 setCursor(0);
                 setShellMode(false); // a fresh conversation opens on a plain prompt
                 setAutoMode('ask'); // and asks again: the mode was granted for the work just cleared
-                setNotes(configNotes()); // the narration goes back to what the config asks for
-                resetStep(); // the step line described work that is gone
+                setNotes(configNotes()); // the steps go back to what the config asks for
+                resetRound(); // the round being written belonged to work that is gone
                 setError(null);
                 setEmptyNotice('');
                 setToolCount(0);
@@ -1876,8 +1814,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               resetLiveViews(); // the calls they tracked belong to the other task
               resetImages();
               setAutoMode('ask'); // the new task has not been given the old one's leeway
-              setNotes(configNotes()); // nor kept the narration the old one was set to
-              resetStep();
+              setNotes(configNotes()); // nor kept the notes mode the old one was set to
+              resetRound();
               setFolds(allFolded()); // the blocks a click had opened belong to the other task
               msgsRef.current = [];
               setMessages([]);
@@ -2225,7 +2163,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             turnTokens,
             // How many lines a block a CLICK opens shows; `^o` opens it in full.
             viewLines: Number((f.config.plugins as Record<string, { runOutputLines?: unknown }> | undefined)?.assistant?.runOutputLines) || VIEW_CAPS.folded,
-            // How the narration between tool calls is drawn — one step line by default.
+            // How the steps between tool calls are drawn — each run folded by default.
             notes,
             // Every renderer the chat can draw a view with (the host's own `console`
             // plus each plugin's, collected at boot — src/loader/registry.ts). The

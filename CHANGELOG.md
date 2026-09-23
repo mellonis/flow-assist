@@ -5,6 +5,24 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **A turn reads in the order it happened, and nothing it wrote jumps away.** A turn
+  used to be laid out by kind — what the assistant said, then every diff, then the
+  answer — so text that turned out to come before a tool call moved up above all the
+  diffs of the turn. With a tall diff it left the screen, and the chat looked as if
+  text had been lost or a file written twice. Now what it said, each diff and the
+  answer stand in the order they came, and a round's text stays where it was drawn:
+  dim, with a spinner beside it, until it is known to be the answer, which then gets
+  its `ƒ`. What it said between tool calls folds to one quiet line per stretch —
+  a diff or a command ends a stretch — showing the latest thing it said and how many
+  steps there were (`▸ Now the tests.  (3 steps)`, no count for one); a click opens
+  that stretch where it stands, `^o` opens them all. `/notes open` shows every step in
+  the normal colour. The `Next: …` lines the assistant writes before a tool call are
+  never shown. `/notes fold` and `/notes hidden` are gone — a config that still says
+  either reads as the default — and so is the separate step line above the answer.
+  Sessions keep the new order; older ones still open. A round whose text and tool call
+  arrived together could also be lost, depending on how the network split the reply;
+  it is kept now.
+
 - **Scrolling the chat is about twice as fast.** The app ran React's development
   build — Bun leaves `NODE_ENV` unset, and React takes that as "development", with
   checks and bookkeeping on every render. `flow-assist` and `bun src/cli.ts` now run

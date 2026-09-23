@@ -2,9 +2,11 @@
 // `scripts/ui-frames.ts`: the REAL app on a test backend, with only the network
 // replaced. No key, no cost.
 //
-// A model turn is a list of steps: text (streamed in chunks), a tool call, or a
-// `hold` that freezes the stream until `release()` — which is how a test acts, or a
-// frame is taken, "while the answer is still coming".
+// A model turn is a list of steps: text (streamed in chunks), a tool call, text and a
+// tool call in ONE chunk (`{ text, tool, args }` — a provider may send them together,
+// and the chat must not lose the text when it does), or a `hold` that freezes the
+// stream until `release()` — which is how a test acts, or a frame is taken, "while the
+// answer is still coming".
 
 import fs from 'node:fs';
 import os from 'node:os';
@@ -17,7 +19,7 @@ import { renderApp } from '../../runtime/app.tsx';
 import type { ClipboardImage } from '../../assistant/images.ts';
 import { renderChatModal, renderHelp, renderLogModal, renderReminder } from '../../views/modals.ts';
 
-export type Step = { text: string } | { tool: string; args: unknown } | { hold: true };
+export type Step = { text: string } | { tool: string; args: unknown } | { text: string; tool: string; args: unknown } | { hold: true };
 export type Turn = Step[];
 
 // ─── the scripted model ───────────────────────────────────────────────────────
@@ -58,16 +60,24 @@ export class ScriptedModel {
             self.gate?.();
           });
           let calls = 0;
+          // From a text-and-call step on, events are held back and go out in ONE
+          // network chunk — up to the next hold, the end of the round included — as a
+          // provider's last packet may carry all of it.
+          let batch: string | null = null;
+          const emit = (o: unknown) => { if (batch === null) send(c, o); else batch += `data: ${JSON.stringify(o)}\n\n`; };
+          const flushBatch = () => { if (batch) c.enqueue(enc.encode(batch)); batch = null; };
           for (const step of turn) {
             if (stopped) return;
-            if ('hold' in step) await new Promise<void>((r) => { self.gate = r; });
-            else if ('text' in step) for (const piece of step.text.match(/.{1,12}/gs) ?? []) send(c, { choices: [{ delta: { content: piece }, finish_reason: null }] });
-            else send(c, { choices: [{ delta: { tool_calls: [{ index: calls, id: `call_${calls++}`, function: { name: step.tool, arguments: JSON.stringify(step.args) } }] }, finish_reason: null }] });
+            if ('hold' in step) { flushBatch(); await new Promise<void>((r) => { self.gate = r; }); }
+            else if ('text' in step && 'tool' in step) { batch ??= ''; emit({ choices: [{ delta: { content: step.text, tool_calls: [{ index: calls, id: `call_${calls++}`, function: { name: step.tool, arguments: JSON.stringify(step.args) } }] }, finish_reason: null }] }); }
+            else if ('text' in step) for (const piece of step.text.match(/.{1,12}/gs) ?? []) emit({ choices: [{ delta: { content: piece }, finish_reason: null }] });
+            else emit({ choices: [{ delta: { tool_calls: [{ index: calls, id: `call_${calls++}`, function: { name: step.tool, arguments: JSON.stringify(step.args) } }] }, finish_reason: null }] });
           }
           if (stopped) return;
-          send(c, { choices: [{ delta: {}, finish_reason: calls ? 'tool_calls' : 'stop' }] });
-          if (self.usage) send(c, { choices: [], usage: self.usage });
-          c.enqueue(enc.encode('data: [DONE]\n\n'));
+          emit({ choices: [{ delta: {}, finish_reason: calls ? 'tool_calls' : 'stop' }] });
+          if (self.usage) emit({ choices: [], usage: self.usage });
+          if (batch === null) c.enqueue(enc.encode('data: [DONE]\n\n'));
+          else { batch += 'data: [DONE]\n\n'; flushBatch(); }
           c.close();
         },
       });

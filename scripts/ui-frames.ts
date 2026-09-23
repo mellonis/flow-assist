@@ -17,6 +17,7 @@
 // frame is taken "while the answer is still coming".
 
 import { ScriptedModel, bootApp, settle } from '../src/__tests__/helpers/scripted.ts';
+import type { Make } from '../src/loader/plugin.ts';
 
 const argv = process.argv.slice(2);
 const sizeAt = argv.indexOf('--size');
@@ -63,8 +64,8 @@ function styledFrame(buf: CellBuffer): string {
 }
 
 // ─── the rig ──────────────────────────────────────────────────────────────────
-async function boot(model: ScriptedModel) {
-  const ui = await bootApp(model, W, H);
+async function boot(model: ScriptedModel, guests?: (make: Make) => never[], extra: Record<string, unknown> = {}) {
+  const ui = await bootApp(model, W, H, guests, extra);
   const frame = (title: string) => {
     const buf = ui.backend.lastBuffer;
     if ((COLOR || STYLES) && buf) { console.log(`\n┏━━ ${title}\n${styledFrame(buf)}`); return; }
@@ -74,6 +75,19 @@ async function boot(model: ScriptedModel) {
   };
   return { ...ui, frame };
 }
+
+// A guest whose one tool edits a file that exists only here and reports the change, so
+// a turn has a ✎ block in it. No `write` flag: the frames are about the turn, not the y/n.
+const editor = (make: Make) => [make('clone', {
+  tools: [{
+    id: 'clone',
+    tools: [{ type: 'function', function: { name: 'edit_app', description: 'Edit app.ts.', parameters: { type: 'object', properties: { b: { type: 'number' } } } } }],
+    exec: async (_name: string, args: Record<string, unknown>, ctx: Record<string, unknown>) => {
+      (ctx as { reportChange?: (c: unknown) => void }).reportChange?.({ title: 'clone/app.ts', before: 'const a = 1;\nconst b = 2;\nconst c = 3;\n', after: `const a = 1;\nconst b = ${Number(args.b)};\nconst c = 3;\n` });
+      return 'edited';
+    },
+  }],
+} as never)] as never[];
 
 // ─── scenarios ────────────────────────────────────────────────────────────────
 const scenarios: Record<string, () => Promise<void>> = {
@@ -152,6 +166,42 @@ const scenarios: Record<string, () => Promise<void>> = {
     await ui.press('return');
     await settle(20);
     ui.frame('answer with a tool trail and a live plan');
+    ui.app.unmount();
+  },
+
+  // One turn in time order: text, a write, two more steps, the answer. In `step` each
+  // run of steps folds to one row where it began; `^o` opens them in place; `open`
+  // draws them all in the normal colour.
+  async turn() {
+    const model = new ScriptedModel();
+    const script = () => model.script(
+      [{ text: 'I will change b to 42.' }, { tool: 'edit_app', args: { b: 42 } }],
+      [{ text: 'Let me check the rest of the file.' }, { hold: true }, { tool: 'datetime', args: {} }],
+      [{ text: 'All clear, nothing else uses b.' }, { tool: 'datetime', args: {} }],
+      [{ text: 'Done: b is now ' }, { hold: true }, { text: '42.' }],
+    );
+    script();
+    const ui = await boot(model, editor);
+    await ui.press('F');
+    await ui.type('set b to 42');
+    await ui.press('return');
+    await settle(20);
+    ui.frame('step: a round streaming after the write — dim, a live mark, no ƒ');
+    model.release();
+    await settle(20);
+    ui.frame('step: the answer streaming under the folded run');
+    model.release();
+    await settle(20);
+    ui.frame('step: the turn done — one row for the run of two steps');
+    ui.backend.press({ name: 'o', ctrl: true });
+    await settle(6);
+    ui.frame('^o: every step in full, dim, where it happened');
+    ui.backend.press({ name: 'o', ctrl: true });
+    await settle(6);
+    await ui.type('/notes open');
+    await ui.press('return');
+    await settle(6);
+    ui.frame('/notes open: the same turn, every step in the normal colour');
     ui.app.unmount();
   },
 

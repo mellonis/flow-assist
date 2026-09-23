@@ -1,39 +1,39 @@
-// The step line: what the model last said it is doing, in ONE dim row under the
-// answer, instead of the folded `▸ notes` header and the last two lines of prose.
+// A turn drawn in TIME ORDER, and what the model said on the way.
 //
-// Between tool calls the model writes prose, and the one thing in it worth seeing is
-// what it is about to do. The naive line — the tail of whatever had arrived, redrawn
-// on every token — changed six times over a single turn, grew mid-sentence, and
-// picked up the final answer as it streamed. The settled line, recorded at a live
-// streaming pace over the same turn, changed twice. Three rules make the difference,
-// and they are the whole of this module:
+// A turn is one assistant message, and it used to be laid out by category: a step
+// line, the text already shown, every diff of the turn, then the answer. A round's
+// text that turned out to carry a tool call was moved into the "already shown" slot
+// — above every diff of the turn — so with a tall diff it left the screen, and the
+// ✎ block was the last thing on it again, as if a second write had happened.
 //
-//   - **Only a complete sentence is shown.** A sentence ends in `.`, `!` or `?`;
-//     while a new one is being written the previous one stays. The input is read as a
-//     PREFIX of what the model is writing: every line but the last was closed by its
-//     newline, the last one only by its own punctuation.
-//   - **A `Next:` line is complete when its line is.** The prompt asks for one short
-//     line starting `Next:` before a tool call, and a model writing to that shape
-//     often leaves the full stop off. The line is the whole step either way, so the
-//     newline that ends it is as good as a full stop — and the `Next:` itself is
-//     protocol, not something to read, so it is stripped.
-//   - **At most one change a second.** A change that comes too soon waits (`pending`)
-//     and lands when the second is up; the caller schedules that with `stepWaitMs`.
+// Now the message carries its PARTS in the order they happened (`TurnPart`): the text
+// of each round that went on to call a tool (a STEP), and each change a write
+// reported. The text of a round stays where it was drawn; the final round is the
+// answer (`content`), drawn after them. Pure: the chat keeps the parts, the view
+// (src/views/modals.ts) lays them out.
 //
-// What is NOT here, because it was the prototype's real bug: the answer's own text
-// never feeds the line. Only the narration of rounds that carried tool calls does —
-// the caller passes what it accumulates in `process`, never a round's `live` or the
-// final content. Reasoning does not feed it either: the status line already says
-// `thinking…`, and ^r unfolds the reasoning as it always did.
+//   - **Steps come in runs.** Consecutive steps with nothing visible between them are
+//     one RUN; anything visible — a ✎ change, a command's block (a message of its
+//     own) — ends it (`turnSegments`).
+//   - **`step` mode (the default) folds each run to ONE dim row** at its own place:
+//     the newest step of the run, and how many there are (`runRowText`). A click
+//     opens that run alone, `^o` every run; opened, each step is drawn in full, dim,
+//     where it happened.
+//   - **`open` mode draws every step in full, in the normal colour** — no folds.
+//   - **A `Next:` line is never drawn** (`shownText`). The prompt asks for one before
+//     a tool call; it is protocol, not something to read.
 
-// How the narration is drawn, and how much of it (`plugins.assistant.notes`,
-// `/notes` for the conversation).
-export type NotesMode = 'step' | 'fold' | 'open' | 'hidden';
-export const NOTES_MODES: readonly NotesMode[] = ['step', 'fold', 'open', 'hidden'];
+import type { ChangeView } from './diff.js';
+
+// ─── The mode ─────────────────────────────────────────────────────────────────
+// How the steps are drawn (`plugins.assistant.notes`, `/notes` for the conversation).
+export type NotesMode = 'step' | 'open';
+export const NOTES_MODES: readonly NotesMode[] = ['step', 'open'];
 
 // A mode written anywhere a person can write one (the config file, `/notes`).
-// Anything unrecognised is `step`: a hand-edited config must not leave the chat with
-// a narration area nobody can explain.
+// Anything unrecognised is `step` — which is also how the modes that were dropped,
+// `fold` and `hidden`, read in a config file written before: a hand-edited config
+// must not leave the chat with a narration area nobody can explain.
 export function notesMode(raw: unknown): NotesMode {
   const word = String(raw ?? '').trim().toLowerCase();
   return (NOTES_MODES as readonly string[]).includes(word) ? (word as NotesMode) : 'step';
@@ -49,31 +49,52 @@ export function notesCommand(arg: string): NotesMode | 'say' | null {
 
 // The sentence said when the mode changes, and by the bare `/notes`.
 export function notesSaid(mode: NotesMode): string {
-  if (mode === 'fold') return 'notes: fold — the narration behind a ▸ header, its last lines under it';
-  if (mode === 'open') return 'notes: open — the whole narration, unfolded';
-  if (mode === 'hidden') return 'notes: hidden — the narration is not drawn (^r still opens the tool calls)';
-  return 'notes: step — one dim line, the last thing it said it is doing';
+  if (mode === 'open') return 'notes: open — every step in full, where it happened';
+  return 'notes: step — each run of steps folds to one dim line where it happened';
 }
 
-// ─── Keeping the rounds apart ─────────────────────────────────────────────────
-// A round's narration is one chunk; a turn is several. Appended with nothing
-// between them the sentences ran together — "…how many there are.Now I will count
-// them…" — in the fold, and in anything reading the accumulated text. A blank line
-// keeps them apart as the paragraphs they are, for the markdown the fold lays out
-// as much as for the sentence rule below.
-export function joinNarration(before: string | undefined, chunk: string): string {
-  return [String(before ?? '').trimEnd(), String(chunk ?? '').trim()].filter(Boolean).join('\n\n');
+// ─── The parts of a turn ──────────────────────────────────────────────────────
+// A step's text as the model wrote it (Next: lines included — they are filtered
+// where it is drawn), or a change a write reported.
+export type TurnPart = { kind: 'text'; text: string } | { kind: 'change'; change: ChangeView };
+
+// The parts of a message as whatever holds them gave them — a session file may have
+// been hand-edited or cut short. Anything that is not a part a renderer can draw is
+// dropped, never drawn and never thrown on.
+export function readParts(raw: unknown): TurnPart[] {
+  if (!Array.isArray(raw)) return [];
+  const out: TurnPart[] = [];
+  for (const p of raw) {
+    if (!p || typeof p !== 'object') continue;
+    const r = p as Record<string, unknown>;
+    if (r.kind === 'text' && typeof r.text === 'string') out.push({ kind: 'text', text: r.text });
+    else if (r.kind === 'change') {
+      const change = readChange(r.change);
+      if (change) out.push({ kind: 'change', change });
+    }
+  }
+  return out;
 }
 
-// ─── The sentence ─────────────────────────────────────────────────────────────
-// A sentence ends in `.`, `!` or `?`, possibly inside a closing quote or bracket.
-const ENDS_SENTENCE = /[.!?]["'”’)\]]*$/;
+// A change as a session kept it: the title and the hunks must be text; a count that
+// is not a number reads as 0.
+export function readChange(raw: unknown): ChangeView | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const c = raw as Record<string, unknown>;
+  if (typeof c.title !== 'string' || typeof c.diff !== 'string') return null;
+  const n = (v: unknown) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+  return { title: c.title, diff: c.diff, added: n(c.added), removed: n(c.removed), hidden: n(c.hidden) };
+}
+
+// ─── What of a text is drawn ──────────────────────────────────────────────────
 // The shape the prompt asks for before a tool call.
 const NEXT_LINE = /^next\s*:\s*/i;
+// Still short enough to grow into `Next:` — `N`, `Ne`, `Nex`, `Next`, `Next ` .
+const MAYBE_NEXT = /^n(e(x(t\s*)?)?)?$/i;
 
-// One line of narration as a person should read it: no list marker, no heading
-// hashes, no backticks or asterisks around a word, whitespace collapsed. Underscores
-// are left alone — `read_file` is a name, not emphasis.
+// One line as a person should read it: no list marker, no heading hashes, no
+// backticks or asterisks around a word, whitespace collapsed. Underscores are left
+// alone — `read_file` is a name, not emphasis.
 function tidy(line: string): string {
   return line
     .replace(/^\s*(?:[-*+]|\d+[.)])\s+/, '')
@@ -82,6 +103,48 @@ function tidy(line: string): string {
     .replace(/\s+/g, ' ')
     .trim();
 }
+
+// The text as it is drawn: every `Next:` line taken out, and a LAST line that could
+// still become one (`N`, `Nex`…) held back until it says what it is — a few
+// characters nobody sees, rather than a line that appears and vanishes. The same
+// function lays out a round while it streams, a step and the answer, so a round that
+// ends keeps exactly the rows it was drawn with.
+export function shownText(text: string): string {
+  const lines = String(text ?? '').split('\n');
+  const kept: string[] = [];
+  lines.forEach((line, i) => {
+    const head = tidy(line);
+    if (NEXT_LINE.test(head)) return;
+    if (i === lines.length - 1 && head && MAYBE_NEXT.test(head)) return;
+    kept.push(line);
+  });
+  return kept.join('\n').trim();
+}
+
+// ─── Runs ─────────────────────────────────────────────────────────────────────
+// What a message draws between its reasoning and its answer, in order: runs of
+// steps (each numbered — `n` is the run's fold id, and a run never changes number as
+// the turn grows, since parts are only ever appended) and changes. A step whose text
+// is all `Next:` draws nothing and does not break a run.
+export type TurnSegment = { kind: 'run'; n: number; steps: string[] } | { kind: 'change'; change: ChangeView };
+
+export function turnSegments(parts: readonly TurnPart[]): TurnSegment[] {
+  const out: TurnSegment[] = [];
+  let runs = 0;
+  for (const p of parts) {
+    if (p.kind === 'change') { out.push({ kind: 'change', change: p.change }); continue; }
+    const text = shownText(p.text);
+    if (!text) continue;
+    const last = out.at(-1);
+    if (last?.kind === 'run') last.steps.push(text);
+    else out.push({ kind: 'run', n: runs++, steps: [text] });
+  }
+  return out;
+}
+
+// ─── The row a folded run is ──────────────────────────────────────────────────
+// A sentence ends in `.`, `!` or `?`, possibly inside a closing quote or bracket.
+const ENDS_SENTENCE = /[.!?]["'”’)\]]*$/;
 
 // The last COMPLETE sentence of one line, or '' while it is still being written.
 function lastSentenceOf(line: string): string {
@@ -93,86 +156,29 @@ function lastSentenceOf(line: string): string {
   return '';
 }
 
-// What the line should say for this narration — '' when nothing in it is finished
-// yet, and then the caller keeps whatever it was showing.
-export function lastStep(narration: string): string {
-  const lines = String(narration ?? '').split('\n');
+// What a step says in one line: its last finished sentence, or — when it finished
+// none — its first line. The input is a step as drawn (`shownText`).
+export function stepSummary(text: string): string {
+  const lines = String(text ?? '').split('\n').map(tidy).filter(Boolean);
   for (let i = lines.length - 1; i >= 0; i--) {
-    // Every line but the last was closed by the newline after it; the last line is
-    // still being written, so only its own punctuation can close it.
-    const closed = i < lines.length - 1;
-    const line = tidy(lines[i]!);
-    if (!line) continue;
-    if (NEXT_LINE.test(line)) {
-      if (closed || ENDS_SENTENCE.test(line)) return line.replace(NEXT_LINE, '').trim();
-      continue;
-    }
-    const sentence = lastSentenceOf(line);
+    const sentence = lastSentenceOf(lines[i]!);
     if (sentence) return sentence;
   }
-  return '';
+  return lines[0] ?? '';
 }
 
-// ─── Which shelf a round's text goes on, decided as it ARRIVES ────────────────
-// A round's text used to be classified at its END, when the tool calls were in: until
-// then it was drawn as the answer, and a round that turned out to carry a call had its
-// paragraph reclassified as narration and collapse into the line above — the person
-// watched what they were reading appear and vanish. The prompt asks for one line
-// starting `Next:` before a call (the same shape the step line reads), so the text says
-// what it is from its first characters and nothing has to be taken away again.
-//
-// `unknown` is the handful of characters that could still become `Next:` — nothing is
-// drawn for them, and that is a few tokens nobody sees, not a paragraph that blinks.
-export type LiveKind = 'answer' | 'notes' | 'unknown';
-// Still short enough to grow into `Next:` — `N`, `Ne`, `Nex`, `Next`, `Next ` .
-const MAYBE_NEXT = /^n(e(x(t\s*)?)?)?$/i;
-export function liveKind(text: string): LiveKind {
-  const head = String(text ?? '').replace(/^\s+/, '');
-  if (!head) return 'unknown';
-  if (NEXT_LINE.test(head)) return 'notes';
-  return MAYBE_NEXT.test(head) ? 'unknown' : 'answer';
+// The folded run's row: `▸ ` + the newest step + how many steps the run holds — no
+// count for a run of one. Exactly one terminal row: the summary is cut so the count
+// always fits.
+export function runRowText(steps: readonly string[], width: number): string {
+  const count = steps.length > 1 ? `  (${steps.length} steps)` : '';
+  const head = '▸ ';
+  const room = Math.max(1, width - Array.from(head).length - Array.from(count).length);
+  return cutStep(`${head}${cutStep(stepSummary(steps.at(-1) ?? ''), room)}${count}`, width);
 }
 
-// ─── One change a second ──────────────────────────────────────────────────────
-// The floor is on the CHANGE, not on the reading: a new sentence that arrives too
-// soon is held and shown when the second is up, so nothing is lost and nothing
-// flickers.
-export const STEP_FLOOR_MS = 1000;
-
-export interface StepState {
-  // What the line says now.
-  shown: string;
-  // When it last changed. 0 — it has not yet, and the first change is immediate.
-  at: number;
-  // A change that came inside the floor and is waiting for it.
-  pending: string;
-}
-
-export const emptyStep = (): StepState => ({ shown: '', at: 0, pending: '' });
-
-// New narration has arrived. The state that comes back is what to draw.
-export function offerStep(state: StepState, narration: string, now: number): StepState {
-  const cand = lastStep(narration);
-  if (!cand || cand === state.shown) return state.pending ? { ...state, pending: '' } : state;
-  if (state.at && now - state.at < STEP_FLOOR_MS) return state.pending === cand ? state : { ...state, pending: cand };
-  return { shown: cand, at: now, pending: '' };
-}
-
-// The floor is up: whatever was waiting becomes what the line says.
-export function dueStep(state: StepState, now: number): StepState {
-  if (!state.pending || now - state.at < STEP_FLOOR_MS) return state;
-  return { shown: state.pending, at: now, pending: '' };
-}
-
-// How long until a waiting change may be shown — 0 when nothing waits.
-export function stepWaitMs(state: StepState, now: number): number {
-  if (!state.pending) return 0;
-  return Math.max(0, STEP_FLOOR_MS - (now - state.at));
-}
-
-// The line is chrome and takes exactly ONE terminal row, so what does not fit is cut
-// with an ellipsis rather than wrapped. Counted in characters, as the grid counts
-// them.
+// A line of chrome takes exactly ONE terminal row, so what does not fit is cut with an
+// ellipsis rather than wrapped. Counted in characters, as the grid counts them.
 export function cutStep(text: string, width: number): string {
   const chars = Array.from(String(text ?? ''));
   if (width <= 0) return '';

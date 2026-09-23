@@ -68,18 +68,21 @@ export function clickedOpen(state: FoldState, id: string): boolean {
   return state.except.has(id) && isOpen(state, id);
 }
 
-// The blocks a message can have. `notes` is what it said on the way (its thinking and
-// its narration), `tools` the trail of calls behind the one-line summary, `calls` the
-// earlier calls an open trail caps away, `view` a command's output capped to its last
-// lines, `group` the head consecutive commands fold under (src/assistant/view-groups.ts).
-export type FoldKind = 'notes' | 'tools' | 'calls' | 'view' | 'group';
+// The blocks a message can have. `thinking` is its reasoning, `steps` one run of the
+// text it wrote between tool calls (src/assistant/step.ts — a message can hold
+// several runs, `n` says which), `tools` the trail of calls behind the one-line
+// summary, `calls` the earlier calls an open trail caps away, `view` a command's output
+// capped to its last lines, `group` the head consecutive commands fold under
+// (src/assistant/view-groups.ts).
+export type FoldKind = 'thinking' | 'steps' | 'tools' | 'calls' | 'view' | 'group';
 
 // A block's id. It names the message by its place in the conversation rather than by
 // its object: the chat REPLACES a message whenever it changes (that is what makes the
 // row cache correct), so an id tied to the object would be lost with every token that
 // arrives. The place is counted over the messages that are DRAWN — the system prompt is
 // not one of them, and it is unshifted onto the list again with every question, which
-// would otherwise move every id by one.
+// would otherwise move every id by one. A kind a message can hold several of (`view`,
+// `steps`) adds which one; the count only grows as a turn goes on, so it never moves.
 export function foldId(index: number, kind: FoldKind, n = 0): string {
-  return kind === 'view' ? `${index}:view:${n}` : `${index}:${kind}`;
+  return kind === 'view' || kind === 'steps' ? `${index}:${kind}:${n}` : `${index}:${kind}`;
 }

@@ -16,7 +16,7 @@
 
 import { askRows, type AskRow, type AskState } from '../assistant/ask.js';
 import { autoBadge, type AutoMode } from '../assistant/auto.js';
-import { cutStep, type NotesMode } from '../assistant/step.js';
+import { cutStep, readParts, runRowText, shownText, turnSegments, type NotesMode } from '../assistant/step.js';
 import { isClicked, isOpen, foldId, type FoldState } from '../assistant/folds.js';
 import { imageTokenRanges, splitTokens } from '../assistant/images.js';
 import { changeCounts, changeMarkdown, diffRows, type ChangeView } from '../assistant/diff.js';
@@ -47,27 +47,19 @@ import {
 interface ChatMsg {
   role: string;
   content?: string | null;
+  // The round being written now, before anyone knows whether it is the answer.
   live?: string;
-  // What the text streaming now IS, decided as it arrives (src/assistant/step.ts):
-  // `answer` draws it as the answer, `notes` dim where it stands, `''` not at all —
-  // a `Next:` line is the step line's, and nothing is drawn twice.
-  liveAs?: '' | 'answer' | 'notes';
-  // Narration that was already DRAWN and so is never taken away again: it stays
-  // where it was, dim, once the round it belonged to turned out to carry tool calls.
-  shown?: string;
+  // The round being written carries a tool call: it is a step, not the answer.
+  liveQuiet?: boolean;
+  // What happened before it, in order: the steps (the text of each round that went
+  // on to call a tool) and the changes the writes reported (src/assistant/step.ts).
+  parts?: unknown;
   reasoning?: string;
-  process?: string;
   toolRuns?: ToolRun[];
   // The turn ran out of rounds after this many, with no answer.
   roundLimit?: number;
-  // What the model last said it is doing, one finished sentence (src/assistant/step.ts).
-  // Written when a round of narration commits, so it is the message's own and stays
-  // with it once the turn has ended.
-  step?: string;
   duration?: number;
   stopped?: boolean;
-  // What the turn's writes changed — drawn as diff blocks above the answer.
-  changes?: ChangeView[];
   // The blocks a tool asked the host to draw (role 'view'): a command's output.
   views?: ViewRecord[];
   [k: string]: unknown;
@@ -145,8 +137,12 @@ interface ChatRow {
   // The `✎ path · +N −M` line over a change. Not markdown: the path is drawn in the
   // chat's accent and the counts dim, which is what a title looks like.
   changeTitle?: boolean;
-  // A content row the model wrote on the way, kept where it was drawn (see `shown`).
+  // A row the model wrote on the way (a step, or a round not yet known to be the
+  // answer): drawn where it happened, dim.
   quiet?: boolean;
+  // The first row of the round being written: a live mark in the gutter, never the
+  // answer's `ƒ`.
+  liveMark?: boolean;
   // `label` is overloaded in the source: `true` marks the role-label row, or a
   // string is the reason/fold-header text (`reasoning`, `reasoning + tools`).
   label?: boolean | string;
@@ -163,10 +159,10 @@ interface ChatRow {
   reasonHeader?: boolean;
   open?: boolean;
   reason?: boolean;
-  // The one dim line saying what the model last said it is doing. Chrome: never
-  // copied by a drag, and cut to one row rather than wrapped.
+  // The one dim row a folded run of steps is: its newest step and how many there
+  // are. Chrome: never copied by a drag, and cut to one row rather than wrapped.
   step?: boolean;
-  // A group's head: the `ƒ` in the gutter, chrome like the step line.
+  // A group's head: the `ƒ` in the gutter, chrome like a folded run's row.
   groupHead?: boolean;
   toolRunsHdr?: boolean;
   toolRun?: boolean;
@@ -519,8 +515,12 @@ function messageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): ChatRow
   // Everything the rows depend on is in the key — which of this message's blocks are
   // open as much as the width, and how the narration is drawn — or a message would
   // keep the rows it was first laid out with, and a click would move nothing.
+  // A run of steps is numbered within its message, and a message may hold several —
+  // one bit for each, up to the number it could hold (one per part, and the live round).
+  const runs = (Array.isArray(m.parts) ? m.parts.length : 0) + 1;
   const open = [
-    isOpen(o.folds, foldId(at, 'notes')) ? 1 : 0,
+    isOpen(o.folds, foldId(at, 'thinking')) ? 1 : 0,
+    ...Array.from({ length: runs }, (_r, n) => (isOpen(o.folds, foldId(at, 'steps', n)) ? 1 : 0)),
     isOpen(o.folds, foldId(at, 'tools')) ? 1 : 0,
     isClicked(o.folds, foldId(at, 'calls')) ? 1 : 0,
     ...views.map((_v, vi) => (isOpen(o.folds, foldId(at, 'view', vi)) ? 1 : 0)),
@@ -660,80 +660,75 @@ function buildMessageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): Ch
     // role:'system' in the API; here it is just not rendered. `/context` says how
     // much room it takes.
     if (role === 'system') return rows;
-    const reasoning = String(m.reasoning ?? '').trim();
-    const process = String(m.process ?? '').trim();
-    const live = String(m.live ?? '').trim();
-    // What the streaming text is was decided as it arrived (src/assistant/step.ts),
-    // not here: the chat used to guess "no reasoning and no round behind it, so this
-    // is the answer", and a round that turned out to carry a tool call had the
-    // paragraph the person was reading taken away again.
-    const liveAs = live ? (m.liveAs ?? 'answer') : '';
-    // Narration already drawn stays drawn, dim, where it was.
-    const kept = String(m.shown ?? '').trim();
-    const hasR = !!reasoning;
-    const hasP = !!process;
-    const notesId = foldId(at, 'notes');
-    if (role === 'assistant' && (hasR || hasP) && notes !== 'hidden') {
-      // What the model said on the way: its thinking, and its notes between tool
-      // calls. `step` draws one dim line instead — the last thing it said it is doing
-      // — and gives way to the whole of it when the block is open, which is what the
-      // key has always opened. `open` is that same unfolded view without asking, and
-      // is the MODE's answer: a mode is not a fold, so nothing there is clickable.
-      const unfolded = notes === 'open' || isOpen(folds, notesId);
-      const foldable = notes !== 'open';
-      const step = String(m.step ?? '').trim();
-      if (notes === 'step' && !unfolded) {
-        // A turn that narrated nothing draws no line at all — and neither does one
-        // whose sentence is already standing on screen, kept where it was drawn: the
-        // line is a summary OF the narration, not a second copy of it.
-        if (step && !String(m.shown ?? '').includes(step)) {
-          rows.push({ role, step: true, spans: [{ text: cutStep(step, inner) }], fold: notesId });
-          rows.push({ gap: true });
-        }
-      } else {
-        const label = (hasR && hasP) ? 'thinking + notes' : (hasR ? 'thinking' : 'notes');
-        rows.push({ role, reasonHeader: true, open: unfolded, label, ...(foldable ? { fold: notesId } : {}) });
-        const bodyLines = mdLines([reasoning, process, live].filter(Boolean).join('\n\n'), inner);
-        const body = unfolded ? bodyLines : bodyLines.slice(-2);
-        for (const line of body) rows.push({ role, reason: true, spans: line.spans, continues: line.continues, chrome: line.chrome, frame: line.frame, ...(foldable ? { fold: notesId } : {}) });
+    if (role === 'assistant') {
+      // A turn in TIME ORDER (src/assistant/step.ts): its reasoning, then its parts as
+      // they happened — the text of each round that went on to call a tool (a step)
+      // and each change a write reported — then the round being written now, then the
+      // answer. Nothing a round drew ever moves: a step dims where it stands, or folds
+      // into the row of its run, and the answer is only ever added to.
+      const row = (line: Line, extra: Partial<ChatRow> = {}): ChatRow => ({ role, spans: line.spans, continues: line.continues, chrome: line.chrome, frame: line.frame, ...extra });
+      const reasoning = String(m.reasoning ?? '').trim();
+      if (reasoning) {
+        // Its own block: folded to a header in `step` (a click or the key opens it),
+        // and always open in `open`, where nothing folds.
+        const id = foldId(at, 'thinking');
+        const foldable = notes !== 'open';
+        const opened = !foldable || isOpen(folds, id);
+        rows.push({ role, reasonHeader: true, open: opened, label: 'thinking', ...(foldable ? { fold: id } : {}) });
+        if (opened) for (const line of mdLines(reasoning, inner)) rows.push(row(line, { reason: true, ...(foldable ? { fold: id } : {}) }));
         rows.push({ gap: true });
       }
+      const live = shownText(String(m.live ?? ''));
+      // A round known to carry a tool call is a step already, streaming or not: it
+      // joins its run where it stands rather than waiting for the round to end.
+      const liveStep = m.liveQuiet === true && !!live;
+      const parts = [...readParts(m.parts), ...(liveStep ? [{ kind: 'text' as const, text: live }] : [])];
+      for (const seg of turnSegments(parts)) {
+        if (seg.kind === 'change') {
+          // What a write changed: always open (not foldable) — it is the part of the
+          // turn the person most needs to see. The hunks are laid out as markdown, so
+          // the ```diff fence is coloured, wrapped and copied like any other; the
+          // title and the line numbers are the chat's own.
+          changeLines(seg.change, inner).forEach((line, li) => rows.push(row(line, li === 0 ? { changeTitle: true } : {})));
+          rows.push({ gap: true });
+          continue;
+        }
+        const id = foldId(at, 'steps', seg.n);
+        if (notes === 'step' && !isOpen(folds, id)) {
+          // The run folded: ONE dim row where it began, saying the newest step and
+          // how many there are. Chrome — the host's account of what was said.
+          rows.push({ role, step: true, fold: id, spans: [{ text: runRowText(seg.steps, inner) }] });
+        } else {
+          // Every step in full, where it happened: dim in `step` (a click on any of
+          // its rows folds the run again), the normal colour in `open`.
+          seg.steps.forEach((text, si) => {
+            if (si) rows.push({ gap: true, ...(notes === 'step' ? { fold: id } : {}) });
+            for (const line of mdLines(text, inner)) rows.push(row(line, notes === 'step' ? { quiet: true, fold: id } : {}));
+          });
+        }
+        rows.push({ gap: true });
+      }
+      // The round being written, while nobody knows yet what it is: in full, dim, a
+      // live mark in the gutter and never the answer's `ƒ` — a round that turns out
+      // to carry a tool call must not have been drawn as the answer.
+      if (live && !liveStep) mdLines(live, inner).forEach((line, li) => rows.push(row(line, { quiet: true, ...(li === 0 ? { liveMark: true } : {}) })));
+      // A turn that ran out of rounds says so where the answer would be. Before this it
+      // was a dim line under the field, which a wall of grey tool lines hid.
+      const answer = shownText(String(m.content ?? ''));
+      if (Number(m.roundLimit) > 0 && !answer) {
+        rows.push({ role, limit: true, first: true, spans: [{ text: cutStep(`stopped after ${Number(m.roundLimit)} rounds — no answer; say "continue" to carry on`, inner) }] });
+      }
+      // The answer: the same rows the round was drawn with while it streamed (the
+      // same `shownText`, the same layout), now in the normal colour under `ƒ`.
+      if (answer) mdLines(answer, inner).forEach((line, li) => rows.push(row(line, { first: li === 0 })));
+    } else {
+      const text = String(m.content ?? '');
+      // The person's message is drawn as typed. A background result and a
+      // `!command`'s block keep markdown: the first is the model's writing, the second
+      // the host's own (a ```console fence under the command).
+      const images = Array.isArray(m.images) ? (m.images as unknown[]).filter((n): n is number => typeof n === 'number') : [];
+      (role === 'user' ? typedLines(text, inner, images) : mdLines(text, inner)).forEach((line, li) => rows.push({ role, spans: line.spans, first: li === 0, continues: line.continues, chrome: line.chrome, frame: line.frame }));
     }
-    // Narration that was already on screen when its round turned out to carry tool
-    // calls: it stays exactly where it was drawn, dim, rather than vanishing into the
-    // fold under it. The whole of it is in the fold too — this is the part the person
-    // had already started reading, and what has been shown is never taken away.
-    const quiet = [kept, liveAs === 'notes' ? live : ''].filter(Boolean).join('\n\n');
-    // Only in `step` mode, and only while the block is folded: `fold` and `open` both
-    // draw the narration themselves, and drawing it twice reads worse than the fold's
-    // own two-line cut on text that was already on screen.
-    if (role === 'assistant' && quiet && notes === 'step' && !isOpen(folds, notesId)) {
-      for (const line of mdLines(quiet, inner)) rows.push({ role, quiet: true, spans: line.spans, continues: line.continues, chrome: line.chrome, frame: line.frame });
-      rows.push({ gap: true });
-    }
-    // What the turn's writes changed: one block per change, always open (not foldable)
-    // — it is the part of the turn the person most needs to see. The hunks are laid
-    // out as markdown, so the ```diff fence is coloured, wrapped and copied like any
-    // other; the title and the line numbers are the chat's own.
-    const changes = (role === 'assistant' && Array.isArray(m.changes) ? m.changes : []) as ChangeView[];
-    for (const change of changes) {
-      changeLines(change, inner).forEach((line, li) => rows.push({
-        role, spans: line.spans, continues: line.continues, chrome: line.chrome, frame: line.frame,
-        ...(li === 0 ? { changeTitle: true } : {}),
-      }));
-      rows.push({ gap: true });
-    }
-    // A turn that ran out of rounds says so where the answer would be. Before this it
-    // was a dim line under the field, which a wall of grey tool lines hid.
-    if (role === 'assistant' && Number(m.roundLimit) > 0 && !String(m.content ?? '').trim()) {
-      rows.push({ role, limit: true, first: true, spans: [{ text: cutStep(`stopped after ${Number(m.roundLimit)} rounds — no answer; say "continue" to carry on`, inner) }] });
-    }
-    const text = String(m.content ?? '') || (liveAs === 'answer' ? live : '');
-    // The person's message is drawn as typed. A background result and a `!command`'s
-    // block keep markdown: the first is the model's writing, the second the host's own
-    // (a ```console fence under the command).
-    const images = Array.isArray(m.images) ? (m.images as unknown[]).filter((n): n is number => typeof n === 'number') : [];
-    (role === 'user' ? typedLines(text, inner, images) : mdLines(text, inner)).forEach((line, li) => rows.push({ role, spans: line.spans, first: li === 0, continues: line.continues, chrome: line.chrome, frame: line.frame }));
     const runs = (Array.isArray(m.toolRuns) ? m.toolRuns : []) as ToolRun[];
     const duration = role === 'assistant' && Number(m.duration) >= 1000 ? m.duration : undefined;
     // What the turn cost, where it is read after the fact — the status line said it
@@ -758,7 +753,10 @@ function buildMessageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): Ch
       if (earlier) rows.push({ role, toolRun: true, fold: callsId, spans: [{ text: `… ${earlier} earlier call${earlier === 1 ? '' : 's'}`, dim: true }] });
       for (const { run, n } of condensed.slice(earlier)) rows.push({ role, toolRun: true, fold: toolsId, spans: [toolRunText(run, inner, n)] });
     }
-    if (!last) rows.push({ gap: true });
+    // One blank row between messages — not two after a block that ends in its own,
+    // and none for a message that drew nothing at all (a round whose only text was
+    // its `Next:` line).
+    if (!last && rows.length && !rows.at(-1)!.gap) rows.push({ gap: true });
   }
   return rows;
 }
@@ -861,6 +859,9 @@ function ChatMessages({ messages, rowOpts, palette: m, errorColor, onViewport, s
     // ∮ reads well as "a loop" but is East-Asian-ambiguous width, and flowtty counts
     // one cell per code point, so it would shift the row in some terminals.
     if (row.first && row.role === 'assistant') return h(Text, { bold: true, color: m.assistantAccent }, `${ASSISTANT_MARK} `);
+    // The round being written: nobody knows yet whether it is the answer, so it gets
+    // a live mark instead of the answer's `ƒ`.
+    if (row.liveMark) return h(Text, { dim: true, color: m.assistantAccent }, `${spin(rowOpts.now) ?? '·'} `);
     return h(Text, null, ' '.repeat(GUTTER));
   };
 
@@ -891,9 +892,9 @@ function ChatMessages({ messages, rowOpts, palette: m, errorColor, onViewport, s
       const key = `chat-${i}`;
       if (row.gap) return h(Box, { key, height: 1, flexShrink: 0 });
       if (row.reasonHeader) return h(Text, { key, dim: true, color: 'magenta', selectable: false }, `${' '.repeat(GUTTER)}${row.open ? '▾' : '▸'} ${row.label}`);
-      // A group's head is a step line too — chrome, cut to one row — but it carries
-      // several spans (`Ran 3 commands · ✗ 1 failed · 34.0 s`) and the `ƒ ` mark a
-      // plain step never draws: a span's own colour (the failed count's warn) wins
+      // A group's head is a one-row line like a folded run — chrome, cut to one row —
+      // but it carries several spans (`Ran 3 commands · ✗ 1 failed · 34.0 s`) and the
+      // `ƒ ` mark a run's row never draws: a span's own colour (the failed count's warn) wins
       // over the line's forced dim, or a red count would read as grey.
       if (row.step && row.groupHead) return h(Box, { key, flexDirection: 'row', flexShrink: 0, selectable: false },
         gutter(row),
@@ -901,10 +902,10 @@ function ChatMessages({ messages, rowOpts, palette: m, errorColor, onViewport, s
           (row.spans || []).map((s, j) => h(Text, {
             key: j, dim: s.dim, color: s.color, wrap: 'truncate',
           }, String(s.text ?? '')))));
-      // The step line. Chrome, like the `N tools` line and the gutter: a drag across
-      // the answer returns what the model SAID, never the host's account of what it
-      // was doing. It is cut to the width above, and truncated here as well so that
-      // it can never take a second row — the whole conversation is laid out one
+      // A folded run of steps. Chrome, like the `N tools` line and the gutter: a drag
+      // across the answer returns what the model SAID, never the host's one-line
+      // account of it. It is cut to the width above, and truncated here as well so
+      // that it can never take a second row — the whole conversation is laid out one
       // terminal line per row.
       if (row.step) return h(Text, { key, dim: true, wrap: 'truncate', selectable: false }, `${' '.repeat(GUTTER)}${String(row.spans?.[0]?.text ?? '')}`);
       if (row.reason) return h(Box, { key, flexDirection: 'row', flexShrink: 0, ...frameRow(row) },
@@ -1082,9 +1083,9 @@ export function renderChatModal({
   // How many lines a block a CLICK opens shows (`plugins.assistant.runOutputLines`);
   // `^o` (the global fold key) opens every block in full, past this cap.
   viewLines?: number;
-  // How the narration between tool calls is drawn (`plugins.assistant.notes`,
-  // `/notes` for the conversation): one step line, folded behind its header, fully
-  // open, or not at all.
+  // How the text written between tool calls is drawn (`plugins.assistant.notes`,
+  // `/notes` for the conversation): each run of steps folded to one row, or every
+  // step in full (src/assistant/step.ts).
   notes?: NotesMode;
   // Every renderer the chat can draw a view with — the host's own `console` by
   // default, and each plugin's, qualified by its name (services.viewRenderers).

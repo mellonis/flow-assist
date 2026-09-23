@@ -1,144 +1,115 @@
-// The step line's rules, with the clock passed in: what counts as a finished
-// sentence, what a `Next:` line means, and the one-change-a-second floor.
+// A turn in time order: what of a round's text is drawn, how steps gather into runs,
+// what a folded run's one row says, and how the notes mode is read.
 import { expect, test } from 'bun:test';
 import {
   cutStep,
-  dueStep,
-  emptyStep,
-  joinNarration,
-  lastStep,
-  liveKind,
   notesCommand,
   notesMode,
   notesSaid,
-  offerStep,
-  STEP_FLOOR_MS,
-  stepWaitMs,
+  readParts,
+  runRowText,
+  shownText,
+  stepSummary,
+  turnSegments,
+  type TurnPart,
 } from '../step.ts';
 
-test('only a finished sentence reaches the line', () => {
-  expect(lastStep('Let me see how many there are.')).toBe('Let me see how many there are.');
-  // Still being written: the line keeps what it had, so nothing comes back here.
-  expect(lastStep('Let me see how many')).toBe('');
-  expect(lastStep('')).toBe('');
-  expect(lastStep('   \n\n  ')).toBe('');
+const change = (title: string) => ({ kind: 'change' as const, change: { title, diff: '@@ -1 +1 @@\n-a\n+b', added: 1, removed: 1, hidden: 0 } });
+const text = (t: string): TurnPart => ({ kind: 'text', text: t });
+
+// ─── What of a text is drawn ──────────────────────────────────────────────────
+test('a Next: line is never drawn, wherever it stands and however it is marked up', () => {
+  expect(shownText('Next: read the notebook.')).toBe('');
+  expect(shownText('next : counting')).toBe('');
+  expect(shownText('**Next:** open the board')).toBe('');
+  expect(shownText('I looked at it.\nNext: count the entries')).toBe('I looked at it.');
+  expect(shownText('Next: look\n\nThe file is short.')).toBe('The file is short.');
 });
 
-test('a sentence growing behind a finished one does not move the line', () => {
-  const text = 'I will read the file first. Now I am count';
-  expect(lastStep(text)).toBe('I will read the file first.');
-  // …and once it finishes, it is the one shown.
-  expect(lastStep(`${text}ing the lines.`)).toBe('Now I am counting the lines.');
+test('a last line that could still become Next: is held back until it says what it is', () => {
+  expect(shownText('N')).toBe('');
+  expect(shownText('Nex')).toBe('');
+  expect(shownText('I looked.\nNext')).toBe('I looked.');
+  // `No` is not on the way to `Next:`, and a line that is not the last is closed.
+  expect(shownText('No')).toBe('No');
+  expect(shownText('N\nmore')).toBe('N\nmore');
+  // Everything else is drawn as written.
+  expect(shownText('There are three entries.')).toBe('There are three entries.');
 });
 
-test('a question or an exclamation ends a sentence too', () => {
-  expect(lastStep('First: how many are there?')).toBe('First: how many are there?');
-  expect(lastStep('Done!')).toBe('Done!');
-  expect(lastStep('She said "go now."')).toBe('She said "go now."');
+// ─── Runs ─────────────────────────────────────────────────────────────────────
+test('consecutive steps are one run, and a change ends it', () => {
+  const segs = turnSegments([text('One.'), text('Two.'), change('a.ts'), text('Three.'), change('b.ts')]);
+  expect(segs.map((s) => s.kind)).toEqual(['run', 'change', 'run', 'change']);
+  expect(segs[0]).toEqual({ kind: 'run', n: 0, steps: ['One.', 'Two.'] });
+  expect(segs[2]).toEqual({ kind: 'run', n: 1, steps: ['Three.'] });
 });
 
-test('a Next: line is a step as soon as its line ends, and the prefix is not shown', () => {
-  // No full stop, but the newline after it closed the line.
-  expect(lastStep('Next: read the tracker\n')).toBe('read the tracker');
-  expect(lastStep('Next: read the tracker.')).toBe('read the tracker.');
-  // The last line is still being written — the one before it stands.
-  expect(lastStep('Next: read the tracker\nNext: count the iss')).toBe('read the tracker');
+test('a step that is all Next: draws nothing and breaks no run', () => {
+  const segs = turnSegments([text('One.'), text('Next: look'), text('Two.')]);
+  expect(segs).toEqual([{ kind: 'run', n: 0, steps: ['One.', 'Two.'] }]);
+  expect(turnSegments([text('Next: look')])).toEqual([]);
 });
 
-test('a line is read as a person reads it, not as markdown', () => {
-  expect(lastStep('- Reading `src/cli.ts` now.')).toBe('Reading src/cli.ts now.');
-  expect(lastStep('**Next:** open the board\n')).toBe('open the board');
-  // An underscore is part of a name, never emphasis.
-  expect(lastStep('Calling read_file now.')).toBe('Calling read_file now.');
+test('a run keeps its number as the turn grows — its fold id never moves', () => {
+  const before = turnSegments([text('One.'), change('a.ts'), text('Two.')]);
+  const after = turnSegments([text('One.'), change('a.ts'), text('Two.'), text('Three.'), change('b.ts'), text('Four.')]);
+  expect(before.filter((s) => s.kind === 'run').map((s) => (s as { n: number }).n)).toEqual([0, 1]);
+  expect(after.filter((s) => s.kind === 'run').map((s) => (s as { n: number }).n)).toEqual([0, 1, 2]);
 });
 
-test('the last finished line wins, whatever came before it', () => {
-  expect(lastStep('First I will look.\n\nThen I will count them.')).toBe('Then I will count them.');
+// ─── The row a folded run is ──────────────────────────────────────────────────
+test('the row says the newest step, by its last finished sentence or its first line', () => {
+  expect(stepSummary('I will read the file first. Now I am counting the lines.')).toBe('Now I am counting the lines.');
+  expect(stepSummary('Looking at the notebook')).toBe('Looking at the notebook');
+  expect(stepSummary('- Reading `src/cli.ts` now.')).toBe('Reading src/cli.ts now.');
+  expect(stepSummary('First I will look.\n\nThen I will count them.')).toBe('Then I will count them.');
 });
 
-test('the line changes at most once a second', () => {
-  const t0 = 10_000;
-  // Nothing has been shown yet, so the first sentence lands at once.
-  let s = offerStep(emptyStep(), 'I will look at the tracker.', t0);
-  expect(s.shown).toBe('I will look at the tracker.');
-  expect(stepWaitMs(s, t0)).toBe(0);
-
-  // A second sentence 300 ms later waits instead of replacing it.
-  s = offerStep(s, 'I will look at the tracker.\n\nNow I will count them.', t0 + 300);
-  expect(s.shown).toBe('I will look at the tracker.');
-  expect(s.pending).toBe('Now I will count them.');
-  expect(stepWaitMs(s, t0 + 300)).toBe(STEP_FLOOR_MS - 300);
-
-  // Too early still.
-  expect(dueStep(s, t0 + 900).shown).toBe('I will look at the tracker.');
-  // The second is up: what waited is what the line says.
-  const due = dueStep(s, t0 + STEP_FLOOR_MS);
-  expect(due.shown).toBe('Now I will count them.');
-  expect(due.pending).toBe('');
-  expect(stepWaitMs(due, t0 + STEP_FLOOR_MS)).toBe(0);
+test('a run of one has no count; a longer run says how many steps it holds', () => {
+  expect(runRowText(['I will look.'], 60)).toBe('▸ I will look.');
+  expect(runRowText(['I will look.', 'Now the tests.'], 60)).toBe('▸ Now the tests.  (2 steps)');
 });
 
-test('the same sentence again is not a change', () => {
-  const t0 = 10_000;
-  const s = offerStep(emptyStep(), 'Reading the file.', t0);
-  const again = offerStep(s, 'Reading the file.', t0 + 50);
-  expect(again).toBe(s);
-  expect(again.pending).toBe('');
+test('the row is one terminal row, and the count always fits', () => {
+  const row = runRowText(['a', 'a very long sentence about everything that was looked at.'], 30);
+  expect(Array.from(row).length).toBeLessThanOrEqual(30);
+  expect(row.endsWith('(2 steps)')).toBe(true);
+  expect(row).toContain('…');
 });
 
-test('narration with nothing finished in it leaves the line alone', () => {
-  const t0 = 10_000;
-  const s = offerStep(emptyStep(), 'Reading the file.', t0);
-  expect(offerStep(s, 'Reading the file.\n\nNow I am', t0 + 5000).shown).toBe('Reading the file.');
-});
-
-test('two chunks of narration do not run together', () => {
-  // Appended with nothing between them they read as one broken sentence:
-  // "…how many there are.Now I will count them."
-  const joined = joinNarration('Let me see how many there are.', 'Now I will count them.');
-  expect(joined).not.toContain('are.Now');
-  expect(joined).toBe('Let me see how many there are.\n\nNow I will count them.');
-  expect(joinNarration('', 'First.')).toBe('First.');
-  expect(joinNarration(undefined, 'First.')).toBe('First.');
-});
-
-test('the line is cut to one row', () => {
+test('a line of chrome is cut to one row', () => {
   expect(cutStep('short', 20)).toBe('short');
   expect(cutStep('a very long sentence indeed', 10)).toBe('a very lo…');
   expect(Array.from(cutStep('a very long sentence indeed', 10)).length).toBe(10);
   expect(cutStep('anything', 0)).toBe('');
 });
 
-test('a mode is read defensively and a command says what it did', () => {
+// ─── Parts as a session gave them ─────────────────────────────────────────────
+test('a malformed part is dropped, never drawn and never thrown on', () => {
+  expect(readParts('garbage')).toEqual([]);
+  expect(readParts(null)).toEqual([]);
+  expect(readParts([null, 7, 'x', { kind: 'text' }, { kind: 'text', text: 3 }, { kind: 'change', change: { title: 'a' } }, { kind: 'odd' }])).toEqual([]);
+  expect(readParts([{ kind: 'text', text: 'Kept.' }, { kind: 'change', change: { title: 'a.ts', diff: '', added: 'x' } }])).toEqual([
+    { kind: 'text', text: 'Kept.' },
+    { kind: 'change', change: { title: 'a.ts', diff: '', added: 0, removed: 0, hidden: 0 } },
+  ]);
+});
+
+// ─── The mode ─────────────────────────────────────────────────────────────────
+test('a mode is read defensively — the dropped fold and hidden read as step', () => {
   expect(notesMode(undefined)).toBe('step');
-  expect(notesMode('FOLD')).toBe('fold');
+  expect(notesMode('OPEN')).toBe('open');
+  expect(notesMode('fold')).toBe('step');
+  expect(notesMode('hidden')).toBe('step');
   expect(notesMode('nonsense')).toBe('step');
+});
+
+test('/notes takes step or open, and says what it did', () => {
   expect(notesCommand('')).toBe('say');
-  expect(notesCommand('hidden')).toBe('hidden');
-  expect(notesCommand('louder')).toBe(null);
+  expect(notesCommand('open')).toBe('open');
+  expect(notesCommand('fold')).toBe(null);
+  expect(notesCommand('hidden')).toBe(null);
   expect(notesSaid('step')).toContain('one dim line');
-  expect(notesSaid('hidden')).toContain('not drawn');
-});
-
-// ─── What a round's text IS, decided as it arrives ────────────────────────────
-// It used to be decided at the END of the round, so a round that turned out to carry
-// a tool call had the paragraph the person was reading reclassified and taken away.
-
-test('a line that starts Next: is narration from its first characters', () => {
-  expect(liveKind('Next: read the notebook.')).toBe('notes');
-  expect(liveKind('Next')).toBe('unknown'); // could still become `Next:`
-  expect(liveKind('Nex')).toBe('unknown');
-  expect(liveKind('N')).toBe('unknown');
-  expect(liveKind('Next :')).toBe('notes'); // the shape allows the space
-  expect(liveKind('next: counting')).toBe('notes');
-  expect(liveKind('\n\nNext: go on')).toBe('notes');
-});
-
-test('anything else is the answer, from its first characters too', () => {
-  expect(liveKind('There are three entries.')).toBe('answer');
-  expect(liveKind('T')).toBe('answer');
-  expect(liveKind('Nothing was found.')).toBe('answer'); // `No` is not on the way to `Next:`
-  // Nothing at all says nothing: no row is drawn for an empty round.
-  expect(liveKind('')).toBe('unknown');
-  expect(liveKind('   ')).toBe('unknown');
+  expect(notesSaid('open')).toContain('in full');
 });
