@@ -111,7 +111,11 @@ test('two run_command calls in one turn never collide, even when the provider\'s
   await ui.press('y');
   await settleUntil(() => ui.backend.lastFrame.includes('Done.'));
   expect(ui.backend.lastFrame).toContain('Done.');
-  // Both blocks stand — the second round's call never overwrote the first's.
+  // Two consecutive commands fold under one head — open it to see both blocks
+  // stand: the second round's call never overwrote the first's.
+  expect(ui.backend.lastFrame).toMatch(/Ran 2 commands · ✓/);
+  await click(ui, rowOf(ui, 'Ran 2 commands'));
+  await settleUntil(() => /echo AAA-first · ✓/.test(ui.backend.lastFrame));
   expect(ui.backend.lastFrame).toMatch(/echo AAA-first · ✓/);
   expect(ui.backend.lastFrame).toMatch(/echo BBB-second · ✓/);
   ui.app.unmount();
@@ -158,5 +162,94 @@ test('the model is sent a !command\'s output as before, and never a view', async
   const sent = JSON.stringify(model.requests.at(-1)!.messages);
   expect(sent).toContain('marker-42');
   expect(sent).not.toContain('"views"');
+  ui.app.unmount();
+});
+
+test('three commands in a row fold under one head, and open into their own blocks', async () => {
+  const model = new ScriptedModel();
+  model.script(
+    [{ text: 'Next: one.\n' }, { tool: 'run_command', args: { command: 'echo one' } }],
+    [{ text: 'Next: two.\n' }, { tool: 'run_command', args: { command: 'echo two' } }],
+    [{ text: 'Next: three.\n' }, { tool: 'run_command', args: { command: 'echo three' } }],
+    // Not "All three." (nor "Done.", which embeds "one.") — the answer must not
+    // itself contain any of the step-text substrings the assertions below check
+    // have folded away, or the collision is with the test's own wording rather
+    // than with the code under test.
+    [{ text: 'All set.' }],
+  );
+  const ui = await bootApp(model, 100, 30, undefined, { shell: { timeoutMs: 20000 } });
+  await ui.press('F');
+  await ui.type('go');
+  await ui.press('return');
+  for (let i = 0; i < 3; i++) {
+    await settleUntil(() => ui.backend.lastFrame.includes('Confirm write: run_command'));
+    expect(ui.backend.lastFrame).toContain('Confirm write: run_command');
+    await ui.press('y');
+  }
+  await settleUntil(() => ui.backend.lastFrame.includes('All set.'));
+  expect(ui.backend.lastFrame).toContain('All set.');
+  expect(ui.backend.lastFrame).toMatch(/Ran 3 commands · ✓ \d+\.\d s/);
+  expect(ui.backend.lastFrame).not.toContain('echo two ·');
+  // The head takes the place of every step line, the first one included.
+  for (const step of ['one.', 'two.', 'three.']) expect(ui.backend.lastFrame).not.toContain(step);
+  await click(ui, rowOf(ui, 'Ran 3 commands'));
+  for (const c of ['echo one ·', 'echo two ·', 'echo three ·']) expect(ui.backend.lastFrame).toContain(c);
+  expect(ui.backend.lastFrame).not.toContain('one.');
+  ui.app.unmount();
+});
+
+test('another tool between two commands keeps them apart', async () => {
+  const model = new ScriptedModel();
+  model.script(
+    [{ tool: 'run_command', args: { command: 'echo a' } }],
+    [{ tool: 'datetime', args: {} }],
+    [{ tool: 'run_command', args: { command: 'echo b' } }],
+    [{ text: 'Both.' }],
+  );
+  const ui = await bootApp(model, 100, 30, undefined, { shell: { timeoutMs: 20000 } });
+  await ui.press('F');
+  await ui.type('go');
+  await ui.press('return');
+  for (let i = 0; i < 2; i++) {
+    await settleUntil(() => ui.backend.lastFrame.includes('Confirm write: run_command'));
+    expect(ui.backend.lastFrame).toContain('Confirm write: run_command');
+    await ui.press('y');
+  }
+  await settleUntil(() => ui.backend.lastFrame.includes('Both.'));
+  expect(ui.backend.lastFrame).toContain('Both.');
+  // Not `.not.toContain('commands ·')` — the footer's own `/ commands ·` hint
+  // contains that substring on every frame, group or no group.
+  expect(ui.backend.lastFrame).not.toMatch(/(Ran|Running) \d+ commands/);
+  expect(ui.backend.lastFrame).toContain('echo a ·');
+  expect(ui.backend.lastFrame).toContain('echo b ·');
+  ui.app.unmount();
+});
+
+test('a command opened before a second one starts stays open inside the group', async () => {
+  const model = new ScriptedModel();
+  model.script(
+    [{ tool: 'run_command', args: { command: 'echo first-out' } }],
+    [{ hold: true }, { tool: 'run_command', args: { command: 'echo second-out' } }],
+    [{ text: 'Both ran.' }],
+  );
+  const ui = await bootApp(model, 100, 30, undefined, { shell: { timeoutMs: 20000 } });
+  await ui.press('F');
+  await ui.type('go');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('Confirm write: run_command'));
+  expect(ui.backend.lastFrame).toContain('Confirm write: run_command');
+  await ui.press('y');
+  await settleUntil(() => /echo first-out · ✓/.test(ui.backend.lastFrame));
+  expect(ui.backend.lastFrame).toMatch(/echo first-out · ✓/);
+  await click(ui, rowOf(ui, 'echo first-out ·'));
+  await settleUntil(() => ui.backend.lastFrame.includes('│ first-out'));
+  expect(ui.backend.lastFrame).toContain('│ first-out');
+  model.release();
+  await settleUntil(() => ui.backend.lastFrame.includes('Confirm write: run_command'));
+  expect(ui.backend.lastFrame).toContain('Confirm write: run_command');
+  await ui.press('y');
+  await settleUntil(() => ui.backend.lastFrame.includes('Both ran.'));
+  expect(ui.backend.lastFrame).toContain('Both ran.');
+  expect(ui.backend.lastFrame).toContain('│ first-out');
   ui.app.unmount();
 });

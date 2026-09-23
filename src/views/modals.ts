@@ -21,6 +21,7 @@ import { isClicked, isOpen, foldId, type FoldState } from '../assistant/folds.js
 import { imageTokenRanges, splitTokens } from '../assistant/images.js';
 import { changeCounts, changeMarkdown, diffRows, type ChangeView } from '../assistant/diff.js';
 import { VIEW_CAPS, frameView, isConsoleKind, type ViewRecord, type ViewRenderers } from '../assistant/views.js';
+import { groupHeadText, groupOpen, viewGroups, type GroupMsg, type ViewGroup } from '../assistant/view-groups.js';
 import { renderConsole } from '../assistant/console-view.js';
 import { CELL_FREE, CELL_FULL, CONTEXT_WARN_AT, GRID_COLS, GRID_ROWS, contextFootnote, contextGrid, contextHeading, contextLegend, tokensBadge, type ContextReading, type GridCell } from '../assistant/context-meter.js';
 import { createElement as h, useEffect, useRef, useState, type ReactNode } from 'react';
@@ -165,6 +166,8 @@ interface ChatRow {
   // The one dim line saying what the model last said it is doing. Chrome: never
   // copied by a drag, and cut to one row rather than wrapped.
   step?: boolean;
+  // A group's head: the `ƒ` in the gutter, chrome like the step line.
+  groupHead?: boolean;
   toolRunsHdr?: boolean;
   toolRun?: boolean;
   spans?: Span[];
@@ -538,16 +541,39 @@ function messageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): ChatRow
   return rows;
 }
 
+// The rows each DRAWN message contributes — the group head counted with its first
+// member, a member of a folded group and every message a group took in contributing
+// none. One walk, so the rows drawn and the rows a click or an anchor counts agree.
+// `chatRows`, `rowAnchor` and `anchorRow` below all read this instead of each walking
+// the messages on its own, which is what keeps grouping decided in exactly one place.
+function rowsPerDrawn(messages: ChatMsg[], o: RowOpts): ChatRow[][] {
+  const drawn = messages.filter((m) => m.role !== 'system');
+  const byAt = new Map<number, { g: ViewGroup; open: boolean }>();
+  for (const g of viewGroups(drawn as GroupMsg[])) {
+    const open = groupOpen(o.folds, g);
+    for (const at of [...g.members, ...g.hidden]) byAt.set(at, { g, open });
+  }
+  return drawn.map((m, at) => {
+    const last = at === drawn.length - 1;
+    const inGroup = byAt.get(at);
+    if (!inGroup) return messageRows(m, at, last, o);
+    const out: ChatRow[] = [];
+    if (inGroup.g.head === at) {
+      const recs = inGroup.g.members.map((i) => (drawn[i]!.views as ViewRecord[])[0]!);
+      out.push({ role: 'assistant', first: true, step: true, groupHead: true, fold: foldId(at, 'group'),
+        spans: groupHeadText(recs, o.now).map((s) => ({ text: s.text, ...(s.color ? { color: o.palette[s.color] } : { dim: true }) })) });
+    }
+    if (inGroup.open && inGroup.g.members.includes(at)) out.push(...messageRows(m, at, last, o));
+    else if (!inGroup.open && inGroup.g.members.at(-1) === at && !last) out.push({ gap: true });
+    return out;
+  });
+}
+
 // The whole conversation as rows. The system prompt is not drawn and is not counted
 // either: it is unshifted onto the list again with every question, and an id that
 // moved with it would carry a click's exception to another message.
 export function chatRows(messages: ChatMsg[], o: RowOpts): ChatRow[] {
-  let at = -1;
-  return messages.flatMap((m, mi) => {
-    if (m.role === 'system') return [];
-    at++;
-    return messageRows(m, at, mi === messages.length - 1, o);
-  });
+  return rowsPerDrawn(messages, o).flat();
 }
 
 // The first row of a block, so opening one can put it at the top of the screen: the
@@ -560,27 +586,23 @@ export function firstFoldRow(rows: readonly ChatRow[], id: string): number {
 // message it belongs to, and how far into that message's rows it is. The key is
 // clamped, so a row that a fold has taken away resolves to the nearest one left.
 export function rowAnchor(messages: ChatMsg[], o: RowOpts, row: number): { at: number; within: number } {
-  let at = -1, seen = 0;
-  for (let mi = 0; mi < messages.length; mi++) {
-    const m = messages[mi]!;
-    if (m.role === 'system') continue;
-    at++;
-    const n = messageRows(m, at, mi === messages.length - 1, o).length;
+  const per = rowsPerDrawn(messages, o);
+  let seen = 0;
+  for (let at = 0; at < per.length; at++) {
+    const n = per[at]!.length;
     if (row < seen + n) return { at, within: row - seen };
     seen += n;
   }
-  return { at: Math.max(0, at), within: 0 };
+  return { at: Math.max(0, per.length - 1), within: 0 };
 }
 
 // The same place, counted again over rows laid out with another fold state — what the
 // list has to be scrolled to for the person to keep reading the line they were on.
 export function anchorRow(messages: ChatMsg[], o: RowOpts, anchor: { at: number; within: number }): number {
-  let at = -1, seen = 0;
-  for (let mi = 0; mi < messages.length; mi++) {
-    const m = messages[mi]!;
-    if (m.role === 'system') continue;
-    at++;
-    const n = messageRows(m, at, mi === messages.length - 1, o).length;
+  const per = rowsPerDrawn(messages, o);
+  let seen = 0;
+  for (let at = 0; at < per.length; at++) {
+    const n = per[at]!.length;
     if (at === anchor.at) return seen + Math.min(anchor.within, Math.max(0, n - 1));
     seen += n;
   }
@@ -856,6 +878,16 @@ function ChatMessages({ messages, rowOpts, palette: m, errorColor, onViewport, s
       const key = `chat-${i}`;
       if (row.gap) return h(Box, { key, height: 1, flexShrink: 0 });
       if (row.reasonHeader) return h(Text, { key, dim: true, color: 'magenta', selectable: false }, `${' '.repeat(GUTTER)}${row.open ? '▾' : '▸'} ${row.label}`);
+      // A group's head is a step line too — chrome, cut to one row — but it carries
+      // several spans (`Ran 3 commands · ✗ 1 failed · 34.0 s`) and the `ƒ ` mark a
+      // plain step never draws: a span's own colour (the failed count's warn) wins
+      // over the line's forced dim, or a red count would read as grey.
+      if (row.step && row.groupHead) return h(Box, { key, flexDirection: 'row', flexShrink: 0, selectable: false },
+        gutter(row),
+        h(Box, { flexDirection: 'row', flexShrink: 1, overflow: 'hidden' },
+          (row.spans || []).map((s, j) => h(Text, {
+            key: j, dim: s.dim, color: s.color, wrap: 'truncate',
+          }, String(s.text ?? '')))));
       // The step line. Chrome, like the `N tools` line and the gutter: a drag across
       // the answer returns what the model SAID, never the host's account of what it
       // was doing. It is cut to the width above, and truncated here as well so that

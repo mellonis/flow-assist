@@ -253,7 +253,10 @@ assistant nobody had asked for a board.
   them — a display cap of its own, quite apart from `shell.maxChars`, which is how much
   the MODEL is given; `^o` opens every block in full (`VIEW_CAPS.lines`, everything the
   view kept), which is what makes `^o for all` true rather than a second, still-capped
-  state.
+  state. Consecutive commands of a turn (no other call between them) fold under one
+  `ƒ Ran N commands · ✓ 34 s` head — `Running N commands · $ cmd · 4 s` while one runs —
+  which takes the place of their step lines. Opened, they are the commands alone, each
+  its own block (`src/assistant/view-groups.ts`).
 - **Whose claim excuses a y/n, and whose does not.** A tool pauses because its `write`
   flag says so, and the flag is set by whoever is entitled to say it. The `mcp` plugin
   keeps the two apart per server: `trusted` is "I believe THIS SERVER's own
@@ -776,6 +779,9 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   - One block does NOT follow it (`isClicked`): the **cap on an open tool trail**. A
     key meaning "open everything" is asking for the trail, not for sixty rows of it,
     and the cap is what keeps an open trail readable.
+  - A group's open state is DERIVED: open when its own id says so, or when a member
+    was clicked open before the group formed around it, so a group never folds away
+    what the person opened.
   - A block's id names its message by its place among the messages that are DRAWN
     (`foldId`). Not by the message OBJECT — the chat replaces a message whenever it
     changes, which is what makes `rowCache` correct — and not by its raw index: the
