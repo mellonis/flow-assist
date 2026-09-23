@@ -5,7 +5,11 @@ import {
   addCalls,
   answerText,
   callRun,
+  cellWidth,
   cutStep,
+  runMarks,
+  startsWithNext,
+  summarizeArgs,
   endRound,
   isPlanOnly,
   notesCommand,
@@ -153,4 +157,43 @@ test('/notes takes step or open, and says what it did', () => {
   expect(notesCommand('hidden')).toBe(null);
   expect(notesSaid('step')).toContain('one dim line');
   expect(notesSaid('open')).toContain('in full');
+});
+
+test('a call keeps only what its trail line draws of its arguments', () => {
+  const args = summarizeArgs({ path: 'a.ts', content: 'x'.repeat(200_000), n: 3, list: [1, 2, 3], obj: { a: 'y'.repeat(100) }, one: ['z'] })!;
+  expect(String(args.content).length).toBeLessThanOrEqual(80);
+  expect(args.path).toBe('a.ts');
+  expect(args.n).toBe(3);
+  expect(args.list).toBe('[3 items]');
+  expect(args.one).toBe('[1 item]');
+  expect(String(args.obj).length).toBeLessThanOrEqual(40);
+  expect(summarizeArgs('junk')).toBe(undefined);
+  expect(callRun({ name: 'write_file', args: { content: 'x'.repeat(5000) }, outcome: 'applied' })!.args).toEqual({ content: `${'x'.repeat(79)}…` });
+});
+
+test('a round that began with its plan is a step even when cut off before its call', () => {
+  expect(startsWithNext('Next: read the file.')).toBe(true);
+  expect(startsWithNext('\n**Next:** read')).toBe(true);
+  expect(startsWithNext('There are three.\nNext: more')).toBe(false);
+  expect(startsWithNext('')).toBe(false);
+});
+
+test('a folded run is marked when a call failed, or a write showed no diff', () => {
+  const c = (n: number, ...runs: { name: string; outcome: string; write?: boolean }[]) => ({ n, runs });
+  expect(runMarks([c(0, { name: 'a', outcome: 'ok' })], false)).toEqual({ failed: false, wrote: false });
+  expect(runMarks([null, c(0, { name: 'a', outcome: 'declined' })], false).failed).toBe(true);
+  expect(runMarks([c(0, { name: 'a', outcome: 'error' })], false).failed).toBe(true);
+  // The last step's write followed by its diff: no mark. Without one, or an earlier
+  // step's (its diff would have ended the run): marked.
+  expect(runMarks([c(0, { name: 'w', outcome: 'applied', write: true })], true).wrote).toBe(false);
+  expect(runMarks([c(0, { name: 'w', outcome: 'applied', write: true })], false).wrote).toBe(true);
+  expect(runMarks([c(0, { name: 'w', outcome: 'applied', write: true }), c(1, { name: 'a', outcome: 'ok' })], true).wrote).toBe(true);
+});
+
+test('a cut counts the cells a character takes — a wide one two', () => {
+  expect(cellWidth('漢字')).toBe(4);
+  const cut = cutStep('漢字漢字漢字', 7);
+  expect(cellWidth(cut)).toBeLessThanOrEqual(7);
+  expect(cut.endsWith('…')).toBe(true);
+  expect(cutStep('short', 20)).toBe('short');
 });

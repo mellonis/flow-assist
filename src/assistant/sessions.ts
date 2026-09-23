@@ -210,16 +210,22 @@ export function normalizeParts(messages: unknown[]): Record<string, unknown>[] {
   return messages.filter((m): m is Record<string, unknown> => !!m && typeof m === 'object' && !Array.isArray(m)).map((m) => {
     if (m.role !== 'assistant') return m;
     const { process, shown, changes, toolRuns, step: _step, liveAs: _liveAs, live: _live, liveQuiet: _quiet, parts, ...rest } = m;
-    const calls = Array.isArray(toolRuns) ? toolRuns.map(callRun).filter((c): c is CallRun => c !== null) : [];
+    // A call that left a view is drawn by its view message already.
+    const calls = Array.isArray(toolRuns)
+      ? toolRuns.filter((r) => !(Array.isArray((r as { views?: unknown } | null)?.views) && ((r as { views: unknown[] }).views.length > 0))).map(callRun).filter((c): c is CallRun => c !== null)
+      : [];
+    // The old trail was the turn's, drawn under the answer — never a step's own calls,
+    // so an empty step stands between it and the text before (as `endRound` does).
+    const trail = (ps: TurnPart[]): TurnPart[] => (calls.length && ps.at(-1)?.kind === 'text' ? addCalls([...ps, { kind: 'text', text: '' }], calls) : addCalls(ps, calls));
     if (Array.isArray(parts)) {
-      const kept = addCalls(readParts(parts), calls);
+      const kept = trail(readParts(parts));
       return kept.length ? { ...rest, parts: kept } : rest;
     }
     const text = [process, shown].find((t): t is string => typeof t === 'string' && !!t.trim());
-    const old: TurnPart[] = addCalls([
+    const old: TurnPart[] = trail([
       ...(text ? [{ kind: 'text' as const, text }] : []),
       ...(Array.isArray(changes) ? changes.map(readChange).filter((c): c is ChangeView => c !== null).map((change) => ({ kind: 'change' as const, change })) : []),
-    ], calls);
+    ]);
     return old.length ? { ...rest, parts: old } : rest;
   });
 }

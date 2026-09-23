@@ -11,7 +11,7 @@ import { addTrigger, chatUser } from '../loader/registry.js';
 import { bgActiveCount } from '../loader/tools-core.js';
 import { autoBadge, autoCommand, autoConfirms, autoSaid, nextAutoMode, type AutoMode } from '../assistant/auto.js';
 import { createPlan, todoGlyph } from '../assistant/plan.js';
-import { addCalls, callRun, endRound, notesCommand, notesMode, notesSaid, type CallRun, type NotesMode, type TurnPart } from '../assistant/step.js';
+import { addCalls, callRun, endRound, startsWithNext, notesCommand, notesMode, notesSaid, type CallRun, type NotesMode, type TurnPart } from '../assistant/step.js';
 import { apiHistory, compactConversation, chatLanguage, requestTools, transcriptSoFar } from '../assistant/agent.js';
 import { createToolSet, toolLoadingMode } from '../assistant/tool-loading.js';
 import { copyTarget, copyToClipboard } from '../assistant/copy.js';
@@ -120,7 +120,7 @@ interface ChatMsg {
 // The message this turn's answer is being written into: the last assistant message
 // the turn has not yet stamped with its duration. It is looked up rather than assumed
 // to be the last one, because a tool's view (a command's output) is a message of its
-// own and may well sit after it — and the turn's seconds and its tool trail belong on
+// own and may well sit after it — and the turn's seconds and what it cost belong on
 // the answer whatever landed below it. −1 when the turn has no answer message yet.
 function answerAt(list: ChatMsg[]): number {
   for (let i = list.length - 1; i >= 0; i--) {
@@ -1260,13 +1260,15 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               const spent = turnTokensRef.current;
               setMessages(cur => {
                 // A round cut off by Esc or an error never said what it was. Its text
-                // stays where it was drawn: a round known to carry a tool call is a
-                // step; any other is what the answer had come to (and the line under
-                // it says it was stopped).
+                // stays where it was drawn: a round known to carry a tool call — or
+                // one that began with the `Next:` plan the prompt asks for before a
+                // call — is a step (drawn exactly as it streamed, the token never);
+                // any other is what the answer had come to (and the line under it
+                // says it was stopped).
                 const next = cur.map((m): ChatMsg => {
                   if (m.role !== 'assistant' || !m.live) return m;
                   const { live, liveQuiet, ...rest } = m;
-                  return liveQuiet
+                  return liveQuiet || startsWithNext(live)
                     ? { ...rest, parts: [...(rest.parts ?? []), { kind: 'text', text: live }] }
                     : { ...rest, content: `${rest.content ?? ''}${live}` };
                 });

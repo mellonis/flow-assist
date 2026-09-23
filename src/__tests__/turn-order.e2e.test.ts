@@ -416,6 +416,43 @@ test('Esc mid-round keeps what was written where it was — the answer so far, u
   ui.app.unmount();
 });
 
+test('Esc on a round that began with its Next: plan keeps it as a step — the text does not change', async () => {
+  const model = new ScriptedModel();
+  const ui = await ask(model, [[{ text: 'Next: read the file.' }, { hold: true }, { tool: 'datetime', args: {} }]]);
+  const y = rowOf(ui, 'read the file.');
+  expect(y).toBeGreaterThan(-1);
+  await ui.press('escape');
+  await settleUntil(() => ui.backend.lastFrame.includes('stopped (Esc)'));
+  expect(rows(ui)[y]).toContain('▸ read the file.');
+  expect(ui.backend.lastFrame).not.toContain('Next');
+  expect(answerMarks(ui)).toBe(0);
+  ui.app.unmount();
+});
+
+test('a folded run says a call in it failed', async () => {
+  const model = new ScriptedModel();
+  const ui = await ask(model, [[{ text: 'I try the tool.' }, { tool: 'no_such_tool', args: {} }], [{ text: 'It is not there.' }]]);
+  const row = rows(ui)[rowOf(ui, '▸ I try the tool.')] ?? '';
+  expect(row).toContain('✗');
+  ui.app.unmount();
+});
+
+test('a call keeps what its trail line draws — never a 200 KB argument in the session', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-turn-args-'));
+  const model = new ScriptedModel();
+  const big = 'x'.repeat(200_000);
+  const ui = await ask(model, [[{ text: 'I write it.' }, { tool: 'edit_app', args: { b: 42, content: big } }], [{ text: 'Written.' }]], { sessions: { dir } });
+  await ui.press('escape', 'escape'); // closing the chat saves at once
+  ui.app.unmount();
+  const file = fs.readdirSync(dir).find((f) => f.endsWith('.json'))!;
+  // The screen's list — the model's own history (`api`) keeps the call as it was
+  // made, which it must: the model is sent it next turn.
+  const screen = JSON.stringify((JSON.parse(fs.readFileSync(path.join(dir, file), 'utf8')) as Session).messages);
+  expect(screen.length).toBeLessThan(5_000);
+  expect(screen).not.toContain('x'.repeat(200));
+  expect(screen).toContain('edit_app');
+});
+
 test('Esc on a round known to carry a call keeps it as a step', async () => {
   const model = new ScriptedModel();
   const ui = await ask(model, [[{ tool: 'datetime', args: {} }, { text: 'Now I count them.' }, { hold: true }]]);
@@ -469,6 +506,10 @@ test('a session saved before the time order still renders — and a malformed me
         toolRuns: [{ name: 'read_file', args: { path: 'old.ts' }, outcome: 'ok', detail: 'const b = 2;' }, { name: 'edit_file', args: {}, write: true, outcome: 'applied', detail: 'ok', changes: [change] }, 'junk'], duration: 1200 },
       { role: 'user', content: 'second question' },
       { role: 'assistant', content: 'Second answer.', parts: 'garbage' },
+      { role: 'user', content: 'third question' },
+      // A trail after a step with no diff between: its own row, not the step's calls. A
+      // call that left a view is drawn by the view — never a second time here.
+      { role: 'assistant', content: 'Third answer.', process: 'Third step.', toolRuns: [{ name: 'list_dir', outcome: 'ok' }, { name: 'run_command', outcome: 'ok', views: [{ kind: 'console' }] }] },
       null as never,
       'stray' as never,
     ],
@@ -494,6 +535,12 @@ test('a session saved before the time order still renders — and a malformed me
   expect(times(ui.backend.lastFrame, 'read_file')).toBe(1);
   expect(ui.backend.lastFrame).not.toContain('Next:');
   expect(ui.backend.lastFrame).toContain('Second answer.');
+  const step3 = rowOf(ui, '▸ Third step.');
+  const trail3 = rowOf(ui, '▸ 1 tool: list_dir');
+  expect(step3).toBeGreaterThan(-1);
+  expect(trail3).toBeGreaterThan(step3);
+  expect(rowOf(ui, 'Third answer.')).toBeGreaterThan(trail3);
+  expect(ui.backend.lastFrame).not.toContain('run_command');
   ui.app.unmount();
 });
 

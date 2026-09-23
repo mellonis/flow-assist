@@ -26,6 +26,7 @@
 //     line starting `Next:` before a tool call — the sentence after it is the step,
 //     the token is protocol. The answer is drawn exactly as written (`answerText`).
 
+import { charWidth } from '@flowtty/core';
 import type { ChangeView } from './diff.js';
 
 // ─── The mode ─────────────────────────────────────────────────────────────────
@@ -63,15 +64,33 @@ export function notesSaid(mode: NotesMode): string {
 export interface CallRun { name: string; args?: unknown; write?: boolean; outcome: string; detail?: string }
 export type TurnPart = { kind: 'text'; text: string } | { kind: 'tools'; runs: CallRun[] } | { kind: 'change'; change: ChangeView };
 
-// A call as a part keeps it: what the trail draws, never the tool's whole result (a
-// file's contents would ride in every session save) and never its changes or views,
-// which are parts and messages of their own.
+// A call as a part keeps it: what the trail draws, never more — not the tool's whole
+// result, and not its arguments as written (a write_file's `content`, an edit's
+// `old`/`new` would ride in every session save), nor its changes or views, which are
+// parts and messages of their own.
+const ARG_CHARS = 80;
+const DETAIL_CHARS = 300;
+function argSummary(v: unknown): unknown {
+  if (Array.isArray(v)) return v.length === 1 ? '[1 item]' : `[${v.length} items]`;
+  if (v && typeof v === 'object') {
+    let json = '';
+    try { json = JSON.stringify(v); } catch { return '{…}'; }
+    return json.length > 40 ? `${json.slice(0, 39)}…` : json;
+  }
+  if (typeof v === 'string') return v.length > ARG_CHARS ? `${v.slice(0, ARG_CHARS - 1)}…` : v;
+  return v;
+}
+export function summarizeArgs(args: unknown): Record<string, unknown> | undefined {
+  if (!args || typeof args !== 'object' || Array.isArray(args)) return undefined;
+  return Object.fromEntries(Object.entries(args as Record<string, unknown>).map(([k, v]) => [k, argSummary(v)]));
+}
 export function callRun(raw: unknown): CallRun | null {
   if (!raw || typeof raw !== 'object') return null;
   const r = raw as Record<string, unknown>;
   if (typeof r.name !== 'string' || typeof r.outcome !== 'string') return null;
   const detail = typeof r.detail === 'string' ? r.detail : r.detail == null ? '' : JSON.stringify(r.detail);
-  return { name: r.name, ...(r.args !== undefined ? { args: r.args } : {}), ...(r.write ? { write: true } : {}), outcome: r.outcome, ...(detail ? { detail: detail.slice(0, 300) } : {}) };
+  const args = summarizeArgs(r.args);
+  return { name: r.name, ...(args ? { args } : {}), ...(r.write ? { write: true } : {}), outcome: r.outcome, ...(detail ? { detail: detail.slice(0, DETAIL_CHARS) } : {}) };
 }
 
 // Calls added to a turn's parts: into the last part when it is calls too, so
@@ -170,6 +189,13 @@ export function answerText(text: string): string {
   return String(text ?? '').trim();
 }
 
+// A round that begins with a `Next:` line: the plan the prompt asks for before a call.
+// Cut off (Esc) before its call arrived, it is still a step — never the answer.
+export function startsWithNext(text: string): boolean {
+  const first = String(text ?? '').split('\n').map(tidy).find(Boolean);
+  return !!first && NEXT_LINE.test(first);
+}
+
 // A step that is nothing but its `Next:` line — the plan the prompt asks for before a
 // call. A group of commands takes such a message in: its head says what ran.
 export function isPlanOnly(text: string): boolean {
@@ -247,20 +273,48 @@ export function stepSummary(text: string): string {
 
 // The folded run's row: `▸ ` + the newest step + how many steps the run holds — no
 // count for a run of one. Exactly one terminal row: the summary is cut so the count
-// always fits.
+// always fits. `room` is the width left once the row's marks (drawn beside it) are
+// taken off.
 export function runRowText(steps: readonly string[], width: number): string {
   const count = steps.length > 1 ? `  (${steps.length} steps)` : '';
   const head = '▸ ';
-  const room = Math.max(1, width - Array.from(head).length - Array.from(count).length);
+  const room = Math.max(1, width - cellWidth(head) - cellWidth(count));
   return cutStep(`${head}${cutStep(stepSummary(steps.at(-1) ?? ''), room)}${count}`, width);
 }
 
+// The marks a folded run carries, so what happened inside it is seen without a click:
+// `✗` — one of its calls failed or was declined; `✎` — a write ran and reported no
+// diff (a write that did is followed by its ✎ block).
+export interface RunMarks { failed: boolean; wrote: boolean }
+export function runMarks(calls: readonly (StepCalls | null)[], diffAfter: boolean): RunMarks {
+  const all = calls.flatMap((c) => c?.runs ?? []);
+  const failed = all.some((r) => r.outcome === 'error' || r.outcome === 'declined');
+  // A write reports its diff right after its step's calls — which ends the run — so
+  // only the last step's write can have one.
+  const wrote = calls.some((c, i) => (c?.runs ?? []).some((r) => r.write && r.outcome === 'applied') && !(i === calls.length - 1 && diffAfter));
+  return { failed, wrote };
+}
+
+// How many terminal cells a string takes (a wide character two).
+export function cellWidth(text: string): number {
+  let w = 0;
+  for (const ch of String(text ?? '')) w += charWidth(ch.codePointAt(0)!);
+  return w;
+}
+
 // A line of chrome takes exactly ONE terminal row, so what does not fit is cut with an
-// ellipsis rather than wrapped. Counted in characters, as the grid counts them.
+// ellipsis rather than wrapped — by the cells it takes, so a wide character counts two.
 export function cutStep(text: string, width: number): string {
-  const chars = Array.from(String(text ?? ''));
+  const str = String(text ?? '');
   if (width <= 0) return '';
-  if (chars.length <= width) return chars.join('');
-  if (width === 1) return '…';
-  return `${chars.slice(0, width - 1).join('')}…`;
+  if (cellWidth(str) <= width) return str;
+  let out = '';
+  let used = 0;
+  for (const ch of str) {
+    const w = charWidth(ch.codePointAt(0)!);
+    if (used + w > width - 1) break;
+    out += ch;
+    used += w;
+  }
+  return `${out}…`;
 }

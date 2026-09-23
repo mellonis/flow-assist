@@ -2,7 +2,7 @@
 //
 // A tool that edits something knows what it looked like before and after; it hands
 // both to the host through `ctx.reportChange` and the host turns them into the block
-// the chat keeps under the answer. The host cannot know how to read a file, an issue
+// the chat keeps in the turn, where the write happened. The host cannot know how to read a file, an issue
 // or a comment — the tool can — so the tool reports and the host only diffs.
 //
 // The diff is for the PERSON: it never reaches the model's history. The model wrote

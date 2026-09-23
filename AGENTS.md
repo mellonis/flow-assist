@@ -957,7 +957,13 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     `foldId(at, 'steps', n)` — `n` is the run's number within its message, which never
     changes as the turn grows because parts are only appended. A click opens that run
     alone: every step in full, dim, where it happened (a click on any of its rows
-    folds it again); `^o` opens and closes every run with everything else. A trail is
+    folds it again); `^o` opens and closes every run with everything else. A folded
+    run carries marks after its text so what happened inside is seen without a click
+    (`runMarks`): `✗` in the error colour when one of its calls failed or was
+    declined, `✎` in the warn colour when a write ran and showed no diff; the summary
+    is cut to leave them room. Every cut in the chat's chrome counts cells, not code
+    units (`cutStep` / `cellWidth` on flowtty's `charWidth`), so a wide character
+    never pushes a row onto a second line. A trail is
     numbered the same way (`foldId(at, 'tools', n)`, its cap `calls` with the same
     `n`), a step's own calls included, so an id means the same in both modes.
   - **`open` draws every step in full, in the normal colour** — steps do not fold, and
@@ -985,14 +991,20 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     round taken for it. Which rounds survived depended on how the network cut the
     stream.
   - **A round cut off** by Esc or an error keeps its text where it was drawn: a round
-    known to carry a call becomes a step, any other is what the answer had come to,
-    under the `stopped (Esc)` line.
+    known to carry a call, or one that began with its `Next:` plan (`startsWithNext`),
+    becomes a step — drawn as it streamed, the token never; any other is what the
+    answer had come to, under the `stopped (Esc)` line.
   - **Sessions keep the parts in order.** A call is kept as the trail draws it
-    (`callRun`: name, arguments, outcome, the first 300 characters of the result) —
-    never a file's whole contents. A session saved before kept the text of the tool
+    (`callRun`): its name, its outcome, the first 300 characters of its result, and its
+    arguments SUMMARISED (`summarizeArgs` — a string cut to 80 characters, a list as
+    `[N items]`, an object as a 40-character JSON cut) — never a write_file's
+    `content` or an edit's `old`/`new` in every save (the model's own history, `api`,
+    keeps the call as it was made; it is sent it again). A session saved before kept the text of the tool
     rounds (`process`, or `shown`), the turn's `changes` and its whole trail
     (`toolRuns`); it reads as those parts in that old order — the text, the changes,
-    then the calls as one trail just before the answer (`normalizeParts`). A part a
+    then the calls as one trail of its own just before the answer, an empty step put
+    before it so it is never taken for the step's own calls, and a call that left a
+    view dropped since its view message draws it (`normalizeParts`). A part a
     renderer cannot draw, or a "message" that is not an object, is dropped on load;
     `live` and `liveQuiet` are never saved.
   - **The model is asked for the shape, not for silence.** `baseStatic()` used to tell

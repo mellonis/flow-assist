@@ -164,8 +164,8 @@ export interface LiveView { update(data: unknown): void; discard(): void }
 
 // ─── API-side history ─────────────────────────────────────────────────────────
 // What a caller sends back on the next turn. The chat UI's own message list is a
-// DISPLAY list — final text plus `process`/`toolRuns`/`live`/`reasoning` — and
-// must never be the model's history: replaying only the final text of each turn
+// DISPLAY list — the turn's parts in order, the round being written, the answer —
+// and must never be the model's history: replaying only the final text of each turn
 // shows the model a transcript in which state changed with no tool call and no
 // tool result, and it imitates exactly that (narrates the change, guesses at
 // state). No system-prompt directive outweighs examples sitting in the history.

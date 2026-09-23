@@ -16,7 +16,7 @@
 
 import { askRows, type AskRow, type AskState } from '../assistant/ask.js';
 import { autoBadge, type AutoMode } from '../assistant/auto.js';
-import { answerText, cutStep, readParts, runRowText, shownText, turnSegments, type NotesMode } from '../assistant/step.js';
+import { answerText, cellWidth, cutStep, readParts, runMarks, runRowText, shownText, turnSegments, type NotesMode } from '../assistant/step.js';
 import { isClicked, isOpen, foldId, type FoldState } from '../assistant/folds.js';
 import { imageTokenRanges, splitTokens } from '../assistant/images.js';
 import { changeCounts, changeMarkdown, diffRows, type ChangeView } from '../assistant/diff.js';
@@ -422,7 +422,8 @@ function toolRunText(run: ToolRun, wrap: number, n = 1): Span {
   if ((run.outcome === 'error' || run.outcome === 'declined') && run.detail) {
     text += ` — ${String(run.detail).slice(0, 60)}`;
   }
-  return { text: text.slice(0, Math.max(20, (wrap || 80) - 1)), dim: true };
+  // One terminal row, cut by the cells it takes — a wide character counts two.
+  return { text: cutStep(text, Math.max(20, (wrap || 80) - 1)), dim: true };
 }
 
 // Every content row is indented by a two-cell gutter: the speaker's marker sits in
@@ -701,7 +702,8 @@ function buildMessageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): Ch
         if (earlier) rows.push({ role, toolRun: true, fold: callsId, spans: [{ text: `… ${earlier} earlier call${earlier === 1 ? '' : 's'}`, dim: true }] });
         for (const { run, n: times } of condensed.slice(earlier)) rows.push({ role, toolRun: true, fold: toolsId, spans: [toolRunText(run, inner, times)] });
       };
-      for (const seg of turnSegments(parts)) {
+      const segs = turnSegments(parts);
+      for (const [si, seg] of segs.entries()) {
         if (seg.kind === 'change') {
           // What a write changed: always open (not foldable) — it is the part of the
           // turn the person most needs to see. The hunks are laid out as markdown, so
@@ -719,8 +721,16 @@ function buildMessageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): Ch
         const id = foldId(at, 'steps', seg.n);
         if (notes === 'step' && !isOpen(folds, id)) {
           // The run folded: ONE dim row where it began, saying the newest step and
-          // how many there are. Chrome — the host's account of what was said.
-          rows.push({ role, step: true, fold: id, spans: [{ text: runRowText(seg.steps, inner) }] });
+          // how many there are. Chrome — the host's account of what was said. Its
+          // marks say what happened inside without a click: `✗` a call failed or was
+          // declined, `✎` a write ran that showed no diff.
+          const marks = runMarks(seg.calls, segs[si + 1]?.kind === 'change');
+          const markSpans: Span[] = [
+            ...(marks.failed ? [{ text: ' ✗', mark: 'failed' }] : []),
+            ...(marks.wrote ? [{ text: ' ✎', mark: 'wrote' }] : []),
+          ];
+          const markWidth = markSpans.reduce((w, sp) => w + cellWidth(sp.text), 0);
+          rows.push({ role, step: true, fold: id, spans: [{ text: runRowText(seg.steps, Math.max(4, inner - markWidth)) }, ...markSpans] });
         } else {
           // Every step in full, where it happened: dim in `step` (a click on any of
           // its rows folds the run again), the normal colour in `open`. Under each,
@@ -921,13 +931,19 @@ function ChatMessages({ messages, rowOpts, palette: m, errorColor, onViewport, s
       // account of it. It is cut to the width above, and truncated here as well so
       // that it can never take a second row — the whole conversation is laid out one
       // terminal line per row.
-      if (row.step) return h(Text, { key, dim: true, wrap: 'truncate', selectable: false }, `${' '.repeat(GUTTER)}${String(row.spans?.[0]?.text ?? '')}`);
+      if (row.step) return h(Box, { key, flexDirection: 'row', flexShrink: 0, selectable: false },
+        h(Text, null, ' '.repeat(GUTTER)),
+        h(Box, { flexDirection: 'row', flexShrink: 1, overflow: 'hidden' },
+          (row.spans || []).map((s, j) => h(Text, {
+            key: j, wrap: 'truncate',
+            ...(s.mark === 'failed' ? { color: errorColor } : s.mark === 'wrote' ? { color: m.warn } : { dim: true }),
+          }, String(s.text ?? '')))));
       if (row.reason) return h(Box, { key, flexDirection: 'row', flexShrink: 0, ...frameRow(row) },
         gutter(row),
         content(row, (s, j) => h(Text, { key: j, dim: true, bold: s.bold, underline: s.underline, color: s.color, selectable: j < (row.chrome ?? 0) ? false : undefined }, String(s.text ?? ''))));
       if (row.toolRun) return h(Box, { key, flexDirection: 'row', flexShrink: 0 },
         h(Text, null, ' '.repeat(GUTTER)),
-        (row.spans || []).map((s, j) => h(Text, { key: j, dim: true }, String(s.text ?? ''))));
+        (row.spans || []).map((s, j) => h(Text, { key: j, dim: true, wrap: 'truncate' }, String(s.text ?? ''))));
       // The turn ran out of rounds: said in the warn colour, where the answer it never
       // wrote would have been. Chrome — it is the host's account of the turn, not
       // something the model said.

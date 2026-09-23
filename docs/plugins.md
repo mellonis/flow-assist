@@ -101,7 +101,8 @@ What the host does with it, and what it expects back:
   not a guard your tool may lean on. Check the arguments yourself, and refuse what the
   plugin must not do whether or not anyone was asked.
 - **A write refuses by throwing.** Whatever a write tool *returns* counts as done — the
-  chat marks the turn with ✎. A refusal or a failed call must throw, in words the
+  chat marks the call's trail line with ✎ (and a folded run of steps whose write
+  reported no diff). A refusal or a failed call must throw, in words the
   model can repeat to the person ("…Nothing was changed.").
 - **`ctx.reportChange({ title, before, after })`** — once the write succeeded, what it
   changed. The chat keeps a `✎ title · +N −M` diff block in the turn, where the write
