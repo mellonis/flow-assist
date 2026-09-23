@@ -246,7 +246,7 @@ test('ai.disabledTools ["shell"] withholds run_command; ! still works', async ()
 // A fenced block is drawn as rows behind a dim `│ `; strip the bar to read the lines.
 const unfence = (frame: string) => frame.split('\n').map((r) => r.replace(/│ /g, '')).join('\n');
 
-test('a confirmed run_command leaves its output in the chat, and the model is not sent a copy', async () => {
+test('a confirmed run_command folds to one line, and opened its output stands; the model is not sent a copy', async () => {
   const root = rootDir();
   const model = new ScriptedModel();
   model.script(
@@ -262,13 +262,23 @@ test('a confirmed run_command leaves its output in the chat, and the model is no
   await settleUntil(() => model.requests.length === 2);
   await settle(10);
 
-  const shown = unfence(ui.backend.lastFrame);
-  expect(shown).toContain('$ echo tool-output-42; echo second-line');
-  expect(shown).toContain('tool-output-42');
-  expect(shown).toContain('second-line');
-  expect(shown).toContain('exit 0');
-  expect(shown).toContain(root.replace(os.homedir(), '~'));
-  expect(shown).toContain('It printed two lines.');
+  // Folded: one line saying how it ended — the output itself is not on screen yet.
+  // (The command's own text already contains "tool-output-42"/"second-line", so what
+  // proves the OUTPUT is off screen is the bar-prefixed row it would stand behind —
+  // `unfence` strips that bar, so the raw frame is checked here instead.)
+  const folded = unfence(ui.backend.lastFrame);
+  expect(folded).toMatch(/\$ echo tool-output-42; echo second-line · ✓ \d+\.\d s/);
+  expect(ui.backend.lastFrame).not.toContain('│ tool-output-42');
+  expect(ui.backend.lastFrame).not.toContain('│ second-line');
+  expect(folded).toContain('It printed two lines.');
+
+  // Opened, the output stands.
+  ui.backend.press({ name: 'o', ctrl: true });
+  await settle(6);
+  expect(ui.backend.lastFrame).toContain('│ tool-output-42');
+  expect(ui.backend.lastFrame).toContain('│ second-line');
+  ui.backend.press({ name: 'o', ctrl: true }); // back to folded
+  await settle(6);
 
   // What the model is SENT: the tool's result once, and no block of its own. The
   // block would be a second copy of output it has already read.
@@ -283,7 +293,7 @@ test('a confirmed run_command leaves its output in the chat, and the model is no
   ui.app.unmount();
 });
 
-test('a long output is cut to its last lines, and ^r shows all of it', async () => {
+test('a long output stays one line folded; opened it shows its last lines, cut', async () => {
   const root = rootDir();
   const model = new ScriptedModel();
   model.script(
@@ -298,21 +308,19 @@ test('a long output is cut to its last lines, and ^r shows all of it', async () 
   await settleUntil(() => model.requests.length === 2);
   await settle(10);
 
+  // Folded: nothing of the forty lines is on screen, whatever their number.
   const folded = unfence(ui.backend.lastFrame);
-  expect(folded).toContain('… 35 lines cut · ^o for all');
-  // The fence's language row is the host's own label over a block the host wrote: the
-  // `$ command` line above it already says what this is.
-  expect(folded.split('\n').some((r) => r.trim() === 'console')).toBe(false);
-  expect(folded).toContain('line 40');
-  expect(folded).not.toContain('line 3 ');
+  expect(folded).not.toContain('lines cut');
+  expect(folded).not.toContain('line 40');
+
+  ui.backend.press({ name: 'r', ctrl: true }); // ^r is ^o's alias
+  await settle(5);
+  const opened = unfence(ui.backend.lastFrame);
+  expect(opened).toContain('… 35 lines cut · ^o for all');
+  expect(opened).toContain('line 40');
+  expect(opened).not.toContain('line 3 ');
   // The model still got the whole of it — the cap here is the screen's, not its.
   expect(String(sentTo(model).find((m) => m.role === 'tool')?.content)).toContain('line 3\n');
-
-  ui.backend.press({ name: 'r', ctrl: true });
-  await settle(5);
-  const all = unfence(ui.backend.lastFrame);
-  expect(all).not.toContain('lines cut');
-  expect(all).toContain('line 40');
   ui.app.unmount();
 });
 
@@ -342,15 +350,20 @@ test('a declined command leaves no block; a failed one shows what it printed and
   await ui.press('y');
   await settleUntil(() => model.requests.length === 4);
   await settle(10);
-  const shown = unfence(ui.backend.lastFrame);
-  expect(shown).toContain('before-it-died');
-  expect(shown).toContain('exit 3');
+  // The exit code is in the folded line; what it printed (the bar-prefixed row) needs
+  // the block opened — the command's own text already contains "before-it-died".
+  const folded = unfence(ui.backend.lastFrame);
+  expect(folded).toContain('exit 3');
+  expect(ui.backend.lastFrame).not.toContain('│ before-it-died');
+  ui.backend.press({ name: 'o', ctrl: true });
+  await settle(5);
+  expect(ui.backend.lastFrame).toContain('│ before-it-died');
   ui.app.unmount();
 });
 
 test('what a command printed cannot pass for the host speaking, and survives a restart', async () => {
-  // The text in the block was written by a command, so it is drawn inside the fenced
-  // block (behind the code bar) and cannot look like a confirmation or a hint line.
+  // The text in the block was written by a command, so it is drawn inside the block
+  // (behind the code bar) and cannot look like a confirmation or a hint line.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-view-sess-'));
   const root = rootDir();
   const first = new ScriptedModel();
@@ -365,6 +378,8 @@ test('what a command printed cannot pass for the host speaking, and survives a r
   await one.press('y');
   await settleUntil(() => first.requests.length === 2);
   await settle(10);
+  one.backend.press({ name: 'o', ctrl: true });
+  await settle(6);
   // Every line of it is inside the block: the code bar is in front of it on screen.
   expect(one.backend.lastFrame).toContain('│ Press y to confirm');
   expect(one.backend.lastFrame).toContain('│ Confirm write: rm -rf /');
@@ -374,10 +389,16 @@ test('what a command printed cannot pass for the host speaking, and survives a r
   const model = new ScriptedModel();
   const two = await boot(model, root, { sessions: { dir } });
   await settle(6);
-  const shown = unfence(two.backend.lastFrame);
-  expect(shown).toContain('$ printf');
-  expect(shown).toContain('Press y to confirm');
-  expect(shown).toContain('exit 0');
+  // Restored, folded: one line — the command's own text (which contains "Press y to
+  // confirm" too) still cannot pass for a confirmation just because the app
+  // restarted; the bar-prefixed row it would stand behind is what proves it is off
+  // screen.
+  const folded = unfence(two.backend.lastFrame);
+  expect(folded).toContain('$ printf');
+  expect(two.backend.lastFrame).not.toContain('│ Press y to confirm');
+  two.backend.press({ name: 'o', ctrl: true });
+  await settle(6);
+  expect(two.backend.lastFrame).toContain('│ Press y to confirm');
   // And it is still not the model's: the restored conversation sends it nothing.
   model.script([{ text: 'Fine.' }]);
   await two.type('ok');

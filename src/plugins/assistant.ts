@@ -22,7 +22,7 @@ import { createShellState, formatShell, nextCwd, runShell, shellLimits } from '.
 import { KEEP_SESSIONS, SESSION_VERSION, closeSession, flushOnExit, listSessions, loadSession, newSessionId, pruneSessions, saveSession, sessionToContinue, sessionWhen, sessionsDir, type Session } from '../assistant/sessions.js';
 import type { ChatMessage } from '../assistant/agent.js';
 import type { ChangeView } from '../assistant/diff.js';
-import { VIEW_CAPS, isConsoleKind, toolView, type ToolView, type ViewRecord } from '../assistant/views.js';
+import { VIEW_CAPS, type ViewRecord, type ViewRenderers } from '../assistant/views.js';
 import { editorReducer } from '@flowtty/core';
 import { z } from 'zod';
 import { anchorRow, askFieldWidth, chatFieldWidth, chatRows, chatWrapWidth, firstFoldRow, rowAnchor, type RowOpts, type Viewport } from '../views/modals.js';
@@ -107,7 +107,7 @@ interface ChatMsg {
   // What the turn's writes changed — drawn as diff blocks above the answer.
   changes?: ChangeView[];
   // A block a tool asked the host to draw (role 'view') — a command's output so far.
-  views?: ToolView[];
+  views?: ViewRecord[];
   [k: string]: unknown;
 }
 
@@ -461,6 +461,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // The display list as the view's own functions read it — the same objects,
           // and so the same cached rows.
           const drawn = () => msgsRef.current as Parameters<typeof chatRows>[0];
+          // A renderer that cannot draw is said once per kind in the log, not once per frame.
+          const failedKinds = f.useRef(new Set<string>());
+          const onViewFail = (kind: string, why: string) => {
+            if (failedKinds.current.has(kind)) return;
+            failedKinds.current.add(kind);
+            (f.services as Record<string, any>).pushLog?.(`[view] ${kind}: ${why} — drawn as one line`);
+          };
           const rowOpts = (state: FoldState): RowOpts => ({
             wrap: chatWrapWidth(width, fullscreenRef.current),
             folds: state,
@@ -469,6 +476,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // Empty when the action is unbound — every hint that names it then
             // leaves it out, rather than teaching a key that does nothing.
             detailsKey: firstGlyph(f.keys.details),
+            renderers: (f.services as { viewRenderers?: ViewRenderers }).viewRenderers ?? {},
+            now: Date.now(),
+            palette: ((f.config.theme as { modals?: { chat?: Record<string, string | undefined> } } | undefined)?.modals?.chat ?? {}),
+            onViewFail,
           });
           // Put a row at the top of the conversation, once the rows have changed.
           const askScroll = (row: number) => setScrollTo({ row: Math.max(0, row), n: ++scrollSeq.current });
@@ -909,13 +920,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   endToolSegment();
                   setPhase('thinking');
                   const added = run.changes ?? [];
-                  // Until the chat draws through renderers: a console record is drawn as
-                  // the old console block; any other kind is not drawn yet.
-                  const shown = (run.views ?? []).flatMap((r) => {
-                    const v = isConsoleKind(r.kind) ? toolView({ kind: 'console', ...(r.data as object) }) : null;
-                    return v ? [v] : [];
-                  });
-                  if (!added.length && !shown.length) { f.notify(); return; }
+                  if (!added.length && !run.views?.length) { f.notify(); return; }
                   setMessages(cur => {
                     const next = cur.slice();
                     if (added.length) {
@@ -927,7 +932,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                     // in the order things happened and carries its own marker — the
                     // way a `!command`'s result does. Display only: `apiRef` never
                     // gets it, and `apiHistory` drops the role even if it somehow did.
-                    if (shown.length) next.push({ role: 'view', content: '', views: shown });
+                    if (run.views?.length) next.push({ role: 'view', content: '', views: run.views });
                     return next;
                   });
                   f.notify();
@@ -1931,6 +1936,11 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             viewLines: Number((f.config.plugins as Record<string, { runOutputLines?: unknown }> | undefined)?.assistant?.runOutputLines) || VIEW_CAPS.folded,
             // How the narration between tool calls is drawn — one step line by default.
             notes,
+            // Every renderer the chat can draw a view with (the host's own `console`
+            // plus each plugin's, collected at boot — src/loader/registry.ts).
+            viewRenderers: (f.services as { viewRenderers?: ViewRenderers }).viewRenderers,
+            now: Date.now(),
+            onViewFail,
             // Live count of IN-FLIGHT background tasks (the host re-renders via
             // notify() when one is armed or completes).
             bgCount: bgActiveCount(),

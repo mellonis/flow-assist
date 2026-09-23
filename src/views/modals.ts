@@ -20,7 +20,8 @@ import { cutStep, type NotesMode } from '../assistant/step.js';
 import { isClicked, isOpen, foldId, type FoldState } from '../assistant/folds.js';
 import { imageTokenRanges, splitTokens } from '../assistant/images.js';
 import { changeCounts, changeMarkdown, diffRows, type ChangeView } from '../assistant/diff.js';
-import { VIEW_CAPS, viewCut, viewMarkdown, type ToolView } from '../assistant/views.js';
+import { VIEW_CAPS, frameView, isConsoleKind, type ViewRecord, type ViewRenderers } from '../assistant/views.js';
+import { renderConsole } from '../assistant/console-view.js';
 import { CELL_FREE, CELL_FULL, CONTEXT_WARN_AT, GRID_COLS, GRID_ROWS, contextFootnote, contextGrid, contextHeading, contextLegend, tokensBadge, type ContextReading, type GridCell } from '../assistant/context-meter.js';
 import { createElement as h, useEffect, useRef, useState, type ReactNode } from 'react';
 import { bindingGlyph, keyGlyph } from '../playback/keys.js';
@@ -67,7 +68,7 @@ interface ChatMsg {
   // What the turn's writes changed — drawn as diff blocks above the answer.
   changes?: ChangeView[];
   // The blocks a tool asked the host to draw (role 'view'): a command's output.
-  views?: ToolView[];
+  views?: ViewRecord[];
   [k: string]: unknown;
 }
 // One executed tool in a turn, for the persistent `▸ name (args) → outcome` trace.
@@ -150,6 +151,8 @@ interface ChatRow {
   label?: boolean | string;
   // The first content row of a message: it carries the speaker's marker.
   first?: boolean;
+  // A view that is not a command draws no `$`.
+  plainGutter?: boolean;
   // The quiet line under an answer: how long it took, which tools ran, what it cost.
   meta?: boolean;
   runs?: ToolRun[];
@@ -495,9 +498,21 @@ export interface RowOpts {
   // The cap of whatever opens a block now, drawn from the binding and never spelled
   // here (`^o`, or what `config.keys.details` says instead).
   detailsKey: string;
+  // Every renderer the chat can draw a view with — the host's own `console` and each
+  // plugin's, qualified by its name (src/loader/registry.ts's collectViewRenderers).
+  renderers: ViewRenderers;
+  // The clock a live view's seconds are read against, once per frame.
+  now: number;
+  palette: Record<string, string | undefined>;
+  onViewFail?: (kind: string, why: string) => void;
 }
 
 function messageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): ChatRow[] {
+  const views = (Array.isArray(m.views) ? m.views : []) as ViewRecord[];
+  // A live view's seconds are part of its rows: without them in the key a cached
+  // `12 s` stands still through a silent `sleep 30`. A finished view's time is in
+  // its data, so it adds nothing.
+  const clock = views.filter((v) => v.phase === 'live').map((v) => Math.floor((o.now - v.startedAt) / 1000)).join(',');
   // Everything the rows depend on is in the key — which of this message's blocks are
   // open as much as the width, and how the narration is drawn — or a message would
   // keep the rows it was first laid out with, and a click would move nothing.
@@ -505,9 +520,9 @@ function messageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): ChatRow
     isOpen(o.folds, foldId(at, 'notes')) ? 1 : 0,
     isOpen(o.folds, foldId(at, 'tools')) ? 1 : 0,
     isClicked(o.folds, foldId(at, 'calls')) ? 1 : 0,
-    ...(Array.isArray(m.views) ? (m.views as ToolView[]).map((_v, vi) => (isOpen(o.folds, foldId(at, 'view', vi)) ? 1 : 0)) : []),
+    ...views.map((_v, vi) => (isOpen(o.folds, foldId(at, 'view', vi)) ? 1 : 0)),
   ].join('');
-  const key = `${o.wrap}:${open}:${last ? 1 : 0}:${o.viewLines}:${o.notes}:${o.detailsKey}:${at}`;
+  const key = `${o.wrap}:${open}:${last ? 1 : 0}:${o.viewLines}:${o.notes}:${o.detailsKey}:${at}:${clock}:${o.palette.ok ?? ''}:${o.palette.warn ?? ''}`;
   let byKey = rowCache.get(m);
   if (!byKey) rowCache.set(m, (byKey = new Map()));
   let rows = byKey.get(key);
@@ -570,28 +585,26 @@ function buildMessageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): Ch
   const inner = Math.max(10, wrap - GUTTER);
   {
     const role = m.role;
-    // A block a tool asked the host to draw (src/assistant/views.ts): a message of its
-    // own, so it reads where it happened. The text in it was written by a command, a
-    // file or a page — never by the host — so it is drawn inside the fence the view
-    // built, which nothing in it can close early, and folded to its last lines until
-    // ^r asks for all of them.
-    if (role === 'view') {
-      const views = (Array.isArray(m.views) ? m.views : []) as ToolView[];
+    // A block a tool described and a renderer draws (src/assistant/views.ts): a
+    // message of its own, so it reads where it happened. A `!command` carries one too,
+    // on the person's ground. Every row is the block's fold line — folded it is ONE
+    // row and a click there opens it; open, a click anywhere on it closes it.
+    if (role === 'view' || (role === 'shell' && Array.isArray(m.views) && m.views.length)) {
+      const views = (m.views ?? []) as ViewRecord[];
       views.forEach((v, vi) => {
         const id = foldId(at, 'view', vi);
         const open = isOpen(folds, id);
-        const md = viewMarkdown(v, { folded: !open, lines: viewLines, moreKey: detailsKey });
-        const cut = viewCut(v, { folded: !open, lines: viewLines });
-        const { lines, src } = blockLines(md, inner);
-        lines.forEach((line, li) => rows.push({
-          role, spans: line.spans, first: vi === 0 && li === 0, continues: line.continues, chrome: line.chrome, frame: line.frame,
-          // Open, every row of the block closes it; folded, only the marker row that
-          // says what was left out — the rest is output, and a click on output that
-          // shows nothing more would be a key that does nothing.
-          ...(open ? { fold: id } : cut && src[li] === 1 ? { fold: id } : {}),
+        const framed = frameView(v, o.renderers, {
+          width: inner, folded: !open, live: v.phase === 'live', failed: v.phase === 'failed',
+          elapsedMs: Math.max(0, o.now - v.startedAt), lines: viewLines, moreKey: detailsKey,
+        }, o.palette, o.onViewFail);
+        framed.forEach((line, li) => rows.push({
+          role, spans: line.spans, first: vi === 0 && li === 0, fold: id,
+          ...(line.chrome ? { chrome: line.chrome } : {}),
+          ...(isConsoleKind(v.kind) ? {} : { plainGutter: true }),
         }));
       });
-      if (!last) rows.push({ gap: true });
+      if (views.length && !last) rows.push({ gap: true });
       return rows;
     }
     // The system prompt (instructions + task context) is CONTEXT, not conversation —
@@ -789,9 +802,9 @@ function ChatMessages({ messages, rowOpts, palette: m, errorColor, onViewport, s
     // from the `! ` it was typed with to the `$ ` its result appears under. A
     // `view` is a command the MODEL ran and the person confirmed: the same `$ ` in
     // the same colour, on no ground of its own, so whose command it was is still
-    // told apart at a glance. (The only view kind there is; a second one brings its
-    // own marker.)
-    if (row.first && (row.role === 'shell' || row.role === 'view')) return h(Text, { bold: true, color: m.shell }, '$ ');
+    // told apart at a glance. A view that is not a command (`plainGutter`, e.g. a
+    // plugin's own block) draws no `$` — it falls through to the blank gutter below.
+    if (row.first && (row.role === 'shell' || row.role === 'view') && !row.plainGutter) return h(Text, { bold: true, color: m.shell }, '$ ');
     if (row.first && row.role === 'bg') return h(Text, { bold: true, color: m.bgAccent }, '◆ ');
     // A note is the HOST speaking to the person (what /memory found, what /clear kept).
     // It is not part of the conversation and is never sent to the model.
@@ -951,6 +964,9 @@ export function renderChatModal({
   turnTokens = 0,
   viewLines = VIEW_CAPS.folded,
   notes = 'step',
+  viewRenderers = { console: renderConsole },
+  now = Date.now(),
+  onViewFail,
   completions = null,
   bgCount = 0,
   contextBadge = '',
@@ -1012,6 +1028,13 @@ export function renderChatModal({
   // `/notes` for the conversation): one step line, folded behind its header, fully
   // open, or not at all.
   notes?: NotesMode;
+  // Every renderer the chat can draw a view with — the host's own `console` by
+  // default, and each plugin's, qualified by its name (services.viewRenderers).
+  viewRenderers?: ViewRenderers;
+  // The clock a live view's seconds are read against, once per frame.
+  now?: number;
+  // A renderer that cannot draw a kind — missing, throws, or returns something odd.
+  onViewFail?: (kind: string, why: string) => void;
   completions?: Completions | null;
   bgCount?: number;
   // `ctx 12%` (assistant/context-meter.ts); yellow once it is time to /compact.
@@ -1111,7 +1134,7 @@ export function renderChatModal({
         // <ScrollBox> is one), so a drag there stays in the conversation.
         selectionScope: true,
       },
-      h(ChatMessages, { messages, rowOpts: { wrap, folds, viewLines, notes, detailsKey }, palette: m, errorColor: theme?.error, onViewport, scrollTo }),
+      h(ChatMessages, { messages, rowOpts: { wrap, folds, viewLines, notes, detailsKey, renderers: viewRenderers, now, palette: m, onViewFail }, palette: m, errorColor: theme?.error, onViewport, scrollTo }),
       error ? h(Text, { color: 'red' }, `⚠ ${error}`) : null,
       // The hint on the left, how full the model's context is on the right — it stays
       // put while the hint changes, and turns yellow when it is time to /compact.

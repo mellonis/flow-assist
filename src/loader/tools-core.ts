@@ -21,7 +21,6 @@ import { WEB_DEFAULTS } from '../assistant/web-fetch.js';
 import { SHELL_DEFAULTS, createShellState } from '../assistant/shell.js';
 import { parseAskArgs, askResult, type AskQuestion, type AskState } from '../assistant/ask.js';
 import type { Change } from '../assistant/diff.js';
-import type { ToolView } from '../assistant/views.js';
 import { TOOLS_LOAD } from '../assistant/tool-loading.js';
 import { IMAGE_DEFAULTS } from '../assistant/images.js';
 
@@ -40,12 +39,12 @@ export interface CoreCtx {
   // it looked like before and after, and the chat shows the diff under the answer.
   // Display only — the model never gets it. Report only a change that was made.
   reportChange?: (change: Change) => void;
-  // Also supplied by `agentChat`: how a tool's RESULT is shown — a block the tool
-  // describes and the host draws (src/assistant/views.ts). `run_command` reports its
-  // output this way. Display only, like a reported change, and capped by the host;
-  // a kind this host does not know is ignored. `reportChange` stays the shorthand it
-  // is, and becomes a kind of its own here later.
-  reportView?: (view: ToolView) => void;
+  // Also supplied by `agentChat`: how a tool's RESULT is shown — a kind and data a
+  // renderer draws and the host frames (src/assistant/views.ts). `run_command` reports
+  // its output this way (kind `console`). Display only, like a reported change, and
+  // capped by the host; a kind with no renderer draws as one dim line naming it.
+  // `reportChange` stays the shorthand it is, and becomes a kind of its own here later.
+  reportView?: (kind: string, data?: unknown) => void;
 }
 
 // Resolves the memory `plugin` scope to the owning plugin name from the host-issued

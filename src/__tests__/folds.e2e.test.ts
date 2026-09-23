@@ -183,32 +183,41 @@ async function longOutput() {
   return { ui, model };
 }
 
-// The block's own first row is the conversation's top row, where the pinned question
-// is painted over it (it always is, whatever is scrolled to the top) — so what a
-// reader sees first is the row under the pin.
-const underPin = (ui: Ui) => contentTop(ui) + 1;
+test('a finished command, folded, is one line saying how it ended', async () => {
+  // longOutput() already ends scrolled to the very top, where the folded line stands.
+  const { ui } = await longOutput();
+  expect(ui.backend.lastFrame).toMatch(/\$ seq 1 60 · ✓ \d+\.\d s/);
+  expect(ui.backend.lastFrame).not.toContain('│ 60');
+  ui.app.unmount();
+});
 
 test('opening a block taller than the window starts at its FIRST row, not its last', async () => {
   const { ui } = await longOutput();
-  await click(ui, rowOf(ui, 'lines cut'));
+  await click(ui, rowOf(ui, 'seq 1 60 ·'));
   // Reading starts at the beginning of the block, and the wheel takes it from there.
   // It used to land on the block's LAST line — the end of the very thing the person
-  // opened it to read.
-  expect(rowOf(ui, '│ 1')).toBe(underPin(ui));
-  expect(ui.backend.lastFrame).not.toContain('│ 60');
-  expect(ui.backend.lastFrame).not.toContain('Sixty lines.');
+  // opened it to read. Opened with runOutputLines: 3, the last 3 lines stand under
+  // the cut marker. The open block is now only 6 rows (cut marker, 3 lines, tail) —
+  // far shorter than the old uncapped "show everything" open state — so it no longer
+  // pushes the pinned question out of view; the first row lands at the very top of
+  // the box rather than under a pin.
+  expect(rowOf(ui, 'seq 1 60')).toBe(contentTop(ui));
+  expect(ui.backend.lastFrame).toContain('lines cut');
+  expect(ui.backend.lastFrame).toContain('│ 58');
+  expect(ui.backend.lastFrame).toContain('│ 60');
+  expect(ui.backend.lastFrame).not.toContain('Remark number 1.');
   ui.app.unmount();
 });
 
 test('closing a block leaves its first row where it was on screen', async () => {
   const { ui } = await longOutput();
-  await click(ui, rowOf(ui, 'lines cut'));
-  const first = rowOf(ui, '│ 1');
+  await click(ui, rowOf(ui, 'seq 1 60 ·'));
+  const first = rowOf(ui, 'seq 1 60');
   // A click inside the open output folds it back — and the block starts on the same
   // row as before, so the conversation does not leap under the person reading it.
   await click(ui, first + 3);
-  expect(ui.backend.lastFrame).toContain('lines cut');
-  expect(rowOf(ui, 'lines cut')).toBe(first);
+  expect(ui.backend.lastFrame).toContain('seq 1 60 ·');
+  expect(rowOf(ui, 'seq 1 60 ·')).toBe(first);
   ui.app.unmount();
 });
 

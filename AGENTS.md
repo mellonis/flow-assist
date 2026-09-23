@@ -246,11 +246,12 @@ assistant nobody had asked for a board.
   **A confirmed call SHOWS what it printed**, as the person's own `!command` does: the
   tool reports a console view (`ctx.reportView`, see "A tool describes what it shows, a
   renderer draws it, the host frames it") and the chat draws the `$ …` block. A declined
-  call leaves none — nothing ran; a failed one shows its output and its exit code. The
-  block is folded to the last
-  `plugins.assistant.runOutputLines` lines (20) with `… N lines cut · ^o for all` — the
-  block's fold line, which a click opens as the key does — a display cap of its own,
-  quite apart from `shell.maxChars`, which is how much the MODEL is given.
+  call leaves none — nothing ran; a failed one shows its output and its exit code.
+  Folded, the block is ONE line saying how it ended — `cmd · ✓ 4.2 s`, `✗ exit 1 · 4.2
+  s`, `stopped`, `timed out`; opened (a click on it, or `^o`) it shows the last
+  `plugins.assistant.runOutputLines` lines (20) with `… N lines cut · ^o for all` above
+  them — a display cap of its own, quite apart from `shell.maxChars`, which is how much
+  the MODEL is given.
 - **Whose claim excuses a y/n, and whose does not.** A tool pauses because its `write`
   flag says so, and the flag is set by whoever is entitled to say it. The `mcp` plugin
   keeps the two apart per server: `trusted` is "I believe THIS SERVER's own
@@ -722,8 +723,9 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   the state, the view resolves it per block). Everything foldable used to answer to
   one flag: `^r` opened the reasoning, the narration, every tool call of every turn
   and every capped command block at once, so to read ONE command's output a person
-  unfolded the whole conversation and folded it back. The model, so that a click and
-  the key cannot disagree:
+  unfolded the whole conversation and folded it back. A command block now folds to
+  ONE line whatever it printed — see the `run_command` bullet above. The model, so
+  that a click and the key cannot disagree:
   - **ONE global state** — everything folded (where a conversation starts) or
     everything open — plus the blocks a CLICK has made an exception of. A click
     toggles that block alone: opening one command's output must not become a sticky

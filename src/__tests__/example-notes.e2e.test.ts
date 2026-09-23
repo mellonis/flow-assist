@@ -60,6 +60,23 @@ test('notes_read gives the model the notebook', async () => {
   ui.app.unmount();
 });
 
+test('the notes plugin draws a block of its own with its own renderer', async () => {
+  const model = new ScriptedModel();
+  model.script([{ tool: 'notes_add', args: { text: 'buy milk' } }], [{ text: 'Noted.' }]);
+  const { ui } = await boot(model);
+  await ui.press('F');
+  await ui.type('remember to buy milk');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('Confirm write: notes_add'));
+  await ui.press('y');
+  await settleUntil(() => ui.backend.lastFrame.includes('Noted.'));
+  const row = ui.backend.lastFrame.split('\n').find((r) => r.includes('note: buy milk'));
+  expect(row).toBeDefined();
+  expect(row).not.toContain('$ '); // not a command: no shell gutter
+  expect(JSON.stringify(model.requests.at(-1)!.messages)).not.toContain('note: buy milk'); // display only
+  ui.app.unmount();
+});
+
 test(':notes counts the notes', async () => {
   const { ui } = await boot(new ScriptedModel());
   await ui.press(':');
