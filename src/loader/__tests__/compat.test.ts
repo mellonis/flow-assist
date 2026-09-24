@@ -138,3 +138,82 @@ test('an archive of a plugin this host cannot load is refused up front, nothing 
 test('the host\'s flowtty is the one installed', () => {
   expect(FLOWTTY_VERSION).toBe(JSON.parse(readFileSync('node_modules/@flowtty/react/package.json', 'utf8')).version);
 });
+
+// A fake registry: each fetch writes the next manifest it was given into the plugin's
+// directory, as the real download untars into it; `fail` throws instead.
+function registry(root: string, next: (object | 'fail')[]) {
+  const availableDir = join(root, 'plugins-available');
+  const enabledDir = join(root, 'plugins-enabled');
+  mkdirSync(availableDir, { recursive: true });
+  const repo = createPluginRepo({
+    availableDir, enabledDir, projectRoot: root,
+    fetchPlugin: async (name) => {
+      const m = next.shift();
+      if (m === 'fail' || m === undefined) throw new Error('registry: 503');
+      const dir = join(availableDir, name);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, 'manifest.json'), JSON.stringify({ name, ...m }));
+      writeFileSync(join(dir, 'index.ts'), `export const v = ${JSON.stringify((m as { version?: string }).version)};\n`);
+      return { version: String((m as { version?: string }).version) };
+    },
+  });
+  return { availableDir, enabledDir, repo };
+}
+
+test('an update this host cannot load keeps the installed version, linked and working', async () => {
+  const d = registry(mkdtempSync(join(tmpdir(), 'fa-compat-reg-')), [
+    { version: '1.0.0', hostApi: HOST_API },
+    { version: '2.0.0', hostApi: OTHER },
+  ]);
+  expect((await d.repo.install('tracker')).ok).toBe(true);
+  const res = await d.repo.update('tracker');
+  expect(res.ok).toBe(false);
+  expect(res.error).toContain(`incompatible: built for host API ${OTHER}`);
+  expect(res.error).toContain('the installed version is kept');
+  expect(JSON.parse(readFileSync(join(d.availableDir, 'tracker', 'manifest.json'), 'utf8')).version).toBe('1.0.0');
+  expect(readFileSync(join(d.enabledDir, 'tracker', 'index.ts'), 'utf8')).toContain('1.0.0');
+  expect(existsSync(join(d.availableDir, 'tracker.flow-assist-previous'))).toBe(false);
+});
+
+test('a failed fresh install leaves nothing behind; a failed fetch keeps the installed version', async () => {
+  const d = registry(mkdtempSync(join(tmpdir(), 'fa-compat-reg-')), [
+    { version: '1.0.0', hostApi: OTHER },
+    { version: '1.0.0', hostApi: HOST_API },
+    'fail',
+  ]);
+  expect((await d.repo.install('tracker')).ok).toBe(false);
+  expect(existsSync(join(d.availableDir, 'tracker'))).toBe(false);
+  expect(existsSync(join(d.enabledDir, 'tracker'))).toBe(false);
+  expect((await d.repo.install('tracker')).ok).toBe(true);
+  const res = await d.repo.update('tracker');
+  expect(res).toEqual({ ok: false, error: 'registry: 503' });
+  expect(JSON.parse(readFileSync(join(d.availableDir, 'tracker', 'manifest.json'), 'utf8')).version).toBe('1.0.0');
+});
+
+test('a batch update goes on past a failure and names each one', async () => {
+  const d = registry(mkdtempSync(join(tmpdir(), 'fa-compat-reg-')), [
+    { version: '1.0.0', hostApi: HOST_API },
+    { version: '1.0.0', hostApi: HOST_API },
+    { version: '1.0.0', hostApi: HOST_API },
+  ]);
+  for (const n of ['a', 'b', 'c']) expect((await d.repo.install(n)).ok).toBe(true);
+  // a fails, b is incompatible, c updates.
+  const next: Record<string, object | 'fail'> = { a: 'fail', b: { version: '2.0.0', hostApi: OTHER }, c: { version: '2.0.0', hostApi: HOST_API } };
+  const d2 = createPluginRepo({
+    availableDir: d.availableDir, enabledDir: d.enabledDir, projectRoot: '/',
+    fetchPlugin: async (name) => {
+      const m = next[name];
+      if (m === 'fail') throw new Error('registry: 503');
+      mkdirSync(join(d.availableDir, name), { recursive: true });
+      writeFileSync(join(d.availableDir, name, 'manifest.json'), JSON.stringify({ name, ...(m as object) }));
+      return { version: '2.0.0' };
+    },
+  });
+  const res = await d2.update();
+  expect(res.ok).toBe(false);
+  expect(res.error).toContain("update 'a': registry: 503");
+  expect(res.error).toContain(`update 'b': plugin 'b' is incompatible: built for host API ${OTHER}`);
+  expect(JSON.parse(readFileSync(join(d.availableDir, 'c', 'manifest.json'), 'utf8')).version).toBe('2.0.0');
+  expect(JSON.parse(readFileSync(join(d.availableDir, 'a', 'manifest.json'), 'utf8')).version).toBe('1.0.0');
+  expect(JSON.parse(readFileSync(join(d.availableDir, 'b', 'manifest.json'), 'utf8')).version).toBe('1.0.0');
+});

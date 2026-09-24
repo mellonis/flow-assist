@@ -20,6 +20,8 @@ import {
   readdirSync,
   readFileSync,
   realpathSync,
+  renameSync,
+  rmSync,
   symlinkSync,
   unlinkSync,
   writeFileSync,
@@ -94,6 +96,9 @@ interface Manifest {
 // ─── Low-level helpers ────────────────────────────────────────────────────────
 
 const SOURCE_MARKER = '.flow-assist-source';
+// Beside a registry plugin's directory while a newer version is fetched into its place;
+// never a plugin of its own.
+const PREVIOUS = '.flow-assist-previous';
 const REGISTRY_SOURCE = 'registry';
 
 // A plugin name must be a single filesystem path segment: non-empty, not `.`/`..`,
@@ -220,7 +225,7 @@ export function createPluginRepo({ availableDir, enabledDir, projectRoot, fetchP
   const registryManagedNames = (): string[] => {
     if (!existsSync(availableDir)) return [];
     return readdirSync(availableDir, { withFileTypes: true })
-      .filter((d) => d.isDirectory())
+      .filter((d) => d.isDirectory() && !d.name.endsWith(PREVIOUS))
       .filter((d) => sourceFor(join(availableDir, d.name)) === REGISTRY_SOURCE)
       .map((d) => d.name);
   };
@@ -237,16 +242,34 @@ export function createPluginRepo({ availableDir, enabledDir, projectRoot, fetchP
       };
     }
     const pluginDir = join(availableDir, n);
+    // The version there now is set aside while the new one is fetched into its place,
+    // and comes back unless the new one arrived AND this host can run it: an update
+    // this host cannot load never replaces one that works, and a failed install leaves
+    // nothing behind. The link points at the directory, so it follows either way.
+    const kept = existsSync(pluginDir) ? `${pluginDir}${PREVIOUS}` : null;
+    if (kept) {
+      rmSync(kept, { recursive: true, force: true });
+      renameSync(pluginDir, kept);
+    }
+    const restore = () => {
+      rmSync(pluginDir, { recursive: true, force: true });
+      if (kept) renameSync(kept, pluginDir);
+    };
     try {
       await fetchPlugin(n);
       writeSourceMarker(pluginDir);
       const compat = pluginCompat(readManifest(pluginDir), THIS_HOST);
-      if (!compat.ok) return { ok: false, error: `plugin '${n}' is ${compat.reason}` };
+      if (!compat.ok) {
+        restore();
+        return { ok: false, error: `plugin '${n}' is ${compat.reason}${kept ? ' — the installed version is kept' : ''}` };
+      }
+      if (kept) rmSync(kept, { recursive: true, force: true });
       const enabledLink = join(enabledDir, n);
       mkdirSync(enabledDir, { recursive: true });
       if (!existsSync(enabledLink)) symlinkSync(pluginDir, enabledLink);
       return { ok: true };
     } catch (e) {
+      restore();
       return { ok: false, error: (e as Error).message };
     }
   };
@@ -325,14 +348,16 @@ export function createPluginRepo({ availableDir, enabledDir, projectRoot, fetchP
         return fetchAndLink(n!);
       }
       // Batch update: re-fetch every registry-managed plugin; a git plugin is
-      // skipped with a hint and does not fail the run.
+      // skipped with a hint and does not fail the run. One that fails does not stop
+      // the rest: each failure is named.
+      const failed: string[] = [];
       for (const n of targets) {
         const pluginDir = join(availableDir, n);
         if (sourceFor(pluginDir) !== REGISTRY_SOURCE) continue;
         const res = await fetchAndLink(n);
-        if (!res.ok) return { ok: false, error: `update '${n}': ${res.error}` };
+        if (!res.ok) failed.push(`update '${n}': ${res.error}`);
       }
-      return { ok: true };
+      return failed.length ? { ok: false, error: failed.join('; ') } : { ok: true };
     },
 
     // Lists all plugins from `plugins-available/*/manifest.json`, skipping built-ins.
@@ -340,7 +365,7 @@ export function createPluginRepo({ availableDir, enabledDir, projectRoot, fetchP
       if (!existsSync(availableDir)) return [];
       const entries: RepoEntry[] = [];
       for (const dirEntry of readdirSync(availableDir, { withFileTypes: true })) {
-        if (!dirEntry.isDirectory()) continue;
+        if (!dirEntry.isDirectory() || dirEntry.name.endsWith(PREVIOUS)) continue;
         const pluginDir = join(availableDir, dirEntry.name);
         const manifest = readManifest(pluginDir);
         // Built-ins live in `plugins/`, not `enabled`, cannot be removed, and are not
