@@ -1807,12 +1807,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               case 'mode': {
                 // For the person; nothing is sent. `/mode panel|window|full` moves the
                 // chat for the session and gives it the keyboard; `/mode` alone says
-                // where it is.
+                // where it is — in the chat, as a note (display only, like /memory's
+                // list): a toast is drawn under a chat that covers the whole terminal.
                 const v = arg.trim().toLowerCase();
                 if (v && !(CHAT_MODES as readonly string[]).includes(v)) { setError(`/mode takes ${CHAT_MODES.join(', ')} — or nothing to say which is on`); return; }
                 setField('');
                 if (!v) {
-                  (f.services as Record<string, any>).showMessage?.(`the chat is in ${modeRef.current} mode · /mode ${CHAT_MODES.join('|')}`);
+                  setMessages((cur) => [...cur, { role: 'note', content: `the chat is in ${modeRef.current} mode · /mode ${CHAT_MODES.join('|')}` }]);
                   f.notify();
                   return;
                 }

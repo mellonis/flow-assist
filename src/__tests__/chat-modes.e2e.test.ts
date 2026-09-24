@@ -379,6 +379,19 @@ test('every chat row is one terminal line at the panel\'s width — steps, calls
   ui.app.unmount();
 });
 
+// `/mode` alone answers in the chat, as a note: a toast is drawn under a chat that
+// covers the whole terminal, and was never seen there.
+test.each(['panel', 'window', 'full'] as const)('/mode alone says where the chat is, in the chat (%s)', async (mode) => {
+  const g = guest();
+  const ui = await bootApp(new ScriptedModel(), 160, 40, g.make as never, {}, { chatMode: mode });
+  await ui.press('F');
+  await command(ui, '/mode');
+  expect(ui.backend.lastFrame).toContain(`the chat is in ${mode} mode`);
+  const notes = (g.ft().store.chat.messages as { role: string; content: string }[]).filter((m) => m.role === 'note');
+  expect(notes.map((m) => m.content)).toEqual([`the chat is in ${mode} mode · /mode panel|window|full`]);
+  ui.app.unmount();
+});
+
 // A letter bound to Ctrl+]'s action would be taken before every field — the chat's,
 // the plugin's, the `:` line's — and could not be undone from inside the app. It falls
 // back to the default.
