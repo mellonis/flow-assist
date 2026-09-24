@@ -40,11 +40,15 @@ export const hostConfigSchema = z.object({
   // Chat sessions on disk (src/assistant/sessions.ts): where, whether the app
   // continues the latest one on start, how many are kept.
   sessions: z.object({ dir: z.string(), resume: z.boolean(), keep: z.number().int().positive() }).partial().optional(),
+  // Legacy: where the roots used to be set. Still accepted and read for one release —
+  // as `shell.roots` by the shell, and after `plugins.repo.roots` / `shell.roots` by
+  // the repo plugin — with one note in the log saying where it moved.
   fs: z.object({ roots: z.array(z.string()) }).optional(),
   // web_fetch: hosts fetched without asking (`*.example.com` for subdomains), and limits.
   web: z.object({ allowlist: z.array(z.string()).optional(), maxBytes: z.number().int().positive().optional(), timeoutMs: z.number().int().positive().optional() }).optional(),
   // Shell commands — `!command` in the chat and the model's run_command
-  // (src/assistant/shell.ts): the time limit and how much of the output is kept.
-  shell: z.object({ timeoutMs: z.number().int().positive(), maxChars: z.number().int().positive() }).partial().optional(),
+  // (src/assistant/shell.ts): the time limit, how much of the output is kept, and
+  // `roots` — the directories commands start in (the first) and may `cd` within.
+  shell: z.object({ timeoutMs: z.number().int().positive(), maxChars: z.number().int().positive(), roots: z.array(z.string()) }).partial().optional(),
   plugins: z.record(z.string(), z.unknown()).optional(),
 }).passthrough();

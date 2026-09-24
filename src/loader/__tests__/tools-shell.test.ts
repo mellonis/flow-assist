@@ -15,6 +15,18 @@ test('the cwd defaults to the first root; with no roots, to the process director
   expect(commandCwd({}, '')).toBe(process.cwd());
 });
 
+test('shell.roots is where run_command starts and what it stays inside; fs.roots only when it is unset', () => {
+  const root = tmp();
+  const other = tmp();
+  const config = { shell: { roots: [root] }, fs: { roots: [other] } };
+  expect(commandCwd(config, undefined)).toBe(root);
+  expect(() => commandCwd(config, other)).toThrow(/outside the configured roots/);
+  expect(commandCwd({ fs: { roots: [other] } }, undefined)).toBe(other);
+  // With no roots at all, the refusal names the key to set.
+  expect(() => commandCwd({}, '/tmp')).toThrow(/shell\.roots/);
+  expect(runCommandDescription(config)).toContain(`It starts at ${root}`);
+});
+
 test('a cwd inside a root is taken, relative to the current directory or absolute', () => {
   const root = tmp();
   fs.mkdirSync(path.join(root, 'pkg'));

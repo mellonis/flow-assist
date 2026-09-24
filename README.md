@@ -77,7 +77,8 @@ the picture, and reads it again after a restart. A model that cannot take images
 one folded line while it runs (`bun test src/features · 3 s`) and stays folded, its tail
 settled, once it ends (`· ✓ 4.2 s`); the output lands in the conversation and the
 assistant sees it with your next message, without spending a turn on it. Esc stops it.
-Commands start in the first `fs.roots` directory and the directory is remembered
+Commands start in the first `shell.roots` directory (`config set shell.roots
+'["~/src/app"]'`) and the directory is remembered
 between them, as in a terminal (`!cd pkg`; only within the roots; variables are not
 kept). The assistant can run commands too — `run_command`, in the same directory and
 drawn the same live way, and only after you confirm each one (`ai.disabledTools:
@@ -119,7 +120,10 @@ Plugins here: `gitlab` (glab CLI), `repo` (local clones and git) and `mcp` — t
 of MCP servers, reached over Streamable HTTP or started as a command (Safari's
 `safaridriver --mcp`), each call asked about first
 (`plugins-available/mcp/README.md`). A plugin's settings are set like the host's:
-`config set plugins.<name>.<key> <value>`.
+`config set plugins.<name>.<key> <value>`. `repo` reads and writes only inside
+`plugins.repo.roots`, and without it inside the shell's `shell.roots`. A config that
+still sets the roots as `fs.roots`, the key both used to share, works for one more
+release, and the log (`L`) says where to move it.
 
 **Writing a plugin**: [docs/plugins.md](docs/plugins.md) builds one step by step — a
 notebook the assistant reads and writes ([examples/notes](examples/notes), run by the

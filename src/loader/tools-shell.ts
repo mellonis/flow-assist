@@ -29,7 +29,7 @@ export function commandCwd(config: Record<string, unknown>, asked: unknown, base
     if (roots.length && !dirAllowed(config, base)) throw new Error(`run_command: «${base}» is not a directory inside the configured roots`);
     return base;
   }
-  if (!roots.length) throw new Error('run_command: no roots are configured (config.fs.roots), so cwd cannot be given — omit it');
+  if (!roots.length) throw new Error('run_command: no roots are configured (shell.roots), so cwd cannot be given — omit it');
   const abs = path.resolve(base, s);
   if (!roots.some((r) => within(abs, r))) throw new Error(`run_command: «${abs}» is outside the configured roots`);
   const real = realOf(abs);

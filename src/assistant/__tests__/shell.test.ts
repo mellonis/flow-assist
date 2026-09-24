@@ -4,7 +4,7 @@ import { expect, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createShellState, dirAllowed, formatShell, nextCwd, runShell, shellCwd, shellLimits, tildePath } from '../shell.ts';
+import { createShellState, dirAllowed, formatShell, legacyRootsNote, nextCwd, runShell, shellCwd, shellLimits, shellRoots, tildePath } from '../shell.ts';
 
 const tmp = () => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-shell-')));
 const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
@@ -83,6 +83,43 @@ test('the cwd is the first root when it is a directory, else the process directo
   expect(shellCwd({ fs: { roots: [path.join(dir, 'missing')] } }, '/proc-cwd')).toBe('/proc-cwd');
   expect(shellCwd({}, '/proc-cwd')).toBe('/proc-cwd');
   expect(shellCwd({ fs: { roots: ['~'] } })).toBe(os.homedir());
+});
+
+// `shell.roots` is the shell's own key; `fs.roots` — where the roots used to be set,
+// a host key only the repo plugin should have owned — is read in its place for one release.
+test('the roots are shell.roots; fs.roots is read only when shell.roots is not set', () => {
+  const a = tmp();
+  const b = tmp();
+  expect(shellRoots({ shell: { roots: [a] } })).toEqual([a]);
+  expect(shellRoots({ shell: { roots: [a] }, fs: { roots: [b] } })).toEqual([a]);
+  expect(shellRoots({ fs: { roots: [b] } })).toEqual([b]);
+  expect(shellRoots({ shell: { timeoutMs: 5000 }, fs: { roots: [b] } })).toEqual([b]);
+  // Set, even empty, is set: an explicit [] leaves the shell unconfined, as fs.roots: [] did.
+  expect(shellRoots({ shell: { roots: [] }, fs: { roots: [b] } })).toEqual([]);
+  expect(shellRoots({})).toEqual([]);
+  expect(shellRoots({ shell: { roots: ['~'] } })).toEqual([os.homedir()]);
+});
+
+test('the shell starts in and stays inside shell.roots', () => {
+  const root = tmp();
+  const other = tmp();
+  fs.mkdirSync(path.join(root, 'sub'));
+  const config = { shell: { roots: [root] }, fs: { roots: [other] } };
+  expect(shellCwd(config, '/proc-cwd')).toBe(root);
+  expect(dirAllowed(config, path.join(root, 'sub'))).toBe(true);
+  expect(dirAllowed(config, other)).toBe(false);
+  expect(nextCwd(config, root, other)).toEqual({ cwd: root, note: `cd led outside the roots — staying in ${root}` });
+  expect(createShellState(() => config).cwd()).toBe(root);
+});
+
+test('fs.roots in use is noted — where it moved; nothing is said when it is not read', () => {
+  const note = legacyRootsNote({ fs: { roots: ['/w'] } });
+  expect(note).toContain('fs.roots is read as shell.roots / plugins.repo.roots');
+  expect(note).toContain('config set shell.roots');
+  expect(legacyRootsNote({})).toBeNull();
+  expect(legacyRootsNote({ shell: { roots: ['/w'] } })).toBeNull();
+  // shell.roots set: nobody reads fs.roots (repo falls back to shell.roots first).
+  expect(legacyRootsNote({ shell: { roots: ['/a'] }, fs: { roots: ['/w'] } })).toBeNull();
 });
 
 test('limits come from config.shell, a bad value falls back', () => {

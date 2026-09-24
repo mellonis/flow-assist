@@ -28,6 +28,15 @@ test('config write validation rejects an unknown key and a bad type', () => {
   expect(validateConfigWriteValue(hostConfigSchema, 'cache.enabled', true).ok).toBe(true);
 });
 
+// The shell's roots are the host's own key; the legacy `fs.roots` is still accepted, so
+// a config file that sets it is not refused.
+test('shell.roots is a host key; a config that still sets fs.roots is accepted', () => {
+  expect(validateConfigWriteValue(hostConfigSchema, 'shell.roots', ['/w'])).toEqual({ ok: true, value: ['/w'] });
+  expect(validateConfigWriteValue(hostConfigSchema, 'shell.roots', '/w').ok).toBe(false);
+  expect(validateConfigWriteValue(hostConfigSchema, 'fs.roots', ['/w']).ok).toBe(true);
+  expect(hostConfigSchema.safeParse({ fs: { roots: ['/w'] }, shell: { roots: ['/x'], timeoutMs: 1000 } }).success).toBe(true);
+});
+
 test('getDeep/setDeep/unsetDeep walk dot paths', () => {
   const o = { a: { b: 1 } };
   setDeep(o, 'a.b', 2);

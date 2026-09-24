@@ -5,6 +5,14 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **The roots have a key per owner: `shell.roots` and `plugins.repo.roots`.** The
+  directories `!command` and `run_command` start in and stay inside, and the ones
+  `repo` may touch, were one host key, `fs.roots`, although only `repo` and the shell
+  read it. The shell now reads `shell.roots`; `repo` reads `plugins.repo.roots`
+  (`config set` checks it against repo's own settings) and, when that is not set,
+  `shell.roots`. `fs.roots` keeps working for this release as the fallback of both,
+  and the log (`L`) says once where to move it: `config set shell.roots '[…]'`.
+
 - **The bundled plugins carry the host's own version.** `gitlab`, `mcp` and `repo`
   said `1.0.0` while the host was `0.1.0` — they ship from this repo, with this
   release, so a `repo-1.0.0.tar.gz` beside a `0.1.0` host read like a mismatch. A

@@ -558,3 +558,30 @@ test('a background run does not move the chat\'s directory', async () => {
   expect(fs.existsSync(path.join(root, 'sub', 'still-here.txt'))).toBe(true);
   ui.app.unmount();
 });
+
+// `shell.roots` is the shell's own key. A config that still says `fs.roots` runs exactly
+// as before, and the host says once, in its log, where the key moved.
+test('!command starts in shell.roots; fs.roots still works, with one note in the log', async () => {
+  const root = rootDir();
+  const model = new ScriptedModel();
+  const ui = await bootApp(model, root.length + 60, 32, undefined, { shell: { roots: [root] } });
+  await ui.press('L');
+  expect(ui.backend.lastFrame).not.toContain('fs.roots is read as');
+  await ui.press('escape', 'F');
+  await ui.type('!pwd');
+  await ui.press('return');
+  await settleUntil(() => /pwd · ✓/.test(ui.backend.lastFrame));
+  model.script([{ text: 'ok' }]);
+  await ui.type('where?');
+  await ui.press('return');
+  await settle(20);
+  expect(String(sentTo(model).find((m) => String(m.content).startsWith('The person ran'))!.content)).toContain(`in ${root}:`);
+  ui.app.unmount();
+
+  const legacy = await bootApp(new ScriptedModel(), 160, 32, undefined, { fs: { roots: [root] } });
+  await legacy.press('L');
+  const frame = legacy.backend.lastFrame;
+  expect(frame.split('fs.roots is read as shell.roots').length - 1).toBe(1);
+  expect(frame).toContain('config set shell.roots');
+  legacy.app.unmount();
+});

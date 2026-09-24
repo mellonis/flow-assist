@@ -52,7 +52,10 @@ export default function buildNotesPlugin({ config, make, z }) {
 ```
 
 - `config` is the whole config; the plugin's own part is `config.plugins.<name>`,
-  set by the person with `config set plugins.notes.file ~/notes.md`.
+  set by the person with `config set plugins.notes.file ~/notes.md`. A plugin may
+  read a host key from it as a default for one of its own — the bundled `repo` takes
+  `shell.roots` when `plugins.repo.roots` is not set, and reads both when a tool runs,
+  not once in the builder.
 - `z` is the host's zod. `configSchema` describes `config.plugins.<name>`: the host
   validates every `config set` against it and shows it to the model, so the
   assistant can tell the person which key to set.

@@ -53,12 +53,30 @@ export interface ShellOptions {
   onOutput?: (chunk: string) => void;
 }
 
-type RootsConfig = { fs?: { roots?: unknown } } | Record<string, unknown> | undefined;
+type RootsConfig = { shell?: { roots?: unknown }; fs?: { roots?: unknown } } | Record<string, unknown> | undefined;
 const expand = (p: string) => path.resolve(p.replace(/^~(?=\/|$)/, os.homedir()));
-// `config.fs.roots`, `~` expanded — the directories the person's work lives in.
+type RootsKeys = { shell?: { roots?: unknown }; fs?: { roots?: unknown } } | undefined;
+// Which key the shell's roots come from: `shell.roots` when it is set (an array, even
+// an empty one), else the legacy `fs.roots` — the key the roots lived under before they
+// were split into the shell's own and the repo plugin's `plugins.repo.roots`. It is
+// read for one release; `legacyRootsNote` says where it moved.
+function rootsSource(config: RootsConfig): unknown {
+  const c = config as RootsKeys;
+  return Array.isArray(c?.shell?.roots) ? c!.shell!.roots : c?.fs?.roots;
+}
+// The shell's roots, `~` expanded — the directories the person's work lives in.
 export function shellRoots(config: RootsConfig): string[] {
-  const roots = ((config as { fs?: { roots?: unknown } } | undefined)?.fs)?.roots;
+  const roots = rootsSource(config);
   return Array.isArray(roots) ? roots.filter((r): r is string => typeof r === 'string' && !!r).map(expand) : [];
+}
+// The one line the host logs at start when `fs.roots` is what is being read. The repo
+// plugin falls back to it only after `shell.roots`, so the shell reading it is exactly
+// the case in which anyone does — one note covers both.
+export function legacyRootsNote(config: RootsConfig): string | null {
+  const c = config as RootsKeys;
+  if (Array.isArray(c?.shell?.roots) || !Array.isArray(c?.fs?.roots)) return null;
+  const list = JSON.stringify(c!.fs!.roots);
+  return `fs.roots is read as shell.roots / plugins.repo.roots — move it: config set shell.roots '${list}' (and plugins.repo.roots, if repo should see other directories)`;
 }
 export const within = (p: string, root: string) => p === root || p.startsWith(root.endsWith(path.sep) ? root : root + path.sep);
 // The real location of a path, following every link on the way; a path that does not

@@ -3,8 +3,8 @@
 // `roots` come in as deps, and it imports nothing from the host or React. It
 // reads the disk with node builtins and runs git as `git -C <repo>`.
 //
-// Security: an ALLOWLIST of roots (config.fs.roots, `~` expanded; `roots` may be a
-// lazy loader). A path is resolved and must lie STRICTLY under one root, or it is
+// Security: an ALLOWLIST of roots (resolved by index.ts from plugins.repo.roots, else
+// shell.roots; `~` expanded; `roots` may be a lazy loader). A path is resolved and must lie STRICTLY under one root, or it is
 // refused — nothing like "take a look at /etc". File writes (write_file, edit_file,
 // …) and git writes (branch, commit, push) are write-flagged, so the chat pauses
 // for a y/n; git reads find the repository under a root and never leave the clone.
@@ -28,8 +28,8 @@ type RepoDeps = {
 };
 
 export function buildRepoGroup({ clip, roots, homeDir = os.homedir() }: RepoDeps = {} as RepoDeps) {
-  // The roots from the config, `~` expanded. Re-read on every call (as memory is), so
-  // a change to config.fs.roots mid-session takes effect at once.
+  // The roots, `~` expanded. Re-read on every call (as memory is) when `roots` is a
+  // loader, which is how the plugin passes them.
   const readRoots = async () => {
     const raw = typeof roots === 'function' ? await roots() : (roots ?? []);
     return (Array.isArray(raw) ? raw : [])
@@ -74,7 +74,7 @@ export function buildRepoGroup({ clip, roots, homeDir = os.homedir() }: RepoDeps
     let abs;
     if (!s) {
       // An empty path is the first root (the default "look where we are").
-      if (!all.length) return { error: 'repo: no read roots configured (config.fs.roots is empty)' };
+      if (!all.length) return { error: 'repo: no read roots configured (plugins.repo.roots, else shell.roots, is empty)' };
       return { abs: all[0], root: all[0] };
     }
     if (path.isAbsolute(s)) {
@@ -348,7 +348,7 @@ export function buildRepoGroup({ clip, roots, homeDir = os.homedir() }: RepoDeps
         type: 'function',
         function: {
           name: 'list_dir',
-          description: 'List the entries of a directory inside the configured repo roots (config.fs.roots). path — absolute path or a root-relative path; default: the first root. start/end — 1-based window over the sorted entries (default: first 200). Returns entries as "d name" (dir) or "f name (sizeB)" (file), annotated [start–end/total] — pass start/end to page.',
+          description: 'List the entries of a directory inside the configured repo roots (plugins.repo.roots). path — absolute path or a root-relative path; default: the first root. start/end — 1-based window over the sorted entries (default: first 200). Returns entries as "d name" (dir) or "f name (sizeB)" (file), annotated [start–end/total] — pass start/end to page.',
           parameters: { type: 'object', properties: {
             path: { type: 'string', description: 'Directory path (absolute or relative to a root).' },
             start: { type: 'number', description: '1-based index of the first entry to show.' },
@@ -360,7 +360,7 @@ export function buildRepoGroup({ clip, roots, homeDir = os.homedir() }: RepoDeps
         type: 'function',
         function: {
           name: 'read_file',
-          description: 'Read a text file under the configured repo roots (config.fs.roots). path — absolute or root-relative. start/end — 1-based inclusive LINE window (default: first 200 lines); each line is prefixed with its number, annotated [start–end/total] — request the next window to read larger files. Rejects paths outside the roots and files > 5MiB.',
+          description: 'Read a text file under the configured repo roots (plugins.repo.roots). path — absolute or root-relative. start/end — 1-based inclusive LINE window (default: first 200 lines); each line is prefixed with its number, annotated [start–end/total] — request the next window to read larger files. Rejects paths outside the roots and files > 5MiB.',
           parameters: { type: 'object', properties: {
             path: { type: 'string', description: 'File path (absolute or relative to a root).' },
             start: { type: 'number', description: 'First line (1-based).' },
@@ -372,7 +372,7 @@ export function buildRepoGroup({ clip, roots, homeDir = os.homedir() }: RepoDeps
         type: 'function',
         function: {
           name: 'search',
-          description: 'Search for a substring inside files under the configured roots (config.fs.roots). query — the literal text to find. path — directory (recursive) or a single file; default ".". glob — optional filename mask with * and ?. start/end — 1-based window over MATCHES (each "rel/file:line: text"), annotated [start–end/total]. Skips node_modules/.git and files > 2MiB, capped at 4000 files / 1000 matches.',
+          description: 'Search for a substring inside files under the configured roots (plugins.repo.roots). query — the literal text to find. path — directory (recursive) or a single file; default ".". glob — optional filename mask with * and ?. start/end — 1-based window over MATCHES (each "rel/file:line: text"), annotated [start–end/total]. Skips node_modules/.git and files > 2MiB, capped at 4000 files / 1000 matches.',
           parameters: { type: 'object', properties: {
             query: { type: 'string', description: 'Substring to find in file contents.' },
             path: { type: 'string', description: 'Directory or file to search (default: a root).' },
@@ -386,7 +386,7 @@ export function buildRepoGroup({ clip, roots, homeDir = os.homedir() }: RepoDeps
         type: 'function',
         function: {
           name: 'write_file',
-          description: 'WRITE: create or overwrite a file under the configured repo roots (config.fs.roots). path — absolute or root-relative (parent dirs created). content — the full file text. The tool is write-flagged: the chat pauses with a y/n confirmation before it runs.',
+          description: 'WRITE: create or overwrite a file under the configured repo roots (plugins.repo.roots). path — absolute or root-relative (parent dirs created). content — the full file text. The tool is write-flagged: the chat pauses with a y/n confirmation before it runs.',
           parameters: { type: 'object', properties: {
             path: { type: 'string', description: 'File path to write (absolute or relative to a root).' },
             content: { type: 'string', description: 'Full file content.' },
@@ -398,7 +398,7 @@ export function buildRepoGroup({ clip, roots, homeDir = os.homedir() }: RepoDeps
         type: 'function',
         function: {
           name: 'edit_file',
-          description: 'WRITE: replace the FIRST occurrence of a substring in a file under the configured roots (config.fs.roots). path — file; old — exact substring to find; new — replacement. Safer than full overwrite. Write-flagged: chat pauses with y/n confirmation. Fails (no change) if old is not found.',
+          description: 'WRITE: replace the FIRST occurrence of a substring in a file under the configured roots (plugins.repo.roots). path — file; old — exact substring to find; new — replacement. Safer than full overwrite. Write-flagged: chat pauses with y/n confirmation. Fails (no change) if old is not found.',
           parameters: { type: 'object', properties: {
             path: { type: 'string', description: 'File path (absolute or relative to a root).' },
             old: { type: 'string', description: 'Exact substring to replace (first occurrence).' },
@@ -411,7 +411,7 @@ export function buildRepoGroup({ clip, roots, homeDir = os.homedir() }: RepoDeps
         type: 'function',
         function: {
           name: 'delete_file',
-          description: 'WRITE: delete a file or directory under the configured repo roots (config.fs.roots). path — absolute or root-relative. Files are removed directly. Directories require recursive: true (removes the tree); without it a directory is refused. Rejects paths outside the roots. Irreversible (no trash) — write-flagged, so the chat pauses with a y/n confirmation before it runs; use it deliberately after reading the path.',
+          description: 'WRITE: delete a file or directory under the configured repo roots (plugins.repo.roots). path — absolute or root-relative. Files are removed directly. Directories require recursive: true (removes the tree); without it a directory is refused. Rejects paths outside the roots. Irreversible (no trash) — write-flagged, so the chat pauses with a y/n confirmation before it runs; use it deliberately after reading the path.',
           parameters: { type: 'object', properties: {
             path: { type: 'string', description: 'File or directory path to delete (absolute or relative to a root).' },
             recursive: { type: 'boolean', description: 'Required to delete a directory (removes it and its contents); ignored for files.' },
@@ -564,7 +564,7 @@ export function buildRepoGroup({ clip, roots, homeDir = os.homedir() }: RepoDeps
     exec: async (name: string, args: any, ctx: any) => {
       const all = await readRoots();
       if (!all.length && !['write_file', 'edit_file', 'delete_file'].includes(name)) {
-        const msg = 'repo: no read roots configured — add config.fs.roots (array of absolute clone dirs).';
+        const msg = 'repo: no read roots configured — config set plugins.repo.roots (array of absolute clone dirs).';
         if (GIT_WRITES.includes(name)) throw new Error(msg);
         return msg;
       }

@@ -44,6 +44,7 @@ import {
 import { bindingGlyph, isKey, isMouseButton, keyGlyph } from '../playback/keys.js';
 import { copyToClipboard } from '../assistant/copy.js';
 import { readClipboardImage, type ClipboardImage } from '../assistant/images.js';
+import { legacyRootsNote } from '../assistant/shell.js';
 import { resolveAppTheme } from '../playback/theme.js';
 import type { ColorScheme, Theme } from '../playback/theme.js';
 import type { Command } from '../loader/plugin.js';
@@ -177,6 +178,9 @@ export function renderApp(
   const services = createServices({ config, tools, onExit });
   (services as unknown as HostServices).clipboardImage = clipboardImage ?? (() => readClipboardImage());
   if (pluginsNote) services.log.append(`[plugins] ${pluginsNote}`);
+  // A config that still sets the roots as `fs.roots` is read as before, and said once.
+  const rootsNote = legacyRootsNote(config);
+  if (rootsNote) services.log.append(`[config] ${rootsNote}`);
   const viewRegistry = buildViewRegistry(plugins);
   const commandRegistry = buildCommandRegistry(plugins);
   const keys = buildKeys(plugins, config);

@@ -1154,7 +1154,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   itself is UI state of the field only, never saved and never restored across a
   restart; a `!…` or a shell-mode field is not a draft. **The directory is remembered**
   between commands, as in a terminal, and shared with `run_command`: it starts at the
-  first `fs.roots` directory (else the process's), a `cd` moves it only within the
+  first `shell.roots` directory (else the process's), a `cd` moves it only within the
   roots by real path (the shell writes `pwd -P` to a private temp file after the
   command — a 4th stdio pipe under Bun lost the report now and then), `exit N` or a
   kill keeps it, run_command's `cwd` argument is a `cd` that stays, `/clear` and a
@@ -1370,6 +1370,20 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   `config_schema` note (`KEY_DEFAULTS['ai.images']`; a leaf takes the note of its
   nearest parent that has one) says how to attach and how to turn it off.
 - `config.user` (`name`, `login`) is the only source of the person's identity in the chat context — never the environment or the OS account.
+- **Roots: each consumer has its own key, and the host never reads a plugin's.** The
+  host's shell (`!command`, `run_command`) is confined to `shell.roots` (`shellRoots`
+  in `src/assistant/shell.ts`); `repo` to `plugins.repo.roots`, declared in its
+  `configSchema`, and without it to `shell.roots`, which it reads from the host config
+  every builder is handed (`repoRoots` in `plugins-available/repo/src/index.ts`, called
+  on every tool call). Both used to read the host key `fs.roots`, a setting only
+  `repo` should have owned. It is still accepted by the schema and read for one release
+  as the last fallback of both (shell: `shell.roots` → `fs.roots`; repo:
+  `plugins.repo.roots` → `shell.roots` → `fs.roots`). A key that is SET — an array, even
+  `[]` — is the answer: nothing falls through an empty list. Because repo reaches
+  `fs.roots` only when `shell.roots` is unset, which is exactly when the shell does,
+  one note covers both: `legacyRootsNote`, logged once at start by `renderApp`
+  (`[config] fs.roots is read as shell.roots / plugins.repo.roots — move it: …`). The
+  one-shot prompt has no log and says nothing.
 
 ## Testing
 
