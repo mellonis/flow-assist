@@ -39,6 +39,7 @@ import { isImageRef, type ImageRef } from './images.js';
 import { readLegacyView, type ViewRecord } from './views.js';
 import { addCalls, callRun, readChange, readParts, type CallRun, type TurnPart } from './step.js';
 import type { ChangeView } from './diff.js';
+import type { TokenUsage } from './agent.js';
 
 export const SESSION_VERSION = 1;
 // What is kept of a long conversation: the summary plus this many latest messages
@@ -56,7 +57,7 @@ export interface Session {
   api: Record<string, unknown>[];      // the model's history
   summary: string;
   plan: { id: number; text: string; status: string }[];
-  usage: { promptTokens: number; completionTokens: number } | null;
+  usage: TokenUsage | null;
   prompts: string[];                   // ↑/↓ history of the field
   draft: string;                       // what was typed and not sent
   subject?: string | null;             // written by older hosts (what the screen was about); read, no longer written or used

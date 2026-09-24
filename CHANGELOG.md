@@ -22,6 +22,14 @@ What each version of flow-assist brought, newest first. The version is the one i
   `ft.useSurfaceSize()` and `ft.useTerminalSize()` report the plugin's side of the
   screen, and a modal laid out by them stays on it; a plugin that sizes itself by
   flowtty's own `useTerminalSize` still sees the whole terminal.
+- **Cache usage is no longer invisible.** `/context` now has a `last request: …
+  prompt · … from cache · … written to cache` line — the last request's cache
+  breakdown, from either wire (Anthropic's `cache_read_input_tokens` /
+  `cache_creation_input_tokens`, an OpenAI-compatible server's
+  `usage.prompt_tokens_details.cached_tokens`) — with a part left out when the
+  provider did not report it, and a plain note when it reported none at all. The
+  session keeps it too: its `usage` and each turn's own message carry the cache
+  figures, so a saved chat still shows where its tokens went, not only how many.
 
 - **`!!command` runs a program that needs the terminal, and asks the assistant about
   it.** `!command` captures what a command prints, so a prompt, `git add -p`, `top` or

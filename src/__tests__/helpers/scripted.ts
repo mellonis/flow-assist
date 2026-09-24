@@ -43,8 +43,9 @@ export class ScriptedModel {
   headers: Record<string, string>[] = [];
   wire: 'openai' | 'anthropic' = 'openai';
   // When set, every response ends with a usage chunk — as a provider asked for
-  // `stream_options.include_usage` sends it.
-  usage: { prompt_tokens: number; completion_tokens: number } | null = null;
+  // `stream_options.include_usage` sends it. `prompt_tokens_details.cached_tokens` is
+  // how an OpenAI-compatible server that caches reports the cached share.
+  usage: { prompt_tokens: number; completion_tokens: number; prompt_tokens_details?: { cached_tokens: number } } | null = null;
   // The Anthropic wire's usage: `message_start` carries the input side, the final
   // `message_delta` the output. Unset: small fixed numbers.
   anthropicUsage: { input_tokens: number; output_tokens: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number } | null = null;

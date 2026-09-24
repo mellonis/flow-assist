@@ -23,7 +23,7 @@ import {
   makeLockToken, newSessionId, pruneSessions, releaseLock, saveSession, sessionFingerprint, sessionFingerprintsEqual,
   sessionTitle, sessionWhen, sessionsDir, type Session, type SessionFingerprint,
 } from '../assistant/sessions.js';
-import type { ChatMessage } from '../assistant/agent.js';
+import type { ChatMessage, TokenUsage } from '../assistant/agent.js';
 import type { ChangeView } from '../assistant/diff.js';
 import { VIEW_CAPS, type ViewRecord, type ViewRenderers } from '../assistant/views.js';
 import { capConsoleData, consoleData, renderConsole } from '../assistant/console-view.js';
@@ -38,7 +38,7 @@ import { bindingGlyph, firstGlyph, isKey, isMouseButton, keyGlyph } from '../pla
 import { askKey, askStart, type AskQuestion, type AskState } from '../assistant/ask.js';
 import { loadMemories, memoryFilePath, saveMemories } from '../runtime/services/memory.js';
 import { keptAfterClear, memoryCommand } from '../assistant/memory-command.js';
-import { CONTEXT_WARN_AT, DEFAULT_CONTEXT_WINDOW, contextBadge, readContext, short as shortTokens } from '../assistant/context-meter.js';
+import { CONTEXT_WARN_AT, DEFAULT_CONTEXT_WINDOW, cacheLine, contextBadge, readContext, short as shortTokens } from '../assistant/context-meter.js';
 import { contextTitle, screenBlock, type ContextItem } from '../assistant/screen-context.js';
 import {
   IMAGES_OFF, dataUrl, imageLimits, imagesInText, insertToken, isImageRefusal, loadImageFile, pastedPaths, readClipboardImage, readImageData, removeTokenAt, wireMessages,
@@ -345,7 +345,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const toolSetRef = f.useRef(createToolSet());
           // What the provider reported for the last turn: its prompt plus the answer it
           // produced is, to a close approximation, the size of the NEXT request.
-          const usageRef = f.useRef<{ promptTokens: number; completionTokens: number } | null>(null);
+          const usageRef = f.useRef<TokenUsage | null>(null);
           // `/context` opens a panel in the field's place, like a write confirmation — it
           // is a look at the conversation, not a line of it. The ref is for the key
           // handler; the state is for the render.
@@ -423,6 +423,11 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const [turnTokens, setTurnTokensState] = f.useState(0);
           const turnTokensRef = f.useRef(0);
           const setTurnTokens = (n: number) => { turnTokensRef.current = n; setTurnTokensState(n); };
+          // The same sum, of `cachedTokens` alone, across every round of the turn — kept
+          // on the answer's message as `cached` (never drawn on the status line: it is
+          // the session's record of the turn's cache hits, not a live figure). A round
+          // that reported nothing adds nothing.
+          const turnCachedRef = f.useRef(0);
           // Empty answer: the model output only reasoning (goes to the fold) but no
           // final text. contentRef accumulates the final content (onDelta) — by it we
           // decide «empty?» and show an amber status message.
@@ -1112,6 +1117,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             setEmptyNotice('');
             setToolCount(0);
             setTurnTokens(0); // what the last turn cost is not what this one costs
+            turnCachedRef.current = 0;
             resetRound(); // the turn starts with a round nobody knows anything about yet
             // Tick the indicator every 120ms: spinner frame + tenths of a second of
             // whatever is running now (`segRef`), not of the whole turn.
@@ -1236,7 +1242,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // toolCalls=1`) or just narrated a status change without calling
                 // (`finish=stop toolCalls=0`). The missing "▸ tool calls" fold in the
                 // chat was AMBIGUOUS — this disambiguates it.
-                onRound: (info: { index: number; finishReason: string; toolCalls: number; contentLen: number; usage?: { promptTokens: number; completionTokens: number } }) => {
+                onRound: (info: { index: number; finishReason: string; toolCalls: number; contentLen: number; usage?: TokenUsage }) => {
                   // This request is done: the next one — after its tools — says a new word.
                   nextVerb();
                   // What the turn costs: a round is billed for its prompt and its
@@ -1244,6 +1250,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   // actually reported is counted — one that reports nothing leaves the
                   // figure off the screen rather than putting a guess there.
                   if (info.usage) setTurnTokens(turnTokensRef.current + info.usage.promptTokens + info.usage.completionTokens);
+                  if (typeof info.usage?.cachedTokens === 'number') turnCachedRef.current += info.usage.cachedTokens;
                   (f.services as Record<string, any>).pushLog?.(`[round ${info.index}] finish=${info.finishReason} toolCalls=${info.toolCalls} content=${info.contentLen}ch${info.usage ? ` tokens=${info.usage.promptTokens + info.usage.completionTokens}` : ''}`);
                 },
                 // Round content streams LIVE (the agent calls onLive per token) into `live`,
@@ -1325,7 +1332,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               (f.services as Record<string, any>).pushLog?.(`[chat] ${q.slice(0, 40)}… → ${q.length} chars${images.length ? ` + ${images.length} image${images.length === 1 ? '' : 's'}` : ''}`);
               roundLimit = Number((chatResult as { roundLimit?: number } | undefined)?.roundLimit ?? 0);
               const turn = (chatResult as { transcript?: ChatMessage[]; content?: string } | undefined);
-              const reported = (chatResult as { usage?: { promptTokens: number; completionTokens: number } } | undefined)?.usage;
+              const reported = (chatResult as { usage?: TokenUsage } | undefined)?.usage;
               if (reported) usageRef.current = reported;
               apiRef.current = [
                 ...apiRef.current,
@@ -1381,6 +1388,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // with Esc: cut short, «The» reads like a whole (and odd) answer unless
               // the line under it says it was stopped.
               const spent = turnTokensRef.current;
+              const cachedSpent = turnCachedRef.current;
               setMessages(cur => {
                 // A round cut off by Esc or an error never said what it was. Its text
                 // stays where it was drawn: a round known to carry a tool call — or
@@ -1396,7 +1404,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                     : { ...rest, content: `${rest.content ?? ''}${live}` };
                 });
                 const at = answerAt(next);
-                if (at >= 0) next[at] = { ...next[at]!, duration: finalMs, ...(spent ? { tokens: spent } : {}), ...(aborted ? { stopped: true, ...(stopKeyRef.current ? { stoppedBy: stopKeyRef.current } : {}) } : {}), ...(roundLimit ? { roundLimit } : {}) };
+                if (at >= 0) next[at] = { ...next[at]!, duration: finalMs, ...(spent ? { tokens: spent } : {}), ...(cachedSpent ? { cached: cachedSpent } : {}), ...(aborted ? { stopped: true, ...(stopKeyRef.current ? { stoppedBy: stopKeyRef.current } : {}) } : {}), ...(roundLimit ? { roundLimit } : {}) };
                 return next;
               });
               // Empty answer: the model gave only reasoning but no final text — say so
@@ -2499,7 +2507,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // Live count of IN-FLIGHT background tasks (the host re-renders via
             // notify() when one is armed or completes).
             bgCount: bgActiveCount(),
-            ...(() => { const r = contextReading(screen); return { contextBadge: contextBadge(r), contextWarn: r.ratio >= CONTEXT_WARN_AT, contextPanel: contextOpen ? r : null }; })(),
+            ...(() => { const r = contextReading(screen); return { contextBadge: contextBadge(r), contextWarn: r.ratio >= CONTEXT_WARN_AT, contextPanel: contextOpen ? r : null, contextCacheLine: contextOpen ? cacheLine(usageRef.current) : '' }; })(),
             // The assistant's task plan (todo tool): a snapshot so the render never
             // mutates the tool's module state. Re-read every render, so a plan the
             // LLM edits (via notify()) shows up immediately.

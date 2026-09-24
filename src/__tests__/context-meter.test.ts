@@ -1,5 +1,8 @@
 // How full the model's context is: the arithmetic, and what the chat shows of it.
 import { expect, test } from 'bun:test';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { CELL_FREE, CELL_FULL, CELL_PART, contextBadge, contextGrid, contextHeading, contextLegend, estimateTokens, readContext } from '../assistant/context-meter.js';
 import { ScriptedModel, bootApp, settle } from './helpers/scripted.js';
 
@@ -157,4 +160,90 @@ test('past 80% the figure is drawn as a warning', async () => {
   expect(row).toBeGreaterThan(-1);
   const col = ui.backend.lastFrame.split('\n')[row]!.indexOf('ctx 85%');
   expect(((ui.backend as unknown as { lastBuffer: { get(x: number, y: number): { style: { fg?: string } } } }).lastBuffer.get(col, row)).style.fg).toBe('yellow');
+});
+
+// Cache usage (AGENTS.md, "How full the context is, is shown"): the last request's
+// `TokenUsage` may carry `cachedTokens` / `cacheWriteTokens` from either wire — never
+// defaulted to 0, only shown when the provider really reported them. `/context` draws
+// them as a `last request: …` line, and the session keeps them (session-wide `usage`
+// and the turn's own message, `cached`) so a saved chat still says where its tokens went.
+test('the cache line: an OpenAI-compatible server\'s prompt_tokens_details.cached_tokens, kept with the session and the turn\'s message', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-cache-e2e-'));
+  const model = new ScriptedModel();
+  model.usage = { prompt_tokens: 3300, completion_tokens: 200, prompt_tokens_details: { cached_tokens: 2840 } };
+  model.script([{ text: 'hi there' }]);
+  const ui = await bootApp(model, 110, 30, undefined, { sessions: { dir }, ai: { baseUrl: 'http://scripted.model', model: 'scripted', contextWindow: 100_000 } });
+  await ui.press('F');
+  await ui.type('hi');
+  await ui.press('return');
+  await settle(20);
+  await ui.type('/context');
+  await ui.press('return');
+  const frame = ui.backend.lastFrame;
+  expect(frame).toContain('last request: 3.3k prompt · 2.8k from cache');
+  // OpenAI-compatible servers report no write figure — the part is left out, not 0.
+  expect(frame).not.toContain('written to cache');
+
+  // Closing the panel, then the chat, writes the session at once (no debounce wait).
+  await ui.press('escape', 'escape', 'escape');
+  const [file] = fs.readdirSync(dir).filter((n) => n.endsWith('.json'));
+  const saved = JSON.parse(fs.readFileSync(path.join(dir, file!), 'utf8'));
+  expect(saved.usage).toMatchObject({ promptTokens: 3300, completionTokens: 200, cachedTokens: 2840 });
+  expect('cacheWriteTokens' in saved.usage).toBe(false);
+  const answer = saved.messages.find((m: Record<string, unknown>) => m.role === 'assistant' && typeof m.content === 'string' && (m.content as string).includes('hi there'));
+  expect(answer.cached).toBe(2840);
+  ui.app.unmount();
+});
+
+test('the cache line: Anthropic\'s cache_read/cache_creation, kept with the session and the turn\'s message', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-cache-e2e-'));
+  const realKey = process.env.ANTHROPIC_API_KEY;
+  process.env.ANTHROPIC_API_KEY = 'sk-ant-scripted';
+  try {
+    const model = new ScriptedModel();
+    model.wire = 'anthropic';
+    model.anthropicUsage = { input_tokens: 260, output_tokens: 200, cache_creation_input_tokens: 1200, cache_read_input_tokens: 2840 };
+    model.script([{ text: 'hi there' }]);
+    const ui = await bootApp(model, 110, 30, undefined, {
+      sessions: { dir },
+      ai: { provider: 'anthropic', model: 'claude-sonnet-5', toolLoading: 'all', contextWindow: 100_000 },
+    });
+    await ui.press('F');
+    await ui.type('hi');
+    await ui.press('return');
+    await settle(20);
+    await ui.type('/context');
+    await ui.press('return');
+    const frame = ui.backend.lastFrame;
+    // promptTokens = input + cache_creation + cache_read = 260 + 1200 + 2840 = 4300.
+    expect(frame).toContain('last request: 4.3k prompt · 2.8k from cache · 1.2k written to cache');
+
+    await ui.press('escape', 'escape', 'escape');
+    const [file] = fs.readdirSync(dir).filter((n) => n.endsWith('.json'));
+    const saved = JSON.parse(fs.readFileSync(path.join(dir, file!), 'utf8'));
+    expect(saved.usage).toMatchObject({ promptTokens: 4300, completionTokens: 200, cachedTokens: 2840, cacheWriteTokens: 1200 });
+    const answer = saved.messages.find((m: Record<string, unknown>) => m.role === 'assistant' && typeof m.content === 'string' && (m.content as string).includes('hi there'));
+    expect(answer.cached).toBe(2840);
+    ui.app.unmount();
+  } finally {
+    if (realKey === undefined) delete process.env.ANTHROPIC_API_KEY; else process.env.ANTHROPIC_API_KEY = realKey;
+  }
+});
+
+test('a provider that reports no cache figures at all: the line says so, plainly', async () => {
+  const model = new ScriptedModel();
+  model.usage = { prompt_tokens: 3300, completion_tokens: 200 }; // no prompt_tokens_details
+  model.script([{ text: 'hi there' }]);
+  const ui = await bootApp(model, 110, 30, undefined, { ai: { baseUrl: 'http://scripted.model', model: 'scripted', contextWindow: 100_000 } });
+  await ui.press('F');
+  await ui.type('hi');
+  await ui.press('return');
+  await settle(20);
+  await ui.type('/context');
+  await ui.press('return');
+  const frame = ui.backend.lastFrame;
+  expect(frame).toContain('last request: 3.3k prompt · the provider reports no cache figures');
+  expect(frame).not.toContain('from cache');
+  expect(frame).not.toContain('written to cache');
+  ui.app.unmount();
 });

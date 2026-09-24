@@ -138,3 +138,18 @@ export function contextFootnote(r: ContextReading): string {
     ? 'Total: reported by the provider for the last request. The split is an estimate.'
     : 'Estimated from the text (about 4 characters a token) until the provider reports usage.';
 }
+
+// What the LAST request actually cost, in the cache's own terms — apart from
+// `contextFootnote`, which is about the TOTAL. `cachedTokens`/`cacheWriteTokens` are
+// undefined, not 0, when the wire never reported them at all (see `TokenUsage` in
+// ./agent.ts); a part that was not reported is left out of the line rather than shown
+// as zero, and a request that reported neither says so instead of a bare prompt figure.
+export interface CacheUsage { promptTokens: number; cachedTokens?: number; cacheWriteTokens?: number }
+export function cacheLine(u: CacheUsage | null | undefined): string {
+  if (!u) return '';
+  const parts = [`${short(u.promptTokens)} prompt`];
+  if (typeof u.cachedTokens === 'number') parts.push(`${short(u.cachedTokens)} from cache`);
+  if (typeof u.cacheWriteTokens === 'number') parts.push(`${short(u.cacheWriteTokens)} written to cache`);
+  const noFigures = u.cachedTokens == null && u.cacheWriteTokens == null;
+  return `last request: ${parts.join(' · ')}${noFigures ? ' · the provider reports no cache figures' : ''}`;
+}

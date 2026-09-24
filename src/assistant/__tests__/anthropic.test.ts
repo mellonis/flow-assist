@@ -162,7 +162,7 @@ test('a streamed round: text, a call assembled from pieces, thinking with its si
     reasoning: 'Let me check.',
     finishReason: 'tool_calls',
     toolCalls: [{ id: 'toolu_1', name: 'datetime', arguments: '{"tz":"UTC"}' }, { id: 'toolu_2', name: 'memory', arguments: '' }],
-    usage: { promptTokens: 4320, completionTokens: 57 },
+    usage: { promptTokens: 4320, completionTokens: 57, cachedTokens: 4000, cacheWriteTokens: 300 },
     blocks: [
       { type: 'thinking', thinking: 'Let me check.', signature: 'SIG' },
       { type: 'text', text: 'Next: the time.' },
@@ -210,7 +210,14 @@ test('stop reasons and usage in the loop\'s words', () => {
   expect(finishReason('end_turn')).toBe('stop');
   expect(finishReason('max_tokens')).toBe('length');
   expect(finishReason('refusal')).toBe('refusal');
+  // No cache_creation/cache_read fields at all: the cache figures are left off, not
+  // defaulted to 0 — a provider that never reports them is different from one that
+  // cached nothing this round.
   expect(usageOf({ input_tokens: 5, output_tokens: 2 })).toEqual({ promptTokens: 5, completionTokens: 2 });
+  expect(usageOf({ input_tokens: 5, output_tokens: 2 })).not.toHaveProperty('cachedTokens');
+  // Reported as 0 is still reported: the figure is kept, not dropped for being falsy.
+  expect(usageOf({ input_tokens: 5, output_tokens: 2, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }))
+    .toEqual({ promptTokens: 5, completionTokens: 2, cachedTokens: 0, cacheWriteTokens: 0 });
   expect(usageOf(undefined)).toBeUndefined();
 });
 

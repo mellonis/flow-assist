@@ -51,8 +51,16 @@ export interface ToolCall {
 
 // What the provider says a request cost. `promptTokens` is the size of EVERYTHING sent
 // — system prompt, tool definitions, the whole history — which is what "how full is the
-// context" means.
-export interface TokenUsage { promptTokens: number; completionTokens: number }
+// context" means (Anthropic: `input_tokens + cache_creation_input_tokens +
+// cache_read_input_tokens`, as `usageOf` in ./anthropic.ts computes it — both cache
+// figures are already counted inside it). `cachedTokens` is the share of the prompt the
+// provider read from its cache (Anthropic's `cache_read_input_tokens`, an OpenAI-
+// compatible server's `usage.prompt_tokens_details.cached_tokens`) and `cacheWriteTokens`
+// the share newly written to it (Anthropic's `cache_creation_input_tokens` only — no
+// OpenAI-compatible server reports a write figure). Both are `undefined`, not `0`, when
+// the wire did not report the field at all — a provider that never caches is different
+// from one that cached nothing this round.
+export interface TokenUsage { promptTokens: number; completionTokens: number; cachedTokens?: number; cacheWriteTokens?: number }
 
 export interface ChatRoundResult {
   content: string;
@@ -389,15 +397,26 @@ async function realChatRound(
         done = true;
         break;
       }
-      let obj: { choices?: Array<{ finish_reason?: string; delta?: Record<string, unknown> }>; usage?: { prompt_tokens?: number; completion_tokens?: number } | null } | undefined;
+      let obj: {
+        choices?: Array<{ finish_reason?: string; delta?: Record<string, unknown> }>;
+        usage?: { prompt_tokens?: number; completion_tokens?: number; prompt_tokens_details?: { cached_tokens?: number } | null } | null;
+      } | undefined;
       try {
         obj = JSON.parse(data);
       } catch {
         continue;
       }
-      // Usage arrives in a chunk of its own, usually the last, with no choices.
+      // Usage arrives in a chunk of its own, usually the last, with no choices. A
+      // provider that caches reports the cached share in `prompt_tokens_details.
+      // cached_tokens`; one that never caches omits the field entirely, so it is kept
+      // only when it was really there — never defaulted to 0.
       if (obj?.usage && typeof obj.usage.prompt_tokens === 'number') {
-        usage = { promptTokens: obj.usage.prompt_tokens, completionTokens: Number(obj.usage.completion_tokens ?? 0) };
+        const cached = obj.usage.prompt_tokens_details?.cached_tokens;
+        usage = {
+          promptTokens: obj.usage.prompt_tokens,
+          completionTokens: Number(obj.usage.completion_tokens ?? 0),
+          ...(typeof cached === 'number' ? { cachedTokens: cached } : {}),
+        };
       }
       const ch = obj?.choices?.[0];
       if (ch?.finish_reason) finishReason = ch.finish_reason;

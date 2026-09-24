@@ -268,9 +268,13 @@ type RawUsage = { input_tokens?: number; output_tokens?: number; cache_creation_
 // it are counted apart from `input_tokens` and are still in the window the meter shows.
 export function usageOf(u: RawUsage): TokenUsage | undefined {
   if (!u || typeof u.input_tokens !== 'number') return undefined;
+  const cacheRead = u.cache_read_input_tokens;
+  const cacheWrite = u.cache_creation_input_tokens;
   return {
-    promptTokens: u.input_tokens + Number(u.cache_creation_input_tokens ?? 0) + Number(u.cache_read_input_tokens ?? 0),
+    promptTokens: u.input_tokens + Number(cacheWrite ?? 0) + Number(cacheRead ?? 0),
     completionTokens: Number(u.output_tokens ?? 0),
+    ...(typeof cacheRead === 'number' ? { cachedTokens: cacheRead } : {}),
+    ...(typeof cacheWrite === 'number' ? { cacheWriteTokens: cacheWrite } : {}),
   };
 }
 

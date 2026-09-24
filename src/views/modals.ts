@@ -1100,6 +1100,7 @@ export function renderChatModal({
   contextBadge = '',
   contextWarn = false,
   contextPanel = null,
+  contextCacheLine = '',
   todo = null,
   fullscreen = false,
   docked = false,
@@ -1185,6 +1186,10 @@ export function renderChatModal({
   contextWarn?: boolean;
   // `/context`: the reading to draw as a panel in the field's place (null — closed).
   contextPanel?: ContextReading | null;
+  // The last request's cache breakdown, in the provider's own words
+  // (`assistant/context-meter.ts`' `cacheLine`) — '' draws nothing (the panel is
+  // closed, or nothing has been sent yet).
+  contextCacheLine?: string;
   todo?: PlanItem[] | null;
   // The window takes the whole terminal — title bar and footer too — instead of a
   // centred 88% × 82% over the dimmed screen. The overlay already spans the
@@ -1363,7 +1368,7 @@ export function renderChatModal({
         pendingQuestion
           ? renderAsk(pendingQuestion, m.bg, wrap)
           : contextPanel
-          ? renderContextPanel(contextPanel, m.bg, wrap)
+          ? renderContextPanel(contextPanel, m.bg, wrap, contextCacheLine)
           : confirmAsk
           ? h(Box, { flexDirection: 'column', width: '100%', gap: 1, border: 'round', paddingX: 1, borderColor: 'yellow', backgroundColor: m.bg },
               h(Text, { bold: true, color: 'yellow' }, `⚠ Confirm write: ${confirmAsk.name}`),
@@ -1471,7 +1476,7 @@ export function renderChatStrip({ width, theme, status, keyHint = '', unread = 0
 const PART_COLORS: Record<string, string> = {
   instructions: 'cyan', tools: 'magenta', memory: 'yellow', plan: 'green', summary: 'blue', 'on screen': 'greenBright', messages: 'white', images: 'cyanBright',
 };
-function renderContextPanel(r: ContextReading, bg: string | undefined, wrap: number) {
+function renderContextPanel(r: ContextReading, bg: string | undefined, wrap: number, cacheLine = '') {
   const cells = contextGrid(r);
   const warn = r.ratio >= CONTEXT_WARN_AT;
   const gridRows = Array.from({ length: GRID_ROWS }, (_, y) => cells.slice(y * GRID_COLS, (y + 1) * GRID_COLS));
@@ -1490,6 +1495,7 @@ function renderContextPanel(r: ContextReading, bg: string | undefined, wrap: num
       h(Text, warn ? { color: 'yellow' } : {}, contextHeading(r))),
     h(Box, { flexDirection: sideBySide ? 'row' : 'column', gap: sideBySide ? 3 : 1 }, grid, legend),
     h(Text, { dim: true, wrap: 'truncate' }, contextFootnote(r)),
+    cacheLine ? h(Text, { dim: true, wrap: 'truncate' }, cacheLine) : null,
     h(Text, { dim: true, wrap: 'truncate', selectable: false }, `/compact summarises · /clear starts over · window: ai.contextWindow · ${CAP.esc} / ${CAP.enter} close`));
 }
 

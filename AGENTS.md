@@ -482,6 +482,22 @@ session (never saved); an old `fullscreen: true` reads as `full` (`chatModeOf`),
   of rows. A note saved before carries the summary in its text and is drawn as it was. There is no
   `/refresh-context`: the system prompt is assembled anew for every message, so the
   command had nothing to refresh.
+- **Cache usage rides on `TokenUsage` beside `promptTokens`/`completionTokens`, from
+  both wires when the provider reports it** (`cachedTokens`/`cacheWriteTokens`,
+  `src/assistant/agent.ts`). Anthropic's `usageOf` (`src/assistant/anthropic.ts`) reads
+  `cache_read_input_tokens` / `cache_creation_input_tokens` — both already counted
+  inside `promptTokens`, as before — and an OpenAI-compatible round reads
+  `usage.prompt_tokens_details.cached_tokens` (no write figure: no such server reports
+  one). Either figure is `undefined`, never `0`, when the wire did not report it at
+  all — a provider that never caches reads differently from one that cached nothing
+  this round. The panel adds a line under the footnote, `cacheLine` (pure): `last
+  request: 33.0k prompt · 28.4k from cache · 1.2k written to cache`, a part left out
+  when not reported, and `· the provider reports no cache figures` appended when
+  neither was. The session keeps it two ways: `usage` (session-wide, the same
+  `TokenUsage` `usageRef` holds) and, on the turn's own answer message, a `cached` sum
+  of `cachedTokens` across the turn's rounds (beside `tokens`, the same sum of
+  prompt+completion `onRound` already kept) — so a saved chat still shows a turn's
+  cache hits, not only what it cost.
 - **The plan (`todo`) belongs to a conversation, not to the process.**
   `createPlan()` in `src/assistant/plan.ts` makes one; its owner passes it to the
   tool as `ctx.plan`. The chat holds its own (`planRef`), and `/clear` resets it —
