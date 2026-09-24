@@ -165,7 +165,10 @@ the blacklist.
   Ctrl+] waits for the popup to close), `ListSelect` and `ListMultiSelect` (the inline lists).
   They hear flowtty's input, not `useInputHandler`, and take the keys they act on — a
   focused `ListSelect` takes what is typed as its filter — so a plugin gates them
-  with `isFocused` (docs/plugins.md says how).
+  with `isFocused` from `host.hasKeyboard()` (`pluginHasKeyboard` in `runtime/app.tsx`:
+  false while the `:` line is open, the log or the help is up, the chat has the keys,
+  or a popup is open; a popup opening or closing redraws the App, through
+  `HostProbe`, so a value read while drawing stays true).
 - **`modalColors`** — per modal the plugin draws, what its palette differs in from
   the host's modal base (`{ relation: { border: 'blue' } }`). `resolveModalPalettes`
   (`src/playback/theme.ts`) lays it on the base into `theme.modals.<modal>`; the

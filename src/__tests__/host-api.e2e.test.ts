@@ -44,3 +44,42 @@ test('a plugin draws with ui and speaks through host', async () => {
   expect(ui.backend.lastFrame).toContain('picked be');
   ui.app.unmount();
 });
+
+// `host.hasKeyboard()` is what a plugin gates the flowtty components that hear keys
+// themselves with: false while anything of the host's has the keyboard.
+test('host.hasKeyboard() says whether the plugin side has the keyboard', async () => {
+  // What the view read on its last draw — a modal may cover the text.
+  let last = '';
+  const make = (mk: any) => [mk('boards', {
+    name: 'boards',
+    keycaps: () => ['c board'],
+    components: {
+      view: ({ ui, host }: any) => function View() {
+        last = host.hasKeyboard() ? 'yes' : 'no';
+        return ui.h(ui.Text, null, `keys: ${last}`);
+      },
+    },
+  })];
+  const ui = await bootApp(new ScriptedModel(), 100, 28, make as never);
+  const keys = () => last;
+  expect(keys()).toBe('yes');
+  await ui.press(':');
+  expect(keys()).toBe('no');
+  await ui.press('escape');
+  expect(keys()).toBe('yes');
+  await ui.press('L');
+  expect(keys()).toBe('no');
+  await ui.press('L');
+  expect(keys()).toBe('yes');
+  await ui.press(':');
+  await ui.type('help');
+  await ui.press('return');
+  expect(ui.backend.lastFrame).toContain('commands');
+  expect(keys()).toBe('no');
+  await ui.press('escape');
+  expect(keys()).toBe('yes');
+  await ui.press('F');
+  expect(ui.backend.lastFrame).toContain('Flow Assist');
+  expect(keys()).toBe('no');
+  ui.app.unmount();
+});

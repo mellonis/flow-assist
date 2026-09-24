@@ -240,6 +240,9 @@ interface HostKeyPath {
   // reached no one in the App's subtree was delivered to a muted subtree.
   heard: boolean;
   probeRendered: boolean;
+  // Called when a popup opens or closes: the App redraws, so what reads
+  // `host.hasKeyboard()` sees it.
+  changed: () => void;
 }
 
 // The backend as flowtty sees it: each key it reports goes through the host's passes.
@@ -282,12 +285,26 @@ function HostKeys({ path }: { path: HostKeyPath }) {
   return null;
 }
 
+// Whether the plugin's side has the keyboard — `host.hasKeyboard()`, which a plugin
+// gates its flowtty pickers, checkboxes and scroll boxes with. Not while the `:` line is
+// open, the log or the help is up, the chat has the keys (open, and not docked with the
+// focus on the plugin), or a dropdown's popup is open.
+export function pluginHasKeyboard(store: Record<string, unknown>, ui: { cmdOpen?: boolean }, popupOpen: boolean): boolean {
+  if (ui.cmdOpen || popupOpen) return false;
+  const s = store as { log?: { open?: boolean }; help?: { helpModal?: boolean }; chat?: { open?: boolean; focus?: string } };
+  if (s.log?.open || s.help?.helpModal) return false;
+  return !(s.chat?.open && s.chat.focus !== 'plugin');
+}
+
 // A listener inside the App's subtree that draws nothing. Memoised with a stable prop,
 // it re-renders only when its input source changes — the DialogHost swapping the
 // App's source for a muted one when a popup opens, and back when it closes — so each
 // re-render flips `popupOpen`; each key it hears says the subtree is live.
 const HostProbe = memo(function HostProbe({ path }: { path: HostKeyPath }) {
-  if (path.probeRendered) path.popupOpen = !path.popupOpen;
+  if (path.probeRendered) {
+    path.popupOpen = !path.popupOpen;
+    queueMicrotask(path.changed);
+  }
   path.probeRendered = true;
   useInput(() => { path.heard = true; });
   return null;
@@ -350,7 +367,7 @@ export function renderApp(
   const ui: UiState = { cmdOpen: false, modalActive: false };
   const cmdline = { current: { open: false, input: '', history: [], historyIdx: -1, walk: null } as CommandLineState };
   // The host's place in key delivery (see `HostKeyPath`); the App fills in its steps.
-  const keyPath: HostKeyPath = { first: () => undefined, last: () => undefined, pass: 1, popupOpen: false, heard: false, probeRendered: false };
+  const keyPath: HostKeyPath = { first: () => undefined, last: () => undefined, pass: 1, popupOpen: false, heard: false, probeRendered: false, changed: () => {} };
 
   function App() {
     const inputRegistryRef = useRef<LazyInputEntry[]>([]);
@@ -454,10 +471,12 @@ export function renderApp(
           helpFor,
           notify,
           copyToClipboard: services.copyToClipboard,
+          hasKeyboard: () => pluginHasKeyboard(apiRef.current!.host.store, ui, keyPath.popupOpen),
         },
       };
     }
     const { ui: pluginUi, host: hostBase } = apiRef.current;
+    keyPath.changed = notify;
 
     // Mount each plugin's `components[slot]` factory EXACTLY once: memoize only
     // the component FUNCTION (stable identity → no remount, state preserved),

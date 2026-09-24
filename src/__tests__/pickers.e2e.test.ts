@@ -9,7 +9,7 @@ afterEach(() => { globalThis.fetch = realFetch; });
 
 const ITEMS = [{ label: 'Frontend', value: 'fe' }, { label: 'Backend', value: 'be' }, { label: 'Design', value: 'ds' }];
 
-// A guest whose surface draws one picker, focused while the chat is not open.
+// A guest whose surface draws one picker, focused while the plugin side has the keyboard.
 function guest(which: 'Select' | 'ListSelect' | 'ListMultiSelect') {
   const chosen: unknown[] = [];
   const make = (mk: any) => [mk('boards', {
@@ -18,8 +18,7 @@ function guest(which: 'Select' | 'ListSelect' | 'ListMultiSelect') {
     components: {
       view: (api: any) => function View() {
         const [value, setValue] = api.ui.useState(which === 'ListMultiSelect' ? [] : undefined);
-        const chat = api.host.store.chat as { open?: boolean; focus?: string } | undefined;
-        const isFocused = !(chat?.open && chat.focus !== 'plugin');
+        const isFocused = api.host.hasKeyboard();
         const onChange = (v: unknown) => { chosen.push(v); setValue(v); };
         return api.ui.h(api.ui.Box, { flexDirection: 'column' },
           api.ui.h(api.ui.Text, null, 'BOARD'),

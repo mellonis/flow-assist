@@ -186,6 +186,7 @@ Every hook of the shape — each `components[slot]` factory, `setup`, `keycaps`,
 | `useInput` — flowtty's own, beside the host's key path | `useInputHandler` — the host's key path |
 | | `useSurfaceSize`, `useTerminalSize` — the room the host gives the plugin |
 | | `notify()`, `viewRegistry`, `commandRegistry`, `helpFor`, `copyToClipboard` |
+| | `hasKeyboard()` — whether the plugin's side has the keyboard now |
 | | `pluginToken` — the plugin's identity; `hostApi` — the host API it runs under |
 
 The services stay on `host.services` and are read when they are called
@@ -260,11 +261,11 @@ setup: ({ host }) => { /* once, before any component mounts: seed a store */ },
   `ui.ListSelect` and `ui.ListMultiSelect` are the inline lists, every option on
   screen. flowtty's docs/components.md (Choosing) says which to reach for. They hear
   flowtty's own input, not `host.useInputHandler`, so a mounted one would hear every
-  key — what the person types in the chat included: pass `isFocused` from your own
-  state: true only while the picker is what the person is using. The host has no
-  single "the plugin has the keyboard" flag yet; the keyboard is not the plugin's
-  while the chat has it (`host.store.chat.open` with `host.store.chat.focus` not
-  `'plugin'`), while the `:` line is open, or while the log or the help is up.
+  key — what the person types in the chat included: pass `isFocused` true only while
+  the picker is what the person is using AND `host.hasKeyboard()` — which is false
+  while the `:` line is open, the log or the help is up, the chat has the keys, or a
+  dropdown's popup is open. Read it while drawing; the host redraws when it changes:
+  `isFocused: host.hasKeyboard() && mine === 'list'`.
   A focused picker takes the keys it acts on — a `ListSelect` takes what is typed as
   its filter, so the host's own letters (`F`, `:`) do not reach the host while it has
   the focus; Ctrl+] and the exit keys always do. The names are flowtty's own: a plugin

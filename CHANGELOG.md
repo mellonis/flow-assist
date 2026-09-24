@@ -34,9 +34,10 @@ What each version of flow-assist brought, newest first. The version is the one i
   renamed those lists in alpha.24 with no aliases: its old `Select` is `ListSelect`
   and its old `MultiSelect` is `ListMultiSelect`, props unchanged, and `Select` is
   now the dropdown — a plugin that took the old names from flowtty must rename them.
-  They hear flowtty's own input, so a plugin gates them with `isFocused`
-  (docs/plugins.md). While a dropdown is open every key is its own: Ctrl+] waits for
-  it to close, and Ctrl+C still takes two presses. Since alpha.26
+  They hear flowtty's own input, so a plugin gates them with `isFocused` from
+  `host.hasKeyboard()` — false while the host has the keyboard (docs/plugins.md).
+  While a dropdown is open every key is its own: Ctrl+] waits for it to close, and
+  Ctrl+C still takes two presses. Since alpha.26
   flowtty's components take the keys they act on — a focused `ListSelect` takes what
   is typed as its filter, so `F` or `:` do not reach the host while it has the focus.
   The host's own chords (Ctrl+], the collapse key, the exit keys) are heard before any

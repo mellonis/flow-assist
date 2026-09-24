@@ -80,6 +80,11 @@ export interface PluginHost {
   // The plugin's identity, a Symbol the host issued: relayed into a tool's ctx, it says
   // which plugin is asking, and no plugin can forge another's.
   pluginToken?: symbol;
+  // Whether the plugin's side has the keyboard now: not while the `:` line is open, the
+  // log or the help is up, the chat has the keys, or a dropdown's popup is open. What a
+  // plugin passes as `isFocused` / `isActive` to the flowtty components that hear keys
+  // themselves. Read it while drawing: the host redraws when it changes.
+  hasKeyboard: () => boolean;
 }
 
 export interface PluginApi {
