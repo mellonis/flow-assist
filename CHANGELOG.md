@@ -5,6 +5,29 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **Ctrl+C stops the answer, and quitting takes a second press.** Ctrl+C used to end
+  the app at once, even in the middle of an answer, and Ctrl+Z to suspend it with a
+  request in flight. Now Ctrl+C while an answer or a `!command` runs stops it, as Esc
+  does. When nothing runs, the first Ctrl+C says `^c again to exit` and a second within
+  two seconds quits; any other key takes it back. Ctrl+D on an empty field does the
+  same, and Ctrl+Z says `^z again to suspend`. This holds on every screen, not only in
+  the chat.
+
+- **Esc stops the answer on the first press, even with a message waiting.** With a
+  message queued and a tool running, the first Esc used to take the message back, the
+  second cleared it (the message was lost), and only the third stopped the tool. Now
+  Esc stops it at once. A stopped or failed answer no longer sends the waiting
+  messages: they come back into the field in order, ahead of anything you had typed
+  meanwhile, and you decide what to send. ↑ on an empty field takes the last waiting
+  message back to edit (the hint says `↑ takes it back`).
+
+- **↑ repeats `/commands` too.** `/notes step`, `/compact`, `/resume 2` go into the
+  ↑/↓ history like every other line you submit, as `!commands` and lines typed in
+  shell mode already did (they come back in shell mode), and the history is saved with
+  the session. A command
+  whose argument may be a secret stays out of it: the `:config` command, and a
+  plugin's command that declares `history: false`.
+
 - **The roots have a key per owner: `shell.roots` and `plugins.repo.roots`.** The
   directories `!command` and `run_command` start in and stay inside, and the ones
   `repo` may touch, were one host key, `fs.roots`, although only `repo` and the shell

@@ -19,6 +19,9 @@ export type Command = {
   minArgs: number;
   maxArgs: number;
   description: string;
+  // `false` keeps the command out of the `:` line's ↑/↓ history — for a command whose
+  // argument may carry a secret. Every command is remembered otherwise.
+  history?: boolean;
 };
 
 // Basic host command set. `maxArgs = -1` means an unlimited argument count.
@@ -28,7 +31,8 @@ export type Command = {
 export const BASE_COMMANDS: Command[] = [
   { name: 'clear', aliases: ['clear-cache'], usage: 'clear', minArgs: 0, maxArgs: 0, description: 'Flush the cache' },
   { name: 'quit', aliases: ['q'], usage: 'quit', minArgs: 0, maxArgs: 0, description: 'Quit' },
-  { name: 'config', aliases: [], usage: 'config [get <key>|set <key> <value>|unset <key>|help]', minArgs: 0, maxArgs: -1, description: 'Show the whole config; get/set/unset a key (writes config.local.json); help — what the keys are' },
+  // Not remembered: a value set may be a secret — an MCP server's `headers` or `env`.
+  { name: 'config', aliases: [], usage: 'config [get <key>|set <key> <value>|unset <key>|help]', minArgs: 0, maxArgs: -1, description: 'Show the whole config; get/set/unset a key (writes config.local.json); help — what the keys are', history: false },
   { name: 'cache', aliases: [], usage: 'cache [on|off]', minArgs: 0, maxArgs: 1, description: 'Turn the cache on or off (config.cache.enabled)' },
   { name: 'help', aliases: ['?'], usage: 'help', minArgs: 0, maxArgs: 0, description: 'List the commands' },
 ];

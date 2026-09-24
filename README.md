@@ -39,6 +39,14 @@ update loses nothing. `/clear` starts a new session and keeps the old one;
 `sessions/` in the config directory, readable by you only (`sessions.resume: false`
 starts every run empty; `sessions.keep` — how many are kept, 50 by default).
 
+A message sent while an answer is still coming waits its turn (`⏎ queued`) and goes
+out when the answer ends; ↑ on an empty field takes the last one back to edit. Esc or
+Ctrl+C stops the answer on the first press — then the waiting messages come back into
+the field instead of being sent, and so they do when a request fails. ↑/↓ walk
+everything you typed, `/commands` and `!commands` included, and the history is saved
+with the session. Ctrl+C (or Ctrl+D on an empty field) quits and Ctrl+Z suspends only
+when pressed twice: the first press says `^c again to exit`.
+
 **Click what you want to read.** Everything the chat folds — a turn's tool calls, what
 it said between them, a command's capped output — opens where you click it: on its fold line to
 open it, anywhere inside it to close it again. A block opens at its first row, so a

@@ -170,6 +170,10 @@ entry: ['notes'],                     // the key that leads in, on the start scr
 ```
 
 - A command is its first word; the rest of the line is its argument (`run(ctx, arg)`).
+- The `:` line remembers what was run, for ↑/↓. A command whose argument may be a
+  secret — a token, a password, a header — says `history: false` and is never kept:
+  `{ name: 'login', usage: 'login <token>', history: false, run: … }`. It is part of
+  the definition, not a decision made per call.
 - A binding is the person's to change (`config.keys`), so a hint never spells a key
   by hand: `ft.keyCap(action)` draws the current one, `''` when it is unbound (then
   show no hint).

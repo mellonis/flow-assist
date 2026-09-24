@@ -1044,6 +1044,7 @@ export function renderChatModal({
   scrollTo = null,
   cursor = 0,
   escArmed = false,
+  armedHint = '',
   shellMode = false,
   autoMode = 'ask',
   pendingConfirm = null,
@@ -1093,6 +1094,9 @@ export function renderChatModal({
   scrollTo?: { row: number; n: number } | null;
   cursor?: number;
   escArmed?: boolean;
+  // An armed Ctrl+C / Ctrl+D / Ctrl+Z says so (`^c again to exit`) where Esc's arm is
+  // said — over a running turn's status too, since Ctrl+Z arms while one runs.
+  armedHint?: string;
   // The field is in shell mode: the prompt reads `! ` in the shell colour and
   // Enter runs its text as a command (assistant.ts owns the state machine).
   shellMode?: boolean;
@@ -1104,7 +1108,9 @@ export function renderChatModal({
   // deciding on exactly that line.
   pendingConfirm?: { name: string; args?: string | unknown; command?: string } | null;
   pendingQuestion?: AskState | null;
-  // Messages sent while an answer was coming; they go out, in order, when the turn ends.
+  // Messages sent while an answer was coming; they go out, in order, when the turn ends
+  // (a stopped or failed turn puts them back into the field). ↑ on an empty field takes
+  // the LAST one back, so the last one is what the line shows.
   queued?: string[];
   // The seconds of what is running NOW — a tool while one runs, the model's round
   // otherwise. The turn's own total is on the finished answer's quiet line.
@@ -1234,7 +1240,7 @@ export function renderChatModal({
       // Chrome, not conversation: out of every selection.
       h(Box, { flexDirection: 'row', width: '100%', flexShrink: 0, selectable: false },
       h(Box, { flexGrow: 1, flexShrink: 1, overflow: 'hidden' },
-      (!escArmed && (streaming || toolLabel))
+      (!escArmed && !armedHint && (streaming || toolLabel))
         // Working: what is happening NOW is the bright part. A tool that is running
         // pulses through the accent colours; with none running the model is either
         // thinking (waiting for its first token, reasoning, working out the next tool
@@ -1257,8 +1263,10 @@ export function renderChatModal({
                   children: `${verb || VERBS[0]}…`,
                 })),
             h(Text, { dim: true, wrap: 'truncate' }, ` · ${CAP.esc} stops`))
-        : h(Text, (emptyNotice && !streaming && !toolLabel && !escArmed) ? { color: 'yellow', wrap: 'truncate' } : { dim: true, wrap: 'truncate' },
-        escArmed
+        : h(Text, (emptyNotice && !streaming && !toolLabel && !escArmed && !armedHint) ? { color: 'yellow', wrap: 'truncate' } : { dim: true, wrap: 'truncate' },
+        armedHint
+          ? armedHint
+          : escArmed
           ? `${CAP.esc} again to exit`
           : emptyNotice
               ? `⚠ ${emptyNotice}`
@@ -1292,8 +1300,10 @@ export function renderChatModal({
       queued.length
         ? h(Box, { flexDirection: 'row', width: '100%' },
             h(Text, { bold: true, color: m.warn }, `${CAP.enter} queued${queued.length > 1 ? ` (${queued.length})` : ''}: `),
-            h(Text, { wrap: 'truncate', color: m.warn }, `${queued[0]!.replace(/\s+/g, ' ').slice(0, Math.max(10, wrap - 40))}${queued.length > 1 ? ' …' : ''}`),
-            h(Text, { dim: true }, ` · ${CAP.esc} takes it back`))
+            h(Text, { wrap: 'truncate', color: m.warn }, `${queued.length > 1 ? '… ' : ''}${queued.at(-1)!.replace(/\s+/g, ' ').slice(0, Math.max(10, wrap - 40))}`),
+            // ↑ takes it back only from an empty field (in a draft it moves the caret),
+            // so it is offered only there.
+            input ? null : h(Text, { dim: true }, ` · ${keyGlyph('up')} takes it back`))
         : null,
       // The input field group (the y/n confirm block or the multiline input box).
       h(Box, { flexDirection: 'column', width: '100%' },

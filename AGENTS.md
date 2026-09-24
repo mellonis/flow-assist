@@ -161,8 +161,8 @@ spawns something long-lived follows:
   `plugins.*` key does, because a plugin's key is validated by the plugin's schema). A
   request in flight holds the program through its ref'd timeout timer — without one a
   one-shot prompt could exit in the middle of a call whose answer was on its way.
-- **It ends with the program.** `process.on('exit')` covers `:quit`, Ctrl+C in the app
-  and a command running out of work; a signal ends a program WITHOUT that event, so
+- **It ends with the program.** `process.on('exit')` covers `:quit`, Ctrl+C (twice) in
+  the app and a command running out of work; a signal ends a program WITHOUT that event, so
   SIGTERM/SIGHUP/SIGINT are heard too.
 - **A signal handler must not swallow the signal.** flowtty decides whether to re-raise
   one by COUNTING listeners — with a second listener present it unmounts and leaves the
@@ -739,6 +739,11 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   line used to be looked up, so every plugin command given an argument was not found
   and did nothing — `:ask hi`, a tracker's `:open ABC-1`. Without an argument they
   worked, which is how it went unnoticed.
+- **↑/↓ recall what was run** (in memory, for this run). A command declared with
+  `history: false` is never kept — the host's `config` is (a value set may be a
+  secret: an MCP server's `headers` or `env`), and a plugin's command may say it on its
+  definition (`Command.history` in `src/loader/plugin.ts`). Static, never decided per
+  call.
 - **Nothing is silent.** An unknown command answers `Unknown command: x — try :help`.
   A command that is listed does something: `view` and `back` set a state nothing in
   the host reads and were removed. The host's commands are `clear`, `quit`, `config`,
@@ -789,13 +794,44 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   a `!command`'s block (`shell`) is the host's own ```console fence — both stay
   markdown. The pinned question folds a multi-line message onto its one row.
 - **⏎** sends; while an answer is coming it **queues** instead (sent in order when
-  the turn ends). **Esc**: clear the field → take the last queued message back →
-  stop the answer (the line under what came so far says `stopped (Esc)` — a cut-off
-  «В» must not read as a whole answer; the model's history gets a closing message of
-  its own, see "The conversation the model sees") → arm/close. **Alt+⏎** (drawn `⌥⏎` on macOS) is a newline (`NEWLINE_KEY` in
+  the turn ends; the line over the field shows the LAST one, and `↑ takes it back`
+  while the field is empty). **Esc** while an answer or a `!command` runs **stops it,
+  on the first press**, touching neither the field nor the queue (the line under what
+  came so far says `stopped (Esc)` — a cut-off «В» must not read as a whole answer;
+  the model's history gets a closing message of its own, see "The conversation the
+  model sees"). Idle: clear the field → leave shell mode → arm/close. It used to clear
+  the field and take the queue back BEFORE stopping, so with a message queued the
+  second Esc threw the message away and only the third stopped the tool.
+  **A stopped or failed turn does not send the queue** (`restoreQueue` in
+  `src/plugins/assistant.ts`): the queued messages come back into the field in order,
+  joined by blank lines, AHEAD of whatever was typed meanwhile — the order they would
+  have gone out in; a shell-mode draft keeps its `!` and the mode goes. A failed
+  request would most likely fail again. **↑ on an EMPTY field takes the last queued
+  message back** before it steps into the history. **Alt+⏎** (drawn `⌥⏎` on macOS) is a newline (`NEWLINE_KEY` in
   `src/views/modals.ts` — the one spelling every hint uses); a blank line is kept.
   ⇧⏎ works too where the terminal sends it (decoded since flowtty 1.0.0-alpha.7),
   but the hint names the key that works in every terminal that has an Alt.
+- **Ctrl+C, Ctrl+D and Ctrl+Z take a second press** (`src/runtime/exit-keys.ts`, pure;
+  the App owns the arm). flowtty hands these three to the app BEFORE the terminal
+  backend acts (exit, exit, suspend — skipped when a `useInput` handler returns strict
+  `true`), and one stray press used to end the app mid-answer. The App's `useInput`
+  takes them before `twoPhaseDispatch`, since the y/n pause, an open question and a
+  modal's catch-all swallow every key: the first press arms and is consumed, the status
+  line says `^c again to exit` / `^d again to exit` / `^z again to suspend` (the cap
+  from `keyGlyph`, in the chat where `Esc again to exit` is — `services.armedHint` —
+  and on the bottom row of every other screen); the same key within `ARM_MS` (2 s)
+  fires; any other key (not a mouse button) disarms, and the arm fades on its own.
+  Ctrl+C / Ctrl+D fire through `onExit`, as `:quit` does; the second Ctrl+Z is NOT
+  consumed, so the backend hands the terminal back and stops the process, and repaints
+  on `fg` (a test sees it as `backend.press()` answering `false`). The open chat speaks
+  first, through `store.chat.ctrlKey`: Ctrl+C with a turn or a `!command` running
+  STOPS it exactly as Esc does (a pending y/n declined and a question dismissed first,
+  or the turn would wait on them) and nothing is armed; Ctrl+D in a field with text is
+  the editor's forward delete, consumed. It holds app-wide — the start screen and a
+  plugin's screen arm the same way; a turn running while the chat is closed is not
+  stopped by Ctrl+C. **Nothing else is consumed**: `twoPhaseDispatch`'s `true` means
+  "handled, redraw", and the chat answers it for every key — PgUp and the wheel
+  included, which the conversation's scroll list hears on its own.
 - **A key has two names, and they meet in one place.** The TERMINAL's name is what
   flowtty's decoder gives as `key.name`: `'return'`, `' '`, `':'`, `'escape'`. A
   PERSON's name is what gets written in a binding — `config.keys`, a plugin's `keys`
@@ -848,7 +884,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     `ft.keys.open`); the host acts on none of them.
   - A test presses every lower-case letter on the start screen and expects silence
     (`home.e2e.test.ts`) — `q` included. **No key quits by default**: a stray `q`
-    closed the whole app. Quitting is the `:quit` (`:q`) command or Ctrl+C; the action
+    closed the whole app. Quitting is the `:quit` (`:q`) command or Ctrl+C twice; the action
     stays in `HOST_DEFAULT_KEYS` unbound (`[]`) so `config.keys.quit` can bind it, and
     the start screen then names the key instead of `:q`. Plugins leave their screens
     on Esc (`keys.back`) only.
@@ -857,7 +893,18 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   A modal is closed by the key it is bound to (`f.keys.<action>`), never by a letter
   written in the handler — the log used to close on a hard-coded `l`.
 - **↑/↓** walk the prompt history, only while the field is empty or still shows a
-  history entry untouched. The **wheel** and **PgUp/PgDn** scroll.
+  history entry untouched (↑ on an empty field takes a queued message back first). The
+  history holds **every submitted line** (`src/assistant/prompt-history.ts`) — a
+  message, a `/command` (an unknown one too: a typo is fixed with ↑), a `!command`
+  and a shell-mode line, both kept as `!cmd` and recalled in shell mode — with no line
+  twice in a row. A command pushed before it runs is pushed again after if it REPLACED
+  the history (`/resume <n>` loads that session's own), so ↑ there still offers it. A
+  command whose definition says `history: false` is never kept — for one whose argument
+  may carry a secret, since the last 100 entries are saved with the session as
+  `prompts`. None of the chat's own commands (`CHAT_COMMAND_DEFS`) takes one; the `:`
+  line's `config` does (an MCP server's `headers` / `env`), and a plugin's command may
+  say it too (docs/plugins.md). A `/…` or `!…` field is still never saved as the draft.
+  The **wheel** and **PgUp/PgDn** scroll.
 - **What is open and what is folded** (`src/assistant/folds.ts`, pure; the chat owns
   the state, the view resolves it per block). Everything foldable used to answer to
   one flag: `^r` opened the reasoning, the narration, every tool call of every turn
@@ -1149,7 +1196,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   runs; `✓ 1.2 s · ~/dir` when it ends, opened by a click to its last lines) — the
   message is still role `shell` and still joins `apiRef` (`apiHistory` maps `shell` →
   `user`) and is read with the next message; no turn is spent. It is saved with the session and
-  its line goes into ↑/↓ as `!cmd`; recalling one with ↑ shows it the way it was
+  its line goes into ↑/↓ as `!cmd` (a shell-mode line too); recalling one with ↑ shows it the way it was
   typed — shell mode on, the field holding `cmd` with the `!` stripped. Shell mode
   itself is UI state of the field only, never saved and never restored across a
   restart; a `!…` or a shell-mode field is not a draft. **The directory is remembered**

@@ -41,11 +41,17 @@ import {
   type ClipboardImage, type ImageRef, type LoadedOk, type ResolvedImage,
 } from '../assistant/images.js';
 import type { Make } from '../loader/plugin.js';
+import { keptInHistory, pushHistory, type HistoryCommand } from '../assistant/prompt-history.js';
 import type { Plugin } from '../loader/plugin.js';
 
 // Slash-commands of the chat — a single source for runChatCommand and Tab-completion.
 // `/analyze` is a tracker slash command and is removed.
-const CHAT_COMMANDS = ['compact', 'context', 'copy', 'image', 'resume', 'clear', 'memory', 'auto', 'notes', 'fullscreen', 'log', 'exit'];
+// `history: false` would keep a command out of the ↑/↓ history, which is saved with the
+// session — for a command whose argument may carry a secret
+// (src/assistant/prompt-history.ts). None of these takes one: a path, a number, a
+// mode word.
+const CHAT_COMMAND_DEFS: HistoryCommand[] = ['compact', 'context', 'copy', 'image', 'resume', 'clear', 'memory', 'auto', 'notes', 'fullscreen', 'log', 'exit'].map((name) => ({ name }));
+const CHAT_COMMANDS = CHAT_COMMAND_DEFS.map((c) => c.name);
 
 // A plain object holding every enumerable service, inherited ones included.
 // `for…in` walks the prototype chain, which is exactly what a spread does not.
@@ -403,7 +409,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const [cursor, setCursor] = f.useState(0);
           const cursorRef = f.useRef(cursor); cursorRef.current = cursor;
           // Messages sent while an answer was coming. They go out in order when the
-          // turn ends; Esc takes the last one back into the field. queueRef is what
+          // turn ends (a stopped or failed turn puts them back into the field instead —
+          // `restoreQueue`); ↑ on an empty field takes the last one back. queueRef is what
           // the handlers act on, `queued` mirrors it for the render.
           const queueRef = f.useRef<string[]>([]);
           const [queued, setQueued] = f.useState<string[]>([]);
@@ -424,6 +431,23 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const [shellMode, setShellModeState] = f.useState(false);
           const shellModeRef = f.useRef(shellMode);
           const setShellMode = (v: boolean) => { shellModeRef.current = v; setShellModeState(v); };
+          // A turn that was stopped (Esc, Ctrl+C) or failed does not send the queue: the
+          // queued messages come back into the field — in order, joined by blank lines,
+          // AHEAD of whatever was typed meanwhile (the order they would have gone out
+          // in) — and the person decides what to send. A failed request would most
+          // likely fail again, and a stopped one was stopped on purpose. Shell mode
+          // goes, as a message is not a command; a shell-mode draft keeps its `!`.
+          const restoreQueue = () => {
+            if (!queueRef.current.length) return;
+            const draft = shellModeRef.current && inputRef.current ? `!${inputRef.current}` : inputRef.current;
+            const text = [...queueRef.current, draft].filter((t) => t.trim()).join('\n\n');
+            queueRef.current = [];
+            setShellMode(false);
+            histAt.current = null;
+            histShown.current = '';
+            setField(text);
+            syncQueue();
+          };
           // ── The auto mode (src/assistant/auto.ts) — how much of a turn runs without
           // the y/n. This conversation's and nothing else's: it is not in the session
           // file, so a restart opens on `ask`, and `/clear`, `/resume` and a change of
@@ -966,7 +990,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             const apiMsgs: ChatMessage[] = apiHistory(apiRef.current);
             const displayMsgs = [...history];
             if (sys) { displayMsgs.unshift({ role: 'system', content: sys }); apiMsgs.unshift({ role: 'system', content: sys }); }
-            if (!opts.fromBackground && historyRef.current.at(-1) !== q) historyRef.current.push(q);
+            if (!opts.fromBackground) pushHistory(historyRef.current, q);
             histAt.current = null;
             histShown.current = '';
             // The images the text names, in the order it names them. A background result
@@ -1323,13 +1347,15 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               setStreaming(false);
               setToolLabel('');
               abortRef.current = null;
-              // The person's queued messages go first, in order; a cancelled turn
-              // keeps them queued rather than firing into a conversation just stopped.
-              if (!aborted && queueRef.current.length) {
+              // The person's queued messages go first, in order; a stopped or failed
+              // turn puts them back into the field instead (`restoreQueue`) rather than
+              // firing them into a conversation just stopped.
+              if (!aborted && !failed && queueRef.current.length) {
                 const nextQueued = queueRef.current.shift() as string;
                 syncQueue();
                 setTimeout(() => { void send(nextQueued); }, 0);
               } else {
+                restoreQueue();
                 // A background result that arrived mid-turn lands the moment the turn
                 // ends, not on the flush timer's next 400 ms tick.
                 setTimeout(() => flushPending(), 0);
@@ -1347,10 +1373,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             if (!cmd) { setError('! runs a shell command — e.g. !git status'); return; }
             streamRef.current = true; // closed synchronously, as in send()
             const line = `!${cmd}`;
-            if (historyRef.current.at(-1) !== line) historyRef.current.push(line);
+            pushHistory(historyRef.current, line);
             histAt.current = null;
             histShown.current = '';
-            // The field is emptied now: Esc clears a non-empty field before it stops anything.
+            // The field is emptied now: the command is in its block from here on.
             setInput(''); inputRef.current = ''; setCursor(0);
             setError(null);
             setEmptyNotice('');
@@ -1415,6 +1441,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               }
               (f.services as Record<string, any>).pushLog?.(`[shell] ${cmd.slice(0, 60)} → ${r.error ? `error: ${r.error}` : r.stopped ? 'stopped' : r.timedOut ? 'timed out' : `exit ${r.code}`}`);
             } catch (e) {
+              stopped = true; // a command that could not run keeps the queue, as a failed turn does
               setError(`!: ${(e as Error).message}`);
               // The block stops ticking rather than waiting forever for a completion
               // that is never coming — marked failed in place, keeping whatever it had
@@ -1441,12 +1468,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               setToolLabel('');
               abortRef.current = null;
               // What the person queued meanwhile goes out now — unless they stopped the
-              // command, as a stopped answer keeps the queue.
+              // command: then it comes back into the field, as after a stopped answer.
               if (!stopped && queueRef.current.length) {
                 const nextQueued = queueRef.current.shift() as string;
                 syncQueue();
                 setTimeout(() => { void send(nextQueued); }, 0);
               } else {
+                restoreQueue();
                 setTimeout(() => flushPending(), 0);
               }
               f.notify();
@@ -1853,7 +1881,28 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             if (initialText?.trim()) send(initialText);
           };
 
-          (f.store as Record<string, any>).chat = { open, unread, openChat, closeChat, send, messages, streaming, toolLabel, cursor, escArmed, pendingConfirm: pendingAsk };
+          // Ctrl+C / Ctrl+D / Ctrl+Z are the App's (src/runtime/exit-keys.ts: a second
+          // press exits or suspends), taken before any handler — a pending y/n or an
+          // open question would swallow them. The open chat speaks first:
+          // - Ctrl+C with a turn or a `!command` running stops it, exactly as Esc does
+          //   (a pending y/n is declined and a question dismissed first, or the turn
+          //   would wait on them forever) — 'handled', and nothing is armed;
+          // - Ctrl+D in a field with text is the editor's forward delete — 'field', and
+          //   the key goes to the handler below; in an empty field it arms the exit.
+          // Any of the three disarms Esc's own exit, as every other key does.
+          const ctrlKey = (key: { name?: string }): 'handled' | 'field' | undefined => {
+            if (!openRef.current) return undefined;
+            disarmEsc();
+            if (key.name === 'c' && streamRef.current) {
+              if (pendingRef.current) settleConfirm(false);
+              dismissAsk();
+              abortRef.current?.abort();
+              return 'handled';
+            }
+            if (key.name === 'd' && inputRef.current !== '') return 'field';
+            return undefined;
+          };
+          (f.store as Record<string, any>).chat = { open, unread, openChat, closeChat, send, messages, streaming, toolLabel, cursor, escArmed, pendingConfirm: pendingAsk, ctrlKey };
           // Lands the next background result. It is SHOWN as soon as no turn is being
           // written (a streaming turn keeps rewriting the display list's last message,
           // so a result cannot be appended under it) — a half-typed draft does not hold
@@ -1983,11 +2032,16 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   return true;
                 }
               }
-              // ── Esc: non-empty field → clear; empty shell-mode field → leave the
-              // mode (closest thing first, before Esc starts arming a chat-wide exit —
-              // the same order as the field-clearing step above); streaming → abort;
-              // armed → exit; otherwise arm + hint «Enter Esc again to exit».
+              // ── Esc: a turn (or a `!command`) running → stop it, on the FIRST press,
+              // touching neither the field nor the queue — the queue comes back into the
+              // field once the turn has ended (see `restoreQueue`). It used to clear the
+              // field and take the queue back first, so with a message queued the third
+              // Esc stopped the tool, and the second had already thrown the message
+              // away. Idle: non-empty field → clear; empty shell-mode field → leave the
+              // mode (closest thing first, before Esc starts arming a chat-wide exit);
+              // armed → exit; otherwise arm + hint «Esc again to exit».
               if (key.name === 'escape') {
+                if (streamRef.current) { abortRef.current?.abort(); disarmEsc(); return true; }
                 if (inputRef.current.length > 0) {
                   setInput(''); inputRef.current = '';
                   setCursor(0);
@@ -1999,12 +2053,6 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   disarmEsc();
                   return true;
                 }
-                if (queueRef.current.length) {
-                  setField(queueRef.current.pop() as string);
-                  syncQueue();
-                  return true;
-                }
-                if (streamRef.current) { abortRef.current?.abort(); return true; }
                 if (escArmed) { closeChat(); return true; }
                 armEsc();
                 return true;
@@ -2055,6 +2103,17 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // (how a shell command is stored, see runShellCommand) is shown the way it
               // was typed: shell mode on, the field holding `cmd` with the `!` stripped.
               if (key.name === 'up' || key.name === 'down') {
+                // ↑ on an EMPTY field takes the last queued message back for editing,
+                // before history — which it reaches once the queue is empty. Shell mode
+                // goes: a message is not a command.
+                if (key.name === 'up' && inputRef.current === '' && queueRef.current.length) {
+                  histAt.current = null;
+                  histShown.current = '';
+                  setShellMode(false);
+                  setField(queueRef.current.pop() as string);
+                  syncQueue();
+                  return true;
+                }
                 const hist = historyRef.current;
                 const untouched = inputRef.current === '' || (histAt.current != null && inputRef.current === histShown.current);
                 if (untouched) {
@@ -2103,7 +2162,19 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   // runShellCommand's own check just has nothing to run.
                   if (!streamRef.current) setShellMode(false);
                   void runShellCommand(cmd);
-                } else if (cmd.startsWith('/')) runChatCommand(cmd.slice(1));
+                } else if (cmd.startsWith('/')) {
+                  // A command goes into ↑/↓ like any line (unless it says `history:
+                  // false`) — before it runs, and again after if it replaced the
+                  // history: `/resume 2` loads that session's own, and ↑ there should
+                  // still offer the `/resume` that led to it.
+                  const kept = keptInHistory(cmd, CHAT_COMMAND_DEFS);
+                  if (kept) pushHistory(historyRef.current, cmd);
+                  histAt.current = null;
+                  histShown.current = '';
+                  const before = historyRef.current;
+                  runChatCommand(cmd.slice(1));
+                  if (kept && historyRef.current !== before) pushHistory(historyRef.current, cmd);
+                }
                 // A `!command` typed as plain text (not via shell mode — e.g. pasted
                 // whole into an empty field, since a paste is never decoded into a
                 // mode switch) still runs, the legacy way. Refused while something
@@ -2147,6 +2218,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           }
           return (f.viewRegistry.chat as (p: Record<string, unknown>) => unknown)({
             width, height, theme: f.config.theme, messages, input, streaming, error, toolLabel, phase, verb, cursor, escArmed,
+            // An armed Ctrl+C / Ctrl+D / Ctrl+Z (the App's, `^c again to exit`) — drawn
+            // where `Esc again to exit` is.
+            armedHint: (f.services as { armedHint?: string }).armedHint ?? '',
             // What is open and what is folded, the cap of the key that changes it, and
             // the two channels a click needs: where the conversation is on the screen,
             // and which row to put at the top once a fold has changed the rows.

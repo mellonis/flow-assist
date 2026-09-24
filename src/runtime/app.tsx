@@ -5,7 +5,8 @@
 // return null), and a bottom line (command line / toast message / footer hints).
 // Input is dispatched two-phase: observers never consume, then the consumer race
 // (`partitionInput`/`runConsumers`), then the host fallback (command line `:`,
-// Esc back, `x` clear cache; quitting is `:quit` or Ctrl+C).
+// Esc back, `x` clear cache; quitting is `:quit` or Ctrl+C twice — the three keys that
+// take a second press are the App's own, before any of this: src/runtime/exit-keys.ts).
 
 import { pluginConfigs } from '../loader/tools.js';
 import { Box, Text, Markdown, Table, Link, render, useApp, useColorScheme, useInput, useTerminalSize, type CopyEvent } from '@flowtty/react';
@@ -42,6 +43,7 @@ import {
   saveConfigUnset,
 } from '../config/load.js';
 import { bindingGlyph, isKey, isMouseButton, keyGlyph } from '../playback/keys.js';
+import { ARM_MS, armHint, armKeyOf, armStep, type Arm } from './exit-keys.js';
 import { copyToClipboard } from '../assistant/copy.js';
 import { readClipboardImage, type ClipboardImage } from '../assistant/images.js';
 import { legacyRootsNote } from '../assistant/shell.js';
@@ -193,6 +195,8 @@ export function renderApp(
 
   function App() {
     const inputRegistryRef = useRef<LazyInputEntry[]>([]);
+    const armRef = useRef<Arm>(null);
+    const armTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [, setTick] = useState(0);
     const toast = useToast(toastMs);
     const app = useApp();
@@ -532,7 +536,8 @@ export function renderApp(
           // Remember the executed command (no empty lines) and CLEAR the buffer so
           // the next `:` opens fresh — before, the leftover input was shown again
           // on the next open (a real defect).
-          if (input) cmdline.current.history.push(input);
+          // A command that says `history: false` (its argument may be a secret) is not.
+          if (input && cmd?.history !== false) cmdline.current.history.push(input);
           cmdline.current.historyIdx = cmdline.current.history.length;
           cmdline.current.input = '';
           cmdline.current.open = false;
@@ -608,8 +613,51 @@ export function renderApp(
       return false;
     };
 
+    // Ctrl+C / Ctrl+D / Ctrl+Z take a second press, everywhere in the app
+    // (src/runtime/exit-keys.ts). The arm is the host's, one for the whole screen; the
+    // chat draws its hint on its status line (`services.armedHint`), any other screen
+    // on the bottom row.
+    const setArm = (next: Arm) => {
+      armRef.current = next;
+      if (armTimer.current) { clearTimeout(armTimer.current); armTimer.current = null; }
+      if (next) armTimer.current = setTimeout(() => { armRef.current = null; armTimer.current = null; (services as unknown as HostServices).armedHint = ''; notify(); }, ARM_MS);
+      (services as unknown as HostServices).armedHint = armHint(next);
+    };
+    useEffect(() => () => { if (armTimer.current) clearTimeout(armTimer.current); }, []);
+    const chatStore = () => (ft.store as { chat?: { open?: boolean; ctrlKey?: (k: InputKey) => 'handled' | 'field' | undefined } } | undefined)?.chat;
+
     useInput((key) => {
       const k = key as unknown as InputKey;
+      // The three keys flowtty lets an app take before the terminal backend acts
+      // (exit, exit, suspend). Taken here, before any handler: the y/n pause, an open
+      // question and a modal's catch-all consume EVERY key, and would otherwise
+      // swallow the only key that quits. The chat speaks first — Ctrl+C stops a turn
+      // that is running, Ctrl+D in a field with text is the editor's forward delete.
+      const armKey = armKeyOf(k);
+      if (armKey) {
+        const claim = chatStore()?.ctrlKey?.(k);
+        if (claim === 'handled') { setArm(null); notify(); return true; }
+        if (claim !== 'field') {
+          const step = armStep(armRef.current, armKey, Date.now());
+          setArm(step.arm);
+          notify();
+          if (!step.fire) return true;
+          // The second press. Ctrl+Z is let through: the backend hands the terminal
+          // back and stops the process, and repaints on `fg`. Ctrl+C / Ctrl+D leave
+          // the way `:quit` does.
+          if (armKey === 'z') return false;
+          onExit();
+          return true;
+        }
+        // The field's: the chat's editor deletes forward. Consumed whatever the
+        // editor made of it — let through, the backend would exit.
+        setArm(null);
+        if (twoPhaseDispatch(inputRegistryRef.current, ui, k, () => hostFallback(k))) notify();
+        return true;
+      } else if (armRef.current && !isMouseButton(k.name)) {
+        setArm(null);
+        notify();
+      }
       // A handled key is followed by a redraw. A plugin keeps its state in one component
       // and draws it in a sibling; a React setState in the first re-renders only the
       // first, and the sibling redraws when the HOST does. That took an explicit
@@ -617,7 +665,12 @@ export function renderApp(
       // cursor) froze on screen until something else happened to notify. The host
       // guarantees it instead: one re-render per handled key, batched by React with
       // whatever the handler set.
+      // `twoPhaseDispatch`'s true means "handled — redraw", not "consume": the chat
+      // answers true for every key, PgUp and the wheel included, which the
+      // conversation's scroll list hears on its own. So nothing but the keys above is
+      // consumed here.
       if (twoPhaseDispatch(inputRegistryRef.current, ui, k, () => hostFallback(k))) notify();
+      return undefined;
     });
 
     // The header, the content slot (host has no single base surface yet — a
@@ -643,7 +696,10 @@ export function renderApp(
     // `bottom` is the command-line buffer (with a leading `: `), the active toast,
     // or the footer hints — which START with `: commands` (part of the host base),
     // so no extra `: ` literal is prepended here.
-    const bottom = toast.message || hints;
+    // An armed Ctrl+C / Ctrl+D / Ctrl+Z says so first; the open chat says it on its own
+    // status line instead.
+    const armed = chatStore()?.open ? '' : (services as unknown as HostServices).armedHint;
+    const bottom = armed || toast.message || hints;
     // The command line completes INLINE, on its own one row: the untyped rest of the
     // suggestion after the caret, the other candidates beside it. A second row of
     // candidates used to appear and vanish under the line with every keystroke, and

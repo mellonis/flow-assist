@@ -76,6 +76,9 @@ export type Command = {
   minArgs?: number;
   maxArgs?: number;
   description?: string;
+  // `false` keeps the command out of the `:` line's ↑/↓ history — for a command whose
+  // argument may carry a secret (a token, a header). Declared, never decided per call.
+  history?: boolean;
   run?: (ctx?: unknown, arg?: string) => unknown;
 };
 

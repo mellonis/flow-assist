@@ -84,7 +84,7 @@ test('Enter while an answer is streaming queues the message, and it is sent when
   ui.app.unmount();
 });
 
-test('Esc takes the last queued message back into the field instead of cancelling the answer', async () => {
+test('Esc stops the answer on the first press even with a message queued; the queue comes back into the field unsent', async () => {
   const model = new ScriptedModel();
   model.script([{ text: 'Looking, ' }, { hold: true }, { text: 'done.' }]);
   const ui = await bootApp(model, 100, 26);
@@ -96,13 +96,12 @@ test('Esc takes the last queued message back into the field instead of cancellin
   expect(ui.backend.lastFrame).toMatch(/queued/);
 
   await ui.press('escape');
-  // Back in the field for editing; the answer is still coming.
+  await settle(10);
+  // Stopped — and the queued message is back in the field for editing, not sent.
+  expect(ui.backend.lastFrame).toContain('stopped (Esc)');
+  expect(ui.backend.lastFrame).not.toContain('done.');
   expect(ui.backend.lastFrame).toContain('› second thoughts');
   expect(ui.backend.lastFrame).not.toMatch(/queued/);
-
-  model.release();
-  await settle(24);
-  expect(ui.backend.lastFrame).toContain('done.');
   expect(model.requests).toHaveLength(1);
   ui.app.unmount();
 });

@@ -84,6 +84,10 @@ export interface HostServices {
   // The default is a no-op; the App rebinds it (app.tsx) so it mutates the shared
   // `ui.overlay` and re-renders. Generic — the tracker uses it for its detail view.
   setOverlay: (overlay: string | null) => void;
+  // What an armed Ctrl+C / Ctrl+D / Ctrl+Z says (`^c again to exit`), '' when none is
+  // armed. The App owns the arm (src/runtime/exit-keys.ts); the chat draws it on its
+  // status line, the App on the bottom row of every other screen.
+  armedHint: string;
   // The chat's side of two plugin hooks (`chatSubject` / `afterWrite` in the plugin
   // shape): what the screen is about now — the first plugin that names something —
   // and "a write was applied, reload what you show", sent to every plugin. The App
@@ -181,6 +185,7 @@ export function createServices({ config, tools, repo, onExit }: CreateServicesOp
     alert: () => {},
     copy: (text) => platformCopy(text),
     setOverlay: () => {},
+    armedHint: '',
     chatSubject: () => null,
     afterWrite: async () => {},
   };

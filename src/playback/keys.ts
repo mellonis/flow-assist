@@ -169,7 +169,7 @@ export function firstGlyph(binding: string | string[] | null | undefined): strin
 // (config wins).
 export const HOST_DEFAULT_KEYS: Record<string, string | string[]> = {
   commandLine: ':',
-  // Quitting is the `:quit` (`:q`) command, or Ctrl+C — not a letter: a stray `q`
+  // Quitting is the `:quit` (`:q`) command, or Ctrl+C twice — not a letter: a stray `q`
   // closed the whole app. The action stays, unbound, so `config.keys.quit` can
   // still put it on a key for a person who wants one.
   quit: [],
