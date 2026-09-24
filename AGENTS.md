@@ -126,6 +126,14 @@ before any of the plugin's components mount (it is where a plugin seeds its stor
 **no** `tools-available/` → `tools-enabled/` repository; `ai.disabledTools` is
 the blacklist.
 
+- **`ft`'s flowtty components** are `Box`, `Text`, `Markdown`, `Table`, `Link` and the
+  three pickers: `Select` (flowtty's dropdown since 1.0.0-alpha.24 — its popup is a
+  floating dialog, so the App is rendered under a `<DialogHost>` at the frame's origin,
+  and while a popup is open the App's one `useInput`, the host's whole key path, is
+  muted: Ctrl+C then exits at once, Ctrl+] waits for the popup to close), `ListSelect`
+  and `ListMultiSelect` (the inline lists, flowtty's old `Select` / `MultiSelect`,
+  renamed with no aliases). They hear flowtty's input, not `useInputHandler`, so a
+  plugin gates them with `isFocused` (docs/plugins.md says how).
 - **`modalColors`** — per modal the plugin draws, what its palette differs in from
   the host's modal base (`{ relation: { border: 'blue' } }`). `resolveModalPalettes`
   (`src/playback/theme.ts`) lays it on the base into `theme.modals.<modal>`; the

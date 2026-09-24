@@ -9,7 +9,7 @@
 // take a second press are the App's own, before any of this: src/runtime/exit-keys.ts).
 
 import { pluginConfigs } from '../loader/tools.js';
-import { Box, Text, Markdown, Table, Link, render, useApp, useColorScheme, useInput, useTerminalSize, type CopyEvent } from '@flowtty/react';
+import { Box, Text, Markdown, Table, Link, Select, ListSelect, ListMultiSelect, DialogHost, render, useApp, useColorScheme, useInput, useTerminalSize, type CopyEvent } from '@flowtty/react';
 import type { Backend } from '@flowtty/core';
 import { createContext, createElement as h, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { createFt } from './ft.js';
@@ -308,6 +308,9 @@ export function renderApp(
         Markdown,
         Table,
         Link,
+        Select,
+        ListSelect,
+        ListMultiSelect,
         useState,
         useEffect,
         useRef,
@@ -887,7 +890,11 @@ export function renderApp(
   // A drag over the screen selects and, on release, copies (flowtty's copy-on-select;
   // the backend has the mouse on unless `ui.mouse` is false). `onCopy` is read through
   // `services`, whose toast the App rebinds on every render.
-  return render(h(App), root, {
+  // A <DialogHost> at the root: a plugin's `ft.Select` opens its popup through it (a
+  // floating dialog anchored under the field, in frame cells — which is why it sits at
+  // the frame's origin). While a popup is open every key is the popup's: the host's
+  // whole key path — the App's one `useInput` — is below the host, and so muted.
+  return render(h(DialogHost, null, h(App)), root, {
     onCopy: (event) => onCopySelection(event, {
       say: (msg) => (services as unknown as ReactBoundServices).showMessage(msg),
       fallback: (text) => copyToClipboard(text),

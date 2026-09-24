@@ -5,6 +5,15 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **flowtty 1.0.0-alpha.25.** **For plugin authors:** `ft` now offers flowtty's
+  pickers — `ft.Select`, a dropdown (the host keeps the `<DialogHost>` its popup
+  needs), and `ft.ListSelect` / `ft.ListMultiSelect`, the inline lists. flowtty
+  renamed those lists in alpha.24 with no aliases: its old `Select` is `ListSelect`
+  and its old `MultiSelect` is `ListMultiSelect`, props unchanged, and `Select` is
+  now the dropdown — a plugin that took the old names from flowtty must rename them.
+  They hear flowtty's own input, so a plugin gates them with `isFocused`
+  (docs/plugins.md). While a dropdown is open every key is its own: Ctrl+] waits for
+  it to close, and Ctrl+C exits at once rather than asking twice.
 - **The chat is a panel beside the plugin's screen.** It used to be a window over the
   screen, so the board the assistant was told about was hidden from the person talking
   about it. Now it is docked to the right by default (at the bottom on a terminal under

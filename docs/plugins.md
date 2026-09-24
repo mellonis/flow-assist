@@ -227,6 +227,20 @@ setup: (ft) => { /* once, before any component mounts: seed a store */ },
 - **Take React and flowtty from `ft`, import only their types.** `ft.useState`,
   `ft.useEffect`, `ft.useRef`, the flowtty components — one React for the host and
   every plugin; a second copy breaks every hook.
+- **To let the person choose, `ft` has flowtty's three pickers.** `ft.Select` is a
+  dropdown: a one-line field whose popup opens under it — the host keeps the
+  `<DialogHost>` it needs, and while the popup is open every key is the popup's.
+  `ft.ListSelect` and `ft.ListMultiSelect` are the inline lists, every option on
+  screen. flowtty's docs/components.md (Choosing) says which to reach for. They hear
+  flowtty's own input, not `ft.useInputHandler`, so a mounted one would hear every
+  key — what the person types in the chat included: pass `isFocused` from your own
+  state, and false while the chat has the keyboard (`ft.store.chat.open` with
+  `ft.store.chat.focus` not `'plugin'`).
+  **Renamed:** flowtty 1.0.0-alpha.24 renamed the inline lists — the old `Select` is
+  `ListSelect`, the old `MultiSelect` is `ListMultiSelect` (the props are the same),
+  and `Select` is now the dropdown. There are no aliases: a plugin that took the old
+  names from flowtty renames them, or it gets a dropdown where it drew a list, and
+  nothing at all for `MultiSelect`.
 - Keys come through `ft.useInputHandler({ mode, priority, handler })`. `mode` is
   `'consume'` (joins the race for the key) or `'observe'` (sees every key, takes
   none). Handlers run from the highest `priority(ui)` down, and a handler takes the
