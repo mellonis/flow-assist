@@ -101,7 +101,7 @@ test('plugins ls names why a plugin cannot load; install refuses it', async () =
   expect(listed.find((e) => e.name === 'old')?.incompatible).toBe(`incompatible: built for host API ${OTHER}, host provides ${HOST_API}`);
   expect(listed.find((e) => e.name === 'fits')?.incompatible).toBeUndefined();
   const res = await d.repo.install('old');
-  expect(res).toEqual({ ok: false, error: `plugin 'old' is incompatible: built for host API ${OTHER}, host provides ${HOST_API}` });
+  expect(res).toEqual({ ok: false, error: `plugin 'old': incompatible: built for host API ${OTHER}, host provides ${HOST_API}` });
   expect(existsSync(join(d.enabledDir, 'old'))).toBe(false);
 });
 
@@ -116,7 +116,7 @@ test('plugins ls lists a plugin linked in from elsewhere, with why it cannot loa
     version: '3.0.0', active: true, source: 'linked',
     incompatible: `incompatible: built for host API ${OTHER}, host provides ${HOST_API}`,
   });
-  // One linked from plugins-available/ is listed once, as before.
+  // One linked from plugins-available/ is listed once, from there.
   expect(listed.filter((e) => e.name === 'fits')).toHaveLength(1);
   expect(listed.find((e) => e.name === 'fits')?.source).not.toBe('linked');
 });
@@ -130,7 +130,7 @@ test('an archive of a plugin this host cannot load is refused up front, nothing 
   const archive = join(mkdtempSync(join(tmpdir(), 'fa-compat-tgz-')), 'old.tar.gz');
   execFileSync('tar', ['-czf', archive, '-C', src, 'old']);
   const res = await installPluginArchive(archive, d);
-  expect(res).toEqual({ ok: false, error: `plugin 'old' is incompatible: built for host API ${OTHER}, host provides ${HOST_API}` });
+  expect(res).toEqual({ ok: false, error: `plugin 'old': incompatible: built for host API ${OTHER}, host provides ${HOST_API}` });
   expect(existsSync(join(d.availableDir, 'old'))).toBe(false);
   expect(existsSync(join(d.enabledDir, 'old'))).toBe(false);
 });
@@ -212,8 +212,36 @@ test('a batch update goes on past a failure and names each one', async () => {
   const res = await d2.update();
   expect(res.ok).toBe(false);
   expect(res.error).toContain("update 'a': registry: 503");
-  expect(res.error).toContain(`update 'b': plugin 'b' is incompatible: built for host API ${OTHER}`);
+  expect(res.error).toContain(`update 'b': plugin 'b': incompatible: built for host API ${OTHER}`);
   expect(JSON.parse(readFileSync(join(d.availableDir, 'c', 'manifest.json'), 'utf8')).version).toBe('2.0.0');
   expect(JSON.parse(readFileSync(join(d.availableDir, 'a', 'manifest.json'), 'utf8')).version).toBe('1.0.0');
   expect(JSON.parse(readFileSync(join(d.availableDir, 'b', 'manifest.json'), 'utf8')).version).toBe('1.0.0');
+});
+
+test('a manifest.json that does not parse is said as such — at load, in plugins ls, at install', async () => {
+  const d = pluginsDir({});
+  const dir = join(d.availableDir, 'bent');
+  mkdirSync(join(dir, 'src'), { recursive: true });
+  writeFileSync(join(dir, 'manifest.json'), '{ "name": "bent", ');
+  writeFileSync(join(dir, 'src', 'index.ts'), "throw new Error('bent was imported');\n");
+  expect(pluginCompat(null, HOST)).toEqual({ ok: false, reason: 'manifest.json is not valid JSON' });
+  expect((await d.repo.list()).find((e) => e.name === 'bent')?.incompatible).toBe('manifest.json is not valid JSON');
+  expect(await d.repo.install('bent')).toEqual({ ok: false, error: "plugin 'bent': manifest.json is not valid JSON" });
+  symlinkSync(dir, join(d.enabledDir, 'bent'));
+  const notes: string[] = [];
+  const warn = console.warn;
+  console.warn = () => {};
+  await loadPlugins({ config: {}, repo: d.repo, enabledDir: d.enabledDir, notes }).finally(() => { console.warn = warn; });
+  expect(notes).toContain('[plugins] skip bent: manifest.json is not valid JSON');
+});
+
+test('a linked plugin is listed with its missing settings, and a link to nothing as broken', async () => {
+  const d = pluginsDir({});
+  const elsewhere = mkdtempSync(join(tmpdir(), 'fa-compat-own-'));
+  writeFileSync(join(elsewhere, 'manifest.json'), JSON.stringify({ name: 'corp', version: '1.0.0', hostApi: HOST_API, requiredSettings: ['FLOW_ASSIST_TEST_NEVER_SET'] }));
+  symlinkSync(elsewhere, join(d.enabledDir, 'corp'));
+  symlinkSync(join(elsewhere, 'gone'), join(d.enabledDir, 'gone'));
+  const listed = await d.repo.list();
+  expect(listed.find((e) => e.name === 'corp')?.missingSettings).toEqual(['FLOW_ASSIST_TEST_NEVER_SET']);
+  expect(listed.find((e) => e.name === 'gone')).toMatchObject({ source: 'linked', broken: true });
 });

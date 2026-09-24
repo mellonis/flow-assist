@@ -892,13 +892,12 @@ export function renderApp(
     // The header, the content slot (host has no single base surface yet — a
     // placeholder the overlay may sit over), the plugin overlay, and the bottom
     // line (command line / toast message / footer hints).
-    // Footer hints (spec: plugin footer hints + universal openBrowser): host base
-    // (`: commands`, plus `quit` if config binds it to a key) + each plugin's
-    // non-empty `keycaps({ ui, host })`. A plugin returns `[]` when its surface is inactive,
-    // so an empty screen collapses to `: commands`. `x flush cache` joins only when a plugin context is
-    // active (content present). Each plugin's pair comes from `apiMap`, built
-    // by `overlayComps`; the plugin's services/store are mutated live, so reading
-    // them here each render stays fresh.
+    // Footer hints: the host base (`: commands`, plus `quit` if config binds it to a
+    // key) + each plugin's non-empty `keycaps({ ui, host })`. A plugin returns `[]` when
+    // its surface is inactive, so an empty screen collapses to `: commands`; `x flush
+    // cache` joins only while a plugin that caches is on screen. Each plugin's pair
+    // comes from `apiMap`, built by `overlayComps`; its services and store are mutated
+    // live, so reading them here each render stays fresh.
     const { width: termWidth, height: termHeight } = useTerminalSize();
     // Where the chat is. Docked (`panel`), the terminal is split between the plugin's
     // side — title bar, surface, footer, always at the top-left corner — and the

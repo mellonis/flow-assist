@@ -6,10 +6,10 @@ const realFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 
 // The shape of a real plugin (the tracker's detail screen): ONE component owns the
-// state and publishes it on `api.host.services`; a SIBLING draws it. A React setState in the
-// owner re-renders the owner only — the sibling redraws when the host re-renders, and
-// that used to take an explicit `api.host.notify()`. The tracker's cursor setter had none,
-// so the cursor "stopped moving" as soon as nothing else happened to notify.
+// state and publishes it on `host.services`; a SIBLING draws it. A React setState in
+// the owner re-renders the owner only — the sibling redraws when the host re-renders,
+// which the host does after every key it handled, with no `host.notify()` from the
+// setter.
 const guest = (make: any) => [make('panel', {
   name: 'panel',
   keycaps: () => ['down next'],

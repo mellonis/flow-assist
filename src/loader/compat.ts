@@ -34,7 +34,9 @@ export function hostApiSet(value: unknown): number[] | null {
   return list as number[];
 }
 
-export function pluginCompat(manifest: Record<string, unknown>, host: HostVersions): Compat {
+export function pluginCompat(manifest: Record<string, unknown> | null, host: HostVersions): Compat {
+  // A manifest that is there and does not parse says nothing about what it is built for.
+  if (manifest === null) return { ok: false, reason: 'manifest.json is not valid JSON' };
   const apis = hostApiSet(manifest.hostApi);
   if (!apis) return { ok: false, reason: `incompatible: hostApi ${JSON.stringify(manifest.hostApi)} is not a number or a list of numbers` };
   if (!apis.includes(host.api)) {
@@ -56,15 +58,22 @@ export function pluginCompat(manifest: Record<string, unknown>, host: HostVersio
 export const THIS_HOST: HostVersions = { api: HOST_API, flowtty: FLOWTTY_VERSION };
 
 // The manifest of a plugin at `dir` — a directory with a manifest.json. A plugin that is
-// a single file has none, and reads as `{}`: host API 1, no flowtty range.
-export function readPluginManifest(dir: string): Record<string, unknown> {
+// a single file has none, and reads as `{}`: host API 1, no flowtty range. A
+// manifest.json that is not a JSON object reads as null (`pluginCompat` says so).
+export function readPluginManifest(dir: string): Record<string, unknown> | null {
+  let text: string;
   try {
     if (statSync(dir).isFile()) return {};
     const file = join(dir, 'manifest.json');
     if (!existsSync(file)) return {};
-    const m = JSON.parse(readFileSync(file, 'utf8')) as unknown;
-    return m && typeof m === 'object' && !Array.isArray(m) ? (m as Record<string, unknown>) : {};
+    text = readFileSync(file, 'utf8');
   } catch {
     return {};
+  }
+  try {
+    const m = JSON.parse(text) as unknown;
+    return m && typeof m === 'object' && !Array.isArray(m) ? (m as Record<string, unknown>) : null;
+  } catch {
+    return null;
   }
 }

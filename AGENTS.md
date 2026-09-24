@@ -120,9 +120,12 @@ test holds equal to the installed `@flowtty/react`). One pure check, `pluginComp
 alone and before its code is imported: `loadPlugins` skips it (a line into the log
 through `loadNotes`), `plugins ls` shows `incompatible: …` (`RepoEntry.incompatible`;
 `list()` also lists a plugin linked into `plugins-enabled/` from outside
-`plugins-available/`, source `linked`),
-and install refuses it — a link, a registry fetch, an archive before it is moved into
-place. A missing `flowtty` is loaded with a note; the bundled plugins and
+`plugins-available/`, source `linked`, with its missing settings, and a link to
+nothing as `broken link`), and install refuses it — a link, an archive before it is
+moved into place, a registry fetch before it replaces the installed version (which is
+set aside and restored unless the new one is compatible; a batch update names each
+failure). A manifest.json that does not parse says `manifest.json is not valid JSON`
+(`readPluginManifest` → null). A missing `flowtty` is loaded with a note; the bundled plugins and
 `examples/notes` declare both fields (a test). A plugin reads the number it runs under
 from `host.hostApi`.
 

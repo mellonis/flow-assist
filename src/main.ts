@@ -189,7 +189,7 @@ async function runPlugins(args: string[], config: Record<string, unknown>, repo:
       const source = e.source === 'registry' || e.source === 'archive' || e.source === 'linked' ? ` (${e.source})` : '';
       const missing = e.missingDeps.length ? `  missing: ${e.missingDeps.join(',')}` : '';
       const settingMiss = e.missingSettings?.length ? `  missing settings: ${e.missingSettings.join(',')}` : '';
-      const incompatible = e.incompatible ? `  ${e.incompatible}` : '';
+      const incompatible = e.broken ? '  broken link' : e.incompatible ? `  ${e.incompatible}` : '';
       console.log(`${e.name}  v${e.version || '-'}  [${state}]${source}${incompatible}${missing}${settingMiss}`);
     }
     const note = await missingPluginsNote(repo);

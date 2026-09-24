@@ -52,6 +52,8 @@ export interface RepoEntry {
   // Why this host cannot load it (src/loader/compat.ts) — `incompatible: built for host
   // API 1, host provides 2`; absent when it can.
   incompatible?: string;
+  // A link in plugins-enabled/ to something that is gone.
+  broken?: boolean;
   source?: PluginSource;
   surfaces?: string[];
   tools?: string[];
@@ -258,10 +260,10 @@ export function createPluginRepo({ availableDir, enabledDir, projectRoot, fetchP
     try {
       await fetchPlugin(n);
       writeSourceMarker(pluginDir);
-      const compat = pluginCompat(readManifest(pluginDir), THIS_HOST);
+      const compat = pluginCompat(readPluginManifest(pluginDir), THIS_HOST);
       if (!compat.ok) {
         restore();
-        return { ok: false, error: `plugin '${n}' is ${compat.reason}${kept ? ' — the installed version is kept' : ''}` };
+        return { ok: false, error: `plugin '${n}': ${compat.reason}${kept ? ' — the installed version is kept' : ''}` };
       }
       if (kept) rmSync(kept, { recursive: true, force: true });
       const enabledLink = join(enabledDir, n);
@@ -286,8 +288,8 @@ export function createPluginRepo({ availableDir, enabledDir, projectRoot, fetchP
         return { ok: false, error: `plugin '${n}' is already installed` };
       }
       if (existsSync(join(pluginDir, 'manifest.json'))) {
-        const compat = pluginCompat(readManifest(pluginDir), THIS_HOST);
-        if (!compat.ok) return { ok: false, error: `plugin '${n}' is ${compat.reason}` };
+        const compat = pluginCompat(readPluginManifest(pluginDir), THIS_HOST);
+        if (!compat.ok) return { ok: false, error: `plugin '${n}': ${compat.reason}` };
         try {
           // plugins-enabled/ is gitignored: a fresh checkout has none, and the first
           // install used to fail with ENOENT.
@@ -362,9 +364,8 @@ export function createPluginRepo({ availableDir, enabledDir, projectRoot, fetchP
 
     // Lists all plugins from `plugins-available/*/manifest.json`, skipping built-ins.
     async list(): Promise<RepoEntry[]> {
-      if (!existsSync(availableDir)) return [];
       const entries: RepoEntry[] = [];
-      for (const dirEntry of readdirSync(availableDir, { withFileTypes: true })) {
+      for (const dirEntry of existsSync(availableDir) ? readdirSync(availableDir, { withFileTypes: true }) : []) {
         if (!dirEntry.isDirectory() || dirEntry.name.endsWith(PREVIOUS)) continue;
         const pluginDir = join(availableDir, dirEntry.name);
         const manifest = readManifest(pluginDir);
@@ -380,7 +381,7 @@ export function createPluginRepo({ availableDir, enabledDir, projectRoot, fetchP
           missingSettings: missingSettingsFor(pluginDir),
           source: sourceFor(pluginDir),
         };
-        const compat = pluginCompat(manifest, THIS_HOST);
+        const compat = pluginCompat(readPluginManifest(pluginDir), THIS_HOST);
         if (!compat.ok) entry.incompatible = compat.reason;
         if (manifest.surfaces && manifest.surfaces.length) entry.surfaces = manifest.surfaces;
         if (manifest.tools && manifest.tools.length) entry.tools = manifest.tools;
@@ -394,18 +395,26 @@ export function createPluginRepo({ availableDir, enabledDir, projectRoot, fetchP
           const link = join(enabledDir, name);
           if (!lstatSync(link).isSymbolicLink() || entries.some((e) => e.name === name)) continue;
           let target: string;
-          try { target = realpathSync(link); } catch { continue; }
+          try {
+            target = realpathSync(link);
+          } catch {
+            // A link to something that is gone is said, not left out.
+            entries.push({ name, version: '', description: '', active: true, missingDeps: [], source: 'linked', broken: true });
+            continue;
+          }
           if (target === inAvailable || target.startsWith(`${inAvailable}/`)) continue;
-          const manifest = readPluginManifest(target) as Manifest;
+          const parsed = readPluginManifest(target);
+          const manifest = (parsed ?? {}) as Manifest;
           const entry: RepoEntry = {
             name,
             version: typeof manifest.version === 'string' ? manifest.version : '',
             description: typeof manifest.description === 'string' ? manifest.description : '',
             active: true,
             missingDeps: [],
+            missingSettings: missingSettingsFor(target),
             source: 'linked',
           };
-          const compat = pluginCompat(manifest, THIS_HOST);
+          const compat = pluginCompat(parsed, THIS_HOST);
           if (!compat.ok) entry.incompatible = compat.reason;
           entries.push(entry);
         }

@@ -370,7 +370,9 @@ one:
   shape and their signatures, the fields of the manifest. It goes up by one on any
   change a plugin built for the previous number would break on. A plugin whose list
   does not hold the host's number is not loaded. No field reads as `1`. A plugin that
-  names several numbers reads the one it runs under from `host.hostApi`.
+  names several numbers tells them apart by what its hooks receive: under host API 2
+  and later the pair `{ ui, host }`, with the number at `host.hostApi`; under 1 the
+  single `ft` object, which has no `host` — `const api2 = 'host' in arg`.
 - **`flowtty`** — a semver range of the flowtty versions the plugin's screens need,
   checked against the flowtty the host runs (`^1.0.0-alpha.26`). A prerelease is
   matched only by a range that names one: `^1.0.0` does not take `1.0.0-alpha.26`,

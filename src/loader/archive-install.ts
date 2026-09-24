@@ -138,7 +138,7 @@ export async function installPluginArchive(source: string, opts: ArchiveInstallO
     const version = typeof manifest.version === 'string' ? manifest.version : '';
     // One this host cannot load is refused here, before anything is moved into place.
     const compat = pluginCompat(manifest, THIS_HOST);
-    if (!compat.ok) throw new Error(`plugin '${name}' is ${compat.reason}`);
+    if (!compat.ok) throw new Error(`plugin '${name}': ${compat.reason}`);
 
     // A plugin already there is replaced only when it came from an archive too: a
     // git checkout or a registry download is someone's to update their own way.
