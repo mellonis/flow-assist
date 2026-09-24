@@ -1793,12 +1793,12 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     coordinates — `backend.wheel('up', 20, 8)`; the default `(0, 0)` is the app title.
   - Every `ChatRow` is exactly one terminal line; the pinned-question check reads a
     row's index as its line. A row that wraps would break it. Long lines of fenced
-    code are hard-wrapped by `layoutMarkdown` since flowtty 1.0.0-alpha.11 (before,
-    one ran out of its box as a single over-wide row); a test holds it.
+    code are hard-wrapped by `layoutMarkdown` (needs flowtty ≥ 1.0.0-alpha.11, or
+    one runs out of its box as a single over-wide row); a test holds it.
 - **One look for every host modal** — the chat's: `frame()` in `src/views/modals.ts`
   (round border, the modal palette, a plain title) and a quiet hint line at the bottom
-  saying how to move and how to get out. The log and the help wore a double frame of
-  their own, so one product looked like two.
+  saying how to move and how to get out. A modal that draws its own frame instead
+  doubles up, so one product looks like two.
   - **A window that paints its own ground sets its own ink**: `color: m.text` on the
     window box (the chat, `frame()`, the reminder, the keycaps panel), which every text
     with no colour of its own inherits (flowtty ≥ 1.0.0-alpha.16). Left to the
