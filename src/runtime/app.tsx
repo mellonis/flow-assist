@@ -12,7 +12,7 @@
 import { pluginConfigs } from '../loader/tools.js';
 import { Box, Text, Markdown, Table, Link, ScrollBox, Select, ListSelect, ListMultiSelect, Checkbox, DialogHost, render, useApp, useColorScheme, useInput, useTerminalSize, type CopyEvent } from '@flowtty/react';
 import type { Backend } from '@flowtty/core';
-import { createContext, createElement as h, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, createContext, createElement as h, memo, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { HOST_API } from '../version.js';
 import type { PluginApi, PluginHost, PluginUi } from './plugin-api.js';
 import { identityToken } from './plugin-identity.js';
@@ -211,12 +211,87 @@ type ChatStore = {
   statusRow?: unknown;
 };
 
-// The first handler flowtty delivers a key to (see `firstKeys` in the App). It draws
-// nothing, and stays mounted as the App's first child for the App's whole life.
-function HostKeysFirst({ take }: { take: { current: (key: unknown) => unknown } }) {
-  useInput((key) => take.current(key));
+// Where the host hears a key, in a fixed order that no mount, remount or dropdown can
+// change. flowtty delivers a key to its `useInput` handlers in subscription order, and
+// that order follows mount time and every change of input source, so the host does not
+// rely on it:
+//   1. The host's chords (`first`): the exit keys, Ctrl+], the collapse key, where a
+//      press landed. While a dropdown's popup is open, the exit keys only.
+//   2. Whatever flowtty component takes the key: a dropdown's popup, a focused field
+//      or list, a scroll box — each takes the keys it acts on.
+//   3. The host's key path (`last`, `twoPhaseDispatch`): plugin handlers, the chat, the
+//      host fallback — for a key nothing took, and never while a popup is open.
+// Both host steps are heard by `HostKeys`, rendered beside the DialogHost, not under
+// it: its input source never changes, so it subscribes first and stays first for the
+// app's life. The backend's key listener is wrapped (`hostKeyed`) to deliver a key in
+// two passes: pass 1 runs step 1 and then flowtty's own order (step 2); a key nothing
+// took goes round again as pass 2, where `HostKeys` runs step 3 and takes it — so no
+// other handler hears it twice, and step 3 runs inside flowtty's own synchronous
+// render, as every handler does. A mouse button runs step 3 straight after pass 1: a
+// second press or release would redo the selection.
+interface HostKeyPath {
+  first: (key: InputKey) => unknown;
+  last: (key: InputKey) => unknown;
+  pass: 1 | 2;
+  // Whether a popup is open — the App's subtree is muted then. Kept by `HostProbe`, and
+  // corrected by every key flowtty delivers.
+  popupOpen: boolean;
+  // Whether the probe heard the key in pass 1: a key that nothing took and that
+  // reached no one in the App's subtree was delivered to a muted subtree.
+  heard: boolean;
+  probeRendered: boolean;
+}
+
+// The backend as flowtty sees it: each key it reports goes through the host's passes.
+function hostKeyed(root: Backend, path: HostKeyPath): Backend {
+  return new Proxy(root, {
+    get(target, prop) {
+      if (prop === 'onKey' && typeof target.onKey === 'function') {
+        return (listener: (key: never) => unknown) => target.onKey!(((key: InputKey) => {
+          path.pass = 1;
+          path.heard = false;
+          if (listener(key as never) === true) return true;
+          path.popupOpen = !path.heard;
+          if (path.popupOpen) return false;
+          if (isMouseButton(key.name)) {
+            path.last(key);
+            return false;
+          }
+          path.pass = 2;
+          try {
+            listener(key as never);
+          } finally {
+            path.pass = 1;
+          }
+          return false;
+        }) as never);
+      }
+      const value = Reflect.get(target, prop, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+}
+
+// The host's own hearer — steps 1 and 3 of `HostKeyPath`.
+function HostKeys({ path }: { path: HostKeyPath }) {
+  useInput((key) => {
+    if (path.pass === 1) return path.first(key as unknown as InputKey);
+    path.last(key as unknown as InputKey);
+    return true;
+  });
   return null;
 }
+
+// A listener inside the App's subtree that draws nothing. Memoised with a stable prop,
+// it re-renders only when its input source changes — the DialogHost swapping the
+// App's source for a muted one when a popup opens, and back when it closes — so each
+// re-render flips `popupOpen`; each key it hears says the subtree is live.
+const HostProbe = memo(function HostProbe({ path }: { path: HostKeyPath }) {
+  if (path.probeRendered) path.popupOpen = !path.popupOpen;
+  path.probeRendered = true;
+  useInput(() => { path.heard = true; });
+  return null;
+});
 
 // How often a console line may redraw the App (see `consoleLog` in renderApp) — the
 // chat's own rate for a view that updates fast.
@@ -272,6 +347,8 @@ export function renderApp(
   // fallback handler so a re-render never resets them).
   const ui: UiState = { cmdOpen: false, modalActive: false };
   const cmdline = { current: { open: false, input: '', history: [], historyIdx: -1, walk: null } as CommandLineState };
+  // The host's place in key delivery (see `HostKeyPath`); the App fills in its steps.
+  const keyPath: HostKeyPath = { first: () => undefined, last: () => undefined, pass: 1, popupOpen: false, heard: false, probeRendered: false };
 
   function App() {
     const inputRegistryRef = useRef<LazyInputEntry[]>([]);
@@ -725,16 +802,14 @@ export function renderApp(
     useEffect(() => () => { if (armTimer.current) clearTimeout(armTimer.current); }, []);
     const chatStore = () => (hostBase.store as { chat?: ChatStore } | undefined)?.chat;
 
-    // The host's own keys — the exit keys, Ctrl+] and the collapse key, where a press
-    // landed — are heard FIRST, before any component on screen: `HostKeysFirst` is the
-    // App's first child, so its handler is the first flowtty delivers a key to. A
-    // flowtty component takes the keys it acts on (a focused list takes what is typed
-    // as its filter, the 0x1d of Ctrl+] included), and one in a plugin's screen would
-    // otherwise keep the person from the chat. The rest of the key path, the App's own
-    // `useInput` below, comes after the components mounted with the App.
-    const firstKeys = useRef<(key: unknown) => unknown>(() => undefined);
-    firstKeys.current = (key) => {
-      const k = key as unknown as InputKey;
+    // Step 1 of the host's key path (`HostKeyPath`): the host's own keys, before any
+    // component on screen. A flowtty component takes the keys it acts on (a focused
+    // list takes what is typed as its filter, the 0x1d of Ctrl+] included), and one in a
+    // plugin's screen would otherwise keep the person from the chat.
+    keyPath.first = (k) => {
+      // A popup open over the screen has every key but the exit keys: they arm and fire
+      // as everywhere else, and nothing under the popup is asked.
+      const popup = keyPath.popupOpen;
       // The three keys flowtty lets an app take before the terminal backend acts
       // (exit, exit, suspend). Taken here, before any handler: the y/n pause, an open
       // question and a modal's catch-all consume EVERY key, and would otherwise
@@ -743,7 +818,7 @@ export function renderApp(
       const armKey = armKeyOf(k);
       if (armKey) {
         // The `:` line owns the keyboard while it is open: the chat's field is not asked.
-        const claim = ui.cmdOpen ? undefined : chatStore()?.ctrlKey?.(k);
+        const claim = ui.cmdOpen || popup ? undefined : chatStore()?.ctrlKey?.(k);
         if (claim === 'handled') { setArm(null); notify(); return true; }
         if (claim !== 'field') {
           const step = armStep(armRef.current, armKey, Date.now());
@@ -766,6 +841,7 @@ export function renderApp(
         setArm(null);
         notify();
       }
+      if (popup) return undefined;
       // Ctrl+] moves the keyboard between the chat and the plugin, and the collapse key
       // folds the docked chat away and back. Taken here, before any handler, as the
       // exit keys are: a plugin that consumes every key, or one of its modals, must
@@ -781,18 +857,15 @@ export function renderApp(
       if (k.name === 'mousedown' && typeof k.x === 'number' && typeof k.y === 'number') chat?.pointer?.(k.x, k.y);
       return undefined;
     };
-    useInput((key) => {
-      const k = key as unknown as InputKey;
-      // A handled key is followed by a redraw. A plugin keeps its state in one component
-      // and draws it in a sibling; a React setState in the first re-renders only the
-      // first, and the sibling redraws when the HOST does. The host guarantees it: one re-render per handled key, batched by React with
-      // whatever the handler set.
-      // `twoPhaseDispatch`'s true means "handled — redraw", not "consume": the chat
-      // answers true for every key, PgUp and the wheel included, which the
-      // conversation's scroll list hears on its own. So nothing is consumed here.
+    // Step 3: the host's key path, for a key no component took. A handled key is
+    // followed by a redraw: a plugin keeps its state in one component and draws it in a
+    // sibling, and the sibling redraws when the HOST does.
+    // `twoPhaseDispatch`'s true means "handled — redraw", not "consume": the chat
+    // answers true for every key. So nothing is consumed here.
+    keyPath.last = (k) => {
       if (twoPhaseDispatch(inputRegistryRef.current, ui, k, () => hostFallback(k))) notify();
       return undefined;
-    });
+    };
 
     // The header, the content slot (host has no single base surface yet — a
     // placeholder the overlay may sit over), the plugin overlay, and the bottom
@@ -884,7 +957,7 @@ export function renderApp(
     return h(
       Box,
       { flexDirection: dock?.side === 'right' ? 'row' : 'column', width: termWidth, height: termHeight },
-      h(HostKeysFirst, { take: firstKeys }),
+      h(HostProbe, { path: keyPath }),
       h(AreaContext.Provider, { value: region },
       // The plugin's side of the screen. A drag that starts here stays here — never
       // into the panel beside it.
@@ -946,9 +1019,9 @@ export function renderApp(
   // `services`, whose toast the App rebinds on every render.
   // A <DialogHost> at the root: a plugin's `ui.Select` opens its popup through it (a
   // floating dialog anchored under the field, in frame cells — which is why it sits at
-  // the frame's origin). While a popup is open every key is the popup's: the host's
-  // whole key path — the App's one `useInput` — is below the host, and so muted.
-  return render(h(DialogHost, null, h(App)), root, {
+  // the frame's origin). While a popup is open every key is the popup's but the exit
+  // keys (`HostKeyPath`).
+  return render(h(Fragment, null, h(HostKeys, { path: keyPath }), h(DialogHost, null, h(App))), hostKeyed(root, keyPath), {
     onCopy: (event) => onCopySelection(event, {
       say: (msg) => (services as unknown as ReactBoundServices).showMessage(msg),
       fallback: (text) => copyToClipboard(text),

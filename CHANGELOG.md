@@ -36,11 +36,13 @@ What each version of flow-assist brought, newest first. The version is the one i
   now the dropdown — a plugin that took the old names from flowtty must rename them.
   They hear flowtty's own input, so a plugin gates them with `isFocused`
   (docs/plugins.md). While a dropdown is open every key is its own: Ctrl+] waits for
-  it to close, and Ctrl+C exits at once rather than asking twice. Since alpha.26
+  it to close, and Ctrl+C still takes two presses. Since alpha.26
   flowtty's components take the keys they act on — a focused `ListSelect` takes what
   is typed as its filter, so `F` or `:` do not reach the host while it has the focus.
   The host's own chords (Ctrl+], the collapse key, the exit keys) are heard before any
-  component, so no picker in a plugin's screen can keep the person from the chat.
+  component, and the host's other keys after them, whenever the plugin's screen was
+  opened — so no picker in a plugin's screen can keep the person from the chat, and a
+  focused one is never beaten to its keys by the host.
 - **A stray `console.log` no longer lands on the screen.** What a plugin, a library or
   React prints through the console while the app runs goes to the log (`L`) at once,
   as `[console] …`, `[console.warn] …` or `[console.error] …`, and is not printed

@@ -256,7 +256,7 @@ setup: ({ host }) => { /* once, before any component mounts: seed a store */ },
   person.
 - **To let the person choose, `ui` has flowtty's three pickers.** `ui.Select` is a
   dropdown: a one-line field whose popup opens under it — the host keeps the
-  `<DialogHost>` it needs, and while the popup is open every key is the popup's.
+  `<DialogHost>` it needs, and while the popup is open every key is the popup's but the exit keys.
   `ui.ListSelect` and `ui.ListMultiSelect` are the inline lists, every option on
   screen. flowtty's docs/components.md (Choosing) says which to reach for. They hear
   flowtty's own input, not `host.useInputHandler`, so a mounted one would hear every

@@ -161,8 +161,8 @@ the blacklist.
 - **`ui`'s flowtty components** are `Box`, `Text`, `Markdown`, `Table`, `Link`,
   `ScrollBox`, `Checkbox` and the three pickers: `Select` (flowtty's dropdown — its popup is a floating dialog, so the
   App is rendered under a `<DialogHost>` at the frame's origin, and while a popup is
-  open the host's whole key path is muted: Ctrl+C then exits at once, Ctrl+] waits
-  for the popup to close), `ListSelect` and `ListMultiSelect` (the inline lists).
+  open the host's key path is muted: the exit keys still take their two presses,
+  Ctrl+] waits for the popup to close), `ListSelect` and `ListMultiSelect` (the inline lists).
   They hear flowtty's input, not `useInputHandler`, and take the keys they act on — a
   focused `ListSelect` takes what is typed as its filter — so a plugin gates them
   with `isFocused` (docs/plugins.md says how).
@@ -1122,14 +1122,26 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   backend acts (exit, exit, suspend — skipped when a `useInput` handler returns strict
   `true`), and one stray press used to end the app mid-answer. The App takes them
   before `twoPhaseDispatch`, since the y/n pause, an open question and a modal's
-  catch-all swallow every key — and before every flowtty component: flowtty delivers a
-  key to its `useInput` handlers in subscription order (children before parents at
-  mount, a later mount after), and a component takes the keys it acts on (a focused
-  `ListSelect` takes what is typed as its filter, the 0x1d of Ctrl+] with it). So the
-  exit keys, Ctrl+], the collapse key and the pointer's pane are handled by
-  `HostKeysFirst`, the App's first child — the first handler a key reaches — and the
-  rest of the host's key path, `twoPhaseDispatch`, by the App's own `useInput`, which
-  consumes nothing: the first press arms and is consumed, the status
+  catch-all swallow every key — and before every flowtty component.
+  **The host's place in key delivery is fixed** (`HostKeyPath` in `runtime/app.tsx`):
+  host chords → whatever flowtty component takes the key → the host's key path. flowtty
+  delivers a key to its `useInput` handlers in subscription order, which follows mount
+  time and every change of input source (a surface mounted after boot comes after the
+  App; a DialogHost opening and closing resubscribes its whole subtree), and a
+  component takes the keys it acts on (a focused `ListSelect` takes what is typed as
+  its filter, the 0x1d of Ctrl+] with it). So the host does not rely on that order.
+  `HostKeys` is rendered beside the DialogHost, not under it: its source never
+  changes, so it is the first subscriber for the app's life. The backend's key listener
+  is wrapped (`hostKeyed`) to deliver each key in two passes. Pass 1: `HostKeys` runs
+  the chords (`first` — the exit keys, Ctrl+], the collapse key, the pointer's pane),
+  then flowtty's own order. A key nothing took goes round as pass 2, where `HostKeys`
+  runs `twoPhaseDispatch` (`last`) and takes it, so no other handler hears it twice and
+  the host's path runs inside flowtty's synchronous render (a burst of keys — Esc Esc —
+  sees each key's state). A mouse button skips pass 2 (a second press would redo the
+  selection) and runs `last` right after pass 1. While a dropdown's popup is open the
+  App's subtree is muted (`HostProbe` notices, by its re-renders and by which keys it
+  hears): the chords are the exit keys alone and there is no `last`. For the exit keys
+  the first press arms and is consumed, the status
   line says `^c again to exit` / `^d again to exit` / `^z again to suspend` (the cap
   from `keyGlyph`, in the chat where `Esc again to exit` is — `services.armedHint` —
   and on the bottom row of every other screen); the same key within `ARM_MS` (2 s)
