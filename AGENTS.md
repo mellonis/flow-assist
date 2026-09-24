@@ -984,7 +984,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   carries it as `stoppedBy`, and a session saved without one reads `(Esc)` as it did —
   a cut-off «В» must not read as a whole answer;
   the model's history gets a closing message of its own, see "The conversation the
-  model sees"). Idle: clear the field → step the bang level down → arm/close. It used to clear
+  model sees"). Idle: clear the field → step the bang level down (one level per Esc) → arm/close (docked, collapse — so an empty `!!` field takes four Escs to fold the panel). It used to clear
   the field and take the queue back BEFORE stopping, so with a message queued the
   second Esc threw the message away and only the third stopped the tool.
   **A queued message never undoes what just ended**: `send` lays its message onto the

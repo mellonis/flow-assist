@@ -227,6 +227,32 @@ test('Esc Esc collapses the panel and gives the plugin the keyboard', async () =
   ui.app.unmount();
 });
 
+// Esc's idle ladder is the field's first: in `!!` it steps back to `!`, then to the
+// plain prompt, and only then do two more collapse the panel.
+test('in a docked chat Esc steps the bang level down first, and only then does Esc Esc collapse', async () => {
+  const g = guest({ take: ['z'] });
+  const ui = await bootApp(new ScriptedModel(), 160, 40, g.make as never, {}, { chatMode: 'panel' });
+  await ui.press('F');
+  await ui.type('!');
+  await ui.type('!');
+  expect(ui.backend.lastFrame).toContain('!!');
+  await ui.press('escape'); // 2 → 1
+  expect(ui.backend.lastFrame).not.toContain('!!');
+  expect(ui.backend.lastFrame).toContain('! again gets the terminal');
+  expect(ui.backend.lastFrame).not.toContain('Esc again to collapse');
+  await ui.press('escape'); // 1 → 0
+  expect(ui.backend.lastFrame).toContain('Esc Esc collapse');
+  expect(ui.backend.lastFrame).not.toContain('Esc again to collapse');
+  expect(chatFrame(ui).left).toBe(104);
+  await ui.press('escape'); // arms
+  expect(ui.backend.lastFrame).toContain('Esc again to collapse');
+  await ui.press('escape'); // collapses
+  expect(chatFrame(ui).top).toBe(-1);
+  await ui.press('z');
+  expect(g.seen).toEqual(['z']);
+  ui.app.unmount();
+});
+
 test('/mode window gives the window, /mode full the whole terminal — and a turn in flight goes on through both', async () => {
   const W = 80;
   const H = 24;

@@ -2258,8 +2258,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // away. Idle: non-empty field → clear; empty field at a non-zero bang
               // level → step the level DOWN by one, same as Backspace (closest thing
               // first, before Esc starts arming a chat-wide exit) — leaving `!!` for
-              // good this way takes two Escs, one per level; armed → exit; otherwise
-              // arm + hint «Esc again to exit».
+              // good this way takes two Escs, one per level; armed → close (docked, that
+              // is collapse: closeChat folds the panel and hands the plugin the keys);
+              // otherwise arm + hint «Esc again to exit» («… to collapse» docked).
               if (key.name === 'escape') {
                 if (canStop()) { stopKeyRef.current = ''; abortRef.current?.abort(); disarmEsc(); return true; }
                 if (inputRef.current.length > 0) {
