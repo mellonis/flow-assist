@@ -31,18 +31,23 @@ export const INTERACTIVE_ASK = 'Look at what the interactive command above print
 // ── `script` ─────────────────────────────────────────────────────────────────
 // Two families: BSD / macOS (`script [-q] file command…`, the child's own status as
 // its exit code) and util-linux (`script [-q] [-e] -c "command" file`, where the
-// command is ONE string its shell runs and `-e` returns the child's status).
+// command is ONE string the person's `$SHELL` runs and `-e` returns the child's
+// status). A `script` that is neither is not used: the program runs unrecorded.
 export type ScriptFlavor = 'bsd' | 'util-linux';
 
-export function flavorFrom(onPath: boolean, versionOutput: string): ScriptFlavor | null {
+const BSD_SYSTEMS = /^(Darwin|FreeBSD|OpenBSD|NetBSD|DragonFly)$/i;
+// util-linux names itself on `--version`; a BSD `script` refuses the option with its
+// usage line (`usage: script [-…`), and the system's own name says BSD too.
+export function flavorFrom(onPath: boolean, versionOutput: string, system = os.type()): ScriptFlavor | null {
   if (!onPath) return null;
-  return /util-linux/i.test(versionOutput) ? 'util-linux' : 'bsd';
+  if (/util-linux/i.test(versionOutput)) return 'util-linux';
+  if (/usage:\s*script\s+\[/i.test(versionOutput) || BSD_SYSTEMS.test(system)) return 'bsd';
+  return null;
 }
 
 let detected: ScriptFlavor | null | undefined;
 // Which `script` this machine has, asked once per process (never at import): whether
-// it is on PATH, then what `--version` says — util-linux answers with its name, BSD's
-// refuses the option with its usage on stderr.
+// it is on PATH, then what `--version` says.
 export function detectScript(): ScriptFlavor | null {
   if (detected !== undefined) return detected;
   const which = spawnSync('/bin/sh', ['-c', 'command -v script'], { encoding: 'utf8', timeout: 2000 });
@@ -52,12 +57,19 @@ export function detectScript(): ScriptFlavor | null {
   return detected;
 }
 
-const shQuote = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
+// A path that every shell reads the same inside single quotes — sh, bash, zsh, csh,
+// tcsh, fish: no quote, backslash, newline, `$`, backtick or `!`.
+const PLAIN_PATH = /^[A-Za-z0-9_./ +,@%:=-]+$/;
 
-// The `script` invocation that runs `body` through `shell -c` and records into `file`.
-export function scriptCommand(flavor: ScriptFlavor, body: string, file: string, shell = '/bin/sh'): { file: string; args: string[] } {
-  if (flavor === 'bsd') return { file: 'script', args: ['-q', file, shell, '-c', body] };
-  return { file: 'script', args: ['-q', '-e', '-c', `${shell} -c ${shQuote(body)}`, file] };
+// The `script` invocation that runs the command FILE `cmdFile` with `shell` and
+// records into `file`. The command goes through a file, never as a string: util-linux
+// hands its `-c` string to the person's `$SHELL`, which re-parses it — csh and tcsh
+// refuse a newline inside quotes (every command has one, the pwd trailer), fish reads
+// backslashes its own way. A plain path parses the same in all of them.
+export function scriptCommand(flavor: ScriptFlavor, cmdFile: string, file: string, shell = '/bin/sh'): { file: string; args: string[] } {
+  if (!PLAIN_PATH.test(cmdFile)) throw new Error(`the temporary directory's path cannot be handed to script: ${cmdFile}`);
+  if (flavor === 'bsd') return { file: 'script', args: ['-q', file, shell, cmdFile] };
+  return { file: 'script', args: ['-q', '-e', '-c', `${shell} '${cmdFile}'`, file] };
 }
 
 // ── The recording ────────────────────────────────────────────────────────────
@@ -71,7 +83,19 @@ export function scriptCommand(flavor: ScriptFlavor, body: string, file: string, 
 // cursor shows and hides, a title — is taken out. What moves between lines on the main
 // screen (cursor addressing) is not followed: such output is its text in the order it
 // was written.
-const TOKEN = /\u001B\][\s\S]*?(?:\u0007|\u001B\\)|\u001B\[([0-?]*)[ -/]*([@-~])|\u001B[()*+][\s\S]?|\u001B[@-Z\\-_]|[\s\S]/gu;
+//
+// Every pattern here is bounded, so a hostile or broken recording costs linear time:
+// a string sequence (OSC — a title —, DCS — sixel —, APC — kitty graphics —, PM, SOS)
+// runs to its BEL or ST, or at most `STRING_MAX` characters, or the next ESC.
+const STRING_MAX = 4096;
+const TOKEN = new RegExp(
+  `\\u001B[\\]P_^X][^\\u0007\\u001B]{0,${STRING_MAX}}(?:\\u0007|\\u001B\\\\)?`
+  + '|\\u001B\\[([0-?]{0,64})[ -/]{0,16}([@-~])'
+  + '|\\u001B[()*+][\\s\\S]?|\\u001B[@-Z\\\\-_]|[\\s\\S]',
+  'gu',
+);
+// How far right a line may be drawn to; a column move past it stops there.
+const COL_MAX = 4096;
 
 export function cleanRecording(raw: string): string {
   const text = String(raw ?? '')
@@ -81,19 +105,28 @@ export function cleanRecording(raw: string): string {
   let line: string[] = [];
   let col = 0;
   let alt = false;
+  let toggled = false;
   const num = (p: string | undefined, d: number) => { const n = parseInt(String(p ?? ''), 10); return Number.isFinite(n) ? n : d; };
   for (const m of text.matchAll(TOKEN)) {
     const t = m[0];
     if (t.length > 1 && t.startsWith('\u001B')) {
-      if ((m[2] === 'h' || m[2] === 'l') && /^\?(1049|1047|47)$/.test(m[1] ?? '')) { alt = m[2] === 'h'; continue; }
+      if ((m[2] === 'h' || m[2] === 'l') && /^\?(1049|1047|47)$/.test(m[1] ?? '')) {
+        // A tail that begins INSIDE the alternate screen (only the end of a long
+        // recording is read): its first toggle is the exit, and all before it was drawn
+        // on the screen that is now gone.
+        if (!toggled && m[2] === 'l') { lines.length = 0; line = []; col = 0; }
+        toggled = true;
+        alt = m[2] === 'h';
+        continue;
+      }
       if (alt) continue;
       if (m[2] === 'K') {
         const mode = num(m[1], 0);
         if (mode === 2) line = [];
         else if (mode === 1) for (let i = 0; i <= col && i < line.length; i++) line[i] = ' ';
         else line.length = Math.min(line.length, col);
-      } else if (m[2] === 'G') col = Math.max(0, num(m[1], 1) - 1);
-      else if (m[2] === 'C') col += Math.max(1, num(m[1], 1));
+      } else if (m[2] === 'G') col = Math.min(COL_MAX, Math.max(0, num(m[1], 1) - 1));
+      else if (m[2] === 'C') col = Math.min(COL_MAX, col + Math.max(1, num(m[1], 1)));
       else if (m[2] === 'D') col = Math.max(0, col - Math.max(1, num(m[1], 1)));
       continue;
     }
@@ -101,8 +134,9 @@ export function cleanRecording(raw: string): string {
     if (t === '\n') { lines.push(line); line = []; col = 0; continue; }
     if (t === '\r') { col = 0; continue; }
     if (t === '\b') { col = Math.max(0, col - 1); continue; }
-    if (t === '\t') { const next = (Math.floor(col / 8) + 1) * 8; while (line.length < next) line.push(' '); col = next; continue; }
+    if (t === '\t') { const next = Math.min(COL_MAX, (Math.floor(col / 8) + 1) * 8); while (line.length < next) line.push(' '); col = next; continue; }
     if (/[\u0000-\u001F\u007F-\u009F]/.test(t)) continue;
+    if (col >= COL_MAX) continue;
     while (line.length < col) line.push(' ');
     line[col] = t;
     col++;
@@ -121,13 +155,17 @@ export function cleanRecording(raw: string): string {
 // whatever else listens, and SIGQUIT has no listener at all, so either would end the
 // app. So, as a shell does for the job in front: a no-op listener goes on first (with
 // one there the process is not ended), the others are taken off, and afterwards they
-// are put back in their order and the no-op removed.
+// are put back in their order and the no-op removed. SIGCONT too: without `script`,
+// Ctrl+Z in the program stops this process as well, and on `fg` the TTY backend's own
+// SIGCONT listener would take the terminal back while the program still runs. The
+// restore waits one turn of the event loop, so a signal the program's last keys raised
+// is still heard by the no-op, never by the app.
 export interface SignalTarget {
   on(event: string, fn: (...a: any[]) => void): unknown;
   removeListener(event: string, fn: (...a: any[]) => void): unknown;
   rawListeners(event: string): Function[];
 }
-const HELD_SIGNALS = ['SIGINT', 'SIGQUIT'] as const;
+const HELD_SIGNALS = ['SIGINT', 'SIGQUIT', 'SIGCONT'] as const;
 
 export async function holdSignals<T>(target: SignalTarget, fn: () => Promise<T>): Promise<T> {
   const noop = () => {};
@@ -141,6 +179,7 @@ export async function holdSignals<T>(target: SignalTarget, fn: () => Promise<T>)
   try {
     return await fn();
   } finally {
+    await new Promise<void>((r) => setImmediate(r));
     for (const sig of HELD_SIGNALS) {
       for (const l of stash.get(sig) ?? []) target.on(sig, l as () => void);
       target.removeListener(sig, noop);
@@ -209,14 +248,19 @@ export async function runInteractive(cmd: string, opts: InteractiveOptions, deps
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-tty-'));
   const recording = path.join(dir, 'recording');
   const pwdFile = path.join(dir, 'pwd');
+  const cmdFile = path.join(dir, 'cmd');
   try {
     // The environment is the person's own, untouched: `!`'s PAGER=cat and
     // GIT_TERMINAL_PROMPT=0 exist because nobody can answer a prompt there, and here
     // somebody is.
-    const body = withPwdTrailer(cmd, pwdFile);
-    const run = flavor ? scriptCommand(flavor, body, recording) : { file: '/bin/sh', args: ['-c', body] };
+    // The command is a file the shell runs, exactly as typed — no shell of the
+    // person's parses it on the way (see `scriptCommand`).
+    fs.writeFileSync(cmdFile, withPwdTrailer(cmd, pwdFile), { mode: 0o600 });
+    const run = flavor ? scriptCommand(flavor, cmdFile, recording) : { file: '/bin/sh', args: [cmdFile] };
     const t0 = Date.now();
-    const outcome = await opts.suspend(() => holdSignals(signals, () => spawnFn(run.file, run.args, { cwd: opts.cwd, env: process.env })));
+    // The signals are held around the WHOLE hand-over — taken before the terminal
+    // goes and given back only after it is the app's again.
+    const outcome = await holdSignals(signals, () => opts.suspend(() => spawnFn(run.file, run.args, { cwd: opts.cwd, env: process.env })));
     const ms = Date.now() - t0;
     let raw = '';
     let skipped = 0;

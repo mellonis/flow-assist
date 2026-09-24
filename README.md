@@ -106,7 +106,9 @@ whenever something was recorded, the assistant is asked at once to look at it: w
 happened, whether anything went wrong, what next. That ask is drawn dim: it is the
 app's, not yours. A full-screen program (`vim`, `less`, `top`) leaves nothing behind
 once it closes, and without `script` on PATH nothing is recorded at all — then the
-line says how it ended and the assistant is not asked.
+line says how it ended and the assistant is not asked. Whatever the program echoes —
+a value you type at a prompt that shows it back — is part of the recording: it goes
+to the assistant and is saved with the session (a password prompt echoes nothing).
 Like `!`, it is refused while an answer is coming.
 
 Shift+Tab — or `/auto reads|all|off` — says how much you want to confirm while you

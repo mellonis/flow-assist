@@ -40,13 +40,14 @@ const PROGRAM = [
   'exit 1',
 ].join('\n');
 
-interface Seen { suspendedWhileRunning: boolean[]; recordings: string[]; argv: string[][] }
+interface Seen { suspendedWhileRunning: boolean[]; recordings: string[]; argv: string[][]; commands: string[] }
 function fakeScript(seen: Seen, backend: () => { suspended: boolean }): InteractiveSpawn {
   return async (file, args, { cwd }) => {
     seen.argv.push([file, ...args]);
     seen.suspendedWhileRunning.push(backend().suspended);
     const rec = args[1]!;
     seen.recordings.push(rec);
+    seen.commands.push(fs.readFileSync(args[3]!, 'utf8'));
     const p = Bun.spawn([args[2]!, ...args.slice(3)], { cwd, stdin: new TextEncoder().encode('Ruslan\n'), stdout: 'pipe', stderr: 'pipe' });
     const out = await new Response(p.stdout).text();
     const code = await p.exited;
@@ -63,7 +64,7 @@ async function boot(model: ScriptedModel, root: string, deps: (backend: () => { 
   return ui;
 }
 
-const newSeen = (): Seen => ({ suspendedWhileRunning: [], recordings: [], argv: [] });
+const newSeen = (): Seen => ({ suspendedWhileRunning: [], recordings: [], argv: [], commands: [] });
 
 test('!!command hands the terminal over, shows the cleaned recording as its view, and asks the model to look at it', async () => {
   const root = rootDir();
@@ -82,8 +83,8 @@ test('!!command hands the terminal over, shows the cleaned recording as its view
   expect(seen.suspendedWhileRunning).toEqual([true]);
   expect(ui.backend.suspended).toBe(false);
   // The program ran under `script`, through the shell `!` uses, in the first root.
-  expect(seen.argv[0]!.slice(0, 5)).toEqual(['script', '-q', seen.recordings[0]!, '/bin/sh', '-c']);
-  expect(seen.argv[0]![5]!.startsWith('./greet.sh\n')).toBe(true);
+  expect(seen.argv[0]).toEqual(['script', '-q', seen.recordings[0]!, '/bin/sh', path.join(path.dirname(seen.recordings[0]!), 'cmd')]);
+  expect(seen.commands[0]!.startsWith('./greet.sh\n')).toBe(true);
   // The recording's temp files are gone.
   expect(fs.existsSync(path.dirname(seen.recordings[0]!))).toBe(false);
 
@@ -201,7 +202,7 @@ test('no `script` on PATH: the program still gets the terminal, a note says noth
   expect(calls).toHaveLength(1);
   expect(calls[0]![0]).toBe('/bin/sh');
   expect(calls[0]!.at(-1)).toBe('true'); // the terminal was handed over while it ran
-  expect(ui.backend.lastFrame).toContain('No script on PATH');
+  expect(ui.backend.lastFrame).toContain('No usable script on PATH');
   expect(ui.backend.lastFrame).toMatch(/vim notes\.md · interactive · ✓/);
   expect(model.requests).toHaveLength(0);
   ui.app.unmount();

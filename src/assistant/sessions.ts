@@ -97,7 +97,8 @@ const bySomeone = (m: Record<string, unknown>) => m.role === 'user' || m.role ==
 // The first thing the person asked — what the list shows; a session that holds only
 // `!commands` is named by the first of them.
 export function sessionTitle(messages: Record<string, unknown>[]): string {
-  const first = messages.find((m) => m.role === 'user' && String(m.content ?? '').trim());
+  // The host's own ask after a `!!command` is not something the person asked.
+  const first = messages.find((m) => m.role === 'user' && m.hostAsk !== true && String(m.content ?? '').trim());
   const ran = first ? undefined : messages.find((m) => m.role === 'shell' && typeof m.command === 'string');
   const t = (first ? String(first.content ?? '') : ran ? `$ ${String(ran.command)}` : '').replace(/\s+/g, ' ').trim();
   return t.length > 70 ? `${t.slice(0, 69)}…` : t;

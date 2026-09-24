@@ -8,6 +8,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { capConsoleData, renderConsole } from '../console-view';
+import { withPwdTrailer } from '../shell';
+import { sessionTitle } from '../sessions';
 import { cleanRecording, flavorFrom, holdSignals, readTail, runInteractive, scriptCommand, type InteractiveSpawn } from '../interactive';
 
 const ESC = '\u001b';
@@ -46,6 +48,34 @@ test('cleanRecording drops what a full-screen program drew on the alternate scre
   expect(cleanRecording(`a\r\n${ESC}[?47hless page${ESC}[?47lb`)).toBe('a\nb');
 });
 
+test('string sequences are dropped whole — an OSC title, a sixel (DCS), kitty graphics (APC), a PM — terminated or not', () => {
+  expect(cleanRecording(`a${ESC}]0;title${ESC}\\b`)).toBe('ab');
+  expect(cleanRecording(`a${ESC}Pq#0;2;0;0;0#0~~@@vv${ESC}\\b`)).toBe('ab');
+  expect(cleanRecording(`a${ESC}_Gf=100,a=T;iVBORw0KGgo=${ESC}\\b`)).toBe('ab');
+  expect(cleanRecording(`a${ESC}^private${ESC}\\b`)).toBe('ab');
+  // Unterminated: runs to the next ESC (or a bounded length), never into the text after it.
+  expect(cleanRecording(`a${ESC}]0;half a title${ESC}[31mred`)).toBe('ared');
+});
+
+test('a hostile recording is cleaned in linear time: 20k unterminated OSCs in 1 MiB, a huge column move', () => {
+  const junk = `${ESC}]` + 'x'.repeat(50);
+  const raw = junk.repeat(20_000).slice(0, 1024 * 1024);
+  const t0 = performance.now();
+  cleanRecording(raw);
+  expect(performance.now() - t0).toBeLessThan(1000);
+  const t1 = performance.now();
+  const moved = cleanRecording(`a${ESC}[999999999Cb${ESC}[999999999Gc`);
+  expect(performance.now() - t1).toBeLessThan(200);
+  expect(moved.length).toBeLessThanOrEqual(4097);
+  expect(moved.startsWith('a')).toBe(true);
+});
+
+test('a tail that begins inside the alternate screen keeps only what came after it left', () => {
+  expect(cleanRecording(`junk\r\n~ redraw ~${ESC}[?1049lafter\r\n`)).toBe('after');
+  // An exit that follows an enter is the ordinary case: what came before stays.
+  expect(cleanRecording(`before\r\n${ESC}[?1049hjunk${ESC}[?1049lafter`)).toBe('before\nafter');
+});
+
 test('readTail reads the END of a big recording, from a whole line, and says how much it skipped', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-tail-'));
   const file = path.join(dir, 'rec');
@@ -62,28 +92,55 @@ test('readTail reads the END of a big recording, from a whole line, and says how
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('scriptCommand: BSD / macOS takes the file, then the command as argv', () => {
-  expect(scriptCommand('bsd', 'echo hi', '/tmp/rec')).toEqual({ file: 'script', args: ['-q', '/tmp/rec', '/bin/sh', '-c', 'echo hi'] });
+test('scriptCommand: BSD / macOS takes the recording file, then the shell and the command FILE as argv', () => {
+  expect(scriptCommand('bsd', '/tmp/fa-tty-x/cmd', '/tmp/rec')).toEqual({ file: 'script', args: ['-q', '/tmp/rec', '/bin/sh', '/tmp/fa-tty-x/cmd'] });
 });
 
-test('scriptCommand: util-linux takes the command as one string for -c, and -e for its exit code', () => {
-  const c = scriptCommand('util-linux', `echo 'it''s' "x"`, '/tmp/rec');
-  expect(c.file).toBe('script');
-  expect(c.args.slice(0, 3)).toEqual(['-q', '-e', '-c']);
-  expect(c.args.at(-1)).toBe('/tmp/rec');
-  // The -c string is run by a shell: it must come back as exactly the command.
-  const r = spawnSync('/bin/sh', ['-c', c.args[3]!], { encoding: 'utf8' });
-  expect(r.stdout).toBe('its x\n');
-  const body = `printf '%s\\n' "a'b"\nexit 4`;
-  const r2 = spawnSync('/bin/sh', ['-c', scriptCommand('util-linux', body, '/f').args[3]!], { encoding: 'utf8' });
-  expect(r2.stdout).toBe("a'b\n");
-  expect(r2.status).toBe(4);
+test('scriptCommand: util-linux gets `/bin/sh <file>` for -c, and -e for its exit code; a path no shell reads plainly is refused', () => {
+  const c = scriptCommand('util-linux', '/tmp/fa-tty-x/cmd', '/tmp/rec');
+  expect(c).toEqual({ file: 'script', args: ['-q', '-e', '-c', "/bin/sh '/tmp/fa-tty-x/cmd'", '/tmp/rec'] });
+  expect(() => scriptCommand('util-linux', "/tmp/it's/cmd", '/r')).toThrow('cannot be handed to script');
+  expect(() => scriptCommand('bsd', '/tmp/a\nb/cmd', '/r')).toThrow('cannot be handed to script');
 });
 
-test('flavorFrom tells util-linux from BSD by what `script --version` says', () => {
+// Every shell a person may have as $SHELL — util-linux's `script -c` runs its string
+// with it — must run the command file exactly as written.
+const SHELLS = ['/bin/sh', '/bin/bash', '/bin/zsh', '/bin/csh', '/bin/tcsh', '/opt/homebrew/bin/fish', '/usr/bin/fish', '/usr/local/bin/fish'].filter((s) => fs.existsSync(s));
+
+test('a nasty command reaches the shell exactly as typed, whatever $SHELL re-parses the -c string', async () => {
+  const nasty = `printf '%s|' "a'b" 'c"d' \`echo tick\` "$HOME_NOPE" 'back\\slash' "two\\\\"; printf '\\n'\necho "line two" && echo '$x'`;
+  let content = '';
+  let dir = '';
+  const spawn: InteractiveSpawn = async (_f, args) => {
+    const cmdFile = args[3]!;
+    dir = path.dirname(cmdFile);
+    content = fs.readFileSync(cmdFile, 'utf8');
+    return { code: 0, signal: null };
+  };
+  await runInteractive(nasty, { cwd: os.tmpdir(), suspend: async (fn) => fn(), maxChars: 100 }, { detect: () => 'bsd', spawn, signals: new EventEmitter() });
+  expect(content).toBe(withPwdTrailer(nasty, path.join(dir, 'pwd')));
+  // And the util-linux -c string, run by each shell there is, runs that file.
+  const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-tty-sh-')));
+  const file = path.join(tmp, 'cmd');
+  fs.writeFileSync(file, nasty);
+  const expected = spawnSync('/bin/sh', [file], { encoding: 'utf8' }).stdout;
+  expect(expected).toContain("a'b|");
+  const c = scriptCommand('util-linux', file, '/r');
+  for (const sh of SHELLS) {
+    const r = spawnSync(sh, ['-c', c.args[3]!], { encoding: 'utf8', env: { ...process.env, HOME: tmp } });
+    expect([sh, r.stdout]).toEqual([sh, expected]);
+  }
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test('flavorFrom tells util-linux from BSD, each by a positive sign, and uses neither otherwise', () => {
   expect(flavorFrom(false, '')).toBeNull();
-  expect(flavorFrom(true, 'script from util-linux 2.39.3')).toBe('util-linux');
-  expect(flavorFrom(true, 'script: illegal option -- -\nusage: script [-aeFkpqr] [-t time] [file [command ...]]')).toBe('bsd');
+  expect(flavorFrom(true, 'script from util-linux 2.39.3', 'Linux')).toBe('util-linux');
+  expect(flavorFrom(true, 'script: illegal option -- -\nusage: script [-aeFkpqr] [-t time] [file [command ...]]', 'Linux')).toBe('bsd');
+  expect(flavorFrom(true, 'script: unknown option', 'FreeBSD')).toBe('bsd');
+  expect(flavorFrom(true, '', 'Darwin')).toBe('bsd');
+  // Some other `script` on some other system: not used — the program runs unrecorded.
+  expect(flavorFrom(true, 'script 1.0 (busybox)', 'Linux')).toBeNull();
 });
 
 test('holdSignals keeps SIGINT and SIGQUIT from the app while the program runs and puts every listener back in order', async () => {
@@ -110,9 +167,30 @@ test('holdSignals keeps SIGINT and SIGQUIT from the app while the program runs a
   expect(target.listeners('SIGINT')).toEqual([a, b]);
 });
 
+test('the signals are held around the whole hand-over — SIGCONT too — and given back only after the terminal is back', async () => {
+  const target = new EventEmitter();
+  const app = () => {};
+  for (const sig of ['SIGINT', 'SIGCONT']) target.on(sig, app);
+  const events: string[] = [];
+  const count = () => `${target.listeners('SIGINT').includes(app)}/${target.listeners('SIGCONT').includes(app)}`;
+  const suspend = async <T>(fn: () => T | Promise<T>) => {
+    events.push(`leave ${count()}`);
+    try { return await fn(); } finally { events.push(`back ${count()}`); }
+  };
+  const spawn: InteractiveSpawn = async () => { events.push(`run ${count()}`); return { code: 0, signal: null }; };
+  await runInteractive('true', { cwd: os.tmpdir(), suspend, maxChars: 100 }, { detect: () => null, spawn, signals: target });
+  // The app's listeners are off before the terminal is handed over, and still off
+  // when it comes back; they return afterwards.
+  expect(events).toEqual(['leave false/false', 'run false/false', 'back false/false']);
+  expect(target.listeners('SIGINT')).toEqual([app]);
+  expect(target.listeners('SIGCONT')).toEqual([app]);
+  expect(target.listeners('SIGQUIT')).toEqual([]);
+});
+
 // A fake `script` for the BSD argv: runs the command with a line on its input and
 // writes what it printed into the recording file, as the real one would.
 const fakeScript = (seen: { dirs: string[] }): InteractiveSpawn => async (file, args, { cwd }) => {
+  expect(args.slice(2)).toEqual(['/bin/sh', path.join(path.dirname(args[1]!), 'cmd')]);
   expect(file).toBe('script');
   const rec = args[1]!;
   seen.dirs.push(path.dirname(rec));
@@ -163,8 +241,8 @@ test('runInteractive without `script` runs the command through the shell with th
   const r = await runInteractive('vim notes.md', { cwd: os.tmpdir(), suspend: async (fn) => fn(), maxChars: 100 }, { detect: () => null, spawn, signals: new EventEmitter() });
   expect(r.recorded).toBe(false);
   expect(calls[0]!.file).toBe('/bin/sh');
-  expect(calls[0]!.args[0]).toBe('-c');
-  expect(calls[0]!.args[1]!.startsWith('vim notes.md\n')).toBe(true);
+  expect(calls[0]!.args).toHaveLength(1);
+  expect(path.basename(calls[0]!.args[0]!)).toBe('cmd');
   expect(r.result.output).toBe('');
 });
 
@@ -185,4 +263,10 @@ test('the console view keeps the interactive mark through the cap (a live update
   expect(folded).toEqual(['git add -p · interactive · ✓ 1.2 s']);
   const open = renderConsole(d, { ...ctx, folded: false }).map((l) => l.map((s) => s.text).join(''));
   expect(open[0]).toBe('git add -p · interactive');
+});
+
+test('a session is never named by the host\'s ask after a !!command', () => {
+  const ask = { role: 'user', content: 'Look at what the interactive command above printed…', hostAsk: true };
+  expect(sessionTitle([{ role: 'shell', command: 'git add -p', content: '' }, ask])).toBe('$ git add -p');
+  expect(sessionTitle([{ role: 'shell', command: 'top', content: '' }, ask, { role: 'user', content: 'why so slow?' }])).toBe('why so slow?');
 });

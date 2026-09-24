@@ -13,7 +13,9 @@ What each version of flow-assist brought, newest first. The version is the one i
   and shown like any command's output, marked `interactive`; then, whenever something
   was recorded, the assistant is asked at once to look at it. A full-screen program
   (`vim`, `less`, `top`) leaves nothing to look at, and without `script` nothing is
-  recorded: then nothing is asked.
+  recorded: then nothing is asked. Whatever the program echoes — a value typed at a
+  prompt that shows it back — is recorded, sent to the assistant and saved with the
+  session.
 
 - **A message sent from the queue no longer undoes what just ended.** Under load, a
   message queued during a `!command` could put the finished command back into its

@@ -1500,7 +1500,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 if (interactive && !r.error && !seen) {
                   const why = recorded
                     ? 'Nothing was printed outside the full-screen program — the assistant was not asked.'
-                    : 'No `script` on PATH — the program ran with the terminal, but nothing was recorded, so the assistant was not asked.';
+                    : 'No usable `script` on PATH — the program ran with the terminal, but nothing was recorded, so the assistant was not asked.';
                   setMessages((cur) => [...cur, { role: 'note', content: why }]);
                 }
                 ask = interactive && seen;

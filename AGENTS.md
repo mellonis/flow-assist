@@ -1352,12 +1352,19 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   `!!`); kept in ↑/↓ as `!!cmd`. The chat hands the terminal over through
   `services.suspend` — flowtty's `useApp().suspend`, bound by the App like `alert` and
   `copy` (the default just runs `fn`) — and the program runs under `script`, so it has
-  a real terminal while what it printed is recorded into a temp file: BSD/macOS
-  `script -q <file> /bin/sh -c <cmd>` (its exit code is the child's; a child killed by
+  a real terminal while what it printed is recorded into a temp file. The command is
+  written to a FILE in the same temp directory and run as `/bin/sh <dir>/cmd`, never
+  passed as a string: util-linux's `-c` string is run by the person's `$SHELL`, which
+  re-parses it — csh and tcsh refuse the newline every command carries (the pwd
+  trailer), fish reads backslashes its own way. So BSD/macOS
+  `script -q <rec> /bin/sh <dir>/cmd` (its exit code is the child's; a child killed by
   a signal comes back as the bare signal number), util-linux
-  `script -q -e -c "/bin/sh -c '<cmd>'" <file>` — which one is asked once per process
-  (`command -v script`, then `script --version`: util-linux names itself, BSD refuses
-  the option). The shell, the directory and its rules are `!`'s own (the same
+  `script -q -e -c "/bin/sh '<dir>/cmd'" <rec>` — the path is checked to be one every
+  shell reads plainly inside single quotes (`scriptCommand` refuses any other), and a
+  test runs that string through every shell on the machine. Which `script` is asked
+  once per process (`command -v script`, then `script --version`): util-linux names
+  itself, BSD is told POSITIVELY (its usage line, or the system is Darwin / a BSD);
+  anything else is not used, and the program runs unrecorded. The shell, the directory and its rules are `!`'s own (the same
   `withPwdTrailer`; a `cd` outside the roots is not remembered); the environment is the
   person's UNTOUCHED — `!`'s `PAGER=cat` and `GIT_TERMINAL_PROMPT=0` exist because
   nobody can answer a prompt there, and here somebody is. No time limit. The child
@@ -1365,17 +1372,28 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   own its first read would stop it). While it runs no key reaches the chat (the TTY
   backend stops reading stdin for the hand-over; the test backend does not, so there
   is no test of that) and Esc / Ctrl+C are the program's: `holdSignals` puts a no-op
-  on SIGINT and SIGQUIT and takes the other listeners off for the duration — flowtty
-  unmounts the app on SIGINT whatever else listens, and without `script` the terminal
-  is in its normal mode and sends SIGINT to the whole group — then puts them back in
-  order. On return only the recording's last `RECORDING_READ_MAX` (1 MiB) is read
+  on SIGINT, SIGQUIT and SIGCONT and takes the other listeners off — flowtty unmounts
+  the app on SIGINT whatever else listens, and without `script` the terminal is in its
+  normal mode and sends SIGINT to the whole group — then puts them back in order. It
+  wraps the WHOLE hand-over (`holdSignals(… suspend(… spawn))`) and gives them back one
+  event-loop turn after the terminal is the app's again, so a signal raised by the
+  program's last keys is never the app's. SIGCONT is held for Ctrl+Z inside a program
+  run WITHOUT `script`: it stops the app too, and on `fg` the TTY backend's own
+  SIGCONT listener used to take the terminal back while the program still ran; held,
+  the program keeps it until it ends and the hand-over's own return repaints. (Reasoned
+  from the backend's code, not tried in a live terminal.) On return only the recording's last `RECORDING_READ_MAX` (1 MiB) is read
   (`readTail`, from a whole line; the bytes skipped count into `cut`) — a program left
   running for hours must not cost a long freeze. `cleanRecording` resolves it as a
   terminal would have left it (`\r` back to the line start and overwrite, `\b` back
-  without erasing, `ESC[K`, `ESC[nG`; what was drawn on the ALTERNATE screen —
-  `?1049`/`?1047`/`?47` — dropped, as it is gone once the program leaves, or every
-  vim/less/top redraw would reach the model; every other sequence dropped; util-linux's
-  header lines dropped), then `sanitizeViewText`; the model gets its END capped at
+  without erasing, `ESC[K`, `ESC[nG`/`ESC[nC` — columns clamped at 4096; what was drawn
+  on the ALTERNATE screen — `?1049`/`?1047`/`?47` — dropped, as it is gone once the
+  program leaves, or every vim/less/top redraw would reach the model, and a tail whose
+  first toggle is an EXIT began inside it, so all before that goes too; string
+  sequences — OSC, DCS (sixel), APC (kitty graphics), PM, SOS — dropped whole, each
+  ending at BEL/ST, the next ESC or 4096 characters; every other sequence dropped;
+  util-linux's header lines dropped). Every pattern is bounded: an unterminated OSC
+  used to be a lazy match to the end, quadratic over a 1 MiB tail (13 s measured);
+  a test holds 20k of them under a second. Then `sanitizeViewText`; the model gets its END capped at
   `shell.maxChars`, the view `capConsoleText`. The temp directory goes in a `finally`,
   whatever happened. The
   result is the same `shell` message and console view as `!`'s, marked `interactive`
@@ -1388,16 +1406,17 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   left once a full-screen program's own screen is dropped (`!!vim`, `less`, `top`) —
   and the run is a block on screen only: no `apiRef` entry, no turn, a dim `note`
   saying the assistant was not asked (a turn on "(no output)" is a request for
-  nothing). The chat stays busy from the command into the ask's turn, so a message
+  nothing). Whatever the program echoed — a value typed at a prompt that echoes it back
+  (a password prompt does not) — is part of the recording: it is sent to the model and
+  saved with the session. `sessionTitle` skips the ask (`hostAsk`): a session is named
+  by what the person said. The chat stays busy from the command into the ask's turn, so a message
   typed in between queues behind the ask and follows the queue's rules. Refused while anything runs, exactly as `!` is: a
   recording landing in the middle of a running turn's history would split it, and a
-  y/n could wait unseen behind the program. No `script` on PATH: the program still runs
-  with the terminal through `/bin/sh -c` and the view shows how it ended. Tests inject `services.interactive`
+  y/n could wait unseen behind the program. No usable `script`: the program still runs
+  with the terminal through `/bin/sh <dir>/cmd` and the view shows how it ended. Tests inject `services.interactive`
   (`InteractiveDeps`: `detect`, `spawn`, `signals` — `renderApp`'s `interactive`,
   `bootApp`'s `opts.interactive`; by default a test has no `script` and a spawn that
-  exits 0) and never reach the machine's `script` or the process's signals. Open:
-  Ctrl+Z inside a program run WITHOUT `script` stops the app too, and on `fg` the
-  backend's SIGCONT handler takes the terminal back while the program still runs.
+  exits 0) and never reach the machine's `script` or the process's signals.
 - A `/command` **completes inline**, like a shell's autosuggestion: the part not
   typed yet is drawn after the caret in the dimmed accent colour, the other
   candidates follow as `⇥ a · b`, **Tab** takes the offer and then walks the rest.
