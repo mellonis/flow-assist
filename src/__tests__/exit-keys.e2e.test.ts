@@ -236,3 +236,29 @@ test('↑ on an empty field takes the last queued message back; with the queue e
   expect(ui.backend.lastFrame).toContain('› earlier prompt');
   ui.app.unmount();
 });
+
+for (const stop of ['escape', 'ctrl+c'] as const) {
+  test(`a message queued behind a running !command comes back into the field when ${stop === 'escape' ? 'Esc' : 'Ctrl+C'} stops it`, async () => {
+    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-exitkeys-sh-')));
+    const model = new ScriptedModel();
+    const ui = await bootApp(model, 110, 30, undefined, { shell: { roots: [root] } });
+    await ui.press('F');
+    const t0 = Date.now();
+    await ui.type('!sleep 5');
+    await ui.press('return');
+    await settleUntil(() => ui.backend.lastFrame.includes('sleep 5'));
+    await ui.type('after the command');
+    await ui.press('return');
+    expect(ui.backend.lastFrame).toMatch(/queued: after the command/);
+
+    if (stop === 'escape') await ui.press('escape'); else expect(await ctrl(ui, 'c')).toBe(true);
+    await settleUntil(() => ui.backend.lastFrame.includes('› after the command'));
+    expect(ui.backend.lastFrame).toContain('stopped');
+    expect(ui.backend.lastFrame).toContain('› after the command');
+    expect(ui.backend.lastFrame).not.toMatch(/queued:/);
+    expect(model.requests).toHaveLength(0);
+    expect(ui.exits()).toBe(0);
+    expect(Date.now() - t0).toBeLessThan(4500); // the process was killed, not waited for
+    ui.app.unmount();
+  });
+}
