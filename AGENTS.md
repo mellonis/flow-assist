@@ -301,7 +301,9 @@ session (never saved); an old `fullscreen: true` reads as `full` (`chatModeOf`),
   Both are the assistant's bindings (`keys`, so a person moves them) but the App takes
   them in its `useInput` right after the exit keys and BEFORE `twoPhaseDispatch`
   (`store.chat.panelKey`), so a plugin consuming every key, or its modal, can never keep
-  the person from the chat. With the plugin focused the chat's handler sits at priority
+  the person from the chat — except the `:` line: while it is open it owns the keyboard,
+  as it does for the exit keys, and neither key acts (nor types a control byte into
+  it). With the plugin focused the chat's handler sits at priority
   1 and answers no key but the wheel over its conversation; its `ScrollList` gets
   `isActive: false`, so PgUp/PgDn are the plugin's; Ctrl+C / Ctrl+D are the plugin
   side's too (`ctrlKey` answers nothing). The focused side is marked: the panel's frame

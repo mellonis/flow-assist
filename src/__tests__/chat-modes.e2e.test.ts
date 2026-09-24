@@ -378,3 +378,24 @@ test('every chat row is one terminal line at the panel\'s width — steps, calls
   for (const line of rows(ui).slice(1, 39)) expect(line.trimEnd().endsWith('│')).toBe(true);
   ui.app.unmount();
 });
+
+// The `:` line owns the keyboard while it is open: Ctrl+] and the collapse key are
+// not taken from it — in a window, the chat would open over the line and what was
+// typed would go into a line nobody sees.
+test.each(['window', 'panel'] as const)('with the : line open, Ctrl+] and Ctrl+\\ leave it alone (%s)', async (mode) => {
+  const g = guest();
+  const ui = await bootApp(new ScriptedModel(), 160, 40, g.make as never, {}, { chatMode: mode });
+  await ui.press(':');
+  for (const key of [CTRL_RIGHT_BRACKET, COLLAPSE]) {
+    await press(ui, key);
+    expect(chatFrame(ui).top).toBe(-1);
+    expect(g.ft().store.chat.open).toBe(false);
+  }
+  await ui.type('ab');
+  expect(rows(ui).some((l) => l.includes(': ab'))).toBe(true);
+  // Closed, the line gives them back.
+  await ui.press('escape');
+  await press(ui, CTRL_RIGHT_BRACKET);
+  expect(chatFrame(ui).top).toBeGreaterThanOrEqual(0);
+  ui.app.unmount();
+});

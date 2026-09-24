@@ -629,8 +629,9 @@ export function renderApp(
           notify();
           return true;
         }
-        // A character, not a chord: Ctrl+D or Alt+x typed no `d` / `x` into the line.
-        if (name.length === 1 && !key.ctrl && !key.meta) {
+        // A character, not a chord: Ctrl+D or Alt+x typed no `d` / `x` into the line —
+        // nor a control byte, which is how Ctrl+] arrives (0x1d).
+        if (name.length === 1 && name >= ' ' && !key.ctrl && !key.meta) {
           cmdline.current.input += name;
           notify();
           return true;
@@ -710,9 +711,11 @@ export function renderApp(
       // Ctrl+] moves the keyboard between the chat and the plugin, and the collapse key
       // folds the docked chat away and back. Taken here, before any handler, as the
       // exit keys are: a plugin that consumes every key, or one of its modals, must
-      // never be able to keep the person from the chat.
+      // never be able to keep the person from the chat. Not while the `:` line is
+      // open, though: it owns the keyboard then (as with the exit keys above), and a
+      // chat opened over it would leave what is typed going into a line nobody sees.
       const chat = chatStore();
-      const panelKey = isKey(keys.chatFocus ?? [], k) ? 'focus' : isKey(keys.chatCollapse ?? [], k) ? 'collapse' : null;
+      const panelKey = ui.cmdOpen ? null : isKey(keys.chatFocus ?? [], k) ? 'focus' : isKey(keys.chatCollapse ?? [], k) ? 'collapse' : null;
       if (panelKey && chat?.panelKey?.(panelKey)) { notify(); return true; }
       // A press anywhere tells the chat which pane it landed in (the keyboard follows
       // it). The button goes on as before: a click in the panel may open a fold, and a
