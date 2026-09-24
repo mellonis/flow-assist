@@ -31,10 +31,9 @@ export interface FTRuntime {
   Link: unknown;
   // Choosing (flowtty's docs/components.md, Choosing): `Select` is a dropdown — a
   // one-line field whose popup the host's <DialogHost> opens; `ListSelect` and
-  // `ListMultiSelect` are the inline lists (the old `Select` / `MultiSelect`, renamed
-  // in flowtty 1.0.0-alpha.24 with no aliases). All three hear flowtty's own input, not
-  // `useInputHandler`: a plugin passes `isFocused` from its own state, false whenever
-  // its side does not have the keyboard.
+  // `ListMultiSelect` are the inline lists. All three hear flowtty's own input, not
+  // `useInputHandler`, and take the keys they act on: a plugin passes `isFocused` from
+  // its own state, false whenever its side does not have the keyboard.
   Select: unknown;
   ListSelect: unknown;
   ListMultiSelect: unknown;

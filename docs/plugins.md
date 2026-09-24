@@ -234,13 +234,15 @@ setup: (ft) => { /* once, before any component mounts: seed a store */ },
   screen. flowtty's docs/components.md (Choosing) says which to reach for. They hear
   flowtty's own input, not `ft.useInputHandler`, so a mounted one would hear every
   key — what the person types in the chat included: pass `isFocused` from your own
-  state, and false while the chat has the keyboard (`ft.store.chat.open` with
-  `ft.store.chat.focus` not `'plugin'`).
-  **Renamed:** flowtty 1.0.0-alpha.24 renamed the inline lists — the old `Select` is
-  `ListSelect`, the old `MultiSelect` is `ListMultiSelect` (the props are the same),
-  and `Select` is now the dropdown. There are no aliases: a plugin that took the old
-  names from flowtty renames them, or it gets a dropdown where it drew a list, and
-  nothing at all for `MultiSelect`.
+  state: true only while the picker is what the person is using. The host has no
+  single "the plugin has the keyboard" flag yet; the keyboard is not the plugin's
+  while the chat has it (`ft.store.chat.open` with `ft.store.chat.focus` not
+  `'plugin'`), while the `:` line is open, or while the log or the help is up.
+  A focused picker takes the keys it acts on — a `ListSelect` takes what is typed as
+  its filter, so the host's own letters (`F`, `:`) do not reach the host while it has
+  the focus; Ctrl+] and the exit keys always do. The names are flowtty's own: a plugin
+  that imports the pickers from flowtty uses `Select` for the dropdown and
+  `ListSelect` / `ListMultiSelect` for the lists — flowtty has no `MultiSelect`.
 - Keys come through `ft.useInputHandler({ mode, priority, handler })`. `mode` is
   `'consume'` (joins the race for the key) or `'observe'` (sees every key, takes
   none). Handlers run from the highest `priority(ui)` down, and a handler takes the

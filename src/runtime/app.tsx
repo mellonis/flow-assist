@@ -207,6 +207,13 @@ type ChatStore = {
   statusRow?: unknown;
 };
 
+// The first handler flowtty delivers a key to (see `firstKeys` in the App). It draws
+// nothing, and stays mounted as the App's first child for the App's whole life.
+function HostKeysFirst({ take }: { take: { current: (key: unknown) => unknown } }) {
+  useInput((key) => take.current(key));
+  return null;
+}
+
 // How often a console line may redraw the App (see `consoleLog` in renderApp) — the
 // chat's own rate for a view that updates fast.
 const CONSOLE_REDRAW_MS = 200;
@@ -236,8 +243,8 @@ export function renderApp(
   // A console line reaches the log as soon as it is printed, and an open log shows it:
   // the App is asked to redraw — once the App is up, and at most once per
   // CONSOLE_REDRAW_MS. Not per line, as `pushLog` does: a plugin that prints on every
-  // render (a debug line left in a view) is redrawn by the redraw its line asked for,
-  // prints again, and the app spun in a loop — some 3000 renders a second.
+  // render (a debug line left in a view) is redrawn by the redraw its line asked for
+  // and prints again, so a redraw per line would never stop.
   let pushLogBound = false;
   let consoleRedraw: ReturnType<typeof setTimeout> | null = null;
   consoleLog?.attach((line) => {
@@ -706,7 +713,15 @@ export function renderApp(
     useEffect(() => () => { if (armTimer.current) clearTimeout(armTimer.current); }, []);
     const chatStore = () => (ft.store as { chat?: ChatStore } | undefined)?.chat;
 
-    useInput((key) => {
+    // The host's own keys — the exit keys, Ctrl+] and the collapse key, where a press
+    // landed — are heard FIRST, before any component on screen: `HostKeysFirst` is the
+    // App's first child, so its handler is the first flowtty delivers a key to. A
+    // flowtty component takes the keys it acts on (a focused list takes what is typed
+    // as its filter, the 0x1d of Ctrl+] included), and one in a plugin's screen would
+    // otherwise keep the person from the chat. The rest of the key path, the App's own
+    // `useInput` below, comes after the components mounted with the App.
+    const firstKeys = useRef<(key: unknown) => unknown>(() => undefined);
+    firstKeys.current = (key) => {
       const k = key as unknown as InputKey;
       // The three keys flowtty lets an app take before the terminal backend acts
       // (exit, exit, suspend). Taken here, before any handler: the y/n pause, an open
@@ -752,6 +767,10 @@ export function renderApp(
       // it). The button goes on as before: a click in the panel may open a fold, and a
       // drag still selects.
       if (k.name === 'mousedown' && typeof k.x === 'number' && typeof k.y === 'number') chat?.pointer?.(k.x, k.y);
+      return undefined;
+    };
+    useInput((key) => {
+      const k = key as unknown as InputKey;
       // A handled key is followed by a redraw. A plugin keeps its state in one component
       // and draws it in a sibling; a React setState in the first re-renders only the
       // first, and the sibling redraws when the HOST does. That took an explicit
@@ -761,8 +780,7 @@ export function renderApp(
       // whatever the handler set.
       // `twoPhaseDispatch`'s true means "handled — redraw", not "consume": the chat
       // answers true for every key, PgUp and the wheel included, which the
-      // conversation's scroll list hears on its own. So nothing but the keys above is
-      // consumed here.
+      // conversation's scroll list hears on its own. So nothing is consumed here.
       if (twoPhaseDispatch(inputRegistryRef.current, ui, k, () => hostFallback(k))) notify();
       return undefined;
     });
@@ -857,6 +875,7 @@ export function renderApp(
     return h(
       Box,
       { flexDirection: dock?.side === 'right' ? 'row' : 'column', width: termWidth, height: termHeight },
+      h(HostKeysFirst, { take: firstKeys }),
       h(AreaContext.Provider, { value: region },
       // The plugin's side of the screen. A drag that starts here stays here — never
       // into the panel beside it.

@@ -127,13 +127,13 @@ before any of the plugin's components mount (it is where a plugin seeds its stor
 the blacklist.
 
 - **`ft`'s flowtty components** are `Box`, `Text`, `Markdown`, `Table`, `Link` and the
-  three pickers: `Select` (flowtty's dropdown since 1.0.0-alpha.24 — its popup is a
-  floating dialog, so the App is rendered under a `<DialogHost>` at the frame's origin,
-  and while a popup is open the App's one `useInput`, the host's whole key path, is
-  muted: Ctrl+C then exits at once, Ctrl+] waits for the popup to close), `ListSelect`
-  and `ListMultiSelect` (the inline lists, flowtty's old `Select` / `MultiSelect`,
-  renamed with no aliases). They hear flowtty's input, not `useInputHandler`, so a
-  plugin gates them with `isFocused` (docs/plugins.md says how).
+  three pickers: `Select` (flowtty's dropdown — its popup is a floating dialog, so the
+  App is rendered under a `<DialogHost>` at the frame's origin, and while a popup is
+  open the host's whole key path is muted: Ctrl+C then exits at once, Ctrl+] waits
+  for the popup to close), `ListSelect` and `ListMultiSelect` (the inline lists).
+  They hear flowtty's input, not `useInputHandler`, and take the keys they act on — a
+  focused `ListSelect` takes what is typed as its filter — so a plugin gates them
+  with `isFocused` (docs/plugins.md says how).
 - **`modalColors`** — per modal the plugin draws, what its palette differs in from
   the host's modal base (`{ relation: { border: 'blue' } }`). `resolveModalPalettes`
   (`src/playback/theme.ts`) lays it on the base into `theme.modals.<modal>`; the
@@ -306,9 +306,9 @@ session (never saved); an old `fullscreen: true` reads as `full` (`chatModeOf`),
   terminal where no growth can hold it (100×22: the default panel is 12 rows, the
   question 17). Collapsed, nothing is needed (the strip says it waits).
 - **In a chat with few rows the plan gives way, never the field.** The field's group
-  never shrinks (`flexShrink: 0`, its whole height kept — without it a 12-row bottom
-  panel with a three-item plan lost the field, its hint and the conversation, and only
-  the plan was left) and the conversation keeps at least one row. The `todo` plan is
+  never shrinks (`flexShrink: 0`, its whole height kept, so a 12-row bottom panel with
+  a three-item plan still shows the field and its hint) and the conversation keeps at
+  least one row. The `todo` plan is
   what yields: whole when it fits, else ONE row — `▸ plan 2/3 · <item>`, the item in
   progress (else the first pending) by its place in the plan, cut to the width — and
   whole again when there is room (`planFit` / `planLine` in `views/modals.ts`, the
@@ -347,7 +347,7 @@ session (never saved); an old `fullscreen: true` reads as `full` (`chatModeOf`),
   `buildKeys` refuses a key that types for `APP_TAKEN_ACTIONS`, logs one line and keeps
   the plugin's default, since a letter taken before every handler would break typing
   everywhere and could not be undone from inside the app) but the App takes
-  them in its `useInput` right after the exit keys and BEFORE `twoPhaseDispatch`
+  them right after the exit keys and BEFORE `twoPhaseDispatch`
   (`store.chat.panelKey`), so a plugin consuming every key, or its modal, can never keep
   the person from the chat — except the `:` line: while it is open it owns the keyboard,
   as it does for the exit keys, and neither key acts (nor types a control byte into
@@ -1088,9 +1088,16 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
 - **Ctrl+C, Ctrl+D and Ctrl+Z take a second press** (`src/runtime/exit-keys.ts`, pure;
   the App owns the arm). flowtty hands these three to the app BEFORE the terminal
   backend acts (exit, exit, suspend — skipped when a `useInput` handler returns strict
-  `true`), and one stray press used to end the app mid-answer. The App's `useInput`
-  takes them before `twoPhaseDispatch`, since the y/n pause, an open question and a
-  modal's catch-all swallow every key: the first press arms and is consumed, the status
+  `true`), and one stray press used to end the app mid-answer. The App takes them
+  before `twoPhaseDispatch`, since the y/n pause, an open question and a modal's
+  catch-all swallow every key — and before every flowtty component: flowtty delivers a
+  key to its `useInput` handlers in subscription order (children before parents at
+  mount, a later mount after), and a component takes the keys it acts on (a focused
+  `ListSelect` takes what is typed as its filter, the 0x1d of Ctrl+] with it). So the
+  exit keys, Ctrl+], the collapse key and the pointer's pane are handled by
+  `HostKeysFirst`, the App's first child — the first handler a key reaches — and the
+  rest of the host's key path, `twoPhaseDispatch`, by the App's own `useInput`, which
+  consumes nothing: the first press arms and is consumed, the status
   line says `^c again to exit` / `^d again to exit` / `^z again to suspend` (the cap
   from `keyGlyph`, in the chat where `Esc again to exit` is — `services.armedHint` —
   and on the bottom row of every other screen); the same key within `ARM_MS` (2 s)
@@ -1798,16 +1805,16 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   plugin with a child process to stop adds one — under the rules in "A plugin that
   starts a process owns its life", which keep flowtty's own re-raise working.
 - **The console goes to the log.** While the TTY backend owns the screen it takes
-  `console.log` / `info` / `debug` / `warn` / `error` over (flowtty ≥ 1.0.0-alpha.25)
-  — a line printed there used to land in the frame. `runInteractive` passes it
+  `console.log` / `info` / `debug` / `warn` / `error` over, so a line printed there
+  never lands in the frame. `runInteractive` passes it
   `onConsole` (`consoleBridge`, `src/runtime/console-log.ts`) and each line goes to the
   host log (`L`) at once as `[console] …` / `[console.warn] …`, one entry per line of
   it. With `onConsole` set flowtty prints nothing again at exit, so the log is where
   such a line is read. Delivery is always on a microtask — React prints its warnings
   mid-render, and the log's refresh is a setState — and the redraw a line asks for is
   coalesced to one per `CONSOLE_REDRAW_MS` (200 ms), never one per line: a view that
-  prints on every render is redrawn by its own line's redraw, and per line that was a
-  loop of ~3000 renders a second. Lines printed before the App is up go into the
+  prints on every render is redrawn by its own line's redraw, and a redraw per line
+  would be a loop. Lines printed before the App is up go into the
   buffer with no redraw. Direct writes to `process.stdout` / `stderr` are not covered.
 
 `flow-assist` with subcommands:

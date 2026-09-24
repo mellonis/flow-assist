@@ -1,7 +1,6 @@
 // flowtty's pickers reach a plugin through `ft`: `Select` is the dropdown, whose popup
 // is a floating dialog the host's <DialogHost> opens; `ListSelect` / `ListMultiSelect`
-// are the inline lists (flowtty's old `Select` / `MultiSelect`, renamed in
-// 1.0.0-alpha.24 with no aliases). docs/plugins.md says how a plugin gates them.
+// are the inline lists. docs/plugins.md says how a plugin gates them.
 import { afterEach, expect, test } from 'bun:test';
 import { ScriptedModel, bootApp } from './helpers/scripted';
 
@@ -81,5 +80,33 @@ test('ft.ListSelect and ft.ListMultiSelect are the inline lists', async () => {
   for (const l of ['Frontend', 'Backend', 'Design']) expect(ui.backend.lastFrame).toContain(l);
   await ui.press(' ');
   expect(many.chosen.at(-1)).toEqual(['fe']);
+  ui.app.unmount();
+});
+
+test('with the popup open, Ctrl+C is not taken: the backend exits at once', async () => {
+  const g = guest('Select');
+  const ui = await bootApp(new ScriptedModel(), 100, 28, g.make as never);
+  await ui.press('down');
+  expect(ui.backend.lastFrame).toContain('Design');
+  // Not consumed — by the popup, or by the host's arm under the DialogHost — so the
+  // TTY backend's own default, exit, runs.
+  expect(ui.backend.press({ name: 'c', ctrl: true })).toBe(false);
+  ui.app.unmount();
+});
+
+test('a focused ListSelect takes what is typed as its filter; Ctrl+] still reaches the host', async () => {
+  const g = guest('ListSelect');
+  const ui = await bootApp(new ScriptedModel(), 100, 28, g.make as never);
+  // `F` would open the chat; the focused list takes it for its filter.
+  await ui.type('F');
+  expect(ui.backend.lastFrame).not.toContain('Flow Assist');
+  expect(ui.backend.lastFrame).toContain('Frontend');
+  expect(ui.backend.lastFrame).not.toContain('Design');
+  // The host's chord is not the list's: the chat opens, and the list, no longer
+  // focused, leaves what is typed to it.
+  await ui.press('\x1d');
+  await ui.type('De');
+  expect(ui.backend.lastFrame).toContain('Flow Assist');
+  expect(ui.backend.lastFrame).toContain('› De');
   ui.app.unmount();
 });

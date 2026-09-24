@@ -1,7 +1,7 @@
 // What a `console.log` / `warn` / `error` printed while the app owns the screen — a
 // plugin's stray line, a library's, React's own warnings — goes to the host log (`L`)
 // at once. The TTY backend takes the console over while it holds the alternate screen
-// (flowtty ≥ 1.0.0-alpha.25) and hands each line to `onConsole`; with that set it
+// and hands each line to `onConsole`; with that set it
 // prints nothing at exit, so the log is where such a line is read.
 //
 // A line is never logged where it was printed: React prints its warnings in the middle

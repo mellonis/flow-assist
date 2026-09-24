@@ -1403,8 +1403,8 @@ export function renderChatModal({
             input ? null : h(Text, { dim: true }, ` · ${keyGlyph('up')} takes it back`))
         : null,
       // The input field group (the y/n confirm block or the multiline input box). It
-      // never shrinks: without `flexShrink: 0` a small panel with a plan squeezed the
-      // field — and its hint — out of sight.
+      // never shrinks: in a small panel the plan gives way (`planFit`), the field and
+      // its hint keep their rows.
       h(Box, { flexDirection: 'column', width: '100%', flexShrink: 0 },
         pendingQuestion
           ? renderAsk(pendingQuestion, m.bg, wrap)

@@ -5,7 +5,7 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
-- **flowtty 1.0.0-alpha.25.** **For plugin authors:** `ft` now offers flowtty's
+- **flowtty 1.0.0-alpha.26.** **For plugin authors:** `ft` now offers flowtty's
   pickers — `ft.Select`, a dropdown (the host keeps the `<DialogHost>` its popup
   needs), and `ft.ListSelect` / `ft.ListMultiSelect`, the inline lists. flowtty
   renamed those lists in alpha.24 with no aliases: its old `Select` is `ListSelect`
@@ -13,7 +13,11 @@ What each version of flow-assist brought, newest first. The version is the one i
   now the dropdown — a plugin that took the old names from flowtty must rename them.
   They hear flowtty's own input, so a plugin gates them with `isFocused`
   (docs/plugins.md). While a dropdown is open every key is its own: Ctrl+] waits for
-  it to close, and Ctrl+C exits at once rather than asking twice.
+  it to close, and Ctrl+C exits at once rather than asking twice. Since alpha.26
+  flowtty's components take the keys they act on — a focused `ListSelect` takes what
+  is typed as its filter, so `F` or `:` do not reach the host while it has the focus.
+  The host's own chords (Ctrl+], the collapse key, the exit keys) are heard before any
+  component, so no picker in a plugin's screen can keep the person from the chat.
 - **A stray `console.log` no longer lands on the screen.** What a plugin, a library or
   React prints through the console while the app runs goes to the log (`L`) at once,
   as `[console] …`, `[console.warn] …` or `[console.error] …`, and is not printed

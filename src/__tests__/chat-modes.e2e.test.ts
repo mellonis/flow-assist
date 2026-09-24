@@ -675,9 +675,7 @@ test.each(['window', 'panel'] as const)('with the : line open, Ctrl+] and Ctrl+\
 });
 
 // A small docked chat with a plan: the field never shrinks, the conversation keeps a
-// row, and the plan is what gives way — ONE row, whole again in a panel with room. It
-// used to be the field's group that shrank, so the field and the conversation vanished
-// and only the plan was left.
+// row, and the plan is what gives way — ONE row, whole again in a panel with room.
 test.each([[30, 'line'], [60, 'full']] as const)('a bottom panel on a %i-row terminal with a three-item plan: the field whole, the plan as %s', async (height, shape) => {
   const model = new ScriptedModel();
   model.script(
