@@ -525,7 +525,14 @@ session (never saved); an old `fullscreen: true` reads as `full` (`chatModeOf`),
   load reaches the next round of the same turn. A call to a tool that is indexed but
   not loaded is an ERROR naming `tools_load`, refused BEFORE the y/n — the wire-name
   map covers every known tool, not only the sent ones, or that call would not even
-  resolve. The loaded set is a `ToolSet` owned like the plan: the chat's `toolSetRef`
+  resolve. `names` also takes a tool QUALIFIED with its group, `<group>:<name>`, as
+  well as the bare name the index shows — the index reads as `group:\n- name — …`, so
+  a model reasonably repeats the two together, and it used to cost a whole round on
+  `ERROR: Not in the list` (`unqualify`, `tool-loading.ts`: stripped only as a
+  fallback, when the bare name misses and the prefix names the group that bare tool
+  is actually in — a name already in the list, bare or genuinely qualified by a
+  clash, is tried first and never rewritten). An unknown name still errors, listing
+  the groups. The loaded set is a `ToolSet` owned like the plan: the chat's `toolSetRef`
   (saved as the session's `tools`, kept by `/compact`, emptied by `/clear`); a background run and the one-shot CLI start from an empty one.
   `agentChat`'s own default is `'all'` — the mode is applied by `services.chatLLM`
   and `runPrompt` from config — and `bootApp` pins `'all'` so an e2e script can call
@@ -778,6 +785,31 @@ hardest. Rules the `repo` and `gitlab` plugins hold, each with a test that tries
   "unavailable" — nothing ever supplied its context — yet it sat first in the list
   and the model called it. A dead tool costs a call, tokens on every request, and a
   wrong turn in the reasoning. Remove it, do not leave it answering "unavailable".
+- **A result over `ai.toolResultMaxChars` (default 40000) is cut before it joins the
+  model's history** (`src/assistant/tool-result-cap.ts`, pure; applied where the tool
+  message is built, `agentChat`'s tool-run path — plugin tools and host tools alike,
+  `run_command` included). A plugin's board-listing tool once answered a "list" with
+  the whole board as raw JSON, 391,864 characters, and that stayed in the model's
+  history: every later request carried it, and the model misread a transition title
+  next to an issue key for the issue's own status. The cut keeps the head (90% of the
+  cap) and a short tail (the rest), with a note between them the model reads in place
+  of what was cut: `… [cut: <N> characters in all — ask the tool for less: filters, a
+  limit, one item]` — the note rides outside the cap, so the caller gets at most the
+  cap plus the note. Only what is SENT is capped: a view (`ctx.liveView`/
+  `reportView`), the tool trail and `ctx.reportChange`'s diff are display and
+  untouched — `run.detail` (the trail's, the log's, the session's) keeps the result
+  whole; only the `role: 'tool'` message pushed into `current` (and so into
+  `transcript`/`apiRef`) is capped, once, for good. A tool declares its own
+  `maxResultChars` on the tool def (the plugin tool type, `src/loader/tools.ts`) to
+  raise its OWN cap — for one whose result is large and worth the tokens — clamped to
+  a hard ceiling (200000) so a plugin cannot flood the history by declaring a bigger
+  number; it is stripped before the def reaches the wire, like `write`/`run`.
+  `run_command` already keeps only the tail of its own output (`shell.maxChars`,
+  default 20000) before this cap ever sees it, so the smaller of the two numbers
+  wins without either needing to know about the other. `services.chatLLM` and the
+  one-shot CLI resolve `ai.toolResultMaxChars` once from config
+  (`toolResultCapFromConfig`) and pass it as `agentChat`'s `toolResultMaxChars`; a
+  caller that says nothing gets `TOOL_RESULT_MAX_CHARS_DEFAULT`.
 
 ## The conversation the model sees
 

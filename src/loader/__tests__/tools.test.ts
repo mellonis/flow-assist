@@ -392,6 +392,22 @@ test('the model gets no `config` and no `log` tool — only the read-only `confi
   expect(reg.tools.find((t) => t.function.name === 'config_schema')?.write).toBeUndefined();
 });
 
+test('a plugin tool\'s maxResultChars never reaches the wire-facing tool def', () => {
+  // The wire-facing `reg.tools` (LLM-facing, `write`/`run` tree-shaken out by
+  // `stripTool`) must not carry the per-tool result cap either — it is host-side
+  // bookkeeping (src/assistant/agent.ts), not something a provider understands.
+  const make = makeFactory({});
+  const plugins = [
+    make('t', {
+      aiTools: [{ type: 'function', function: { name: 't:wide', description: 'wide', parameters: { type: 'object', properties: {} } }, maxResultChars: 100_000, run: async () => 'x' }],
+    }),
+  ];
+  const reg = assembleToolRegistry({ plugins, config: {}, repo: { list: async () => [] } as any });
+  const wireDef = reg.tools.find((t) => t.function.name === 't:wide');
+  expect(wireDef).toBeDefined();
+  expect((wireDef as Record<string, unknown>).maxResultChars).toBeUndefined();
+});
+
 test('config_schema shows structure, defaults and set/unset — never a value', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'fa-cfgschema-'));
   const local = join(dir, 'config.local.json');
@@ -400,6 +416,9 @@ test('config_schema shows structure, defaults and set/unset — never a value', 
   const out = await reg.exec('config_schema', {}, { configLocalPath: local });
   expect(out).toMatch(/- ai\.model: string — set/);
   expect(out).toMatch(/- ai\.stream: true\|false — unset/);
+  // An unset ai.toolResultMaxChars carries its active default, so the model can
+  // explain the cap accurately instead of guessing.
+  expect(out).toMatch(/- ai\.toolResultMaxChars: number — unset \(default: 40000 — a tool result longer than this is cut/);
   expect(out).toMatch(/- user\.name: string — set/);
   for (const secret of ['secret-model-name', 'llm.internal.example', 'Ada Lovelace']) expect(out).not.toContain(secret);
   // The model once claimed "cache is off by default": an unset key carries its ACTIVE default.

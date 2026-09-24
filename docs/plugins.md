@@ -150,6 +150,18 @@ What the host does with it, and what it expects back:
   its description up to the first full stop — and the model loads the ones it needs
   (`tools_load`) before calling them. Make that sentence say what the tool is for;
   put details after it. (`ai.toolLoading: "all"` sends every definition in full.)
+  `tools_load` also accepts the name qualified with its group, `<group>:<name>`, as
+  well as the bare name the index shows — the index reads naturally either way, and a
+  model that qualifies it is not refused for a round.
+- **A result over `ai.toolResultMaxChars` (default 40000) is cut before it joins the
+  conversation** — the head kept, a short tail too, and a note in between saying how
+  much was cut (src/assistant/tool-result-cap.ts). Only what is SENT is capped: a
+  view, the tool trail and `ctx.reportChange`'s diff show what really happened,
+  uncapped. A tool that knows its own result is large and worth the tokens (a
+  paginated read at its widest page) declares its own `maxResultChars` on the tool
+  def, clamped to a hard ceiling (200000) so it cannot flood the history by declaring
+  a bigger number: `{ type: 'function', function: { name: 'dump_all', … },
+  maxResultChars: 100_000 }`.
 
 `aiTools` is the other shape: standalone tools, each with its own `run(args, ctx)`,
 for a plugin that has no group.

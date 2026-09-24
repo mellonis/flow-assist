@@ -35,6 +35,7 @@ import { assembleToolRegistry, pluginConfigs } from './loader/tools.js';
 import { renderApp } from './runtime/app.js';
 import { agentChat } from './assistant/agent.js';
 import { toolLoadingMode } from './assistant/tool-loading.js';
+import { toolResultCapFromConfig } from './assistant/tool-result-cap.js';
 import { llmOpts } from './assistant/llm-endpoint.js';
 import { createLogService } from './runtime/services/log.js';
 import { createServices } from './runtime/services.js';
@@ -272,6 +273,7 @@ async function runPrompt(args: string[], config: Record<string, unknown>, repo: 
     ...llmOpts(ai),
     extraTools: aiTools,
     toolLoading: toolLoadingMode(ai),
+    toolResultMaxChars: toolResultCapFromConfig(ai),
     toolCtx: services as never,
     logToolRun: log.logToolRun,
     onLive: (delta: string) => process.stdout.write(delta),

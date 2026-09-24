@@ -43,6 +43,11 @@ export interface ToolDef {
   write?: boolean | ((args: Record<string, unknown>) => boolean);
   // Present only on `aiTools`: the execution handler.
   run?: (...args: unknown[]) => unknown;
+  // Overrides the conversation's `ai.toolResultMaxChars` for THIS tool's result —
+  // for one a plugin knows returns a lot and is worth the tokens (docs/plugins.md).
+  // Clamped to `TOOL_RESULT_MAX_CHARS_CEILING` (src/assistant/tool-result-cap.ts).
+  // Never sent to the provider: stripped from a wire tool def like `write`/`run`.
+  maxResultChars?: number;
 }
 
 export type AiToolDef = ToolDef & { run: (...args: unknown[]) => unknown };

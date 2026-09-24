@@ -129,11 +129,28 @@ export function toolsToSend(catalog: CatalogEntry[], mode: ToolLoading, set: Too
   ];
 }
 
+// The index shows a tool grouped under its group's name (`repo:\n- read_file — …`),
+// which reads naturally as `<group>:<name>` — a model that passes it that way
+// qualified, exactly as a clash-qualified tool's own name looks, used to get
+// `ERROR: Not in the list` for a whole round. Stripped only as a FALLBACK: a name
+// that is already in `deferred` (bare, or genuinely qualified by a clash — see
+// `register` in ../loader/tools.js) is tried first and never rewritten; this only
+// fires when that lookup misses AND the prefix names the group the bare tool
+// actually belongs to.
+function unqualify(n: string, deferred: Map<string, CatalogEntry>): string {
+  const i = n.indexOf(':');
+  if (i < 0) return n;
+  const rest = n.slice(i + 1);
+  const entry = deferred.get(rest);
+  return entry && groupLabel(entry.group) === n.slice(0, i) ? rest : n;
+}
+
 // A `tools_load` call. Returns what the model reads; throws when nothing it asked for
 // exists, so the result is an ERROR the model cannot mistake for a success.
 export function runToolsLoad(args: Record<string, unknown>, catalog: CatalogEntry[], set: ToolSet): string {
   const deferred = deferredTools(catalog);
-  const asked = Array.isArray(args.names) ? args.names.map(String) : typeof args.names === 'string' ? [args.names] : [];
+  const askedRaw = Array.isArray(args.names) ? args.names.map(String) : typeof args.names === 'string' ? [args.names] : [];
+  const asked = askedRaw.map((n) => (deferred.has(n) ? n : unqualify(n, deferred)));
   const group = typeof args.group === 'string' ? args.group.trim() : '';
   const groups = [...new Set([...deferred.values()].map((e) => groupLabel(e.group)))];
   if (!asked.length && !group) throw new Error(`Pass \`names\` or \`group\`. Groups: ${groups.join(', ')}.`);

@@ -29,6 +29,12 @@ export const hostConfigSchema = z.object({
     // the rest, which the model loads by name (src/assistant/tool-loading.ts). 'all':
     // every tool in full on every request.
     toolLoading: z.enum(['all', 'onDemand']).optional(),
+    // The cap on ONE tool result before it joins the model's history (default 40000
+    // characters, src/assistant/tool-result-cap.ts). A longer result is cut, the head
+    // kept and a short tail, with a note naming how much was cut. Display — a view, the
+    // tool trail — is never capped, only what is sent. A plugin tool may declare its
+    // own `maxResultChars` (docs/plugins.md), clamped to a hard ceiling (200000).
+    toolResultMaxChars: z.number().int().positive().optional(),
     // Images the person attaches in the chat (src/assistant/images.ts): on unless
     // `enabled` is false (a model that cannot take them), the largest file sent as it
     // is (5 MB — a bigger one is refused, never shrunk), how many one message carries (4).

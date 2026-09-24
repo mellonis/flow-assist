@@ -4,6 +4,7 @@ import { agentChat, apiHistory, transcriptSoFar } from '../agent';
 import { assembleToolRegistry } from '../../loader/tools';
 import { makeFactory } from '../../loader/plugin';
 import { VIEW_CAPS } from '../views';
+import { TOOL_RESULT_MAX_CHARS_CEILING, TOOL_RESULT_MAX_CHARS_DEFAULT } from '../tool-result-cap';
 
 test('assistant language fallback: assistantLanguage ?? language ?? en', () => {
   expect(chatLanguage({})).toBe('en');
@@ -115,6 +116,85 @@ test('agentChat tags the model-facing tool result with OK / ERROR / DECLINED', a
   expect(seen).toContain('OK: saved');
   expect(seen).toContain('ERROR: boom');
   expect(seen.some((s) => s.startsWith('DECLINED:'))).toBe(true);
+});
+
+// Runs a two-round turn (one tool call, then a final answer) against a tool
+// returning `result`, with `opts` merged into agentChat's own options. Returns the
+// content of the `role: 'tool'` message the SECOND round was actually sent — the
+// model's next request — and the finished AgentResult (for `toolRuns`). Named
+// differently from the OTHER `runOneToolTurn` below (a `(run, extra)` helper the
+// view tests share) — same-named top-level function declarations in one module
+// silently shadow each other, and the later one wins for every caller.
+async function runToolTurnWithResult(toolDef: Record<string, unknown>, result: unknown, opts: Record<string, unknown> = {}) {
+  const make = makeFactory({});
+  const plugins = [make('t', { aiTools: [{ ...toolDef, run: async () => result }] })];
+  assembleToolRegistry({ plugins, config: {}, repo: { list: async () => [] } as any });
+  let sent = '';
+  let n = 0;
+  const fakeRound = async (messages: any[]) => {
+    if (n === 1) sent = messages.find((m: any) => m.role === 'tool')?.content ?? '';
+    const calls: Record<number, any> = {
+      0: { content: '', finishReason: 'tool_calls', toolCalls: [{ id: '1', name: (toolDef as any).function.name, arguments: '{}' }] },
+      1: { content: 'done', finishReason: 'stop', toolCalls: [] },
+    };
+    return calls[n++];
+  };
+  const res = await agentChat([{ role: 'user', content: 'hi' }], {
+    baseUrl: 'http://x', model: 'm', token: 't', onLiveCommit: () => {}, onLive: () => {}, chatRound: fakeRound, ...opts,
+  });
+  return { sent, res };
+}
+
+test('a tool returning 400k characters is cut to at most the cap plus the note before it joins the model\'s history', async () => {
+  const big = 'A'.repeat(390_000) + 'Z'.repeat(10_000); // 400,000 characters, as in the issue
+  const def = { type: 'function', function: { name: 't:big', description: 'big', parameters: { type: 'object', properties: {} } } };
+  const { sent, res } = await runToolTurnWithResult(def, big);
+
+  const rawSent = `OK: ${big}`; // what the tool result becomes before capping
+  expect(rawSent.length).toBe(400_004);
+  const note = `\n… [cut: ${rawSent.length} characters in all — ask the tool for less: filters, a limit, one item]\n`;
+  // At most the DEFAULT cap plus the note.
+  expect(sent.length).toBeLessThanOrEqual(TOOL_RESULT_MAX_CHARS_DEFAULT + note.length);
+  expect(sent).toContain(note);
+  expect(sent.startsWith('OK: ')).toBe(true);
+
+  // The view / trail is UNCHANGED — the tool run keeps the whole, uncapped result.
+  const run = res.toolRuns.find((r) => r.name === 't:big')!;
+  expect(run.detail).toBe(big);
+  expect((run.detail as string).length).toBe(400_000);
+});
+
+test('a per-tool maxResultChars overrides the conversation default, clamped to the hard ceiling', async () => {
+  // 250,004 chars ("OK: " + 250,000) — over the hard ceiling (200,000), so a tool
+  // that asks for more than the ceiling is still capped AT the ceiling, not at what
+  // it asked for.
+  const huge = 'B'.repeat(250_000);
+  const def = { type: 'function', function: { name: 't:wide', description: 'wide', parameters: { type: 'object', properties: {} } }, maxResultChars: 500_000 };
+  // The conversation's own default is tiny (100) — proof the per-tool cap wins.
+  const { sent } = await runToolTurnWithResult(def, huge, { toolResultMaxChars: 100 });
+
+  const rawLen = `OK: ${huge}`.length;
+  expect(rawLen).toBe(250_004);
+  const note = `\n… [cut: ${rawLen} characters in all — ask the tool for less: filters, a limit, one item]\n`;
+  expect(sent.length).toBeLessThanOrEqual(TOOL_RESULT_MAX_CHARS_CEILING + note.length);
+  expect(sent.length).toBeGreaterThan(100); // NOT capped at the conversation's tiny default
+  expect(sent).toContain(note);
+});
+
+test('a tool result under the per-tool cap (even over the ceiling) is not cut at all', async () => {
+  const small = 'C'.repeat(1000);
+  const def = { type: 'function', function: { name: 't:tiny', description: 'tiny', parameters: { type: 'object', properties: {} } }, maxResultChars: 500_000 };
+  const { sent } = await runToolTurnWithResult(def, small);
+  expect(sent).toBe(`OK: ${small}`);
+});
+
+test('the conversation\'s toolResultMaxChars (from ai.toolResultMaxChars) caps a small result too', async () => {
+  const text = 'D'.repeat(500);
+  const def = { type: 'function', function: { name: 't:small', description: 'small', parameters: { type: 'object', properties: {} } } };
+  const { sent } = await runToolTurnWithResult(def, text, { toolResultMaxChars: 100 });
+  const rawLen = `OK: ${text}`.length;
+  expect(sent).toContain(`cut: ${rawLen} characters in all`);
+  expect(sent.length).toBeLessThan(rawLen);
 });
 
 test('a turn hands back its full transcript, so the next turn replays the tool calls and their results', async () => {

@@ -28,6 +28,7 @@ import {
   TOOLS_LOAD, createToolSet, deferredTools, notLoadedError, runToolsLoad, toolsToSend,
   type CatalogEntry, type ToolLoading, type ToolSet,
 } from './tool-loading.js';
+import { TOOL_RESULT_MAX_CHARS_DEFAULT, capToolResult, resolveToolResultCap } from './tool-result-cap.js';
 
 // A single chat message. `role` is the OpenAI role; `content` may be null when a
 // message carries tool_calls. Extra fields (tool_calls, tool_call_id) ride along.
@@ -167,6 +168,11 @@ export interface AgentOpts {
   // `toolSet` is the conversation's loaded set; without one a turn starts empty.
   toolLoading?: ToolLoading;
   toolSet?: ToolSet;
+  // The cap on one tool result before it joins the model's history
+  // (src/assistant/tool-result-cap.ts), from `ai.toolResultMaxChars` — the default
+  // here so a caller that says nothing still caps. A tool's own `maxResultChars`
+  // overrides it per call, clamped to the hard ceiling.
+  toolResultMaxChars?: number;
   // Every change to a view a call opened (`ctx.liveView`): its first state, each
   // update, and its final phase once the call ends. Display only — the chat draws it.
   onToolLive?: (rec: ViewRecord) => void;
@@ -510,11 +516,12 @@ function modelToolResult(outcome: string, detail: unknown): string {
 // and the chat passes them again as `extraTools` for their `run`. The list for the
 // provider used to concatenate both, and a provider answers a duplicate name with 400
 // before the model runs — so with a real plugin enabled, every message failed. The
-// extra wins, as in `agentChat`'s `toolByName`. `write`/`run` never go on the wire.
+// extra wins, as in `agentChat`'s `toolByName`. `write`/`run`/`maxResultChars` never
+// go on the wire.
 export function toolCatalog(extraTools: ToolDef[] = []): CatalogEntry[] {
   const sent = new Map<string, ToolDef>();
   for (const t of chatTools()) sent.set(t.function.name, t);
-  for (const { write: _w, run: _r, ...rest } of extraTools) sent.set(rest.function.name, rest);
+  for (const { write: _w, run: _r, maxResultChars: _m, ...rest } of extraTools) sent.set(rest.function.name, rest);
   const groupOf = chatToolGroupOf();
   return [...sent.values()].map((def) => ({ name: def.function.name, group: groupOf.get(def.function.name) ?? 'other', def }));
 }
@@ -561,6 +568,7 @@ export async function agentChat(
     logToolRun: logRun = () => {},
     toolLoading = 'all',
     toolSet = createToolSet(),
+    toolResultMaxChars = TOOL_RESULT_MAX_CHARS_DEFAULT,
     requestTail,
     ...opts
   }: AgentOpts = {},
@@ -843,7 +851,11 @@ export async function agentChat(
         // A tool that threw keeps what it showed, marked failed: the person was reading it.
         const views = opened.filter((s) => !s.discarded).map((s) => s.rec);
         const detailStr = typeof detail === 'string' ? detail : JSON.stringify(detail);
-        current.push({ role: 'tool', tool_call_id: tc.id, content: modelToolResult(outcome, detailStr) });
+        // Only what joins the model's history is capped — the trail line, the log and
+        // the session below all keep `detailStr` whole; `def?.maxResultChars` (the
+        // plugin tool type) overrides the conversation's cap for this one tool.
+        const resultCap = resolveToolResultCap(toolResultMaxChars, def?.maxResultChars);
+        current.push({ role: 'tool', tool_call_id: tc.id, content: capToolResult(modelToolResult(outcome, detailStr), resultCap) });
         logRun({ name: tc.name, write, outcome, detail: detailStr, args: parsed });
         const run: ToolRun = { name: tc.name, args: parsed, write, outcome, detail: detailStr };
         if (outcome !== 'error' && changes.length) run.changes = changes;

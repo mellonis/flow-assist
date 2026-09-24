@@ -22,6 +22,7 @@ import { SHELL_DEFAULTS, createShellState } from '../assistant/shell.js';
 import { parseAskArgs, askResult, type AskQuestion, type AskState } from '../assistant/ask.js';
 import type { Change } from '../assistant/diff.js';
 import { TOOLS_LOAD } from '../assistant/tool-loading.js';
+import { TOOL_RESULT_MAX_CHARS_CEILING, TOOL_RESULT_MAX_CHARS_DEFAULT } from '../assistant/tool-result-cap.js';
 import { IMAGE_DEFAULTS } from '../assistant/images.js';
 import { ANTHROPIC_BASE_URL, DEFAULT_MAX_TOKENS, llmOpts } from '../assistant/llm-endpoint.js';
 
@@ -78,6 +79,7 @@ const KEY_DEFAULTS: Record<string, string> = {
   'ai.maxTokens': `${DEFAULT_MAX_TOKENS} — the longest answer one request may get, with ai.provider anthropic only (that API requires one; thinking counts against it). A fixed thinking budget that leaves the answer less than 1024 under it is lowered to fit (the log says so)`,
   'ai.thinking': 'unset — the model thinks as it does by default (the current Claude models decide for themselves; their thinking is not shown). With ai.provider anthropic: config set ai.thinking \'{"adaptive":true}\' asks for adaptive thinking and shows a summary of it in the chat\'s thinking fold; {"budgetTokens":N} (at least 1024) is a fixed budget, for older models only — the current ones refuse it',
   'ai.toolLoading': `onDemand — each request carries the core tools in full and only an index (name and one line) of the others; the model loads what it needs with ${TOOLS_LOAD}, and a loaded tool stays for the rest of the conversation (/clear empties the set). config set ai.toolLoading all sends every tool in full on every request — more tokens per request, for a model that does not load tools well`,
+  'ai.toolResultMaxChars': `${TOOL_RESULT_MAX_CHARS_DEFAULT} — a tool result longer than this is cut before it joins the conversation: the head is kept, a short tail too, and a note in between says how much was cut and asks for less (a filter, a limit, one item). Only what is SENT is capped — a command's own block and the tool trail always show what really happened. A tool may declare its own higher cap for one call, up to ${TOOL_RESULT_MAX_CHARS_CEILING}. config set ai.toolResultMaxChars 80000 raises the default`,
   // Said in full: "can I show it a screenshot?" is asked of the assistant, and so is
   // "why was my image refused?".
   'ai.images': `enabled: true — the person can show the model images in the chat: drag a file onto the terminal or paste its path (the whole paste must be the path), /image <path>, or /image, Ctrl+V or Cmd+V for the image on the clipboard (macOS: pngpaste or osascript; Linux: wl-paste or xclip). Each becomes an [Image #N] token in the text; the file is read only when the person attaches it, and kept in the session as its path and hash, not its bytes. maxBytes: ${IMAGE_DEFAULTS.maxBytes} (a bigger file is refused, never shrunk), maxPerMessage: ${IMAGE_DEFAULTS.maxPerMessage}. A model that cannot take images: config set ai.images.enabled false — attaching is then refused, and images already in the conversation go as their names only`,

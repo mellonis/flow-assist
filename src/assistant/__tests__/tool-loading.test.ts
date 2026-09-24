@@ -119,3 +119,23 @@ test('a loaded set is saved as names and put back from them; anything else reads
 test('the not-loaded answer names tools_load and the tool', () => {
   expect(notLoadedError('read_file')).toBe('read_file is not loaded — call tools_load with names ["read_file"] first, then call it.');
 });
+
+test('tools_load accepts a name qualified with its group, as well as the bare name the index shows', () => {
+  const set = createToolSet();
+  // acme:get_issue — the index shows it under "acme:", and get_issue's group is
+  // "acme:aiTools" (groupLabel strips the ":aiTools" suffix); a model that repeats
+  // the two together must not be refused.
+  expect(runToolsLoad({ names: ['acme:get_issue'] }, catalog, set)).toBe('Loaded: get_issue — call them now.');
+  expect(set.names()).toEqual(['get_issue']);
+  // A whole group qualified the same way loads every tool in it.
+  const groupSet = createToolSet();
+  expect(runToolsLoad({ names: ['repo:read_file'] }, catalog, groupSet)).toBe('Loaded: read_file — call them now.');
+  // A bare name already in the list is never rewritten (no accidental double match).
+  const bareSet = createToolSet();
+  expect(runToolsLoad({ names: ['read_file'] }, catalog, bareSet)).toBe('Loaded: read_file — call them now.');
+  // The WRONG group prefix does not resolve, and still errors, naming the groups.
+  expect(() => runToolsLoad({ names: ['repo:get_issue'] }, catalog, createToolSet()))
+    .toThrow('Not in the list: repo:get_issue. Groups: repo, acme.');
+  // Already loaded, asked again qualified: reads as already loaded, not a fresh load.
+  expect(runToolsLoad({ names: ['acme:get_issue'] }, catalog, set)).toBe('Already loaded: get_issue.');
+});

@@ -36,6 +36,18 @@ What each version of flow-assist brought, newest first. The version is the one i
   `$0` was the temp file it ran the command from. It now reads `!!: asd: command not
   found`.
 
+- **A tool result over `ai.toolResultMaxChars` (default 40000) is cut before it joins
+  the assistant's history.** A tool can return arbitrarily much, and it stayed in the
+  conversation forever, costing tokens on every later request. A longer result now
+  keeps its head and a short tail, with a note in between saying how much was cut and
+  asking the tool for less — a filter, a limit, one item. Only what is sent is
+  capped: a command's own block and the tool trail still show what really happened. A
+  tool may declare its own higher cap for a result that is large and worth the
+  tokens, up to a hard ceiling.
+- **`tools_load` accepts a tool name qualified with its group** (`plugin:tool`), not
+  only the bare name the index shows — the index reads naturally either way, and a
+  model that qualified it used to lose a whole round to `ERROR: Not in the list`.
+
 - **`!!command` runs a program that needs the terminal, and asks the assistant about
   it.** `!command` captures what a command prints, so a prompt, `git add -p`, `top` or
   a login flow could not run there. `!!command` gives the program the whole terminal
