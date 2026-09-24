@@ -39,7 +39,7 @@ past incident may motivate a rule; keep the rule, drop the incident.
   `package.json` has an **`exports`** field — scoped or not, string or conditions
   (`main`-only packages and deep paths resolve). So a plugin run from SOURCE with its
   own `node_modules` is skipped by the binary; a plugin bundled into one file has no
-  on-disk package left to resolve, and loads. It was never a two-React problem —
+  on-disk package left to resolve, and loads. This is not a two-React problem:
   plugins take hooks from `ui` and import only types from React.
 - **Where the program finds its plugins and `.env`** (`src/install.ts` on the pure
   `src/loader/install-root.ts`). The root holding `plugins-available/` +
@@ -78,7 +78,7 @@ past incident may motivate a rule; keep the rule, drop the incident.
   loader takes `main` first and falls back to `src/` only when it is missing, which
   is what a working copy in `plugins-available/` relies on — so a `dist/` left behind
   by a local build is what the host loads, and a test that mocks one of the plugin's
-  dependencies no longer reaches it. `files` in `package.json` (as npm reads it)
+  dependencies never reaches it. `files` in `package.json` (as npm reads it)
   names what ships, beside the manifest and `package.json` — for a plugin whose
   directory also holds what it is built from (a client package of a workspace).
 - **A plugin kept in a repository of its own** is linked into `plugins-enabled/` from
@@ -213,8 +213,8 @@ the blacklist.
     message above.` The nonce is new for every block (`screenNonce`). Before wrapping,
     `cleanItem` takes the frame's own parts out of every label and text — the marker
     line, any `screen-item` tag, the closing and heading words, a heading left empty —
-    and a label loses `"`: the block is the LAST thing the model reads, and an item text
-    that closed it and went on "as the person" was reproduced verbatim before this. The
+    and a label loses `"`: the block is the LAST thing the model reads, so an item text
+    that closes it and goes on "as the person" would otherwise be reproduced verbatim. The
     pushLog of a throwing hook is deferred (`queueMicrotask`): it runs during the chat's
     draw, and a setState there is React's "cannot update a component while rendering".
     Open: with thinking on, the Anthropic API's handling of a text block beside
@@ -241,9 +241,9 @@ the blacklist.
     (`ƒ Flow Assist · Board: Frontend · Issue ABC-1`), the plain name with none.
     **The screen changing never switches the session**: opening the chat continues
     the conversation whatever is on screen (switching lost the dialogue for the
-    person); `/clear` is how a fresh one starts. The session no longer writes
-    `subject`; one written by an older host (or `issue`, older still) is read and
-    ignored.
+    person); `/clear` is how a fresh one starts. The session never writes
+    `subject`; a session file that carries `subject` (or `issue`) is read and the
+    field ignored.
   - `chatSubject` → deprecated, for one release: a short id, read as ONE item
     `{ label: <id>, text: '' }`; a plugin that has `chatContext` is not asked it.
   - `afterWrite` → called, for every plugin, after a chat turn in which a write
@@ -278,12 +278,12 @@ spawns something long-lived follows:
 
 A plugin usually keeps its state in ONE component (a workspace that publishes it on
 `host.services`) and draws it in a SIBLING. A React `setState` in the first re-renders
-the first only; the sibling redraws when the host re-renders. That used to require an
-explicit `host.notify()` in every setter, and a setter without one — the tracker's info
-panel cursor, `setPanelIdx` — changed the state and froze on screen. It looked
-intermittent: while related issues were still loading, each arriving name called
-`notify()` and so "showed" the pending key presses; once loading finished, the cursor
-stopped moving.
+the first only; the sibling redraws when the host re-renders. The host calls
+`notify()` after every handled key, so a setter needs none of its own; a setter that
+did would change the state and freeze it on screen, and the bug is easy to read as
+intermittent — anything else nearby that keeps calling `notify()` on its own (data
+still loading) keeps the sibling redrawing and hides the missing call, until that
+stops.
 
 The host guarantees it: `useInput` in `runtime/app.tsx` calls `notify()` after every
 key that was handled (`twoPhaseDispatch` returned true). React batches it with
@@ -293,10 +293,10 @@ come from a key — a fetch that finished, a timer.
 ### A plugin is a guest: whose screen it is
 
 The app opens on the HOST's start screen (`src/views/home.ts`: the ƒ mark drawn
-large, what can be done from here, the enabled plugins). flow-assist grew out of a
-tracker TUI and for a long time still opened like one — every plugin component
-mounted from the first frame, so the tracker's board drew "No board data" over an
-assistant nobody had asked for a board.
+large, what can be done from here, the enabled plugins). A plugin is a guest on it:
+mounting every plugin component from the first frame would draw a plugin's own
+screen — a tracker's "No board data" — over an assistant nobody had asked for a
+board.
 
 - A plugin's **surface** — its own full screen — is the component slot named `view`,
   or named after `shape.surface`. Every other slot (modals, key triggers, the
@@ -319,13 +319,13 @@ assistant nobody had asked for a board.
 
 ### Where the chat is: panel, window, full
 
-The chat used to be a window over the plugin's screen, so the board the model was told
-about (`chatContext`) was hidden from the person typing about it. Three modes now
+`panel` docks the chat beside the plugin's screen, so the board the model is told
+about (`chatContext`) stays visible to the person typing about it. Three modes
 (`src/runtime/panel-layout.ts`, pure): `panel` — the default — docks it beside the
-plugin's screen, `window` is the old window over it, `full` the whole terminal.
-`plugins.assistant.mode` says where a conversation starts, `/mode` moves it for the
-session (never saved); an old `fullscreen: true` reads as `full` (`chatModeOf`), and
-`/fullscreen` is gone.
+plugin's screen, `window` floats it over the plugin's screen, `full` takes the whole
+terminal. `plugins.assistant.mode` says where a conversation starts, `/mode` moves it
+for the session (never saved); `fullscreen: true` reads as `full` (`chatModeOf`), and
+there is no `/fullscreen`.
 
 - **The layout is the App's** (`runtime/app.tsx`). The terminal is split into the
   plugin's SIDE — title bar, surface, footer, always from the top-left corner — and the
@@ -340,8 +340,8 @@ session (never saved); an old `fullscreen: true` reads as `full` (`chatModeOf`),
   terminal. The chat is drawn in the panel as a plain box (`docked`), not an overlay.
 - **Too small to dock, it is a window.** `panelLayout` says `fits: false` when the
   terminal cannot give the panel its least (12 rows) AND the plugin's side its own
-  (`PLUGIN_MIN_ROWS`: title bar + footer + one row — the panel's least used to win and
-  left the plugin 4 rows at 16, none at 12). The App then gives the chat no dock
+  (`PLUGIN_MIN_ROWS`: title bar + footer + one row — both floors must hold, or docking
+  would squeeze the plugin's side down to a few rows or none). The App then gives the chat no dock
   (`chatDock` null) and it is laid out and behaves as a `window` — `layout` in the chat,
   published as `store.chat.layout`, which every behaviour check reads while `mode` stays
   what was asked for — until the terminal grows back. Both Ctrl+] and the collapse key
@@ -375,7 +375,7 @@ session (never saved); an old `fullscreen: true` reads as `full` (`chatModeOf`),
   bounds would hold.
 - **"Closed" in panel mode is COLLAPSED.** Open = expanded; opening (`F`, `:ask`,
   Ctrl+]) expands and brings the keyboard; Esc Esc and `/exit` collapse and hand the
-  keyboard to the plugin (in `window`/`full` they close, as before). Collapsed on the
+  keyboard to the plugin (in `window`/`full` they close). Collapsed on the
   right the panel has no width, and a running turn's status (spinner, seconds, word,
   `^] chat`) is drawn on the plugin's bottom row — the App reads `store.chat.statusRow`,
   an element the chat hands over (`liveChatStatus` in `views/modals.ts`): a component
@@ -412,10 +412,10 @@ session (never saved); an old `fullscreen: true` reads as `full` (`chatModeOf`),
   0x1c–0x1f as chords.
 - **The mouse goes by the pointer.** A press anywhere tells the chat which pane it
   landed in (`store.chat.pointer`) and the keyboard follows it; the button then goes on
-  as before — the chat's `mouse: true` handler folds by the conversation's own rect, so
+  its usual path — the chat's `mouse: true` handler folds by the conversation's own rect, so
   a click on a fold in the panel works whichever side has the keys. The wheel scrolls
   whatever list is under it (flowtty's lists check the pointer; the chat's own, when not
-  focused, through its handler). Plugins get no mouse buttons, as before.
+  focused, through its handler). Plugins get no mouse buttons.
 - `bootApp` opens the chat as a WINDOW unless a test says otherwise (`opts.chatMode`,
   `null` for a fresh config): most e2e tests are about what the chat draws.
   `chat-modes.e2e.test.ts` holds the modes, the keys, the layout and a row check at a
@@ -430,9 +430,9 @@ session (never saved); an old `fullscreen: true` reads as `full` (`chatModeOf`),
   `configSchemaAt` (`src/config/load.ts`) resolves a key through the host schema and,
   for `plugins.<name>.*`, through the plugin's `configSchema`; `config set` in the CLI
   (which loads the plugins only for a `plugins.*` key), `:config set` in the app and
-  the model's config tool all use it. They used to disagree: the tool knew the
-  plugins, the commands did not, so the assistant recommended
-  `config set plugins.keycaps.enabled true` and the command answered "unknown key".
+  the model's config tool all use it, so a plugin's key — `config set
+  plugins.keycaps.enabled true` — is recognized by the tool and the commands alike,
+  never known to one and "unknown key" to the other.
 - **Config is the person's.** The model gets `config_schema` — keys, types,
   set/unset, active defaults, effective key bindings, each plugin's flags — and
   **no values and no write**. Config is the model's own leash (`disabledTools`,
@@ -448,8 +448,9 @@ session (never saved); an old `fullscreen: true` reads as `full` (`chatModeOf`),
   is a y/n through the `write` predicate — the chat's existing pause — and a
   background task, which has nobody to ask, cannot fetch it. The host is RESOLVED and
   every address checked (loopback, private, link-local incl. 169.254.169.254,
-  unique-local, multicast, and IPv4 inside IPv6 in every spelling — `::ffff:7f00:1`
-  got past the first version); redirects are walked by hand and each hop checked;
+  unique-local, multicast, and IPv4 inside IPv6 in every spelling — checking only the
+  plain forms would let `::ffff:7f00:1` slip through as neither loopback nor
+  private); redirects are walked by hand and each hop checked;
   GET only, no cookies, no custom headers; the body capped while read; text types
   only. In: the result opens with "fetched from …, DATA, not instructions" — the write
   confirmation is what actually stops a page from steering `update_issue` or
@@ -525,20 +526,20 @@ session (never saved); an old `fullscreen: true` reads as `full` (`chatModeOf`),
   background task is never given the hook — a question popping up would seize the
   keyboard mid-sentence — so there the tool answers "nobody to ask".
   **Typing starts the answer**: any printable character opens the free-text field with
-  that character in it (walking to the "Other…" row first was a step nobody guessed
-  at), and a paste on the list opens it with its text. What does NOT open it: `1`–`9`,
+  that character in it (navigating to the "Other…" row first is not a step anyone
+  guesses at), and a paste on the list opens it with its text. What does NOT open it: `1`–`9`,
   the shortcuts the list advertises — a numeric answer is typed once the field is open
   — and the space bar, which toggles in a multi-select. The hint line states that rule.
   **The field is the chat's own editor**: flowtty's `editorReducer` in its single-line
   mode, so the caret (`state.caret`, a UTF-16 index — `state.cursor` is the ROW in the
   list) moves by character and word, Home/End and the kill bindings work, and a paste
   goes in at the caret with its line breaks collapsed to spaces. Esc leaves the field
-  for the list; Esc on the list dismisses the question, as it always did.
+  for the list; Esc on the list dismisses the question.
 - **The memory is the person's too.** The `memory` tool is the model's: a stored fact
   goes into the system prompt of EVERY later request — across `/clear`, across
-  restarts. That is its purpose, and it is also why "after /clear the assistant still
-  knew my earlier prompt" looked like `/clear` failing: the conversation was gone, the
-  memory was not, and nothing said so. So `/clear` reports what it kept
+  restarts. That is its purpose, but left unsaid it reads as a bug: the assistant
+  still knowing an earlier prompt after `/clear` looks like `/clear` failing, when in
+  fact the conversation is gone and only the memory remains. So `/clear` reports what it kept
   (`keptAfterClear`), and `/memory` lists and `/memory forget <n|all>` removes — without
   going through the model (`src/assistant/memory-command.ts`). What the host tells the
   person this way is a display-only message of role `note`; `apiHistory` drops it, and
@@ -580,15 +581,15 @@ session (never saved); an old `fullscreen: true` reads as `full` (`chatModeOf`),
   where the model's view now begins; wiping the screen read as `/clear`. The note is ONE
   row, `── compacted · ~58k → ~2.1k tokens ──` (the `ctx N%` reading before and after;
   a size not known is left out), with the summary the model was given folded under it
-  (`summary` on the note, fold kind `summary`); it used to be the whole summary, dozens
-  of rows. A note saved before carries the summary in its text and is drawn as it was. There is no
+  (`summary` on the note, fold kind `summary`). A note whose text already carries the
+  summary inline (an older format) is drawn as saved, without folding it. There is no
   `/refresh-context`: the system prompt is assembled anew for every message, so the
   command had nothing to refresh.
 - **Cache usage rides on `TokenUsage` beside `promptTokens`/`completionTokens`, from
   both wires when the provider reports it** (`cachedTokens`/`cacheWriteTokens`,
   `src/assistant/agent.ts`). Anthropic's `usageOf` (`src/assistant/anthropic.ts`) reads
   `cache_read_input_tokens` / `cache_creation_input_tokens` — both already counted
-  inside `promptTokens`, as before — and an OpenAI-compatible round reads
+  inside `promptTokens` — and an OpenAI-compatible round reads
   `usage.prompt_tokens_details.cached_tokens` (no write figure: no such server reports
   one). Either figure is `undefined`, never `0`, when the wire did not report it at
   all — a provider that never caches reads differently from one that cached nothing
@@ -616,24 +617,26 @@ session (never saved); an old `fullscreen: true` reads as `full` (`chatModeOf`),
   from one test into the next.
 - **A request carries the core tools and an INDEX of the rest** (tools on demand,
   `src/assistant/tool-loading.ts`, pure; wired in `agentChat`). Every tool's full
-  schema on every request was ~7k tokens with only the bundled plugins, a tracker
+  schema on every request costs ~7k tokens with only the bundled plugins, a tracker
   plugin doubles it, and a turn uses two or three. So with `ai.toolLoading: 'onDemand'`
   (the config default) a request sends the `core` group in full, the tools this
   conversation has LOADED, and `tools_load`, whose description is the index — per
   group, `name — first sentence of the description`. The index does not change as
   tools load (a stable prefix). `tools_load({ names | group })` is the loop's own
   tool, not the registry's; a group's name given in `names` loads the group (a tool of
-  the same name wins) — a model passes one there, and refusing it cost a round; what is sent is worked out again for EVERY round, so a
+  the same name wins), since a model reasonably passes one there and refusing it would
+  cost a round; what is sent is worked out again for EVERY round, so a
   load reaches the next round of the same turn. A call to a tool that is indexed but
   not loaded is an ERROR naming `tools_load`, refused BEFORE the y/n — the wire-name
   map covers every known tool, not only the sent ones, or that call would not even
   resolve. `names` also takes a tool QUALIFIED with its group, `<group>:<name>`, as
   well as the bare name the index shows — the index reads as `group:\n- name — …`, so
-  a model reasonably repeats the two together, and it used to cost a whole round on
-  `ERROR: Not in the list` (`unqualify`, `tool-loading.ts`: stripped only as a
+  a model reasonably repeats the two together, and accepting that combination
+  (`unqualify`, `tool-loading.ts`: stripped only as a
   fallback, when the bare name misses and the prefix names the group that bare tool
   is actually in — a name already in the list, bare or genuinely qualified by a
-  clash, is tried first and never rewritten). An unknown name still errors, listing
+  clash, is tried first and never rewritten) avoids the round `ERROR: Not in the
+  list` would otherwise cost. An unknown name still errors, listing
   the groups. The loaded set is a `ToolSet` owned like the plan: the chat's `toolSetRef`
   (saved as the session's `tools`, kept by `/compact`, emptied by `/clear`); a background run and the one-shot CLI start from an empty one.
   `agentChat`'s own default is `'all'` — the mode is applied by `services.chatLLM`
@@ -723,17 +726,16 @@ names against `^[a-zA-Z0-9_-]{1,128}$`.
 **The model sees the name the plugin gave** — `get_issue`, `open_issue`, `read_file` —
 for group tools (`shape.tools`) and standalone ones (`shape.aiTools`) alike. No plugin
 prefix: it is shorter, costs fewer tokens on every request, and the model has no use
-for which plugin stands behind a tool. (The loader used to qualify aiTools and not
-group tools, so one plugin's tools arrived as both `get_issue` and
-`acme-tracker__open_issue`.) The loader neither adds a prefix nor takes one away: a
-plugin that wrote `x:tool` itself gets exactly that.
+for which plugin stands behind a tool. The loader neither adds a prefix nor takes one
+away, treating group tools (`shape.tools`) and standalone ones (`shape.aiTools`)
+alike: a plugin that wrote `x:tool` itself gets exactly that.
 
 A prefix appears only when it is NEEDED. **A name is claimed once**: the first group to
 declare it keeps the bare word; a later group's tool is registered as `<plugin>:<name>`
 instead and the clash is said (`[tools] "search" is declared by both …`). The registry
 remembers the tool's own name (`ownName`) because that is what the group's `exec`
-understands. Without this a clash is silent — the provider's "Duplicate tool name" 400
-no longer fires, since `agentChat` sends one declaration per name.
+understands. Without this a clash is silent: `agentChat` sends one declaration per
+name, so the provider's own "Duplicate tool name" 400 never fires to catch it.
 
 The host's own groups: `core` is bare (`memory`, `todo`), `host` qualifies its names
 itself (`host:plugins_list`). Names reach the provider through the wire translation in
@@ -765,8 +767,8 @@ hardest. Rules the `repo` and `gitlab` plugins hold, each with a test that tries
   of a turn the person most needs to see.
   **How it is DRAWN** is the chat's (`changeLines` in `src/views/modals.ts`): the `✎`
   line is a title, not markdown — plain text, the path in the chat's accent, the counts
-  dim — because `changeMarkdown` used to wrap the path in backticks and a path took the
-  code style. Each row carries the line it is in the FILE (`diffRows` / `diffLineNumbers`
+  dim, so the path never takes on the code style a backtick-wrapped path in markdown
+  would give it. Each row carries the line it is in the FILE (`diffRows` / `diffLineNumbers`
   in `diff.ts`: a context or added row its number in the new file, a removed row its
   number in the old, counted again per hunk), which is why the `@@` row is left out of
   what is drawn — it exists to say where in the file one is. The numbers are chrome:
@@ -809,7 +811,7 @@ hardest. Rules the `repo` and `gitlab` plugins hold, each with a test that tries
     A view still `live` when a session was SAVED (the process ended mid-call) reads
     the same way on load — `failed`, never a clock ticking forever (`normalizeViews`,
     `src/assistant/sessions.ts`).
-  - **Display only**, as before: a view rides on the display message (a message of
+  - **Display only**: a view rides on the display message (a message of
     role `view`, which `apiHistory` drops) and never on the tool's result — the model
     already read the result, and a copy of it in the conversation costs the context
     twice.
@@ -831,8 +833,8 @@ hardest. Rules the `repo` and `gitlab` plugins hold, each with a test that tries
     `callSeq` the turn's own call counter, `n` which view this call opened. Never the
     provider's own tool-call id alone: that id is not guaranteed unique across the
     rounds of one turn (a test double restarts at `call_0` every round; some real
-    servers send `''` or reuse ids), and two commands whose ids collided used to
-    overwrite one another's block.
+    servers send `''` or reuse ids); using it alone would let two commands whose ids
+    collided overwrite one another's block.
   - **A reset — `/clear` and `/resume`, the same places `planRef`
     resets — clears `liveBuf`, `liveSeen` and any pending `liveTimer`, and bumps an
     `epochRef`** (`resetLiveViews` in `src/plugins/assistant.ts`); `turnRef` is NOT
@@ -843,8 +845,8 @@ hardest. Rules the `repo` and `gitlab` plugins hold, each with a test that tries
     final `flushLive()`, `!command`'s own completion — compares its captured value
     against the ref's CURRENT one and drops the update if they differ, rather than
     finding no message for the old `callId` (the buffer forgot it) and pushing a NEW
-    one into the fresh conversation — reproduced: a command still running when
-    `/clear` fires used to reappear, with its final phase, in the cleared chat.
+    one into the fresh conversation: without this, a command still running when
+    `/clear` fires would reappear, with its final phase, in the cleared chat.
 - **A shell command is seen before it runs.** `run_command`'s guard is the y/n, not a
   filter on the command; its directory is checked anyway — inside a root by the REAL
   path (`dirAllowed`), a `cd` that leads out is not remembered. `runShell` has exactly
@@ -877,22 +879,23 @@ hardest. Rules the `repo` and `gitlab` plugins hold, each with a test that tries
 
 ### A tool's result is what the model will tell the person
 
-- **A failure is reported as a failure, in the failing thing's own words.** The
-  `gitlab` plugin's `glab` runner was a stub that answered `{}` to everything; the
-  model made five calls, read five empty objects, and told the person with full
-  confidence to run `glab auth login`. A wrapper returns the exit code and stderr,
+- **A failure is reported as a failure, in the failing thing's own words.** A `glab`
+  runner that merely answered `{}` to everything would leave the model reading empty
+  objects across every call and telling the person with full confidence to run
+  `glab auth login`. So the wrapper returns the exit code and stderr,
   says "not installed" when the binary is missing, says "empty body" when it is
   empty, and times out instead of hanging the turn (`plugins-available/gitlab/src/glab.ts`).
-- **A tool that can never work is not offered.** `get_feature_context` always answered
-  "unavailable" — nothing ever supplied its context — yet it sat first in the list
-  and the model called it. A dead tool costs a call, tokens on every request, and a
-  wrong turn in the reasoning. Remove it, do not leave it answering "unavailable".
+- **A tool that can never work is not offered.** A tool that only ever answers
+  "unavailable" still sits in the list and still costs a call, tokens on every
+  request, and a wrong turn in the model's reasoning if left there. Remove it, do not
+  leave it answering "unavailable".
 - **A result over `ai.toolResultMaxChars` (default 40000) is cut before it joins the
   model's history** (`src/assistant/tool-result-cap.ts`, pure; applied where the tool
   message is built, `agentChat`'s tool-run path — plugin tools and host tools alike,
-  `run_command` included). A plugin's board-listing tool once answered a "list" with
-  the whole board as raw JSON, 391,864 characters, and that stayed in the model's
-  history: every later request carried it, and the model misread a transition title
+  `run_command` included). An uncapped result can be enormous — a board-listing tool
+  answering a "list" with the whole board as raw JSON runs past 391,864 characters —
+  and without a cut it stays in the model's history: every later request would carry
+  it, and the model would misread a transition title
   next to an issue key for the issue's own status. The cut keeps the head (90% of the
   cap) and a short tail (the rest), with a note between them the model reads in place
   of what was cut: `… [cut: <N> characters in all — ask the tool for less: filters, a
@@ -928,13 +931,13 @@ same reason: a display-only system message never reaches the model.
 
 **A call whose arguments do not parse to a JSON object is refused at the call, not
 stored as it arrived.** A stream that ends mid-argument (`{"path": "…", "ref": "f`), or
-valid JSON that isn't an object (an array, a bare string, `null`), used to go into
-`current` raw and run as `{}`; every later request then carried that malformed call and
-an OpenAI-compatible provider answered 400 on all of them, forever — `/clear` was the
-only way out. Now the call does not run, the model gets an error naming the parse
-failure, and the history keeps `"{}"` in the call's place so it stays valid JSON.
-`apiHistory()` repairs the same shape found in an older session, so one saved before
-this fix recovers on its next request.
+valid JSON that isn't an object (an array, a bare string, `null`), never goes into
+`current` raw to run as `{}`: stored that way, every later request would carry the
+malformed call, and an OpenAI-compatible provider answers 400 on all of them, forever
+— `/clear` the only way out. Instead the call does not run, the model gets an error
+naming the parse failure, and the history keeps `"{}"` in the call's place so it stays
+valid JSON. `apiHistory()` repairs the same shape found in a session saved by an older
+host, so it recovers on its next request.
 
 **A turn that did not finish is closed in the model's history too.** The question
 joins `apiRef` before the request, so it stays on record whatever happens. Left there
@@ -953,8 +956,8 @@ error. It is saved with the session like the rest of `apiRef`
 (`turn-end.e2e.test.ts` asserts on what the model is sent next).
 
 **A provider's refusal is read, not pasted** (`llmErrorMessage` in
-`src/assistant/llm-error.ts`, pure). The raw body used to be the error — the chat
-showed `LLM 403: { "message":"model_access_denied", "request_id":"2395…" }`. The body is
+`src/assistant/llm-error.ts`, pure). The raw body is not the error: pasted as-is it
+would show `LLM 403: { "message":"model_access_denied", "request_id":"2395…" }`. The body is
 read for the provider's own words in the shapes providers answer with (OpenAI's
 `{error:{message,code,type}}`, a flat `{message}`, `{detail}` as text or a list of
 `{msg}`, else the text collapsed and cut to 200) and the line is `LLM 403 · <model>:
@@ -1044,15 +1047,15 @@ that every later message fails too. A background task never gets images.
 untyped rest of the suggestion after the caret, the other candidates beside it as
 `⇥ a · b`; Tab takes the offer and then walks the rest. The logic is pure —
 `lineView` / `lineTab` in `src/config/commandline.ts` — and both the drawing and Tab go
-through the one `completeLine`. Never add a row that appears while typing: the old
-second row of candidates made the whole screen jump with every keystroke. Tab
+through the one `completeLine`. Never add a row that appears while typing: a second
+row of candidates would make the whole screen jump with every keystroke. Tab
 replaces the WORD being completed (`stem + candidate`), a command name or a
 `config get|set|unset` argument alike.
 
-- **A command is its first word**; the rest of the line is its argument. The whole
-  line used to be looked up, so every plugin command given an argument was not found
-  and did nothing — `:ask hi`, a tracker's `:open ABC-1`. Without an argument they
-  worked, which is how it went unnoticed.
+- **A command is its first word**; the rest of the line is its argument. Looking up
+  the whole line instead would silently break every plugin command given one —
+  `:ask hi`, a tracker's `:open ABC-1` — since such a command still runs fine with no
+  argument at all, which is exactly what would hide the bug.
 - **↑/↓ recall what was run** (in memory, for this run). A command declared with
   `history: false` is never kept — the host's `config` is (a value set may be a
   secret: an MCP server's `headers` or `env`), and a plugin's command may say it on its
@@ -1067,12 +1070,11 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   inline offer after the caret, not the `⇥ a · b` candidates — so a long
   `config set plugins.mcp.servers.safari.readOnly …` can be taken out to be fixed or
   shared. It follows the rule the chat's rows follow (the gutter is chrome, the text
-  is not): the bottom box used to be `selectable: false` whole and swallowed the
-  command with its chrome; only the spans carry the flag now, and the box carries
+  is not): only the spans carry `selectable: false`, and the bottom box carries
   `selectionScope` instead — a drag that starts there stays on its row and inside the
   padding, so the layout's own blank cells never come back as spaces around the
   command. The footer hints and the toast, which have that row whenever the line is
-  closed, are chrome as they were. A command wider than the terminal is not wrapped
+  closed, are chrome too. A command wider than the terminal is not wrapped
   (the rule above), so a drag copies the part that is on the screen. The chat's input
   field is NOT this: its caret and placeholder sit in the middle of its text, so it
   stays unselectable whole until that is thought through.
@@ -1115,19 +1117,21 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   on the first press**, touching neither the field nor the queue (the line under what
   came so far says `stopped (Esc)` — `stopped (^c)` after Ctrl+C: the label names the
   key that stopped it, from `keyGlyph`, and so does a `!command`'s outcome; the message
-  carries it as `stoppedBy`, and a session saved without one reads `(Esc)` as it did —
+  carries it as `stoppedBy`, and a session saved without one reads as `(Esc)` —
   a cut-off «В» must not read as a whole answer;
   the model's history gets a closing message of its own, see "The conversation the
-  model sees"). Idle: clear the field → step the bang level down (one level per Esc) → arm/close (docked, collapse — so an empty `!!` field takes four Escs to fold the panel). It used to clear
-  the field and take the queue back BEFORE stopping, so with a message queued the
-  second Esc threw the message away and only the third stopped the tool.
+  model sees"). Idle: clear the field → step the bang level down (one level per Esc)
+  → arm/close (docked, collapse — so an empty `!!` field takes four Escs to fold the
+  panel). Stopping always comes first, before clearing the field or taking the queue back: with
+  a message queued, doing either first would throw the queued message away on the
+  second Esc and only stop the tool on the third.
   **A queued message never undoes what just ended**: `send` lays its message onto the
   list with an UPDATER over the list as React has it, never onto `msgsRef` (what was
   last DRAWN). The queue goes out from a zero-delay timer after a turn, a `!command`
   or a slash command (and `!!`'s ask likewise), and that timer can run before the
-  render carrying the end: a list built from `msgsRef` threw the end away — a finished
-  command's block came back live and ticked forever, an answer lost its last words.
-  Seen under load; `queued-send-race.e2e.test.ts` makes it deterministic by running
+  render carrying the end: a list built from `msgsRef` would throw the end away — a
+  finished command's block would come back live and tick forever, an answer would
+  lose its last words. This shows up under load; `queued-send-race.e2e.test.ts` makes it deterministic by running
   zero-delay timers as microtasks. **A stopped or failed turn does not send the queue** (`restoreQueue` in
   `src/plugins/assistant.ts`): the queued messages come back into the field in order,
   joined by blank lines, AHEAD of whatever was typed meanwhile — the order they would
@@ -1140,7 +1144,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
 - **Ctrl+C, Ctrl+D and Ctrl+Z take a second press** (`src/runtime/exit-keys.ts`, pure;
   the App owns the arm). flowtty hands these three to the app BEFORE the terminal
   backend acts (exit, exit, suspend — skipped when a `useInput` handler returns strict
-  `true`), and one stray press used to end the app mid-answer. The App takes them
+  `true`), so a stray press never ends the app mid-answer. The App takes them
   before `twoPhaseDispatch`, since the y/n pause, an open question and a modal's
   catch-all swallow every key — and before every flowtty component.
   **The host's place in key delivery is fixed** (`HostKeyPath` in `runtime/app.tsx`):
@@ -1215,8 +1219,8 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     the bare `name` where every binding is a bare key and a modifier held with it
     should not stop it firing (the host fallback in `app.tsx`). Shift on a CHARACTER
     is left out: the decoder reports `'A'`, never shift+`'a'`. Without this an action
-    on a modified key had to be hard-coded in its handler — which is what `^r` was,
-    `key.name === 'r' && key.ctrl`: unremappable, and invisible to every hint.
+    on a modified key would have to be hard-coded in its handler, `key.name === 'r'
+    && key.ctrl` style: unremappable, and invisible to every hint.
   - **Never write a key's symbol by hand in a hint.** Two cases:
     - the action is BOUND (it is in `host.keys`, so the person can remap it) → draw
       `host.keyCap(action)`; it is `''` when the action is unbound, and then the hint is
@@ -1229,28 +1233,28 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
       `CAP` table in `src/views/modals.ts` does.
     A bundled plugin that still spells caps by hand in its `keycaps` (acme-tracker)
     shows the default key after a remap — that is the bug this rule prevents.
-- **A key acts where it is shown, and is shown where it acts.** Audited 2026-09-21:
-  - `x` flushed the cache from the start screen, where the footer did not offer it.
-    The hint and the key now read ONE predicate, `cacheInPlay` (`loader/registry.ts`):
-    a plugin that keeps data in the cache is on screen. `:clear` works from anywhere.
+- **A key acts where it is shown, and is shown where it acts.**
+  - The hint and the key read ONE predicate, `cacheInPlay` (`loader/registry.ts`): `x`
+    flushes the cache only from a screen whose footer offers it — a plugin that keeps
+    data in the cache is on screen. `:clear` works from anywhere.
   - Flushing the cache (`x`, `:clear`) also **reloads what is on screen**: the host
     counts flushes in `services.cacheEpoch`, and a plugin that draws cached data
-    reloads when the number changes (`useEffect(..., [host.services.cacheEpoch])`). A
-    flush that left the open board as it was read as a key that does nothing.
-  - `b` was answered by the host with "no target (tracker supplies the URL)". The host
-    no longer handles it. `openBrowser`, `prev`, `next` and `open` stay in
+    reloads when the number changes (`useEffect(..., [host.services.cacheEpoch])`); a
+    flush that leaves the open board as it was reads as a key that does nothing.
+  - `openBrowser`, `prev`, `next` and `open` stay in
     `HOST_DEFAULT_KEYS` only as a shared vocabulary for plugins (a plugin reads
     `host.keys.open`); the host acts on none of them.
   - A test presses every lower-case letter on the start screen and expects silence
-    (`home.e2e.test.ts`) — `q` included. **No key quits by default**: a stray `q`
-    closed the whole app. Quitting is the `:quit` (`:q`) command or Ctrl+C twice; the action
+    (`home.e2e.test.ts`) — `q` included. **No key quits by default**: quitting is
+    deliberately unbound from any letter, since a stray `q` would otherwise close the
+    whole app. Quitting is the `:quit` (`:q`) command or Ctrl+C twice; the action
     stays in `HOST_DEFAULT_KEYS` unbound (`[]`) so `config.keys.quit` can bind it, and
     the start screen then names the key instead of `:q`. Plugins leave their screens
     on Esc (`keys.back`) only.
 - **A capital opens something big**: `F` the assistant (Flow Assist), `L` the log; a plugin's main
   screen should follow (`B` for a board). Lower case is for what is INSIDE a screen.
   A modal is closed by the key it is bound to (`f.keys.<action>`), never by a letter
-  written in the handler — the log used to close on a hard-coded `l`.
+  written in the handler.
 - **↑/↓** walk the prompt history, only while the field is empty or still shows a
   history entry untouched (↑ on an empty field takes a queued message back first). The
   history holds **every submitted line** (`src/assistant/prompt-history.ts`) — a
@@ -1266,11 +1270,11 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   say it too (docs/plugins.md). A `/…` or `!…` field is still never saved as the draft.
   The **wheel** and **PgUp/PgDn** scroll.
 - **What is open and what is folded** (`src/assistant/folds.ts`, pure; the chat owns
-  the state, the view resolves it per block). Everything foldable used to answer to
-  one flag: `^r` opened the reasoning, the narration, every tool call of every turn
-  and every capped command block at once, so to read ONE command's output a person
-  unfolded the whole conversation and folded it back. A command block now folds to
-  ONE line whatever it printed — see the `run_command` bullet above. The model, so
+  the state, the view resolves it per block). A single global flag would open the
+  reasoning, the narration, every tool call of every turn and every capped command
+  block at once, so reading ONE command's output would mean unfolding the whole
+  conversation and folding it back. Instead each command block folds to ONE line
+  whatever it printed — see the `run_command` bullet above. The model, so
   that a click and the key cannot disagree:
   - **ONE global state** — everything folded (where a conversation starts) or
     everything open — plus the blocks a CLICK has made an exception of. A click
@@ -1295,8 +1299,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     steps — a message may hold several, numbered), `tools` / `calls` (one stretch of
     calls and its trail's cap, numbered together), `view` (a command's block,
     numbered), `group` (a group's head), `summary` (what /compact's note folds under its
-    separator row). The `▸ notes` fold is gone with the category
-    layout, and so is the one trail per turn.
+    separator row).
   - A block's id names its message by its place among the messages that are DRAWN
     (`foldId`). Not by the message OBJECT — the chat replaces a message whenever it
     changes, which is what makes `rowCache` correct — and not by its raw index: the
@@ -1319,8 +1322,8 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   message — which row carries which `fold` id. The pinned question is painted over
   the top row, so a click there is the pin's and not the row beneath it.
   - **Where the eye is left.** Opening a block scrolls so its FIRST row is the top row
-    (a block taller than the window used to land on its LAST line — the end of the
-    thing the person opened it to read); closing keeps the clicked block's first row
+    — landing on its LAST line instead would show the end of the thing the person
+    opened it to read, past where they meant to start; closing keeps the clicked block's first row
     where it was; the key, which has no one block to anchor on, keeps the message the
     top row belongs to where it was. With the list resting at the END nothing scrolls
     at all: the rows are added above the reader and the bottom is already their place.
@@ -1329,12 +1332,13 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   - Following the bottom belongs to a message ARRIVING (`scrollToEnd` on the count of
     questions asked), never to rows appearing above the viewport.
 - **A turn is drawn in the order it happened** (`src/assistant/step.ts`, pure; the chat
-  owns the parts and the view lays them out). A whole turn is one assistant message, and
-  it used to be laid out by CATEGORY — a step line, the text already shown, every ✎ diff
-  of the turn, then the answer. A round's text that turned out to carry a tool call was
-  moved into the "shown" slot, above EVERY diff of the turn: with a tall diff it left
-  the screen, and the ✎ block was the last thing on it again, as if a second write had
-  happened. The message now carries its `parts` in order — the text of each round that
+  owns the parts and the view lays them out). A whole turn is one assistant message,
+  its `parts` kept in the order they happened rather than grouped by CATEGORY: laying
+  out by category — a step line, the text already shown, every ✎ diff of the turn,
+  then the answer — would move a round's text that turns out to carry a tool call into
+  the "shown" slot, above EVERY diff of the turn, so a tall diff scrolls off the
+  screen and its ✎ block looks like the last thing on it, as if a second write had
+  happened. The message carries its `parts` in order — the text of each round that
   went on to call a tool (a STEP), the calls (`tools`, from `onToolRun` as each call
   ends) and each change a write reported — then `live` (the round being written) and
   `content` (the answer):
@@ -1404,11 +1408,11 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   - **Round bookkeeping lives outside the state updaters.** Whether the round being
     streamed carries a call is a ref (`roundToolsRef`), set by `onRoundKind`, read by
     `onLive` when it FIRES and handed to its updater, reset by `onLiveCommit`. The
-    updaters are pure functions of the list. They used to mutate round state that
-    `onLiveCommit` read synchronously, so a round whose tokens and call arrived in one
-    batch could be read before its own updater had run — its text lost and the next
-    round taken for it. Which rounds survived depended on how the network cut the
-    stream.
+    updaters are pure functions of the list, and round state lives outside them: kept
+    inside, `onLiveCommit` would read round state an updater mutates synchronously, so
+    a round whose tokens and call arrive in one batch could be read before its own
+    updater has run — its text lost and the next round taken for it, however the
+    network happens to cut the stream.
   - **A round cut off** by Esc or an error keeps its text where it was drawn: a round
     known to carry a call, or one that began with its `Next:` plan (`startsWithNext`),
     becomes a step — drawn as it streamed, the token never; any other is what the
@@ -1418,26 +1422,26 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     arguments SUMMARISED (`summarizeArgs` — a string cut to 80 characters, a list as
     `[N items]`, an object as a 40-character JSON cut) — never a write_file's
     `content` or an edit's `old`/`new` in every save (the model's own history, `api`,
-    keeps the call as it was made; it is sent it again). A session saved before kept the text of the tool
+    keeps the call as it was made; it is sent it again). A session file saved by an older host keeps the text of the tool
     rounds (`process`, or `shown`), the turn's `changes` and its whole trail
-    (`toolRuns`); it reads as those parts in that old order — the text, the changes,
+    (`toolRuns`); it reads as those parts in that order — the text, the changes,
     then the calls as one trail of its own just before the answer, an empty step put
     before it so it is never taken for the step's own calls, and a call that left a
     view dropped since its view message draws it (`normalizeParts`). A part a
     renderer cannot draw, or a "message" that is not an object, is dropped on load;
     `live` and `liveQuiet` are never saved.
-  - **The model is asked for the shape, not for silence.** `baseStatic()` used to tell
-    it not to narrate; it narrated anyway, having nothing else to write between calls.
-    It now asks for ONE short line starting `Next:` before a tool call and nothing else
-    between calls, and for the final answer not to start with one. The sentence after
+  - **The model is asked for the shape, not for silence.** `baseStatic()` asks for ONE
+    short line starting `Next:` before a tool call and nothing else between calls, and
+    for the final answer not to start with one — telling it merely not to narrate
+    leaves it nothing else to write between calls, so it narrates anyway. The sentence after
     the token is the step the chat draws. Whether the instruction holds over a long
     turn, and that it costs no tool call, is a question for a live run
     (`scripts/eval-tool-use.ts`); the e2e test only holds the host to SENDING it.
 - **⇧⇥ steps the auto mode** — how much of a turn runs without the y/n (the rules are
   under "What the model can do"). It is one of the chat's own fixed keys, like ⏎ and
   Esc, drawn with `keyGlyph` and NOT in `HOST_DEFAULT_KEYS`: the chat owns the keyboard
-  while it is open. It used to fall into the plain Tab's completion, which is not what
-  anyone asks for by holding Shift. `/auto [reads|all|off]` does the same in words, and
+  while it is open, rather than letting it fall into the plain Tab's completion, which
+  is not what anyone asks for by holding Shift. `/auto [reads|all|off]` does the same in words, and
   a bare `/auto` takes the next rung. The mode is stated on the hint line in the warn
   colour (`auto: writes`) as a SIBLING of the hint, not inside it: the left cell becomes
   the running turn's status while an answer comes in, and a mode that disappeared
@@ -1547,12 +1551,12 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   usual double-Esc exit arms (the same "closest thing first" order as Esc's own
   field-clearing step) — leaving `!!` for good this way costs two Backspaces (or two
   Escs), one per level, from an empty field. `!` after other text, or already at
-  level 2 (the top), is just a character. Enter no longer inspects the field's TEXT
-  for a leading `!` to pick the level — only the UI state does — so a command's own
-  text CAN start with `!` now (the shell's negation, `! grep -q x f`: a shell-mode
-  line starting with `!` used to force an interactive run and eat the bang the
-  negation needed; getting such text INTO a level-1 field takes a paste, since typing
-  `!` there on the still-empty field steps the level instead of inserting it).
+  level 2 (the top), is just a character. Enter reads only the UI state to pick the
+  level, never the field's TEXT for a leading `!`, so a command's own text can start
+  with `!` (the shell's negation, `! grep -q x f`) without being read as a request for
+  an interactive run that would eat the bang the negation needs; getting such text
+  INTO a level-1 field takes a paste, since typing
+  `!` there on the still-empty field steps the level instead of inserting it.
   History keeps each line as it was run, `!cmd` or `!!cmd` — `encodeBangLine`/
   `decodeBangLine` in `src/assistant/prompt-history.ts` — with one wrinkle: a level-1
   `cmd` that itself starts with `!` gets a disambiguating space (`! !cmd`), since
@@ -1591,8 +1595,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   to the root, `/resume` and a restart bring it back. Variables
   and functions are not kept — every command is a fresh shell. **The live block still
   says where a `cd` moved to, or that one was refused** (`ConsoleData`'s `movedTo`/
-  `note`, `src/assistant/console-view.ts`), the same facts the old markdown line's
-  arrow and "cd led outside the roots" carried, drawn only alongside `showCwd`:
+  `note`, `src/assistant/console-view.ts`), drawn only alongside `showCwd`:
   `~/a → ~/b` when the command's own `cd` actually moved the directory, `cd led
   outside the roots — stayed` (fixed wording, dim) when one tried to leave the roots
   and was refused. `run_command`'s own view never sets `showCwd` and so never draws
@@ -1617,12 +1620,13 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   signal number), util-linux `script -q -e -c "/bin/sh '<dir>/cmd'" <rec>` — the path
   is checked to be one every shell reads plainly inside single quotes (`scriptCommand`
   refuses any other), and a test runs that string through every shell on the machine.
-  **`$0` is a neutral name, `!!`, not the temp file's own path** — `!!asd` used to read
-  `<dir>/cmd: line 1: asd: command not found`. Running the file as `sh <dir>/cmd`
+  **`$0` is a neutral name, `!!`, not the temp file's own path** — running the file as
+  its own path would read `!!asd` as `<dir>/cmd: line 1: asd: command not found`.
+  Running the file as `sh <dir>/cmd`
   (two args) sets `$0` to the file; `sh -c '<script>' name args…` sets it to `name`
   instead (POSIX: with `-c`, the word after the script text is `$0`), and the script
-  text READS the file and `eval`s it — `. "$1"` (sourcing) also keeps `$0`, but was
-  tried and rejected: bash's own "command not found" / syntax-error messages for a
+  text READS the file and `eval`s it rather than sourcing it: `. "$1"` (sourcing) also
+  keeps `$0`, but bash's own "command not found" / syntax-error messages for a
   SOURCED file still name the file, never `$0` (verified against the real macOS
   `/bin/sh`); `eval "$(cat "$1")"` does not, since nothing is tracked as a "source"
   file — the trade-off is bash's `line N:` prefix, tied to that same tracking, which
@@ -1651,9 +1655,10 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   wraps the WHOLE hand-over (`holdSignals(… suspend(… spawn))`) and gives them back one
   event-loop turn after the terminal is the app's again, so a signal raised by the
   program's last keys is never the app's. SIGCONT is held for Ctrl+Z inside a program
-  run WITHOUT `script`: it stops the app too, and on `fg` the TTY backend's own
-  SIGCONT listener used to take the terminal back while the program still ran; held,
-  the program keeps it until it ends and the hand-over's own return repaints. (Reasoned
+  run WITHOUT `script`: it stops the app too, and without holding it, on `fg` the TTY
+  backend's own SIGCONT listener would take the terminal back while the program still
+  ran; held, the program keeps it until it ends and the hand-over's own return
+  repaints. (Reasoned
   from the backend's code, not tried in a live terminal.) On return only the recording's last `RECORDING_READ_MAX` (1 MiB) is read
   (`readTail`, from a whole line; the bytes skipped count into `cut`) — a program left
   running for hours must not cost a long freeze. `cleanRecording` resolves it as a
@@ -1665,8 +1670,8 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   sequences — OSC, DCS (sixel), APC (kitty graphics), PM, SOS — dropped whole, each
   ending at BEL/ST, the next ESC or 4096 characters; every other sequence dropped;
   util-linux's header lines dropped). Every pattern is bounded: an unterminated OSC
-  used to be a lazy match to the end, quadratic over a 1 MiB tail (13 s measured);
-  a test holds 20k of them under a second. Then `sanitizeViewText`; the model gets its END capped at
+  never lazy-matches to the end, which would be quadratic over a 1 MiB tail (13 s
+  measured); a test holds 20k of them under a second. Then `sanitizeViewText`; the model gets its END capped at
   `shell.maxChars`, the view `capConsoleText`. The temp directory goes in a `finally`,
   whatever happened. The
   result is the same `shell` message and console view as `!`'s, marked `interactive`
@@ -1707,11 +1712,11 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   round, and a new round never repeats the last word. The PHASE is the colour:
   magenta while the model thinks — before the first token, while it reasons, between
   tools while it works out the next call — and the assistant's accent only while its
-  text arrives. It used to say `thinking…`/`writing…`, and `writing…` read as a
-  promise of text that was not there. The stream callbacks are
+  text arrives; spelling that out as `thinking…`/`writing…` instead would have
+  `writing…` read as a promise of text that is not there yet. The stream callbacks are
   closures made when the message was sent, so anything they READ (the tool label
-  they clear) is kept in a ref beside the state — reading the state there saw its
-  send-time value, and a finished tool's label stayed up for the rest of the turn.
+  they clear) is kept in a ref beside the state — reading the state there would see
+  its send-time value, and a finished tool's label would stay up for the rest of the turn.
   - **The seconds are the running THING's, not the turn's.** They start again whenever
     the line changes hands: a tool the moment it is called (`onTool`), the model's
     round the moment the tool ends (`segRef`, `beginSegment` in the chat; `t0Ref` still
@@ -1727,8 +1732,8 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     than none, and nothing here is estimated.
 - **The tool trail is condensed and capped** (`condenseRuns` / `TRAIL_ROWS` in
   `src/views/modals.ts`). One dim line per call earns nothing past a handful: a turn
-  that ran to the round limit printed dozens of them and the screen was a sheet of
-  grey, with the end of the turn lost in the middle of it. Consecutive calls of the
+  that runs to the round limit would print dozens of them, turning the screen into a
+  sheet of grey with the end of the turn lost in the middle of it. Consecutive calls of the
   same tool that ENDED the same way are one line with a count (`read_file ×12`) — a
   different argument is not a different line, the arguments are in the log — while a
   call that FAILED keeps a line of its own with its reason, which is how a person
@@ -1808,7 +1813,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     `bootApp` starts the e2e tests on a dark terminal (`opts.scheme` for another).
   - A modal is **as tall as what it holds** and never taller than the screen; what does
     not fit scrolls (`<ScrollBox scrollbar>` — the bar is how a person learns there is
-    more). The help used to run off both ends of the terminal with no way to scroll.
+    more).
   - **The log** stamps each entry with its time (`services/log.ts`), and what a line IS
     decides how loud it is: a failure red, `[bg]` the background's colour, the
     model-round bookkeeping and the stamp dim.
@@ -1916,8 +1921,8 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   in `src/assistant/shell.ts`); `repo` to `plugins.repo.roots`, declared in its
   `configSchema`, and without it to `shell.roots`, which it reads from the host config
   every builder is handed (`repoRoots` in `plugins-available/repo/src/index.ts`, called
-  on every tool call). Both used to read the host key `fs.roots`, a setting only
-  `repo` should have owned. It is still accepted by the schema and read for one release
+  on every tool call). `fs.roots` is a setting only `repo` should own; the schema still
+  accepts it and reads it for one release
   as the last fallback of both (shell: `shell.roots` → `fs.roots`; repo:
   `plugins.repo.roots` → `shell.roots` → `fs.roots`). A key that is SET — an array, even
   `[]` — is the answer: nothing falls through an empty list. Because repo reaches

@@ -52,8 +52,8 @@ it said between them, a command's capped output — opens where you click it: on
 open it, anywhere inside it to close it again. A block opens at its first row, so a
 long one starts where it starts; a drag is still a selection and never folds anything.
 `^o` is the same thing for the whole screen: with anything folded it opens everything,
-pressed again it closes everything (`config set keys.details <key>` moves it; `^r`,
-the key it used to be, still works).
+pressed again it closes everything (`config set keys.details <key>` moves it; `^r`
+works too).
 
 A turn reads in the order it happened: what the assistant said, the diff of the
 file it changed, what it said next, the answer. Its text stays where it was written —
@@ -173,7 +173,7 @@ of MCP servers, reached over Streamable HTTP or started as a command (Safari's
 (`plugins-available/mcp/README.md`). A plugin's settings are set like the host's:
 `config set plugins.<name>.<key> <value>`. `repo` reads and writes only inside
 `plugins.repo.roots`, and without it inside the shell's `shell.roots`. A config that
-still sets the roots as `fs.roots`, the key both used to share, works for one more
+still sets the roots as `fs.roots` works for one more
 release, and the log (`L`) says where to move it.
 
 **Writing a plugin**: [docs/plugins.md](docs/plugins.md) builds one step by step — a
