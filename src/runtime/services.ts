@@ -13,6 +13,7 @@ import { agentChat } from '../assistant/agent.js';
 import { copyToClipboard as platformCopy } from '../assistant/copy.js';
 import { toolLoadingMode } from '../assistant/tool-loading.js';
 import { toolResultCapFromConfig } from '../assistant/tool-result-cap.js';
+import { imageLimits } from '../assistant/images.js';
 import { llmOpts } from '../assistant/llm-endpoint.js';
 import type { AgentResult, AgentOpts, ChatMessage, ToolLogger } from '../assistant/agent.js';
 import type { AiToolDef, ToolRegistry } from '../loader/tools.js';
@@ -184,6 +185,8 @@ export function createServices({ config, tools, repo, onExit }: CreateServicesOp
     chatLLM: (messages, opts) => agentChat(messages, {
       toolLoading: toolLoadingMode(config.ai),
       toolResultMaxChars: toolResultCapFromConfig(config.ai),
+      // `ai.images` holds a tool's returned images to the same limits as an attachment.
+      imageLimits: imageLimits(config.ai),
       ...llmOpts(config.ai),
       ...opts,
       logToolRun: (opts?.logToolRun as ToolLogger | undefined) ?? log.logToolRun,

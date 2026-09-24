@@ -105,8 +105,11 @@ the terminal passes it on) for the image on the clipboard. It becomes an `[Image
 token in your message, and Backspace takes the token away whole. PNG, JPEG, GIF and
 WebP, up to 5 MB (`ai.images.maxBytes`) and 4 a message (`ai.images.maxPerMessage`);
 a bigger one is refused, never shrunk. The session keeps the file's path and hash, not
-the picture, and reads it again after a restart. A model that cannot take images:
-`config set ai.images.enabled false`.
+the picture, and reads it again after a restart. A tool that fetched images itself —
+the screenshots attached to an issue — can show them to the assistant too, under the
+same limits; the chat shows one `▣ shot.png · 400×300` row per image under the call,
+never the image, and nothing the assistant reads can make the host open a file or a
+URL as an image. A model that cannot take images: `config set ai.images.enabled false`.
 
 Bulky things — an image, a `!command`'s output, a large tool result — are sent to the
 model in full in the turn they arrive in, and later as a one-line stub naming an id

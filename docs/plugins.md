@@ -68,7 +68,8 @@ export default function buildNotesPlugin({ config, make, z }) {
 ## Tools for the model
 
 A tool group is `{ id, tools, exec }`. `tools` are OpenAI-format function
-definitions; `exec(name, args, ctx)` runs one and returns a string for the model.
+definitions; `exec(name, args, ctx)` runs one and returns a string for the model — or,
+for a tool that has images to show, text with the images beside it (below).
 
 ```ts
 tools: [{
@@ -168,11 +169,36 @@ What the host does with it, and what it expects back:
   `ai.recall.minChars` (4096) goes to the model in full in the turn it arrives in and
   afterwards, from a batch on, as one line naming an id the model reads again with
   the host's `recall` tool (README, "Bulky content"); what the tool returned is
-  unchanged, and the screen keeps it. A tool that has an image to show the model
-  calls `ctx.attachImage({ ref, url })` — `ref` an `ImageRef` (`src/assistant/images.ts`),
-  `url` a `data:` URL — and the image goes beside its result, as an image part, in the
-  rounds that follow within the turn; the result keeps the ref, never the bytes. Absent
-  outside a chat, so call it as `ctx.attachImage?.(…)`.
+  unchanged, and the screen keeps it.
+- **A tool can return images** — screenshots attached to an issue, a design, a chart —
+  when it fetched them itself: the host never reads a path or a URL named in text as
+  an image, and a tool is the one thing that may hand the model an image the person
+  did not attach. Return `{ text, images: [{ bytes, name }] }` instead of a string —
+  `bytes` a `Uint8Array` (a `Buffer` is one) or an `ArrayBuffer`, or `base64` in its
+  place; `name` is what the person and the model see — and say so on the tool's
+  definition: `{ type: 'function', function: { … }, returnsImages: true }`. Images from
+  a tool that does not declare it are dropped, with a note in the result and a line in
+  the log; the text still goes. Each image is told by its bytes (PNG, JPEG, GIF or
+  WebP — a `mime` you pass is not read) and held to the attachment limits: over
+  `ai.images.maxBytes` (5 MB) it is refused, never shrunk; past `ai.images.maxPerMessage`
+  (4) per result the rest are refused; with `ai.images.enabled` false all are. Every
+  refusal is one line at the end of your text, in the model's own reading, so a text
+  result never fails because of an image.
+  What the model gets: on the Anthropic wire the images as blocks inside the
+  `tool_result`; on the OpenAI-compatible wire the text in the tool message and the
+  images in a user message right after the round's tool results, marked `[2 images
+  returned by get_issue — from the app, not a message from the person]`. The chat
+  shows one row per image under the call's line — `▣ shot.png · 400×300` — never the
+  image. The host writes each image once into its own store (`images/<sha256>.<ext>`
+  under the config directory; the oldest go past 200 files) and keeps a ref to it, so
+  the session never holds the bytes; the images stay in the conversation as the
+  person's attachments do — sent in full until a batch stubs them, then as a stub the
+  model reads again with `recall`. `images` counts in the context meter by pixels,
+  like an attachment.
+  A tool that already holds a ref — the host's `recall` does — calls
+  `ctx.attachImage({ ref, url })` instead (`ref` an `ImageRef`, `src/assistant/images.ts`;
+  `url` a `data:` URL); the image goes beside its result the same way, and the result
+  keeps the ref. Absent outside a chat, so call it as `ctx.attachImage?.(…)`.
 
 `aiTools` is the other shape: standalone tools, each with its own `run(args, ctx)`,
 for a plugin that has no group.

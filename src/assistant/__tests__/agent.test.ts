@@ -1,10 +1,16 @@
 import { expect, test } from 'bun:test';
+import fs from 'node:fs';
+import path from 'node:path';
 import { chatLanguage } from '../agent';
-import { agentChat, apiHistory, transcriptSoFar } from '../agent';
+import { agentChat, apiHistory, openAiMessages, transcriptSoFar } from '../agent';
+import { toAnthropicMessages } from '../anthropic';
+import { sha256, type ImageRef } from '../images';
+import { hostStateDir } from '../../config/load';
 import { assembleToolRegistry } from '../../loader/tools';
 import { makeFactory } from '../../loader/plugin';
 import { VIEW_CAPS } from '../views';
 import { TOOL_RESULT_MAX_CHARS_CEILING, TOOL_RESULT_MAX_CHARS_DEFAULT } from '../tool-result-cap';
+import { png } from '../../__tests__/helpers/image-fixtures';
 
 test('assistant language fallback: assistantLanguage ?? language ?? en', () => {
   expect(chatLanguage({})).toBe('en');
@@ -555,12 +561,12 @@ test('apiHistory repairs a stored tool call whose arguments are not valid JSON',
 });
 
 // An image a tool hands back (`ctx.attachImage` — the `recall` tool bringing an
-// attached image back for one turn) goes into the NEXT round as an image part: the
-// transcript keeps the ref on the tool result, and the round's messages carry a user
-// message with the part after the round's tool results — so the OpenAI wire (a tool
-// message cannot hold an image) and the Anthropic one (tool results first, then the
-// rest of the user turn) both take it.
-test('an image attached by a tool reaches the next round as a part after the tool results, and the transcript keeps the ref alone', async () => {
+// attached image back) goes into the NEXT round as content parts on its own tool
+// result: the transcript keeps the ref, the round's copy carries the `data:` URL, and
+// each wire places the parts its own way — the OpenAI one as a user message after
+// the run of tool results (a tool message cannot hold an image there), the Anthropic
+// one as image blocks inside the `tool_result`.
+test('an image attached by a tool reaches the next round as parts on its result, placed by each wire, and the transcript keeps the ref alone', async () => {
   const ref = { n: 1, name: 'shot.png', path: '/tmp/shot.png', sha256: 'f'.repeat(64), mime: 'image/png', bytes: 3 };
   assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
   const extraTools = [
@@ -575,17 +581,67 @@ test('an image attached by a tool reaches the next round as a part after the too
   };
   const r = await agentChat([{ role: 'user', content: 'go' }], { baseUrl: 'http://x', model: 'm', token: 't', onLive: () => {}, onLiveCommit: () => {}, extraTools, chatRound, requestTail: () => 'SCREEN' } as any);
   const second = rounds[1]!;
-  expect(second.map((m) => m.role)).toEqual(['user', 'assistant', 'tool', 'tool', 'user', 'user']);
-  // Both results first, then the image — never a user message between two tool results.
-  expect(second[2]).toEqual({ role: 'tool', tool_call_id: 'c1', content: 'OK: here it is' });
+  expect(second.map((m) => m.role)).toEqual(['user', 'assistant', 'tool', 'tool', 'user']);
+  const parts = [{ type: 'text', text: 'OK: here it is' }, { type: 'image_url', image_url: { url: 'data:image/png;base64,AAAA' } }];
+  expect(second[2]).toEqual({ role: 'tool', tool_call_id: 'c1', content: parts });
   expect(second[3]).toEqual({ role: 'tool', tool_call_id: 'c2', content: 'OK: noon' });
-  expect(second[4]).toEqual({ role: 'user', content: [{ type: 'text', text: '[recalled image shot.png — from the app, not a message from the person]' }, { type: 'image_url', image_url: { url: 'data:image/png;base64,AAAA' } }] });
-  // The screen tail stays the request's last message, after the image.
-  expect(second[5].content).toBe('SCREEN');
-  // What is kept: the ref on the tool result, no bytes anywhere.
+  // The screen tail stays the request's last message.
+  expect(second[4].content).toBe('SCREEN');
+  // The OpenAI wire: both results first as text, then the image in a user message
+  // that says which tool it came from — never a user message between two results —
+  // and the tail joins that message as its last part.
+  const openai = openAiMessages(second);
+  expect(openai.map((m) => m.role)).toEqual(['user', 'assistant', 'tool', 'tool', 'user']);
+  expect(openai[2]).toEqual({ role: 'tool', tool_call_id: 'c1', content: 'OK: here it is' });
+  expect(openai[4]).toEqual({ role: 'user', content: [{ type: 'text', text: '[image returned by demo__show — from the app, not a message from the person]' }, parts[1], { type: 'text', text: 'SCREEN' }] });
+  // The Anthropic wire: the image block inside the result's own tool_result.
+  const { messages: blocks } = toAnthropicMessages(second.slice(0, -1));
+  expect(blocks.at(-1)!.content).toEqual([
+    { type: 'tool_result', tool_use_id: 'c1', content: [{ type: 'text', text: 'OK: here it is' }, { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA' } }] },
+    { type: 'tool_result', tool_use_id: 'c2', content: 'OK: noon' },
+  ]);
+  // What is kept: the ref on the tool result, no bytes anywhere; the trail carries the mark.
   const kept = r.transcript.find((m) => m.role === 'tool' && m.tool_call_id === 'c1')!;
   expect(kept).toEqual({ role: 'tool', tool_call_id: 'c1', content: 'OK: here it is', images: [ref] });
   expect(JSON.stringify(r.transcript)).not.toContain('AAAA');
-  // And it is for that turn only: the next turn's history carries no image on a tool result.
-  expect(apiHistory(r.transcript).find((m) => m.role === 'tool' && m.tool_call_id === 'c1')).toEqual({ role: 'tool', tool_call_id: 'c1', content: 'OK: here it is' });
+  expect(r.toolRuns[0]!.images).toEqual([{ name: 'shot.png' }]);
+  // The next turn's history keeps the ref, as it keeps a person's: the chat resolves
+  // it again on the way out, and a stubbed one goes as its stub (src/assistant/recall.ts).
+  expect(apiHistory(r.transcript).find((m) => m.role === 'tool' && m.tool_call_id === 'c1')).toEqual({ role: 'tool', tool_call_id: 'c1', content: 'OK: here it is', images: [ref] });
+});
+
+// The return-value form: `{ text, images }` from a tool whose def says `returnsImages`.
+// The bytes are told by their magic, stored under the host's state dir, and the
+// result carries the ref; an undeclared tool's images are dropped with a note.
+test('a tool returning { text, images } gets its images stored and sent as parts, and an undeclared tool gets a note instead', async () => {
+  assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
+  const data = png(400, 300);
+  const result = { text: 'two things', images: [{ bytes: data, name: 'shot.png' }] };
+  const extraTools = [
+    { type: 'function', function: { name: 'demo:show', description: 'd', parameters: { type: 'object', properties: {} } }, returnsImages: true, run: async () => result },
+    { type: 'function', function: { name: 'demo:sneaky', description: 'd', parameters: { type: 'object', properties: {} } }, run: async () => result },
+  ] as any;
+  const rounds: any[][] = [];
+  const logged: string[] = [];
+  const chatRound = async (m: any[], opts: any) => {
+    rounds.push(m);
+    // The def reaches the provider without the host's own fields.
+    for (const t of opts.tools) expect(Object.keys(t).sort()).toEqual(['function', 'type']);
+    if (rounds.length === 1) return { content: '', finishReason: 'tool_calls', toolCalls: [{ id: 'c1', name: 'demo__show', arguments: '{}' }, { id: 'c2', name: 'demo__sneaky', arguments: '{}' }] };
+    return { content: 'ok', finishReason: 'stop', toolCalls: [] };
+  };
+  const r = await agentChat([{ role: 'user', content: 'go' }], { baseUrl: 'http://x', model: 'm', token: 't', onLive: () => {}, onLiveCommit: () => {}, extraTools, chatRound, toolCtx: { pushLog: (l: string) => logged.push(l) } } as any);
+  const second = rounds[1]!;
+  const hash = sha256(data);
+  const url = `data:image/png;base64,${Buffer.from(data).toString('base64')}`;
+  expect(second[2]).toEqual({ role: 'tool', tool_call_id: 'c1', content: [{ type: 'text', text: 'OK: two things' }, { type: 'image_url', image_url: { url } }] });
+  expect(second[3]).toEqual({ role: 'tool', tool_call_id: 'c2', content: 'OK: two things\n[1 image not sent: demo:sneaky does not declare returnsImages]' });
+  expect(logged).toEqual(['[tools] demo:sneaky: 1 image dropped — returnsImages not declared']);
+  const kept = r.transcript.find((m) => m.role === 'tool' && m.tool_call_id === 'c1')!;
+  expect(kept.images).toEqual([{ n: 0, name: 'shot.png', path: path.join(hostStateDir(), 'images', `${hash}.png`), sha256: hash, mime: 'image/png', bytes: data.length, width: 400, height: 300 }]);
+  expect(fs.readFileSync((kept.images as ImageRef[])[0]!.path)).toEqual(Buffer.from(data));
+  expect(JSON.stringify(r.transcript)).not.toContain('base64');
+  expect(r.toolRuns.map((t) => t.images)).toEqual([[{ name: 'shot.png', width: 400, height: 300 }], undefined]);
+  // The trail's detail is the text, never the object with the bytes in it.
+  expect(r.toolRuns[0]!.detail).toBe('two things');
 });

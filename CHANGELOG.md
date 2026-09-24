@@ -5,6 +5,23 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **A tool can show the assistant images it fetched itself.** The screenshots attached
+  to an issue, a design, a chart: a tool that has them returns them beside its text,
+  and the assistant sees them — inside the tool result on Anthropic's API, in a
+  message right after the tool's results on an OpenAI-compatible one — under the same
+  limits as your own attachments (`ai.images.maxBytes` per image, `ai.images.maxPerMessage`
+  per result, refused with a note and never shrunk; with `ai.images.enabled false` the
+  text goes and a note says the images did not). The chat shows one row per image
+  under the call, `▣ shot.png · 400×300`, never the image; the images stay in the
+  conversation as attachments do — in full until a batch stubs them, then as a stub
+  `recall` reads again — and the session keeps a ref into the host's own image store
+  (`images/` in the config directory, the oldest pruned past 200), never the bytes.
+  Your rule stands: nothing the assistant reads can make the host open a file or a URL
+  as an image. On Anthropic's API a recalled image now goes inside its tool result as
+  well. **For plugin authors:** return `{ text, images: [{ bytes | base64, name }] }`
+  and mark the tool `returnsImages: true` (docs/plugins.md, "A tool can return
+  images"); an undeclared tool's images are dropped with a note. The host API number
+  is unchanged.
 - **Bulky content is sent once, then as a stub the assistant can recall.** An attached
   image, the output of a `!command` and a tool result over 4 KB stay in the model's
   history for good and used to ride every later request in full — a screenshot re-sent

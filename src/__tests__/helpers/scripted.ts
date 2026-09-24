@@ -238,14 +238,28 @@ export function anthropicRefusal(req: Record<string, unknown>, headers: Record<s
     for (const [j, b] of blocks.entries()) {
       if (b.type === 'text' && !b.text) return `messages.${i}.content.${j}.text: text content blocks must be non-empty`;
       if (b.type === 'thinking' && (m.role !== 'assistant' || typeof b.signature !== 'string' || !b.signature)) return `messages.${i}.content.${j}.thinking.signature: Field required`;
+      const badImage = (img: Record<string, unknown>, at: string): string | null => {
+        const src = img.source as { type?: string; media_type?: string; data?: string } | undefined;
+        if (src?.type === 'base64' && (!src.media_type || !src.data || src.data.includes(','))) return `${at}.image.source: invalid base64 source`;
+        return null;
+      };
       if (b.type === 'tool_result') {
         if (m.role !== 'user') return `messages.${i}.content.${j}: tool_result in an assistant message`;
         if (seenOther) return `messages.${i}: tool_result blocks must come first in the content`;
         if (!asked.has(String(b.tool_use_id))) return `messages.${i}.content.${j}: unexpected tool_use_id found in tool_result blocks: ${b.tool_use_id}. Each tool_result block must have a corresponding tool_use block in the previous message.`;
+        // A tool_result's content is a string, or text and image blocks — nothing else.
+        if (Array.isArray(b.content)) {
+          for (const [k, c] of (b.content as Array<Record<string, unknown>>).entries()) {
+            const at = `messages.${i}.content.${j}.content.${k}`;
+            if (c.type === 'text') { if (!c.text) return `${at}.text: text content blocks must be non-empty`; }
+            else if (c.type === 'image') { const bad = badImage(c, at); if (bad) return bad; }
+            else return `${at}.type: Input tag '${String(c.type)}' found using 'type' does not match any of the expected tags: 'text', 'image'`;
+          }
+        } else if (b.content != null && typeof b.content !== 'string') return `messages.${i}.content.${j}.content: Input should be a valid string or a list of content blocks`;
       } else seenOther = true;
       if (b.type === 'image') {
-        const src = b.source as { type?: string; media_type?: string; data?: string } | undefined;
-        if (src?.type === 'base64' && (!src.media_type || !src.data || src.data.includes(','))) return `messages.${i}.content.${j}.image.source: invalid base64 source`;
+        const bad = badImage(b, `messages.${i}.content.${j}`);
+        if (bad) return bad;
       }
     }
     if (m.role === 'assistant') {

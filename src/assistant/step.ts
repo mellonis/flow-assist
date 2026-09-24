@@ -29,6 +29,7 @@
 
 import { charWidth } from '@flowtty/core';
 import type { ChangeView } from './diff.js';
+import { imageMark, isImageMark, type ImageMark } from './tool-images.js';
 
 // ─── The mode ─────────────────────────────────────────────────────────────────
 // How the steps are drawn (`plugins.assistant.notes`, `/notes` for the conversation).
@@ -62,7 +63,7 @@ export function notesSaid(mode: NotesMode): string {
 // A step's text as the model wrote it (the `Next:` token included — it is taken out
 // where it is drawn), the calls a round made (consecutive calls with nothing drawn
 // between them share one part), or a change a write reported.
-export interface CallRun { name: string; args?: unknown; write?: boolean; outcome: string; detail?: string }
+export interface CallRun { name: string; args?: unknown; write?: boolean; outcome: string; detail?: string; images?: ImageMark[] }
 export type TurnPart = { kind: 'text'; text: string } | { kind: 'tools'; runs: CallRun[] } | { kind: 'change'; change: ChangeView };
 
 // A call as a part keeps it: what the trail draws, never more — not the tool's whole
@@ -91,7 +92,9 @@ export function callRun(raw: unknown): CallRun | null {
   if (typeof r.name !== 'string' || typeof r.outcome !== 'string') return null;
   const detail = typeof r.detail === 'string' ? r.detail : r.detail == null ? '' : JSON.stringify(r.detail);
   const args = summarizeArgs(r.args);
-  return { name: r.name, ...(args ? { args } : {}), ...(r.write ? { write: true } : {}), outcome: r.outcome, ...(detail ? { detail: detail.slice(0, DETAIL_CHARS) } : {}) };
+  // The images the call returned, as marks — a name and a size — never the bytes.
+  const images = Array.isArray(r.images) ? r.images.filter(isImageMark).map(imageMark) : [];
+  return { name: r.name, ...(args ? { args } : {}), ...(r.write ? { write: true } : {}), outcome: r.outcome, ...(detail ? { detail: detail.slice(0, DETAIL_CHARS) } : {}), ...(images.length ? { images } : {}) };
 }
 
 // Calls added to a turn's parts: into the last part when it is calls too, so

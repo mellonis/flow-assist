@@ -25,6 +25,7 @@ import { buildKeys } from './registry.js';
 import { purgePluginMemories } from '../runtime/services/memory.js';
 import { identityToken } from '../runtime/plugin-identity.js';
 import { qualifyKind } from '../assistant/views.js';
+import { toolImageResult, type ToolImageResult } from '../assistant/tool-images.js';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 export type ToolParameters = Record<string, unknown>;
@@ -48,11 +49,20 @@ export interface ToolDef {
   // Clamped to `TOOL_RESULT_MAX_CHARS_CEILING` (src/assistant/tool-result-cap.ts).
   // Never sent to the provider: stripped from a wire tool def like `write`/`run`.
   maxResultChars?: number;
+  // The tool may return images beside its text — `{ text, images }`, the
+  // `ToolImageResult` of src/assistant/tool-images.ts. Images from a tool that does
+  // not say so are dropped with a note in the result (docs/plugins.md). Never sent to
+  // the provider: stripped like `write`/`run`/`maxResultChars`.
+  returnsImages?: boolean;
 }
 
 export type AiToolDef = ToolDef & { run: (...args: unknown[]) => unknown };
 
 export type ToolCtx = CoreCtx & Record<string, unknown>;
+
+// What a tool answers with: a string for the model, or text with images beside it
+// (src/assistant/tool-images.ts — only from a tool whose def says `returnsImages`).
+export type ToolResult = string | ToolImageResult;
 
 // A self-contained tool group factory object — `args` is already parsed, `ctx`
 // is the runtime context ({ memoryFile, configLocalPath }).
@@ -60,13 +70,13 @@ export interface ToolGroup {
   id: string;
   alwaysOn?: boolean;
   tools: ToolDef[];
-  exec(name: string, args: Record<string, unknown>, ctx: ToolCtx): Promise<string>;
+  exec(name: string, args: Record<string, unknown>, ctx: ToolCtx): Promise<ToolResult>;
 }
 
 export interface ToolRegistry {
   groups: ToolGroup[];
   tools: ToolDef[];
-  exec(name: string, args: Record<string, unknown>, ctx: ToolCtx): Promise<string>;
+  exec(name: string, args: Record<string, unknown>, ctx: ToolCtx): Promise<ToolResult>;
 }
 
 export interface AssembledToolRegistryInput {
@@ -226,7 +236,9 @@ export function assembleToolRegistry({ plugins, config, repo }: AssembledToolReg
           // pass ctx through untouched — fusing plugin services again would be a
           // no-op (same keys, same values) and confuse the caller's overrides.
           if (def && typeof def.run === 'function') {
-            return String(await def.run(args, ctx));
+            // A result with images keeps its shape; anything else is the string it reads as.
+            const r = await def.run(args, ctx);
+            return toolImageResult(r) ?? String(r);
           }
           throw new Error(`Unknown tool: ${name}`);
         },
@@ -280,7 +292,7 @@ export function chatToolGroupOf(): Map<string, string> {
 }
 
 // Dispatches a tool call to the current registry (source-faithful, module-level).
-export async function execChatTool(name: string, args: Record<string, unknown>, ctx: ToolCtx): Promise<string> {
+export async function execChatTool(name: string, args: Record<string, unknown>, ctx: ToolCtx): Promise<ToolResult> {
   if (!currentRegistry) throw new Error('No tool registry assembled');
   return currentRegistry.exec(name, args, ctx);
 }

@@ -655,15 +655,58 @@ there is no `/fullscreen`.
   points back at the item recalled. An image goes through `ctx.attachImage({ ref, url
   })` (`agentChat` gives every call one): the tool result keeps the REF (`images`,
   never bytes — the session stays base64-free), the turn keeps the `data:` URL, and
-  `withAttachedImages` puts a user message of parts — a note `[recalled image shot.png
-  — from the app, not a message from the person]` and the image — right AFTER the run
-  of that round's tool results in every following round of the turn: a tool message
-  cannot hold an image on the OpenAI wire, a user message between two results would
-  break their run there, and on the Anthropic wire it merges into the same user turn
-  after the `tool_result` blocks (the image takes the message breakpoint).
-  `apiHistory` carries `images` on user messages only, so the next turn sends the
-  result's text and no image — the recall was for that turn. A file gone or changed
+  `withAttachedImages` puts the image on the round's copy of that tool message as
+  content PARTS — the one carrier for an image on a tool message, whatever brought
+  it (a recall, or a tool's own `{ text, images }` return, "A tool can return images"
+  below) — which each wire places its own way: the OpenAI wire as ONE user message
+  after the run of that round's tool results, `[image returned by recall — from the
+  app, not a message from the person]` and the image parts (`openAiMessages`; a tool
+  message cannot hold an image there, and a user message between two results would
+  break their run), the Anthropic wire as image blocks inside the `tool_result` itself
+  (`toolResultBlock`, the API's native form). The recall is for that turn: the item's
+  id is stubbed already, so from the next turn on `applyRecall` sends the recall's
+  result with the image's stub under its text and no image. A file gone or changed
   since it was attached is the tool's own answer, not a note.
+- **A tool can return images it fetched itself** (`src/assistant/tool-images.ts`; the
+  rule stands: nothing the model reads makes the host open a path or a URL as an
+  image). A tool answers `{ text, images: [{ bytes | base64, name }] }` instead of a
+  string — a group's `exec` or an `aiTools` `run` alike — and its def says
+  `returnsImages: true`, stripped before the wire like `write`/`maxResultChars`; images
+  from a tool that does not declare it are dropped with a note in the result and a
+  `[tools] <name>: N images dropped — returnsImages not declared` line in the log, and
+  the text still goes. `acceptToolImages` tells each image by its bytes (`sniffImage`;
+  a `mime` the tool passes is a claim and is not read) and holds it to `ai.images`:
+  over `maxBytes` refused, never shrunk (a base64 too long is refused before it is
+  decoded); past `maxPerMessage` per result the rest refused; `enabled` false drops
+  all. Every refusal is one line at the END of the result text, in the model's
+  reading, so it survives `capToolResult`'s head-and-tail cut. An accepted image is
+  written ONCE to `images/<sha256>.<ext>` under `hostStateDir()` (resolved on every
+  call — a test's temp dir), 0700/0600, temp file + rename, and kept as an `ImageRef`
+  with `n: 0` (no `[Image #N]` token) on the tool message's `images`; the same
+  hash-checked `readImageData` serves a restart and `recall`. **The store is pruned by
+  count**: `pruneImageStore` after every write keeps the newest `IMAGE_STORE_KEEP`
+  (200) files by mtime and touches only `<sha256>.<ext>` names; a pruned ref reads
+  `[image unavailable: name]` on the wire and is `recall`'s own answer. **An image on a
+  tool message is an image on a user message, everywhere**: `apiHistory` keeps it,
+  `wireMessages` resolves it into parts, `bulkyItems` makes it an `img:` item,
+  `applyRecall` stubs it under the result's text, the context meter counts it by
+  pixels (`imageTokens`), `/compact` names it — so a returned image is sent in full
+  until a batch stubs it, then as a stub `recall` brings back; a recalled image's id is
+  stubbed already, which is what keeps a recall to its turn. The one thing that differs
+  per wire is placement: the round's copy of the tool message carries the image as
+  content PARTS (`withAttachedImages`, the same carrier `wireMessages` gives an earlier
+  turn), `openAiMessages` turns those into ONE user message after the run of tool
+  results — `[2 images returned by get_shots — from the app, not a message from the
+  person]` (`RETURNED_IMAGES_NOTE`, the tool named from the assistant message's
+  `tool_calls`) — and `toolResultBlock` puts text and `image` blocks inside the
+  `tool_result` itself; the scripted model's `anthropicRefusal` checks a `tool_result`'s
+  array content the way the API does. The chat draws one dim row per image under the
+  call's line — `▣ shot.png · 400×300` (`ImageMark` on `ToolRun`/`CallRun`, `markText`;
+  `▣` is East-Asian-ambiguous like the `◆` marker and counts one cell in flowtty's
+  grid) — never the image, and `condenseRuns` never folds a call that carries marks
+  into a `×N`; the session keeps the marks and the refs, never bytes.
+  `AgentOpts.imageLimits` carries `ai.images` in (`services.chatLLM`, `runPrompt`); a
+  caller that says nothing gets the defaults.
 - **A request carries the core tools and an INDEX of the rest** (tools on demand,
   `src/assistant/tool-loading.ts`, pure; wired in `agentChat`). Every tool's full
   schema on every request costs ~7k tokens with only the bundled plugins, a tracker
@@ -1076,7 +1119,9 @@ provider: everywhere the host keeps a message (the display list, `apiRef`, the
 session) its content is a string, and a person's message with images carries them
 beside it as `images: ImageRef[]` (`{ n, name, path, sha256, mime, bytes, width,
 height }`, `src/assistant/images.ts`) — on the display message only their numbers.
-`apiHistory` passes a user message's `images` through; `send()` alone turns them into
+`apiHistory` passes a user message's `images` through — and a tool message's, the
+images a tool returned beside its result ("A tool can return images" under What the
+model can do); `send()` alone turns them into
 `[{type:'text'}, {type:'image_url', image_url:{url:'data:…'}}]` (`wireMessages`) right
 before `chatLLM`, from bytes read when the image was attached or, after a restart,
 read again from the path with the hash checked. A file gone or changed is a `note` in

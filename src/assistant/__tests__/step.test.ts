@@ -89,6 +89,11 @@ test('a call is kept as the trail draws it — never its whole result', () => {
   expect(callRun({ name: 'read_file', args: { p: 1 }, outcome: 'ok', detail: 'x'.repeat(1000), changes: [1], views: [2] })).toEqual({ name: 'read_file', args: { p: 1 }, outcome: 'ok', detail: 'x'.repeat(300) });
   expect(callRun({ outcome: 'ok' })).toBe(null);
   expect(callRun('junk')).toBe(null);
+  // The images a call returned are kept as marks — a name and a size — and a mark
+  // that is not one (a session file hand-edited) is dropped.
+  expect(callRun({ name: 'get_shots', outcome: 'ok', images: [{ name: 'a.png', width: 400, height: 300, path: '/x', sha256: 'f' }, { name: 'b.gif' }, 'junk', { width: 1 }] }))
+    .toEqual({ name: 'get_shots', outcome: 'ok', images: [{ name: 'a.png', width: 400, height: 300 }, { name: 'b.gif' }] });
+  expect(callRun({ name: 'get_shots', outcome: 'ok', images: [] })).toEqual({ name: 'get_shots', outcome: 'ok' });
 });
 
 test('a step with nothing to draw breaks no run', () => {

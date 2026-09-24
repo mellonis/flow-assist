@@ -91,22 +91,24 @@ test('an attached image goes in full in its turn and until the context passes th
   expect(result.content).toBe(`OK: [recalled ${id} — shot.png · 1000×750 — sent as an image beside this result, for this turn]`);
   const after = recalled.messages[recalled.messages.indexOf(result) + 1]!;
   expect(after.role).toBe('user');
-  expect(after.content).toEqual([{ type: 'text', text: '[recalled image shot.png — from the app, not a message from the person]' }, { type: 'image_url', image_url: { url: `data:image/png;base64,${b64(file)}` } }]);
+  expect(after.content).toEqual([{ type: 'text', text: '[image returned by recall — from the app, not a message from the person]' }, { type: 'image_url', image_url: { url: `data:image/png;base64,${b64(file)}` } }]);
   // The stub in the first message stays a stub — the recall is beside the result.
   expect(recalled.messages.find((m) => m.role === 'user')!.content).toBe(first.content);
   expect(ui.backend.lastFrame).toContain('Seen again.');
 
-  // For that turn only: the next turn's history keeps the result's text and no image.
+  // For that turn only: the item's id is stubbed already, so the next turn's history
+  // carries the recall's result with the same stub under it, and no image.
   await ask(ui, model, 'thanks', 6);
   const later = req(model, 5);
   expect(imageUrls(later)).toEqual([]);
   expect(JSON.stringify(later)).not.toContain('base64');
   expect(later.messages.filter((m) => m.role === 'tool')).toHaveLength(1);
-  expect(later.messages.some((m) => textOf(m.content).includes('[recalled image shot.png'))).toBe(false);
+  expect(later.messages.some((m) => textOf(m.content).includes('[image returned by recall'))).toBe(false);
+  expect(later.messages.find((m) => m.role === 'tool')!.content).toBe(`${result.content}\n[image shot.png · 1000×750 — recall("${id}")]`);
   ui.app.unmount();
 });
 
-test('the same on the Anthropic wire: the stub replaces the image block, and recall puts the image back as a block after the tool result', async () => {
+test('the same on the Anthropic wire: the stub replaces the image block, and recall puts the image back as a block inside the tool result', async () => {
   const { file } = shot();
   const id = idOf(file);
   const model = new ScriptedModel();
@@ -130,13 +132,19 @@ test('the same on the Anthropic wire: the stub replaces the image block, and rec
   await ask(ui, model, 'again', 4);
   expect(images(2)).toHaveLength(0);
   expect(sent(2).messages[0]!.content).toEqual([{ type: 'text', text: `[Image #1] what is this?\n[image shot.png · 1000×750 — recall("${id}")]` }]);
-  // One user turn: the tool result first, then the note and the image — the block the
-  // API's own rules want last of all takes the cache breakpoint.
+  // One user turn of one block: the tool result, holding its text and the image — the
+  // API's native form for an image a tool returned — and it takes the cache breakpoint.
   const last = sent(3).messages.at(-1)!;
   expect(last.role).toBe('user');
-  expect(last.content.map((b) => b.type)).toEqual(['tool_result', 'text', 'image']);
-  expect(last.content[0]).toMatchObject({ type: 'tool_result', content: `OK: [recalled ${id} — shot.png · 1000×750 — sent as an image beside this result, for this turn]` });
-  expect(last.content[2]).toMatchObject({ type: 'image', source: { type: 'base64', media_type: 'image/png', data: b64(file) }, cache_control: { type: 'ephemeral' } });
+  expect(last.content).toEqual([{
+    type: 'tool_result',
+    tool_use_id: 'toolu_0',
+    content: [
+      { type: 'text', text: `OK: [recalled ${id} — shot.png · 1000×750 — sent as an image beside this result, for this turn]` },
+      { type: 'image', source: { type: 'base64', media_type: 'image/png', data: b64(file) } },
+    ],
+    cache_control: { type: 'ephemeral' },
+  }]);
   expect(ui.backend.lastFrame).toContain('Seen again.');
   ui.app.unmount();
 });

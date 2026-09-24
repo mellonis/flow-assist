@@ -3,7 +3,15 @@ import { createElement as h } from 'react';
 import { render } from '@flowtty/react';
 import { TestBackend } from '@flowtty/core/testing';
 import { MODAL_COLOR_DEFAULTS } from '../../playback/theme.js';
-import { helpEntries, inputVisualRows, mdLines, renderChatModal, renderHelp, renderLogModal, renderReminder } from '../modals.js';
+import { condenseRuns, helpEntries, inputVisualRows, mdLines, renderChatModal, renderHelp, renderLogModal, renderReminder } from '../modals.js';
+
+// The trail condenses a run of one tool ending one way into a count — except a call
+// that returned images, whose marks are what the person looks for.
+test('condenseRuns counts same-name same-outcome calls, and never folds a call that returned images', () => {
+  const ok = (name: string, images?: { name: string }[]) => ({ name, outcome: 'ok', ...(images ? { images } : {}) });
+  expect(condenseRuns([ok('read_file'), ok('read_file'), ok('read_file')]).map((c) => c.n)).toEqual([3]);
+  expect(condenseRuns([ok('get_shots'), ok('get_shots', [{ name: 'a.png' }]), ok('get_shots')]).map((c) => [c.run.name, c.n, c.run.images?.length ?? 0])).toEqual([['get_shots', 1, 0], ['get_shots', 1, 1], ['get_shots', 1, 0]]);
+});
 
 // The built-in modal renderers, driven directly so the chat/help/log surfaces are
 // actually drawn. Each renderer is pure — it takes props and returns an element —

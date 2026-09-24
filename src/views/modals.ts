@@ -20,6 +20,7 @@ import { VERBS } from '../assistant/verbs.js';
 import { answerText, cellWidth, cutStep, readParts, runMarks, runRowText, shownText, turnSegments, type NotesMode } from '../assistant/step.js';
 import { isClicked, isOpen, foldId, type FoldState } from '../assistant/folds.js';
 import { imageTokenRanges, splitTokens } from '../assistant/images.js';
+import { markText, type ImageMark } from '../assistant/tool-images.js';
 import { changeCounts, changeMarkdown, diffRows, type ChangeView } from '../assistant/diff.js';
 import { VIEW_CAPS, frameView, isConsoleKind, type ViewRecord, type ViewRenderers } from '../assistant/views.js';
 import { groupHeadText, groupOpen, viewGroups, type GroupMsg, type ViewGroup } from '../assistant/view-groups.js';
@@ -74,6 +75,9 @@ interface ToolRun {
   args?: unknown;
   outcome: string;
   detail?: string;
+  // The images the call returned, drawn as one row each under its line (`▣ shot.png
+  // · 400×300`) — the mark, never the image (src/assistant/tool-images.ts).
+  images?: ImageMark[];
 }
 // The assistant's task plan (the `todo` core tool). Rendered as a fixed checkbox
 // block above the chat: active items (in-progress ◐ first, then pending ☐), up to
@@ -334,14 +338,22 @@ function changeLines(v: ChangeView, inner: number): Line[] {
 // — a different argument is not a different line, the arguments are in the log. A call
 // that failed keeps a line of its own with its reason: that is how a person knows why
 // an answer is thin, and it is the one thing the grey was hiding.
+// A call that returned images keeps a line of its own too: its marks are what the
+// person looks for, and a count would hide them.
 export function condenseRuns(runs: readonly ToolRun[]): { run: ToolRun; n: number }[] {
   const out: { run: ToolRun; n: number }[] = [];
   for (const run of runs) {
     const last = out[out.length - 1];
-    if (last && last.run.name === run.name && last.run.outcome === run.outcome) last.n++;
+    if (last && last.run.name === run.name && last.run.outcome === run.outcome && !run.images?.length && !last.run.images?.length) last.n++;
     else out.push({ run, n: 1 });
   }
   return out;
+}
+
+// The rows under a call's line, one per image it returned: dim, indented under the
+// `▸`, and one terminal row like every other.
+function imageMarkRows(run: ToolRun, wrap: number): Span[] {
+  return (run.images ?? []).map((m) => ({ text: cutStep(`  ${markText(m)}`, Math.max(20, (wrap || 80) - 1)), dim: true }));
 }
 // How many lines of an open trail stand before the rest fold into `… N earlier calls`.
 export const TRAIL_ROWS = 12;
@@ -719,7 +731,10 @@ function buildMessageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): Ch
         const callsId = foldId(at, 'calls', n);
         const earlier = isClicked(folds, callsId) ? 0 : Math.max(0, condensed.length - TRAIL_ROWS);
         if (earlier) rows.push({ role, toolRun: true, fold: callsId, spans: [{ text: `… ${earlier} earlier call${earlier === 1 ? '' : 's'}`, dim: true }] });
-        for (const { run, n: times } of condensed.slice(earlier)) rows.push({ role, toolRun: true, fold: toolsId, spans: [toolRunText(run, inner, times)] });
+        for (const { run, n: times } of condensed.slice(earlier)) {
+          rows.push({ role, toolRun: true, fold: toolsId, spans: [toolRunText(run, inner, times)] });
+          for (const mark of imageMarkRows(run, inner)) rows.push({ role, toolRun: true, fold: toolsId, spans: [mark] });
+        }
       };
       const segs = turnSegments(parts);
       for (const [si, seg] of segs.entries()) {
@@ -760,8 +775,12 @@ function buildMessageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): Ch
             for (const line of mdLines(text, inner)) rows.push(row(line, notes === 'step' ? { quiet: true, fold: id } : {}));
             const calls = seg.calls[si];
             if (!calls) return;
-            if (notes === 'step') for (const { run, n } of condenseRuns(calls.runs)) rows.push({ role, toolRun: true, fold: id, spans: [toolRunText(run, inner, n)] });
-            else trail(calls.n, calls.runs);
+            if (notes === 'step') {
+              for (const { run, n } of condenseRuns(calls.runs)) {
+                rows.push({ role, toolRun: true, fold: id, spans: [toolRunText(run, inner, n)] });
+                for (const mark of imageMarkRows(run, inner)) rows.push({ role, toolRun: true, fold: id, spans: [mark] });
+              }
+            } else trail(calls.n, calls.runs);
           });
         }
         rows.push({ gap: true });

@@ -109,13 +109,16 @@ function assistantBlocks(m: ChatMessage): Block[] {
 }
 
 // The loop tags every tool result `OK:` / `ERROR:` / `DECLINED:` for the model; the
-// native API has a flag for the second.
+// native API has a flag for the second. A result carrying images (its content is
+// parts, src/assistant/tool-images.ts) is one `tool_result` whose content holds the
+// text and the image blocks — the API's own form for an image a tool returned.
 function toolResultBlock(m: ChatMessage): Block {
   const text = textOf(m.content);
+  const content: string | Block[] = Array.isArray(m.content) ? userBlocks(m.content) : text;
   return {
     type: 'tool_result',
     tool_use_id: String(m.tool_call_id ?? ''),
-    ...(text ? { content: text } : {}),
+    ...(content.length ? { content } : {}),
     ...(text.startsWith('ERROR:') ? { is_error: true } : {}),
   };
 }

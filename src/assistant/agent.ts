@@ -20,7 +20,8 @@ import type { ToolRunEntry } from '../runtime/services/log.js';
 import { changeView, type Change, type ChangeView } from './diff.js';
 import { acceptData, isConsoleKind, readLegacyView, type ViewRecord } from './views.js';
 import { capConsoleData } from './console-view.js';
-import { contentText, type ContentPart, type ImageRef } from './images.js';
+import { IMAGE_DEFAULTS, contentText, type ContentPart, type ImageLimits, type ImageRef } from './images.js';
+import { acceptToolImages, imageMark, imageStoreDir, toolImageResult, type ImageMark } from './tool-images.js';
 import { llmErrorMessage } from './llm-error.js';
 import { ANTHROPIC_CONTENT, REQUEST_TAIL, anthropicChatRound, anthropicCompact } from './anthropic.js';
 import type { ThinkingConfig } from './llm-endpoint.js';
@@ -93,6 +94,10 @@ export interface ToolRun {
   // The views the call left — in their final phase, never a discarded one; drawn in
   // the chat, never sent to the model.
   views?: ViewRecord[];
+  // The images the call handed the model beside its result (returned, or attached
+  // through `ctx.attachImage`), as marks — a name and a size, drawn one row each in
+  // the chat; the bytes are in the host's store (src/assistant/tool-images.ts).
+  images?: ImageMark[];
 }
 
 export interface AgentResult {
@@ -173,6 +178,11 @@ export interface AgentOpts {
   // here so a caller that says nothing still caps. A tool's own `maxResultChars`
   // overrides it per call, clamped to the hard ceiling.
   toolResultMaxChars?: number;
+  // The limits a tool's returned images are held to (src/assistant/tool-images.ts),
+  // from `ai.images` — the attachment limits: per image `maxBytes`, per result
+  // `maxPerMessage`, and none at all with `enabled` false. A caller that says nothing
+  // gets the defaults.
+  imageLimits?: ImageLimits;
   // Every change to a view a call opened (`ctx.liveView`): its first state, each
   // update, and its final phase once the call ends. Display only — the chat draws it.
   onToolLive?: (rec: ViewRecord) => void;
@@ -219,8 +229,11 @@ export function apiHistory(messages: ChatMessage[]): ChatMessage[] {
     // A background result and a `!command` the person ran reach the model as the user's.
     const out: ChatMessage = { role: m.role === 'bg' || m.role === 'shell' ? 'user' : m.role, content: m.content ?? null };
     // The images the person attached stay with their message for the rest of the
-    // conversation — as refs; `send` turns them into parts on the way out.
-    if (m.role === 'user' && Array.isArray(m.images) && m.images.length) out.images = m.images;
+    // conversation — as refs; `send` turns them into parts on the way out. So do the
+    // images a tool returned beside its result, on the tool message (a recalled image
+    // among them — its id is stubbed already, so it goes as its stub from the next
+    // turn on, src/assistant/recall.ts).
+    if ((m.role === 'user' || m.role === 'tool') && Array.isArray(m.images) && m.images.length) out.images = m.images;
     // A call from an older session (or hand-edited) may carry arguments that never
     // parse — the same 400 a malformed call at the wire produces, forever,
     // since this is the history sent on every later request. Repaired here too, so an
@@ -297,13 +310,52 @@ function openAiShaped(m: ChatMessage): ChatMessage {
   return rest as ChatMessage;
 }
 
-// A round's messages on the OpenAI wire. The round's tail (`REQUEST_TAIL`) joins the
-// end of the person's last message as a paragraph of its own — or a text part, when
-// that message has parts (images) — rather than making a second user message in a
-// row; after tool results it stands as a user message of its own. Either way it is
-// the END of the request, past the prefix the provider's automatic cache matches.
+// The text of the user message that carries a tool's images on the OpenAI wire, after
+// the run of tool results: which tool returned how many, and that it is not the person
+// speaking — the model reads a user message as the person's unless told.
+export const RETURNED_IMAGES_NOTE = (by: ReadonlyArray<{ tool: string; count: number }>): string =>
+  `[${by.map(({ tool, count }) => `${count === 1 ? 'image' : `${count} images`} returned by ${tool}`).join('; ')} — from the app, not a message from the person]`;
+
+// A round's messages on the OpenAI wire. A tool result carrying images — its content
+// is parts (src/assistant/tool-images.ts) — goes as its text in the `tool` message,
+// and the images follow in ONE user message after the run of tool results it belongs
+// to (`RETURNED_IMAGES_NOTE`, then the image parts): a tool message cannot hold an
+// image on this wire, and a user message between two results would break their run.
+// The round's tail (`REQUEST_TAIL`) joins the end of the person's last message as a
+// paragraph of its own — or a text part, when that message has parts (images, or the
+// tool's images above) — rather than making a second user message in a row; after
+// tool results it stands as a user message of its own. Either way it is the END of
+// the request, past the prefix the provider's automatic cache matches.
 export function openAiMessages(messages: ChatMessage[]): ChatMessage[] {
-  const out = messages.map(openAiShaped);
+  const out: ChatMessage[] = [];
+  // Which tool a result answers, by call id — the assistant message before names it.
+  const toolOf = new Map<string, string>();
+  let pending: { tool: string; parts: ContentPart[] }[] = [];
+  const flush = () => {
+    if (!pending.length) return;
+    const by: { tool: string; count: number }[] = [];
+    for (const p of pending) {
+      const last = by.at(-1);
+      if (last?.tool === p.tool) last.count += p.parts.length; else by.push({ tool: p.tool, count: p.parts.length });
+    }
+    out.push({ role: 'user', content: [{ type: 'text', text: RETURNED_IMAGES_NOTE(by) }, ...pending.flatMap((p) => p.parts)] });
+    pending = [];
+  };
+  for (const raw of messages) {
+    const m = openAiShaped(raw);
+    if (m.role === 'assistant' && Array.isArray(m.tool_calls)) {
+      for (const c of m.tool_calls as Array<{ id?: unknown; function?: { name?: unknown } }>) if (c?.id != null) toolOf.set(String(c.id), String(c.function?.name ?? 'tool'));
+    }
+    if (m.role !== 'tool') flush();
+    if (m.role === 'tool' && Array.isArray(m.content)) {
+      const images = m.content.filter((p) => p.type === 'image_url');
+      if (images.length) pending.push({ tool: toolOf.get(String(m.tool_call_id)) ?? 'tool', parts: images });
+      out.push({ ...m, content: contentText(m.content.filter((p) => p.type === 'text')) });
+      continue;
+    }
+    out.push(m);
+  }
+  flush();
   const tail = out.at(-1);
   if (!tail?.[REQUEST_TAIL]) return out;
   const text = typeof tail.content === 'string' ? tail.content : '';
@@ -521,7 +573,7 @@ function modelToolResult(outcome: string, detail: unknown): string {
 export function toolCatalog(extraTools: ToolDef[] = []): CatalogEntry[] {
   const sent = new Map<string, ToolDef>();
   for (const t of chatTools()) sent.set(t.function.name, t);
-  for (const { write: _w, run: _r, maxResultChars: _m, ...rest } of extraTools) sent.set(rest.function.name, rest);
+  for (const { write: _w, run: _r, maxResultChars: _m, returnsImages: _i, ...rest } of extraTools) sent.set(rest.function.name, rest);
   const groupOf = chatToolGroupOf();
   return [...sent.values()].map((def) => ({ name: def.function.name, group: groupOf.get(def.function.name) ?? 'other', def }));
 }
@@ -555,36 +607,26 @@ function withRequestTail(messages: ChatMessage[], tail: (() => string) | undefin
   return [...messages, { role: 'user', content: text, [REQUEST_TAIL]: true }];
 }
 
-// An image a tool of THIS turn attached to its result (`ctx.attachImage` — the `recall`
-// tool bringing an attached image back). The result keeps the ref (`images`, as a
-// person's message does — never the bytes), and the round's messages carry the image
-// as a user message of content parts right AFTER the run of tool results it belongs
-// to: a tool message cannot hold an image on the OpenAI wire, and a user message
-// between two tool results would break the results' run there; on the Anthropic wire
-// it merges into the same user turn, after the tool results. `urls` are the turn's own
-// (`data:` URLs resolved by the tool's caller), never kept: `apiHistory` carries no
-// image on a tool message into the next turn — the image was for this one.
-export const RECALLED_IMAGE_NOTE = (name: string) => `[recalled image ${name} — from the app, not a message from the person]`;
+// An image a tool of THIS turn handed the model beside its result — returned as
+// `{ text, images }`, or attached through `ctx.attachImage` (the `recall` tool
+// bringing an image back). The result keeps the ref (`images`, as a person's message
+// does — never the bytes), and the round's copy of it carries the image as content
+// PARTS on the tool message itself — the same carrier `wireMessages` (./images.ts)
+// gives a message from an earlier turn — which each wire then places its own way:
+// image blocks inside the `tool_result` on the Anthropic wire (`toolResultBlock`), a
+// user message after the run of tool results on the OpenAI wire (`openAiMessages`).
+// `urls` are the turn's own (`data:` URLs resolved when the image was accepted),
+// never kept. A ref with no URL of this turn goes as its text alone, and `images`
+// never reaches a round.
 function withAttachedImages(messages: ChatMessage[], urls: ReadonlyMap<string, string>): ChatMessage[] {
-  if (!urls.size) return messages;
-  const out: ChatMessage[] = [];
-  let pending: Array<{ ref: ImageRef; url: string }> = [];
-  const flush = () => {
-    if (!pending.length) return;
-    const parts: ContentPart[] = [{ type: 'text', text: pending.map((p) => RECALLED_IMAGE_NOTE(p.ref.name)).join('\n') }, ...pending.map((p) => ({ type: 'image_url' as const, image_url: { url: p.url } }))];
-    out.push({ role: 'user', content: parts });
-    pending = [];
-  };
-  for (const m of messages) {
-    if (m.role !== 'tool') flush();
-    if (m.role === 'tool' && Array.isArray(m.images) && m.images.length) {
-      const { images, ...rest } = m;
-      for (const ref of images) { const url = urls.get(ref.sha256); if (url) pending.push({ ref, url }); }
-      out.push(rest);
-    } else out.push(m);
-  }
-  flush();
-  return out;
+  return messages.map((m) => {
+    if (m.role !== 'tool' || !Array.isArray(m.images) || !m.images.length) return m;
+    const { images, ...rest } = m;
+    const parts: ContentPart[] = [];
+    for (const ref of images) { const url = urls.get(ref.sha256); if (url) parts.push({ type: 'image_url', image_url: { url } }); }
+    if (!parts.length) return rest;
+    return { ...rest, content: [{ type: 'text', text: contentText(m.content) }, ...parts] };
+  });
 }
 
 export async function agentChat(
@@ -601,6 +643,7 @@ export async function agentChat(
     toolLoading = 'all',
     toolSet = createToolSet(),
     toolResultMaxChars = TOOL_RESULT_MAX_CHARS_DEFAULT,
+    imageLimits: limits = { ...IMAGE_DEFAULTS },
     requestTail,
     ...opts
   }: AgentOpts = {},
@@ -673,10 +716,13 @@ export async function agentChat(
   let rounds = 0;
   // Set once a round came back `thinkingDropped`: the rest of the turn asks for none.
   let noThinking = false;
-  // The images tools of this turn attached to their results, by hash → the `data:`
-  // URL the next rounds send them as (`withAttachedImages`). The turn's own: the
-  // transcript keeps the refs, never these.
+  // The images tools of this turn returned or attached to their results, by hash →
+  // the `data:` URL the next rounds send them as (`withAttachedImages`). The turn's
+  // own: the transcript keeps the refs, never these.
   const attachedUrls = new Map<string, string>();
+  // A line for the host's log (`L`) — the chat's ctx carries `pushLog`; a caller
+  // without one (a bare ctx) is told nothing.
+  const say = (line: string) => { const f = (toolCtx as { pushLog?: unknown }).pushLog; if (typeof f === 'function') { try { (f as (l: string) => void)(line); } catch { /* the log's trouble */ } } };
   try {
     for (let i = 0; i < maxRounds; i++) {
       rounds = i + 1;
@@ -884,6 +930,19 @@ export async function agentChat(
             : def?.run
               ? await (def.run as (args: Record<string, unknown>, ctx: ToolCtx) => unknown)(parsed, callCtx)
               : await execChatTool(tc.name, parsed, callCtx);
+          // A result with images beside its text (src/assistant/tool-images.ts): the
+          // text is the result, each accepted image is stored and joins the result as a
+          // ref, and every refusal — undeclared, off, too big, too many, not an image —
+          // is a line at the end of the text. Undeclared is said in the log too: the
+          // model reads the note, the plugin's author reads the log.
+          const withImages = toolImageResult(detail);
+          if (withImages) {
+            const declared = def?.returnsImages === true;
+            if (!declared && withImages.images.length) say(`[tools] ${tc.name}: ${withImages.images.length} image${withImages.images.length === 1 ? '' : 's'} dropped — returnsImages not declared`);
+            const accepted = acceptToolImages(withImages.images, { declared, limits, dir: imageStoreDir(), tool: tc.name });
+            for (const ref of accepted.refs) { attached.push(ref); attachedUrls.set(ref.sha256, accepted.urls.get(ref.sha256)!); }
+            detail = [withImages.text, ...accepted.notes].filter(Boolean).join('\n');
+          }
           outcome = write ? 'applied' : 'ok';
         } catch (e) {
           detail = `Error: ${e instanceof Error ? e.message : String(e)}`;
@@ -908,6 +967,7 @@ export async function agentChat(
         const run: ToolRun = { name: tc.name, args: parsed, write, outcome, detail: detailStr };
         if (outcome !== 'error' && changes.length) run.changes = changes;
         if (views.length) run.views = views;
+        if (outcome !== 'error' && attached.length) run.images = attached.map(imageMark);
         toolRuns.push(run);
         opts.onToolRun?.(run);
       }

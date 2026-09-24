@@ -117,7 +117,8 @@ function shellMetaOf(v: unknown): ShellMeta | null {
 
 // Every bulky item the model's history (`apiRef`, the host's own shape — a `!command`
 // is still role `shell` there) holds, in order of first appearance, each id once. A
-// tool result is bulky over `minChars`; an image and a `!command`'s output always are.
+// tool result is bulky over `minChars`; an image — the person's, or one a tool
+// returned beside its result — and a `!command`'s output always are.
 export function bulkyItems(api: ChatMessage[], minChars: number): BulkyItem[] {
   const out = new Map<string, BulkyItem>();
   const add = (item: BulkyItem) => { if (!out.has(item.id)) out.set(item.id, item); };
@@ -129,12 +130,12 @@ export function bulkyItems(api: ChatMessage[], minChars: number): BulkyItem[] {
         if (c?.id != null) calls.set(String(c.id), { name: String(c.function?.name ?? 'tool'), args: c.function?.arguments });
       }
     }
-    if (m.role === 'user' && Array.isArray(m.images)) {
+    if ((m.role === 'user' || m.role === 'tool') && Array.isArray(m.images)) {
       for (const ref of m.images as ImageRef[]) {
         if (!ref || typeof ref.sha256 !== 'string') continue;
         add({ id: itemId('img', ref.sha256), hash: ref.sha256, kind: 'img', stub: imageStub(ref), chars: 0, lines: 0, ref });
       }
-      continue;
+      if (m.role === 'user') continue;
     }
     if (m.role === 'shell' && typeof m.content === 'string' && m.content) {
       const hash = hashOf(m.content);
@@ -190,10 +191,12 @@ export function decideBatch(state: RecallState, items: BulkyItem[], ratio: numbe
 // ─── Applying the stubs on the way out ────────────────────────────────────────
 // `messages` is what `apiHistory` gave — a `!command` is a user message there, a tool
 // result a tool message — and comes back with every stubbed item replaced: an image
-// taken off its message and named in its text, an output or a result replaced by its
-// stub. Matched by content: the hash is the id, so a message is looked up only when
-// its length is one of the stubbed items' (a hash for every message on every render
-// would be waste). Messages not touched are the same objects.
+// taken off its message (the person's, or a tool result's) and named in its text, an
+// output or a result replaced by its stub. Matched by content: the hash is the id, so
+// a message is looked up only when its length is one of the stubbed items' (a hash
+// for every message on every render would be waste). A tool result that is both
+// bulky text and carries images takes both: its stub, with the images' stubs after
+// it. Messages not touched are the same objects.
 export function applyRecall(messages: ChatMessage[], items: BulkyItem[], stubbed: ReadonlySet<string>): ChatMessage[] {
   if (!stubbed.size) return messages;
   const byImage = new Map<string, BulkyItem>();
@@ -206,23 +209,24 @@ export function applyRecall(messages: ChatMessage[], items: BulkyItem[], stubbed
   }
   if (!byImage.size && !byHash.size) return messages;
   return messages.map((m) => {
-    if (m.role === 'user' && Array.isArray(m.images) && m.images.length && byImage.size) {
+    let out = m;
+    if ((m.role === 'tool' || m.role === 'user') && typeof m.content === 'string' && lengths.has(m.content.length)) {
+      const item = byHash.get(hashOf(m.content));
+      if (item) out = { ...m, content: item.stub };
+    }
+    if ((m.role === 'user' || m.role === 'tool') && Array.isArray(m.images) && m.images.length && byImage.size) {
       const kept: ImageRef[] = [];
       const stubs: string[] = [];
       for (const ref of m.images) {
         const item = byImage.get(ref.sha256);
         if (item) stubs.push(item.stub); else kept.push(ref);
       }
-      if (!stubs.length) return m;
-      const { images: _images, ...rest } = m;
-      const text = contentText(m.content);
+      if (!stubs.length) return out;
+      const { images: _images, ...rest } = out;
+      const text = contentText(out.content);
       return { ...rest, content: `${text}${text ? '\n' : ''}${stubs.join('\n')}`, ...(kept.length ? { images: kept } : {}) };
     }
-    if ((m.role === 'tool' || m.role === 'user') && typeof m.content === 'string' && lengths.has(m.content.length)) {
-      const item = byHash.get(hashOf(m.content));
-      if (item) return { ...m, content: item.stub };
-    }
-    return m;
+    return out;
   });
 }
 

@@ -1013,7 +1013,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             }
             if (!imageNotedRef.current.has(key)) {
               imageNotedRef.current.add(key);
-              notes.push(`Image #${ref.n} (${ref.name}) ${r.why === 'missing' ? `is no longer at ${ref.path}` : 'has changed on disk since it was attached'} — the model gets the text of that message without it.`);
+              // A tool's returned image has no token (`n` 0): it is named by its name.
+              notes.push(`${ref.n ? `Image #${ref.n} (${ref.name})` : `The image ${ref.name} a tool returned`} ${r.why === 'missing' ? `is no longer at ${ref.path}` : 'has changed on disk since it was attached'} — the model gets the text of that message without it.`);
             }
             return { ok: false, why: r.why };
           };
