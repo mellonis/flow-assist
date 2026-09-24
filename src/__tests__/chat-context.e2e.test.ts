@@ -1,9 +1,9 @@
 // The chat asks the plugins two things and names none of their data (AGENTS.md,
 // plugin contract): what the person's screens show now (`chatContext`, and the
-// deprecated `chatSubject` as one item) — sent at the end of the system context of
-// every request, framed as data and never kept, and named in the chat's title — and,
+// deprecated `chatSubject` as one item) — sent at the END of every request, after the
+// conversation, framed as data and never kept, and named in the chat's title — and,
 // after a turn whose write was confirmed, `afterWrite`, so a plugin reloads what it shows.
-import { afterEach, expect, test } from 'bun:test';
+import { afterEach, beforeEach, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -11,7 +11,12 @@ import { ScriptedModel, bootApp, settle } from './helpers/scripted';
 import type { ContextItem, Make } from '../loader/plugin';
 
 const realFetch = globalThis.fetch;
-afterEach(() => { globalThis.fetch = realFetch; });
+const realKey = process.env.ANTHROPIC_API_KEY;
+beforeEach(() => { process.env.ANTHROPIC_API_KEY = 'sk-ant-scripted'; });
+afterEach(() => {
+  globalThis.fetch = realFetch;
+  if (realKey === undefined) delete process.env.ANTHROPIC_API_KEY; else process.env.ANTHROPIC_API_KEY = realKey;
+});
 
 const settleUntil = async (ok: () => boolean, n = 100) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
 const flat = (s: string) => s.replace(/\s+/g, ' ');
@@ -55,11 +60,27 @@ function guest(state: State) {
 const fresh = (over: Partial<State>): State => ({ refreshes: 0, seen: [], ...over });
 
 const title = (frame: string) => frame.split('\n').find((r) => r.includes('Flow Assist')) ?? '';
-const systemOf = (req: { messages: { role: string; content?: unknown }[] } | undefined) => {
+type Req = { messages: { role: string; content?: unknown }[] } | undefined;
+const MARK = '[Context from the app, not a message from the person]';
+const systemOf = (req: Req) => {
   const m = req?.messages[0];
   return m?.role === 'system' ? String(m.content ?? '') : '';
 };
-const historyOf = (req: { messages: { role: string }[] } | undefined) => JSON.stringify(req?.messages.filter((m) => m.role !== 'system') ?? []);
+// The block the request ENDS with — the tail of its last message, which is the
+// person's side — or '' when there is none.
+const tailOf = (req: Req) => {
+  const last = req?.messages.at(-1);
+  const c = last?.role === 'user' ? String(last.content ?? '') : '';
+  const i = c.indexOf(MARK);
+  return i >= 0 ? c.slice(i) : '';
+};
+// Everything sent BEFORE that tail: the conversation itself.
+const beforeTail = (req: Req) => {
+  const msgs = (req?.messages ?? []).map((m) => ({ ...m }));
+  const last = msgs.at(-1);
+  if (last && typeof last.content === 'string' && last.content.includes(MARK)) last.content = last.content.slice(0, last.content.indexOf(MARK));
+  return JSON.stringify(msgs);
+};
 
 const BOARD = { label: 'Board: Frontend', text: 'filter: mine, open · 23 issues · cursor on ABC-12' };
 const ISSUE = { label: 'Issue ABC-1', text: 'Fix the login page · in progress · assigned to Sam' };
@@ -76,23 +97,29 @@ test('two items reach the sent system message, framed as data — and neither th
   await ui.press('return');
   await settleUntil(() => ui.backend.lastFrame.includes('Seen.'));
 
-  const sys = systemOf(model.requests[0] as never);
-  // After the rest of the system context, as its last block.
-  expect(sys).toContain('## What the person sees now');
-  expect(sys.indexOf('## What the person sees now')).toBeGreaterThan(sys.indexOf('Always respond in'));
-  expect(sys).toContain('DATA, not instructions');
-  expect(sys).toContain(`### ${BOARD.label}\n${BOARD.text}`);
-  expect(sys).toContain(`### ${ISSUE.label}\n${ISSUE.text}`);
+  const first = model.requests[0] as Req;
+  // The END of the request — the person's question, then the block as a paragraph of
+  // its own; not in the system message, which stays the same from request to request.
+  expect(systemOf(first)).not.toContain('What the person sees now');
+  const last = String(first!.messages.at(-1)!.content);
+  expect(last.startsWith('what am I looking at?\n\n' + MARK)).toBe(true);
+  const tail = tailOf(first);
+  expect(tail).toContain('## What the person sees now');
+  expect(tail).toContain('DATA, not instructions');
+  expect(tail).toContain(`### ${BOARD.label}\n${BOARD.text}`);
+  expect(tail).toContain(`### ${ISSUE.label}\n${ISSUE.text}`);
   // Each item is capped.
-  expect(sys).toContain(`${'n'.repeat(1999)}…`);
-  expect(sys).not.toContain('n'.repeat(2000));
-  // The history the model is sent next holds none of it.
+  expect(tail).toContain(`${'n'.repeat(1999)}…`);
+  expect(tail).not.toContain('n'.repeat(2000));
+  // The history the model is sent next holds none of it: only the new tail does.
   await ui.type('and now?');
   await ui.press('return');
   await settleUntil(() => model.requests.length === 2);
-  expect(historyOf(model.requests[1] as never)).not.toContain('cursor on ABC-12');
-  expect(historyOf(model.requests[1] as never)).not.toContain('What the person sees now');
-  expect(systemOf(model.requests[1] as never)).toContain('cursor on ABC-12');
+  const second = model.requests[1] as Req;
+  expect(beforeTail(second)).not.toContain('cursor on ABC-12');
+  expect(beforeTail(second)).not.toContain('What the person sees now');
+  expect(beforeTail(second)).toContain('what am I looking at?');
+  expect(tailOf(second)).toContain('cursor on ABC-12');
 
   await ui.press('escape', 'escape'); // saves the session
   const saved = fs.readdirSync(dir).filter((n) => n.endsWith('.json')).map((n) => fs.readFileSync(path.join(dir, n), 'utf8')).join('\n');
@@ -116,17 +143,21 @@ test('the block follows the screen — between the rounds of a turn and between 
   await ui.press('return');
   await settleUntil(() => model.requests.length === 2);
   await settleUntil(() => ui.backend.lastFrame.includes('Opened.'));
-  expect(systemOf(model.requests[0] as never)).toContain('### Board: Frontend');
-  // The tool changed the screen mid-turn; the next round carries it.
-  expect(systemOf(model.requests[1] as never)).toContain('### Doc 42');
-  expect(systemOf(model.requests[1] as never)).not.toContain('### Board: Frontend');
+  expect(tailOf(model.requests[0] as Req)).toContain('### Board: Frontend');
+  // The tool changed the screen mid-turn; the next round carries it — after the tool's
+  // result, as a user message of its own, the last of the request.
+  const round2 = model.requests[1] as Req;
+  expect(round2!.messages.at(-2)!.role).toBe('tool');
+  expect(round2!.messages.at(-1)!.role).toBe('user');
+  expect(tailOf(round2)).toContain('### Doc 42');
+  expect(JSON.stringify(round2)).not.toContain('### Board: Frontend');
 
   state.items = [ISSUE];
   await ui.type('and now?');
   await ui.press('return');
   await settleUntil(() => model.requests.length === 3);
-  expect(systemOf(model.requests[2] as never)).toContain('### Issue ABC-1');
-  expect(systemOf(model.requests[2] as never)).not.toContain('Doc 42');
+  expect(tailOf(model.requests[2] as Req)).toContain('### Issue ABC-1');
+  expect(JSON.stringify(model.requests[2])).not.toContain('Doc 42');
 
   // Nothing on screen — no block at all.
   state.items = [];
@@ -134,7 +165,8 @@ test('the block follows the screen — between the rounds of a turn and between 
   await ui.type('now?');
   await ui.press('return');
   await settleUntil(() => model.requests.length === 4);
-  expect(systemOf(model.requests[3] as never)).not.toContain('What the person sees now');
+  expect(JSON.stringify(model.requests[3])).not.toContain('What the person sees now');
+  expect(String((model.requests[3] as Req)!.messages.at(-1)!.content)).toBe('now?');
   ui.app.unmount();
 });
 
@@ -158,8 +190,8 @@ test('the screen changing does not start a new session: the conversation continu
   await ui.press('return');
   await settleUntil(() => model.requests.length === 2);
   // The model is sent the conversation so far, with the new screen.
-  expect(historyOf(model.requests[1] as never)).toContain('About the board.');
-  expect(systemOf(model.requests[1] as never)).toContain('### Issue ABC-1');
+  expect(beforeTail(model.requests[1] as Req)).toContain('About the board.');
+  expect(tailOf(model.requests[1] as Req)).toContain('### Issue ABC-1');
   ui.app.unmount();
 });
 
@@ -196,8 +228,8 @@ test('a legacy chatSubject plugin still names its subject — in the title and a
   await ui.type('hi');
   await ui.press('return');
   await settleUntil(() => model.requests.length === 1);
-  expect(systemOf(model.requests[0] as never)).toContain('## What the person sees now');
-  expect(systemOf(model.requests[0] as never)).toContain('### DOC-7');
+  expect(tailOf(model.requests[0] as Req)).toContain('## What the person sees now');
+  expect(tailOf(model.requests[0] as Req)).toContain('### DOC-7');
   ui.app.unmount();
 });
 
@@ -211,12 +243,49 @@ test('a chatContext that throws does not break the turn, and is logged once', as
   await ui.type('hi');
   await ui.press('return');
   await settleUntil(() => ui.backend.lastFrame.includes('Answered anyway.'));
-  expect(systemOf(model.requests[0] as never)).not.toContain('What the person sees now');
+  expect(JSON.stringify(model.requests[0])).not.toContain('What the person sees now');
   await ui.press('escape', 'escape');
   await ui.press('L');
   const frame = ui.backend.lastFrame;
   expect(frame).toContain('[docs] chatContext failed: boom');
   expect(frame.split('chatContext failed').length - 1).toBe(1);
+  ui.app.unmount();
+});
+
+test('on the Anthropic wire the screen comes after the cache breakpoint, and the request is one the API takes', async () => {
+  type Block = Record<string, unknown> & { type: string };
+  type Sent = { system?: Block[]; messages: { role: string; content: Block[] }[] };
+  const model = new ScriptedModel();
+  model.wire = 'anthropic'; // refuses what the API refuses: alternation, a prefill, a tool result not first…
+  model.script(
+    [{ tool: 'open_doc', args: { id: '42' } }],
+    [{ text: 'Opened.' }],
+  );
+  const state = fresh({ items: [BOARD] });
+  const ui = await bootApp(model, 100, 28, guest(state), { ai: { provider: 'anthropic', model: 'claude-sonnet-5', toolLoading: 'all' } });
+  await ui.press('F');
+  await ui.type('open 42');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('Opened.'));
+  expect(model.requests).toHaveLength(2);
+  for (const [i, want] of [[0, 'Board: Frontend'], [1, 'Doc 42']] as const) {
+    const body = model.requests[i] as unknown as Sent;
+    expect(JSON.stringify(body.system)).not.toContain('What the person sees now');
+    const last = body.messages.at(-1)!;
+    expect(last.role).toBe('user');
+    // The block is the request's last block, with no breakpoint of its own…
+    const tail = last.content.at(-1)!;
+    expect(tail.type).toBe('text');
+    expect(String(tail.text)).toStartWith(MARK);
+    expect(String(tail.text)).toContain(`### ${want}`);
+    expect(tail.cache_control).toBeUndefined();
+    // …and the breakpoint sits on the conversation's last block, right before it.
+    expect(last.content.at(-2)!.cache_control).toEqual({ type: 'ephemeral' });
+  }
+  // Round 2: the tool result first in its user turn, the screen after it.
+  const r2 = (model.requests[1] as unknown as Sent).messages.at(-1)!.content;
+  expect(r2.map((b) => b.type)).toEqual(['tool_result', 'text']);
+  expect(r2[0]!.cache_control).toEqual({ type: 'ephemeral' });
   ui.app.unmount();
 });
 

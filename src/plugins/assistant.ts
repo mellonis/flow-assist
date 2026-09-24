@@ -878,8 +878,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             return `## Current task plan (the \`todo\` tool)\nYou maintain it through \`todo\`; it changes only when you call the tool.\n${lines.join('\n')}`;
           };
           // The full system context of a message = the «cheap» base (directive+identity)
-          // + fresh memory + the current plan + the summary, then — added by `agentChat`
-          // to each round, never here — what the screens show now (`screenNow`). No
+          // + fresh memory + the current plan + the summary. What the screens show now
+          // (`screenNow`) is not here: `agentChat` adds it after the conversation, at the
+          // end of each round's request, so a change to it spares the cache. No
           // network: the base is synchronous, memory a local file, the plan the tool's
           // module state. This part is also what the display list keeps as its system
           // message, which is why the screen's block is not in it.
@@ -1069,8 +1070,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // Plugin ai-tools (aiTools): agentChat runs their own run(args, toolCtx).
                 extraTools: (f.services as Record<string, any>).pluginAiTools ?? [],
                 // What the screens show, read again before every round of the turn and
-                // added to the end of its system context — never to the history.
-                systemTail: () => screenBlock(screenNow()),
+                // sent at the END of its request, after the conversation — past what the
+                // provider caches, and never into the history.
+                requestTail: () => screenBlock(screenNow()),
                 // What this conversation has loaded; `tools_load` adds to it mid-turn.
                 // The mode (`ai.toolLoading`) is applied by the `chatLLM` service.
                 toolSet: toolSetRef.current,

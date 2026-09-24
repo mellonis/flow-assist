@@ -2,14 +2,14 @@
 // streamed round folded back into what the loop reads.
 import { expect, test } from 'bun:test';
 import {
-  ANTHROPIC_CONTENT, anthropicRequest, errorStatus, finishReason, imageBlock, roundReader, summaryHistory, thinkingParams,
+  ANTHROPIC_CONTENT, REQUEST_TAIL, anthropicRequest, errorStatus, finishReason, imageBlock, roundReader, summaryHistory, thinkingParams,
   toAnthropicMessages, toAnthropicTools, usageOf, withoutThinking,
 } from '../anthropic.ts';
 import { llmConfigNotes, llmOpts } from '../llm-endpoint.ts';
 import { llmErrorMessage } from '../llm-error.ts';
 import { isImageRefusal } from '../images.ts';
 import { anthropicRefusal } from '../../__tests__/helpers/scripted.ts';
-import type { ChatMessage } from '../agent.ts';
+import { openAiMessages, type ChatMessage } from '../agent.ts';
 import type { ToolDef } from '../../loader/tools.ts';
 
 const tool = (name: string): ToolDef => ({ type: 'function', function: { name, description: `${name} does it`, parameters: { type: 'object', properties: { p: { type: 'string' } } } } });
@@ -269,4 +269,27 @@ test('the endpoint: an OpenAI-compatible API unless the provider says anthropic,
     .toMatchObject({ baseUrl: 'http://proxy/v1', token: 'm', tokenEnv: 'MINE', maxTokens: 2000, thinking: { adaptive: true } });
   expect(llmOpts({ provider: 'anthropic', thinking: { budgetTokens: 2048 } }, env).thinking).toEqual({ budgetTokens: 2048 });
   expect(llmOpts(undefined, {})).toEqual({ provider: 'openai', tokenEnv: 'LLM_TOKEN', maxTokens: 8192 });
+});
+
+test("a round's tail goes after the cache breakpoint — a text block of the last user turn, or a user turn of its own", () => {
+  const tail: ChatMessage = { role: 'user', content: 'ON SCREEN', [REQUEST_TAIL]: true };
+  const q: ChatMessage[] = [{ role: 'system', content: 'sys' }, { role: 'user', content: 'hi' }];
+  const a = anthropicRequest([...q, tail], { model: 'm', maxTokens: 1024, stream: true });
+  expect(a.messages).toHaveLength(1);
+  expect(a.messages[0]!.content).toEqual([{ type: 'text', text: 'hi', cache_control: { type: 'ephemeral' } }, { type: 'text', text: 'ON SCREEN' }]);
+  expect(anthropicRefusal(a as never, { 'x-api-key': 'k', 'anthropic-version': 'v' })).toBeNull();
+  // The same history without a tail is marked exactly as before.
+  expect(anthropicRequest(q, { maxTokens: 1024, stream: true }).messages[0]!.content).toEqual([{ type: 'text', text: 'hi', cache_control: { type: 'ephemeral' } }]);
+  // A tail alone (no conversation) is one user turn with no breakpoint.
+  expect(anthropicRequest([tail], { maxTokens: 1024, stream: true }).messages).toEqual([{ role: 'user', content: [{ type: 'text', text: 'ON SCREEN' }] }]);
+});
+
+test('on the OpenAI wire the tail joins the end of the last user message, or follows tool results', () => {
+  const tail: ChatMessage = { role: 'user', content: 'ON SCREEN', [REQUEST_TAIL]: true };
+  expect(openAiMessages([{ role: 'user', content: 'hi' }, tail])).toEqual([{ role: 'user', content: 'hi\n\nON SCREEN' }]);
+  expect(openAiMessages([{ role: 'user', content: [{ type: 'text', text: 'look' }] }, tail]))
+    .toEqual([{ role: 'user', content: [{ type: 'text', text: 'look' }, { type: 'text', text: 'ON SCREEN' }] }]);
+  const afterTool = openAiMessages([{ role: 'assistant', content: null, tool_calls: [] }, { role: 'tool', content: 'OK', tool_call_id: 'c' }, tail]);
+  expect(afterTool.at(-1)).toEqual({ role: 'user', content: 'ON SCREEN' });
+  expect(afterTool.some((m) => REQUEST_TAIL in m)).toBe(false);
 });

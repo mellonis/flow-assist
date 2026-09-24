@@ -48,6 +48,13 @@ export interface AnthropicRequest {
 // blocks, which keeps the current turn's valid.
 export const ANTHROPIC_CONTENT = 'anthropicContent';
 
+// The flag on the one message a round adds AFTER the conversation — what the person's
+// screens show now (`requestTail` in ./agent.ts). It lives in that round's request only,
+// never in the history. Each wire puts it where the cache does not see it: here as a
+// text block after the last cache breakpoint; on the OpenAI wire merged into the last
+// user message's end (`openAiMessages`), behind the prefix its automatic cache keeps.
+export const REQUEST_TAIL = 'requestTail';
+
 // ─── The request ──────────────────────────────────────────────────────────────
 
 const textOf = (content: unknown): string => {
@@ -175,12 +182,15 @@ export function thinkingParams(thinking: ThinkingConfig | undefined, maxTokens: 
 // last message, so each round of a tool loop reads the turn so far from the cache and
 // pays only for what the round added. A `tools_load` mid-turn (`ai.toolLoading`
 // onDemand) changes the tools, and with them every prefix after — the next round
-// writes the cache anew.
+// writes the cache anew. The round's tail (`REQUEST_TAIL`, what is on screen) goes in
+// AFTER that breakpoint, as the last text block of the last user turn: a screen that
+// changed costs the tail, never the cached conversation.
 export function anthropicRequest(
   messages: ChatMessage[],
   opts: { model?: string; maxTokens: number; thinking?: ThinkingConfig; tools?: ToolDef[]; stream: boolean },
 ): AnthropicRequest {
-  const { system, messages: msgs } = toAnthropicMessages(messages);
+  const tailMsg = messages.at(-1)?.[REQUEST_TAIL] ? messages.at(-1)! : null;
+  const { system, messages: msgs } = toAnthropicMessages(tailMsg ? messages.slice(0, -1) : messages);
   const tools = toAnthropicTools(opts.tools);
   const cached = (b: Block): Block => ({ ...b, cache_control: { type: 'ephemeral' } });
   if (system.length) system[system.length - 1] = cached(system.at(-1)!);
@@ -191,6 +201,14 @@ export function anthropicRequest(
   // marked in place: a kept round's blocks are the history's own objects.
   if (last && tail && tail.type !== 'thinking' && tail.type !== 'redacted_thinking') {
     msgs[msgs.length - 1] = { ...last, content: [...last.content.slice(0, -1), cached(tail)] };
+  }
+  const tailText = tailMsg ? textOf(tailMsg.content) : '';
+  if (tailText) {
+    const end = msgs.at(-1);
+    // After tool results is where text may stand in a user turn; a new turn only when
+    // the conversation does not end with the person's side (it always does in a round).
+    if (end?.role === 'user') msgs[msgs.length - 1] = { ...end, content: [...end.content, { type: 'text', text: tailText }] };
+    else msgs.push({ role: 'user', content: [{ type: 'text', text: tailText }] });
   }
   return {
     model: opts.model,

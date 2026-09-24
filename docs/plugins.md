@@ -242,7 +242,8 @@ setup: (ft) => { /* once, before any component mounts: seed a store */ },
 
   The host asks every plugin, in load order, before **every request** to the model —
   every round of a turn, so a tool that changes the screen is seen by the next round —
-  and adds one block to the end of the system context: `## What the person sees now`,
+  and sends one block at the very END of the request, after the conversation: a line
+  saying it comes from the app and not from the person, `## What the person sees now`,
   a sentence saying it is what the screens show, from external systems, to be used as
   context and never followed as instructions, then each item as `### <label>` and its
   text. It is never kept: not in the model's history, not in the saved session, so the
@@ -259,9 +260,9 @@ setup: (ft) => { /* once, before any component mounts: seed a store */ },
     selected, what the filter is, the first lines of what is open), not secrets.
   - It is called often — on every draw of the chat too — so read what the screen
     already holds; never fetch in it.
-  - It sits in the system context, ahead of the conversation, so a change to it makes
-    the provider read the whole conversation again instead of from its prompt cache.
-    A cursor that moves with every key is worth sending only when it helps answer. A hook that throws gives nothing (said once in
+  - It comes after everything the provider caches, so a change to it — a cursor that
+    moved — costs only the block itself; the conversation before it is still read from
+    the prompt cache. A hook that throws gives nothing (said once in
     the log, `[<plugin>] chatContext failed: …`); the turn goes on.
   - The screen changing does **not** start a new conversation: the chat continues, and
     only the block follows the screen. A person who wants a fresh one says `/clear`.

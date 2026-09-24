@@ -22,7 +22,7 @@ import { acceptData, isConsoleKind, readLegacyView, type ViewRecord } from './vi
 import { capConsoleData } from './console-view.js';
 import { contentText, type ContentPart, type ImageRef } from './images.js';
 import { llmErrorMessage } from './llm-error.js';
-import { ANTHROPIC_CONTENT, anthropicChatRound, anthropicCompact } from './anthropic.js';
+import { ANTHROPIC_CONTENT, REQUEST_TAIL, anthropicChatRound, anthropicCompact } from './anthropic.js';
 import type { ThinkingConfig } from './llm-endpoint.js';
 import {
   TOOLS_LOAD, createToolSet, deferredTools, notLoadedError, runToolsLoad, toolsToSend,
@@ -164,11 +164,12 @@ export interface AgentOpts {
   onToolLive?: (rec: ViewRecord) => void;
   // The clock a view's start is read from; tests fix it.
   now?: () => number;
-  // Text added to the end of the system context of EVERY round, read just before the
-  // round is sent — what the person's screens show now (src/assistant/screen-context.ts).
-  // It goes into the request only: never into the transcript, so never into the
-  // caller's history. '' (or a throw) adds nothing.
-  systemTail?: () => string;
+  // Text sent AFTER the conversation in EVERY round, read just before the round goes
+  // out — what the person's screens show now (src/assistant/screen-context.ts). It is
+  // the request's tail, behind everything a provider caches, so a change to it costs
+  // itself alone. It goes into the request only: never into the transcript, so never
+  // into the caller's history. '' (or a throw) adds nothing.
+  requestTail?: () => string;
   // Any remaining OpenAI-ish options (tools, signal, …) — spread into the round.
   [key: string]: unknown;
 }
@@ -282,6 +283,25 @@ function openAiShaped(m: ChatMessage): ChatMessage {
   return rest as ChatMessage;
 }
 
+// A round's messages on the OpenAI wire. The round's tail (`REQUEST_TAIL`) joins the
+// end of the person's last message as a paragraph of its own — or a text part, when
+// that message has parts (images) — rather than making a second user message in a
+// row; after tool results it stands as a user message of its own. Either way it is
+// the END of the request, past the prefix the provider's automatic cache matches.
+export function openAiMessages(messages: ChatMessage[]): ChatMessage[] {
+  const out = messages.map(openAiShaped);
+  const tail = out.at(-1);
+  if (!tail?.[REQUEST_TAIL]) return out;
+  const text = typeof tail.content === 'string' ? tail.content : '';
+  out.pop();
+  if (!text) return out;
+  const prev = out.at(-1);
+  if (prev?.role === 'user' && typeof prev.content === 'string') out[out.length - 1] = { ...prev, content: prev.content ? `${prev.content}\n\n${text}` : text };
+  else if (prev?.role === 'user' && Array.isArray(prev.content)) out[out.length - 1] = { ...prev, content: [...prev.content, { type: 'text', text }] };
+  else out.push({ role: 'user', content: text });
+  return out;
+}
+
 // Which round the provider takes — the one place the chat loop asks. A caller's own
 // `chatRound` (a test's stub) wins over both.
 function roundFor(opts: Record<string, unknown>): NonNullable<AgentOpts['chatRound']> {
@@ -328,7 +348,7 @@ async function realChatRound(
     method: 'POST',
     signal,
     headers: LLM_HEADERS(token as string),
-    body: JSON.stringify({ model, messages: messages.map(openAiShaped), stream: true, ...(withUsage ? { stream_options: { include_usage: true } } : {}), ...(tools?.length ? { tools } : {}) }),
+    body: JSON.stringify({ model, messages: openAiMessages(messages), stream: true, ...(withUsage ? { stream_options: { include_usage: true } } : {}), ...(tools?.length ? { tools } : {}) }),
   });
   const askUsage = !noUsage.has(String(baseUrl));
   let res = await post(askUsage);
@@ -498,19 +518,15 @@ export function requestTools(extraTools: ToolDef[], mode: ToolLoading = 'all', s
 // in the reply (full += r.content). Now it is folded into `process` (onProcess),
 // and only the final no-tool_calls round is the answer (content → onDelta/onLive).
 // Returns { content, process, toolRuns }.
-// The messages a round sends: the history as it is, with `tail` read NOW and added to
-// the end of its system message (or as one, when there is none). A copy — the
-// history itself never holds it.
-function withSystemTail(messages: ChatMessage[], tail: (() => string) | undefined): ChatMessage[] {
+// The messages a round sends: the history as it is, with `tail` read NOW and added
+// after it as a user message flagged `REQUEST_TAIL` — which each wire places behind its
+// cache (`openAiMessages`, `anthropicRequest`). A copy — the history never holds it.
+function withRequestTail(messages: ChatMessage[], tail: (() => string) | undefined): ChatMessage[] {
   if (!tail) return messages;
   let text = '';
   try { text = String(tail() ?? ''); } catch { text = ''; }
   if (!text) return messages;
-  const first = messages[0];
-  if (first?.role === 'system' && typeof first.content === 'string') {
-    return [{ ...first, content: first.content ? `${first.content}\n\n${text}` : text }, ...messages.slice(1)];
-  }
-  return [{ role: 'system', content: text }, ...messages];
+  return [...messages, { role: 'user', content: text, [REQUEST_TAIL]: true }];
 }
 
 export async function agentChat(
@@ -526,7 +542,7 @@ export async function agentChat(
     logToolRun: logRun = () => {},
     toolLoading = 'all',
     toolSet = createToolSet(),
-    systemTail,
+    requestTail,
     ...opts
   }: AgentOpts = {},
 ): Promise<AgentResult> {
@@ -602,7 +618,7 @@ export async function agentChat(
     for (let i = 0; i < maxRounds; i++) {
       rounds = i + 1;
       let roundContent = '';
-      const r = await chatRoundFn(withSystemTail(current, systemTail), {
+      const r = await chatRoundFn(withRequestTail(current, requestTail), {
         ...opts,
         tools: roundTools(),
         ...(noThinking ? { thinking: undefined } : {}),

@@ -143,14 +143,24 @@ the blacklist.
     failed: …`), and returns the items sanitized (`sanitizeViewText`; a label on one
     line) and capped — a label 120 code points, a text 2000, the list 6000, the tail
     dropped behind one `… N more` item (`src/assistant/screen-context.ts`, pure).
-    **What the model gets**: `## What the person sees now` — a sentence framing it as
-    what the screens show, from external systems, context and never instructions —
-    then `### <label>` + text per item. It is NOT part of `assembleSystem()`: that
-    string is also the display list's system message and so lands in the session file.
-    The chat hands `agentChat` a `systemTail` read before EVERY round (a tool that
-    changes the screen is seen by the next round) and appended to that round's system
-    message in a copy — never `current`, so never the transcript, `apiRef` or the
-    session. No items, no block. The meter counts it as the `on screen` part
+    **What the model gets**, at the very END of every request — after the conversation,
+    past everything a provider caches, so a screen that changed (a cursor moved) costs
+    the block alone and never the cached prefix: `[Context from the app, not a message
+    from the person]`, `## What the person sees now`, a sentence framing it as what the
+    screens show, from external systems, context and never instructions, then
+    `### <label>` + text per item. It is NOT in the system prompt (a change there would
+    invalidate the whole cached conversation) and NOT part of `assembleSystem()` (that
+    string is also the display list's system message and so lands in the session file).
+    The chat hands `agentChat` a `requestTail` read before EVERY round (a tool that
+    changes the screen is seen by the next round); the loop adds it to a COPY of the
+    round's messages as a user message flagged `REQUEST_TAIL` — never to `current`, so
+    never the transcript, `apiRef` or the session — and each wire places it:
+    `openAiMessages` joins it to the end of the person's last message (a paragraph, or a
+    text part when that message has parts) and after tool results leaves it a user
+    message of its own; `anthropicRequest` sets the message breakpoint on the last
+    CONVERSATION block first and then appends the tail as a text block of the last user
+    turn (after its tool results), so alternation holds and the tail is uncached. No
+    items, no block. The meter counts it as the `on screen` part
     (`ContextParts.screen`). Only the chat's `send()` passes it: a background task
     (the `background` tool's nested `chatLLM`) and the one-shot CLI (no mounted
     plugins) get none — they run apart from the screen. `/compact` does not see it.
@@ -745,7 +755,8 @@ the API wants them alternating), image parts into base64 blocks. Two `cache_cont
 breakpoints (the API takes four): the last system block — the prefix is tools → system →
 messages, so it covers the tools; the last tool only when there is no system — and the
 last block of the last message, so each round of a tool loop reads the turn so far from
-the cache. Blocks are copied to be marked, never marked in place (a kept round's blocks
+the cache. A round's `REQUEST_TAIL` (what is on screen) is left out of that and appended
+after the breakpoint, as the last text block of the last user turn. Blocks are copied to be marked, never marked in place (a kept round's blocks
 are the history's own). A `tools_load` mid-turn changes the tools and so every prefix. A streamed round comes back as the
 same `ChatRoundResult` with the same live callbacks (`onToolCalls` on the first `tool_use`
 block, `thinking_delta` → `onReasoning` → the thinking fold; an empty one says nothing);
