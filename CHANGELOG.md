@@ -21,6 +21,11 @@ What each version of flow-assist brought, newest first. The version is the one i
   meanwhile, and you decide what to send. ↑ on an empty field takes the last waiting
   message back to edit (the hint says `↑ takes it back`).
 
+- **`/compact` leaves the field at once.** It stayed in the field until the summary
+  came back, as if it had not been sent. Now the field empties the moment you press ⏎
+  (↑ brings the command back), a draft typed meanwhile is left alone, and a message
+  queued behind it goes out after it — or comes back into the field when you stop it.
+
 - **↑ repeats `/commands` too.** `/notes step`, `/compact`, `/resume 2` go into the
   ↑/↓ history like every other line you submit, as `!commands` and lines typed in
   shell mode already did (they come back in shell mode), and the history is saved with

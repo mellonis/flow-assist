@@ -892,7 +892,10 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   Esc goes back to its idle steps, and the status line drops `Esc stops`. `/compact`
   (`runAsyncCommand`) has a controller of its own, passes the signal to its request and
   races the wait against the abort, so it stops at once (`/compact stopped (^c)`) and a
-  late summary is not applied. It holds app-wide — the start screen and a
+  late summary is not applied. It **leaves the field the moment it is submitted**, as a
+  sent message does (it is in ↑ already), and never touches the field when it ends — a
+  draft typed meanwhile stays; what was queued meanwhile goes out after it, or comes
+  back into the field when it was stopped or failed (`restoreQueue`), as after an answer. It holds app-wide — the start screen and a
   plugin's screen arm the same way; a turn running while the chat is closed is not
   stopped by Ctrl+C. **Nothing else is consumed**: `twoPhaseDispatch`'s `true` means
   "handled, redraw", and the chat answers it for every key — PgUp and the wheel

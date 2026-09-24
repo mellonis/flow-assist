@@ -1514,6 +1514,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             abortRef.current = abort;
             stopKeyRef.current = '';
             const stopped = new Promise<never>((_, reject) => abort.signal.addEventListener('abort', () => reject(new DOMException('stopped', 'AbortError')), { once: true }));
+            // The command leaves the field the moment it is submitted, as a sent message
+            // does (it is in ↑ already); what the person types while it runs is theirs.
+            setField('');
+            let ok = false;
             setError(null);
             setStreaming(true);
             setToolLabel(`⚙ ${label}…`);
@@ -1522,6 +1526,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             if (tickRef.current) clearInterval(tickRef.current);
             tickRef.current = setInterval(() => setElapsedMs(Date.now() - segRef.current), 120);
             Promise.race([fn(abort.signal), stopped])
+              .then(() => { ok = !abort.signal.aborted; })
               .catch((e) => setError((e as Error)?.name === 'AbortError' ? `/${label} stopped (${stopKeyRef.current || keyGlyph('escape')})` : (e as Error).message))
               .finally(() => {
                 if (tickRef.current) { clearInterval(tickRef.current); tickRef.current = null; }
@@ -1530,6 +1535,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 streamRef.current = false;
                 setStreaming(false);
                 setToolLabel('');
+                // What was queued meanwhile goes out now, as after an answer — unless the
+                // command was stopped or failed: then it comes back into the field.
+                if (ok && queueRef.current.length) {
+                  const nextQueued = queueRef.current.shift() as string;
+                  syncQueue();
+                  setTimeout(() => { void send(nextQueued); }, 0);
+                } else restoreQueue();
                 f.notify();
               });
           };
@@ -1554,9 +1566,6 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // view now begins and shows the summary it was given.
               setMessages((cur) => [...cur, { role: 'note', content: `── compacted ── the model now sees a summary of everything above, not the messages themselves:\n${summary}` }]);
               persist();
-              setInput('');
-              inputRef.current = '';
-              setCursor(0);
               (f.services as Record<string, any>).showMessage?.('History compacted');
             });
           };
