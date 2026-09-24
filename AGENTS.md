@@ -1361,18 +1361,25 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   on SIGINT and SIGQUIT and takes the other listeners off for the duration — flowtty
   unmounts the app on SIGINT whatever else listens, and without `script` the terminal
   is in its normal mode and sends SIGINT to the whole group — then puts them back in
-  order. On return `cleanRecording` resolves the recording as a terminal would have
-  left it (`\r` back to the line start and overwrite, `\b` back without erasing,
-  `ESC[K`, `ESC[nG`; every other sequence dropped; util-linux's header lines dropped),
-  then `sanitizeViewText`; the model gets its END capped at `shell.maxChars`, the view
-  `capConsoleText`. The temp directory goes in a `finally`, whatever happened. The
+  order. On return only the recording's last `RECORDING_READ_MAX` (1 MiB) is read
+  (`readTail`, from a whole line; the bytes skipped count into `cut`) — a program left
+  running for hours must not cost a long freeze. `cleanRecording` resolves it as a
+  terminal would have left it (`\r` back to the line start and overwrite, `\b` back
+  without erasing, `ESC[K`, `ESC[nG`; what was drawn on the ALTERNATE screen —
+  `?1049`/`?1047`/`?47` — dropped, as it is gone once the program leaves, or every
+  vim/less/top redraw would reach the model; every other sequence dropped; util-linux's
+  header lines dropped), then `sanitizeViewText`; the model gets its END capped at
+  `shell.maxChars`, the view `capConsoleText`. The temp directory goes in a `finally`,
+  whatever happened. The
   result is the same `shell` message and console view as `!`'s, marked `interactive`
   (`ConsoleData.interactive`, drawn dim beside the command, kept by `capConsoleData`),
   and joins `apiRef` as `The person ran an interactive program …`; then a turn starts
   at once with `INTERACTIVE_ASK` as the person's message — `send(…, { hostAsk: true })`:
   drawn dim, gutter and all (`hostAsk` on the display message, `quiet` rows), never put
-  into ↑/↓. The chat stays busy from the command into that turn (the ask waits one tick
-  for the render carrying the block), so a message typed in between queues behind the
+  into ↑/↓, and the field is left alone (it did not come from there). `send` lays its
+  list out from what was last DRAWN (`msgsRef`), so the ask waits — checked, not
+  timed — until the render carrying the finished block has happened; one tick was not
+  always enough under load, and the block came back live. The chat stays busy from the command into that turn, so a message typed in between queues behind the
   ask and follows the queue's rules. Refused while anything runs, exactly as `!` is: a
   recording landing in the middle of a running turn's history would split it, and a
   y/n could wait unseen behind the program. No `script` on PATH: the program still runs

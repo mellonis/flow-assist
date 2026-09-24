@@ -64,10 +64,13 @@ export function scriptCommand(flavor: ScriptFlavor, body: string, file: string, 
 // What the program drew, as a terminal would have left it, line by line: a carriage
 // return goes back to the start of the line and what follows overwrites it (a
 // progress bar ends in its last state), a backspace moves back without erasing,
-// `ESC[K` erases, `ESC[nG` moves to a column. Every other sequence — colours, cursor
-// shows and hides, a title — is taken out. What moves between lines (a full-screen
-// program's cursor addressing) is not followed: such a program's recording is its
-// text in the order it was written.
+// `ESC[K` erases, `ESC[nG` moves to a column. What a program draws on the ALTERNATE
+// screen (`ESC[?1049h` … `l`, and the older 1047 / 47 — vim, less, top) is gone once
+// it leaves, as in a terminal, so it is dropped: otherwise every redraw of a
+// full-screen program would reach the model as text. Every other sequence — colours,
+// cursor shows and hides, a title — is taken out. What moves between lines on the main
+// screen (cursor addressing) is not followed: such output is its text in the order it
+// was written.
 const TOKEN = /\u001B\][\s\S]*?(?:\u0007|\u001B\\)|\u001B\[([0-?]*)[ -/]*([@-~])|\u001B[()*+][\s\S]?|\u001B[@-Z\\-_]|[\s\S]/gu;
 
 export function cleanRecording(raw: string): string {
@@ -77,10 +80,13 @@ export function cleanRecording(raw: string): string {
   const lines: string[][] = [];
   let line: string[] = [];
   let col = 0;
+  let alt = false;
   const num = (p: string | undefined, d: number) => { const n = parseInt(String(p ?? ''), 10); return Number.isFinite(n) ? n : d; };
   for (const m of text.matchAll(TOKEN)) {
     const t = m[0];
     if (t.length > 1 && t.startsWith('\u001B')) {
+      if ((m[2] === 'h' || m[2] === 'l') && /^\?(1049|1047|47)$/.test(m[1] ?? '')) { alt = m[2] === 'h'; continue; }
+      if (alt) continue;
       if (m[2] === 'K') {
         const mode = num(m[1], 0);
         if (mode === 2) line = [];
@@ -91,6 +97,7 @@ export function cleanRecording(raw: string): string {
       else if (m[2] === 'D') col = Math.max(0, col - Math.max(1, num(m[1], 1)));
       continue;
     }
+    if (alt) continue;
     if (t === '\n') { lines.push(line); line = []; col = 0; continue; }
     if (t === '\r') { col = 0; continue; }
     if (t === '\b') { col = Math.max(0, col - 1); continue; }
@@ -173,6 +180,28 @@ export interface InteractiveOptions {
 }
 export interface InteractiveRun { recorded: boolean; result: ShellResult }
 
+// How much of a recording is read: its END, as with every other output here. A program
+// left running for hours (`!!npm run dev`) must not cost the app its memory or a long
+// freeze when it returns.
+export const RECORDING_READ_MAX = 1024 * 1024;
+
+// The last `max` bytes of a file, from the first whole line in them, and how many bytes
+// came before (0 when the whole file was read).
+export function readTail(file: string, max = RECORDING_READ_MAX): { text: string; skipped: number } {
+  const size = fs.statSync(file).size;
+  if (size <= max) return { text: fs.readFileSync(file, 'utf8'), skipped: 0 };
+  const fd = fs.openSync(file, 'r');
+  try {
+    const buf = Buffer.alloc(max);
+    const n = fs.readSync(fd, buf, 0, max, size - max);
+    const nl = buf.subarray(0, n).indexOf(0x0a);
+    const from = nl >= 0 ? nl + 1 : 0;
+    return { text: buf.subarray(from, n).toString('utf8'), skipped: size - max + from };
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
 export async function runInteractive(cmd: string, opts: InteractiveOptions, deps: InteractiveDeps = {}): Promise<InteractiveRun> {
   const flavor = (deps.detect ?? detectScript)();
   const spawnFn = deps.spawn ?? spawnWithTerminal;
@@ -190,14 +219,18 @@ export async function runInteractive(cmd: string, opts: InteractiveOptions, deps
     const outcome = await opts.suspend(() => holdSignals(signals, () => spawnFn(run.file, run.args, { cwd: opts.cwd, env: process.env })));
     const ms = Date.now() - t0;
     let raw = '';
-    if (flavor) { try { raw = fs.readFileSync(recording, 'utf8'); } catch { /* nothing was recorded */ } }
+    let skipped = 0;
+    if (flavor) { try { ({ text: raw, skipped } = readTail(recording)); } catch { /* nothing was recorded */ } }
     const text = cleanRecording(raw);
-    const cut = Math.max(0, text.length - opts.maxChars);
+    const over = Math.max(0, text.length - opts.maxChars);
+    // Bytes left unread count as characters cut: near enough to say that the start of
+    // the recording is missing, and how much of it.
+    const cut = over + skipped;
     let pwd = '';
     try { pwd = fs.readFileSync(pwdFile, 'utf8').trim(); } catch { /* ended before the trailer */ }
     const result: ShellResult = {
       code: outcome.signal ? null : outcome.code,
-      output: cut ? text.slice(-opts.maxChars) : text,
+      output: over ? text.slice(-opts.maxChars) : text,
       cut,
       timedOut: false,
       stopped: false,

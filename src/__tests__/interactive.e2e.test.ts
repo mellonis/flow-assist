@@ -290,3 +290,24 @@ test('a message typed while the ask is being answered queues behind it, and Esc 
   expect(model.requests).toHaveLength(1);
   ui.app.unmount();
 });
+
+test('the ask leaves the field alone: text typed as the terminal came back is still there', async () => {
+  const root = rootDir();
+  const model = new ScriptedModel();
+  model.script([{ text: 'Looked.' }]);
+  let typeInto: ((t: string) => void) | null = null;
+  const ui = await boot(model, root, () => ({
+    detect: () => 'bsd',
+    // Keys pressed right as the program ends reach the field (the test backend
+    // delivers them at any time; a real one once it reads its input again).
+    spawn: async (_f, args) => { fs.writeFileSync(args[1]!, 'ok\r\n'); typeInto?.('draft'); return { code: 0, signal: null }; },
+    signals: new EventEmitter(),
+  }));
+  typeInto = (t) => ui.backend.type(t);
+  await ui.type('!!true');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('Looked.'));
+  expect(model.requests).toHaveLength(1);
+  expect(ui.backend.lastFrame).toContain('› draft');
+  ui.app.unmount();
+});

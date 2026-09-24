@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { capConsoleData, renderConsole } from '../console-view';
-import { cleanRecording, flavorFrom, holdSignals, runInteractive, scriptCommand, type InteractiveSpawn } from '../interactive';
+import { cleanRecording, flavorFrom, holdSignals, readTail, runInteractive, scriptCommand, type InteractiveSpawn } from '../interactive';
 
 const ESC = '\u001b';
 
@@ -39,6 +39,27 @@ test('cleanRecording honours a column move and drops control characters and the 
   expect(cleanRecording('Script started on 2026-09-24 10:00:00+00:00 [TERM="xterm"]\nhello\u0007\nScript done on 2026-09-24 10:00:01+00:00 [COMMAND_EXIT_CODE="0"]\n')).toBe('hello');
   // Trailing blank lines and trailing spaces go; blank lines inside stay.
   expect(cleanRecording('a   \r\n\r\nb\r\n\r\n\r\n')).toBe('a\n\nb');
+});
+
+test('cleanRecording drops what a full-screen program drew on the alternate screen, as a terminal does once it leaves', () => {
+  expect(cleanRecording(`before\r\n${ESC}[?1049h${ESC}[2J${ESC}[1;1H~ vim junk ~\r\n~${ESC}[?1049lafter\r\n`)).toBe('before\nafter');
+  expect(cleanRecording(`a\r\n${ESC}[?47hless page${ESC}[?47lb`)).toBe('a\nb');
+});
+
+test('readTail reads the END of a big recording, from a whole line, and says how much it skipped', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-tail-'));
+  const file = path.join(dir, 'rec');
+  const line = 'x'.repeat(99) + '\n';
+  fs.writeFileSync(file, line.repeat(30_000) + 'the end\n'); // ~3 MB
+  const { text, skipped } = readTail(file, 1000);
+  expect(text.endsWith('the end\n')).toBe(true);
+  expect(text.startsWith('x')).toBe(true);
+  expect(text.split('\n')[0]).toHaveLength(99); // a whole line, never half of one
+  expect(skipped + Buffer.byteLength(text)).toBe(fs.statSync(file).size);
+  expect(readTail(file).text.length).toBeLessThanOrEqual(1024 * 1024);
+  fs.writeFileSync(file, 'small\n');
+  expect(readTail(file)).toEqual({ text: 'small\n', skipped: 0 });
+  fs.rmSync(dir, { recursive: true, force: true });
 });
 
 test('scriptCommand: BSD / macOS takes the file, then the command as argv', () => {

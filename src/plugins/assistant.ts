@@ -1035,9 +1035,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // final flush): a mismatch means the conversation it was for is gone.
             const epoch = epochRef.current;
             persist(); // the question survives a restart even if the answer does not
-            setInput('');
-            inputRef.current = '';
-            setCursor(0);
+            // The host's ask did not come from the field: whatever is being typed there
+            // (keys pressed right as the program handed the terminal back) stays.
+            if (!opts.hostAsk) {
+              setInput('');
+              inputRef.current = '';
+              setCursor(0);
+            }
             setError(null);
             setStreaming(true);
             setPhase('thinking');
