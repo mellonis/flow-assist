@@ -877,13 +877,6 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             });
             return `## Current task plan (the \`todo\` tool)\nYou maintain it through \`todo\`; it changes only when you call the tool.\n${lines.join('\n')}`;
           };
-          // The full system context of a message = the «cheap» base (directive+identity)
-          // + fresh memory + the current plan + the summary. What the screens show now
-          // (`screenNow`) is not here: `agentChat` adds it after the conversation, at the
-          // end of each round's request, so a change to it spares the cache. No
-          // network: the base is synchronous, memory a local file, the plan the tool's
-          // module state. This part is also what the display list keeps as its system
-          // message, which is why the screen's block is not in it.
           // What the person's screens show now, as the plugins describe it
           // (src/assistant/screen-context.ts). Read fresh for every request — every
           // round of a turn — and never kept: not in `apiRef`, not in the session.
@@ -904,6 +897,12 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             );
           };
 
+          // The system prompt of a message = the «cheap» base (directive+identity) + fresh
+          // memory + the current plan + the summary. No network: the base is synchronous,
+          // memory a local file, the plan the tool's module state. It is also what the
+          // display list keeps as its system message (and so the session), which is one
+          // reason what the screens show is not in it; the other is the cache — it goes
+          // at the end of each request instead (`requestTail`, `screenNow`).
           const assembleSystem = () => {
             const summary = summaryRef.current ? `Summary of the conversation so far (older turns were compacted):\n${summaryRef.current}` : '';
             const parts = [baseStatic(), memoryBlock(), planBlock(), summary].filter(Boolean);
@@ -1867,7 +1866,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           };
 
           // Opening the chat continues the conversation whatever the screen shows: what
-          // is on screen reaches the model through every request's system context
+          // is on screen reaches the model at the end of every request
           // (`screenNow`), and a person who wants a fresh conversation says /clear.
           const openChat = (initialText?: string) => {
             setOpen(true);

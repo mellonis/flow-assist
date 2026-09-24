@@ -25,7 +25,7 @@ export interface ContextParts {
   memory: string; // the persistent-memory block
   plan: string; // the task plan block
   summary: string; // what /compact left
-  screen?: string; // what the person's screens show — the block every request ends its system context with
+  screen?: string; // what the person's screens show — the block at the end of each request
   tools: unknown[]; // tool definitions sent with every request
   messages: unknown[]; // the model's history
 }

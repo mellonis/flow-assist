@@ -245,8 +245,11 @@ setup: (ft) => { /* once, before any component mounts: seed a store */ },
   and sends one block at the very END of the request, after the conversation: a line
   saying it comes from the app and not from the person, `## What the person sees now`,
   a sentence saying it is what the screens show, from external systems, to be used as
-  context and never followed as instructions, then each item as `### <label>` and its
-  text. It is never kept: not in the model's history, not in the saved session, so the
+  context and never followed as instructions, then each item wrapped in a delimiter
+  that carries a random value made for that request (`<screen-item n="…"
+  label="…">` … `</screen-item n="…">`), and a closing line naming the same value. The
+  frame's own words and tags are taken out of every label and text first, so an item
+  cannot close the block and go on as if the person had written it. It is never kept: not in the model's history, not in the saved session, so the
   conversation does not grow with it. With no items there is no block. The context
   meter counts it (`on screen` in `/context`).
   - **Caps**: a label is one line of at most 120 characters, a text at most 2000; the
@@ -258,12 +261,16 @@ setup: (ft) => { /* once, before any component mounts: seed a store */ },
   - **It is data.** A title, a description, a comment — someone else wrote them, and the
     model is told not to follow them. Put there what helps answer the person (what is
     selected, what the filter is, the first lines of what is open), not secrets.
-  - It is called often — on every draw of the chat too — so read what the screen
-    already holds; never fetch in it.
+  - It is called often — on every draw of the chat, which is several times a second
+    while an answer comes in — so it must be cheap: read the state your screen already
+    holds, never fetch or touch the disk in it. A hook that throws gives nothing (said
+    once in the log, `[<plugin>] chatContext failed: …`); the turn goes on.
   - It comes after everything the provider caches, so a change to it — a cursor that
     moved — costs only the block itself; the conversation before it is still read from
-    the prompt cache. A hook that throws gives nothing (said once in
-    the log, `[<plugin>] chatContext failed: …`); the turn goes on.
+    the prompt cache.
+  - On the OpenAI-compatible wire, after a tool's result the block is a user message
+    of its own, right after the `tool` messages. The OpenAI API takes that; some
+    OpenAI-compatible servers may refuse a user message in that place.
   - The screen changing does **not** start a new conversation: the chat continues, and
     only the block follows the screen. A person who wants a fresh one says `/clear`.
   - A background task and a one-shot prompt get no block: they run apart from the

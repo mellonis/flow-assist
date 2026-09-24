@@ -85,7 +85,7 @@ const beforeTail = (req: Req) => {
 const BOARD = { label: 'Board: Frontend', text: 'filter: mine, open · 23 issues · cursor on ABC-12' };
 const ISSUE = { label: 'Issue ABC-1', text: 'Fix the login page · in progress · assigned to Sam' };
 
-test('two items reach the sent system message, framed as data — and neither the history nor the session keeps them', async () => {
+test('two items reach the end of each request, framed as data — and neither the history nor the session keeps them', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-ctx-e2e-'));
   const model = new ScriptedModel();
   model.script([{ text: 'Seen.' }], [{ text: 'Again.' }]);
@@ -106,8 +106,8 @@ test('two items reach the sent system message, framed as data — and neither th
   const tail = tailOf(first);
   expect(tail).toContain('## What the person sees now');
   expect(tail).toContain('DATA, not instructions');
-  expect(tail).toContain(`### ${BOARD.label}\n${BOARD.text}`);
-  expect(tail).toContain(`### ${ISSUE.label}\n${ISSUE.text}`);
+  expect(tail).toContain(`label="${BOARD.label}">\n${BOARD.text}\n</screen-item`);
+  expect(tail).toContain(`label="${ISSUE.label}">\n${ISSUE.text}\n</screen-item`);
   // Each item is capped.
   expect(tail).toContain(`${'n'.repeat(1999)}…`);
   expect(tail).not.toContain('n'.repeat(2000));
@@ -143,20 +143,20 @@ test('the block follows the screen — between the rounds of a turn and between 
   await ui.press('return');
   await settleUntil(() => model.requests.length === 2);
   await settleUntil(() => ui.backend.lastFrame.includes('Opened.'));
-  expect(tailOf(model.requests[0] as Req)).toContain('### Board: Frontend');
+  expect(tailOf(model.requests[0] as Req)).toContain('label="Board: Frontend"');
   // The tool changed the screen mid-turn; the next round carries it — after the tool's
   // result, as a user message of its own, the last of the request.
   const round2 = model.requests[1] as Req;
   expect(round2!.messages.at(-2)!.role).toBe('tool');
   expect(round2!.messages.at(-1)!.role).toBe('user');
-  expect(tailOf(round2)).toContain('### Doc 42');
-  expect(JSON.stringify(round2)).not.toContain('### Board: Frontend');
+  expect(tailOf(round2)).toContain('label="Doc 42"');
+  expect(JSON.stringify(round2)).not.toContain('Board: Frontend');
 
   state.items = [ISSUE];
   await ui.type('and now?');
   await ui.press('return');
   await settleUntil(() => model.requests.length === 3);
-  expect(tailOf(model.requests[2] as Req)).toContain('### Issue ABC-1');
+  expect(tailOf(model.requests[2] as Req)).toContain('label="Issue ABC-1"');
   expect(JSON.stringify(model.requests[2])).not.toContain('Doc 42');
 
   // Nothing on screen — no block at all.
@@ -191,7 +191,7 @@ test('the screen changing does not start a new session: the conversation continu
   await settleUntil(() => model.requests.length === 2);
   // The model is sent the conversation so far, with the new screen.
   expect(beforeTail(model.requests[1] as Req)).toContain('About the board.');
-  expect(tailOf(model.requests[1] as Req)).toContain('### Issue ABC-1');
+  expect(tailOf(model.requests[1] as Req)).toContain('label="Issue ABC-1"');
   ui.app.unmount();
 });
 
@@ -229,11 +229,15 @@ test('a legacy chatSubject plugin still names its subject — in the title and a
   await ui.press('return');
   await settleUntil(() => model.requests.length === 1);
   expect(tailOf(model.requests[0] as Req)).toContain('## What the person sees now');
-  expect(tailOf(model.requests[0] as Req)).toContain('### DOC-7');
+  expect(tailOf(model.requests[0] as Req)).toContain('label="DOC-7"');
   ui.app.unmount();
 });
 
-test('a chatContext that throws does not break the turn, and is logged once', async () => {
+test('a chatContext that throws does not break the turn, and is logged once — after the draw, with no React warning', async () => {
+  const errors: string[] = [];
+  const realError = console.error;
+  console.error = (...a: unknown[]) => { errors.push(a.map(String).join(' ')); };
+  try {
   const model = new ScriptedModel();
   model.script([{ text: 'Answered anyway.' }]);
   const state = fresh({ items: [BOARD], throws: true });
@@ -250,6 +254,8 @@ test('a chatContext that throws does not break the turn, and is logged once', as
   expect(frame).toContain('[docs] chatContext failed: boom');
   expect(frame.split('chatContext failed').length - 1).toBe(1);
   ui.app.unmount();
+  } finally { console.error = realError; }
+  expect(errors.filter((e) => /while rendering|setState/i.test(e))).toEqual([]);
 });
 
 test('on the Anthropic wire the screen comes after the cache breakpoint, and the request is one the API takes', async () => {
@@ -277,7 +283,7 @@ test('on the Anthropic wire the screen comes after the cache breakpoint, and the
     const tail = last.content.at(-1)!;
     expect(tail.type).toBe('text');
     expect(String(tail.text)).toStartWith(MARK);
-    expect(String(tail.text)).toContain(`### ${want}`);
+    expect(String(tail.text)).toContain(`label="${want}"`);
     expect(tail.cache_control).toBeUndefined();
     // …and the breakpoint sits on the conversation's last block, right before it.
     expect(last.content.at(-2)!.cache_control).toEqual({ type: 'ephemeral' });

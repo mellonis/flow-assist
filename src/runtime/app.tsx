@@ -353,11 +353,15 @@ export function renderApp(
     // runtime cannot see another plugin's services.
     // Asked on every draw of the chat and before every request: a plugin whose hook
     // throws gives nothing, and it is said in the log once per plugin, not per draw.
+    // The log line is written after the draw, never during it: pushLog sets the App's
+    // state, and a setState while the chat renders is React's "cannot update a
+    // component while rendering a different component".
     (services as unknown as HostServices).chatContext = () =>
       collectContext(plugins as Plugin[], (name) => pFtMap[name], (name, e) => {
         if (contextFailed.has(name)) return;
         contextFailed.add(name);
-        (services as unknown as ReactBoundServices).pushLog(`[${name}] chatContext failed: ${(e as Error)?.message ?? String(e)}`);
+        const line = `[${name}] chatContext failed: ${(e as Error)?.message ?? String(e)}`;
+        queueMicrotask(() => (services as unknown as ReactBoundServices).pushLog(line));
       });
     (services as unknown as HostServices).afterWrite = async () => {
       for (const p of plugins) {
