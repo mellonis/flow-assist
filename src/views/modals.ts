@@ -813,8 +813,14 @@ function buildMessageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): Ch
 // chat was one more term to forget, and twice was.
 // Below this many rows the conversation keeps every row for itself.
 const MIN_ROWS_TO_PIN = 4;
-function ChatMessages({ messages, rowOpts, palette: m, errorColor, onViewport, scrollTo }: {
+function ChatMessages({ messages, rowOpts, palette: m, errorColor, onViewport, scrollTo, keysActive = true, wheel }: {
   messages: ChatMsg[];
+  // Whether PgUp/PgDn (and the wheel) reach the list through its own input: not while a
+  // docked chat has given the keyboard to the plugin — those keys are the plugin's then.
+  keysActive?: boolean;
+  // Filled with a function that scrolls the list by a wheel step, for the chat's own
+  // handler to call with the wheel over the list while the list does not hear it.
+  wheel?: { current: ((up: boolean) => void) | null };
   rowOpts: RowOpts;
   palette: Record<string, string | undefined>;
   errorColor?: string;
@@ -841,7 +847,18 @@ function ChatMessages({ messages, rowOpts, palette: m, errorColor, onViewport, s
     const r = rect.current;
     if (r) onViewport?.({ ...r, scrollTop, pinned: pinnedRef.current, atEnd });
   };
+  const metrics = useRef<ScrollMetrics | null>(null);
+  if (wheel) {
+    wheel.current = (up: boolean) => {
+      const x = metrics.current;
+      if (!x) return;
+      // The box counts its offset from the bottom (it is anchored there).
+      const top = Math.max(0, Math.min(x.maxScrollTop, x.scrollTop + (up ? -3 : 3)));
+      box.current?.scrollTo(x.maxScrollTop - top);
+    };
+  }
   const see = (x: ScrollMetrics) => {
+    metrics.current = x;
     setView((v) => (v && v.top === x.scrollTop && v.height === x.viewportHeight ? v : { top: x.scrollTop, height: x.viewportHeight }));
     // The metrics are fresh HERE — the box has just measured the rows a fold added or
     // took away — so this is where an ask can be turned into an offset the box
@@ -1006,7 +1023,7 @@ function ChatMessages({ messages, rowOpts, palette: m, errorColor, onViewport, s
   };
 
   const scroll = {
-    ref: box, anchor: 'bottom' as const, flexGrow: 1, flexShrink: 1, flexDirection: 'column' as const,
+    ref: box, anchor: 'bottom' as const, isActive: keysActive, flexGrow: 1, flexShrink: 1, flexDirection: 'column' as const,
     onScroll: (_o: number, x: ScrollMetrics) => see(x), onMetrics: see,
     // Where the conversation sits on the terminal, in the coordinates a mouse key is
     // reported in — so a click can be turned into the row under it.
@@ -1085,6 +1102,10 @@ export function renderChatModal({
   contextPanel = null,
   todo = null,
   fullscreen = false,
+  docked = false,
+  focused = true,
+  wheel,
+  escWord = 'close',
   imageNumbers = [],
   imagesOn = false,
 }: {
@@ -1169,6 +1190,14 @@ export function renderChatModal({
   // centred 88% × 82% over the dimmed screen. The overlay already spans the
   // terminal from its first row, so the window only has to be as big.
   fullscreen?: boolean;
+  // Docked beside the plugin's screen (the `panel` mode): the window is the panel, laid
+  // out where the host put it — not an overlay — and its frame says whether it has the
+  // keyboard (the accent colour) or the plugin has.
+  docked?: boolean;
+  focused?: boolean;
+  wheel?: { current: ((up: boolean) => void) | null };
+  // What a second Esc does to the chat: `close` the window, or `collapse` the panel.
+  escWord?: 'close' | 'collapse';
   // The numbers of the conversation's images: an `[Image #N]` in the field with one of
   // them behind it is an attachment, drawn in the accent colour. Typed by hand with
   // nothing behind it, the same text is just text.
@@ -1232,7 +1261,7 @@ export function renderChatModal({
 
   return h(
     Box,
-    overlay(width, height),
+    docked ? { width, height, flexDirection: 'column' } : overlay(width, height),
     h(
       Box,
       {
@@ -1243,7 +1272,7 @@ export function renderChatModal({
         // terminal's foreground, a light terminal theme drew black on black.
         color: m.text,
         borderBackgroundColor: m.borderBg,
-        borderColor: m.border,
+        borderColor: docked ? (focused ? m.accent : m.idleBorder) : m.border,
         // What is on screen, after the name — cut to the border, never wrapped.
         borderTitle: subject ? cutStep(`${ASSISTANT_MARK} Flow Assist · ${subject}`, Math.max(0, boxW - 4)) : `${ASSISTANT_MARK} Flow Assist`,
         width: boxW,
@@ -1257,7 +1286,7 @@ export function renderChatModal({
         // <ScrollBox> is one), so a drag there stays in the conversation.
         selectionScope: true,
       },
-      h(ChatMessages, { messages, rowOpts: { wrap, folds, viewLines, notes, detailsKey, renderers: viewRenderers, now, palette: m, onViewFail }, palette: m, errorColor: theme?.error, onViewport, scrollTo }),
+      h(ChatMessages, { messages, rowOpts: { wrap, folds, viewLines, notes, detailsKey, renderers: viewRenderers, now, palette: m, onViewFail }, palette: m, errorColor: theme?.error, onViewport, scrollTo, keysActive: focused, wheel }),
       error ? h(Text, { color: 'red' }, `⚠ ${error}`) : null,
       // The hint on the left, how full the model's context is on the right — it stays
       // put while the hint changes, and turns yellow when it is time to /compact.
@@ -1291,7 +1320,7 @@ export function renderChatModal({
         armedHint
           ? armedHint
           : escArmed
-          ? `${CAP.esc} again to exit`
+          ? `${CAP.esc} again to ${escWord === 'collapse' ? 'collapse' : 'exit'}`
           : emptyNotice
               ? `⚠ ${emptyNotice}`
               // `⇧⇥ auto` goes LAST of the keys: the row is cut at the window's width,
@@ -1377,7 +1406,7 @@ export function renderChatModal({
                         ? ` ${CAP.enter} run with the terminal · ${CAP.backspace} on empty back to !`
                         : bangLevel === 1
                         ? ` ${CAP.enter} run · ! again gets the terminal · ${CAP.backspace} on empty leaves ! mode`
-                        : streaming ? ` an answer is coming — ${CAP.enter} queues your next message` : ` ${CAP.enter} send · ${NEWLINE_KEY} new line · ${CAP.esc} ${CAP.esc} close`)
+                        : streaming ? ` an answer is coming — ${CAP.enter} queues your next message` : ` ${CAP.enter} send · ${NEWLINE_KEY} new line · ${CAP.esc} ${CAP.esc} ${escWord}`)
                     // Text after the caret is the person's own text — drawn like the rest
                     // of it. It used to take the placeholder's dim and went grey whenever
                     // the caret moved back.
@@ -1386,6 +1415,53 @@ export function renderChatModal({
       ),
     ),
   );
+}
+
+// ─── The chat, collapsed ──────────────────────────────────────────────────────
+// A docked chat folded away still says what its turn is doing: on the plugin's bottom
+// row when the panel was on the right, on the one row a bottom panel keeps. The same
+// facts as the chat's own status line — the spinner, the seconds of what runs now, the
+// tool or the request's word with the same shimmer — and the key that brings it back.
+// Null when nothing runs.
+export function renderChatStatus({ theme, streaming, toolLabel = '', phase = 'writing', verb = '', elapsed = 0, keyHint = '' }: {
+  theme: Theme | undefined;
+  streaming: boolean;
+  toolLabel?: string;
+  phase?: 'thinking' | 'writing';
+  verb?: string;
+  elapsed?: number;
+  // `^] chat` — from the binding, empty when it is unbound.
+  keyHint?: string;
+}) {
+  if (!streaming && !toolLabel) return null;
+  const m = (theme?.modals?.chat ?? {}) as Record<string, string | undefined>;
+  return h(Box, { key: 'chat-status', flexDirection: 'row', flexShrink: 0, selectable: false },
+    h(Text, { dim: true }, `${spin(elapsed)} ${fmtSec(elapsed)} · `),
+    h(Shimmer, {
+      color: toolLabel ? (m.accent ?? 'cyan') : phase === 'thinking' ? 'magenta' : (m.assistantAccent ?? 'green'),
+      highlight: TOOL_PULSE(m), width: 4, interval: 70, direction: 'ltr', running: true,
+      children: toolLabel || `${verb || VERBS[0]}…`,
+    }),
+    keyHint ? h(Text, { dim: true }, ` · ${keyHint}`) : null);
+}
+
+// The one row a collapsed bottom panel keeps: the chat's name, and either its running
+// turn's status or how to bring it back.
+export function renderChatStrip({ width, theme, status, keyHint = '', unread = 0 }: {
+  width: number;
+  theme: Theme | undefined;
+  status: ReactNode;
+  keyHint?: string;
+  unread?: number;
+}) {
+  const m = (theme?.modals?.chat ?? {}) as Record<string, string | undefined>;
+  return h(Box, { width, height: 1, flexDirection: 'row', backgroundColor: m.bg, overflow: 'hidden', selectable: false },
+    h(Text, { bold: true, color: m.assistantAccent }, ` ${ASSISTANT_MARK} `),
+    h(Text, { bold: true }, 'Flow Assist'),
+    unread ? h(Text, { color: m.bgAccent }, ` · ◆ ${unread} new`) : null,
+    status
+      ? [h(Text, { key: 'sep', dim: true }, ' · '), status]
+      : keyHint ? h(Text, { dim: true, wrap: 'truncate' }, ` · ${keyHint}`) : null);
 }
 
 // `/context` — the window as a field of cells beside a legend, in the field's place

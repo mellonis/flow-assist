@@ -11,7 +11,7 @@
 import { pluginConfigs } from '../loader/tools.js';
 import { Box, Text, Markdown, Table, Link, render, useApp, useColorScheme, useInput, useTerminalSize, type CopyEvent } from '@flowtty/react';
 import type { Backend } from '@flowtty/core';
-import { createElement as h, useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, createElement as h, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { createFt } from './ft.js';
 import type { FTRuntime } from './ft.js';
 import { identityToken } from './plugin-identity.js';
@@ -54,10 +54,16 @@ import type { ColorScheme, Theme } from '../playback/theme.js';
 import type { Command } from '../loader/plugin.js';
 import type { Plugin, PluginShape } from '../loader/plugin.js';
 import { renderHome } from '../views/home.js';
+import { chatModeOf, panelLayout, type ChatMode, type PanelLayout } from './panel-layout.js';
 
 // The host's own plugins: they ARE the host, so the start screen does not list them
 // among the guests.
 const BUILTIN_PLUGINS = ['core', 'assistant', 'keycaps', 'log'];
+// The host's furniture drawn over everything, the docked chat included, and the corner
+// of the terminal each piece places itself from: the reminder is laid out over the
+// whole terminal from its top-left corner, the keycaps panel floats in from the
+// bottom-right one.
+const TOP_LAYER: Record<string, 'topLeft' | 'bottomRight'> = { 'core:reminder': 'topLeft', 'keycaps:keycaps': 'bottomRight' };
 
 // ─── Two-phase input dispatch ────────────────────────────────────────────────
 // Observers (mode 'observe') always run, never consume; then the consumer race
@@ -160,13 +166,41 @@ interface CommandLineState {
 export const TITLE_ROWS = 3;
 export const FOOTER_ROWS = 3;
 
-// The room a plugin's surface has: the terminal less the title bar and the footer.
-// A surface that sized itself by the terminal was four rows taller than its room and
-// pushed the command line off the screen.
+// The part of the terminal a subtree is drawn in. With the chat docked beside it, a
+// plugin's side of the screen is smaller than the terminal, and everything drawn there
+// — its surface, its modals, the host's own furniture — is laid out as on a smaller
+// terminal; the chat is given its panel the same way. Unset: the whole terminal.
+// flowtty's own size context is not exported, so this reaches what a plugin reads
+// through `ft` (`ft.useTerminalSize`, `ft.useSurfaceSize`), not flowtty's hook itself.
+const AreaContext = createContext<{ width: number; height: number } | null>(null);
+export function useAreaSize(): { width: number; height: number } {
+  const terminal = useTerminalSize();
+  return useContext(AreaContext) ?? terminal;
+}
+
+// The room a plugin's surface has: its side of the screen less the title bar and the
+// footer. A surface that sized itself by the terminal was four rows taller than its room
+// and pushed the command line off the screen.
 export function useSurfaceSize(): { width: number; height: number } {
-  const { width, height } = useTerminalSize();
+  const { width, height } = useAreaSize();
   return { width, height: Math.max(1, height - TITLE_ROWS - FOOTER_ROWS) };
 }
+
+// What the App reads of the chat (the assistant plugin publishes it on `ft.store.chat`;
+// its `setup` seeds the first three before anything renders).
+type ChatStore = {
+  open?: boolean;
+  mode?: ChatMode;
+  focus?: 'chat' | 'plugin';
+  ctrlKey?: (k: InputKey) => 'handled' | 'field' | undefined;
+  // Ctrl+] (`chatFocus`) and the collapse key (`chatCollapse`): true when the chat acted.
+  panelKey?: (which: 'focus' | 'collapse') => boolean;
+  // A click at a cell: the chat moves the keyboard to the pane under it.
+  pointer?: (x: number, y: number) => void;
+  // The running turn's status, drawn on the plugin's bottom row while the panel is
+  // collapsed on the right; null when nothing runs.
+  statusRow?: unknown;
+};
 
 export function renderApp(
   root: Backend,
@@ -276,7 +310,7 @@ export function renderApp(
         useEffect,
         useRef,
         useInput: useInput as unknown as FTRuntime['useInput'],
-        useTerminalSize,
+        useTerminalSize: useAreaSize,
         useSurfaceSize,
         useInputHandler: (opts) => registerInputHandler(inputRegistryRef, opts),
         store: {},
@@ -638,7 +672,7 @@ export function renderApp(
       (services as unknown as HostServices).armedHint = armHint(next);
     };
     useEffect(() => () => { if (armTimer.current) clearTimeout(armTimer.current); }, []);
-    const chatStore = () => (ft.store as { chat?: { open?: boolean; ctrlKey?: (k: InputKey) => 'handled' | 'field' | undefined } } | undefined)?.chat;
+    const chatStore = () => (ft.store as { chat?: ChatStore } | undefined)?.chat;
 
     useInput((key) => {
       const k = key as unknown as InputKey;
@@ -673,6 +707,17 @@ export function renderApp(
         setArm(null);
         notify();
       }
+      // Ctrl+] moves the keyboard between the chat and the plugin, and the collapse key
+      // folds the docked chat away and back. Taken here, before any handler, as the
+      // exit keys are: a plugin that consumes every key, or one of its modals, must
+      // never be able to keep the person from the chat.
+      const chat = chatStore();
+      const panelKey = isKey(keys.chatFocus ?? [], k) ? 'focus' : isKey(keys.chatCollapse ?? [], k) ? 'collapse' : null;
+      if (panelKey && chat?.panelKey?.(panelKey)) { notify(); return true; }
+      // A press anywhere tells the chat which pane it landed in (the keyboard follows
+      // it). The button goes on as before: a click in the panel may open a fold, and a
+      // drag still selects.
+      if (k.name === 'mousedown' && typeof k.x === 'number' && typeof k.y === 'number') chat?.pointer?.(k.x, k.y);
       // A handled key is followed by a redraw. A plugin keeps its state in one component
       // and draws it in a sibling; a React setState in the first re-renders only the
       // first, and the sibling redraws when the HOST does. That took an explicit
@@ -698,7 +743,23 @@ export function renderApp(
     // active (content present). The per-plugin `pFt` comes from `pFtMap`, built
     // by `overlayComps`; the plugin's services/store are mutated live, so reading
     // them here each render stays fresh.
-    const { width: termWidth } = useTerminalSize();
+    const { width: termWidth, height: termHeight } = useTerminalSize();
+    // Where the chat is. Docked (`panel`), the terminal is split between the plugin's
+    // side — title bar, surface, footer, always at the top-left corner — and the
+    // chat's; in `window` and `full` the chat is drawn over the whole terminal while it
+    // is open, and the plugin's side is all of it.
+    const chat = chatStore();
+    const assistantCfg = (config.plugins as Record<string, Record<string, unknown> | undefined> | undefined)?.assistant;
+    const mode: ChatMode | null = chat ? chat.mode ?? chatModeOf(assistantCfg) : null;
+    const dock: PanelLayout | null = mode === 'panel'
+      ? panelLayout({ width: termWidth, height: termHeight, ...((assistantCfg?.panel as { side?: unknown; size?: unknown } | undefined) ?? {}), collapsed: !chat?.open })
+      : null;
+    (services as unknown as HostServices).chatDock = dock;
+    const region = dock ? dock.region : { width: termWidth, height: termHeight };
+    // The side with the keyboard is marked: the chat's frame in its accent, or — the
+    // plugin's side — the title bar in the same colour.
+    const pluginFocused = !!dock && !dock.collapsed && chat?.focus === 'plugin';
+    const chatAccent = ((config.theme as Theme | undefined)?.modals as Record<string, { accent?: string }> | undefined)?.chat?.accent;
     const hints = composeFooterHints(plugins, pFtMap, keys).join(' · ');
     const surfaceActive = (p: PluginShape): boolean => {
       const kc = (p as Plugin).keycaps;
@@ -713,7 +774,9 @@ export function renderApp(
     // so no extra `: ` literal is prepended here.
     // An armed Ctrl+C / Ctrl+D / Ctrl+Z says so first; the open chat says it on its own
     // status line instead.
-    const armed = chatStore()?.open ? '' : (services as unknown as HostServices).armedHint;
+    const armed = chat?.open && !pluginFocused ? '' : (services as unknown as HostServices).armedHint;
+    // Collapsed on the right, the chat's running turn says what it is doing here.
+    const status = dock?.collapsed && dock.side === 'right' && !armed && !toast.message ? chat?.statusRow : null;
     const bottom = armed || toast.message || hints;
     // The command line completes INLINE, on its own one row: the untyped rest of the
     // suggestion after the caret, the other candidates beside it. A second row of
@@ -721,13 +784,41 @@ export function renderApp(
     // the whole screen jumped by a row each time.
     const line = cmdline.current.open ? lineView(cmdline.current.input, cmdline.current.walk, completeLine) : null;
 
+    const isChat = (c: { key: string }) => c.key === 'assistant:chat';
+    const chatComp = overlayComps.find(isChat);
+    // What floats over the whole terminal, the chat included: a fired reminder, and the
+    // keycaps panel (the keys being pressed, wherever they go).
+    const isTop = (c: { key: string }) => c.key in TOP_LAYER;
+    // A layer of no size of its own, at one corner of the terminal: what it holds places
+    // itself from that corner, and the layer takes no room — and no pointer: a box that
+    // covered the screen would be what every drag started in, and no pane's own
+    // selection bounds would hold.
+    const layer = (corner: 'topLeft' | 'bottomRight') =>
+      h(Box, { position: 'absolute', top: corner === 'topLeft' ? 0 : termHeight, left: corner === 'topLeft' ? 0 : termWidth, width: 0, height: 0, zIndex: 6 },
+        overlayComps.filter((c) => TOP_LAYER[c.key] === corner).map(({ Comp, key }) => h(Comp as any, { key })));
+    // Two slots, in every mode and in the same order — only their props change. A
+    // component that moved from one parent to another would be mounted anew, and the
+    // chat would lose the turn it is writing, the draft and the queue with every
+    // `/mode`; so would a plugin's screen.
+    const panelBox = dock
+      ? { width: dock.panel.width, height: dock.panel.height, flexShrink: 0, overflow: 'hidden' as const }
+      // Over everything: the chat's own window is laid out over the whole terminal
+      // (and steps the screen behind it back). Closed, it takes no room at all.
+      : chat?.open
+        ? { position: 'absolute' as const, top: 0, left: 0, width: termWidth, height: termHeight, zIndex: 5 }
+        : { position: 'absolute' as const, top: 0, left: 0, width: 0, height: 0 };
+    const panelArea = dock ? { width: dock.panel.width, height: dock.panel.height } : { width: termWidth, height: termHeight };
     return h(
       Box,
-      { flexDirection: 'column' },
+      { flexDirection: dock?.side === 'right' ? 'row' : 'column', width: termWidth, height: termHeight },
+      h(AreaContext.Provider, { value: region },
+      // The plugin's side of the screen. A drag that starts here stays here — never
+      // into the panel beside it.
+      h(Box, { flexDirection: 'column', width: region.width, height: region.height, flexShrink: 0, overflow: 'hidden', selectionScope: true },
       // The title bar names the app over a guest's screen; the start screen says it itself.
       // Chrome, not text: a drag that runs over the title bar or the footer copies
       // nothing from them.
-      atHome ? h(Box, { height: 1 }) : h(Box, { padding: 1, selectable: false }, h(Text, { bold: true }, title)),
+      atHome ? h(Box, { height: 1 }) : h(Box, { padding: 1, selectable: false }, h(Text, { bold: true, ...(pluginFocused ? { color: chatAccent } : {}) }, title)),
       // A plugin is a guest: its surface takes the screen only while the plugin says
       // its context is active — `keycaps(ft)` non-empty, which is already the
       // contract ("returns [] when its surface is inactive"). Until then the screen
@@ -739,8 +830,8 @@ export function renderApp(
       // own zIndex, and the footer's text ran over the panel's frame. It also puts
       // the footer under a modal's dimmed backdrop, like everything else behind it.
       h(Box, { flexGrow: 1, zIndex: 1 },
-        overlayComps.filter((c) => !c.surface || surfaceActive(c.plugin)).map(({ Comp, key }) => h(Comp as any, { key })),
-        atHome ? renderHome({ title, plugins, keys, builtins: BUILTIN_PLUGINS, width: termWidth, pluginsNote }) : null),
+        overlayComps.filter((c) => !isChat(c) && !isTop(c) && (!c.surface || surfaceActive(c.plugin))).map(({ Comp, key }) => h(Comp as any, { key })),
+        atHome ? renderHome({ title, plugins, keys, builtins: BUILTIN_PLUGINS, width: region.width, pluginsNote }) : null),
       // The bottom row, and the one place on this screen a drag has something to
       // copy: the command the person typed. The box used to be `selectable: false`
       // whole, which is right for what surrounds the command — and swallowed the
@@ -766,8 +857,13 @@ export function renderApp(
                 ? [h(Text, { key: 'g0', inverse: true, dim: true, color: 'cyan', selectable: false }, line.ghost[0]), h(Text, { key: 'g1', dim: true, color: 'cyan', selectable: false }, line.ghost.slice(1))]
                 : h(Text, { inverse: true, selectable: false }, ' '),
               line.others.length ? h(Text, { dim: true, wrap: 'truncate', selectable: false }, `  ${keyGlyph('tab')} ${line.others.slice(0, 12).join(' · ')}`) : null)
-          : h(Text, { dim: true, selectable: false }, bottom),
-      ),
+          : status
+            ? h(Box, { flexDirection: 'row', selectable: false }, status as never, h(Text, { dim: true, wrap: 'truncate' }, ` · ${bottom}`))
+            : h(Text, { dim: true, selectable: false }, bottom),
+      ))),
+      h(AreaContext.Provider, { value: panelArea },
+        h(Box, panelBox, chatComp ? h(chatComp.Comp as any, { key: chatComp.key }) : null)),
+      h(AreaContext.Provider, { value: { width: termWidth, height: termHeight } }, layer('topLeft'), layer('bottomRight')),
     );
   }
 

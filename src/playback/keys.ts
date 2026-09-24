@@ -68,9 +68,20 @@ function asKey(spelled: string): KeyParts {
 // never agree about a capital.
 export function keyId(key: KeyLike): string {
   if (typeof key === 'string') return keyId(asKey(key));
+  key = controlKey(key);
   const name = key.name ?? '';
   const named = Array.from(name).length !== 1;
   return `${key.ctrl ? 'ctrl+' : ''}${key.meta ? 'alt+' : ''}${key.shift && named ? 'shift+' : ''}${name}`;
+}
+
+// Ctrl with `\`, `]`, `^` or `_` is a control byte of its own (0x1c–0x1f), past the 26
+// the decoder turns into ctrl+letter, and it reports the bare byte as the key's name.
+// Read as the key that was held with Ctrl, so `ctrl+]` in a binding meets what the
+// terminal sends; a terminal that reports modifiers itself sends `]` with ctrl already.
+const CONTROL_KEYS: Record<string, string> = { '\x1c': '\\', '\x1d': ']', '\x1e': '^', '\x1f': '_' };
+function controlKey<K extends { name?: string; ctrl?: boolean }>(key: K): K {
+  const held = CONTROL_KEYS[key.name ?? ''];
+  return held ? { ...key, name: held, ctrl: true } : key;
 }
 
 // A binding as written → the name the decoder gives that key. A single character is
@@ -140,7 +151,7 @@ export function isMouseButton(name: string | undefined): boolean {
 export const META_CAP = process.platform === 'darwin' ? '⌥' : 'Alt+';
 export type KeyLike = string | { name?: string; ctrl?: boolean; meta?: boolean; shift?: boolean };
 export function keyGlyph(key: KeyLike): string {
-  const k = typeof key === 'string' ? asKey(key) : key;
+  const k = typeof key === 'string' ? asKey(key) : controlKey(key);
   const name = k.name ?? '';
   const named = Array.from(name).length !== 1;
   const cap = KEY_GLYPHS[name] ?? (/^f\d{1,2}$/.test(name) ? name.toUpperCase() : name);

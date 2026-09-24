@@ -199,6 +199,19 @@ setup: (ft) => { /* once, before any component mounts: seed a store */ },
   keeps a title bar above the surface and the footer (the command line) below it;
   `useSurfaceSize` is what is left between them. A surface sized by the terminal is
   taller than its room, and the host cuts off what does not fit — its bottom rows.
+- **A surface may be given less than the terminal.** The chat is docked beside it by
+  default — on the right, or at the bottom of a narrow terminal — and the plugin's
+  side of the screen (its title bar, surface and footer) is what remains, always from
+  the terminal's top-left corner. `ft.useSurfaceSize()` and `ft.useTerminalSize()`
+  both report that side, so a surface and a modal laid out by them stay on it; the
+  sizes change when the chat is folded away or brought back, and a surface re-renders
+  with them. Take the size from `ft`, never from flowtty's own `useTerminalSize`:
+  that one always reports the whole terminal.
+- **The keyboard is yours only while your side has it.** Ctrl+] moves it between the
+  chat and the plugin; while the chat has it, your handlers see no keys, exactly as
+  under the chat's window. The host takes Ctrl+] (and the key that folds the chat,
+  Ctrl+\) before any handler, so a handler that consumes every key cannot trap the
+  person.
 - **Take React and flowtty from `ft`, import only their types.** `ft.useState`,
   `ft.useEffect`, `ft.useRef`, the flowtty components — one React for the host and
   every plugin; a second copy breaks every hook.

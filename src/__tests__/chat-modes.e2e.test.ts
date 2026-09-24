@@ -1,0 +1,354 @@
+// Where the chat is (src/runtime/panel-layout.ts). `panel`, the default, docks it beside
+// the plugin's screen, which is laid out in what remains; Ctrl+] moves the keyboard
+// between the two, taken by the host before any plugin; the collapse key (Ctrl+\) and
+// Esc Esc fold the panel away, its turn's status going to the plugin's bottom row.
+// `/mode window` is the window over the screen, `/mode full` the whole terminal, and an
+// old `fullscreen: true` reads as full.
+import { afterEach, expect, test } from 'bun:test';
+import { ScriptedModel, bootApp, settle } from './helpers/scripted';
+import { chatRows, chatWrapWidth, type RowOpts } from '../views/modals';
+import { cellWidth } from '../assistant/step';
+
+const realFetch = globalThis.fetch;
+afterEach(() => { globalThis.fetch = realFetch; });
+
+type UI = Awaited<ReturnType<typeof bootApp>>;
+const CTRL_RIGHT_BRACKET = { name: '\x1d' }; // what a terminal sends for Ctrl+]
+const COLLAPSE = { name: '\\', ctrl: true };
+const press = async (ui: UI, key: { name: string; ctrl?: boolean }) => { ui.backend.press(key); await settle(); };
+const rows = (ui: UI) => ui.backend.lastFrame.split('\n');
+// The chat's frame: its top row, its left edge and its width.
+const chatFrame = (ui: UI) => {
+  const r = rows(ui);
+  const top = r.findIndex((l) => l.includes('╭─ ƒ Flow Assist'));
+  const bottom = r.findLastIndex((l) => /╰─+╯\s*$/.test(l));
+  return { top, bottom, left: top >= 0 ? r[top]!.indexOf('╭─ ƒ') : -1, width: top >= 0 ? r[top]!.trimEnd().length - r[top]!.indexOf('╭─ ƒ') : 0 };
+};
+const command = async (ui: UI, text: string) => {
+  await ui.type(text);
+  await ui.press('return');
+  await settle();
+};
+
+// A guest with a screen: it says how big the room it was given is, and its runtime is
+// kept for what the test reads through it (the chat's messages, the theme). `take`
+// lists the keys it consumes; `all` consumes every key, at the priority given.
+function guest(opts: { take?: string[]; all?: boolean; priority?: number } = {}) {
+  const seen: string[] = [];
+  const size = { width: 0, height: 0 };
+  let ft: any = null;
+  const make = (mk: any) => [mk('boards', {
+    name: 'boards',
+    keycaps: () => ['c card'],
+    components: {
+      keys: (f: any) => function Keys() {
+        ft = f;
+        f.useInputHandler({ mode: 'consume', priority: () => opts.priority ?? 50, handler: (key: { name: string }) => {
+          if (key.name.startsWith('mouse') || key.name.startsWith('wheel')) return false;
+          if (opts.all || opts.take?.includes(key.name)) { seen.push(key.name); return true; }
+          return false;
+        } });
+        return null;
+      },
+      view: (f: any) => function View() {
+        const s = f.useSurfaceSize();
+        size.width = s.width; size.height = s.height;
+        return f.h(f.Text, null, 'BOARD-SURFACE');
+      },
+    },
+  })];
+  return { make, seen, size, ft: () => ft };
+}
+
+test('a fresh config docks the chat on the right of a wide terminal, and the board is given the rest', async () => {
+  const g = guest();
+  const ui = await bootApp(new ScriptedModel(), 160, 40, g.make as never, {}, { chatMode: null });
+  expect(g.size).toEqual({ width: 160, height: 34 });
+  await ui.press('F');
+  const f = chatFrame(ui);
+  // The panel: the whole height, 35% of the width, at the right edge.
+  expect(f).toEqual({ top: 0, bottom: 39, left: 104, width: 56 });
+  // Both are drawn: the board's surface, narrower now, and its title bar and footer.
+  expect(g.size).toEqual({ width: 104, height: 34 });
+  const r = rows(ui);
+  expect(r.findIndex((l) => l.includes('BOARD-SURFACE'))).toBeGreaterThan(0);
+  expect(r.find((l) => l.includes('BOARD-SURFACE'))!.indexOf('BOARD-SURFACE')).toBeLessThan(104);
+  expect(r[1]).toContain('flow-assist');
+  expect(r.find((l) => l.includes(': commands'))!.indexOf(': commands')).toBeLessThan(104);
+  ui.app.unmount();
+});
+
+test('below 120 columns the panel is at the bottom', async () => {
+  const g = guest();
+  const ui = await bootApp(new ScriptedModel(), 100, 40, g.make as never, {}, { chatMode: null });
+  await ui.press('F');
+  expect(chatFrame(ui)).toEqual({ top: 24, bottom: 39, left: 0, width: 100 });
+  expect(g.size).toEqual({ width: 100, height: 18 });
+  // The board's footer is its own, above the panel.
+  expect(rows(ui).findIndex((l) => l.includes(': commands'))).toBeLessThan(24);
+  ui.app.unmount();
+});
+
+test('Ctrl+] moves the keyboard between the chat and the plugin, and the side that has it is marked', async () => {
+  // The plugin takes EVERY key: only a key the host claims first can get past it.
+  const g = guest({ all: true });
+  const ui = await bootApp(new ScriptedModel(), 160, 40, g.make as never, {}, { chatMode: 'panel' });
+  await ui.press('F');
+  expect(g.seen).toEqual(['F']); // the plugin had it; the chat stayed collapsed
+  expect(chatFrame(ui).top).toBe(-1);
+  // Ctrl+] brings the collapsed panel with the keyboard.
+  await press(ui, CTRL_RIGHT_BRACKET);
+  expect(chatFrame(ui).left).toBe(104);
+  await ui.type('a');
+  expect(ui.backend.lastFrame).toContain('› a');
+  expect(g.seen).toEqual(['F']);
+  const accent = g.ft().config.theme.modals.chat.accent;
+  const corner = () => ui.backend.lastBuffer!.get(104, 0).style.fg;
+  const title = () => ui.backend.lastBuffer!.get(1, 1).style.fg;
+  expect(corner()).toBe(accent);
+  expect(title()).not.toBe(accent);
+  // To the plugin: its key reaches it, the field keeps what it had, the mark moves.
+  await press(ui, CTRL_RIGHT_BRACKET);
+  await ui.type('b');
+  expect(g.seen).toEqual(['F', 'b']);
+  expect(ui.backend.lastFrame).toContain('› a');
+  expect(ui.backend.lastFrame).not.toContain('› ab');
+  expect(corner()).not.toBe(accent);
+  expect(title()).toBe(accent);
+  // The footer says how to get back.
+  expect(rows(ui).find((l) => l.includes(': commands'))).toContain('^] chat');
+  // And back.
+  await press(ui, CTRL_RIGHT_BRACKET);
+  await ui.type('c');
+  expect(ui.backend.lastFrame).toContain('› ac');
+  expect(g.seen).toEqual(['F', 'b']);
+  ui.app.unmount();
+});
+
+test('a plugin modal that takes every key cannot keep the chat away either', async () => {
+  const g = guest({ all: true, priority: 100 });
+  const ui = await bootApp(new ScriptedModel(), 160, 40, g.make as never, {}, { chatMode: 'panel' });
+  await press(ui, CTRL_RIGHT_BRACKET);
+  expect(chatFrame(ui).left).toBe(104);
+  expect(g.ft().store.chat.focus).toBe('chat');
+  await press(ui, CTRL_RIGHT_BRACKET);
+  expect(g.ft().store.chat.focus).toBe('plugin');
+  expect(g.seen).toEqual([]);
+  ui.app.unmount();
+});
+
+test('the chat goes on streaming while the plugin has the keyboard', async () => {
+  const model = new ScriptedModel();
+  model.script([{ text: 'Half' }, { hold: true }, { text: ' and the rest.' }]);
+  const g = guest({ take: ['z'] });
+  const ui = await bootApp(model, 160, 40, g.make as never, {}, { chatMode: 'panel' });
+  await ui.press('F');
+  await ui.type('go');
+  await ui.press('return');
+  await press(ui, CTRL_RIGHT_BRACKET);
+  const before = ui.backend.lastFrame;
+  expect(before).toContain('Half');
+  expect(before).not.toContain('and the rest.');
+  await ui.press('z');
+  expect(g.seen).toEqual(['z']);
+  model.release();
+  await settle(20);
+  const after = rows(ui);
+  const at = after.findIndex((l) => l.includes('Half and the rest.'));
+  expect(at).toBeGreaterThan(0);
+  expect(after[at]!.indexOf('Half')).toBeGreaterThan(104); // in the panel
+  expect(g.ft().store.chat.focus).toBe('plugin');
+  ui.app.unmount();
+});
+
+test('collapsed on the right, the turn\'s status is on the plugin\'s bottom row; the same key brings the panel back', async () => {
+  const model = new ScriptedModel();
+  model.script([{ hold: true }, { text: 'Done.' }]);
+  const g = guest();
+  const ui = await bootApp(model, 160, 40, g.make as never, {}, { chatMode: 'panel' });
+  await ui.press('F');
+  await ui.type('go');
+  await ui.press('return');
+  const footer = () => rows(ui).find((l) => l.includes(': commands')) ?? '';
+  expect(footer()).not.toContain('…');
+  await press(ui, COLLAPSE);
+  expect(chatFrame(ui).top).toBe(-1);
+  expect(g.size.width).toBe(160);
+  // The spinner, the seconds, the word, and the key that brings it back.
+  expect(footer()).toMatch(/^ [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] \d+\.\ds · \S+… · \^\] chat · : commands/);
+  await press(ui, COLLAPSE);
+  expect(chatFrame(ui).left).toBe(104);
+  expect(footer()).not.toContain('…');
+  // The status line is the chat's own again.
+  expect(ui.backend.lastFrame).toMatch(/\d+\.\ds · \S+… · Esc stops/);
+  model.release();
+  await settle(20);
+  ui.app.unmount();
+});
+
+test('collapsed at the bottom, the panel is one status row', async () => {
+  const model = new ScriptedModel();
+  model.script([{ hold: true }, { text: 'Done.' }]);
+  const g = guest();
+  const ui = await bootApp(model, 100, 40, g.make as never, {}, { chatMode: 'panel' });
+  await ui.press('F');
+  await ui.type('go');
+  await ui.press('return');
+  await press(ui, COLLAPSE);
+  const r = rows(ui);
+  expect(chatFrame(ui).top).toBe(-1);
+  expect(r[39]).toMatch(/^ ƒ Flow Assist · [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] \d+\.\ds · \S+… · \^\] chat/);
+  expect(g.size.height).toBe(33);
+  model.release();
+  await settle(20);
+  // Idle, it says how to bring the chat back.
+  expect(rows(ui)[39]).toMatch(/^ ƒ Flow Assist · \^\] chat\s*$/);
+  await press(ui, COLLAPSE);
+  expect(chatFrame(ui).top).toBe(24);
+  expect(ui.backend.lastFrame).toContain('Done.');
+  ui.app.unmount();
+});
+
+test('Esc Esc collapses the panel and gives the plugin the keyboard', async () => {
+  const g = guest({ take: ['z'] });
+  const ui = await bootApp(new ScriptedModel(), 160, 40, g.make as never, {}, { chatMode: 'panel' });
+  await ui.press('F');
+  expect(ui.backend.lastFrame).toContain('Esc Esc collapse');
+  await ui.press('escape');
+  expect(ui.backend.lastFrame).toContain('Esc again to collapse');
+  await ui.press('escape');
+  expect(chatFrame(ui).top).toBe(-1);
+  await ui.press('z');
+  expect(g.seen).toEqual(['z']);
+  // F opens it again, with the keyboard.
+  await ui.press('F');
+  expect(chatFrame(ui).left).toBe(104);
+  expect(g.ft().store.chat.focus).toBe('chat');
+  ui.app.unmount();
+});
+
+test('/mode window gives the window, /mode full the whole terminal — and a turn in flight goes on through both', async () => {
+  const W = 80;
+  const H = 24;
+  const model = new ScriptedModel();
+  model.script([{ text: 'Started' }, { hold: true }, { text: ' and finished.' }]);
+  const ui = await bootApp(model, W, H, undefined, {}, { chatMode: null });
+  await ui.press('F');
+  // 80 columns: the panel is at the bottom.
+  expect(chatFrame(ui)).toEqual({ top: 12, bottom: 23, left: 0, width: W });
+  await ui.type('go');
+  await ui.press('return');
+  await command(ui, '/mode window');
+  const windowed = chatFrame(ui);
+  expect(windowed.top).toBeGreaterThan(0);
+  expect(windowed.left).toBeGreaterThan(0);
+  expect(ui.backend.lastFrame).toContain('Started');
+  await command(ui, '/mode full');
+  expect(chatFrame(ui)).toEqual({ top: 0, bottom: H - 1, left: 0, width: W });
+  expect(ui.backend.lastFrame).not.toContain(': commands');
+  model.release();
+  await settle(20);
+  // The turn was never cut: the chat was not mounted anew with the move.
+  expect(ui.backend.lastFrame).toContain('Started and finished.');
+  await command(ui, '/mode panel');
+  expect(chatFrame(ui)).toEqual({ top: 12, bottom: 23, left: 0, width: W });
+  await command(ui, '/mode sideways');
+  expect(ui.backend.lastFrame).toContain('/mode takes panel, window, full');
+  ui.app.unmount();
+});
+
+test('an old fullscreen: true reads as the whole terminal — over a guest\'s screen too', async () => {
+  const g = guest();
+  const ui = await bootApp(new ScriptedModel(), 80, 24, g.make as never, { plugins: { assistant: { fullscreen: true } } });
+  expect(ui.backend.lastFrame).toContain('BOARD-SURFACE');
+  await ui.press('F');
+  expect(chatFrame(ui)).toEqual({ top: 0, bottom: 23, left: 0, width: 80 });
+  ui.app.unmount();
+});
+
+test('/fullscreen is gone: /mode says where the chat is', async () => {
+  const ui = await bootApp(new ScriptedModel(), 100, 28);
+  await ui.press('F');
+  await command(ui, '/fullscreen');
+  expect(ui.backend.lastFrame).toContain('unknown command /fullscreen');
+  ui.app.unmount();
+});
+
+test('a click on a fold in the right panel opens it, whichever side has the keyboard', async () => {
+  const g = guest();
+  const ui = await bootApp(new ScriptedModel(), 160, 40, g.make as never, {}, { chatMode: 'panel' });
+  await ui.press('F');
+  await ui.type('!');
+  await ui.type('echo panel-click');
+  await ui.press('return');
+  for (let i = 0; i < 200 && !/echo panel-click · ✓/.test(ui.backend.lastFrame); i++) await settle(1);
+  const r = rows(ui);
+  const y = r.findIndex((l) => /echo panel-click · ✓/.test(l));
+  expect(y).toBeGreaterThan(0);
+  expect(ui.backend.lastFrame).not.toContain('│ panel-click');
+  // The keyboard to the plugin first: a click in the panel still reaches the chat.
+  await press(ui, CTRL_RIGHT_BRACKET);
+  expect(g.ft().store.chat.focus).toBe('plugin');
+  const x = r[y]!.indexOf('echo panel-click');
+  ui.backend.mouse('down', x, y);
+  ui.backend.mouse('up', x, y);
+  await settle();
+  expect(ui.backend.lastFrame).toContain('panel-click');
+  expect(rows(ui).filter((l) => l.includes('panel-click')).length).toBeGreaterThan(1);
+  // The press put the keyboard where it landed.
+  expect(g.ft().store.chat.focus).toBe('chat');
+  // A press on the board's side gives it back.
+  ui.backend.mouse('down', 10, 10);
+  ui.backend.mouse('up', 10, 10);
+  await settle();
+  expect(g.ft().store.chat.focus).toBe('plugin');
+  ui.app.unmount();
+});
+
+test('every chat row is one terminal line at the panel\'s width — steps, calls, a diff, a command', async () => {
+  // A narrow panel: 32% of 160 columns.
+  const model = new ScriptedModel();
+  model.script(
+    [{ text: 'Next: change the value in a file whose name is long enough to need cutting' }, { tool: 'edit_app', args: { b: 42 } }],
+    [{ text: 'Next: check the clock twice' }, { tool: 'datetime', args: {} }, { tool: 'datetime', args: {} }],
+    [{ text: `Done — the value is 42 now, and here is a line of code:\n\n\`\`\`ts\nconst value = ${'x'.repeat(90)};\n\`\`\`\n` }],
+  );
+  const g = guest();
+  const editor = (mk: any) => [...(g.make(mk) as unknown[]), mk('clone', {
+    tools: [{
+      id: 'clone',
+      tools: [{ type: 'function', function: { name: 'edit_app', description: 'Edit app.ts.', parameters: { type: 'object', properties: { b: { type: 'number' } } } } }],
+      exec: async (_n: string, args: Record<string, unknown>, ctx: any) => {
+        ctx?.reportChange?.({ title: 'clone/some/deeply/nested/directory/with/a/long/path/app.ts', before: 'const a = 1;\nconst b = 2;\n', after: `const a = 1;\nconst b = ${Number(args.b)}; // ${'y'.repeat(80)}\n` });
+        return 'edited';
+      },
+    }],
+  })];
+  const ui = await bootApp(model, 160, 40, editor as never, { plugins: { assistant: { mode: 'panel', panel: { size: 32 } } } });
+  await ui.press('F');
+  await ui.type('change it');
+  await ui.press('return');
+  for (let i = 0; i < 200 && !ui.backend.lastFrame.includes('Done'); i++) await settle(1);
+  await ui.type('!');
+  await ui.type(`echo ${'z'.repeat(70)}`);
+  await ui.press('return');
+  for (let i = 0; i < 200 && !/· ✓/.test(ui.backend.lastFrame); i++) await settle(1);
+  const panelW = Math.round(160 * 0.32);
+  expect(chatFrame(ui)).toEqual({ top: 0, bottom: 39, left: 160 - panelW, width: panelW });
+  const wrap = chatWrapWidth(panelW, true);
+  const ft = g.ft();
+  const messages = ft.store.chat.messages;
+  // Folded, and then everything open (what ^o shows).
+  for (const open of [false, true]) {
+    const opts: RowOpts = { wrap, folds: { open, except: new Set() }, viewLines: 20, notes: 'step', detailsKey: '^o', renderers: ft.services.viewRenderers, now: Date.now(), palette: {} };
+    const laid = chatRows(messages, opts);
+    expect(laid.length).toBeGreaterThan(5);
+    for (const row of laid) {
+      const text = (row.spans ?? []).map((s) => String(s.text ?? '')).join('');
+      expect(cellWidth(text)).toBeLessThanOrEqual(wrap);
+    }
+  }
+  // And on screen: nothing ran over the panel's right edge.
+  for (const line of rows(ui).slice(1, 39)) expect(line.trimEnd().endsWith('│')).toBe(true);
+  ui.app.unmount();
+});

@@ -149,14 +149,16 @@ export const MODAL_COLOR_DEFAULTS: Record<string, Record<string, string>> = {
   //   assistantAccent — the `ƒ` mark on the assistant's answers
   //   bgAccent / bgBg — the `◆` marker and ground of a background-task result
   //   warn     — things waiting on the person (the queue); ok — finished work
-  chat: { userBg: '#2b2b40', accent: 'cyan', shell: 'magentaBright', assistantAccent: 'green', fieldBg: '#1f1f2e', bgAccent: 'magenta', bgBg: '#2a2438', warn: 'yellow', ok: 'green' },
+  //   idleBorder — the frame of a docked chat while the plugin has the keyboard; with
+  //              it, the frame is in `accent`
+  chat: { userBg: '#2b2b40', accent: 'cyan', shell: 'magentaBright', assistantAccent: 'green', fieldBg: '#1f1f2e', bgAccent: 'magenta', bgBg: '#2a2438', warn: 'yellow', ok: 'green', idleBorder: 'gray' },
 };
 
 // The same for a light terminal (light grounds; accents dark enough to read on them),
 // and for an unknown one (no grounds of the chat's own).
 const LIGHT_MODAL_COLORS: Record<string, Record<string, string>> = {
   log: {},
-  chat: { userBg: '#e4e4f0', accent: 'blue', shell: 'magenta', assistantAccent: 'green', fieldBg: '#eaeaf0', bgAccent: 'magenta', bgBg: '#efe4f2', warn: '#9a6700', ok: 'green' },
+  chat: { userBg: '#e4e4f0', accent: 'blue', shell: 'magenta', assistantAccent: 'green', fieldBg: '#eaeaf0', bgAccent: 'magenta', bgBg: '#efe4f2', warn: '#9a6700', ok: 'green', idleBorder: '#a0a0b0' },
 };
 const UNKNOWN_MODAL_COLORS: Record<string, Record<string, string>> = {
   log: {},

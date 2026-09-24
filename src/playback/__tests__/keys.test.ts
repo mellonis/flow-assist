@@ -1,7 +1,34 @@
 import { expect, test } from 'bun:test';
 import { NAMED_KEYS } from '@flowtty/core';
+import { parseKeypress } from '@flowtty/tty-backend';
 import { bindingGlyph, canonicalBinding, canonicalKey, firstGlyph, isKey, keyGlyph, keyId, resolveKeys, writtenKey } from '../keys';
 import { buildKeys } from '../../loader/registry';
+
+test('Ctrl with ] \\ ^ _ is the control byte the terminal sends, and a binding meets it', () => {
+  // The decoder names Ctrl+letter; 0x1c–0x1f come through as the bare byte.
+  expect(keyId({ name: '\x1d' })).toBe('ctrl+]');
+  expect(keyId({ name: ']', ctrl: true })).toBe('ctrl+]');
+  expect(canonicalKey('ctrl+]')).toBe('ctrl+]');
+  expect(canonicalKey('^]')).toBe('ctrl+]');
+  expect(isKey(canonicalBinding('ctrl+]'), { name: '\x1d' })).toBe(true);
+  expect(isKey(canonicalBinding('ctrl+\\'), { name: '\x1c' })).toBe(true);
+  expect(keyGlyph({ name: '\x1d' })).toBe('^]');
+  expect(bindingGlyph('ctrl+\\')).toBe('^\\');
+  // A bare ] is still a ].
+  expect(keyId({ name: ']' })).toBe(']');
+  // What the TTY backend's own decoder makes of the bytes a terminal sends.
+  const [focus] = parseKeypress('\x1d');
+  const [collapse] = parseKeypress('\x1c');
+  expect(isKey(canonicalBinding('ctrl+]'), focus!)).toBe(true);
+  expect(isKey(canonicalBinding('ctrl+\\'), collapse!)).toBe(true);
+});
+
+test('config.keys moves the chat\'s focus and collapse keys', () => {
+  const assistant = { name: 'assistant', keys: { chatFocus: 'ctrl+]', chatCollapse: 'ctrl+\\' } };
+  const keys = buildKeys([assistant] as never, { keys: { chatFocus: 'ctrl+t' } });
+  expect(keys.chatFocus).toEqual(['ctrl+t']);
+  expect(keys.chatCollapse).toEqual(['ctrl+\\']);
+});
 
 test('resolveKeys folds string to array and defaults to [] when missing', () => {
   const k = resolveKeys({});

@@ -67,10 +67,29 @@ they were made (`▸ 2 tools: read_file ×2`).
 conversation; `/notes step` goes back. To have it that way from the start:
 `config set plugins.assistant.notes open`.
 
-`/fullscreen` gives the chat the whole terminal instead of a window over the
-screen — code, tables and diffs get every column; `/fullscreen off` brings the
-window back. To have it that way from the start:
-`config set plugins.assistant.fullscreen true`.
+**The chat sits beside what you are looking at.** By default it is a panel docked to
+the right of a plugin's screen — a board and the conversation about it, both in view —
+and the plugin's screen is laid out in the rest, as on a smaller terminal. On a terminal
+under 120 columns the panel goes to the bottom by itself.
+**Ctrl+]** moves the keyboard between the chat and the plugin; the side that has it is
+marked (the panel's frame, or the title bar, in the accent colour), and a click in
+either side gives it the keyboard too. With the plugin at the keys the chat goes on
+answering in its panel. **Ctrl+\\** folds the panel away and brings it back: on the
+right it goes, and a running turn's spinner, seconds and word move to the plugin's
+bottom row; at the bottom it keeps one row saying the same. Esc Esc in the chat folds
+it the same way and hands the keyboard to the plugin; `F` or Ctrl+] brings it back.
+Both keys are the host's before any plugin's — a plugin that takes every key cannot
+keep you from the chat — and both can be moved (`config set keys.chatFocus <key>`,
+`keys.chatCollapse`).
+
+`/mode window` puts the chat in a window over the screen instead, and Esc Esc closes
+it; `/mode full` gives it the whole terminal — code, tables and diffs get every
+column; `/mode panel` docks it again. That is for the session; from the start:
+`config set plugins.assistant.mode window` (or `full`). Where the panel goes and how
+big it is: `plugins.assistant.panel.side` (`right` or `bottom`) and
+`plugins.assistant.panel.size` (percent of the width on the right, 35 by default; of
+the height at the bottom, 40). A config that still says
+`plugins.assistant.fullscreen: true` is read as `mode: full`.
 
 To show the assistant an image — a screenshot, a mock, a diagram — drag the file onto
 the terminal (or paste its path), type `/image <path>`, or press Ctrl+V (Cmd+V where

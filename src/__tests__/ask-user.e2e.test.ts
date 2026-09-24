@@ -39,7 +39,9 @@ test.each([[110, 40], [100, 22]])('the model asks, the person picks with the key
     return sse({ choices: [{ delta: { content: 'Merging then.' }, finish_reason: null }] }, { choices: [{ delta: {}, finish_reason: 'stop' }] });
   }) as typeof fetch;
 
-  const config: Record<string, unknown> = { ai: { baseUrl: 'http://llm.test', model: 'm' } };
+  // The window over the screen, which these sizes were written for (a docked chat on a
+  // 22-row terminal has less room than the question needs).
+  const config: Record<string, unknown> = { ai: { baseUrl: 'http://llm.test', model: 'm' }, plugins: { assistant: { mode: 'window' } } };
   const repo = { enabledPlugins: async () => [], list: async () => [] } as any;
   const renders = { chat: renderChatModal, help: renderHelp, log: renderLogModal, reminder: renderReminder };
   const plugins = await loadPlugins({ config, repo, renders: renders as any });

@@ -5,6 +5,24 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **The chat is a panel beside the plugin's screen.** It used to be a window over the
+  screen, so the board the assistant was told about was hidden from the person talking
+  about it. Now it is docked to the right by default (at the bottom on a terminal under
+  120 columns) and the plugin's screen is laid out in the rest. Ctrl+] moves the
+  keyboard between the two, the side that has it is marked, and the chat goes on
+  answering while the plugin has the keys. Ctrl+\ folds the panel away and back — a
+  running turn's status then sits on the plugin's bottom row, or on the one row a
+  bottom panel keeps — and so does Esc Esc, which hands the keyboard to the plugin.
+  Both keys are the host's before any plugin's. `/mode window` brings the window back
+  and `/mode full` gives the chat the whole terminal; `plugins.assistant.mode`,
+  `panel.side` and `panel.size` set it from the start.
+  **`/fullscreen` is gone** — it is `/mode full`; a config that says
+  `plugins.assistant.fullscreen: true` is read as `mode: full`.
+  **For plugin authors:** a surface may be given less than the terminal.
+  `ft.useSurfaceSize()` and `ft.useTerminalSize()` report the plugin's side of the
+  screen, and a modal laid out by them stays on it; a plugin that sizes itself by
+  flowtty's own `useTerminalSize` still sees the whole terminal.
+
 - **`!!command` runs a program that needs the terminal, and asks the assistant about
   it.** `!command` captures what a command prints, so a prompt, `git add -p`, `top` or
   a login flow could not run there. `!!command` gives the program the whole terminal

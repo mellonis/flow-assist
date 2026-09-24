@@ -64,8 +64,10 @@ function styledFrame(buf: CellBuffer): string {
 }
 
 // ─── the rig ──────────────────────────────────────────────────────────────────
-async function boot(model: ScriptedModel, guests?: (make: Make) => never[], extra: Record<string, unknown> = {}) {
-  const ui = await bootApp(model, W, H, guests, extra);
+// The chat opens as a window over the screen here, as in the tests (bootApp's default);
+// the `panel` scenarios dock it, at sizes of their own.
+async function boot(model: ScriptedModel, guests?: (make: Make) => never[], extra: Record<string, unknown> = {}, size?: { w: number; h: number; chatMode?: 'panel' | 'window' | 'full' }) {
+  const ui = await bootApp(model, size?.w ?? W, size?.h ?? H, guests, extra, { chatMode: size?.chatMode });
   const frame = (title: string) => {
     const buf = ui.backend.lastBuffer;
     if ((COLOR || STYLES) && buf) { console.log(`\n┏━━ ${title}\n${styledFrame(buf)}`); return; }
@@ -87,6 +89,19 @@ const editor = (make: Make) => [make('clone', {
       return 'edited';
     },
   }],
+} as never)] as never[];
+
+// A guest with a screen of its own: a board in a frame that takes the room it is given.
+const board = (make: Make) => [make('boards', {
+  name: 'boards',
+  keycaps: () => ['c card'],
+  components: {
+    view: (ft: any) => function View() {
+      const { width, height } = ft.useSurfaceSize();
+      return ft.h(ft.Box, { width, height, border: 'round', borderTitle: `Board ${width}×${height}`, flexDirection: 'column', paddingX: 1 },
+        ft.h(ft.Text, null, 'TODO  · ABC-1 Fix the login'), ft.h(ft.Text, null, 'DOING · ABC-2 Dock the chat'));
+    },
+  },
 } as never)] as never[];
 
 // ─── scenarios ────────────────────────────────────────────────────────────────
@@ -321,11 +336,41 @@ const scenarios: Record<string, () => Promise<void>> = {
   },
 };
 
+// The docked chat, beside a guest's board: on the right on a wide terminal, at the
+// bottom on a narrow one; which side has the keyboard; collapsed with a turn running.
+async function panelScenario(w: number, h: number) {
+  const model = new ScriptedModel();
+  model.script([{ text: 'Looking at the board' }, { hold: true }, { text: ' — ABC-2 is in progress.' }]);
+  const ui = await boot(model, board, {}, { w, h, chatMode: 'panel' });
+  await ui.press('F');
+  ui.frame(`${w}×${h}: F — the chat docked, with the keyboard`);
+  await ui.type('what is in progress?');
+  await ui.press('return');
+  ui.frame('a turn running');
+  ui.backend.press({ name: '\x1d' });
+  await settle();
+  ui.frame('Ctrl+] — the keyboard goes to the board (its title in the accent), the turn goes on');
+  ui.backend.press({ name: '\\', ctrl: true });
+  await settle();
+  ui.frame('the collapse key — the panel folds away, the turn says what it does');
+  ui.backend.press({ name: '\\', ctrl: true });
+  await settle();
+  model.release();
+  await settle(20);
+  ui.frame('restored — the answer arrived while it was collapsed');
+  ui.app.unmount();
+}
+Object.assign(scenarios, {
+  panelRight: () => panelScenario(160, 40),
+  panelBottom: () => panelScenario(100, 40),
+});
+
 const names = wanted.length ? wanted : Object.keys(scenarios);
 for (const name of names) {
   const run = scenarios[name];
   if (!run) { console.error(`unknown scenario "${name}" — have: ${Object.keys(scenarios).join(', ')}`); process.exit(2); }
-  console.log(`\n\n════════ ${name} (${W}×${H}) ════════`);
+  // The panel scenarios boot at sizes of their own and say them in their frames.
+  console.log(`\n\n════════ ${name}${name.startsWith('panel') ? '' : ` (${W}×${H})`} ════════`);
   await run();
 }
 process.exit(0);

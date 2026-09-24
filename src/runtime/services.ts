@@ -97,6 +97,10 @@ export interface HostServices {
   // armed. The App owns the arm (src/runtime/exit-keys.ts); the chat draws it on its
   // status line, the App on the bottom row of every other screen.
   armedHint: string;
+  // Where the chat is docked beside the plugin's screen (src/runtime/panel-layout.ts),
+  // null while it is not a panel. The App lays the screen out and says it here, before
+  // any plugin renders; the chat reads its side from it, and which pane a click is in.
+  chatDock: import('./panel-layout.js').PanelLayout | null;
   // The chat's side of two plugin hooks (`chatContext` / `afterWrite` in the plugin
   // shape): what the person's screens show now — every plugin's items, in load order,
   // sanitized and capped (src/assistant/screen-context.ts; a plugin with only the
@@ -201,6 +205,7 @@ export function createServices({ config, tools, repo, onExit }: CreateServicesOp
     copy: (text) => platformCopy(text),
     setOverlay: () => {},
     armedHint: '',
+    chatDock: null,
     chatContext: () => [],
     afterWrite: async () => {},
   };

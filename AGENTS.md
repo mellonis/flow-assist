@@ -258,6 +258,67 @@ assistant nobody had asked for a board.
 - The start screen draws keys with `bindingGlyph(keys[action])` and offers nothing
   that is unbound.
 
+### Where the chat is: panel, window, full
+
+The chat used to be a window over the plugin's screen, so the board the model was told
+about (`chatContext`) was hidden from the person typing about it. Three modes now
+(`src/runtime/panel-layout.ts`, pure): `panel` — the default — docks it beside the
+plugin's screen, `window` is the old window over it, `full` the whole terminal.
+`plugins.assistant.mode` says where a conversation starts, `/mode` moves it for the
+session (never saved); an old `fullscreen: true` reads as `full` (`chatModeOf`), and
+`/fullscreen` is gone.
+
+- **The layout is the App's** (`runtime/app.tsx`). The terminal is split into the
+  plugin's SIDE — title bar, surface, footer, always from the top-left corner — and the
+  chat's panel: on the right (`panel.size`, 35% of the width) or at the bottom (40% of
+  the height; a right panel goes there by itself under `RIGHT_PANEL_MIN_COLS`, 120).
+  Each side is given its size through a host context (`AreaContext`), which is what
+  `ft.useTerminalSize` and `ft.useSurfaceSize` read — so a surface, a plugin's modal and
+  the host's own furniture on that side are laid out as on a smaller terminal, and a
+  modal's `overlay()` at `top: 0, left: 0` covers that side only (absolutes are placed
+  from the root, and the side starts at it). flowtty's own size context is not exported:
+  a plugin that calls flowtty's `useTerminalSize` directly still sees the whole
+  terminal. The chat is drawn in the panel as a plain box (`docked`), not an overlay.
+- **Two slots, in every mode, in the same order** — the plugin's side, then the panel;
+  only their props change (the row/column direction, a width, `position: 'absolute'`
+  over the whole terminal for `window`/`full`). A component moved to another parent is
+  mounted anew: `/mode` would lose the turn being written, the draft and the queue,
+  and a plugin's screen its state. A third place holds what floats over everything,
+  the chat included — the reminder and the keycaps panel (`TOP_LAYER`): layers of no
+  size of their own at the corner each piece places itself from, because a box that
+  covered the screen would be what every drag starts in, and no pane's selection
+  bounds would hold.
+- **"Closed" in panel mode is COLLAPSED.** Open = expanded; opening (`F`, `:ask`,
+  Ctrl+]) expands and brings the keyboard; Esc Esc and `/exit` collapse and hand the
+  keyboard to the plugin (in `window`/`full` they close, as before). Collapsed on the
+  right the panel has no width, and a running turn's status (spinner, seconds, word,
+  `^] chat`) is drawn on the plugin's bottom row — the App reads `store.chat.statusRow`,
+  an element the chat builds each render, and the chat asks the App to redraw while the
+  seconds tick; collapsed at the bottom the panel keeps ONE row, the same status or the
+  key that brings it back (`renderChatStrip`).
+- **Focus** (`store.chat.focus`, docked and expanded only): Ctrl+] (`chatFocus`) moves
+  the keyboard between the two sides; Ctrl+\ (`chatCollapse`) collapses and restores.
+  Both are the assistant's bindings (`keys`, so a person moves them) but the App takes
+  them in its `useInput` right after the exit keys and BEFORE `twoPhaseDispatch`
+  (`store.chat.panelKey`), so a plugin consuming every key, or its modal, can never keep
+  the person from the chat. With the plugin focused the chat's handler sits at priority
+  1 and answers no key but the wheel over its conversation; its `ScrollList` gets
+  `isActive: false`, so PgUp/PgDn are the plugin's; Ctrl+C / Ctrl+D are the plugin
+  side's too (`ctrlKey` answers nothing). The focused side is marked: the panel's frame
+  in `accent`, `idleBorder` when not; the title bar in `accent` when the plugin has it.
+  Ctrl+] in `window`/`full` opens or closes the chat, and the collapse key is nobody's.
+  Ctrl+] arrives as the bare byte 0x1d — `keyId` reads 0x1c–0x1f as Ctrl with `\ ] ^ _`.
+- **The mouse goes by the pointer.** A press anywhere tells the chat which pane it
+  landed in (`store.chat.pointer`) and the keyboard follows it; the button then goes on
+  as before — the chat's `mouse: true` handler folds by the conversation's own rect, so
+  a click on a fold in the panel works whichever side has the keys. The wheel scrolls
+  whatever list is under it (flowtty's lists check the pointer; the chat's own, when not
+  focused, through its handler). Plugins get no mouse buttons, as before.
+- `bootApp` opens the chat as a WINDOW unless a test says otherwise (`opts.chatMode`,
+  `null` for a fresh config): most e2e tests are about what the chat draws.
+  `chat-modes.e2e.test.ts` holds the modes, the keys, the layout and a row check at a
+  panel's width.
+
 ## What the model can do (the `core` tool group)
 
 `memory`, `config_schema`, `datetime`, `remind`, `background`, `todo`, `ask_user`,
@@ -1573,7 +1634,8 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
 - Every host modal is centred on one full-screen layer, `overlay()` in
   `src/views/modals.ts`, which carries `backdrop: 'dim'`: the screen behind a modal
   keeps its characters and colours and steps back. A new modal uses `overlay()` —
-  do not rebuild the absolute box by hand (there were four copies of it).
+  do not rebuild the absolute box by hand (there were four copies of it). The one
+  exception is the docked chat, a plain box in its panel (see "Where the chat is").
   - Rows are cached per message OBJECT (`rowCache`, a WeakMap). It is correct only
     because the chat replaces a message and never mutates one — keep every
     `setMessages` updater that way.

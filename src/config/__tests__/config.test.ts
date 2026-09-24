@@ -103,10 +103,16 @@ test('a plugin key is written through the plugin\'s schema', () => {
   expect(validateConfigWriteValue(hostConfigSchema, 'plugins.keycaps.bogus', 1, plugins).ok).toBe(false);
 });
 
-test('the chat\'s fullscreen is a setting `config set` writes', async () => {
+test('where the chat is — its mode and its panel — is a setting `config set` writes', async () => {
   const { buildAssistantPlugin } = await import('../../plugins/assistant');
   const assistant = buildAssistantPlugin({ renders: {}, config: {}, make: ((_: string, shape: unknown) => shape) as never }) as { configSchema?: z.ZodTypeAny };
   const plugins = { assistant: assistant.configSchema! };
+  expect(validateConfigWriteValue(hostConfigSchema, 'plugins.assistant.mode', 'window', plugins)).toEqual({ ok: true, value: 'window' });
+  expect(validateConfigWriteValue(hostConfigSchema, 'plugins.assistant.mode', 'sideways', plugins).ok).toBe(false);
+  expect(validateConfigWriteValue(hostConfigSchema, 'plugins.assistant.panel.side', 'bottom', plugins)).toEqual({ ok: true, value: 'bottom' });
+  expect(validateConfigWriteValue(hostConfigSchema, 'plugins.assistant.panel.size', 40, plugins)).toEqual({ ok: true, value: 40 });
+  expect(validateConfigWriteValue(hostConfigSchema, 'plugins.assistant.panel.size', 95, plugins).ok).toBe(false);
+  // The key a config written before the modes still has: read as `mode: full`.
   expect(validateConfigWriteValue(hostConfigSchema, 'plugins.assistant.fullscreen', true, plugins)).toEqual({ ok: true, value: true });
   expect(validateConfigWriteValue(hostConfigSchema, 'plugins.assistant.fullscreen', 'yes', plugins).ok).toBe(false);
 });

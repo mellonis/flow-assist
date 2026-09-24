@@ -269,7 +269,12 @@ export const settle = async (n = 10) => { for (let i = 0; i < n; i++) { await fl
 // file a test then reads. `opts.toastMs` shortens the toast, for a test that waits
 // for one to go. `opts.clipboardImage` stands in for the system clipboard's image; a
 // test that does not give one has an empty clipboard — never the platform's real tools.
-export async function bootApp(model: ScriptedModel, cols = 100, rows = 28, guests?: (make: Make) => Plugin[], extra: Record<string, unknown> = {}, opts: { toastMs?: number; scheme?: 'light' | 'dark' | 'unknown'; clipboardImage?: () => ClipboardImage; pluginsNote?: string; interactive?: InteractiveDeps } = {}) {
+// `opts.chatMode` is where the chat opens: a WINDOW over the screen unless a test says
+// otherwise — most tests are about what the chat draws, and their frames were written
+// against the window. `null` leaves the config as the test gave it (a fresh config
+// docks the chat as a panel), and a test whose `extra` says `mode` or `fullscreen` for
+// the assistant is left alone too.
+export async function bootApp(model: ScriptedModel, cols = 100, rows = 28, guests?: (make: Make) => Plugin[], extra: Record<string, unknown> = {}, opts: { toastMs?: number; scheme?: 'light' | 'dark' | 'unknown'; clipboardImage?: () => ClipboardImage; pluginsNote?: string; interactive?: InteractiveDeps; chatMode?: 'panel' | 'window' | 'full' | null } = {}) {
   process.env.LLM_TOKEN = 'scripted';
   model.install();
   // Sessions go to a fresh temp dir unless a test names one: a test must never write
@@ -284,6 +289,11 @@ export async function bootApp(model: ScriptedModel, cols = 100, rows = 28, guest
   // about, as a model that sees the whole list would. Tools on demand are tested on
   // their own, with `extra` giving an `ai` that does not say 'all'.
   const config: Record<string, unknown> = { ai: { baseUrl: 'http://scripted.model', model: 'scripted', toolLoading: 'all' }, sessions, memory, ...extra };
+  const chatMode = opts.chatMode === undefined ? 'window' : opts.chatMode;
+  const assistant = (extra.plugins as Record<string, Record<string, unknown> | undefined> | undefined)?.assistant;
+  if (chatMode && !(assistant && ('mode' in assistant || 'fullscreen' in assistant))) {
+    config.plugins = { ...(config.plugins as Record<string, unknown> | undefined), assistant: { ...assistant, mode: chatMode } };
+  }
   const repo = { enabledPlugins: async () => [], list: async () => [] } as never;
   const renders = { chat: renderChatModal, help: renderHelp, log: renderLogModal, reminder: renderReminder };
   const plugins = await loadPlugins({ config, repo, renders: renders as never });
