@@ -3,8 +3,8 @@
 // in its `configSchema` so `config set` and the model's config tool know it as repo's.
 // When it is not set, repo reads the directories the host's shell works in,
 // `shell.roots`, from the host config every builder is handed; after that the legacy
-// `fs.roots`, the key both used to share (read for one release — the host logs where it
-// moved). `clip` is the identity here.
+// `fs.roots`, a setting `shell.roots` and `plugins.repo.roots` replace (read for one
+// release — the host logs where it moved). `clip` is the identity here.
 import { buildRepoGroup } from './tools.ts';
 
 type RootsConfig = { plugins?: { repo?: { roots?: unknown } }; shell?: { roots?: unknown }; fs?: { roots?: unknown } } | undefined;

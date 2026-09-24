@@ -12,8 +12,8 @@
 //      state, not from what the model says about it.
 //   2. Run N trials and report a RATE. One run proves nothing either way.
 //   3. Compare variants that differ in exactly one thing. `--history display`
-//      replays only each turn's final text (the old chat behaviour); `--history
-//      api` replays tool calls and results (the fix). Same model, same prompts.
+//      replays only each turn's final text; `--history
+//      api` replays tool calls and results. Same model, same prompts.
 //   4. Break the rate down BY TURN — a flat average hides a failure that only
 //      starts on turn three.
 //   5. Run the same eval across models: a gap between variants that holds across
@@ -82,7 +82,7 @@ type TurnResult = { turn: number; expected: string; called: boolean; stateOk: bo
 
 async function trial(model: string, variant: Variant, show = false): Promise<TurnResult[]> {
   trialPlan = createPlan();
-  // `api` keeps what was really exchanged; `display` keeps what the old chat kept.
+  // `api` keeps what was really exchanged; `display` keeps only each turn's final text.
   let history: ChatMessage[] = [];
   const results: TurnResult[] = [];
 

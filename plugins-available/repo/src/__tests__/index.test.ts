@@ -1,6 +1,6 @@
 // Where `repo` takes its roots from, and that its key is its own: `plugins.repo.roots`,
-// else the shell's `shell.roots`, else the legacy `fs.roots` — the key both used to
-// share. The builder is called as the host calls it (its `make`, its zod), and
+// else the shell's `shell.roots`, else the legacy `fs.roots`, a setting `shell.roots`
+// and `plugins.repo.roots` replace. The builder is called as the host calls it (its `make`, its zod), and
 // `config set` is validated through the host's own validator with repo's schema.
 import { describe, expect, it } from 'bun:test';
 import fs from 'node:fs';
@@ -41,7 +41,7 @@ describe('repo roots', () => {
     const f = tmp('from-fs.txt');
     expect(await firstRootListing({ plugins: { repo: { roots: [r] } }, shell: { roots: [s] }, fs: { roots: [f] } })).toContain('from-repo.txt');
     expect(await firstRootListing({ shell: { roots: [s] }, fs: { roots: [f] } })).toContain('from-shell.txt');
-    // A config that still says only fs.roots works exactly as before.
+    // A config that still says only fs.roots works the same way.
     expect(await firstRootListing({ fs: { roots: [f] } })).toContain('from-fs.txt');
     expect(await firstRootListing({})).toContain('no read roots configured');
   });

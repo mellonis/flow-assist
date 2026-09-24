@@ -2,7 +2,7 @@
 // needs — and in how many rounds, at what request size?
 //
 // A made-up plugin brings a dozen tools in three groups; each task can be done by
-// exactly one of them. `--tools all` sends every definition (the old way), `--tools
+// exactly one of them. `--tools all` sends every definition; `--tools
 // onDemand` sends the core tools and the index, and the model has to `tools_load`
 // first. Same model, same tasks; only the tool list differs. Read the result as the
 // other eval says (scripts/eval-tool-use.ts): a RATE over trials, compared between
