@@ -12,6 +12,15 @@
 
 import { hostConfigSchema } from './schema.js';
 
+// One value a command's argument takes: the word itself, or the word with a label
+// shown beside it (`{ value: '3', label: 'fix the build' }` — the label is never
+// inserted).
+export type ArgValue = string | { value: string; label?: string };
+// What a command's FIRST argument may be: a fixed list, or a function read each time
+// the line is drawn — for a list that changes (the saved sessions). A function that
+// throws reads as no values.
+export type ArgValues = readonly ArgValue[] | (() => readonly ArgValue[]);
+
 export type Command = {
   name: string;
   aliases?: string[];
@@ -22,6 +31,8 @@ export type Command = {
   // `false` keeps the command out of the `:` line's ↑/↓ history — for a command whose
   // argument may carry a secret. Every command is remembered otherwise.
   history?: boolean;
+  // The values the first argument takes; the line completes it from them.
+  values?: ArgValues;
 };
 
 // Basic host command set. `maxArgs = -1` means an unlimited argument count.
@@ -228,7 +239,38 @@ export type CompleteResult = {
   hasSpace: boolean;
   best: string;
   candidates: string[];
+  // A word said beside a candidate (a session's title beside its number), by
+  // candidate; absent when no candidate has one.
+  labels?: Record<string, string>;
 };
+
+// The values of a command's argument, resolved: a function is called (its throw is an
+// empty list), each entry read as its word and its label.
+function argValues(values: ArgValues | undefined): { value: string; label?: string }[] {
+  if (!values) return [];
+  let list: readonly ArgValue[];
+  try { list = typeof values === 'function' ? values() : values; } catch { return []; }
+  if (!Array.isArray(list)) return [];
+  return list.map((v) => (typeof v === 'string' ? { value: v } : { value: String(v?.value ?? ''), label: v?.label })).filter((v) => v.value);
+}
+
+// Completion of a command's first argument from its declared values. `text` is the
+// argument text — everything after the command and its space. The values are kept in
+// their declared order (an `/auto` rung after the one before it); `best` is the first
+// that is not the typed word itself, so Tab on a whole word walks to the next. A text
+// with a second word in it completes nothing: the values are the first argument's.
+export function completeValues(text: string, values: ArgValues | undefined): CompleteResult {
+  const m = String(text ?? '').match(/^(\S*)(\s[\s\S]*)?$/);
+  const head = m![1];
+  if (m![2] !== undefined) return { head: '', hasSpace: true, best: '', candidates: [] };
+  const all = argValues(values);
+  const lower = head.toLowerCase();
+  const matches = all.filter((v) => v.value.toLowerCase().startsWith(lower));
+  const best = matches.find((v) => v.value.toLowerCase() !== lower)?.value ?? matches[0]?.value ?? '';
+  const labels: Record<string, string> = {};
+  for (const v of matches) if (v.label) labels[v.value] = v.label;
+  return { head, hasSpace: true, best, candidates: matches.map((v) => v.value), ...(Object.keys(labels).length ? { labels } : {}) };
+}
 
 // Completion of a command name/alias by the first word's prefix. Returns:
 //   head      — the typed prefix (first word up to the space);
@@ -242,8 +284,9 @@ export type CompleteResult = {
 // command list — too noisy; the user completes a specific command).
 // For `config get|set|unset <key> [value]` it delegates the arguments to
 // completeConfigCommand (config — the actual config object, configSchema — the
-// schema for plugin namespaces, both optional). The first command word is
-// still the ordinary completion.
+// schema for plugin namespaces, both optional); for any other command that declares
+// `values`, the first argument is completed from them (completeValues). The first
+// command word is still the ordinary completion.
 export function completeCommand(text: string, commands: Command[] = BASE_COMMANDS, config?: unknown, configSchema: any = hostConfigSchema): CompleteResult {
   const raw = String(text ?? '');
   const m = raw.match(/^(\S*)(?:\s([\s\S]*))?$/);
@@ -252,7 +295,15 @@ export function completeCommand(text: string, commands: Command[] = BASE_COMMAND
   if (head.toLowerCase() === 'config' && hasSpace) {
     return completeConfigCommand(m![2] ?? '', config, configSchema);
   }
-  if (hasSpace) return { head, hasSpace, best: '', candidates: [] };
+  if (hasSpace) {
+    // The command by the bare name the person typed (a plugin's is registered
+    // qualified, `boards:open`, as in the name completion below).
+    const lower = head.toLowerCase();
+    const bare = (n: string) => (n.includes(':') ? n.slice(n.lastIndexOf(':') + 1) : n).toLowerCase();
+    const cmd = commands.find((c) => bare(c.name) === lower || (c.aliases ?? []).some((a) => a.toLowerCase() === lower));
+    if (cmd?.values) return completeValues(m![2] ?? '', cmd.values);
+    return { head, hasSpace, best: '', candidates: [] };
+  }
   if (!head) return { head, hasSpace, best: '', candidates: [] };
   const lower = head.toLowerCase();
   // The command registry namespaces plugin commands ('assistant:ask'), but the

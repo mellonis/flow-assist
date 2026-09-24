@@ -12,12 +12,15 @@ import { bgActiveCount } from '../loader/tools-core.js';
 import { autoBadge, autoCommand, autoConfirms, autoSaid, nextAutoMode, type AutoMode } from '../assistant/auto.js';
 import { createPlan, todoGlyph } from '../assistant/plan.js';
 import { pickVerb, verbList } from '../assistant/verbs.js';
-import { addCalls, callRun, endRound, startsWithNext, notesCommand, notesMode, notesSaid, type CallRun, type NotesMode, type TurnPart } from '../assistant/step.js';
+import { NOTES_MODES, addCalls, callRun, endRound, startsWithNext, notesCommand, notesMode, notesSaid, type CallRun, type NotesMode, type TurnPart } from '../assistant/step.js';
+import { lineTab, lineView, type TabWalk } from '../config/commandline.js';
+import { completePath, completeSlash, listDirectory, type ChatCommandDef } from '../config/fieldcomplete.js';
+import type { CompleteResult } from '../config/commands.js';
 import { apiHistory, compactConversation, chatLanguage, requestTools, transcriptSoFar } from '../assistant/agent.js';
 import { createToolSet, toolLoadingMode } from '../assistant/tool-loading.js';
 import { llmOpts } from '../assistant/llm-endpoint.js';
 import { copyTarget, copyToClipboard } from '../assistant/copy.js';
-import { createShellState, formatShell, nextCwd, runShell, shellLimits, tildePath, type ShellResult } from '../assistant/shell.js';
+import { createShellState, formatShell, nextCwd, realOf, runShell, shellLimits, shellRoots, tildePath, type ShellResult } from '../assistant/shell.js';
 import {
   KEEP_SESSIONS, SESSION_VERSION, acquireLock, closeSession, flushOnExit, listSessions, loadSession, lockPath,
   makeLockToken, newSessionId, pruneSessions, releaseLock, saveSession, sessionFingerprint, sessionFingerprintsEqual,
@@ -55,7 +58,14 @@ import type { PluginApi } from '../runtime/plugin-api.js';
 // session — for a command whose argument may carry a secret
 // (src/assistant/prompt-history.ts). None of these takes one: a path, a number, a
 // mode word.
-const CHAT_COMMAND_DEFS: HistoryCommand[] = ['compact', 'context', 'copy', 'image', 'resume', 'clear', 'memory', 'auto', 'notes', 'mode', 'log', 'exit'].map((name) => ({ name }));
+// `values` is what a command's argument may be, and Tab completes it from them
+// (src/config/fieldcomplete.ts). `/resume`'s are the saved sessions, read where the
+// sessions directory is known (`chatCommandDefs` in the chat).
+type ChatCommand = HistoryCommand & ChatCommandDef;
+const CHAT_COMMAND_DEFS: ChatCommand[] = [
+  { name: 'compact' }, { name: 'context' }, { name: 'copy' }, { name: 'image' }, { name: 'resume' }, { name: 'clear' }, { name: 'memory' },
+  { name: 'auto', values: ['reads', 'all', 'off'] }, { name: 'notes', values: NOTES_MODES }, { name: 'mode', values: CHAT_MODES }, { name: 'log' }, { name: 'exit' },
+];
 const CHAT_COMMANDS = CHAT_COMMAND_DEFS.map((c) => c.name);
 
 // A plain object holding every enumerable service, inherited ones included.
@@ -425,7 +435,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // Tab-completion cycle: { base, idx, cmd } — by which prefix the matches were
           // built, the last selected command in that list and its text. Repeat Tab cycles;
           // changing the prefix (typed/deleted) restarts.
-          const tabRef = ui.useRef<{ base: string; idx: number; cmd: string } | null>(null);
+          // The Tab walk through the field's completion candidates — the `:` line's own
+          // (src/config/commandline.ts); over as soon as the field is anything else.
+          const tabRef = ui.useRef<TabWalk | null>(null);
           const inputRef = ui.useRef(input); inputRef.current = input;
           const msgsRef = ui.useRef(messages); msgsRef.current = messages;
           // The MODEL's history, kept apart from the display list above. `messages`
@@ -661,6 +673,20 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // first has something to keep; `/clear` starts a new one and leaves the old
           // for `/resume`.
           const sessDir = sessionsDir(host.config);
+          // The chat's commands with `/resume`'s values filled in: the saved sessions,
+          // newest first, numbered as `/resume` lists them, each number labelled with
+          // its title. Read when the field is drawn, so the list is the one on disk.
+          const chatCommandDefs: ChatCommandDef[] = CHAT_COMMAND_DEFS.map((c) => (c.name === 'resume'
+            ? { ...c, values: () => (sessDir ? listSessions(sessDir).slice(0, 15).map((s, i) => ({ value: String(i + 1), label: s.title || '(untitled)' })) : []) }
+            : c));
+          // What the field completes, from its text alone: in shell mode the word being
+          // typed as a path under the shell's directory (nothing outside the roots by
+          // real path — `dirAllowed`'s own rule); otherwise a `/command` and its
+          // argument. Drawn and walked through `lineView` / `lineTab`, exactly as the
+          // `:` line is.
+          const chatComplete = (text: string): CompleteResult => (bangLevelRef.current
+            ? completePath(text, { cwd: shellRef.current.cwd(), roots: shellRoots(host.config as Record<string, unknown>).map(realOf), list: listDirectory, real: realOf })
+            : completeSlash(text, chatCommandDefs));
           const sessConf = (host.config.sessions ?? {}) as { resume?: unknown; keep?: unknown };
           const sessionIdRef = ui.useRef('');
           const createdAtRef = ui.useRef('');
@@ -2296,32 +2322,21 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 host.notify();
                 return true;
               }
-              // ── Tab: slash-command autocomplete (CHAT_COMMANDS).
+              // ── Tab: completion — a `/command`, its argument, a path in shell mode
+              // (`chatComplete`). It takes the offer drawn after the caret and then walks
+              // the other candidates, the `:` line's way; only with the caret at the end
+              // of a one-line field, where the offer is drawn.
               if (key.name === 'tab' && !key.meta && !key.ctrl) {
                 const text = inputRef.current;
-                if (text.startsWith('/')) {
-                  const rest = text.slice(1);
-                  const sp = rest.search(/\s/);
-                  const curPrefix = sp === -1 ? rest : rest.slice(0, sp);
-                  const suffix = sp === -1 ? '' : rest.slice(sp);
-                  let base: string, idx: number;
-                  if (tabRef.current && rest === tabRef.current.cmd) {
-                    base = tabRef.current.base; idx = tabRef.current.idx;
-                  } else {
-                    base = curPrefix; idx = -1;
-                  }
-                  const matches = CHAT_COMMANDS.filter((c) => c.startsWith(base));
-                  if (matches.length) {
-                    const nxt = (idx + 1) % matches.length;
-                    const newText = `/${matches[nxt]}${suffix}`;
-                    setInput(newText); inputRef.current = newText;
-                    setCursor(newText.length);
-                    tabRef.current = { base, idx: nxt, cmd: matches[nxt] };
+                if (!text.includes('\n') && cursorRef.current >= text.length) {
+                  const next = lineTab(text, tabRef.current, chatComplete);
+                  tabRef.current = next.walk;
+                  if (next.input !== text) {
+                    setInput(next.input); inputRef.current = next.input;
+                    setCursor(next.input.length); cursorRef.current = next.input.length;
                     host.notify();
-                    return true;
                   }
-                }
-                tabRef.current = null;
+                } else tabRef.current = null;
                 return true;
               }
               // ── ↑/↓ — prompt history, but only while the field is empty or still shows
@@ -2450,19 +2465,14 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // What the screens show, asked once per draw: the title names it and the meter
           // counts it, as the next request will carry it.
           const screen = screenNow();
-          // Slash-command completion, shown INLINE in the field: `matches[sel]` is the
-          // suggestion and the view draws the part of it not typed yet right after the
-          // caret; the other matches are named beside it. While Tab is walking the
-          // candidates the field already holds a whole command, so the list is taken
-          // from the prefix the walk started from (`tabRef.base`), not from the field —
-          // otherwise the first Tab would narrow the list to the one it just picked.
-          let completions: { matches: string[]; sel: number } | null = null;
-          if (input.startsWith('/') && !input.includes(' ')) {
-            const typed = input.slice(1);
-            const walking = tabRef.current && tabRef.current.cmd === typed ? tabRef.current : null;
-            const matches = CHAT_COMMANDS.filter((c) => c.startsWith(walking ? walking.base : typed));
-            if (matches.length) completions = { matches, sel: walking ? Math.min(walking.idx, matches.length - 1) : 0 };
-          }
+          // The field's completion, shown INLINE: the part of the offer not typed yet
+          // right after the caret, its label, the other candidates beside it — a
+          // `/command`, its argument, or a path in shell mode (`chatComplete`), through
+          // the `:` line's own `lineView`. While Tab walks the candidates the field
+          // already holds a whole one, and the view takes the list from where the walk
+          // started (`tabRef`), not from the field. Only with the caret at the end of a
+          // one-line field, where the offer can be drawn.
+          const completion = !input.includes('\n') && cursor >= input.length ? lineView(input, tabRef.current, chatComplete) : null;
           return (host.viewRegistry.chat as (p: Record<string, unknown>) => unknown)({
             width, height, theme: host.config.theme, messages, input, streaming, error, toolLabel, phase, verb, cursor, escArmed,
             // An armed Ctrl+C / Ctrl+D / Ctrl+Z (the App's, `^c again to exit`) — drawn
@@ -2479,6 +2489,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             onViewport: (v: Viewport) => { viewportRef.current = v; },
             scrollTo,
             bangLevel,
+            // Where `!` / `!!` will run, for the hint row in shell mode — read only
+            // there, since `cwd()` checks the directory against the roots on disk.
+            shellCwd: bangLevel ? tildePath(shellRef.current.cwd()) : '',
             // How much runs without a y/n — said on the hint line, so the mode is never
             // a hidden state, while an answer is coming as much as between turns.
             autoMode,
@@ -2497,7 +2510,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             queued,
             // The title names what is on screen — the items' labels.
             subject: contextTitle(screen),
-            elapsed: elapsedMs, emptyNotice, toolCount, completions,
+            elapsed: elapsedMs, emptyNotice, toolCount, completion,
             // What the turn has cost so far, as the provider reported it (0 — nothing
             // reported, and nothing is drawn).
             turnTokens,

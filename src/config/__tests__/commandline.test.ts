@@ -8,7 +8,7 @@ test('the untyped rest of the best match is offered after the caret', () => {
   const v = lineView('he', null, complete);
   expect(`he${v.ghost}`).toBe('help');
   // Nothing typed → nothing offered: the full command list is noise.
-  expect(lineView('', null, complete)).toEqual({ ghost: '', others: [] });
+  expect(lineView('', null, complete)).toEqual({ ghost: '', label: '', others: [] });
   // A whole command has nothing left to offer.
   expect(lineView('help', null, complete).ghost).toBe('');
 });
@@ -53,4 +53,34 @@ test('Tab replaces the WORD being completed, not everything before the first spa
 test('Tab with nothing to offer changes nothing', () => {
   expect(lineTab('zzzz', null, complete)).toEqual({ input: 'zzzz', walk: null });
   expect(lineTab('', null, complete)).toEqual({ input: '', walk: null });
+});
+
+test('a labelled candidate is said beside the field, and the others carry their labels', () => {
+  const labelled = (text: string) => {
+    const head = text.replace(/^open ?/, '');
+    const all = ['1', '2', '3'].filter((c) => c.startsWith(head));
+    return { head, hasSpace: true, best: all.find((c) => c !== head) ?? all[0] ?? '', candidates: all, labels: { '1': 'first', '2': 'second' } };
+  };
+  expect(lineView('open ', null, labelled)).toEqual({ ghost: '1', label: 'first', others: ['2 second', '3'] });
+  // Typed by hand, the whole word still says what it names.
+  expect(lineView('open 2', null, labelled)).toMatchObject({ ghost: '', label: 'second' });
+  // Walking: the label follows the candidate the line holds.
+  const first = lineTab('open ', null, labelled);
+  const second = lineTab(first.input, first.walk, labelled);
+  expect(second.input).toBe('open 2');
+  expect(lineView(second.input, second.walk, labelled)).toEqual({ ghost: '', label: 'second', others: ['1 first', '3'] });
+  // No labels: the view says nothing beside the field.
+  expect(lineView('he', null, complete).label).toBe('');
+});
+
+test('a walk over a single candidate completes anew: Tab after a unique directory walks into it', () => {
+  // A completer over a small tree: `a` → `a/`, then `a/` → `a/b/`.
+  const tree = (text: string) => {
+    const word = text.split(' ').at(-1)!;
+    const all = word.startsWith('a/') ? ['a/b/'] : ['a/'].filter((c) => c.startsWith(word));
+    return { head: word, hasSpace: true, best: all[0] ?? '', candidates: all };
+  };
+  const first = lineTab('cd a', null, tree);
+  expect(first.input).toBe('cd a/');
+  expect(lineTab(first.input, first.walk, tree).input).toBe('cd a/b/');
 });

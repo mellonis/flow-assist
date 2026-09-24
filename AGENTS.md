@@ -1056,6 +1056,15 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   the whole line instead would silently break every plugin command given one —
   `:ask hi`, a tracker's `:open ABC-1` — since such a command still runs fine with no
   argument at all, which is exactly what would hide the bug.
+- **A command's argument completes from the values it declares.** `Command.values` — a
+  list of words, or a function read when the line is drawn (a list that changes), each
+  value a word or `{ value, label }` — is what the first argument may be, and
+  `completeCommand` completes it through the same inline offer as the name
+  (`completeValues` in `src/config/commands.ts`; a second word gets nothing). The
+  label is said beside the offer, dim, never inserted (`LineView.label`); a walk over a
+  single candidate completes anew, which is what lets Tab walk INTO a directory in the
+  chat. A plugin declares it on its command (docs/plugins.md); the host's own `:`
+  commands declare none.
 - **↑/↓ recall what was run** (in memory, for this run). A command declared with
   `history: false` is never kept — the host's `config` is (a value set may be a
   secret: an MCP server's `headers` or `env`), and a plugin's command may say it on its
@@ -1593,7 +1602,12 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   command — a 4th stdio pipe under Bun lost the report now and then), `exit N` or a
   kill keeps it, run_command's `cwd` argument is a `cd` that stays, `/clear` goes back
   to the root, `/resume` and a restart bring it back. Variables
-  and functions are not kept — every command is a fresh shell. **The live block still
+  and functions are not kept — every command is a fresh shell. While the field is in
+  `!` or `!!` mode the hint row under it STARTS with that directory (`~`-shortened,
+  cut from the left when long — `cutFromLeft` in `views/modals.ts`; the chat passes
+  `shellCwd` only at a non-zero bang level, since `cwd()` checks the roots on disk), so
+  where the command will run is seen while it is typed and `!cd` is seen to take
+  effect before the next command. **The live block still
   says where a `cd` moved to, or that one was refused** (`ConsoleData`'s `movedTo`/
   `note`, `src/assistant/console-view.ts`), drawn only alongside `showCwd`:
   `~/a → ~/b` when the command's own `cd` actually moved the directory, `cd led
@@ -1696,12 +1710,25 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   (`InteractiveDeps`: `detect`, `spawn`, `signals` — `renderApp`'s `interactive`,
   `bootApp`'s `opts.interactive`; by default a test has no `script` and a spawn that
   exits 0) and never reach the machine's `script` or the process's signals.
-- A `/command` **completes inline**, like a shell's autosuggestion: the part not
-  typed yet is drawn after the caret in the dimmed accent colour, the other
-  candidates follow as `⇥ a · b`, **Tab** takes the offer and then walks the rest.
-  Only with the caret at the end of a one-line `/word`. In the field, dim means
-  "offered, not yours yet" — the person's own text is never dimmed, on either side
-  of the caret.
+- **The field completes inline, through the `:` line's own `lineView` / `lineTab`** —
+  one vocabulary: the untyped rest of the offer after the caret in the dimmed accent,
+  its label beside it, the other candidates as `⇥ a · b`, Tab taking the offer and then
+  walking the rest. What is offered is `chatComplete`'s (`src/config/fieldcomplete.ts`,
+  pure): a `/command`'s name in the declared order (a bare `/` lists them all), then
+  its argument from `CHAT_COMMAND_DEFS`' `values` — `/auto reads|all|off`, `/notes
+  step|open`, `/mode panel|window|full`, and `/resume` the saved sessions by number,
+  newest first, each labelled with its title (`chatCommandDefs`, bound where `sessDir`
+  is known and read when the field is drawn) — or, at a non-zero bang level, the last
+  word as a PATH under the shell's directory (`completePath`): `~` is the home, a
+  directory gets `/`, hidden entries only for a word starting with `.`, a name with a
+  space escaped `\ `, and nothing outside `shell.roots` by REAL path — the listed
+  directory itself, and any link that leads out (`dirAllowed`'s rule; only the
+  directory and its links are resolved, never every entry). The listing and the
+  real-path check are injected (`listDirectory`, `realOf`), so the tests use a
+  directory of their own. Only with the caret at the end of a one-line field; the walk
+  is `tabRef` (a `TabWalk`), over the moment the field is anything else. In the field,
+  dim means "offered, not yours yet" — the person's own text is never dimmed, on
+  either side of the caret.
 - The **status line** while a turn runs says what happens NOW: a running tool's label
   (`⚙ name(args)…`, `$ command`) pulses through bright colours; once the tool ends
   (`onToolRun`) the label goes. With no tool running the line says a WORD — a gerund

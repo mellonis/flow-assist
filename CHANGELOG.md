@@ -5,6 +5,22 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **The chat's field completes more than a command's name, and shell mode says where
+  it runs.** In `!` and `!!` mode the hint row under the field starts with the shell's
+  directory (`~`-shortened, cut from the left when long), so `!cd` is seen to take
+  effect before the next command. Tab there completes the word being typed as a path
+  under that directory, as a shell does — a unique match filled in, a directory with
+  its `/` (Tab again walks into it), several walked in turn with the others named
+  beside the field; hidden entries only for a word that starts with `.`, nothing
+  outside `shell.roots` by real path (a link that leads out is not offered). A chat
+  command's argument completes from the values it takes — `/notes step|open`, `/mode
+  panel|window|full`, `/auto reads|all|off`, and `/resume` the saved sessions by
+  number with each title said beside it. All of it is drawn as the `/command` name
+  already was: the untyped rest after the caret, `⇥ a · b` for the rest. **For plugin
+  authors:** a `:` command may declare `values` — a list, or a function returning one,
+  each value a word or `{ value, label }` — and the `:` line completes its first
+  argument from them (docs/plugins.md, "Commands, keys and the footer"). Optional; the
+  host API number is unchanged.
 - **A plugin is given `{ ui, host }` instead of `ft` — host API 2.** **For plugin
   authors — every plugin must change:** each hook of the shape (`components[slot]`,
   `setup`, `keycaps`, `chatContext`, `chatSubject`, `afterWrite`) receives

@@ -211,6 +211,15 @@ entry: ['notes'],                     // the key that leads in, on the start scr
 ```
 
 - A command is its first word; the rest of the line is its argument (`run(ctx, arg)`).
+- A command whose argument is one of a few words says which, and the `:` line
+  completes it — Tab after `:open ` offers them inline, a typed prefix narrows them:
+  `{ name: 'open', usage: 'open <what>', values: ['board', 'card'], run: … }`. For a
+  list that changes, `values` is a function read when the line is drawn:
+  `values: () => boards().map((b, i) => ({ value: String(i + 1), label: b.name }))` —
+  a value is a word, or `{ value, label }` when a word alone says too little (a
+  number): the label is shown beside it, dim, and never inserted. The values are the
+  first argument's; a second word is not completed. Optional: a command without it
+  completes its name and nothing more.
 - The `:` line remembers what was run, for ↑/↓. A command whose argument may be a
   secret — a token, a password, a header — says `history: false` and is never kept:
   `{ name: 'login', usage: 'login <token>', history: false, run: … }`. It is part of

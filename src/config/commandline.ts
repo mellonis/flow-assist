@@ -6,7 +6,9 @@
 // keystroke, jumping the whole screen by a row each time.
 //
 // Pure: what to draw and what Tab does are computed from the text, so both are tested
-// without a terminal.
+// without a terminal. The chat's field goes through the same two functions with a
+// completer of its own (src/config/fieldcomplete.ts), so a `/command`'s argument and a
+// path in shell mode are drawn and walked exactly as a `:` command is.
 import type { CompleteResult } from './commands.js';
 
 // A Tab walk in progress: `stem` is the text before the word being completed, `head`
@@ -18,7 +20,11 @@ export interface LineView {
   // The untyped rest of the suggestion, drawn after the caret. '' when there is
   // nothing to offer, or while walking (the line already holds a whole candidate).
   ghost: string;
-  // The other candidates, named beside it.
+  // What the offered candidate's label says (a session's title beside its number);
+  // '' when it has none.
+  label: string;
+  // The other candidates, named beside it — each with its label after it, when it
+  // has one.
   others: string[];
 }
 
@@ -30,28 +36,38 @@ const stemOf = (input: string, head: string) => input.slice(0, input.length - he
 
 const walking = (input: string, walk: TabWalk | null): walk is TabWalk => !!walk && walk.shown === input;
 
+const named = (c: string, labels: Record<string, string> | undefined) => (labels?.[c] ? `${c} ${labels[c]}` : c);
+
 export function lineView(input: string, walk: TabWalk | null, complete: Complete): LineView {
-  if (!input.trim()) return { ghost: '', others: [] };
+  if (!input.trim()) return { ghost: '', label: '', others: [] };
   if (walking(input, walk)) {
     // The candidates of the walk, taken from where it STARTED — from the line as it
     // stands they would narrow to the one Tab just picked.
-    const all = complete(walk.stem + walk.head).candidates;
-    return { ghost: '', others: all.filter((_, i) => i !== walk.idx % all.length) };
+    const comp = complete(walk.stem + walk.head);
+    const all = comp.candidates;
+    if (all.length > 1) {
+      const at = walk.idx % all.length;
+      return { ghost: '', label: comp.labels?.[all[at]!] ?? '', others: all.filter((_, i) => i !== at).map((c) => named(c, comp.labels)) };
+    }
   }
   const comp = complete(input);
   const fits = comp.best && comp.best.toLowerCase().startsWith(comp.head.toLowerCase()) && input.endsWith(comp.head);
   const ghost = fits ? comp.best.slice(comp.head.length) : '';
-  return { ghost, others: comp.candidates.filter((c) => c !== comp.best) };
+  return { ghost, label: fits ? comp.labels?.[comp.best] ?? '' : '', others: comp.candidates.filter((c) => c !== comp.best).map((c) => named(c, comp.labels)) };
 }
 
 export function lineTab(input: string, walk: TabWalk | null, complete: Complete): { input: string; walk: TabWalk | null } {
   if (!input.trim()) return { input, walk: null };
   if (walking(input, walk)) {
     const all = complete(walk.stem + walk.head).candidates;
-    if (!all.length) return { input, walk: null };
-    const idx = (walk.idx + 1) % all.length;
-    const shown = walk.stem + all[idx]!;
-    return { input: shown, walk: { ...walk, idx, shown } };
+    // A walk over more than one candidate steps to the next. Over exactly one there
+    // is nowhere to step, and the line is completed anew from what it holds — which
+    // is how a second Tab after a unique `dir/` walks into the directory.
+    if (all.length > 1) {
+      const idx = (walk.idx + 1) % all.length;
+      const shown = walk.stem + all[idx]!;
+      return { input: shown, walk: { ...walk, idx, shown } };
+    }
   }
   const comp = complete(input);
   if (!comp.best || !input.endsWith(comp.head)) return { input, walk: null };

@@ -5,6 +5,7 @@
 // disabled). Extracted into its own module so the registry (`registry.ts`) and
 // the plugins themselves can both import it without a cycle.
 import type { ContextItem } from '../assistant/screen-context.js';
+import type { ArgValues } from '../config/commands.js';
 
 export type { ContextItem };
 
@@ -85,6 +86,11 @@ export type Command = {
   // `false` keeps the command out of the `:` line's ↑/↓ history — for a command whose
   // argument may carry a secret (a token, a header). Declared, never decided per call.
   history?: boolean;
+  // The values the first argument takes, and the `:` line completes it from: a list
+  // of words, or a function read when the line is drawn (for a list that changes);
+  // a value may be `{ value, label }` to show a word beside it (docs/plugins.md,
+  // "Commands, keys and the footer"). Optional, so a plugin without it is unchanged.
+  values?: ArgValues;
   run?: (ctx?: unknown, arg?: string) => unknown;
 };
 

@@ -95,7 +95,7 @@ test('chat draws a slash-command completion inside the field, not on a row of it
       messages: [],
       input: '/c',
       cursor: 2,
-      completions: { matches: ['compact', 'clear'], sel: 0 },
+      completion: { ghost: 'ompact', others: ['clear'] },
     }),
     backend,
   );
@@ -111,13 +111,43 @@ test('chat draws a slash-command completion inside the field, not on a row of it
 test('chat offers no completion while the caret is inside the word', async () => {
   const backend = new TestBackend(80, 24);
   const handle = await render(
-    h(renderChatModal, { ...baseChat, messages: [], input: '/c', cursor: 1, completions: { matches: ['compact', 'clear'], sel: 0 } }),
+    h(renderChatModal, { ...baseChat, messages: [], input: '/c', cursor: 1, completion: { ghost: 'ompact', others: ['clear'] } }),
     backend,
   );
   expect(backend.lastFrame).not.toContain('/compact');
   // No row of candidates either — the hint line's own `⇧⇥ auto` is not one.
   expect(backend.lastFrame).not.toContain('⇥ clear');
   handle.unmount();
+});
+
+test('chat says a labelled candidate beside the field', async () => {
+  const backend = new TestBackend(80, 24);
+  const handle = await render(
+    h(renderChatModal, { ...baseChat, messages: [], input: '/resume ', cursor: 8, completion: { ghost: '1', label: 'hello there', others: ['2 fix the tests'] } }),
+    backend,
+  );
+  const row = backend.lastFrame.split('\n').find((r) => r.includes('/resume 1'))!;
+  expect(row).toContain('/resume 1 hello there');
+  expect(row).toContain('⇥ 2 fix the tests');
+  handle.unmount();
+});
+
+test('in shell mode the hint row starts with the shell directory, cut from the left when long', async () => {
+  const backend = new TestBackend(80, 24);
+  const handle = await render(h(renderChatModal, { ...baseChat, messages: [], bangLevel: 1, shellCwd: '~/snake-project' }), backend);
+  expect(backend.lastFrame).toContain('~/snake-project · ⇥ path · ↑↓ history');
+  handle.unmount();
+  const narrow = new TestBackend(40, 24);
+  const long = await render(h(renderChatModal, { ...baseChat, width: 40, messages: [], bangLevel: 2, shellCwd: '~/a-very-long/directory/name/that/does/not/fit' }), narrow);
+  const row = narrow.lastFrame.split('\n').find((r) => r.includes('⇥ path'))!;
+  // The tail of the directory stays, the head goes.
+  expect(row).toMatch(/…[^ ]*not\/fit · ⇥ path/);
+  long.unmount();
+  // Outside shell mode the row is the usual one.
+  const plain = new TestBackend(80, 24);
+  const none = await render(h(renderChatModal, { ...baseChat, messages: [], shellCwd: '~/snake-project' }), plain);
+  expect(plain.lastFrame).not.toContain('~/snake-project');
+  none.unmount();
 });
 
 test('chat renders a todo plan capped at 5 active + one summary line', async () => {

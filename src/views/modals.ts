@@ -179,9 +179,20 @@ interface ChatRow {
   frame?: true;
 }
 // The slash-command autocomplete state the assistant plugin computes.
-interface Completions {
-  matches: string[];
-  sel: number;
+// What the field's completion draws (`lineView` in src/config/commandline.ts): the
+// untyped rest of the offer after the caret, what its label says, the other candidates.
+interface Completion {
+  ghost: string;
+  label?: string;
+  others: string[];
+}
+
+// `text` cut to `max` cells from the LEFT, an ellipsis marking the cut — for a path,
+// whose tail is the part that says where one is.
+export function cutFromLeft(text: string, max: number): string {
+  const chars = Array.from(text);
+  if (chars.length <= max) return text;
+  return `…${chars.slice(chars.length - Math.max(0, max - 1)).join('')}`;
 }
 // The theme config subtree (`host.config.theme`) — a free-form object. Only `modals`
 // (the per-surface palette) and a few flat keys are read. Typed loosely so a missing/
@@ -1123,6 +1134,7 @@ export function renderChatModal({
   armedHint = '',
   stoppable = true,
   bangLevel = 0,
+  shellCwd = '',
   autoMode = 'ask',
   pendingConfirm = null,
   pendingQuestion = null,
@@ -1136,7 +1148,7 @@ export function renderChatModal({
   viewRenderers = { console: renderConsole },
   now = Date.now(),
   onViewFail,
-  completions = null,
+  completion = null,
   bgCount = 0,
   contextBadge = '',
   contextWarn = false,
@@ -1186,6 +1198,10 @@ export function renderChatModal({
   // mode (prompt `! `, Enter runs the text as a command), 2 interactive mode (prompt
   // `!!`, Enter hands the terminal over) — both non-zero levels in the shell colour.
   bangLevel?: 0 | 1 | 2;
+  // The shell's directory, `~`-shortened, as the hint row starts in shell mode — so
+  // where `!` / `!!` will run is seen while the command is typed, not only in the
+  // block after it ran. Drawn at a non-zero bang level only.
+  shellCwd?: string;
   // How much of a turn runs without a y/n (src/assistant/auto.ts). Drawn beside the
   // context badge, in the warn colour, in every state the hint row can be in: the
   // person must be able to see it while the answer they did not confirm is arriving.
@@ -1220,7 +1236,7 @@ export function renderChatModal({
   now?: number;
   // A renderer that cannot draw a kind — missing, throws, or returns something odd.
   onViewFail?: (kind: string, why: string) => void;
-  completions?: Completions | null;
+  completion?: Completion | null;
   bgCount?: number;
   // `ctx 12%` (assistant/context-meter.ts); yellow once it is time to /compact.
   contextBadge?: string;
@@ -1273,14 +1289,14 @@ export function renderChatModal({
   // An open question takes the plan's room: the person is answering, not planning.
   const planList = (pendingQuestion ? [] : (todo ?? [])) as PlanItem[];
   const { shown: planShown, summary: planSummary } = planView(planList);
-  // Inline completion: the part of the suggested command not typed yet, drawn
-  // right after the caret, and the other candidates named beside it. Only while the
-  // caret is at the end of a one-line `/command` — there is nothing to continue
-  // from the middle of a word.
-  const suggestion = completions?.matches[completions.sel] ?? '';
-  const atEnd = cursor >= input.length;
-  const ghost = suggestion && atEnd && !input.includes('\n') ? suggestion.slice(input.length - 1) : '';
-  const others = completions && atEnd ? completions.matches.filter((_, i) => i !== completions.sel) : [];
+  // Inline completion: the part of the offer not typed yet, drawn right after the
+  // caret, what its label says, and the other candidates named beside it. Only while
+  // the caret is at the end of a one-line field — there is nothing to continue from
+  // the middle of a word.
+  const atEnd = cursor >= input.length && !input.includes('\n');
+  const ghost = atEnd ? completion?.ghost ?? '' : '';
+  const label = atEnd ? completion?.label ?? '' : '';
+  const others = atEnd ? completion?.others ?? [] : [];
   const confirmAsk = pendingConfirm ? confirmView(pendingConfirm) : null;
   // What the field's place holds: the question, `/context`, the y/n, or the field.
   const fieldPlace = pendingQuestion
@@ -1368,6 +1384,11 @@ export function renderChatModal({
               // it, so nothing about the mode is lost to the cut.
               // A hint for an action nobody has a key for is not shown at all — a key
               // on screen is an instruction, and `config.keys.details: []` disables it.
+              // In shell mode the row starts with the shell's directory — where the
+              // command will run — cut from the left when long, so its tail stays; the
+              // field's own row says what ⏎ does there, this one the other keys.
+              : bangLevel && shellCwd
+              ? (() => { const rest = [`${CAP.tab} path`, `${CAP.upDown} history`].join(' · '); return `${cutFromLeft(shellCwd, Math.max(8, wrap - rest.length - 3))} · ${rest}`; })()
               : ([`${CAP.upDown} history`, `wheel or ${CAP.page} scroll`, detailsKey && `${detailsKey} details`, '/ commands',
                   imagesOn && `${CAP.image} image`, `${CAP.auto} auto`, bgCount > 0 && `${bgCount} in background`].filter(Boolean).join(' · ')))),
       // A sibling of the hint, not part of it: the left cell is the hint OR the status
@@ -1447,6 +1468,9 @@ export function renderChatModal({
                   prompt,
                   ...(row.before ? typed(row.before, row.start, 'b') : []),
                   ...offer,
+                  // The offered candidate's label (a session's title beside its
+                  // number): said, dim, never part of the text.
+                  label ? h(Text, { wrap: 'truncate', dim: true }, ` ${label}`) : null,
                   others.length ? h(Text, { wrap: 'truncate', dim: true }, `  ${CAP.tab} ${others.join(' · ')}`) : null,
                   input === ''
                     ? h(Text, { wrap: 'truncate', dim: true }, bangLevel === 2
