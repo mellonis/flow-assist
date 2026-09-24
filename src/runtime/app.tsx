@@ -133,6 +133,9 @@ export interface RenderAppInput {
   // into the log and onto the start screen: a binary started from the wrong place
   // otherwise just looks like an assistant with fewer tools.
   pluginsNote?: string;
+  // What the chat's `!!command` runs with — which `script`, the process, the signals.
+  // Only tests pass one: the test backend has no terminal to hand to a program.
+  interactive?: import('../assistant/interactive.js').InteractiveDeps;
 }
 
 // Command-line state lives in a single stable `{ current }` object created in
@@ -167,7 +170,7 @@ export function useSurfaceSize(): { width: number; height: number } {
 
 export function renderApp(
   root: Backend,
-  { plugins, config, onExit, renders: _renders = {}, tools, toastMs, clipboardImage, pluginsNote }: RenderAppInput,
+  { plugins, config, onExit, renders: _renders = {}, tools, toastMs, clipboardImage, pluginsNote, interactive }: RenderAppInput,
 ) {
   // Resolve config.theme into the full per-modal palette BEFORE anything reads it
   // (createServices/ft and every renderer read `f.config.theme`): the base of the
@@ -181,6 +184,7 @@ export function renderApp(
   config.theme = resolveAppTheme(userTheme, plugins, config, themeScheme);
   const services = createServices({ config, tools, onExit });
   (services as unknown as HostServices).clipboardImage = clipboardImage ?? (() => readClipboardImage());
+  if (interactive) (services as unknown as HostServices).interactive = interactive;
   if (pluginsNote) services.log.append(`[plugins] ${pluginsNote}`);
   // A config that still sets the roots as `fs.roots` is read as before, and said once.
   const rootsNote = legacyRootsNote(config);
@@ -241,6 +245,8 @@ export function renderApp(
       notify();
     };
     (services as unknown as HostServices).alert = (title, body) => app.notify(title, body);
+    // The terminal handed to another program and taken back (the chat's `!!command`).
+    (services as unknown as HostServices).suspend = (fn) => app.suspend(fn);
     // The terminal's clipboard first; the platform's tool where no sequence went out.
     // `app.copy` fires `onCopy` too (source 'api'), which leaves an api copy alone —
     // the caller says what it copied, so the toast is not shown twice.

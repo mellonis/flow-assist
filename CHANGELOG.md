@@ -5,6 +5,15 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **`!!command` runs a program that needs the terminal, and asks the assistant about
+  it.** `!command` captures what a command prints, so a prompt, `git add -p`, `top` or
+  a login flow could not run there. `!!command` (or `!command` in shell mode) gives the
+  program the whole terminal and takes it back when the program ends. What it printed
+  is recorded with `script` — colours taken out, a progress bar in its last state —
+  and shown like any command's output, marked `interactive`; then the assistant is
+  asked at once to look at it. Without `script` the program still runs, but nothing is
+  recorded and nothing is asked.
+
 - **The assistant knows what is on your screen.** A plugin can now describe what its
   screens show — a board with its filter and cursor and the issue open beside it —
   through a new hook, `chatContext`, as a list of items with a label and a text. Before

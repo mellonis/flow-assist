@@ -663,7 +663,9 @@ hardest. Rules the `repo` and `gitlab` plugins hold, each with a test that tries
   filter on the command; its directory is checked anyway — inside a root by the REAL
   path (`dirAllowed`), a `cd` that leads out is not remembered. `runShell` has exactly
   two callers, `!command` (the person typed it) and `run_command` (the person
-  confirmed it); a new caller keeps one of those guards.
+  confirmed it); a new caller keeps one of those guards. The interactive `!!command`
+  (`runInteractive`, `src/assistant/interactive.ts`) is the person's too, typed into the
+  field — the model can never reach it, and no tool may call it.
 - **No "magic" flags**: glab's `--field` reads `@path` from disk; strings go through
   `--raw-field`. Check the same before wrapping any other CLI (`gh api -F` is alike —
   this applies to the planned `github` plugin).
@@ -871,7 +873,9 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   assistant's answer (also signing the frame, `ƒ Flow Assist`), `◆` on its own
   ground for a background result, `$` on the user ground for the person's own
   `!command` and on none for a command the MODEL ran and they confirmed (a `view`
-  message) — the same marker in the same colour, the ground saying whose it was. Colours come from `theme.modals.chat` (`accent`,
+  message) — the same marker in the same colour, the ground saying whose it was. The
+  host's own ask after a `!!command` is a `›` message drawn dim, marker and text: the
+  person's side of the conversation, not their words. Colours come from `theme.modals.chat` (`accent`,
   `assistantAccent`, `userBg`, `fieldBg`, `bgAccent`, `bgBg`, `warn`, `ok`) and are
   overridable via `config.plugins.assistant.colors`.
 - A marker is ONE narrow code point: flowtty's grid counts one cell per code point,
@@ -1011,7 +1015,8 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   history entry untouched (↑ on an empty field takes a queued message back first). The
   history holds **every submitted line** (`src/assistant/prompt-history.ts`) — a
   message, a `/command` (an unknown one too: a typo is fixed with ↑), a `!command`
-  and a shell-mode line, both kept as `!cmd` and recalled in shell mode — with no line
+  and a shell-mode line, both kept as `!cmd` (an interactive one as `!!cmd`) and
+  recalled in shell mode — never the host's own ask after a `!!` — with no line
   twice in a row. A command pushed before it runs is pushed again after if it REPLACED
   the history (`/resume <n>` loads that session's own), so ↑ there still offers it. A
   command whose definition says `history: false` is never kept — for one whose argument
@@ -1295,7 +1300,10 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   anything else; Esc on an empty shell-mode field leaves the mode before the usual
   double-Esc exit arms (the same "closest thing first" order as Esc's own field-
   clearing step). `!` after other text, or already in the mode, is just a character —
-  a shell command may itself start with one. A paste is never decoded into a mode
+  and a shell-mode line that STARTS with one is `!!`, an interactive run (below): that
+  is how ↑ shows a `!!cmd` (the mode on, the field `!cmd`), so recall + ⏎ runs it the
+  way it ran. So a command can no longer START with `!` (the shell's negation, rarely
+  typed as a whole command); `true && ! …` still says it. A paste is never decoded into a mode
   switch (pasted text, letters included, fires no binding), so pasting a whole
   `!command` into an empty field inserts it literally and runs the legacy way: typed
   or pasted text starting with `!` still runs as a command even outside shell mode
@@ -1330,6 +1338,51 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   outside the roots — stayed` (fixed wording, dim) when one tried to leave the roots
   and was refused. `run_command`'s own view never sets `showCwd` and so never draws
   either.
+- **`!!command` runs an INTERACTIVE program and hands its recording to the model**
+  (`src/assistant/interactive.ts`; the chat's side is `runShellCommand(cmd, true)`) — a
+  TUI, a prompt, `git add -p`, a login flow, which `!` cannot run (its output goes
+  through pipes). Typed as `!!cmd`, or `!cmd` in shell mode (a leading `!` there is
+  `!!`); kept in ↑/↓ as `!!cmd`. The chat hands the terminal over through
+  `services.suspend` — flowtty's `useApp().suspend`, bound by the App like `alert` and
+  `copy` (the default just runs `fn`) — and the program runs under `script`, so it has
+  a real terminal while what it printed is recorded into a temp file: BSD/macOS
+  `script -q <file> /bin/sh -c <cmd>` (its exit code is the child's; a child killed by
+  a signal comes back as the bare signal number), util-linux
+  `script -q -e -c "/bin/sh -c '<cmd>'" <file>` — which one is asked once per process
+  (`command -v script`, then `script --version`: util-linux names itself, BSD refuses
+  the option). The shell, the directory and its rules are `!`'s own (the same
+  `withPwdTrailer`; a `cd` outside the roots is not remembered); the environment is the
+  person's UNTOUCHED — `!`'s `PAGER=cat` and `GIT_TERMINAL_PROMPT=0` exist because
+  nobody can answer a prompt there, and here somebody is. No time limit. The child
+  stays in the app's process group (the terminal's foreground group; in a group of its
+  own its first read would stop it). While it runs no key reaches the chat (the TTY
+  backend stops reading stdin for the hand-over; the test backend does not, so there
+  is no test of that) and Esc / Ctrl+C are the program's: `holdSignals` puts a no-op
+  on SIGINT and SIGQUIT and takes the other listeners off for the duration — flowtty
+  unmounts the app on SIGINT whatever else listens, and without `script` the terminal
+  is in its normal mode and sends SIGINT to the whole group — then puts them back in
+  order. On return `cleanRecording` resolves the recording as a terminal would have
+  left it (`\r` back to the line start and overwrite, `\b` back without erasing,
+  `ESC[K`, `ESC[nG`; every other sequence dropped; util-linux's header lines dropped),
+  then `sanitizeViewText`; the model gets its END capped at `shell.maxChars`, the view
+  `capConsoleText`. The temp directory goes in a `finally`, whatever happened. The
+  result is the same `shell` message and console view as `!`'s, marked `interactive`
+  (`ConsoleData.interactive`, drawn dim beside the command, kept by `capConsoleData`),
+  and joins `apiRef` as `The person ran an interactive program …`; then a turn starts
+  at once with `INTERACTIVE_ASK` as the person's message — `send(…, { hostAsk: true })`:
+  drawn dim, gutter and all (`hostAsk` on the display message, `quiet` rows), never put
+  into ↑/↓. The chat stays busy from the command into that turn (the ask waits one tick
+  for the render carrying the block), so a message typed in between queues behind the
+  ask and follows the queue's rules. Refused while anything runs, exactly as `!` is: a
+  recording landing in the middle of a running turn's history would split it, and a
+  y/n could wait unseen behind the program. No `script` on PATH: the program still runs
+  with the terminal through `/bin/sh -c`, the view shows how it ended, a `note` says
+  nothing was recorded and no turn starts. Tests inject `services.interactive`
+  (`InteractiveDeps`: `detect`, `spawn`, `signals` — `renderApp`'s `interactive`,
+  `bootApp`'s `opts.interactive`; by default a test has no `script` and a spawn that
+  exits 0) and never reach the machine's `script` or the process's signals. Open:
+  Ctrl+Z inside a program run WITHOUT `script` stops the app too, and on `fg` the
+  backend's SIGCONT handler takes the terminal back while the program still runs.
 - A `/command` **completes inline**, like a shell's autosuggestion: the part not
   typed yet is drawn after the caret in the dimmed accent colour, the other
   candidates follow as `⇥ a · b`, **Tab** takes the offer and then walks the rest.

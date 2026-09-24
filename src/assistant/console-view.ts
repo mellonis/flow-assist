@@ -1,6 +1,7 @@
 // The host's own view renderer: a shell command and what it printed. Registered as
 // `console` exactly as a plugin's renderer is (src/loader/registry.ts) — the host has
-// no drawing path of its own. `run_command` and the person's `!command` both use it.
+// no drawing path of its own. `run_command` and the person's `!command` both use it,
+// and so does an interactive `!!command` (./interactive.ts), marked `interactive`.
 //
 // Folded, a command is ONE line: `bun test · ✓ 4.2 s` (the `$ ` is the gutter's).
 // Open, it is the command, the last `ctx.lines` lines of output under a bar a drag
@@ -26,6 +27,9 @@ export interface ConsoleData {
   // the fixed "cd led outside the roots — stayed" note; its own text is unused,
   // only its presence (kept anyway, so a session file records the WHY too).
   note?: string;
+  // The person's `!!command` (./interactive.ts): the program had the terminal, and
+  // `text` is its recording. Drawn as a dim `interactive` beside the command.
+  interactive?: boolean;
 }
 
 // The tail of a text, capped in every direction: each line, the number of lines, the
@@ -63,13 +67,14 @@ export function capConsoleData(raw: unknown): ConsoleData {
     ...(v.showCwd === true ? { showCwd: true } : {}),
     ...(v.movedTo ? { movedTo: oneLine(String(v.movedTo), VIEW_CAPS.command) } : {}),
     ...(v.note ? { note: oneLine(String(v.note), 80) } : {}),
+    ...(v.interactive === true ? { interactive: true } : {}),
   };
 }
 
 // A finished command as the view keeps it. `opts` carries what a `cd` inside the
 // command did to the conversation's directory (`!command`'s own — `run_command`'s
 // call sites pass neither and stay exactly as they were).
-export function consoleData(cmd: string, r: ShellResult, cwd: string, timeoutMs: number, showCwd = false, opts: { movedTo?: string; note?: string } = {}): ConsoleData {
+export function consoleData(cmd: string, r: ShellResult, cwd: string, timeoutMs: number, showCwd = false, opts: { movedTo?: string; note?: string; interactive?: boolean } = {}): ConsoleData {
   return {
     command: oneLine(cmd, VIEW_CAPS.command),
     cwd: tildePath(cwd),
@@ -80,6 +85,7 @@ export function consoleData(cmd: string, r: ShellResult, cwd: string, timeoutMs:
     ...(showCwd ? { showCwd: true } : {}),
     ...(opts.movedTo ? { movedTo: opts.movedTo } : {}),
     ...(opts.note ? { note: opts.note } : {}),
+    ...(opts.interactive ? { interactive: true } : {}),
   };
 }
 
@@ -109,7 +115,8 @@ export const renderConsole: ViewRenderer = (raw, ctx) => {
   const d = (raw ?? {}) as ConsoleData;
   const command = String(d.command ?? '');
   const tail = consoleTail(d, ctx);
-  if (ctx.folded) return [[{ text: command }, { text: ' · ', dim: true }, ...tail]];
+  const head: ViewLine = [{ text: command }, ...(d.interactive ? [{ text: ' · interactive', dim: true }] : [])];
+  if (ctx.folded) return [[...head, { text: ' · ', dim: true }, ...tail]];
   const all = d.text ? String(d.text).split('\n') : [];
   const max = Math.max(1, ctx.lines);
   const cutN = all.length > max ? all.length - max : 0;
@@ -118,5 +125,5 @@ export const renderConsole: ViewRenderer = (raw, ctx) => {
     ...(cutN ? [[bar, { text: `… ${cutN} line${cutN === 1 ? '' : 's'} cut${ctx.moreKey ? ` · ${ctx.moreKey} for all` : ''}`, dim: true }]] : []),
     ...(cutN ? all.slice(-max) : all).map((l): ViewLine => [bar, { text: l }]),
   ];
-  return [[{ text: command }], ...body, tail];
+  return [head, ...body, tail];
 };

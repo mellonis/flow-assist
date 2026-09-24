@@ -45,6 +45,13 @@ export interface HostServices {
   // The image on the system clipboard, written to a private temporary file (the chat's
   // `/image`, Ctrl+V, an empty paste). Bound by `renderApp`; a test passes a fake.
   clipboardImage?: () => import('../assistant/images.js').ClipboardImage;
+  // Hands the terminal to another program for the duration of `fn` and takes it back
+  // with a full repaint (flowtty's `suspend`) — the chat's `!!command`. The App binds
+  // it; the default, with no terminal, just runs `fn`.
+  suspend: <T>(fn: () => T | Promise<T>) => Promise<T>;
+  // What `!!command` runs with (src/assistant/interactive.ts): which `script` there is,
+  // the process, the signals. Only tests pass one; absent means the machine's own.
+  interactive?: import('../assistant/interactive.js').InteractiveDeps;
   showMessage: (msg: string) => void;
   onExit: () => void;
   clearCache: () => void;
@@ -190,6 +197,7 @@ export function createServices({ config, tools, repo, onExit }: CreateServicesOp
     showReminder: () => {},
     dismissReminder: () => {},
     alert: () => {},
+    suspend: async (fn) => fn(),
     copy: (text) => platformCopy(text),
     setOverlay: () => {},
     armedHint: '',

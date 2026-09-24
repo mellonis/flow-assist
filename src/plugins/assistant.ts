@@ -17,7 +17,7 @@ import { apiHistory, compactConversation, chatLanguage, requestTools, transcript
 import { createToolSet, toolLoadingMode } from '../assistant/tool-loading.js';
 import { llmOpts } from '../assistant/llm-endpoint.js';
 import { copyTarget, copyToClipboard } from '../assistant/copy.js';
-import { createShellState, formatShell, nextCwd, runShell, shellLimits, tildePath } from '../assistant/shell.js';
+import { createShellState, formatShell, nextCwd, runShell, shellLimits, tildePath, type ShellResult } from '../assistant/shell.js';
 import {
   KEEP_SESSIONS, SESSION_VERSION, acquireLock, closeSession, flushOnExit, listSessions, loadSession, lockPath,
   makeLockToken, newSessionId, pruneSessions, releaseLock, saveSession, sessionFingerprint, sessionFingerprintsEqual,
@@ -27,6 +27,7 @@ import type { ChatMessage } from '../assistant/agent.js';
 import type { ChangeView } from '../assistant/diff.js';
 import { VIEW_CAPS, type ViewRecord, type ViewRenderers } from '../assistant/views.js';
 import { capConsoleData, consoleData, renderConsole } from '../assistant/console-view.js';
+import { INTERACTIVE_ASK, runInteractive, type InteractiveDeps } from '../assistant/interactive.js';
 import { editorReducer } from '@flowtty/core';
 import { z } from 'zod';
 import { anchorRow, askFieldWidth, chatFieldWidth, chatRows, chatWrapWidth, firstFoldRow, rowAnchor, viewGroupFor, type RowOpts, type Viewport } from '../views/modals.js';
@@ -982,7 +983,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             epochRef.current += 1;
           };
 
-          const send = async (text: string | null = null, opts: { fromBackground?: boolean } = {}) => {
+          // `hostAsk`: the text is the HOST's request, sent as the person's message (after
+          // an interactive `!!command`, "look at what it printed") — drawn as the host's,
+          // never kept in ↑/↓.
+          const send = async (text: string | null = null, opts: { fromBackground?: boolean; hostAsk?: boolean } = {}) => {
             const q = (text ?? inputRef.current).trim();
             if (!q || streamRef.current) return false;
             // Close the re-entrancy window SYNCHRONOUSLY, before any await: send() is
@@ -1003,12 +1007,12 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             const apiMsgs: ChatMessage[] = apiHistory(apiRef.current);
             const displayMsgs = [...history];
             if (sys) { displayMsgs.unshift({ role: 'system', content: sys }); apiMsgs.unshift({ role: 'system', content: sys }); }
-            if (!opts.fromBackground) pushHistory(historyRef.current, q);
+            if (!opts.fromBackground && !opts.hostAsk) pushHistory(historyRef.current, q);
             histAt.current = null;
             histShown.current = '';
             // The images the text names, in the order it names them. A background result
             // is the model's writing and carries none.
-            const images = opts.fromBackground ? [] : imagesInText(q, imagesRef.current);
+            const images = opts.fromBackground || opts.hostAsk ? [] : imagesInText(q, imagesRef.current);
             const asked: ChatMessage = { role: 'user', content: q, ...(images.length ? { images } : {}) };
             apiMsgs.push(asked);
             // What goes to the provider: every image of the history as a part — read now,
@@ -1019,7 +1023,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             for (const note of notes) displayMsgs.push({ role: 'note', content: note });
             // On screen the message is its text, with the numbers of the images sent, so
             // their tokens are drawn as attachments.
-            displayMsgs.push({ role: opts.fromBackground ? 'bg' : 'user', content: q, ...(images.length ? { images: images.map((r) => r.n) } : {}) });
+            displayMsgs.push({ role: opts.fromBackground ? 'bg' : 'user', content: q, ...(images.length ? { images: images.map((r) => r.n) } : {}), ...(opts.hostAsk ? { hostAsk: true } : {}) });
             // The question joins the model's history now, so a failed or cancelled
             // turn still leaves it on record; the turn's transcript follows on success.
             apiRef.current = [...apiRef.current, asked];
@@ -1384,11 +1388,17 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // The chat is busy exactly as while an answer is written — the same spinner,
           // and Esc stops it — but no model turn is spent: the result joins the model's
           // history and is read with the person's next message, as a background result is.
-          const runShellCommand = async (cmd: string) => {
+          // `interactive` is `!!command` (src/assistant/interactive.ts): the program gets
+          // the terminal, what it printed is recorded, and once it is back the recording
+          // lands the same way — and a turn starts at once with the host's ask to look at
+          // it. Refused while anything runs, exactly as `!` is: a program taking the
+          // terminal under a running turn would put its recording in the middle of that
+          // turn's history, and hide a y/n the turn may be waiting on.
+          const runShellCommand = async (cmd: string, interactive = false) => {
             if (streamRef.current) { setError('an answer or a command is still running — wait, or stop it with Esc'); return; }
-            if (!cmd) { setError('! runs a shell command — e.g. !git status'); return; }
+            if (!cmd) { setError(interactive ? '!! runs an interactive program with the terminal — e.g. !!git add -p' : '! runs a shell command — e.g. !git status'); return; }
             streamRef.current = true; // closed synchronously, as in send()
-            const line = `!${cmd}`;
+            const line = `${interactive ? '!!' : '!'}${cmd}`;
             pushHistory(historyRef.current, line);
             histAt.current = null;
             histShown.current = '';
@@ -1422,20 +1432,36 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             const callId = `shell#${startedAt}`;
             const liveRec = (data: unknown, phase: ViewRecord['phase'] = 'live'): ViewRecord => ({ kind: 'console', data, phase, startedAt, callId });
             const epoch = epochRef.current;
+            // Set once an interactive run's recording has joined the model's history: the
+            // turn that looks at it starts when this command is done (the `finally`).
+            let ask = false;
             try {
               liveSeen.current.add(callId);
-              setMessages((cur) => [...cur, { role: 'shell', content: '', command: cmd, views: [{ ...liveRec(capConsoleData({ command: cmd, cwd: tildePath(cwd), text: '', showCwd: true })), turn: turnRef.current }] }]);
+              setMessages((cur) => [...cur, { role: 'shell', content: '', command: cmd, views: [{ ...liveRec(capConsoleData({ command: cmd, cwd: tildePath(cwd), text: '', showCwd: true, interactive })), turn: turnRef.current }] }]);
               let raw = '';
               const onOutput = (chunk: string) => {
                 raw += chunk;
                 if (raw.length > maxChars * 2) raw = raw.slice(-maxChars);
                 offerLive(liveRec(capConsoleData({ command: cmd, cwd: tildePath(cwd), text: raw, showCwd: true })), epoch);
               };
-              const r = await runShell(cmd, { cwd, timeoutMs, maxChars, signal: abort.signal, onOutput });
+              // The interactive run holds no AbortController of its own: while it runs the
+              // terminal is the program's, and no key reaches the chat (flowtty's TTY
+              // backend stops reading its input for the hand-over) — Esc and Ctrl+C are
+              // the program's keys.
+              let recorded = true;
+              let r: ShellResult;
+              if (interactive) {
+                const svc = f.services as { suspend?: <T>(fn: () => T | Promise<T>) => Promise<T>; interactive?: InteractiveDeps };
+                const run = await runInteractive(cmd, { cwd, maxChars, suspend: svc.suspend ?? (async (fn) => fn()) }, svc.interactive ?? {});
+                r = run.result;
+                recorded = run.recorded;
+              } else {
+                r = await runShell(cmd, { cwd, timeoutMs, maxChars, signal: abort.signal, onOutput });
+              }
               stopped = r.stopped;
               if (r.stopped && stopKeyRef.current) r.stoppedBy = stopKeyRef.current;
               const move = nextCwd(f.config as Record<string, unknown>, cwd, r.pwd);
-              const { display, forModel } = formatShell(cmd, r, cwd, timeoutMs, { after: move.cwd, note: move.note });
+              const { display, forModel } = formatShell(cmd, r, cwd, timeoutMs, { after: move.cwd, note: move.note, ...(interactive ? { interactive: { recorded } } : {}) });
               // Everything from here on is display/model-facing state for THIS
               // conversation — skipped whole for a stale epoch (a /clear mid-command,
               // reproduced: the command still finishes, and without this its block used
@@ -1447,7 +1473,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // The block says where a `cd` inside the command left the directory — or
                 // that one tried to leave the roots and stayed — the same facts the old
                 // markdown line carried, now on the live view instead.
-                const data = consoleData(cmd, r, cwd, timeoutMs, true, { movedTo: tildePath(move.cwd), note: move.note });
+                const data = consoleData(cmd, r, cwd, timeoutMs, true, { movedTo: tildePath(move.cwd), note: move.note, interactive });
                 setMessages((cur) => {
                   const next = cur.slice();
                   const at = next.findLastIndex((m) => callOf(m) === callId);
@@ -1456,8 +1482,12 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   return next;
                 });
                 apiRef.current = [...apiRef.current, { role: 'shell', content: forModel }];
+                // No `script` to record with: the program ran with the terminal all the
+                // same, and there is nothing for the model to look at.
+                if (interactive && !recorded && !r.error) setMessages((cur) => [...cur, { role: 'note', content: 'No `script` on PATH — the program ran with the terminal, but nothing was recorded, so the assistant was not asked to look at it.' }]);
+                ask = interactive && recorded;
               }
-              (f.services as Record<string, any>).pushLog?.(`[shell] ${cmd.slice(0, 60)} → ${r.error ? `error: ${r.error}` : r.stopped ? 'stopped' : r.timedOut ? 'timed out' : `exit ${r.code}`}`);
+              (f.services as Record<string, any>).pushLog?.(`[shell] ${interactive ? '!! ' : ''}${cmd.slice(0, 60)} → ${r.error ? `error: ${r.error}` : r.stopped ? 'stopped' : r.timedOut ? 'timed out' : r.signal ? `killed by ${r.signal}` : `exit ${r.code}`}`);
             } catch (e) {
               stopped = true; // a command that could not run keeps the queue, as a failed turn does
               setError(`!: ${(e as Error).message}`);
@@ -1479,15 +1509,36 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             } finally {
               if (tickRef.current) { clearInterval(tickRef.current); tickRef.current = null; }
               setElapsedMs(Date.now() - t0Ref.current);
-              streamRef.current = false;
+              // An interactive run that was recorded goes on into the turn that looks at
+              // it. The chat stays BUSY until that turn has started (the `send` waits one
+              // tick, for the render that carries the command's block): a message typed
+              // in between queues behind the ask, as behind any turn — never ahead of it.
+              const askNow = ask && epoch === epochRef.current;
+              streamRef.current = askNow;
               if (epoch === epochRef.current) flushLive();
               persist();
-              setStreaming(false);
+              if (!askNow) setStreaming(false);
               setToolLabel('');
               abortRef.current = null;
+              if (askNow) {
+                // `send` lays the new list out from what was last DRAWN (`msgsRef`), so it
+                // waits until the render carrying the finished block has happened — one
+                // tick is not always enough under load, and sending early would put the
+                // block back in its live state. Checked, not timed; after ~2 s it goes
+                // anyway rather than never.
+                const drawn = () => msgsRef.current.some((m) => callOf(m) === callId && (m.views as ViewRecord[] | undefined)?.[0]?.phase !== 'live');
+                let tries = 0;
+                const go = () => {
+                  if (epoch !== epochRef.current) { streamRef.current = false; setStreaming(false); return; }
+                  if (!drawn() && tries++ < 200) { setTimeout(go, 10); return; }
+                  streamRef.current = false;
+                  void send(INTERACTIVE_ASK, { hostAsk: true });
+                };
+                setTimeout(go, 0);
+              }
               // What the person queued meanwhile goes out now — unless they stopped the
               // command: then it comes back into the field, as after a stopped answer.
-              if (!stopped && queueRef.current.length) {
+              else if (!stopped && queueRef.current.length) {
                 const nextQueued = queueRef.current.shift() as string;
                 syncQueue();
                 setTimeout(() => { void send(nextQueued); }, 0);
@@ -2168,7 +2219,11 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   // instead. An empty command still exits the mode — it did submit,
                   // runShellCommand's own check just has nothing to run.
                   if (!streamRef.current) setShellMode(false);
-                  void runShellCommand(cmd);
+                  // A leading `!` in shell mode is `!!`: the program gets the terminal.
+                  // It is how ↑ shows a `!!cmd` (the mode on, the field `!cmd`), so
+                  // recalling one and pressing ⏎ runs it the way it ran.
+                  if (cmd.startsWith('!')) void runShellCommand(cmd.slice(1).trim(), true);
+                  else void runShellCommand(cmd);
                 } else if (cmd.startsWith('/')) {
                   // A command goes into ↑/↓ like any line (unless it says `history:
                   // false`) — before it runs, and again after if it replaced the
@@ -2187,6 +2242,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // mode switch) still runs, the legacy way. Refused while something
                 // runs rather than queued: a command fired later, into a state nobody
                 // is looking at, is a surprise.
+                else if (cmd.startsWith('!!')) void runShellCommand(cmd.slice(2).trim(), true);
                 else if (cmd.startsWith('!')) void runShellCommand(cmd.slice(1).trim());
                 else if (streamRef.current) {
                   // An answer is coming: queue instead of dropping the keypress.

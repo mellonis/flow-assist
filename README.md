@@ -96,6 +96,17 @@ opens into each command's own block. A click on a command's line opens its last
 everything else folded, in full. Limits:
 `shell.timeoutMs` (120 s) and `shell.maxChars` (20000; the end of the output is kept).
 
+`!!command` is for a program that needs the terminal — a prompt, `git add -p`, `top`,
+a login flow (`!!npm login`); in shell mode, start the line with `!`. The chat steps
+aside and the program has the whole terminal, keys included (Esc and Ctrl+C are the
+program's); when it ends the chat comes back as it was. What the program printed is
+recorded with `script` — colours taken out, a progress bar in its last state — and
+lands as the command's line, marked `interactive`, like any `!command`'s; then the
+assistant is asked at once to look at it: what happened, whether anything went wrong,
+what next. That ask is drawn dim: it is the app's, not yours. Without `script` on
+PATH the program still runs, but nothing is recorded and the assistant is not asked.
+Like `!`, it is refused while an answer is coming.
+
 Shift+Tab — or `/auto reads|all|off` — says how much you want to confirm while you
 work: `auto: reads` leaves every write asking, `auto: writes` lets writes run without
 the y/n, and the chat's hint line says which is on for as long as it is. It belongs to

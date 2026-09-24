@@ -781,7 +781,11 @@ function buildMessageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): Ch
       // `!command`'s block keep markdown: the first is the model's writing, the second
       // the host's own (a ```console fence under the command).
       const images = Array.isArray(m.images) ? (m.images as unknown[]).filter((n): n is number => typeof n === 'number') : [];
-      (role === 'user' ? typedLines(text, inner, images) : mdLines(text, inner)).forEach((line, li) => rows.push({ role, spans: line.spans, first: li === 0, continues: line.continues, chrome: line.chrome, frame: line.frame }));
+      // The host's own ask sent as the person's message (after an interactive
+      // `!!command`) is theirs in the conversation but not their words: it steps back,
+      // dim, gutter and all.
+      const hostAsk = role === 'user' && m.hostAsk === true;
+      (role === 'user' ? typedLines(text, inner, images) : mdLines(text, inner)).forEach((line, li) => rows.push({ role, spans: line.spans, first: li === 0, continues: line.continues, chrome: line.chrome, frame: line.frame, ...(hostAsk ? { quiet: true } : {}) }));
     }
     const duration = role === 'assistant' && Number(m.duration) >= 1000 ? m.duration : undefined;
     // What the turn cost, where it is read after the fact — the status line said it
@@ -882,7 +886,7 @@ function ChatMessages({ messages, rowOpts, palette: m, errorColor, onViewport, s
   // without the `ƒ ` (or `› `, `$ `, `◆ `) in front of it.
   const gutter = (row: ChatRow) => h(Box, { selectable: false, flexShrink: 0 }, marker(row));
   const marker = (row: ChatRow) => {
-    if (row.first && row.role === 'user') return h(Text, { bold: true, color: m.accent }, '› ');
+    if (row.first && row.role === 'user') return row.quiet ? h(Text, { dim: true, color: m.accent }, '› ') : h(Text, { bold: true, color: m.accent }, '› ');
     // Same colour as the shell-mode prompt below — a command reads as one thing
     // from the `! ` it was typed with to the `$ ` its result appears under. A
     // `view` is a command the MODEL ran and the person confirmed: the same `$ ` in
@@ -1365,7 +1369,7 @@ export function renderChatModal({
                   others.length ? h(Text, { wrap: 'truncate', dim: true }, `  ${CAP.tab} ${others.join(' · ')}`) : null,
                   input === ''
                     ? h(Text, { wrap: 'truncate', dim: true }, shellMode
-                        ? ` ${CAP.enter} run · ${CAP.backspace} on empty leaves ! mode`
+                        ? ` ${CAP.enter} run · !cmd gets the terminal · ${CAP.backspace} on empty leaves ! mode`
                         : streaming ? ` an answer is coming — ${CAP.enter} queues your next message` : ` ${CAP.enter} send · ${NEWLINE_KEY} new line · ${CAP.esc} ${CAP.esc} close`)
                     // Text after the caret is the person's own text — drawn like the rest
                     // of it. It used to take the placeholder's dim and went grey whenever
