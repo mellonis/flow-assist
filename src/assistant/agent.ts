@@ -773,11 +773,12 @@ function compactable(m: ChatMessage): ChatMessage {
 // system context (key facts, decisions, open questions). No tools.
 export async function compactConversation(
   messages: ChatMessage[],
-  { baseUrl, model, token }: { baseUrl?: string; model?: string; token?: string },
+  { baseUrl, model, token, signal }: { baseUrl?: string; model?: string; token?: string; signal?: AbortSignal },
 ): Promise<string> {
   requireAiOpts({ baseUrl, model, token });
   const res = await fetch(`${baseUrl}/chat/completions`, {
     method: 'POST',
+    signal,
     headers: LLM_HEADERS(token as string),
     body: JSON.stringify({
       model,

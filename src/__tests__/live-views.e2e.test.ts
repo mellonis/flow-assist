@@ -62,7 +62,9 @@ test('the clock moves while nothing is printed', async () => {
   expect(ui.backend.lastFrame).toMatch(/sleep 2\.5 · 0 s/);
   await settleUntil(() => /sleep 2\.5 · [12] s/.test(ui.backend.lastFrame));
   expect(ui.backend.lastFrame).toMatch(/sleep 2\.5 · [12] s/);
-  await settleUntil(() => ui.backend.lastFrame.includes('Done.'));
+  // The budget is counted in settle rounds, not time: on an idle machine 300 of them
+  // pass before a 2.5 s sleep ends. The wait is for the command's own clock.
+  await settleUntil(() => ui.backend.lastFrame.includes('Done.'), 1500);
   expect(ui.backend.lastFrame).toContain('Done.');
   ui.app.unmount();
 });

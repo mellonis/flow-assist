@@ -381,6 +381,11 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // reset that aborts it), the cap otherwise (`^c`) — the quiet line under the
           // answer and a command's outcome say `stopped (^c)`. Cleared when one starts.
           const stopKeyRef = f.useRef('');
+          // Whether Esc / Ctrl+C have something to stop: a run whose controller has not
+          // been aborted yet. A run that goes on after its abort (a tool that ignores its
+          // signal) does not hold the keys: Esc goes back to its idle steps and Ctrl+C
+          // arms the exit, so the person can always leave.
+          const canStop = () => !!abortRef.current && !abortRef.current.signal.aborted;
           const ctxSubjectRef = f.useRef<string | null>(null); // what the screen was about when this session began
           // Tab-completion cycle: { base, idx, cmd } — by which prefix the matches were
           // built, the last selected command in that list and its text. Repeat Tab cycles;
@@ -1499,8 +1504,17 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // elapsed): the chat stays interactive while the command works. A long-running
           // plugin command runs through this helper. Guards
           // on an active stream — one activity at a time.
-          const runAsyncCommand = (label: string, fn: () => Promise<void>): void => {
+          // Esc and Ctrl+C stop it like a turn: it gets the turn's AbortController, and
+          // the wait is raced against the abort, so a request that ignores its signal
+          // still lets go of the chat at once. `fn` checks the signal before it applies
+          // anything, so a result arriving after the stop changes nothing.
+          const runAsyncCommand = (label: string, fn: (signal: AbortSignal) => Promise<void>): void => {
             if (streamRef.current) return;
+            streamRef.current = true; // closed synchronously, as in send()
+            const abort = new AbortController();
+            abortRef.current = abort;
+            stopKeyRef.current = '';
+            const stopped = new Promise<never>((_, reject) => abort.signal.addEventListener('abort', () => reject(new DOMException('stopped', 'AbortError')), { once: true }));
             setError(null);
             setStreaming(true);
             setToolLabel(`⚙ ${label}…`);
@@ -1508,13 +1522,16 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             beginSegment(); // the command is the one thing running
             if (tickRef.current) clearInterval(tickRef.current);
             tickRef.current = setInterval(() => setElapsedMs(Date.now() - segRef.current), 120);
-            fn()
-              .catch((e) => setError((e as Error).message))
+            Promise.race([fn(abort.signal), stopped])
+              .catch((e) => setError((e as Error)?.name === 'AbortError' ? `/${label} stopped (${stopKeyRef.current || keyGlyph('escape')})` : (e as Error).message))
               .finally(() => {
                 if (tickRef.current) { clearInterval(tickRef.current); tickRef.current = null; }
                 setElapsedMs(Date.now() - t0Ref.current);
+                if (abortRef.current === abort) abortRef.current = null;
+                streamRef.current = false;
                 setStreaming(false);
                 setToolLabel('');
+                f.notify();
               });
           };
 
@@ -1522,14 +1539,16 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             if (streamRef.current || apiRef.current.length < 2) return;
             // The command body; the spinner/label/elapsed-tick live in
             // runAsyncCommand, which clears streaming/toolLabel on completion.
-            runAsyncCommand('compact', async () => {
+            runAsyncCommand('compact', async (signal) => {
               const ai = (f.config.ai ?? {}) as Record<string, any>;
               // Compact what the MODEL saw (tool results included), not the display list.
               const summary = await compactConversation(apiHistory(apiRef.current), {
                 baseUrl: ai.baseUrl,
                 model: ai.model,
                 token: process.env[ai.tokenEnv ?? 'LLM_TOKEN'],
+                signal,
               });
+              if (signal.aborted) return; // stopped: the history stays as it was
               summaryRef.current = summaryRef.current ? `${summaryRef.current}\n\n${summary}` : summary;
               usageRef.current = null; // the measured size was of the history just replaced
               apiRef.current = [];
@@ -1900,7 +1919,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const ctrlKey = (key: { name?: string }): 'handled' | 'field' | undefined => {
             if (!openRef.current) return undefined;
             disarmEsc();
-            if (key.name === 'c' && streamRef.current) {
+            if (key.name === 'c' && canStop()) {
               if (pendingRef.current) settleConfirm(false);
               dismissAsk();
               stopKeyRef.current = keyGlyph({ name: 'c', ctrl: true });
@@ -2049,7 +2068,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // mode (closest thing first, before Esc starts arming a chat-wide exit);
               // armed → exit; otherwise arm + hint «Esc again to exit».
               if (key.name === 'escape') {
-                if (streamRef.current) { stopKeyRef.current = ''; abortRef.current?.abort(); disarmEsc(); return true; }
+                if (canStop()) { stopKeyRef.current = ''; abortRef.current?.abort(); disarmEsc(); return true; }
                 if (inputRef.current.length > 0) {
                   setInput(''); inputRef.current = '';
                   setCursor(0);
@@ -2229,6 +2248,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // An armed Ctrl+C / Ctrl+D / Ctrl+Z (the App's, `^c again to exit`) — drawn
             // where `Esc again to exit` is.
             armedHint: (f.services as { armedHint?: string }).armedHint ?? '',
+            // `Esc stops` only while there is something it stops (see `canStop`).
+            stoppable: canStop(),
             // What is open and what is folded, the cap of the key that changes it, and
             // the two channels a click needs: where the conversation is on the screen,
             // and which row to put at the top once a fold has changed the rows.

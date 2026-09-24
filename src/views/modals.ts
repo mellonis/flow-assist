@@ -1050,6 +1050,7 @@ export function renderChatModal({
   cursor = 0,
   escArmed = false,
   armedHint = '',
+  stoppable = true,
   shellMode = false,
   autoMode = 'ask',
   pendingConfirm = null,
@@ -1102,6 +1103,9 @@ export function renderChatModal({
   // An armed Ctrl+C / Ctrl+D / Ctrl+Z says so (`^c again to exit`) where Esc's arm is
   // said — over a running turn's status too, since Ctrl+Z arms while one runs.
   armedHint?: string;
+  // Whether Esc has something to stop — not once the run was stopped and still has
+  // not let go (a tool that ignores its signal): the status line then drops `Esc stops`.
+  stoppable?: boolean;
   // The field is in shell mode: the prompt reads `! ` in the shell colour and
   // Enter runs its text as a command (assistant.ts owns the state machine).
   shellMode?: boolean;
@@ -1267,7 +1271,7 @@ export function renderChatModal({
                   highlight: TOOL_PULSE(m), width: 4, interval: 70, direction: 'ltr', running: true,
                   children: `${verb || VERBS[0]}…`,
                 })),
-            h(Text, { dim: true, wrap: 'truncate' }, ` · ${CAP.esc} stops`))
+            stoppable ? h(Text, { dim: true, wrap: 'truncate' }, ` · ${CAP.esc} stops`) : null)
         : h(Text, (emptyNotice && !streaming && !toolLabel && !escArmed && !armedHint) ? { color: 'yellow', wrap: 'truncate' } : { dim: true, wrap: 'truncate' },
         armedHint
           ? armedHint

@@ -14,9 +14,9 @@ export type Arm = { key: ArmKey; at: number } | null;
 // How long an armed key waits for its second press.
 export const ARM_MS = 2000;
 
-// The key as one of the three, or null. Alt held with it is another key.
-export function armKeyOf(key: { name?: string; ctrl?: unknown; meta?: unknown }): ArmKey | null {
-  if (!key.ctrl || key.meta) return null;
+// The key as one of the three, or null. Alt or Shift held with it is another key.
+export function armKeyOf(key: { name?: string; ctrl?: unknown; meta?: unknown; shift?: unknown }): ArmKey | null {
+  if (!key.ctrl || key.meta || key.shift) return null;
   return key.name === 'c' || key.name === 'd' || key.name === 'z' ? key.name : null;
 }
 

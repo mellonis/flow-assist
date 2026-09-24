@@ -7,6 +7,7 @@ test('only Ctrl+C, Ctrl+D and Ctrl+Z are arm keys — not the letters, not with 
   expect(armKeyOf({ name: 'z', ctrl: true })).toBe('z');
   expect(armKeyOf({ name: 'c' })).toBeNull();
   expect(armKeyOf({ name: 'c', ctrl: true, meta: true })).toBeNull();
+  expect(armKeyOf({ name: 'c', ctrl: true, shift: true })).toBeNull();
   expect(armKeyOf({ name: 'o', ctrl: true })).toBeNull();
 });
 

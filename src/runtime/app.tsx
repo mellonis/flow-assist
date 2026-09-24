@@ -582,7 +582,8 @@ export function renderApp(
           notify();
           return true;
         }
-        if (name.length === 1) {
+        // A character, not a chord: Ctrl+D or Alt+x typed no `d` / `x` into the line.
+        if (name.length === 1 && !key.ctrl && !key.meta) {
           cmdline.current.input += name;
           notify();
           return true;
@@ -635,7 +636,8 @@ export function renderApp(
       // that is running, Ctrl+D in a field with text is the editor's forward delete.
       const armKey = armKeyOf(k);
       if (armKey) {
-        const claim = chatStore()?.ctrlKey?.(k);
+        // The `:` line owns the keyboard while it is open: the chat's field is not asked.
+        const claim = ui.cmdOpen ? undefined : chatStore()?.ctrlKey?.(k);
         if (claim === 'handled') { setArm(null); notify(); return true; }
         if (claim !== 'field') {
           const step = armStep(armRef.current, armKey, Date.now());

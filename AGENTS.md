@@ -830,7 +830,15 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   first, through `store.chat.ctrlKey`: Ctrl+C with a turn or a `!command` running
   STOPS it exactly as Esc does (a pending y/n declined and a question dismissed first,
   or the turn would wait on them) and nothing is armed; Ctrl+D in a field with text is
-  the editor's forward delete, consumed. It holds app-wide — the start screen and a
+  the editor's forward delete, consumed (never while the `:` line is open — it owns the
+  keyboard then; its own catch-all types no chord as a character). **The keys are
+  claimed only while there is something to stop** (`canStop`: a live `abortRef` not yet
+  aborted) — for Esc as well: a run that goes on after its abort (a tool that ignores
+  its signal) no longer holds them, so the next Ctrl+C arms and the one after exits,
+  Esc goes back to its idle steps, and the status line drops `Esc stops`. `/compact`
+  (`runAsyncCommand`) has a controller of its own, passes the signal to its request and
+  races the wait against the abort, so it stops at once (`/compact stopped (^c)`) and a
+  late summary is not applied. It holds app-wide — the start screen and a
   plugin's screen arm the same way; a turn running while the chat is closed is not
   stopped by Ctrl+C. **Nothing else is consumed**: `twoPhaseDispatch`'s `true` means
   "handled, redraw", and the chat answers it for every key — PgUp and the wheel
