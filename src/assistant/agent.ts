@@ -817,13 +817,7 @@ export async function compactConversation(
       'Compress the chat history below into a compact system context (up to ~400 words). Keep the key facts, decisions made and open questions. Return only the compressed text.',
   };
   const history = messages.filter((m) => m.role !== 'system').slice(-30).map(compactable);
-  // The Messages API starts with the person and refuses a tool result whose call is
-  // gone — the last 30 messages may start with either, so they start at the first
-  // message the person wrote.
-  if (provider === 'anthropic') {
-    const from = history.findIndex((m) => m.role === 'user');
-    return anthropicCompact([instruction, ...(from < 0 ? [] : history.slice(from))], { baseUrl, model, token, maxTokens, thinking, signal });
-  }
+  if (provider === 'anthropic') return anthropicCompact([instruction, ...history], { baseUrl, model, token, maxTokens, thinking, signal });
   const res = await fetch(`${baseUrl}/chat/completions`, {
     method: 'POST',
     signal,

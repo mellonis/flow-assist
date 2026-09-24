@@ -206,6 +206,8 @@ export function anthropicRefusal(req: Record<string, unknown>, headers: Record<s
   }
   const msgs = (req.messages ?? []) as { role: string; content: Array<Record<string, unknown>> | string }[];
   if (!msgs.length || msgs[0]!.role !== 'user') return 'messages: the first message must use the "user" role';
+  const toolBlocks = msgs.some((m) => Array.isArray(m.content) && m.content.some((b) => b.type === 'tool_use' || b.type === 'tool_result'));
+  if (toolBlocks && !(req.tools as unknown[] | undefined)?.length) return 'Requests which include tool_use or tool_result blocks must define tools.';
   let asked = new Set<string>();
   for (let i = 0; i < msgs.length; i++) {
     const m = msgs[i]!;

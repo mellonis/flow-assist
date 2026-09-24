@@ -724,7 +724,10 @@ block, `thinking_delta` → `onReasoning` → the thinking fold; an empty one sa
 usage is `input + cache_creation + cache_read` as the prompt, since the meter measures
 what is sent. An SSE `error` event carries no status, so its type stands for one
 (`overloaded_error` → 529) and the line is `llmErrorMessage`'s, with the `request-id`
-header. **Thinking blocks go back unchanged within a turn**: a round that thought AND
+header. `/compact` sends no tools, and the API refuses tool blocks without them, so its
+request carries calls and results as text (`summaryHistory`: `[called name {…}]`,
+`[result: …]`), starting at the first message the person wrote. **Thinking blocks go
+back unchanged within a turn**: a round that thought AND
 called a tool keeps its blocks as they came (`ChatRoundResult.blocks`), the loop puts them
 on that round's assistant message (`anthropicContent`), and the conversion replays that
 array verbatim — thinking, signature, order. It never outlives the turn: `apiHistory`

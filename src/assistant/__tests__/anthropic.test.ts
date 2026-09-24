@@ -2,7 +2,7 @@
 // streamed round folded back into what the loop reads.
 import { expect, test } from 'bun:test';
 import {
-  ANTHROPIC_CONTENT, anthropicRequest, errorStatus, finishReason, imageBlock, roundReader, thinkingParams,
+  ANTHROPIC_CONTENT, anthropicRequest, errorStatus, finishReason, imageBlock, roundReader, summaryHistory, thinkingParams,
   toAnthropicMessages, toAnthropicTools, usageOf, withoutThinking,
 } from '../anthropic.ts';
 import { llmOpts } from '../llm-endpoint.ts';
@@ -202,6 +202,24 @@ test('stop reasons and usage in the loop\'s words', () => {
   expect(finishReason('refusal')).toBe('refusal');
   expect(usageOf({ input_tokens: 5, output_tokens: 2 })).toEqual({ promptTokens: 5, completionTokens: 2 });
   expect(usageOf(undefined)).toBeUndefined();
+});
+
+test('what /compact sends: calls and results as text, starting with the person', () => {
+  expect(summaryHistory([
+    { role: 'system', content: 'Compress.' },
+    { role: 'tool', tool_call_id: 'gone', content: 'OK: orphan' },
+    { role: 'assistant', content: 'Next: look.', tool_calls: [call('t1', 'read_file', '{"path":"a"}')], [ANTHROPIC_CONTENT]: [{ type: 'thinking', thinking: 'x', signature: 's' }] },
+    { role: 'tool', tool_call_id: 't1', content: 'OK: aaa' },
+    { role: 'assistant', content: 'Done.' },
+  ])).toEqual([
+    { role: 'system', content: 'Compress.' },
+    { role: 'user', content: '[result: OK: orphan]' },
+    { role: 'assistant', content: 'Next: look.\n[called read_file {"path":"a"}]' },
+    { role: 'user', content: '[result: OK: aaa]' },
+    { role: 'assistant', content: 'Done.' },
+  ]);
+  // A leading answer whose question fell off the 30 is not where a conversation starts.
+  expect(summaryHistory([{ role: 'assistant', content: 'late' }, { role: 'user', content: 'q' }])).toEqual([{ role: 'user', content: 'q' }]);
 });
 
 test('tools are name, description and input_schema only', () => {

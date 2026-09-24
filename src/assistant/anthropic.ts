@@ -392,9 +392,30 @@ export async function anthropicChatRound(
   return round.result();
 }
 
+// What /compact sends: calls and results as TEXT. The request carries no tools, and
+// the API refuses tool_use / tool_result blocks in a request without them — a summary
+// needs to read what was done, not to call anything. The conversation then starts
+// with the person, as the API wants: the last 30 messages may begin mid-turn.
+export function summaryHistory(messages: ChatMessage[]): ChatMessage[] {
+  const out: ChatMessage[] = [];
+  for (const m of messages) {
+    if (m.role === 'assistant' && Array.isArray(m.tool_calls) && m.tool_calls.length) {
+      const calls = (m.tool_calls as Array<{ function?: { name?: string; arguments?: string } }>).map((c) => `[called ${c.function?.name ?? '?'} ${c.function?.arguments || '{}'}]`);
+      out.push({ role: 'assistant', content: [textOf(m.content), ...calls].filter(Boolean).join('\n') });
+    } else if (m.role === 'tool') {
+      out.push({ role: 'user', content: `[result: ${textOf(m.content)}]` });
+    } else {
+      const { [ANTHROPIC_CONTENT]: _kept, tool_calls: _c, ...rest } = m;
+      out.push(rest as ChatMessage);
+    }
+  }
+  const first = out.findIndex((m) => m.role !== 'system' && m.role !== 'assistant');
+  return out.filter((m, i) => m.role === 'system' || (first >= 0 && i >= first));
+}
+
 // /compact's one-shot: the same conversion, not streamed, the answer's text blocks.
 export async function anthropicCompact(messages: ChatMessage[], o: AnthropicOpts): Promise<string> {
-  const body = anthropicRequest(messages, { model: o.model, maxTokens: o.maxTokens ?? 8192, thinking: o.thinking, stream: false });
+  const body = anthropicRequest(summaryHistory(messages), { model: o.model, maxTokens: o.maxTokens ?? 8192, thinking: o.thinking, stream: false });
   const res = await post(body, o);
   const data = (await res.json()) as { content?: Array<{ type?: string; text?: string }> };
   return (data?.content ?? []).filter((b) => b?.type === 'text').map((b) => b.text ?? '').join('');

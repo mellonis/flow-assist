@@ -195,6 +195,47 @@ test('/compact asks /messages once, not streamed, and the summary is its text', 
   expect(ui.backend.lastFrame).toContain('The second answer.');
 });
 
+test('/compact after a tool round sends the calls and results as text — the request has no tools to define them', async () => {
+  const model = new ScriptedModel();
+  model.script([{ tool: 'datetime', args: {} }], [{ text: 'It is noon.' }], [{ text: 'SUMMARY: asked the time.' }]);
+  const ui = await boot(model);
+  await ask(ui, 'what time is it?');
+  await settleUntil(() => model.requests.length === 2);
+  await settle(10);
+  await ui.type('/compact');
+  await ui.press('return');
+  await settle(20);
+  const compact = sent(model, 2);
+  expect('tools' in compact).toBe(false);
+  expect(JSON.stringify(compact.messages)).not.toMatch(/tool_use|tool_result/);
+  expect(compact.messages.map((m) => m.role)).toEqual(['user', 'assistant', 'user', 'assistant']);
+  expect(compact.messages[1]!.content[0]!.text).toBe('[called datetime {}]');
+  expect(String(compact.messages[2]!.content[0]!.text)).toMatch(/^\[result: OK: /);
+  expect(ui.backend.lastFrame).toContain('SUMMARY: asked the time.');
+});
+
+test('a thinking block the API will not take back is dropped, once, and the turn goes on', async () => {
+  const model = new ScriptedModel();
+  model.script([{ thinking: 'Check the clock.', signature: 'sig-stale' }, { tool: 'datetime', args: {} }], [{ text: 'Noon.' }]);
+  const ui = await boot(model);
+  const scripted = globalThis.fetch;
+  let refused = 0;
+  globalThis.fetch = (async (url: unknown, init: RequestInit) => {
+    if (JSON.stringify(JSON.parse(String(init.body)).messages).includes('"type":"thinking"')) {
+      refused++;
+      return new Response(JSON.stringify({ type: 'error', error: { type: 'invalid_request_error', message: 'messages.1.content.0: Invalid `signature` in `thinking` block. The block is bound to a different conversation.' } }), { status: 400 });
+    }
+    return scripted(url as string, init);
+  }) as typeof fetch;
+  await ask(ui, 'time?');
+  await settleUntil(() => model.requests.length === 2);
+  await settle(10);
+  expect(refused).toBe(1);
+  expect(sent(model, 1).messages[1]!.content).toEqual([{ type: 'tool_use', id: 'toolu_0', name: 'datetime', input: {} }]);
+  expect(ui.backend.lastFrame).toContain('Noon.');
+  expect(ui.backend.lastFrame).not.toContain('LLM 400');
+});
+
 test('an attached image goes as a base64 image block', async () => {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-anthropic-img-')));
   const file = path.join(dir, 'shot.png');
