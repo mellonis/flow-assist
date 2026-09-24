@@ -17,19 +17,19 @@ const guest = (state: { open: boolean }) => (make: any) => [make('boards', {
   surface: 'board',
   keycaps: () => (state.open ? ['c board'] : []),
   components: {
-    furniture: (ft: any) => function Furniture() {
-      ft.useInputHandler({
+    furniture: (api: any) => function Furniture() {
+      api.host.useInputHandler({
         mode: 'consume',
         priority: () => 10,
         handler: (key: { name: string }) => {
-          if (key.name === 'c') { state.open = !state.open; ft.notify(); return true; }
+          if (key.name === 'c') { state.open = !state.open; api.host.notify(); return true; }
           return false;
         },
       });
       return null;
     },
-    view: (ft: any) => function View() {
-      return ft.h(ft.Text, null, state.open ? 'BOARD-101 · three cards' : 'No board data');
+    view: (api: any) => function View() {
+      return api.ui.h(api.ui.Text, null, state.open ? 'BOARD-101 · three cards' : 'No board data');
     },
   },
 })];
@@ -200,14 +200,14 @@ test('the keycaps panel is drawn over the footer, not under it', async () => {
     // Enough hints to run the footer under the panel.
     keycaps: () => (state.open ? ['c board', 'f filters', 'e expand', 'm bookmark', 'b browser', '␣ fold', 'i info', 'r relations', 'x more'] : []),
     components: {
-      furniture: (ft: any) => function Furniture() {
-        ft.useInputHandler({ mode: 'consume', priority: () => 10, handler: (key: { name: string }) => {
-          if (key.name === 'c') { state.open = !state.open; ft.notify(); return true; }
+      furniture: (api: any) => function Furniture() {
+        api.host.useInputHandler({ mode: 'consume', priority: () => 10, handler: (key: { name: string }) => {
+          if (key.name === 'c') { state.open = !state.open; api.host.notify(); return true; }
           return false;
         } });
         return null;
       },
-      view: (ft: any) => function View() { return ft.h(ft.Text, null, 'BOARD-101'); },
+      view: (api: any) => function View() { return api.ui.h(api.ui.Text, null, 'BOARD-101'); },
     },
   })];
   const ui = await bootApp(new ScriptedModel(), 90, 24, wide, { plugins: { keycaps: { enabled: true } } });
@@ -228,9 +228,9 @@ test('a surface as tall as useSurfaceSize says fits between the title bar and th
     name: 'boards',
     keycaps: () => ['c board'],
     components: {
-      view: (ft: any) => function View() {
-        const { height } = ft.useSurfaceSize();
-        return ft.h(ft.Box, { height, border: 'round', flexDirection: 'column' }, ft.h(ft.Text, null, 'TOP ROW'));
+      view: (api: any) => function View() {
+        const { height } = api.host.useSurfaceSize();
+        return api.ui.h(api.ui.Box, { height, border: 'round', flexDirection: 'column' }, api.ui.h(api.ui.Text, null, 'TOP ROW'));
       },
     },
   })];

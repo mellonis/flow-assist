@@ -240,8 +240,8 @@ export async function buildMcpPlugin({ make, config, z }: { make: (name: string,
     description: servers.length ? `MCP — ${status.filter((s) => s.ok).length} of ${status.length} servers connected` : 'MCP servers — none configured (plugins.mcp.servers)',
     // What happened to each server, in the log (L): the start screen only has room for
     // the count.
-    setup: (ft: { services?: { pushLog?: (m: string) => void } }) => {
-      for (const line of summary) ft.services?.pushLog?.(`[mcp] ${line}`);
+    setup: ({ host }: { host: { services?: { pushLog?: (m: string) => void } } }) => {
+      for (const line of summary) host.services?.pushLog?.(`[mcp] ${line}`);
     },
   });
 }

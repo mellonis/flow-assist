@@ -39,29 +39,29 @@ function guest(opts: { take?: string[]; all?: boolean; priority?: number } = {})
   const size = { width: 0, height: 0 };
   // How many times the surface was drawn.
   const drawn = { count: 0 };
-  let ft: any = null;
+  let host: any = null;
   const make = (mk: any) => [mk('boards', {
     name: 'boards',
     keycaps: () => ['c card'],
     components: {
-      keys: (f: any) => function Keys() {
-        ft = f;
-        f.useInputHandler({ mode: 'consume', priority: () => opts.priority ?? 50, handler: (key: { name: string }) => {
+      keys: (api: any) => function Keys() {
+        host = api.host;
+        api.host.useInputHandler({ mode: 'consume', priority: () => opts.priority ?? 50, handler: (key: { name: string }) => {
           if (key.name.startsWith('mouse') || key.name.startsWith('wheel')) return false;
           if (opts.all || opts.take?.includes(key.name)) { seen.push(key.name); return true; }
           return false;
         } });
         return null;
       },
-      view: (f: any) => function View() {
-        const s = f.useSurfaceSize();
+      view: (api: any) => function View() {
+        const s = api.host.useSurfaceSize();
         size.width = s.width; size.height = s.height;
         drawn.count += 1;
-        return f.h(f.Text, null, 'BOARD-SURFACE');
+        return api.ui.h(api.ui.Text, null, 'BOARD-SURFACE');
       },
     },
   })];
-  return { make, seen, size, drawn, ft: () => ft };
+  return { make, seen, size, drawn, host: () => host };
 }
 
 test('a fresh config docks the chat on the right of a wide terminal, and the board is given the rest', async () => {
@@ -106,7 +106,7 @@ test('Ctrl+] moves the keyboard between the chat and the plugin, and the side th
   await ui.type('a');
   expect(ui.backend.lastFrame).toContain('› a');
   expect(g.seen).toEqual(['F']);
-  const accent = g.ft().config.theme.modals.chat.accent;
+  const accent = g.host().config.theme.modals.chat.accent;
   const corner = () => ui.backend.lastBuffer!.get(104, 0).style.fg;
   const title = () => ui.backend.lastBuffer!.get(1, 1).style.fg;
   expect(corner()).toBe(accent);
@@ -134,9 +134,9 @@ test('a plugin modal that takes every key cannot keep the chat away either', asy
   const ui = await bootApp(new ScriptedModel(), 160, 40, g.make as never, {}, { chatMode: 'panel' });
   await press(ui, CTRL_RIGHT_BRACKET);
   expect(chatFrame(ui).left).toBe(104);
-  expect(g.ft().store.chat.focus).toBe('chat');
+  expect(g.host().store.chat.focus).toBe('chat');
   await press(ui, CTRL_RIGHT_BRACKET);
-  expect(g.ft().store.chat.focus).toBe('plugin');
+  expect(g.host().store.chat.focus).toBe('plugin');
   expect(g.seen).toEqual([]);
   ui.app.unmount();
 });
@@ -161,7 +161,7 @@ test('the chat goes on streaming while the plugin has the keyboard', async () =>
   const at = after.findIndex((l) => l.includes('Half and the rest.'));
   expect(at).toBeGreaterThan(0);
   expect(after[at]!.indexOf('Half')).toBeGreaterThan(104); // in the panel
-  expect(g.ft().store.chat.focus).toBe('plugin');
+  expect(g.host().store.chat.focus).toBe('plugin');
   ui.app.unmount();
 });
 
@@ -227,7 +227,7 @@ test('Esc Esc collapses the panel and gives the plugin the keyboard', async () =
   // F opens it again, with the keyboard.
   await ui.press('F');
   expect(chatFrame(ui).left).toBe(104);
-  expect(g.ft().store.chat.focus).toBe('chat');
+  expect(g.host().store.chat.focus).toBe('chat');
   ui.app.unmount();
 });
 
@@ -318,7 +318,7 @@ test('a click on a fold in the right panel opens it, whichever side has the keyb
   expect(ui.backend.lastFrame).not.toContain('│ panel-click');
   // The keyboard to the plugin first: a click in the panel still reaches the chat.
   await press(ui, CTRL_RIGHT_BRACKET);
-  expect(g.ft().store.chat.focus).toBe('plugin');
+  expect(g.host().store.chat.focus).toBe('plugin');
   const x = r[y]!.indexOf('echo panel-click');
   ui.backend.mouse('down', x, y);
   ui.backend.mouse('up', x, y);
@@ -326,12 +326,12 @@ test('a click on a fold in the right panel opens it, whichever side has the keyb
   expect(ui.backend.lastFrame).toContain('panel-click');
   expect(rows(ui).filter((l) => l.includes('panel-click')).length).toBeGreaterThan(1);
   // The press put the keyboard where it landed.
-  expect(g.ft().store.chat.focus).toBe('chat');
+  expect(g.host().store.chat.focus).toBe('chat');
   // A press on the board's side gives it back.
   ui.backend.mouse('down', 10, 10);
   ui.backend.mouse('up', 10, 10);
   await settle();
-  expect(g.ft().store.chat.focus).toBe('plugin');
+  expect(g.host().store.chat.focus).toBe('plugin');
   ui.app.unmount();
 });
 
@@ -366,11 +366,11 @@ test('every chat row is one terminal line at the panel\'s width — steps, calls
   const panelW = Math.round(160 * 0.32);
   expect(chatFrame(ui)).toEqual({ top: 0, bottom: 39, left: 160 - panelW, width: panelW });
   const wrap = chatWrapWidth(panelW, true);
-  const ft = g.ft();
-  const messages = ft.store.chat.messages;
+  const host = g.host();
+  const messages = host.store.chat.messages;
   // Folded, and then everything open (what ^o shows).
   for (const open of [false, true]) {
-    const opts: RowOpts = { wrap, folds: { open, except: new Set() }, viewLines: 20, notes: 'step', detailsKey: '^o', renderers: ft.services.viewRenderers, now: Date.now(), palette: {} };
+    const opts: RowOpts = { wrap, folds: { open, except: new Set() }, viewLines: 20, notes: 'step', detailsKey: '^o', renderers: host.services.viewRenderers, now: Date.now(), palette: {} };
     const laid = chatRows(messages, opts);
     expect(laid.length).toBeGreaterThan(5);
     for (const row of laid) {
@@ -407,7 +407,7 @@ test.each([16, 12])('a panel on a %i-row terminal is drawn as a window; the plug
   expect(f.left).toBeGreaterThan(0); // a window, not a panel across the whole width
   expect(g.size).toEqual({ width: 100, height: height - 6 });
   expect(ui.backend.lastFrame).toContain('Esc Esc close');
-  expect(g.ft().store.chat.focus).toBe('chat');
+  expect(g.host().store.chat.focus).toBe('chat');
   // The collapse key closes it, as Ctrl+] does, and the keyboard is the plugin's.
   await press(ui, COLLAPSE);
   expect(chatFrame(ui).top).toBe(-1);
@@ -499,7 +499,7 @@ test('collapsing during a y/n keeps it pending; the footer says it waits; expand
   expect(r[y]).toMatch(/^ \? waiting for you · \^\] chat · : commands/);
   expect(r[y]!.match(/chat/g)).toHaveLength(1);
   // In the warn colour.
-  expect(ui.backend.lastBuffer!.get(1, y).style.fg).toBe(g.ft().config.theme.modals.chat.warn);
+  expect(ui.backend.lastBuffer!.get(1, y).style.fg).toBe(g.host().config.theme.modals.chat.warn);
   await press(ui, COLLAPSE);
   expect(ui.backend.lastFrame).toContain('Confirm write: notes_write');
   await ui.press('y');
@@ -632,7 +632,7 @@ test.each(['panel', 'window', 'full'] as const)('/mode alone says where the chat
   await ui.press('F');
   await command(ui, '/mode');
   expect(ui.backend.lastFrame).toContain(`the chat is in ${mode} mode`);
-  const notes = (g.ft().store.chat.messages as { role: string; content: string }[]).filter((m) => m.role === 'note');
+  const notes = (g.host().store.chat.messages as { role: string; content: string }[]).filter((m) => m.role === 'note');
   expect(notes.map((m) => m.content)).toEqual([`the chat is in ${mode} mode · /mode panel|window|full`]);
   ui.app.unmount();
 });
@@ -649,7 +649,7 @@ test('chatFocus bound to a letter keeps Ctrl+]: the letter still types', async (
   await press(ui, CTRL_RIGHT_BRACKET);
   await ui.type('x');
   expect(ui.backend.lastFrame).toContain('› x');
-  expect(g.ft().store.chat.focus).toBe('chat');
+  expect(g.host().store.chat.focus).toBe('chat');
   ui.app.unmount();
 });
 
@@ -663,7 +663,7 @@ test.each(['window', 'panel'] as const)('with the : line open, Ctrl+] and Ctrl+\
   for (const key of [CTRL_RIGHT_BRACKET, COLLAPSE]) {
     await press(ui, key);
     expect(chatFrame(ui).top).toBe(-1);
-    expect(g.ft().store.chat.open).toBe(false);
+    expect(g.host().store.chat.open).toBe(false);
   }
   await ui.type('ab');
   expect(rows(ui).some((l) => l.includes(': ab'))).toBe(true);

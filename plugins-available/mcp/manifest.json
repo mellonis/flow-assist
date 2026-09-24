@@ -1,7 +1,7 @@
 {
   "name": "mcp",
   "version": "0.1.0",
-  "hostApi": 1,
+  "hostApi": 2,
   "flowtty": "^1.0.0-alpha.26",
   "description": "MCP servers — their tools, as the assistant's tools",
   "tools": ["mcp"]

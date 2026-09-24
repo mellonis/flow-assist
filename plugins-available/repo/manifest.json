@@ -1,7 +1,7 @@
 {
   "name": "repo",
   "version": "0.1.0",
-  "hostApi": 1,
+  "hostApi": 2,
   "flowtty": "^1.0.0-alpha.26",
   "description": "Local clones + git context",
   "tools": ["repo"]

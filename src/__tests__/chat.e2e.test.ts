@@ -637,7 +637,7 @@ test('an open modal pushes the screen behind it back, and stays bright itself', 
   const guest = (make: any) => [make('boards', {
     name: 'boards',
     keycaps: () => ['c board'],
-    components: { view: (ft: any) => function View() { return ft.h(ft.Text, null, 'a guest surface'); } },
+    components: { view: (api: any) => function View() { return api.ui.h(api.ui.Text, null, 'a guest surface'); } },
   })];
   const ui = await bootApp(new ScriptedModel(), 100, 24, guest);
   // The host's own title, before anything is open.

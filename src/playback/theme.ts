@@ -214,7 +214,7 @@ export function resolveModalPalettes(
 // modalColors + plugin colors + config.plugins.<name>.colors), and
 // resolvePluginColors adds any non-modal plugin palette (keycaps/bg, board).
 // Returns the resolved theme the caller folds back into config.theme, so
-// ft.config.theme carries the full palette and the renders get borders/colors
+// host.config.theme carries the full palette and the renders get borders/colors
 // instead of degrading to empty Flowtty defaults. `plugins` provides the
 // plugin.colors sources; `config` the config.plugins.<name>.colors overrides. The
 // user's theme wins over every scheme: a person who set a colour keeps it.

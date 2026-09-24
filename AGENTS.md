@@ -26,7 +26,7 @@ English throughout; a half-translated screen is worse than either language.
   (`main`-only packages and deep paths resolve). So a plugin run from SOURCE with its
   own `node_modules` is skipped by the binary; a plugin bundled into one file has no
   on-disk package left to resolve, and loads. It was never a two-React problem —
-  plugins take hooks from `ft` and import only types from React.
+  plugins take hooks from `ui` and import only types from React.
 - **Where the program finds its plugins and `.env`** (`src/install.ts` on the pure
   `src/loader/install-root.ts`). The root holding `plugins-available/` +
   `plugins-enabled/` is the first of: a source checkout (one up from `src/`, never
@@ -122,7 +122,7 @@ through `loadNotes`), `plugins ls` shows `incompatible: …` (`RepoEntry.incompa
 and install refuses it — a link, a registry fetch, an archive before it is moved into
 place. A missing `flowtty` is loaded with a note; the bundled plugins and
 `examples/notes` declare both fields (a test). A plugin reads the number it runs under
-from `ft.hostApi`.
+from `host.hostApi`.
 
 A plugin module default-exports `build<Name>Plugin({ renders, config, make, z })`.
 The builder may be **async** — the loader awaits it — for a plugin whose tools are known
@@ -134,16 +134,30 @@ cannot import a package from disk), still declares its `configSchema` with it.
 `make(name, shape)` injects `config.plugins.<name>` and qualified keys. The
 returned `shape` has optional: `commands`, `keys`, `keyActions`, `views`,
 `surface`, `modals`, `colors`, `modalColors`, `configSchema`, `components`, `tools`,
-`services`, `aiTools`, `keycaps(ft)`, `entry`, `setup(ft)`, `chatContext(ft)`,
-`chatSubject(ft)` (deprecated), `afterWrite(ft)`. `components[slot] = (ft) => Component`;
-`services` expose host services through `ft.services` — the host wins on every
-key it owns, a plugin's same-named key never clobbers it. `setup(ft)` runs once,
+`services`, `aiTools`, `keycaps`, `entry`, `setup`, `chatContext`,
+`chatSubject` (deprecated), `afterWrite`; every hook, and each
+`components[slot] = ({ ui, host }) => Component`, receives the plugin's pair (below).
+`services` expose host services through `host.services` — the host wins on every
+key it owns, a plugin's same-named key never clobbers it. `setup` runs once,
 before any of the plugin's components mount (it is where a plugin seeds its store). Tool groups are delivered by plugins — there is
 **no** `tools-available/` → `tools-enabled/` repository; `ai.disabledTools` is
 the blacklist.
 
-- **`ft`'s flowtty components** are `Box`, `Text`, `Markdown`, `Table`, `Link` and the
-  three pickers: `Select` (flowtty's dropdown — its popup is a floating dialog, so the
+- **What a plugin is given is `{ ui, host }`** (`src/runtime/plugin-api.ts`). The rule:
+  `ui` is what React and flowtty ship, passed through unchanged — `h`, `useState`,
+  `useEffect`, `useRef`, flowtty's own `useInput`, `Box`, `Text`, `Markdown`, `Table`,
+  `Link`, `ScrollBox`, `Select`, `ListSelect`, `ListMultiSelect`, `Checkbox` — one
+  object for every plugin; `host` is what the host implements or wraps — `services`,
+  `store`, `config`, `keys`, `keyCap`, `useInputHandler`, `useSurfaceSize`,
+  `useTerminalSize` (the plugin's side, not flowtty's whole terminal), `notify`,
+  `viewRegistry`, `commandRegistry`, `helpFor`, `copyToClipboard`, `pluginToken`,
+  `hostApi` — one per plugin. `host.services` stays the live per-plugin view (host
+  services on its prototype, rebound every render): never flatten it into `host` or
+  spread it. Each pair is built once per App, where `apiMap` is filled, so a component
+  factory makes one component type for the App's life. A change to either part a
+  plugin would break on bumps `HOST_API`.
+- **`ui`'s flowtty components** are `Box`, `Text`, `Markdown`, `Table`, `Link`,
+  `ScrollBox`, `Checkbox` and the three pickers: `Select` (flowtty's dropdown — its popup is a floating dialog, so the
   App is rendered under a `<DialogHost>` at the frame's origin, and while a popup is
   open the host's whole key path is muted: Ctrl+C then exits at once, Ctrl+] waits
   for the popup to close), `ListSelect` and `ListMultiSelect` (the inline lists).
@@ -159,8 +173,8 @@ the blacklist.
 - **The chat asks the plugins; it knows no plugin's data.** Each plugin's
   `services` are its own (a per-plugin view over the host's), so the chat cannot
   read another plugin's state — which is why two hooks are part of the shape, called
-  with the plugin's own `ft`:
-  - `chatContext(ft)` → what the plugin's screens show now, as items `{ label, text }`
+  with the plugin's own pair:
+  - `chatContext` → what the plugin's screens show now, as items `{ label, text }`
     (a board with its filter and cursor AND the open issue), or `[]`/`null`.
     `services.chatContext()` asks every plugin in load order, each call guarded (a
     throw gives nothing and is logged once per plugin, `[<plugin>] chatContext
@@ -209,9 +223,9 @@ the blacklist.
     person); `/clear` is how a fresh one starts. The session no longer writes
     `subject`; one written by an older host (or `issue`, older still) is read and
     ignored.
-  - `chatSubject(ft)` → deprecated, for one release: a short id, read as ONE item
+  - `chatSubject` → deprecated, for one release: a short id, read as ONE item
     `{ label: <id>, text: '' }`; a plugin that has `chatContext` is not asked it.
-  - `afterWrite(ft)` → called, for every plugin, after a chat turn in which a write
+  - `afterWrite` → called, for every plugin, after a chat turn in which a write
     tool was confirmed and APPLIED (not declined, not failed): reload what you show,
     or an open document keeps its text from before the write. It may return a
     promise; a rejection is logged as `[<plugin>] refresh after a write failed: …`.
@@ -242,9 +256,9 @@ spawns something long-lived follows:
 ### A handled key is followed by a redraw
 
 A plugin usually keeps its state in ONE component (a workspace that publishes it on
-`ft.services`) and draws it in a SIBLING. A React `setState` in the first re-renders
+`host.services`) and draws it in a SIBLING. A React `setState` in the first re-renders
 the first only; the sibling redraws when the host re-renders. That used to require an
-explicit `ft.notify()` in every setter, and a setter without one — the tracker's info
+explicit `host.notify()` in every setter, and a setter without one — the tracker's info
 panel cursor, `setPanelIdx` — changed the state and froze on screen. It looked
 intermittent: while related issues were still loading, each arriving name called
 `notify()` and so "showed" the pending key presses; once loading finished, the cursor
@@ -252,7 +266,7 @@ stopped moving.
 
 The host guarantees it: `useInput` in `runtime/app.tsx` calls `notify()` after every
 key that was handled (`twoPhaseDispatch` returned true). React batches it with
-whatever the handler set. A plugin still calls `ft.notify()` for changes that do NOT
+whatever the handler set. A plugin still calls `host.notify()` for changes that do NOT
 come from a key — a fetch that finished, a timer.
 
 ### A plugin is a guest: whose screen it is
@@ -268,7 +282,7 @@ assistant nobody had asked for a board.
   workspace that feeds them) is furniture and is always mounted, which is how a
   plugin's own key (`c`, the board picker) works from the start screen.
 - The surface is mounted **only while the plugin says its context is active**:
-  `keycaps(ft)` non-empty. That is the existing contract of `keycaps` ("returns `[]`
+  `keycaps` non-empty. That is the existing contract of `keycaps` ("returns `[]`
   when its surface is inactive"), so a plugin needs no new API to be a good guest. A
   plugin with a surface and no `keycaps` cannot say, and is shown always.
 - Over a guest's surface the host keeps its title bar; on the start screen it does not.
@@ -297,7 +311,7 @@ session (never saved); an old `fullscreen: true` reads as `full` (`chatModeOf`),
   chat's panel: on the right (`panel.size`, 35% of the width) or at the bottom (40% of
   the height; a right panel goes there by itself under `RIGHT_PANEL_MIN_COLS`, 120).
   Each side is given its size through a host context (`AreaContext`), which is what
-  `ft.useTerminalSize` and `ft.useSurfaceSize` read — so a surface, a plugin's modal and
+  `host.useTerminalSize` and `host.useSurfaceSize` read — so a surface, a plugin's modal and
   the host's own furniture on that side are laid out as on a smaller terminal, and a
   modal's `overlay()` at `top: 0, left: 0` covers that side only (absolutes are placed
   from the root, and the side starts at it). flowtty's own size context is not exported:
@@ -1167,8 +1181,8 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     on a modified key had to be hard-coded in its handler — which is what `^r` was,
     `key.name === 'r' && key.ctrl`: unremappable, and invisible to every hint.
   - **Never write a key's symbol by hand in a hint.** Two cases:
-    - the action is BOUND (it is in `ft.keys`, so the person can remap it) → draw
-      `ft.keyCap(action)`; it is `''` when the action is unbound, and then the hint is
+    - the action is BOUND (it is in `host.keys`, so the person can remap it) → draw
+      `host.keyCap(action)`; it is `''` when the action is unbound, and then the hint is
       not shown at all. The host footer (`composeFooterHints`) and the chat's
       `F chat` hint do this. Host-side code uses `bindingGlyph(keys[action])`, or
       `firstGlyph(…)` where an action answers to several keys and the hint should
@@ -1176,7 +1190,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
       as two keys to learn).
     - the key is fixed (the chat's own Enter / Esc / Tab) → `keyGlyph(…)`, as the
       `CAP` table in `src/views/modals.ts` does.
-    A bundled plugin that still spells caps by hand in its `keycaps(ft)` (acme-tracker)
+    A bundled plugin that still spells caps by hand in its `keycaps` (acme-tracker)
     shows the default key after a remap — that is the bug this rule prevents.
 - **A key acts where it is shown, and is shown where it acts.** Audited 2026-09-21:
   - `x` flushed the cache from the start screen, where the footer did not offer it.
@@ -1184,12 +1198,12 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     a plugin that keeps data in the cache is on screen. `:clear` works from anywhere.
   - Flushing the cache (`x`, `:clear`) also **reloads what is on screen**: the host
     counts flushes in `services.cacheEpoch`, and a plugin that draws cached data
-    reloads when the number changes (`useEffect(..., [ft.services.cacheEpoch])`). A
+    reloads when the number changes (`useEffect(..., [host.services.cacheEpoch])`). A
     flush that left the open board as it was read as a key that does nothing.
   - `b` was answered by the host with "no target (tracker supplies the URL)". The host
     no longer handles it. `openBrowser`, `prev`, `next` and `open` stay in
     `HOST_DEFAULT_KEYS` only as a shared vocabulary for plugins (a plugin reads
-    `ft.keys.open`); the host acts on none of them.
+    `host.keys.open`); the host acts on none of them.
   - A test presses every lower-case letter on the start screen and expects silence
     (`home.e2e.test.ts`) — `q` included. **No key quits by default**: a stray `q`
     closed the whole app. Quitting is the `:quit` (`:q`) command or Ctrl+C twice; the action
@@ -1704,10 +1718,10 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   `useApp()`; tests read `TestBackend.notifications` / `bells`.
   `ai.backgroundFollowUp: true` opts back into a turn per result, and then only
   with the chat open, the field empty and nothing queued.
-- What the footer reads from a plugin (`ft.store.<x>`) must be patched
+- What the footer reads from a plugin (`host.store.<x>`) must be patched
   synchronously when it changes: the host draws its footer BEFORE the plugin's
   component re-renders, so a value assigned during render is one frame stale.
-- A tool's ctx is built with `allServices(ft.services)`, never `...ft.services`:
+- A tool's ctx is built with `allServices(host.services)`, never `...host.services`:
   host services sit on the PROTOTYPE of the per-plugin services view, and a spread
   copies own properties only. The spread silently gave tools a ctx with no
   `chatLLM`/`config`/`showMessage`, and `background` answered "no LLM service".

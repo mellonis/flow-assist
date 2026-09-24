@@ -1,5 +1,5 @@
 // Host hooks. The runtime injects React primitives (`useState`, `useEffect`,
-// `useRef`) plus the runtime's own `useInputHandler` into plugins via `ft`. This
+// `useRef`) plus the runtime's own `useInputHandler` into plugins via `{ ui, host }`. This
 // module holds the hooks that are HOST-owned — built on top of React but
 // independent of the App component, so they can be imported and reused by
 // `app.tsx` and tested in isolation.
@@ -37,7 +37,7 @@ export interface InputHandlerOpts {
 
 // Registers an input handler into the App's registry. A React hook: it keeps a
 // ref (so the handler is always the freshest closure) and subscribes it on mount
-// (cleanup unsubscribes on unmount). Plugins call this (via `ft.useInputHandler`)
+// (cleanup unsubscribes on unmount). Plugins call this (via `host.useInputHandler`)
 // from their own component render, so a plugin component owns its handler
 // lifecycle. Registration is keyed-by-identity, not re-registered on re-render.
 export function registerInputHandler(

@@ -6,26 +6,11 @@ import { z } from 'zod';
 import type { Make } from '../loader/plugin.js';
 import type { Plugin } from '../loader/plugin.js';
 import { isMouseButton, keyGlyph } from '../playback/keys.js';
+import type { PluginApi } from '../runtime/plugin-api.js';
 
 // The app-glue dispatched to by the :keycaps command.
 interface KeycapsCtx {
   toggleKeycaps?(arg?: string): unknown;
-}
-
-// The `ft` runtime the keycaps component receives (typed by shape).
-interface KeycapsFT {
-  useState<T>(init: T): [T, (v: T | ((prev: T) => T)) => void];
-  useInputHandler(opts: {
-    mode: 'observe';
-    priority: () => number;
-    handler: (key: { name: string; ctrl?: boolean; meta?: boolean; shift?: boolean }) => void;
-  }): void;
-  store: Record<string, unknown>;
-  services: Record<string, unknown>;
-  config: Record<string, unknown>;
-  h: (...args: unknown[]) => unknown;
-  Box: unknown;
-  Text: unknown;
 }
 
 type BuildKeycapsParams = {
@@ -52,14 +37,14 @@ export function buildKeycapsPlugin({ renders, config, make }: BuildKeycapsParams
     // startup, colors — palette override (→ theme.keycaps).
     configSchema: z.object({ enabled: z.boolean().optional(), colors: z.record(z.string(), z.unknown()).optional() }).optional(),
     components: {
-      keycaps: (ft) => {
-        const f = ft as KeycapsFT;
+      keycaps: (api) => {
+        const { ui, host } = api as PluginApi;
         return function Keycaps() {
           // Default from the plugin config (config.plugins.keycaps.enabled) or hidden.
-          const initEnabled = !!(f.config as Record<string, any>)?.plugins?.keycaps?.enabled;
-          const [enabled, setEnabled] = f.useState(initEnabled);
-          const [recent, setRecent] = f.useState<string[]>([]);
-          f.useInputHandler({
+          const initEnabled = !!(host.config as Record<string, any>)?.plugins?.keycaps?.enabled;
+          const [enabled, setEnabled] = ui.useState(initEnabled);
+          const [recent, setRecent] = ui.useState<string[]>([]);
+          host.useInputHandler({
             mode: 'observe',
             priority: () => 1000,
             // The cap is what is printed on the key — ⏎, ␣, ^r — not the terminal's name
@@ -72,14 +57,14 @@ export function buildKeycapsPlugin({ renders, config, make }: BuildKeycapsParams
           });
           // API for the :keycaps command — toggles/enables/disables the panel. Reads
           // `enabled` from the latest render (the toggle is recreated each render).
-          (f.store as Record<string, any>).keycaps = {
+          (host.store as Record<string, any>).keycaps = {
             enabled,
             setEnabled,
             toggle: (arg: string) => {
               const v = String(arg ?? '').trim().toLowerCase();
               const next = v === 'off' ? false : v === 'on' ? true : !enabled;
               setEnabled(next);
-              (f.services as Record<string, any>).showMessage?.(`Keycaps ${next ? 'enabled' : 'disabled'}`);
+              (host.services as Record<string, any>).showMessage?.(`Keycaps ${next ? 'enabled' : 'disabled'}`);
             },
           };
           if (!enabled || !recent.length) return null;
@@ -87,7 +72,7 @@ export function buildKeycapsPlugin({ renders, config, make }: BuildKeycapsParams
           // modal's: otherwise an override of config.plugins.log.colors.bg would paint
           // keycaps for nothing. Without a palette the panel is transparent and the
           // frame is unreadable. Fallback — the abstract modal base theme.modals.bg.
-          const cfg = f.config as Record<string, any>;
+          const cfg = host.config as Record<string, any>;
           const panelBg = cfg?.theme?.keycaps?.bg ?? cfg?.theme?.modals?.bg;
           // The ink goes with the ground: the caps and the frame inherit it, so a light
           // terminal theme does not draw them black on the dark fill.
@@ -95,16 +80,16 @@ export function buildKeycapsPlugin({ renders, config, make }: BuildKeycapsParams
           // flowtty frame prop is `border` (not borderStyle); 'round' is the default,
           // but we set it explicitly. Inner «keys» are also frames, single.
           const caps = recent.map((k, i) =>
-            (f.h as (...args: unknown[]) => unknown)(f.Box, { key: `${k}-${i}`, border: 'single', paddingX: 1 },
-              (f.h as (...args: unknown[]) => unknown)(f.Text, {}, k)),
+            (ui.h as (...args: unknown[]) => unknown)(ui.Box, { key: `${k}-${i}`, border: 'single', paddingX: 1 },
+              (ui.h as (...args: unknown[]) => unknown)(ui.Text, {}, k)),
           );
-          return (f.h as (...args: unknown[]) => unknown)(f.Box, {
+          return (ui.h as (...args: unknown[]) => unknown)(ui.Box, {
             position: 'absolute', bottom: 1, right: 1, flexDirection: 'column',
             border: 'round', borderTitle: 'keycaps', paddingX: 1, zIndex: 10, backgroundColor: panelBg, color: panelText,
             // Floats over whatever is on screen: a drag across it copies no cap.
             selectable: false,
           },
-            (f.h as (...args: unknown[]) => unknown)(f.Box, { flexDirection: 'row' }, caps),
+            (ui.h as (...args: unknown[]) => unknown)(ui.Box, { flexDirection: 'row' }, caps),
           );
         };
       },

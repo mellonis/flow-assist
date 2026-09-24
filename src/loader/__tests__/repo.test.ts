@@ -3,6 +3,7 @@ import { createPluginRepo } from '../repo';
 import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, existsSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { HOST_API } from '../../version';
 
 function fakeRepo() {
   const root = mkdtempSync(join(tmpdir(), 'fa-repo-'));
@@ -10,14 +11,14 @@ function fakeRepo() {
   const enabled = join(root, 'plugins-enabled');
   mkdirSync(avail, { recursive: true }); mkdirSync(enabled, { recursive: true });
   mkdirSync(join(avail, 'tracker'), { recursive: true });
-  writeFileSync(join(avail, 'tracker', 'manifest.json'), JSON.stringify({ name: 'tracker', version: '1.0.0', deps: {} }));
+  writeFileSync(join(avail, 'tracker', 'manifest.json'), JSON.stringify({ name: 'tracker', hostApi: HOST_API, version: '1.0.0', deps: {} }));
   return { root, avail, enabled, repo: createPluginRepo({ availableDir: avail, enabledDir: enabled, projectRoot: root }) };
 }
 
 test('list shows available, active, and built-in exclusion', async () => {
   const { repo, avail } = fakeRepo();
   mkdirSync(join(avail, 'core'), { recursive: true });
-  writeFileSync(join(avail, 'core', 'manifest.json'), JSON.stringify({ name: 'core', version: '1.0.0', builtin: true }));
+  writeFileSync(join(avail, 'core', 'manifest.json'), JSON.stringify({ name: 'core', hostApi: HOST_API, version: '1.0.0', builtin: true }));
   const list = await repo.list();
   expect(list.find(e => e.name === 'tracker')?.active).toBe(false);
 });
@@ -29,7 +30,7 @@ test('install works in a fresh checkout — plugins-enabled/ is created', async 
   const avail = join(root, 'plugins-available');
   const enabled = join(root, 'plugins-enabled');
   mkdirSync(join(avail, 'mcp'), { recursive: true });
-  writeFileSync(join(avail, 'mcp', 'manifest.json'), JSON.stringify({ name: 'mcp', version: '1.0.0' }));
+  writeFileSync(join(avail, 'mcp', 'manifest.json'), JSON.stringify({ name: 'mcp', hostApi: HOST_API, version: '1.0.0' }));
   const repo = createPluginRepo({ availableDir: avail, enabledDir: enabled, projectRoot: root });
   expect(existsSync(enabled)).toBe(false);
   expect(await repo.install('mcp')).toEqual({ ok: true });
@@ -54,7 +55,7 @@ test('install downloads from the registry when source is absent, then symlinks; 
     fetchPlugin: async (name, version) => {
       calls.push(`${name}@${version ?? 'latest'}`);
       const dir = join(avail, name); mkdirSync(dir, { recursive: true });
-      writeFileSync(join(dir, 'manifest.json'), JSON.stringify({ name, version: version ?? '9.9.9', deps: {} }));
+      writeFileSync(join(dir, 'manifest.json'), JSON.stringify({ name, hostApi: HOST_API, version: version ?? '9.9.9', deps: {} }));
       return { version: version ?? '9.9.9' };
     },
   });
@@ -89,7 +90,7 @@ test('install by name takes no archive URL', async () => {
 test('list reports requiredSettings missing from the environment', async () => {
   const { repo, avail } = fakeRepo();
   const pluginDir = join(avail, 'tracker');
-  writeFileSync(join(pluginDir, 'manifest.json'), JSON.stringify({ name: 'tracker', version: '1.0.0', requiredSettings: ['FLOW_ASSIST_TEST_REQUIRED_VAR'] }));
+  writeFileSync(join(pluginDir, 'manifest.json'), JSON.stringify({ name: 'tracker', hostApi: HOST_API, version: '1.0.0', requiredSettings: ['FLOW_ASSIST_TEST_REQUIRED_VAR'] }));
   // Unset (empty) → reported missing.
   process.env.FLOW_ASSIST_TEST_REQUIRED_VAR = '';
   let list = await repo.list();
@@ -103,7 +104,7 @@ test('list reports requiredSettings missing from the environment', async () => {
 test('a built plugin carries its dependencies inside: none of them is reported missing', async () => {
   const { repo, avail } = fakeRepo();
   const dir = join(avail, 'tracker');
-  const manifest = { name: 'tracker', version: '1.0.0', deps: { '@acme/client': 'file:../client' } };
+  const manifest = { name: 'tracker', hostApi: HOST_API, version: '1.0.0', deps: { '@acme/client': 'file:../client' } };
   writeFileSync(join(dir, 'manifest.json'), JSON.stringify(manifest));
   // From source, with the dependency not there: it IS missing, and said so.
   mkdirSync(join(dir, 'src'), { recursive: true });

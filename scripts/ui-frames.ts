@@ -96,10 +96,10 @@ const board = (make: Make) => [make('boards', {
   name: 'boards',
   keycaps: () => ['c card'],
   components: {
-    view: (ft: any) => function View() {
-      const { width, height } = ft.useSurfaceSize();
-      return ft.h(ft.Box, { width, height, border: 'round', borderTitle: `Board ${width}×${height}`, flexDirection: 'column', paddingX: 1 },
-        ft.h(ft.Text, null, 'TODO  · ABC-1 Fix the login'), ft.h(ft.Text, null, 'DOING · ABC-2 Dock the chat'));
+    view: ({ ui, host }: any) => function View() {
+      const { width, height } = host.useSurfaceSize();
+      return ui.h(ui.Box, { width, height, border: 'round', borderTitle: `Board ${width}×${height}`, flexDirection: 'column', paddingX: 1 },
+        ui.h(ui.Text, null, 'TODO  · ABC-1 Fix the login'), ui.h(ui.Text, null, 'DOING · ABC-2 Dock the chat'));
     },
   },
 } as never)] as never[];

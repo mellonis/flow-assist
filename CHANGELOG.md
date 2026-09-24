@@ -5,18 +5,32 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **A plugin is given `{ ui, host }` instead of `ft` — host API 2.** **For plugin
+  authors — every plugin must change:** each hook of the shape (`components[slot]`,
+  `setup`, `keycaps`, `chatContext`, `chatSubject`, `afterWrite`) receives
+  `{ ui, host }`. `ui` holds what React and flowtty ship, unchanged: `h`, `useState`,
+  `useEffect`, `useRef`, `useInput`, `Box`, `Text`, `Markdown`, `Table`, `Link`,
+  `ScrollBox`, `Select`, `ListSelect`, `ListMultiSelect`, `Checkbox`. `host` holds what
+  the host implements: `services` (`host.services.showMessage(…)`, `pushLog`,
+  `chatLLM`, …), `store`, `config`, `keys`, `keyCap`, `useInputHandler`,
+  `useSurfaceSize`, `useTerminalSize`, `notify`, `viewRegistry`, `commandRegistry`,
+  `helpFor`, `copyToClipboard`, `pluginToken`, `hostApi`. There is no `ft`: `ft.h` is
+  `ui.h`, `ft.services` is `host.services`, and so on by that table. A plugin
+  declares `"hostApi": 2` and a `flowtty` range in its manifest; one that declares
+  neither reads as host API 1 and is not loaded. A plugin that is a single file has no
+  manifest, and so is not loaded either — make it a directory with a `manifest.json`.
 - **Plugins say what they are built for.** **For plugin authors:** `manifest.json`
   takes `hostApi` — the host API numbers the plugin works with, a number or a list —
   and `flowtty`, a semver range of the flowtty its screens need. A plugin this host
   cannot run is not loaded, and said so: `plugins ls` shows `incompatible: built for
   host API 1, host provides 2` or `incompatible: needs flowtty …, host has …`, the log
   has a line, and `plugins install` refuses it. No `hostApi` reads as 1; no `flowtty`
-  is loaded with a note. `ft.hostApi` is the number the host provides. The host API is
-  1; it goes up on any change to what the host gives plugins that a plugin would
-  break on, and this page says what to change each time.
-- **flowtty 1.0.0-alpha.26.** **For plugin authors:** `ft` now offers flowtty's
-  pickers — `ft.Select`, a dropdown (the host keeps the `<DialogHost>` its popup
-  needs), and `ft.ListSelect` / `ft.ListMultiSelect`, the inline lists. flowtty
+  is loaded with a note. `host.hostApi` is the number the host provides. It goes up
+  on any change to what the host gives plugins that a plugin would break on, and this
+  page says what to change each time.
+- **flowtty 1.0.0-alpha.26.** **For plugin authors:** `ui` offers flowtty's
+  pickers — `ui.Select`, a dropdown (the host keeps the `<DialogHost>` its popup
+  needs), and `ui.ListSelect` / `ui.ListMultiSelect`, the inline lists. flowtty
   renamed those lists in alpha.24 with no aliases: its old `Select` is `ListSelect`
   and its old `MultiSelect` is `ListMultiSelect`, props unchanged, and `Select` is
   now the dropdown — a plugin that took the old names from flowtty must rename them.
@@ -53,7 +67,7 @@ What each version of flow-assist brought, newest first. The version is the one i
   **`/fullscreen` is gone** — it is `/mode full`; a config that says
   `plugins.assistant.fullscreen: true` is read as `mode: full`.
   **For plugin authors:** a surface may be given less than the terminal.
-  `ft.useSurfaceSize()` and `ft.useTerminalSize()` report the plugin's side of the
+  `host.useSurfaceSize()` and `host.useTerminalSize()` report the plugin's side of the
   screen, and a modal laid out by them stays on it; a plugin that sizes itself by
   flowtty's own `useTerminalSize` still sees the whole terminal.
 - **Cache usage is no longer invisible.** `/context` now has a `last request: …

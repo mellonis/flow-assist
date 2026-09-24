@@ -9,7 +9,7 @@ export function hostVersion(): string {
 // fields. It goes up on any change a plugin built for the previous number would break
 // on; a plugin declares the numbers it works with (`hostApi` in its manifest.json) and
 // is not loaded under any other (src/loader/compat.ts, docs/plugins.md "Compatibility").
-export const HOST_API = 1;
+export const HOST_API = 2;
 
 // The flowtty the host runs and hands plugins: a plugin's manifest names the flowtty
 // versions it needs (`flowtty`, a semver range) and is checked against this. It must

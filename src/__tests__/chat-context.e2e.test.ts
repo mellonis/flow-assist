@@ -37,8 +37,8 @@ function guest(state: State) {
   return (make: Make) => [make('docs', {
     name: 'docs',
     ...(state.items !== undefined
-      ? { chatContext: (ft: unknown) => { state.seen.push(ft); if (state.throws) throw new Error('boom'); return state.items; } }
-      : { chatSubject: (ft: unknown) => { state.seen.push(ft); return state.subject ?? null; } }),
+      ? { chatContext: (api: unknown) => { state.seen.push(api); if (state.throws) throw new Error('boom'); return state.items; } }
+      : { chatSubject: (api: unknown) => { state.seen.push(api); return state.subject ?? null; } }),
     afterWrite: async () => {
       state.refreshes += 1;
       if (state.fail) throw new Error('backend down');
@@ -200,8 +200,8 @@ test("the chat's title is the items' labels, cut to the frame", async () => {
   const ui = await bootApp(new ScriptedModel(), 100, 28, guest(state));
   await ui.press('F');
   expect(title(ui.backend.lastFrame)).toContain('Flow Assist · Board: Frontend · Issue ABC-1');
-  // The plugin is asked with its OWN runtime — the one its services live on.
-  expect((state.seen.at(-1) as { pluginToken?: unknown } | undefined)?.pluginToken).toBeDefined();
+  // The plugin is asked with its OWN pair — the host part its services live on.
+  expect((state.seen.at(-1) as { host?: { pluginToken?: unknown } } | undefined)?.host?.pluginToken).toBeDefined();
   // A title longer than the frame stays on the border, cut.
   state.items = [{ label: 'L'.repeat(100), text: '' }, ISSUE];
   await ui.type('x');

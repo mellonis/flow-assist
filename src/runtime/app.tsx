@@ -1,5 +1,6 @@
-// Host App shell + two-phase input dispatch. `renderApp` builds the `ft` runtime
-// once and hands it to every plugin's `components[slot]` factory, then renders a
+// Host App shell + two-phase input dispatch. `renderApp` builds what a plugin is given,
+// `{ ui, host }` (src/runtime/plugin-api.ts), once per plugin and hands it to every
+// plugin's `components[slot]` factory and hooks, then renders a
 // minimal shell: a title bar, a content slot for the active view, the plugin
 // component overlay (each modal gates itself via its own state — closed modals
 // return null), and a bottom line (command line / toast message / footer hints).
@@ -9,12 +10,11 @@
 // take a second press are the App's own, before any of this: src/runtime/exit-keys.ts).
 
 import { pluginConfigs } from '../loader/tools.js';
-import { Box, Text, Markdown, Table, Link, Select, ListSelect, ListMultiSelect, DialogHost, render, useApp, useColorScheme, useInput, useTerminalSize, type CopyEvent } from '@flowtty/react';
+import { Box, Text, Markdown, Table, Link, ScrollBox, Select, ListSelect, ListMultiSelect, Checkbox, DialogHost, render, useApp, useColorScheme, useInput, useTerminalSize, type CopyEvent } from '@flowtty/react';
 import type { Backend } from '@flowtty/core';
 import { createContext, createElement as h, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { createFt } from './ft.js';
 import { HOST_API } from '../version.js';
-import type { FTRuntime } from './ft.js';
+import type { PluginApi, PluginHost, PluginUi } from './plugin-api.js';
 import { identityToken } from './plugin-identity.js';
 import { createServices } from './services.js';
 import type { HostServices } from './services.js';
@@ -106,7 +106,7 @@ export function twoPhaseDispatch(
 // ─── Host service bindings the App reassigns each render ───────────────────
 // `createServices` (services.ts) wires the generic slice with no-op stubs for
 // the React-bound members (showMessage/pushLog/notify/logs/view). The App
-// reassigns them per render so plugins reading `ft.services` see the live
+// reassigns them per render so plugins reading `host.services` see the live
 // channels (same object, mutated by reference).
 type ReactBoundServices = {
   showMessage: (msg: string) => void;
@@ -177,7 +177,7 @@ export { TITLE_ROWS, FOOTER_ROWS };
 // — its surface, its modals, the host's own furniture — is laid out as on a smaller
 // terminal; the chat is given its panel the same way. Unset: the whole terminal.
 // flowtty's own size context is not exported, so this reaches what a plugin reads
-// through `ft` (`ft.useTerminalSize`, `ft.useSurfaceSize`), not flowtty's hook itself.
+// through `host` (`host.useTerminalSize`, `host.useSurfaceSize`), not flowtty's hook itself.
 const AreaContext = createContext<{ width: number; height: number } | null>(null);
 export function useAreaSize(): { width: number; height: number } {
   const terminal = useTerminalSize();
@@ -192,7 +192,7 @@ export function useSurfaceSize(): { width: number; height: number } {
   return { width, height: Math.max(1, height - TITLE_ROWS - FOOTER_ROWS) };
 }
 
-// What the App reads of the chat (the assistant plugin publishes it on `ft.store.chat`;
+// What the App reads of the chat (the assistant plugin publishes it on `host.store.chat`;
 // its `setup` seeds the first three before anything renders).
 type ChatStore = {
   open?: boolean;
@@ -227,7 +227,7 @@ export function renderApp(
   { plugins, config, onExit, renders: _renders = {}, tools, toastMs, clipboardImage, pluginsNote, loadNotes = [], interactive, consoleLog }: RenderAppInput,
 ) {
   // Resolve config.theme into the full per-modal palette BEFORE anything reads it
-  // (createServices/ft and every renderer read `f.config.theme`): the base of the
+  // (createServices, the plugins' `host` and every renderer read `config.theme`): the base of the
   // terminal's scheme + user config.theme on top, then resolveModalPalettes lays the
   // per-modal palettes down and resolvePluginColors adds non-modal plugin palettes.
   // Without this the modals degrade to empty Flowtty defaults — no borders, no colors.
@@ -334,60 +334,66 @@ export function renderApp(
       notify();
     };
 
-    // The `ft` runtime is built ONCE per App (stable object). The useInputHandler
-    // closes over the SAME inputRegistryRef the App reads in dispatch, so plugin
-    // handlers registered during render land in the registry the App consumes.
-    const ftRef = useRef<FTRuntime | null>(null);
-    if (!ftRef.current) {
-      ftRef.current = createFt({
-        h: h as unknown as FTRuntime['h'],
-        Box,
-        Text,
-        Markdown,
-        Table,
-        Link,
-        Select,
-        ListSelect,
-        ListMultiSelect,
-        useState,
-        useEffect,
-        useRef,
-        useInput: useInput as unknown as FTRuntime['useInput'],
-        useTerminalSize: useAreaSize,
-        useSurfaceSize,
-        useInputHandler: (opts) => registerInputHandler(inputRegistryRef, opts),
-        store: {},
-        services: services as unknown as Record<string, unknown>,
-        config,
-        keys,
-        keyCap: (action: string) => bindingGlyph(keys[action]),
-        viewRegistry,
-        commandRegistry,
-        helpFor,
-        notify,
-        copyToClipboard: services.copyToClipboard,
-        hostApi: HOST_API,
-      });
+    // What every plugin is given is built ONCE per App (stable objects): `ui`, shared by
+    // every plugin, and the host's part, of which each plugin gets its own copy with its
+    // services view and identity (below). The useInputHandler closes over the SAME
+    // inputRegistryRef the App reads in dispatch, so plugin handlers registered during
+    // render land in the registry the App consumes.
+    const apiRef = useRef<{ ui: PluginUi; host: PluginHost } | null>(null);
+    if (!apiRef.current) {
+      apiRef.current = {
+        ui: {
+          h: h as unknown as PluginUi['h'],
+          useState: useState as unknown as PluginUi['useState'],
+          useEffect,
+          useRef,
+          Box,
+          Text,
+          Markdown,
+          Table,
+          Link,
+          ScrollBox,
+          Select,
+          ListSelect,
+          ListMultiSelect,
+          Checkbox,
+          useInput: useInput as unknown as PluginUi['useInput'],
+        },
+        host: {
+          hostApi: HOST_API,
+          useTerminalSize: useAreaSize,
+          useSurfaceSize,
+          useInputHandler: (opts) => registerInputHandler(inputRegistryRef, opts as Parameters<typeof registerInputHandler>[1]),
+          store: {},
+          services: services as unknown as Record<string, unknown>,
+          config,
+          keys,
+          keyCap: (action: string) => bindingGlyph(keys[action]),
+          viewRegistry,
+          commandRegistry,
+          helpFor,
+          notify,
+          copyToClipboard: services.copyToClipboard,
+        },
+      };
     }
-    const ft = ftRef.current;
+    const { ui: pluginUi, host: hostBase } = apiRef.current;
 
     // Mount each plugin's `components[slot]` factory EXACTLY once: memoize only
     // the component FUNCTION (stable identity → no remount, state preserved),
     // but render a fresh element each App render (so a modal re-renders on
     // `notify()` and re-reads shared mutable state like `services.logs`). Each
-    // plugin's factory receives its OWN `ft` copy with the plugin's HOST-ISSUED
-    // identity token bound in the closure (`identityToken(p.name)`), so the
-    // memory `plugin` scope resolves to the true owner — a caller or LLM cannot
+    // plugin's factory receives `{ ui, host }` with its OWN `host` — its services view
+    // and the HOST-ISSUED identity token bound in the closure (`identityToken(p.name)`),
+    // so the memory `plugin` scope resolves to the true owner — a caller or LLM cannot
     // forge this value.
-    // Each plugin's `pFt` (with its plugins-specific `services`), captured so the
-    // footer can call the plugin's `keycaps(pFt)` with the SAME runtime the plugin
-    // reads its live state from. Populated by `overlayComps` (which builds pFt);
-    // the object is a ref so it SURVIVES cached meme-md renders (the useMemo runs
-    // only on dep change, so a fresh `{}` each render would lose the capture and
-    // the footer would collapse even while a board is open). The pFt objects are
-    // stable, and the services/store they point at are mutated live, so re-reading
-    // them each render stays fresh.
-    const pFtMap = useRef<Record<string, unknown>>({}).current;
+    // Each plugin's pair, captured so the footer can call the plugin's `keycaps` with
+    // the SAME objects the plugin reads its live state from. Populated by
+    // `overlayComps`; a ref, so it SURVIVES renders where the useMemo does not run (a
+    // fresh `{}` each render would lose the capture and the footer would collapse even
+    // while a board is open). The pairs are stable, and the services/store they point
+    // at are mutated live, so re-reading them each render stays fresh.
+    const apiMap = useRef<Record<string, PluginApi>>({}).current;
     // The plugins whose `chatContext` threw and was logged — once each, for the run.
     const contextFailed = useRef(new Set<string>()).current;
     const overlayComps = useMemo(
@@ -395,7 +401,7 @@ export function renderApp(
         const comps: { Comp: () => unknown; key: string; plugin: PluginShape; surface: boolean }[] = [];
         for (const p of plugins) {
           // Host contract (AGENTS.md §shape): a plugin's `services` are exposed
-          // through `ft.services`, but the HOST must win on keys it owns — a
+          // through `host.services`, but the HOST must win on keys it owns — a
           // plugin's no-op `showMessage`/`openBrowser` must never clobber the real
           // toast/browser. Build a per-plugin view with the host services as the
           // prototype (host wins via lookup) and only the plugin-OWNED keys (the
@@ -411,11 +417,11 @@ export function renderApp(
           }
           // `setup` seeds the plugin's cross-component store BEFORE any component
           // mounts, so hooks reading the store during render don't throw.
-          const pFt = { ...ft, services: pServices, pluginToken: identityToken(p.name) };
-          pFtMap[p.name] = pFt;
-          p.setup?.(pFt);
+          const api: PluginApi = { ui: pluginUi, host: { ...hostBase, services: pServices, pluginToken: identityToken(p.name) } };
+          apiMap[p.name] = api;
+          p.setup?.(api);
           for (const [slot, factory] of Object.entries(p.components ?? {})) {
-            const Comp = factory(pFt);
+            const Comp = factory(api);
             // A plugin's SURFACE — its own full screen — is the slot named `view`, or
             // named after `shape.surface`. Everything else (modals, triggers, the
             // workspace that feeds them) is furniture and is always mounted.
@@ -425,7 +431,7 @@ export function renderApp(
         }
         return comps;
       },
-      [plugins, ft],
+      [plugins, pluginUi, hostBase],
     );
 
     // Every view renderer, the host's and each plugin's: the chat draws a tool's block
@@ -441,7 +447,7 @@ export function renderApp(
     // state, and a setState while the chat renders is React's "cannot update a
     // component while rendering a different component".
     (services as unknown as HostServices).chatContext = () =>
-      collectContext(plugins as Plugin[], (name) => pFtMap[name], (name, e) => {
+      collectContext(plugins as Plugin[], (name) => apiMap[name], (name, e) => {
         if (contextFailed.has(name)) return;
         contextFailed.add(name);
         const line = `[${name}] chatContext failed: ${(e as Error)?.message ?? String(e)}`;
@@ -449,10 +455,10 @@ export function renderApp(
       });
     (services as unknown as HostServices).afterWrite = async () => {
       for (const p of plugins) {
-        const pFt = pFtMap[p.name];
-        if (!pFt || !(p as Plugin).afterWrite) continue;
+        const api = apiMap[p.name];
+        if (!api || !(p as Plugin).afterWrite) continue;
         try {
-          await (p as Plugin).afterWrite!(pFt);
+          await (p as Plugin).afterWrite!(api);
         } catch (e) {
           (services as unknown as ReactBoundServices).pushLog(`[${p.name}] refresh after a write failed: ${(e as Error).message}`);
         }
@@ -465,12 +471,12 @@ export function renderApp(
     // view (the host renders no surface — a tracker plugin supplies the views).
     // All feedback lands in the command-line toast.
     const setHelpModalOpen = (open: boolean): void => {
-      const h = (ft.store as { help?: { setHelpModal?: (o: boolean) => void } } | undefined)?.help;
+      const h = (hostBase.store as { help?: { setHelpModal?: (o: boolean) => void } } | undefined)?.help;
       if (h?.setHelpModal) h.setHelpModal(open);
       notify();
     };
     const toggleKeycaps = (arg: string): void => {
-      const k = (ft.store as { keycaps?: { toggle?: (a: string) => void } } | undefined)?.keycaps;
+      const k = (hostBase.store as { keycaps?: { toggle?: (a: string) => void } } | undefined)?.keycaps;
       if (k?.toggle) k.toggle(arg);
     };
     const runConfigCmd = (arg: string): void => {
@@ -586,7 +592,7 @@ export function renderApp(
           const arg = rest.join(' ');
           // The command context carries the REAL closures (F1): setView/back
           // mutate ui state + notify, setHelpModal opens core's help modal via
-          // ft.store.help, runConfigCommand/runCacheCommand route to the
+          // host.store.help, runConfigCommand/runCacheCommand route to the
           // config/cache handlers. Before, most were no-ops/absent, so
           // `:help`/`:config`/`:back`/`:cache`/`:view` were silent.
           const ctx = {
@@ -600,11 +606,11 @@ export function renderApp(
             setHelpModal: (open: boolean) => setHelpModalOpen(open),
             toggleKeycaps: (a: string) => toggleKeycaps(a),
             // `:ask`/`:chat` route to the assistant plugin's live `openChat`,
-            // published on the shared ft.store.chat by its ChatModal (the same
+            // published on the shared host.store.chat by its ChatModal (the same
             // bridge pattern setHelpModal uses for the help modal). Absent until
             // the chat surface mounts — the optional chaining makes it a no-op,
             // exactly like the other not-yet-mounted plugin channels.
-            openChat: (t?: string) => (ft.store as { chat?: { openChat?: (t?: string) => void } } | undefined)?.chat?.openChat?.(t),
+            openChat: (t?: string) => (hostBase.store as { chat?: { openChat?: (t?: string) => void } } | undefined)?.chat?.openChat?.(t),
           };
           if (cmd?.run) {
             try {
@@ -615,7 +621,7 @@ export function renderApp(
               // services (mutated live by its mount) so tracker commands reach real
               // nav/modals; the host base closures stay on top (name collisions win
               // for the host — `showMessage` stays the toast, not a plugin no-op).
-              const ctxForCmd = commandContextFor(cmd, ctx, pFtMap as never);
+              const ctxForCmd = commandContextFor(cmd, ctx, apiMap as never);
               cmd.run(ctxForCmd as never, arg);
             } catch {
               // A failing host command must not crash the shell.
@@ -694,7 +700,7 @@ export function renderApp(
       }
       // `x` flushes the cache only while the footer offers it — while a plugin that
       // keeps something there is on screen. `:clear` works from anywhere.
-      if (isKey(keys.clearCache, name) && cacheInPlay(plugins, pFtMap)) {
+      if (isKey(keys.clearCache, name) && cacheInPlay(plugins, apiMap)) {
         services.clearCache();
         toast.showMessage('Cache cleared');
         return true;
@@ -717,7 +723,7 @@ export function renderApp(
       (services as unknown as HostServices).armedHint = armHint(next);
     };
     useEffect(() => () => { if (armTimer.current) clearTimeout(armTimer.current); }, []);
-    const chatStore = () => (ft.store as { chat?: ChatStore } | undefined)?.chat;
+    const chatStore = () => (hostBase.store as { chat?: ChatStore } | undefined)?.chat;
 
     // The host's own keys — the exit keys, Ctrl+] and the collapse key, where a press
     // landed — are heard FIRST, before any component on screen: `HostKeysFirst` is the
@@ -779,10 +785,7 @@ export function renderApp(
       const k = key as unknown as InputKey;
       // A handled key is followed by a redraw. A plugin keeps its state in one component
       // and draws it in a sibling; a React setState in the first re-renders only the
-      // first, and the sibling redraws when the HOST does. That took an explicit
-      // `ft.notify()` in every setter — and a setter without one (the tracker's panel
-      // cursor) froze on screen until something else happened to notify. The host
-      // guarantees it instead: one re-render per handled key, batched by React with
+      // first, and the sibling redraws when the HOST does. The host guarantees it: one re-render per handled key, batched by React with
       // whatever the handler set.
       // `twoPhaseDispatch`'s true means "handled — redraw", not "consume": the chat
       // answers true for every key, PgUp and the wheel included, which the
@@ -796,9 +799,9 @@ export function renderApp(
     // line (command line / toast message / footer hints).
     // Footer hints (spec: plugin footer hints + universal openBrowser): host base
     // (`: commands`, plus `quit` if config binds it to a key) + each plugin's
-    // non-empty `keycaps(ft)`. A plugin returns `[]` when its surface is inactive,
+    // non-empty `keycaps({ ui, host })`. A plugin returns `[]` when its surface is inactive,
     // so an empty screen collapses to `: commands`. `x flush cache` joins only when a plugin context is
-    // active (content present). The per-plugin `pFt` comes from `pFtMap`, built
+    // active (content present). Each plugin's pair comes from `apiMap`, built
     // by `overlayComps`; the plugin's services/store are mutated live, so reading
     // them here each render stays fresh.
     const { width: termWidth, height: termHeight } = useTerminalSize();
@@ -828,11 +831,11 @@ export function renderApp(
     // plugin's side — the title bar in the same colour.
     const pluginFocused = !!dock && !dock.collapsed && chat?.focus === 'plugin';
     const chatAccent = ((config.theme as Theme | undefined)?.modals as Record<string, { accent?: string }> | undefined)?.chat?.accent;
-    const hints = composeFooterHints(plugins, pFtMap, keys).join(' · ');
+    const hints = composeFooterHints(plugins, apiMap, keys).join(' · ');
     const surfaceActive = (p: PluginShape): boolean => {
       const kc = (p as Plugin).keycaps;
-      const pFt = pFtMap[p.name];
-      return !kc || !pFt ? true : kc(pFt).length > 0;
+      const api = apiMap[p.name];
+      return !kc || !api ? true : kc(api).length > 0;
     };
     const atHome = !overlayComps.some((c) => c.surface && surfaceActive(c.plugin));
 
@@ -891,7 +894,7 @@ export function renderApp(
       // nothing from them.
       atHome ? h(Box, { height: 1 }) : h(Box, { padding: 1, selectable: false }, h(Text, { bold: true, ...(pluginFocused ? { color: chatAccent } : {}) }, title)),
       // A plugin is a guest: its surface takes the screen only while the plugin says
-      // its context is active — `keycaps(ft)` non-empty, which is already the
+      // its context is active — `keycaps` non-empty, which is already the
       // contract ("returns [] when its surface is inactive"). Until then the screen
       // is the host's own. A plugin with no `keycaps` cannot say, and keeps the old
       // behaviour of being shown always.
@@ -941,7 +944,7 @@ export function renderApp(
   // A drag over the screen selects and, on release, copies (flowtty's copy-on-select;
   // the backend has the mouse on unless `ui.mouse` is false). `onCopy` is read through
   // `services`, whose toast the App rebinds on every render.
-  // A <DialogHost> at the root: a plugin's `ft.Select` opens its popup through it (a
+  // A <DialogHost> at the root: a plugin's `ui.Select` opens its popup through it (a
   // floating dialog anchored under the field, in frame cells — which is why it sits at
   // the frame's origin). While a popup is open every key is the popup's: the host's
   // whole key path — the App's one `useInput` — is below the host, and so muted.

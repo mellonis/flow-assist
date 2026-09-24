@@ -13,11 +13,11 @@ const cachingGuest = (state: { open: boolean }) => (make: any) => [make('boards'
   keys: { boardPicker: 'c' },
   keycaps: () => (state.open ? ['c board'] : []),
   components: {
-    furniture: (ft: any) => function Furniture() {
-      ft.useInputHandler({ mode: 'consume', priority: () => 10, handler: (key: { name: string }) => { if (key.name === 'c') { state.open = !state.open; ft.notify(); return true; } return false; } });
+    furniture: (api: any) => function Furniture() {
+      api.host.useInputHandler({ mode: 'consume', priority: () => 10, handler: (key: { name: string }) => { if (key.name === 'c') { state.open = !state.open; api.host.notify(); return true; } return false; } });
       return null;
     },
-    view: (ft: any) => function View() { return ft.h(ft.Text, null, 'BOARD'); },
+    view: (api: any) => function View() { return api.ui.h(api.ui.Text, null, 'BOARD'); },
   },
 })];
 
@@ -82,11 +82,11 @@ test('x flushes the cache AND what is on screen is loaded again', async () => {
     name: 'boards',
     keycaps: () => ['c board'],
     components: {
-      view: (ft: any) => function View() {
-        const [loads, setLoads] = ft.useState(0);
-        const epoch = (ft.services as { cacheEpoch: number }).cacheEpoch;
-        ft.useEffect(() => { setLoads((n: number) => n + 1); }, [epoch]);
-        return ft.h(ft.Text, null, `board loaded ${loads}×`);
+      view: (api: any) => function View() {
+        const [loads, setLoads] = api.ui.useState(0);
+        const epoch = (api.host.services as { cacheEpoch: number }).cacheEpoch;
+        api.ui.useEffect(() => { setLoads((n: number) => n + 1); }, [epoch]);
+        return api.ui.h(api.ui.Text, null, `board loaded ${loads}×`);
       },
     },
   })];

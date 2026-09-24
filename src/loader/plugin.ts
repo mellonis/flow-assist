@@ -28,19 +28,19 @@ export type PluginShape = {
   // overridable by the person via config.plugins.<modal>.colors.
   modalColors?: Record<string, Record<string, string>>;
   configSchema?: unknown;
-  components?: Record<string, (ft: unknown) => unknown>;
+  components?: Record<string, (api: unknown) => unknown>;
   tools?: unknown[];
   services?: Record<string, unknown>;
   aiTools?: unknown[];
-  // Context-aware footer hints: a function of `ft` returning the `<key>: <label>`
+  // Context-aware footer hints: a function of `{ ui, host }` returning the `<key>: <label>`
   // hints for the plugin's CURRENT context, or `[]` when its surface is inactive.
   // The host footer = its base (`: commands`) + concat of each plugin's
-  // non-empty `keycaps(ft)`. Optional — absent/null means `() => []`.
-  // The key in a hint is `ft.keyCap('<action>')` — the cap of what the action is
+  // non-empty `keycaps`. Optional — absent/null means `() => []`.
+  // The key in a hint is `host.keyCap('<action>')` — the cap of what the action is
   // bound to NOW — never a letter written in the plugin: the person can remap it,
   // and the hint would then name a key that does nothing. `''` means unbound: show
   // no hint for it.
-  keycaps?: (ft: unknown) => string[];
+  keycaps?: (api: unknown) => string[];
   // The key actions that lead INTO the plugin from the host's start screen (e.g.
   // `['boardPicker']`). The start screen names these beside the plugin; without
   // `entry` it lists every key the plugin binds.
@@ -52,23 +52,23 @@ export type PluginShape = {
   // offers "flush cache" only while such a plugin is showing hints; a plugin with
   // nothing in the cache says `false`, so its hint does not advertise one.
   usesCache?: boolean;
-  // A per-plugin setup hook the host calls ONCE with the plugin's `ft` before any
+  // A per-plugin setup hook the host calls ONCE with the plugin's `{ ui, host }` before any
   // of its components mount. A plugin uses it to seed its cross-component store
-  // channel (e.g. tracker's `createTrackerStore(ft)`), so hooks that read the
+  // channel (e.g. tracker's `createTrackerStore(host)`), so hooks that read the
   // store during render never see an uninitialized one.
-  setup?: (ft: unknown) => unknown;
+  setup?: (api: unknown) => unknown;
   // What the plugin's screens show right now, as items the model reads and the chat's
   // title names: `{ label: 'Board: Frontend', text: 'filter: mine · cursor on ABC-12' }`.
   // Asked before every request; the host sanitizes and caps them and frames them as
   // data (docs/plugins.md, "The chat's two hooks"). `[]` / `null` — nothing on screen.
-  chatContext?: (ft: unknown) => ContextItem[] | null | undefined;
+  chatContext?: (api: unknown) => ContextItem[] | null | undefined;
   // Deprecated — `chatContext` replaces it: one short id of what the screen is about,
   // read as a single item with no text. Ignored when the plugin has `chatContext`.
-  chatSubject?: (ft: unknown) => string | null | undefined;
+  chatSubject?: (api: unknown) => string | null | undefined;
   // Called after a chat turn in which a write tool was confirmed and applied, so a
   // plugin reloads what it shows — otherwise the screen keeps the text from before
   // the write. May return a promise; a failure is logged.
-  afterWrite?: (ft: unknown) => unknown;
+  afterWrite?: (api: unknown) => unknown;
 };
 
 // A plugin command. The host prefixes the command name at load time; the base
@@ -103,18 +103,18 @@ export interface Plugin {
   colors?: Record<string, string>;
   modalColors?: Record<string, Record<string, string>>;
   configSchema?: unknown;
-  components?: Record<string, (ft: unknown) => unknown>;
+  components?: Record<string, (api: unknown) => unknown>;
   tools?: unknown[];
   services?: Record<string, unknown>;
   aiTools?: unknown[];
-  keycaps?: (ft: unknown) => string[];
+  keycaps?: (api: unknown) => string[];
   entry?: string[];
   description?: string;
   usesCache?: boolean;
-  setup?: (ft: unknown) => unknown;
-  chatContext?: (ft: unknown) => ContextItem[] | null | undefined;
-  chatSubject?: (ft: unknown) => string | null | undefined;
-  afterWrite?: (ft: unknown) => unknown;
+  setup?: (api: unknown) => unknown;
+  chatContext?: (api: unknown) => ContextItem[] | null | undefined;
+  chatSubject?: (api: unknown) => string | null | undefined;
+  afterWrite?: (api: unknown) => unknown;
 }
 
 export type MakeFactoryConfig = {

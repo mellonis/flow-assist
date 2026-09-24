@@ -183,7 +183,7 @@ interface Completions {
   matches: string[];
   sel: number;
 }
-// The theme config subtree (`f.config.theme`) — a free-form object. Only `modals`
+// The theme config subtree (`host.config.theme`) — a free-form object. Only `modals`
 // (the per-surface palette) and a few flat keys are read. Typed loosely so a missing/
 // deep-absent key degrades to Flowtty defaults instead of throwing on `undefined`.
 interface Theme {
@@ -447,7 +447,7 @@ export const ASSISTANT_MARK = 'ƒ';
 // (`keyGlyph`), so a key reads the same here, in the footer and on the keycaps panel
 // — the hints used to mix `⏎`, `Enter` and `Space` for keys drawn elsewhere as ⏎ ␣.
 // These keys are the chat's own and are not remappable; an action that IS bound
-// through `config.keys` must be drawn with `ft.keyCap(action)` instead.
+// through `config.keys` must be drawn with `host.keyCap(action)` instead.
 const CAP = {
   enter: keyGlyph('return'),
   esc: keyGlyph('escape'),

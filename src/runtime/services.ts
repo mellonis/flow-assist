@@ -1,5 +1,5 @@
 // Host services container. `createServices` wires the generic host services into
-// a single `HostServices` object that plugins read via `ft.services`. The generic
+// a single `HostServices` object that plugins read via `host.services`. The generic
 // slice (cache/log/memory/config/chatLLM/compactChat/openBrowser/copyToClipboard)
 // is initialized here, BEFORE plugins load; the React-bound slice
 // (showMessage/pushLog/notify/logs/view) is bound by the App on every render
@@ -31,7 +31,7 @@ export interface MemoryService {
   filePath(): string;
 }
 
-// The service bundle handed to plugins as `ft.services`. The React-bound members
+// The service bundle handed to plugins as `host.services`. The React-bound members
 // (showMessage/pushLog/notify/logs/view) are mutable — the App reassigns them
 // each render so they stay fresh; the rest is stable.
 export interface HostServices {
@@ -59,7 +59,7 @@ export interface HostServices {
   // Counts cache flushes. A flush empties the cache but changes nothing on screen — the
   // board and the issue that are open keep showing what they loaded — so `x` looked
   // like it did nothing. A plugin that draws cached data watches this number
-  // (`useEffect(..., [ft.services.cacheEpoch])`) and reloads what it is showing.
+  // (`useEffect(..., [host.services.cacheEpoch])`) and reloads what it is showing.
   cacheEpoch: number;
   pushLog: (entry: string) => void;
   notify: () => void;

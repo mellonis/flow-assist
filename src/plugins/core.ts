@@ -5,6 +5,7 @@
 
 import type { Make } from '../loader/plugin.js';
 import type { Plugin } from '../loader/plugin.js';
+import type { PluginApi } from '../runtime/plugin-api.js';
 
 // The app-glue dispatched to by core commands. All members are optional because a
 // plugin command may be merged with a base command of the same name, or the host
@@ -18,25 +19,6 @@ interface CoreCtx {
   runConfigCommand?(arg: string): unknown;
   runCacheCommand?(arg: string): unknown;
   setHelpModal?(open: boolean): void;
-}
-
-// The `ft` runtime the help component receives (typed by shape — provided by the
-// runtime). Only the members the component touches.
-interface CoreFT {
-  useTerminalSize(): { width: number; height: number };
-  useState<T>(init: T): [T, (v: T | ((prev: T) => T)) => void];
-  useInputHandler(opts: {
-    mode: 'consume';
-    priority: (ui: { cmdOpen?: boolean }) => number;
-    handler: (key: { name: string }) => boolean;
-  }): void;
-  store: Record<string, unknown>;
-  viewRegistry: Record<string, unknown>;
-  config: Record<string, unknown>;
-  services: Record<string, unknown>;
-  helpFor(cmd: unknown): string;
-  commandRegistry: unknown;
-  keys: Record<string, string[]>;
 }
 
 type BuildCoreParams = {
@@ -69,12 +51,12 @@ export function buildCorePlugin({ renders, config, make }: BuildCoreParams): Plu
       // Help — a self-sufficient modal on core: owns its state and input. Opened by
       // the :help command (via ctx.setHelpModal), closed by Esc/Enter/q/l. It is a
       // consumer: priority 100 when open, 0 otherwise.
-      help: (ft) => {
-        const f = ft as CoreFT;
+      help: (api) => {
+        const { ui, host } = api as PluginApi;
         return function HelpModal() {
-          const { width, height } = f.useTerminalSize();
-          const [helpModal, setHelpModal] = f.useState(false);
-          f.useInputHandler({
+          const { width, height } = host.useTerminalSize();
+          const [helpModal, setHelpModal] = ui.useState(false);
+          host.useInputHandler({
             mode: 'consume',
             priority: (ui) => ui.cmdOpen ? 0 : (helpModal ? 100 : 0),
             handler: (key) => {
@@ -84,9 +66,9 @@ export function buildCorePlugin({ renders, config, make }: BuildCoreParams): Plu
               return true;
             },
           });
-          f.store.help = { setHelpModal, helpModal };
+          host.store.help = { setHelpModal, helpModal };
           if (!helpModal) return null;
-          return (f.viewRegistry.help as (p: Record<string, unknown>) => unknown)({ width, height, theme: f.config.theme, helpOpen: helpModal, commands: f.commandRegistry, keys: f.keys });
+          return (host.viewRegistry.help as (p: Record<string, unknown>) => unknown)({ width, height, theme: host.config.theme, helpOpen: helpModal, commands: host.commandRegistry, keys: host.keys });
         };
       },
       // Reminder — a centered, top-most NON-blocking banner (like keycaps), driven
@@ -95,13 +77,13 @@ export function buildCorePlugin({ renders, config, make }: BuildCoreParams): Plu
       // it never hijacks the keyboard — every other key falls through to whatever
       // was active. Priority 200 beats the modals (100) so it truly sits on top;
       // the renderer uses zIndex 20 (keycaps is 10) for the same reason.
-      reminder: (ft) => {
-        const f = ft as CoreFT;
-        const sx = f.services as { reminder?: string | null; dismissReminder?: () => void };
+      reminder: (api) => {
+        const { ui, host } = api as PluginApi;
+        const sx = host.services as { reminder?: string | null; dismissReminder?: () => void };
         return function Reminder() {
-          const { width, height } = f.useTerminalSize();
+          const { width, height } = host.useTerminalSize();
           const active = !!sx.reminder;
-          f.useInputHandler({
+          host.useInputHandler({
             mode: 'consume',
             priority: () => (active ? 200 : 0),
             handler: (key) => {
@@ -114,7 +96,7 @@ export function buildCorePlugin({ renders, config, make }: BuildCoreParams): Plu
             },
           });
           if (!active) return null;
-          return (f.viewRegistry.reminder as (p: Record<string, unknown>) => unknown)({ width, height, theme: f.config.theme, text: sx.reminder });
+          return (host.viewRegistry.reminder as (p: Record<string, unknown>) => unknown)({ width, height, theme: host.config.theme, text: sx.reminder });
         };
       },
     },

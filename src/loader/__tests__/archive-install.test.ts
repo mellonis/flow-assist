@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path';
 import { installPluginArchive, isArchiveSource } from '../archive-install';
 import { createPluginRepo } from '../repo';
 import { packPlugin } from '../../../scripts/publish';
+import { HOST_API } from '../../version';
 
 function dirs() {
   const root = mkdtempSync(join(tmpdir(), 'fa-archive-'));
@@ -18,7 +19,7 @@ function dirs() {
 function pluginTree(name: string, manifest: object, extra: Record<string, string> = {}): string {
   const root = mkdtempSync(join(tmpdir(), 'fa-archive-src-'));
   mkdirSync(join(root, name), { recursive: true });
-  writeFileSync(join(root, name, 'manifest.json'), JSON.stringify(manifest));
+  writeFileSync(join(root, name, 'manifest.json'), JSON.stringify({ hostApi: HOST_API, ...manifest }));
   writeFileSync(join(root, name, 'index.ts'), 'export default () => null;\n');
   for (const [file, content] of Object.entries(extra)) {
     mkdirSync(join(root, file, '..'), { recursive: true });

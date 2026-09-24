@@ -85,20 +85,20 @@ export function findIn(registry: Command[], name: string): Command | null {
 // base `ctx` carries only host-owned closures (showMessage/setView/back/…), so a
 // plugin command that forwards to one of its own services would find no such
 // method and silently no-op. Here we extend the base ctx with the OWNING
-// plugin's own-key services (the per-plugin `pFt.services` the plugin's own
+// plugin's own-key services (the per-plugin `host.services` the plugin's own
 // mount mutates). The host stays agnostic — it never names a plugin method; it
 // just spreads them.
 //
 // Precedence: base ctx wins over plugin services (`...services, ...baseCtx`), so
 // a plugin's no-op `showMessage` never shadows the host's real toast. A base
-// command (no ':') or a plugin with no mounted pFt gets the base ctx unchanged.
+// command (no ':') or a plugin not mounted yet gets the base ctx unchanged.
 export function commandContextFor(
   cmd: Command,
   baseCtx: Record<string, unknown>,
-  pFtMap: Record<string, { services?: Record<string, unknown> }> = {},
+  apiMap: Record<string, { host?: { services?: Record<string, unknown> } }> = {},
 ): Record<string, unknown> {
   const pluginName = cmd.name.includes(':') ? cmd.name.split(':')[0] : null;
-  const services = pluginName ? pFtMap[pluginName]?.services : undefined;
+  const services = pluginName ? apiMap[pluginName]?.host?.services : undefined;
   return services ? { ...services, ...baseCtx } : baseCtx;
 }
 
@@ -111,27 +111,27 @@ export function helpFor(registry: Command[]): string {
 // The host footer composition (spec: plugin footer hints + universal openBrowser).
 // The footer = host base (`: commands`, and `quit` only if config binds it to a
 // key — by default it is the `:quit` command; derived from `keys` so a user remap is
-// respected) + each plugin's non-empty `keycaps(ft)`. A plugin's `keycaps` returns
+// respected) + each plugin's non-empty `keycaps({ ui, host })`. A plugin's `keycaps` returns
 // `[]` when its surface is inactive, so an empty screen collapses to `: commands`. `x flush cache` joins only when a plugin
-// context is active (content present). `pFtMap[plugin.name]` is each plugin's
+// context is active (content present). `apiMap[plugin.name]` is each plugin's
 // runtime (from the App's overlayComps), which `keycaps` reads for live state;
-// a plugin whose `pFt` is not mounted yet (or that declares no keycaps) simply
+// a plugin whose pair is not built yet (or that declares no keycaps) simply
 // contributes nothing. Pure — no imports beyond the plugin shape.
 // Is a plugin that keeps data in the cache on screen right now? One answer for the
 // footer's `x flush cache` hint AND for the key itself: a key acts where it is shown
 // and nowhere else. (`x` used to flush the cache from the start screen too, where
 // nothing said it would.)
-export function cacheInPlay(plugins: PluginShape[] = [], pFtMap: Record<string, unknown> = {}): boolean {
+export function cacheInPlay(plugins: PluginShape[] = [], apiMap: Record<string, unknown> = {}): boolean {
   return plugins.some((p) => {
     const kc = (p as Plugin).keycaps;
-    const pFt = pFtMap[p.name];
-    return (p as Plugin).usesCache !== false && !!kc && !!pFt && kc(pFt).length > 0;
+    const api = apiMap[p.name];
+    return (p as Plugin).usesCache !== false && !!kc && !!api && kc(api).length > 0;
   });
 }
 
 export function composeFooterHints(
   plugins: PluginShape[] = [],
-  pFtMap: Record<string, unknown> = {},
+  apiMap: Record<string, unknown> = {},
   keys: Record<string, string[]> = {},
 ): string[] {
   // Bindings are drawn as CAPS (`bindingGlyph`), and an unbound action (config can
@@ -145,13 +145,13 @@ export function composeFooterHints(
   const shown = plugins
     .map((p) => {
       const kc = (p as Plugin).keycaps;
-      const pFt = pFtMap[p.name];
-      return { caches: (p as Plugin).usesCache !== false, hints: kc && pFt ? kc(pFt) : [] };
+      const api = apiMap[p.name];
+      return { caches: (p as Plugin).usesCache !== false, hints: kc && api ? kc(api) : [] };
     })
     .filter((s) => s.hints.length);
   // "flush cache" is offered only while a plugin that keeps something in the cache
   // is on screen — the chat's own hint must not advertise a cache it never fills.
-  if (cacheInPlay(plugins, pFtMap)) hints.push(...hint('clearCache', 'flush cache'));
+  if (cacheInPlay(plugins, apiMap)) hints.push(...hint('clearCache', 'flush cache'));
   return [...hints, ...shown.flatMap((s) => s.hints)];
 }
 
@@ -248,12 +248,12 @@ export function triggerOpenable(ui: UiState, isOpen: boolean, extraGate: (ui: Ui
   return extraGate(ui);
 }
 
-type TriggerFT = {
+type TriggerHost = {
   useInputHandler: (opts: { mode: string; priority: (ui: UiState) => number; handler: (key: InputKey, ui: UiState) => boolean }) => void;
   keys?: Record<string, string | string[]>;
 };
 type AddTriggerArgs = {
-  ft: TriggerFT;
+  host: TriggerHost;
   action: string;
   isOpen: () => boolean;
   open: () => void;
@@ -265,12 +265,12 @@ type AddTriggerArgs = {
 // opens, and consumes (true). Priority 10 — below an open modal (100), above the
 // residual monolith (0). So the host no longer knows "f opens filters" — the
 // plugin registers its own open key itself.
-export function addTrigger({ ft, action, isOpen, open, extraGate = () => true }: AddTriggerArgs): void {
-  ft.useInputHandler({
+export function addTrigger({ host, action, isOpen, open, extraGate = () => true }: AddTriggerArgs): void {
+  host.useInputHandler({
     mode: 'consume',
     priority: (ui) => (triggerOpenable(ui, isOpen(), extraGate) ? 10 : 0),
     handler: (key, ui) => {
-      if (triggerOpenable(ui, isOpen(), extraGate) && isKey(ft.keys?.[action] ?? [], key.name ?? '')) {
+      if (triggerOpenable(ui, isOpen(), extraGate) && isKey(host.keys?.[action] ?? [], key.name ?? '')) {
         open();
         return true;
       }

@@ -1,7 +1,7 @@
 // Plugin «assistant»: a chat with the LLM about the current task. A self-sufficient
 // modal: owns the messages, input, streaming and scroll. THE HOST does the network
-// (ft.services.chatLLM) — the plugin never touches it; the endpoint is read from
-// ft.config.ai through `llmOpts` (provider, baseUrl, model, the token's variable).
+// (host.services.chatLLM) — the plugin never touches it; the endpoint is read from
+// host.config.ai through `llmOpts` (provider, baseUrl, model, the token's variable).
 //   - what the person's screens show and the refresh after a write are asked of the
 //     plugins through two generic hooks (`services.chatContext` / `services.afterWrite`,
 //     see AGENTS.md, plugin contract) — the chat names no plugin's data.
@@ -47,6 +47,7 @@ import {
 import type { Make } from '../loader/plugin.js';
 import { decodeBangLine, encodeBangLine, keptInHistory, pushHistory, type HistoryCommand } from '../assistant/prompt-history.js';
 import type { Plugin } from '../loader/plugin.js';
+import type { PluginApi } from '../runtime/plugin-api.js';
 
 // Slash-commands of the chat — a single source for runChatCommand and Tab-completion.
 // `/analyze` is a tracker slash command and is removed.
@@ -147,42 +148,9 @@ interface AssistantCtx {
   openChat?(text?: string): unknown;
 }
 
-// The `ft` runtime the chat component receives (typed by shape, loose where the
-// runtime is not yet present). `services`/`store`/`viewRegistry`/`config` are
-// opaque so any member access type-checks — their exact members are the
-// runtime's concern.
-interface AssistantFT {
-  useTerminalSize(): { width: number; height: number };
-  useState<T>(init: T): [T, (v: T | ((prev: T) => T)) => void];
-  useRef<T>(init: T): { current: T };
-  useEffect(fn: () => void | (() => void), deps?: unknown[]): void;
-  // `key`/`ui` are typed `any` so the same interface is structurally compatible with
-  // the host's `TriggerFT` (used by `addTrigger`) AND accepts the direct
-  // `(key) => boolean` handlers the component passes — the runtime is the
-  // real source of these shapes.
-  useInputHandler(opts: {
-    mode: string;
-    priority: (ui: any) => number;
-    handler: (key: any, ui: any) => boolean;
-    // The chat's conversation is the one handler that reads the mouse buttons.
-    mouse?: boolean;
-  }): void;
-  store: Record<string, unknown>;
-  services: Record<string, unknown>;
-  viewRegistry: Record<string, unknown>;
-  config: Record<string, unknown>;
-  notify(): void;
-  keys: Record<string, string | string[]>;
-  // The plugin's own identity token, a Symbol the HOST issued and bound in the
-  // mount closure. Relayed into toolCtx so the memory tool's `plugin` scope
-  // resolves to the true owner (the assistant). Unforgeable: only the host maps
-  // tokens to names, so the assistant can present itself but never impersonate.
-  pluginToken?: symbol;
-}
-
 // config.plugins.assistant, as the chat reads it.
-const assistantConfig = (ft: unknown) =>
-  ((ft as { config?: { plugins?: Record<string, Record<string, unknown> | undefined> } }).config?.plugins?.assistant ?? {}) as Record<string, unknown>;
+const assistantConfig = (host: { config?: unknown }) =>
+  ((host as { config?: { plugins?: Record<string, Record<string, unknown> | undefined> } }).config?.plugins?.assistant ?? {}) as Record<string, unknown>;
 
 type BuildAssistantParams = {
   renders: Record<string, unknown>;
@@ -241,8 +209,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
     // when background results landed meanwhile, how many are waiting. Open, the
     // chat says its own keys inside its frame.
     usesCache: false,
-    keycaps: (ft) => {
-      const p = ft as { keyCap?: (action: string) => string; store?: { chat?: { open?: boolean; unread?: number; layout?: ChatMode; focus?: string; footerStatus?: boolean } } };
+    keycaps: (api) => {
+      const p = (api as PluginApi).host as { keyCap?: (action: string) => string; store?: { chat?: { open?: boolean; unread?: number; layout?: ChatMode; focus?: string; footerStatus?: boolean } } };
       const chat = p.store?.chat;
       // The collapsed chat's status is on the footer row and already says `^] chat`:
       // only what it does not say — the unread count — is left to add.
@@ -261,79 +229,80 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
     views: { chat: renders.chat },
     // Where the chat is, before anything renders: the App lays the screen out by it on
     // its very first frame, before the chat has published anything of its own.
-    setup: (ft) => {
-      const store = (ft as { store: Record<string, any> }).store;
-      store.chat = { ...(store.chat ?? {}), mode: chatModeOf(assistantConfig(ft)), open: false, focus: 'plugin' };
+    setup: (api) => {
+      const { host } = api as PluginApi;
+      const store = host.store as Record<string, any>;
+      store.chat = { ...(store.chat ?? {}), mode: chatModeOf(assistantConfig(host)), open: false, focus: 'plugin' };
     },
     components: {
-      chat: (ft) => {
-        const f = ft as AssistantFT;
+      chat: (api) => {
+        const { ui, host } = api as PluginApi;
         return function ChatModal() {
           // The room the chat has: its panel when docked, the terminal otherwise (the App
           // gives each side of the screen its own area).
-          const { width, height } = f.useTerminalSize();
+          const { width, height } = host.useTerminalSize();
           // Open: shown — a window, the whole terminal, or a panel expanded. A docked
           // chat that is not open is COLLAPSED: out of the way on the right (its turn's
           // status on the plugin's bottom row), one row at the bottom.
-          const [open, setOpen] = f.useState(false);
+          const [open, setOpen] = ui.useState(false);
           // Where the chat is (src/runtime/panel-layout.ts): config.plugins.assistant.mode
           // to start with, `/mode` for the session.
-          const [mode, setModeState] = f.useState<ChatMode>(chatModeOf(assistantConfig(f)));
-          const modeRef = f.useRef(mode); modeRef.current = mode;
+          const [mode, setModeState] = ui.useState<ChatMode>(chatModeOf(assistantConfig(host)));
+          const modeRef = ui.useRef(mode); modeRef.current = mode;
           // Which side has the keyboard while the chat is docked and open. In the other
           // modes an open chat has it, as a window over the screen always had.
-          const [focus, setFocusState] = f.useState<'chat' | 'plugin'>('plugin');
-          const focusRef = f.useRef(focus); focusRef.current = focus;
+          const [focus, setFocusState] = ui.useState<'chat' | 'plugin'>('plugin');
+          const focusRef = ui.useRef(focus); focusRef.current = focus;
           // Where the App docked the chat, this frame (null unless it is a panel).
-          const dock = (f.services as { chatDock?: PanelLayout | null }).chatDock ?? null;
+          const dock = (host.services as { chatDock?: PanelLayout | null }).chatDock ?? null;
           // How the chat is DRAWN, which is the mode — except a panel on a terminal too
           // small to dock on (src/runtime/panel-layout.ts, `fits`): the App gives it no
           // dock, and it is a window for as long as the terminal stays that small. Every
           // check of how the chat behaves reads this; `mode` stays what was asked for.
           const layout: ChatMode = mode === 'panel' && !dock ? 'window' : mode;
-          const layoutRef = f.useRef(layout); layoutRef.current = layout;
+          const layoutRef = ui.useRef(layout); layoutRef.current = layout;
           const focused = open && (layout !== 'panel' || focus === 'chat');
-          const focusedRef = f.useRef(focused); focusedRef.current = focused;
+          const focusedRef = ui.useRef(focused); focusedRef.current = focused;
           // The window fills its area — the panel, or the whole terminal — rather than a
           // centred window over the screen. The ref is for the key handler (the field's
           // width decides up/down across wrapped rows).
           const fullscreen = layout !== 'window';
-          const fullscreenRef = f.useRef(fullscreen); fullscreenRef.current = fullscreen;
+          const fullscreenRef = ui.useRef(fullscreen); fullscreenRef.current = fullscreen;
           // The wheel over the conversation while the plugin has the keys (the list does
           // not hear its own keys then) — ChatMessages fills it.
-          const wheelRef = f.useRef<((up: boolean) => void) | null>(null);
+          const wheelRef = ui.useRef<((up: boolean) => void) | null>(null);
           // `openRef` is what the detached background flush reads (a timer's closure
           // would see a stale `open`); `unread` counts results that landed while the
           // chat was closed — the footer shows it, opening the chat clears it.
-          const openRef = f.useRef(open); openRef.current = open;
-          const [unread, setUnread] = f.useState(0);
-          const unreadRef = f.useRef(unread); unreadRef.current = unread;
+          const openRef = ui.useRef(open); openRef.current = open;
+          const [unread, setUnread] = ui.useState(0);
+          const unreadRef = ui.useRef(unread); unreadRef.current = unread;
           // The host draws its footer BEFORE this component re-renders, so what the
-          // footer reads (`ft.store.chat.open` / `.unread`) is patched synchronously at
+          // footer reads (`host.store.chat.open` / `.unread`) is patched synchronously at
           // the moment it changes — otherwise the footer runs one render behind and
           // "F chat" vanishes on close.
           const publish = (patch: { open?: boolean; unread?: number; mode?: ChatMode; focus?: 'chat' | 'plugin' }) => {
-            const store = f.store as Record<string, any>;
+            const store = host.store as Record<string, any>;
             store.chat = { ...(store.chat ?? {}), ...patch };
           };
           // The plan is this conversation's: made here, handed to the `todo` tool through
           // the tool context, emptied by /clear. It used to be module state and so
           // outlived the conversation it described.
-          const planRef = f.useRef(createPlan());
+          const planRef = ui.useRef(createPlan());
           // Where this conversation's shell commands run — `!command` and the model's
           // run_command share it; `cd` moves it. The conversation's, like the plan: a
           // background run gets its own, /clear resets it.
-          const shellRef = f.useRef(createShellState(() => f.config as Record<string, unknown>));
+          const shellRef = ui.useRef(createShellState(() => host.config as Record<string, unknown>));
           // Which turn a view belongs to — groups never span two.
-          const turnRef = f.useRef(0);
+          const turnRef = ui.useRef(0);
           // Live views, coalesced: the latest record per view waits here at most
           // LIVE_REDRAW_MS, so a command printing thousands of lines a second costs a few
           // redraws, not thousands. A view's first state and its final phase are placed at
           // once — the block must appear when the call starts, and its end must not wait.
           const LIVE_REDRAW_MS = 200;
-          const liveBuf = f.useRef(new Map<string, ViewRecord>());
-          const liveSeen = f.useRef(new Set<string>());
-          const liveTimer = f.useRef<ReturnType<typeof setTimeout> | null>(null);
+          const liveBuf = ui.useRef(new Map<string, ViewRecord>());
+          const liveSeen = ui.useRef(new Set<string>());
+          const liveTimer = ui.useRef<ReturnType<typeof setTimeout> | null>(null);
           // Bumped at every reset (/clear, /resume — the same places
           // liveSeen/liveBuf are cleared), never at anything else — turnRef is NOT reset
           // there, it belongs to the conversation's whole history. `send()` and the
@@ -344,48 +313,48 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // either the display or `apiRef`, and writing into the fresh one would be
           // exactly the "a stopped command from before /clear reappears in the cleared
           // chat" bug this guards.
-          const epochRef = f.useRef(0);
+          const epochRef = ui.useRef(0);
           // A pending coalesce timer must not fire into whatever the chat looks like by
           // then — unmounting is a reset the timer itself cannot observe.
-          f.useEffect(() => () => { if (liveTimer.current) clearTimeout(liveTimer.current); }, []);
+          ui.useEffect(() => () => { if (liveTimer.current) clearTimeout(liveTimer.current); }, []);
           // The tools the model has loaded (tools on demand, src/assistant/tool-loading.ts).
           // The conversation's, like the plan: its history calls them, so it is saved
           // with the session, kept through /compact, emptied by /clear.
-          const toolSetRef = f.useRef(createToolSet());
+          const toolSetRef = ui.useRef(createToolSet());
           // What the provider reported for the last turn: its prompt plus the answer it
           // produced is, to a close approximation, the size of the NEXT request.
-          const usageRef = f.useRef<TokenUsage | null>(null);
+          const usageRef = ui.useRef<TokenUsage | null>(null);
           // `/context` opens a panel in the field's place, like a write confirmation — it
           // is a look at the conversation, not a line of it. The ref is for the key
           // handler; the state is for the render.
-          const contextOpenRef = f.useRef(false);
-          const [contextOpen, setContextOpenState] = f.useState(false);
-          const setContextOpen = (v: boolean) => { contextOpenRef.current = v; setContextOpenState(v); f.notify(); };
-          const [messages, setMessages] = f.useState<ChatMsg[]>([]);
-          const [input, setInput] = f.useState('');
-          const [streaming, setStreaming] = f.useState(false);
-          const [error, setError] = f.useState<string | null>(null);
-          const [toolLabelState, setToolLabelState] = f.useState(''); // «⚙ calling get_issue…» during tool rounds
+          const contextOpenRef = ui.useRef(false);
+          const [contextOpen, setContextOpenState] = ui.useState(false);
+          const setContextOpen = (v: boolean) => { contextOpenRef.current = v; setContextOpenState(v); host.notify(); };
+          const [messages, setMessages] = ui.useState<ChatMsg[]>([]);
+          const [input, setInput] = ui.useState('');
+          const [streaming, setStreaming] = ui.useState(false);
+          const [error, setError] = ui.useState<string | null>(null);
+          const [toolLabelState, setToolLabelState] = ui.useState(''); // «⚙ calling get_issue…» during tool rounds
           // Mirrored in a ref: the stream callbacks are closures made when the message was
           // sent, and they read the label to clear it. Reading the state there saw the
           // value at send time — empty — so the label of a finished tool never cleared and
           // the chat looked stuck on it while the model was already writing.
-          const toolLabelRef = f.useRef('');
+          const toolLabelRef = ui.useRef('');
           const toolLabel = toolLabelState;
           const setToolLabel = (v: string) => { toolLabelRef.current = v; setToolLabelState(v); };
           // What the model is doing when no tool runs: 'writing' only while its text
           // arrives; before the first token, while it reasons, and between tools (it is
           // working out the next call) it is 'thinking'. One word for all of it read
           // "writing…" while nothing was being written.
-          const [phase, setPhase] = f.useState<'thinking' | 'writing'>('thinking');
+          const [phase, setPhase] = ui.useState<'thinking' | 'writing'>('thinking');
           // The word the line says for either phase (src/assistant/verbs.ts): one per
           // model request, picked when the request goes out — never in the render, so it
           // cannot change under the person within a round. The ref is what the next
           // pick avoids repeating.
-          const [verb, setVerbState] = f.useState('');
-          const verbRef = f.useRef('');
+          const [verb, setVerbState] = ui.useState('');
+          const verbRef = ui.useRef('');
           const nextVerb = () => {
-            const word = pickVerb(verbList(f.config as { ui?: { verbs?: unknown } }), verbRef.current);
+            const word = pickVerb(verbList(host.config as { ui?: { verbs?: unknown } }), verbRef.current);
             verbRef.current = word;
             setVerbState(word);
           };
@@ -394,19 +363,19 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // is the master switch; a click opens the block under it alone. The
           // conversation's, like the auto mode — never saved, and `/clear` and `/resume`
           // both come back to everything folded.
-          const [folds, setFoldsState] = f.useState<FoldState>(allFolded());
-          const foldsRef = f.useRef(folds);
+          const [folds, setFoldsState] = ui.useState<FoldState>(allFolded());
+          const foldsRef = ui.useRef(folds);
           const setFolds = (s: FoldState) => { foldsRef.current = s; setFoldsState(s); };
           // What the conversation last said about where it is on the screen — the
           // view reports it, and a click is turned into a row with it.
-          const viewportRef = f.useRef<Viewport | null>(null);
+          const viewportRef = ui.useRef<Viewport | null>(null);
           // A row the list should be put at the top of once the rows have changed, and
           // the nonce that makes a repeat of the same row ask again.
-          const [scrollTo, setScrollTo] = f.useState<{ row: number; n: number } | null>(null);
-          const scrollSeq = f.useRef(0);
+          const [scrollTo, setScrollTo] = ui.useState<{ row: number; n: number } | null>(null);
+          const scrollSeq = ui.useRef(0);
           // The mouse press a click may still come out of: the cell it landed on and
           // when. A drag clears it — a drag is a selection and never a fold.
-          const pressRef = f.useRef<{ x: number; y: number; at: number } | null>(null);
+          const pressRef = ui.useRef<{ x: number; y: number; at: number } | null>(null);
           // Process indicator: spinner + the seconds of whatever is running NOW.
           // t0Ref — when the turn started, which is what the finished answer's quiet
           // line says (`· 12.4s`). segRef — when the thing on the status line started:
@@ -414,10 +383,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // ended. A turn that runs a build sat at `3m 12s`, which says nothing about
           // what is happening; the number a person wants there is how long the RUNNING
           // thing has taken. tickRef ticks elapsedMs off segRef.
-          const [elapsedMs, setElapsedMs] = f.useState(0);
-          const t0Ref = f.useRef(0);
-          const segRef = f.useRef(0);
-          const tickRef = f.useRef<ReturnType<typeof setInterval> | null>(null);
+          const [elapsedMs, setElapsedMs] = ui.useState(0);
+          const t0Ref = ui.useRef(0);
+          const segRef = ui.useRef(0);
+          const tickRef = ui.useRef<ReturnType<typeof setInterval> | null>(null);
           // What is on the status line now starts its own clock.
           const beginSegment = () => { segRef.current = Date.now(); setElapsedMs(0); };
           // A tool has ended: its label goes, and the clock on the line is the model's
@@ -429,25 +398,25 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // from `usageRef` above, which is the last round alone — the size of the next
           // request, and so how full the context is. Nothing is estimated here: a
           // provider that reports no usage leaves this at 0 and no figure is drawn.
-          const [turnTokens, setTurnTokensState] = f.useState(0);
-          const turnTokensRef = f.useRef(0);
+          const [turnTokens, setTurnTokensState] = ui.useState(0);
+          const turnTokensRef = ui.useRef(0);
           const setTurnTokens = (n: number) => { turnTokensRef.current = n; setTurnTokensState(n); };
           // The same sum, of `cachedTokens` alone, across every round of the turn — kept
           // on the answer's message as `cached` (never drawn on the status line: it is
           // the session's record of the turn's cache hits, not a live figure). A round
           // that reported nothing adds nothing.
-          const turnCachedRef = f.useRef(0);
+          const turnCachedRef = ui.useRef(0);
           // Empty answer: the model output only reasoning (goes to the fold) but no
           // final text. contentRef accumulates the final content (onDelta) — by it we
           // decide «empty?» and show an amber status message.
-          const contentRef = f.useRef('');
-          const [emptyNotice, setEmptyNotice] = f.useState('');
-          const [toolCount, setToolCount] = f.useState(0); // tool calls in this turn (for the status)
-          const abortRef = f.useRef<AbortController | null>(null);
+          const contentRef = ui.useRef('');
+          const [emptyNotice, setEmptyNotice] = ui.useState('');
+          const [toolCount, setToolCount] = ui.useState(0); // tool calls in this turn (for the status)
+          const abortRef = ui.useRef<AbortController | null>(null);
           // Which key stopped the running turn or `!command`: '' for Esc (and for a
           // reset that aborts it), the cap otherwise (`^c`) — the quiet line under the
           // answer and a command's outcome say `stopped (^c)`. Cleared when one starts.
-          const stopKeyRef = f.useRef('');
+          const stopKeyRef = ui.useRef('');
           // Whether Esc / Ctrl+C have something to stop: a run whose controller has not
           // been aborted yet. A run that goes on after its abort (a tool that ignores its
           // signal) does not hold the keys: Esc goes back to its idle steps and Ctrl+C
@@ -456,47 +425,47 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // Tab-completion cycle: { base, idx, cmd } — by which prefix the matches were
           // built, the last selected command in that list and its text. Repeat Tab cycles;
           // changing the prefix (typed/deleted) restarts.
-          const tabRef = f.useRef<{ base: string; idx: number; cmd: string } | null>(null);
-          const inputRef = f.useRef(input); inputRef.current = input;
-          const msgsRef = f.useRef(messages); msgsRef.current = messages;
+          const tabRef = ui.useRef<{ base: string; idx: number; cmd: string } | null>(null);
+          const inputRef = ui.useRef(input); inputRef.current = input;
+          const msgsRef = ui.useRef(messages); msgsRef.current = messages;
           // The MODEL's history, kept apart from the display list above. `messages`
           // holds what the person reads (final text + parts/live); this
           // holds what was actually exchanged — tool calls and tool results included
           // — and is what every turn replays. See `apiHistory` for why the display
           // list must never stand in for it.
-          const apiRef = f.useRef<ChatMessage[]>([]);
+          const apiRef = ui.useRef<ChatMessage[]>([]);
           // `/compact`'s summary. It rides in the system context of every later turn;
           // a display-only `system` message would be dropped by `send` and lost.
-          const summaryRef = f.useRef<string>('');
-          const streamRef = f.useRef(streaming); streamRef.current = streaming;
+          const summaryRef = ui.useRef<string>('');
+          const streamRef = ui.useRef(streaming); streamRef.current = streaming;
           // Background-result queue (populated by `postToChat`, see below): results are
           // NOT dropped when the chat is busy — they wait here and are auto-fed through
           // `send` (analyzed) one at a time once the chat is idle. A short interval
           // drives the flush; it self-clears when the queue empties.
-          const bgQueueRef = f.useRef<string[]>([]);
-          const flushTimer = f.useRef<ReturnType<typeof setInterval> | null>(null);
+          const bgQueueRef = ui.useRef<string[]>([]);
+          const flushTimer = ui.useRef<ReturnType<typeof setInterval> | null>(null);
           const clearFlush = () => {
             if (flushTimer.current) { clearInterval(flushTimer.current); flushTimer.current = null; }
           };
           let flushPending: () => void = () => {};
           // Input field caret — an index (codepoint) in `input`. Kept in a ref so the
           // handler reads a fresh value.
-          const [cursor, setCursor] = f.useState(0);
-          const cursorRef = f.useRef(cursor); cursorRef.current = cursor;
+          const [cursor, setCursor] = ui.useState(0);
+          const cursorRef = ui.useRef(cursor); cursorRef.current = cursor;
           // Messages sent while an answer was coming. They go out in order when the
           // turn ends (a stopped or failed turn puts them back into the field instead —
           // `restoreQueue`); ↑ on an empty field takes the last one back. queueRef is what
           // the handlers act on, `queued` mirrors it for the render.
-          const queueRef = f.useRef<string[]>([]);
-          const [queued, setQueued] = f.useState<string[]>([]);
-          const syncQueue = () => { setQueued(queueRef.current.slice()); f.notify(); };
+          const queueRef = ui.useRef<string[]>([]);
+          const [queued, setQueued] = ui.useState<string[]>([]);
+          const syncQueue = () => { setQueued(queueRef.current.slice()); host.notify(); };
           // Prompt history for ↑/↓. `histAt` is the entry on screen (null = the draft),
           // `histShown` is its text — an arrow only replaces the field while it still
           // shows exactly that, so a draft being typed is never lost to a keypress.
-          const historyRef = f.useRef<string[]>([]);
-          const histAt = f.useRef<number | null>(null);
-          const histShown = f.useRef<string>('');
-          const setField = (t: string) => { setInput(t); inputRef.current = t; setCursor(t.length); f.notify(); };
+          const historyRef = ui.useRef<string[]>([]);
+          const histAt = ui.useRef<number | null>(null);
+          const histShown = ui.useRef<string>('');
+          const setField = (t: string) => { setInput(t); inputRef.current = t; setCursor(t.length); host.notify(); };
           // Bang LEVEL — `!` typed into an EMPTY field steps it UP: 0 (normal) → 1
           // (shell mode, `! ` in the shell colour replaces `› `) → 2 (interactive
           // mode, `!!`, the same colour — see src/views/modals.ts). Enter at level 1
@@ -505,8 +474,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // field each step the level back DOWN by one. It is UI state of the field
           // only: never saved with the session (snapshotSession's draft rule below)
           // and never restored on a restart.
-          const [bangLevel, setBangLevelState] = f.useState<0 | 1 | 2>(0);
-          const bangLevelRef = f.useRef(bangLevel);
+          const [bangLevel, setBangLevelState] = ui.useState<0 | 1 | 2>(0);
+          const bangLevelRef = ui.useRef(bangLevel);
           const setBangLevel = (v: 0 | 1 | 2) => { bangLevelRef.current = v; setBangLevelState(v); };
           // A turn that was stopped (Esc, Ctrl+C) or failed does not send the queue: the
           // queued messages come back into the field — in order, joined by blank lines,
@@ -532,17 +501,17 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // task put it back there too. The ref is what the confirmation closure reads
           // (it was made when the message was sent, and would otherwise see the mode of
           // that moment for the whole turn); the state is for the render.
-          const [autoMode, setAutoModeState] = f.useState<AutoMode>('ask');
-          const autoModeRef = f.useRef<AutoMode>(autoMode);
+          const [autoMode, setAutoModeState] = ui.useState<AutoMode>('ask');
+          const autoModeRef = ui.useRef<AutoMode>(autoMode);
           const setAutoMode = (m: AutoMode) => { autoModeRef.current = m; setAutoModeState(m); };
           // ── The steps (src/assistant/step.ts) — how the text the model writes between
           // tool calls is drawn. `plugins.assistant.notes` is where a conversation
           // starts, `/notes` moves it for this one only, and `/clear` puts it back
           // where the config says. The ref is for the key handler and the command,
           // which are closures made before the state they would read.
-          const configNotes = (): NotesMode => notesMode((f.config.plugins as Record<string, { notes?: unknown }> | undefined)?.assistant?.notes);
-          const [notes, setNotesState] = f.useState<NotesMode>(configNotes());
-          const notesRef = f.useRef<NotesMode>(notes);
+          const configNotes = (): NotesMode => notesMode((host.config.plugins as Record<string, { notes?: unknown }> | undefined)?.assistant?.notes);
+          const [notes, setNotesState] = ui.useState<NotesMode>(configNotes());
+          const notesRef = ui.useRef<NotesMode>(notes);
           const setNotes = (m: NotesMode) => { notesRef.current = m; setNotesState(m); };
           // Whether the round being streamed carries a tool call — heard the moment
           // its first fragment arrives (`onRoundKind`), and from then on its text is a
@@ -552,7 +521,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // own updater had run — its text was lost and the NEXT round was taken for
           // it. Every updater is a pure function of the list; what it needs to know is
           // read here, when the callback fires, and handed to it.
-          const roundToolsRef = f.useRef(false);
+          const roundToolsRef = ui.useRef(false);
           const resetRound = () => { roundToolsRef.current = false; };
           // ── Folds ── the rows a click lands on, and what opening one does to the
           // scroll. The rows are laid out by the view and cached per message object,
@@ -568,29 +537,29 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // … while rendering a different component"). The set is updated synchronously
           // (so the next render in the same pass still sees the kind as said), and the
           // log write itself is pushed past the current render/commit with a microtask.
-          const failedKinds = f.useRef(new Set<string>());
+          const failedKinds = ui.useRef(new Set<string>());
           const onViewFail = (kind: string, why: string) => {
             if (failedKinds.current.has(kind)) return;
             failedKinds.current.add(kind);
-            queueMicrotask(() => (f.services as Record<string, any>).pushLog?.(`[view] ${kind}: ${why} — drawn as one line`));
+            queueMicrotask(() => (host.services as Record<string, any>).pushLog?.(`[view] ${kind}: ${why} — drawn as one line`));
           };
           // Every renderer the chat can draw a view with — the host's own `console`
           // (collected at boot, src/loader/registry.ts) plus each plugin's, qualified
           // by its name; the same default the view's own `renderChatModal` falls back
           // to, so a host that somehow boots with no `services.viewRenderers` draws
           // views identically whichever of the two places below reads it.
-          const viewRenderers: ViewRenderers = (f.services as { viewRenderers?: ViewRenderers }).viewRenderers ?? { console: renderConsole };
+          const viewRenderers: ViewRenderers = (host.services as { viewRenderers?: ViewRenderers }).viewRenderers ?? { console: renderConsole };
           const rowOpts = (state: FoldState): RowOpts => ({
             wrap: chatWrapWidth(width, fullscreenRef.current),
             folds: state,
-            viewLines: Number((f.config.plugins as Record<string, { runOutputLines?: unknown }> | undefined)?.assistant?.runOutputLines) || VIEW_CAPS.folded,
+            viewLines: Number((host.config.plugins as Record<string, { runOutputLines?: unknown }> | undefined)?.assistant?.runOutputLines) || VIEW_CAPS.folded,
             notes: notesRef.current,
             // Empty when the action is unbound — every hint that names it then
             // leaves it out, rather than teaching a key that does nothing.
-            detailsKey: firstGlyph(f.keys.details),
+            detailsKey: firstGlyph(host.keys.details),
             renderers: viewRenderers,
             now: Date.now(),
-            palette: ((f.config.theme as { modals?: { chat?: Record<string, string | undefined> } } | undefined)?.modals?.chat ?? {}),
+            palette: ((host.config.theme as { modals?: { chat?: Record<string, string | undefined> } } | undefined)?.modals?.chat ?? {}),
             onViewFail,
           });
           // Put a row at the top of the conversation, once the rows have changed.
@@ -616,7 +585,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               const where = rowAnchor(drawn(), rowOpts(before), v.scrollTop);
               askScroll(anchorRow(drawn(), rowOpts(next), where));
             }
-            f.notify();
+            host.notify();
           };
           // The key: everything at once, and the exceptions go with it. There is no one
           // block to anchor on, so the person keeps the text they were reading.
@@ -668,15 +637,15 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // the plan: saved with the session, emptied by /clear. The
           // TEXT decides what a message sends — the tokens in it this map knows — so the
           // field, a queued message, ↑/↓ and the draft need nothing beside their text.
-          const imagesRef = f.useRef(new Map<number, ImageRef>());
-          const imageSeqRef = f.useRef(0);
+          const imagesRef = ui.useRef(new Map<number, ImageRef>());
+          const imageSeqRef = ui.useRef(0);
           // The `data:` URL of an image, once read and found unchanged — built on the way to
           // the provider, never kept in a message or written to disk. Keyed by path + hash.
-          const imageDataRef = f.useRef(new Map<string, string>());
+          const imageDataRef = ui.useRef(new Map<string, string>());
           // Images already said to be gone, so the note is not repeated with every message;
           // and whether the provider's refusal of an image has been explained.
-          const imageNotedRef = f.useRef(new Set<string>());
-          const imageRefusalSaidRef = f.useRef(false);
+          const imageNotedRef = ui.useRef(new Set<string>());
+          const imageRefusalSaidRef = ui.useRef(false);
           const imageKey = (r: ImageRef) => `${r.path}\0${r.sha256}`;
           const resetImages = (refs: ImageRef[] = [], seq = 0) => {
             imagesRef.current = new Map(refs.map((r) => [r.n, r]));
@@ -691,17 +660,17 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // continues it. A session gets its id — and its ownership lock — when it
           // first has something to keep; `/clear` starts a new one and leaves the old
           // for `/resume`.
-          const sessDir = sessionsDir(f.config);
-          const sessConf = (f.config.sessions ?? {}) as { resume?: unknown; keep?: unknown };
-          const sessionIdRef = f.useRef('');
-          const createdAtRef = f.useRef('');
-          const saveTimer = f.useRef<ReturnType<typeof setTimeout> | null>(null);
+          const sessDir = sessionsDir(host.config);
+          const sessConf = (host.config.sessions ?? {}) as { resume?: unknown; keep?: unknown };
+          const sessionIdRef = ui.useRef('');
+          const createdAtRef = ui.useRef('');
+          const saveTimer = ui.useRef<ReturnType<typeof setTimeout> | null>(null);
           // One token for this chat instance's whole life (not per process — see
           // sessions.ts, "Ownership lock"): what makes a lock this instance's own.
           // `useRef`'s init runs on every render, so `makeLockToken()` (a UUID) would
           // otherwise be generated and discarded on every one but the first; the ref
           // starts empty and is filled in once, here, on the first render only.
-          const lockTokenRef = f.useRef('');
+          const lockTokenRef = ui.useRef('');
           if (!lockTokenRef.current) lockTokenRef.current = makeLockToken();
           const lockToken = lockTokenRef.current;
           // The zero fingerprint: what a session with nothing written yet, or one this
@@ -711,7 +680,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // The fingerprint (rev + mtimeMs + size) this instance last read or wrote for
           // the session it currently holds — what a save compares the disk against
           // before overwriting it (sessions.ts, "sessionFingerprint").
-          const fingerprintRef = f.useRef<SessionFingerprint>(NO_FILE);
+          const fingerprintRef = ui.useRef<SessionFingerprint>(NO_FILE);
           const releaseCurrentLock = () => { if (sessDir && sessionIdRef.current) releaseLock(sessDir, sessionIdRef.current, lockToken); };
           const snapshotSession = (): Session => {
             if (!sessionIdRef.current) {
@@ -762,13 +731,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 const text = forkNoteText(snap.messages, snap.id);
                 if (!opts.silent) {
                   setMessages((cur) => [...cur, { role: 'note', content: text }]);
-                  f.notify();
+                  host.notify();
                 }
                 return;
               }
               fingerprintRef.current = saveSession(sessDir, snap);
             } catch (e) {
-              (f.services as Record<string, any>).pushLog?.(`[session] not saved: ${(e as Error).message}`);
+              (host.services as Record<string, any>).pushLog?.(`[session] not saved: ${(e as Error).message}`);
             }
           };
           // After the render that carries the change — the screen list is read from msgsRef.
@@ -776,7 +745,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             if (saveTimer.current) clearTimeout(saveTimer.current);
             saveTimer.current = setTimeout(() => { saveTimer.current = null; writeSession(); }, 250);
           };
-          const writeRef = f.useRef(writeSession); writeRef.current = writeSession;
+          const writeRef = ui.useRef(writeSession); writeRef.current = writeSession;
           // `fingerprint` is the caller's — taken with a stat BEFORE the content in
           // `s` was read, never re-derived here. Reading it fresh off the disk at
           // this point (after `s` was already loaded) would leave a window: a
@@ -806,8 +775,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             setBangLevel(0); // the level is never saved — a restored draft is plain text
             setField(s.draft);
           };
-          const startedRef = f.useRef(false);
-          const unhookExitRef = f.useRef<(() => void) | null>(null);
+          const startedRef = ui.useRef(false);
+          const unhookExitRef = ui.useRef<(() => void) | null>(null);
           if (!startedRef.current && sessDir) {
             startedRef.current = true;
             // Whatever happens at exit, the last change is written (a pending
@@ -827,18 +796,18 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               const outcome = acquireLock(sessDir, s.id, lockToken);
               if (outcome.status === 'held') {
                 setMessages((cur) => [...cur, { role: 'note', content: `Session "${s.title || s.id}" is open in another flow-assist process — started a new one. (lock: ${lockPath(sessDir, s.id)})` }]);
-                f.notify();
+                host.notify();
                 return;
               }
               applySession(s, fp);
-              (f.services as Record<string, any>).showMessage?.(`Continued «${s.title || 'the last session'}» — /clear starts a new one, /resume lists others`);
-              f.notify();
+              (host.services as Record<string, any>).showMessage?.(`Continued «${s.title || 'the last session'}» — /clear starts a new one, /resume lists others`);
+              host.notify();
             }, 0);
           }
           // Component unmount is the other leaving-the-session trigger (exit, /clear,
           // /resume are handled at their own sites below): a
           // last, silent save and the lock's release.
-          f.useEffect(() => () => {
+          ui.useEffect(() => () => {
             unhookExitRef.current?.();
             if (!sessDir) return;
             writeRef.current({ silent: true });
@@ -846,26 +815,26 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           }, []);
           // Exit «arming» by Esc: 0 — not armed; else ms when the first Esc was pressed.
           // A second Esc within the window closes the chat; any other key disarms.
-          const [escArmAt, setEscArmAt] = f.useState(0);
-          const escTimer = f.useRef<ReturnType<typeof setTimeout> | null>(null);
+          const [escArmAt, setEscArmAt] = ui.useState(0);
+          const escTimer = ui.useRef<ReturnType<typeof setTimeout> | null>(null);
           // y/n pause on a writing operation (write-flag tool → agentChat →
           // confirmWrite): while the promise hangs, input pauses and a confirmation
           // block renders. pendingRef holds { name, args, resolve } — read by the
           // input-handler (a ref, always current); pendingAsk is only for render.
-          const pendingRef = f.useRef<{ name: string; args: string; resolve: (ok: boolean) => void } | null>(null);
-          const [pendingAsk, setPendingAsk] = f.useState<{ name: string; args: string; command?: string } | null>(null);
+          const pendingRef = ui.useRef<{ name: string; args: string; resolve: (ok: boolean) => void } | null>(null);
+          const [pendingAsk, setPendingAsk] = ui.useState<{ name: string; args: string; command?: string } | null>(null);
           // `ask_user`: the same kind of pause, but the person picks among options.
           // askRef is what the input handler steps key by key (a ref, always current);
           // pendingQuestion mirrors it for the render.
-          const askRef = f.useRef<{ state: AskState; resolve: (done: AskState) => void } | null>(null);
-          const [pendingQuestion, setPendingQuestion] = f.useState<AskState | null>(null);
+          const askRef = ui.useRef<{ state: AskState; resolve: (done: AskState) => void } | null>(null);
+          const [pendingQuestion, setPendingQuestion] = ui.useState<AskState | null>(null);
           const settleAsk = (done: AskState) => {
             const a = askRef.current;
             if (!a) return;
             askRef.current = null;
             setPendingQuestion(null);
             a.resolve(done);
-            f.notify();
+            host.notify();
           };
           // Leaving the chat or resetting it must not leave the tool hanging: an
           // unanswered question is reported to the model as dismissed.
@@ -877,7 +846,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             setEscArmAt(Date.now());
             // Self-disarm: if after the first Esc nothing is pressed for a while, the
             // arm fades so a stray Esc later does not eject from the chat unintentionally.
-            escTimer.current = setTimeout(() => { setEscArmAt(0); escTimer.current = null; f.notify(); }, 3200);
+            escTimer.current = setTimeout(() => { setEscArmAt(0); escTimer.current = null; host.notify(); }, 3200);
           };
           const disarmEsc = () => {
             if (escTimer.current) { clearTimeout(escTimer.current); escTimer.current = null; }
@@ -893,7 +862,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             pendingRef.current = null;
             setPendingAsk(null);
             p.resolve(ok);
-            f.notify();
+            host.notify();
           };
 
           // The «cheap» synchronous base: a directive about the reply (language/
@@ -902,7 +871,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const baseStatic = () => {
             // Who speaks — the LLM does not know itself: mix in `config.user` (when the
             // person set one) so it addresses a human.
-            const who = chatUser(f.config as { user?: { name?: unknown; login?: unknown } });
+            const who = chatUser(host.config as { user?: { name?: unknown; login?: unknown } });
             const identity = who
               ? `You are talking to ${who.name}${who.login && who.login !== who.name ? ` (login ${who.login})` : ''}. Address the answer to them, not to an anonymous service account.`
               : '';
@@ -913,7 +882,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // (src/assistant/step.ts), so a model that keeps to it leaves nothing but
             // what it did on screen. The final answer is not a step, so the line is
             // asked for before a call only.
-            const chatLang = chatLanguage((f.config as Record<string, unknown>).ai as Record<string, unknown>);
+            const chatLang = chatLanguage((host.config as Record<string, unknown>).ai as Record<string, unknown>);
             const directive = `Always respond in ${chatLang}. Answer concisely and to the point: only the outcome, and no retelling of your own moves in the final answer. Before you call a tool, write ONE short line that starts with "Next:" and says what you are about to do — nothing else between calls, no plans, no commentary, no repetition of what you already said. Do not begin the final answer with "Next:". Never claim you changed, created or deleted something unless a write tool actually returned success for it; if a write was declined or errored, say so instead. If the user asks why you did not run a tool, or says they do not see its result, do NOT just restate that the tool was already called («it’s already done», «it was scheduled»): actually re-run it now, or ask the user to confirm the repeat («run it again?»). Never claim a result you have not seen returned.`;
             // Write-language directive. The tracker named tracker tools here; the host is
             // tracker-agnostic, so it is generalized to any write/persist tool.
@@ -925,7 +894,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // edited mid-session lands in the next answer immediately. Empty → '' (block
           // not added).
           const memoryBlock = () => {
-            const mems = loadMemories(memoryFilePath(f.config));
+            const mems = loadMemories(memoryFilePath(host.config));
             return mems.length
               ? `## Persistent memory\nFacts remembered across sessions (the \`memory\` tool adds/updates/removes them). Consider them when answering.\n${mems.map(m => `- ${m.scope}: ${m.text}`).join('\n')}`
               : '';
@@ -950,17 +919,17 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // (src/assistant/screen-context.ts). Read fresh for every request — every
           // round of a turn — and never kept: not in `apiRef`, not in the session.
           const screenNow = (): ContextItem[] => {
-            try { return (f.services as { chatContext?: () => ContextItem[] }).chatContext?.() ?? []; } catch { return []; }
+            try { return (host.services as { chatContext?: () => ContextItem[] }).chatContext?.() ?? []; } catch { return []; }
           };
           // How full the model's context is (assistant/context-meter.ts).
           const contextReading = (screen: ContextItem[] = screenNow()) => {
             const summary = summaryRef.current ? `Summary of the conversation so far (older turns were compacted):\n${summaryRef.current}` : '';
-            const window = Number((f.config.ai as { contextWindow?: unknown } | undefined)?.contextWindow) || DEFAULT_CONTEXT_WINDOW;
+            const window = Number((host.config.ai as { contextWindow?: unknown } | undefined)?.contextWindow) || DEFAULT_CONTEXT_WINDOW;
             const u = usageRef.current;
             return readContext(
               // The tools the next request will CARRY — with tools on demand, the core ones,
               // what was loaded and the index; not every tool there is.
-              { system: baseStatic(), memory: memoryBlock(), plan: planBlock(), summary, screen: screenBlock(screen), tools: requestTools((f.services as Record<string, any>).pluginAiTools ?? [], toolLoadingMode(f.config.ai), toolSetRef.current), messages: apiHistory(apiRef.current) },
+              { system: baseStatic(), memory: memoryBlock(), plan: planBlock(), summary, screen: screenBlock(screen), tools: requestTools((host.services as Record<string, any>).pluginAiTools ?? [], toolLoadingMode(host.config.ai), toolSetRef.current), messages: apiHistory(apiRef.current) },
               window,
               u ? u.promptTokens + u.completionTokens : undefined,
             );
@@ -983,7 +952,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // gone or changed is said once, in a note (`notes`); the message then goes as its
           // text and `[image unavailable: name]`.
           const resolveImage = (ref: ImageRef, notes: string[]): ResolvedImage => {
-            if (!imageLimits(f.config.ai).enabled) return { ok: false, why: 'off' };
+            if (!imageLimits(host.config.ai).enabled) return { ok: false, why: 'off' };
             const key = imageKey(ref);
             const hit = imageDataRef.current.get(key);
             if (hit) return { ok: true, url: hit };
@@ -1022,7 +991,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             if (liveTimer.current) { clearTimeout(liveTimer.current); liveTimer.current = null; }
             const recs = [...liveBuf.current.values()];
             liveBuf.current.clear();
-            if (recs.length) { placeViews(recs); f.notify(); }
+            if (recs.length) { placeViews(recs); host.notify(); }
           };
           // `epoch` is the caller's own — captured when the turn or the `!command` that
           // opened this view STARTED, so a change that arrives after a LATER reset
@@ -1137,20 +1106,20 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             const abort = new AbortController();
             abortRef.current = abort;
             stopKeyRef.current = '';
-            const ai = (f.config.ai ?? {}) as Record<string, any>;
+            const ai = (host.config.ai ?? {}) as Record<string, any>;
             let failed = false, aborted = false;
             // The loop ran out of rounds with no answer. It is said where the answer
             // would be, in the warn colour, and it replaces the dim line under the
             // field that a wall of grey tool lines used to hide.
             let roundLimit = 0;
             try {
-              const chatResult = await (f.services as Record<string, any>).chatLLM(wire, {
+              const chatResult = await (host.services as Record<string, any>).chatLLM(wire, {
                 ...llmOpts(ai),
                 signal: abort.signal,
                 // Debug-log of tool calls (opt-in: config.debug.logTools).
-                logTools: !!((f.config as Record<string, any>)?.debug?.logTools),
+                logTools: !!((host.config as Record<string, any>)?.debug?.logTools),
                 // Plugin ai-tools (aiTools): agentChat runs their own run(args, toolCtx).
-                extraTools: (f.services as Record<string, any>).pluginAiTools ?? [],
+                extraTools: (host.services as Record<string, any>).pluginAiTools ?? [],
                 // What the screens show, read again before every round of the turn and
                 // sent at the END of its request, after the conversation — past what the
                 // provider caches, and never into the history.
@@ -1161,24 +1130,24 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 toolCtx: {
                   plan: planRef.current,
                   shell: shellRef.current,
-                  memoryFile: memoryFilePath(f.config),
+                  memoryFile: memoryFilePath(host.config),
                   // The plugin's OWN host-issued token. The CALLER never supplies a
                   // name here — a raw plugin-name string is ignored by the memory
                   // tool (it resolves `plugin` scope only through a token the host
                   // issued), so a plugin can present itself but not impersonate one.
-                  pluginToken: f.pluginToken,
+                  pluginToken: host.pluginToken,
                   askUser: (questions: AskQuestion[]) => new Promise<AskState>((resolve) => {
                     const state = askStart(questions);
                     askRef.current = { state, resolve };
                     setPendingQuestion(state);
-                    f.notify();
+                    host.notify();
                   }),
                   // Every service a tool may call through ctx — flattened, not spread:
-                  // `ft.services` is a per-plugin view whose HOST services sit on its
+                  // `host.services` is a per-plugin view whose HOST services sit on its
                   // prototype, and `...obj` copies own properties only. Spreading it
                   // silently handed tools a ctx with no chatLLM, config, showMessage or
                   // pushLog — `background` answered "no LLM service" and nothing ran.
-                  ...allServices(f.services),
+                  ...allServices(host.services),
                 },
                 // The y/n pause on a writing op: agentChat calls confirmWrite for tools
                 // with a write-flag, we set pendingRef + pendingAsk and wait for the
@@ -1198,7 +1167,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   if (contextOpenRef.current) setContextOpen(false);
                   pendingRef.current = { name, args, resolve };
                   setPendingAsk({ name, args, ...(command != null ? { command } : {}) });
-                  f.notify();
+                  host.notify();
                 }),
                 // A view a tool opened, and every change to it. Its message is pushed on
                 // the FIRST change, so it has its place — and its fold id — from the
@@ -1229,7 +1198,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   const call = run.views?.length ? null : callRun(run);
                   const calls: CallRun[] = call ? [call] : [];
                   const changed: TurnPart[] = (run.changes ?? []).map((change) => ({ kind: 'change', change }));
-                  if (!calls.length && !changed.length) { f.notify(); return; }
+                  if (!calls.length && !changed.length) { host.notify(); return; }
                   setMessages(cur => {
                     const next = cur.slice();
                     const last = next[next.length - 1];
@@ -1237,13 +1206,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                     else next.push({ role: 'assistant', content: '', parts: [...addCalls([], calls), ...changed] });
                     return next;
                   });
-                  f.notify();
+                  host.notify();
                 },
                 onTool: (name: string, args: unknown) => {
                   setToolLabel(`⚙ ${name}(${String(args ?? '').slice(0, 40)})…`);
                   setToolCount(c => c + 1); // call counter for the turn — in the status line
                   beginSegment(); // the seconds on the line are this tool's now
-                  f.notify();
+                  host.notify();
                 },
                 // Diagnostic trace of what EACH round emitted: finish_reason + how many
                 // tool_calls streamed. Logged unconditionally so the `l` panel shows
@@ -1260,7 +1229,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   // figure off the screen rather than putting a guess there.
                   if (info.usage) setTurnTokens(turnTokensRef.current + info.usage.promptTokens + info.usage.completionTokens);
                   if (typeof info.usage?.cachedTokens === 'number') turnCachedRef.current += info.usage.cachedTokens;
-                  (f.services as Record<string, any>).pushLog?.(`[round ${info.index}] finish=${info.finishReason} toolCalls=${info.toolCalls} content=${info.contentLen}ch${info.usage ? ` tokens=${info.usage.promptTokens + info.usage.completionTokens}` : ''}`);
+                  (host.services as Record<string, any>).pushLog?.(`[round ${info.index}] finish=${info.finishReason} toolCalls=${info.toolCalls} content=${info.contentLen}ch${info.usage ? ` tokens=${info.usage.promptTokens + info.usage.completionTokens}` : ''}`);
                 },
                 // Round content streams LIVE (the agent calls onLive per token) into `live`,
                 // drawn in full and dim with a live mark until the round says what it is:
@@ -1277,7 +1246,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                     if (last?.role === 'assistant' && last.live) next[next.length - 1] = { ...last, liveQuiet: true };
                     return next;
                   });
-                  f.notify();
+                  host.notify();
                 },
                 onLive: (delta: string) => {
                   if (!delta) return;
@@ -1338,7 +1307,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   });
                 },
               });
-              (f.services as Record<string, any>).pushLog?.(`[chat] ${q.slice(0, 40)}… → ${q.length} chars${images.length ? ` + ${images.length} image${images.length === 1 ? '' : 's'}` : ''}`);
+              (host.services as Record<string, any>).pushLog?.(`[chat] ${q.slice(0, 40)}… → ${q.length} chars${images.length ? ` + ${images.length} image${images.length === 1 ? '' : 's'}` : ''}`);
               roundLimit = Number((chatResult as { roundLimit?: number } | undefined)?.roundLimit ?? 0);
               const turn = (chatResult as { transcript?: ChatMessage[]; content?: string } | undefined);
               const reported = (chatResult as { usage?: TokenUsage } | undefined)?.usage;
@@ -1352,18 +1321,18 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // After a real write the plugins reload what they show — otherwise an open
               // document keeps the text from before the write. It does not close the chat.
               if (runs.some(r => (r as { write?: boolean; outcome?: string }).write && (r as { outcome?: string }).outcome === 'applied')) {
-                void (f.services as { afterWrite?: () => Promise<void> }).afterWrite?.();
+                void (host.services as { afterWrite?: () => Promise<void> }).afterWrite?.();
               }
             } catch (e) {
               // Esc during a stream is an expected cancel (AbortError) — not shown as an
               // error in the panel, but logged quietly.
               if ((e as Error)?.name === 'AbortError') {
                 aborted = true;
-                (f.services as Record<string, any>).pushLog?.('[chat] aborted by user');
+                (host.services as Record<string, any>).pushLog?.('[chat] aborted by user');
               } else {
                 failed = true;
                 setError((e as Error).message);
-                (f.services as Record<string, any>).pushLog?.(`[chat] error: ${(e as Error).message}`);
+                (host.services as Record<string, any>).pushLog?.(`[chat] error: ${(e as Error).message}`);
                 // A model that cannot take images answers the first one with a 400. Said
                 // once, in the provider's words, with the one switch that stops it — the
                 // image stays in the history, so every later message would fail the same.
@@ -1422,7 +1391,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // turn that ran out of rounds, which now says so in the conversation
               // itself, where the answer would have been.
               if (!contentRef.current.trim() && !failed && !aborted && !roundLimit) {
-                const opens = firstGlyph(f.keys.details);
+                const opens = firstGlyph(host.keys.details);
                 setEmptyNotice(`The turn ended without a final answer — only reasoning came back${opens ? ` (${opens} shows it)` : ''}. Narrow the question, or say "continue".`);
               }
               // Sync streamRef to false HERE, not just via the render
@@ -1500,7 +1469,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             abortRef.current = abort;
             stopKeyRef.current = '';
             const cwd = shellRef.current.cwd();
-            const { timeoutMs, maxChars } = shellLimits(f.config as { shell?: unknown });
+            const { timeoutMs, maxChars } = shellLimits(host.config as { shell?: unknown });
             let stopped = false;
             // The person's command gets the same live block as the model's. The message
             // is still role `shell`: it joins apiRef and ↑/↓ as it always did. Declared
@@ -1532,7 +1501,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               let recorded = true;
               let r: ShellResult;
               if (interactive) {
-                const svc = f.services as { suspend?: <T>(fn: () => T | Promise<T>) => Promise<T>; interactive?: InteractiveDeps };
+                const svc = host.services as { suspend?: <T>(fn: () => T | Promise<T>) => Promise<T>; interactive?: InteractiveDeps };
                 const run = await runInteractive(cmd, { cwd, maxChars, suspend: svc.suspend ?? (async (fn) => fn()) }, svc.interactive ?? {});
                 r = run.result;
                 recorded = run.recorded;
@@ -1541,7 +1510,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               }
               stopped = r.stopped;
               if (r.stopped && stopKeyRef.current) r.stoppedBy = stopKeyRef.current;
-              const move = nextCwd(f.config as Record<string, unknown>, cwd, r.pwd);
+              const move = nextCwd(host.config as Record<string, unknown>, cwd, r.pwd);
               const { display, forModel } = formatShell(cmd, r, cwd, timeoutMs, { after: move.cwd, note: move.note, ...(interactive ? { interactive: { recorded } } : {}) });
               // Everything from here on is display/model-facing state for THIS
               // conversation — skipped whole for a stale epoch (a /clear mid-command,
@@ -1576,7 +1545,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 }
                 ask = interactive && seen;
               }
-              (f.services as Record<string, any>).pushLog?.(`[shell] ${interactive ? '!! ' : ''}${cmd.slice(0, 60)} → ${r.error ? `error: ${r.error}` : r.stopped ? 'stopped' : r.timedOut ? 'timed out' : r.signal ? `killed by ${r.signal}` : `exit ${r.code}`}`);
+              (host.services as Record<string, any>).pushLog?.(`[shell] ${interactive ? '!! ' : ''}${cmd.slice(0, 60)} → ${r.error ? `error: ${r.error}` : r.stopped ? 'stopped' : r.timedOut ? 'timed out' : r.signal ? `killed by ${r.signal}` : `exit ${r.code}`}`);
             } catch (e) {
               stopped = true; // a command that could not run keeps the queue, as a failed turn does
               setError(`!: ${(e as Error).message}`);
@@ -1626,7 +1595,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 restoreQueue();
                 setTimeout(() => flushPending(), 0);
               }
-              f.notify();
+              host.notify();
             }
           };
 
@@ -1680,7 +1649,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   syncQueue();
                   setTimeout(() => { void send(nextQueued); }, 0);
                 } else restoreQueue();
-                f.notify();
+                host.notify();
               });
           };
 
@@ -1689,7 +1658,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // The command body; the spinner/label/elapsed-tick live in
             // runAsyncCommand, which clears streaming/toolLabel on completion.
             runAsyncCommand('compact', async (signal) => {
-              const ai = (f.config.ai ?? {}) as Record<string, any>;
+              const ai = (host.config.ai ?? {}) as Record<string, any>;
               // How big the model's view was — as `ctx N%` read it.
               const before = contextReading().used;
               // Compact what the MODEL saw (tool results included), not the display list.
@@ -1709,7 +1678,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               const sizes = before > 0 && after > 0 ? ` · ~${shortTokens(before)} → ~${shortTokens(after)} tokens` : '';
               setMessages((cur) => [...cur, { role: 'note', content: `── compacted${sizes} ──`, summary }]);
               persist();
-              (f.services as Record<string, any>).showMessage?.('History compacted');
+              (host.services as Record<string, any>).showMessage?.('History compacted');
             });
           };
 
@@ -1719,7 +1688,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // nothing is attached — never a file shrunk or dropped quietly.
           type ImagesRead = { images: false; error: string } | { images: true; loaded: LoadedOk[]; refusal: string | null };
           const readImages = (paths: string[], base: string): ImagesRead => {
-            const lim = imageLimits(f.config.ai);
+            const lim = imageLimits(host.config.ai);
             const loaded = paths.map((p) => loadImageFile(p, shellRef.current.cwd(), lim.maxBytes));
             // A file that is not there, or not an image: these are not images being
             // attached — a paste of them is text, `/image` names the first.
@@ -1747,7 +1716,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             setCursor(at.cursor); cursorRef.current = at.cursor;
             setError(null);
             disarmEsc();
-            f.notify();
+            host.notify();
           };
           // A paste that is paths, all of them images, attaches them. true — handled; false
           // — the paste is text and goes in as it is (after a refusal is said, too: the
@@ -1765,11 +1734,11 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // The image on the clipboard. From a key (Ctrl+V, an empty paste) an empty
           // clipboard is a short hint and nothing else; from `/image` it is said in the chat.
           const attachClipboard = (from: 'key' | 'command') => {
-            if (!imageLimits(f.config.ai).enabled) { setError(`not attached: ${IMAGES_OFF}`); return; }
-            const read = (f.services as { clipboardImage?: () => ClipboardImage }).clipboardImage ?? (() => readClipboardImage());
+            if (!imageLimits(host.config.ai).enabled) { setError(`not attached: ${IMAGES_OFF}`); return; }
+            const read = (host.services as { clipboardImage?: () => ClipboardImage }).clipboardImage ?? (() => readClipboardImage());
             const clip = read();
             if (!clip.ok) {
-              if (from === 'key' && clip.none) (f.services as Record<string, any>).showMessage?.(clip.error);
+              if (from === 'key' && clip.none) (host.services as Record<string, any>).showMessage?.(clip.error);
               else setError(`not attached: ${clip.error}`);
               return;
             }
@@ -1795,8 +1764,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 const next = want === 'cycle' ? nextAutoMode(autoModeRef.current) : want;
                 setAutoMode(next);
                 setField('');
-                (f.services as Record<string, any>).showMessage?.(autoSaid(next));
-                f.notify();
+                (host.services as Record<string, any>).showMessage?.(autoSaid(next));
+                host.notify();
                 return;
               }
               case 'notes': {
@@ -1809,8 +1778,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 const next = want === 'say' ? notesRef.current : want;
                 setNotes(next);
                 setField('');
-                (f.services as Record<string, any>).showMessage?.(notesSaid(next));
-                f.notify();
+                (host.services as Record<string, any>).showMessage?.(notesSaid(next));
+                host.notify();
                 return;
               }
               case 'mode': {
@@ -1824,14 +1793,14 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 if (!v) {
                   const small = modeRef.current === 'panel' && layoutRef.current !== 'panel' ? ' (drawn as a window: the terminal is too small for a panel)' : '';
                   setMessages((cur) => [...cur, { role: 'note', content: `the chat is in ${modeRef.current} mode${small} · /mode ${CHAT_MODES.join('|')}` }]);
-                  f.notify();
+                  host.notify();
                   return;
                 }
                 setMode(v as ChatMode);
                 return;
               }
               case 'log': {
-                const svc = f.services as Record<string, any>;
+                const svc = host.services as Record<string, any>;
                 const shared = logShareMessage((svc.log?.read?.() ?? svc.logs ?? []) as string[], arg);
                 if (shared) void send(shared); else setError('the log is empty — nothing to share');
                 return;
@@ -1840,12 +1809,12 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // The person's own view of the model's memory; nothing here reaches the
                 // model. A `note` is a display-only message: `apiRef` — the model's
                 // history — is not touched.
-                const file = memoryFilePath(f.config);
+                const file = memoryFilePath(host.config);
                 const res = memoryCommand(arg, loadMemories(file));
                 if (res.next) saveMemories(res.next, file);
                 setMessages((cur) => [...cur, { role: 'note', content: res.note }]);
                 setField('');
-                f.notify();
+                host.notify();
                 return;
               }
               case 'resume': {
@@ -1859,7 +1828,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   const lines = list.slice(0, 15).map((s, i) => `${i + 1}. ${s.title || '(untitled)'} — ${sessionWhen(s.updatedAt)}, ${s.turns} message${s.turns === 1 ? '' : 's'}${s.id === sessionIdRef.current ? ' · this one' : ''}`);
                   setMessages((cur) => [...cur, { role: 'note', content: lines.length ? `Sessions (newest first) — /resume <number> opens one:\n${lines.join('\n')}` : 'No saved sessions yet.' }]);
                   setField('');
-                  f.notify();
+                  host.notify();
                   return;
                 }
                 const pick = Number.isInteger(n) && n >= 1 ? list[n - 1] : undefined;
@@ -1878,7 +1847,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   if (outcome.status === 'held') {
                     setMessages((cur) => [...cur, { role: 'note', content: `Session "${pick.title || pick.id}" is open in another flow-assist process. (lock: ${lockPath(sessDir, pick.id)})` }]);
                     setField('');
-                    f.notify();
+                    host.notify();
                     return;
                   }
                 }
@@ -1887,8 +1856,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 setError(null); setEmptyNotice(''); setToolLabel(''); setToolCount(0);
                 if (pick.id !== sessionIdRef.current) releaseCurrentLock(); // leaving the old one for /resume
                 applySession(s, fp);
-                (f.services as Record<string, any>).showMessage?.(`Resumed «${s.title || 'session'}»`);
-                f.notify();
+                (host.services as Record<string, any>).showMessage?.(`Resumed «${s.title || 'session'}»`);
+                host.notify();
                 return;
               }
               case 'clear':
@@ -1924,7 +1893,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // /clear ends the conversation, not the memory — and says so, or the
                 // assistant "still knowing" an earlier prompt reads as /clear failing.
                 {
-                  const kept = keptAfterClear(loadMemories(memoryFilePath(f.config)));
+                  const kept = keptAfterClear(loadMemories(memoryFilePath(host.config)));
                   setMessages(kept ? [{ role: 'note', content: kept }] : []);
                 }
                 setInput(''); inputRef.current = '';
@@ -1941,7 +1910,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 setFolds(allFolded()); // everything folded again, and no exceptions left over
                 setStreaming(false);
                 disarmEsc();
-                f.notify();
+                host.notify();
                 return;
               case 'context':
                 // For the person; nothing is sent and nothing joins the conversation.
@@ -1954,11 +1923,11 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 if ('error' in target) { setError(target.error); return; }
                 // The terminal's clipboard sequence where there is one, the platform's tool
                 // where not (`services.copy`); what was copied is said here, once.
-                const done = (f.services as { copy?: (t: string) => { ok: boolean; error?: string } }).copy?.(target.text) ?? copyToClipboard(target.text);
+                const done = (host.services as { copy?: (t: string) => { ok: boolean; error?: string } }).copy?.(target.text) ?? copyToClipboard(target.text);
                 if (!done.ok) { setError(`/copy: ${done.error}`); return; }
                 setField('');
-                (f.services as Record<string, any>).showMessage?.(`Copied ${target.what} — ${Array.from(target.text).length} chars`);
-                f.notify();
+                (host.services as Record<string, any>).showMessage?.(`Copied ${target.what} — ${Array.from(target.text).length} chars`);
+                host.notify();
                 return;
               }
               case 'image': {
@@ -1993,7 +1962,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             setFocusState(next);
             focusRef.current = next;
             publish({ focus: next });
-            f.notify();
+            host.notify();
           };
 
           // Closing does NOT abort the stream: the chat component is always mounted, the
@@ -2036,7 +2005,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               setCursor(Array.from(initialText).length);
             }
             disarmEsc();
-            f.notify();
+            host.notify();
             if (initialText?.trim()) send(initialText);
           };
 
@@ -2072,7 +2041,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // A press on the screen: the keyboard goes to the pane it landed in, as a click
           // into a window does anywhere else.
           const pointer = (x: number, y: number) => {
-            const d = (f.services as { chatDock?: PanelLayout | null }).chatDock;
+            const d = (host.services as { chatDock?: PanelLayout | null }).chatDock;
             if (layoutRef.current !== 'panel' || !openRef.current || !d || d.collapsed) return;
             const next = inRect(d.panel, x, y) ? 'chat' : 'plugin';
             if (next !== focusRef.current) setFocus(next);
@@ -2108,10 +2077,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // A y/n or a question left pending when the chat was closed says so in every
           // mode — on the footer row in a window or the whole terminal too (Ctrl+] closes
           // those, and the question must not be forgotten behind them).
-          const focusCap = bindingGlyph(f.keys.chatFocus);
+          const focusCap = bindingGlyph(host.keys.chatFocus);
           const waiting = !open && (!!pendingAsk || !!pendingQuestion);
           const statusRow = !open && (layout === 'panel' || waiting)
-            ? renderChatStatus({ theme: f.config.theme as never, streaming, toolLabel, phase, verb, elapsed: elapsedMs, keyHint: focusCap ? `${focusCap} chat` : '', waiting })
+            ? renderChatStatus({ theme: host.config.theme as never, streaming, toolLabel, phase, verb, elapsed: elapsedMs, keyHint: focusCap ? `${focusCap} chat` : '', waiting })
             : null;
           // The App draws that status on the plugin's footer row as a component that ticks
           // by itself (`liveChatStatus`), reading what this render built — so the seconds
@@ -2119,9 +2088,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // them. The App is asked to redraw only when the status comes or goes: a turn
           // starts or ends collapsed, or starts or stops waiting on the person.
           const collapsedBusy = layout === 'panel' && !open && !waiting && (streaming || !!toolLabel);
-          const statusRef = f.useRef<unknown>(null);
+          const statusRef = ui.useRef<unknown>(null);
           statusRef.current = statusRow;
-          f.useEffect(() => { f.notify(); }, [collapsedBusy, waiting]);
+          ui.useEffect(() => { host.notify(); }, [collapsedBusy, waiting]);
           // `footerStatus`: the status goes on the plugin's footer row (not on a bottom
           // panel's own strip), and it names the key that brings the chat back — the
           // footer's `F chat` beside it would say "chat" twice.
@@ -2141,7 +2110,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               queued: queueRef.current.length,
             });
           };
-          (f.store as Record<string, any>).chat = { open, unread, mode, focus, openChat, closeChat, send, messages, streaming, toolLabel, cursor, escArmed, pendingConfirm: pendingAsk, ctrlKey, panelKey, pointer, statusRow: statusRow ? liveChatStatus(() => statusRef.current as never, collapsedBusy) : null, footerStatus, layout, needRows };
+          (host.store as Record<string, any>).chat = { open, unread, mode, focus, openChat, closeChat, send, messages, streaming, toolLabel, cursor, escArmed, pendingConfirm: pendingAsk, ctrlKey, panelKey, pointer, statusRow: statusRow ? liveChatStatus(() => statusRef.current as never, collapsedBusy) : null, footerStatus, layout, needRows };
           // Lands the next background result. It is SHOWN as soon as no turn is being
           // written (a streaming turn keeps rewriting the display list's last message,
           // so a result cannot be appended under it) — a half-typed draft does not hold
@@ -2156,7 +2125,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             if (streamRef.current) return;
             const q = bgQueueRef.current[0];
             if (q == null) { clearFlush(); return; }
-            const followUp = (f.config.ai as { backgroundFollowUp?: unknown } | undefined)?.backgroundFollowUp === true;
+            const followUp = (host.config.ai as { backgroundFollowUp?: unknown } | undefined)?.backgroundFollowUp === true;
             if (followUp && openRef.current && !inputRef.current && !queueRef.current.length) {
               bgQueueRef.current.shift();
               void send(q, { fromBackground: true });
@@ -2171,9 +2140,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               setUnread(unreadRef.current);
               publish({ unread: unreadRef.current });
               // Nobody is looking at the chat: say so beyond the footer counter.
-              (f.services as { alert?: (title: string, body?: string) => void }).alert?.('flow-assist', String(q).split('\n')[0].slice(0, 120));
+              (host.services as { alert?: (title: string, body?: string) => void }).alert?.('flow-assist', String(q).split('\n')[0].slice(0, 120));
             }
-            f.notify();
+            host.notify();
           };
           // A host-reachable channel to inject a message into the chat from OUTSIDE
           // (e.g. a `background` task's result). Registered per render (idempotent) so
@@ -2182,7 +2151,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // still current. Results are QUEUED, not dropped: if the chat is busy (mid-
           // answer or drafting), the result waits here and is auto-analyzed when the
           // chat goes idle — so a back-to-back burst of background tasks all land.
-          (f.services as Record<string, any>).postToChat = (text: string) => {
+          (host.services as Record<string, any>).postToChat = (text: string) => {
             const q = String(text ?? '').trim();
             if (!q) return;
             bgQueueRef.current.push(q);
@@ -2192,7 +2161,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // While the chat is open it owns the KEYBOARD: priority 100 (like log/tags).
           // The host dims the overlay-detail via ui.modalActive, so its consumer (also
           // 100) does not contend for 'r'/'c' etc.
-          f.useInputHandler({
+          host.useInputHandler({
             mode: 'consume',
             // Docked with the plugin at the keys, the chat asks for none — only for what
             // nobody else took (priority 1), which is the wheel over its conversation.
@@ -2229,7 +2198,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // way it is shown to move.
                 const next = askKey(askRef.current.state, key, askFieldWidth(chatWrapWidth(width, fullscreenRef.current)));
                 if (next.done) settleAsk(next);
-                else { askRef.current.state = next; setPendingQuestion(next); f.notify(); }
+                else { askRef.current.state = next; setPendingQuestion(next); host.notify(); }
                 return true;
               }
               // The context panel holds the keys while it is up; Esc or ⏎ put it away.
@@ -2283,7 +2252,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   disarmEsc();
                   setInput(cut.value); inputRef.current = cut.value;
                   setCursor(cut.cursor); cursorRef.current = cut.cursor;
-                  f.notify();
+                  host.notify();
                   return true;
                 }
               }
@@ -2323,8 +2292,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               if (key.name === 'tab' && key.shift && !key.meta && !key.ctrl) {
                 const next = nextAutoMode(autoModeRef.current);
                 setAutoMode(next);
-                (f.services as Record<string, any>).showMessage?.(autoSaid(next));
-                f.notify();
+                (host.services as Record<string, any>).showMessage?.(autoSaid(next));
+                host.notify();
                 return true;
               }
               // ── Tab: slash-command autocomplete (CHAT_COMMANDS).
@@ -2348,7 +2317,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                     setInput(newText); inputRef.current = newText;
                     setCursor(newText.length);
                     tabRef.current = { base, idx: nxt, cmd: matches[nxt] };
-                    f.notify();
+                    host.notify();
                     return true;
                   }
                 }
@@ -2393,7 +2362,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // blocks a click made an exception of go back to following it. A bound
               // action, so `config.keys.details` moves it; it answers to ^o and still
               // to ^r, which every hint written before it named.
-              if (isKey(f.keys.details ?? [], key)) { flipAllFolds(); return true; }
+              if (isKey(host.keys.details ?? [], key)) { flipAllFolds(); return true; }
               // PgUp/PgDn and the wheel belong to the conversation's own scroll box (the
               // view's <ScrollBox> hears them itself).
               // ── Everything else is EDITING, and that is flowtty's editor reducer: caret
@@ -2404,7 +2373,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // `submit` for a plain Enter; what that means here is the chat's business.
               const act = editorReducer(
                 { value: inputRef.current, cursor: cursorRef.current },
-                key as Parameters<typeof editorReducer>[1],
+                key as unknown as Parameters<typeof editorReducer>[1],
                 { multiline: true, width: chatFieldWidth(width, fullscreenRef.current) },
               );
               if (act.kind === 'submit') {
@@ -2459,7 +2428,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 if (act.state.value !== inputRef.current) { tabRef.current = null; disarmEsc(); }
                 setInput(act.state.value); inputRef.current = act.state.value;
                 setCursor(act.state.cursor); cursorRef.current = act.state.cursor;
-                f.notify();
+                host.notify();
               }
               return true;
             },
@@ -2469,13 +2438,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // gate was always false and the key never fired). triggerOpenable still guards the
           // command line / an open modal and when the chat is
           // already open; closed is not handled by the base consumer (priority 0).
-          addTrigger({ ft: f, action: 'chat', isOpen: () => focused, open: () => openChat() });
+          addTrigger({ host, action: 'chat', isOpen: () => focused, open: () => openChat() });
           if (!open) {
             // Collapsed at the bottom, the panel keeps one row: the turn's status, or how
             // to bring it back.
             if (layout !== 'panel' || dock?.side !== 'bottom') return null;
-            const cap = focusCap || bindingGlyph(f.keys.chatCollapse);
-            return renderChatStrip({ width, theme: f.config.theme as never, status: statusRow, keyHint: cap ? `${cap} chat` : '', unread });
+            const cap = focusCap || bindingGlyph(host.keys.chatCollapse);
+            return renderChatStrip({ width, theme: host.config.theme as never, status: statusRow, keyHint: cap ? `${cap} chat` : '', unread });
           }
           // What the screens show, asked once per draw: the title names it and the meter
           // counts it, as the next request will carry it.
@@ -2493,11 +2462,11 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             const matches = CHAT_COMMANDS.filter((c) => c.startsWith(walking ? walking.base : typed));
             if (matches.length) completions = { matches, sel: walking ? Math.min(walking.idx, matches.length - 1) : 0 };
           }
-          return (f.viewRegistry.chat as (p: Record<string, unknown>) => unknown)({
-            width, height, theme: f.config.theme, messages, input, streaming, error, toolLabel, phase, verb, cursor, escArmed,
+          return (host.viewRegistry.chat as (p: Record<string, unknown>) => unknown)({
+            width, height, theme: host.config.theme, messages, input, streaming, error, toolLabel, phase, verb, cursor, escArmed,
             // An armed Ctrl+C / Ctrl+D / Ctrl+Z (the App's, `^c again to exit`) — drawn
             // where `Esc again to exit` is.
-            armedHint: (f.services as { armedHint?: string }).armedHint ?? '',
+            armedHint: (host.services as { armedHint?: string }).armedHint ?? '',
             // `Esc stops` only while there is something it stops (see `canStop`) — and not
             // while a docked chat has given the keyboard to the plugin: Esc is its then.
             stoppable: canStop() && focused,
@@ -2505,7 +2474,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // the two channels a click needs: where the conversation is on the screen,
             // and which row to put at the top once a fold has changed the rows.
             folds,
-            detailsKey: firstGlyph(f.keys.details),
+            detailsKey: firstGlyph(host.keys.details),
             onViewport: (v: Viewport) => { viewportRef.current = v; },
             scrollTo,
             bangLevel,
@@ -2515,7 +2484,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // The numbers the conversation's images carry — their tokens are drawn as
             // attachments — and whether attaching is on (the hint names Ctrl+V then).
             imageNumbers: [...imagesRef.current.keys()],
-            imagesOn: imageLimits(f.config.ai).enabled,
+            imagesOn: imageLimits(host.config.ai).enabled,
             fullscreen,
             // Docked beside the plugin's screen: the frame marks which side has the keys.
             docked: layout === 'panel',
@@ -2532,7 +2501,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // reported, and nothing is drawn).
             turnTokens,
             // How many lines a block a CLICK opens shows; `^o` opens it in full.
-            viewLines: Number((f.config.plugins as Record<string, { runOutputLines?: unknown }> | undefined)?.assistant?.runOutputLines) || VIEW_CAPS.folded,
+            viewLines: Number((host.config.plugins as Record<string, { runOutputLines?: unknown }> | undefined)?.assistant?.runOutputLines) || VIEW_CAPS.folded,
             // How the steps between tool calls are drawn — each run folded by default.
             notes,
             // Every renderer the chat can draw a view with (the host's own `console`

@@ -1,4 +1,4 @@
-// flowtty's pickers reach a plugin through `ft`: `Select` is the dropdown, whose popup
+// flowtty's pickers reach a plugin through `ui`: `Select` is the dropdown, whose popup
 // is a floating dialog the host's <DialogHost> opens; `ListSelect` / `ListMultiSelect`
 // are the inline lists. docs/plugins.md says how a plugin gates them.
 import { afterEach, expect, test } from 'bun:test';
@@ -16,21 +16,21 @@ function guest(which: 'Select' | 'ListSelect' | 'ListMultiSelect') {
     name: 'boards',
     keycaps: () => ['c card'],
     components: {
-      view: (f: any) => function View() {
-        const [value, setValue] = f.useState(which === 'ListMultiSelect' ? [] : undefined);
-        const chat = f.store.chat as { open?: boolean; focus?: string } | undefined;
+      view: (api: any) => function View() {
+        const [value, setValue] = api.ui.useState(which === 'ListMultiSelect' ? [] : undefined);
+        const chat = api.host.store.chat as { open?: boolean; focus?: string } | undefined;
         const isFocused = !(chat?.open && chat.focus !== 'plugin');
         const onChange = (v: unknown) => { chosen.push(v); setValue(v); };
-        return f.h(f.Box, { flexDirection: 'column' },
-          f.h(f.Text, null, 'BOARD'),
-          f.h(f[which], { items: ITEMS, value, onChange, isFocused, width: 20, placeholder: 'pick a board' }));
+        return api.ui.h(api.ui.Box, { flexDirection: 'column' },
+          api.ui.h(api.ui.Text, null, 'BOARD'),
+          api.ui.h(api.ui[which], { items: ITEMS, value, onChange, isFocused, width: 20, placeholder: 'pick a board' }));
       },
     },
   })];
   return { make, chosen };
 }
 
-test('ft.Select is the dropdown: the host keeps the DialogHost its popup opens in', async () => {
+test('ui.Select is the dropdown: the host keeps the DialogHost its popup opens in', async () => {
   const g = guest('Select');
   const ui = await bootApp(new ScriptedModel(), 100, 28, g.make as never);
   expect(ui.backend.lastFrame).toContain('pick a board');
@@ -49,7 +49,7 @@ test('ft.Select is the dropdown: the host keeps the DialogHost its popup opens i
   ui.app.unmount();
 });
 
-test('ft.Select\'s popup closes on Esc with nothing changed', async () => {
+test('ui.Select\'s popup closes on Esc with nothing changed', async () => {
   const g = guest('Select');
   const ui = await bootApp(new ScriptedModel(), 100, 28, g.make as never);
   await ui.press('down');
@@ -67,7 +67,7 @@ test('ft.Select\'s popup closes on Esc with nothing changed', async () => {
   ui.app.unmount();
 });
 
-test('ft.ListSelect and ft.ListMultiSelect are the inline lists', async () => {
+test('ui.ListSelect and ui.ListMultiSelect are the inline lists', async () => {
   const one = guest('ListSelect');
   let ui = await bootApp(new ScriptedModel(), 100, 28, one.make as never);
   for (const l of ['Frontend', 'Backend', 'Design']) expect(ui.backend.lastFrame).toContain(l);

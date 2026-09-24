@@ -139,14 +139,14 @@ test('commandContextFor passes a base command ctx through unchanged', () => {
   const cmd = { name: 'help', description: 'base help' };
   const base = { showMessage: () => {}, back: () => {} };
   expect(commandContextFor(cmd, base)).toBe(base);
-  expect(commandContextFor(cmd, base, { tracker: { services: { openIssue: () => {} } } })).toBe(base);
+  expect(commandContextFor(cmd, base, { tracker: { host: { services: { openIssue: () => {} } } } })).toBe(base);
 });
 
 test('commandContextFor merges the owning plugin services into a plugin command ctx', () => {
   const cmd = { name: 'tracker:open', description: 'open' };
   const base = { showMessage: () => {} };
   const services = { openIssue: (code: string) => code, openBoard: () => {} };
-  const ctx = commandContextFor(cmd, base, { tracker: { services } });
+  const ctx = commandContextFor(cmd, base, { tracker: { host: { services } } });
   // Both the plugin's services and the host base closures land on the ctx.
   expect((ctx as { openIssue: (c: string) => string }).openIssue('ABC-1')).toBe('ABC-1');
   expect(typeof (ctx as { openBoard: () => void }).openBoard).toBe('function');
@@ -158,14 +158,14 @@ test('commandContextFor lets the host base ctx win a name collision with a plugi
   const cmd = { name: 'tracker:open', description: 'open' };
   const base = { showMessage: 'host-toast' as unknown, back: () => {} };
   const services = { showMessage: 'plugin-noop' as unknown, openIssue: () => {} };
-  const ctx = commandContextFor(cmd, base, { tracker: { services } });
+  const ctx = commandContextFor(cmd, base, { tracker: { host: { services } } });
   expect((ctx as { showMessage: unknown }).showMessage).toBe('host-toast');
 });
 
-test('commandContextFor returns the base ctx for a plugin with no mounted pFt', () => {
+test('commandContextFor returns the base ctx for a plugin that is not mounted', () => {
   const cmd = { name: 'tracker:open', description: 'open' };
   const base = { showMessage: () => {} };
-  // No `tracker` entry in pFtMap (the plugin is not mounted) → base ctx unchanged.
+  // No `tracker` entry in apiMap (the plugin is not mounted) → base ctx unchanged.
   expect(commandContextFor(cmd, base, {})).toBe(base);
 });
 
@@ -205,10 +205,10 @@ test('composeFooterHints omits a plugin that declares no keycaps (default inacti
   expect(hints).toEqual([': commands', 'q quit']);
 });
 
-test('composeFooterHints omits a plugin whose pFt is not mounted yet', () => {
+test('composeFooterHints omits a plugin whose pair is not built yet', () => {
   const keys = { commandLine: [':'], quit: ['q'], clearCache: ['x'] };
   const plugin: PluginShape = { name: 'tracker', keycaps: () => ['f: filters'] };
-  // No pFt entry → the keycaps fn is never called.
+  // No entry → the keycaps fn is never called.
   const hints = composeFooterHints([plugin], {}, keys);
   expect(hints).toEqual([': commands', 'q quit']);
 });

@@ -23,9 +23,9 @@ export const CONTEXT_TOTAL_MAX = 6000;
 // What the host needs of a plugin here — the two hooks, called with its own runtime.
 export interface ContextSource {
   name: string;
-  chatContext?: (ft: unknown) => unknown;
+  chatContext?: (api: unknown) => unknown;
   // Deprecated: one short id, read as a single item with no text.
-  chatSubject?: (ft: unknown) => unknown;
+  chatSubject?: (api: unknown) => unknown;
 }
 
 const cut = (s: string, max: number): string => {
@@ -83,19 +83,19 @@ export function capItems(items: ContextItem[], total = CONTEXT_TOTAL_MAX): Conte
 // item with no text. A hook that throws gives nothing and is reported through `onError`.
 export function collectContext(
   plugins: readonly ContextSource[],
-  ftOf: (name: string) => unknown,
+  apiOf: (name: string) => unknown,
   onError: (plugin: string, e: unknown) => void = () => {},
 ): ContextItem[] {
   const items: ContextItem[] = [];
   for (const p of plugins) {
-    const ft = ftOf(p.name);
-    if (!ft) continue;
+    const api = apiOf(p.name);
+    if (!api) continue;
     try {
       if (typeof p.chatContext === 'function') {
-        const got = p.chatContext(ft);
+        const got = p.chatContext(api);
         if (Array.isArray(got)) for (const raw of got) { const it = cleanItem(raw); if (it) items.push(it); }
       } else if (typeof p.chatSubject === 'function') {
-        const subject = p.chatSubject(ft);
+        const subject = p.chatSubject(api);
         const it = subject ? cleanItem({ label: String(subject), text: '' }) : null;
         if (it) items.push(it);
       }

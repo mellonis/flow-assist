@@ -28,7 +28,7 @@ notes/
 ```
 
 ```json
-{ "name": "notes", "version": "0.1.0", "hostApi": 1, "flowtty": "^1.0.0-alpha.26",
+{ "name": "notes", "version": "0.1.0", "hostApi": 2, "flowtty": "^1.0.0-alpha.26",
   "description": "A notebook the assistant reads and writes", "tools": ["notes"] }
 ```
 
@@ -168,6 +168,31 @@ What the host does with it, and what it expects back:
 `aiTools` is the other shape: standalone tools, each with its own `run(args, ctx)`,
 for a plugin that has no group.
 
+## What a plugin is given: `{ ui, host }`
+
+Every hook of the shape — each `components[slot]` factory, `setup`, `keycaps`,
+`chatContext`, `chatSubject`, `afterWrite` — receives one object with two parts:
+
+- **`ui`** — what React and flowtty ship, passed through unchanged, the same for every
+  plugin. Take them from here and import only their types: one React for the host and
+  every plugin; a second copy breaks every hook.
+- **`host`** — what the host implements or wraps, one per plugin.
+
+| `ui` | `host` |
+|---|---|
+| `h`, `useState`, `useEffect`, `useRef` (React) | `services` — the host's (`showMessage`, `pushLog`, `chatLLM`, `cache`, …) with the plugin's own under them |
+| `Box`, `Text`, `Markdown`, `Table`, `Link`, `ScrollBox` | `store` — the channel between plugins and the host |
+| `Select`, `ListSelect`, `ListMultiSelect`, `Checkbox` | `config`, `keys`, `keyCap(action)` |
+| `useInput` — flowtty's own, beside the host's key path | `useInputHandler` — the host's key path |
+| | `useSurfaceSize`, `useTerminalSize` — the room the host gives the plugin |
+| | `notify()`, `viewRegistry`, `commandRegistry`, `helpFor`, `copyToClipboard` |
+| | `pluginToken` — the plugin's identity; `hostApi` — the host API it runs under |
+
+The services stay on `host.services` and are read when they are called
+(`host.services.showMessage('saved')`): the host rebinds some of them on every render,
+so a copy taken once is stale. The two parts are built once, so a component factory
+runs once and its component is mounted for the app's life.
+
 ## Commands, keys and the footer
 
 ```ts
@@ -176,8 +201,8 @@ commands: [{
   run: (ctx) => ctx?.showMessage?.(`${count()} notes`),
 }],
 keys: { notes: 'N' },                 // an action and its default binding
-keycaps: (ft) => {                    // the footer's hints for the current context
-  const cap = ft.keyCap('notes');     // the cap of what `notes` is bound to NOW
+keycaps: ({ host }) => {              // the footer's hints for the current context
+  const cap = host.keyCap('notes');   // the cap of what `notes` is bound to NOW
   return cap ? [`${cap} notes`] : [];
 },
 entry: ['notes'],                     // the key that leads in, on the start screen
@@ -189,63 +214,66 @@ entry: ['notes'],                     // the key that leads in, on the start scr
   `{ name: 'login', usage: 'login <token>', history: false, run: … }`. It is part of
   the definition, not a decision made per call.
 - A binding is the person's to change (`config.keys`), so a hint never spells a key
-  by hand: `ft.keyCap(action)` draws the current one, `''` when it is unbound (then
+  by hand: `host.keyCap(action)` draws the current one, `''` when it is unbound (then
   show no hint).
-- `keycaps(ft)` returns `[]` while the plugin's screen is not active — it is also how
+- `keycaps` returns `[]` while the plugin's screen is not active — it is also how
   the host knows whether to mount the plugin's surface.
 
 ## Screens
 
 `components` are React components the host mounts, keyed by slot, each built from
-the plugin's runtime `ft`:
+the plugin's `{ ui, host }`:
 
 ```ts
 components: {
-  view: (ft) => function NotesView() { /* the plugin's full screen (its surface) */ },
-  panel: (ft) => function NotesPanel() { /* furniture: always mounted */ },
+  view: ({ ui, host }) => function NotesView() {   // the plugin's full screen (its surface)
+    const { width, height } = host.useSurfaceSize();
+    return ui.h(ui.Box, { width, height }, ui.h(ui.Text, null, 'notes'));
+  },
+  panel: ({ ui, host }) => function NotesPanel() { /* furniture: always mounted */ },
 },
-setup: (ft) => { /* once, before any component mounts: seed a store */ },
+setup: ({ host }) => { /* once, before any component mounts: seed a store */ },
 ```
 
 - The slot named `view` (or the one `surface` names) is the plugin's full screen,
-  mounted only while `keycaps(ft)` is non-empty; every other slot is always mounted.
-- **Size a surface by `ft.useSurfaceSize()`, not `ft.useTerminalSize()`.** The host
+  mounted only while `keycaps` is non-empty; every other slot is always mounted.
+- **Size a surface by `host.useSurfaceSize()`, not `host.useTerminalSize()`.** The host
   keeps a title bar above the surface and the footer (the command line) below it;
   `useSurfaceSize` is what is left between them. A surface sized by the terminal is
   taller than its room, and the host cuts off what does not fit — its bottom rows.
 - **A surface may be given less than the terminal.** The chat is docked beside it by
   default — on the right, or at the bottom of a narrow terminal — and the plugin's
   side of the screen (its title bar, surface and footer) is what remains, always from
-  the terminal's top-left corner. `ft.useSurfaceSize()` and `ft.useTerminalSize()`
+  the terminal's top-left corner. `host.useSurfaceSize()` and `host.useTerminalSize()`
   both report that side, so a surface and a modal laid out by them stay on it; the
   sizes change when the chat is folded away or brought back, and a surface re-renders
-  with them. Take the size from `ft`, never from flowtty's own `useTerminalSize`:
+  with them. Take the size from `host`, never from flowtty's own `useTerminalSize`:
   that one always reports the whole terminal.
 - **The keyboard is yours only while your side has it.** Ctrl+] moves it between the
   chat and the plugin; while the chat has it, your handlers see no keys, exactly as
   under the chat's window. The host takes Ctrl+] (and the key that folds the chat,
   Ctrl+\) before any handler, so a handler that consumes every key cannot trap the
   person.
-- **Take React and flowtty from `ft`, import only their types.** `ft.useState`,
-  `ft.useEffect`, `ft.useRef`, the flowtty components — one React for the host and
-  every plugin; a second copy breaks every hook.
-- **To let the person choose, `ft` has flowtty's three pickers.** `ft.Select` is a
+- **To let the person choose, `ui` has flowtty's three pickers.** `ui.Select` is a
   dropdown: a one-line field whose popup opens under it — the host keeps the
   `<DialogHost>` it needs, and while the popup is open every key is the popup's.
-  `ft.ListSelect` and `ft.ListMultiSelect` are the inline lists, every option on
+  `ui.ListSelect` and `ui.ListMultiSelect` are the inline lists, every option on
   screen. flowtty's docs/components.md (Choosing) says which to reach for. They hear
-  flowtty's own input, not `ft.useInputHandler`, so a mounted one would hear every
+  flowtty's own input, not `host.useInputHandler`, so a mounted one would hear every
   key — what the person types in the chat included: pass `isFocused` from your own
   state: true only while the picker is what the person is using. The host has no
   single "the plugin has the keyboard" flag yet; the keyboard is not the plugin's
-  while the chat has it (`ft.store.chat.open` with `ft.store.chat.focus` not
+  while the chat has it (`host.store.chat.open` with `host.store.chat.focus` not
   `'plugin'`), while the `:` line is open, or while the log or the help is up.
   A focused picker takes the keys it acts on — a `ListSelect` takes what is typed as
   its filter, so the host's own letters (`F`, `:`) do not reach the host while it has
   the focus; Ctrl+] and the exit keys always do. The names are flowtty's own: a plugin
   that imports the pickers from flowtty uses `Select` for the dropdown and
   `ListSelect` / `ListMultiSelect` for the lists — flowtty has no `MultiSelect`.
-- Keys come through `ft.useInputHandler({ mode, priority, handler })`. `mode` is
+  `ui.Checkbox` and `ui.ScrollBox` hear flowtty's input the same way — a scroll box
+  takes the page keys and the wheel over it — and are gated the same way
+  (`isFocused`, `isActive`).
+- Keys come through `host.useInputHandler({ mode, priority, handler })`. `mode` is
   `'consume'` (joins the race for the key) or `'observe'` (sees every key, takes
   none). Handlers run from the highest `priority(ui)` down, and a handler takes the
   key by returning exactly `true`. Conventionally: 100 — an open modal, 50 — a base
@@ -256,7 +284,7 @@ setup: (ft) => { /* once, before any component mounts: seed a store */ },
   `process.stderr` still lands in the frame — keep those out of a plugin.
 - A setter in one component re-renders that component only; the host redraws after
   every key that was handled. For a change that does not come from a key (a fetch
-  that finished, a timer) call `ft.notify()`.
+  that finished, a timer) call `host.notify()`.
 - `colors` and `modalColors` give the plugin's screens and modals their palettes;
   the person overrides them with `config.plugins.<name>.colors`.
 - **Write a ground as a theme token, not a literal:** `bg: '${panelBg}'`, not
@@ -270,13 +298,13 @@ setup: (ft) => { /* once, before any component mounts: seed a store */ },
 
 ## The chat's two hooks
 
-- `chatContext(ft)` — what the plugin's screens show right now, as a list of items
+- `chatContext({ ui, host })` — what the plugin's screens show right now, as a list of items
   `{ label, text }`, or `[]` / `null` when nothing is on screen. A screen may show
   several things at once — a board and an open issue — so it is a list:
 
   ```ts
-  chatContext: (ft: any) => {
-    const { board, issue } = ft.store.tracker ?? {}; // whatever your screen keeps
+  chatContext: ({ host }: any) => {
+    const { board, issue } = host.store.tracker ?? {}; // whatever your screen keeps
     const items: { label: string; text: string }[] = [];
     if (board) items.push({ label: `Board: ${board.name}`, text: `filter: ${board.filter} · ${board.count} issues · cursor on ${board.cursor ?? '—'}` });
     if (issue) items.push({ label: `Issue ${issue.key}`, text: `${issue.title} · ${issue.status}\n${(issue.description ?? '').slice(0, 500)}` });
@@ -322,10 +350,10 @@ setup: (ft) => { /* once, before any component mounts: seed a store */ },
     only the block follows the screen. A person who wants a fresh one says `/clear`.
   - A background task and a one-shot prompt get no block: they run apart from the
     screen.
-- `chatSubject(ft)` — **deprecated**, kept for one release: a short id of what the
+- `chatSubject({ ui, host })` — **deprecated**, kept for one release: a short id of what the
   screen is about, read as one item `{ label: <id>, text: '' }`. A plugin that has
   `chatContext` is not asked it. Move to `chatContext`.
-- `afterWrite(ft)` — called after a turn in which a write the person confirmed went
+- `afterWrite({ ui, host })` — called after a turn in which a write the person confirmed went
   through: reload what the screen shows, or it keeps the text from before the write.
 
 ## Compatibility
@@ -340,7 +368,7 @@ one:
   shape and their signatures, the fields of the manifest. It goes up by one on any
   change a plugin built for the previous number would break on. A plugin whose list
   does not hold the host's number is not loaded. No field reads as `1`. A plugin that
-  names several numbers reads the one it runs under from `ft.hostApi`.
+  names several numbers reads the one it runs under from `host.hostApi`.
 - **`flowtty`** — a semver range of the flowtty versions the plugin's screens need,
   checked against the flowtty the host runs (`^1.0.0-alpha.26`). A prerelease is
   matched only by a range that names one: `^1.0.0` does not take `1.0.0-alpha.26`,

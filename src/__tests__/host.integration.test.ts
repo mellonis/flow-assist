@@ -10,6 +10,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { TestBackend, flush } from '@flowtty/core/testing';
 import { renderApp } from '../runtime/app';
+import { HOST_API } from '../version';
 
 test('host is tracker-agnostic and loads a plugin-delivered tool', async () => {
   const root = mkdtempSync(join(tmpdir(), 'fa-host-'));
@@ -75,7 +76,7 @@ test('renderApp wires an enabled plugin: setup runs before mount, plugin service
   mkdirSync(join(available, 'demo'), { recursive: true });
   mkdirSync(enabled, { recursive: true });
   writeFileSync(join(available, 'demo', 'package.json'), JSON.stringify({ name: 'demo-plugin', type: 'module', main: './index.mjs' }));
-  writeFileSync(join(available, 'demo', 'manifest.json'), JSON.stringify({ name: 'demo', version: '1.0.0' }));
+  writeFileSync(join(available, 'demo', 'manifest.json'), JSON.stringify({ name: 'demo', version: '1.0.0', hostApi: HOST_API }));
   writeFileSync(
     join(available, 'demo', 'index.mjs'),
     `const trace = (globalThis.__daDemoTrace = []);
@@ -87,13 +88,13 @@ test('renderApp wires an enabled plugin: setup runs before mount, plugin service
          get detail() { return store; },
          showMessage: pluginShowMessage,
        },
-       setup(ft) {
+       setup(api) {
          store = { seeded: true };
-         trace.push({ step: 'setup', ownDetail: ft.services.detail });
+         trace.push({ step: 'setup', ownDetail: api.host.services.detail });
        },
        components: {
-         overlay: (ft) => {
-           trace.push({ step: 'factory', detail: ft.services.detail, clobbered: ft.services.showMessage === pluginShowMessage });
+         overlay: (api) => {
+           trace.push({ step: 'factory', detail: api.host.services.detail, clobbered: api.host.services.showMessage === pluginShowMessage });
            return () => null;
          },
        },
@@ -118,7 +119,7 @@ test('renderApp wires an enabled plugin: setup runs before mount, plugin service
     expect(steps.indexOf('setup')).toBe(0);
     expect(steps.indexOf('factory')).toBeGreaterThan(0);
     const factory = trace.find((t) => t.step === 'factory') as Record<string, unknown>;
-    // The plugin-owned lazy getter is live through ft.services…
+    // The plugin-owned lazy getter is live through api.host.services…
     expect(factory.detail).toEqual({ seeded: true });
     // …and a plugin's same-named key never clobbers a host service.
     expect(factory.clobbered).toBe(false);
