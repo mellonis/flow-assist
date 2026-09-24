@@ -77,12 +77,14 @@ test.each([[110, 40, 'window'], [100, 22, 'window'], [100, 22, 'panel']] as cons
   const toolResult = bodies[1].messages.find((m: any) => m.role === 'tool' && m.tool_call_id === 'call_ask');
   expect(toolResult).toMatchObject({ tool_call_id: 'call_ask' });
   expect(toolResult.content).toContain('Rebase or merge? → merge');
-  // Answered, the panel is docked again at its own 12 rows — where the three-item plan
-  // takes the rows the conversation AND the field would have had (the field's group is
-  // the part that shrinks), so the answer is looked for in a window only. A known gap
-  // of a 12-row panel with a plan, apart from the question.
-  if (mode === 'window') expect(backend.lastFrame).toContain('Merging then.');
-  else expect(backend.lastFrame.split('\n')[rows - 12]).toContain('╭─ ƒ Flow Assist');
+  // Answered, the panel is docked again at its own 12 rows: the three-item plan gives
+  // way to one row, so the field and the answer are on screen as in a window.
+  expect(backend.lastFrame).toContain('Merging then.');
+  if (mode === 'panel') {
+    expect(backend.lastFrame.split('\n')[rows - 12]).toContain('╭─ ƒ Flow Assist');
+    expect(backend.lastFrame).toContain('▸ plan 1/3 · one');
+    expect(backend.lastFrame).toContain('Esc Esc collapse');
+  }
   expect(backend.lastFrame).not.toContain('Rebase or merge?');
   handle.unmount();
 });

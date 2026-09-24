@@ -297,6 +297,14 @@ session (never saved); an old `fullscreen: true` reads as `full` (`chatModeOf`),
   question is usually about) and moves the layout by a few rows; the window is for the
   terminal where no growth can hold it (100×22: the default panel is 12 rows, the
   question 17). Collapsed, nothing is needed (the strip says it waits).
+- **In a chat with few rows the plan gives way, never the field.** The field's group
+  never shrinks (`flexShrink: 0`, its whole height kept — without it a 12-row bottom
+  panel with a three-item plan lost the field, its hint and the conversation, and only
+  the plan was left) and the conversation keeps at least one row. The `todo` plan is
+  what yields: whole when it fits, else ONE row — `▸ plan 2/3 · <item>`, the item in
+  progress (else the first pending) by its place in the plan, cut to the width — and
+  whole again when there is room (`planFit` / `planLine` in `views/modals.ts`, the
+  rows counted from the same pieces the blocks draw). Past even that it is not drawn.
 - **Two slots, in every mode, in the same order** — the plugin's side, then the panel;
   only their props change (the row/column direction, a width, `position: 'absolute'`
   over the whole terminal for `window`/`full`). A component moved to another parent is
@@ -1675,8 +1683,9 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
 - The conversation is a flowtty **`<ScrollList anchor="bottom" rowHeight={1}>`**
   (`ChatMessages` in `src/views/modals.ts`): it takes the rows the column leaves,
   follows new rows until the person scrolls up, and hears PgUp/PgDn and the wheel
-  ITSELF — the chat's key handler must not. No heights are added up anywhere: a new
-  block under the conversation needs `flexShrink: 0` and nothing else. Sending a
+  ITSELF — the chat's key handler must not. No heights are added up for the
+  conversation: a new block under it needs `flexShrink: 0` — and a place in the count
+  `planFit` is given, since the plan is the one block that yields rows. Sending a
   message calls `scrollToEnd()`. Needs flowtty ≥ 1.0.0-alpha.20; since alpha.22 the
   rendered window snaps to a grid, so a small scroll step re-renders no row at all.
   - **Only the rows near the screen are laid out.** A `<ScrollBox>` lays out every row

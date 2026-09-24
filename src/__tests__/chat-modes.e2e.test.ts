@@ -673,3 +673,46 @@ test.each(['window', 'panel'] as const)('with the : line open, Ctrl+] and Ctrl+\
   expect(chatFrame(ui).top).toBeGreaterThanOrEqual(0);
   ui.app.unmount();
 });
+
+// A small docked chat with a plan: the field never shrinks, the conversation keeps a
+// row, and the plan is what gives way — ONE row, whole again in a panel with room. It
+// used to be the field's group that shrank, so the field and the conversation vanished
+// and only the plan was left.
+test.each([[30, 'line'], [60, 'full']] as const)('a bottom panel on a %i-row terminal with a three-item plan: the field whole, the plan as %s', async (height, shape) => {
+  const model = new ScriptedModel();
+  model.script(
+    [{ tool: 'todo', args: { action: 'set', todos: [{ text: 'read the code', status: 'done' }, { text: 'write the fix', status: 'in_progress' }, { text: 'run the tests' }] } }],
+    [{ text: 'Planned.' }],
+  );
+  const g = guest();
+  const ui = await bootApp(model, 100, height, g.make as never, {}, { chatMode: 'panel' });
+  await ui.press('F');
+  await ui.type('plan it');
+  await ui.press('return');
+  for (let i = 0; i < 50 && model.requests.length < 2; i++) await settle(1);
+  await settle(10);
+  const f = chatFrame(ui);
+  expect(f.left).toBe(0); // docked at the bottom
+  if (shape === 'line') expect(f.bottom - f.top + 1).toBe(12);
+  // Inside the frame's border and padding.
+  const inside = rows(ui).slice(f.top + 2, f.bottom - 1);
+  // The field and its hint, whole, on the last row of the frame's content.
+  expect(inside.at(-1)).toContain('› ');
+  expect(inside.at(-1)).toContain('⏎ send ·');
+  expect(inside.at(-1)).toContain('new line · Esc Esc collapse');
+  // At least one row of conversation — the answer is on screen.
+  expect(ui.backend.lastFrame).toContain('Planned.');
+  if (shape === 'line') {
+    const plan = inside.filter((l) => l.includes('plan'));
+    expect(plan).toHaveLength(1);
+    expect(plan[0]).toContain('▸ plan 2/3 · write the fix');
+    expect(ui.backend.lastFrame).not.toContain('☐');
+  } else {
+    expect(ui.backend.lastFrame).toContain('▾ plan');
+    expect(ui.backend.lastFrame).toContain('◐ 2 · write the fix');
+    expect(ui.backend.lastFrame).toContain('☐ 3 · run the tests');
+    expect(ui.backend.lastFrame).toContain('· 1 done');
+    expect(ui.backend.lastFrame).not.toContain('plan 2/3');
+  }
+  ui.app.unmount();
+});

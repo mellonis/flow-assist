@@ -1077,6 +1077,29 @@ function planView(list: PlanItem[]): { shown: PlanItem[]; summary: string } {
   const summary = [hidden > 0 ? `+${hidden} pending` : '', done > 0 ? `· ${done} done` : ''].filter(Boolean).join(' ');
   return { shown, summary };
 }
+// How many rows the whole plan block takes: its `▾ plan` head, the items shown, the
+// summary line.
+const planBlockRows = (plan: { shown: PlanItem[]; summary: string }) =>
+  plan.shown.length || plan.summary ? 1 + plan.shown.length + (plan.summary ? 1 : 0) : 0;
+// The plan on ONE row, for a chat with too few rows for the whole block: `plan 2/3 ·`
+// and the item being worked on — the one in progress, else the first pending — counted
+// by its place in the plan.
+export function planLine(list: PlanItem[]): { head: string; text: string; inProgress: boolean } {
+  let at = list.findIndex((t) => t.status === 'in_progress');
+  if (at < 0) at = list.findIndex((t) => t.status === 'pending');
+  if (at < 0) return { head: `plan ${list.length}/${list.length} · `, text: 'all done', inProgress: false };
+  return { head: `plan ${at + 1}/${list.length} · `, text: list[at]!.text, inProgress: list[at]!.status === 'in_progress' };
+}
+// How the plan is drawn in a chat column of `rows` rows, `others` of which everything but
+// the conversation and the plan takes (the gaps between those pieces included). The
+// field never gives up a row and the conversation keeps at least one, so the plan is
+// what gives way: whole when it fits, ONE row when that fits, else not drawn at all.
+export function planFit(rows: number, others: number, full: number): 'full' | 'line' | 'none' {
+  if (full === 0) return 'none';
+  // The conversation's row and the gap the plan brings with it.
+  const room = rows - others - 1 - 1;
+  return full <= room ? 'full' : room >= 1 ? 'line' : 'none';
+}
 
 export function renderChatModal({
   width,
@@ -1241,9 +1264,9 @@ export function renderChatModal({
   const caretLi = Math.max(0, fieldRows.findIndex((r) => r.caret !== ''));
   const MAX_INPUT_LINES = 5;
   const visible = windowAround(fieldRows, caretLi, MAX_INPUT_LINES).items;
-  // No heights are added up here: the conversation is a scroll box that takes what
-  // the column leaves, so the plan, the queue line, the field and the question block
-  // (each `flexShrink: 0`) simply take their own rows.
+  // The conversation is a scroll box that takes what the column leaves, so the plan,
+  // the queue line, the field and the question block (each `flexShrink: 0`) take their
+  // own rows. Heights are added up for one thing only: whether the plan fits whole.
   // The todo plan block: in-progress items first, then pending, capped at
   // MAX_VISIBLE_PLAN active rows; done items are counted, not listed.
   // An open question takes the plan's room: the person is answering, not planning.
@@ -1258,6 +1281,21 @@ export function renderChatModal({
   const ghost = suggestion && atEnd && !input.includes('\n') ? suggestion.slice(input.length - 1) : '';
   const others = completions && atEnd ? completions.matches.filter((_, i) => i !== completions.sel) : [];
   const confirmAsk = pendingConfirm ? confirmView(pendingConfirm) : null;
+  // What the field's place holds: the question, `/context`, the y/n, or the field.
+  const fieldPlace = pendingQuestion
+    ? askBlockRows(pendingQuestion, wrap)
+    : contextPanel
+    ? contextPanelRows(contextPanel, wrap, contextCacheLine)
+    : confirmAsk
+    ? confirmBlockRows(confirmAsk, wrap)
+    : visible.length;
+  // Everything in the column but the conversation and the plan — the error, the hint
+  // row, the queue line, the field's place — each with the gap above it. The frame's
+  // border and padding take 4 rows.
+  const besides = [error ? textRows(`⚠ ${error}`, boxW - 4) : 0, 1, queued.length ? 1 : 0, fieldPlace]
+    .filter((n) => n > 0).reduce((a, n) => a + n + 1, 0);
+  const planShape = planFit(boxH - 4, besides, planBlockRows({ shown: planShown, summary: planSummary }));
+  const oneLine = planShape === 'line' ? planLine(planList) : null;
 
   return h(
     Box,
@@ -1336,9 +1374,15 @@ export function renderChatModal({
       autoBadge(autoMode) ? h(Text, { color: m.warn, bold: true }, `  ${autoBadge(autoMode)}`) : null,
       contextBadge ? h(Text, contextWarn ? { color: 'yellow' } : { dim: true }, `  ${contextBadge}`) : null),
       // The task plan sits ABOVE the input (not above the messages) — the newest
-      // answer stays pinned just above it, so a growing plan never hides it. Its
-      // height (todoH) is accounted for in `available`.
-      planList.length
+      // answer stays pinned just above it, so a growing plan never hides it. In a chat
+      // with too few rows for it (a small docked panel) it gives way first: ONE row,
+      // `plan 2/3 · <item>`, cut to the width, and whole again once there is room. The
+      // field never shrinks and the conversation keeps a row (`planFit`).
+      oneLine
+        ? h(Box, { key: 'plan', flexDirection: 'row', width: '100%', flexShrink: 0, overflow: 'hidden' },
+            h(Text, { dim: true, color: 'magenta', wrap: 'truncate' }, `▸ ${oneLine.head}`),
+            h(Text, { wrap: 'truncate', color: oneLine.inProgress ? 'yellow' : undefined }, oneLine.text))
+        : planShape === 'full'
         ? h(Box, { key: 'plan', flexDirection: 'column', width: '100%', flexShrink: 0 },
             h(Text, { dim: true, color: 'magenta' }, '▾ plan'),
             planShown.map((t) =>
@@ -1351,15 +1395,17 @@ export function renderChatModal({
           )
         : null,
       queued.length
-        ? h(Box, { flexDirection: 'row', width: '100%' },
+        ? h(Box, { flexDirection: 'row', width: '100%', flexShrink: 0 },
             h(Text, { bold: true, color: m.warn }, `${CAP.enter} queued${queued.length > 1 ? ` (${queued.length})` : ''}: `),
             h(Text, { wrap: 'truncate', color: m.warn }, `${queued.length > 1 ? '… ' : ''}${queued.at(-1)!.replace(/\s+/g, ' ').slice(0, Math.max(10, wrap - 40))}`),
             // ↑ takes it back only from an empty field (in a draft it moves the caret),
             // so it is offered only there.
             input ? null : h(Text, { dim: true }, ` · ${keyGlyph('up')} takes it back`))
         : null,
-      // The input field group (the y/n confirm block or the multiline input box).
-      h(Box, { flexDirection: 'column', width: '100%' },
+      // The input field group (the y/n confirm block or the multiline input box). It
+      // never shrinks: without `flexShrink: 0` a small panel with a plan squeezed the
+      // field — and its hint — out of sight.
+      h(Box, { flexDirection: 'column', width: '100%', flexShrink: 0 },
         pendingQuestion
           ? renderAsk(pendingQuestion, m.bg, wrap)
           : contextPanel
@@ -1577,22 +1623,32 @@ export function pendingChatRows({ width, question, confirm, todo, queued = 0 }: 
 }): number {
   if (!question && !confirm) return 0;
   const wrap = chatWrapWidth(width, true);
-  // Inside the block: its border and its paddingX, two columns each side.
-  const inner = wrap - 2;
-  let block: number;
-  if (question) {
-    const v = askView(question, wrap);
-    block = 2 + textRows(v.title, inner) + v.rows.reduce((n, r) => n + 1 + (r.description ? 1 : 0), 0) + v.fieldRows.length + textRows(v.hint, inner);
-  } else {
-    const v = confirmView(confirm!);
-    // Three pieces with a gap between each.
-    block = 2 + 1 + 1 + (v.command != null ? textRows(v.command, inner) : 1) + 1 + textRows(v.hint, inner);
-  }
-  const plan = question ? { shown: [], summary: '' } : planView(todo ?? []);
-  const planRows = plan.shown.length || plan.summary ? 1 + plan.shown.length + (plan.summary ? 1 : 0) : 0;
+  const block = question ? askBlockRows(question, wrap) : confirmBlockRows(confirmView(confirm!), wrap);
+  const planRows = question ? 0 : planBlockRows(planView(todo ?? []));
   const parts = [1, 1, planRows, queued ? 1 : 0, block].filter((n) => n > 0);
   // The frame's border and padding, the parts, a gap between each two.
   return 4 + parts.reduce((a, b) => a + b, 0) + parts.length - 1;
+}
+
+// The rows of the blocks that take the field's place, counted from the pieces their
+// renders draw. Inside a block: its border and its paddingX, two columns each side.
+function askBlockRows(state: AskState, wrap: number): number {
+  const v = askView(state, wrap);
+  const inner = wrap - 2;
+  return 2 + textRows(v.title, inner) + v.rows.reduce((n, r) => n + 1 + (r.description ? 1 : 0), 0) + v.fieldRows.length + textRows(v.hint, inner);
+}
+function confirmBlockRows(v: ReturnType<typeof confirmView>, wrap: number): number {
+  const inner = wrap - 2;
+  // Three pieces with a gap between each.
+  return 2 + 1 + 1 + (v.command != null ? textRows(v.command, inner) : 1) + 1 + textRows(v.hint, inner);
+}
+function contextPanelRows(r: ContextReading, wrap: number, cacheLine: string): number {
+  const legend = contextLegend(r).length;
+  const body = wrap >= GRID_COLS * 2 + 30 ? Math.max(GRID_ROWS, legend) : GRID_ROWS + 1 + legend;
+  // The heading, the grid with its legend, the footnote, the cache line, the hint — a
+  // gap between each two — inside a border.
+  const parts = [1, body, 1, cacheLine ? 1 : 0, 1].filter((n) => n > 0);
+  return 2 + parts.reduce((a, b) => a + b, 0) + parts.length - 1;
 }
 
 function renderAsk(state: AskState, bg: string | undefined, wrap: number) {
