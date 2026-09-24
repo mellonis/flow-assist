@@ -242,13 +242,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
     // chat says its own keys inside its frame.
     usesCache: false,
     keycaps: (ft) => {
-      const p = ft as { keyCap?: (action: string) => string; store?: { chat?: { open?: boolean; unread?: number; mode?: ChatMode; focus?: string; footerStatus?: boolean } } };
+      const p = ft as { keyCap?: (action: string) => string; store?: { chat?: { open?: boolean; unread?: number; layout?: ChatMode; focus?: string; footerStatus?: boolean } } };
       const chat = p.store?.chat;
       // The collapsed chat's status is on the footer row and already says `^] chat`:
       // only what it does not say — the unread count — is left to add.
       if (!chat?.open && chat?.footerStatus) return chat.unread ? [`◆ ${chat.unread} new`] : [];
       // Docked and open with the plugin at the keys: the footer says how to get back.
-      if (chat?.open && chat.mode === 'panel' && chat.focus === 'plugin') {
+      if (chat?.open && chat.layout === 'panel' && chat.focus === 'plugin') {
         const cap = p.keyCap?.('chatFocus') ?? '';
         return cap ? [`${cap} chat`] : [];
       }
@@ -284,15 +284,21 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // modes an open chat has it, as a window over the screen always had.
           const [focus, setFocusState] = f.useState<'chat' | 'plugin'>('plugin');
           const focusRef = f.useRef(focus); focusRef.current = focus;
-          const focused = open && (mode !== 'panel' || focus === 'chat');
+          // Where the App docked the chat, this frame (null unless it is a panel).
+          const dock = (f.services as { chatDock?: PanelLayout | null }).chatDock ?? null;
+          // How the chat is DRAWN, which is the mode — except a panel on a terminal too
+          // small to dock on (src/runtime/panel-layout.ts, `fits`): the App gives it no
+          // dock, and it is a window for as long as the terminal stays that small. Every
+          // check of how the chat behaves reads this; `mode` stays what was asked for.
+          const layout: ChatMode = mode === 'panel' && !dock ? 'window' : mode;
+          const layoutRef = f.useRef(layout); layoutRef.current = layout;
+          const focused = open && (layout !== 'panel' || focus === 'chat');
           const focusedRef = f.useRef(focused); focusedRef.current = focused;
           // The window fills its area — the panel, or the whole terminal — rather than a
           // centred window over the screen. The ref is for the key handler (the field's
           // width decides up/down across wrapped rows).
-          const fullscreen = mode !== 'window';
+          const fullscreen = layout !== 'window';
           const fullscreenRef = f.useRef(fullscreen); fullscreenRef.current = fullscreen;
-          // Where the App docked the chat, this frame (null unless it is a panel).
-          const dock = (f.services as { chatDock?: PanelLayout | null }).chatDock ?? null;
           // The wheel over the conversation while the plugin has the keys (the list does
           // not hear its own keys then) — ChatMessages fills it.
           const wheelRef = f.useRef<((up: boolean) => void) | null>(null);
@@ -1816,7 +1822,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 if (v && !(CHAT_MODES as readonly string[]).includes(v)) { setError(`/mode takes ${CHAT_MODES.join(', ')} — or nothing to say which is on`); return; }
                 setField('');
                 if (!v) {
-                  setMessages((cur) => [...cur, { role: 'note', content: `the chat is in ${modeRef.current} mode · /mode ${CHAT_MODES.join('|')}` }]);
+                  const small = modeRef.current === 'panel' && layoutRef.current !== 'panel' ? ' (drawn as a window: the terminal is too small for a panel)' : '';
+                  setMessages((cur) => [...cur, { role: 'note', content: `the chat is in ${modeRef.current} mode${small} · /mode ${CHAT_MODES.join('|')}` }]);
                   f.notify();
                   return;
                 }
@@ -2048,9 +2055,12 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // the panel away (the plugin gets the keys) and brings it back. In a window or
           // the whole terminal Ctrl+] opens the chat or closes it — the plugin has the
           // keyboard whenever the chat is not over it — and the collapse key is nobody's.
+          // A panel drawn as a window on a terminal too small to dock on answers both keys
+          // the way a window answers Ctrl+] — the person asked for a panel, and the key
+          // that collapses one must not go dead.
           const panelKey = (which: 'focus' | 'collapse'): boolean => {
-            if (modeRef.current !== 'panel') {
-              if (which === 'collapse') return false;
+            if (layoutRef.current !== 'panel') {
+              if (which === 'collapse' && modeRef.current !== 'panel') return false;
               if (openRef.current) closeChat(); else openChat();
               return true;
             }
@@ -2063,7 +2073,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // into a window does anywhere else.
           const pointer = (x: number, y: number) => {
             const d = (f.services as { chatDock?: PanelLayout | null }).chatDock;
-            if (modeRef.current !== 'panel' || !openRef.current || !d || d.collapsed) return;
+            if (layoutRef.current !== 'panel' || !openRef.current || !d || d.collapsed) return;
             const next = inRect(d.panel, x, y) ? 'chat' : 'plugin';
             if (next !== focusRef.current) setFocus(next);
           };
@@ -2080,7 +2090,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const ctrlKey = (key: { name?: string }): 'handled' | 'field' | undefined => {
             // Docked with the plugin at the keys, these are the plugin's side's, as with
             // the chat closed.
-            if (!openRef.current || (modeRef.current === 'panel' && focusRef.current !== 'chat')) return undefined;
+            if (!openRef.current || (layoutRef.current === 'panel' && focusRef.current !== 'chat')) return undefined;
             disarmEsc();
             if (key.name === 'c' && canStop()) {
               if (pendingRef.current) settleConfirm(false);
@@ -2100,13 +2110,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // those, and the question must not be forgotten behind them).
           const focusCap = bindingGlyph(f.keys.chatFocus);
           const waiting = !open && (!!pendingAsk || !!pendingQuestion);
-          const statusRow = !open && (mode === 'panel' || waiting)
+          const statusRow = !open && (layout === 'panel' || waiting)
             ? renderChatStatus({ theme: f.config.theme as never, streaming, toolLabel, phase, verb, elapsed: elapsedMs, keyHint: focusCap ? `${focusCap} chat` : '', waiting })
             : null;
           // The App draws that status from what the chat published on its last render, so
           // while a collapsed turn runs the App is asked to redraw as the seconds tick,
           // and once more when it ends — or starts, or stops, waiting on the person.
-          const collapsedBusy = mode === 'panel' && !open && !waiting && (streaming || !!toolLabel);
+          const collapsedBusy = layout === 'panel' && !open && !waiting && (streaming || !!toolLabel);
           f.useEffect(() => {
             f.notify();
             if (!collapsedBusy) return;
@@ -2117,7 +2127,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // panel's own strip), and it names the key that brings the chat back — the
           // footer's `F chat` beside it would say "chat" twice.
           const footerStatus = statusRow != null && dock?.side !== 'bottom';
-          (f.store as Record<string, any>).chat = { open, unread, mode, focus, openChat, closeChat, send, messages, streaming, toolLabel, cursor, escArmed, pendingConfirm: pendingAsk, ctrlKey, panelKey, pointer, statusRow, footerStatus };
+          (f.store as Record<string, any>).chat = { open, unread, mode, focus, openChat, closeChat, send, messages, streaming, toolLabel, cursor, escArmed, pendingConfirm: pendingAsk, ctrlKey, panelKey, pointer, statusRow, footerStatus, layout };
           // Lands the next background result. It is SHOWN as soon as no turn is being
           // written (a streaming turn keeps rewriting the display list's last message,
           // so a result cannot be appended under it) — a half-typed draft does not hold
@@ -2449,7 +2459,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           if (!open) {
             // Collapsed at the bottom, the panel keeps one row: the turn's status, or how
             // to bring it back.
-            if (mode !== 'panel' || dock?.side !== 'bottom') return null;
+            if (layout !== 'panel' || dock?.side !== 'bottom') return null;
             const cap = focusCap || bindingGlyph(f.keys.chatCollapse);
             return renderChatStrip({ width, theme: f.config.theme as never, status: statusRow, keyHint: cap ? `${cap} chat` : '', unread });
           }
@@ -2494,10 +2504,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             imagesOn: imageLimits(f.config.ai).enabled,
             fullscreen,
             // Docked beside the plugin's screen: the frame marks which side has the keys.
-            docked: mode === 'panel',
+            docked: layout === 'panel',
             focused,
             wheel: wheelRef,
-            escWord: mode === 'panel' ? 'collapse' : 'close',
+            escWord: layout === 'panel' ? 'collapse' : 'close',
             pendingConfirm: pendingAsk,
             pendingQuestion,
             queued,

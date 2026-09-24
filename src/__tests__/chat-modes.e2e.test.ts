@@ -5,6 +5,7 @@
 // `/mode window` is the window over the screen, `/mode full` the whole terminal, and an
 // old `fullscreen: true` reads as full.
 import { afterEach, expect, test } from 'bun:test';
+import { TestBackend } from '@flowtty/core/testing';
 import { ScriptedModel, bootApp, settle } from './helpers/scripted';
 import { chatRows, chatWrapWidth, type RowOpts } from '../views/modals';
 import { cellWidth } from '../assistant/step';
@@ -376,6 +377,60 @@ test('every chat row is one terminal line at the panel\'s width — steps, calls
   }
   // And on screen: nothing ran over the panel's right edge.
   for (const line of rows(ui).slice(1, 39)) expect(line.trimEnd().endsWith('│')).toBe(true);
+  ui.app.unmount();
+});
+
+// A terminal that can be resized, as a real one is.
+class ResizableBackend extends TestBackend {
+  private w: number;
+  private h: number;
+  private subs = new Set<() => void>();
+  constructor(w: number, h: number) { super(w, h); this.w = w; this.h = h; }
+  override size() { return { width: this.w, height: this.h }; }
+  onResize(fn: () => void) { this.subs.add(fn); return () => { this.subs.delete(fn); }; }
+  resize(w: number, h: number) { this.w = w; this.h = h; for (const fn of this.subs) fn(); }
+}
+
+// Too small for the panel's least and the plugin's (its title bar, its footer and one
+// row of its own), a docked chat is drawn as a window — for that size only: the config
+// still says panel, and a terminal grown back docks it again.
+test.each([16, 12])('a panel on a %i-row terminal is drawn as a window; the plugin keeps its whole screen', async (height) => {
+  const g = guest({ take: ['z'] });
+  const ui = await bootApp(new ScriptedModel(), 100, height, g.make as never, {}, { chatMode: 'panel' });
+  expect(g.size).toEqual({ width: 100, height: height - 6 });
+  await ui.press('F');
+  const f = chatFrame(ui);
+  expect(f.top).toBeGreaterThanOrEqual(0);
+  expect(f.left).toBeGreaterThan(0); // a window, not a panel across the whole width
+  expect(g.size).toEqual({ width: 100, height: height - 6 });
+  expect(ui.backend.lastFrame).toContain('Esc Esc close');
+  expect(g.ft().store.chat.focus).toBe('chat');
+  // The collapse key closes it, as Ctrl+] does, and the keyboard is the plugin's.
+  await press(ui, COLLAPSE);
+  expect(chatFrame(ui).top).toBe(-1);
+  await ui.press('z');
+  expect(g.seen).toEqual(['z']);
+  await press(ui, CTRL_RIGHT_BRACKET);
+  expect(chatFrame(ui).left).toBeGreaterThan(0);
+  ui.app.unmount();
+});
+
+test('grown back, the terminal docks the chat again — with what it held', async () => {
+  const g = guest();
+  const backend = new ResizableBackend(100, 16);
+  const ui = await bootApp(new ScriptedModel(), 100, 16, g.make as never, {}, { chatMode: 'panel', backend });
+  await ui.press('F');
+  await ui.type('draft');
+  expect(chatFrame(ui).left).toBeGreaterThan(0);
+  backend.resize(100, 40);
+  await settle();
+  expect(chatFrame(ui)).toEqual({ top: 24, bottom: 39, left: 0, width: 100 });
+  expect(g.size).toEqual({ width: 100, height: 18 });
+  expect(ui.backend.lastFrame).toContain('› draft');
+  backend.resize(100, 16);
+  await settle();
+  expect(chatFrame(ui).left).toBeGreaterThan(0);
+  expect(g.size).toEqual({ width: 100, height: 10 });
   ui.app.unmount();
 });
 

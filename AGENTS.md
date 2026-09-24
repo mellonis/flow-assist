@@ -279,6 +279,14 @@ session (never saved); an old `fullscreen: true` reads as `full` (`chatModeOf`),
   from the root, and the side starts at it). flowtty's own size context is not exported:
   a plugin that calls flowtty's `useTerminalSize` directly still sees the whole
   terminal. The chat is drawn in the panel as a plain box (`docked`), not an overlay.
+- **Too small to dock, it is a window.** `panelLayout` says `fits: false` when the
+  terminal cannot give the panel its least (12 rows) AND the plugin's side its own
+  (`PLUGIN_MIN_ROWS`: title bar + footer + one row — the panel's least used to win and
+  left the plugin 4 rows at 16, none at 12). The App then gives the chat no dock
+  (`chatDock` null) and it is laid out and behaves as a `window` — `layout` in the chat,
+  published as `store.chat.layout`, which every behaviour check reads while `mode` stays
+  what was asked for — until the terminal grows back. Both Ctrl+] and the collapse key
+  open and close it then. A right panel needs its 12 rows of height the same way.
 - **Two slots, in every mode, in the same order** — the plugin's side, then the panel;
   only their props change (the row/column direction, a width, `position: 'absolute'`
   over the whole terminal for `window`/`full`). A component moved to another parent is

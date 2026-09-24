@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { chatModeOf, inRect, panelLayout } from '../panel-layout';
+import { PLUGIN_MIN_ROWS, chatModeOf, inRect, panelLayout } from '../panel-layout';
 
 test('the mode: the config says it, an old fullscreen reads as full, else the panel', () => {
   expect(chatModeOf(undefined)).toBe('panel');
@@ -35,6 +35,25 @@ test('neither side is left a sliver', () => {
   expect(small.region.height).toBe(12);
   // A size that would leave the plugin nothing is held back.
   expect(panelLayout({ width: 130, height: 40, size: 90 }).region.width).toBe(60);
+});
+
+test('a terminal too small for the panel and the plugin\'s least does not dock: it is drawn as a window', () => {
+  // The plugin's least is its title bar, its footer and one row of its own.
+  expect(PLUGIN_MIN_ROWS).toBe(7);
+  // 12 rows of panel + 7 of plugin: 19 is the least that docks at the bottom.
+  for (const height of [19, 22, 24, 40]) {
+    const l = panelLayout({ width: 100, height });
+    expect(l.fits).toBe(true);
+    expect(l.region.height).toBeGreaterThanOrEqual(PLUGIN_MIN_ROWS);
+  }
+  for (const height of [18, 16, 12, 8]) {
+    expect(panelLayout({ width: 100, height }).fits).toBe(false);
+    // Collapsed or not: the size decides, not the state.
+    expect(panelLayout({ width: 100, height, collapsed: true }).fits).toBe(false);
+  }
+  // On the right the panel has the whole height, and it needs its least of it too.
+  expect(panelLayout({ width: 160, height: 12 }).fits).toBe(true);
+  expect(panelLayout({ width: 160, height: 11 }).fits).toBe(false);
 });
 
 test('collapsed: gone on the right, one row at the bottom', () => {

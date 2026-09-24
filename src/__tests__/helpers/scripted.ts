@@ -270,12 +270,13 @@ export const settle = async (n = 10) => { for (let i = 0; i < n; i++) { await fl
 // file a test then reads. `opts.toastMs` shortens the toast, for a test that waits
 // for one to go. `opts.clipboardImage` stands in for the system clipboard's image; a
 // test that does not give one has an empty clipboard — never the platform's real tools.
-// `opts.chatMode` is where the chat opens: a WINDOW over the screen unless a test says
+// `opts.backend` is a backend of the test's own (one it can resize); `cols` and `rows`
+// are then its business. `opts.chatMode` is where the chat opens: a WINDOW over the screen unless a test says
 // otherwise — most tests are about what the chat draws, and their frames were written
 // against the window. `null` leaves the config as the test gave it (a fresh config
 // docks the chat as a panel), and a test whose `extra` says `mode` or `fullscreen` for
 // the assistant is left alone too.
-export async function bootApp(model: ScriptedModel, cols = 100, rows = 28, guests?: (make: Make) => Plugin[], extra: Record<string, unknown> = {}, opts: { toastMs?: number; scheme?: 'light' | 'dark' | 'unknown'; clipboardImage?: () => ClipboardImage; pluginsNote?: string; interactive?: InteractiveDeps; chatMode?: 'panel' | 'window' | 'full' | null } = {}) {
+export async function bootApp(model: ScriptedModel, cols = 100, rows = 28, guests?: (make: Make) => Plugin[], extra: Record<string, unknown> = {}, opts: { toastMs?: number; scheme?: 'light' | 'dark' | 'unknown'; clipboardImage?: () => ClipboardImage; pluginsNote?: string; interactive?: InteractiveDeps; chatMode?: 'panel' | 'window' | 'full' | null; backend?: TestBackend } = {}) {
   process.env.LLM_TOKEN = 'scripted';
   model.install();
   // Sessions go to a fresh temp dir unless a test names one: a test must never write
@@ -300,7 +301,7 @@ export async function bootApp(model: ScriptedModel, cols = 100, rows = 28, guest
   const plugins = await loadPlugins({ config, repo, renders: renders as never });
   if (guests) plugins.push(...guests(makeFactory(config as never)));
   const tools = assembleToolRegistry({ plugins, config, repo });
-  const backend = new TestBackend(cols, rows);
+  const backend = opts.backend ?? new TestBackend(cols, rows);
   // A dark terminal unless a test says otherwise: the look every frame here was written
   // against. `unknown` is the terminal that has not answered (TestBackend's own start).
   const scheme = opts.scheme ?? 'dark';

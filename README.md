@@ -70,7 +70,8 @@ conversation; `/notes step` goes back. To have it that way from the start:
 **The chat sits beside what you are looking at.** By default it is a panel docked to
 the right of a plugin's screen — a board and the conversation about it, both in view —
 and the plugin's screen is laid out in the rest, as on a smaller terminal. On a terminal
-under 120 columns the panel goes to the bottom by itself.
+under 120 columns the panel goes to the bottom by itself, and on one too short for both
+(under 19 rows) the chat is drawn as a window until the terminal grows again.
 **Ctrl+]** moves the keyboard between the chat and the plugin; the side that has it is
 marked (the panel's frame, or the title bar, in the accent colour), and a click in
 either side gives it the keyboard too. With the plugin at the keys the chat goes on

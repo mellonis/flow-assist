@@ -54,7 +54,7 @@ import type { ColorScheme, Theme } from '../playback/theme.js';
 import type { Command } from '../loader/plugin.js';
 import type { Plugin, PluginShape } from '../loader/plugin.js';
 import { renderHome } from '../views/home.js';
-import { chatModeOf, panelLayout, type ChatMode, type PanelLayout } from './panel-layout.js';
+import { FOOTER_ROWS, TITLE_ROWS, chatModeOf, panelLayout, type ChatMode, type PanelLayout } from './panel-layout.js';
 
 // The host's own plugins: they ARE the host, so the start screen does not list them
 // among the guests.
@@ -161,10 +161,9 @@ interface CommandLineState {
   walk: TabWalk | null;
 }
 
-// The host's chrome around a plugin's surface: the title bar and the footer are one
-// row of text each inside `padding: 1` (the render below) — three rows apiece.
-export const TITLE_ROWS = 3;
-export const FOOTER_ROWS = 3;
+// The host's chrome around a plugin's surface (the title bar and the footer, three rows
+// apiece) is counted where the panel's layout needs it too.
+export { TITLE_ROWS, FOOTER_ROWS };
 
 // The part of the terminal a subtree is drawn in. With the chat docked beside it, a
 // plugin's side of the screen is smaller than the terminal, and everything drawn there
@@ -754,9 +753,13 @@ export function renderApp(
     const chat = chatStore();
     const assistantCfg = (config.plugins as Record<string, Record<string, unknown> | undefined> | undefined)?.assistant;
     const mode: ChatMode | null = chat ? chat.mode ?? chatModeOf(assistantCfg) : null;
-    const dock: PanelLayout | null = mode === 'panel'
+    const layout: PanelLayout | null = mode === 'panel'
       ? panelLayout({ width: termWidth, height: termHeight, ...((assistantCfg?.panel as { side?: unknown; size?: unknown } | undefined) ?? {}), collapsed: !chat?.open })
       : null;
+    // A terminal too small for the panel's least and the plugin's is laid out as for a
+    // window, for as long as it is that small: `chatDock` is null, and the chat reads
+    // that as being drawn as a window (src/runtime/panel-layout.ts, `fits`).
+    const dock: PanelLayout | null = layout?.fits ? layout : null;
     (services as unknown as HostServices).chatDock = dock;
     const region = dock ? dock.region : { width: termWidth, height: termHeight };
     // The side with the keyboard is marked: the chat's frame in its accent, or — the

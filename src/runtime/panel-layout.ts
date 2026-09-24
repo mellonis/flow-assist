@@ -25,6 +25,18 @@ export const PANEL_SIZE_DEFAULT: Record<PanelSide, number> = { right: 35, bottom
 // screen needs its title bar and its footer around a few rows of its own.
 const MIN_PANEL: Record<PanelSide, number> = { right: 40, bottom: 12 };
 const MIN_REST: Record<PanelSide, number> = { right: 60, bottom: 10 };
+// The rows a panel's chat needs whichever side it is on (a right panel has the whole
+// height, and needs this much of it).
+const MIN_PANEL_ROWS = MIN_PANEL.bottom;
+
+// The host's chrome around a plugin's surface: the title bar and the footer are one
+// row of text each inside `padding: 1` (the App's render) — three rows apiece.
+export const TITLE_ROWS = 3;
+export const FOOTER_ROWS = 3;
+// The least a plugin's side can be and still be one: its title bar, its footer and one
+// row of its own between them. A terminal that cannot give the panel its least AND the
+// plugin this is too small to dock on: the chat is drawn as a window there (`fits`).
+export const PLUGIN_MIN_ROWS = TITLE_ROWS + FOOTER_ROWS + 1;
 
 export interface AssistantLayoutConfig {
   mode?: unknown;
@@ -50,6 +62,11 @@ export interface PanelLayout {
   // it is one row, the turn's status.
   panel: Rect;
   collapsed: boolean;
+  // Whether the terminal has room to dock at all — the panel's least beside the
+  // plugin's (`PLUGIN_MIN_ROWS`). When it has not, the App draws the chat as a window
+  // for this size (the config still says panel; a terminal grown back docks it again),
+  // and the rects above are not used. Collapsed or not, the size alone decides it.
+  fits: boolean;
 }
 
 const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n));
@@ -69,11 +86,15 @@ export function panelLayout({ width, height, side, size, collapsed = false }: {
   if (s === 'right') {
     const full = clamp(Math.round((width * pct) / 100), Math.min(MIN_PANEL.right, width), Math.max(0, width - MIN_REST.right));
     const w = collapsed ? 0 : full;
-    return { side: s, collapsed, region: { left: 0, top: 0, width: width - w, height }, panel: { left: width - w, top: 0, width: w, height } };
+    const fits = height >= Math.max(MIN_PANEL_ROWS, PLUGIN_MIN_ROWS);
+    return { side: s, collapsed, fits, region: { left: 0, top: 0, width: width - w, height }, panel: { left: width - w, top: 0, width: w, height } };
   }
+  // The panel's least wins over the plugin's preferred rest (`MIN_REST`) — and when
+  // even the plugin's bare least is not left beside it, nothing is docked.
   const full = clamp(Math.round((height * pct) / 100), Math.min(MIN_PANEL.bottom, height), Math.max(1, height - MIN_REST.bottom));
+  const fits = height - full >= PLUGIN_MIN_ROWS;
   const h = collapsed ? 1 : full;
-  return { side: s, collapsed, region: { left: 0, top: 0, width, height: height - h }, panel: { left: 0, top: height - h, width, height: h } };
+  return { side: s, collapsed, fits, region: { left: 0, top: 0, width, height: height - h }, panel: { left: 0, top: height - h, width, height: h } };
 }
 
 export const inRect = (r: Rect, x: number, y: number) => x >= r.left && x < r.left + r.width && y >= r.top && y < r.top + r.height;
