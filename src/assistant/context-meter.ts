@@ -25,6 +25,7 @@ export interface ContextParts {
   memory: string; // the persistent-memory block
   plan: string; // the task plan block
   summary: string; // what /compact left
+  screen?: string; // what the person's screens show — the block every request ends its system context with
   tools: unknown[]; // tool definitions sent with every request
   messages: unknown[]; // the model's history
 }
@@ -58,6 +59,7 @@ export function readContext(parts: ContextParts, window: number, measuredPromptT
     { label: 'memory', tokens: estimateTokens(parts.memory) },
     { label: 'plan', tokens: estimateTokens(parts.plan) },
     { label: 'summary', tokens: estimateTokens(parts.summary) },
+    { label: 'on screen', tokens: estimateTokens(parts.screen ?? '') },
     { label: 'messages', tokens: estimateTokens(JSON.stringify(history.text)) },
     { label: 'images', tokens: history.tokens },
   ];

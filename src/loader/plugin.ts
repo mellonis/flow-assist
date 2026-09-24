@@ -4,6 +4,9 @@
 // (`config.plugins.<name>`) and the `keys` field (default hotkeys; `[]` =
 // disabled). Extracted into its own module so the registry (`registry.ts`) and
 // the plugins themselves can both import it without a cycle.
+import type { ContextItem } from '../assistant/screen-context.js';
+
+export type { ContextItem };
 
 // Input shape — the plugin author supplies this; `make` fills in the host-owned
 // fields (`name`, `config`, `keys`). `keyActions` is a legacy alias for `keys`;
@@ -54,10 +57,13 @@ export type PluginShape = {
   // channel (e.g. tracker's `createTrackerStore(ft)`), so hooks that read the
   // store during render never see an uninitialized one.
   setup?: (ft: unknown) => unknown;
-  // What the plugin's screen is about right now, as a short id the chat can show
-  // (a document, a ticket) — `null` when nothing is. The chat's title carries it,
-  // and opening the chat on a different one starts a new conversation (the old one
-  // stays on /resume). The host asks every plugin in order; the first answer wins.
+  // What the plugin's screens show right now, as items the model reads and the chat's
+  // title names: `{ label: 'Board: Frontend', text: 'filter: mine · cursor on ABC-12' }`.
+  // Asked before every request; the host sanitizes and caps them and frames them as
+  // data (docs/plugins.md, "The chat's two hooks"). `[]` / `null` — nothing on screen.
+  chatContext?: (ft: unknown) => ContextItem[] | null | undefined;
+  // Deprecated — `chatContext` replaces it: one short id of what the screen is about,
+  // read as a single item with no text. Ignored when the plugin has `chatContext`.
   chatSubject?: (ft: unknown) => string | null | undefined;
   // Called after a chat turn in which a write tool was confirmed and applied, so a
   // plugin reloads what it shows — otherwise the screen keeps the text from before
@@ -106,6 +112,7 @@ export interface Plugin {
   description?: string;
   usesCache?: boolean;
   setup?: (ft: unknown) => unknown;
+  chatContext?: (ft: unknown) => ContextItem[] | null | undefined;
   chatSubject?: (ft: unknown) => string | null | undefined;
   afterWrite?: (ft: unknown) => unknown;
 }

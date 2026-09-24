@@ -48,6 +48,7 @@ import { copyToClipboard } from '../assistant/copy.js';
 import { readClipboardImage, type ClipboardImage } from '../assistant/images.js';
 import { legacyRootsNote } from '../assistant/shell.js';
 import { llmConfigNotes } from '../assistant/llm-endpoint.js';
+import { collectContext } from '../assistant/screen-context.js';
 import { resolveAppTheme } from '../playback/theme.js';
 import type { ColorScheme, Theme } from '../playback/theme.js';
 import type { Command } from '../loader/plugin.js';
@@ -303,6 +304,8 @@ export function renderApp(
     // stable, and the services/store they point at are mutated live, so re-reading
     // them each render stays fresh.
     const pFtMap = useRef<Record<string, unknown>>({}).current;
+    // The plugins whose `chatContext` threw and was logged — once each, for the run.
+    const contextFailed = useRef(new Set<string>()).current;
     const overlayComps = useMemo(
       () => {
         const comps: { Comp: () => unknown; key: string; plugin: PluginShape; surface: boolean }[] = [];
@@ -348,16 +351,14 @@ export function renderApp(
     // The chat's two plugin hooks (AGENTS.md, plugin contract). Each plugin is asked
     // with its OWN runtime — the one its services and store live on; the chat's
     // runtime cannot see another plugin's services.
-    (services as unknown as HostServices).chatSubject = () => {
-      for (const p of plugins) {
-        const pFt = pFtMap[p.name];
-        let subject: string | null | undefined = null;
-        // Asked on every draw of the chat: a plugin that throws names nothing.
-        try { subject = pFt ? (p as Plugin).chatSubject?.(pFt) : null; } catch { subject = null; }
-        if (subject) return String(subject);
-      }
-      return null;
-    };
+    // Asked on every draw of the chat and before every request: a plugin whose hook
+    // throws gives nothing, and it is said in the log once per plugin, not per draw.
+    (services as unknown as HostServices).chatContext = () =>
+      collectContext(plugins as Plugin[], (name) => pFtMap[name], (name, e) => {
+        if (contextFailed.has(name)) return;
+        contextFailed.add(name);
+        (services as unknown as ReactBoundServices).pushLog(`[${name}] chatContext failed: ${(e as Error)?.message ?? String(e)}`);
+      });
     (services as unknown as HostServices).afterWrite = async () => {
       for (const p of plugins) {
         const pFt = pFtMap[p.name];

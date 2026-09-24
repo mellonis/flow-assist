@@ -5,6 +5,21 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **The assistant knows what is on your screen.** A plugin can now describe what its
+  screens show — a board with its filter and cursor and the issue open beside it —
+  through a new hook, `chatContext`, as a list of items with a label and a text. Before
+  every request the assistant is given them in a block of its own, `What the person
+  sees now`, marked as data from outside systems and never as instructions; it follows
+  the screen from one request to the next and is never stored in the conversation or
+  the saved session. `/context` counts it as `on screen`. The chat's title shows the
+  items' labels (`ƒ Flow Assist · Board: Frontend · Issue ABC-1`).
+
+- **Opening the chat on another screen no longer starts a new conversation.** It used
+  to switch to a fresh session whenever the plugin's subject changed, and the dialogue
+  seemed lost. Now the conversation continues and only what the assistant sees of the
+  screen changes; `/clear` starts a fresh one. `chatSubject` still works for this
+  release, read as one item with no text, and is deprecated — move to `chatContext`.
+
 - **Ctrl+C stops the answer, and quitting takes a second press.** Ctrl+C used to end
   the app at once, even in the middle of an answer, and Ctrl+Z to suspend it with a
   request in flight. Now Ctrl+C while an answer or a `!command` runs stops it, as Esc

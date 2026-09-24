@@ -7,8 +7,8 @@
 // `.ts` with explicit `h()` (createElement) calls — `tsconfig.json` includes `*.ts`
 // only, so a `.tsx` view would silently bypass `bun run typecheck`.
 //
-//   - The chat's title names its `subject` (what a plugin's screen is about,
-//     `services.chatSubject`) when there is one.
+//   - The chat's title names what the person's screens show — the labels of the
+//     plugins' `chatContext` items (`services.chatContext`) — when there are any.
 //   - `renderChatModal` accepts `completions { matches, sel }` and completes a
 //     `/`-command inside the field.
 //   - `theme` may be undefined / lack a resolved `modals` map, so every
@@ -1091,7 +1091,7 @@ export function renderChatModal({
   input: string;
   streaming: boolean;
   error?: string | null;
-  subject?: string | null;
+  subject?: string | null; // the labels of what is on screen, joined
   toolLabel?: string;
   // What the model is doing while no tool runs — see the status line.
   phase?: 'thinking' | 'writing';
@@ -1239,7 +1239,8 @@ export function renderChatModal({
         color: m.text,
         borderBackgroundColor: m.borderBg,
         borderColor: m.border,
-        borderTitle: subject ? `${ASSISTANT_MARK} Flow Assist · ${subject}` : `${ASSISTANT_MARK} Flow Assist`,
+        // What is on screen, after the name — cut to the border, never wrapped.
+        borderTitle: subject ? cutStep(`${ASSISTANT_MARK} Flow Assist · ${subject}`, Math.max(0, boxW - 4)) : `${ASSISTANT_MARK} Flow Assist`,
         width: boxW,
         height: boxH,
         padding: 1,
@@ -1381,7 +1382,7 @@ export function renderChatModal({
 // colours only tell the parts apart; the legend carries the same glyph in the same
 // colour, so it reads without them too (each row names its part).
 const PART_COLORS: Record<string, string> = {
-  instructions: 'cyan', tools: 'magenta', memory: 'yellow', plan: 'green', summary: 'blue', messages: 'white', images: 'cyanBright',
+  instructions: 'cyan', tools: 'magenta', memory: 'yellow', plan: 'green', summary: 'blue', 'on screen': 'greenBright', messages: 'white', images: 'cyanBright',
 };
 function renderContextPanel(r: ContextReading, bg: string | undefined, wrap: number) {
   const cells = contextGrid(r);

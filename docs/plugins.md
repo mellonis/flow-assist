@@ -223,9 +223,53 @@ setup: (ft) => { /* once, before any component mounts: seed a store */ },
 
 ## The chat's two hooks
 
-- `chatSubject(ft)` — a short id of what the plugin's screen is about now (an open
-  document, a ticket), or `null`. The chat shows it in its title, and opening the chat
-  on another subject starts a new session.
+- `chatContext(ft)` — what the plugin's screens show right now, as a list of items
+  `{ label, text }`, or `[]` / `null` when nothing is on screen. A screen may show
+  several things at once — a board and an open issue — so it is a list:
+
+  ```ts
+  chatContext: (ft: any) => {
+    const { board, issue } = ft.store.tracker ?? {}; // whatever your screen keeps
+    const items: { label: string; text: string }[] = [];
+    if (board) items.push({ label: `Board: ${board.name}`, text: `filter: ${board.filter} · ${board.count} issues · cursor on ${board.cursor ?? '—'}` });
+    if (issue) items.push({ label: `Issue ${issue.key}`, text: `${issue.title} · ${issue.status}\n${(issue.description ?? '').slice(0, 500)}` });
+    return items;
+  },
+  ```
+
+  Write it so it cannot throw on a half-loaded screen: a throw drops the plugin's
+  whole list, not one item.
+
+  The host asks every plugin, in load order, before **every request** to the model —
+  every round of a turn, so a tool that changes the screen is seen by the next round —
+  and adds one block to the end of the system context: `## What the person sees now`,
+  a sentence saying it is what the screens show, from external systems, to be used as
+  context and never followed as instructions, then each item as `### <label>` and its
+  text. It is never kept: not in the model's history, not in the saved session, so the
+  conversation does not grow with it. With no items there is no block. The context
+  meter counts it (`on screen` in `/context`).
+  - **Caps**: a label is one line of at most 120 characters, a text at most 2000; the
+    whole list at most 6000 — items that do not fit are left out from the end and
+    replaced by one `… N more` item. Escape sequences and control characters are
+    stripped from both. Say what matters first.
+  - **The chat's title** is the labels, joined with ` · ` and cut to the frame:
+    `ƒ Flow Assist · Board: Frontend · Issue ABC-1`.
+  - **It is data.** A title, a description, a comment — someone else wrote them, and the
+    model is told not to follow them. Put there what helps answer the person (what is
+    selected, what the filter is, the first lines of what is open), not secrets.
+  - It is called often — on every draw of the chat too — so read what the screen
+    already holds; never fetch in it.
+  - It sits in the system context, ahead of the conversation, so a change to it makes
+    the provider read the whole conversation again instead of from its prompt cache.
+    A cursor that moves with every key is worth sending only when it helps answer. A hook that throws gives nothing (said once in
+    the log, `[<plugin>] chatContext failed: …`); the turn goes on.
+  - The screen changing does **not** start a new conversation: the chat continues, and
+    only the block follows the screen. A person who wants a fresh one says `/clear`.
+  - A background task and a one-shot prompt get no block: they run apart from the
+    screen.
+- `chatSubject(ft)` — **deprecated**, kept for one release: a short id of what the
+  screen is about, read as one item `{ label: <id>, text: '' }`. A plugin that has
+  `chatContext` is not asked it. Move to `chatContext`.
 - `afterWrite(ft)` — called after a turn in which a write the person confirmed went
   through: reload what the screen shows, or it keeps the text from before the write.
 

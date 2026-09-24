@@ -59,7 +59,7 @@ export interface Session {
   usage: { promptTokens: number; completionTokens: number } | null;
   prompts: string[];                   // ↑/↓ history of the field
   draft: string;                       // what was typed and not sent
-  subject?: string | null;             // what the screen was about when the chat began (`chatSubject`), if anything
+  subject?: string | null;             // written by older hosts (what the screen was about); read, no longer written or used
   shellCwd?: string | null;            // where `!command` / run_command were last left (null — the default)
   tools?: string[];                    // the tools the model loaded (tools on demand); absent in older sessions
   images?: ImageRef[];                 // what each `[Image #N]` of the conversation stands for; absent in older sessions

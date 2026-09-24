@@ -20,6 +20,7 @@ import type { CacheService } from './services/cache.js';
 import type { LogService } from './services/log.js';
 import type { Memory } from './services/memory.js';
 import type { ViewRenderers } from '../assistant/views.js';
+import type { ContextItem } from '../assistant/screen-context.js';
 
 // The assistant memory: a plugin reads/updates the memory file. `filePath` is
 // resolved from config.memory.file (default under the host config dir).
@@ -89,11 +90,13 @@ export interface HostServices {
   // armed. The App owns the arm (src/runtime/exit-keys.ts); the chat draws it on its
   // status line, the App on the bottom row of every other screen.
   armedHint: string;
-  // The chat's side of two plugin hooks (`chatSubject` / `afterWrite` in the plugin
-  // shape): what the screen is about now — the first plugin that names something —
-  // and "a write was applied, reload what you show", sent to every plugin. The App
-  // binds both over the mounted plugins; the defaults answer nothing and do nothing.
-  chatSubject: () => string | null;
+  // The chat's side of two plugin hooks (`chatContext` / `afterWrite` in the plugin
+  // shape): what the person's screens show now — every plugin's items, in load order,
+  // sanitized and capped (src/assistant/screen-context.ts; a plugin with only the
+  // deprecated `chatSubject` gives one item) — and "a write was applied, reload what
+  // you show", sent to every plugin. The App binds both over the mounted plugins; the
+  // defaults answer nothing and do nothing.
+  chatContext: () => ContextItem[];
   afterWrite: () => Promise<void>;
   // Every view renderer the chat can draw a tool's block with: the host's own
   // `console` plus each plugin's, qualified `<plugin>:<kind>` (src/loader/registry.ts).
@@ -190,7 +193,7 @@ export function createServices({ config, tools, repo, onExit }: CreateServicesOp
     copy: (text) => platformCopy(text),
     setOverlay: () => {},
     armedHint: '',
-    chatSubject: () => null,
+    chatContext: () => [],
     afterWrite: async () => {},
   };
   // Read the LIVE channels at fire time (the App reassigns showMessage/pushLog/

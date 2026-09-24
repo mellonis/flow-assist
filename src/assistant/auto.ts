@@ -2,8 +2,8 @@
 // working session is a long series of confirmations, and there are stretches — a batch
 // of edits, a clean-up — where the person wants to stop confirming for a while.
 //
-// It belongs to a CONVERSATION and is never saved: a restart, `/clear`, `/resume` and a
-// change of task all come back to `ask`. A mode that survived a restart would be a
+// It belongs to a CONVERSATION and is never saved: a restart, `/clear` and `/resume`
+// all come back to `ask`. A mode that survived a restart would be a
 // standing permission nobody remembers granting.
 //
 // The three rungs:

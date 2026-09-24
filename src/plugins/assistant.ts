@@ -2,8 +2,8 @@
 // modal: owns the messages, input, streaming and scroll. THE HOST does the network
 // (ft.services.chatLLM) — the plugin never touches it; the endpoint is read from
 // ft.config.ai through `llmOpts` (provider, baseUrl, model, the token's variable).
-//   - what the chat is about and the refresh after a write are asked of the plugins
-//     through two generic hooks (`services.chatSubject` / `services.afterWrite`,
+//   - what the person's screens show and the refresh after a write are asked of the
+//     plugins through two generic hooks (`services.chatContext` / `services.afterWrite`,
 //     see AGENTS.md, plugin contract) — the chat names no plugin's data.
 //   - the chat's language is `ai.assistantLanguage` (chatLanguage).
 
@@ -37,6 +37,7 @@ import { askKey, askStart, type AskQuestion, type AskState } from '../assistant/
 import { loadMemories, memoryFilePath, saveMemories } from '../runtime/services/memory.js';
 import { keptAfterClear, memoryCommand } from '../assistant/memory-command.js';
 import { CONTEXT_WARN_AT, DEFAULT_CONTEXT_WINDOW, contextBadge, readContext, short as shortTokens } from '../assistant/context-meter.js';
+import { contextTitle, screenBlock, type ContextItem } from '../assistant/screen-context.js';
 import {
   IMAGES_OFF, dataUrl, imageLimits, imagesInText, insertToken, isImageRefusal, loadImageFile, pastedPaths, readClipboardImage, readImageData, removeTokenAt, wireMessages,
   type ClipboardImage, type ImageRef, type LoadedOk, type ResolvedImage,
@@ -261,7 +262,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const planRef = f.useRef(createPlan());
           // Where this conversation's shell commands run — `!command` and the model's
           // run_command share it; `cd` moves it. The conversation's, like the plan: a
-          // background run gets its own, /clear and a change of task reset it.
+          // background run gets its own, /clear resets it.
           const shellRef = f.useRef(createShellState(() => f.config as Record<string, unknown>));
           // Which turn a view belongs to — groups never span two.
           const turnRef = f.useRef(0);
@@ -273,7 +274,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const liveBuf = f.useRef(new Map<string, ViewRecord>());
           const liveSeen = f.useRef(new Set<string>());
           const liveTimer = f.useRef<ReturnType<typeof setTimeout> | null>(null);
-          // Bumped at every reset (/clear, /resume, a change of task — the same places
+          // Bumped at every reset (/clear, /resume — the same places
           // liveSeen/liveBuf are cleared), never at anything else — turnRef is NOT reset
           // there, it belongs to the conversation's whole history. `send()` and the
           // `!command` runner each capture it when they START; every callback of theirs
@@ -289,7 +290,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           f.useEffect(() => () => { if (liveTimer.current) clearTimeout(liveTimer.current); }, []);
           // The tools the model has loaded (tools on demand, src/assistant/tool-loading.ts).
           // The conversation's, like the plan: its history calls them, so it is saved
-          // with the session, kept through /compact, emptied by /clear and a change of task.
+          // with the session, kept through /compact, emptied by /clear.
           const toolSetRef = f.useRef(createToolSet());
           // What the provider reported for the last turn: its prompt plus the answer it
           // produced is, to a close approximation, the size of the NEXT request.
@@ -331,8 +332,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // What is open and what is folded (src/assistant/folds.ts): one global
           // state, plus the blocks a click has made an exception of. `details` (^o)
           // is the master switch; a click opens the block under it alone. The
-          // conversation's, like the auto mode — never saved, and `/clear`, `/resume`
-          // and a change of task all come back to everything folded.
+          // conversation's, like the auto mode — never saved, and `/clear` and `/resume`
+          // both come back to everything folded.
           const [folds, setFoldsState] = f.useState<FoldState>(allFolded());
           const foldsRef = f.useRef(folds);
           const setFolds = (s: FoldState) => { foldsRef.current = s; setFoldsState(s); };
@@ -387,7 +388,6 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // signal) does not hold the keys: Esc goes back to its idle steps and Ctrl+C
           // arms the exit, so the person can always leave.
           const canStop = () => !!abortRef.current && !abortRef.current.signal.aborted;
-          const ctxSubjectRef = f.useRef<string | null>(null); // what the screen was about when this session began
           // Tab-completion cycle: { base, idx, cmd } — by which prefix the matches were
           // built, the last selected command in that list and its text. Repeat Tab cycles;
           // changing the prefix (typed/deleted) restarts.
@@ -597,7 +597,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
 
           // ── Images (src/assistant/images.ts) ── what each `[Image #N]` of this
           // conversation stands for, and the last N given out. The conversation's, like
-          // the plan: saved with the session, emptied by /clear and a change of task. The
+          // the plan: saved with the session, emptied by /clear. The
           // TEXT decides what a message sends — the tokens in it this map knows — so the
           // field, a queued message, ↑/↓ and the draft need nothing beside their text.
           const imagesRef = f.useRef(new Map<number, ImageRef>());
@@ -657,7 +657,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // A /command or !command in the field is being run, not drafted (it was
               // "/clear" itself); a shell-mode field has no leading `!` left to catch by
               // that regex, so its own flag is checked too — it is not a draft either.
-              prompts: historyRef.current.slice(-100), draft: (shellModeRef.current || /^\s*[/!]/.test(inputRef.current)) ? '' : inputRef.current, subject: ctxSubjectRef.current,
+              prompts: historyRef.current.slice(-100), draft: (shellModeRef.current || /^\s*[/!]/.test(inputRef.current)) ? '' : inputRef.current,
               shellCwd: shellRef.current.saved(),
               tools: toolSetRef.current.names(),
               // Refs only — a path and a hash per image, never its bytes.
@@ -665,16 +665,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               closed: false, // written means in use — a resumed cleared session is open again
             };
           };
-          // The fork note's text, for whichever of the two places shows it decides how.
+          // The fork note's text.
           const forkNoteText = (messages: Record<string, unknown>[], id: string): string =>
             `Session "${sessionTitle(messages) || id}" was changed elsewhere — saved this conversation as a new session.`;
           // `silent` — nothing shown, no notify — for the paths that write on the way
           // out (exit, unmount): the screen is not going to be read again, though the
           // fork itself (never overwrite what changed) still happens even there.
-          // `forkNotice`, if given, receives the note's text instead of it becoming a
-          // chat message — the change-of-task site uses it to fold the note into the
-          // toast it already shows, rather than raising a second one.
-          const writeSession = (opts: { silent?: boolean; forkNotice?: (text: string) => void } = {}) => {
+          const writeSession = (opts: { silent?: boolean } = {}) => {
             if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null; }
             if (!sessDir || !msgsRef.current.some((m) => personSpoke(m.role))) return; // nothing said or run yet
             try {
@@ -694,9 +691,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 const fp = saveSession(sessDir, forked);
                 sessionIdRef.current = forkedId; createdAtRef.current = now; fingerprintRef.current = fp;
                 const text = forkNoteText(snap.messages, snap.id);
-                if (opts.forkNotice) {
-                  opts.forkNotice(text);
-                } else if (!opts.silent) {
+                if (!opts.silent) {
                   setMessages((cur) => [...cur, { role: 'note', content: text }]);
                   f.notify();
                 }
@@ -723,7 +718,6 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const applySession = (s: Session, fingerprint: SessionFingerprint) => {
             sessionIdRef.current = s.id; createdAtRef.current = s.createdAt;
             fingerprintRef.current = fingerprint;
-            ctxSubjectRef.current = s.subject ?? null;
             apiRef.current = s.api as unknown as ChatMessage[];
             summaryRef.current = s.summary;
             planRef.current.load(s.plan);
@@ -773,7 +767,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             }, 0);
           }
           // Component unmount is the other leaving-the-session trigger (exit, /clear,
-          // /resume and a change of task are handled at their own sites below): a
+          // /resume are handled at their own sites below): a
           // last, silent save and the lock's release.
           f.useEffect(() => () => {
             unhookExitRef.current?.();
@@ -884,17 +878,26 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             return `## Current task plan (the \`todo\` tool)\nYou maintain it through \`todo\`; it changes only when you call the tool.\n${lines.join('\n')}`;
           };
           // The full system context of a message = the «cheap» base (directive+identity)
-          // + fresh memory + the current plan. No network: the base is synchronous,
-          // memory a local file, the plan the tool's module state.
+          // + fresh memory + the current plan + the summary, then — added by `agentChat`
+          // to each round, never here — what the screens show now (`screenNow`). No
+          // network: the base is synchronous, memory a local file, the plan the tool's
+          // module state. This part is also what the display list keeps as its system
+          // message, which is why the screen's block is not in it.
+          // What the person's screens show now, as the plugins describe it
+          // (src/assistant/screen-context.ts). Read fresh for every request — every
+          // round of a turn — and never kept: not in `apiRef`, not in the session.
+          const screenNow = (): ContextItem[] => {
+            try { return (f.services as { chatContext?: () => ContextItem[] }).chatContext?.() ?? []; } catch { return []; }
+          };
           // How full the model's context is (assistant/context-meter.ts).
-          const contextReading = () => {
+          const contextReading = (screen: ContextItem[] = screenNow()) => {
             const summary = summaryRef.current ? `Summary of the conversation so far (older turns were compacted):\n${summaryRef.current}` : '';
             const window = Number((f.config.ai as { contextWindow?: unknown } | undefined)?.contextWindow) || DEFAULT_CONTEXT_WINDOW;
             const u = usageRef.current;
             return readContext(
               // The tools the next request will CARRY — with tools on demand, the core ones,
               // what was loaded and the index; not every tool there is.
-              { system: baseStatic(), memory: memoryBlock(), plan: planBlock(), summary, tools: requestTools((f.services as Record<string, any>).pluginAiTools ?? [], toolLoadingMode(f.config.ai), toolSetRef.current), messages: apiHistory(apiRef.current) },
+              { system: baseStatic(), memory: memoryBlock(), plan: planBlock(), summary, screen: screenBlock(screen), tools: requestTools((f.services as Record<string, any>).pluginAiTools ?? [], toolLoadingMode(f.config.ai), toolSetRef.current), messages: apiHistory(apiRef.current) },
               window,
               u ? u.promptTokens + u.completionTokens : undefined,
             );
@@ -954,7 +957,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           };
           // `epoch` is the caller's own — captured when the turn or the `!command` that
           // opened this view STARTED, so a change that arrives after a LATER reset
-          // (/clear, /resume, a change of task) is dropped here, before it ever touches
+          // (/clear, /resume) is dropped here, before it ever touches
           // `liveBuf`/`liveSeen` or triggers a flush into the fresh conversation.
           const offerLive = (rec: ViewRecord, epoch: number) => {
             if (epoch !== epochRef.current) return;
@@ -965,7 +968,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             if (first || rec.phase !== 'live') { flushLive(); return; }
             liveTimer.current ??= setTimeout(flushLive, LIVE_REDRAW_MS);
           };
-          // /clear, /resume and a change of task all call this: the calls liveSeen/
+          // /clear and /resume both call this: the calls liveSeen/
           // liveBuf tracked belong to the conversation being left, and the pending
           // coalesce timer (if any) is for a view that conversation drew — cancelled,
           // not left to fire into whatever replaces it. The epoch bump is what actually
@@ -1065,6 +1068,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 logTools: !!((f.config as Record<string, any>)?.debug?.logTools),
                 // Plugin ai-tools (aiTools): agentChat runs their own run(args, toolCtx).
                 extraTools: (f.services as Record<string, any>).pluginAiTools ?? [],
+                // What the screens show, read again before every round of the turn and
+                // added to the end of its system context — never to the history.
+                systemTail: () => screenBlock(screenNow()),
                 // What this conversation has loaded; `tools_load` adds to it mid-turn.
                 // The mode (`ai.toolLoading`) is applied by the `chatLLM` service.
                 toolSet: toolSetRef.current,
@@ -1409,7 +1415,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // OUTSIDE the try so the catch below can still find the message by `callId`
             // if something throws after it was pushed; `epoch` is this command's own
             // conversation identity, captured now — a completion that arrives after a
-            // LATER /clear (or /resume, or a change of task) must not touch the fresh
+            // LATER /clear (or /resume) must not touch the fresh
             // conversation's messages, session-facing history or shell directory.
             const startedAt = Date.now();
             const callId = `shell#${startedAt}`;
@@ -1761,7 +1767,6 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 abortRef.current?.abort(); abortRef.current = null;
                 if (pendingRef.current) settleConfirm(false);
                 dismissAsk();
-                ctxSubjectRef.current = null;
                 contentRef.current = '';
                 // A cleared session must not have a pre-clear background result surface in
                 // the fresh chat: drop any queued-but-unsent delivery and stop the flush
@@ -1859,44 +1864,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             f.notify();
           };
 
+          // Opening the chat continues the conversation whatever the screen shows: what
+          // is on screen reaches the model through every request's system context
+          // (`screenNow`), and a person who wants a fresh conversation says /clear.
           const openChat = (initialText?: string) => {
-            const subject = (f.services as { chatSubject?: () => string | null }).chatSubject?.() ?? null;
-            // A change of subject — a new session (fresh context); re-opening on the same
-            // subject continues the history, nothing is cleared.
-            if (subject !== ctxSubjectRef.current) {
-              // The conversation about the other task is saved and stays on /resume.
-              // A fork here (the file changed since this chat last saw it) must still
-              // be visible — captured instead of shown as a chat note (the screen is
-              // cleared right below, so a note in it would only flash and vanish) and
-              // folded into the one toast this branch shows, so a fork does not go
-              // unremarked and a stale "new session" toast never follows it.
-              const had = msgsRef.current.some((m) => m.role === 'user');
-              let forkNote: string | null = null;
-              writeSession({ forkNotice: (text) => { forkNote = text; } });
-              releaseCurrentLock();
-              sessionIdRef.current = ''; createdAtRef.current = ''; fingerprintRef.current = NO_FILE;
-              if (forkNote) (f.services as Record<string, any>).showMessage?.(forkNote);
-              else if (had) (f.services as Record<string, any>).showMessage?.(`A new session for ${subject ?? 'no task'} — /resume goes back to the previous one`);
-              ctxSubjectRef.current = subject;
-              apiRef.current = []; summaryRef.current = ''; queueRef.current = []; setQueued([]);
-              usageRef.current = null;
-              planRef.current.reset();
-              shellRef.current.setCwd(null);
-              toolSetRef.current.reset();
-              resetLiveViews(); // the calls they tracked belong to the other task
-              resetImages();
-              setAutoMode('ask'); // the new task has not been given the old one's leeway
-              setNotes(configNotes()); // nor kept the notes mode the old one was set to
-              resetRound();
-              setFolds(allFolded()); // the blocks a click had opened belong to the other task
-              msgsRef.current = [];
-              setMessages([]);
-              // Task change — a new session: reset the status fields too, else the
-              // «limit of steps» warning / tool name from the old task moves into the new.
-              setEmptyNotice('');
-              setToolLabel('');
-              setToolCount(0);
-            }
             setOpen(true);
             openRef.current = true;
             setUnread(0);
@@ -2238,6 +2209,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // already open; closed is not handled by the base consumer (priority 0).
           addTrigger({ ft: f, action: 'chat', isOpen: () => open, open: () => openChat() });
           if (!open) return null;
+          // What the screens show, asked once per draw: the title names it and the meter
+          // counts it, as the next request will carry it.
+          const screen = screenNow();
           // Slash-command completion, shown INLINE in the field: `matches[sel]` is the
           // suggestion and the view draws the part of it not typed yet right after the
           // caret; the other matches are named beside it. While Tab is walking the
@@ -2277,7 +2251,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             pendingConfirm: pendingAsk,
             pendingQuestion,
             queued,
-            subject: (f.services as { chatSubject?: () => string | null }).chatSubject?.() ?? null,
+            // The title names what is on screen — the items' labels.
+            subject: contextTitle(screen),
             elapsed: elapsedMs, emptyNotice, toolCount, completions,
             // What the turn has cost so far, as the provider reported it (0 — nothing
             // reported, and nothing is drawn).
@@ -2296,7 +2271,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // Live count of IN-FLIGHT background tasks (the host re-renders via
             // notify() when one is armed or completes).
             bgCount: bgActiveCount(),
-            ...(() => { const r = contextReading(); return { contextBadge: contextBadge(r), contextWarn: r.ratio >= CONTEXT_WARN_AT, contextPanel: contextOpen ? r : null }; })(),
+            ...(() => { const r = contextReading(screen); return { contextBadge: contextBadge(r), contextWarn: r.ratio >= CONTEXT_WARN_AT, contextPanel: contextOpen ? r : null }; })(),
             // The assistant's task plan (todo tool): a snapshot so the render never
             // mutates the tool's module state. Re-read every render, so a plan the
             // LLM edits (via notify()) shows up immediately.

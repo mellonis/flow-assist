@@ -6,7 +6,6 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { SESSION_VERSION, newSessionId, saveSession, type Session } from '../assistant/sessions.ts';
-import type { Make } from '../loader/plugin.ts';
 import { ScriptedModel, bootApp, settle } from './helpers/scripted';
 
 const realFetch = globalThis.fetch;
@@ -320,39 +319,6 @@ test('a legacy session (no rev field) changed elsewhere by another legacy writer
   expect(originalStill.rev).toBeUndefined(); // the foreign legacy write, still untouched
   expect(originalStill.messages.some((m: { content: unknown }) => m.content === 'FOREIGN LEGACY EDIT')).toBe(true);
   expect(originalStill.messages.some((m: { content: unknown }) => m.content === 'q2')).toBe(false);
-  ui.app.unmount();
-});
-
-test('a fork during a change of task shows the note as a toast, not a suppressed one', async () => {
-  const dir = dirOf();
-  const model = new ScriptedModel();
-  model.script([{ text: 'a1' }]);
-  const state = { subject: 'DOC-7' as string | null };
-  const guest = (make: Make) => [make('docs', { name: 'docs', chatSubject: () => state.subject })];
-  const ui = await bootApp(model, 100, 28, guest, { sessions: { dir } });
-  await ui.press('F');
-  await ui.type('q1');
-  await ui.press('return');
-  await settle(20);
-  await ui.press('escape', 'escape'); // save #1 under subject DOC-7
-
-  const name = fs.readdirSync(dir).find((n) => n.endsWith('.json'))!;
-  const file = path.join(dir, name);
-  const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
-  fs.writeFileSync(file, JSON.stringify({ ...raw, messages: [...raw.messages, { role: 'user', content: 'FOREIGN' }] })); // same rev, different content
-
-  state.subject = 'DOC-8'; // a change of task — writeSession runs on the way out and must fork
-  await ui.press('F'); // opens on DOC-8; the fork happens here
-  await ui.press('escape', 'escape'); // close — the toast, set during the task change, is what the footer shows now
-
-  const frame = ui.backend.lastFrame!;
-  expect(flat(frame)).toContain(flat('was changed elsewhere — saved this conversation as a new session.'));
-  expect(frame).not.toContain('A new session for DOC-8'); // the fork note replaced the routine one, not both shown
-
-  const files = fs.readdirSync(dir).filter((n) => n.endsWith('.json'));
-  expect(files).toHaveLength(2); // the original session, plus the fork this task change made
-  const originalStill = JSON.parse(fs.readFileSync(file, 'utf8'));
-  expect(originalStill.messages.some((m: { content: unknown }) => m.content === 'FOREIGN')).toBe(true); // untouched
   ui.app.unmount();
 });
 

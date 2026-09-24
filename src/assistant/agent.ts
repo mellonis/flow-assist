@@ -164,6 +164,11 @@ export interface AgentOpts {
   onToolLive?: (rec: ViewRecord) => void;
   // The clock a view's start is read from; tests fix it.
   now?: () => number;
+  // Text added to the end of the system context of EVERY round, read just before the
+  // round is sent — what the person's screens show now (src/assistant/screen-context.ts).
+  // It goes into the request only: never into the transcript, so never into the
+  // caller's history. '' (or a throw) adds nothing.
+  systemTail?: () => string;
   // Any remaining OpenAI-ish options (tools, signal, …) — spread into the round.
   [key: string]: unknown;
 }
@@ -493,6 +498,21 @@ export function requestTools(extraTools: ToolDef[], mode: ToolLoading = 'all', s
 // in the reply (full += r.content). Now it is folded into `process` (onProcess),
 // and only the final no-tool_calls round is the answer (content → onDelta/onLive).
 // Returns { content, process, toolRuns }.
+// The messages a round sends: the history as it is, with `tail` read NOW and added to
+// the end of its system message (or as one, when there is none). A copy — the
+// history itself never holds it.
+function withSystemTail(messages: ChatMessage[], tail: (() => string) | undefined): ChatMessage[] {
+  if (!tail) return messages;
+  let text = '';
+  try { text = String(tail() ?? ''); } catch { text = ''; }
+  if (!text) return messages;
+  const first = messages[0];
+  if (first?.role === 'system' && typeof first.content === 'string') {
+    return [{ ...first, content: first.content ? `${first.content}\n\n${text}` : text }, ...messages.slice(1)];
+  }
+  return [{ role: 'system', content: text }, ...messages];
+}
+
 export async function agentChat(
   messages: ChatMessage[],
   {
@@ -506,6 +526,7 @@ export async function agentChat(
     logToolRun: logRun = () => {},
     toolLoading = 'all',
     toolSet = createToolSet(),
+    systemTail,
     ...opts
   }: AgentOpts = {},
 ): Promise<AgentResult> {
@@ -581,7 +602,7 @@ export async function agentChat(
     for (let i = 0; i < maxRounds; i++) {
       rounds = i + 1;
       let roundContent = '';
-      const r = await chatRoundFn(current, {
+      const r = await chatRoundFn(withSystemTail(current, systemTail), {
         ...opts,
         tools: roundTools(),
         ...(noThinking ? { thinking: undefined } : {}),

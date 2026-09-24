@@ -118,8 +118,8 @@ cannot import a package from disk), still declares its `configSchema` with it.
 `make(name, shape)` injects `config.plugins.<name>` and qualified keys. The
 returned `shape` has optional: `commands`, `keys`, `keyActions`, `views`,
 `surface`, `modals`, `colors`, `modalColors`, `configSchema`, `components`, `tools`,
-`services`, `aiTools`, `keycaps(ft)`, `entry`, `setup(ft)`, `chatSubject(ft)`,
-`afterWrite(ft)`. `components[slot] = (ft) => Component`;
+`services`, `aiTools`, `keycaps(ft)`, `entry`, `setup(ft)`, `chatContext(ft)`,
+`chatSubject(ft)` (deprecated), `afterWrite(ft)`. `components[slot] = (ft) => Component`;
 `services` expose host services through `ft.services` — the host wins on every
 key it owns, a plugin's same-named key never clobbers it. `setup(ft)` runs once,
 before any of the plugin's components mount (it is where a plugin seeds its store). Tool groups are delivered by plugins — there is
@@ -136,16 +136,38 @@ the blacklist.
   `services` are its own (a per-plugin view over the host's), so the chat cannot
   read another plugin's state — which is why two hooks are part of the shape, called
   with the plugin's own `ft`:
-  - `chatSubject(ft)` → a short id of what the plugin's screen is about now (the
-    tracker: the open issue), or `null`. The first plugin to name something wins. The
-    chat's title shows it (`ƒ Flow Assist · ABC-1`), and opening the chat on a
-    different subject starts a new session (the old one stays on `/resume`); the
-    session saves it as `subject` (older sessions wrote `issue`, still read).
+  - `chatContext(ft)` → what the plugin's screens show now, as items `{ label, text }`
+    (a board with its filter and cursor AND the open issue), or `[]`/`null`.
+    `services.chatContext()` asks every plugin in load order, each call guarded (a
+    throw gives nothing and is logged once per plugin, `[<plugin>] chatContext
+    failed: …`), and returns the items sanitized (`sanitizeViewText`; a label on one
+    line) and capped — a label 120 code points, a text 2000, the list 6000, the tail
+    dropped behind one `… N more` item (`src/assistant/screen-context.ts`, pure).
+    **What the model gets**: `## What the person sees now` — a sentence framing it as
+    what the screens show, from external systems, context and never instructions —
+    then `### <label>` + text per item. It is NOT part of `assembleSystem()`: that
+    string is also the display list's system message and so lands in the session file.
+    The chat hands `agentChat` a `systemTail` read before EVERY round (a tool that
+    changes the screen is seen by the next round) and appended to that round's system
+    message in a copy — never `current`, so never the transcript, `apiRef` or the
+    session. No items, no block. The meter counts it as the `on screen` part
+    (`ContextParts.screen`). Only the chat's `send()` passes it: a background task
+    (the `background` tool's nested `chatLLM`) and the one-shot CLI (no mounted
+    plugins) get none — they run apart from the screen. `/compact` does not see it.
+    The chat's title is the labels joined ` · `, cut to the frame
+    (`ƒ Flow Assist · Board: Frontend · Issue ABC-1`), the plain name with none.
+    **The screen changing never switches the session**: opening the chat continues
+    the conversation whatever is on screen (switching lost the dialogue for the
+    person); `/clear` is how a fresh one starts. The session no longer writes
+    `subject`; one written by an older host (or `issue`, older still) is read and
+    ignored.
+  - `chatSubject(ft)` → deprecated, for one release: a short id, read as ONE item
+    `{ label: <id>, text: '' }`; a plugin that has `chatContext` is not asked it.
   - `afterWrite(ft)` → called, for every plugin, after a chat turn in which a write
     tool was confirmed and APPLIED (not declined, not failed): reload what you show,
     or an open document keeps its text from before the write. It may return a
     promise; a rejection is logged as `[<plugin>] refresh after a write failed: …`.
-  The host reaches them as `services.chatSubject()` / `services.afterWrite()`
+  The host reaches them as `services.chatContext()` / `services.afterWrite()`
   (bound in `runtime/app.tsx`).
 
 ### A plugin that starts a process owns its life
@@ -297,8 +319,8 @@ assistant nobody had asked for a board.
   flag, an MCP tool on the person's `readOnly` list) never reached the y/n anyway — it
   is the rung the cycle passes THROUGH, so one keypress cannot land on "every write
   runs", and it is what the hint line then says. `all` answers a write's y/n for the
-  person. The mode belongs to the CONVERSATION and is never saved: a restart, `/clear`,
-  `/resume` and a change of task all come back to `ask`, and the session file does not
+  person. The mode belongs to the CONVERSATION and is never saved: a restart, `/clear`
+  and `/resume` all come back to `ask`, and the session file does not
   hold it. Two calls are never automatic in ANY mode — `run_command` (the y/n is its
   only guard, and the command may have been written from a page the model just read)
   and `web_fetch` (one that reaches the confirmation at all is to a host outside
@@ -403,8 +425,7 @@ assistant nobody had asked for a board.
   not loaded is an ERROR naming `tools_load`, refused BEFORE the y/n — the wire-name
   map covers every known tool, not only the sent ones, or that call would not even
   resolve. The loaded set is a `ToolSet` owned like the plan: the chat's `toolSetRef`
-  (saved as the session's `tools`, kept by `/compact`, emptied by `/clear` and a
-  change of task); a background run and the one-shot CLI start from an empty one.
+  (saved as the session's `tools`, kept by `/compact`, emptied by `/clear`); a background run and the one-shot CLI start from an empty one.
   `agentChat`'s own default is `'all'` — the mode is applied by `services.chatLLM`
   and `runPrompt` from config — and `bootApp` pins `'all'` so an e2e script can call
   the tool it tests; `tool-loading.e2e.test.ts` opts in. The context meter measures
@@ -419,10 +440,10 @@ assistant nobody had asked for a board.
   three views of one conversation, saved together or not at all. Not saved: an answer
   in progress (`live`), a pending y/n or question, the queues. Saves: 250 ms after a
   question, an answer's end, `/compact`, a background result; at once on closing the
-  chat, `/clear`, `/resume`, a task change, and at process exit (`flushOnExit`). A
+  chat, `/clear`, `/resume`, and at process exit (`flushOnExit`). A
   write is temp file + rename; a file that does not parse is skipped. On start the
   newest session is continued unless `/clear` closed it (`sessions.resume: false`
-  turns this off); `/clear` and a change of task start a new one and keep the old on
+  turns this off); `/clear` starts a new one and keeps the old on
   `/resume` (`/resume <n>` opens it). The last 400 messages are kept, 50 sessions.
   An image is saved as a ref (`images`, `imageSeq` — see "Images" under The chat),
   never as its bytes; the e2e test asserts the file holds no base64.
@@ -449,7 +470,7 @@ assistant nobody had asked for a board.
   unreadable lock has sat there longer than that — is STALE and is taken over. The
   lock is acquired when a session first gets its id (a fresh one, or the one a
   start-up/`/resume` continues) and released — after the final save — on exit
-  (`flushOnExit`), `/clear`, `/resume` to another session, a change of task, and
+  (`flushOnExit`), `/clear`, `/resume` to another session, and
   component unmount. `pruneSessions` leaves a HELD session's file alone regardless
   of the keep count (deleting it out from under a live process would be a second
   way to lose data) and separately sweeps any `.lock` whose session file is already
@@ -481,10 +502,7 @@ assistant nobody had asked for a board.
   and says so: `Session "<title or id>" was changed elsewhere — saved this
   conversation as a new session.` The save at exit and at unmount shows nothing
   (the screen is not going to be read again) but still forks rather than
-  overwrites, so the data is never lost even then; the save on a change of task
-  folds the note into the one toast that branch already shows (replacing it, not
-  raising a second one) rather than suppressing it, since the screen it would
-  otherwise write into is cleared right after.
+  overwrites, so the data is never lost even then.
 
 A qualified tool name (`plugin:tool`) is translated to a provider-safe wire name
 (`plugin__tool`) in `src/assistant/agent.ts` and nowhere else: providers validate
@@ -605,7 +623,7 @@ hardest. Rules the `repo` and `gitlab` plugins hold, each with a test that tries
     rounds of one turn (a test double restarts at `call_0` every round; some real
     servers send `''` or reuse ids), and two commands whose ids collided used to
     overwrite one another's block.
-  - **A reset — `/clear`, `/resume`, a change of task, the same places `planRef`
+  - **A reset — `/clear` and `/resume`, the same places `planRef`
     resets — clears `liveBuf`, `liveSeen` and any pending `liveTimer`, and bumps an
     `epochRef`** (`resetLiveViews` in `src/plugins/assistant.ts`); `turnRef` is NOT
     reset there, it belongs to the conversation's whole history, not one turn.
@@ -994,8 +1012,8 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     describe. It is `^o` (`^r` kept as an alias) and a BOUND action, so
     `config.keys.details` moves it and every hint draws from the binding.
   - **A block that did not exist yet follows the global state**: with everything open,
-    the next turn's tool calls and command output arrive open. `/clear`, `/resume` and
-    a change of task all go back to everything folded with no exceptions — the state
+    the next turn's tool calls and command output arrive open. `/clear` and `/resume`
+    both go back to everything folded with no exceptions — the state
     is the CONVERSATION's, like the auto mode, and is never saved.
   - One block does NOT follow it (`isClicked`): the **cap on an open tool trail**. A
     key meaning "open everything" is asking for the trail, not for sixty rows of it,
@@ -1100,7 +1118,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   - **`open` draws every step in full, in the normal colour** — steps do not fold, and
     each step's calls are a trail line under it. The mode is the CONVERSATION's: `plugins.assistant.notes` says where
     a conversation starts, `/notes [step|open]` moves it, nothing is saved, and
-    `/clear`, `/resume` and a change of task come back to the config's answer. The
+    `/clear` and `/resume` come back to the config's answer. The
     modes `fold` and `hidden` were dropped; a config file that still says either reads
     as `step` (`notesMode`), and `/notes fold` is refused. The mode is in the
     `rowCache` key, and so is every run's open bit.
@@ -1166,7 +1184,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   in at the caret with a space after it, drawn in `accent` (in the field and in the
   sent message — not dim, which in the field means "offered"). N counts up for the
   whole conversation (`imagesRef` N → ref, `imageSeqRef`; saved as the session's
-  `images` / `imageSeq`, reset by `/clear` and a change of task). The TEXT decides
+  `images` / `imageSeq`, reset by `/clear`). The TEXT decides
   what is sent — the tokens it holds that the map knows, in the order written, each
   once — so a queued message, ↑/↓ recall and the draft carry their images by their
   text alone; a token edited away is not sent, one typed by hand with nothing behind
@@ -1277,8 +1295,8 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   first `shell.roots` directory (else the process's), a `cd` moves it only within the
   roots by real path (the shell writes `pwd -P` to a private temp file after the
   command — a 4th stdio pipe under Bun lost the report now and then), `exit N` or a
-  kill keeps it, run_command's `cwd` argument is a `cd` that stays, `/clear` and a
-  change of task go back to the root, `/resume` and a restart bring it back. Variables
+  kill keeps it, run_command's `cwd` argument is a `cd` that stays, `/clear` goes back
+  to the root, `/resume` and a restart bring it back. Variables
   and functions are not kept — every command is a fresh shell. **The live block still
   says where a `cd` moved to, or that one was refused** (`ConsoleData`'s `movedTo`/
   `note`, `src/assistant/console-view.ts`), the same facts the old markdown line's
