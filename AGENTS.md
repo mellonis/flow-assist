@@ -424,7 +424,7 @@ there is no `/fullscreen`.
 ## What the model can do (the `core` tool group)
 
 `memory`, `config_schema`, `datetime`, `remind`, `background`, `todo`, `ask_user`,
-`open_url`, plus `host:plugins_list`. Three rules hold this set together:
+`open_url`, `recall`, plus `host:plugins_list`. Three rules hold this set together:
 
 - **A plugin's config key is validated by the plugin's schema — everywhere.**
   `configSchemaAt` (`src/config/load.ts`) resolves a key through the host schema and,
@@ -615,6 +615,55 @@ there is no `/fullscreen`.
   **Tool state that describes a conversation is never module-level** — as a module
   variable the plan outlived `/clear`, was shared with background runs, and leaked
   from one test into the next.
+- **Bulky content is sent once, then as a stub the model recalls**
+  (`src/assistant/recall.ts`, pure; the chat owns the state). An attached image, a
+  `!`/`!!` output and a tool result over `ai.recall.minChars` (4096) are BULKY ITEMS:
+  sent in full in the turn they arrive in — all its rounds — and, from a later batch
+  on, as a one-line stub naming an id: `[$ brew update — exit 0 · 24.7 s · 120 lines —
+  recall("out:7d41e0aa")]`, `[image shot.png · 3384×2078 — recall("img:3f9a2c1b")]`,
+  `[read_file src/app.ts — 412 lines — recall("res:c02b9f15")]`. An id is
+  `<kind>:<first 8 hex of sha256>` of the content (an image's the sha256 its ref
+  carries), so it survives `/compact`, `/resume` and deletions, identical content
+  shares one id and one stored item, and `recall` takes any unique prefix or the hash
+  alone (an ambiguous one answers with the candidates). **What the host keeps never
+  changes shape**: `apiRef` and the session hold the full content; the stubs are
+  applied on the way OUT — `sentHistory()` in the chat, `applyRecall` over
+  `apiHistory`'s output, matched by content hash — for the request, the context meter
+  (a stubbed item counts as its stub) and `/compact` alike. Which items are stubbed is
+  conversation state, `recallRef` (`RecallState`: the ids, this turn's recalls, turns
+  since the last batch), saved as the session's `recall`, reset by `/clear`, never
+  module-level. It is decided in BATCHES at the END of a turn (`decideBatch`, in
+  `send()`'s `finally`): replacing old content changes the request's prefix and costs
+  one prompt-cache miss, so it happens when the measured context passes
+  `ai.recall.threshold` (0.5 of `ai.contextWindow`) or every `ai.recall.everyTurns`
+  turns (10; 0 — the threshold alone), every eligible item at once; a stub is a pure
+  function of its item, so between batches the prefix is byte-stable, and a batch that
+  finds nothing new changes nothing. The end of a turn is the one moment everything in
+  the history has had its turn in full: a `!command` run afterwards and the next
+  question's images go in full and become eligible at that turn's end. The
+  `!command`'s message carries `shell: ShellMeta` (command, outcome, ms, lines) beside
+  its text for the stub; `apiHistory` never sends it. `ai.recall.enabled: false` sends
+  everything in full and withholds the tool — a tool that can never work is not
+  offered. `/context` adds `recall: N items stubbed · M recalled this turn` under the
+  cache line (`recallLine`; nothing when nothing to say).
+- **`recall(id)` brings an item back for ONE turn, beside its result — never back in
+  place.** The tool reads the conversation's items through `ctx.recall`
+  (`RecallSource`: `items`, `resolveImage`, `onRecalled` — supplied by the chat; a
+  background task and the one-shot prompt have none and the tool says so). Text comes
+  back whole as `[recalled out:… — N lines]\n<content>` (a result with its own `OK:`
+  tag, as the history holds it); its stub, when that result is itself stubbed later,
+  points back at the item recalled. An image goes through `ctx.attachImage({ ref, url
+  })` (`agentChat` gives every call one): the tool result keeps the REF (`images`,
+  never bytes — the session stays base64-free), the turn keeps the `data:` URL, and
+  `withAttachedImages` puts a user message of parts — a note `[recalled image shot.png
+  — from the app, not a message from the person]` and the image — right AFTER the run
+  of that round's tool results in every following round of the turn: a tool message
+  cannot hold an image on the OpenAI wire, a user message between two results would
+  break their run there, and on the Anthropic wire it merges into the same user turn
+  after the `tool_result` blocks (the image takes the message breakpoint).
+  `apiHistory` carries `images` on user messages only, so the next turn sends the
+  result's text and no image — the recall was for that turn. A file gone or changed
+  since it was attached is the tool's own answer, not a note.
 - **A request carries the core tools and an INDEX of the rest** (tools on demand,
   `src/assistant/tool-loading.ts`, pure; wired in `agentChat`). Every tool's full
   schema on every request costs ~7k tokens with only the bundled plugins, a tracker
@@ -1942,6 +1991,9 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   machine whose model cannot says `config set ai.images.enabled false`. Its
   `config_schema` note (`KEY_DEFAULTS['ai.images']`; a leaf takes the note of its
   nearest parent that has one) says how to attach and how to turn it off.
+- `ai.recall` (`enabled` true, `threshold` 0.5, `minChars` 4096, `everyTurns` 10) —
+  bulky content as stubs (see "What the model can do"). Its `config_schema` note
+  (`KEY_DEFAULTS['ai.recall']`) says what a stub is and how to turn it off.
 - `config.user` (`name`, `login`) is the only source of the person's identity in the chat context — never the environment or the OS account.
 - **Roots: each consumer has its own key, and the host never reads a plugin's.** The
   host's shell (`!command`, `run_command`) is confined to `shell.roots` (`shellRoots`

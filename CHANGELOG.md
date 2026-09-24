@@ -5,6 +5,23 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **Bulky content is sent once, then as a stub the assistant can recall.** An attached
+  image, the output of a `!command` and a tool result over 4 KB stay in the model's
+  history for good and used to ride every later request in full — a screenshot re-sent
+  with every message. Each now goes in full in the turn it arrives in and, from a later
+  batch on, as one line naming an id — `[$ brew update — exit 0 · 24.7 s · 120 lines —
+  recall("out:7d41e0aa")]` — that the new `recall` core tool reads again for one turn,
+  an image as an image. Ids are hashes of the content, so identical content shares one
+  and they survive `/compact`, `/resume` and a restart; the screen and the session
+  keep everything in full. Stubbing happens in batches (every eligible item at once
+  when the context passes `ai.recall.threshold`, half the window, or every
+  `ai.recall.everyTurns` turns, 10), since replacing old content costs one prompt-cache
+  miss. `/context` says how many items are stubbed and how many were recalled this
+  turn. `ai.recall.enabled: false` sends everything in full, as before; `ai.recall.
+  minChars` is the size that makes a tool result bulky. **For plugin authors:** a
+  tool's `ctx` gains `attachImage({ ref, url })` — an image to send beside the result in
+  the rounds that follow — and a large result of yours may reach the model as a stub
+  on later turns; what the tool returned is unchanged.
 - **The chat's field completes more than a command's name, and shell mode says where
   it runs.** In `!` and `!!` mode the hint row under the field starts with the shell's
   directory (`~`-shortened, cut from the left when long), so `!cd` is seen to take

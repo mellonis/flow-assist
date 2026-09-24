@@ -164,6 +164,15 @@ What the host does with it, and what it expects back:
   def, clamped to a hard ceiling (200000) so it cannot flood the history by declaring
   a bigger number: `{ type: 'function', function: { name: 'dump_all', … },
   maxResultChars: 100_000 }`.
+- **A large result may reach the model as a stub on later turns.** A result over
+  `ai.recall.minChars` (4096) goes to the model in full in the turn it arrives in and
+  afterwards, from a batch on, as one line naming an id the model reads again with
+  the host's `recall` tool (README, "Bulky content"); what the tool returned is
+  unchanged, and the screen keeps it. A tool that has an image to show the model
+  calls `ctx.attachImage({ ref, url })` — `ref` an `ImageRef` (`src/assistant/images.ts`),
+  `url` a `data:` URL — and the image goes beside its result, as an image part, in the
+  rounds that follow within the turn; the result keeps the ref, never the bytes. Absent
+  outside a chat, so call it as `ctx.attachImage?.(…)`.
 
 `aiTools` is the other shape: standalone tools, each with its own `run(args, ctx)`,
 for a plugin that has no group.

@@ -36,6 +36,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { configDir } from '../config/load.js';
 import { isImageRef, type ImageRef } from './images.js';
+import { createRecallState, saveRecallState } from './recall.js';
 import { readLegacyView, type ViewRecord } from './views.js';
 import { addCalls, callRun, readChange, readParts, type CallRun, type TurnPart } from './step.js';
 import type { ChangeView } from './diff.js';
@@ -65,6 +66,7 @@ export interface Session {
   tools?: string[];                    // the tools the model loaded (tools on demand); absent in older sessions
   images?: ImageRef[];                 // what each `[Image #N]` of the conversation stands for; absent in older sessions
   imageSeq?: number;                   // the last N given out — numbering goes on from it
+  recall?: { stubbed: string[]; turns: number }; // the bulky items sent as stubs (by id) and the turns since the last batch (./recall.ts)
   closed?: boolean;                    // left with /clear — listed, never continued on start
   rev?: number;                        // bumped by every saveSession; absent (an older host) reads as 0
 }
@@ -254,6 +256,9 @@ export function loadSession(dir: string, id: string): Session | null {
       tools: Array.isArray(s.tools) ? s.tools.filter((n): n is string => typeof n === 'string') : [],
       images: Array.isArray(s.images) ? s.images.filter(isImageRef) : [],
       imageSeq: Number.isInteger(s.imageSeq) && (s.imageSeq as number) > 0 ? s.imageSeq : 0,
+      // The ids are content hashes, so a set saved by any host still names the same
+      // items; anything that is not a list of strings reads as nothing stubbed.
+      recall: saveRecallState(createRecallState(s.recall)),
       rev: Number.isInteger(s.rev) ? (s.rev as number) : 0,
     };
   } catch {

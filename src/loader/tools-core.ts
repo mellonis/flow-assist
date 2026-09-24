@@ -23,7 +23,8 @@ import { parseAskArgs, askResult, type AskQuestion, type AskState } from '../ass
 import type { Change } from '../assistant/diff.js';
 import { TOOLS_LOAD } from '../assistant/tool-loading.js';
 import { TOOL_RESULT_MAX_CHARS_CEILING, TOOL_RESULT_MAX_CHARS_DEFAULT } from '../assistant/tool-result-cap.js';
-import { IMAGE_DEFAULTS } from '../assistant/images.js';
+import { IMAGE_DEFAULTS, type ImageRef } from '../assistant/images.js';
+import { RECALL_DEFAULTS, findItem, recallLimits, recallResult, type RecallSource } from '../assistant/recall.js';
 import { ANTHROPIC_BASE_URL, DEFAULT_MAX_TOKENS, llmOpts } from '../assistant/llm-endpoint.js';
 
 // Runtime context handed to core tools by the caller: the resolved memory
@@ -47,6 +48,14 @@ export interface CoreCtx {
   // capped by the host; a kind with no renderer draws as one dim line naming it.
   // `reportChange` stays the shorthand it is, and becomes a kind of its own here later.
   reportView?: (kind: string, data?: unknown) => void;
+  // Also supplied by `agentChat`: an image to send beside this call's result in the
+  // rounds that follow, as an image part — how `recall` shows an attached image again.
+  // The result keeps the ref; the `data:` URL lives for the turn.
+  attachImage?: (image: { ref: ImageRef; url: string }) => void;
+  // Supplied by the chat: the conversation's bulky items — what a stub stands for —
+  // and how to read an attached image's bytes again (src/assistant/recall.ts). Absent
+  // where there is no conversation (a background task, the one-shot prompt).
+  recall?: RecallSource;
 }
 
 // Resolves the memory `plugin` scope to the owning plugin name from the host-issued
@@ -83,6 +92,9 @@ const KEY_DEFAULTS: Record<string, string> = {
   // Said in full: "can I show it a screenshot?" is asked of the assistant, and so is
   // "why was my image refused?".
   'ai.images': `enabled: true — the person can show the model images in the chat: drag a file onto the terminal or paste its path (the whole paste must be the path), /image <path>, or /image, Ctrl+V or Cmd+V for the image on the clipboard (macOS: pngpaste or osascript; Linux: wl-paste or xclip). Each becomes an [Image #N] token in the text; the file is read only when the person attaches it, and kept in the session as its path and hash, not its bytes. maxBytes: ${IMAGE_DEFAULTS.maxBytes} (a bigger file is refused, never shrunk), maxPerMessage: ${IMAGE_DEFAULTS.maxPerMessage}. A model that cannot take images: config set ai.images.enabled false — attaching is then refused, and images already in the conversation go as their names only`,
+  // Said in full: "why does the conversation show [$ … — recall("out:…")] instead of the
+  // output?" and "did it forget my screenshot?" are asked of the assistant.
+  'ai.recall': `enabled: true — bulky content is sent to the model in full in the turn it arrives in, and later as a short stub it can read again with the recall tool: an attached image, the output of a !command, a tool result over minChars (${RECALL_DEFAULTS.minChars} characters). A stub names the item's id, a hash of its content (img:…, out:…, res:…), e.g. [$ brew update — exit 0 · 24.7 s · 120 lines — recall("out:7d41e0aa")]; recall("out:7d41e0aa") brings it back for one turn, an image as an image. Stubbing happens in batches — every eligible item at once when the context passes threshold (${RECALL_DEFAULTS.threshold} of ai.contextWindow) or every everyTurns turns (${RECALL_DEFAULTS.everyTurns}; 0 — the threshold alone) — because replacing old content costs one prompt-cache miss. The screen and the session keep everything in full; /context says how many items are stubbed. config set ai.recall.enabled false sends everything in full on every request`,
   cache: 'enabled: true; ON unless config.cache.enabled = false',
   theme: `${JSON.stringify(DEFAULT_THEME)}; flowtty default theme`,
   debug: 'logTools: false',
@@ -250,7 +262,7 @@ const processPlan = createPlan();
 export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record<string, string[]>, pluginConfigs?: Record<string, unknown>): ToolGroup => ({
   id: 'core',
   alwaysOn: true,
-  tools: [
+  tools: ([
     {
       type: 'function',
       function: {
@@ -355,9 +367,33 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
         parameters: { type: 'object', properties: { url: { type: 'string', description: 'Full URL to open in the browser (e.g. "https://example.com"), or a `webUrl` taken from a tool result.' } }, required: ['url'] },
       },
     },
-  ],
+    {
+      type: 'function',
+      function: {
+        name: 'recall',
+        description: 'Read again a bulky item the conversation shows as a stub — an image the person attached (sent to you again as an image), the output of a command the person ran (`$ …`), or a large tool result. A stub names the item\'s id, e.g. [$ brew update — exit 0 · 24.7 s · 120 lines — recall("out:7d41e0aa")]; pass that id (a unique prefix is enough). The item comes back whole for THIS turn only — call again in a later turn if it is needed again. Nothing else is recalled: content that was never stubbed is already in the conversation.',
+        parameters: { type: 'object', properties: { id: { type: 'string', description: 'The id from the stub — "img:…", "out:…" or "res:…" — or a unique prefix of it.' } }, required: ['id'] },
+      },
+    },
+  // With `ai.recall.enabled` false nothing is ever stubbed, so `recall` could only ever
+  // answer "already in the conversation" — a tool that can never work is not offered.
+  ] as ToolDef[]).filter((t) => t.function.name !== 'recall' || recallLimits((config as { ai?: unknown }).ai).enabled),
   exec: async (name, args, ctx: CoreCtx) => {
     switch (name) {
+      case 'recall': {
+        // The items are the conversation's (`ctx.recall`, supplied by the chat — src/
+        // assistant/recall.ts); a run with no conversation of its own (a background
+        // task, the one-shot prompt) has nothing stubbed and says so. An image goes
+        // back through `ctx.attachImage` (agentChat), as an image part of the next round.
+        if (!ctx.recall) return 'recall: nothing can be recalled here — this run has no conversation with stubbed items.';
+        const found = findItem(ctx.recall.items(), String(args.id ?? ''));
+        if (!found.ok) return `recall: ${found.error}`;
+        const r = recallResult(found.item, { resolveImage: ctx.recall.resolveImage });
+        if (!r.ok) return `recall: ${r.error}`;
+        if (r.image) ctx.attachImage?.(r.image);
+        ctx.recall.onRecalled?.(found.item.id);
+        return r.text;
+      }
       case 'ask_user': {
         const parsed = parseAskArgs(args);
         if ('error' in parsed) return `ask_user: ${parsed.error}`;

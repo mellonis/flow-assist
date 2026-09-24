@@ -20,7 +20,7 @@ import { apiHistory, compactConversation, chatLanguage, requestTools, transcript
 import { createToolSet, toolLoadingMode } from '../assistant/tool-loading.js';
 import { llmOpts } from '../assistant/llm-endpoint.js';
 import { copyTarget, copyToClipboard } from '../assistant/copy.js';
-import { createShellState, formatShell, nextCwd, realOf, runShell, shellLimits, shellRoots, tildePath, type ShellResult } from '../assistant/shell.js';
+import { createShellState, formatShell, nextCwd, realOf, runShell, shellLimits, shellOutcome, shellRoots, tildePath, type ShellResult } from '../assistant/shell.js';
 import {
   KEEP_SESSIONS, SESSION_VERSION, acquireLock, closeSession, flushOnExit, listSessions, loadSession, lockPath,
   makeLockToken, newSessionId, pruneSessions, releaseLock, saveSession, sessionFingerprint, sessionFingerprintsEqual,
@@ -42,6 +42,7 @@ import { askKey, askStart, type AskQuestion, type AskState } from '../assistant/
 import { loadMemories, memoryFilePath, saveMemories } from '../runtime/services/memory.js';
 import { keptAfterClear, memoryCommand } from '../assistant/memory-command.js';
 import { CONTEXT_WARN_AT, DEFAULT_CONTEXT_WINDOW, cacheLine, contextBadge, readContext, short as shortTokens } from '../assistant/context-meter.js';
+import { applyRecall, bulkyItems, createRecallState, decideBatch, recallLimits, recallLine, saveRecallState, type BulkyItem, type RecallSource, type ShellMeta } from '../assistant/recall.js';
 import { contextTitle, screenBlock, type ContextItem } from '../assistant/screen-context.js';
 import {
   IMAGES_OFF, dataUrl, imageLimits, imagesInText, insertToken, isImageRefusal, loadImageFile, pastedPaths, readClipboardImage, readImageData, removeTokenAt, wireMessages,
@@ -334,6 +335,25 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // What the provider reported for the last turn: its prompt plus the answer it
           // produced is, to a close approximation, the size of the NEXT request.
           const usageRef = ui.useRef<TokenUsage | null>(null);
+          // Which bulky items go to the model as stubs (src/assistant/recall.ts) — the
+          // conversation's, like the plan: decided in batches at the end of a turn, saved
+          // with the session, reset by /clear. `recalled` is this turn's, for /context.
+          const recallRef = ui.useRef(createRecallState());
+          // The items the history holds, computed once per history (`apiRef.current` is
+          // replaced, never mutated) — hashing every result on every render would not do.
+          const itemsCache = ui.useRef(new WeakMap<ChatMessage[], BulkyItem[]>());
+          const recallItems = (): BulkyItem[] => {
+            const api = apiRef.current;
+            let items = itemsCache.current.get(api);
+            if (!items) { items = bulkyItems(api, recallLimits(host.config.ai).minChars); itemsCache.current.set(api, items); }
+            return items;
+          };
+          // The model's history as it is SENT: `apiHistory`'s shape with every stubbed item
+          // replaced by its stub — for the request, the meter and /compact alike.
+          const sentHistory = (): ChatMessage[] => {
+            const history = apiHistory(apiRef.current);
+            return recallLimits(host.config.ai).enabled ? applyRecall(history, recallItems(), recallRef.current.stubbed) : history;
+          };
           // `/context` opens a panel in the field's place, like a write confirmation — it
           // is a look at the conversation, not a line of it. The ref is for the key
           // handler; the state is for the render.
@@ -726,6 +746,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               tools: toolSetRef.current.names(),
               // Refs only — a path and a hash per image, never its bytes.
               images: [...imagesRef.current.values()], imageSeq: imageSeqRef.current,
+              recall: saveRecallState(recallRef.current),
               closed: false, // written means in use — a resumed cleared session is open again
             };
           };
@@ -789,6 +810,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             toolSetRef.current.load(s.tools);
             resetLiveViews(); // the calls they tracked belong to the conversation being left
             resetImages(s.images ?? [], s.imageSeq ?? 0);
+            recallRef.current = createRecallState(s.recall); // the ids are hashes: they still name the same items
             setAutoMode('ask'); // another conversation is another conversation's mode
             setNotes(configNotes()); // and its own answer to how the steps are drawn
             resetRound(); // the round being written belonged to the conversation being left
@@ -955,7 +977,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             return readContext(
               // The tools the next request will CARRY — with tools on demand, the core ones,
               // what was loaded and the index; not every tool there is.
-              { system: baseStatic(), memory: memoryBlock(), plan: planBlock(), summary, screen: screenBlock(screen), tools: requestTools((host.services as Record<string, any>).pluginAiTools ?? [], toolLoadingMode(host.config.ai), toolSetRef.current), messages: apiHistory(apiRef.current) },
+              // The history as it goes out: a stubbed item counts as its stub, not its content.
+              { system: baseStatic(), memory: memoryBlock(), plan: planBlock(), summary, screen: screenBlock(screen), tools: requestTools((host.services as Record<string, any>).pluginAiTools ?? [], toolLoadingMode(host.config.ai), toolSetRef.current), messages: sentHistory() },
               window,
               u ? u.promptTokens + u.completionTokens : undefined,
             );
@@ -1066,7 +1089,11 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // so the render labels it Background (it is NOT the user's own message, and
             // must never render as "You"), while for the model it is still a prompt to
             // answer — apiMsgs maps 'bg' → 'user'. History messages are re-mapped too.
-            const apiMsgs: ChatMessage[] = apiHistory(apiRef.current);
+            // Every bulky item a batch has stubbed goes as its stub (src/assistant/
+            // recall.ts); what this turn adds — the question's images, a `!command` run
+            // since the last turn — is not in the set yet and goes in full.
+            const apiMsgs: ChatMessage[] = sentHistory();
+            recallRef.current.recalled = new Set(); // what `recall` brings back is this turn's
             // What this message ADDS to the screen list; laid onto the list as it is when
             // React applies it (below), never onto what was last drawn.
             const added: ChatMsg[] = [];
@@ -1156,6 +1183,15 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 toolCtx: {
                   plan: planRef.current,
                   shell: shellRef.current,
+                  // What `recall` can bring back: the items of the turns before this one
+                  // (this turn's own are still in full), an image read again from its
+                  // path with the hash checked — a file gone is the tool's answer, not a
+                  // note — and the count the /context line shows.
+                  recall: {
+                    items: recallItems,
+                    resolveImage: (ref: ImageRef) => resolveImage(ref, []),
+                    onRecalled: (id: string) => { recallRef.current.recalled.add(id); },
+                  } satisfies RecallSource,
                   memoryFile: memoryFilePath(host.config),
                   // The plugin's OWN host-issued token. The CALLER never supplies a
                   // name here — a raw plugin-name string is ignored by the memory
@@ -1439,6 +1475,17 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // A reset mid-turn already cleared liveBuf/liveSeen/liveTimer — this is
               // for the ordinary case, and a stale one finds nothing to flush regardless.
               if (epoch === epochRef.current) flushLive();
+              // The turn is over, so everything in the history has had its turn in full:
+              // a batch may now stub it (src/assistant/recall.ts, `decideBatch`) — past
+              // the context threshold, or on the turn clock — every eligible item at
+              // once, so the request's prefix moves once and not every turn. The
+              // reading is the measured one where the provider reports usage.
+              if (epoch === epochRef.current) {
+                const limits = recallLimits(ai);
+                if (limits.enabled && decideBatch(recallRef.current, recallItems(), contextReading().ratio, limits)) {
+                  (host.services as Record<string, any>).pushLog?.(`[recall] ${recallRef.current.stubbed.size} bulky item${recallRef.current.stubbed.size === 1 ? '' : 's'} now go as stubs`);
+                }
+              }
               persist();
               setStreaming(false);
               setToolLabel('');
@@ -1562,7 +1609,11 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // own screen is dropped (vim, less, top), and it is only a block on screen —
                 // a turn spent on "(no output)" would cost a request for nothing.
                 const seen = !interactive || (recorded && !!r.output.trim());
-                if (seen) apiRef.current = [...apiRef.current, { role: 'shell', content: forModel }];
+                // Beside the text, what its stub says once a batch stubs it (src/assistant/
+                // recall.ts): the command, how it ended, how long, how many lines.
+                const printed = r.output.replace(/\n+$/, '');
+                const meta: ShellMeta = { command: cmd, outcome: shellOutcome(r, timeoutMs), ms: r.ms, lines: printed ? printed.split('\n').length : 0 };
+                if (seen) apiRef.current = [...apiRef.current, { role: 'shell', content: forModel, shell: meta }];
                 if (interactive && !r.error && !seen) {
                   const why = recorded
                     ? 'Nothing was printed outside the full-screen program — the assistant was not asked.'
@@ -1687,8 +1738,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               const ai = (host.config.ai ?? {}) as Record<string, any>;
               // How big the model's view was — as `ctx N%` read it.
               const before = contextReading().used;
-              // Compact what the MODEL saw (tool results included), not the display list.
-              const summary = await compactConversation(apiHistory(apiRef.current), { ...llmOpts(ai), signal });
+              // Compact what the MODEL saw (tool results included, a stubbed item as its
+              // stub), not the display list.
+              const summary = await compactConversation(sentHistory(), { ...llmOpts(ai), signal });
               if (signal.aborted) return; // stopped: the history stays as it was
               summaryRef.current = summaryRef.current ? `${summaryRef.current}\n\n${summary}` : summary;
               usageRef.current = null; // the measured size was of the history just replaced
@@ -1915,6 +1967,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 toolSetRef.current.reset(); // a new conversation starts from the index
                 resetLiveViews(); // the calls they tracked are gone with the conversation
                 resetImages(); // numbering starts again at [Image #1]
+                recallRef.current = createRecallState(); // nothing is stubbed in a fresh conversation
                 usageRef.current = null; // measured for a conversation that is gone
                 // /clear ends the conversation, not the memory — and says so, or the
                 // assistant "still knowing" an earlier prompt reads as /clear failing.
@@ -2528,7 +2581,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // Live count of IN-FLIGHT background tasks (the host re-renders via
             // notify() when one is armed or completes).
             bgCount: bgActiveCount(),
-            ...(() => { const r = contextReading(screen); return { contextBadge: contextBadge(r), contextWarn: r.ratio >= CONTEXT_WARN_AT, contextPanel: contextOpen ? r : null, contextCacheLine: contextOpen ? cacheLine(usageRef.current) : '' }; })(),
+            ...(() => {
+              const r = contextReading(screen);
+              // How many of the history's items go as stubs now — after /compact the
+              // set still names ids, but the history holds none of them.
+              const stubbedNow = () => recallItems().filter((i) => recallRef.current.stubbed.has(i.id)).length;
+              return { contextBadge: contextBadge(r), contextWarn: r.ratio >= CONTEXT_WARN_AT, contextPanel: contextOpen ? r : null, contextCacheLine: contextOpen ? cacheLine(usageRef.current) : '', contextRecallLine: contextOpen ? recallLine(stubbedNow(), recallRef.current.recalled.size) : '' };
+            })(),
             // The assistant's task plan (todo tool): a snapshot so the render never
             // mutates the tool's module state. Re-read every render, so a plan the
             // LLM edits (via notify()) shows up immediately.

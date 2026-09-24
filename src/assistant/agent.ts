@@ -555,6 +555,38 @@ function withRequestTail(messages: ChatMessage[], tail: (() => string) | undefin
   return [...messages, { role: 'user', content: text, [REQUEST_TAIL]: true }];
 }
 
+// An image a tool of THIS turn attached to its result (`ctx.attachImage` — the `recall`
+// tool bringing an attached image back). The result keeps the ref (`images`, as a
+// person's message does — never the bytes), and the round's messages carry the image
+// as a user message of content parts right AFTER the run of tool results it belongs
+// to: a tool message cannot hold an image on the OpenAI wire, and a user message
+// between two tool results would break the results' run there; on the Anthropic wire
+// it merges into the same user turn, after the tool results. `urls` are the turn's own
+// (`data:` URLs resolved by the tool's caller), never kept: `apiHistory` carries no
+// image on a tool message into the next turn — the image was for this one.
+export const RECALLED_IMAGE_NOTE = (name: string) => `[recalled image ${name} — from the app, not a message from the person]`;
+function withAttachedImages(messages: ChatMessage[], urls: ReadonlyMap<string, string>): ChatMessage[] {
+  if (!urls.size) return messages;
+  const out: ChatMessage[] = [];
+  let pending: Array<{ ref: ImageRef; url: string }> = [];
+  const flush = () => {
+    if (!pending.length) return;
+    const parts: ContentPart[] = [{ type: 'text', text: pending.map((p) => RECALLED_IMAGE_NOTE(p.ref.name)).join('\n') }, ...pending.map((p) => ({ type: 'image_url' as const, image_url: { url: p.url } }))];
+    out.push({ role: 'user', content: parts });
+    pending = [];
+  };
+  for (const m of messages) {
+    if (m.role !== 'tool') flush();
+    if (m.role === 'tool' && Array.isArray(m.images) && m.images.length) {
+      const { images, ...rest } = m;
+      for (const ref of images) { const url = urls.get(ref.sha256); if (url) pending.push({ ref, url }); }
+      out.push(rest);
+    } else out.push(m);
+  }
+  flush();
+  return out;
+}
+
 export async function agentChat(
   messages: ChatMessage[],
   {
@@ -641,11 +673,15 @@ export async function agentChat(
   let rounds = 0;
   // Set once a round came back `thinkingDropped`: the rest of the turn asks for none.
   let noThinking = false;
+  // The images tools of this turn attached to their results, by hash → the `data:`
+  // URL the next rounds send them as (`withAttachedImages`). The turn's own: the
+  // transcript keeps the refs, never these.
+  const attachedUrls = new Map<string, string>();
   try {
     for (let i = 0; i < maxRounds; i++) {
       rounds = i + 1;
       let roundContent = '';
-      const r = await chatRoundFn(withRequestTail(current, requestTail), {
+      const r = await chatRoundFn(withRequestTail(withAttachedImages(current, attachedUrls), requestTail), {
         ...opts,
         tools: roundTools(),
         ...(noThinking ? { thinking: undefined } : {}),
@@ -781,6 +817,9 @@ export async function agentChat(
           }
         }
         const changes: ChangeView[] = [];
+        // The images this call attaches to its result (`ctx.attachImage`): the refs go
+        // on the result, the URLs into the turn's map for the rounds that follow.
+        const attached: ImageRef[] = [];
         // The views this call opens: each a record the chat hears about on every change.
         // `ended` closes them — an update after the call returned is ignored.
         const opened: { rec: ViewRecord; discarded: boolean }[] = [];
@@ -817,6 +856,14 @@ export async function agentChat(
             ...(opts.signal ? { signal: opts.signal } : {}),
             reportChange: (c: Change) => {
               try { const v = changeView(c); if (v) changes.push(v); } catch { /* a bad report never fails the write */ }
+            },
+            // An image to send beside this result in the rounds that follow — the
+            // `recall` tool's way of showing an attached image again. The ref is what
+            // is kept; the URL lives for this turn.
+            attachImage: (image: { ref: ImageRef; url: string }) => {
+              if (!image?.ref?.sha256 || typeof image.url !== 'string' || !image.url) return;
+              attached.push(image.ref);
+              attachedUrls.set(image.ref.sha256, image.url);
             },
             // A view the tool keeps open and updates while it runs.
             liveView: (kind: string, data: unknown) => open(kind, data),
@@ -855,7 +902,8 @@ export async function agentChat(
         // the session below all keep `detailStr` whole; `def?.maxResultChars` (the
         // plugin tool type) overrides the conversation's cap for this one tool.
         const resultCap = resolveToolResultCap(toolResultMaxChars, def?.maxResultChars);
-        current.push({ role: 'tool', tool_call_id: tc.id, content: capToolResult(modelToolResult(outcome, detailStr), resultCap) });
+        // A tool that threw attaches nothing: the image went with the result it was for.
+        current.push({ role: 'tool', tool_call_id: tc.id, content: capToolResult(modelToolResult(outcome, detailStr), resultCap), ...(outcome !== 'error' && attached.length ? { images: attached } : {}) });
         logRun({ name: tc.name, write, outcome, detail: detailStr, args: parsed });
         const run: ToolRun = { name: tc.name, args: parsed, write, outcome, detail: detailStr };
         if (outcome !== 'error' && changes.length) run.changes = changes;

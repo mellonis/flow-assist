@@ -553,3 +553,39 @@ test('apiHistory repairs a stored tool call whose arguments are not valid JSON',
   expect(asst.tool_calls.find((c: any) => c.id === 'good').function.arguments).toBe('{"ok":true}');
   expect(input).toEqual(before); // never mutated
 });
+
+// An image a tool hands back (`ctx.attachImage` — the `recall` tool bringing an
+// attached image back for one turn) goes into the NEXT round as an image part: the
+// transcript keeps the ref on the tool result, and the round's messages carry a user
+// message with the part after the round's tool results — so the OpenAI wire (a tool
+// message cannot hold an image) and the Anthropic one (tool results first, then the
+// rest of the user turn) both take it.
+test('an image attached by a tool reaches the next round as a part after the tool results, and the transcript keeps the ref alone', async () => {
+  const ref = { n: 1, name: 'shot.png', path: '/tmp/shot.png', sha256: 'f'.repeat(64), mime: 'image/png', bytes: 3 };
+  assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
+  const extraTools = [
+    { type: 'function', function: { name: 'demo:show', description: 'd', parameters: { type: 'object', properties: {} } }, run: async (_a: unknown, ctx: any) => { ctx.attachImage({ ref, url: 'data:image/png;base64,AAAA' }); return 'here it is'; } },
+    { type: 'function', function: { name: 'demo:other', description: 'd', parameters: { type: 'object', properties: {} } }, run: async () => 'noon' },
+  ] as any;
+  const rounds: any[][] = [];
+  const chatRound = async (m: any[]) => {
+    rounds.push(m);
+    if (rounds.length === 1) return { content: '', finishReason: 'tool_calls', toolCalls: [{ id: 'c1', name: 'demo__show', arguments: '{}' }, { id: 'c2', name: 'demo__other', arguments: '{}' }] };
+    return { content: 'ok', finishReason: 'stop', toolCalls: [] };
+  };
+  const r = await agentChat([{ role: 'user', content: 'go' }], { baseUrl: 'http://x', model: 'm', token: 't', onLive: () => {}, onLiveCommit: () => {}, extraTools, chatRound, requestTail: () => 'SCREEN' } as any);
+  const second = rounds[1]!;
+  expect(second.map((m) => m.role)).toEqual(['user', 'assistant', 'tool', 'tool', 'user', 'user']);
+  // Both results first, then the image — never a user message between two tool results.
+  expect(second[2]).toEqual({ role: 'tool', tool_call_id: 'c1', content: 'OK: here it is' });
+  expect(second[3]).toEqual({ role: 'tool', tool_call_id: 'c2', content: 'OK: noon' });
+  expect(second[4]).toEqual({ role: 'user', content: [{ type: 'text', text: '[recalled image shot.png — from the app, not a message from the person]' }, { type: 'image_url', image_url: { url: 'data:image/png;base64,AAAA' } }] });
+  // The screen tail stays the request's last message, after the image.
+  expect(second[5].content).toBe('SCREEN');
+  // What is kept: the ref on the tool result, no bytes anywhere.
+  const kept = r.transcript.find((m) => m.role === 'tool' && m.tool_call_id === 'c1')!;
+  expect(kept).toEqual({ role: 'tool', tool_call_id: 'c1', content: 'OK: here it is', images: [ref] });
+  expect(JSON.stringify(r.transcript)).not.toContain('AAAA');
+  // And it is for that turn only: the next turn's history carries no image on a tool result.
+  expect(apiHistory(r.transcript).find((m) => m.role === 'tool' && m.tool_call_id === 'c1')).toEqual({ role: 'tool', tool_call_id: 'c1', content: 'OK: here it is' });
+});

@@ -1154,6 +1154,7 @@ export function renderChatModal({
   contextWarn = false,
   contextPanel = null,
   contextCacheLine = '',
+  contextRecallLine = '',
   todo = null,
   fullscreen = false,
   docked = false,
@@ -1247,6 +1248,9 @@ export function renderChatModal({
   // (`assistant/context-meter.ts`' `cacheLine`) — '' draws nothing (the panel is
   // closed, or nothing has been sent yet).
   contextCacheLine?: string;
+  // How many bulky items go as stubs, and how many `recall` brought back this turn
+  // (`assistant/recall.ts`' `recallLine`) — '' draws nothing.
+  contextRecallLine?: string;
   todo?: PlanItem[] | null;
   // The window takes the whole terminal — title bar and footer too — instead of a
   // centred 88% × 82% over the dimmed screen. The overlay already spans the
@@ -1302,7 +1306,7 @@ export function renderChatModal({
   const fieldPlace = pendingQuestion
     ? askBlockRows(pendingQuestion, wrap)
     : contextPanel
-    ? contextPanelRows(contextPanel, wrap, contextCacheLine)
+    ? contextPanelRows(contextPanel, wrap, contextCacheLine, contextRecallLine)
     : confirmAsk
     ? confirmBlockRows(confirmAsk, wrap)
     : visible.length;
@@ -1431,7 +1435,7 @@ export function renderChatModal({
         pendingQuestion
           ? renderAsk(pendingQuestion, m.bg, wrap)
           : contextPanel
-          ? renderContextPanel(contextPanel, m.bg, wrap, contextCacheLine)
+          ? renderContextPanel(contextPanel, m.bg, wrap, contextCacheLine, contextRecallLine)
           : confirmAsk
           ? h(Box, { flexDirection: 'column', width: '100%', gap: 1, border: 'round', paddingX: 1, borderColor: 'yellow', backgroundColor: m.bg },
               h(Text, { bold: true, color: 'yellow' }, confirmAsk.title),
@@ -1565,7 +1569,7 @@ export function renderChatStrip({ width, theme, status, keyHint = '', unread = 0
 const PART_COLORS: Record<string, string> = {
   instructions: 'cyan', tools: 'magenta', memory: 'yellow', plan: 'green', summary: 'blue', 'on screen': 'greenBright', messages: 'white', images: 'cyanBright',
 };
-function renderContextPanel(r: ContextReading, bg: string | undefined, wrap: number, cacheLine = '') {
+function renderContextPanel(r: ContextReading, bg: string | undefined, wrap: number, cacheLine = '', recallLine = '') {
   const cells = contextGrid(r);
   const warn = r.ratio >= CONTEXT_WARN_AT;
   const gridRows = Array.from({ length: GRID_ROWS }, (_, y) => cells.slice(y * GRID_COLS, (y + 1) * GRID_COLS));
@@ -1585,6 +1589,7 @@ function renderContextPanel(r: ContextReading, bg: string | undefined, wrap: num
     h(Box, { flexDirection: sideBySide ? 'row' : 'column', gap: sideBySide ? 3 : 1 }, grid, legend),
     h(Text, { dim: true, wrap: 'truncate' }, contextFootnote(r)),
     cacheLine ? h(Text, { dim: true, wrap: 'truncate' }, cacheLine) : null,
+    recallLine ? h(Text, { dim: true, wrap: 'truncate' }, recallLine) : null,
     h(Text, { dim: true, wrap: 'truncate', selectable: false }, `/compact summarises · /clear starts over · window: ai.contextWindow · ${CAP.esc} / ${CAP.enter} close`));
 }
 
@@ -1667,12 +1672,12 @@ function confirmBlockRows(v: ReturnType<typeof confirmView>, wrap: number): numb
   // Three pieces with a gap between each.
   return 2 + 1 + 1 + (v.command != null ? textRows(v.command, inner) : 1) + 1 + textRows(v.hint, inner);
 }
-function contextPanelRows(r: ContextReading, wrap: number, cacheLine: string): number {
+function contextPanelRows(r: ContextReading, wrap: number, cacheLine: string, recallLine = ''): number {
   const legend = contextLegend(r).length;
   const body = wrap >= GRID_COLS * 2 + 30 ? Math.max(GRID_ROWS, legend) : GRID_ROWS + 1 + legend;
-  // The heading, the grid with its legend, the footnote, the cache line, the hint — a
-  // gap between each two — inside a border.
-  const parts = [1, body, 1, cacheLine ? 1 : 0, 1].filter((n) => n > 0);
+  // The heading, the grid with its legend, the footnote, the cache line, the recall
+  // line, the hint — a gap between each two — inside a border.
+  const parts = [1, body, 1, cacheLine ? 1 : 0, recallLine ? 1 : 0, 1].filter((n) => n > 0);
   return 2 + parts.reduce((a, b) => a + b, 0) + parts.length - 1;
 }
 

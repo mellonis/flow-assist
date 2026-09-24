@@ -39,6 +39,12 @@ export const hostConfigSchema = z.object({
     // `enabled` is false (a model that cannot take them), the largest file sent as it
     // is (5 MB — a bigger one is refused, never shrunk), how many one message carries (4).
     images: z.object({ enabled: z.boolean(), maxBytes: z.number().int().positive(), maxPerMessage: z.number().int().positive() }).partial().optional(),
+    // Bulky content — an attached image, a `!command`'s output, a tool result over
+    // `minChars` (4096) — goes to the model in full in its own turn and as a stub it can
+    // `recall` afterwards (src/assistant/recall.ts). Stubs are applied in batches: when
+    // the context passes `threshold` (0.5 of `ai.contextWindow`) or every `everyTurns`
+    // turns (10; 0 — the threshold alone). `enabled: false` sends everything in full.
+    recall: z.object({ enabled: z.boolean(), threshold: z.number().positive().max(1), minChars: z.number().int().positive(), everyTurns: z.number().int().min(0) }).partial().optional(),
   }).optional(),
   user: z.object({ name: z.string().optional(), login: z.string().optional() }).optional(),
   // `mouse` reports the mouse to the app: the wheel scrolls the conversation, and a drag

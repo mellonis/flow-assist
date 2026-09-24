@@ -108,6 +108,15 @@ a bigger one is refused, never shrunk. The session keeps the file's path and has
 the picture, and reads it again after a restart. A model that cannot take images:
 `config set ai.images.enabled false`.
 
+Bulky things — an image, a `!command`'s output, a large tool result — are sent to the
+model in full in the turn they arrive in, and later as a one-line stub naming an id
+(`[$ brew update — exit 0 · 24.7 s · 120 lines — recall("out:7d41e0aa")]`) that the
+assistant reads again with its `recall` tool when it needs the content; the screen and
+the session keep everything. Stubbing happens in batches, once the context passes half
+the window (`ai.recall.threshold`) or every ten turns (`ai.recall.everyTurns`), so the
+provider's prompt cache is missed rarely; `/context` says how many items are stubbed.
+`config set ai.recall.enabled false` sends everything in full every time.
+
 `!command` in the chat runs a shell command yourself (`!bun test src/features`): it is
 one folded line while it runs (`bun test src/features · 3 s`) and stays folded, its tail
 settled, once it ends (`· ✓ 4.2 s`); the output lands in the conversation and the
