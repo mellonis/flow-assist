@@ -37,6 +37,8 @@ const command = async (ui: UI, text: string) => {
 function guest(opts: { take?: string[]; all?: boolean; priority?: number } = {}) {
   const seen: string[] = [];
   const size = { width: 0, height: 0 };
+  // How many times the surface was drawn.
+  const drawn = { count: 0 };
   let ft: any = null;
   const make = (mk: any) => [mk('boards', {
     name: 'boards',
@@ -54,11 +56,12 @@ function guest(opts: { take?: string[]; all?: boolean; priority?: number } = {})
       view: (f: any) => function View() {
         const s = f.useSurfaceSize();
         size.width = s.width; size.height = s.height;
+        drawn.count += 1;
         return f.h(f.Text, null, 'BOARD-SURFACE');
       },
     },
   })];
-  return { make, seen, size, ft: () => ft };
+  return { make, seen, size, drawn, ft: () => ft };
 }
 
 test('a fresh config docks the chat on the right of a wide terminal, and the board is given the rest', async () => {
@@ -551,6 +554,33 @@ test.each(['window', 'full'] as const)('Ctrl+] closing the %s during a question 
   await ui.press('escape');
   for (let i = 0; i < 50 && model.requests.length < 2; i++) await settle(1);
   expect(toolResult(model, 1)).toMatch(/dismiss/i);
+  ui.app.unmount();
+});
+
+// The collapsed status ticks by itself: the seconds move on the footer row while the
+// plugin's surface is not drawn again for them (the whole App used to redraw every
+// 120 ms while a collapsed turn ran).
+test('a collapsed turn\'s seconds tick without redrawing the plugin\'s screen', async () => {
+  const model = new ScriptedModel();
+  model.script([{ hold: true }, { text: 'Done.' }]);
+  const g = guest();
+  const ui = await bootApp(model, 160, 40, g.make as never, {}, { chatMode: 'panel' });
+  await ui.press('F');
+  await ui.type('go');
+  await ui.press('return');
+  await press(ui, COLLAPSE);
+  await settle(10);
+  const footer = () => rows(ui).find((l) => l.includes(': commands')) ?? '';
+  const seconds = () => /(\d+\.\d)s · /.exec(footer())?.[1];
+  const before = seconds();
+  const drawnBefore = g.drawn.count;
+  await new Promise((r) => setTimeout(r, 700));
+  await settle(2);
+  expect(seconds()).not.toBe(before);
+  expect(g.drawn.count - drawnBefore).toBeLessThanOrEqual(1);
+  model.release();
+  await settle(20);
+  expect(footer()).not.toContain('…');
   ui.app.unmount();
 });
 

@@ -1451,6 +1451,23 @@ export function renderChatStatus({ theme, streaming, toolLabel = '', phase = 'wr
     keyHint ? h(Text, { dim: true }, ` · ${keyHint}`) : null);
 }
 
+// The collapsed chat's status as the App draws it on the plugin's footer row: a
+// component that redraws ITSELF as the seconds tick, reading the chat's latest status
+// through `read` — so a running turn no longer redraws the whole App, the plugin's
+// surface with it, several times a second. `live` false (a status that does not change
+// by itself: waiting on the person) sets no timer. Module-level, so its type is stable
+// and it is never mounted anew.
+function LiveStatus({ read, live }: { read: () => ReactNode; live: boolean }) {
+  const [, tick] = useState(0);
+  useEffect(() => {
+    if (!live) return;
+    const t = setInterval(() => tick((n) => n + 1), 120);
+    return () => clearInterval(t);
+  }, [live]);
+  return (read() ?? null) as never;
+}
+export const liveChatStatus = (read: () => ReactNode, live: boolean) => h(LiveStatus, { key: 'chat-status', read, live });
+
 // The one row a collapsed bottom panel keeps: the chat's name, and either its running
 // turn's status or how to bring it back.
 export function renderChatStrip({ width, theme, status, keyHint = '', unread = 0 }: {

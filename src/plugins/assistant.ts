@@ -30,7 +30,7 @@ import { capConsoleData, consoleData, renderConsole } from '../assistant/console
 import { INTERACTIVE_ASK, runInteractive, type InteractiveDeps } from '../assistant/interactive.js';
 import { editorReducer } from '@flowtty/core';
 import { z } from 'zod';
-import { anchorRow, askFieldWidth, chatFieldWidth, chatRows, chatWrapWidth, firstFoldRow, pendingChatRows, renderChatStatus, renderChatStrip, rowAnchor, viewGroupFor, type RowOpts, type Viewport } from '../views/modals.js';
+import { anchorRow, askFieldWidth, chatFieldWidth, chatRows, chatWrapWidth, firstFoldRow, liveChatStatus, pendingChatRows, renderChatStatus, renderChatStrip, rowAnchor, viewGroupFor, type RowOpts, type Viewport } from '../views/modals.js';
 import { CHAT_MODES, chatModeOf, inRect, type ChatMode, type PanelLayout } from '../runtime/panel-layout.js';
 import { allFolded, flipFolds, isClicked, isOpen, toggleFold, type FoldState } from '../assistant/folds.js';
 import { groupOpen, toggleGroup } from '../assistant/view-groups.js';
@@ -2113,16 +2113,15 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const statusRow = !open && (layout === 'panel' || waiting)
             ? renderChatStatus({ theme: f.config.theme as never, streaming, toolLabel, phase, verb, elapsed: elapsedMs, keyHint: focusCap ? `${focusCap} chat` : '', waiting })
             : null;
-          // The App draws that status from what the chat published on its last render, so
-          // while a collapsed turn runs the App is asked to redraw as the seconds tick,
-          // and once more when it ends — or starts, or stops, waiting on the person.
+          // The App draws that status on the plugin's footer row as a component that ticks
+          // by itself (`liveChatStatus`), reading what this render built — so the seconds
+          // move without the whole App, the plugin's surface with it, being redrawn for
+          // them. The App is asked to redraw only when the status comes or goes: a turn
+          // starts or ends collapsed, or starts or stops waiting on the person.
           const collapsedBusy = layout === 'panel' && !open && !waiting && (streaming || !!toolLabel);
-          f.useEffect(() => {
-            f.notify();
-            if (!collapsedBusy) return;
-            const tick = setInterval(() => f.notify(), 120);
-            return () => clearInterval(tick);
-          }, [collapsedBusy, waiting]);
+          const statusRef = f.useRef<unknown>(null);
+          statusRef.current = statusRow;
+          f.useEffect(() => { f.notify(); }, [collapsedBusy, waiting]);
           // `footerStatus`: the status goes on the plugin's footer row (not on a bottom
           // panel's own strip), and it names the key that brings the chat back — the
           // footer's `F chat` beside it would say "chat" twice.
@@ -2140,7 +2139,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               queued: queueRef.current.length,
             });
           };
-          (f.store as Record<string, any>).chat = { open, unread, mode, focus, openChat, closeChat, send, messages, streaming, toolLabel, cursor, escArmed, pendingConfirm: pendingAsk, ctrlKey, panelKey, pointer, statusRow, footerStatus, layout, needRows };
+          (f.store as Record<string, any>).chat = { open, unread, mode, focus, openChat, closeChat, send, messages, streaming, toolLabel, cursor, escArmed, pendingConfirm: pendingAsk, ctrlKey, panelKey, pointer, statusRow: statusRow ? liveChatStatus(() => statusRef.current as never, collapsedBusy) : null, footerStatus, layout, needRows };
           // Lands the next background result. It is SHOWN as soon as no turn is being
           // written (a streaming turn keeps rewriting the display list's last message,
           // so a result cannot be appended under it) — a half-typed draft does not hold

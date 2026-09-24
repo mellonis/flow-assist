@@ -311,8 +311,10 @@ session (never saved); an old `fullscreen: true` reads as `full` (`chatModeOf`),
   keyboard to the plugin (in `window`/`full` they close, as before). Collapsed on the
   right the panel has no width, and a running turn's status (spinner, seconds, word,
   `^] chat`) is drawn on the plugin's bottom row — the App reads `store.chat.statusRow`,
-  an element the chat builds each render, and the chat asks the App to redraw while the
-  seconds tick; the assistant's own footer hint (`F chat`) steps aside while it is there
+  an element the chat hands over (`liveChatStatus` in `views/modals.ts`): a component
+  that redraws itself every 120 ms while a turn runs, reading the status the chat's last
+  render built, so the ticking seconds never redraw the App and the plugin's surface
+  with it (the chat asks the App to redraw only when the status comes or goes); the assistant's own footer hint (`F chat`) steps aside while it is there
   (`store.chat.footerStatus`), keeping only an unread count, so "chat" is said once; collapsed at the bottom the panel keeps ONE row, the same status or the
   key that brings it back (`renderChatStrip`).
 - **Closing is not an answer.** A y/n or an `ask_user` question pending when the chat
