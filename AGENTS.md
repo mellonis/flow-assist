@@ -14,6 +14,20 @@ comments from ported source are translated during the port and are never left in
 the new tree. The host's own UI — the chat, its hints, its status line — is
 English throughout; a half-translated screen is worse than either language.
 
+## Comments describe the code as it is
+
+A comment or doc line states what the code does and why, in the present tense —
+never how it got there. No "used to", "no longer", "was renamed", "previously",
+"since alpha.N", "as before", "now does X" where "now" contrasts with a past
+state: that is history, and history belongs only in `CHANGELOG.md` and git. A
+past incident may motivate a rule; keep the rule, drop the incident.
+
+- Bad: "That used to require an explicit `host.notify()` in every setter."
+  Good: "The host calls `notify()` after every handled key, so a setter needs
+  none."
+- Bad: "an old `fullscreen: true` reads as `full`, and `/fullscreen` is gone."
+  Good: "`fullscreen: true` reads as `full`; there is no `/fullscreen`."
+
 ## Stack
 
 - TypeScript **7.0.2** (native `tsc`), module `NodeNext`, target `ES2022`, `strict`.
