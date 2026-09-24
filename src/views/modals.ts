@@ -1064,7 +1064,7 @@ export function renderChatModal({
   escArmed = false,
   armedHint = '',
   stoppable = true,
-  shellMode = false,
+  bangLevel = 0,
   autoMode = 'ask',
   pendingConfirm = null,
   pendingQuestion = null,
@@ -1119,9 +1119,10 @@ export function renderChatModal({
   // Whether Esc has something to stop — not once the run was stopped and still has
   // not let go (a tool that ignores its signal): the status line then drops `Esc stops`.
   stoppable?: boolean;
-  // The field is in shell mode: the prompt reads `! ` in the shell colour and
-  // Enter runs its text as a command (assistant.ts owns the state machine).
-  shellMode?: boolean;
+  // The field's bang level (assistant.ts owns the state machine): 0 normal, 1 shell
+  // mode (prompt `! `, Enter runs the text as a command), 2 interactive mode (prompt
+  // `!!`, Enter hands the terminal over) — both non-zero levels in the shell colour.
+  bangLevel?: 0 | 1 | 2;
   // How much of a turn runs without a y/n (src/assistant/auto.ts). Drawn beside the
   // context badge, in the warn colour, in every state the hint row can be in: the
   // person must be able to see it while the answer they did not confirm is arriving.
@@ -1346,10 +1347,14 @@ export function renderChatModal({
           : h(Box, { flexDirection: 'column', width: '100%', backgroundColor: m.fieldBg, selectable: false },
               visible.map((row, i) => {
                 // The prompt marks the field's first line; it dims while an answer is
-                // coming, when ⏎ queues instead of sending. Shell mode swaps both the
-                // glyph and the colour — `! ` in m.shell — so the field itself says
-                // what Enter will do, the way Claude Code's bash mode does.
-                const prompt = h(Text, { bold: !streaming, dim: streaming, color: shellMode ? m.shell : m.accent }, visible[i] === fieldRows[0] ? (shellMode ? '! ' : '› ') : ' '.repeat(GUTTER));
+                // coming, when ⏎ queues instead of sending. A non-zero bang level swaps
+                // both the glyph and the colour — `! ` or `!!` in m.shell, the same
+                // colour at both levels — so the field itself says what Enter will do,
+                // the way Claude Code's bash mode does. Every glyph is exactly GUTTER
+                // (2) columns wide (`!!` has no trailing space) so a wrapped command's
+                // continuation rows still line up under the first.
+                const bangGlyph = bangLevel === 2 ? '!!' : bangLevel === 1 ? '! ' : '› ';
+                const prompt = h(Text, { bold: !streaming, dim: streaming, color: bangLevel ? m.shell : m.accent }, visible[i] === fieldRows[0] ? bangGlyph : ' '.repeat(GUTTER));
                 // A blank line is a real '' — flowtty ≥ 1.0.0-alpha.5 gives an empty Text
                 // its row (it used to collapse, which is how "two newlines" vanished).
                 if (row.caret === '') return h(Box, { key: i, flexDirection: 'row' }, prompt, row.before ? typed(row.before, row.start, 'b') : h(Text, { wrap: 'truncate' }, ''));
@@ -1368,8 +1373,10 @@ export function renderChatModal({
                   ...offer,
                   others.length ? h(Text, { wrap: 'truncate', dim: true }, `  ${CAP.tab} ${others.join(' · ')}`) : null,
                   input === ''
-                    ? h(Text, { wrap: 'truncate', dim: true }, shellMode
-                        ? ` ${CAP.enter} run · !cmd gets the terminal · ${CAP.backspace} on empty leaves ! mode`
+                    ? h(Text, { wrap: 'truncate', dim: true }, bangLevel === 2
+                        ? ` ${CAP.enter} run with the terminal · ${CAP.backspace} on empty back to !`
+                        : bangLevel === 1
+                        ? ` ${CAP.enter} run · ! again gets the terminal · ${CAP.backspace} on empty leaves ! mode`
                         : streaming ? ` an answer is coming — ${CAP.enter} queues your next message` : ` ${CAP.enter} send · ${NEWLINE_KEY} new line · ${CAP.esc} ${CAP.esc} close`)
                     // Text after the caret is the person's own text — drawn like the rest
                     // of it. It used to take the placeholder's dim and went grey whenever

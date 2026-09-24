@@ -123,9 +123,10 @@ test('!!command hands the terminal over, shows the cleaned recording as its view
   expect(ui.backend.lastFrame).toContain('│ progress 100%');
   expect(ui.backend.lastFrame).toContain('│ Your name? Hello, Ruslan!');
 
-  // ↑ brings back `!!./greet.sh` — not the ask — shown in shell mode as `!./greet.sh`.
+  // ↑ brings back `!!./greet.sh` — not the ask — shown in interactive mode, `!!` and
+  // `./greet.sh` with its bangs stripped.
   await ui.press('up');
-  expect(ui.backend.lastFrame).toContain('! !./greet.sh');
+  expect(ui.backend.lastFrame).toContain('!!./greet.sh');
   ui.app.unmount();
 });
 
@@ -148,20 +149,20 @@ test('the ask is drawn as the host speaking: a dim marker and dim text', async (
   ui.app.unmount();
 });
 
-test('shell mode: a leading ! runs the line interactively; ↑ then ⏎ runs it the same way again', async () => {
+test('a second ! on the still-empty shell-mode field steps to interactive mode; ↑ then ⏎ runs it the same way again', async () => {
   const root = rootDir();
   const model = new ScriptedModel();
   model.script([{ text: 'First.' }], [{ text: 'Second.' }]);
   const seen = newSeen();
   const ui = await boot(model, root, (b) => ({ detect: () => 'bsd', spawn: fakeScript(seen, b), signals: new EventEmitter() }));
   await ui.type('!'); // shell mode
-  await ui.type('!echo hi');
-  expect(ui.backend.lastFrame).toContain('! !echo hi');
+  await ui.type('!echo hi'); // the leading ! here steps to interactive mode; the rest types normally
+  expect(ui.backend.lastFrame).toContain('!!echo hi');
   await ui.press('return');
   await settleUntil(() => ui.backend.lastFrame.includes('First.'));
   expect(ui.backend.suspensions).toBe(1);
   await ui.press('up');
-  expect(ui.backend.lastFrame).toContain('! !echo hi');
+  expect(ui.backend.lastFrame).toContain('!!echo hi');
   await ui.press('return');
   await settleUntil(() => ui.backend.lastFrame.includes('Second.'));
   expect(ui.backend.suspensions).toBe(2);

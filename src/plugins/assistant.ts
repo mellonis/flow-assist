@@ -44,7 +44,7 @@ import {
   type ClipboardImage, type ImageRef, type LoadedOk, type ResolvedImage,
 } from '../assistant/images.js';
 import type { Make } from '../loader/plugin.js';
-import { keptInHistory, pushHistory, type HistoryCommand } from '../assistant/prompt-history.js';
+import { decodeBangLine, encodeBangLine, keptInHistory, pushHistory, type HistoryCommand } from '../assistant/prompt-history.js';
 import type { Plugin } from '../loader/plugin.js';
 
 // Slash-commands of the chat — a single source for runChatCommand and Tab-completion.
@@ -433,27 +433,30 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const histAt = f.useRef<number | null>(null);
           const histShown = f.useRef<string>('');
           const setField = (t: string) => { setInput(t); inputRef.current = t; setCursor(t.length); f.notify(); };
-          // Shell MODE — `!` typed into an EMPTY field flips it (`! ` in the shell
-          // colour replaces `› `, see src/views/modals.ts); Enter then runs the field
-          // text exactly as the legacy `!<text>` path always has, and the mode reverts
-          // right after — one command per `!`, like Claude Code's bash mode. It is UI
-          // state of the field only: never saved with the session (snapshotSession's
-          // draft rule below) and never restored on a restart.
-          const [shellMode, setShellModeState] = f.useState(false);
-          const shellModeRef = f.useRef(shellMode);
-          const setShellMode = (v: boolean) => { shellModeRef.current = v; setShellModeState(v); };
+          // Bang LEVEL — `!` typed into an EMPTY field steps it UP: 0 (normal) → 1
+          // (shell mode, `! ` in the shell colour replaces `› `) → 2 (interactive
+          // mode, `!!`, the same colour — see src/views/modals.ts). Enter at level 1
+          // runs the field text as a plain shell command; at level 2 it hands the
+          // terminal over (runShellCommand below). Backspace and Esc on an empty
+          // field each step the level back DOWN by one. It is UI state of the field
+          // only: never saved with the session (snapshotSession's draft rule below)
+          // and never restored on a restart.
+          const [bangLevel, setBangLevelState] = f.useState<0 | 1 | 2>(0);
+          const bangLevelRef = f.useRef(bangLevel);
+          const setBangLevel = (v: 0 | 1 | 2) => { bangLevelRef.current = v; setBangLevelState(v); };
           // A turn that was stopped (Esc, Ctrl+C) or failed does not send the queue: the
           // queued messages come back into the field — in order, joined by blank lines,
           // AHEAD of whatever was typed meanwhile (the order they would have gone out
           // in) — and the person decides what to send. A failed request would most
-          // likely fail again, and a stopped one was stopped on purpose. Shell mode
-          // goes, as a message is not a command; a shell-mode draft keeps its `!`.
+          // likely fail again, and a stopped one was stopped on purpose. The bang
+          // level goes to 0, as a message is not a command; a `!`/`!!` draft keeps
+          // its bang(s).
           const restoreQueue = () => {
             if (!queueRef.current.length) return;
-            const draft = shellModeRef.current && inputRef.current ? `!${inputRef.current}` : inputRef.current;
+            const draft = bangLevelRef.current && inputRef.current ? encodeBangLine(bangLevelRef.current as 1 | 2, inputRef.current) : inputRef.current;
             const text = [...queueRef.current, draft].filter((t) => t.trim()).join('\n\n');
             queueRef.current = [];
-            setShellMode(false);
+            setBangLevel(0);
             histAt.current = null;
             histShown.current = '';
             setField(text);
@@ -656,9 +659,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               messages: msgsRef.current as Record<string, unknown>[], api: apiRef.current as unknown as Record<string, unknown>[],
               summary: summaryRef.current, plan: planRef.current.snapshot(), usage: usageRef.current,
               // A /command or !command in the field is being run, not drafted (it was
-              // "/clear" itself); a shell-mode field has no leading `!` left to catch by
-              // that regex, so its own flag is checked too — it is not a draft either.
-              prompts: historyRef.current.slice(-100), draft: (shellModeRef.current || /^\s*[/!]/.test(inputRef.current)) ? '' : inputRef.current,
+              // "/clear" itself); a non-zero bang-level field has no leading `!`/`!!`
+              // left to catch by that regex, so its own flag is checked too — it is
+              // not a draft either.
+              prompts: historyRef.current.slice(-100), draft: (bangLevelRef.current || /^\s*[/!]/.test(inputRef.current)) ? '' : inputRef.current,
               shellCwd: shellRef.current.saved(),
               tools: toolSetRef.current.names(),
               // Refs only — a path and a hash per image, never its bytes.
@@ -735,7 +739,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             histAt.current = null;
             msgsRef.current = s.messages as ChatMsg[];
             setMessages(s.messages as ChatMsg[]);
-            setShellMode(false); // the mode is never saved — a restored draft is plain text
+            setBangLevel(0); // the level is never saved — a restored draft is plain text
             setField(s.draft);
           };
           const startedRef = f.useRef(false);
@@ -1408,7 +1412,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             if (streamRef.current) { setError('an answer or a command is still running — wait, or stop it with Esc'); return; }
             if (!cmd) { setError(interactive ? '!! runs an interactive program with the terminal — e.g. !!git add -p' : '! runs a shell command — e.g. !git status'); return; }
             streamRef.current = true; // closed synchronously, as in send()
-            const line = `${interactive ? '!!' : '!'}${cmd}`;
+            const line = encodeBangLine(interactive ? 2 : 1, cmd);
             pushHistory(historyRef.current, line);
             histAt.current = null;
             histShown.current = '';
@@ -1710,7 +1714,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           };
           // A field that is a /command or a !command, or in shell mode, is not a message:
           // an image has nowhere to go there, and a pasted path is the command's argument.
-          const fieldTakesImages = () => !shellModeRef.current && !/^\s*[/!]/.test(inputRef.current);
+          const fieldTakesImages = () => !bangLevelRef.current && !/^\s*[/!]/.test(inputRef.current);
 
           const runChatCommand = (cmd: string) => {
             const [name, ...rest] = cmd.split(/\s+/);
@@ -1852,7 +1856,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 }
                 setInput(''); inputRef.current = '';
                 setCursor(0);
-                setShellMode(false); // a fresh conversation opens on a plain prompt
+                setBangLevel(0); // a fresh conversation opens on a plain prompt
                 setAutoMode('ask'); // and asks again: the mode was granted for the work just cleared
                 setNotes(configNotes()); // the steps go back to what the config asks for
                 resetRound(); // the round being written belonged to work that is gone
@@ -2058,18 +2062,20 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               }
               // Any key except the second Esc disarms the exit.
               if (key.name !== 'escape' && escArmAt > 0) disarmEsc();
-              // ── Shell mode: `!` on an EMPTY, non-shell field switches the prompt
-              // instead of being typed — the field never holds the `!` itself, unlike
-              // the legacy path below. After other text, or already in the mode, `!`
-              // falls through to the editor as a plain character (a shell command may
-              // start with one). Backspace on an empty shell-mode field leaves the mode
-              // without deleting anything else — there is nothing there to delete.
-              if (key.name === '!' && !key.ctrl && !key.meta && !shellMode && inputRef.current === '') {
-                setShellMode(true);
+              // ── Bang level: `!` on an EMPTY field steps it UP (0 → 1 shell mode →
+              // 2 interactive mode) instead of being typed — the field never holds the
+              // bang itself, unlike the legacy path below. After other text, or
+              // already at level 2 (the top), `!` falls through to the editor as a
+              // plain character (a shell command may start with one, and so may text
+              // typed at level 2). Backspace on an empty field steps the level back
+              // DOWN by one, without deleting anything else — there is nothing there
+              // to delete.
+              if (key.name === '!' && !key.ctrl && !key.meta && bangLevel < 2 && inputRef.current === '') {
+                setBangLevel((bangLevel + 1) as 1 | 2);
                 return true;
               }
-              if (key.name === 'backspace' && shellMode && inputRef.current === '') {
-                setShellMode(false);
+              if (key.name === 'backspace' && bangLevel > 0 && inputRef.current === '') {
+                setBangLevel((bangLevel - 1) as 0 | 1);
                 return true;
               }
               // ── Images. A paste is ONE key and is matched as one — never decoded into
@@ -2104,9 +2110,11 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // field once the turn has ended (see `restoreQueue`). It used to clear the
               // field and take the queue back first, so with a message queued the third
               // Esc stopped the tool, and the second had already thrown the message
-              // away. Idle: non-empty field → clear; empty shell-mode field → leave the
-              // mode (closest thing first, before Esc starts arming a chat-wide exit);
-              // armed → exit; otherwise arm + hint «Esc again to exit».
+              // away. Idle: non-empty field → clear; empty field at a non-zero bang
+              // level → step the level DOWN by one, same as Backspace (closest thing
+              // first, before Esc starts arming a chat-wide exit) — leaving `!!` for
+              // good this way takes two Escs, one per level; armed → exit; otherwise
+              // arm + hint «Esc again to exit».
               if (key.name === 'escape') {
                 if (canStop()) { stopKeyRef.current = ''; abortRef.current?.abort(); disarmEsc(); return true; }
                 if (inputRef.current.length > 0) {
@@ -2115,8 +2123,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   disarmEsc();
                   return true;
                 }
-                if (shellMode) {
-                  setShellMode(false);
+                if (bangLevel > 0) {
+                  setBangLevel((bangLevel - 1) as 0 | 1);
                   disarmEsc();
                   return true;
                 }
@@ -2166,17 +2174,18 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               }
               // ── ↑/↓ — prompt history, but only while the field is empty or still shows
               // the history entry untouched; in a draft they move the caret between its
-              // rows (the editor below), so a draft is never replaced. A `!cmd` entry
-              // (how a shell command is stored, see runShellCommand) is shown the way it
-              // was typed: shell mode on, the field holding `cmd` with the `!` stripped.
+              // rows (the editor below), so a draft is never replaced. A `!cmd`/`!!cmd`
+              // entry (how a shell command is stored, see runShellCommand) is shown the
+              // way it was typed: the matching bang level, the field holding `cmd` with
+              // its bang(s) stripped.
               if (key.name === 'up' || key.name === 'down') {
                 // ↑ on an EMPTY field takes the last queued message back for editing,
-                // before history — which it reaches once the queue is empty. Shell mode
-                // goes: a message is not a command.
+                // before history — which it reaches once the queue is empty. The bang
+                // level goes to 0: a message is not a command.
                 if (key.name === 'up' && inputRef.current === '' && queueRef.current.length) {
                   histAt.current = null;
                   histShown.current = '';
-                  setShellMode(false);
+                  setBangLevel(0);
                   setField(queueRef.current.pop() as string);
                   syncQueue();
                   return true;
@@ -2189,9 +2198,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   const next = key.name === 'up' ? (at == null ? hist.length - 1 : Math.max(0, at - 1)) : (at == null ? null : at + 1 >= hist.length ? null : at + 1);
                   histAt.current = next;
                   const raw = next == null ? '' : hist[next]!;
-                  const isShell = raw.startsWith('!');
-                  histShown.current = isShell ? raw.slice(1) : raw;
-                  setShellMode(isShell);
+                  const { level, cmd: shown } = decodeBangLine(raw);
+                  histShown.current = shown;
+                  setBangLevel(level);
                   setField(histShown.current);
                   return true;
                 }
@@ -2218,21 +2227,21 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               if (act.kind === 'submit') {
                 const cmd = inputRef.current.trim();
                 disarmEsc();
-                if (shellMode) {
-                  // One command per `!`, like Claude Code's bash mode — but only once
+                if (bangLevel > 0) {
+                  // One command per bang, like Claude Code's bash mode — but only once
                   // it actually SUBMITS: while something else is still running,
                   // runShellCommand refuses without touching the field (the same
                   // "refused, not queued" contract `!command` always had), and a
                   // retried Enter must go through that same refusal again, not fall
                   // into a mode-less field where the text queues as a chat message
-                  // instead. An empty command still exits the mode — it did submit,
+                  // instead. An empty command still drops the level — it did submit,
                   // runShellCommand's own check just has nothing to run.
-                  if (!streamRef.current) setShellMode(false);
-                  // A leading `!` in shell mode is `!!`: the program gets the terminal.
-                  // It is how ↑ shows a `!!cmd` (the mode on, the field `!cmd`), so
-                  // recalling one and pressing ⏎ runs it the way it ran.
-                  if (cmd.startsWith('!')) void runShellCommand(cmd.slice(1).trim(), true);
-                  else void runShellCommand(cmd);
+                  if (!streamRef.current) setBangLevel(0);
+                  // Enter runs the field text exactly as it reads — level 1 as the
+                  // plain command, level 2 handed to the terminal — with no more
+                  // inspecting it for a leading `!`: that used to force an interactive
+                  // run and eat the bang a literal shell negation needs.
+                  void runShellCommand(cmd, bangLevel === 2);
                 } else if (cmd.startsWith('/')) {
                   // A command goes into ↑/↓ like any line (unless it says `history:
                   // false`) — before it runs, and again after if it replaced the
@@ -2246,13 +2255,17 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   runChatCommand(cmd.slice(1));
                   if (kept && historyRef.current !== before) pushHistory(historyRef.current, cmd);
                 }
-                // A `!command` typed as plain text (not via shell mode — e.g. pasted
-                // whole into an empty field, since a paste is never decoded into a
-                // mode switch) still runs, the legacy way. Refused while something
-                // runs rather than queued: a command fired later, into a state nobody
-                // is looking at, is a surprise.
-                else if (cmd.startsWith('!!')) void runShellCommand(cmd.slice(2).trim(), true);
-                else if (cmd.startsWith('!')) void runShellCommand(cmd.slice(1).trim());
+                // A `!command`/`!!command` typed as plain text (not via the bang
+                // level — e.g. pasted whole into an empty field, since a paste is
+                // never decoded into a level change, or a queued draft restored with
+                // its bang(s) still on it) still runs, the legacy way, read with the
+                // same decoder history uses. Refused while something runs rather than
+                // queued: a command fired later, into a state nobody is looking at,
+                // is a surprise.
+                else if (cmd.startsWith('!')) {
+                  const { level, cmd: decoded } = decodeBangLine(cmd);
+                  void runShellCommand(decoded.trim(), level === 2);
+                }
                 else if (streamRef.current) {
                   // An answer is coming: queue instead of dropping the keypress.
                   if (cmd) { queueRef.current.push(cmd); setField(''); syncQueue(); }
@@ -2305,7 +2318,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             detailsKey: firstGlyph(f.keys.details),
             onViewport: (v: Viewport) => { viewportRef.current = v; },
             scrollTo,
-            shellMode,
+            bangLevel,
             // How much runs without a y/n — said on the hint line, so the mode is never
             // a hidden state, while an answer is coming as much as between turns.
             autoMode,

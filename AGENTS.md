@@ -907,7 +907,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   carries it as `stoppedBy`, and a session saved without one reads `(Esc)` as it did —
   a cut-off «В» must not read as a whole answer;
   the model's history gets a closing message of its own, see "The conversation the
-  model sees"). Idle: clear the field → leave shell mode → arm/close. It used to clear
+  model sees"). Idle: clear the field → step the bang level down → arm/close. It used to clear
   the field and take the queue back BEFORE stopping, so with a message queued the
   second Esc threw the message away and only the third stopped the tool.
   **A queued message never undoes what just ended**: `send` lays its message onto the
@@ -920,7 +920,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   zero-delay timers as microtasks. **A stopped or failed turn does not send the queue** (`restoreQueue` in
   `src/plugins/assistant.ts`): the queued messages come back into the field in order,
   joined by blank lines, AHEAD of whatever was typed meanwhile — the order they would
-  have gone out in; a shell-mode draft keeps its `!` and the mode goes. A failed
+  have gone out in; a `!`/`!!`-mode draft keeps its bang(s) and the level drops to 0. A failed
   request would most likely fail again. **↑ on an EMPTY field takes the last queued
   message back** before it steps into the history. **Alt+⏎** (drawn `⌥⏎` on macOS) is a newline (`NEWLINE_KEY` in
   `src/views/modals.ts` — the one spelling every hint uses); a blank line is kept.
@@ -1023,8 +1023,8 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   history holds **every submitted line** (`src/assistant/prompt-history.ts`) — a
   message, a `/command` (an unknown one too: a typo is fixed with ↑), a `!command`
   and a shell-mode line, both kept as `!cmd` (an interactive one as `!!cmd`) and
-  recalled in shell mode — never the host's own ask after a `!!` — with no line
-  twice in a row. A command pushed before it runs is pushed again after if it REPLACED
+  recalled at the matching bang level — never the host's own ask after a `!!` — with
+  no line twice in a row. A command pushed before it runs is pushed again after if it REPLACED
   the history (`/resume <n>` loads that session's own), so ↑ there still offers it. A
   command whose definition says `history: false` is never kept — for one whose argument
   may carry a secret, since the last 100 entries are saved with the session as
@@ -1295,27 +1295,45 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     `backend.clipboard`; `backend.clipboardAvailable = false` stands for Apple
     Terminal (`src/__tests__/copy.e2e.test.ts`).
 - **`!command` runs a shell command** — the person's own, typed into the field
-  (`!bun test src/features`); the model never reaches this path. `!` typed into an
-  EMPTY field switches the field into **shell mode** instead of being inserted (like
-  Claude Code's bash mode): the prompt glyph reads `! ` instead of `› `, in
-  `theme.modals.chat.shell` (a colour of its own, distinct from `accent` — pick it
-  from `MODAL_COLOR_DEFAULTS.chat` in `src/playback/theme.ts`, checked against
-  flowtty's `NAMED_COLORS` by the theme test). Enter then runs the field text as the
-  command and the mode reverts right after — one command per `!`, even on an empty
-  submit (leaving it engaged would silently redirect the next thing typed into the
-  shell too). Backspace on an empty shell-mode field leaves the mode without deleting
-  anything else; Esc on an empty shell-mode field leaves the mode before the usual
-  double-Esc exit arms (the same "closest thing first" order as Esc's own field-
-  clearing step). `!` after other text, or already in the mode, is just a character —
-  and a shell-mode line that STARTS with one is `!!`, an interactive run (below): that
-  is how ↑ shows a `!!cmd` (the mode on, the field `!cmd`), so recall + ⏎ runs it the
-  way it ran. So a command can no longer START with `!` (the shell's negation, rarely
-  typed as a whole command); `true && ! …` still says it. A paste is never decoded into a mode
-  switch (pasted text, letters included, fires no binding), so pasting a whole
-  `!command` into an empty field inserts it literally and runs the legacy way: typed
-  or pasted text starting with `!` still runs as a command even outside shell mode
-  (also how ↑/↓ recall worked before shell mode existed, and how a session saved by an
-  older build could still replay one). It runs through `/bin/sh -c` in its own process
+  (`!bun test src/features`); the model never reaches this path. The field carries a
+  **bang LEVEL** — 0 normal, 1 shell mode, 2 interactive mode (`!!command` below) —
+  and `!` typed into an EMPTY field steps it UP one level instead of being inserted
+  (like Claude Code's bash mode, taken one step further): the prompt glyph reads `! `
+  at level 1 and `!!` at level 2 in place of `› `, both in `theme.modals.chat.shell`
+  (a colour of its own, distinct from `accent` — pick it from
+  `MODAL_COLOR_DEFAULTS.chat` in `src/playback/theme.ts`, checked against flowtty's
+  `NAMED_COLORS` by the theme test; `!!` reuses the same colour rather than getting a
+  second one — one shell identity at two depths). Both glyphs are exactly `GUTTER`
+  (2) columns, `!!` with no trailing space, so a wrapped command's continuation rows
+  still line up under the first. Enter runs the field text as it reads — level 1 as
+  the plain command, level 2 handed to the terminal (below) — and the level drops
+  back to 0 right after, whatever it was: one command per bang, even on an empty
+  submit (leaving a level engaged would silently redirect the next thing typed into
+  the shell too). Backspace on an empty field steps the level DOWN by one (2 → 1 →
+  0) without deleting anything else; Esc on an empty field does the same, before the
+  usual double-Esc exit arms (the same "closest thing first" order as Esc's own
+  field-clearing step) — leaving `!!` for good this way costs two Backspaces (or two
+  Escs), one per level, from an empty field. `!` after other text, or already at
+  level 2 (the top), is just a character. Enter no longer inspects the field's TEXT
+  for a leading `!` to pick the level — only the UI state does — so a command's own
+  text CAN start with `!` now (the shell's negation, `! grep -q x f`: a shell-mode
+  line starting with `!` used to force an interactive run and eat the bang the
+  negation needed; getting such text INTO a level-1 field takes a paste, since typing
+  `!` there on the still-empty field steps the level instead of inserting it).
+  History keeps each line as it was run, `!cmd` or `!!cmd` — `encodeBangLine`/
+  `decodeBangLine` in `src/assistant/prompt-history.ts` — with one wrinkle: a level-1
+  `cmd` that itself starts with `!` gets a disambiguating space (`! !cmd`), since
+  `cmd` is always trimmed and so never starts with a space otherwise; without it,
+  `!` + `!cmd` reads back as `!!cmd`, indistinguishable from a level-2 entry
+  (decoding checks the PREFIX `!!`, not what follows it). ↑ recalls a line into the
+  matching level with its bang(s) — and that disambiguating space, if any — stripped
+  from the field shown, so recall + ⏎ runs it the way it ran. A paste is never
+  decoded into a level change (pasted text, bangs included, fires no binding), so
+  pasting a whole `!command` or `!!command` into an empty NORMAL field inserts it
+  literally and runs the legacy way, `decodeBangLine`-read from the pasted TEXT
+  instead (also how ↑/↓ recall worked before shell mode existed, and how a session
+  saved by an older build could still replay one). It runs through `/bin/sh -c` in
+  its own process
   group (a timeout, `shell.timeoutMs` 120 s, or Esc kills the whole group), stdin
   closed, `PAGER`/`GIT_PAGER=cat`, `GIT_TERMINAL_PROMPT=0`; stdout and stderr merged;
   the output keeps its TAIL (`shell.maxChars` 20000) and says how much was cut. While
@@ -1327,10 +1345,11 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   runs; `✓ 1.2 s · ~/dir` when it ends, opened by a click to its last lines) — the
   message is still role `shell` and still joins `apiRef` (`apiHistory` maps `shell` →
   `user`) and is read with the next message; no turn is spent. It is saved with the session and
-  its line goes into ↑/↓ as `!cmd` (a shell-mode line too); recalling one with ↑ shows it the way it was
-  typed — shell mode on, the field holding `cmd` with the `!` stripped. Shell mode
-  itself is UI state of the field only, never saved and never restored across a
-  restart; a `!…` or a shell-mode field is not a draft. **The directory is remembered**
+  its line goes into ↑/↓ as `!cmd`; recalling one with ↑ shows it the way it was
+  typed — level 1, the field holding `cmd` with the `!` stripped (see the bang-level
+  paragraph above). The bang level itself is UI state of the field only, never saved
+  and never restored across a restart; a `!…`/`!!…` or a non-zero-level field is not
+  a draft. **The directory is remembered**
   between commands, as in a terminal, and shared with `run_command`: it starts at the
   first `shell.roots` directory (else the process's), a `cd` moves it only within the
   roots by real path (the shell writes `pwd -P` to a private temp file after the
@@ -1348,8 +1367,12 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
 - **`!!command` runs an INTERACTIVE program and hands its recording to the model**
   (`src/assistant/interactive.ts`; the chat's side is `runShellCommand(cmd, true)`) — a
   TUI, a prompt, `git add -p`, a login flow, which `!` cannot run (its output goes
-  through pipes). Typed as `!!cmd`, or `!cmd` in shell mode (a leading `!` there is
-  `!!`); kept in ↑/↓ as `!!cmd`. The chat hands the terminal over through
+  through pipes). Typed as `!!cmd` — the second `!`, on the still-empty field, steps
+  from level 1 to level 2, the same as pressing `!` again once already in shell mode
+  — or reached at once by anything that skips the keystrokes: a recalled `!!cmd`
+  (↑/↓), or the legacy path below for a `!!cmd` pasted whole into an empty NORMAL
+  field (a paste never changes the level, so it stays 0 there and is read from the
+  text instead); kept in ↑/↓ as `!!cmd`. The chat hands the terminal over through
   `services.suspend` — flowtty's `useApp().suspend`, bound by the App like `alert` and
   `copy` (the default just runs `fn`) — and the program runs under `script`, so it has
   a real terminal while what it printed is recorded into a temp file. The command is

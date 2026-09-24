@@ -97,7 +97,8 @@ everything else folded, in full. Limits:
 `shell.timeoutMs` (120 s) and `shell.maxChars` (20000; the end of the output is kept).
 
 `!!command` is for a program that needs the terminal — a prompt, `git add -p`, `top`,
-a login flow (`!!npm login`); in shell mode, start the line with `!`. The chat steps
+a login flow (`!!npm login`); or press `!` again on the still-empty line once already
+in shell mode (Backspace steps back the same way, one bang at a time). The chat steps
 aside and the program has the whole terminal, keys included (Esc and Ctrl+C are the
 program's); when it ends the chat comes back as it was. What the program printed is
 recorded with `script` — colours taken out, a progress bar in its last state — and

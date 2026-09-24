@@ -165,3 +165,70 @@ test('a shell-mode command refused while an answer is running stays refused, not
   expect(model.requests).toHaveLength(1); // the question only — the command never reached the model
   ui.app.unmount();
 });
+
+test('`!` again on an empty shell-mode field steps to interactive mode — the prompt reads `!!`, and Backspace steps back down one level at a time', async () => {
+  const root = rootDir();
+  const ui = await boot(new ScriptedModel(), root);
+
+  await ui.type('!');
+  expect(ui.backend.lastFrame).toContain('! ');
+  await ui.type('!'); // field still empty — the second bang steps up, not typed
+  expect(ui.backend.lastFrame).toContain('!!');
+  expect(styleAt(ui.backend, '!!').fg).toBe('magentaBright');
+
+  await ui.press('backspace'); // level 2 → 1, nothing to delete
+  expect(ui.backend.lastFrame).toContain('! ');
+  expect(ui.backend.lastFrame).not.toContain('!!');
+  await ui.press('backspace'); // level 1 → 0
+  expect(ui.backend.lastFrame).toContain('› ');
+  ui.app.unmount();
+});
+
+test('Esc on an empty field steps the bang level back down one at a time, the same as Backspace, before the double-Esc exit arms', async () => {
+  const root = rootDir();
+  const ui = await boot(new ScriptedModel(), root);
+
+  await ui.type('!');
+  await ui.type('!'); // level 2
+  expect(ui.backend.lastFrame).toContain('!!');
+
+  await ui.press('escape'); // level 2 → 1, not armed
+  expect(ui.backend.lastFrame).toContain('! ');
+  expect(ui.backend.lastFrame).not.toContain('!!');
+  expect(ui.backend.lastFrame).not.toContain('Esc again to exit');
+
+  await ui.press('escape'); // level 1 → 0, still not armed
+  expect(ui.backend.lastFrame).toContain('› ');
+  expect(ui.backend.lastFrame).not.toContain('Esc again to exit');
+
+  await ui.press('escape'); // level already 0 — this Esc arms the chat-wide exit
+  expect(ui.backend.lastFrame).toContain('Esc again to exit');
+  ui.app.unmount();
+});
+
+test('a shell negation pasted into shell mode runs plain, not interactively, and round-trips through ↑', async () => {
+  const root = rootDir();
+  const model = new ScriptedModel();
+  const ui = await boot(model, root);
+
+  await ui.type('!'); // shell mode
+  ui.backend.paste('! true'); // a paste is never decoded into a level step
+  await settle();
+  expect(ui.backend.lastFrame).toContain('! ! true');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('✗'));
+  // `! true` ran literally — negation flips `true`'s exit to 1 — not `true` handed to
+  // an interactive program (which the old leading-bang rule would have forced).
+  expect(ui.backend.lastFrame).toContain('✗ exit 1');
+  expect(ui.backend.suspensions).toBe(0);
+  expect(model.requests).toHaveLength(0);
+
+  // ↑ recalls it the way it was typed: shell mode, the field showing `! true` whole —
+  // the disambiguating space `encodeBangLine` adds is stripped back off.
+  await ui.press('up');
+  expect(ui.backend.lastFrame).toContain('! ! true');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.split('✗ exit 1').length > 2);
+  expect(ui.backend.suspensions).toBe(0);
+  ui.app.unmount();
+});

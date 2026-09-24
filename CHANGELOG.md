@@ -7,15 +7,19 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 - **`!!command` runs a program that needs the terminal, and asks the assistant about
   it.** `!command` captures what a command prints, so a prompt, `git add -p`, `top` or
-  a login flow could not run there. `!!command` (or `!command` in shell mode) gives the
-  program the whole terminal and takes it back when the program ends. What it printed
+  a login flow could not run there. `!!command` gives the program the whole terminal
+  and takes it back when the program ends. It has its own level of the chat field's
+  bang prompt: `!` on an empty field enters shell mode (`! `), `!` again on the
+  still-empty field steps to interactive mode (`!!`) — the same way Backspace steps
+  back down, one bang at a time — so Enter always runs the field exactly as it reads,
+  with no more guessing a leading `!` in the text meant `!!`. What the program printed
   is recorded with `script` — colours taken out, a progress bar in its last state —
   and shown like any command's output, marked `interactive`; then, whenever something
   was recorded, the assistant is asked at once to look at it. A full-screen program
   (`vim`, `less`, `top`) leaves nothing to look at, and without `script` nothing is
-  recorded: then nothing is asked. Whatever the program echoes — a value typed at a
-  prompt that shows it back — is recorded, sent to the assistant and saved with the
-  session.
+  recorded: then nothing is asked. Whatever
+  the program echoes — a value typed at a prompt that shows it back — is recorded,
+  sent to the assistant and saved with the session.
 
 - **A message sent from the queue no longer undoes what just ended.** Under load, a
   message queued during a `!command` could put the finished command back into its

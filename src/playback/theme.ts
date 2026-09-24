@@ -140,9 +140,10 @@ export const MODAL_COLOR_DEFAULTS: Record<string, Record<string, string>> = {
   // leaving only the separators and the sticky dump without a background.
   // The chat's own colours, every one overridable via config.plugins.assistant.colors:
   //   accent   — the `›` prompt, shared by the input field and the person's messages
-  //   shell    — the `!` prompt of shell mode and the `$ ` marker on a command's
-  //              result — the same colour for both, so a shell command reads as one
-  //              thing from the moment it is typed to the moment its output appears
+  //   shell    — the `!`/`!!` prompt of shell/interactive mode and the `$ ` marker on
+  //              a command's result — the same colour for all three, so a shell
+  //              command reads as one thing from the moment it is typed to the
+  //              moment its output appears
   //   userBg   — the ground under the person's messages
   //   fieldBg  — the ground under the input field
   //   assistantAccent — the `ƒ` mark on the assistant's answers
