@@ -704,6 +704,42 @@ body or the `x-request-id` header; a 401/403 adds a generic hint about the token
 `config set ai.model`. It starts `LLM <status>` so `isImageRefusal` still reads it.
 The streamed round and `/compact`'s one-shot both use it.
 
+**Two wires, one history** (`src/assistant/llm-endpoint.ts`, `src/assistant/anthropic.ts`).
+`ai.provider` picks how the model is reached: unset (or anything but `anthropic`) an
+OpenAI-compatible chat-completions API, `anthropic` Anthropic's own Messages API. Every
+caller — the chat's send and `/compact`, a background task, the one-shot prompt — spreads
+`llmOpts(config.ai)` into its call, and the start-up gate (`configWarnings`) checks the
+same resolution: with `anthropic` the base URL defaults to `https://api.anthropic.com/v1`
+and the token variable to `ANTHROPIC_API_KEY`. In `agent.ts` the provider is looked at in
+exactly two places, `roundFor` (the round `agentChat` runs; a caller's own `chatRound`, a
+test's stub, wins) and `compactConversation`. **What the host keeps never changes shape**:
+`apiRef` and the session stay OpenAI-shaped, and `anthropicRequest` converts on the way
+out, every request — system messages into the top-level `system`, `tool_calls` into
+`tool_use` blocks (arguments parsed; `{}` for any that do not), each run of tool results
+into ONE user message with the person's next words after them (turns of one role merge —
+the API wants them alternating), image parts into base64 blocks, a `cache_control`
+breakpoint on the last system block and the last tool. A streamed round comes back as the
+same `ChatRoundResult` with the same live callbacks (`onToolCalls` on the first `tool_use`
+block, `thinking_delta` → `onReasoning` → the thinking fold; an empty one says nothing);
+usage is `input + cache_creation + cache_read` as the prompt, since the meter measures
+what is sent. An SSE `error` event carries no status, so its type stands for one
+(`overloaded_error` → 529) and the line is `llmErrorMessage`'s, with the `request-id`
+header. **Thinking blocks go back unchanged within a turn**: a round that thought AND
+called a tool keeps its blocks as they came (`ChatRoundResult.blocks`), the loop puts them
+on that round's assistant message (`anthropicContent`), and the conversion replays that
+array verbatim — thinking, signature, order. It never outlives the turn: `apiHistory`
+whitelists fields and drops it, which removes a LEADING run of thinking blocks — what the
+API allows — and the OpenAI round strips it too (`openAiShaped`). A 400 that names a
+thinking block (its history changed under it — the tool list does, when `tools_load` runs
+mid-turn) is retried once without any thinking, the API's own recovery. `ai.thinking`:
+`{adaptive: true}` → `{type:'adaptive', display:'summarized'}` (the current models' only
+mode); `{budgetTokens}` → a fixed budget for older models, `max_tokens` raised by it when
+it does not fit; unset → no `thinking` field at all (a current model then thinks by its
+own default, its text not shown — but its blocks still come and still go back). The
+scripted model has an Anthropic wire (`model.wire = 'anthropic'`) that REFUSES what the
+API refuses (`anthropicRefusal`: headers, alternation, a tool result per call, first in
+its message, no empty text, a signed thinking block) — keep it in step with the API.
+
 **An image is kept as a ref and sent as a part.** `ChatMessage.content` is
 `string | ContentPart[] | null`, but content PARTS exist only on the way to the
 provider: everywhere the host keeps a message (the display list, `apiRef`, the
@@ -1421,7 +1457,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
 ## Config & environment
 
 - Config: `~/.config/flow-assist/config.json` (schema from each plugin's `configSchema`).
-- Environment: the host reads `LLM_TOKEN` (or `ai.tokenEnv`) and the optional `FLOW_ASSIST_PLUGIN_REGISTRY_URL` / `FLOW_ASSIST_PLUGIN_REGISTRY_PROJECT` / `FLOW_ASSIST_PLUGIN_REGISTRY_TOKEN`; host variables take the `FLOW_ASSIST_` prefix. A plugin owns its own variables and declares them in `requiredSettings`.
+- Environment: the host reads `LLM_TOKEN` (or `ai.tokenEnv`; `ANTHROPIC_API_KEY` with `ai.provider: 'anthropic'`) and the optional `FLOW_ASSIST_PLUGIN_REGISTRY_URL` / `FLOW_ASSIST_PLUGIN_REGISTRY_PROJECT` / `FLOW_ASSIST_PLUGIN_REGISTRY_TOKEN`; host variables take the `FLOW_ASSIST_` prefix. A plugin owns its own variables and declares them in `requiredSettings`.
 - `ai.images` (`enabled` true, `maxBytes` 5 MB, `maxPerMessage` 4) — images in the
   chat. On by default: the API cannot be asked whether a model takes images, so a
   machine whose model cannot says `config set ai.images.enabled false`. Its

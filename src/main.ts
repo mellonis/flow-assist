@@ -35,6 +35,7 @@ import { assembleToolRegistry, pluginConfigs } from './loader/tools.js';
 import { renderApp } from './runtime/app.js';
 import { agentChat } from './assistant/agent.js';
 import { toolLoadingMode } from './assistant/tool-loading.js';
+import { llmOpts } from './assistant/llm-endpoint.js';
 import { createLogService } from './runtime/services/log.js';
 import { createServices } from './runtime/services.js';
 import { hostVersion } from './version.js';
@@ -268,9 +269,7 @@ async function runPrompt(args: string[], config: Record<string, unknown>, repo: 
   const services = createServices({ config, tools: registry, repo, onExit: () => {} });
 
   const result = await agentChat([{ role: 'user', content: prompt }], {
-    baseUrl: ai.baseUrl as string | undefined,
-    model: ai.model as string | undefined,
-    token: process.env[(ai.tokenEnv as string | undefined) ?? 'LLM_TOKEN'],
+    ...llmOpts(ai),
     extraTools: aiTools,
     toolLoading: toolLoadingMode(ai),
     toolCtx: services as never,

@@ -6,11 +6,19 @@ export const hostConfigSchema = z.object({
   theme: z.record(z.string(), z.unknown()).optional(),
   debug: z.object({ logTools: z.boolean() }).optional(),
   ai: z.object({
+    // 'anthropic' — Anthropic's own Messages API; anything else, or unset, an
+    // OpenAI-compatible chat-completions API (src/assistant/llm-endpoint.ts).
     provider: z.string().optional(),
     baseUrl: z.string().optional(),
     model: z.string().optional(),
     tokenEnv: z.string().optional(),
     stream: z.boolean().optional(),
+    // The Anthropic wire only (`provider: 'anthropic'`, src/assistant/anthropic.ts):
+    // the ceiling on one answer, which that API requires (default 8192), and how the
+    // model is asked to think — `adaptive` (the current models) or a fixed
+    // `budgetTokens` (older ones; at least 1024). Unset: the model's own default.
+    maxTokens: z.number().int().positive().optional(),
+    thinking: z.object({ adaptive: z.boolean().optional(), budgetTokens: z.number().int().min(1024).optional() }).optional(),
     // The model's context window in tokens — the API cannot be asked for it. The
     // chat's `ctx N%` and `/context` measure against it (default 200000).
     contextWindow: z.number().int().positive().optional(),

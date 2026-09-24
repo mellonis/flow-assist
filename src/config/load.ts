@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { hostConfigSchema } from './schema.js';
+import { llmOpts } from '../assistant/llm-endpoint.js';
 
 // Config files live outside the repo, under the user's home config dir (or the
 // XDG override). config.json is the committed/default base; config.local.json
@@ -312,12 +313,13 @@ export function configWarnings(config: Record<string, unknown>): string[] {
       out.push(`config: ${issue.path.join('.')} — ${issue.message}`);
     }
   }
-  const ai = (config.ai ?? {}) as Record<string, unknown>;
-  const tokenEnv = (ai.tokenEnv as string | undefined) ?? 'LLM_TOKEN';
-  if (!ai.baseUrl || !ai.model || !process.env[tokenEnv]) {
+  // Resolved as every caller resolves it (`llmOpts`): with ai.provider "anthropic"
+  // the base URL and the token variable have defaults of their own.
+  const llm = llmOpts(config.ai);
+  if (!llm.baseUrl || !llm.model || !llm.token) {
     out.push(
       'config: LLM not fully configured — set ai.baseUrl, ai.model and the token env ' +
-      `(ai.tokenEnv, default ${tokenEnv}); chat/prompt need all three, config/plugins do not.`,
+      `(ai.tokenEnv, default ${llm.tokenEnv}); chat/prompt need all three, config/plugins do not.`,
     );
   }
   return out;

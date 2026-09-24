@@ -7,7 +7,10 @@
 // via onDelta, accumulates tool_calls fragments); `agentChat` is the loop
 // "round → run tools → again" until a final text round; `compactConversation`
 // is a one-shot non-streaming call for /compact. Tokens/baseUrl/model are read
-// ONLY here, from opts (wired by the runtime from config).
+// ONLY here, from opts (wired by the runtime from config through `llmOpts`,
+// ./llm-endpoint.ts). `provider: 'anthropic'` swaps both calls for the native
+// Messages API (./anthropic.ts) — `roundFor` and `compactConversation` are the only
+// places that look at it.
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 import crypto from 'node:crypto';
@@ -19,6 +22,8 @@ import { acceptData, isConsoleKind, readLegacyView, type ViewRecord } from './vi
 import { capConsoleData } from './console-view.js';
 import { contentText, type ContentPart, type ImageRef } from './images.js';
 import { llmErrorMessage } from './llm-error.js';
+import { ANTHROPIC_CONTENT, anthropicChatRound, anthropicCompact } from './anthropic.js';
+import type { ThinkingConfig } from './llm-endpoint.js';
 import {
   TOOLS_LOAD, createToolSet, deferredTools, notLoadedError, runToolsLoad, toolsToSend,
   type CatalogEntry, type ToolLoading, type ToolSet,
@@ -56,6 +61,10 @@ export interface ChatRoundResult {
   toolCalls: ToolCall[];
   // Present when the provider reported it (see `realChatRound`).
   usage?: TokenUsage;
+  // The round's content blocks as the provider wrote them, when they must go back
+  // unchanged within the turn (the Anthropic round's thinking, ./anthropic.ts). The
+  // loop keeps them on the round's assistant message and nothing else reads them.
+  blocks?: unknown[];
 }
 
 // A trace of one executed tool call — what actually ran, so the chat UI can show
@@ -218,8 +227,8 @@ export function apiHistory(messages: ChatMessage[]): ChatMessage[] {
 }
 
 // ─── AI preconditions & headers ───────────────────────────────────────────────
-function requireAiOpts({ baseUrl, model, token }: { baseUrl?: string; model?: string; token?: string }): void {
-  if (!token) throw new Error('LLM_TOKEN is not set — add it to .env');
+function requireAiOpts({ baseUrl, model, token, tokenEnv }: { baseUrl?: string; model?: string; token?: string; tokenEnv?: string }): void {
+  if (!token) throw new Error(`${tokenEnv || 'LLM_TOKEN'} is not set — add it to .env`);
   if (!baseUrl) throw new Error('config ai.baseUrl is not set');
   if (!model) throw new Error('config ai.model is not set');
 }
@@ -257,6 +266,27 @@ function clip(s: unknown, n = 6000): string {
 // Base URLs that refused `stream_options` — not asked again in this process.
 const noUsage = new Set<string>();
 
+// A message as the OpenAI wire takes it: the Anthropic round's kept blocks are not an
+// API field, and a strict server refuses a field it does not know.
+function openAiShaped(m: ChatMessage): ChatMessage {
+  if (!(ANTHROPIC_CONTENT in m)) return m;
+  const { [ANTHROPIC_CONTENT]: _kept, ...rest } = m;
+  return rest as ChatMessage;
+}
+
+// Which round the provider takes — the one place the chat loop asks. A caller's own
+// `chatRound` (a test's stub) wins over both.
+function roundFor(opts: Record<string, unknown>): NonNullable<AgentOpts['chatRound']> {
+  if (typeof opts.chatRound === 'function') return opts.chatRound as NonNullable<AgentOpts['chatRound']>;
+  if (opts.provider === 'anthropic') {
+    return (messages, o) => {
+      requireAiOpts(o as { baseUrl?: string; model?: string; token?: string; tokenEnv?: string });
+      return anthropicChatRound(messages, o as Parameters<typeof anthropicChatRound>[1]);
+    };
+  }
+  return realChatRound as NonNullable<AgentOpts['chatRound']>;
+}
+
 async function realChatRound(
   messages: ChatMessage[],
   {
@@ -268,10 +298,12 @@ async function realChatRound(
     onReasoning = () => {},
     onToolCalls = () => {},
     signal,
+    tokenEnv,
   }: {
     baseUrl?: string;
     model?: string;
     token?: string;
+    tokenEnv?: string;
     tools?: ToolDef[];
     onDelta?: (d: string) => void;
     onReasoning?: (d: string) => void;
@@ -279,7 +311,7 @@ async function realChatRound(
     signal?: AbortSignal;
   },
 ): Promise<ChatRoundResult> {
-  requireAiOpts({ baseUrl, model, token });
+  requireAiOpts({ baseUrl, model, token, tokenEnv });
   // A streamed response carries token usage only when asked (`stream_options`). Most
   // OpenAI-compatible servers know the field; one that does not may answer 400 — so a
   // refusal that NAMES the field is retried once without it, and that base URL is not
@@ -288,7 +320,7 @@ async function realChatRound(
     method: 'POST',
     signal,
     headers: LLM_HEADERS(token as string),
-    body: JSON.stringify({ model, messages, stream: true, ...(withUsage ? { stream_options: { include_usage: true } } : {}), ...(tools?.length ? { tools } : {}) }),
+    body: JSON.stringify({ model, messages: messages.map(openAiShaped), stream: true, ...(withUsage ? { stream_options: { include_usage: true } } : {}), ...(tools?.length ? { tools } : {}) }),
   });
   const askUsage = !noUsage.has(String(baseUrl));
   let res = await post(askUsage);
@@ -532,7 +564,7 @@ export async function agentChat(
   // keeping the provider's id absent from the key means it can never matter again.
   const turnKey = crypto.randomUUID();
 
-  const chatRoundFn = ((opts as { chatRound?: AgentOpts['chatRound'] }).chatRound) ?? realChatRound;
+  const chatRoundFn = roundFor(opts);
 
   // The LAST round's usage is the one that counts: its prompt is the whole turn so far.
   let usage: TokenUsage | undefined;
@@ -606,6 +638,9 @@ export async function agentChat(
           type: 'function',
           function: { name: tc.name, arguments: callParses[idx]!.ok && tc.arguments !== '' ? tc.arguments : '{}' },
         })),
+        // The round's own blocks, thinking and signatures included, to go back as they
+        // came in the next round of this turn (./anthropic.ts, `ANTHROPIC_CONTENT`).
+        ...(r.blocks?.length ? { [ANTHROPIC_CONTENT]: r.blocks } : {}),
       });
       for (let idx = 0; idx < r.toolCalls.length; idx++) {
         const called = r.toolCalls[idx]!;
@@ -773,23 +808,29 @@ function compactable(m: ChatMessage): ChatMessage {
 // system context (key facts, decisions, open questions). No tools.
 export async function compactConversation(
   messages: ChatMessage[],
-  { baseUrl, model, token, signal }: { baseUrl?: string; model?: string; token?: string; signal?: AbortSignal },
+  { baseUrl, model, token, tokenEnv, provider, maxTokens, thinking, signal }: { baseUrl?: string; model?: string; token?: string; tokenEnv?: string; provider?: string; maxTokens?: number; thinking?: ThinkingConfig; signal?: AbortSignal },
 ): Promise<string> {
-  requireAiOpts({ baseUrl, model, token });
+  requireAiOpts({ baseUrl, model, token, tokenEnv });
+  const instruction: ChatMessage = {
+    role: 'system',
+    content:
+      'Compress the chat history below into a compact system context (up to ~400 words). Keep the key facts, decisions made and open questions. Return only the compressed text.',
+  };
+  const history = messages.filter((m) => m.role !== 'system').slice(-30).map(compactable);
+  // The Messages API starts with the person and refuses a tool result whose call is
+  // gone — the last 30 messages may start with either, so they start at the first
+  // message the person wrote.
+  if (provider === 'anthropic') {
+    const from = history.findIndex((m) => m.role === 'user');
+    return anthropicCompact([instruction, ...(from < 0 ? [] : history.slice(from))], { baseUrl, model, token, maxTokens, thinking, signal });
+  }
   const res = await fetch(`${baseUrl}/chat/completions`, {
     method: 'POST',
     signal,
     headers: LLM_HEADERS(token as string),
     body: JSON.stringify({
       model,
-      messages: [
-        {
-          role: 'system',
-          content:
-            'Compress the chat history below into a compact system context (up to ~400 words). Keep the key facts, decisions made and open questions. Return only the compressed text.',
-        },
-        ...messages.filter((m) => m.role !== 'system').slice(-30).map(compactable),
-      ],
+      messages: [instruction, ...history],
     }),
   });
   if (!res.ok) {

@@ -15,6 +15,7 @@ import { pickVerb, verbList } from '../assistant/verbs.js';
 import { addCalls, callRun, endRound, startsWithNext, notesCommand, notesMode, notesSaid, type CallRun, type NotesMode, type TurnPart } from '../assistant/step.js';
 import { apiHistory, compactConversation, chatLanguage, requestTools, transcriptSoFar } from '../assistant/agent.js';
 import { createToolSet, toolLoadingMode } from '../assistant/tool-loading.js';
+import { llmOpts } from '../assistant/llm-endpoint.js';
 import { copyTarget, copyToClipboard } from '../assistant/copy.js';
 import { createShellState, formatShell, nextCwd, runShell, shellLimits, tildePath } from '../assistant/shell.js';
 import {
@@ -1058,9 +1059,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             let roundLimit = 0;
             try {
               const chatResult = await (f.services as Record<string, any>).chatLLM(wire, {
-                baseUrl: ai.baseUrl,
-                model: ai.model,
-                token: process.env[ai.tokenEnv ?? 'LLM_TOKEN'],
+                ...llmOpts(ai),
                 signal: abort.signal,
                 // Debug-log of tool calls (opt-in: config.debug.logTools).
                 logTools: !!((f.config as Record<string, any>)?.debug?.logTools),
@@ -1542,12 +1541,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             runAsyncCommand('compact', async (signal) => {
               const ai = (f.config.ai ?? {}) as Record<string, any>;
               // Compact what the MODEL saw (tool results included), not the display list.
-              const summary = await compactConversation(apiHistory(apiRef.current), {
-                baseUrl: ai.baseUrl,
-                model: ai.model,
-                token: process.env[ai.tokenEnv ?? 'LLM_TOKEN'],
-                signal,
-              });
+              const summary = await compactConversation(apiHistory(apiRef.current), { ...llmOpts(ai), signal });
               if (signal.aborted) return; // stopped: the history stays as it was
               summaryRef.current = summaryRef.current ? `${summaryRef.current}\n\n${summary}` : summary;
               usageRef.current = null; // the measured size was of the history just replaced

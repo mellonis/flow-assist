@@ -23,6 +23,7 @@ import { parseAskArgs, askResult, type AskQuestion, type AskState } from '../ass
 import type { Change } from '../assistant/diff.js';
 import { TOOLS_LOAD } from '../assistant/tool-loading.js';
 import { IMAGE_DEFAULTS } from '../assistant/images.js';
+import { ANTHROPIC_BASE_URL, DEFAULT_MAX_TOKENS, llmOpts } from '../assistant/llm-endpoint.js';
 
 // Runtime context handed to core tools by the caller: the resolved memory
 // file (absent → resolved from config), the config.local.json path, and the active
@@ -73,6 +74,9 @@ function prettyKeys(map: Record<string, string[]>): string {
 // (the "unset" default), since a set key needs no default note. A full path
 // (`ai.toolLoading`) is looked up before its top-level key.
 const KEY_DEFAULTS: Record<string, string> = {
+  'ai.provider': `unset — an OpenAI-compatible chat-completions API at ai.baseUrl with the token from LLM_TOKEN (or the variable ai.tokenEnv names). config set ai.provider anthropic talks to Anthropic's own Messages API instead: ai.baseUrl defaults to ${ANTHROPIC_BASE_URL}, the token to ANTHROPIC_API_KEY, and ai.model is a Claude model id (claude-sonnet-5, claude-opus-5-5); the system prompt and the tools are cached between requests, and the model's thinking shows in the chat's thinking fold`,
+  'ai.maxTokens': `${DEFAULT_MAX_TOKENS} — the longest answer one request may get, with ai.provider anthropic only (that API requires one; thinking counts against it). A fixed thinking budget at or above it raises it by the budget`,
+  'ai.thinking': 'unset — the model thinks as it does by default (the current Claude models decide for themselves; their thinking is not shown). With ai.provider anthropic: config set ai.thinking \'{"adaptive":true}\' asks for adaptive thinking and shows a summary of it in the chat\'s thinking fold; {"budgetTokens":N} (at least 1024) is a fixed budget, for older models only — the current ones refuse it',
   'ai.toolLoading': `onDemand — each request carries the core tools in full and only an index (name and one line) of the others; the model loads what it needs with ${TOOLS_LOAD}, and a loaded tool stays for the rest of the conversation (/clear empties the set). config set ai.toolLoading all sends every tool in full on every request — more tokens per request, for a model that does not load tools well`,
   // Said in full: "can I show it a screenshot?" is asked of the assistant, and so is
   // "why was my image refused?".
@@ -554,12 +558,11 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
         const bgConfig = ((ctx as { config?: Record<string, unknown> }).config ?? {}) as Record<string, unknown>;
         const toolCtx = { ...(ctx as Record<string, unknown>), _bgDepth: depth + 1, askUser: undefined, plan: createPlan(), shell: createShellState(() => bgConfig) };
         // The nested run needs its OWN LLM credentials — the same way the chat's
-        // send() derives them (`ai.baseUrl`, `ai.model`, `process.env[tokenEnv]`).
+        // send() derives them (`llmOpts(ai)`: the provider, base URL, model, token).
         // `ctx` is the chat's toolCtx (config + host services), so read ai.* from it;
         // without these agentChat throws "LLM_TOKEN is not set" and the task fails
         // even though the chat itself authenticates fine.
         const ai = ((ctx as { config?: { ai?: Record<string, unknown> } }).config?.ai ?? {}) as Record<string, unknown>;
-        const token = process.env[(ai.tokenEnv as string) ?? 'LLM_TOKEN'];
         // Count the task as in-flight from the moment it is ARMED (its delay starts),
         // so the chat's «N in background» indicator reflects a scheduled-but-not-yet-firing
         // task too — and re-render NOW so the count appears during the wait.
@@ -574,7 +577,7 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
               const res = await chatLLM(
                 [{ role: 'system', content: prompt }, { role: 'user', content: task }],
                 { extraTools: extraTools as ToolDef[], toolCtx, maxRounds: 12, confirmWrite: () => false,
-                  baseUrl: ai.baseUrl as string | undefined, model: ai.model as string | undefined, token },
+                  ...llmOpts(ai) },
               );
               const result = String(res?.content ?? '').trim() || '(no output)';
               (ctx as { showMessage?: (m: string) => void }).showMessage?.(`⏳ ${label} done`);

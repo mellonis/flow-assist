@@ -148,8 +148,26 @@ repository), recorded against a mock tracker:
 
 - **Config**: `~/.config/flow-assist/config.json` — schema comes from each
   plugin's `configSchema` (see `config get`).
+- **The model**: by default an OpenAI-compatible chat-completions API —
+  `config set ai.baseUrl <url>`, `config set ai.model <id>`, the token in
+  `LLM_TOKEN`. For Anthropic's own Messages API:
+
+  ```sh
+  flow-assist config set ai.provider anthropic
+  flow-assist config set ai.model claude-sonnet-5      # or claude-opus-5-5, …
+  export ANTHROPIC_API_KEY=…                           # or ai.tokenEnv names another variable
+  ```
+
+  `ai.baseUrl` then defaults to `https://api.anthropic.com/v1`. The system prompt
+  and the tools are cached between requests, the context meter counts the cached
+  part, and the model's thinking shows in the chat's thinking fold (`^o`).
+  `ai.maxTokens` caps one answer (8192 by default; that API requires a cap, and
+  thinking counts against it). `config set ai.thinking '{"adaptive":true}'` asks the
+  model to think as much as it sees fit and shows a summary of it; a fixed
+  `'{"budgetTokens":4096}'` is for older models only (the current ones refuse it).
+  Unset, the model thinks as it does by default and its thinking is not shown.
 - **Environment**: the host reads `LLM_TOKEN` (or the variable named by
-  `ai.tokenEnv`) and the optional `FLOW_ASSIST_PLUGIN_REGISTRY_URL` /
+  `ai.tokenEnv`; `ANTHROPIC_API_KEY` with `ai.provider anthropic`) and the optional `FLOW_ASSIST_PLUGIN_REGISTRY_URL` /
   `FLOW_ASSIST_PLUGIN_REGISTRY_PROJECT` / `FLOW_ASSIST_PLUGIN_REGISTRY_TOKEN` — see `.env.example`.
   A plugin documents its own variables and declares them in its manifest's
   `requiredSettings`. Secrets belong in env, not in the config file.
