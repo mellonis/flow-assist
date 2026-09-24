@@ -14,8 +14,8 @@
     "test:binary": "FLOW_ASSIST_BINARY_TEST=1 bun test src/__tests__/binary.test.ts"
   },
   "dependencies": {
-    "@flowtty/react": "^1.0.0-alpha.22",
-    "@flowtty/tty-backend": "^1.0.0-alpha.22",
+    "@flowtty/react": "^1.0.0-alpha.23",
+    "@flowtty/tty-backend": "^1.0.0-alpha.23",
     "react": "^19.2.8",
     "zod": "^4.6.5"
   },
