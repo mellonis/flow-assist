@@ -43,7 +43,7 @@ test('/compact leaves the field at once, the field stays empty after, and ↑ br
   expect(fieldRow(ui)).not.toContain('/compact');
 
   go();
-  await settleUntil(() => ui.backend.lastFrame.includes('SUMMARY: a greeting.'));
+  await settleUntil(() => ui.backend.lastFrame.includes('── compacted'));
   expect(ui.backend.lastFrame).not.toContain('compact…');
   expect(fieldRow(ui)).not.toContain('/compact');
 
@@ -58,7 +58,7 @@ test('a draft typed while /compact runs is left alone when it ends', async () =>
   await ui.press('return');
   await ui.type('next thought');
   go();
-  await settleUntil(() => ui.backend.lastFrame.includes('SUMMARY: a greeting.'));
+  await settleUntil(() => ui.backend.lastFrame.includes('── compacted'));
   expect(fieldRow(ui)).toContain('› next thought');
   ui.app.unmount();
 });

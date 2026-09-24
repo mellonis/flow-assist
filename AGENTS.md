@@ -368,7 +368,11 @@ assistant nobody had asked for a board.
   `/compact`, `/clear` and a change of conversation drop the measurement. `/compact`
   shrinks what the MODEL sees (`apiRef` → a summary in the system context) and leaves
   the screen alone — the display list keeps the conversation and gains a `note` marking
-  where the model's view now begins; wiping the screen read as `/clear`. There is no
+  where the model's view now begins; wiping the screen read as `/clear`. The note is ONE
+  row, `── compacted · ~58k → ~2.1k tokens ──` (the `ctx N%` reading before and after;
+  a size not known is left out), with the summary the model was given folded under it
+  (`summary` on the note, fold kind `summary`); it used to be the whole summary, dozens
+  of rows. A note saved before carries the summary in its text and is drawn as it was. There is no
   `/refresh-context`: the system prompt is assembled anew for every message, so the
   command had nothing to refresh.
 - **The plan (`todo`) belongs to a conversation, not to the process.**
@@ -1002,7 +1006,8 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   - The kinds (`FoldKind`): `thinking` (a message's reasoning), `steps` (one run of
     steps — a message may hold several, numbered), `tools` / `calls` (one stretch of
     calls and its trail's cap, numbered together), `view` (a command's block,
-    numbered), `group` (a group's head). The `▸ notes` fold is gone with the category
+    numbered), `group` (a group's head), `summary` (what /compact's note folds under its
+    separator row). The `▸ notes` fold is gone with the category
     layout, and so is the one trail per turn.
   - A block's id names its message by its place among the messages that are DRAWN
     (`foldId`). Not by the message OBJECT — the chat replaces a message whenever it

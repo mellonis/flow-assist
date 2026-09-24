@@ -245,7 +245,7 @@ test('/compact asks /messages once, not streamed, and the summary is its text', 
   // the API would take for the start of its own answer.
   expect(compact.messages.map((m) => m.role)).toEqual(['user']);
   expect(compact.messages[0]!.content[0]!.text).toBe('The conversation:\n\nuser: the first question\n\nassistant: The first answer.\n\nCompress it now, as instructed.');
-  expect(ui.backend.lastFrame).toContain('SUMMARY: they greeted each other.');
+  expect(ui.backend.lastFrame).toContain('── compacted');
 
   await ask(ui, 'the second question');
   const last = sent(model, 2);
@@ -269,7 +269,7 @@ test('/compact after a tool round sends the calls and results as text — the re
   expect(JSON.stringify(compact.messages)).not.toMatch(/tool_use|tool_result/);
   expect(compact.messages.map((m) => m.role)).toEqual(['user']);
   expect(String(compact.messages[0]!.content[0]!.text)).toMatch(/^The conversation:\n\nuser: what time is it\?\n\nassistant: \[called datetime \{\}\]\n\ntool result: OK: .*\n\nassistant: It is noon\.\n\nCompress it now, as instructed\.$/s);
-  expect(ui.backend.lastFrame).toContain('SUMMARY: asked the time.');
+  expect(ui.backend.lastFrame).toContain('── compacted');
 });
 
 test('a thinking block the API will not take back is dropped, once, and the turn goes on', async () => {

@@ -21,6 +21,12 @@ What each version of flow-assist brought, newest first. The version is the one i
   meanwhile, and you decide what to send. ↑ on an empty field takes the last waiting
   message back to edit (the hint says `↑ takes it back`).
 
+- **`/compact` leaves one row, not the whole summary.** The note it left in the chat
+  was the summary itself, often dozens of lines. It is now one separator row,
+  `── compacted · ~58k → ~2.1k tokens ──` — how big the model's view was and is now —
+  with the summary folded under it: a click or `^o` opens it. A conversation saved
+  before shows its old note as it was.
+
 - **`/compact` leaves the field at once.** It stayed in the field until the summary
   came back, as if it had not been sent. Now the field empties the moment you press ⏎
   (↑ brings the command back), a draft typed meanwhile is left alone, and a message

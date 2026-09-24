@@ -74,8 +74,9 @@ export function clickedOpen(state: FoldState, id: string): boolean {
 // one-line summary (numbered the same way), `calls` the earlier calls that stretch's
 // open trail caps away (numbered with it), `view` a command's output
 // capped to its last lines, `group` the head consecutive commands fold under
-// (src/assistant/view-groups.ts).
-export type FoldKind = 'thinking' | 'steps' | 'tools' | 'calls' | 'view' | 'group';
+// (src/assistant/view-groups.ts), `summary` what /compact's note holds under its one
+// separator row.
+export type FoldKind = 'thinking' | 'steps' | 'tools' | 'calls' | 'view' | 'group' | 'summary';
 
 // A block's id. It names the message by its place in the conversation rather than by
 // its object: the chat REPLACES a message whenever it changes (that is what makes the

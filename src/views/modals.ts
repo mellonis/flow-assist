@@ -526,6 +526,7 @@ function messageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): ChatRow
   const blocks = Array.from({ length: (Array.isArray(m.parts) ? m.parts.length : 0) + 1 }, (_b, n) => n);
   const open = [
     isOpen(o.folds, foldId(at, 'thinking')) ? 1 : 0,
+    isOpen(o.folds, foldId(at, 'summary')) ? 1 : 0,
     ...blocks.map((n) => (isOpen(o.folds, foldId(at, 'steps', n)) ? 1 : 0)),
     ...blocks.map((n) => (isOpen(o.folds, foldId(at, 'tools', n)) ? 1 : 0)),
     ...blocks.map((n) => (isClicked(o.folds, foldId(at, 'calls', n)) ? 1 : 0)),
@@ -766,6 +767,14 @@ function buildMessageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): Ch
       // streamed (a `Next:` it held reflows by a word), now in the normal colour
       // under `ƒ`.
       if (answer) mdLines(answer, inner).forEach((line, li) => rows.push(row(line, { first: li === 0 })));
+    } else if (role === 'note' && typeof m.summary === 'string') {
+      // /compact's note: ONE separator row, the summary the model now sees folded
+      // under it (a click or the key opens it). A note saved before carries the
+      // summary in its text and is drawn as it always was, below.
+      const id = foldId(at, 'summary');
+      const opened = isOpen(folds, id);
+      rows.push({ role, first: true, fold: id, spans: [{ text: cutStep(String(m.content ?? ''), Math.max(1, inner - 10)) }, { text: ` ${opened ? '▾' : '▸'} summary`, dim: true }] });
+      if (opened) for (const line of mdLines(m.summary, inner)) rows.push({ role, spans: line.spans, continues: line.continues, chrome: line.chrome, frame: line.frame, fold: id });
     } else {
       const text = String(m.content ?? '');
       // The person's message is drawn as typed. A background result and a

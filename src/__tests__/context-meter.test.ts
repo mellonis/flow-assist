@@ -112,8 +112,28 @@ test('/compact shrinks what the model sees and leaves the screen alone', async (
   // The conversation is still on screen — it used to be wiped down to the last message.
   expect(ui.backend.lastFrame).toContain('the first question');
   expect(ui.backend.lastFrame).toContain('The first answer.');
-  expect(ui.backend.lastFrame).toContain('compacted');
+  // One separator row saying how big the model's view was and is now; the summary is
+  // folded under it until a click or the key opens it.
+  const separator = ui.backend.lastFrame.split('\n').filter((r) => r.includes('── compacted'));
+  expect(separator).toHaveLength(1);
+  expect(separator[0]).toMatch(/── compacted · ~[\d.k]+ → ~[\d.k]+ tokens ── ▸ summary/);
+  expect(ui.backend.lastFrame).not.toContain('SUMMARY: they greeted each other.');
+  ui.backend.press({ name: 'o', ctrl: true });
+  await settle();
   expect(ui.backend.lastFrame).toContain('SUMMARY: they greeted each other.');
+  expect(ui.backend.lastFrame).toContain('▾ summary');
+  ui.backend.press({ name: 'o', ctrl: true });
+  await settle();
+  expect(ui.backend.lastFrame).not.toContain('SUMMARY: they greeted each other.');
+  // A click on the separator opens that fold alone, and a second click closes it.
+  const y = ui.backend.lastFrame.split('\n').findIndex((r) => r.includes('── compacted'));
+  const x = ui.backend.lastFrame.split('\n')[y]!.indexOf('compacted');
+  const click = async () => { ui.backend.mouse('down', x, y); ui.backend.mouse('up', x, y); await settle(6); };
+  await click();
+  expect(ui.backend.lastFrame).toContain('SUMMARY: they greeted each other.');
+  const y2 = ui.backend.lastFrame.split('\n').findIndex((r) => r.includes('── compacted'));
+  ui.backend.mouse('down', x, y2); ui.backend.mouse('up', x, y2); await settle(6);
+  expect(ui.backend.lastFrame).not.toContain('SUMMARY: they greeted each other.');
 
   // The model's next request carries the summary and NOT the old messages.
   await ui.type('the second question');
@@ -121,7 +141,7 @@ test('/compact shrinks what the model sees and leaves the screen alone', async (
   const last = JSON.stringify(model.requests.at(-1));
   expect(last).toContain('SUMMARY: they greeted each other.');
   expect(last).not.toContain('the first question');
-  expect(last).not.toContain('── compacted ──'); // the note is the person's, not the model's
+  expect(last).not.toContain('── compacted'); // the note is the person's, not the model's
   expect(ui.backend.lastFrame).toContain('The second answer.');
 });
 

@@ -36,7 +36,7 @@ import { firstGlyph, isKey, isMouseButton, keyGlyph } from '../playback/keys.js'
 import { askKey, askStart, type AskQuestion, type AskState } from '../assistant/ask.js';
 import { loadMemories, memoryFilePath, saveMemories } from '../runtime/services/memory.js';
 import { keptAfterClear, memoryCommand } from '../assistant/memory-command.js';
-import { CONTEXT_WARN_AT, DEFAULT_CONTEXT_WINDOW, contextBadge, readContext } from '../assistant/context-meter.js';
+import { CONTEXT_WARN_AT, DEFAULT_CONTEXT_WINDOW, contextBadge, readContext, short as shortTokens } from '../assistant/context-meter.js';
 import {
   IMAGES_OFF, dataUrl, imageLimits, imagesInText, insertToken, isImageRefusal, loadImageFile, pastedPaths, readClipboardImage, readImageData, removeTokenAt, wireMessages,
   type ClipboardImage, type ImageRef, type LoadedOk, type ResolvedImage,
@@ -1552,6 +1552,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // runAsyncCommand, which clears streaming/toolLabel on completion.
             runAsyncCommand('compact', async (signal) => {
               const ai = (f.config.ai ?? {}) as Record<string, any>;
+              // How big the model's view was — as `ctx N%` read it.
+              const before = contextReading().used;
               // Compact what the MODEL saw (tool results included), not the display list.
               const summary = await compactConversation(apiHistory(apiRef.current), { ...llmOpts(ai), signal });
               if (signal.aborted) return; // stopped: the history stays as it was
@@ -1563,8 +1565,11 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // What the MODEL sees shrank to the summary; what the PERSON sees stays —
               // the conversation above is theirs to scroll. (It used to be wiped down to
               // the last message, which read as /clear.) A note marks where the model's
-              // view now begins and shows the summary it was given.
-              setMessages((cur) => [...cur, { role: 'note', content: `── compacted ── the model now sees a summary of everything above, not the messages themselves:\n${summary}` }]);
+              // view now begins — one row, how big that view was and is now (the same
+              // reading `ctx N%` shows) — with the summary it was given folded under it.
+              const after = contextReading().used;
+              const sizes = before > 0 && after > 0 ? ` · ~${shortTokens(before)} → ~${shortTokens(after)} tokens` : '';
+              setMessages((cur) => [...cur, { role: 'note', content: `── compacted${sizes} ──`, summary }]);
               persist();
               (f.services as Record<string, any>).showMessage?.('History compacted');
             });

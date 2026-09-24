@@ -77,7 +77,7 @@ export function readContext(parts: ContextParts, window: number, measuredPromptT
   };
 }
 
-const short = (n: number): string => (n >= 10_000 ? `${Math.round(n / 1000)}k` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
+export const short = (n: number): string => (n >= 10_000 ? `${Math.round(n / 1000)}k` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
 export const percent = (ratio: number): string => `${Math.round(ratio * 100)}%`;
 
 // The status line's word: `ctx 12%`, `ctx ~12%` when estimated.
