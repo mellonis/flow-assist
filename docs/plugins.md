@@ -28,7 +28,7 @@ notes/
 ```
 
 ```json
-{ "name": "notes", "version": "0.1.0", "hostApi": 2, "flowtty": "^1.0.0-alpha.26",
+{ "name": "notes", "version": "0.1.0", "hostApi": 2, "flowtty": ">=1.0.0-alpha.28 <1.0.0-alpha.29",
   "description": "A notebook the assistant reads and writes", "tools": ["notes"] }
 ```
 
@@ -263,8 +263,9 @@ setup: ({ host }) => { /* once, before any component mounts: seed a store */ },
   flowtty's own input, not `host.useInputHandler`, so a mounted one would hear every
   key — what the person types in the chat included: pass `isFocused` true only while
   the picker is what the person is using AND `host.hasKeyboard()` — which is false
-  while the `:` line is open, the log or the help is up, the chat has the keys, or a
-  dropdown's popup is open. Read it while drawing; the host redraws when it changes:
+  while the `:` line is open, the log or the help is up, or the chat has the keys (a
+  dropdown's popup mutes everything under it on its own). Read it while drawing; the
+  host redraws when it changes:
   `isFocused: host.hasKeyboard() && mine === 'list'`.
   A focused picker takes the keys it acts on — a `ListSelect` takes what is typed as
   its filter, so the host's own letters (`F`, `:`) do not reach the host while it has
@@ -374,14 +375,15 @@ one:
   and later the pair `{ ui, host }`, with the number at `host.hostApi`; under 1 the
   single `ft` object, which has no `host` — `const api2 = 'host' in arg`.
 - **`flowtty`** — a semver range of the flowtty versions the plugin's screens need,
-  checked against the flowtty the host runs (`^1.0.0-alpha.26`). A prerelease is
-  matched only by a range that names one: `^1.0.0` does not take `1.0.0-alpha.26`,
-  `^1.0.0-alpha.26` does. A plugin with no field is loaded unchecked, and the log says
+  checked against the flowtty the host runs. While flowtty is in alpha, name the one
+  alpha you built against: `>=1.0.0-alpha.28 <1.0.0-alpha.29` — an alpha may change what the next one gives. A
+  prerelease is matched only by a range that names one: `^1.0.0`, and even `*`, do not
+  take `1.0.0-alpha.28`. A plugin with no field is loaded unchecked, and the log says
   so — a plugin with no screens has nothing to check; the bundled ones declare it.
 
 A plugin that cannot run here is skipped — the rest load — and said so: `plugins ls`
 shows `incompatible: built for host API 1, host provides 2` (or `incompatible: needs
-flowtty ^1.1.0, host has 1.0.0-alpha.26`) beside it — a plugin linked into
+flowtty ^1.1.0, host has 1.0.0-alpha.28`) beside it — a plugin linked into
 `plugins-enabled/` from a repository of its own is listed too, marked `(linked)` — the log (`L`) has a line, and
 `plugins install` refuses it — an archive before anything is unpacked into place. A
 plugin that is a single file has no manifest, so it reads as host API 1 with no

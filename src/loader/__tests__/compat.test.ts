@@ -38,6 +38,10 @@ test('the flowtty range is checked against the host\'s flowtty — a prerelease 
   expect(at('^1.0.0-alpha.26')).toEqual({ ok: true });
   expect(at('>=1.0.0-alpha.27')).toEqual({ ok: false, reason: 'incompatible: needs flowtty >=1.0.0-alpha.27, host has 1.0.0-alpha.26' });
   expect(at('^1.0.0')).toEqual({ ok: false, reason: 'incompatible: needs flowtty ^1.0.0, host has 1.0.0-alpha.26' });
+  // `*` takes no prerelease either; the one-alpha range the docs recommend does.
+  expect(at('*')).toEqual({ ok: false, reason: 'incompatible: needs flowtty *, host has 1.0.0-alpha.26' });
+  expect(at('>=1.0.0-alpha.26 <1.0.0-alpha.27')).toEqual({ ok: true });
+  expect(at('>=1.0.0-alpha.25 <1.0.0-alpha.26')).toMatchObject({ ok: false });
   expect(at(42)).toMatchObject({ ok: false, reason: expect.stringContaining('not a semver range') });
   // Missing: loaded, with a note.
   expect(at(undefined)).toEqual({ ok: true, note: 'declares no flowtty range — loaded unchecked' });

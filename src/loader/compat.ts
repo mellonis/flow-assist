@@ -8,7 +8,8 @@
 // - `flowtty`: a semver range of the flowtty versions its screens need, checked against
 //   the flowtty the host runs. Missing is accepted, with a note: a plugin with no
 //   screens has nothing to check. A prerelease is matched only by a range that names
-//   one — `^1.0.0` does not take `1.0.0-alpha.26`, `^1.0.0-alpha.26` does.
+//   one — `^1.0.0` and `*` do not take `1.0.0-alpha.28`, `>=1.0.0-alpha.28 <1.0.0-alpha.29`
+//   does.
 
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';

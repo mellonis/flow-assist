@@ -81,7 +81,8 @@ export interface PluginHost {
   // which plugin is asking, and no plugin can forge another's.
   pluginToken?: symbol;
   // Whether the plugin's side has the keyboard now: not while the `:` line is open, the
-  // log or the help is up, the chat has the keys, or a dropdown's popup is open. What a
+  // log or the help is up, or the chat has the keys (a dropdown's popup mutes the rest
+  // on its own). What a
   // plugin passes as `isFocused` / `isActive` to the flowtty components that hear keys
   // themselves. Read it while drawing: the host redraws when it changes.
   hasKeyboard: () => boolean;

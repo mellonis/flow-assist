@@ -15,6 +15,7 @@
 // written here and cannot drift from the chat's.
 
 import { editorReducer } from '@flowtty/core';
+import { isPrintable } from '@flowtty/core';
 
 export interface AskOption { label: string; description?: string }
 export interface AskQuestion { question: string; header?: string; options: AskOption[]; multiSelect?: boolean }
@@ -164,7 +165,7 @@ export function askKey(state: AskState, key: AskKey, width = 60): AskState {
     const pasted = onePasteLine(key.text ?? '').trim();
     return pasted ? startTyping(state, otherRow, pasted) : state;
   }
-  if (name.length === 1 && !key.ctrl && !key.meta && !/[0-9 ]/.test(name)) return startTyping(state, otherRow, name);
+  if (isPrintable({ ...key, name } as never) && !/[0-9 ]/.test(name)) return startTyping(state, otherRow, name);
   return state;
 }
 

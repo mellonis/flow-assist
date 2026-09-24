@@ -4,15 +4,14 @@ import { parseKeypress } from '@flowtty/tty-backend';
 import { bindingGlyph, canonicalBinding, canonicalKey, firstGlyph, isKey, keyGlyph, keyId, resolveKeys, writtenKey } from '../keys';
 import { buildKeys } from '../../loader/registry';
 
-test('Ctrl with ] \\ ^ _ is the control byte the terminal sends, and a binding meets it', () => {
-  // The decoder names Ctrl+letter; 0x1c–0x1f come through as the bare byte.
-  expect(keyId({ name: '\x1d' })).toBe('ctrl+]');
+test('Ctrl with ] \\ ^ _ is a chord as the decoder names it, and a binding meets it', () => {
+  // The decoder names the control bytes 0x1c–0x1f as the key held with Ctrl.
   expect(keyId({ name: ']', ctrl: true })).toBe('ctrl+]');
   expect(canonicalKey('ctrl+]')).toBe('ctrl+]');
   expect(canonicalKey('^]')).toBe('ctrl+]');
-  expect(isKey(canonicalBinding('ctrl+]'), { name: '\x1d' })).toBe(true);
-  expect(isKey(canonicalBinding('ctrl+\\'), { name: '\x1c' })).toBe(true);
-  expect(keyGlyph({ name: '\x1d' })).toBe('^]');
+  expect(isKey(canonicalBinding('ctrl+]'), { name: ']', ctrl: true })).toBe(true);
+  expect(isKey(canonicalBinding('ctrl+\\'), { name: '\\', ctrl: true })).toBe(true);
+  expect(keyGlyph({ name: ']', ctrl: true })).toBe('^]');
   expect(bindingGlyph('ctrl+\\')).toBe('^\\');
   // A bare ] is still a ].
   expect(keyId({ name: ']' })).toBe(']');

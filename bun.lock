@@ -5,8 +5,9 @@
     "": {
       "name": "flow-assist",
       "dependencies": {
-        "@flowtty/react": "^1.0.0-alpha.26",
-        "@flowtty/tty-backend": "^1.0.0-alpha.26",
+        "@flowtty/core": "^1.0.0-alpha.28",
+        "@flowtty/react": "^1.0.0-alpha.28",
+        "@flowtty/tty-backend": "^1.0.0-alpha.28",
         "react": "^19.2.8",
         "zod": "^4.6.5",
       },
@@ -18,11 +19,11 @@
     },
   },
   "packages": {
-    "@flowtty/core": ["@flowtty/core@1.0.0-alpha.26", "", { "dependencies": { "yoga-layout": "^3.2.1" } }, "sha512-tHiwKdAZZ6CovfvNEWPrdTbrO4rC0E1v+iT85HOM9ih0AWXmP28hS3HuAcq5dPtCFLp0NMJIsHVy0f8amBkJ1A=="],
+    "@flowtty/core": ["@flowtty/core@1.0.0-alpha.28", "", { "dependencies": { "yoga-layout": "^3.2.1" } }, "sha512-rFc5VhqDKNGoee+LewohGvKqhxflUMCun8Ar1WH6Eyu5Row+P71oXoEccOr201XFi6fZ5rDhN4D9DoNb+qyr9w=="],
 
-    "@flowtty/react": ["@flowtty/react@1.0.0-alpha.26", "", { "dependencies": { "@flowtty/core": "1.0.0-alpha.26" }, "peerDependencies": { "react": "^19.3.0" } }, "sha512-zKyNh+xriNEwf154IHm/QhqfdV8E7qXk5zBaoPw7cG28Ii0vVPkHN8gmzZubd7SZKPPHtx68E09bzxbz94/owQ=="],
+    "@flowtty/react": ["@flowtty/react@1.0.0-alpha.28", "", { "dependencies": { "@flowtty/core": "1.0.0-alpha.28" }, "peerDependencies": { "react": "^19.3.0" } }, "sha512-Tu2rgjFh7Nl5A0EH/c/4puIl6VEY3B5x6F2VUSFOZPgLochjgRRGMB7fNdXoURNHXv167EvQpntF8oMNEuiAyA=="],
 
-    "@flowtty/tty-backend": ["@flowtty/tty-backend@1.0.0-alpha.26", "", { "dependencies": { "@flowtty/core": "1.0.0-alpha.26" } }, "sha512-kzXGnldKzYCO7Px9NYvd+hcvQ2IBc/fvHJ6MyxX18EYrbnJ16auTBURahRwUIhKgaA78ngBsQCxaNbfbOvxoxg=="],
+    "@flowtty/tty-backend": ["@flowtty/tty-backend@1.0.0-alpha.28", "", { "dependencies": { "@flowtty/core": "1.0.0-alpha.28" } }, "sha512-ojrNLf7p853sIP44Cpn8lX14O0N/tfPGjCcu+1iBYMmQRcypWSkH+QSYzgGFYDjVljD38u6brANHyXZY6cE7SA=="],
 
     "@types/node": ["@types/node@22.20.4", "", { "dependencies": { "undici-types": "~6.21.0" } }, "sha512-zJRE40jpHtKqE/C4fgHrAKQLJuSpzEnP9ff9Y7YtoR3Wd2pwqzlekDeEuUQXjRd+QCYnVnNwuJYmhdk9XV8gvA=="],
 

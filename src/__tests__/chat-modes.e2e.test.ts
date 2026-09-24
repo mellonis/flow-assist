@@ -14,7 +14,7 @@ const realFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 
 type UI = Awaited<ReturnType<typeof bootApp>>;
-const CTRL_RIGHT_BRACKET = { name: '\x1d' }; // what a terminal sends for Ctrl+]
+const CTRL_RIGHT_BRACKET = { name: ']', ctrl: true }; // Ctrl+], as the decoder names it
 const COLLAPSE = { name: '\\', ctrl: true };
 const press = async (ui: UI, key: { name: string; ctrl?: boolean }) => { ui.backend.press(key); await settle(); };
 const rows = (ui: UI) => ui.backend.lastFrame.split('\n');

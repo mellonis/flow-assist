@@ -347,7 +347,7 @@ async function panelScenario(w: number, h: number) {
   await ui.type('what is in progress?');
   await ui.press('return');
   ui.frame('a turn running');
-  ui.backend.press({ name: '\x1d' });
+  ui.backend.press({ name: ']', ctrl: true });
   await settle();
   ui.frame('Ctrl+] — the keyboard goes to the board (its title in the accent), the turn goes on');
   ui.backend.press({ name: '\\', ctrl: true });

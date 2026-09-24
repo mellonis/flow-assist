@@ -28,7 +28,7 @@ What each version of flow-assist brought, newest first. The version is the one i
   is loaded with a note. `host.hostApi` is the number the host provides. It goes up
   on any change to what the host gives plugins that a plugin would break on, and this
   page says what to change each time.
-- **flowtty 1.0.0-alpha.26.** **For plugin authors:** `ui` offers flowtty's
+- **flowtty 1.0.0-alpha.28.** **For plugin authors:** `ui` offers flowtty's
   pickers — `ui.Select`, a dropdown (the host keeps the `<DialogHost>` its popup
   needs), and `ui.ListSelect` / `ui.ListMultiSelect`, the inline lists. flowtty
   renamed those lists in alpha.24 with no aliases: its old `Select` is `ListSelect`
@@ -37,13 +37,15 @@ What each version of flow-assist brought, newest first. The version is the one i
   They hear flowtty's own input, so a plugin gates them with `isFocused` from
   `host.hasKeyboard()` — false while the host has the keyboard (docs/plugins.md).
   While a dropdown is open every key is its own: Ctrl+] waits for it to close, and
-  Ctrl+C still takes two presses. Since alpha.26
-  flowtty's components take the keys they act on — a focused `ListSelect` takes what
+  Ctrl+C still takes two presses. flowtty's components take the keys they act on — a focused `ListSelect` takes what
   is typed as its filter, so `F` or `:` do not reach the host while it has the focus.
   The host's own chords (Ctrl+], the collapse key, the exit keys) are heard before any
   component, and the host's other keys after them, whenever the plugin's screen was
   opened — so no picker in a plugin's screen can keep the person from the chat, and a
-  focused one is never beaten to its keys by the host.
+  focused one is never beaten to its keys by the host. Ctrl+] and the other control
+  chords arrive as chords (`{ name: ']', ctrl: true }`), so a plugin that matched the
+  raw byte matches the chord instead. Declare flowtty as the one alpha you built
+  against — `"flowtty": ">=1.0.0-alpha.28 <1.0.0-alpha.29"`.
 - **A stray `console.log` no longer lands on the screen.** What a plugin, a library or
   React prints through the console while the app runs goes to the log (`L`) at once,
   as `[console] …`, `[console.warn] …` or `[console.error] …`; the last 200 such

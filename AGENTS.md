@@ -169,9 +169,8 @@ the blacklist.
   They hear flowtty's input, not `useInputHandler`, and take the keys they act on — a
   focused `ListSelect` takes what is typed as its filter — so a plugin gates them
   with `isFocused` from `host.hasKeyboard()` (`pluginHasKeyboard` in `runtime/app.tsx`:
-  false while the `:` line is open, the log or the help is up, the chat has the keys,
-  or a popup is open; a popup opening or closing redraws the App, through
-  `HostProbe`, so a value read while drawing stays true).
+  false while the `:` line is open, the log or the help is up, or the chat has the
+  keys; a dropdown's popup mutes everything under it on its own).
 - **`modalColors`** — per modal the plugin draws, what its palette differs in from
   the host's modal base (`{ relation: { border: 'blue' } }`). `resolveModalPalettes`
   (`src/playback/theme.ts`) lays it on the base into `theme.modals.<modal>`; the
@@ -395,7 +394,8 @@ session (never saved); an old `fullscreen: true` reads as `full` (`chatModeOf`),
   side's too (`ctrlKey` answers nothing). The focused side is marked: the panel's frame
   in `accent`, `idleBorder` when not; the title bar in `accent` when the plugin has it.
   Ctrl+] in `window`/`full` opens or closes the chat, and the collapse key is nobody's.
-  Ctrl+] arrives as the bare byte 0x1d — `keyId` reads 0x1c–0x1f as Ctrl with `\ ] ^ _`.
+  Ctrl+] arrives as `{ name: ']', ctrl: true }` — the decoder names the control bytes
+  0x1c–0x1f as chords.
 - **The mouse goes by the pointer.** A press anywhere tells the chat which pane it
   landed in (`store.chat.pointer`) and the keyboard follows it; the button then goes on
   as before — the chat's `mouse: true` handler folds by the conversation's own rect, so
@@ -1131,23 +1131,23 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   catch-all swallow every key — and before every flowtty component.
   **The host's place in key delivery is fixed** (`HostKeyPath` in `runtime/app.tsx`):
   host chords → whatever flowtty component takes the key → the host's key path. flowtty
-  delivers a key to its `useInput` handlers in subscription order, which follows mount
-  time and every change of input source (a surface mounted after boot comes after the
-  App; a DialogHost opening and closing resubscribes its whole subtree), and a
-  component takes the keys it acts on (a focused `ListSelect` takes what is typed as
-  its filter, the 0x1d of Ctrl+] with it). So the host does not rely on that order.
-  `HostKeys` is rendered beside the DialogHost, not under it: its source never
-  changes, so it is the first subscriber for the app's life. The backend's key listener
-  is wrapped (`hostKeyed`) to deliver each key in two passes. Pass 1: `HostKeys` runs
-  the chords (`first` — the exit keys, Ctrl+], the collapse key, the pointer's pane),
-  then flowtty's own order. A key nothing took goes round as pass 2, where `HostKeys`
-  runs `twoPhaseDispatch` (`last`) and takes it, so no other handler hears it twice and
-  the host's path runs inside flowtty's synchronous render (a burst of keys — Esc Esc —
-  sees each key's state). A mouse button skips pass 2 (a second press would redo the
-  selection) and runs `last` right after pass 1. While a dropdown's popup is open the
-  App's subtree is muted (`HostProbe` notices, by its re-renders and by which keys it
-  hears): the chords are the exit keys alone and there is no `last`. For the exit keys
-  the first press arms and is consumed, the status
+  delivers a key to its ordinary `useInput` handlers in mount order (a surface mounted
+  after boot comes after everything of the App's), and a component takes the keys it
+  acts on (a focused `ListSelect` takes what is typed as its filter); a capture
+  handler (`{ capture: true }`) hears every key before the ordinary ones. So:
+  `HostChords`, the App's first child, is a capture handler — the first in the App's
+  subtree — and runs the chords (`first`: the exit keys, Ctrl+], the collapse key, the
+  pointer's pane). flowtty has no phase after the ordinary handlers, so the backend's
+  key listener is wrapped (`hostKeyed`): a key nothing took in pass 1 goes round as
+  pass 2, where `HostChords` runs `twoPhaseDispatch` (`last`) and takes it — no other
+  handler hears it twice, and the host's path runs inside flowtty's synchronous render
+  (a burst of keys — Esc Esc — sees each key's state). A mouse button skips pass 2 (a
+  second press would redo the selection) and runs `last` right after pass 1. While a
+  dropdown's popup is open flowtty mutes the App's subtree, `HostChords` with it; the
+  exit keys are then heard by `HostExit`, a capture handler beside the DialogHost
+  (never muted, mounted after it, and acting only when `HostChords` did not hear the
+  key), and nothing else of the host's runs. For the exit keys the first press arms and
+  is consumed, the status
   line says `^c again to exit` / `^d again to exit` / `^z again to suspend` (the cap
   from `keyGlyph`, in the chat where `Esc again to exit` is — `services.armedHint` —
   and on the bottom row of every other screen); the same key within `ARM_MS` (2 s)

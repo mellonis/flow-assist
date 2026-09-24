@@ -238,12 +238,12 @@ test('the keys the App takes before any handler take only a chord: a key that ty
   said.length = 0;
   expect(keys({ plugins: { assistant: { keys: { chatCollapse: 'q' } } } }).chatCollapse).toEqual(['ctrl+\\']);
   expect(said).toHaveLength(1);
-  // A chord, an F-key, a control byte, or nothing at all is taken as it is, silently.
+  // A chord, an F-key, or nothing at all is taken as it is, silently.
   said.length = 0;
   expect(keys({ keys: { chatFocus: 'ctrl+g' } }).chatFocus).toEqual(['ctrl+g']);
   expect(keys({ keys: { chatFocus: 'alt+c' } }).chatFocus).toEqual(['alt+c']);
   expect(keys({ keys: { chatFocus: 'f2' } }).chatFocus).toEqual(['f2']);
-  expect(keys({ keys: { chatFocus: '\x1f' } }).chatFocus).toEqual(['ctrl+_']);
+  expect(keys({ keys: { chatFocus: 'ctrl+_' } }).chatFocus).toEqual(['ctrl+_']);
   expect(keys({ keys: { chatCollapse: [] } }).chatCollapse).toEqual([]);
   expect(said).toEqual([]);
   // Any other action binds a letter as before.

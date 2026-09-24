@@ -169,8 +169,7 @@ type KeysConfig = {
 // Ctrl+] and the chat's collapse key. Bound to a key that types — a letter, Enter,
 // Space — they would take it from every field on screen, the chat's, a plugin's and
 // the `:` line's alike, and nothing typed could undo it. So they take only a chord:
-// Ctrl or Alt held, an F-key, or a control byte (0x1c–0x1f read as Ctrl, which
-// `canonicalBinding` already spells `ctrl+…`). Unbound (`[]`) is fine too.
+// Ctrl or Alt held, or an F-key. Unbound (`[]`) is fine too.
 export const APP_TAKEN_ACTIONS: readonly string[] = ['chatFocus', 'chatCollapse'];
 export const isChordKey = (id: string): boolean =>
   id.startsWith('ctrl+') || id.startsWith('alt+') || /^(shift\+)?f([1-9]|1\d|2[0-4])$/.test(id);

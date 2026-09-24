@@ -169,7 +169,8 @@ test('a focused ListSelect takes what is typed as its filter; Ctrl+] still reach
   expect(ui.backend.lastFrame).not.toContain('Design');
   // The host's chord is not the list's: the chat opens, and the list, no longer
   // focused, leaves what is typed to it.
-  await ui.press('\x1d');
+  ui.backend.press({ name: ']', ctrl: true });
+  await ui.press();
   await ui.type('De');
   expect(ui.backend.lastFrame).toContain('Flow Assist');
   expect(ui.backend.lastFrame).toContain('› De');
@@ -194,11 +195,13 @@ test('whatever the history of mounts and dropdowns, a key is delivered once; Ctr
   expect(g.state.heard).toEqual(['f5']);
   // With the popup open, Ctrl+] is not the host's.
   await ui.press('down');
-  await ui.press('\x1d');
+  ui.backend.press({ name: ']', ctrl: true });
+  await ui.press();
   expect(ui.backend.lastFrame).not.toContain('Flow Assist');
   await ui.press('escape');
   // Closed, it is.
-  await ui.press('\x1d');
+  ui.backend.press({ name: ']', ctrl: true });
+  await ui.press();
   expect(ui.backend.lastFrame).toContain('Flow Assist');
   ui.app.unmount();
 });
