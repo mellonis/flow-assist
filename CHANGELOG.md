@@ -13,7 +13,11 @@ What each version of flow-assist brought, newest first. The version is the one i
   answering while the plugin has the keys. Ctrl+\ folds the panel away and back — a
   running turn's status then sits on the plugin's bottom row, or on the one row a
   bottom panel keeps — and so does Esc Esc, which hands the keyboard to the plugin.
-  Both keys are the host's before any plugin's. `/mode window` brings the window back
+  Folding the chat away (or closing a window with Ctrl+]) never answers a y/n or a
+  question for you: it waits, the folded chat says `? waiting for you`, and it is
+  back when the chat is. Both keys are the host's before any plugin's, take only a
+  chord (a key that types is refused and the default kept) and leave an open `:` line
+  alone. `/mode window` brings the window back
   and `/mode full` gives the chat the whole terminal; `plugins.assistant.mode`,
   `panel.side` and `panel.size` set it from the start.
   **`/fullscreen` is gone** — it is `/mode full`; a config that says

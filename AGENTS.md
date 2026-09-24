@@ -297,6 +297,14 @@ session (never saved); an old `fullscreen: true` reads as `full` (`chatModeOf`),
   seconds tick; the assistant's own footer hint (`F chat`) steps aside while it is there
   (`store.chat.footerStatus`), keeping only an unread count, so "chat" is said once; collapsed at the bottom the panel keeps ONE row, the same status or the
   key that brings it back (`renderChatStrip`).
+- **Closing is not an answer.** A y/n or an `ask_user` question pending when the chat
+  is collapsed or closed by Ctrl+] / Ctrl+\ stays pending (`closeChat` settles
+  nothing), in every mode: the closed chat's `statusRow` becomes `? waiting for you ·
+  ^] chat` in the chat's `warn` colour — on the plugin's bottom row (collapsed on the
+  right, or a closed window / full chat) or on a bottom panel's strip — and opening
+  the chat shows the block again. Esc keeps its meaning: it declines or dismisses first,
+  in the chat's handler, so Esc Esc never closes over one; `/exit` cannot be typed
+  while one is up. Ctrl+C with a turn running still declines and stops.
 - **Focus** (`store.chat.focus`, docked and expanded only): Ctrl+] (`chatFocus`) moves
   the keyboard between the two sides; Ctrl+\ (`chatCollapse`) collapses and restores.
   Both are the assistant's bindings (`keys`, so a person moves them — to a chord only:

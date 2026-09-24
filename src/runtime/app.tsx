@@ -778,8 +778,10 @@ export function renderApp(
     // An armed Ctrl+C / Ctrl+D / Ctrl+Z says so first; the open chat says it on its own
     // status line instead.
     const armed = chat?.open && !pluginFocused ? '' : (services as unknown as HostServices).armedHint;
-    // Collapsed on the right, the chat's running turn says what it is doing here.
-    const status = dock?.collapsed && dock.side === 'right' && !armed && !toast.message ? chat?.statusRow : null;
+    // Collapsed on the right, the chat's running turn says what it is doing here; so does
+    // a closed window's (or full chat's) y/n or question left waiting. A bottom panel
+    // says it on its own strip.
+    const status = chat && !chat.open && (dock ? dock.side === 'right' : true) && !armed && !toast.message ? chat.statusRow : null;
     const bottom = armed || toast.message || hints;
     // The command line completes INLINE, on its own one row: the untyped rest of the
     // suggestion after the caret, the other candidates beside it. A second row of

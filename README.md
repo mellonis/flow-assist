@@ -78,6 +78,9 @@ answering in its panel. **Ctrl+\\** folds the panel away and brings it back: on 
 right it goes, and a running turn's spinner, seconds and word move to the plugin's
 bottom row; at the bottom it keeps one row saying the same. Esc Esc in the chat folds
 it the same way and hands the keyboard to the plugin; `F` or Ctrl+] brings it back.
+Folding the chat away is not an answer: a y/n or a question the assistant is waiting on
+stays open, the folded chat says `? waiting for you`, and it is there again when the
+chat comes back (Esc still says no, or dismisses the question).
 Both keys are the host's before any plugin's — a plugin that takes every key cannot
 keep you from the chat — and both can be moved (`config set keys.chatFocus <key>`,
 `keys.chatCollapse`) to another chord: Ctrl or Alt held, or an F-key. A key that types

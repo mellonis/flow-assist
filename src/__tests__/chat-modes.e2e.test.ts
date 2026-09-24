@@ -379,6 +379,97 @@ test('every chat row is one terminal line at the panel\'s width — steps, calls
   ui.app.unmount();
 });
 
+// A write that waits for a y/n. Its guest has no surface of its own.
+const notebook = (make: any) => make('notes', {
+  tools: [{
+    id: 'notes',
+    tools: [{ type: 'function', function: { name: 'notes_write', description: 'Write the notebook.', parameters: { type: 'object', properties: { text: { type: 'string' } } } }, write: true }],
+    exec: async () => 'notes_write: written',
+  }],
+});
+const toolResult = (model: ScriptedModel, n: number) =>
+  String(((model.requests[n]?.messages ?? []) as { role: string; content?: string }[]).find((m) => m.role === 'tool')?.content ?? '');
+const ASK = { questions: [{ question: 'Rebase or merge?', header: 'Strategy', options: [{ label: 'rebase', description: 'Linear history' }, { label: 'merge', description: 'Keeps the branch shape' }] }] };
+
+// Folding the chat away is not an answer: a y/n or a question waits for the person,
+// the collapsed chat says so, and bringing it back shows it again.
+test('collapsing during a y/n keeps it pending; the footer says it waits; expanded, y confirms', async () => {
+  const model = new ScriptedModel();
+  model.script([{ tool: 'notes_write', args: { text: 'x' } }], [{ text: 'Written.' }]);
+  const g = guest();
+  const ui = await bootApp(model, 160, 40, (make) => [...g.make(make), notebook(make)] as never, {}, { chatMode: 'panel' });
+  await ui.press('F');
+  await ui.type('write it');
+  await ui.press('return');
+  await settle(10);
+  expect(ui.backend.lastFrame).toContain('Confirm write: notes_write');
+  await press(ui, COLLAPSE);
+  await settle(10);
+  expect(chatFrame(ui).top).toBe(-1);
+  expect(model.requests).toHaveLength(1); // not declined behind the person's back
+  const r = rows(ui);
+  const y = r.findIndex((l) => l.includes(': commands'));
+  expect(r[y]).toMatch(/^ \? waiting for you · \^\] chat · : commands/);
+  expect(r[y]!.match(/chat/g)).toHaveLength(1);
+  // In the warn colour.
+  expect(ui.backend.lastBuffer!.get(1, y).style.fg).toBe(g.ft().config.theme.modals.chat.warn);
+  await press(ui, COLLAPSE);
+  expect(ui.backend.lastFrame).toContain('Confirm write: notes_write');
+  await ui.press('y');
+  for (let i = 0; i < 50 && model.requests.length < 2; i++) await settle(1);
+  await settle(10);
+  expect(toolResult(model, 1)).toContain('written');
+  expect(ui.backend.lastFrame).toContain('Written.');
+  ui.app.unmount();
+});
+
+test('collapsed at the bottom during a question, the strip says it waits; expanded, it is answered', async () => {
+  const model = new ScriptedModel();
+  model.script([{ tool: 'ask_user', args: ASK }], [{ text: 'Merging then.' }]);
+  const g = guest();
+  const ui = await bootApp(model, 100, 40, g.make as never, {}, { chatMode: 'panel' });
+  await ui.press('F');
+  await ui.type('how?');
+  await ui.press('return');
+  await settle(10);
+  expect(ui.backend.lastFrame).toContain('Rebase or merge?');
+  await press(ui, COLLAPSE);
+  await settle(10);
+  expect(rows(ui)[39]).toMatch(/^ ƒ Flow Assist · \? waiting for you · \^\] chat\s*$/);
+  expect(model.requests).toHaveLength(1);
+  await press(ui, CTRL_RIGHT_BRACKET);
+  expect(ui.backend.lastFrame).toContain('Rebase or merge?');
+  await ui.press('down');
+  await ui.press('return');
+  for (let i = 0; i < 50 && model.requests.length < 2; i++) await settle(1);
+  expect(toolResult(model, 1)).toContain('Rebase or merge? → merge');
+  ui.app.unmount();
+});
+
+// In a window (or the whole terminal) Ctrl+] closes the chat the same way: the question
+// waits, the footer says so, and F brings it back. Esc still dismisses it, as before.
+test.each(['window', 'full'] as const)('Ctrl+] closing the %s during a question keeps it; Esc still dismisses', async (mode) => {
+  const model = new ScriptedModel();
+  model.script([{ tool: 'ask_user', args: ASK }], [{ text: 'Fine.' }]);
+  const g = guest();
+  const ui = await bootApp(model, 100, 40, g.make as never, {}, { chatMode: mode });
+  await ui.press('F');
+  await ui.type('how?');
+  await ui.press('return');
+  await settle(10);
+  await press(ui, CTRL_RIGHT_BRACKET);
+  await settle(10);
+  expect(chatFrame(ui).top).toBe(-1);
+  expect(model.requests).toHaveLength(1);
+  expect(rows(ui).find((l) => l.includes(': commands'))).toMatch(/^ \? waiting for you · \^\] chat · : commands/);
+  await ui.press('F');
+  expect(ui.backend.lastFrame).toContain('Rebase or merge?');
+  await ui.press('escape');
+  for (let i = 0; i < 50 && model.requests.length < 2; i++) await settle(1);
+  expect(toolResult(model, 1)).toMatch(/dismiss/i);
+  ui.app.unmount();
+});
+
 // The status on the footer row names the key that brings the chat back; the footer's
 // own `F chat` beside it said "chat" twice. Idle, the status is gone and it is back.
 test('collapsed on the right with a turn running, the footer says "chat" once', async () => {

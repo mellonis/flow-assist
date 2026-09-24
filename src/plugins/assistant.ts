@@ -1994,12 +1994,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // cleared. Closing via Esc//exit just disarms the exit and hides the panel.
           // Docked, "closed" is COLLAPSED: the panel folds away and the plugin gets the
           // keyboard; the conversation and a running turn carry on.
+          // A pending y/n or question is NOT answered by closing — folding the chat away
+          // (Ctrl+], the collapse key) is not a "no". It stays pending, the closed chat
+          // says it is waiting (`statusRow`), and opening it shows it again. Esc still
+          // declines or dismisses it first, in the handler, before Esc Esc can close;
+          // `/exit` cannot be typed while one is up.
           const closeChat = () => {
             disarmEsc();
-            // Closing during a y/n pause: do not wait — decline the op, else the
-            // confirmWrite promise would hang and the stream never finish.
-            if (pendingRef.current) settleConfirm(false);
-            dismissAsk();
             writeSession(); // the draft too
             setOpen(false);
             openRef.current = false; // the background flush may fire before the next render
@@ -2094,20 +2095,24 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // What the collapsed panel says of the running turn — on the plugin's bottom row
           // (the App draws it there) or on the one row a bottom panel keeps. The key that
           // brings the panel back, from its binding.
+          // A y/n or a question left pending when the chat was closed says so in every
+          // mode — on the footer row in a window or the whole terminal too (Ctrl+] closes
+          // those, and the question must not be forgotten behind them).
           const focusCap = bindingGlyph(f.keys.chatFocus);
-          const statusRow = mode === 'panel' && !open
-            ? renderChatStatus({ theme: f.config.theme as never, streaming, toolLabel, phase, verb, elapsed: elapsedMs, keyHint: focusCap ? `${focusCap} chat` : '' })
+          const waiting = !open && (!!pendingAsk || !!pendingQuestion);
+          const statusRow = !open && (mode === 'panel' || waiting)
+            ? renderChatStatus({ theme: f.config.theme as never, streaming, toolLabel, phase, verb, elapsed: elapsedMs, keyHint: focusCap ? `${focusCap} chat` : '', waiting })
             : null;
           // The App draws that status from what the chat published on its last render, so
           // while a collapsed turn runs the App is asked to redraw as the seconds tick,
-          // and once more when it ends.
-          const collapsedBusy = mode === 'panel' && !open && (streaming || !!toolLabel);
+          // and once more when it ends — or starts, or stops, waiting on the person.
+          const collapsedBusy = mode === 'panel' && !open && !waiting && (streaming || !!toolLabel);
           f.useEffect(() => {
             f.notify();
             if (!collapsedBusy) return;
             const tick = setInterval(() => f.notify(), 120);
             return () => clearInterval(tick);
-          }, [collapsedBusy]);
+          }, [collapsedBusy, waiting]);
           // `footerStatus`: the status goes on the plugin's footer row (not on a bottom
           // panel's own strip), and it names the key that brings the chat back — the
           // footer's `F chat` beside it would say "chat" twice.

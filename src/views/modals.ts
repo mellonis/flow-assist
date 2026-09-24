@@ -1427,8 +1427,9 @@ export function renderChatModal({
 // row when the panel was on the right, on the one row a bottom panel keeps. The same
 // facts as the chat's own status line — the spinner, the seconds of what runs now, the
 // tool or the request's word with the same shimmer — and the key that brings it back.
-// Null when nothing runs.
-export function renderChatStatus({ theme, streaming, toolLabel = '', phase = 'writing', verb = '', elapsed = 0, keyHint = '' }: {
+// Null when nothing runs. A y/n or a question the turn is waiting on wins over all of
+// it: folding the chat away is not an answer, and the person is the one holding it up.
+export function renderChatStatus({ theme, streaming, toolLabel = '', phase = 'writing', verb = '', elapsed = 0, keyHint = '', waiting = false }: {
   theme: Theme | undefined;
   streaming: boolean;
   toolLabel?: string;
@@ -1437,9 +1438,14 @@ export function renderChatStatus({ theme, streaming, toolLabel = '', phase = 'wr
   elapsed?: number;
   // `^] chat` — from the binding, empty when it is unbound.
   keyHint?: string;
+  // A y/n or a question is pending.
+  waiting?: boolean;
 }) {
-  if (!streaming && !toolLabel) return null;
   const m = (theme?.modals?.chat ?? {}) as Record<string, string | undefined>;
+  if (waiting) {
+    return h(Text, { key: 'chat-status', color: m.warn, wrap: 'truncate', selectable: false }, `? waiting for you${keyHint ? ` · ${keyHint}` : ''}`);
+  }
+  if (!streaming && !toolLabel) return null;
   return h(Box, { key: 'chat-status', flexDirection: 'row', flexShrink: 0, selectable: false },
     h(Text, { dim: true }, `${spin(elapsed)} ${fmtSec(elapsed)} · `),
     h(Shimmer, {
