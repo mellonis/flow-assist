@@ -1453,15 +1453,32 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   `services.suspend` — flowtty's `useApp().suspend`, bound by the App like `alert` and
   `copy` (the default just runs `fn`) — and the program runs under `script`, so it has
   a real terminal while what it printed is recorded into a temp file. The command is
-  written to a FILE in the same temp directory and run as `/bin/sh <dir>/cmd`, never
-  passed as a string: util-linux's `-c` string is run by the person's `$SHELL`, which
-  re-parses it — csh and tcsh refuse the newline every command carries (the pwd
-  trailer), fish reads backslashes its own way. So BSD/macOS
-  `script -q <rec> /bin/sh <dir>/cmd` (its exit code is the child's; a child killed by
-  a signal comes back as the bare signal number), util-linux
-  `script -q -e -c "/bin/sh '<dir>/cmd'" <rec>` — the path is checked to be one every
-  shell reads plainly inside single quotes (`scriptCommand` refuses any other), and a
-  test runs that string through every shell on the machine. Which `script` is asked
+  written to a FILE in the same temp directory, never passed as a string: util-linux's
+  `-c` string is run by the person's `$SHELL`, which re-parses it — csh and tcsh refuse
+  the newline every command carries (the pwd trailer), fish reads backslashes its own
+  way. So BSD/macOS `script -q <rec> /bin/sh -c 'eval "$(cat "$1")"' '!!' <dir>/cmd`
+  (its exit code is the child's; a child killed by a signal comes back as the bare
+  signal number), util-linux `script -q -e -c "/bin/sh '<dir>/cmd'" <rec>` — the path
+  is checked to be one every shell reads plainly inside single quotes (`scriptCommand`
+  refuses any other), and a test runs that string through every shell on the machine.
+  **`$0` is a neutral name, `!!`, not the temp file's own path** — `!!asd` used to read
+  `<dir>/cmd: line 1: asd: command not found`. Running the file as `sh <dir>/cmd`
+  (two args) sets `$0` to the file; `sh -c '<script>' name args…` sets it to `name`
+  instead (POSIX: with `-c`, the word after the script text is `$0`), and the script
+  text READS the file and `eval`s it — `. "$1"` (sourcing) also keeps `$0`, but was
+  tried and rejected: bash's own "command not found" / syntax-error messages for a
+  SOURCED file still name the file, never `$0` (verified against the real macOS
+  `/bin/sh`); `eval "$(cat "$1")"` does not, since nothing is tracked as a "source"
+  file — the trade-off is bash's `line N:` prefix, tied to that same tracking, which
+  goes with it (`!!: asd: command not found`, not `!!: line 1: …`). This applies to
+  BSD (its argv is exec'd directly, `script` never hands it to a shell to re-parse)
+  and to the no-`script` fallback (Node's own spawn, same reasoning) — **never to
+  util-linux's `-c` STRING**, the one thing actually re-parsed by the person's
+  `$SHELL`: csh and tcsh treat `!` as history expansion even inside single quotes and
+  even non-interactively (`csh -c "echo '!!'"` fails with "Event not found", verified),
+  so `!!`, and the `eval`/`$(…)` syntax csh does not share either, must never reach it
+  — that string stays exactly `/bin/sh '<dir>/cmd'`, so `$0` there is still the temp
+  path, a known gap on util-linux alone. Which `script` is asked
   once per process (`command -v script`, then `script --version`): util-linux names
   itself, BSD is told POSITIVELY (its usage line, or the system is Darwin / a BSD);
   anything else is not used, and the program runs unrecorded. The shell, the directory and its rules are `!`'s own (the same
@@ -1513,7 +1530,8 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   typed in between queues behind the ask and follows the queue's rules. Refused while anything runs, exactly as `!` is: a
   recording landing in the middle of a running turn's history would split it, and a
   y/n could wait unseen behind the program. No usable `script`: the program still runs
-  with the terminal through `/bin/sh <dir>/cmd` and the view shows how it ended. Tests inject `services.interactive`
+  with the terminal through the same `$0`-neutral `/bin/sh -c 'eval "$(cat "$1")"' '!!'
+  <dir>/cmd` and the view shows how it ended. Tests inject `services.interactive`
   (`InteractiveDeps`: `detect`, `spawn`, `signals` — `renderApp`'s `interactive`,
   `bootApp`'s `opts.interactive`; by default a test has no `script` and a spawn that
   exits 0) and never reach the machine's `script` or the process's signals.

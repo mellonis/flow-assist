@@ -31,6 +31,11 @@ What each version of flow-assist brought, newest first. The version is the one i
   session keeps it too: its `usage` and each turn's own message carry the cache
   figures, so a saved chat still shows where its tokens went, not only how many.
 
+- **`!!` error messages no longer show the temp command file's path.** `!!asd` used to
+  print `/var/folders/…/fa-tty-x/cmd: line 1: asd: command not found` — the shell's
+  `$0` was the temp file it ran the command from. It now reads `!!: asd: command not
+  found`.
+
 - **`!!command` runs a program that needs the terminal, and asks the assistant about
   it.** `!command` captures what a command prints, so a prompt, `git add -p`, `top` or
   a login flow could not run there. `!!command` gives the program the whole terminal

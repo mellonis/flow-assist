@@ -92,15 +92,44 @@ test('readTail reads the END of a big recording, from a whole line, and says how
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('scriptCommand: BSD / macOS takes the recording file, then the shell and the command FILE as argv', () => {
-  expect(scriptCommand('bsd', '/tmp/fa-tty-x/cmd', '/tmp/rec')).toEqual({ file: 'script', args: ['-q', '/tmp/rec', '/bin/sh', '/tmp/fa-tty-x/cmd'] });
+test('scriptCommand: BSD / macOS takes the recording file, then the shell told to eval the command FILE under a neutral name — never $0 the temp path', () => {
+  expect(scriptCommand('bsd', '/tmp/fa-tty-x/cmd', '/tmp/rec')).toEqual({
+    file: 'script',
+    args: ['-q', '/tmp/rec', '/bin/sh', '-c', 'eval "$(cat "$1")"', '!!', '/tmp/fa-tty-x/cmd'],
+  });
 });
 
 test('scriptCommand: util-linux gets `/bin/sh <file>` for -c, and -e for its exit code; a path no shell reads plainly is refused', () => {
   const c = scriptCommand('util-linux', '/tmp/fa-tty-x/cmd', '/tmp/rec');
+  // Unlike BSD, this string is re-parsed by the person's own $SHELL (csh/tcsh treat
+  // `!` as history expansion even inside single quotes, non-interactively too — see
+  // interactive.ts), so it stays exactly the plain path: $0 there is still the temp
+  // path, a known gap on util-linux alone.
   expect(c).toEqual({ file: 'script', args: ['-q', '-e', '-c', "/bin/sh '/tmp/fa-tty-x/cmd'", '/tmp/rec'] });
   expect(() => scriptCommand('util-linux', "/tmp/it's/cmd", '/r')).toThrow('cannot be handed to script');
   expect(() => scriptCommand('bsd', '/tmp/a\nb/cmd', '/r')).toThrow('cannot be handed to script');
+});
+
+test('the BSD form actually masks $0: a real /bin/sh reports the neutral name, never the temp path', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-tty-dollar0-'));
+  const cmdFile = path.join(dir, 'cmd');
+  fs.writeFileSync(cmdFile, 'asd\n');
+  const c = scriptCommand('bsd', cmdFile, path.join(dir, 'rec'));
+  // What `script` would exec directly (argv, never re-parsed) is args[2:] here: shell, -c, body, name, file.
+  const r = spawnSync(c.args[2]!, c.args.slice(3), { encoding: 'utf8' });
+  expect(r.stderr).toContain('!!: asd: command not found');
+  expect(r.stderr).not.toContain(dir);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('the no-`script` fallback (plain /bin/sh) masks $0 the same way', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-tty-dollar0-'));
+  const cmdFile = path.join(dir, 'cmd');
+  fs.writeFileSync(cmdFile, 'asd\n');
+  const r = spawnSync('/bin/sh', ['-c', 'eval "$(cat "$1")"', '!!', cmdFile], { encoding: 'utf8' });
+  expect(r.stderr).toContain('!!: asd: command not found');
+  expect(r.stderr).not.toContain(dir);
+  fs.rmSync(dir, { recursive: true, force: true });
 });
 
 // Every shell a person may have as $SHELL — util-linux's `script -c` runs its string
@@ -112,7 +141,7 @@ test('a nasty command reaches the shell exactly as typed, whatever $SHELL re-par
   let content = '';
   let dir = '';
   const spawn: InteractiveSpawn = async (_f, args) => {
-    const cmdFile = args[3]!;
+    const cmdFile = args.at(-1)!;
     dir = path.dirname(cmdFile);
     content = fs.readFileSync(cmdFile, 'utf8');
     return { code: 0, signal: null };
@@ -190,7 +219,7 @@ test('the signals are held around the whole hand-over — SIGCONT too — and gi
 // A fake `script` for the BSD argv: runs the command with a line on its input and
 // writes what it printed into the recording file, as the real one would.
 const fakeScript = (seen: { dirs: string[] }): InteractiveSpawn => async (file, args, { cwd }) => {
-  expect(args.slice(2)).toEqual(['/bin/sh', path.join(path.dirname(args[1]!), 'cmd')]);
+  expect(args.slice(2)).toEqual(['/bin/sh', '-c', 'eval "$(cat "$1")"', '!!', path.join(path.dirname(args[1]!), 'cmd')]);
   expect(file).toBe('script');
   const rec = args[1]!;
   seen.dirs.push(path.dirname(rec));
@@ -241,8 +270,10 @@ test('runInteractive without `script` runs the command through the shell with th
   const r = await runInteractive('vim notes.md', { cwd: os.tmpdir(), suspend: async (fn) => fn(), maxChars: 100 }, { detect: () => null, spawn, signals: new EventEmitter() });
   expect(r.recorded).toBe(false);
   expect(calls[0]!.file).toBe('/bin/sh');
-  expect(calls[0]!.args).toHaveLength(1);
-  expect(path.basename(calls[0]!.args[0]!)).toBe('cmd');
+  // `$0` is neutral here too — the same `-c '<eval the file>' '!!' file` form, never
+  // `sh cmdFile` (which would set $0 to the temp path).
+  expect(calls[0]!.args.slice(0, 3)).toEqual(['-c', 'eval "$(cat "$1")"', '!!']);
+  expect(path.basename(calls[0]!.args.at(-1)!)).toBe('cmd');
   expect(r.result.output).toBe('');
 });
 

@@ -47,7 +47,7 @@ function fakeScript(seen: Seen, backend: () => { suspended: boolean }): Interact
     seen.suspendedWhileRunning.push(backend().suspended);
     const rec = args[1]!;
     seen.recordings.push(rec);
-    seen.commands.push(fs.readFileSync(args[3]!, 'utf8'));
+    seen.commands.push(fs.readFileSync(args.at(-1)!, 'utf8'));
     const p = Bun.spawn([args[2]!, ...args.slice(3)], { cwd, stdin: new TextEncoder().encode('Ruslan\n'), stdout: 'pipe', stderr: 'pipe' });
     const out = await new Response(p.stdout).text();
     const code = await p.exited;
@@ -82,8 +82,12 @@ test('!!command hands the terminal over, shows the cleaned recording as its view
   expect(ui.backend.suspensions).toBe(1);
   expect(seen.suspendedWhileRunning).toEqual([true]);
   expect(ui.backend.suspended).toBe(false);
-  // The program ran under `script`, through the shell `!` uses, in the first root.
-  expect(seen.argv[0]).toEqual(['script', '-q', seen.recordings[0]!, '/bin/sh', path.join(path.dirname(seen.recordings[0]!), 'cmd')]);
+  // The program ran under `script`, through the shell `!` uses, in the first root —
+  // `$0` there is a neutral name, never the temp directory's own path.
+  expect(seen.argv[0]).toEqual([
+    'script', '-q', seen.recordings[0]!, '/bin/sh', '-c', 'eval "$(cat "$1")"', '!!',
+    path.join(path.dirname(seen.recordings[0]!), 'cmd'),
+  ]);
   expect(seen.commands[0]!.startsWith('./greet.sh\n')).toBe(true);
   // The recording's temp files are gone.
   expect(fs.existsSync(path.dirname(seen.recordings[0]!))).toBe(false);

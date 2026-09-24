@@ -61,14 +61,40 @@ export function detectScript(): ScriptFlavor | null {
 // tcsh, fish: no quote, backslash, newline, `$`, backtick or `!`.
 const PLAIN_PATH = /^[A-Za-z0-9_./ +,@%:=-]+$/;
 
+// Running the command FILE as `shell cmdFile` (two args) sets `$0` to the file's own
+// path — a temp directory nobody asked to see (`…/fa-tty-x/cmd: line 1: asd: command
+// not found`). `shell -c '<script>' name args…` sets `$0` to `name` instead (POSIX:
+// with `-c`, the word after the script text is `$0`, the rest `$1`, `$2`, …), so the
+// script text here READS the file (`cat "$1"`) and `eval`s it in the SAME shell — it
+// never sources or re-execs it as a file of its own, which is what keeps `$0` as
+// `RUN_NAME` in whatever the command goes on to print. Sourcing (`. "$1"`) also keeps
+// `$0`, but was tried and rejected: bash's own "command not found" / syntax-error
+// messages for a SOURCED file still name the file, never `$0` — verified empirically
+// (macOS bash 3.2, the `/bin/sh` here) — while `eval "$(cat "$1")"` does not, since
+// nothing is ever tracked as a "source" file. The trade-off: bash's `line N:` prefix,
+// tied to that same source-file tracking, goes with it — `!!: asd: command not found`,
+// not `!!: line 1: …`. `cat`'s own command substitution forks and exits before `eval`
+// ever runs, so it costs nothing of the interactive program's terminal control.
+const RUN_BODY = 'eval "$(cat "$1")"';
+const RUN_NAME = '!!';
+
 // The `script` invocation that runs the command FILE `cmdFile` with `shell` and
 // records into `file`. The command goes through a file, never as a string: util-linux
 // hands its `-c` string to the person's `$SHELL`, which re-parses it — csh and tcsh
 // refuse a newline inside quotes (every command has one, the pwd trailer), fish reads
 // backslashes its own way. A plain path parses the same in all of them.
+//
+// BSD's `command…` words are exec'd directly — `script` never hands them to a shell to
+// re-parse — so `RUN_BODY`/`RUN_NAME` are safe to add there too. util-linux's `-c`
+// STRING is the one thing that IS re-parsed, by the person's own `$SHELL`, and csh and
+// tcsh treat `!` as history expansion even inside single quotes and even
+// non-interactively (`csh -c "echo '!!'"` fails with "0: Event not found", verified) —
+// so `RUN_NAME`, and `eval`/`$(…)` syntax csh does not share either, must never reach
+// it. That string stays exactly what it was: `shell 'cmdFile'`, read the same by every
+// shell there is — `$0` there is still the temp path, a known gap on util-linux alone.
 export function scriptCommand(flavor: ScriptFlavor, cmdFile: string, file: string, shell = '/bin/sh'): { file: string; args: string[] } {
   if (!PLAIN_PATH.test(cmdFile)) throw new Error(`the temporary directory's path cannot be handed to script: ${cmdFile}`);
-  if (flavor === 'bsd') return { file: 'script', args: ['-q', file, shell, cmdFile] };
+  if (flavor === 'bsd') return { file: 'script', args: ['-q', file, shell, '-c', RUN_BODY, RUN_NAME, cmdFile] };
   return { file: 'script', args: ['-q', '-e', '-c', `${shell} '${cmdFile}'`, file] };
 }
 
@@ -256,7 +282,9 @@ export async function runInteractive(cmd: string, opts: InteractiveOptions, deps
     // The command is a file the shell runs, exactly as typed — no shell of the
     // person's parses it on the way (see `scriptCommand`).
     fs.writeFileSync(cmdFile, withPwdTrailer(cmd, pwdFile), { mode: 0o600 });
-    const run = flavor ? scriptCommand(flavor, cmdFile, recording) : { file: '/bin/sh', args: [cmdFile] };
+    // No `script` at all: the terminal goes to `/bin/sh` directly (Node's own spawn,
+    // never a shell of the person's), so the same `$0`-neutral form applies here too.
+    const run = flavor ? scriptCommand(flavor, cmdFile, recording) : { file: '/bin/sh', args: ['-c', RUN_BODY, RUN_NAME, cmdFile] };
     const t0 = Date.now();
     // The signals are held around the WHOLE hand-over — taken before the terminal
     // goes and given back only after it is the app's again.
