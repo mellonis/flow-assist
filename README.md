@@ -80,7 +80,9 @@ bottom row; at the bottom it keeps one row saying the same. Esc Esc in the chat 
 it the same way and hands the keyboard to the plugin; `F` or Ctrl+] brings it back.
 Both keys are the host's before any plugin's — a plugin that takes every key cannot
 keep you from the chat — and both can be moved (`config set keys.chatFocus <key>`,
-`keys.chatCollapse`).
+`keys.chatCollapse`) to another chord: Ctrl or Alt held, or an F-key. A key that types
+would be taken from every field, so it is refused (the log says so) and the default
+kept. They do nothing while the `:` line is open.
 
 `/mode window` puts the chat in a window over the screen instead, and Esc Esc closes
 it; `/mode full` gives it the whole terminal — code, tables and diffs get every

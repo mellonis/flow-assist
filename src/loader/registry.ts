@@ -165,22 +165,43 @@ type KeysConfig = {
   plugins?: Record<string, { keys?: Record<string, string | string[]> }>;
   keys?: Record<string, string | string[]>;
 };
+// The actions the App takes in its `useInput` before any handler (src/runtime/app.tsx):
+// Ctrl+] and the chat's collapse key. Bound to a key that types — a letter, Enter,
+// Space — they would take it from every field on screen, the chat's, a plugin's and
+// the `:` line's alike, and nothing typed could undo it. So they take only a chord:
+// Ctrl or Alt held, an F-key, or a control byte (0x1c–0x1f read as Ctrl, which
+// `canonicalBinding` already spells `ctrl+…`). Unbound (`[]`) is fine too.
+export const APP_TAKEN_ACTIONS: readonly string[] = ['chatFocus', 'chatCollapse'];
+export const isChordKey = (id: string): boolean =>
+  id.startsWith('ctrl+') || id.startsWith('alt+') || /^(shift\+)?f([1-9]|1\d|2[0-4])$/.test(id);
+
+// `warn` hears one line per such action whose binding was refused (the App puts it in
+// the log); a caller that only reads the bindings leaves it out.
 export function buildKeys(
   plugins: PluginShape[] = [],
   config: KeysConfig = {},
   base: Record<string, string | string[]> = HOST_DEFAULT_KEYS,
+  warn?: (line: string) => void,
 ): Record<string, string[]> {
   const merged: Record<string, string | string[]> = { ...base };
+  // What each plugin itself binds an action to, before any config.
+  const defaults: Record<string, string | string[]> = { ...base };
   for (const p of plugins) {
     const pk = p.keys ?? p.keyActions ?? {};
     const pKeys = config?.plugins?.[p.name]?.keys;
     for (const [action, binding] of Object.entries(pk)) {
       merged[action] = pKeys?.[action] ?? binding;
+      defaults[action] = binding;
     }
   }
   const out: Record<string, string[]> = {};
   for (const [action, def] of Object.entries(merged)) {
     out[action] = canonicalBinding(config?.keys?.[action] ?? def);
+    if (APP_TAKEN_ACTIONS.includes(action) && !out[action].every(isChordKey)) {
+      const kept = canonicalBinding(defaults[action]);
+      warn?.(`[keys] ${action} takes only a chord (Ctrl or Alt held, an F-key) — ${JSON.stringify(out[action])} would take a key that types from every field; kept ${JSON.stringify(kept)}`);
+      out[action] = kept;
+    }
   }
   return out;
 }

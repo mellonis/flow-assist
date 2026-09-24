@@ -379,6 +379,22 @@ test('every chat row is one terminal line at the panel\'s width — steps, calls
   ui.app.unmount();
 });
 
+// A letter bound to Ctrl+]'s action would be taken before every field — the chat's,
+// the plugin's, the `:` line's — and could not be undone from inside the app. It falls
+// back to the default.
+test('chatFocus bound to a letter keeps Ctrl+]: the letter still types', async () => {
+  const g = guest({ take: ['x'] });
+  const ui = await bootApp(new ScriptedModel(), 160, 40, g.make as never, { keys: { chatFocus: 'x' } }, { chatMode: 'panel' });
+  await ui.press('x');
+  expect(g.seen).toEqual(['x']);
+  expect(chatFrame(ui).top).toBe(-1);
+  await press(ui, CTRL_RIGHT_BRACKET);
+  await ui.type('x');
+  expect(ui.backend.lastFrame).toContain('› x');
+  expect(g.ft().store.chat.focus).toBe('chat');
+  ui.app.unmount();
+});
+
 // The `:` line owns the keyboard while it is open: Ctrl+] and the collapse key are
 // not taken from it — in a window, the chat would open over the line and what was
 // typed would go into a line nobody sees.

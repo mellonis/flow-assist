@@ -298,7 +298,10 @@ session (never saved); an old `fullscreen: true` reads as `full` (`chatModeOf`),
   key that brings it back (`renderChatStrip`).
 - **Focus** (`store.chat.focus`, docked and expanded only): Ctrl+] (`chatFocus`) moves
   the keyboard between the two sides; Ctrl+\ (`chatCollapse`) collapses and restores.
-  Both are the assistant's bindings (`keys`, so a person moves them) but the App takes
+  Both are the assistant's bindings (`keys`, so a person moves them — to a chord only:
+  `buildKeys` refuses a key that types for `APP_TAKEN_ACTIONS`, logs one line and keeps
+  the plugin's default, since a letter taken before every handler would break typing
+  everywhere and could not be undone from inside the app) but the App takes
   them in its `useInput` right after the exit keys and BEFORE `twoPhaseDispatch`
   (`store.chat.panelKey`), so a plugin consuming every key, or its modal, can never keep
   the person from the chat — except the `:` line: while it is open it owns the keyboard,

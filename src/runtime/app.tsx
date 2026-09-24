@@ -226,7 +226,7 @@ export function renderApp(
   for (const note of llmConfigNotes(config.ai)) services.log.append(`[config] ${note}`);
   const viewRegistry = buildViewRegistry(plugins);
   const commandRegistry = buildCommandRegistry(plugins);
-  const keys = buildKeys(plugins, config);
+  const keys = buildKeys(plugins, config, undefined, (line) => services.log.append(line));
   const helpFor = (reg: unknown) => helpForRegistry(reg as Command[]);
 
   // Shared per-app mutable state (created ONCE; read by the App and the

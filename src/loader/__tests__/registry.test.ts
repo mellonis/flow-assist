@@ -222,3 +222,30 @@ test('the footer names the key the action is bound to NOW, as its cap', () => {
   // key that did nothing.
   expect(hints).toEqual(['⏎/␣ quit']);
 });
+
+test('the keys the App takes before any handler take only a chord: a key that types falls back to the default, said once', () => {
+  const chat = { name: 'assistant', keys: { chatFocus: 'ctrl+]', chatCollapse: 'ctrl+\\', chat: 'F' } } as PluginShape;
+  const said: string[] = [];
+  const keys = (cfg: Record<string, unknown>) => buildKeys([chat], cfg as never, undefined, (line) => said.push(line));
+  // A letter, a named key, a shifted letter: each would be taken from every field.
+  for (const bad of ['x', 'enter', 'space', 'F', 'tab', ['ctrl+g', 'y']]) {
+    said.length = 0;
+    expect(keys({ keys: { chatFocus: bad } }).chatFocus).toEqual(['ctrl+]']);
+    expect(said).toHaveLength(1);
+    expect(said[0]).toContain('chatFocus');
+  }
+  // Through the plugin's own keys too.
+  said.length = 0;
+  expect(keys({ plugins: { assistant: { keys: { chatCollapse: 'q' } } } }).chatCollapse).toEqual(['ctrl+\\']);
+  expect(said).toHaveLength(1);
+  // A chord, an F-key, a control byte, or nothing at all is taken as it is, silently.
+  said.length = 0;
+  expect(keys({ keys: { chatFocus: 'ctrl+g' } }).chatFocus).toEqual(['ctrl+g']);
+  expect(keys({ keys: { chatFocus: 'alt+c' } }).chatFocus).toEqual(['alt+c']);
+  expect(keys({ keys: { chatFocus: 'f2' } }).chatFocus).toEqual(['f2']);
+  expect(keys({ keys: { chatFocus: '\x1f' } }).chatFocus).toEqual(['ctrl+_']);
+  expect(keys({ keys: { chatCollapse: [] } }).chatCollapse).toEqual([]);
+  expect(said).toEqual([]);
+  // Any other action binds a letter as before.
+  expect(keys({ keys: { chat: 'x' } }).chat).toEqual(['x']);
+});
