@@ -17,10 +17,12 @@ const sse = (...chunks: unknown[]) =>
   new Response([...chunks.map((c) => `data: ${JSON.stringify(c)}\n\n`), 'data: [DONE]\n\n'].join(''), { headers: { 'content-type': 'text/event-stream' } });
 const settle = async () => { for (let i = 0; i < 8; i++) { await flush(); await new Promise((r) => setTimeout(r, 5)); } };
 
-test.each([[110, 40], [100, 22]])('the model asks, the person picks with the keyboard, the model gets the answer (%ix%i)', async (cols, rows) => {
+test.each([[110, 40, 'window'], [100, 22, 'window'], [100, 22, 'panel']] as const)('the model asks, the person picks with the keyboard, the model gets the answer (%ix%i, %s)', async (cols, rows, mode) => {
   // The short screen carries a plan too: the question block must still show its
   // last row and its key hints — it used to be budgeted as a one-line input field
-  // and lost "Other…" and the hint line below the frame.
+  // and lost "Other…" and the hint line below the frame. Docked at the bottom of 22
+  // rows, the panel's 12 cannot hold it and growing it would leave the plugin less
+  // than its least: the chat is a window until the question is answered.
   process.env.LLM_TOKEN = 't';
   const bodies: any[] = [];
   globalThis.fetch = (async (_url: unknown, init: RequestInit) => {
@@ -39,9 +41,7 @@ test.each([[110, 40], [100, 22]])('the model asks, the person picks with the key
     return sse({ choices: [{ delta: { content: 'Merging then.' }, finish_reason: null }] }, { choices: [{ delta: {}, finish_reason: 'stop' }] });
   }) as typeof fetch;
 
-  // The window over the screen, which these sizes were written for (a docked chat on a
-  // 22-row terminal has less room than the question needs).
-  const config: Record<string, unknown> = { ai: { baseUrl: 'http://llm.test', model: 'm' }, plugins: { assistant: { mode: 'window' } } };
+  const config: Record<string, unknown> = { ai: { baseUrl: 'http://llm.test', model: 'm' }, plugins: { assistant: { mode } } };
   const repo = { enabledPlugins: async () => [], list: async () => [] } as any;
   const renders = { chat: renderChatModal, help: renderHelp, log: renderLogModal, reminder: renderReminder };
   const plugins = await loadPlugins({ config, repo, renders: renders as any });
@@ -63,6 +63,11 @@ test.each([[110, 40], [100, 22]])('the model asks, the person picks with the key
   expect(backend.lastFrame).toContain('3. Other…');
   expect(backend.lastFrame).toContain('Esc dismiss');
   expect(bodies).toHaveLength(1);
+  // Whole: the question's frame closes below its hint, inside the chat's own frame.
+  const lines = backend.lastFrame.split('\n');
+  const hintAt = lines.findIndex((l) => l.includes('Esc dismiss'));
+  expect(lines[hintAt + 1]).toMatch(/╰─+╯/);
+  expect(lines.slice(hintAt + 2).some((l) => /╰─+╯/.test(l))).toBe(true);
 
   backend.press({ name: 'down' });
   backend.press({ name: 'return' });
@@ -72,7 +77,11 @@ test.each([[110, 40], [100, 22]])('the model asks, the person picks with the key
   const toolResult = bodies[1].messages.find((m: any) => m.role === 'tool' && m.tool_call_id === 'call_ask');
   expect(toolResult).toMatchObject({ tool_call_id: 'call_ask' });
   expect(toolResult.content).toContain('Rebase or merge? → merge');
-  expect(backend.lastFrame).toContain('Merging then.');
+  // Answered, the panel is docked again at its own 12 rows — where the three-item plan
+  // takes the rows the conversation would have had, so the answer is looked for in a
+  // window only.
+  if (mode === 'window') expect(backend.lastFrame).toContain('Merging then.');
+  else expect(backend.lastFrame.split('\n')[rows - 12]).toContain('╭─ ƒ Flow Assist');
   expect(backend.lastFrame).not.toContain('Rebase or merge?');
   handle.unmount();
 });

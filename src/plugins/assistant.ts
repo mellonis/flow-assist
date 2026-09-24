@@ -30,7 +30,7 @@ import { capConsoleData, consoleData, renderConsole } from '../assistant/console
 import { INTERACTIVE_ASK, runInteractive, type InteractiveDeps } from '../assistant/interactive.js';
 import { editorReducer } from '@flowtty/core';
 import { z } from 'zod';
-import { anchorRow, askFieldWidth, chatFieldWidth, chatRows, chatWrapWidth, firstFoldRow, renderChatStatus, renderChatStrip, rowAnchor, viewGroupFor, type RowOpts, type Viewport } from '../views/modals.js';
+import { anchorRow, askFieldWidth, chatFieldWidth, chatRows, chatWrapWidth, firstFoldRow, pendingChatRows, renderChatStatus, renderChatStrip, rowAnchor, viewGroupFor, type RowOpts, type Viewport } from '../views/modals.js';
 import { CHAT_MODES, chatModeOf, inRect, type ChatMode, type PanelLayout } from '../runtime/panel-layout.js';
 import { allFolded, flipFolds, isClicked, isOpen, toggleFold, type FoldState } from '../assistant/folds.js';
 import { groupOpen, toggleGroup } from '../assistant/view-groups.js';
@@ -2127,7 +2127,20 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // panel's own strip), and it names the key that brings the chat back — the
           // footer's `F chat` beside it would say "chat" twice.
           const footerStatus = statusRow != null && dock?.side !== 'bottom';
-          (f.store as Record<string, any>).chat = { open, unread, mode, focus, openChat, closeChat, send, messages, streaming, toolLabel, cursor, escArmed, pendingConfirm: pendingAsk, ctrlKey, panelKey, pointer, statusRow, footerStatus, layout };
+          // The rows a pending question or y/n needs at a panel's width (the App grows a
+          // bottom panel to it, or draws the chat as a window while it waits — see
+          // `pendingChatRows`). Read from the refs: the App asks before this re-renders.
+          const needRows = (w: number): number => {
+            const c = pendingRef.current;
+            return pendingChatRows({
+              width: w,
+              question: askRef.current?.state ?? null,
+              confirm: c ? { name: c.name, args: c.args, command: shellCommandOf(c.name, c.args) ?? undefined } : null,
+              todo: planRef.current.snapshot(),
+              queued: queueRef.current.length,
+            });
+          };
+          (f.store as Record<string, any>).chat = { open, unread, mode, focus, openChat, closeChat, send, messages, streaming, toolLabel, cursor, escArmed, pendingConfirm: pendingAsk, ctrlKey, panelKey, pointer, statusRow, footerStatus, layout, needRows };
           // Lands the next background result. It is SHOWN as soon as no turn is being
           // written (a streaming turn keeps rewriting the display list's last message,
           // so a result cannot be appended under it) — a half-typed draft does not hold

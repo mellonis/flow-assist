@@ -56,6 +56,20 @@ test('a terminal too small for the panel and the plugin\'s least does not dock: 
   expect(panelLayout({ width: 160, height: 11 }).fits).toBe(false);
 });
 
+test('what a pending question needs: a bottom panel grows to it while the plugin keeps its least; past that it is a window', () => {
+  const grown = panelLayout({ width: 100, height: 40, need: 17 });
+  expect(grown.fits).toBe(true);
+  expect(grown.panel).toEqual({ left: 0, top: 23, width: 100, height: 17 });
+  // Never smaller than it would be anyway.
+  expect(panelLayout({ width: 100, height: 40, need: 5 }).panel.height).toBe(16);
+  expect(panelLayout({ width: 100, height: 40, need: 33 }).fits).toBe(true);
+  expect(panelLayout({ width: 100, height: 40, need: 34 }).fits).toBe(false);
+  expect(panelLayout({ width: 100, height: 22, need: 17 }).fits).toBe(false);
+  // On the right it has the whole height, or nothing.
+  expect(panelLayout({ width: 160, height: 20, need: 20 }).fits).toBe(true);
+  expect(panelLayout({ width: 160, height: 20, need: 21 }).fits).toBe(false);
+});
+
 test('collapsed: gone on the right, one row at the bottom', () => {
   const right = panelLayout({ width: 160, height: 40, collapsed: true });
   expect(right.panel.width).toBe(0);

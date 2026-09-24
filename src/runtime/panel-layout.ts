@@ -71,12 +71,17 @@ export interface PanelLayout {
 
 const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n));
 
-export function panelLayout({ width, height, side, size, collapsed = false }: {
+// `need`: the rows the open chat needs right now — a question or a y/n it must show
+// whole (0 otherwise). A bottom panel grows to it, as far as the plugin's least allows;
+// past that, or past a right panel's whole height, it does not fit, and the chat is a
+// window until the question is answered.
+export function panelLayout({ width, height, side, size, collapsed = false, need = 0 }: {
   width: number;
   height: number;
   side?: unknown;
   size?: unknown;
   collapsed?: boolean;
+  need?: number;
 }): PanelLayout {
   const wanted: PanelSide = side === 'bottom' ? 'bottom' : 'right';
   const s: PanelSide = wanted === 'right' && width < RIGHT_PANEL_MIN_COLS ? 'bottom' : wanted;
@@ -86,12 +91,12 @@ export function panelLayout({ width, height, side, size, collapsed = false }: {
   if (s === 'right') {
     const full = clamp(Math.round((width * pct) / 100), Math.min(MIN_PANEL.right, width), Math.max(0, width - MIN_REST.right));
     const w = collapsed ? 0 : full;
-    const fits = height >= Math.max(MIN_PANEL_ROWS, PLUGIN_MIN_ROWS);
+    const fits = height >= Math.max(MIN_PANEL_ROWS, PLUGIN_MIN_ROWS, need);
     return { side: s, collapsed, fits, region: { left: 0, top: 0, width: width - w, height }, panel: { left: width - w, top: 0, width: w, height } };
   }
   // The panel's least wins over the plugin's preferred rest (`MIN_REST`) — and when
   // even the plugin's bare least is not left beside it, nothing is docked.
-  const full = clamp(Math.round((height * pct) / 100), Math.min(MIN_PANEL.bottom, height), Math.max(1, height - MIN_REST.bottom));
+  const full = Math.max(need, clamp(Math.round((height * pct) / 100), Math.min(MIN_PANEL.bottom, height), Math.max(1, height - MIN_REST.bottom)));
   const fits = height - full >= PLUGIN_MIN_ROWS;
   const h = collapsed ? 1 : full;
   return { side: s, collapsed, fits, region: { left: 0, top: 0, width, height: height - h }, panel: { left: 0, top: height - h, width, height: h } };

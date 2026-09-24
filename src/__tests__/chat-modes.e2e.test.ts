@@ -446,6 +446,35 @@ const toolResult = (model: ScriptedModel, n: number) =>
   String(((model.requests[n]?.messages ?? []) as { role: string; content?: string }[]).find((m) => m.role === 'tool')?.content ?? '');
 const ASK = { questions: [{ question: 'Rebase or merge?', header: 'Strategy', options: [{ label: 'rebase', description: 'Linear history' }, { label: 'merge', description: 'Keeps the branch shape' }] }] };
 
+// A question the bottom panel cannot hold: the panel grows to it while the plugin keeps
+// more than its least, and is its own size again once it is answered.
+test('a bottom panel grows to show a pending question whole, and shrinks back once it is answered', async () => {
+  const model = new ScriptedModel();
+  model.script([{ tool: 'ask_user', args: ASK }], [{ text: 'Merging then.' }]);
+  const g = guest();
+  const ui = await bootApp(model, 100, 40, g.make as never, {}, { chatMode: 'panel' });
+  await ui.press('F');
+  expect(chatFrame(ui)).toEqual({ top: 24, bottom: 39, left: 0, width: 100 });
+  await ui.type('how?');
+  await ui.press('return');
+  await settle(10);
+  // 17 rows: the frame and its padding, a row of conversation, the status row, the
+  // nine of the question, and the gaps.
+  expect(chatFrame(ui)).toEqual({ top: 23, bottom: 39, left: 0, width: 100 });
+  expect(g.size).toEqual({ width: 100, height: 17 });
+  const r = rows(ui);
+  const hintAt = r.findIndex((l) => l.includes('Esc dismiss'));
+  expect(r[hintAt - 5]).toContain('1. rebase');
+  expect(r[hintAt + 1]).toMatch(/╰─+╯/);
+  await ui.press('down');
+  await ui.press('return');
+  for (let i = 0; i < 50 && model.requests.length < 2; i++) await settle(1);
+  await settle(10);
+  expect(chatFrame(ui)).toEqual({ top: 24, bottom: 39, left: 0, width: 100 });
+  expect(ui.backend.lastFrame).toContain('Merging then.');
+  ui.app.unmount();
+});
+
 // Folding the chat away is not an answer: a y/n or a question waits for the person,
 // the collapsed chat says so, and bringing it back shows it again.
 test('collapsing during a y/n keeps it pending; the footer says it waits; expanded, y confirms', async () => {

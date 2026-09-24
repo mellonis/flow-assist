@@ -287,6 +287,16 @@ session (never saved); an old `fullscreen: true` reads as `full` (`chatModeOf`),
   published as `store.chat.layout`, which every behaviour check reads while `mode` stays
   what was asked for — until the terminal grows back. Both Ctrl+] and the collapse key
   open and close it then. A right panel needs its 12 rows of height the same way.
+- **A pending question is shown whole.** While a question or a y/n is up in the open
+  chat, the App asks it for the rows it needs at the panel's width
+  (`store.chat.needRows` → `pendingChatRows` in `views/modals.ts`, counted from the same
+  pieces `renderAsk` and the confirm block draw) and passes them to `panelLayout` as
+  `need`: a bottom panel GROWS to it as long as the plugin keeps `PLUGIN_MIN_ROWS`, and
+  past that — or past a right panel's whole height — `fits` is false and the chat is a
+  window until it is answered. Growing first keeps the plugin's screen in view (what the
+  question is usually about) and moves the layout by a few rows; the window is for the
+  terminal where no growth can hold it (100×22: the default panel is 12 rows, the
+  question 17). Collapsed, nothing is needed (the strip says it waits).
 - **Two slots, in every mode, in the same order** — the plugin's side, then the panel;
   only their props change (the row/column direction, a width, `position: 'absolute'`
   over the whole terminal for `window`/`full`). A component moved to another parent is

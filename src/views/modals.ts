@@ -26,6 +26,7 @@ import { groupHeadText, groupOpen, viewGroups, type GroupMsg, type ViewGroup } f
 import { renderConsole } from '../assistant/console-view.js';
 import { CELL_FREE, CELL_FULL, CONTEXT_WARN_AT, GRID_COLS, GRID_ROWS, contextFootnote, contextGrid, contextHeading, contextLegend, tokensBadge, type ContextReading, type GridCell } from '../assistant/context-meter.js';
 import { createElement as h, useEffect, useRef, useState, type ReactNode } from 'react';
+import { wrapText } from '@flowtty/core';
 import { bindingGlyph, keyGlyph } from '../playback/keys.js';
 import {
   Box,
@@ -1061,6 +1062,22 @@ function ChatMessages({ messages, rowOpts, palette: m, errorColor, onViewport, s
 // scroll box that takes the rows the rest of the column leaves; under it sit the
 // error, the status line, the plan, the queue line and the field (or the question /
 // y-n block that replaces it). Palette: theme.modals.chat.
+// What the plan block shows: in progress first, then pending, each in insertion order
+// (the sort is stable): the cap cuts from the END, so the items being worked on are the
+// last to fall off the screen. Needs flowtty ≥ 1.0.0-alpha.5 — before it, re-ordering
+// keyed children aborted Yoga and the plan was pinned to insertion order. Done items are
+// counted, not listed.
+function planView(list: PlanItem[]): { shown: PlanItem[]; summary: string } {
+  const active = list
+    .filter((t) => t.status !== 'done')
+    .sort((a, b) => Number(b.status === 'in_progress') - Number(a.status === 'in_progress'));
+  const shown = active.slice(0, MAX_VISIBLE_PLAN);
+  const done = list.filter((t) => t.status === 'done').length;
+  const hidden = active.length - shown.length;
+  const summary = [hidden > 0 ? `+${hidden} pending` : '', done > 0 ? `· ${done} done` : ''].filter(Boolean).join(' ');
+  return { shown, summary };
+}
+
 export function renderChatModal({
   width,
   height,
@@ -1231,21 +1248,7 @@ export function renderChatModal({
   // MAX_VISIBLE_PLAN active rows; done items are counted, not listed.
   // An open question takes the plan's room: the person is answering, not planning.
   const planList = (pendingQuestion ? [] : (todo ?? [])) as PlanItem[];
-  // What is in progress comes first, then what is pending, each in insertion order
-  // (the sort is stable): the cap below cuts from the END, so the items being worked
-  // on are the last to fall off the screen. Needs flowtty ≥ 1.0.0-alpha.5 — before
-  // it, re-ordering keyed children aborted Yoga and the plan was pinned to insertion
-  // order.
-  const planActive = planList
-    .filter((t) => t.status !== 'done')
-    .sort((a, b) => Number(b.status === 'in_progress') - Number(a.status === 'in_progress'));
-  const planShown = planActive.slice(0, MAX_VISIBLE_PLAN);
-  const planDone = planList.filter((t) => t.status === 'done').length;
-  const planHidden = planActive.length - planShown.length;
-  const planSummary = [
-    planHidden > 0 ? `+${planHidden} pending` : '',
-    planDone > 0 ? `· ${planDone} done` : '',
-  ].filter(Boolean).join(' ');
+  const { shown: planShown, summary: planSummary } = planView(planList);
   // Inline completion: the part of the suggested command not typed yet, drawn
   // right after the caret, and the other candidates named beside it. Only while the
   // caret is at the end of a one-line `/command` — there is nothing to continue
@@ -1254,15 +1257,7 @@ export function renderChatModal({
   const atEnd = cursor >= input.length;
   const ghost = suggestion && atEnd && !input.includes('\n') ? suggestion.slice(input.length - 1) : '';
   const others = completions && atEnd ? completions.matches.filter((_, i) => i !== completions.sel) : [];
-  const confirmAsk = pendingConfirm
-    ? {
-        name: pendingConfirm.name,
-        command: pendingConfirm.command,
-        args: typeof pendingConfirm.args === 'string'
-          ? (pendingConfirm.args.length > 120 ? `${pendingConfirm.args.slice(0, 120)}…` : pendingConfirm.args)
-          : JSON.stringify(pendingConfirm.args ?? ''),
-      }
-    : null;
+  const confirmAsk = pendingConfirm ? confirmView(pendingConfirm) : null;
 
   return h(
     Box,
@@ -1371,11 +1366,11 @@ export function renderChatModal({
           ? renderContextPanel(contextPanel, m.bg, wrap, contextCacheLine)
           : confirmAsk
           ? h(Box, { flexDirection: 'column', width: '100%', gap: 1, border: 'round', paddingX: 1, borderColor: 'yellow', backgroundColor: m.bg },
-              h(Text, { bold: true, color: 'yellow' }, `⚠ Confirm write: ${confirmAsk.name}`),
+              h(Text, { bold: true, color: 'yellow' }, confirmAsk.title),
               confirmAsk.command != null
-                ? h(Text, { wrap: 'wrap' }, `$ ${confirmAsk.command.length > 1000 ? `${confirmAsk.command.slice(0, 1000)}…` : confirmAsk.command}`)
+                ? h(Text, { wrap: 'wrap' }, confirmAsk.command)
                 : h(Text, { dim: true, wrap: 'truncate' }, confirmAsk.args),
-              h(Text, { color: theme?.error, selectable: false }, `Press y to confirm · n to decline · ${CAP.esc} to cancel`))
+              h(Text, { color: theme?.error, selectable: false }, confirmAsk.hint))
           // The field is where the person types — its caret, prompt and placeholder are
           // not text to copy, and a drag over it must not pick them up.
           : h(Box, { flexDirection: 'column', width: '100%', backgroundColor: m.fieldBg, selectable: false },
@@ -1512,11 +1507,11 @@ function renderContextPanel(r: ContextReading, bg: string | undefined, wrap: num
 const ASK_PROMPT = '     › ';
 export const askFieldWidth = (wrap: number) => Math.max(10, wrap - ASK_PROMPT.length - 2);
 
-function renderAsk(state: AskState, bg: string | undefined, wrap: number) {
+// The question block's pieces, shared by its render and by the count of its rows
+// (`pendingChatRows`), so the two cannot drift apart.
+function askView(state: AskState, wrap: number) {
   const q = state.questions[state.index]!;
   const many = state.questions.length > 1 ? `${state.index + 1}/${state.questions.length} · ` : '';
-  const rows = askRows(state);
-  const mark = (r: AskRow) => (q.multiSelect && !r.other ? (r.picked ? '[x]' : '[ ]') : r.active ? ' ❯ ' : '   ');
   // The hint says the rule the list itself cannot: the digits pick, and anything else
   // typed starts an answer in the person's own words.
   const hint = state.typing
@@ -1524,11 +1519,70 @@ function renderAsk(state: AskState, bg: string | undefined, wrap: number) {
     : q.multiSelect
       ? `${CAP.upDown} move · ${CAP.space} toggle · ${CAP.enter} confirm · type your own words · ${CAP.esc} dismiss`
       : `${CAP.upDown} move · ${CAP.enter} or a digit to answer · type your own words · ${CAP.esc} dismiss`;
-  // The field is an editor, so it has a caret of its own to draw — wherever it is in
-  // the text, not always at the end.
-  const fieldRows = state.typing ? inputVisualRows(state.text, state.caret, askFieldWidth(wrap)) : [];
+  return {
+    q,
+    title: `? ${many}${q.header ? `${q.header} — ` : ''}${q.question}`,
+    rows: askRows(state),
+    hint,
+    // The field is an editor, so it has a caret of its own to draw — wherever it is in
+    // the text, not always at the end.
+    fieldRows: state.typing ? inputVisualRows(state.text, state.caret, askFieldWidth(wrap)) : [],
+  };
+}
+
+// The y/n block's pieces, the same way.
+function confirmView(c: { name: string; args?: string | unknown; command?: string }) {
+  return {
+    title: `⚠ Confirm write: ${c.name}`,
+    command: c.command != null ? `$ ${c.command.length > 1000 ? `${c.command.slice(0, 1000)}…` : c.command}` : null,
+    args: typeof c.args === 'string'
+      ? (c.args.length > 120 ? `${c.args.slice(0, 120)}…` : c.args)
+      : JSON.stringify(c.args ?? ''),
+    hint: `Press y to confirm · n to decline · ${CAP.esc} to cancel`,
+  };
+}
+
+// How many rows a wrapping text takes at `width` columns, as a Text lays it out.
+const textRows = (text: string, width: number) => Math.max(1, wrapText(text, Math.max(1, width), 'wrap').length);
+
+// How many rows the chat needs to show a pending question or y/n WHOLE, in a frame
+// `width` columns wide that fills its area (a docked panel): the frame and its padding,
+// one row of conversation, the status row, the plan and the queue line when they are
+// up, the block — and the gaps between them. 0 when nothing is pending. The App grows a
+// bottom panel to it, and draws the chat as a window while it is pending when even that
+// would leave the plugin less than its least (src/runtime/panel-layout.ts).
+export function pendingChatRows({ width, question, confirm, todo, queued = 0 }: {
+  width: number;
+  question?: AskState | null;
+  confirm?: { name: string; args?: string | unknown; command?: string } | null;
+  todo?: PlanItem[] | null;
+  queued?: number;
+}): number {
+  if (!question && !confirm) return 0;
+  const wrap = chatWrapWidth(width, true);
+  // Inside the block: its border and its paddingX, two columns each side.
+  const inner = wrap - 2;
+  let block: number;
+  if (question) {
+    const v = askView(question, wrap);
+    block = 2 + textRows(v.title, inner) + v.rows.reduce((n, r) => n + 1 + (r.description ? 1 : 0), 0) + v.fieldRows.length + textRows(v.hint, inner);
+  } else {
+    const v = confirmView(confirm!);
+    // Three pieces with a gap between each.
+    block = 2 + 1 + 1 + (v.command != null ? textRows(v.command, inner) : 1) + 1 + textRows(v.hint, inner);
+  }
+  const plan = question ? { shown: [], summary: '' } : planView(todo ?? []);
+  const planRows = plan.shown.length || plan.summary ? 1 + plan.shown.length + (plan.summary ? 1 : 0) : 0;
+  const parts = [1, 1, planRows, queued ? 1 : 0, block].filter((n) => n > 0);
+  // The frame's border and padding, the parts, a gap between each two.
+  return 4 + parts.reduce((a, b) => a + b, 0) + parts.length - 1;
+}
+
+function renderAsk(state: AskState, bg: string | undefined, wrap: number) {
+  const { q, title, rows, hint, fieldRows } = askView(state, wrap);
+  const mark = (r: AskRow) => (q.multiSelect && !r.other ? (r.picked ? '[x]' : '[ ]') : r.active ? ' ❯ ' : '   ');
   return h(Box, { flexDirection: 'column', width: '100%', border: 'round', paddingX: 1, borderColor: 'cyan', backgroundColor: bg },
-    h(Text, { bold: true, color: 'cyan', wrap: 'wrap' }, `? ${many}${q.header ? `${q.header} — ` : ''}${q.question}`),
+    h(Text, { bold: true, color: 'cyan', wrap: 'wrap' }, title),
     ...rows.map((r, i) => h(Box, { key: i, flexDirection: 'column' },
       h(Text, { bold: r.active, inverse: r.active && !state.typing, wrap: 'truncate' }, `${mark(r)} ${i + 1}. ${r.label}`),
       r.description ? h(Text, { dim: true, wrap: 'truncate' }, `       ${r.description.slice(0, Math.max(10, wrap - 8))}`) : null)),

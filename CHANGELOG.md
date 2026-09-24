@@ -9,7 +9,8 @@ What each version of flow-assist brought, newest first. The version is the one i
   screen, so the board the assistant was told about was hidden from the person talking
   about it. Now it is docked to the right by default (at the bottom on a terminal under
   120 columns; as a window on one too short for a panel and the plugin's screen both)
-  and the plugin's screen is laid out in the rest. Ctrl+] moves the
+  and the plugin's screen is laid out in the rest. A question or a y/n is always shown
+  whole — a bottom panel grows to it, or the chat is a window until it is answered. Ctrl+] moves the
   keyboard between the two, the side that has it is marked, and the chat goes on
   answering while the plugin has the keys. Ctrl+\ folds the panel away and back — a
   running turn's status then sits on the plugin's bottom row, or on the one row a

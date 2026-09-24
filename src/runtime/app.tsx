@@ -196,6 +196,9 @@ type ChatStore = {
   panelKey?: (which: 'focus' | 'collapse') => boolean;
   // A click at a cell: the chat moves the keyboard to the pane under it.
   pointer?: (x: number, y: number) => void;
+  // The rows the open chat needs at a panel `width` columns wide to show a pending
+  // question or y/n whole; 0 when nothing is pending.
+  needRows?: (width: number) => number;
   // The running turn's status, drawn on the plugin's bottom row while the panel is
   // collapsed on the right; null when nothing runs.
   statusRow?: unknown;
@@ -753,9 +756,15 @@ export function renderApp(
     const chat = chatStore();
     const assistantCfg = (config.plugins as Record<string, Record<string, unknown> | undefined> | undefined)?.assistant;
     const mode: ChatMode | null = chat ? chat.mode ?? chatModeOf(assistantCfg) : null;
-    const layout: PanelLayout | null = mode === 'panel'
-      ? panelLayout({ width: termWidth, height: termHeight, ...((assistantCfg?.panel as { side?: unknown; size?: unknown } | undefined) ?? {}), collapsed: !chat?.open })
+    const panelCfg = (assistantCfg?.panel as { side?: unknown; size?: unknown } | undefined) ?? {};
+    let layout: PanelLayout | null = mode === 'panel'
+      ? panelLayout({ width: termWidth, height: termHeight, ...panelCfg, collapsed: !chat?.open })
       : null;
+    // A question or a y/n the open chat must show whole: the panel is given the rows it
+    // needs at the width it has — or, when that would leave the plugin less than its
+    // least, the chat is a window until it is answered.
+    const need = layout && chat?.open ? chat.needRows?.(layout.panel.width) ?? 0 : 0;
+    if (layout && need > layout.panel.height) layout = panelLayout({ width: termWidth, height: termHeight, ...panelCfg, collapsed: false, need });
     // A terminal too small for the panel's least and the plugin's is laid out as for a
     // window, for as long as it is that small: `chatDock` is null, and the chat reads
     // that as being drawn as a window (src/runtime/panel-layout.ts, `fits`).
