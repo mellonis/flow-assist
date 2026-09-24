@@ -118,7 +118,9 @@ flowtty it needs (`flowtty`, a semver range, checked against `FLOWTTY_VERSION`, 
 test holds equal to the installed `@flowtty/react`). One pure check, `pluginCompat`
 (`src/loader/compat.ts`), answers for every place a plugin is met, from the manifest
 alone and before its code is imported: `loadPlugins` skips it (a line into the log
-through `loadNotes`), `plugins ls` shows `incompatible: …` (`RepoEntry.incompatible`),
+through `loadNotes`), `plugins ls` shows `incompatible: …` (`RepoEntry.incompatible`;
+`list()` also lists a plugin linked into `plugins-enabled/` from outside
+`plugins-available/`, source `linked`),
 and install refuses it — a link, a registry fetch, an archive before it is moved into
 place. A missing `flowtty` is loaded with a note; the bundled plugins and
 `examples/notes` declare both fields (a test). A plugin reads the number it runs under

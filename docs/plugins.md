@@ -377,7 +377,8 @@ one:
 
 A plugin that cannot run here is skipped — the rest load — and said so: `plugins ls`
 shows `incompatible: built for host API 1, host provides 2` (or `incompatible: needs
-flowtty ^1.1.0, host has 1.0.0-alpha.26`) beside it, the log (`L`) has a line, and
+flowtty ^1.1.0, host has 1.0.0-alpha.26`) beside it — a plugin linked into
+`plugins-enabled/` from a repository of its own is listed too, marked `(linked)` — the log (`L`) has a line, and
 `plugins install` refuses it — an archive before anything is unpacked into place. A
 plugin that is a single file has no manifest, so it reads as host API 1 with no
 flowtty range; a plugin is a directory with a `manifest.json`.

@@ -19,12 +19,13 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   symlinkSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { THIS_HOST, pluginCompat } from './compat.js';
+import { THIS_HOST, pluginCompat, readPluginManifest } from './compat.js';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -127,7 +128,9 @@ function writeSourceMarker(pluginDir: string): void {
 
 // Where a plugin came from: 'registry' (downloaded by name), 'archive' (installed
 // from a .tar.gz file or URL — archive-install.ts), 'git' (checked out, or unmarked).
-export type PluginSource = 'git' | 'registry' | 'archive';
+// `linked` — enabled by a link to a plugin kept outside `plugins-available/` (a
+// plugin in a repository of its own).
+export type PluginSource = 'git' | 'registry' | 'archive' | 'linked';
 
 // Provenance for a plugin dir, read from its `.flow-assist-source` marker; 'git' when
 // there is none.
@@ -357,6 +360,30 @@ export function createPluginRepo({ availableDir, enabledDir, projectRoot, fetchP
         if (manifest.surfaces && manifest.surfaces.length) entry.surfaces = manifest.surfaces;
         if (manifest.tools && manifest.tools.length) entry.tools = manifest.tools;
         entries.push(entry);
+      }
+      // A plugin enabled by a link to somewhere else — kept in a repository of its own —
+      // is listed too, with whether this host can load it.
+      const inAvailable = (() => { try { return realpathSync(availableDir); } catch { return resolve(availableDir); } })();
+      if (existsSync(enabledDir)) {
+        for (const name of readdirSync(enabledDir)) {
+          const link = join(enabledDir, name);
+          if (!lstatSync(link).isSymbolicLink() || entries.some((e) => e.name === name)) continue;
+          let target: string;
+          try { target = realpathSync(link); } catch { continue; }
+          if (target === inAvailable || target.startsWith(`${inAvailable}/`)) continue;
+          const manifest = readPluginManifest(target) as Manifest;
+          const entry: RepoEntry = {
+            name,
+            version: typeof manifest.version === 'string' ? manifest.version : '',
+            description: typeof manifest.description === 'string' ? manifest.description : '',
+            active: true,
+            missingDeps: [],
+            source: 'linked',
+          };
+          const compat = pluginCompat(manifest, THIS_HOST);
+          if (!compat.ok) entry.incompatible = compat.reason;
+          entries.push(entry);
+        }
       }
       return entries;
     },

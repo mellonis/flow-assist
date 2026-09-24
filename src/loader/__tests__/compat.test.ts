@@ -105,6 +105,22 @@ test('plugins ls names why a plugin cannot load; install refuses it', async () =
   expect(existsSync(join(d.enabledDir, 'old'))).toBe(false);
 });
 
+test('plugins ls lists a plugin linked in from elsewhere, with why it cannot load', async () => {
+  const d = pluginsDir({ fits: { manifest: { hostApi: HOST_API, flowtty: FITS } } });
+  // A plugin kept in a repository of its own, linked into plugins-enabled/.
+  const elsewhere = mkdtempSync(join(tmpdir(), 'fa-compat-own-'));
+  writeFileSync(join(elsewhere, 'manifest.json'), JSON.stringify({ name: 'corp', version: '3.0.0', hostApi: OTHER }));
+  symlinkSync(elsewhere, join(d.enabledDir, 'corp'));
+  const listed = await d.repo.list();
+  expect(listed.find((e) => e.name === 'corp')).toMatchObject({
+    version: '3.0.0', active: true, source: 'linked',
+    incompatible: `incompatible: built for host API ${OTHER}, host provides ${HOST_API}`,
+  });
+  // One linked from plugins-available/ is listed once, as before.
+  expect(listed.filter((e) => e.name === 'fits')).toHaveLength(1);
+  expect(listed.find((e) => e.name === 'fits')?.source).not.toBe('linked');
+});
+
 test('an archive of a plugin this host cannot load is refused up front, nothing unpacked into place', async () => {
   const d = pluginsDir({});
   const src = mkdtempSync(join(tmpdir(), 'fa-compat-src-'));
