@@ -182,7 +182,8 @@ Every hook of the shape — each `components[slot]` factory, `setup`, `keycaps`,
 |---|---|
 | `h`, `useState`, `useEffect`, `useRef` (React) | `services` — the host's (`showMessage`, `pushLog`, `chatLLM`, `cache`, …) with the plugin's own under them |
 | `Box`, `Text`, `Markdown`, `Table`, `Link`, `ScrollBox` | `store` — the channel between plugins and the host |
-| `Select`, `ListSelect`, `ListMultiSelect`, `Checkbox` | `config`, `keys`, `keyCap(action)` |
+| `Select`, `ListSelect`, `ListMultiSelect`, `Checkbox`, `TextInput` | `config`, `keys`, `keyCap(action)` |
+| `isPrintable(key)` (@flowtty/core) — whether a key types a character | |
 | `useInput` — flowtty's own, beside the host's key path | `useInputHandler` — the host's key path |
 | | `useSurfaceSize`, `useTerminalSize` — the room the host gives the plugin |
 | | `notify()`, `viewRegistry`, `commandRegistry`, `helpFor`, `copyToClipboard` |
@@ -272,7 +273,9 @@ setup: ({ host }) => { /* once, before any component mounts: seed a store */ },
   the focus; Ctrl+] and the exit keys always do. The names are flowtty's own: a plugin
   that imports the pickers from flowtty uses `Select` for the dropdown and
   `ListSelect` / `ListMultiSelect` for the lists — flowtty has no `MultiSelect`.
-  `ui.Checkbox` and `ui.ScrollBox` hear flowtty's input the same way — a scroll box
+  `ui.Checkbox`, `ui.TextInput` (a one-line field; it takes the width of a column
+  around it, so give it a box with a width) and `ui.ScrollBox` hear flowtty's input
+  the same way — a scroll box
   takes the page keys and the wheel over it — and are gated the same way
   (`isFocused`, `isActive`).
 - Tab and ⇧⇥ always come through `host.useInputHandler`, never to a flowtty

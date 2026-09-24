@@ -151,8 +151,8 @@ the blacklist.
 - **What a plugin is given is `{ ui, host }`** (`src/runtime/plugin-api.ts`). The rule:
   `ui` is what React and flowtty ship, passed through unchanged — `h`, `useState`,
   `useEffect`, `useRef`, flowtty's own `useInput`, `Box`, `Text`, `Markdown`, `Table`,
-  `Link`, `ScrollBox`, `Select`, `ListSelect`, `ListMultiSelect`, `Checkbox` — one
-  object for every plugin; `host` is what the host implements or wraps — `services`,
+  `Link`, `ScrollBox`, `Select`, `ListSelect`, `ListMultiSelect`, `Checkbox`,
+  `TextInput`, and @flowtty/core's `isPrintable` — one object for every plugin; `host` is what the host implements or wraps — `services`,
   `store`, `config`, `keys`, `keyCap`, `useInputHandler`, `useSurfaceSize`,
   `useTerminalSize` (the plugin's side, not flowtty's whole terminal), `notify`,
   `viewRegistry`, `commandRegistry`, `helpFor`, `copyToClipboard`, `pluginToken`,

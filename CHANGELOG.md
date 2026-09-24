@@ -10,7 +10,8 @@ What each version of flow-assist brought, newest first. The version is the one i
   `setup`, `keycaps`, `chatContext`, `chatSubject`, `afterWrite`) receives
   `{ ui, host }`. `ui` holds what React and flowtty ship, unchanged: `h`, `useState`,
   `useEffect`, `useRef`, `useInput`, `Box`, `Text`, `Markdown`, `Table`, `Link`,
-  `ScrollBox`, `Select`, `ListSelect`, `ListMultiSelect`, `Checkbox`. `host` holds what
+  `ScrollBox`, `Select`, `ListSelect`, `ListMultiSelect`, `Checkbox`, `TextInput`, and
+  `isPrintable` — whether a key types a character. `host` holds what
   the host implements: `services` (`host.services.showMessage(…)`, `pushLog`,
   `chatLLM`, …), `store`, `config`, `keys`, `keyCap`, `useInputHandler`,
   `useSurfaceSize`, `useTerminalSize`, `notify`, `viewRegistry`, `commandRegistry`,

@@ -41,6 +41,12 @@ export interface PluginUi {
   ListSelect: unknown;
   ListMultiSelect: unknown;
   Checkbox: unknown;
+  // A one-line text field (`frame`: `field`, `none`, `border`), as wide as the column
+  // around it — it hears keys itself, gated like the pickers.
+  TextInput: unknown;
+  // Whether a key types a character (@flowtty/core): never a chord, never a control
+  // character — what a plugin's own field or filter accepts.
+  isPrintable: (key: { name: string; ctrl?: boolean; meta?: boolean }) => boolean;
   // flowtty's own `useInput`: every key, in flowtty's delivery order — beside the
   // host's key path, not in it. A plugin's keys go through `host.useInputHandler`.
   useInput: (handler: (key: InputKey) => void, opts?: { isActive?: boolean }) => void;

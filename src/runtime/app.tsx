@@ -10,7 +10,7 @@
 // take a second press are the App's own, before any of this: src/runtime/exit-keys.ts).
 
 import { pluginConfigs } from '../loader/tools.js';
-import { Box, Text, Markdown, Table, Link, ScrollBox, Select, ListSelect, ListMultiSelect, Checkbox, DialogHost, render, useApp, useColorScheme, useInput, useTerminalSize, type CopyEvent } from '@flowtty/react';
+import { Box, Text, Markdown, Table, Link, ScrollBox, Select, ListSelect, ListMultiSelect, Checkbox, TextInput, DialogHost, render, useApp, useColorScheme, useInput, useTerminalSize, type CopyEvent } from '@flowtty/react';
 import { isPrintable, type Backend } from '@flowtty/core';
 import { Fragment, createContext, createElement as h, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { HOST_API } from '../version.js';
@@ -454,6 +454,8 @@ export function renderApp(
           ListSelect,
           ListMultiSelect,
           Checkbox,
+          TextInput,
+          isPrintable: isPrintable as unknown as PluginUi['isPrintable'],
           useInput: useInput as unknown as PluginUi['useInput'],
         },
         host: {

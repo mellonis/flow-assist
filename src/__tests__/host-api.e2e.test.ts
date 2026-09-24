@@ -83,3 +83,29 @@ test('host.hasKeyboard() says whether the plugin side has the keyboard', async (
   expect(keys()).toBe('no');
   ui.app.unmount();
 });
+
+// A plugin's filter bar: `ui.TextInput`, and its own keys judged by `ui.isPrintable`.
+test('ui.TextInput types, and ui.isPrintable tells a character from a chord', async () => {
+  let printable: ((key: unknown) => boolean) | null = null;
+  const make = (mk: any) => [mk('boards', {
+    name: 'boards',
+    keycaps: () => ['c board'],
+    components: {
+      view: ({ ui, host }: any) => function View() {
+        printable = ui.isPrintable;
+        const [text, setText] = ui.useState('');
+        return ui.h(ui.Box, { flexDirection: 'row' },
+          ui.h(ui.Text, null, 'filter: '),
+          // A field takes the width of a column around it.
+          ui.h(ui.Box, { width: 20, flexDirection: 'column' },
+            ui.h(ui.TextInput, { value: text, onChange: setText, frame: 'field', isFocused: host.hasKeyboard() })));
+      },
+    },
+  })];
+  const ui = await bootApp(new ScriptedModel(), 100, 28, make as never);
+  await ui.type('abc');
+  expect(ui.backend.lastFrame).toContain('filter: abc');
+  expect(printable!({ name: 'a' })).toBe(true);
+  expect(printable!({ name: ']', ctrl: true })).toBe(false);
+  ui.app.unmount();
+});
