@@ -2125,7 +2125,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // `footerStatus`: the status goes on the plugin's footer row (not on a bottom
           // panel's own strip), and it names the key that brings the chat back — the
           // footer's `F chat` beside it would say "chat" twice.
-          const footerStatus = statusRow != null && dock?.side !== 'bottom';
+          // With Ctrl+]'s action unbound the status names no key, and the footer's own
+          // hint is the only way back that is said.
+          const footerStatus = statusRow != null && dock?.side !== 'bottom' && !!focusCap;
           // The rows a pending question or y/n needs at a panel's width (the App grows a
           // bottom panel to it, or draws the chat as a window while it waits — see
           // `pendingChatRows`). Read from the refs: the App asks before this re-renders.

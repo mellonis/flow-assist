@@ -605,6 +605,25 @@ test('collapsed on the right with a turn running, the footer says "chat" once', 
   ui.app.unmount();
 });
 
+// With Ctrl+]'s action unbound the status names no key: the footer keeps its own.
+test('with chatFocus unbound, a collapsed turn\'s footer still says F chat', async () => {
+  const model = new ScriptedModel();
+  model.script([{ hold: true }, { text: 'Done.' }]);
+  const g = guest();
+  const ui = await bootApp(model, 160, 40, g.make as never, { keys: { chatFocus: [] } }, { chatMode: 'panel' });
+  await ui.press('F');
+  await ui.type('go');
+  await ui.press('return');
+  await press(ui, COLLAPSE);
+  const footer = rows(ui).find((l) => l.includes(': commands')) ?? '';
+  expect(footer).toContain('…');
+  expect(footer).not.toContain('^] chat');
+  expect(footer).toContain('F chat');
+  model.release();
+  await settle(20);
+  ui.app.unmount();
+});
+
 // `/mode` alone answers in the chat, as a note: a toast is drawn under a chat that
 // covers the whole terminal, and was never seen there.
 test.each(['panel', 'window', 'full'] as const)('/mode alone says where the chat is, in the chat (%s)', async (mode) => {
