@@ -275,6 +275,8 @@ setup: ({ host }) => { /* once, before any component mounts: seed a store */ },
   `ui.Checkbox` and `ui.ScrollBox` hear flowtty's input the same way — a scroll box
   takes the page keys and the wheel over it — and are gated the same way
   (`isFocused`, `isActive`).
+- Tab and ⇧⇥ always come through `host.useInputHandler`, never to a flowtty
+  component: flowtty's focus cycling does not run in a plugin's screen.
 - Keys come through `host.useInputHandler({ mode, priority, handler })`. `mode` is
   `'consume'` (joins the race for the key) or `'observe'` (sees every key, takes
   none). Handlers run from the highest `priority(ui)` down, and a handler takes the

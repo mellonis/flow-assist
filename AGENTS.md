@@ -1142,7 +1142,10 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   pass 2, where `HostChords` runs `twoPhaseDispatch` (`last`) and takes it — no other
   handler hears it twice, and the host's path runs inside flowtty's synchronous render
   (a burst of keys — Esc Esc — sees each key's state). A mouse button skips pass 2 (a
-  second press would redo the selection) and runs `last` right after pass 1. While a
+  second press would redo the selection) and runs `last` right after pass 1. Tab and
+  ⇧⇥ go from `HostChords` to `last` at once: the DialogHost's `FocusGroup` above the
+  App takes Tab whenever two flowtty fields are mounted, and the chat completes and
+  steps its auto mode with them, a plugin's handlers hear them. While a
   dropdown's popup is open flowtty mutes the App's subtree, `HostChords` with it; the
   exit keys are then heard by `HostExit`, a capture handler beside the DialogHost
   (never muted, mounted after it, and acting only when `HostChords` did not hear the

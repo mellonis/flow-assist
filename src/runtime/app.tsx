@@ -218,7 +218,8 @@ type ChatStore = {
 //   2. Whatever flowtty component takes the key: a dropdown's popup, a focused field
 //      or list, a scroll box — each takes the keys it acts on.
 //   3. The host's key path (`last`, `twoPhaseDispatch`): plugin handlers, the chat, the
-//      host fallback — for a key nothing took.
+//      host fallback — for a key nothing took. Tab and ⇧⇥ come here straight from
+//      step 1: the DialogHost's FocusGroup above the App would take them otherwise.
 // flowtty has no phase after the ordinary handlers, and those go in mount order — a
 // plugin's surface opened after boot comes after anything of the App's — so step 3 is
 // a second pass: the backend's key listener is wrapped (`hostKeyed`), and a key nothing
@@ -273,7 +274,16 @@ function HostChords({ path }: { path: HostKeyPath }) {
   useInput((key) => {
     if (path.pass === 1) {
       path.heard = true;
-      return path.first(key as unknown as InputKey, false);
+      const k = key as unknown as InputKey;
+      if (path.first(k, false) === true) return true;
+      // Tab and ⇧⇥ are the host's key path's at once — the chat completes and steps
+      // its auto mode with them, a plugin's handlers hear them — never flowtty's focus
+      // cycling above the App, which would take them whenever two fields are mounted.
+      if (k.name === 'tab') {
+        path.last(k);
+        return true;
+      }
+      return undefined;
     }
     path.last(key as unknown as InputKey);
     return true;

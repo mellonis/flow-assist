@@ -205,3 +205,35 @@ test('whatever the history of mounts and dropdowns, a key is delivered once; Ctr
   expect(ui.backend.lastFrame).toContain('Flow Assist');
   ui.app.unmount();
 });
+
+// Tab is the host's: the chat completes with it, and a plugin's own handler hears it —
+// never flowtty's focus cycling, which would take it whenever two fields are mounted.
+test('Tab reaches the chat and the plugin, with two lists on screen', async () => {
+  const tabs: string[] = [];
+  const make = (mk: any) => [mk('boards', {
+    name: 'boards',
+    keycaps: () => ['c board'],
+    components: {
+      keys: (api: any) => function Keys() {
+        api.host.useInputHandler({ mode: 'consume', priority: () => 10, handler: (key: { name: string; shift?: boolean }) => {
+          if (key.name === 'tab') { tabs.push(key.shift ? 'shift+tab' : 'tab'); return true; }
+          return false;
+        } });
+        return null;
+      },
+      view: (api: any) => function View() {
+        return api.ui.h(api.ui.Box, { flexDirection: 'column' },
+          api.ui.h(api.ui.ListSelect, { items: ITEMS, value: 'fe', onChange: () => {}, isFocused: false }),
+          api.ui.h(api.ui.ListSelect, { items: ITEMS, value: 'be', onChange: () => {}, isFocused: false }));
+      },
+    },
+  })];
+  const ui = await bootApp(new ScriptedModel(), 100, 28, make as never);
+  await ui.press('tab');
+  expect(tabs).toEqual(['tab']);
+  await ui.press('F');
+  await ui.type('/comp');
+  await ui.press('tab');
+  expect(ui.backend.lastFrame).toContain('› /compact');
+  ui.app.unmount();
+});
