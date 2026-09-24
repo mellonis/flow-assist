@@ -52,6 +52,10 @@ export interface LogService {
 // Creates the host log service: an in-memory line buffer plus an opt-in
 // on-disk tool-call log. The buffer is a plain array of strings; the file log is
 // the only place `logToolRun` writes and it never throws.
+// The in-memory log keeps its last LOG_MAX_LINES lines: a plugin printing on every
+// render, or a long session, must not grow it without end.
+export const LOG_MAX_LINES = 2000;
+
 export function createLogService(config: Record<string, unknown> | undefined): LogService {
   const debug = config?.debug as { logTools?: boolean } | undefined;
   const logTools = debug?.logTools === true;
@@ -63,6 +67,7 @@ export function createLogService(config: Record<string, unknown> | undefined): L
       const t = new Date();
       const stamp = [t.getHours(), t.getMinutes(), t.getSeconds()].map((n) => String(n).padStart(2, '0')).join(':');
       buffer.push(`${stamp} ${entry}`);
+      if (buffer.length > LOG_MAX_LINES) buffer.splice(0, buffer.length - LOG_MAX_LINES);
     },
 
     read(): string[] {

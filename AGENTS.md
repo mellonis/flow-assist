@@ -1853,13 +1853,16 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   never lands in the frame. `runInteractive` passes it
   `onConsole` (`consoleBridge`, `src/runtime/console-log.ts`) and each line goes to the
   host log (`L`) at once as `[console] …` / `[console.warn] …`, one entry per line of
-  it. With `onConsole` set flowtty prints nothing again at exit, so the log is where
-  such a line is read. Delivery is always on a microtask — React prints its warnings
-  mid-render, and the log's refresh is a setState — and the redraw a line asks for is
-  coalesced to one per `CONSOLE_REDRAW_MS` (200 ms), never one per line: a view that
-  prints on every render is redrawn by its own line's redraw, and a redraw per line
-  would be a loop. Lines printed before the App is up go into the
-  buffer with no redraw. Direct writes to `process.stdout` / `stderr` are not covered.
+  it. With `onConsole` set flowtty prints nothing again at exit, so the host does: the
+  bridge keeps the run's last `CONSOLE_KEEP` (200) lines, and `runInteractive`'s exit
+  writes them to stderr after the terminal is restored. Delivery is always on a
+  microtask — React prints its warnings mid-render, and the log's refresh is a
+  setState. A line redraws the App only while the log is open, and then at most once
+  per `CONSOLE_REDRAW_MS` (200 ms): a view that prints on every render is redrawn by
+  its own line's redraw, so with the log closed nothing redraws for it at all. The log
+  keeps its last `LOG_MAX_LINES` (2000). Lines printed before the App is up go into
+  the buffer with no redraw. Direct writes to `process.stdout` / `stderr` are not
+  covered.
 
 `flow-assist` with subcommands:
 

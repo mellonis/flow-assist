@@ -96,5 +96,24 @@ test('a view that prints on every render does not redraw the app in a loop', asy
   const until = Date.now() + 500;
   while (Date.now() < until) { await flush(); await new Promise((r) => setTimeout(r, 10)); }
   handle.unmount();
-  expect(renders).toBeLessThan(20);
+  // With the log closed nothing redraws for a console line: the view drew once.
+  expect(renders).toBeLessThan(3);
+});
+
+test('the last lines of the run are kept for stderr at exit, capped', () => {
+  const bridge = consoleBridge(3);
+  expect(bridge.kept()).toEqual([]);
+  bridge.onConsole({ level: 'log', line: 'one' });
+  bridge.onConsole({ level: 'warn', line: 'two\nthree' });
+  bridge.onConsole({ level: 'error', line: 'four' });
+  // Kept at once, not a microtask later: an exit may come before it runs.
+  expect(bridge.kept()).toEqual(['[console.warn] two', '[console.warn] three', '[console.error] four']);
+});
+
+test('the log keeps its last lines only', async () => {
+  const { createLogService, LOG_MAX_LINES } = await import('../services/log');
+  const log = createLogService({});
+  for (let i = 0; i < LOG_MAX_LINES + 5; i++) log.append(`line ${i}`);
+  expect(log.read()).toHaveLength(LOG_MAX_LINES);
+  expect(log.read()[0]).toEndWith(' line 5');
 });

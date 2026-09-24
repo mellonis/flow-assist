@@ -45,8 +45,8 @@ What each version of flow-assist brought, newest first. The version is the one i
   focused one is never beaten to its keys by the host.
 - **A stray `console.log` no longer lands on the screen.** What a plugin, a library or
   React prints through the console while the app runs goes to the log (`L`) at once,
-  as `[console] …`, `[console.warn] …` or `[console.error] …`, and is not printed
-  again when the app exits.
+  as `[console] …`, `[console.warn] …` or `[console.error] …`; the last 200 such
+  lines are printed to stderr when the app exits. The log keeps its last 2000 lines.
 - **The chat is a panel beside the plugin's screen.** It used to be a window over the
   screen, so the board the assistant was told about was hidden from the person talking
   about it. Now it is docked to the right by default (at the bottom on a terminal under

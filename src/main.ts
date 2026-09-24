@@ -325,6 +325,10 @@ async function runInteractive(config: Record<string, unknown>, repo: PluginRepo)
   const onExit = () => {
     handle?.unmount();
     backend.dispose?.();
+    // What was printed through the console while the app ran, now that the terminal is
+    // the shell's again: the log that showed it is gone with the app.
+    const printed = consoleLog.kept();
+    if (printed.length) process.stderr.write(`${printed.join('\n')}\n`);
     process.exit(0);
   };
   const pluginsNote = await missingPluginsNote(repo);

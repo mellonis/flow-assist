@@ -1,8 +1,9 @@
 // What a `console.log` / `warn` / `error` printed while the app owns the screen — a
 // plugin's stray line, a library's, React's own warnings — goes to the host log (`L`)
 // at once. The TTY backend takes the console over while it holds the alternate screen
-// and hands each line to `onConsole`; with that set it
-// prints nothing at exit, so the log is where such a line is read.
+// and hands each line to `onConsole`; with that set it prints nothing at exit, so the
+// host does: the last CONSOLE_KEEP lines of the run go to stderr once the terminal is
+// the shell's again (`runInteractive`'s exit), after the log that held them is gone.
 //
 // A line is never logged where it was printed: React prints its warnings in the middle
 // of a render, and the log's refresh is a setState — "cannot update a component while
@@ -24,15 +25,22 @@ export interface ConsoleBridge {
   onConsole: (entry: { level: ConsoleLevel; line: string }) => void;
   // Where the lines go once the app is up; what was held is delivered first.
   attach: (push: (line: string) => void) => void;
+  // The last lines of the run, oldest first — for stderr at exit.
+  kept: () => string[];
 }
 
-export function consoleBridge(): ConsoleBridge {
+export const CONSOLE_KEEP = 200;
+
+export function consoleBridge(keep = CONSOLE_KEEP): ConsoleBridge {
   let push: ((line: string) => void) | null = null;
   const held: string[] = [];
+  const last: string[] = [];
   return {
     onConsole: (entry) => {
       const lines = consoleLogLines(entry);
       if (!lines.length) return;
+      last.push(...lines);
+      if (last.length > keep) last.splice(0, last.length - keep);
       queueMicrotask(() => {
         if (push) for (const l of lines) push(l);
         else held.push(...lines);
@@ -42,5 +50,6 @@ export function consoleBridge(): ConsoleBridge {
       push = fn;
       for (const l of held.splice(0)) fn(l);
     },
+    kept: () => [...last],
   };
 }

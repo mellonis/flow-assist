@@ -280,7 +280,8 @@ setup: ({ host }) => { /* once, before any component mounts: seed a store */ },
   screen, 10 — a key that opens something, 0 — nothing (a closed modal).
 - **A `console.log` goes to the log**, not to the screen: while the app runs, a line
   printed through `console` (`log`, `warn`, `error`, …) is shown in the log (`L`) as
-  `[console] …` / `[console.warn] …`. A write straight to `process.stdout` or
+  `[console] …` / `[console.warn] …`, and the last of them are printed to stderr when
+  the app exits. A write straight to `process.stdout` or
   `process.stderr` still lands in the frame — keep those out of a plugin.
 - A setter in one component re-renders that component only; the host redraws after
   every key that was handled. For a change that does not come from a key (a fetch

@@ -321,15 +321,17 @@ export function renderApp(
   if (rootsNote) services.log.append(`[config] ${rootsNote}`);
   for (const note of llmConfigNotes(config.ai)) services.log.append(`[config] ${note}`);
   // A console line reaches the log as soon as it is printed, and an open log shows it:
-  // the App is asked to redraw — once the App is up, and at most once per
-  // CONSOLE_REDRAW_MS. Not per line, as `pushLog` does: a plugin that prints on every
-  // render (a debug line left in a view) is redrawn by the redraw its line asked for
-  // and prints again, so a redraw per line would never stop.
+  // while the log is open the App is asked to redraw, at most once per
+  // CONSOLE_REDRAW_MS. Not per line, as `pushLog` does, and not while the log is closed:
+  // a plugin that prints on every render (a debug line left in a view) is redrawn by
+  // the redraw its line asked for and prints again. With the log closed nothing redraws
+  // for it; with the log open it costs a few frames a second.
   let pushLogBound = false;
+  let logOpen = () => false;
   let consoleRedraw: ReturnType<typeof setTimeout> | null = null;
   consoleLog?.attach((line) => {
     services.log.append(line);
-    if (!pushLogBound || consoleRedraw) return;
+    if (!pushLogBound || consoleRedraw || !logOpen()) return;
     consoleRedraw = setTimeout(() => {
       consoleRedraw = null;
       const bound = services as unknown as ReactBoundServices;
@@ -381,6 +383,7 @@ export function renderApp(
       notify();
     };
     pushLogBound = true;
+    logOpen = () => !!(hostBase.store as { log?: { open?: boolean } }).log?.open;
     (services as unknown as ReactBoundServices).notify = notify;
     (services as unknown as ReactBoundServices).logs = services.log.read();
     // Reminder banner: `showReminder` is the `remind` tool's timer delivery (the
