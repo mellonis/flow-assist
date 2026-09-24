@@ -207,6 +207,10 @@ type ChatStore = {
   statusRow?: unknown;
 };
 
+// How often a console line may redraw the App (see `consoleLog` in renderApp) — the
+// chat's own rate for a view that updates fast.
+const CONSOLE_REDRAW_MS = 200;
+
 export function renderApp(
   root: Backend,
   { plugins, config, onExit, renders: _renders = {}, tools, toastMs, clipboardImage, pluginsNote, interactive, consoleLog }: RenderAppInput,
@@ -229,13 +233,23 @@ export function renderApp(
   const rootsNote = legacyRootsNote(config);
   if (rootsNote) services.log.append(`[config] ${rootsNote}`);
   for (const note of llmConfigNotes(config.ai)) services.log.append(`[config] ${note}`);
-  // A console line reaches the log as soon as it is printed — through `pushLog` once the
-  // App has bound it, so an open log shows it at once; straight into the buffer before
-  // that (the unbound `pushLog` is a no-op).
+  // A console line reaches the log as soon as it is printed, and an open log shows it:
+  // the App is asked to redraw — once the App is up, and at most once per
+  // CONSOLE_REDRAW_MS. Not per line, as `pushLog` does: a plugin that prints on every
+  // render (a debug line left in a view) is redrawn by the redraw its line asked for,
+  // prints again, and the app spun in a loop — some 3000 renders a second.
   let pushLogBound = false;
+  let consoleRedraw: ReturnType<typeof setTimeout> | null = null;
   consoleLog?.attach((line) => {
-    if (pushLogBound) (services as unknown as ReactBoundServices).pushLog(line);
-    else services.log.append(line);
+    services.log.append(line);
+    if (!pushLogBound || consoleRedraw) return;
+    consoleRedraw = setTimeout(() => {
+      consoleRedraw = null;
+      const bound = services as unknown as ReactBoundServices;
+      bound.logs = services.log.read();
+      bound.notify();
+    }, CONSOLE_REDRAW_MS);
+    consoleRedraw.unref?.();
   });
   const viewRegistry = buildViewRegistry(plugins);
   const commandRegistry = buildCommandRegistry(plugins);

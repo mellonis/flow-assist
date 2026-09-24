@@ -1804,9 +1804,11 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   host log (`L`) at once as `[console] …` / `[console.warn] …`, one entry per line of
   it. With `onConsole` set flowtty prints nothing again at exit, so the log is where
   such a line is read. Delivery is always on a microtask — React prints its warnings
-  mid-render, and the log's refresh is a setState — and lines printed before the App
-  has bound `pushLog` go straight into the buffer. Direct writes to `process.stdout`
-  / `stderr` are not covered.
+  mid-render, and the log's refresh is a setState — and the redraw a line asks for is
+  coalesced to one per `CONSOLE_REDRAW_MS` (200 ms), never one per line: a view that
+  prints on every render is redrawn by its own line's redraw, and per line that was a
+  loop of ~3000 renders a second. Lines printed before the App is up go into the
+  buffer with no redraw. Direct writes to `process.stdout` / `stderr` are not covered.
 
 `flow-assist` with subcommands:
 

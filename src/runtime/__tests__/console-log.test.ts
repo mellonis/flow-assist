@@ -65,6 +65,7 @@ test('the log shows a console line at once — one printed during a render too, 
     expect(backend.lastFrame).toContain('[console.error] printed in a render');
     // Logged while open: the log follows.
     bridge.onConsole({ level: 'warn', line: 'while the log is open' });
+    await new Promise((r) => setTimeout(r, 250)); // the redraw is coalesced (200 ms)
     for (let i = 0; i < 4; i++) { await flush(); await tick(); }
     expect(backend.lastFrame).toContain('[console.warn] while the log is open');
     handle.unmount();
@@ -72,4 +73,28 @@ test('the log shows a console line at once — one printed during a render too, 
     console.error = realError;
   }
   expect(errors.map((a) => String(a[0]))).not.toContainEqual(expect.stringContaining('Cannot update a component'));
+});
+
+// A plugin that prints on EVERY render (a debug line left in a view) must not spin the
+// app: the line's redraw re-renders the view, which prints again. The redraw a console
+// line asks for is coalesced, so such a view costs a few frames a second, not a loop.
+test('a view that prints on every render does not redraw the app in a loop', async () => {
+  const bridge = consoleBridge();
+  let renders = 0;
+  const guest = {
+    name: 'chatty',
+    components: {
+      view: () => function View() {
+        renders += 1;
+        bridge.onConsole({ level: 'log', line: `render ${renders}` });
+        return null;
+      },
+    },
+  };
+  const backend = new TestBackend(100, 30);
+  const handle = await renderApp(backend, { plugins: [guest as never], config: {}, onExit: () => {}, consoleLog: bridge });
+  const until = Date.now() + 500;
+  while (Date.now() < until) { await flush(); await new Promise((r) => setTimeout(r, 10)); }
+  handle.unmount();
+  expect(renders).toBeLessThan(20);
 });
