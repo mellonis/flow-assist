@@ -2,8 +2,8 @@
 //
 // flowtty hands these three to the app before the terminal backend acts on them —
 // Ctrl+C / Ctrl+D exit and Ctrl+Z suspends unless a handler consumes the key. One
-// accidental press used to end the app in the middle of an answer, or stop it with a
-// request in flight. So the first press ARMS (and is consumed), and says so; the same
+// accidental press would otherwise end the app in the middle of an answer, or stop it
+// with a request in flight. So the first press ARMS (and is consumed), and says so; the same
 // key again within `ARM_MS` does what the key means; any other key disarms.
 
 import { keyGlyph } from '../playback/keys.js';

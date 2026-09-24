@@ -1,12 +1,13 @@
 // A turn drawn in TIME ORDER, and what the model said on the way.
 //
-// A turn is one assistant message, and it used to be laid out by category: a step
-// line, the text already shown, every diff of the turn, then the answer. A round's
-// text that turned out to carry a tool call was moved into the "already shown" slot
-// — above every diff of the turn — so with a tall diff it left the screen, and the
-// ✎ block was the last thing on it again, as if a second write had happened.
+// A turn is one assistant message, its PARTS kept in the order they happened
+// (`TurnPart`) rather than grouped by category: laying out by category — a step
+// line, the text already shown, every diff of the turn, then the answer — would move
+// a round's text that turns out to carry a tool call into the "already shown" slot,
+// above every diff of the turn, so a tall diff scrolls off the screen and its ✎ block
+// looks like the last thing on it, as if a second write had happened.
 //
-// Now the message carries its PARTS in the order they happened (`TurnPart`): the text
+// The message carries its PARTS in the order they happened: the text
 // of each round that went on to call a tool (a STEP), the calls themselves (a `tools`
 // part — the trail, where the calls happened), and each change a write reported. The
 // text of a round stays where it was drawn; the final round is the answer

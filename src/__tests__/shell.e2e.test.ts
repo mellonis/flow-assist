@@ -31,7 +31,7 @@ test('!command runs in the first root, shows its output, and spends no model tur
   const root = rootDir();
   const model = new ScriptedModel();
   // Wide enough that the folded line's own cwd tail — sharing its one row with the
-  // command and its outcome, unlike the old markdown's dedicated line — is not cut
+  // command and its outcome, instead of a dedicated line of its own — is not cut
   // by the frame regardless of how long the OS's real temp path is.
   const ui = await boot(model, root, {}, root.length + 60);
   await ui.type('!echo hello; pwd');
@@ -466,7 +466,7 @@ test('cd sticks between !commands — inside the roots only; exit keeps it; /cle
   const model = new ScriptedModel();
   // Wide enough for a folded block's own cwd tail — command, outcome, cwd, and (for
   // the two cd commands below) the arrow or the outside-the-roots note, all sharing
-  // one row unlike the old markdown's dedicated line — to stand unbroken regardless
+  // one row instead of a dedicated line of their own — to stand unbroken regardless
   // of how long the OS's real temp path is.
   const ui = await boot(model, root, {}, root.length + 160);
   await bang(ui, 'cd sub');
@@ -559,8 +559,8 @@ test('a background run does not move the chat\'s directory', async () => {
   ui.app.unmount();
 });
 
-// `shell.roots` is the shell's own key. A config that still says `fs.roots` runs exactly
-// as before, and the host says once, in its log, where the key moved.
+// `shell.roots` is the shell's own key. A config that still says `fs.roots` runs the
+// same way, and the host says once, in its log, where the key moved.
 test('!command starts in shell.roots; fs.roots still works, with one note in the log', async () => {
   const root = rootDir();
   const model = new ScriptedModel();

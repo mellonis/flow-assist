@@ -46,7 +46,7 @@ test(':help shows keys and commands, inside the screen, each command once', asyn
   await settle();
   const frame = ui.backend.lastFrame;
   const rows = frame.split('\n');
-  // It used to be taller than the terminal, with its title cut off the top.
+  // Without a height cap it would be taller than the terminal, with its title cut off the top.
   expect(rows.some((r) => r.includes('╭─ Help'))).toBe(true);
   expect(frame).toContain('Keys — anywhere');
   expect(frame).toMatch(/F\s+talk to the assistant/);

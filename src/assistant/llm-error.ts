@@ -1,7 +1,7 @@
-// What a provider's refusal SAYS, read out of its body. The raw body used to be pasted
-// into the error — `LLM 403: { "message":"model_access_denied", "request_id":"2395…" }`
-// — and the chat showed that JSON as the reason a turn failed. The shapes providers
-// answer with:
+// What a provider's refusal SAYS, read out of its body. Pasted whole, the raw body
+// would show as the reason a turn failed — `LLM 403: { "message":"model_access_denied",
+// "request_id":"2395…" }` — so it is read instead for the provider's own words. The
+// shapes providers answer with:
 //
 //   - OpenAI-style `{ "error": { "message", "code", "type", "request_id" } }` (or
 //     `"error": "…"` as a bare string);

@@ -4,8 +4,8 @@
 // program: in a source checkout that is the repository root, one directory up from
 // `src/cli.ts`; in a `bun build --compile` binary it is the directory the binary was
 // installed in. The binary cannot learn that from `import.meta.dirname` — inside it
-// that is the virtual `bunfs` — so it used to fall back to the working directory, and
-// a binary started from anywhere else ran with no plugins and said nothing. The real
+// that is the virtual `bunfs` — so falling back to the working directory instead would
+// run a binary started from anywhere else with no plugins and say nothing. The real
 // location is `process.execPath`, taken through `realpath` so that a link to the
 // binary (`/usr/local/bin/flow-assist`) still leads to the directory it lives in.
 //

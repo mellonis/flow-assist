@@ -218,7 +218,7 @@ test('a shell negation pasted into shell mode runs plain, not interactively, and
   await ui.press('return');
   await settleUntil(() => ui.backend.lastFrame.includes('✗'));
   // `! true` ran literally — negation flips `true`'s exit to 1 — not `true` handed to
-  // an interactive program (which the old leading-bang rule would have forced).
+  // an interactive program (inspecting the field's text for a leading `!` would force that instead).
   expect(ui.backend.lastFrame).toContain('✗ exit 1');
   expect(ui.backend.suspensions).toBe(0);
   expect(model.requests).toHaveLength(0);

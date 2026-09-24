@@ -54,7 +54,8 @@ export const hostConfigSchema = z.object({
   // Chat sessions on disk (src/assistant/sessions.ts): where, whether the app
   // continues the latest one on start, how many are kept.
   sessions: z.object({ dir: z.string(), resume: z.boolean(), keep: z.number().int().positive() }).partial().optional(),
-  // Legacy: where the roots used to be set. Still accepted and read for one release —
+  // Legacy: `shell.roots` and `plugins.repo.roots` replace this. Still accepted and
+  // read for one release —
   // as `shell.roots` by the shell, and after `plugins.repo.roots` / `shell.roots` by
   // the repo plugin — with one note in the log saying where it moved.
   fs: z.object({ roots: z.array(z.string()) }).optional(),

@@ -1,7 +1,8 @@
 // What a turn that did not finish leaves in the model's history. A turn stopped with
-// Esc used to leave only the question: the next request showed the model two user
-// messages in a row, and it answered both — going back to the work the person had
-// stopped. The tool calls that ran before Esc were lost with it.
+// Esc leaves a closing message, not only the question: without one, the next request
+// would show the model two user messages in a row, and it would answer both — going
+// back to the work the person had stopped, and the tool calls that ran before Esc
+// would be lost with it.
 import { afterEach, expect, test } from 'bun:test';
 import { ScriptedModel, bootApp, settle } from './helpers/scripted';
 

@@ -19,8 +19,8 @@ const settle = async () => { for (let i = 0; i < 8; i++) { await flush(); await 
 
 test.each([[110, 40, 'window'], [100, 22, 'window'], [100, 22, 'panel']] as const)('the model asks, the person picks with the keyboard, the model gets the answer (%ix%i, %s)', async (cols, rows, mode) => {
   // The short screen carries a plan too: the question block must still show its
-  // last row and its key hints — it used to be budgeted as a one-line input field
-  // and lost "Other…" and the hint line below the frame. Docked at the bottom of 22
+  // last row and its key hints — budgeting it as a one-line input field instead
+  // would lose "Other…" and the hint line below the frame. Docked at the bottom of 22
   // rows, the panel's 12 cannot hold it and growing it would leave the plugin less
   // than its least: the chat is a window until the question is answered.
   process.env.LLM_TOKEN = 't';

@@ -3,8 +3,8 @@ import { askKey, askResult, askRows, askStart, parseAskArgs, type AskState } fro
 
 // Key names are the ones flowtty's decoder really produces — checked against
 // `decodeKeys`: the space bar is ' ' (there is no 'space'), Enter is 'return'
-// (there is no 'enter'). A helper that invents friendlier names tests a keyboard
-// no terminal has: the first version of this file did, and blessed a dead branch.
+// (there is no 'enter'). A helper that invents friendlier names would test a keyboard
+// no terminal has, blessing a dead branch.
 const SPACE = ' ';
 const press = (state: AskState, ...names: string[]) => names.reduce((s, name) => askKey(s, { name: name === 'space' ? SPACE : name }), state);
 const type = (state: AskState, text: string) => [...text].reduce((s, c) => askKey(s, { name: c }), state);
@@ -126,8 +126,8 @@ test('typing starts the answer: a printable key opens the field with it in, a di
 });
 
 test('the field is an editor: the caret moves, words are killed, and a paste goes in at it', () => {
-  // A paste arrives as ONE key and used to be dropped whole, so a pasted path could
-  // not be given as an answer at all.
+  // A paste arrives as ONE key; dropping it whole would make it impossible to give a
+  // pasted path as an answer at all.
   let s = type(askStart(one.questions), 'see ');
   s = askKey(s, { name: 'paste', text: '/tmp/a b/report.txt' });
   expect(s.text).toBe('see /tmp/a b/report.txt');

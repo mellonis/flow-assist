@@ -63,7 +63,7 @@ test('Enter while an answer is streaming queues the message, and it is sent when
   await ui.type('how far is my branch');
   await ui.press('return');
 
-  // The field stays a field while the answer comes — it used to turn into "…".
+  // The field stays a field while the answer comes, never turning into "…".
   await ui.type('and is CI green');
   expect(ui.backend.lastFrame).toContain('› and is CI green');
   await ui.press('return');
@@ -171,8 +171,8 @@ test('a slash command completes inline: the rest of it is shown in the field, Ta
 });
 
 test('text to the right of the caret is drawn like the text to its left', async () => {
-  // It used to be dimmed — the placeholder's style had leaked onto real text, so
-  // moving the caret back greyed out everything after it.
+  // Dimming it would leak the placeholder's style onto real text, greying out
+  // everything after the caret when it moves back.
   const ui = await bootApp(new ScriptedModel(), 100, 24);
   await ui.press('F');
   await ui.type('hello world');
@@ -204,8 +204,7 @@ test('a blank line between two thoughts is a row of the field on screen', async 
 });
 
 test('the plan lists what is in progress first, and re-orders live without a crash', async () => {
-  // Re-ordering keyed children used to abort Yoga inside flowtty, so the plan was
-  // pinned to insertion order. Fixed in flowtty 1.0.0-alpha.5.
+  // Needs flowtty ≥ 1.0.0-alpha.5: re-ordering keyed children aborts Yoga below that version.
   const model = new ScriptedModel();
   model.script(
     [{ tool: 'todo', args: { action: 'add', items: ['read the diff', 'run the tests', 'write the summary'] } }],
@@ -231,7 +230,8 @@ test('the plan lists what is in progress first, and re-orders live without a cra
 });
 
 test('a plan finished in the turn goes when the answer ends; one with work left stays', async () => {
-  // It used to hang over the chat as "· 2 done" until the next plan replaced it.
+  // A finished plan disappears when the turn's answer ends; left as is it would hang
+  // over the chat as "· 2 done" until the next plan replaced it.
   const model = new ScriptedModel();
   model.script(
     [{ tool: 'todo', args: { action: 'add', items: ['read the diff', 'run the tests'] } }],
@@ -354,8 +354,8 @@ const backgroundScript = (model: ScriptedModel, result: string) => model.script(
 );
 
 test('a background result shows at once — a half-typed draft does not hold it back, and no turn is spent on it', async () => {
-  // It used to wait for an EMPTY field with nothing on screen saying so: type half
-  // a line, stop to think, and a finished task stayed invisible indefinitely.
+  // Waiting for an EMPTY field with nothing on screen saying so would mean: type half
+  // a line, stop to think, and a finished task stays invisible indefinitely.
   const model = new ScriptedModel();
   backgroundScript(model, 'There are 14 TODO comments.');
   const ui = await bootApp(model, 100, 28);
@@ -586,8 +586,8 @@ test('/clear starts a conversation with no plan, and a new chat does not inherit
   expect(ui.backend.lastFrame).toContain('▾ plan');
   expect(ui.backend.lastFrame).toContain('alpha item');
 
-  // The plan described work the model no longer remembers after /clear. It used to
-  // stay on screen — and in the system prompt — of the next conversation.
+  // The plan described work the model no longer remembers after /clear: left in
+  // place, it would stay on screen — and in the system prompt — of the next conversation.
   await ui.type('/clear');
   await ui.press('return');
   await settle();

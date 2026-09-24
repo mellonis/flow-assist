@@ -116,7 +116,7 @@ export function askKey(state: AskState, key: AskKey, width = 60): AskState {
   // While typing, the field is the chat's own field: flowtty's `editorReducer`, in its
   // single-line mode. So the caret moves by character and by word, Home/End and the
   // kill bindings work, and a PASTE goes in at the caret — it arrives as one key
-  // (`{ name: 'paste', text }`) and used to be dropped whole, which made a pasted path
+  // (`{ name: 'paste', text }`); dropping it whole instead would make a pasted path
   // impossible to give as an answer. Every printable key is text here: `y`, `n` and
   // the digits are not shortcuts while the person is writing.
   if (state.typing) {

@@ -112,7 +112,8 @@ test('/compact shrinks what the model sees and leaves the screen alone', async (
   await ui.type('/compact');
   await ui.press('return');
   await settle(20);
-  // The conversation is still on screen — it used to be wiped down to the last message.
+  // The conversation is still on screen: wiping it down to the last message instead
+  // would read as /clear.
   expect(ui.backend.lastFrame).toContain('the first question');
   expect(ui.backend.lastFrame).toContain('The first answer.');
   // One separator row saying how big the model's view was and is now; the summary is

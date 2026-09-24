@@ -144,9 +144,7 @@ export function assembleToolRegistry({ plugins, config, repo }: AssembledToolReg
   // ─── How a tool gets its name ───────────────────────────────────────────────
   // The model sees the name the plugin gave: `get_issue`, `open_issue`, `read_file`.
   // No plugin prefix — it is shorter, costs fewer tokens on every request, and the
-  // model has no use for which plugin stands behind a tool. (aiTools used to be
-  // qualified by this loader and group tools not, so the model saw both `get_issue`
-  // and `acme-tracker__open_issue` from one plugin.)
+  // model has no use for which plugin stands behind a tool.
   //
   // A prefix appears only when it is NEEDED: a name already claimed by another group
   // is registered as `<owner>:<name>` instead, and said so. The first claimant keeps

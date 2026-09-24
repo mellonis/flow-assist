@@ -115,9 +115,9 @@ test('drawn, a key is its cap — and the modifiers are part of what was pressed
 });
 
 // ─── A modifier is part of the key, and so part of a binding ───────────────────
-// `details` lives on ^o. Before this, a binding could only name a bare key and an
-// action on a modified one had to be written into its handler — which is what `^r`
-// was: `key.name === 'r' && key.ctrl`, unremappable and invisible to every hint.
+// `details` lives on ^o. Without this, a binding could only name a bare key, and an
+// action on a modified one would have to be written into its handler,
+// `key.name === 'r' && key.ctrl` style: unremappable and invisible to every hint.
 
 test('a modifier can be written into a binding, however a person spells it', () => {
   expect(canonicalKey('ctrl+o')).toBe('ctrl+o');

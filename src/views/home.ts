@@ -1,11 +1,10 @@
 // The host's own start screen.
 //
-// flow-assist grew out of a tracker TUI, and for a long time still opened like one:
-// every plugin component was mounted from the first frame, so the tracker plugin's
-// board drew itself over an assistant that had not been asked for a board — and,
-// with no board chosen, said "No board data". A plugin is a guest. Until the person
-// opens something of its own, the screen is the HOST's: who this is, and what can be
-// done from here.
+// A plugin is a guest: mounting every plugin component from the first frame would
+// draw a plugin's own screen — a tracker plugin's board, with no board chosen saying
+// "No board data" — over an assistant that had not been asked for a board. Until the
+// person opens something of its own, the screen is the HOST's: who this is, and what
+// can be done from here.
 import { createElement as h } from 'react';
 import { Box, Text } from '@flowtty/react';
 import { bindingGlyph } from '../playback/keys.js';

@@ -221,8 +221,8 @@ export function apiHistory(messages: ChatMessage[]): ChatMessage[] {
     // The images the person attached stay with their message for the rest of the
     // conversation — as refs; `send` turns them into parts on the way out.
     if (m.role === 'user' && Array.isArray(m.images) && m.images.length) out.images = m.images;
-    // A call stored before this fix existed (or hand-edited) may carry arguments
-    // that never parse — the same 400 a malformed call at the wire produces, forever,
+    // A call from an older session (or hand-edited) may carry arguments that never
+    // parse — the same 400 a malformed call at the wire produces, forever,
     // since this is the history sent on every later request. Repaired here too, so an
     // old session recovers on its next request; never mutates `m` itself.
     if (Array.isArray(m.tool_calls) && m.tool_calls.length) {
@@ -440,8 +440,8 @@ async function realChatRound(
         onDelta(delta.content);
       }
       // A round says it carries tool calls the moment its first fragment arrives —
-      // long before the round ends, which is where the caller used to learn it. The
-      // chat needs it that early: until it knows, the text streaming beside these
+      // long before the round ends. The chat needs it that early: until it knows,
+      // the text streaming beside these
       // fragments is drawn as the answer, and a model that ignores the `Next:` shape
       // would otherwise have its paragraph reclassified after the person read it.
       if ((delta?.tool_calls ?? []).length && !toolCalls.size) onToolCalls();
@@ -513,10 +513,10 @@ function modelToolResult(outcome: string, detail: unknown): string {
 // ─── The tools a request may carry ────────────────────────────────────────────
 // One entry per name, with the group it comes from. A plugin's aiTools reach
 // `agentChat` TWICE: they are in the registry (the synthetic `<plugin>:aiTools` group)
-// and the chat passes them again as `extraTools` for their `run`. The list for the
-// provider used to concatenate both, and a provider answers a duplicate name with 400
-// before the model runs — so with a real plugin enabled, every message failed. The
-// extra wins, as in `agentChat`'s `toolByName`. `write`/`run`/`maxResultChars` never
+// and the chat passes them again as `extraTools` for their `run`. Concatenating both
+// for the provider would send it a duplicate name, and a provider answers that with
+// 400 before the model runs — so with a real plugin enabled, every message would
+// fail. The extra wins, as in `agentChat`'s `toolByName`. `write`/`run`/`maxResultChars` never
 // go on the wire.
 export function toolCatalog(extraTools: ToolDef[] = []): CatalogEntry[] {
   const sent = new Map<string, ToolDef>();
@@ -621,10 +621,10 @@ export async function agentChat(
   // Counts every call of the turn, declined ones included: another call between two
   // commands is what separates them — a view's `callId` says which call it belongs to.
   let seq = 0;
-  // A view's `callId` used to be `${tc.id}#${n}` alone — a provider's own tool-call
-  // id, which is NOT guaranteed unique across rounds of one turn (a test double
-  // restarts at `call_0` every round; some real servers send '' or reuse ids). Two
-  // commands whose ids collided overwrote one another's block. `turnKey` is random
+  // A view's `callId` is never the provider's own tool-call id, `${tc.id}#${n}`,
+  // alone: that id is NOT guaranteed unique across rounds of one turn (a test double
+  // restarts at `call_0` every round; some real servers send '' or reuse ids), so two
+  // commands whose ids collided would overwrite one another's block. `turnKey` is random
   // per `agentChat` CALL (one per model turn), so `${turnKey}.${callSeq}#${n}` is
   // unique across the whole turn whatever the provider's ids do; `callSeq` alone
   // (this turn's own call counter, unique within it) would already be enough, but

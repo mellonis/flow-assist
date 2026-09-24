@@ -42,7 +42,7 @@ test('typing anything ends the walk', () => {
 });
 
 test('Tab replaces the WORD being completed, not everything before the first space', () => {
-  // It used to: `config ge` + Tab gave `get ge`.
+  // Completing the whole line instead of just the word would give `config ge` + Tab → `get ge`.
   expect(lineTab('config ge', null, complete).input).toBe('config get');
   expect(lineView('config ge', null, complete).ghost).toBe('t');
   // A config key is completed in place too.

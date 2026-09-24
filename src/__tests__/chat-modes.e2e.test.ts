@@ -534,7 +534,7 @@ test('collapsed at the bottom during a question, the strip says it waits; expand
 });
 
 // In a window (or the whole terminal) Ctrl+] closes the chat the same way: the question
-// waits, the footer says so, and F brings it back. Esc still dismisses it, as before.
+// waits, the footer says so, and F brings it back. Esc still dismisses it.
 test.each(['window', 'full'] as const)('Ctrl+] closing the %s during a question keeps it; Esc still dismisses', async (mode) => {
   const model = new ScriptedModel();
   model.script([{ tool: 'ask_user', args: ASK }], [{ text: 'Fine.' }]);
@@ -558,8 +558,8 @@ test.each(['window', 'full'] as const)('Ctrl+] closing the %s during a question 
 });
 
 // The collapsed status ticks by itself: the seconds move on the footer row while the
-// plugin's surface is not drawn again for them (the whole App used to redraw every
-// 120 ms while a collapsed turn ran).
+// plugin's surface is not drawn again for them, rather than the whole App redrawing
+// every 120 ms while a collapsed turn runs.
 test('a collapsed turn\'s seconds tick without redrawing the plugin\'s screen', async () => {
   const model = new ScriptedModel();
   model.script([{ hold: true }, { text: 'Done.' }]);

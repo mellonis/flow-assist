@@ -167,7 +167,7 @@ test('sessionFingerprint carries mtimeMs/size alongside rev, and a missing file 
 // primitives); it is a calling-convention property. What is deterministically
 // testable here is the shape of the guarantee: a fingerprint taken before a write
 // differs from the disk's fingerprint afterward — so recording the BEFORE value (as
-// applySession now does, per the caller's own comment) means the next save's
+// applySession does, per the caller's own comment) means the next save's
 // compare against the disk's CURRENT state disagrees and forks, rather than
 // matching and silently overwriting. Taking it AFTER the write — the bug — would
 // instead record exactly that current state, indistinguishable from "nothing

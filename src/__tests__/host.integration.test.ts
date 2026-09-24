@@ -50,7 +50,7 @@ test('host is tracker-agnostic and loads a plugin-delivered tool', async () => {
   expect(reg.tools.some((t) => t.function.name === 'memory')).toBe(true);
   // Acceptance #2: a plugin-delivered tool flows through the assembled registry.
   expect(reg.tools.some((t) => t.function.name === 'tracker:open')).toBe(true);
-  // Acceptance #3: host is tracker-agnostic — no tracker/renamed keys in the schema.
+  // Acceptance #3: the host is domain-agnostic — no tracker-specific keys in the schema.
   expect('trackerLanguage' in hostConfigSchema.shape).toBe(false);
   expect('tools' in hostConfigSchema.shape).toBe(false);
   const aiShape = hostConfigSchema.shape.ai.unwrap().shape;

@@ -8,10 +8,10 @@ import { hostStateDir } from '../../config/load.js';
 // place that decides where that is — the config directory normally, a temporary
 // directory under `bun test`.
 //
-// It is resolved on every call, never once at import. As an import-time constant it
-// was fixed before a test could point the directory anywhere, so every test that
-// reached the `memory` tool and named no file of its own appended to the person's own
-// file: their `memory.json` held 32 copies of one fact, one per run.
+// It is resolved on every call, never once at import: as an import-time constant it
+// would be fixed before a test could point the directory anywhere, so every test that
+// reaches the `memory` tool and names no file of its own would append to the person's
+// own file — their `memory.json` gaining a copy of the same fact per run.
 export function defaultMemoryPath(env: Record<string, string | undefined> = process.env): string {
   return path.join(hostStateDir(env), 'memory.json');
 }

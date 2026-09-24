@@ -40,8 +40,9 @@ test('notify fires on a change and not on a read', () => {
 });
 
 test('the todo tool writes to the plan in its context, not to a shared one', async () => {
-  // `execChatTool` dispatches through the registry singleton: assemble it HERE. The
-  // test used to lean on some earlier test file having done so, and failed alone.
+  // `execChatTool` dispatches through the registry singleton: assemble it HERE, so
+  // this test does not depend on an earlier test file having done so and cannot fail
+  // when run alone.
   assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as never });
   const mine = createPlan();
   const theirs = createPlan();

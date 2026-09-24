@@ -155,8 +155,8 @@ test('a long description wraps under its own first line, and the block stays cen
   ui.app.unmount();
 });
 
-// A binary started away from its plugins used to run with none and say nothing. With
-// no guest, the start screen and the log say where the host looked.
+// A binary started away from its plugins would otherwise run with none and say
+// nothing. With no guest, the start screen and the log say where the host looked.
 test('with no plugins, the start screen and the log say where the host looked', async () => {
   const note = 'no plugins in /opt/kit/plugins-enabled';
   const ui = await bootApp(new ScriptedModel(), 100, 26, undefined, {}, { pluginsNote: note });
@@ -191,7 +191,7 @@ test('no letter acts on the start screen — q included; :q quits', async () => 
 });
 
 // The keycaps panel floats at the bottom right, over the row the footer uses. It is
-// drawn ABOVE the footer: the footer, a later sibling one level up, used to run its
+// drawn ABOVE the footer: the footer, a later sibling one level up, would otherwise run its
 // text across the panel's frame whatever the panel's own zIndex.
 test('the keycaps panel is drawn over the footer, not under it', async () => {
   const state = { open: false };

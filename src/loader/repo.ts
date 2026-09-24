@@ -291,8 +291,8 @@ export function createPluginRepo({ availableDir, enabledDir, projectRoot, fetchP
         const compat = pluginCompat(readPluginManifest(pluginDir), THIS_HOST);
         if (!compat.ok) return { ok: false, error: `plugin '${n}': ${compat.reason}` };
         try {
-          // plugins-enabled/ is gitignored: a fresh checkout has none, and the first
-          // install used to fail with ENOENT.
+          // plugins-enabled/ is gitignored: a fresh checkout has none, so the first
+          // install creates it (`recursive`) rather than failing with ENOENT.
           mkdirSync(enabledDir, { recursive: true });
           symlinkSync(pluginDir, enabledLink);
           return { ok: true };

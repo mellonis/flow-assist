@@ -218,7 +218,7 @@ test('the footer names the key the action is bound to NOW, as its cap', () => {
   const keys = buildKeys([], { keys: { quit: ['enter', 'space'], commandLine: [] } });
   const hints = composeFooterHints([], {}, keys);
   // Drawn as caps, not as the terminal's names ('return', ' ') — and an unbound
-  // action gets no hint: it used to fall back to its default letter, advertising a
+  // action gets no hint: falling back to its default letter instead would advertise a
   // key that did nothing.
   expect(hints).toEqual(['⏎/␣ quit']);
 });

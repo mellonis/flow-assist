@@ -1,8 +1,8 @@
 // A message queued while something ran goes out when that thing ends — and must not
-// undo what the ending itself just put on screen. `send` used to lay its new list out
-// from what was last DRAWN, so when it ran before the render that carried the finished
-// block (a zero-delay timer that won the race against React's commit — seen under
-// load), the block came back in its live state, ticking forever.
+// undo what the ending itself just put on screen. Laying the new list out from what
+// was last DRAWN instead would mean: when it runs before the render that carries the
+// finished block (a zero-delay timer winning the race against React's commit — this
+// happens under load), the block comes back in its live state, ticking forever.
 //
 // The race is made deterministic here: while armed, a zero-delay timer runs as a
 // microtask, which is always before React's commit.

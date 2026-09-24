@@ -8,8 +8,8 @@ afterEach(() => { globalThis.fetch = realFetch; });
 const lastRow = (ui: { backend: { lastFrame: string } }) => ui.backend.lastFrame.split('\n').filter((r) => r.trim()).at(-1) ?? '';
 
 test(':ask <text> opens the chat and sends the text', async () => {
-  // A command is its FIRST WORD. The whole line used to be looked up, so any plugin
-  // command given an argument was not found and nothing happened.
+  // A command is its FIRST WORD. Looking up the whole line instead would fail to
+  // find any plugin command given an argument, and nothing would happen.
   const model = new ScriptedModel();
   model.script([{ text: 'hello there' }]);
   const ui = await bootApp(model, 100, 24);

@@ -30,6 +30,6 @@ test('the interactive screen is refused without a terminal, in a sentence — no
   expect(piped).toContain('needs a terminal');
   // The way that DOES work without one is named.
   expect(piped).toContain('flow-assist "your question"');
-  // stdin redirected: keys cannot arrive, and the app used to quit at once, silently.
+  // stdin redirected: keys cannot arrive, and without this the app would quit at once, silently.
   expect(interactiveRefusal({ isTTY: true }, { isTTY: false }, yes)).toContain('needs a terminal');
 });

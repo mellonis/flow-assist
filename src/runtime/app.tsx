@@ -333,7 +333,7 @@ export function renderApp(
   if (interactive) (services as unknown as HostServices).interactive = interactive;
   if (pluginsNote) services.log.append(`[plugins] ${pluginsNote}`);
   for (const line of loadNotes) services.log.append(line);
-  // A config that still sets the roots as `fs.roots` is read as before, and said once.
+  // A config that still sets the roots as `fs.roots` is read, and said once in the log.
   const rootsNote = legacyRootsNote(config);
   if (rootsNote) services.log.append(`[config] ${rootsNote}`);
   for (const note of llmConfigNotes(config.ai)) services.log.append(`[config] ${note}`);
@@ -683,10 +683,10 @@ export function renderApp(
         // directly.
         if (name === 'return') {
           const input = cmdline.current.input.trim();
-          // The command is the FIRST WORD; the rest is its argument. The whole line
-          // used to be looked up, so a plugin command with an argument was never
-          // found — `:ask hi`, a tracker's `:open ABC-1` — and fell through to the
-          // host's own dispatch, which knew nothing of it and said nothing.
+          // The command is the FIRST WORD; the rest is its argument. Looking up the
+          // whole line instead would fail to find every plugin command given an
+          // argument — `:ask hi`, a tracker's `:open ABC-1` — and fall through to the
+          // host's own dispatch, which knows nothing of it and says nothing.
           const [head = '', ...rest] = input.split(/\s+/);
           const cmd = findIn(commandRegistry, head);
           const arg = rest.join(' ');
@@ -805,9 +805,7 @@ export function renderApp(
         return true;
       }
       // `openBrowser` (b), `prev`, `next` and `open` are NOT handled here: the host only
-      // gives them a default so plugins share one vocabulary. The host used to answer
-      // `b` with "no target (tracker supplies the URL)" — a key that did nothing but
-      // say so.
+      // gives them a default so plugins share one vocabulary.
       return false;
     };
 
@@ -873,7 +871,7 @@ export function renderApp(
       const panelKey = ui.cmdOpen ? null : isKey(keys.chatFocus ?? [], k) ? 'focus' : isKey(keys.chatCollapse ?? [], k) ? 'collapse' : null;
       if (panelKey && chat?.panelKey?.(panelKey)) { notify(); return true; }
       // A press anywhere tells the chat which pane it landed in (the keyboard follows
-      // it). The button goes on as before: a click in the panel may open a fold, and a
+      // it). The button goes on its usual path: a click in the panel may open a fold, and a
       // drag still selects.
       if (k.name === 'mousedown' && typeof k.x === 'number' && typeof k.y === 'number') chat?.pointer?.(k.x, k.y);
       return undefined;
@@ -946,8 +944,8 @@ export function renderApp(
     const bottom = armed || toast.message || hints;
     // The command line completes INLINE, on its own one row: the untyped rest of the
     // suggestion after the caret, the other candidates beside it. A second row of
-    // candidates used to appear and vanish under the line with every keystroke, and
-    // the whole screen jumped by a row each time.
+    // candidates appearing and vanishing under the line with every keystroke would
+    // jump the whole screen by a row each time.
     const line = cmdline.current.open ? lineView(cmdline.current.input, cmdline.current.walk, completeLine) : null;
 
     const isChat = (c: { key: string }) => c.key === 'assistant:chat';
@@ -1000,8 +998,8 @@ export function renderApp(
         overlayComps.filter((c) => !isChat(c) && !isTop(c) && (!c.surface || surfaceActive(c.plugin))).map(({ Comp, key }) => h(Comp as any, { key })),
         atHome ? renderHome({ title, plugins, keys, builtins: BUILTIN_PLUGINS, width: region.width, pluginsNote }) : null),
       // The bottom row, and the one place on this screen a drag has something to
-      // copy: the command the person typed. The box used to be `selectable: false`
-      // whole, which is right for what surrounds the command — and swallowed the
+      // copy: the command the person typed. Marking the box `selectable: false`
+      // whole would be right for what surrounds the command, but would swallow the
       // command with it, so a long `:config set …` could not be copied out to be
       // fixed or shared. It follows the rule the chat's rows follow instead (the
       // gutter is chrome, the text is not): the typed text is the only selectable
@@ -1011,7 +1009,7 @@ export function renderApp(
       // come back as spaces around what was copied.
       h(Box, { padding: 1, flexDirection: 'column', selectionScope: true },
         // `dim`, not `dimColor` — the latter is another library's prop; flowtty does
-        // not know it, and an `as any` had been hiding that the footer was never dimmed.
+        // not know it, so an `as any` would hide that the footer is never dimmed.
         line
           ? h(Box, { flexDirection: 'row' },
               // The prompt, the inline offer and the candidate list are the host

@@ -1,5 +1,5 @@
 // A /command that runs for a while (/compact) leaves the field the moment it is
-// submitted, as a sent message does — it used to sit there until the command ended —
+// submitted, as a sent message does, rather than sitting there until the command ends,
 // and still goes into ↑. What was queued meanwhile goes out after it, or comes back
 // into the field when it is stopped.
 import { afterEach, expect, test } from 'bun:test';

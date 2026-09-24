@@ -69,9 +69,9 @@ test('configWarnings flags an incomplete LLM and a schema type error, silent for
   }
 });
 test('a first `config set` on a fresh machine creates the config directory and persists', () => {
-  // The regression: the file was written without creating its directory, the
-  // ENOENT was swallowed, and the CLI printed the value as if it had been saved —
-  // so the very first setup on any new machine silently did nothing.
+  // Writing the file without creating its directory first would swallow the ENOENT
+  // and have the CLI print the value as if it had been saved —
+  // so the very first setup on any new machine would silently do nothing.
   const dir = join(mkdtempSync(join(tmpdir(), 'fa-cfg-')), 'not', 'there', 'yet');
   const file = join(dir, 'config.local.json');
   expect(saveConfigSetting('ai.model', 'm1', file)).toEqual({ ai: { model: 'm1' } });
@@ -89,9 +89,9 @@ test('the config directory is a flow-assist folder under XDG_CONFIG_HOME, never 
   expect(configDir({ XDG_CONFIG_HOME: '' }, '/home/me')).toBe('/home/me/.config/flow-assist');
 });
 
-// A plugin's key is checked by the plugin's own schema — `config set` used to know only
-// the host's, so every `plugins.<name>.<key>` was "unknown key" (the assistant, whose
-// config tool did know the plugins, kept recommending exactly that command).
+// A plugin's key is checked by the plugin's own schema — `config set`, `:config set`
+// and the model's config tool all resolve `plugins.<name>.<key>` through it, so none
+// of them disagree on which keys exist.
 test('a plugin key is written through the plugin\'s schema', () => {
   const plugins = { keycaps: z.object({ enabled: z.boolean().optional() }).optional(), 'acme-tracker': z.object({ storyPointsField: z.string().optional() }).optional() };
   expect(validateConfigWriteValue(hostConfigSchema, 'plugins.keycaps.enabled', true, plugins)).toEqual({ ok: true, value: true });

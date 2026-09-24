@@ -1,6 +1,6 @@
-// The person's own message is drawn as it was typed. It used to be laid out as
-// markdown, where a single line break is a soft one: two lines became one, an
-// indented command lost its indent, and `- a` turned into a bullet.
+// The person's own message is drawn as it was typed, never laid out as
+// markdown: there a single line break is a soft one, so two lines would become one, an
+// indented command would lose its indent, and `- a` would turn into a bullet.
 import { afterEach, expect, test } from 'bun:test';
 import { ScriptedModel, bootApp, settle } from './helpers/scripted';
 

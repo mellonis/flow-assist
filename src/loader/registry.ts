@@ -119,8 +119,8 @@ export function helpFor(registry: Command[]): string {
 // contributes nothing. Pure — no imports beyond the plugin shape.
 // Is a plugin that keeps data in the cache on screen right now? One answer for the
 // footer's `x flush cache` hint AND for the key itself: a key acts where it is shown
-// and nowhere else. (`x` used to flush the cache from the start screen too, where
-// nothing said it would.)
+// and nowhere else, so `x` never flushes the cache from a screen that gives no hint
+// it would.
 export function cacheInPlay(plugins: PluginShape[] = [], apiMap: Record<string, unknown> = {}): boolean {
   return plugins.some((p) => {
     const kc = (p as Plugin).keycaps;
@@ -135,7 +135,7 @@ export function composeFooterHints(
   keys: Record<string, string[]> = {},
 ): string[] {
   // Bindings are drawn as CAPS (`bindingGlyph`), and an unbound action (config can
-  // set `[]`) gets no hint at all — it used to fall back to the default letter and so
+  // set `[]`) gets no hint at all — falling back to the default letter instead would
   // advertise a key that did nothing.
   const hint = (action: string, label: string): string[] => {
     const cap = bindingGlyph(keys[action]);
@@ -262,8 +262,8 @@ type AddTriggerArgs = {
 // Registers a trigger-open: while the modal is closed and the context fits, the
 // plugin catches ONLY its key (foreign keys return false — the race continues),
 // opens, and consumes (true). Priority 10 — below an open modal (100), above the
-// residual monolith (0). So the host no longer knows "f opens filters" — the
-// plugin registers its own open key itself.
+// residual monolith (0). So the host holds no built-in knowledge like "f opens
+// filters" — the plugin registers its own open key itself.
 export function addTrigger({ host, action, isOpen, open, extraGate = () => true }: AddTriggerArgs): void {
   host.useInputHandler({
     mode: 'consume',

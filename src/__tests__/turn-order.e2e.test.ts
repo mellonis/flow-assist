@@ -1,8 +1,8 @@
 // A turn drawn in TIME ORDER. A round's text stays where it was drawn; the one that
 // turns out to carry a tool call is a step — in `step` it folds into its run's one row,
 // in `open` it keeps its rows in the normal colour — and the final round is the answer.
-// Nothing a round drew ever moves above a later part of the turn: it used to jump into
-// a "kept" slot above EVERY diff of the turn, and with a tall diff it left the screen.
+// Nothing a round drew ever moves above a later part of the turn: jumping it into
+// a "kept" slot above EVERY diff of the turn would leave the screen with a tall diff.
 // Driven through the real chat on the scripted model — one model round per scripted
 // turn, so a turn that ends in a tool call is a step and the last one is the answer.
 import { afterEach, expect, test } from 'bun:test';
@@ -172,8 +172,8 @@ test('a round whose text and tool call arrive in ONE chunk keeps its text — an
     [{ text: 'I will look in the notebook now.', tool: 'datetime', args: {} }],
     [{ text: 'Three entries.' }],
   ]);
-  // Which rounds survived used to depend on how the network cut the stream: read
-  // before its own state update had run, this round was lost, and the NEXT one was
+  // Which rounds survive must not depend on how the network cuts the stream: read
+  // before its own state update has run, a round would be lost, and the NEXT one
   // taken for the step it had been.
   expect(ui.backend.lastFrame).toContain('▸ I will look in the notebook now.');
   expect(rowOf(ui, 'Three entries.')).toBeGreaterThan(rowOf(ui, 'I will look in the notebook now.'));
@@ -315,7 +315,7 @@ test('calls no step made stand between the runs, in order; a click opens one, ^o
   expect(change).toBeGreaterThan(reads);
   expect(rowOf(ui, '✎ clone/app.ts')).toBeGreaterThan(change);
   expect(rowOf(ui, 'Done.')).toBeGreaterThan(rowOf(ui, '✎ clone/app.ts'));
-  // The trail is no longer under the answer: every call is where it was made.
+  // The trail sits where the call was made, never under the answer.
   expect(times(ui.backend.lastFrame, 'tools:')).toBe(1);
 
   // A click on the calls opens them alone.
@@ -500,8 +500,8 @@ test('a session saved before the time order still renders — and a malformed me
     version: SESSION_VERSION, id, title: 'old', createdAt: now, updatedAt: now,
     messages: [
       { role: 'user', content: 'old question' },
-      // The category layout: the narration of the tool rounds, the part of it that was
-      // on screen, the one-line step, every change of the turn, the answer.
+      // A session written by an older host: the narration of the tool rounds, the part
+      // of it that was on screen, the one-line step, every change of the turn, the answer.
       { role: 'assistant', content: 'Old answer.', process: 'I looked at the old file.', shown: 'I looked at the old file.', step: 'look', changes: [change, { title: 7 }],
         toolRuns: [{ name: 'read_file', args: { path: 'old.ts' }, outcome: 'ok', detail: 'const b = 2;' }, { name: 'edit_file', args: {}, write: true, outcome: 'applied', detail: 'ok', changes: [change] }, 'junk'], duration: 1200 },
       { role: 'user', content: 'second question' },

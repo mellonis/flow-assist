@@ -319,7 +319,7 @@ test('help fits the screen, names the keys, and wraps what it says', async () =>
   expect(rows.some((r) => r.includes('╭─ Help'))).toBe(true);
   expect(rows.some((r) => r.includes('╰'))).toBe(true);
   expect(frame).toContain('Esc close');
-  // The keys — which used to be nowhere — by what they do, drawn as caps.
+  // The keys, listed by what they do, drawn as caps.
   expect(frame).toMatch(/F\s+talk to the assistant/);
   expect(frame).toMatch(/L\s+the log/);
   // A key the host does not act on is not listed as if it worked anywhere.
@@ -386,9 +386,8 @@ test('the input keeps a blank line, and the caret can stand on it', () => {
 });
 
 test('a markdown table in an answer is laid out by flowtty, not by the host', () => {
-  // The host used to re-write GFM tables itself because layoutMarkdown did not
-  // understand them. It does now — with a ruled separator and inline markup inside
-  // cells — so the host's own layout is gone and this pins flowtty's.
+  // layoutMarkdown lays out a GFM table itself — a ruled separator, inline markup
+  // inside cells — so the host does none of its own table layout; this pins flowtty's.
   const text = (md: string) => mdLines(md, 60).map((l) => l.spans.map((s) => s.text).join(''));
   const lines = text('Result:\n\n| check | state |\n|---|---|\n| lint | ✅ **ok** |\n| tests | ❌ 2 failed |\n\nDone.');
   expect(lines).toContain('check  state');

@@ -1,9 +1,9 @@
 // What is open in the chat, and what is folded.
 //
-// Everything foldable used to answer to one flag: `^r` opened the reasoning, the
-// narration, every tool call of every turn and every capped command block at once, and
-// to read the output of ONE command a person unfolded the whole conversation and folded
-// it back. A click opens the block under it instead — so the state has to say more than
+// A single global flag would open the reasoning, the
+// narration, every tool call of every turn and every capped command block at once, so
+// reading the output of ONE command would mean unfolding the whole conversation and
+// folding it back. A click opens the block under it instead — so the state has to say more than
 // "open" or "closed", and it has to say it in a way a key and a click cannot disagree
 // about.
 //

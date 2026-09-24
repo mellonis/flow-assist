@@ -85,8 +85,8 @@ test('the cwd is the first root when it is a directory, else the process directo
   expect(shellCwd({ fs: { roots: ['~'] } })).toBe(os.homedir());
 });
 
-// `shell.roots` is the shell's own key; `fs.roots` — where the roots used to be set,
-// a host key only the repo plugin should have owned — is read in its place for one release.
+// `shell.roots` is the shell's own key; `fs.roots` — a host key only the repo plugin
+// should own — is read in its place for one release.
 test('the roots are shell.roots; fs.roots is read only when shell.roots is not set', () => {
   const a = tmp();
   const b = tmp();

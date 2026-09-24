@@ -13,8 +13,8 @@ test('cache namespaces do not collide', () => {
 });
 
 test('under bun test the cache writes no file at all', () => {
-  // These two lines used to land in the person's own `cache.json`, and the `x` that
-  // flushes the cache emptied it. `createCacheService` takes no path and there is no
+  // These two lines would otherwise land in the person's own `cache.json`, and the
+  // `x` that flushes the cache would empty it. `createCacheService` takes no path and there is no
   // `cache.file` setting, so a test has nothing of its own to name: under a test run
   // the store stays in memory and answers just the same.
   const c = createCacheService({ cache: { enabled: true } });

@@ -199,8 +199,8 @@ export function normalizeViews(messages: Record<string, unknown>[]): Record<stri
 }
 
 // A turn's parts as a session keeps them (src/assistant/step.ts): the steps and the
-// changes, in the order they happened. A session saved before the turn was drawn in
-// time order kept them by category instead — the text of its tool rounds (`process`;
+// changes, in the order they happened. An older session (saved before turns were
+// drawn in time order) keeps them by category instead — the text of its tool rounds (`process`;
 // `shown`, the part of it that had been on screen) and every change of the turn
 // (`changes`) and the turn's whole trail of calls (`toolRuns`) — and reads as those
 // parts in that old order: the text, then the changes, then the calls (the trail was
@@ -216,8 +216,8 @@ export function normalizeParts(messages: unknown[]): Record<string, unknown>[] {
     const calls = Array.isArray(toolRuns)
       ? toolRuns.filter((r) => !(Array.isArray((r as { views?: unknown } | null)?.views) && ((r as { views: unknown[] }).views.length > 0))).map(callRun).filter((c): c is CallRun => c !== null)
       : [];
-    // The old trail was the turn's, drawn under the answer — never a step's own calls,
-    // so an empty step stands between it and the text before (as `endRound` does).
+    // An old-format trail belongs to the turn, drawn under the answer — never a step's
+    // own calls, so an empty step stands between it and the text before (as `endRound` does).
     const trail = (ps: TurnPart[]): TurnPart[] => (calls.length && ps.at(-1)?.kind === 'text' ? addCalls([...ps, { kind: 'text', text: '' }], calls) : addCalls(ps, calls));
     if (Array.isArray(parts)) {
       const kept = trail(readParts(parts));
@@ -244,13 +244,13 @@ export function loadSession(dir: string, id: string): Session | null {
       usage: s.usage ?? null,
       prompts: Array.isArray(s.prompts) ? s.prompts.map(String) : [],
       draft: typeof s.draft === 'string' ? s.draft : '',
-      // Saved before the rename as `issue`; read either spelling, write the new one.
+      // A session may hold this as `issue`, an earlier spelling; read either, write the new one.
       subject: subjectOf(s.subject ?? (s as { issue?: unknown }).issue),
       // Checked again when it is used: a directory that has gone or left the roots
       // since reads as the default (`createShellState`).
       shellCwd: typeof s.shellCwd === 'string' ? s.shellCwd : null,
-      // A tool no longer offered (a plugin removed since) stays in the list and is
-      // simply never sent — the request is built from what exists.
+      // A tool not currently offered (its plugin missing or removed) stays in the
+      // list and is simply never sent — the request is built from what exists.
       tools: Array.isArray(s.tools) ? s.tools.filter((n): n is string => typeof n === 'string') : [],
       images: Array.isArray(s.images) ? s.images.filter(isImageRef) : [],
       imageSeq: Number.isInteger(s.imageSeq) && (s.imageSeq as number) > 0 ? s.imageSeq : 0,

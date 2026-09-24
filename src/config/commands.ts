@@ -25,9 +25,9 @@ export type Command = {
 };
 
 // Basic host command set. `maxArgs = -1` means an unlimited argument count.
-// The host's own commands. Every entry DOES something: `view` and `back` used to be
-// here, setting a view state nothing in the host reads — listed in :help, and silent
-// when run. (A plugin that wants navigation commands declares its own.)
+// The host's own commands. Every entry DOES something: a command that only set a
+// view state nothing in the host reads would be listed in :help and silent when run.
+// (A plugin that wants navigation commands declares its own.)
 export const BASE_COMMANDS: Command[] = [
   { name: 'clear', aliases: ['clear-cache'], usage: 'clear', minArgs: 0, maxArgs: 0, description: 'Flush the cache' },
   { name: 'quit', aliases: ['q'], usage: 'quit', minArgs: 0, maxArgs: 0, description: 'Quit' },
@@ -129,8 +129,7 @@ export function completeConfigArgs(text: string, config?: unknown, configSchema:
   return completeConfigValue(keyHead, valueHead, nodes);
 }
 
-// Subcommands of `config get|set|unset|help` (the old `config <key>` syntax is
-// gone).
+// Subcommands of `config get|set|unset|help` — there is no bare `config <key>` form.
 const CONFIG_SUBS = ['get', 'set', 'unset', 'help'];
 
 // Completion of arguments after `config ` accounting for subcommands. Empty

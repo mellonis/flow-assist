@@ -131,7 +131,7 @@ test('a turn that runs out of rounds says so where the answer would be, in the w
   await settle(8);
   const frame = ui.backend.lastFrame;
   expect(frame).toContain('stopped after 64 rounds — no answer; say "continue" to carry on');
-  // In the conversation, not on the dim hint line a wall of grey used to hide.
+  // In the conversation, not on the dim hint line a wall of grey would otherwise hide.
   expect(frame).not.toContain('ran out of steps');
   const y = frame.split('\n').findIndex((r) => r.includes('stopped after 64 rounds'));
   const x = Array.from(frame.split('\n')[y]!.slice(0, frame.split('\n')[y]!.indexOf('stopped'))).length;

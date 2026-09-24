@@ -1,7 +1,8 @@
 // A click opens the block under it, and the key opens everything.
 //
-// Everything foldable used to answer to one key: to read the output of ONE command a
-// person unfolded the whole conversation and folded it back. The mouse was already
+// A single global key would make everything foldable answer to it: to read the output
+// of ONE command a person would have to unfold the whole conversation and fold it
+// back. The mouse was already
 // reported — the wheel scrolls, a drag selects and copies — and the buttons were
 // dropped before every handler, so a click was available and unused.
 //
@@ -151,8 +152,9 @@ test('with everything open a new turn arrives open, and /clear goes back to fold
 });
 
 // ─── Where the eye is left ────────────────────────────────────────────────────
-// A block opened into a bottom-anchored conversation used to land on its LAST line:
-// a report opened to be read, shown from its end.
+// A block opened into a bottom-anchored conversation lands on its FIRST line, never
+// its last: landing on the last line would show a report opened to be read from its
+// end instead.
 
 // The conversation's own top row: the frame's title, then its padding.
 const contentTop = (ui: Ui) => rowOf(ui, 'ƒ Flow Assist') + 2;
@@ -219,8 +221,8 @@ test('opening a block taller than the window starts at its FIRST row, not its la
   expect(foldRow).not.toBe(contentTop(ui));
   await click(ui, foldRow);
   // Reading starts at the beginning of the block, and the wheel takes it from there.
-  // It used to land on the block's LAST line — the end of the very thing the person
-  // opened it to read. The block is far taller than the window, so it pushes the
+  // Landing on the block's LAST line instead would show the end of the very thing the
+  // person opened it to read. The block is far taller than the window, so it pushes the
   // pinned last question back out of view — the block's own first row (the command
   // line) sits behind the pin, and the cut marker is the first row a reader actually
   // sees.

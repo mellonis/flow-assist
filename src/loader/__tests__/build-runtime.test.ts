@@ -32,8 +32,8 @@ test('loads a plugin dir via its package.json main; a single-file plugin has no 
   mkdirSync(avail, { recursive: true });
   mkdirSync(enabled, { recursive: true });
   // A directory plugin whose entry is a nested `package.json` `main` — the shape the
-  // tracker/gitlab/repo plugins all use. The OLD loader imported the directory,
-  // which the compiled binary cannot resolve; it must import the entry FILE.
+  // tracker/gitlab/repo plugins all use. Importing the directory (rather than the
+  // entry FILE) is what the compiled binary cannot resolve.
   const dirPlug = join(avail, 'dirplug');
   mkdirSync(join(dirPlug, 'src'), { recursive: true });
   writeFileSync(join(dirPlug, 'package.json'), JSON.stringify({ name: 'dirplug', main: './src/index.ts' }));

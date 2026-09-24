@@ -1,6 +1,6 @@
-// What a write changed stays in the chat as a diff block. The y/n used to be all the
-// person saw of an edit — the model's arguments, cut to one line — and after the yes
-// nothing showed what the file became. The diff is for the person only: the model
+// What a write changed stays in the chat as a diff block. Without it, the y/n would be
+// all the person sees of an edit — the model's arguments, cut to one line — and after
+// the yes nothing would show what the file became. The diff is for the person only: the model
 // wrote the text itself, and its history must not grow by a copy of every edit.
 import { afterEach, expect, test } from 'bun:test';
 import fs from 'node:fs';
@@ -86,7 +86,7 @@ test('the numbers are chrome: a drag copies the code alone, and the title is tex
   );
   // A light terminal, where the chat's accent is blue and flowtty's inline code is
   // cyan: the ✎ title is drawn as a title — the path in the chat's own accent — and
-  // not as the fragment of code `changeMarkdown` used to wrap it in.
+  // not as the fragment of code wrapping it in backticks would give.
   const root = path.join(fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-diff-'))), 'clone');
   fs.mkdirSync(root);
   fs.writeFileSync(path.join(root, 'app.ts'), 'const a = 1;\nconst b = 2;\nconst c = 3;\n');
@@ -145,8 +145,8 @@ test('a declined edit changes nothing and shows no diff', async () => {
 });
 
 test('a confirmed edit that fails is an error, not a change made', async () => {
-  // The host counts what a write RETURNS as done; `edit_file` used to return its
-  // refusal ("not found"), so the chat marked the turn ✎ as if the file had changed.
+  // The host counts what a write RETURNS as done; a refusal returned as a plain
+  // string ("not found") instead of thrown would mark the turn ✎ as if the file had changed.
   const model = new ScriptedModel();
   model.script(
     [{ tool: 'edit_file', args: { path: 'app.ts', old: 'const z = 9;', new: 'const z = 10;' } }],

@@ -27,7 +27,7 @@ test('x flushes the cache only while the footer offers it', async () => {
   expect(footer(ui)).not.toContain('flush cache');
   await ui.press('x');
   await settle();
-  // …and so the key does nothing. It used to answer "cache cleared" from here.
+  // …and so the key does nothing, never answering "cache cleared" from here.
   expect(ui.backend.lastFrame).not.toMatch(/cache cleared/i);
 
   await ui.press('c'); // the guest becomes active

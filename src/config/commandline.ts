@@ -2,8 +2,8 @@
 // suggestion not typed yet is drawn right after the caret, the other candidates follow
 // on the same row, and Tab takes the offer and then walks the rest.
 //
-// It used to be a second row of candidates under the line, appearing and vanishing
-// with every keystroke — the whole screen jumped by a row each time.
+// A second row of candidates under the line would appear and vanish with every
+// keystroke, jumping the whole screen by a row each time.
 //
 // Pure: what to draw and what Tab does are computed from the text, so both are tested
 // without a terminal.

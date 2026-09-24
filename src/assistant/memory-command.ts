@@ -2,9 +2,10 @@
 //
 // The `memory` tool is the MODEL's: it stores a fact, and the fact is put into the
 // system prompt of every later request — across `/clear`, across restarts. That is
-// what it is for. But nothing showed the person what had been stored, and nothing but
-// asking the model could remove it: after `/clear` the assistant "still knew" an
-// earlier prompt, which read as `/clear` not working. Like the config and the log,
+// what it is for, but left unsaid it reads as a bug: after `/clear` the assistant
+// "still knows" an earlier prompt, which reads as `/clear` not working, with nothing
+// showing the person what was stored and nothing but asking the model able to remove
+// it. Like the config and the log,
 // the memory is the person's, so they get a command that does not go through the model.
 //
 // Pure: text in, text (and possibly a new list) out.

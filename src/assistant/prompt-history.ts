@@ -4,8 +4,7 @@
 // Every line the person submits goes in — a message, a `/command`, a `!command` or
 // `!!command` (kept as `!cmd`/`!!cmd`, see encodeBangLine/decodeBangLine below, and
 // recalling it turns the matching bang level back on) — so ↑ repeats a command as
-// readily as a question. Commands used to be left out, and
-// `/notes step` had to be typed again every time. Two lines are not kept: the same
+// readily as a question, and `/notes step` need not be typed again every time. Two lines are not kept: the same
 // line twice in a row, and a command whose definition says `history: false` — one
 // whose argument may carry a secret, since the history is written to the session file.
 

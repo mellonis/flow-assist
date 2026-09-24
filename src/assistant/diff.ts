@@ -129,8 +129,8 @@ export function changeView(c: Change, opts: DiffOpts = {}): ChangeView | null {
 
 // What the `✎` line says after the path: how much went in and how much came out. The
 // path itself is not part of it — the chat draws the title as a title, the path in its
-// accent colour and this dim beside it, which is why the header is no longer markdown
-// (it used to be inline code, so a path took the code style instead of being read).
+// accent colour and this dim beside it. The header is plain text, not markdown, so
+// the path never takes on the code style inline-code backticks would give it.
 export function changeCounts(v: ChangeView): string {
   return v.diff || v.added || v.removed ? `· +${v.added} −${v.removed}` : '· binary, not shown';
 }

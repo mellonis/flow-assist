@@ -215,8 +215,8 @@ const overlay = (width: number, height: number, zIndex = 10) => ({
 const SPINNER = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 const spin = (ms: number) => SPINNER[Math.floor(ms / 120) % SPINNER.length];
 // A band of light travels along the running tool's label — movement says "still
-// working" where a static label read as "stuck". It used to be the whole label
-// changing colour four times a second, which read as blinking; the band moves instead,
+// working" where a static label reads as "stuck". The whole label changing colour
+// four times a second would read as blinking; the band moves instead,
 // and the label keeps one colour. The gradient is the chat's own accents, brightest at
 // the band's leading edge; the window's own ink stands in for white, which vanished on
 // a light ground.
@@ -445,7 +445,8 @@ export const ASSISTANT_MARK = 'ƒ';
 // `return` + `shift`. The handler still accepts `shift`, for the day that lands.
 // The caps the chat's hints name. They come from the one glyph dictionary
 // (`keyGlyph`), so a key reads the same here, in the footer and on the keycaps panel
-// — the hints used to mix `⏎`, `Enter` and `Space` for keys drawn elsewhere as ⏎ ␣.
+// — spelling them out by hand here instead would mix `⏎`, `Enter` and `Space` for
+// keys drawn elsewhere as ⏎ ␣.
 // These keys are the chat's own and are not remappable; an action that IS bound
 // through `config.keys` must be drawn with `host.keyCap(action)` instead.
 const CAP = {
@@ -758,8 +759,8 @@ function buildMessageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): Ch
       // live mark in the gutter and never the answer's `ƒ` — a round that turns out
       // to carry a tool call must not have been drawn as the answer.
       if (live && !liveStep) mdLines(live, inner).forEach((line, li) => rows.push(row(line, { quiet: true, ...(li === 0 ? { liveMark: true } : {}) })));
-      // A turn that ran out of rounds says so where the answer would be. Before this it
-      // was a dim line under the field, which a wall of grey tool lines hid.
+      // A turn that ran out of rounds says so where the answer would be: a dim line
+      // under the field would instead be hidden by a wall of grey tool lines.
       const answer = answerText(String(m.content ?? ''));
       if (Number(m.roundLimit) > 0 && !answer) {
         rows.push({ role, limit: true, first: true, spans: [{ text: cutStep(`stopped after ${Number(m.roundLimit)} rounds — no answer; say "continue" to carry on`, inner) }] });
@@ -1431,7 +1432,7 @@ export function renderChatModal({
                 const bangGlyph = bangLevel === 2 ? '!!' : bangLevel === 1 ? '! ' : '› ';
                 const prompt = h(Text, { bold: !streaming, dim: streaming, color: bangLevel ? m.shell : m.accent }, visible[i] === fieldRows[0] ? bangGlyph : ' '.repeat(GUTTER));
                 // A blank line is a real '' — flowtty ≥ 1.0.0-alpha.5 gives an empty Text
-                // its row (it used to collapse, which is how "two newlines" vanished).
+                // its row; a collapsed one instead is how "two newlines" would vanish.
                 if (row.caret === '') return h(Box, { key: i, flexDirection: 'row' }, prompt, row.before ? typed(row.before, row.start, 'b') : h(Text, { wrap: 'truncate' }, ''));
                 // The caret sits ON the first suggested character, as a shell's
                 // autosuggestion does, so what was typed and what is offered read as one
@@ -1454,7 +1455,7 @@ export function renderChatModal({
                         ? ` ${CAP.enter} run · ! again gets the terminal · ${CAP.backspace} on empty leaves ! mode`
                         : streaming ? ` an answer is coming — ${CAP.enter} queues your next message` : ` ${CAP.enter} send · ${NEWLINE_KEY} new line · ${CAP.esc} ${CAP.esc} ${escWord}`)
                     // Text after the caret is the person's own text — drawn like the rest
-                    // of it. It used to take the placeholder's dim and went grey whenever
+                    // of it, never the placeholder's dim, or it would grey out whenever
                     // the caret moved back.
                     : row.after ? typed(row.after, caretAt + row.caret.length, 'a') : null);
               })),
@@ -1499,7 +1500,7 @@ export function renderChatStatus({ theme, streaming, toolLabel = '', phase = 'wr
 
 // The collapsed chat's status as the App draws it on the plugin's footer row: a
 // component that redraws ITSELF as the seconds tick, reading the chat's latest status
-// through `read` — so a running turn no longer redraws the whole App, the plugin's
+// through `read` — so a running turn does not redraw the whole App, the plugin's
 // surface with it, several times a second. `live` false (a status that does not change
 // by itself: waiting on the person) sets no timer. Module-level, so its type is stable
 // and it is never mounted anew.
@@ -1671,8 +1672,8 @@ function renderAsk(state: AskState, bg: string | undefined, wrap: number) {
 }
 
 // One look for every host modal: the chat's — a round frame in the modal palette, a
-// plain title, a quiet hint line at the bottom. The log and the help used to wear a
-// double frame of their own, so one product looked like two.
+// plain title, a quiet hint line at the bottom. A modal that draws its own frame
+// instead doubles up, so one product looks like two.
 const frame = (m: Record<string, string | undefined>, title: string, extra: Record<string, unknown>) => ({
   border: 'round' as const,
   backgroundColor: m.bg,
@@ -1731,7 +1732,7 @@ export function renderLogModal({
   const more = total > visible.length;
   const title = more ? `Log · ${start + 1}–${start + visible.length} of ${total}` : total ? `Log · ${total}` : 'Log';
   return h(Box, overlay(width, height),
-    // As tall as what it holds — two lines no longer sit in a frame made for forty.
+    // As tall as what it holds: a fixed frame would leave two lines sitting in a box made for forty.
     h(Box, frame(m, title, { width: Math.max(40, Math.floor(width * 0.7)), paddingY: 1, gap: 1 }),
       h(Box, { flexDirection: 'column' },
         visible.length

@@ -198,10 +198,10 @@ test('the conversation\'s toolResultMaxChars (from ai.toolResultMaxChars) caps a
 });
 
 test('a turn hands back its full transcript, so the next turn replays the tool calls and their results', async () => {
-  // The regression this guards: the chat kept only the final TEXT of each
-  // assistant turn. By the third turn the model had two in-context examples of
+  // Keeping only the final TEXT of each assistant turn would show the model a
+  // conversation where, by the third turn, it has two in-context examples of
   // "the user asked for a change → I said done" with no tool call and no tool
-  // result in sight, so it imitated them: it narrated the change and guessed at
+  // result in sight — so it imitates them: narrating the change and guessing at
   // state instead of calling the tool. No prompt overrides examples in history.
   assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
   let n = 0;
@@ -532,7 +532,7 @@ async function runOneToolTurnWithArgs(rawArguments: string, run: (args: unknown,
   return agentChat([{ role: 'user', content: 'go' }], { baseUrl: 'http://x', model: 'm', token: 't', onLive: () => {}, onLiveCommit: () => {}, extraTools, chatRound } as any);
 }
 
-// apiHistory repairs a session saved BEFORE this fix existed (or hand-edited): any
+// apiHistory repairs a session saved by an older host (or hand-edited): any
 // stored tool_calls[].function.arguments that is not a string parsing to JSON becomes
 // "{}", a good call is untouched, and the input array/messages are never mutated.
 test('apiHistory repairs a stored tool call whose arguments are not valid JSON', () => {

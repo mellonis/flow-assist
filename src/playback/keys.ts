@@ -11,9 +11,9 @@
 //   - what a PERSON writes — in config.json's `keys`, in a plugin's `keys` table:
 //     "enter", "space", "colon", "esc". Nobody writes `"foldSwimlane": " "`.
 // A binding is the second kind of thing and is turned into the first kind HERE, once,
-// when the key map is built. Before this, a binding spelled 'enter' or 'space' was
-// compared with the decoder's name as it stood and simply never fired: a plugin's
-// `open: 'enter'` replaced the host's `['enter','return']` and Enter went dead.
+// when the key map is built. Comparing a binding spelled 'enter' or 'space' directly
+// against the decoder's name would simply never fire: a plugin's
+// `open: 'enter'` replacing the host's `['enter','return']` would leave Enter dead.
 // (What is DRAWN for a key — ⏎, ␣ — is a third thing, the plugins' keycaps.)
 const KEY_SPELLINGS: Record<string, string> = {
   enter: 'return',
@@ -34,8 +34,8 @@ const KEY_SPELLINGS: Record<string, string> = {
 // and it meets the terminal's own report in the same place every other spelling does:
 // `keyId` gives both sides ONE string, the terminal's name with the modifiers that
 // were part of pressing it, in one fixed order. Without this a binding could only ever
-// name a bare key, and an action on a modified one had to be hard-coded in its handler
-// — which is exactly what `^r` was before it became an action.
+// name a bare key, and an action on a modified one would have to be hard-coded in its
+// handler, `key.name === 'r' && key.ctrl` style.
 const MODIFIER_WORDS: Record<string, 'ctrl' | 'meta' | 'shift'> = {
   ctrl: 'ctrl', control: 'ctrl', ctl: 'ctrl',
   alt: 'meta', meta: 'meta', opt: 'meta', option: 'meta',

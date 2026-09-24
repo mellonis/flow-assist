@@ -1,6 +1,6 @@
-// The status line says what is happening NOW. A tool's label used to stay after the
-// tool finished — the stream callbacks read a stale copy of it — so the chat looked
-// stuck on the tool while the model was already writing its notes.
+// The status line says what is happening NOW. Reading a stale copy of a tool's label
+// in the stream callbacks would leave it showing after the tool finished, so the chat
+// would look stuck on the tool while the model is already writing its notes.
 import { afterEach, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -56,7 +56,7 @@ test('once the tool is done and the model writes, the line says a word in the wr
 });
 
 // Between tools nothing is being written: the model is working out its next call.
-// The line used to say "writing…" there, which read as text that never appeared.
+// Saying "writing…" there instead would read as text that never appears.
 test('between tools, before any text, the line is in the thinking colour, not the writing one or the last tool', async () => {
   const model = new ScriptedModel();
   model.script(

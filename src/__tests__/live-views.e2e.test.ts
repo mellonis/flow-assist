@@ -150,7 +150,7 @@ test('/clear during a running command: its eventual completion never lands in th
   ui.app.unmount();
 }, 10_000);
 
-test('the model is sent a !command\'s output as before, and never a view', async () => {
+test('the model is sent a !command\'s output as plain text, and never a view', async () => {
   const model = new ScriptedModel();
   model.script([{ text: 'Seen.' }]);
   const ui = await bootApp(model, 100, 24, undefined, { shell: { timeoutMs: 20000 } });
@@ -340,7 +340,7 @@ test('a view with an unknown kind is drawn as a fallback line, never a "Cannot u
   // A saved view whose kind no renderer answers to — a plugin disabled since it was
   // drawn, or (as here) a kind that never had one — reaches `frameView` on the very
   // first render of a restored session, straight from `ChatMessages`' own render
-  // pass. `onViewFail` used to call `pushLog` synchronously there, which ends in the
+  // pass. `onViewFail` never calls `pushLog` synchronously there: that would end in the
   // App's `notify()` (a setState) — updating a different component while this one is
   // still rendering, which React refuses loudly.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-live-sess-'));

@@ -197,7 +197,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
         side: z.enum(['right', 'bottom']).optional(),
         size: z.number().int().min(10).max(90).optional(),
       }).optional(),
-      // Read as `mode: full` (true) — the key `/fullscreen` used to set.
+      // Read as `mode: full` (true) — a legacy key; there is no `/fullscreen` command.
       fullscreen: z.boolean().optional(),
       // `fold` and `hidden` were dropped; a config file that still says one is read as
       // `step` (`notesMode`) — the plugin's config is checked only when it is written.
@@ -286,8 +286,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             store.chat = { ...(store.chat ?? {}), ...patch };
           };
           // The plan is this conversation's: made here, handed to the `todo` tool through
-          // the tool context, emptied by /clear. It used to be module state and so
-          // outlived the conversation it described.
+          // the tool context, emptied by /clear — never module state, which would
+          // outlive the conversation it describes.
           const planRef = ui.useRef(createPlan());
           // Where this conversation's shell commands run — `!command` and the model's
           // run_command share it; `cd` moves it. The conversation's, like the plan: a
@@ -517,9 +517,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // its first fragment arrives (`onRoundKind`), and from then on its text is a
           // step, not the answer. Kept HERE, beside the state and never inside a
           // `setMessages` updater: an updater runs when React gets to it, and a round
-          // whose tokens and tool call arrived in one batch used to be read before its
-          // own updater had run — its text was lost and the NEXT round was taken for
-          // it. Every updater is a pure function of the list; what it needs to know is
+          // whose tokens and tool call arrive in one batch could otherwise be read
+          // before its own updater has run — its text lost and the NEXT round taken
+          // for it. Every updater is a pure function of the list; what it needs to know is
           // read here, when the callback fires, and handed to it.
           const roundToolsRef = ui.useRef(false);
           const resetRound = () => { roundToolsRef.current = false; };
@@ -565,8 +565,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // Put a row at the top of the conversation, once the rows have changed.
           const askScroll = (row: number) => setScrollTo({ row: Math.max(0, row), n: ++scrollSeq.current });
           // A fold changed. Opening a block puts its FIRST row at the top of the
-          // screen — a block taller than the window used to land on its last line,
-          // which is the end of what the person opened it to read. Anything else keeps
+          // screen — landing on its last line instead would show the end of what the
+          // person opened it to read. Anything else keeps
           // the line they were on where it was: the rows a fold adds or takes away
           // above the view would otherwise slide the whole conversation under them.
           const applyFolds = (next: FoldState, opened: string | null) => {
@@ -1110,7 +1110,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             let failed = false, aborted = false;
             // The loop ran out of rounds with no answer. It is said where the answer
             // would be, in the warn colour, and it replaces the dim line under the
-            // field that a wall of grey tool lines used to hide.
+            // field that a wall of grey tool lines would otherwise hide.
             let roundLimit = 0;
             try {
               const chatResult = await (host.services as Record<string, any>).chatLLM(wire, {
@@ -1513,9 +1513,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               const move = nextCwd(host.config as Record<string, unknown>, cwd, r.pwd);
               const { display, forModel } = formatShell(cmd, r, cwd, timeoutMs, { after: move.cwd, note: move.note, ...(interactive ? { interactive: { recorded } } : {}) });
               // Everything from here on is display/model-facing state for THIS
-              // conversation — skipped whole for a stale epoch (a /clear mid-command,
-              // reproduced: the command still finishes, and without this its block used
-              // to land in the fresh, cleared chat).
+              // conversation — skipped whole for a stale epoch (a /clear mid-command:
+              // the command still finishes, and without this its block would land in
+              // the fresh, cleared chat).
               if (epoch === epochRef.current) {
                 // `cd` sticks, as in a terminal — within the roots.
                 if (move.cwd !== cwd) shellRef.current.setCwd(move.cwd);
@@ -1670,8 +1670,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // The loaded tools stay (`toolSetRef`): the work the summary describes goes on
               // with them, and loading them again would spend a round for nothing.
               // What the MODEL sees shrank to the summary; what the PERSON sees stays —
-              // the conversation above is theirs to scroll. (It used to be wiped down to
-              // the last message, which read as /clear.) A note marks where the model's
+              // the conversation above is theirs to scroll. (Wiping it down to
+              // the last message instead would read as /clear.) A note marks where the model's
               // view now begins — one row, how big that view was and is now (the same
               // reading `ctx N%` shows) — with the summary it was given folded under it.
               const after = contextReading().used;
@@ -2258,10 +2258,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               }
               // ── Esc: a turn (or a `!command`) running → stop it, on the FIRST press,
               // touching neither the field nor the queue — the queue comes back into the
-              // field once the turn has ended (see `restoreQueue`). It used to clear the
-              // field and take the queue back first, so with a message queued the third
-              // Esc stopped the tool, and the second had already thrown the message
-              // away. Idle: non-empty field → clear; empty field at a non-zero bang
+              // field once the turn has ended (see `restoreQueue`). Clearing the
+              // field and taking the queue back first instead would mean, with a message
+              // queued, that the second Esc throws the message
+              // away and only the third stops the tool. Idle: non-empty field → clear; empty field at a non-zero bang
               // level → step the level DOWN by one, same as Backspace (closest thing
               // first, before Esc starts arming a chat-wide exit) — leaving `!!` for
               // good this way takes two Escs, one per level; armed → close (docked, that
@@ -2390,8 +2390,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   // runShellCommand's own check just has nothing to run.
                   if (!streamRef.current) setBangLevel(0);
                   // Enter runs the field text exactly as it reads — level 1 as the
-                  // plain command, level 2 handed to the terminal — with no more
-                  // inspecting it for a leading `!`: that used to force an interactive
+                  // plain command, level 2 handed to the terminal — with no
+                  // inspecting it for a leading `!`, which would force an interactive
                   // run and eat the bang a literal shell negation needs.
                   void runShellCommand(cmd, bangLevel === 2);
                 } else if (cmd.startsWith('/')) {
@@ -2433,9 +2433,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               return true;
             },
           });
-          // Trigger-open: `F` (Shift+f) opens the chat from any base state (a tracker-
-          // agnostic host has no task-detail overlay, so the old `overlay === 'detail'`
-          // gate was always false and the key never fired). triggerOpenable still guards the
+          // Trigger-open: `F` (Shift+f) opens the chat from any base state (a domain-
+          // agnostic host has no task-detail overlay, so a gate checking
+          // `overlay === 'detail'` would always be false and the key would never
+          // fire). triggerOpenable still guards the
           // command line / an open modal and when the chat is
           // already open; closed is not handled by the base consumer (priority 0).
           addTrigger({ host, action: 'chat', isOpen: () => focused, open: () => openChat() });

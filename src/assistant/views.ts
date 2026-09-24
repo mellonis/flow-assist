@@ -2,8 +2,8 @@
 // host FRAMES.
 //
 // A write tool can already say what it changed (`ctx.reportChange`, ./diff.ts) and the
-// host turns that into the `✎ title · +N −M` diff. Everything else a tool does used to
-// collapse to one dim line under ^r unless the host knew the tool by name. So a tool
+// host turns that into the `✎ title · +N −M` diff. Everything else a tool does would
+// collapse to one dim line under ^r if the host had to know the tool by name. So a tool
 // may also hand over a VIEW — a kind and data, never rendering — and something draws
 // it: the host's own `console` (./console-view.ts, what `run_command` and the person's
 // own `!command` both print) or a plugin's own renderer, named in its shape's

@@ -1,9 +1,9 @@
 // Tools on demand: what one request tells the model about the tools it has.
 //
-// Every request used to carry the full schema of every enabled tool — the core ones,
+// Carrying the full schema of every enabled tool on every request — the core ones,
 // `repo`'s seventeen, `gitlab`, an MCP server's, a tracker plugin's couple of dozen —
-// while a turn uses two or three. That is prompt tokens paid on every round, and a
-// longer list to choose from. With `ai.toolLoading: 'onDemand'` (the default) a
+// costs prompt tokens paid on every round, and a longer list to choose from, while a
+// turn uses two or three. With `ai.toolLoading: 'onDemand'` (the default) a
 // request carries:
 //   - the `core` group in full — the chat itself relies on it (`todo`, `ask_user`,
 //     `memory`, …);
@@ -131,7 +131,7 @@ export function toolsToSend(catalog: CatalogEntry[], mode: ToolLoading, set: Too
 
 // The index shows a tool grouped under its group's name (`repo:\n- read_file — …`),
 // which reads naturally as `<group>:<name>` — a model that passes it that way
-// qualified, exactly as a clash-qualified tool's own name looks, used to get
+// qualified, exactly as a clash-qualified tool's own name looks, would otherwise get
 // `ERROR: Not in the list` for a whole round. Stripped only as a FALLBACK: a name
 // that is already in `deferred` (bare, or genuinely qualified by a clash — see
 // `register` in ../loader/tools.js) is tried first and never rewritten; this only

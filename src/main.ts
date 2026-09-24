@@ -153,8 +153,8 @@ async function runConfig(args: string[], config: Record<string, unknown>, repo?:
       process.exitCode = 1;
       return;
     }
-    // A value is only echoed once it is really on disk: a failed write used to
-    // print the value just the same, which read as "saved".
+    // A value is only echoed once it is really on disk: printing it before a
+    // failed write would read as "saved".
     if (!saveConfigSetting(key, check.value)) {
       console.log(`config: could not write ${key} — check that the config directory is writable`);
       process.exitCode = 1;
@@ -293,10 +293,10 @@ export function mouseEnabled(config: Record<string, unknown>): boolean {
 }
 
 // The TUI needs a terminal on BOTH ends: it draws on stdout and reads keys from
-// stdin. Started in a pipe, in CI or with its input redirected, it used to write
-// escape codes into the pipe (and, with stdin piped, quit at once with nothing said);
-// flowtty ≥ 1.0.0-alpha.12 throws instead. Either way the person deserves a sentence
-// and the way that does work without a terminal.
+// stdin. Started in a pipe, in CI or with its input redirected, flowtty ≥
+// 1.0.0-alpha.12 throws rather than writing escape codes into the pipe (or, with
+// stdin piped, quitting at once with nothing said). Either way the person deserves
+// a sentence and the way that does work without a terminal.
 export function interactiveRefusal(stdout: { isTTY?: boolean }, stdin: { isTTY?: boolean }, interactive = isInteractive): string | null {
   if (interactive(stdout as never) && stdin.isTTY) return null;
   return [
