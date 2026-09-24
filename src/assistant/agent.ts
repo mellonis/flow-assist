@@ -65,6 +65,9 @@ export interface ChatRoundResult {
   // unchanged within the turn (the Anthropic round's thinking, ./anthropic.ts). The
   // loop keeps them on the round's assistant message and nothing else reads them.
   blocks?: unknown[];
+  // The provider refused the turn's kept thinking and the round went without any: the
+  // loop drops the kept blocks and asks for no thinking for the rest of the turn.
+  thinkingDropped?: boolean;
 }
 
 // A trace of one executed tool call — what actually ran, so the chat UI can show
@@ -572,6 +575,8 @@ export async function agentChat(
   // the caller has nothing to show for the turn but the trail.
   let answered = false;
   let rounds = 0;
+  // Set once a round came back `thinkingDropped`: the rest of the turn asks for none.
+  let noThinking = false;
   try {
     for (let i = 0; i < maxRounds; i++) {
       rounds = i + 1;
@@ -579,6 +584,7 @@ export async function agentChat(
       const r = await chatRoundFn(current, {
         ...opts,
         tools: roundTools(),
+        ...(noThinking ? { thinking: undefined } : {}),
         onToolCalls: () => opts.onRoundKind?.('tools'),
         // Round content streams LIVE via onLive while accumulating into roundContent.
         // Which shelf it belongs to (answer vs. narration fold) is decided at the end
@@ -589,6 +595,14 @@ export async function agentChat(
         },
       } as Record<string, unknown>);
       if (r.usage) usage = r.usage;
+      if (r.thinkingDropped) {
+        noThinking = true;
+        current = current.map((m) => {
+          if (!(ANTHROPIC_CONTENT in m)) return m;
+          const { [ANTHROPIC_CONTENT]: _kept, ...rest } = m;
+          return rest as ChatMessage;
+        });
+      }
       // Diagnostic: what did THIS round actually emit? `finish_reason === 'tool_calls'`
       // promises tool_calls; if toolCalls is 0 the SSE accumulation silently dropped
       // them (a bug we'd want to catch). Distinguishes "the model narrated a status
@@ -640,7 +654,8 @@ export async function agentChat(
         })),
         // The round's own blocks, thinking and signatures included, to go back as they
         // came in the next round of this turn (./anthropic.ts, `ANTHROPIC_CONTENT`).
-        ...(r.blocks?.length ? { [ANTHROPIC_CONTENT]: r.blocks } : {}),
+        // Not once the turn has gone without thinking: none is sent back from then on.
+        ...(r.blocks?.length && !noThinking ? { [ANTHROPIC_CONTENT]: r.blocks } : {}),
       });
       for (let idx = 0; idx < r.toolCalls.length; idx++) {
         const called = r.toolCalls[idx]!;

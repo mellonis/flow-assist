@@ -152,20 +152,30 @@ export function toAnthropicTools(tools: ToolDef[] = []): Block[] {
   }) as unknown as Block);
 }
 
-// What `thinking` says, and the `max_tokens` beside it. A fixed budget must stay under
-// max_tokens and cannot be below 1024; a ceiling set at or under the budget is raised
-// by the budget, so the answer keeps the room it was given.
+// What `thinking` says, and the `max_tokens` beside it. Adaptive asks for a summary
+// of the thinking (`display: 'summarized'`): on the current models the thinking text is
+// omitted by default, and the chat's thinking fold would have nothing to show. A fixed
+// budget must stay under max_tokens and cannot be below 1024. `ai.maxTokens` is the
+// person's ceiling and is kept: a budget that does not fit under it is LOWERED to
+// leave the answer 1024 tokens (said once at start, `llmConfigNotes`); only a ceiling
+// under 2048, too small for any budget at all, is raised to 2048.
 export function thinkingParams(thinking: ThinkingConfig | undefined, maxTokens: number): { thinking?: Record<string, unknown>; max_tokens: number } {
   if (thinking?.adaptive) return { thinking: { type: 'adaptive', display: 'summarized' }, max_tokens: maxTokens };
   if (thinking?.budgetTokens) {
-    const budget = Math.max(MIN_THINKING_BUDGET, thinking.budgetTokens);
-    return { thinking: { type: 'enabled', budget_tokens: budget }, max_tokens: maxTokens > budget ? maxTokens : budget + maxTokens };
+    const ceiling = Math.max(maxTokens, 2 * MIN_THINKING_BUDGET);
+    const budget = Math.min(Math.max(MIN_THINKING_BUDGET, thinking.budgetTokens), ceiling - MIN_THINKING_BUDGET);
+    return { thinking: { type: 'enabled', budget_tokens: budget }, max_tokens: ceiling };
   }
   return { max_tokens: maxTokens };
 }
 
-// The whole body. The cache breakpoints go on the last tool and the last system block:
-// the tools and the system prompt are the prefix every round of a turn repeats.
+// The whole body, with two cache breakpoints (the API takes four). The prefix is
+// tools → system → messages, so the one on the last system block covers the tools
+// too — the last tool when there is no system; the other sits on the last block of the
+// last message, so each round of a tool loop reads the turn so far from the cache and
+// pays only for what the round added. A `tools_load` mid-turn (`ai.toolLoading`
+// onDemand) changes the tools, and with them every prefix after — the next round
+// writes the cache anew.
 export function anthropicRequest(
   messages: ChatMessage[],
   opts: { model?: string; maxTokens: number; thinking?: ThinkingConfig; tools?: ToolDef[]; stream: boolean },
@@ -173,8 +183,15 @@ export function anthropicRequest(
   const { system, messages: msgs } = toAnthropicMessages(messages);
   const tools = toAnthropicTools(opts.tools);
   const cached = (b: Block): Block => ({ ...b, cache_control: { type: 'ephemeral' } });
-  if (tools.length) tools[tools.length - 1] = cached(tools.at(-1)!);
   if (system.length) system[system.length - 1] = cached(system.at(-1)!);
+  else if (tools.length) tools[tools.length - 1] = cached(tools.at(-1)!);
+  const last = msgs.at(-1);
+  const tail = last?.content.at(-1);
+  // A thinking block takes no breakpoint of its own. The blocks are copied, never
+  // marked in place: a kept round's blocks are the history's own objects.
+  if (last && tail && tail.type !== 'thinking' && tail.type !== 'redacted_thinking') {
+    msgs[msgs.length - 1] = { ...last, content: [...last.content.slice(0, -1), cached(tail)] };
+  }
   return {
     model: opts.model,
     ...thinkingParams(opts.thinking, opts.maxTokens),
@@ -185,11 +202,16 @@ export function anthropicRequest(
   };
 }
 
-// Every thinking block taken out — the API's own recovery for a thinking block it
-// will not take back (one bound to a history that has changed since it was written).
-export function withoutThinking(body: AnthropicRequest): AnthropicRequest {
+// Every thinking block taken out, and the `thinking` field with them — the API's own
+// recovery for a thinking block it will not take back (one bound to a history that has
+// changed since it was written). The field goes too: with thinking on, the last
+// assistant turn of a tool loop must START with a thinking block, and it no longer
+// does. `max_tokens` goes back to the person's own ceiling.
+export function withoutThinking(body: AnthropicRequest, maxTokens: number = body.max_tokens): AnthropicRequest {
+  const { thinking: _t, ...rest } = body;
   return {
-    ...body,
+    ...rest,
+    max_tokens: maxTokens,
     messages: body.messages
       .map((m) => ({ ...m, content: m.content.filter((b) => b.type !== 'thinking' && b.type !== 'redacted_thinking') }))
       .filter((m) => m.content.length),
@@ -338,17 +360,20 @@ const headers = (token: string): Record<string, string> => ({
   'content-type': 'application/json',
 });
 
-async function post(body: AnthropicRequest, o: AnthropicOpts): Promise<Response> {
+// `thinkingDropped`: the request went without its thinking (see `withoutThinking`),
+// and the loop drops it for the rest of the turn — or every later round pays the
+// same 400 first.
+async function post(body: AnthropicRequest, o: AnthropicOpts): Promise<{ res: Response; thinkingDropped: boolean }> {
   const send = (b: AnthropicRequest) => fetch(endpoint(o.baseUrl), { method: 'POST', signal: o.signal, headers: headers(String(o.token)), body: JSON.stringify(b) });
   let res = await send(body);
-  if (res.ok) return res;
+  if (res.ok) return { res, thinkingDropped: false };
   let text = await res.text().catch(() => '');
   // A thinking block the API will not take back (its history changed under it) is a
   // 400 naming the block; the API's own recovery is to send the history without any
   // thinking, once. The model answers without the reasoning those blocks carried.
   if (res.status === 400 && hasThinking(body) && /thinking|signature/i.test(text)) {
-    res = await send(withoutThinking(body));
-    if (res.ok) return res;
+    res = await send(withoutThinking(body, o.maxTokens ?? body.max_tokens));
+    if (res.ok) return { res, thinkingDropped: true };
     text = await res.text().catch(() => '');
   }
   throw new Error(llmErrorMessage(res.status, text, { model: o.model, requestId: res.headers.get('request-id'), statusText: res.statusText }));
@@ -359,7 +384,7 @@ export async function anthropicChatRound(
   o: AnthropicOpts & { tools?: ToolDef[]; onDelta?: (d: string) => void; onReasoning?: (d: string) => void; onToolCalls?: () => void },
 ): Promise<ChatRoundResult> {
   const body = anthropicRequest(messages, { model: o.model, maxTokens: o.maxTokens ?? 8192, thinking: o.thinking, tools: o.tools, stream: true });
-  const res = await post(body, o);
+  const { res, thinkingDropped } = await post(body, o);
   const reader = res.body?.getReader();
   if (!reader) throw new Error('LLM: no response body');
   const requestId = res.headers.get('request-id');
@@ -389,34 +414,40 @@ export async function anthropicChatRound(
   if (buf) line(buf);
   const err = round.error();
   if (err) throw new Error(llmErrorMessage(err.status, err.body, { model: o.model, requestId }));
-  return round.result();
+  return { ...round.result(), ...(thinkingDropped ? { thinkingDropped } : {}) };
 }
 
-// What /compact sends: calls and results as TEXT. The request carries no tools, and
-// the API refuses tool_use / tool_result blocks in a request without them — a summary
-// needs to read what was done, not to call anything. The conversation then starts
-// with the person, as the API wants: the last 30 messages may begin mid-turn.
+// What /compact sends: the system messages (the instruction) and ONE user message
+// holding the whole conversation as text, ending with the request for the summary.
+// Sent as turns, it would end with the assistant's last answer — which the Messages
+// API reads as a PREFILL, the start of its own answer to continue (a 400 with thinking
+// on, and the newest models refuse a prefill outright). Calls and results are text too:
+// the request carries no tools, and the API refuses tool blocks without them.
 export function summaryHistory(messages: ChatMessage[]): ChatMessage[] {
-  const out: ChatMessage[] = [];
+  const system = messages.filter((m) => m.role === 'system');
+  const lines: string[] = [];
   for (const m of messages) {
-    if (m.role === 'assistant' && Array.isArray(m.tool_calls) && m.tool_calls.length) {
-      const calls = (m.tool_calls as Array<{ function?: { name?: string; arguments?: string } }>).map((c) => `[called ${c.function?.name ?? '?'} ${c.function?.arguments || '{}'}]`);
-      out.push({ role: 'assistant', content: [textOf(m.content), ...calls].filter(Boolean).join('\n') });
+    if (m.role === 'system') continue;
+    const text = textOf(m.content);
+    if (m.role === 'assistant') {
+      const calls = ((Array.isArray(m.tool_calls) ? m.tool_calls : []) as Array<{ function?: { name?: string; arguments?: string } }>)
+        .map((c) => `[called ${c.function?.name ?? '?'} ${c.function?.arguments || '{}'}]`);
+      const said = [text, ...calls].filter(Boolean).join('\n');
+      if (said) lines.push(`assistant: ${said}`);
     } else if (m.role === 'tool') {
-      out.push({ role: 'user', content: `[result: ${textOf(m.content)}]` });
-    } else {
-      const { [ANTHROPIC_CONTENT]: _kept, tool_calls: _c, ...rest } = m;
-      out.push(rest as ChatMessage);
+      lines.push(`tool result: ${text}`);
+    } else if (text) {
+      lines.push(`user: ${text}`);
     }
   }
-  const first = out.findIndex((m) => m.role !== 'system' && m.role !== 'assistant');
-  return out.filter((m, i) => m.role === 'system' || (first >= 0 && i >= first));
+  const conversation = lines.length ? lines.join('\n\n') : '(nothing yet)';
+  return [...system, { role: 'user', content: `The conversation:\n\n${conversation}\n\nCompress it now, as instructed.` }];
 }
 
 // /compact's one-shot: the same conversion, not streamed, the answer's text blocks.
 export async function anthropicCompact(messages: ChatMessage[], o: AnthropicOpts): Promise<string> {
   const body = anthropicRequest(summaryHistory(messages), { model: o.model, maxTokens: o.maxTokens ?? 8192, thinking: o.thinking, stream: false });
-  const res = await post(body, o);
+  const { res } = await post(body, o);
   const data = (await res.json()) as { content?: Array<{ type?: string; text?: string }> };
   return (data?.content ?? []).filter((b) => b?.type === 'text').map((b) => b.text ?? '').join('');
 }

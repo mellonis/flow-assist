@@ -1,7 +1,7 @@
 // Plugin «assistant»: a chat with the LLM about the current task. A self-sufficient
 // modal: owns the messages, input, streaming and scroll. THE HOST does the network
-// (ft.services.chatLLM) — the plugin never touches it; config read from
-// ft.config.ai (baseUrl/model/tokenEnv), token from process.env[tokenEnv].
+// (ft.services.chatLLM) — the plugin never touches it; the endpoint is read from
+// ft.config.ai through `llmOpts` (provider, baseUrl, model, the token's variable).
 //   - what the chat is about and the refresh after a write are asked of the plugins
 //     through two generic hooks (`services.chatSubject` / `services.afterWrite`,
 //     see AGENTS.md, plugin contract) — the chat names no plugin's data.

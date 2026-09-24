@@ -51,14 +51,34 @@ test('a text answer streams from /messages, with the API\'s headers, a max_token
   expect(body).toMatchObject({ model: 'claude-sonnet-5', max_tokens: 8192, stream: true });
   expect('stream_options' in body).toBe(false);
   expect('thinking' in body).toBe(false);
-  // The system prompt left the messages for the top-level field; its last block and the
-  // last tool carry the breakpoint, nothing else does.
+  // The system prompt left the messages for the top-level field. Two breakpoints: the
+  // last system block (the tools come before it, so it covers them) and the last block
+  // of the last message; nothing else carries one.
   expect(body.messages.map((m) => m.role)).toEqual(['user']);
   expect(body.system!.at(-1)!.cache_control).toEqual({ type: 'ephemeral' });
   expect(body.system!.slice(0, -1).every((b) => !b.cache_control)).toBe(true);
+  expect(body.messages[0]!.content.at(-1)!.cache_control).toEqual({ type: 'ephemeral' });
   expect(body.tools!.length).toBeGreaterThan(1);
-  expect(body.tools!.at(-1)!.cache_control).toEqual({ type: 'ephemeral' });
-  expect(body.tools!.slice(0, -1).every((t) => !t.cache_control && t.input_schema)).toBe(true);
+  expect(body.tools!.every((t) => !t.cache_control && t.input_schema)).toBe(true);
+});
+
+test('in a tool loop the breakpoint moves to the newest block — the turn so far is read from the cache', async () => {
+  const model = new ScriptedModel();
+  model.script([{ tool: 'datetime', args: {} }], [{ tool: 'datetime', args: {} }], [{ text: 'Noon.' }]);
+  const ui = await boot(model);
+  await ask(ui, 'time?');
+  await settleUntil(() => model.requests.length === 3);
+  await settle(10);
+  for (const i of [1, 2]) {
+    const marked = sent(model, i).messages.flatMap((m) => m.content).filter((b) => b.cache_control);
+    expect(marked).toHaveLength(1);
+    expect(marked[0]).toBe(sent(model, i).messages.at(-1)!.content.at(-1)!);
+    expect(marked[0]!.type).toBe('tool_result');
+  }
+  // The kept history itself was never marked: the first request's user message went
+  // with a breakpoint, the same message in the next request goes without one.
+  expect(sent(model, 1).messages[0]!.content[0]!.cache_control).toBeUndefined();
+  expect(ui.backend.lastFrame).toContain('Noon.');
 });
 
 test('a tool round runs the tool, and its results go back in ONE user message answering the calls by id', async () => {
@@ -138,13 +158,49 @@ test('thinking that is not shown still goes back within the turn, and draws no e
   expect(ui.backend.lastFrame).not.toMatch(/▸ thinking/);
 });
 
-test('a fixed thinking budget is sent under a max_tokens raised past it', async () => {
+test('a fixed thinking budget that does not fit under ai.maxTokens is lowered, and the log says so', async () => {
   const model = new ScriptedModel();
   model.script([{ text: 'ok' }]);
   const ui = await boot(model, { thinking: { budgetTokens: 10000 }, maxTokens: 4000 });
   await ask(ui, 'hi');
-  expect(sent(model, 0)).toMatchObject({ thinking: { type: 'enabled', budget_tokens: 10000 }, max_tokens: 14000 });
+  expect(sent(model, 0)).toMatchObject({ thinking: { type: 'enabled', budget_tokens: 2976 }, max_tokens: 4000 });
   expect(ui.backend.lastFrame).toContain('ok');
+  await ui.press('escape', 'escape');
+  await ui.press('L');
+  expect(ui.backend.lastFrame).toContain('ai.thinking.budgetTokens 10000 does not fit');
+});
+
+test('with a fixed budget, a thinking block refused goes with the thinking field — and the rest of the turn asks for none', async () => {
+  const model = new ScriptedModel();
+  model.script(
+    [{ thinking: 'Check the clock.', signature: 'sig-stale' }, { tool: 'datetime', args: {} }],
+    [{ tool: 'datetime', args: {} }],
+    [{ text: 'Noon.' }],
+  );
+  const ui = await boot(model, { thinking: { budgetTokens: 2048 } });
+  const scripted = globalThis.fetch;
+  let refused = 0;
+  globalThis.fetch = (async (url: unknown, init: RequestInit) => {
+    if (JSON.stringify(JSON.parse(String(init.body)).messages).includes('sig-stale')) {
+      refused++;
+      return new Response(JSON.stringify({ type: 'error', error: { type: 'invalid_request_error', message: 'messages.1.content.0: Invalid `signature` in `thinking` block. The block is bound to a different conversation.' } }), { status: 400 });
+    }
+    return scripted(url as string, init);
+  }) as typeof fetch;
+  await ask(ui, 'time?');
+  await settleUntil(() => model.requests.length === 3);
+  await settle(10);
+  // One refusal only: the retry, and the round after it, carry neither the block nor
+  // the field — the double refuses a thinking-on tool loop whose turn starts otherwise.
+  expect(refused).toBe(1);
+  expect(sent(model, 0).thinking).toEqual({ type: 'enabled', budget_tokens: 2048 });
+  for (const i of [1, 2]) {
+    expect('thinking' in sent(model, i)).toBe(false);
+    expect(sent(model, i).max_tokens).toBe(8192);
+    expect(JSON.stringify(sent(model, i).messages)).not.toContain('"type":"thinking"');
+  }
+  expect(ui.backend.lastFrame).toContain('Noon.');
+  expect(ui.backend.lastFrame).not.toContain('LLM 400');
 });
 
 test('usage reaches the context meter with the cache counted in — what was sent, cached or not', async () => {
@@ -185,7 +241,10 @@ test('/compact asks /messages once, not streamed, and the summary is its text', 
   const compact = sent(model, 1);
   expect(compact.stream).toBeUndefined();
   expect(compact.system![0]!.text).toMatch(/^Compress the chat history/);
-  expect(compact.messages.map((m) => m.role)).toEqual(['user', 'assistant']);
+  // One user message, the conversation as text — never an assistant turn last, which
+  // the API would take for the start of its own answer.
+  expect(compact.messages.map((m) => m.role)).toEqual(['user']);
+  expect(compact.messages[0]!.content[0]!.text).toBe('The conversation:\n\nuser: the first question\n\nassistant: The first answer.\n\nCompress it now, as instructed.');
   expect(ui.backend.lastFrame).toContain('SUMMARY: they greeted each other.');
 
   await ask(ui, 'the second question');
@@ -208,9 +267,8 @@ test('/compact after a tool round sends the calls and results as text — the re
   const compact = sent(model, 2);
   expect('tools' in compact).toBe(false);
   expect(JSON.stringify(compact.messages)).not.toMatch(/tool_use|tool_result/);
-  expect(compact.messages.map((m) => m.role)).toEqual(['user', 'assistant', 'user', 'assistant']);
-  expect(compact.messages[1]!.content[0]!.text).toBe('[called datetime {}]');
-  expect(String(compact.messages[2]!.content[0]!.text)).toMatch(/^\[result: OK: /);
+  expect(compact.messages.map((m) => m.role)).toEqual(['user']);
+  expect(String(compact.messages[0]!.content[0]!.text)).toMatch(/^The conversation:\n\nuser: what time is it\?\n\nassistant: \[called datetime \{\}\]\n\ntool result: OK: .*\n\nassistant: It is noon\.\n\nCompress it now, as instructed\.$/s);
   expect(ui.backend.lastFrame).toContain('SUMMARY: asked the time.');
 });
 
@@ -249,7 +307,7 @@ test('an attached image goes as a base64 image block', async () => {
   await settleUntil(() => model.requests.length === 1);
   expect(sent(model, 0).messages[0]!.content).toEqual([
     { type: 'text', text: '[Image #1] what is this?' },
-    { type: 'image', source: { type: 'base64', media_type: 'image/png', data: fs.readFileSync(file).toString('base64') } },
+    { type: 'image', source: { type: 'base64', media_type: 'image/png', data: fs.readFileSync(file).toString('base64') }, cache_control: { type: 'ephemeral' } },
   ]);
   expect(ui.backend.lastFrame).toContain('A screenshot.');
 });

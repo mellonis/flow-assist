@@ -5,7 +5,7 @@ import {
   ANTHROPIC_CONTENT, anthropicRequest, errorStatus, finishReason, imageBlock, roundReader, summaryHistory, thinkingParams,
   toAnthropicMessages, toAnthropicTools, usageOf, withoutThinking,
 } from '../anthropic.ts';
-import { llmOpts } from '../llm-endpoint.ts';
+import { llmConfigNotes, llmOpts } from '../llm-endpoint.ts';
 import { llmErrorMessage } from '../llm-error.ts';
 import { isImageRefusal } from '../images.ts';
 import { anthropicRefusal } from '../../__tests__/helpers/scripted.ts';
@@ -93,26 +93,36 @@ test('a round\'s kept blocks go back exactly as they came — thinking, signatur
   expect(withoutThinking(body).messages[1]!.content.map((b) => b.type)).toEqual(['text', 'tool_use']);
 });
 
-test('the cache breakpoints sit on the last system block and the last tool; no thinking is asked for unless configured', () => {
+test('the cache breakpoints sit on the last system block and the last message block; no thinking is asked for unless configured', () => {
   const body = anthropicRequest(history, { model: 'claude-sonnet-5', maxTokens: 8192, stream: true, tools: [tool('a'), tool('b')] });
   expect(body.system!.map((b) => b.cache_control)).toEqual([undefined, { type: 'ephemeral' }]);
-  expect(body.tools).toEqual([
-    { name: 'a', description: 'a does it', input_schema: { type: 'object', properties: { p: { type: 'string' } } } },
-    { name: 'b', description: 'b does it', input_schema: { type: 'object', properties: { p: { type: 'string' } } }, cache_control: { type: 'ephemeral' } },
-  ]);
+  // The tools come before the system in the prefix: its breakpoint covers them.
+  expect(body.tools!.every((t) => !t.cache_control)).toBe(true);
+  expect(body.messages.flatMap((m) => m.content).map((b) => b.cache_control ?? null)).toEqual([null, null, null, null, null, null, { type: 'ephemeral' }]);
+  // With no system, the last tool takes it.
+  const noSystem = anthropicRequest([{ role: 'user', content: 'hi' }], { maxTokens: 5, stream: true, tools: [tool('a'), tool('b')] });
+  expect(noSystem.tools!.map((t) => t.cache_control ?? null)).toEqual([null, { type: 'ephemeral' }]);
+  // The kept blocks are never marked in place.
+  const kept = [{ type: 'tool_use', id: 't1', name: 'datetime', input: {} }];
+  const msgs: ChatMessage[] = [{ role: 'user', content: 'q' }, { role: 'assistant', content: null, tool_calls: [call('t1', 'datetime', '{}')], [ANTHROPIC_CONTENT]: kept }];
+  anthropicRequest([...msgs, { role: 'user', content: 'more' }], { maxTokens: 5, stream: true });
+  expect(kept[0]).toEqual({ type: 'tool_use', id: 't1', name: 'datetime', input: {} });
   expect(body).toMatchObject({ model: 'claude-sonnet-5', max_tokens: 8192, stream: true });
   expect('thinking' in body).toBe(false);
   // No system, no tools: neither field is sent.
   const bare = anthropicRequest([{ role: 'user', content: 'hi' }], { maxTokens: 5, stream: false });
   expect(Object.keys(bare).sort()).toEqual(['max_tokens', 'messages', 'model']);
+  expect(bare.messages[0]!.content[0]!.cache_control).toEqual({ type: 'ephemeral' });
 });
 
 test('thinking: adaptive shows a summary; a fixed budget keeps under max_tokens, at least 1024', () => {
   expect(thinkingParams({ adaptive: true }, 8192)).toEqual({ thinking: { type: 'adaptive', display: 'summarized' }, max_tokens: 8192 });
   expect(thinkingParams({ budgetTokens: 4000 }, 8192)).toEqual({ thinking: { type: 'enabled', budget_tokens: 4000 }, max_tokens: 8192 });
-  // A ceiling at or under the budget is raised by the budget — the answer keeps its room.
-  expect(thinkingParams({ budgetTokens: 10000 }, 8192)).toEqual({ thinking: { type: 'enabled', budget_tokens: 10000 }, max_tokens: 18192 });
+  // The person's ceiling stays: a budget that does not fit is lowered, leaving the answer 1024.
+  expect(thinkingParams({ budgetTokens: 10000 }, 8192)).toEqual({ thinking: { type: 'enabled', budget_tokens: 7168 }, max_tokens: 8192 });
   expect(thinkingParams({ budgetTokens: 100 }, 8192).thinking).toEqual({ type: 'enabled', budget_tokens: 1024 });
+  // Only a ceiling too small for any budget is raised — to 2048.
+  expect(thinkingParams({ budgetTokens: 4096 }, 1000)).toEqual({ thinking: { type: 'enabled', budget_tokens: 1024 }, max_tokens: 2048 });
   expect(thinkingParams(undefined, 8192)).toEqual({ max_tokens: 8192 });
 });
 
@@ -204,22 +214,46 @@ test('stop reasons and usage in the loop\'s words', () => {
   expect(usageOf(undefined)).toBeUndefined();
 });
 
-test('what /compact sends: calls and results as text, starting with the person', () => {
-  expect(summaryHistory([
+test('what /compact sends: the instruction, and the conversation as ONE user message that ends asking for the summary', () => {
+  const out = summaryHistory([
     { role: 'system', content: 'Compress.' },
     { role: 'tool', tool_call_id: 'gone', content: 'OK: orphan' },
+    { role: 'user', content: 'read a' },
     { role: 'assistant', content: 'Next: look.', tool_calls: [call('t1', 'read_file', '{"path":"a"}')], [ANTHROPIC_CONTENT]: [{ type: 'thinking', thinking: 'x', signature: 's' }] },
     { role: 'tool', tool_call_id: 't1', content: 'OK: aaa' },
     { role: 'assistant', content: 'Done.' },
-  ])).toEqual([
-    { role: 'system', content: 'Compress.' },
-    { role: 'user', content: '[result: OK: orphan]' },
-    { role: 'assistant', content: 'Next: look.\n[called read_file {"path":"a"}]' },
-    { role: 'user', content: '[result: OK: aaa]' },
-    { role: 'assistant', content: 'Done.' },
   ]);
-  // A leading answer whose question fell off the 30 is not where a conversation starts.
-  expect(summaryHistory([{ role: 'assistant', content: 'late' }, { role: 'user', content: 'q' }])).toEqual([{ role: 'user', content: 'q' }]);
+  expect(out).toEqual([
+    { role: 'system', content: 'Compress.' },
+    { role: 'user', content: 'The conversation:\n\ntool result: OK: orphan\n\nuser: read a\n\nassistant: Next: look.\n[called read_file {"path":"a"}]\n\ntool result: OK: aaa\n\nassistant: Done.\n\nCompress it now, as instructed.' },
+  ]);
+  // The API takes it: no tools needed, no prefill.
+  expect(anthropicRefusal(anthropicRequest(out, { maxTokens: 100, stream: false, thinking: { budgetTokens: 1024 } }) as never, { 'x-api-key': 'k', 'anthropic-version': 'v' })).toBeNull();
+});
+
+test('the double refuses a prefill, a fifth breakpoint, and a thinking-on tool loop whose turn does not start with thinking', () => {
+  const h = { 'x-api-key': 'k', 'anthropic-version': 'v' };
+  const base = { model: 'm', max_tokens: 4096, tools: [{ name: 't', input_schema: {} }] };
+  expect(anthropicRefusal({ ...base, messages: [{ role: 'user', content: 'q' }, { role: 'assistant', content: 'Sure' }] }, h)).toMatch(/prefill/);
+  const five = Array.from({ length: 5 }, (_, i) => ({ type: 'text', text: `s${i}`, cache_control: { type: 'ephemeral' } }));
+  expect(anthropicRefusal({ ...base, system: five, messages: [{ role: 'user', content: 'q' }] }, h)).toMatch(/maximum of 4/);
+  const loop = [
+    { role: 'user', content: [{ type: 'text', text: 'q' }] },
+    { role: 'assistant', content: [{ type: 'tool_use', id: 'a', name: 't', input: {} }] },
+    { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'a' }] },
+  ];
+  expect(anthropicRefusal({ ...base, thinking: { type: 'enabled', budget_tokens: 1024 }, messages: loop }, h)).toMatch(/must start with a thinking block/);
+  expect(anthropicRefusal({ ...base, messages: loop }, h)).toBeNull();
+});
+
+test('the provider is read as written by a person; a value this host does not know is said, not refused', () => {
+  expect(llmOpts({ provider: ' Anthropic ' }, {}).provider).toBe('anthropic');
+  expect(llmConfigNotes({ provider: 'Anthropic' })).toEqual([]);
+  expect(llmConfigNotes({ provider: 'openai' })).toEqual([]);
+  expect(llmConfigNotes({})).toEqual([]);
+  expect(llmConfigNotes({ provider: 'openrouter' })).toEqual(['ai.provider "openrouter" is not one this host knows — read as an OpenAI-compatible API; the other one is "anthropic"']);
+  expect(llmConfigNotes({ provider: 'anthropic', thinking: { budgetTokens: 10000 } })[0]).toMatch(/^ai\.thinking\.budgetTokens 10000 does not fit under ai\.maxTokens 8192 .* sent as 7168; raise ai\.maxTokens/);
+  expect(llmConfigNotes({ provider: 'anthropic', thinking: { budgetTokens: 4000 } })).toEqual([]);
 });
 
 test('tools are name, description and input_schema only', () => {

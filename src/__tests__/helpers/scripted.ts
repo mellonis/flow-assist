@@ -208,6 +208,22 @@ export function anthropicRefusal(req: Record<string, unknown>, headers: Record<s
   if (!msgs.length || msgs[0]!.role !== 'user') return 'messages: the first message must use the "user" role';
   const toolBlocks = msgs.some((m) => Array.isArray(m.content) && m.content.some((b) => b.type === 'tool_use' || b.type === 'tool_result'));
   if (toolBlocks && !(req.tools as unknown[] | undefined)?.length) return 'Requests which include tool_use or tool_result blocks must define tools.';
+  // A last message of the assistant's is a prefill — the start of the answer to go on
+  // from. The current models refuse it, and with thinking on no model takes one.
+  if (msgs.at(-1)!.role === 'assistant') return 'This model does not support assistant message prefill. The conversation must end with a user message.';
+  const marked = [...((req.tools ?? []) as Array<Record<string, unknown>>), ...((req.system ?? []) as Array<Record<string, unknown>>), ...msgs.flatMap((m) => (Array.isArray(m.content) ? m.content : []))]
+    .filter((b) => b.cache_control).length;
+  if (marked > 4) return `A maximum of 4 blocks with cache_control may be provided. Found ${marked}.`;
+  // With a fixed thinking budget, the assistant turn a tool loop is answering must start
+  // with its thinking block.
+  if (thinking?.type === 'enabled') {
+    const i = msgs.map((m) => m.role).lastIndexOf('assistant');
+    const turn = msgs[i];
+    const blocks = turn && Array.isArray(turn.content) ? turn.content : [];
+    if (turn && i === msgs.length - 2 && blocks.some((b) => b.type === 'tool_use') && !['thinking', 'redacted_thinking'].includes(String(blocks[0]?.type))) {
+      return `messages.${i}.content.0.type: Expected \`thinking\` or \`redacted_thinking\`, but found \`${blocks[0]?.type}\`. When \`thinking\` is enabled, a final \`assistant\` message must start with a thinking block.`;
+    }
+  }
   let asked = new Set<string>();
   for (let i = 0; i < msgs.length; i++) {
     const m = msgs[i]!;

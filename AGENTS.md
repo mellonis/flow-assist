@@ -705,11 +705,13 @@ body or the `x-request-id` header; a 401/403 adds a generic hint about the token
 The streamed round and `/compact`'s one-shot both use it.
 
 **Two wires, one history** (`src/assistant/llm-endpoint.ts`, `src/assistant/anthropic.ts`).
-`ai.provider` picks how the model is reached: unset (or anything but `anthropic`) an
-OpenAI-compatible chat-completions API, `anthropic` Anthropic's own Messages API. Every
-caller — the chat's send and `/compact`, a background task, the one-shot prompt — spreads
-`llmOpts(config.ai)` into its call, and the start-up gate (`configWarnings`) checks the
-same resolution: with `anthropic` the base URL defaults to `https://api.anthropic.com/v1`
+`ai.provider` picks how the model is reached: unset (or anything but `anthropic`, read
+case-blind) an OpenAI-compatible chat-completions API, `anthropic` Anthropic's own
+Messages API; a value that is neither `openai` nor `anthropic` is said once in the log
+(`llmConfigNotes`), never refused — the schema has always taken any string. Every
+caller — the chat's send and `/compact`, a background task, the one-shot prompt, and
+`services.chatLLM` itself for a plugin that passes less — spreads `llmOpts(config.ai)`
+into its call, and the start-up gate (`configWarnings`) checks the same resolution: with `anthropic` the base URL defaults to `https://api.anthropic.com/v1`
 and the token variable to `ANTHROPIC_API_KEY`. In `agent.ts` the provider is looked at in
 exactly two places, `roundFor` (the round `agentChat` runs; a caller's own `chatRound`, a
 test's stub, wins) and `compactConversation`. **What the host keeps never changes shape**:
@@ -717,16 +719,22 @@ test's stub, wins) and `compactConversation`. **What the host keeps never change
 out, every request — system messages into the top-level `system`, `tool_calls` into
 `tool_use` blocks (arguments parsed; `{}` for any that do not), each run of tool results
 into ONE user message with the person's next words after them (turns of one role merge —
-the API wants them alternating), image parts into base64 blocks, a `cache_control`
-breakpoint on the last system block and the last tool. A streamed round comes back as the
+the API wants them alternating), image parts into base64 blocks. Two `cache_control`
+breakpoints (the API takes four): the last system block — the prefix is tools → system →
+messages, so it covers the tools; the last tool only when there is no system — and the
+last block of the last message, so each round of a tool loop reads the turn so far from
+the cache. Blocks are copied to be marked, never marked in place (a kept round's blocks
+are the history's own). A `tools_load` mid-turn changes the tools and so every prefix. A streamed round comes back as the
 same `ChatRoundResult` with the same live callbacks (`onToolCalls` on the first `tool_use`
 block, `thinking_delta` → `onReasoning` → the thinking fold; an empty one says nothing);
 usage is `input + cache_creation + cache_read` as the prompt, since the meter measures
 what is sent. An SSE `error` event carries no status, so its type stands for one
 (`overloaded_error` → 529) and the line is `llmErrorMessage`'s, with the `request-id`
-header. `/compact` sends no tools, and the API refuses tool blocks without them, so its
-request carries calls and results as text (`summaryHistory`: `[called name {…}]`,
-`[result: …]`), starting at the first message the person wrote. **Thinking blocks go
+header. `/compact` sends the instruction as `system` and the whole conversation as ONE
+user message of text ending with the request for the summary (`summaryHistory`: `user:`,
+`assistant:` with `[called name {…}]`, `tool result:`) — sent as turns it would end with
+the assistant's answer, which the API reads as a prefill, and its tool blocks would need
+tools the request does not carry. **Thinking blocks go
 back unchanged within a turn**: a round that thought AND
 called a tool keeps its blocks as they came (`ChatRoundResult.blocks`), the loop puts them
 on that round's assistant message (`anthropicContent`), and the conversion replays that
@@ -734,14 +742,21 @@ array verbatim — thinking, signature, order. It never outlives the turn: `apiH
 whitelists fields and drops it, which removes a LEADING run of thinking blocks — what the
 API allows — and the OpenAI round strips it too (`openAiShaped`). A 400 that names a
 thinking block (its history changed under it — the tool list does, when `tools_load` runs
-mid-turn) is retried once without any thinking, the API's own recovery. `ai.thinking`:
-`{adaptive: true}` → `{type:'adaptive', display:'summarized'}` (the current models' only
-mode); `{budgetTokens}` → a fixed budget for older models, `max_tokens` raised by it when
-it does not fit; unset → no `thinking` field at all (a current model then thinks by its
+mid-turn) is retried once without any thinking blocks AND without the `thinking` field
+(with it on, the tool loop's last assistant turn must start with a thinking block); the
+round says `thinkingDropped`, and the loop drops the turn's kept blocks and asks for no
+thinking for the rest of the turn, so later rounds do not pay the 400 again.
+`ai.thinking`: `{adaptive: true}` → `{type:'adaptive', display:'summarized'}` (the
+current models' only mode; they omit the thinking text by default, and the fold would
+be empty); `{budgetTokens}` → a fixed budget for older models, LOWERED to leave the
+answer 1024 under `ai.maxTokens` when it does not fit (said once in the log) — the
+person's ceiling is kept, only one under 2048 is raised to 2048; unset → no `thinking` field at all (a current model then thinks by its
 own default, its text not shown — but its blocks still come and still go back). The
 scripted model has an Anthropic wire (`model.wire = 'anthropic'`) that REFUSES what the
 API refuses (`anthropicRefusal`: headers, alternation, a tool result per call, first in
-its message, no empty text, a signed thinking block) — keep it in step with the API.
+its message, no empty text, a signed thinking block, tool blocks without tools, a prefill,
+more than four breakpoints, a thinking-on tool loop whose turn does not start with
+thinking) — keep it in step with the API.
 
 **An image is kept as a ref and sent as a part.** `ChatMessage.content` is
 `string | ContentPart[] | null`, but content PARTS exist only on the way to the

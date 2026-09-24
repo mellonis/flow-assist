@@ -32,8 +32,30 @@ export interface LlmOpts {
 export const ANTHROPIC_BASE_URL = 'https://api.anthropic.com/v1';
 export const DEFAULT_MAX_TOKENS = 8192;
 
+// Read as written by a person: `Anthropic` and ` anthropic ` are anthropic.
 export function providerOf(ai: unknown): Provider {
-  return (ai as { provider?: unknown } | null | undefined)?.provider === 'anthropic' ? 'anthropic' : 'openai';
+  const p = (ai as { provider?: unknown } | null | undefined)?.provider;
+  return typeof p === 'string' && p.trim().toLowerCase() === 'anthropic' ? 'anthropic' : 'openai';
+}
+
+// What the log says once at start about `config.ai` — never a refusal to start: the
+// schema has always taken any string as `ai.provider`, so an older config may hold a
+// value this host does not know, and it still works as the OpenAI-compatible API it
+// always meant. `thinkingParams` (./anthropic.ts) is the rule the budget note describes.
+export function llmConfigNotes(ai: unknown): string[] {
+  const notes: string[] = [];
+  const a = (ai && typeof ai === 'object' ? ai : {}) as Record<string, unknown>;
+  const p = typeof a.provider === 'string' ? a.provider.trim().toLowerCase() : '';
+  if (p && p !== 'anthropic' && p !== 'openai') {
+    notes.push(`ai.provider "${String(a.provider)}" is not one this host knows — read as an OpenAI-compatible API; the other one is "anthropic"`);
+  }
+  const o = llmOpts(ai, {});
+  const budget = o.thinking?.budgetTokens;
+  if (o.provider === 'anthropic' && budget && budget > o.maxTokens - 1024) {
+    const ceiling = Math.max(o.maxTokens, 2048);
+    notes.push(`ai.thinking.budgetTokens ${budget} does not fit under ai.maxTokens ${o.maxTokens} with room for the answer — sent as ${ceiling - 1024}${ceiling > o.maxTokens ? ` with max_tokens ${ceiling}` : ''}; raise ai.maxTokens to keep the budget`);
+  }
+  return notes;
 }
 
 export function llmOpts(ai: unknown, env: Record<string, string | undefined> = process.env): LlmOpts {

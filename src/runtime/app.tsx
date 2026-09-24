@@ -47,6 +47,7 @@ import { ARM_MS, armHint, armKeyOf, armStep, type Arm } from './exit-keys.js';
 import { copyToClipboard } from '../assistant/copy.js';
 import { readClipboardImage, type ClipboardImage } from '../assistant/images.js';
 import { legacyRootsNote } from '../assistant/shell.js';
+import { llmConfigNotes } from '../assistant/llm-endpoint.js';
 import { resolveAppTheme } from '../playback/theme.js';
 import type { ColorScheme, Theme } from '../playback/theme.js';
 import type { Command } from '../loader/plugin.js';
@@ -183,6 +184,7 @@ export function renderApp(
   // A config that still sets the roots as `fs.roots` is read as before, and said once.
   const rootsNote = legacyRootsNote(config);
   if (rootsNote) services.log.append(`[config] ${rootsNote}`);
+  for (const note of llmConfigNotes(config.ai)) services.log.append(`[config] ${note}`);
   const viewRegistry = buildViewRegistry(plugins);
   const commandRegistry = buildCommandRegistry(plugins);
   const keys = buildKeys(plugins, config);

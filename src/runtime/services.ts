@@ -12,6 +12,7 @@ import { loadMemories, saveMemories, memoryFilePath } from './services/memory.js
 import { agentChat } from '../assistant/agent.js';
 import { copyToClipboard as platformCopy } from '../assistant/copy.js';
 import { toolLoadingMode } from '../assistant/tool-loading.js';
+import { llmOpts } from '../assistant/llm-endpoint.js';
 import type { AgentResult, AgentOpts, ChatMessage, ToolLogger } from '../assistant/agent.js';
 import type { AiToolDef, ToolRegistry } from '../loader/tools.js';
 import type { PluginRepo } from '../loader/repo.js';
@@ -162,9 +163,12 @@ export function createServices({ config, tools, repo, onExit }: CreateServicesOp
     // no-op default would otherwise leave it inert. A caller-supplied
     // `logToolRun` wins over ours.
     // `ai.toolLoading` is applied here, once, for the chat and a background task alike;
-    // a caller that names a mode keeps it.
+    // a caller that names a mode keeps it. So is the endpoint (`llmOpts`: the provider,
+    // base URL, model, token): a plugin that passes only some of it still reaches the
+    // model the person configured, on the wire they chose.
     chatLLM: (messages, opts) => agentChat(messages, {
       toolLoading: toolLoadingMode(config.ai),
+      ...llmOpts(config.ai),
       ...opts,
       logToolRun: (opts?.logToolRun as ToolLogger | undefined) ?? log.logToolRun,
     }),

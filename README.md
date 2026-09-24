@@ -158,13 +158,16 @@ repository), recorded against a mock tracker:
   export ANTHROPIC_API_KEY=…                           # or ai.tokenEnv names another variable
   ```
 
-  `ai.baseUrl` then defaults to `https://api.anthropic.com/v1`. The system prompt
-  and the tools are cached between requests, the context meter counts the cached
-  part, and the model's thinking shows in the chat's thinking fold (`^o`).
+  `ai.baseUrl` then defaults to `https://api.anthropic.com/v1`; a base URL of your own
+  (a proxy) includes the `/v1` too — requests go to `<ai.baseUrl>/messages`. The
+  tools, the system prompt and the turn so far are cached between requests, the
+  context meter counts the cached part, and the model's thinking shows in the chat's thinking fold (`^o`).
   `ai.maxTokens` caps one answer (8192 by default; that API requires a cap, and
   thinking counts against it). `config set ai.thinking '{"adaptive":true}'` asks the
   model to think as much as it sees fit and shows a summary of it; a fixed
-  `'{"budgetTokens":4096}'` is for older models only (the current ones refuse it).
+  `'{"budgetTokens":4096}'` is for older models only (the current ones refuse it), and
+  a budget that leaves the answer less than 1024 tokens under `ai.maxTokens` is lowered
+  (the log says so at start).
   Unset, the model thinks as it does by default and its thinking is not shown.
 - **Environment**: the host reads `LLM_TOKEN` (or the variable named by
   `ai.tokenEnv`; `ANTHROPIC_API_KEY` with `ai.provider anthropic`) and the optional `FLOW_ASSIST_PLUGIN_REGISTRY_URL` /

@@ -33,8 +33,9 @@ What each version of flow-assist brought, newest first. The version is the one i
   native API gives. With `config set ai.provider anthropic` and a Claude model id
   (`claude-sonnet-5`, `claude-opus-5-5`) the chat, `/compact`, a background task and
   the one-shot prompt talk to `/v1/messages`: the token comes from `ANTHROPIC_API_KEY`
-  and the base URL defaults to `https://api.anthropic.com/v1`. The system prompt and
-  the tool list are cached between requests (and `ctx N%` counts the cached part);
+  and the base URL defaults to `https://api.anthropic.com/v1`. The tools, the
+  system prompt and the turn so far are cached between requests (and `ctx N%` counts
+  the cached part);
   tool calls and results go natively; the model's thinking shows in the chat's
   thinking fold, and its blocks are sent back unchanged while a tool loop runs.
   New keys: `ai.maxTokens` (the cap on one answer, 8192) and `ai.thinking`
