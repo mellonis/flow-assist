@@ -28,6 +28,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
+import { THIS_HOST, pluginCompat, readPluginManifest } from './compat.js';
 
 // A plugin builder: `build<X>Plugin({ renders, config, make, z })` → Plugin (or a promise of one).
 // `z` is the host's zod, handed to every builder: a plugin with no bundler (and so no
@@ -88,6 +89,9 @@ export interface LoadPluginsOptions {
   // The `plugins-enabled/` dir, needed only to dynamically import enabled plugins.
   // Omitted → enabled plugins are skipped (built-ins still load).
   enabledDir?: string;
+  // Where the loader says what it skipped and why, a line each — the host puts them in
+  // its log. A skip is also said on stderr, as before the app has a screen.
+  notes?: string[];
 }
 
 export async function loadPlugins({
@@ -96,7 +100,13 @@ export async function loadPlugins({
   renders = {},
   make = makeFactory(config as MakeFactoryConfig),
   enabledDir,
+  notes = [],
 }: LoadPluginsOptions): Promise<Plugin[]> {
+  const skip = (name: string, why: string) => {
+    const line = `[plugins] skip ${name}: ${why}`;
+    console.warn(line);
+    notes.push(line);
+  };
   const plugins: Plugin[] = [];
 
   // Built-ins: always present and not removable (they are not part of the enabled
@@ -116,6 +126,13 @@ export async function loadPlugins({
       console.warn(`[plugins] skip ${name}: no enabledDir provided`);
       continue;
     }
+    // Whether it can run here is read from its manifest before any of its code runs.
+    const compat = pluginCompat(readPluginManifest(join(enabledDir, name)), THIS_HOST);
+    if (!compat.ok) {
+      skip(name, compat.reason);
+      continue;
+    }
+    if (compat.note) notes.push(`[plugins] ${name} ${compat.note}`);
     try {
       // Import the entry FILE (not the symlinked directory), so the compiled binary
       // and the runtime resolve plugins the same way — see resolvePluginEntry.
@@ -135,10 +152,10 @@ export async function loadPlugins({
         plugin.description ??= manifestDescription(join(enabledDir, name));
         plugins.push(plugin);
       } else {
-        console.warn(`[plugins] skip ${name}: default export is not a builder function`);
+        skip(name, 'default export is not a builder function');
       }
     } catch (e) {
-      console.warn(`[plugins] skip ${name}: ${(e as Error).message}`);
+      skip(name, (e as Error).message);
     }
   }
 

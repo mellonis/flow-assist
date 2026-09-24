@@ -28,12 +28,14 @@ notes/
 ```
 
 ```json
-{ "name": "notes", "version": "0.1.0", "description": "A notebook the assistant reads and writes", "tools": ["notes"] }
+{ "name": "notes", "version": "0.1.0", "hostApi": 1, "flowtty": "^1.0.0-alpha.26",
+  "description": "A notebook the assistant reads and writes", "tools": ["notes"] }
 ```
 
 A manifest may also list `requiredSettings` — the environment variables the plugin
 cannot work without (a token): the host says a plugin is missing settings instead of
-loading it half-working.
+loading it half-working. `hostApi` and `flowtty` say what the plugin is built for —
+see [Compatibility](#compatibility).
 
 ## The builder
 
@@ -325,6 +327,32 @@ setup: (ft) => { /* once, before any component mounts: seed a store */ },
   `chatContext` is not asked it. Move to `chatContext`.
 - `afterWrite(ft)` — called after a turn in which a write the person confirmed went
   through: reload what the screen shows, or it keeps the text from before the write.
+
+## Compatibility
+
+Two fields in `manifest.json` say what a plugin is built for, and the host reads them
+before any of the plugin's code runs — when it lists plugins, loads them and installs
+one:
+
+- **`hostApi`** — the host API numbers the plugin works with: a number (`1`) or a list
+  (`[1, 2]`). The host API is everything the host gives a plugin: the object each hook
+  receives and what is on it (components, hooks, services), the hooks of the plugin
+  shape and their signatures, the fields of the manifest. It goes up by one on any
+  change a plugin built for the previous number would break on. A plugin whose list
+  does not hold the host's number is not loaded. No field reads as `1`. A plugin that
+  names several numbers reads the one it runs under from `ft.hostApi`.
+- **`flowtty`** — a semver range of the flowtty versions the plugin's screens need,
+  checked against the flowtty the host runs (`^1.0.0-alpha.26`). A prerelease is
+  matched only by a range that names one: `^1.0.0` does not take `1.0.0-alpha.26`,
+  `^1.0.0-alpha.26` does. A plugin with no field is loaded unchecked, and the log says
+  so — a plugin with no screens has nothing to check; the bundled ones declare it.
+
+A plugin that cannot run here is skipped — the rest load — and said so: `plugins ls`
+shows `incompatible: built for host API 1, host provides 2` (or `incompatible: needs
+flowtty ^1.1.0, host has 1.0.0-alpha.26`) beside it, the log (`L`) has a line, and
+`plugins install` refuses it — an archive before anything is unpacked into place. A
+plugin that is a single file has no manifest, so it reads as host API 1 with no
+flowtty range; a plugin is a directory with a `manifest.json`.
 
 ## Shipping it
 

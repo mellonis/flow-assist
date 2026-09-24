@@ -24,6 +24,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { THIS_HOST, pluginCompat } from './compat.js';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -45,6 +46,9 @@ export interface RepoEntry {
   active: boolean;
   missingDeps: string[];
   missingSettings?: string[];
+  // Why this host cannot load it (src/loader/compat.ts) — `incompatible: built for host
+  // API 1, host provides 2`; absent when it can.
+  incompatible?: string;
   source?: PluginSource;
   surfaces?: string[];
   tools?: string[];
@@ -233,6 +237,8 @@ export function createPluginRepo({ availableDir, enabledDir, projectRoot, fetchP
     try {
       await fetchPlugin(n);
       writeSourceMarker(pluginDir);
+      const compat = pluginCompat(readManifest(pluginDir), THIS_HOST);
+      if (!compat.ok) return { ok: false, error: `plugin '${n}' is ${compat.reason}` };
       const enabledLink = join(enabledDir, n);
       mkdirSync(enabledDir, { recursive: true });
       if (!existsSync(enabledLink)) symlinkSync(pluginDir, enabledLink);
@@ -254,6 +260,8 @@ export function createPluginRepo({ availableDir, enabledDir, projectRoot, fetchP
         return { ok: false, error: `plugin '${n}' is already installed` };
       }
       if (existsSync(join(pluginDir, 'manifest.json'))) {
+        const compat = pluginCompat(readManifest(pluginDir), THIS_HOST);
+        if (!compat.ok) return { ok: false, error: `plugin '${n}' is ${compat.reason}` };
         try {
           // plugins-enabled/ is gitignored: a fresh checkout has none, and the first
           // install used to fail with ENOENT.
@@ -344,6 +352,8 @@ export function createPluginRepo({ availableDir, enabledDir, projectRoot, fetchP
           missingSettings: missingSettingsFor(pluginDir),
           source: sourceFor(pluginDir),
         };
+        const compat = pluginCompat(manifest, THIS_HOST);
+        if (!compat.ok) entry.incompatible = compat.reason;
         if (manifest.surfaces && manifest.surfaces.length) entry.surfaces = manifest.surfaces;
         if (manifest.tools && manifest.tools.length) entry.tools = manifest.tools;
         entries.push(entry);

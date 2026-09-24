@@ -78,6 +78,9 @@ export interface FTRuntime {
   // never forge another plugin's — a Symbol is unforgeable and the host alone maps
   // tokens to names (memory's `plugin` scope resolves through that map).
   pluginToken?: symbol;
+  // The host API this host provides (`HOST_API`, src/version.ts) — for a plugin whose
+  // manifest names several, to know which one it is running under.
+  hostApi: number;
 }
 
 export interface CreateFtInput {
@@ -107,6 +110,7 @@ export interface CreateFtInput {
   helpFor: (registry: unknown) => string;
   notify: () => void;
   copyToClipboard?: (text: string) => void;
+  hostApi: number;
 }
 
 // Assembles the runtime object. The App passes the concrete React hooks, the

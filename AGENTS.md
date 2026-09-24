@@ -101,12 +101,28 @@ flow-assist/
 updates the page and the example in the same commit.
 
 A plugin lives in `plugins-available/<name>/`, ships a `manifest.json` (name,
-version, description, `deps`, `surfaces`, `tools`), and is enabled by symlinking
+version, description, `hostApi`, `flowtty`, `deps`, `surfaces`, `tools`), and is enabled by symlinking
 it into `plugins-enabled/`. At load time the host qualifies every registry key
 with the plugin namespace (`<plugin>:<view>`, `<plugin>:<tool>`), while display
 labels keep short names.
 
 ## Plugin contract (`shape`)
+
+**The host API has a number, `HOST_API` (`src/version.ts`).** It covers everything the
+host gives a plugin — the object each hook receives and what is on it (components,
+hooks, services), the shape's hooks and their signatures, the manifest's fields — and a
+change a plugin built for the previous number would break on bumps it, in the same
+commit, with a CHANGELOG line saying what a plugin must change. A plugin names the
+numbers it works with (`hostApi` in its manifest, a number or a list; none is 1) and the
+flowtty it needs (`flowtty`, a semver range, checked against `FLOWTTY_VERSION`, which a
+test holds equal to the installed `@flowtty/react`). One pure check, `pluginCompat`
+(`src/loader/compat.ts`), answers for every place a plugin is met, from the manifest
+alone and before its code is imported: `loadPlugins` skips it (a line into the log
+through `loadNotes`), `plugins ls` shows `incompatible: …` (`RepoEntry.incompatible`),
+and install refuses it — a link, a registry fetch, an archive before it is moved into
+place. A missing `flowtty` is loaded with a note; the bundled plugins and
+`examples/notes` declare both fields (a test). A plugin reads the number it runs under
+from `ft.hostApi`.
 
 A plugin module default-exports `build<Name>Plugin({ renders, config, make, z })`.
 The builder may be **async** — the loader awaits it — for a plugin whose tools are known

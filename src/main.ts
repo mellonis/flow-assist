@@ -189,7 +189,8 @@ async function runPlugins(args: string[], config: Record<string, unknown>, repo:
       const source = e.source === 'registry' || e.source === 'archive' ? ` (${e.source})` : '';
       const missing = e.missingDeps.length ? `  missing: ${e.missingDeps.join(',')}` : '';
       const settingMiss = e.missingSettings?.length ? `  missing settings: ${e.missingSettings.join(',')}` : '';
-      console.log(`${e.name}  v${e.version || '-'}  [${state}]${source}${missing}${settingMiss}`);
+      const incompatible = e.incompatible ? `  ${e.incompatible}` : '';
+      console.log(`${e.name}  v${e.version || '-'}  [${state}]${source}${incompatible}${missing}${settingMiss}`);
     }
     const note = await missingPluginsNote(repo);
     if (note) console.log(note);
@@ -311,7 +312,9 @@ async function runInteractive(config: Record<string, unknown>, repo: PluginRepo)
     console.error(refusal);
     process.exit(1);
   }
-  const plugins = await loadPlugins({ config, repo, renders, enabledDir });
+  // What the loader skipped, and why, goes into the app's log too.
+  const loadNotes: string[] = [];
+  const plugins = await loadPlugins({ config, repo, renders, enabledDir, notes: loadNotes });
   const registry = assembleToolRegistry({ plugins, config, repo: repo as unknown as RepoShape });
   // The backend holds the console while it owns the screen; with `onConsole` set every
   // line goes to the log (`L`) at once and nothing is printed again at exit.
@@ -325,7 +328,7 @@ async function runInteractive(config: Record<string, unknown>, repo: PluginRepo)
     process.exit(0);
   };
   const pluginsNote = await missingPluginsNote(repo);
-  handle = await renderApp(backend, { plugins, config, renders: {}, tools: registry, onExit, pluginsNote: pluginsNote ?? undefined, consoleLog });
+  handle = await renderApp(backend, { plugins, config, renders: {}, tools: registry, onExit, pluginsNote: pluginsNote ?? undefined, loadNotes, consoleLog });
 }
 
 // ─── help text ────────────────────────────────────────────────────────────────

@@ -1,6 +1,8 @@
 {
   "name": "gitlab",
   "version": "0.1.0",
+  "hostApi": 1,
+  "flowtty": "^1.0.0-alpha.26",
   "description": "glab CLI",
   "tools": ["gitlab"]
 }

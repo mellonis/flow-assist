@@ -18,6 +18,7 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, renameSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { InstallResult } from './repo.js';
+import { THIS_HOST, pluginCompat } from './compat.js';
 
 // The provenance marker (repo.ts's `SOURCE_MARKER`): `archive` tells `list` and
 // `update` the plugin came from a file, so a newer file is how it is updated.
@@ -125,7 +126,7 @@ export async function installPluginArchive(source: string, opts: ArchiveInstallO
     const staged = join(unpacked, name);
     const manifestFile = join(staged, 'manifest.json');
     if (!existsSync(manifestFile)) throw new Error(`no manifest.json in ${name}/ — not a plugin archive`);
-    let manifest: { name?: unknown; version?: unknown };
+    let manifest: Record<string, unknown>;
     try {
       manifest = JSON.parse(readFileSync(manifestFile, 'utf8'));
     } catch {
@@ -135,6 +136,9 @@ export async function installPluginArchive(source: string, opts: ArchiveInstallO
       throw new Error(`the manifest names '${String(manifest.name)}', the archive's directory is '${name}'`);
     }
     const version = typeof manifest.version === 'string' ? manifest.version : '';
+    // One this host cannot load is refused here, before anything is moved into place.
+    const compat = pluginCompat(manifest, THIS_HOST);
+    if (!compat.ok) throw new Error(`plugin '${name}' is ${compat.reason}`);
 
     // A plugin already there is replaced only when it came from an archive too: a
     // git checkout or a registry download is someone's to update their own way.

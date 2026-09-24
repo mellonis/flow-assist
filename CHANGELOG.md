@@ -5,6 +5,15 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **Plugins say what they are built for.** **For plugin authors:** `manifest.json`
+  takes `hostApi` — the host API numbers the plugin works with, a number or a list —
+  and `flowtty`, a semver range of the flowtty its screens need. A plugin this host
+  cannot run is not loaded, and said so: `plugins ls` shows `incompatible: built for
+  host API 1, host provides 2` or `incompatible: needs flowtty …, host has …`, the log
+  has a line, and `plugins install` refuses it. No `hostApi` reads as 1; no `flowtty`
+  is loaded with a note. `ft.hostApi` is the number the host provides. The host API is
+  1; it goes up on any change to what the host gives plugins that a plugin would
+  break on, and this page says what to change each time.
 - **flowtty 1.0.0-alpha.26.** **For plugin authors:** `ft` now offers flowtty's
   pickers — `ft.Select`, a dropdown (the host keeps the `<DialogHost>` its popup
   needs), and `ft.ListSelect` / `ft.ListMultiSelect`, the inline lists. flowtty

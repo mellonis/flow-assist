@@ -13,6 +13,7 @@ import { Box, Text, Markdown, Table, Link, Select, ListSelect, ListMultiSelect, 
 import type { Backend } from '@flowtty/core';
 import { createContext, createElement as h, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { createFt } from './ft.js';
+import { HOST_API } from '../version.js';
 import type { FTRuntime } from './ft.js';
 import { identityToken } from './plugin-identity.js';
 import { createServices } from './services.js';
@@ -139,6 +140,9 @@ export interface RenderAppInput {
   // into the log and onto the start screen: a binary started from the wrong place
   // otherwise just looks like an assistant with fewer tools.
   pluginsNote?: string;
+  // What the loader said about the plugins it skipped (`loadPlugins`' notes): each goes
+  // into the log.
+  loadNotes?: string[];
   // What the chat's `!!command` runs with — which `script`, the process, the signals.
   // Only tests pass one: the test backend has no terminal to hand to a program.
   interactive?: import('../assistant/interactive.js').InteractiveDeps;
@@ -220,7 +224,7 @@ const CONSOLE_REDRAW_MS = 200;
 
 export function renderApp(
   root: Backend,
-  { plugins, config, onExit, renders: _renders = {}, tools, toastMs, clipboardImage, pluginsNote, interactive, consoleLog }: RenderAppInput,
+  { plugins, config, onExit, renders: _renders = {}, tools, toastMs, clipboardImage, pluginsNote, loadNotes = [], interactive, consoleLog }: RenderAppInput,
 ) {
   // Resolve config.theme into the full per-modal palette BEFORE anything reads it
   // (createServices/ft and every renderer read `f.config.theme`): the base of the
@@ -236,6 +240,7 @@ export function renderApp(
   (services as unknown as HostServices).clipboardImage = clipboardImage ?? (() => readClipboardImage());
   if (interactive) (services as unknown as HostServices).interactive = interactive;
   if (pluginsNote) services.log.append(`[plugins] ${pluginsNote}`);
+  for (const line of loadNotes) services.log.append(line);
   // A config that still sets the roots as `fs.roots` is read as before, and said once.
   const rootsNote = legacyRootsNote(config);
   if (rootsNote) services.log.append(`[config] ${rootsNote}`);
@@ -361,6 +366,7 @@ export function renderApp(
         helpFor,
         notify,
         copyToClipboard: services.copyToClipboard,
+        hostApi: HOST_API,
       });
     }
     const ft = ftRef.current;
