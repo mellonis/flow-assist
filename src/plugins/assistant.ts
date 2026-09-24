@@ -1003,10 +1003,11 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // so the render labels it Background (it is NOT the user's own message, and
             // must never render as "You"), while for the model it is still a prompt to
             // answer — apiMsgs maps 'bg' → 'user'. History messages are re-mapped too.
-            const history = msgsRef.current.filter(m => m.role !== 'system').map(m => ({ ...m }));
             const apiMsgs: ChatMessage[] = apiHistory(apiRef.current);
-            const displayMsgs = [...history];
-            if (sys) { displayMsgs.unshift({ role: 'system', content: sys }); apiMsgs.unshift({ role: 'system', content: sys }); }
+            // What this message ADDS to the screen list; laid onto the list as it is when
+            // React applies it (below), never onto what was last drawn.
+            const added: ChatMsg[] = [];
+            if (sys) apiMsgs.unshift({ role: 'system', content: sys });
             if (!opts.fromBackground && !opts.hostAsk) pushHistory(historyRef.current, q);
             histAt.current = null;
             histShown.current = '';
@@ -1020,14 +1021,19 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             const notes: string[] = [];
             const wire = wireMessages(apiMsgs, (ref) => resolveImage(ref, notes));
             const wireHasImages = wire.some((m) => Array.isArray(m.content));
-            for (const note of notes) displayMsgs.push({ role: 'note', content: note });
+            for (const note of notes) added.push({ role: 'note', content: note });
             // On screen the message is its text, with the numbers of the images sent, so
             // their tokens are drawn as attachments.
-            displayMsgs.push({ role: opts.fromBackground ? 'bg' : 'user', content: q, ...(images.length ? { images: images.map((r) => r.n) } : {}), ...(opts.hostAsk ? { hostAsk: true } : {}) });
+            added.push({ role: opts.fromBackground ? 'bg' : 'user', content: q, ...(images.length ? { images: images.map((r) => r.n) } : {}), ...(opts.hostAsk ? { hostAsk: true } : {}) });
             // The question joins the model's history now, so a failed or cancelled
             // turn still leaves it on record; the turn's transcript follows on success.
             apiRef.current = [...apiRef.current, asked];
-            setMessages(displayMsgs);
+            // An UPDATER, over the list as it is — not a list built from `msgsRef`, which
+            // is what was last DRAWN. A message sent from a zero-delay timer (the queue
+            // after a turn, a `!command` or a slash command; the ask after `!!`) can run
+            // before the render carrying what just ended, and a plain list then threw that
+            // update away: the finished block came back live, ticking forever.
+            setMessages((cur) => [...(sys ? [{ role: 'system', content: sys } as ChatMsg] : []), ...cur.filter((m) => m.role !== 'system'), ...added]);
             turnRef.current += 1; // views this turn opens are its own, never the last turn's
             // This turn's own conversation identity — captured now, compared against
             // `epochRef.current` by every one of this turn's async callbacks that could
@@ -1485,11 +1491,19 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   if (at >= 0) next[at] = done; else next.push(done);
                   return next;
                 });
-                apiRef.current = [...apiRef.current, { role: 'shell', content: forModel }];
-                // No `script` to record with: the program ran with the terminal all the
-                // same, and there is nothing for the model to look at.
-                if (interactive && !recorded && !r.error) setMessages((cur) => [...cur, { role: 'note', content: 'No `script` on PATH — the program ran with the terminal, but nothing was recorded, so the assistant was not asked to look at it.' }]);
-                ask = interactive && recorded;
+                // An interactive run reaches the model only with something to look at: no
+                // `script` to record with, or nothing left once the full-screen program's
+                // own screen is dropped (vim, less, top), and it is only a block on screen —
+                // a turn spent on "(no output)" would cost a request for nothing.
+                const seen = !interactive || (recorded && !!r.output.trim());
+                if (seen) apiRef.current = [...apiRef.current, { role: 'shell', content: forModel }];
+                if (interactive && !r.error && !seen) {
+                  const why = recorded
+                    ? 'Nothing was printed outside the full-screen program — the assistant was not asked.'
+                    : 'No `script` on PATH — the program ran with the terminal, but nothing was recorded, so the assistant was not asked.';
+                  setMessages((cur) => [...cur, { role: 'note', content: why }]);
+                }
+                ask = interactive && seen;
               }
               (f.services as Record<string, any>).pushLog?.(`[shell] ${interactive ? '!! ' : ''}${cmd.slice(0, 60)} → ${r.error ? `error: ${r.error}` : r.stopped ? 'stopped' : r.timedOut ? 'timed out' : r.signal ? `killed by ${r.signal}` : `exit ${r.code}`}`);
             } catch (e) {
@@ -1525,20 +1539,11 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               setToolLabel('');
               abortRef.current = null;
               if (askNow) {
-                // `send` lays the new list out from what was last DRAWN (`msgsRef`), so it
-                // waits until the render carrying the finished block has happened — one
-                // tick is not always enough under load, and sending early would put the
-                // block back in its live state. Checked, not timed; after ~2 s it goes
-                // anyway rather than never.
-                const drawn = () => msgsRef.current.some((m) => callOf(m) === callId && (m.views as ViewRecord[] | undefined)?.[0]?.phase !== 'live');
-                let tries = 0;
-                const go = () => {
-                  if (epoch !== epochRef.current) { streamRef.current = false; setStreaming(false); return; }
-                  if (!drawn() && tries++ < 200) { setTimeout(go, 10); return; }
+                setTimeout(() => {
                   streamRef.current = false;
+                  if (epoch !== epochRef.current) { setStreaming(false); return; }
                   void send(INTERACTIVE_ASK, { hostAsk: true });
-                };
-                setTimeout(go, 0);
+                }, 0);
               }
               // What the person queued meanwhile goes out now — unless they stopped the
               // command: then it comes back into the field, as after a stopped answer.

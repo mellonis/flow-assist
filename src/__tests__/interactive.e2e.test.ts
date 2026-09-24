@@ -291,6 +291,76 @@ test('a message typed while the ask is being answered queues behind it, and Esc 
   ui.app.unmount();
 });
 
+test('a full-screen program that left nothing printed: the view says how it ended, a note says so, no turn, and nothing reaches the model', async () => {
+  const root = rootDir();
+  const model = new ScriptedModel();
+  model.script([{ text: 'Hi.' }]);
+  const ui = await boot(model, root, () => ({
+    detect: () => 'bsd',
+    // What vim leaves in a recording: everything on the alternate screen.
+    spawn: async (_f, args) => { fs.writeFileSync(args[1]!, '\u001b[?1049h\u001b[2J~ notes.md ~\r\n~\r\n"notes.md" 3L\u001b[?1049l'); return { code: 0, signal: null }; },
+    signals: new EventEmitter(),
+  }));
+  await ui.type('!!vim notes.md');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('Nothing was printed outside'));
+  await settle(10);
+  expect(ui.backend.lastFrame).toMatch(/vim notes\.md · interactive · ✓/);
+  expect(ui.backend.lastFrame).toContain('the assistant was not asked');
+  expect(model.requests).toHaveLength(0);
+  // The next message carries no copy of it.
+  await ui.type('hello');
+  await ui.press('return');
+  await settleUntil(() => model.requests.length === 1);
+  const sent = model.requests[0]!.messages as Sent;
+  expect(sent.some((m) => String(m.content).includes('interactive program'))).toBe(false);
+  ui.app.unmount();
+});
+
+test('with no `script`, the next message carries no copy of the run either', async () => {
+  const root = rootDir();
+  const model = new ScriptedModel();
+  model.script([{ text: 'Hi.' }]);
+  const ui = await boot(model, root, () => ({ detect: () => null, spawn: async () => ({ code: 0, signal: null }), signals: new EventEmitter() }));
+  await ui.type('!!vim notes.md');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('nothing was recorded'));
+  await ui.type('hello');
+  await ui.press('return');
+  await settleUntil(() => model.requests.length === 1);
+  const sent = model.requests[0]!.messages as Sent;
+  expect(sent.some((m) => String(m.content).includes('interactive program'))).toBe(false);
+  ui.app.unmount();
+});
+
+test('the ask sent before the render that finishes the block leaves the block finished', async () => {
+  const root = rootDir();
+  const model = new ScriptedModel();
+  model.script([{ text: 'Seen it.' }]);
+  const realSetTimeout = globalThis.setTimeout;
+  const ui = await boot(model, root, () => ({
+    detect: () => 'bsd',
+    spawn: async (_f, args) => {
+      fs.writeFileSync(args[1]!, 'printed\r\n');
+      // From here a zero-delay timer runs as a microtask — before React's commit.
+      globalThis.setTimeout = ((fn: (...a: unknown[]) => void, ms?: number, ...a: unknown[]) => {
+        if (!ms) { queueMicrotask(() => fn(...a)); return 0 as unknown as ReturnType<typeof setTimeout>; }
+        return realSetTimeout(fn, ms, ...a);
+      }) as typeof setTimeout;
+      return { code: 0, signal: null };
+    },
+    signals: new EventEmitter(),
+  }));
+  try {
+    await ui.type('!!echo printed');
+    await ui.press('return');
+    await settleUntil(() => ui.backend.lastFrame.includes('Seen it.'));
+  } finally { globalThis.setTimeout = realSetTimeout; }
+  await settle(6);
+  expect(ui.backend.lastFrame).toMatch(/echo printed · interactive · ✓/);
+  ui.app.unmount();
+});
+
 test('the ask leaves the field alone: text typed as the terminal came back is still there', async () => {
   const root = rootDir();
   const model = new ScriptedModel();

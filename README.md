@@ -101,10 +101,12 @@ a login flow (`!!npm login`); in shell mode, start the line with `!`. The chat s
 aside and the program has the whole terminal, keys included (Esc and Ctrl+C are the
 program's); when it ends the chat comes back as it was. What the program printed is
 recorded with `script` — colours taken out, a progress bar in its last state — and
-lands as the command's line, marked `interactive`, like any `!command`'s; then the
-assistant is asked at once to look at it: what happened, whether anything went wrong,
-what next. That ask is drawn dim: it is the app's, not yours. Without `script` on
-PATH the program still runs, but nothing is recorded and the assistant is not asked.
+lands as the command's line, marked `interactive`, like any `!command`'s; then,
+whenever something was recorded, the assistant is asked at once to look at it: what
+happened, whether anything went wrong, what next. That ask is drawn dim: it is the
+app's, not yours. A full-screen program (`vim`, `less`, `top`) leaves nothing behind
+once it closes, and without `script` on PATH nothing is recorded at all — then the
+line says how it ended and the assistant is not asked.
 Like `!`, it is refused while an answer is coming.
 
 Shift+Tab — or `/auto reads|all|off` — says how much you want to confirm while you

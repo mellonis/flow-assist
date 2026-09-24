@@ -910,7 +910,14 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   model sees"). Idle: clear the field → leave shell mode → arm/close. It used to clear
   the field and take the queue back BEFORE stopping, so with a message queued the
   second Esc threw the message away and only the third stopped the tool.
-  **A stopped or failed turn does not send the queue** (`restoreQueue` in
+  **A queued message never undoes what just ended**: `send` lays its message onto the
+  list with an UPDATER over the list as React has it, never onto `msgsRef` (what was
+  last DRAWN). The queue goes out from a zero-delay timer after a turn, a `!command`
+  or a slash command (and `!!`'s ask likewise), and that timer can run before the
+  render carrying the end: a list built from `msgsRef` threw the end away — a finished
+  command's block came back live and ticked forever, an answer lost its last words.
+  Seen under load; `queued-send-race.e2e.test.ts` makes it deterministic by running
+  zero-delay timers as microtasks. **A stopped or failed turn does not send the queue** (`restoreQueue` in
   `src/plugins/assistant.ts`): the queued messages come back into the field in order,
   joined by blank lines, AHEAD of whatever was typed meanwhile — the order they would
   have gone out in; a shell-mode draft keeps its `!` and the mode goes. A failed
@@ -1372,19 +1379,20 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   `shell.maxChars`, the view `capConsoleText`. The temp directory goes in a `finally`,
   whatever happened. The
   result is the same `shell` message and console view as `!`'s, marked `interactive`
-  (`ConsoleData.interactive`, drawn dim beside the command, kept by `capConsoleData`),
-  and joins `apiRef` as `The person ran an interactive program …`; then a turn starts
-  at once with `INTERACTIVE_ASK` as the person's message — `send(…, { hostAsk: true })`:
-  drawn dim, gutter and all (`hostAsk` on the display message, `quiet` rows), never put
-  into ↑/↓, and the field is left alone (it did not come from there). `send` lays its
-  list out from what was last DRAWN (`msgsRef`), so the ask waits — checked, not
-  timed — until the render carrying the finished block has happened; one tick was not
-  always enough under load, and the block came back live. The chat stays busy from the command into that turn, so a message typed in between queues behind the
-  ask and follows the queue's rules. Refused while anything runs, exactly as `!` is: a
+  (`ConsoleData.interactive`, drawn dim beside the command, kept by `capConsoleData`).
+  It asks whenever something was recorded: the recording joins `apiRef` as `The person
+  ran an interactive program …`, and a turn starts at once with `INTERACTIVE_ASK` as
+  the person's message — `send(…, { hostAsk: true })`: drawn dim, gutter and all
+  (`hostAsk` on the display message, `quiet` rows), never put into ↑/↓, and the field
+  is left alone (it did not come from there). Nothing recorded — no `script`, or nothing
+  left once a full-screen program's own screen is dropped (`!!vim`, `less`, `top`) —
+  and the run is a block on screen only: no `apiRef` entry, no turn, a dim `note`
+  saying the assistant was not asked (a turn on "(no output)" is a request for
+  nothing). The chat stays busy from the command into the ask's turn, so a message
+  typed in between queues behind the ask and follows the queue's rules. Refused while anything runs, exactly as `!` is: a
   recording landing in the middle of a running turn's history would split it, and a
   y/n could wait unseen behind the program. No `script` on PATH: the program still runs
-  with the terminal through `/bin/sh -c`, the view shows how it ended, a `note` says
-  nothing was recorded and no turn starts. Tests inject `services.interactive`
+  with the terminal through `/bin/sh -c` and the view shows how it ended. Tests inject `services.interactive`
   (`InteractiveDeps`: `detect`, `spawn`, `signals` — `renderApp`'s `interactive`,
   `bootApp`'s `opts.interactive`; by default a test has no `script` and a spawn that
   exits 0) and never reach the machine's `script` or the process's signals. Open:
