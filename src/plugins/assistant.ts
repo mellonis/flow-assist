@@ -242,8 +242,11 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
     // chat says its own keys inside its frame.
     usesCache: false,
     keycaps: (ft) => {
-      const p = ft as { keyCap?: (action: string) => string; store?: { chat?: { open?: boolean; unread?: number; mode?: ChatMode; focus?: string } } };
+      const p = ft as { keyCap?: (action: string) => string; store?: { chat?: { open?: boolean; unread?: number; mode?: ChatMode; focus?: string; footerStatus?: boolean } } };
       const chat = p.store?.chat;
+      // The collapsed chat's status is on the footer row and already says `^] chat`:
+      // only what it does not say — the unread count — is left to add.
+      if (!chat?.open && chat?.footerStatus) return chat.unread ? [`◆ ${chat.unread} new`] : [];
       // Docked and open with the plugin at the keys: the footer says how to get back.
       if (chat?.open && chat.mode === 'panel' && chat.focus === 'plugin') {
         const cap = p.keyCap?.('chatFocus') ?? '';
@@ -2105,7 +2108,11 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             const tick = setInterval(() => f.notify(), 120);
             return () => clearInterval(tick);
           }, [collapsedBusy]);
-          (f.store as Record<string, any>).chat = { open, unread, mode, focus, openChat, closeChat, send, messages, streaming, toolLabel, cursor, escArmed, pendingConfirm: pendingAsk, ctrlKey, panelKey, pointer, statusRow };
+          // `footerStatus`: the status goes on the plugin's footer row (not on a bottom
+          // panel's own strip), and it names the key that brings the chat back — the
+          // footer's `F chat` beside it would say "chat" twice.
+          const footerStatus = statusRow != null && dock?.side !== 'bottom';
+          (f.store as Record<string, any>).chat = { open, unread, mode, focus, openChat, closeChat, send, messages, streaming, toolLabel, cursor, escArmed, pendingConfirm: pendingAsk, ctrlKey, panelKey, pointer, statusRow, footerStatus };
           // Lands the next background result. It is SHOWN as soon as no turn is being
           // written (a streaming turn keeps rewriting the display list's last message,
           // so a result cannot be appended under it) — a half-typed draft does not hold

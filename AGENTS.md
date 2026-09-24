@@ -294,7 +294,8 @@ session (never saved); an old `fullscreen: true` reads as `full` (`chatModeOf`),
   right the panel has no width, and a running turn's status (spinner, seconds, word,
   `^] chat`) is drawn on the plugin's bottom row — the App reads `store.chat.statusRow`,
   an element the chat builds each render, and the chat asks the App to redraw while the
-  seconds tick; collapsed at the bottom the panel keeps ONE row, the same status or the
+  seconds tick; the assistant's own footer hint (`F chat`) steps aside while it is there
+  (`store.chat.footerStatus`), keeping only an unread count, so "chat" is said once; collapsed at the bottom the panel keeps ONE row, the same status or the
   key that brings it back (`renderChatStrip`).
 - **Focus** (`store.chat.focus`, docked and expanded only): Ctrl+] (`chatFocus`) moves
   the keyboard between the two sides; Ctrl+\ (`chatCollapse`) collapses and restores.

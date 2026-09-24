@@ -379,6 +379,27 @@ test('every chat row is one terminal line at the panel\'s width — steps, calls
   ui.app.unmount();
 });
 
+// The status on the footer row names the key that brings the chat back; the footer's
+// own `F chat` beside it said "chat" twice. Idle, the status is gone and it is back.
+test('collapsed on the right with a turn running, the footer says "chat" once', async () => {
+  const model = new ScriptedModel();
+  model.script([{ hold: true }, { text: 'Done.' }]);
+  const g = guest();
+  const ui = await bootApp(model, 160, 40, g.make as never, {}, { chatMode: 'panel' });
+  await ui.press('F');
+  await ui.type('go');
+  await ui.press('return');
+  await press(ui, COLLAPSE);
+  const footer = () => rows(ui).find((l) => l.includes(': commands')) ?? '';
+  expect(footer()).toContain('^] chat');
+  expect(footer().match(/chat/g)).toHaveLength(1);
+  model.release();
+  await settle(20);
+  expect(footer()).not.toContain('^] chat');
+  expect(footer()).toContain('F chat');
+  ui.app.unmount();
+});
+
 // `/mode` alone answers in the chat, as a note: a toast is drawn under a chat that
 // covers the whole terminal, and was never seen there.
 test.each(['panel', 'window', 'full'] as const)('/mode alone says where the chat is, in the chat (%s)', async (mode) => {
