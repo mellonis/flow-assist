@@ -5,6 +5,14 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **The bundled plugins carry the host's own version.** `gitlab`, `mcp` and `repo`
+  said `1.0.0` while the host was `0.1.0` — they ship from this repo, with this
+  release, so a `repo-1.0.0.tar.gz` beside a `0.1.0` host read like a mismatch. A
+  test now keeps every bundled plugin equal to `hostVersion()`, naming the one that
+  drifts. Installing an archive over an already-installed one now says what it
+  replaced when the version changed (`plugin 'notes' v0.2.0 replaced (was
+  v0.1.0)`).
+
 - **The status line says a word of its own while the model works** — `Pondering…`,
   `Brewing…`, `Tinkering…` — one picked for each request and drawn with the same
   shimmer as a running tool; magenta while it thinks, green while its text arrives.

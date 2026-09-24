@@ -238,6 +238,14 @@ setup: (ft) => { /* once, before any component mounts: seed a store */ },
   handed over: `plugins install ./notes-0.1.0.tar.gz` (or its https URL) unpacks and
   enables it, and installing a newer archive updates it. The archive must hold one
   top-level `<name>/` whose `manifest.json` names the same plugin, and no links.
+- **What a plugin's version means.** A bundled plugin (`plugins-available/`) ships
+  with the host from the same repo and release, so it carries the host's own version
+  — `manifest.json` and `package.json` both, kept equal by a test. A plugin kept in
+  a repository of its own versions itself. Either way, an installed archive is named
+  and stamped with the version its `manifest.json` names — `bun run plugin:publish
+  <name>` (no version argument of its own) always reads it from there — and
+  `plugins ls` shows the version actually on disk, read fresh from the installed
+  plugin's own manifest.
 
 A plugin kept in a repository of its own links the host's packages into its own
 `node_modules` for its tests (one React, never two), and must not leave a `dist/`

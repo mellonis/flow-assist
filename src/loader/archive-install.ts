@@ -37,6 +37,9 @@ export interface ArchiveInstallResult extends InstallResult {
   name?: string;
   version?: string;
   replaced?: boolean;
+  // The version replaced, when it differs from the new one and its manifest
+  // still parsed — absent on a fresh install or when the old version is unknown.
+  previousVersion?: string;
 }
 
 // Is this `plugins install` argument an archive rather than a plugin name? A URL,
@@ -91,6 +94,18 @@ function sourceOf(pluginDir: string): string {
   return existsSync(marker) ? readFileSync(marker, 'utf8').trim() : '';
 }
 
+// The version an already-installed plugin directory names, for the "replaced"
+// note ('' when its manifest is missing or will not parse — never a reason to
+// refuse the new install).
+function versionOf(pluginDir: string): string {
+  try {
+    const m = JSON.parse(readFileSync(join(pluginDir, 'manifest.json'), 'utf8')) as { version?: unknown };
+    return typeof m.version === 'string' ? m.version : '';
+  } catch {
+    return '';
+  }
+}
+
 export async function installPluginArchive(source: string, opts: ArchiveInstallOptions): Promise<ArchiveInstallResult> {
   const work = mkdtempSync(join(tmpdir(), 'flow-assist-plugin-'));
   try {
@@ -125,12 +140,14 @@ export async function installPluginArchive(source: string, opts: ArchiveInstallO
     // git checkout or a registry download is someone's to update their own way.
     const target = join(opts.availableDir, name);
     let replaced = false;
+    let previousVersion = '';
     if (existsSync(target)) {
       const from = sourceOf(target);
       if (from !== ARCHIVE_SOURCE) {
         const what = from === 'registry' ? 'from the registry — use `plugins update`' : 'a checkout — update it with git';
         throw new Error(`plugin '${name}' is already in plugins-available, ${what}`);
       }
+      previousVersion = versionOf(target);
       rmSync(target, { recursive: true, force: true });
       replaced = true;
     }
@@ -146,7 +163,7 @@ export async function installPluginArchive(source: string, opts: ArchiveInstallO
     mkdirSync(opts.enabledDir, { recursive: true });
     // lstat, not exists: a link left dangling by a removed plugin still occupies the name.
     try { lstatSync(link); } catch { symlinkSync(target, link); }
-    return { ok: true, name, version, replaced };
+    return { ok: true, name, version, replaced, ...(replaced && previousVersion && previousVersion !== version ? { previousVersion } : {}) };
   } catch (e) {
     return { ok: false, error: (e as Error).message };
   } finally {

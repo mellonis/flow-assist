@@ -127,7 +127,11 @@ test('a newer archive replaces one installed from an archive; a checkout is neve
   const d = dirs();
   await installPluginArchive(tarOf(pluginTree('notes', { name: 'notes', version: '1.0.0' }), ['notes']), d);
   const newer = await installPluginArchive(tarOf(pluginTree('notes', { name: 'notes', version: '1.1.0' }), ['notes']), d);
-  expect(newer).toMatchObject({ ok: true, version: '1.1.0', replaced: true });
+  expect(newer).toMatchObject({ ok: true, version: '1.1.0', replaced: true, previousVersion: '1.0.0' });
+  // Installing the same version again is still a replace, but there is no "was …" to say.
+  const same = await installPluginArchive(tarOf(pluginTree('notes', { name: 'notes', version: '1.1.0' }), ['notes']), d);
+  expect(same).toMatchObject({ ok: true, version: '1.1.0', replaced: true });
+  expect(same.previousVersion).toBeUndefined();
   expect(JSON.parse(readFileSync(join(d.availableDir, 'notes', 'manifest.json'), 'utf8')).version).toBe('1.1.0');
 
   mkdirSync(join(d.availableDir, 'repo'), { recursive: true });

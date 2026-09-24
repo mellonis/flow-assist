@@ -197,8 +197,9 @@ async function runPlugins(args: string[], config: Record<string, unknown>, repo:
   // and enabled; a name is linked from there or fetched from the registry.
   if (sub === 'install' && name && isArchiveSource(name)) {
     const res = await installPluginArchive(name, { availableDir, enabledDir });
+    const replacedNote = res.replaced ? (res.previousVersion ? `replaced (was v${res.previousVersion})` : 'replaced') : 'installed';
     console.log(res.ok
-      ? `plugin '${res.name}'${res.version ? ` v${res.version}` : ''} ${res.replaced ? 'replaced' : 'installed'} — restart the assistant for the change to take effect`
+      ? `plugin '${res.name}'${res.version ? ` v${res.version}` : ''} ${replacedNote} — restart the assistant for the change to take effect`
       : `plugins install: ${res.error}`);
     if (!res.ok) process.exitCode = 1;
     return;

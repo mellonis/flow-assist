@@ -1426,3 +1426,8 @@ keeps both:
   lives in `package.json` and `src/version.ts` (a test keeps them equal); each release
   gets a `CHANGELOG.md` entry and a `vX.Y.Z` tag. A release is what is handed out —
   a build of the host that someone installs — so bump the version before building one.
+  A bundled plugin (`plugins-available/gitlab`, `mcp`, `repo`) ships from this repo
+  with the same release, so it carries the host's own version too — bump its
+  `manifest.json` and `package.json` alongside the host's (a test keeps every
+  bundled plugin equal to `hostVersion()`, naming the one that drifts). A
+  third-party plugin, kept in its own repository, versions itself.
