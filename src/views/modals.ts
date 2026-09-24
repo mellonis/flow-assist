@@ -60,6 +60,9 @@ interface ChatMsg {
   roundLimit?: number;
   duration?: number;
   stopped?: boolean;
+  // The cap of the key that stopped the turn when it was not Esc (`^c`). A session
+  // saved before it has none and reads `stopped (Esc)`, as it did.
+  stoppedBy?: string;
   // The blocks a tool asked the host to draw (role 'view'): a command's output.
   views?: ViewRecord[];
   [k: string]: unknown;
@@ -156,6 +159,7 @@ interface ChatRow {
   duration?: number;
   tokens?: number;
   stopped?: boolean;
+  stoppedBy?: string;
   reasonHeader?: boolean;
   open?: boolean;
   reason?: boolean;
@@ -777,7 +781,8 @@ function buildMessageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): Ch
     // One quiet line under the answer: how long the turn took, whether it was
     // stopped, what it cost. The calls are in the turn, where they were made.
     const stopped = role === 'assistant' && m.stopped === true;
-    if (duration || stopped || tokens) rows.push({ role, meta: true, duration, tokens, runs: [], stopped });
+    const stoppedBy = stopped && typeof m.stoppedBy === 'string' && m.stoppedBy ? m.stoppedBy : undefined;
+    if (duration || stopped || tokens) rows.push({ role, meta: true, duration, tokens, runs: [], stopped, ...(stoppedBy ? { stoppedBy } : {}) });
     // One blank row between messages — not two after a block that ends in its own,
     // and none for a message that drew nothing at all (a round whose only text was
     // its `Next:` line).
@@ -959,7 +964,7 @@ function ChatMessages({ messages, rowOpts, palette: m, errorColor, onViewport, s
         return h(Box, { key, flexDirection: 'row', flexShrink: 0, selectable: false },
           h(Text, null, ' '.repeat(GUTTER)),
           row.duration ? h(Text, { dim: true }, `${fmtSec(row.duration)}${runs.length || row.stopped ? ' · ' : ''}`) : null,
-          row.stopped ? h(Text, { color: m.warn }, `stopped (Esc)${runs.length ? ' · ' : ''}`) : null,
+          row.stopped ? h(Text, { color: m.warn }, `stopped (${row.stoppedBy ?? CAP.esc})${runs.length ? ' · ' : ''}`) : null,
           runs.length ? h(Text, { dim: !failed, color: failed ? errorColor : wrote ? m.warn : m.ok }, `${row.open ? '▾' : '▸'} ${runs.length} tool${runs.length === 1 ? '' : 's'}${wrote ? ' ✎' : ''}: `) : null,
           // The summary is a row like any other: cut it to what is left of the width,
           // or a turn of fifty tools takes a second line and the list's arithmetic

@@ -797,7 +797,10 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   the turn ends; the line over the field shows the LAST one, and `↑ takes it back`
   while the field is empty). **Esc** while an answer or a `!command` runs **stops it,
   on the first press**, touching neither the field nor the queue (the line under what
-  came so far says `stopped (Esc)` — a cut-off «В» must not read as a whole answer;
+  came so far says `stopped (Esc)` — `stopped (^c)` after Ctrl+C: the label names the
+  key that stopped it, from `keyGlyph`, and so does a `!command`'s outcome; the message
+  carries it as `stoppedBy`, and a session saved without one reads `(Esc)` as it did —
+  a cut-off «В» must not read as a whole answer;
   the model's history gets a closing message of its own, see "The conversation the
   model sees"). Idle: clear the field → leave shell mode → arm/close. It used to clear
   the field and take the queue back BEFORE stopping, so with a message queued the

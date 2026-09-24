@@ -31,7 +31,7 @@ import { z } from 'zod';
 import { anchorRow, askFieldWidth, chatFieldWidth, chatRows, chatWrapWidth, firstFoldRow, rowAnchor, viewGroupFor, type RowOpts, type Viewport } from '../views/modals.js';
 import { allFolded, flipFolds, isClicked, isOpen, toggleFold, type FoldState } from '../assistant/folds.js';
 import { groupOpen, toggleGroup } from '../assistant/view-groups.js';
-import { firstGlyph, isKey, isMouseButton } from '../playback/keys.js';
+import { firstGlyph, isKey, isMouseButton, keyGlyph } from '../playback/keys.js';
 import { askKey, askStart, type AskQuestion, type AskState } from '../assistant/ask.js';
 import { loadMemories, memoryFilePath, saveMemories } from '../runtime/services/memory.js';
 import { keptAfterClear, memoryCommand } from '../assistant/memory-command.js';
@@ -377,6 +377,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const [emptyNotice, setEmptyNotice] = f.useState('');
           const [toolCount, setToolCount] = f.useState(0); // tool calls in this turn (for the status)
           const abortRef = f.useRef<AbortController | null>(null);
+          // Which key stopped the running turn or `!command`: '' for Esc (and for a
+          // reset that aborts it), the cap otherwise (`^c`) — the quiet line under the
+          // answer and a command's outcome say `stopped (^c)`. Cleared when one starts.
+          const stopKeyRef = f.useRef('');
           const ctxSubjectRef = f.useRef<string | null>(null); // what the screen was about when this session began
           // Tab-completion cycle: { base, idx, cmd } — by which prefix the matches were
           // built, the last selected command in that list and its text. Repeat Tab cycles;
@@ -1040,6 +1044,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             disarmEsc();
             const abort = new AbortController();
             abortRef.current = abort;
+            stopKeyRef.current = '';
             const ai = (f.config.ai ?? {}) as Record<string, any>;
             let failed = false, aborted = false;
             // The loop ran out of rounds with no answer. It is said where the answer
@@ -1312,7 +1317,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                     : { ...rest, content: `${rest.content ?? ''}${live}` };
                 });
                 const at = answerAt(next);
-                if (at >= 0) next[at] = { ...next[at]!, duration: finalMs, ...(spent ? { tokens: spent } : {}), ...(aborted ? { stopped: true } : {}), ...(roundLimit ? { roundLimit } : {}) };
+                if (at >= 0) next[at] = { ...next[at]!, duration: finalMs, ...(spent ? { tokens: spent } : {}), ...(aborted ? { stopped: true, ...(stopKeyRef.current ? { stoppedBy: stopKeyRef.current } : {}) } : {}), ...(roundLimit ? { roundLimit } : {}) };
                 return next;
               });
               // Empty answer: the model gave only reasoning but no final text — say so
@@ -1391,6 +1396,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             disarmEsc();
             const abort = new AbortController();
             abortRef.current = abort;
+            stopKeyRef.current = '';
             const cwd = shellRef.current.cwd();
             const { timeoutMs, maxChars } = shellLimits(f.config as { shell?: unknown });
             let stopped = false;
@@ -1416,6 +1422,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               };
               const r = await runShell(cmd, { cwd, timeoutMs, maxChars, signal: abort.signal, onOutput });
               stopped = r.stopped;
+              if (r.stopped && stopKeyRef.current) r.stoppedBy = stopKeyRef.current;
               const move = nextCwd(f.config as Record<string, unknown>, cwd, r.pwd);
               const { display, forModel } = formatShell(cmd, r, cwd, timeoutMs, { after: move.cwd, note: move.note });
               // Everything from here on is display/model-facing state for THIS
@@ -1896,6 +1903,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             if (key.name === 'c' && streamRef.current) {
               if (pendingRef.current) settleConfirm(false);
               dismissAsk();
+              stopKeyRef.current = keyGlyph({ name: 'c', ctrl: true });
               abortRef.current?.abort();
               return 'handled';
             }
@@ -2041,7 +2049,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // mode (closest thing first, before Esc starts arming a chat-wide exit);
               // armed → exit; otherwise arm + hint «Esc again to exit».
               if (key.name === 'escape') {
-                if (streamRef.current) { abortRef.current?.abort(); disarmEsc(); return true; }
+                if (streamRef.current) { stopKeyRef.current = ''; abortRef.current?.abort(); disarmEsc(); return true; }
                 if (inputRef.current.length > 0) {
                   setInput(''); inputRef.current = '';
                   setCursor(0);

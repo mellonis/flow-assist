@@ -34,7 +34,10 @@ export interface ShellResult {
   output: string; // stdout and stderr in the order they arrived; the TAIL when cut
   cut: number; // characters dropped from the start
   timedOut: boolean;
-  stopped: boolean; // aborted by the person (Esc)
+  stopped: boolean; // aborted by the person
+  // The cap of the key that stopped it, when not Esc (`^c`) — the caller sets it;
+  // the runner cannot know.
+  stoppedBy?: string;
   ms: number;
   pid?: number;
   error?: string; // the shell could not be started
@@ -224,7 +227,7 @@ export const tildePath = (p: string, home = os.homedir()) => (home && (p === hom
 // when there is no exit code to give.
 export function shellOutcome(r: ShellResult, timeoutMs: number): string {
   if (r.error) return `could not start: ${r.error}`;
-  if (r.stopped) return 'stopped (Esc)';
+  if (r.stopped) return `stopped (${r.stoppedBy || 'Esc'})`;
   if (r.timedOut) return `timed out after ${timeoutMs % 1000 ? fmtSecs(timeoutMs) : `${timeoutMs / 1000} s`}`;
   return `exit ${r.code ?? '?'}`;
 }

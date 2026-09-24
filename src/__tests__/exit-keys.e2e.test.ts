@@ -31,7 +31,9 @@ test('Ctrl+C while an answer is coming stops it, as Esc does — the app lives, 
 
   expect(await ctrl(ui, 'c')).toBe(true);
   await settle(10);
-  expect(ui.backend.lastFrame).toContain('stopped (Esc)');
+  // The quiet line names the key that stopped it.
+  expect(ui.backend.lastFrame).toContain('stopped (^c)');
+  expect(ui.backend.lastFrame).not.toContain('stopped (Esc)');
   expect(ui.backend.lastFrame).not.toContain('never.');
   expect(ui.backend.lastFrame).not.toContain('again to exit');
   expect(ui.exits()).toBe(0);
@@ -49,7 +51,8 @@ test('Ctrl+C while a write waits for its y/n declines it and stops the turn', as
   await settleUntil(() => ui.backend.lastFrame.includes('echo hi'));
 
   expect(await ctrl(ui, 'c')).toBe(true);
-  await settleUntil(() => ui.backend.lastFrame.includes('stopped (Esc)'));
+  await settleUntil(() => ui.backend.lastFrame.includes('stopped (^c)'));
+  expect(ui.backend.lastFrame).toContain('stopped (^c)');
   expect(ui.backend.lastFrame).not.toContain('never.');
   expect(ui.exits()).toBe(0);
   ui.app.unmount();
@@ -258,6 +261,14 @@ for (const stop of ['escape', 'ctrl+c'] as const) {
     expect(ui.backend.lastFrame).not.toMatch(/queued:/);
     expect(model.requests).toHaveLength(0);
     expect(ui.exits()).toBe(0);
+    // What the model is told with the next message names the key too.
+    await ui.press('escape');
+    model.script([{ text: 'ok.' }]);
+    await ui.type('next');
+    await ui.press('return');
+    await settle(14);
+    const told = JSON.stringify(model.requests.at(-1)!.messages);
+    expect(told).toContain(stop === 'escape' ? 'stopped (Esc)' : 'stopped (^c)');
     expect(Date.now() - t0).toBeLessThan(4500); // the process was killed, not waited for
     ui.app.unmount();
   });
