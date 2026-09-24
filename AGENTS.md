@@ -1797,6 +1797,16 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   `NO_COLOR` / `FORCE_COLOR`; the host adds no handler or colour flag of its own. A
   plugin with a child process to stop adds one — under the rules in "A plugin that
   starts a process owns its life", which keep flowtty's own re-raise working.
+- **The console goes to the log.** While the TTY backend owns the screen it takes
+  `console.log` / `info` / `debug` / `warn` / `error` over (flowtty ≥ 1.0.0-alpha.25)
+  — a line printed there used to land in the frame. `runInteractive` passes it
+  `onConsole` (`consoleBridge`, `src/runtime/console-log.ts`) and each line goes to the
+  host log (`L`) at once as `[console] …` / `[console.warn] …`, one entry per line of
+  it. With `onConsole` set flowtty prints nothing again at exit, so the log is where
+  such a line is read. Delivery is always on a microtask — React prints its warnings
+  mid-render, and the log's refresh is a setState — and lines printed before the App
+  has bound `pushLog` go straight into the buffer. Direct writes to `process.stdout`
+  / `stderr` are not covered.
 
 `flow-assist` with subcommands:
 

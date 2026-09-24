@@ -246,6 +246,10 @@ setup: (ft) => { /* once, before any component mounts: seed a store */ },
   none). Handlers run from the highest `priority(ui)` down, and a handler takes the
   key by returning exactly `true`. Conventionally: 100 — an open modal, 50 — a base
   screen, 10 — a key that opens something, 0 — nothing (a closed modal).
+- **A `console.log` goes to the log**, not to the screen: while the app runs, a line
+  printed through `console` (`log`, `warn`, `error`, …) is shown in the log (`L`) as
+  `[console] …` / `[console.warn] …`. A write straight to `process.stdout` or
+  `process.stderr` still lands in the frame — keep those out of a plugin.
 - A setter in one component re-renders that component only; the host redraws after
   every key that was handled. For a change that does not come from a key (a fetch
   that finished, a timer) call `ft.notify()`.

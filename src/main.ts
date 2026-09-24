@@ -33,6 +33,7 @@ import type { PluginRepo as RepoShape } from './loader/host-group.js';
 import { loadPlugins } from './loader/build.js';
 import { assembleToolRegistry, pluginConfigs } from './loader/tools.js';
 import { renderApp } from './runtime/app.js';
+import { consoleBridge } from './runtime/console-log.js';
 import { agentChat } from './assistant/agent.js';
 import { toolLoadingMode } from './assistant/tool-loading.js';
 import { toolResultCapFromConfig } from './assistant/tool-result-cap.js';
@@ -312,7 +313,10 @@ async function runInteractive(config: Record<string, unknown>, repo: PluginRepo)
   }
   const plugins = await loadPlugins({ config, repo, renders, enabledDir });
   const registry = assembleToolRegistry({ plugins, config, repo: repo as unknown as RepoShape });
-  const backend = new TtyBackend(process.stdout, process.stdin, { mouse: mouseEnabled(config) });
+  // The backend holds the console while it owns the screen; with `onConsole` set every
+  // line goes to the log (`L`) at once and nothing is printed again at exit.
+  const consoleLog = consoleBridge();
+  const backend = new TtyBackend(process.stdout, process.stdin, { mouse: mouseEnabled(config), onConsole: consoleLog.onConsole });
 
   let handle: { unmount(): void } | undefined;
   const onExit = () => {
@@ -321,7 +325,7 @@ async function runInteractive(config: Record<string, unknown>, repo: PluginRepo)
     process.exit(0);
   };
   const pluginsNote = await missingPluginsNote(repo);
-  handle = await renderApp(backend, { plugins, config, renders: {}, tools: registry, onExit, pluginsNote: pluginsNote ?? undefined });
+  handle = await renderApp(backend, { plugins, config, renders: {}, tools: registry, onExit, pluginsNote: pluginsNote ?? undefined, consoleLog });
 }
 
 // ─── help text ────────────────────────────────────────────────────────────────

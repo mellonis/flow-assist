@@ -14,6 +14,10 @@ What each version of flow-assist brought, newest first. The version is the one i
   They hear flowtty's own input, so a plugin gates them with `isFocused`
   (docs/plugins.md). While a dropdown is open every key is its own: Ctrl+] waits for
   it to close, and Ctrl+C exits at once rather than asking twice.
+- **A stray `console.log` no longer lands on the screen.** What a plugin, a library or
+  React prints through the console while the app runs goes to the log (`L`) at once,
+  as `[console] …`, `[console.warn] …` or `[console.error] …`, and is not printed
+  again when the app exits.
 - **The chat is a panel beside the plugin's screen.** It used to be a window over the
   screen, so the board the assistant was told about was hidden from the person talking
   about it. Now it is docked to the right by default (at the bottom on a terminal under

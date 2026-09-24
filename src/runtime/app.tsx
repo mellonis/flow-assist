@@ -142,6 +142,9 @@ export interface RenderAppInput {
   // What the chat's `!!command` runs with — which `script`, the process, the signals.
   // Only tests pass one: the test backend has no terminal to hand to a program.
   interactive?: import('../assistant/interactive.js').InteractiveDeps;
+  // What the TTY backend took off the console while it holds the screen (its
+  // `onConsole`, src/runtime/console-log.ts): each line goes to the log.
+  consoleLog?: import('./console-log.js').ConsoleBridge;
 }
 
 // Command-line state lives in a single stable `{ current }` object created in
@@ -206,7 +209,7 @@ type ChatStore = {
 
 export function renderApp(
   root: Backend,
-  { plugins, config, onExit, renders: _renders = {}, tools, toastMs, clipboardImage, pluginsNote, interactive }: RenderAppInput,
+  { plugins, config, onExit, renders: _renders = {}, tools, toastMs, clipboardImage, pluginsNote, interactive, consoleLog }: RenderAppInput,
 ) {
   // Resolve config.theme into the full per-modal palette BEFORE anything reads it
   // (createServices/ft and every renderer read `f.config.theme`): the base of the
@@ -226,6 +229,14 @@ export function renderApp(
   const rootsNote = legacyRootsNote(config);
   if (rootsNote) services.log.append(`[config] ${rootsNote}`);
   for (const note of llmConfigNotes(config.ai)) services.log.append(`[config] ${note}`);
+  // A console line reaches the log as soon as it is printed — through `pushLog` once the
+  // App has bound it, so an open log shows it at once; straight into the buffer before
+  // that (the unbound `pushLog` is a no-op).
+  let pushLogBound = false;
+  consoleLog?.attach((line) => {
+    if (pushLogBound) (services as unknown as ReactBoundServices).pushLog(line);
+    else services.log.append(line);
+  });
   const viewRegistry = buildViewRegistry(plugins);
   const commandRegistry = buildCommandRegistry(plugins);
   const keys = buildKeys(plugins, config, undefined, (line) => services.log.append(line));
@@ -266,6 +277,7 @@ export function renderApp(
       (services as unknown as ReactBoundServices).logs = services.log.read();
       notify();
     };
+    pushLogBound = true;
     (services as unknown as ReactBoundServices).notify = notify;
     (services as unknown as ReactBoundServices).logs = services.log.read();
     // Reminder banner: `showReminder` is the `remind` tool's timer delivery (the
