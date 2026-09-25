@@ -572,7 +572,11 @@ the action is unbound.
 
 `frame.modals` is `{ name: Tree | null }` — a modal that is not null is open. An open
 modal of the plugin's takes keys before its own surface, drawn as its own root over
-the plugin's own side of the screen, the same way the host's own modals are.
+the plugin's own side of the screen, the same way the host's own modals are. While any
+modal is open the surface has no keyboard: a field focused on the surface keeps its
+text but hears nothing, and what is typed goes to the modal's focused field. One
+focused node per root — the surface, each modal — is the rule; a root with several is
+said once in the host's log.
 
 ### Views
 

@@ -21,7 +21,7 @@ import { bumpViewRevision, type ViewLine, type ViewRenderer } from '../assistant
 import { overlay } from '../views/modals.js';
 import { FLOWTTY_VERSION, HOST_API } from '../version.js';
 import { validateFrame } from './frame.js';
-import { drawFrame, type RenderCtx } from './tree.js';
+import { drawFrame, focusedCount, type RenderCtx } from './tree.js';
 import { createFieldState } from './fieldState.js';
 import { canonicalConsume, consumes, keyEventFor, type Consume } from './keys.js';
 import { localeFromEnv } from './locale.js';
@@ -111,6 +111,10 @@ export async function remotePlugin(opts: RemotePluginOpts): Promise<Plugin> {
     if (!v.ok) { say(`frame dropped: ${v.why}`); return; }
     frame = v.frame;
     frameSeq++;
+    for (const [where, tree] of [['the surface', frame.surface ?? null], ...Object.entries(frame.modals ?? {}).map(([m, t]) => [`modal ${m}`, t] as const)] as const) {
+      const n = focusedCount(tree);
+      if (n > 1) once(`focused:${where}`, `${where} has ${n} focused nodes — only one can have the keyboard`);
+    }
     fields.applyFrame(frame.surface ?? null, frame.modals ?? {});
     stopped = null;
     notify();
@@ -338,7 +342,9 @@ export async function remotePlugin(opts: RemotePluginOpts): Promise<Plugin> {
     view: (a) => {
       const { ui, host } = a as PluginApi;
       return function RemoteSurface(): ReactElement | null {
-        const hasKeyboard = host.hasKeyboard();
+        // An open modal of the plugin's has the keyboard, as the host's own modals do over
+        // a surface: a focused field under it must not hear what is typed into the modal.
+        const hasKeyboard = host.hasKeyboard() && openModals().length === 0;
         if (stopped) return ui.h(ui.Box, { padding: 1 }, ui.h(ui.Text, { color: 'red' }, stopped));
         return draw(frame.surface ?? null, treeCtx(ui, hasKeyboard));
       };

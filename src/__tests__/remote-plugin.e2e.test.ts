@@ -345,3 +345,17 @@ test('a field and a ScrollBox with a held value redraw on their own change: keys
   await until(ui, () => !ui.backend.lastFrame.includes('row 0'), 'the view moved');
   ui.app.unmount();
 });
+
+test('an open modal\'s focused field has the keyboard, not the focused field on the surface under it', async () => {
+  const { fake, ui } = await boot();
+  fake.frame({ surface: ['Box', { flexDirection: 'column' }, ['Text', {}, 'under'], ['TextInput', { id: 'a', isFocused: true }]], modals: { ask: ['Box', { border: 'round' }, ['TextInput', { id: 'b', isFocused: true }]] }, keycaps: ['x'] });
+  await until(ui, () => ui.backend.lastFrame.includes('under') && ui.backend.lastFrame.includes('╭'), 'the surface and the modal');
+  await ui.type('xy');
+  expect(fake.events.filter(([m]) => m === 'changed').map(([, p]) => p)).toEqual([{ id: 'b', value: 'x' }, { id: 'b', value: 'xy' }]);
+  // The modal closed: the surface's field has the keyboard again.
+  fake.frame({ surface: ['Box', { flexDirection: 'column' }, ['Text', {}, 'under'], ['TextInput', { id: 'a', isFocused: true }]], keycaps: ['x'] });
+  await until(ui, () => !ui.backend.lastFrame.includes('╭'), 'the modal gone');
+  await ui.type('z');
+  expect(fake.events.filter(([m]) => m === 'changed').map(([, p]) => p).at(-1)).toEqual({ id: 'a', value: 'z' });
+  ui.app.unmount();
+});

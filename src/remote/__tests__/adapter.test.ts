@@ -251,3 +251,18 @@ test('a store write is told to the App\'s other remote plugins as their store ev
   expect(one.store.a).toEqual({ lesson: 3 });
   expect(heard).toEqual({ a: [], b: [{ key: 'a', value: { lesson: 3 } }], c: [] });
 });
+
+test('several focused nodes in one root are said once; one per root, a surface\'s and a modal\'s, is not', async () => {
+  const { transport, plugin } = fakeTransport();
+  hello(plugin);
+  const lines: string[] = [];
+  await remotePlugin({ manifest, transport, config: {}, make: makeFactory({}), log: (l) => lines.push(l) });
+  const two = ['Box', {}, ['TextInput', { id: 'a', isFocused: true }], ['ListSelect', { id: 'b', items: [], isFocused: true }], ['TextInput', { id: 'c', isFocused: false }]];
+  plugin.notify('frame', { surface: ['TextInput', { id: 'a', isFocused: true }], modals: { m: ['TextInput', { id: 'b', isFocused: true }] } });
+  await tick();
+  expect(lines.filter((l) => l.includes('focused'))).toEqual([]);
+  plugin.notify('frame', { surface: two });
+  plugin.notify('frame', { surface: two });
+  await tick();
+  expect(lines.filter((l) => l.includes('focused'))).toEqual(['[fake] the surface has 2 focused nodes — only one can have the keyboard']);
+});

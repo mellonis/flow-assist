@@ -41,6 +41,15 @@ const KNOWN = ['Box', 'Text', 'Markdown', 'Table', 'Link', 'ScrollBox', 'Select'
 const VALUE_PROP: Record<string, string> = { TextInput: 'value', Select: 'value', ListSelect: 'value', ListMultiSelect: 'value', Checkbox: 'checked', ScrollBox: 'offset' };
 const FOCUSABLE = new Set(['TextInput', 'Select', 'ListSelect', 'ListMultiSelect', 'Checkbox']);
 
+// How many nodes of one root ask for the keyboard (`isFocused: true` on a component that
+// takes keys): more than one in a root is the plugin's mistake, said once in the log.
+export function focusedCount(tree: Tree | null): number {
+  const node = normalizeNode(tree);
+  if (!node) return 0;
+  const own = FOCUSABLE.has(node.type) && node.props.isFocused === true ? 1 : 0;
+  return node.children.reduce<number>((n, c) => n + (typeof c === 'string' ? 0 : focusedCount(c as Tree)), own);
+}
+
 export function renderTree(tree: Tree | null, ctx: RenderCtx): ReactElement | null {
   if (!tree) return null;
   const warnedProps = new Set<string>();

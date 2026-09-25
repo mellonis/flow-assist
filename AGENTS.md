@@ -358,6 +358,10 @@ into an ordinary `Plugin`; nothing else in the host knows a plugin is remote.
   terminal's own, the canonical one bindings are compared by, and the action whenever
   the key is a declared action's effective binding. A plugin's actions share the one
   keymap with the host's and every other plugin's (`buildKeys`), as a JS plugin's do.
+- **An open modal has the keyboard.** The surface renders with `hasKeyboard() &&` no
+  modal open — the host's own modal-over-surface rule — so a surface field focused
+  under a modal never hears what is typed into it. A root (the surface, a modal) with
+  several `isFocused` nodes is said once in the log (`focusedCount`).
 - `keycaps` with `{ action, label }` draws `` `${host.keyCap(action)} ${label}` ``, so
   a rebound key never needs the plugin to know.
 - `viewRenderers` are built from the manifest's `views`, not `hello` — every renderer
