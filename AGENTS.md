@@ -937,7 +937,20 @@ there is no `/fullscreen`.
   load reaches the next round of the same turn. A call to a tool that is indexed but
   not loaded is an ERROR naming `tools_load`, refused BEFORE the y/n — the wire-name
   map covers every known tool, not only the sent ones, or that call would not even
-  resolve. `names` also takes a tool QUALIFIED with its group, `<group>:<name>`, as
+  resolve. That error shows the call to make as JSON (`notLoadedError`: `x is not
+  loaded — call tools_load with {"names": ["x"]} first, then call it.`), never as prose
+  around a quoted list, which a model copies into `names` as a string. `names` is an
+  array or one string, and a string that parses as JSON is read as that value first
+  (`readNames`): a list (`'["a","b"]'`), a quoted name (`'"a"'`), or the whole call the
+  hint shows (`'{"names": [...]}'`); JSON that is none of those, and a string that does
+  not parse, stays one bare name, and a list holding anything but strings is an
+  argument error naming the type. The argument check (`toolArgsError`, below) passes
+  the string form as a string — `TOOLS_LOAD_PARAMETERS` declares `names` as `anyOf`
+  an array of strings or a string — so the parsing lives in `runToolsLoad` alone. A
+  name that still looks serialised (brackets, braces or quotes around it) is explained
+  in `Not in the list: …` (`notInList`, the error and a partial load's line alike): `—
+  that is one name with brackets in it; pass names as an array: {"names": ["x"]}`.
+  `names` also takes a tool QUALIFIED with its group, `<group>:<name>`, as
   well as the bare name the index shows — the index reads as `group:\n- name — …`, so
   a model reasonably repeats the two together, and accepting that combination
   (`unqualify`, `tool-loading.ts`: stripped only as a
@@ -961,8 +974,9 @@ there is no `/fullscreen`.
   never loaded whole by `group` alone.** `estimateGroupTokens` (pure: the JSON size
   of the group's tools' own `function` — name, description, parameters — divided by
   four, rounded to the nearest 100) prices it; a group over the line gets a line of
-  its own in the index, `toolIndex`: `N tools — load the ones you need by name; the
-  whole group costs about X tokens in every later request`, above its per-tool lines.
+  its own in the index, `toolIndex`: `N tools — load the ones you need with {"names":
+  [...]}; the whole group costs about X tokens in every later request`, above its
+  per-tool lines.
   `tools_load({ group })` for such a group loads nothing and answers with the same
   cost line and the group's own index instead, so the model names what it actually
   needs next; one of `BIG_GROUP_TOOLS` or fewer still loads whole, as before.

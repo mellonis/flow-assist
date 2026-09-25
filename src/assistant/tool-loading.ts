@@ -117,7 +117,7 @@ function groupLines(es: readonly CatalogEntry[]): string {
 // What a big group's cost reads as, in the index and in `runToolsLoad`'s refusal —
 // one phrase, so the two never drift apart.
 function costPhrase(es: readonly CatalogEntry[]): string {
-  return `load the ones you need by name; the whole group costs about ${estimateGroupTokens(es)} tokens in every later request`;
+  return `load the ones you need with {"names": [...]}; the whole group costs about ${estimateGroupTokens(es)} tokens in every later request`;
 }
 
 // The index: one line per group, `name — what it does` per tool, with the group's own
@@ -145,9 +145,10 @@ export function toolIndex(deferred: Map<string, CatalogEntry>, groupDescriptions
 export const TOOLS_LOAD_PARAMETERS: ToolParameters = {
   type: 'object',
   properties: {
-    // `runToolsLoad` itself accepts one bare name as a string, not only an array —
-    // the schema says so too, or a model that sent one would be told its call is
-    // wrong for something the tool has always taken.
+    // `runToolsLoad` takes one bare name as a string, not only an array — the schema
+    // says so too, or a model that sent one would be told its call is wrong for
+    // something the tool takes. A string holding a JSON list passes here as a string
+    // and is read as that list by `runToolsLoad` (`readNames`).
     names: {
       anyOf: [{ type: 'array', items: { type: 'string' } }, { type: 'string' }],
       description: 'Tool names from the list — an array, or a single name as a bare string.',
@@ -221,11 +222,49 @@ function unqualify(n: string, deferred: Map<string, CatalogEntry>): string {
   return entry && groupLabel(entry.group) === n.slice(0, i) ? rest : n;
 }
 
+// `{"names": [...]}` for these names, spaced the way the hints print it.
+function namesCall(names: readonly string[]): string {
+  return `{"names": [${names.map((n) => JSON.stringify(n)).join(', ')}]}`;
+}
+
+// `names` as the model sends it: an array of names, or one string. A string that
+// parses as JSON is read as that value first — a list (`["a","b"]`), a quoted name
+// (`"a"`), or the whole call a hint shows (`{"names": [...]}`) — since a model that
+// copies a list out of a hint into `names` sends it as a string, and taken as one bare
+// name it matches nothing. JSON that is none of those, and a string that does not
+// parse, stays one bare name. A list holding anything but strings is an argument error.
+function readNames(raw: unknown): string[] {
+  if (Array.isArray(raw)) return raw.map(String);
+  if (typeof raw !== 'string') return [];
+  let v: unknown;
+  try { v = JSON.parse(raw); } catch { return [raw]; }
+  if (v && typeof v === 'object' && !Array.isArray(v) && 'names' in v) v = (v as { names: unknown }).names;
+  if (typeof v === 'string') return [v];
+  if (!Array.isArray(v)) return [raw];
+  const bad = v.find((n) => typeof n !== 'string');
+  if (bad !== undefined) throw new Error(`\`names\` must be tool names (strings); got ${bad === null ? 'null' : `a ${Array.isArray(bad) ? 'list' : typeof bad}`} in ${raw}.`);
+  return v as string[];
+}
+
+// A name that is a list or a call written out — brackets, braces or quotes around it.
+// What it most likely meant, pulled out of it, is shown as the call to make instead.
+const looksSerialised = (n: string) => /^\s*[[{"']/.test(n);
+const namesInside = (n: string) => n.replace(/^\s*\{[^[]*/, '').replace(/[[\]{}"'\s]/g, ' ').split(/[ ,]+/).filter(Boolean);
+
+// `Not in the list: …`, in the error and beside a partial load alike. A name that is a
+// serialised list gets why it matched nothing and the call that would have worked.
+function notInList(unknown: readonly string[]): string {
+  const odd = unknown.filter(looksSerialised);
+  const marks = odd.some((n) => /[[{]/.test(n)) ? 'brackets' : 'quotes';
+  const why = odd.length ? ` — that is one name with ${marks} in it; pass names as an array: ${namesCall(odd.flatMap(namesInside))}` : '';
+  return `Not in the list: ${unknown.join(', ')}${why}.`;
+}
+
 // A `tools_load` call. Returns what the model reads; throws when nothing it asked for
 // exists, so the result is an ERROR the model cannot mistake for a success.
 export function runToolsLoad(args: Record<string, unknown>, catalog: CatalogEntry[], set: ToolSet): string {
   const deferred = deferredTools(catalog);
-  const askedRaw = Array.isArray(args.names) ? args.names.map(String) : typeof args.names === 'string' ? [args.names] : [];
+  const askedRaw = readNames(args.names);
   const asked = askedRaw.map((n) => (deferred.has(n) ? n : unqualify(n, deferred)));
   const group = typeof args.group === 'string' ? args.group.trim() : '';
   const groups = [...new Set([...deferred.values()].map((e) => groupLabel(e.group)))];
@@ -260,17 +299,20 @@ export function runToolsLoad(args: Record<string, unknown>, catalog: CatalogEntr
     else if (group === ALWAYS_LOADED_GROUP) always.push(`group "${group}"`);
     else unknown.push(`group "${group}"`);
   }
-  if (!wanted.length && !always.length && !groupRefusal) throw new Error(`Not in the list: ${unknown.join(', ')}. Groups: ${groups.join(', ')}.`);
+  if (!wanted.length && !always.length && !groupRefusal) throw new Error(`${notInList(unknown)} Groups: ${groups.join(', ')}.`);
   const fresh = set.add(wanted);
   const already = [...new Set([...wanted.filter((n) => !fresh.includes(n)), ...always])];
   const summary = [
     fresh.length ? `Loaded: ${fresh.join(', ')} — call them now.` : '',
     already.length ? `Already loaded: ${already.join(', ')}.` : '',
-    unknown.length ? `Not in the list: ${unknown.join(', ')}.` : '',
+    unknown.length ? notInList(unknown) : '',
   ].filter(Boolean).join(' ');
   return [summary, groupRefusal].filter(Boolean).join('\n');
 }
 
 // The answer to a call of a tool the index lists but this conversation has not loaded.
+// The call to make is shown as JSON, the arguments exactly as they go — prose around a
+// quoted list reads as a string to copy, and a model that copies `["x"]` into `names`
+// as a string asks for one name with brackets in it.
 export const notLoadedError = (name: string) =>
-  `${name} is not loaded — call ${TOOLS_LOAD} with names ["${name}"] first, then call it.`;
+  `${name} is not loaded — call ${TOOLS_LOAD} with ${namesCall([name])} first, then call it.`;

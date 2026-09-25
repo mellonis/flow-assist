@@ -161,9 +161,11 @@ test('caps at a few problems and says how many more', () => {
   expect(msg.endsWith('Nothing was run.')).toBe(true);
 });
 
-test('tools_load\'s own names takes an array or a single bare name, as runToolsLoad always has', () => {
+test('tools_load\'s own names takes an array or a string, both of which runToolsLoad reads', () => {
   expect(toolArgsError('tools_load', TOOLS_LOAD_PARAMETERS, { names: ['get_issue'] })).toBeNull();
   expect(toolArgsError('tools_load', TOOLS_LOAD_PARAMETERS, { names: 'get_issue' })).toBeNull();
+  // A list sent as a JSON string passes the check; runToolsLoad reads it as the list.
+  expect(toolArgsError('tools_load', TOOLS_LOAD_PARAMETERS, { names: '["get_issue"]' })).toBeNull();
   expect(toolArgsError('tools_load', TOOLS_LOAD_PARAMETERS, { group: 'repo' })).toBeNull();
 });
 

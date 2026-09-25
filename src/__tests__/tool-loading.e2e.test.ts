@@ -61,7 +61,7 @@ test('the model sees an index, is refused a tool it did not load, loads it, and 
   const index = first.tools!.find((t) => t.function.name === 'tools_load')!.function.description;
   expect(index).toContain('notes:\n- notes_read — Read the notebook.\n- notes_count — Count the notes.');
   // Round 2: the call it made without loading was answered with what to do.
-  expect(JSON.stringify(sent(model, 1).messages)).toContain('ERROR: notes_read is not loaded — call tools_load with names [\\"notes_read\\"] first');
+  expect(JSON.stringify(sent(model, 1).messages)).toContain('ERROR: notes_read is not loaded — call tools_load with {\\"names\\": [\\"notes_read\\"]} first');
   expect(toolNames(sent(model, 1))).not.toContain('notes_read');
   // Round 3: loaded — the full definition is sent, and only the one asked for.
   expect(toolNames(sent(model, 2))).toContain('notes_read');
@@ -148,5 +148,34 @@ test('a group over BIG_GROUP_TOOLS is not loaded whole; the model reads its inde
   expect(toolNames(sent(model, 2))).toEqual(expect.arrayContaining(['acme_0', 'acme_1']));
   expect(toolNames(sent(model, 2))).not.toContain('acme_2');
   expect(ui.backend.lastFrame).toContain('Loaded two.');
+  ui.app.unmount();
+});
+
+test("a tool of a big group, called unloaded: the hint's list sent back as a string loads it on that call", async () => {
+  const model = new ScriptedModel();
+  model.script(
+    [{ tool: 'tools_load', args: { group: 'acme' } }],
+    [{ tool: 'acme_3', args: {} }],
+    // The hint's own list, copied into the call as a STRING.
+    [{ tool: 'tools_load', args: { names: '["acme_3"]' } }],
+    [{ tool: 'acme_3', args: {} }],
+    [{ text: 'Did thing 3.' }],
+  );
+  const ui = await bootApp(model, 100, 28, (make) => [bigPlugin(make)], { ai: { baseUrl: 'http://scripted.model', model: 'scripted' }, sessions: { dir: fs.mkdtempSync(path.join(os.tmpdir(), 'fa-load-str-')) } });
+  await ui.press('F');
+  await ask(ui, model, 'do thing 3', 5);
+
+  const toolReplies = (i: number) => sent(model, i).messages.filter((m) => m.role === 'tool').map((m) => String(m.content));
+  // The whole group is refused with its index, and the way to name tools is shown as JSON.
+  expect(toolReplies(1).at(-1)).toContain('"acme" has 13 tools — load the ones you need with {"names": [...]}');
+  // The unloaded call is answered with the call to make, as JSON.
+  expect(toolReplies(2).at(-1)).toContain('acme_3 is not loaded — call tools_load with {"names": ["acme_3"]} first');
+  // The list sent as a string loads the tool on that call, and only that tool.
+  expect(toolReplies(3).at(-1)).toBe('OK: Loaded: acme_3 — call them now.');
+  expect(toolNames(sent(model, 3))).toContain('acme_3');
+  expect(toolNames(sent(model, 3))).not.toContain('acme_4');
+  // The call goes through.
+  expect(toolReplies(4).at(-1)).toBe('OK: ok');
+  expect(ui.backend.lastFrame).toContain('Did thing 3.');
   ui.app.unmount();
 });

@@ -117,8 +117,41 @@ test('a loaded set is saved as names and put back from them; anything else reads
   expect(set.names()).toEqual([]);
 });
 
-test('the not-loaded answer names tools_load and the tool', () => {
-  expect(notLoadedError('read_file')).toBe('read_file is not loaded — call tools_load with names ["read_file"] first, then call it.');
+test('the not-loaded answer names tools_load and shows the call as JSON, not prose to re-quote', () => {
+  expect(notLoadedError('read_file')).toBe('read_file is not loaded — call tools_load with {"names": ["read_file"]} first, then call it.');
+});
+
+test('a names string that parses as JSON is read as that value; one that does not stays one bare name', () => {
+  // The not-loaded hint copied into the call as a string — the list it shows.
+  const list = createToolSet();
+  expect(runToolsLoad({ names: '["read_file"]' }, catalog, list)).toBe('Loaded: read_file — call them now.');
+  expect(list.names()).toEqual(['read_file']);
+  expect(runToolsLoad({ names: '[ "list_dir", "get_issue" ]' }, catalog, createToolSet())).toBe('Loaded: list_dir, get_issue — call them now.');
+  // A quoted name.
+  expect(runToolsLoad({ names: '"read_file"' }, catalog, createToolSet())).toBe('Loaded: read_file — call them now.');
+  // The whole call the hint shows, sent as the string.
+  expect(runToolsLoad({ names: '{"names": ["read_file"]}' }, catalog, createToolSet())).toBe('Loaded: read_file — call them now.');
+  // A bare name, as ever.
+  expect(runToolsLoad({ names: 'read_file' }, catalog, createToolSet())).toBe('Loaded: read_file — call them now.');
+  // JSON that is neither a list nor a name stays the string it was.
+  expect(() => runToolsLoad({ names: '7' }, catalog, createToolSet())).toThrow('Not in the list: 7.');
+});
+
+test('a names string holding a JSON list of non-strings is an argument error naming the type', () => {
+  expect(() => runToolsLoad({ names: '[1]' }, catalog, createToolSet())).toThrow('`names` must be tool names (strings); got a number');
+  expect(() => runToolsLoad({ names: '["read_file", null]' }, catalog, createToolSet())).toThrow('got null');
+});
+
+test('a name that looks like a serialised list is explained, with the call to make instead', () => {
+  // Not JSON (single quotes), so it stays one name — brackets and all.
+  expect(() => runToolsLoad({ names: "['write_file']" }, catalog, createToolSet()))
+    .toThrow('Not in the list: [\'write_file\'] — that is one name with brackets in it; pass names as an array: {"names": ["write_file"]}. Groups: repo, acme.');
+  // Quotes alone, not JSON either.
+  expect(() => runToolsLoad({ names: "'write_file'" }, catalog, createToolSet()))
+    .toThrow('that is one name with quotes in it; pass names as an array: {"names": ["write_file"]}.');
+  // Inside an array, beside a name that loads.
+  expect(runToolsLoad({ names: ['read_file', '["write_file"]'] }, catalog, createToolSet()))
+    .toBe('Loaded: read_file — call them now. Not in the list: ["write_file"] — that is one name with brackets in it; pass names as an array: {"names": ["write_file"]}.');
 });
 
 test('tools_load accepts a name qualified with its group, as well as the bare name the index shows', () => {
@@ -202,7 +235,7 @@ test('a group over BIG_GROUP_TOOLS carries its cost in the index; a smaller one 
 
   const big = bigCatalog(BIG_GROUP_TOOLS + 1);
   const bigIdx = toolIndex(deferredTools(big));
-  expect(bigIdx.startsWith(`big:\n${BIG_GROUP_TOOLS + 1} tools — load the ones you need by name; the whole group costs about `)).toBe(true);
+  expect(bigIdx.startsWith(`big:\n${BIG_GROUP_TOOLS + 1} tools — load the ones you need with {"names": [...]}; the whole group costs about `)).toBe(true);
   expect(bigIdx).toContain('tokens in every later request');
   expect(bigIdx).toContain('- big_0 — big_0 does a thing.');
 
@@ -214,7 +247,7 @@ test('tools_load { group } over BIG_GROUP_TOOLS is not loaded whole — the answ
   const big = bigCatalog(BIG_GROUP_TOOLS + 1);
   const set = createToolSet();
   const answer = runToolsLoad({ group: 'big' }, big, set);
-  expect(answer.startsWith(`"big" has ${BIG_GROUP_TOOLS + 1} tools — load the ones you need by name`)).toBe(true);
+  expect(answer.startsWith(`"big" has ${BIG_GROUP_TOOLS + 1} tools — load the ones you need with {"names": [...]}`)).toBe(true);
   expect(answer).toContain('tokens in every later request');
   expect(answer).toContain('- big_0 — big_0 does a thing.');
   expect(answer).toContain(`- big_${BIG_GROUP_TOOLS} — big_${BIG_GROUP_TOOLS} does a thing.`);

@@ -5,6 +5,16 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **A list of tool names sent as a string loads those tools.** The answer to a call of
+  a tool that was not loaded showed the fix as prose — `call tools_load with names
+  ["write_file"] first` — and a model copied the list into the call as a string. The
+  host read that string as one name, brackets included, answered `Not in the list:
+  ["write_file"]`, which reads as "write_file does not exist", and the model gave up on a
+  tool it had. Now a `names` string that parses as JSON is read as that list or name
+  first, and the hints show the call itself as JSON: `call tools_load with {"names":
+  ["write_file"]} first`, and a big group's refusal says `load the ones you need with
+  {"names": [...]}`. A name that still looks like a list is explained, with the call to
+  make instead.
 - **A plugin can measure text as the screen draws it.** `ui.stringWidth(text)` is
   flowtty's own width function, the one the host sizes its columns with: a CJK character,
   an emoji, a flag or a joined emoji takes two cells. A plugin that sized a column from a
