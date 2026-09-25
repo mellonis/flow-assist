@@ -350,7 +350,7 @@ test('help fits the screen, names the keys, and wraps what it says', async () =>
       theme: { modals: { bg: undefined } },
       helpOpen: true,
       commands: COMMANDS,
-      keys: { commandLine: [':'], quit: ['q'], chat: ['F'], log: ['L'], open: ['return'], disabled: [] },
+      keys: { commandLine: [':'], quit: ['q'], chat: ['F'], sessions: ['ctrl+s'], log: ['L'], open: ['return'], disabled: [] },
     }),
     backend,
   );
@@ -363,10 +363,12 @@ test('help fits the screen, names the keys, and wraps what it says', async () =>
   // The keys, listed by what they do, drawn as caps.
   expect(frame).toMatch(/F\s+talk to the assistant/);
   expect(frame).toMatch(/L\s+the log/);
+  expect(frame).toMatch(/\^s\s+saved sessions/);
   // A key the host does not act on is not listed as if it worked anywhere.
   const anywhere = rows.findIndex((r) => r.includes('Keys — anywhere'));
   const plugins = rows.findIndex((r) => r.includes("on a plugin's own screen"));
   const open = rows.findIndex((r) => /⏎\s+open/.test(r));
+  expect(rows.findIndex((r) => /\^s\s+saved sessions/.test(r))).toBeLessThan(plugins);
   expect(anywhere).toBeGreaterThanOrEqual(0);
   expect(open).toBeGreaterThan(plugins);
   // An unbound action is not offered at all.

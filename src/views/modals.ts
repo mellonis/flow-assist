@@ -2038,13 +2038,13 @@ export function helpEntries(commands: HelpCommand[]): { usage: string; descripti
 // read from its name (`boardPicker` → "board picker").
 const ACTION_LABELS: Record<string, string> = {
   commandLine: 'command line', quit: 'quit', back: 'back / close', prev: 'previous', next: 'next',
-  open: 'open', openBrowser: 'open in the browser', clearCache: 'flush the cache', chat: 'talk to the assistant', log: 'the log',
+  open: 'open', openBrowser: 'open in the browser', clearCache: 'flush the cache', chat: 'talk to the assistant', sessions: 'saved sessions', log: 'the log',
 };
 // Keys the HOST acts on from anywhere. Everything else in the key map belongs to a
 // plugin's own screen (`prev`/`next`/`open`/`openBrowser` are shared bindings the host
 // merely defines a default for) — listed separately, because on the start screen they
 // do nothing and a key in a help list is an instruction.
-const HOST_ACTIONS = ['chat', 'commandLine', 'log', 'back', 'quit'];
+const HOST_ACTIONS = ['chat', 'sessions', 'commandLine', 'log', 'back', 'quit'];
 const actionLabel = (action: string) => ACTION_LABELS[action] ?? action.replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase();
 
 export function renderHelp({

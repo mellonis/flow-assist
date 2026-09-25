@@ -24,9 +24,10 @@ import { createShellState, formatShell, nextCwd, realOf, runShell, shellLimits, 
 import { findInstructions, instructionsBlock, instructionsNote, type ProjectInstructions } from '../assistant/project-instructions.js';
 import {
   KEEP_SESSIONS, SESSION_VERSION, acquireLock, closeSession, cutTitle, flushOnExit, listSessions, loadSession, lockPath,
-  makeLockToken, newSessionId, pruneSessions, releaseLock, saveSession, sessionFingerprint, sessionFingerprintsEqual,
-  sessionTitle, sessionWhen, sessionsDir, type Session, type SessionFingerprint,
+  makeLockToken, newSessionId, pruneSessions, releaseLock, removeSession, renameSession, saveSession, sessionFingerprint,
+  sessionFingerprintsEqual, sessionRows, sessionTitle, sessionWhen, sessionsDir, type Session, type SessionFingerprint,
 } from '../assistant/sessions.js';
+import { pickerKey, pickerReload, pickerStart, type PickerAction, type PickerState } from '../assistant/session-picker.js';
 import type { ChatMessage, TokenUsage } from '../assistant/agent.js';
 import type { ChangeView } from '../assistant/diff.js';
 import { VIEW_CAPS, type ViewRecord, type ViewRenderers } from '../assistant/views.js';
@@ -65,7 +66,7 @@ import type { PluginApi } from '../runtime/plugin-api.js';
 // sessions directory is known (`chatCommandDefs` in the chat).
 type ChatCommand = HistoryCommand & ChatCommandDef;
 const CHAT_COMMAND_DEFS: ChatCommand[] = [
-  { name: 'compact' }, { name: 'context' }, { name: 'copy' }, { name: 'image' }, { name: 'resume' }, { name: 'new' }, { name: 'title' }, { name: 'clear' }, { name: 'memory' },
+  { name: 'compact' }, { name: 'context' }, { name: 'copy' }, { name: 'image' }, { name: 'resume' }, { name: 'sessions' }, { name: 'new' }, { name: 'title' }, { name: 'clear' }, { name: 'memory' },
   { name: 'auto', values: ['reads', 'all', 'off'] }, { name: 'notes', values: NOTES_MODES }, { name: 'mode', values: CHAT_MODES }, { name: 'log' }, { name: 'exit' },
 ];
 const CHAT_COMMANDS = CHAT_COMMAND_DEFS.map((c) => c.name);
@@ -191,7 +192,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
     // `chatCollapse` (Ctrl+\) folds a docked chat away and brings it back. Both are
     // taken by the App before any handler (src/runtime/app.tsx), so no plugin can keep
     // them from the person.
-    keys: { chat: 'F', details: ['ctrl+o', 'ctrl+r'], chatFocus: 'ctrl+]', chatCollapse: 'ctrl+\\' },
+    // `sessions` (Ctrl+S) opens the session picker from anywhere — a chord, since the
+    // chat's field would type a letter; the terminal's raw mode leaves Ctrl+S to the app,
+    // not to flow control.
+    keys: { chat: 'F', sessions: 'ctrl+s', details: ['ctrl+o', 'ctrl+r'], chatFocus: 'ctrl+]', chatCollapse: 'ctrl+\\' },
     // config.plugins.assistant: `mode` — where the chat is (src/runtime/panel-layout.ts):
     // `panel` beside the plugin's screen (the default), `window` over it, `full` the
     // whole terminal; `/mode` switches it for the session, and an old `fullscreen: true`
@@ -372,6 +376,12 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const contextOpenRef = ui.useRef(false);
           const [contextOpen, setContextOpenState] = ui.useState(false);
           const setContextOpen = (v: boolean) => { contextOpenRef.current = v; setContextOpenState(v); host.notify(); };
+          // `/sessions` and the `sessions` key: the picker, drawn in the conversation's
+          // place (src/assistant/session-picker.ts). The ref is for the key handler, the
+          // state for the render; null — closed.
+          const pickerRef = ui.useRef<PickerState | null>(null);
+          const [picker, setPickerState] = ui.useState<PickerState | null>(null);
+          const setPicker = (next: PickerState | null) => { pickerRef.current = next; setPickerState(next); host.notify(); };
           const [messages, setMessages] = ui.useState<ChatMsg[]>([]);
           const [input, setInput] = ui.useState('');
           const [streaming, setStreaming] = ui.useState(false);
@@ -897,7 +907,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 return;
               }
               applySession(s, fp);
-              (host.services as Record<string, any>).showMessage?.(`Continued «${s.title || 'the last session'}» — /clear starts a new one, /resume lists others`);
+              (host.services as Record<string, any>).showMessage?.(`Continued «${s.title || 'the last session'}» — /new starts a new one, /sessions lists them all`);
               host.notify();
             }, 0);
           }
@@ -1939,6 +1949,82 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // an image has nowhere to go there, and a pasted path is the command's argument.
           const fieldTakesImages = () => !bangLevelRef.current && !/^\s*[/!]/.test(inputRef.current);
 
+          // Switches this chat to a saved session — `/resume <n>` and the picker's ⏎. The
+          // one being left is written first, so it is on the list to come back to; one
+          // another flow-assist process holds is refused with a note naming its lock.
+          // true — switched.
+          const openSession = (id: string, title: string): boolean => {
+            if (!sessDir) return false;
+            if (streamRef.current) { setError('an answer is still coming — stop it (Esc) before switching sessions'); return false; }
+            writeSession();
+            // The fingerprint first, stat before the content read just below — see
+            // applySession's own comment for why the order matters.
+            const fp = sessionFingerprint(sessDir, id);
+            const s = loadSession(sessDir, id);
+            if (!s) { setError('that session file cannot be read'); return false; }
+            // Held by another live flow-assist process: refuse and stay put. Own lock
+            // already, or free/stale, and this acquires it — side-effect free when held,
+            // so nothing to undo on the refusal.
+            if (id !== sessionIdRef.current) {
+              const outcome = acquireLock(sessDir, id, lockToken);
+              if (outcome.status === 'held') {
+                setMessages((cur) => [...cur, { role: 'note', content: `Session "${title || id}" is open in another flow-assist process. (lock: ${lockPath(sessDir, id)})` }]);
+                setField('');
+                host.notify();
+                return false;
+              }
+            }
+            dismissAsk();
+            queueRef.current = []; setQueued([]); bgQueueRef.current = [];
+            setError(null); setEmptyNotice(''); setToolLabel(''); setToolCount(0);
+            if (id !== sessionIdRef.current) releaseCurrentLock(); // leaving the old one
+            applySession(s, fp);
+            (host.services as Record<string, any>).showMessage?.(`Resumed «${s.title || 'session'}»`);
+            host.notify();
+            return true;
+          };
+          // The picker: the list is read here and after a rename or a delete — never per
+          // keystroke; the filter runs over what was read. The conversation in this chat
+          // is written first, so it is listed as it is now. A pending y/n or question is
+          // answered before anything else: the chat opens on it and the picker waits.
+          const openPicker = () => {
+            // Closed, collapsed, or docked with the plugin at the keys: the chat opens and
+            // takes the keyboard, or the picker would draw where no key reaches it.
+            if (!focusedRef.current) openChat();
+            if (!sessDir) { setError('sessions are not saved here (no sessions directory)'); return; }
+            if (pendingRef.current || askRef.current) return;
+            writeSession();
+            setPicker(pickerStart(sessionRows(sessDir, lockToken)));
+          };
+          // What a picker key asked for (session-picker.ts' `PickerAction`).
+          const pickerAction = (a: PickerAction) => {
+            const p = pickerRef.current;
+            if (!sessDir || !p) return;
+            const titleOf = (id: string) => p.rows.find((r) => r.id === id)?.title || id;
+            switch (a.kind) {
+              case 'close': setPicker(null); return;
+              case 'new': if (startNew()) setPicker(null); return;
+              case 'open': setPicker(null); openSession(a.id, titleOf(a.id)); return;
+              case 'rename': {
+                const title = cutTitle(a.title);
+                if (a.id === sessionIdRef.current) { titleRef.current = title; writeSession(); }
+                else if (renameSession(sessDir, a.id, title, lockToken) === 'held') {
+                  setPicker(pickerReload(p, sessionRows(sessDir, lockToken), `"${titleOf(a.id)}" is open in another flow-assist process — it cannot be renamed here`));
+                  return;
+                }
+                setPicker(pickerReload(p, sessionRows(sessDir, lockToken), `Renamed to «${title}»`));
+                return;
+              }
+              case 'delete': {
+                const done = removeSession(sessDir, a.id, lockToken);
+                const notice = done === 'deleted' ? `Deleted «${titleOf(a.id)}»`
+                  : done === 'held' ? `"${titleOf(a.id)}" is open in another flow-assist process — it cannot be deleted`
+                  : `"${titleOf(a.id)}" is the session in this chat — it cannot be deleted from here`;
+                setPicker(pickerReload(p, sessionRows(sessDir, lockToken), notice));
+                return;
+              }
+            }
+          };
           // A fresh conversation in this chat — `/clear` and `/new` both: everything that
           // would survive a rebuild is reset — emptyNotice, the tool name/counter, the time,
           // the stream/tick, the context, the title. The session's id and lock are the caller's.
@@ -2002,7 +2088,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             releaseCurrentLock();
             sessionIdRef.current = ''; createdAtRef.current = ''; fingerprintRef.current = NO_FILE;
             resetConversation();
-            (host.services as Record<string, any>).showMessage?.('New session — /resume lists the others');
+            (host.services as Record<string, any>).showMessage?.('New session — /sessions lists the others');
             return true;
           };
 
@@ -2107,33 +2193,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 }
                 const pick = Number.isInteger(n) && n >= 1 ? list[n - 1] : undefined;
                 if (!pick) { setError(`/resume takes a number from the list (1–${list.length})`); return; }
-                if (streamRef.current) { setError('an answer is still coming — stop it (Esc) before switching sessions'); return; }
-                // The fingerprint first, stat before the content read just below — see
-                // applySession's own comment for why the order matters.
-                const fp = sessionFingerprint(sessDir, pick.id);
-                const s = loadSession(sessDir, pick.id);
-                if (!s) { setError('that session file cannot be read'); return; }
-                // Held by another live flow-assist process: refuse and stay put. Own
-                // lock already, or free/stale, and this acquires it — side-effect free
-                // when held, so nothing to undo on the refusal below.
-                if (pick.id !== sessionIdRef.current) {
-                  const outcome = acquireLock(sessDir, pick.id, lockToken);
-                  if (outcome.status === 'held') {
-                    setMessages((cur) => [...cur, { role: 'note', content: `Session "${pick.title || pick.id}" is open in another flow-assist process. (lock: ${lockPath(sessDir, pick.id)})` }]);
-                    setField('');
-                    host.notify();
-                    return;
-                  }
-                }
-                dismissAsk();
-                queueRef.current = []; setQueued([]); bgQueueRef.current = [];
-                setError(null); setEmptyNotice(''); setToolLabel(''); setToolCount(0);
-                if (pick.id !== sessionIdRef.current) releaseCurrentLock(); // leaving the old one for /resume
-                applySession(s, fp);
-                (host.services as Record<string, any>).showMessage?.(`Resumed «${s.title || 'session'}»`);
-                host.notify();
+                openSession(pick.id, pick.title);
                 return;
               }
+              case 'sessions':
+                setField('');
+                openPicker();
+                return;
               case 'clear':
                 // The session is written and left for /resume — closed, so a restart does
                 // not bring back what was just cleared; what follows is a new one.
@@ -2435,6 +2501,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             mouse: true,
             handler: (key) => {
               if (!open) return false;
+              // The picker stands in the conversation's place: a button or the wheel must
+              // not reach the list it hides.
+              if (pickerRef.current && isMouseButton(key.name)) return false;
+              if (pickerRef.current && (key.name === 'wheelup' || key.name === 'wheeldown')) return true;
               // A press, a drag or a release. It is consumed only when it actually
               // folded something: a drag that reported "handled" per dragged cell
               // would cost a re-render a cell, and every other click must be free.
@@ -2480,6 +2550,15 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 if (key.name === 'y' || key.name === 'return') { settleConfirm(true); return true; }
                 return true;
               }
+              // The picker holds the keys while it is up — after a pending question or
+              // y/n, which are drawn over it and answered first.
+              if (pickerRef.current) {
+                const step = pickerKey(pickerRef.current, key, chatWrapWidth(width, fullscreenRef.current));
+                setPicker(step.state);
+                if (step.action) pickerAction(step.action);
+                return true;
+              }
+              if (isKey(host.keys.sessions ?? [], key)) { openPicker(); return true; }
               // Any key except the second Esc disarms the exit.
               if (key.name !== 'escape' && escArmAt > 0) disarmEsc();
               // ── Bang level: `!` on an EMPTY field steps it UP (0 → 1 shell mode →
@@ -2698,6 +2777,18 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // command line / an open modal and when the chat is
           // already open; closed is not handled by the base consumer (priority 0).
           addTrigger({ host, action: 'chat', isOpen: () => focused, open: () => openChat() });
+          // The `sessions` key wherever the chat does not have the keyboard (the start
+          // screen, a plugin's screen). A chord: `addTrigger` compares the bare name, so
+          // the whole key is compared here.
+          host.useInputHandler({
+            mode: 'consume',
+            priority: (u) => (u.cmdOpen || u.modalActive || focused ? 0 : 10),
+            handler: (key) => {
+              if (focused || !isKey(host.keys.sessions ?? [], key)) return false;
+              openPicker();
+              return true;
+            },
+          });
           if (!open) {
             // Collapsed at the bottom, the panel keeps one row: the turn's status, or how
             // to bring it back.
@@ -2751,6 +2842,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             escWord: layout === 'panel' ? 'collapse' : 'close',
             pendingConfirm: pendingAsk,
             pendingQuestion,
+            picker,
             queued,
             // The title names what is on screen — the items' labels.
             subject: contextTitle(screen),

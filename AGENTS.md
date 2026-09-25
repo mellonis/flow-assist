@@ -994,7 +994,8 @@ there is no `/fullscreen`.
   three views of one conversation, saved together or not at all. Not saved: an answer
   in progress (`live`), a pending y/n or question, the queues. Saves: 250 ms after a
   question, an answer's end, `/compact`, a background result; at once on closing the
-  chat, `/clear`, `/new`, `/resume`, and at process exit (`flushOnExit`). A
+  chat, `/clear`, `/new`, `/resume`, opening the picker (`/sessions`), and at process
+  exit (`flushOnExit`). A
   write is temp file + rename; a file that does not parse is skipped. On start the
   newest session is continued unless `/clear` closed it (`sessions.resume: false`
   turns this off); `/clear` starts a new one and keeps the old on
@@ -1006,6 +1007,31 @@ there is no `/fullscreen`.
   state, the images' numbering, the auto mode, the notes mode, the folds, the live views,
   the shell's directory — `/new` resets too. `/new` is refused while an answer or a
   `!command` runs. The last 400 messages are kept, 50 sessions.
+  **The picker** (`/sessions`, and the assistant's `sessions` key — `^s`, `config.keys.sessions`
+  moves it) lists every saved session newest first, one row each: the title, `this chat`
+  or `in use elsewhere` (`lockState`: ours / held), `sessionWhen`, the file's size
+  (`formatBytes`), the messages. It is pure state in `src/assistant/session-picker.ts`
+  (`pickerKey`, the `ask.ts` pattern) drawn by `renderSessionPicker`
+  (`src/views/modals.ts`) in the conversation's place, in the chat's own frame, in every
+  mode. `sessionRows` reads the list when the picker opens and after a rename or a
+  delete, never per keystroke: one file parsed at a time, and of each only the title and
+  `searchText` kept — the person's words, the answers and the commands run, lower-cased,
+  the NEWEST `SEARCH_TEXT_MAX` (64 Ki) characters; typing filters by every word, in the
+  title or that text. ⏎ opens one through `openSession`, the one path `/resume <n>` takes
+  too — the session being left written first, a HELD one refused with the note below — so
+  everything said here of `/resume` holds for it; ⏎ on a row marked held is refused in the
+  picker's own notice line before that. `^n` is `/new`. `^r` renames: this chat's own
+  through its `titleRef`, another through `renameSession`, which takes the lock for the
+  write and never writes a HELD session (its next save would fork) or this chat's own.
+  `^x` deletes after a y/n line of the picker's own — `y` deletes, `n` or Esc keeps, ⏎
+  is no answer — through `removeSession`, refused for a HELD session and for this chat's
+  own. A pending y/n or `ask_user` question wins over the picker — drawn in its place and
+  answered first (a turn may start while it is up), the picker back once it is settled.
+  The picker holds the keys while up; a mouse button and the wheel never reach the
+  conversation it hides, and closing it mounts the conversation's list anew, at its end.
+  The key works from the chat (its handler, after a pending y/n or question) and from
+  any other screen (a trigger of its own: `addTrigger` compares the bare name, and this
+  is a chord).
   A session's `title` is fixed at its first save — the first non-empty line of the first
   thing the person wrote (a `!command` otherwise), whitespace collapsed and cut at
   `TITLE_MAX` (70) code points (`cutTitle` / `sessionTitle`) — and kept in the chat's
@@ -1628,6 +1654,8 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     on Esc (`keys.back`) only.
 - **A capital opens something big**: `F` the assistant (Flow Assist), `L` the log; a plugin's main
   screen should follow (`B` for a board). Lower case is for what is INSIDE a screen.
+  The session picker is the exception, `^s` (`sessions`): it must open from inside the
+  chat, where a letter types.
   A modal is closed by the key it is bound to (`f.keys.<action>`), never by a letter
   written in the handler.
 - **↑/↓** walk the prompt history, only while the field is empty or still shows a
@@ -2122,7 +2150,8 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   its argument from `CHAT_COMMAND_DEFS`' `values` — `/auto reads|all|off`, `/notes
   step|open`, `/mode panel|window|full`, and `/resume` the saved sessions by number,
   newest first, each labelled with its title (`chatCommandDefs`, bound where `sessDir`
-  is known and read when the field is drawn) — or, at a non-zero bang level, the last
+  is known and read when the field is drawn) — the picker (`/sessions`) is the way to
+  find one by what was said — or, at a non-zero bang level, the last
   word as a PATH under the shell's directory (`completePath`): `~` is the home, a
   directory gets `/`, hidden entries only for a word starting with `.`, a name with a
   space escaped `\ `, and nothing outside `shell.roots` by REAL path — the listed
