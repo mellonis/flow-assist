@@ -96,18 +96,35 @@ test('echoes drain the queue in order, oldest first', () => {
   s.applyFrame(['TextInput', { id: 'name', value: 'he' }], {});
   expect(s.get('name')).toBe('hel');
   s.applyFrame(['TextInput', { id: 'name', value: 'hel' }], {});
-  expect(s.get('name')).toBe('hel'); // equal to the held value: the queue empties
+  expect(s.get('name')).toBe('hel'); // still in the queue too: an echo, and the queue empties
   // `he` is older than the head and is already gone: a write, not an echo.
   s.applyFrame(['TextInput', { id: 'name', value: 'he' }], {});
   expect(s.get('name')).toBe('he');
 });
 
-test('a frame equal to the held value empties the queue', () => {
+test('a frame matching the only queued copy of the held value drains the whole queue, so an older value after it is a write', () => {
   const s = createFieldState();
   s.set('x', 'a'); s.set('x', 'b');
   s.applyFrame(['TextInput', { id: 'x', value: 'b' }], {});
   expect(s.get('x')).toBe('b');
-  // `a` was in the queue, but the frame above emptied it: this is a write, not an echo.
+  // `a` was in the queue, but the frame above drained through it too (it was older than
+  // `b`'s own match): this is a write, not an echo.
   s.applyFrame(['TextInput', { id: 'x', value: 'a' }], {});
   expect(s.get('x')).toBe('a');
+});
+
+test('a frame equal to the held value is not proof the plugin caught up: it may echo an older moment, and must not empty a still-outstanding entry', () => {
+  const s = createFieldState();
+  s.set('name', 'h'); s.set('name', 'he'); s.set('name', 'h');
+  // Typed `h`, `he`, backspaced back to `h` — three frames echoing each moment in turn,
+  // none of them a write, even though the first and third equal the held value `h`.
+  s.applyFrame(['TextInput', { id: 'name', value: 'h' }], {});
+  expect(s.get('name')).toBe('h');
+  s.applyFrame(['TextInput', { id: 'name', value: 'he' }], {});
+  expect(s.get('name')).toBe('h');
+  s.applyFrame(['TextInput', { id: 'name', value: 'h' }], {});
+  expect(s.get('name')).toBe('h');
+  // `he` is no longer in the queue: a write, not an echo.
+  s.applyFrame(['TextInput', { id: 'name', value: 'he' }], {});
+  expect(s.get('name')).toBe('he');
 });

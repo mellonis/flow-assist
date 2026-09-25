@@ -6,13 +6,21 @@
 // model sends frames that lag the typing (`h`, `he`, `hel` while the host holds
 // `hello`), and applying those would clobber the input. So per id the host keeps a
 // QUEUE of the last `ECHO_QUEUE` values it itself sent, oldest first, and a frame's
-// value is read against it three ways: equal to the HELD value, the plugin has caught
-// up and the queue empties, nothing changes; equal to some entry in the queue, it is
-// an echo of that moment, and that entry and every older one drain from the queue
-// while the field stays put; equal to none of it, it is a write, applied at once, and
-// the queue empties. Draining on a match is what keeps a value the person revisits
-// from poisoning the field forever: a deliberate write may be read as an echo at most
-// once, since its next frame with the same value finds no entry left and lands. An id
+// value is checked against it in this order: found in the queue, it is an echo of
+// that moment — the OLDEST matching entry and every entry before it drain, and the
+// held value is left exactly as it is; not found there but equal to the HELD value,
+// it is a no-op and the queue is left untouched; equal to neither, it is a write,
+// applied at once, with the queue emptied. The queue is checked before the held value
+// because equaling the held value is not proof the plugin caught up — it can just as
+// well be the echo of an OLDER, still-outstanding moment: typing `h`, `he`, then
+// backspacing back to `h` sends three frames, and the `h` that follows the backspace
+// must not empty the queue, or the still-lagging `he` frame would land afterward as a
+// write over the backspace. Draining on a match is what keeps a value the person
+// revisits from poisoning the field forever; stopping the drain exactly at the oldest
+// match leaves any newer, still-outstanding moment in the queue matchable in its own
+// turn, as `he` stays matchable above. A deliberate write lands after at most as many
+// frames as there are copies of its value already in the queue — bounded by
+// `ECHO_QUEUE`, not by one, since each copy is read as its own echo in turn. An id
 // absent from a whole frame loses its state. A frame's value prop may arrive as JSON
 // `null` — a plugin in a language whose "nothing" serializes that way — and is read
 // the same as the prop being absent: no value in the frame.
@@ -57,10 +65,10 @@ export function createFieldState(): FieldState {
       for (const id of [...held.keys()]) if (!seen.has(id)) { held.delete(id); sent.delete(id); }
       for (const [id, { value, has }] of seen) {
         if (!has || value === undefined || value === null) continue;
-        if (held.has(id) && same(held.get(id), value)) { sent.delete(id); continue; } // the plugin caught up
         const queue = sent.get(id) ?? [];
         const idx = queue.findIndex((v) => same(v, value));
-        if (idx !== -1) { sent.set(id, queue.slice(idx + 1)); continue; } // an echo: drop it and every older entry
+        if (idx !== -1) { sent.set(id, queue.slice(idx + 1)); continue; } // an echo: drop it and every older entry, held unchanged
+        if (held.has(id) && same(held.get(id), value)) continue; // a no-op: equal to held, but not an echo the queue can vouch for — the queue stays as it is
         held.set(id, value);
         sent.delete(id);
       }
