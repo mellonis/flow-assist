@@ -105,11 +105,13 @@ const LAYERS = new WeakMap<object, ConfigLayers>();
 // overrides in config.local.json, and the session's values laid over both. Missing
 // files simply fall back to the other side (or an empty object), never throwing.
 // `localPath` swaps the local overrides file — tests point it at a temp file.
-export function loadConfig(opts?: { localPath?: string }): Record<string, unknown> {
+// `session: false` reads the files alone — for a caller that writes the result back to
+// a file, which must never carry a session value into it.
+export function loadConfig(opts?: { localPath?: string; session?: boolean }): Record<string, unknown> {
   const base = asConfigObject(readConfigFile(CONFIG_PATH)) ?? {};
   const local = asConfigObject(readConfigFile(opts?.localPath ?? CONFIG_LOCAL_PATH)) ?? {};
   const merged = deepMerge(structuredClone(base), structuredClone(local));
-  for (const [key, value] of SESSION) setDeep(merged, key, structuredClone(value));
+  if (opts?.session !== false) for (const [key, value] of SESSION) setDeep(merged, key, structuredClone(value));
   LAYERS.set(merged, { base, local });
   return merged;
 }
@@ -123,8 +125,8 @@ function sessionHolds(key: string): boolean {
   return false;
 }
 
-// The layers of a config the caller built itself are started at its first saved
-// write: what it held then is its base, and what is saved from then on is `local`.
+// The layers of a config the caller built itself are started at its first write:
+// what it held then is its base, and what is saved from then on is `local`.
 function layersOf(config: Record<string, unknown>): ConfigLayers {
   let layers = LAYERS.get(config);
   if (!layers) {
@@ -134,6 +136,21 @@ function layersOf(config: Record<string, unknown>): ConfigLayers {
     LAYERS.set(config, layers);
   }
   return layers;
+}
+
+// The value `key` has now, as `config get` answers it: the files' layers with the
+// session laid over them. It differs from the running app's config only for a key read
+// at start, which is never laid on it — the answer is then the value the next start
+// reads. A config built by hand with no layers yet answers from itself.
+export function configValue(config: Record<string, unknown>, key: string): unknown {
+  const layers = LAYERS.get(config);
+  const root: Record<string, unknown> = layers ? deepMerge(structuredClone(layers.base), structuredClone(layers.local)) : {};
+  if (!layers) {
+    const own = getDeep(config, key);
+    if (own !== undefined) setDeep(root, key, structuredClone(own));
+  }
+  for (const [k, v] of SESSION) if (k === key || key.startsWith(`${k}.`) || k.startsWith(`${key}.`)) setDeep(root, k, structuredClone(v));
+  return getDeep(root, key);
 }
 
 // Where the value at `key` of `config` comes from. A config the caller built itself
@@ -147,15 +164,6 @@ export function configSource(config: Record<string, unknown>, key: string): Conf
   return 'default';
 }
 
-// The part of the running app's config that is not the person's values but derived
-// from them at start: `theme` holds the palette resolved for the terminal's scheme,
-// and a value laid over it would leave a partial one. It is written (a session value
-// into the map, a saved one into the file) and read at the next start.
-const DERIVED_AT_START = ['theme'];
-const derivedAtStart = (key: string) => DERIVED_AT_START.some((k) => key === k || key.startsWith(`${k}.`));
-
-// `restart` — the key's consumer reads it when the app starts (`appliesOnRestart`):
-// the caller says the value takes effect then.
 export type ConfigSetResult = { ok: true; value: unknown; restart: boolean } | { ok: false; error: string };
 
 // The words a caller adds after a value whose key is read at start.
@@ -175,6 +183,9 @@ export function setConfigValue(
 ): ConfigSetResult {
   const check = validateConfigWriteValue(opts.rootSchema ?? hostConfigSchema, key, value, opts.pluginConfigs);
   if (!check.ok) return check;
+  // The layers before anything is laid on `config`: a config built by hand gets them now,
+  // so an `unset` later knows what the key falls back to.
+  layersOf(config);
   if (opts.scope === 'session') {
     SESSION.set(key, structuredClone(check.value));
   } else {
@@ -184,9 +195,35 @@ export function setConfigValue(
     for (const k of [...SESSION.keys()]) if (k === key || k.startsWith(`${key}.`)) SESSION.delete(k);
     setDeep(layersOf(config).local, key, structuredClone(check.value));
   }
-  if (!derivedAtStart(key)) setDeep(config, key, structuredClone(check.value));
-  const rootSchema = opts.rootSchema ?? hostConfigSchema;
-  return { ok: true, value: check.value, restart: configMarks(rootSchema, key, opts.pluginConfigs).restart };
+  const restart = configMarks(opts.rootSchema ?? hostConfigSchema, key, opts.pluginConfigs).restart;
+  if (!restart) setDeep(config, key, structuredClone(check.value));
+  return { ok: true, value: check.value, restart };
+}
+
+// `config unset`, the reverse of `setConfigValue`. `session` drops only the session's
+// value at or under the key — the saved one is back. `saved` also removes the key from
+// config.local.json. Either way the value the key falls back to (config.json's, or
+// none) is laid on `config` at once, unless the key is read at start; `value` is that
+// fallback.
+export function unsetConfigValue(
+  config: Record<string, unknown>,
+  key: string,
+  opts: { scope: 'session' | 'saved'; rootSchema?: unknown; pluginConfigs?: Record<string, unknown>; filePath?: string },
+): ConfigSetResult {
+  if (opts.scope === 'saved') {
+    if (!saveConfigUnset(key, opts.filePath)) {
+      return { ok: false, error: `config: could not unset ${key} — check that the config directory is writable` };
+    }
+    unsetDeep(layersOf(config).local, key);
+  }
+  for (const k of [...SESSION.keys()]) if (k === key || k.startsWith(`${key}.`)) SESSION.delete(k);
+  const value = configValue(config, key);
+  const restart = configMarks(opts.rootSchema ?? hostConfigSchema, key, opts.pluginConfigs).restart;
+  if (!restart) {
+    if (value === undefined) unsetDeep(config, key);
+    else setDeep(config, key, structuredClone(value));
+  }
+  return { ok: true, value, restart };
 }
 
 // Strips zod wrappers (optional/nullable/default) off a node: in v4 they hide
@@ -404,7 +441,7 @@ export function editConfigArray(
   schema: any = hostConfigSchema,
   filePath?: string,
 ): WriteResult {
-  const cur = getDeep(loadConfig(), key);
+  const cur = getDeep(loadConfig({ session: false }), key);
   const arr: any[] | null = Array.isArray(cur) ? (cur as any[]).slice() : (cur == null ? [] : null);
   if (arr === null) return { ok: false, error: `config: ${key} — not an array (${typeof cur}); push/insert/remove need an array (use set to replace the whole value).` };
   if (op === 'push') arr.push(value);

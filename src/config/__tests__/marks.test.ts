@@ -3,6 +3,8 @@
 // and a plugin marks its own keys the same way.
 import { expect, test } from 'bun:test';
 import { z } from 'zod';
+import fs from 'node:fs';
+import path from 'node:path';
 import { appliesOnRestart, hostConfigSchema, isLeashKey, modelMaySave, modelMaySet } from '../schema';
 import { configMarks } from '../load';
 
@@ -108,4 +110,26 @@ test('a save mark without the set mark saves nothing; a mark under the leash is 
   // A root schema of its own that marks a key under `ai`: still the leash.
   const root = z.object({ ai: z.object({ model: z.string().register(modelMaySet, { reason: 'x' }) }).optional() });
   expect(configMarks(root, 'ai.model').maySet).toBeNull();
+});
+
+// The bundled plugins' own schemas hold what the model must never touch — a repository's
+// roots, a server's URL, command, headers and token variable. None of them carries a mark
+// at all (docs/plugins.md: a key holding a path, a command, a URL or a token stays
+// unmarked), and none under the leash. The walk takes whatever `plugins-available/` holds
+// with a manifest, so the host suite still passes with it empty.
+test('the bundled plugins mark none of their keys', async () => {
+  const dir = path.join(import.meta.dir, '../../../plugins-available');
+  const names = fs.existsSync(dir) ? fs.readdirSync(dir).filter((n) => fs.existsSync(path.join(dir, n, 'manifest.json'))) : [];
+  const make = ((_: string, shape: unknown) => shape) as never;
+  for (const name of names) {
+    const mod = await import(path.join(dir, name, 'src', 'index.ts'));
+    const plugin = await (mod.default as (ctx: unknown) => unknown)({ renders: {}, config: {}, make, z, modelMaySet, modelMaySave, appliesOnRestart }) as { configSchema?: unknown };
+    if (!plugin?.configSchema) continue;
+    const walked = nodes(plugin.configSchema, `plugins.${name}`);
+    expect(walked.length).toBeGreaterThan(1);
+    const marked = walked.filter(({ node }) => modelMaySet.has(node) || modelMaySave.has(node)).map(({ path: p }) => p);
+    expect({ name, marked }).toEqual({ name, marked: [] });
+    // And a mark there would be inert where the leash is: repo's roots.
+    for (const { path: p } of walked) if (/\.roots(\.|$)/.test(p)) expect(isLeashKey(p)).toBe(true);
+  }
 });

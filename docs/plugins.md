@@ -43,7 +43,7 @@ The entry default-exports a function that gets `{ renders, config, make, z,
 modelMaySet, modelMaySave, appliesOnRestart }` and returns `make(name, shape)`:
 
 ```ts
-export default function buildNotesPlugin({ config, make, z }) {
+export default function buildNotesPlugin({ config, make, z, modelMaySet, modelMaySave, appliesOnRestart }) {
   return make('notes', {
     name: 'notes',
     configSchema: z.object({ file: z.string().optional() }).optional(),

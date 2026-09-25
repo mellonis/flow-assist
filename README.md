@@ -250,8 +250,10 @@ repository), recorded against a mock tracker:
 - **Setting a value**: `config set <key> <value>` saves it to `config.local.json`;
   inside the app, `:config set --session <key> <value>` changes it for that run only —
   nothing is written, and the next start has the saved value again. Either way a
-  running app uses it at once where it can; a key read only at start (`ui.mouse`) waits
-  for the next one. `config get <key>` says where the value comes from: `session`,
+  running app uses it at once where it can; a key read only at start (`ui.mouse`, the
+  model's endpoint, `ai.disabledTools`) waits for the next one and says so.
+  `config unset <key>` removes a saved value (`:config unset --session <key>` only the
+  one for this run). `config get <key>` says where the value comes from: `session`,
   `local` (`config.local.json`), `config` (`config.json`) or `default`.
 - **What the assistant may change itself**: nothing that decides what it can reach —
   its model, token, tools, the shell's and the web's reach, a plugin's roots. A few

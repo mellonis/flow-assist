@@ -44,28 +44,33 @@ export const BASE_COMMANDS: Command[] = [
   { name: 'clear', aliases: ['clear-cache'], usage: 'clear', minArgs: 0, maxArgs: 0, description: 'Flush the cache' },
   { name: 'quit', aliases: ['q'], usage: 'quit', minArgs: 0, maxArgs: 0, description: 'Quit' },
   // Not remembered: a value set may be a secret — an MCP server's `headers` or `env`.
-  { name: 'config', aliases: [], usage: 'config [get <key>|set [--session] <key> <value>|unset <key>|help]', minArgs: 0, maxArgs: -1, description: 'Show the whole config; get a key and where its value comes from; set a key (config.local.json, or with --session for this run only); unset a key; help — what the keys are', history: false },
+  { name: 'config', aliases: [], usage: 'config [get <key>|set [--session] <key> <value>|unset [--session] <key>|help]', minArgs: 0, maxArgs: -1, description: 'Show the whole config; get a key and where its value comes from; set a key (config.local.json, or with --session for this run only); unset a key (with --session, only the value for this run); help — what the keys are', history: false },
   { name: 'cache', aliases: [], usage: 'cache [on|off]', minArgs: 0, maxArgs: 1, description: 'Turn the cache on or off (config.cache.enabled)' },
   { name: 'help', aliases: ['?'], usage: 'help', minArgs: 0, maxArgs: 0, description: 'List the commands' },
 ];
 
 // The words after `config`, read the same way on the `:` line and in the CLI:
-// `get <key>`, `set [--session] <key> <value…>`, `unset <key>`. `value` is the rest
+// `get <key>`, `set [--session] <key> <value…>`, `unset [--session] <key>`. `value` is the rest
 // of the words joined by one space — still text, `parseValue` reads it.
 export type ConfigArgs = { sub: string; key?: string; value?: string; session: boolean };
 export function parseConfigArgs(words: string[]): ConfigArgs {
   const sub = (words[0] ?? '').toLowerCase();
   const rest = words.slice(1);
-  const session = sub === 'set' && rest[0] === '--session';
+  const session = (sub === 'set' || sub === 'unset') && rest[0] === '--session';
   if (session) rest.shift();
   return { sub, key: rest[0], ...(rest.length > 1 ? { value: rest.slice(1).join(' ') } : {}), session };
 }
 
 // A value typed on the `:` line loses one layer of surrounding quotes, as a shell
-// takes it off: `config set ui.verbs '["Thinking"]'` reads the same in both places.
+// takes it off: `config set ui.verbs '["Thinking"]'` reads the same in both places. Inside
+// single quotes `'\''` is an apostrophe, as a shell reads it — what `configSetLine`
+// writes for a value holding both kinds of quote. (The line's words are joined by one
+// space, so a run of spaces inside quotes comes back as one.)
 export function unquoteValue(text: string): string {
   const t = text.trim();
-  return t.length >= 2 && (t[0] === "'" || t[0] === '"') && t.at(-1) === t[0] ? t.slice(1, -1) : t;
+  if (t.length < 2 || (t[0] !== "'" && t[0] !== '"') || t.at(-1) !== t[0]) return t;
+  const inner = t.slice(1, -1);
+  return t[0] === "'" ? inner.replace(/'\\''/g, "'") : inner;
 }
 
 // What `config get` answers: the value and where it comes from — `session`, `local`
@@ -80,10 +85,14 @@ export function describeConfigValue(key: string, value: unknown, source: string)
 // `config_set` shows it, and a refusal names it. A string goes as its text, anything
 // else as JSON; a word with a character a shell would read is single-quoted, and the
 // `:` line takes the quotes off again (`unquoteValue`).
+// A control character in a string is drawn as its escape, so the line stays one line.
 export function configSetLine(key: string, value: unknown, scope: 'session' | 'saved'): string {
-  const text = typeof value === 'string' ? value : JSON.stringify(value) ?? '';
-  const word = text !== '' && /^[\w.,:/@+=%-]+$/.test(text) ? text : `'${text.replace(/'/g, `'\\''`)}'`;
-  return `config set ${scope === 'session' ? '--session ' : ''}${key} ${word}`;
+  const raw = typeof value === 'string' ? value : JSON.stringify(value) ?? '';
+  const text = raw.replace(/[\u0000-\u001f\u007f]/g, (c) => JSON.stringify(c).slice(1, -1));
+  const word = text !== '' && /^[\w.,:/@+=%-]+$/.test(text) ? text
+    : text.includes("'") && !text.includes('"') ? `"${text}"`
+    : `'${text.replace(/'/g, `'\\''`)}'`;
+  return `config set ${scope === 'session' ? '--session ' : ''}${key.trim()} ${word}`;
 }
 
 // Returns the command metadata for a name/alias, or null.
@@ -203,7 +212,7 @@ export function completeConfigCommand(text: string, config?: unknown, configSche
     const best = matches.find(s => s !== lower) ?? matches[0] ?? '';
     return { head: first, hasSpace: false, best, candidates: matches };
   }
-  if (lower === 'set') {
+  if (lower === 'set' || lower === 'unset') {
     // `--session` is a flag before the key: the key after it completes as it does
     // without it, and a word starting with `-` is offered the flag itself.
     const rest = m![2] ?? '';

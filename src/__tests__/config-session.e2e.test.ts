@@ -98,3 +98,46 @@ test('a key read only at start says so, in both scopes', async () => {
   saveConfigUnset('ui.mouse');
   ui.app.unmount();
 });
+
+// The endpoint changes together or not at all: a saved `ai.baseUrl` must not send the
+// token of the running endpoint to the new host before the person has set the rest.
+test(':config set ai.baseUrl waits for a restart — the next request still goes where it went', async () => {
+  const model = new ScriptedModel();
+  model.script([{ text: 'first' }], [{ text: 'second' }]);
+  const ui = await bootApp(model, 110, 28);
+  // (No `://` typed: the rig's `:` line drops a typed colon.)
+  await command(ui, 'config set ai.baseUrl other.example/v1');
+  expect(lastRow(ui)).toContain('"other.example/v1" · local — takes effect on restart');
+  await command(ui, 'config get ai.baseUrl');
+  expect(lastRow(ui)).toContain('"other.example/v1" · local');
+  await ui.press('F');
+  await ui.type('hi');
+  await ui.press('return');
+  await settle(20);
+  expect(model.urls.length).toBeGreaterThan(0);
+  for (const url of model.urls) expect(url).not.toContain('other.example');
+  saveConfigUnset('ai.baseUrl');
+  ui.app.unmount();
+});
+
+test(':config set ai.disabledTools says it takes effect on restart', async () => {
+  const ui = await bootApp(new ScriptedModel(), 110, 28);
+  await command(ui, `config set ai.disabledTools '["shell"]'`);
+  expect(lastRow(ui)).toContain('["shell"] · local — takes effect on restart');
+  saveConfigUnset('ai.disabledTools');
+  ui.app.unmount();
+});
+
+test(':config unset takes the value back — with --session only this run\'s — and get names the source', async () => {
+  const ui = await bootApp(new ScriptedModel(), 110, 28);
+  await command(ui, 'config set ui.verbs ["Kept"]');
+  await command(ui, 'config set --session ui.verbs ["Fleeting"]');
+  await command(ui, 'config unset --session ui.verbs');
+  expect(lastRow(ui)).toContain('config: unset ui.verbs — now ["Kept"] · local');
+  await command(ui, 'config unset ui.verbs');
+  expect(lastRow(ui)).toContain('config: unset ui.verbs — now no key ui.verbs · default');
+  await command(ui, 'config get ui.verbs');
+  expect(lastRow(ui)).toContain('no key ui.verbs · default');
+  expect(JSON.parse(readSaved() ?? '{}').ui?.verbs).toBeUndefined();
+  ui.app.unmount();
+});

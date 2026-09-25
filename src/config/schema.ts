@@ -15,8 +15,10 @@ import { z } from 'zod';
 export const modelMaySet = z.registry<{ reason: string }>();
 export const modelMaySave = z.registry<{ reason: string }>();
 // A key whose consumer reads it only when the app starts (the backend's mouse, the
-// key map, the session to continue): a value set while the app runs takes effect at the
-// next start, and every `config set` says so. A mark on a node covers every key under it.
+// key map, the session to continue, the model's endpoint): a value set while the app
+// runs takes effect at the next start, and every `config set` says so. Such a value is
+// never laid on the running app's config — it is written (or kept for the session) and
+// read at the next start. A mark on a node covers every key under it.
 export const appliesOnRestart = z.registry<{ reason?: string }>();
 
 // The model's leash: the keys that decide what the model can reach — its endpoint and
@@ -48,10 +50,13 @@ export const hostConfigSchema = z.object({
   ai: z.object({
     // 'anthropic' — Anthropic's own Messages API; anything else, or unset, an
     // OpenAI-compatible chat-completions API (src/assistant/llm-endpoint.ts).
-    provider: z.string().optional(),
-    baseUrl: z.string().optional(),
+    // The endpoint — provider, base URL and the token's variable — changes together or
+    // not at all: laid on a running app one key at a time, the next request would send
+    // the old token to a new host. So the three wait for the next start.
+    provider: z.string().register(appliesOnRestart, {}).optional(),
+    baseUrl: z.string().register(appliesOnRestart, {}).optional(),
     model: z.string().optional(),
-    tokenEnv: z.string().optional(),
+    tokenEnv: z.string().register(appliesOnRestart, {}).optional(),
     stream: z.boolean().optional(),
     // The Anthropic wire only (`provider: 'anthropic'`, src/assistant/anthropic.ts):
     // the ceiling on one answer, which that API requires (default 8192), and how the
@@ -64,7 +69,8 @@ export const hostConfigSchema = z.object({
     contextWindow: z.number().int().positive().optional(),
     language: z.string().optional(),
     assistantLanguage: z.string().optional(),
-    disabledTools: z.array(z.string()).optional(),
+    // Read when the tool registry is assembled, at start.
+    disabledTools: z.array(z.string()).register(appliesOnRestart, {}).optional(),
     // 'onDemand' (default): a request carries the core tools in full and an index of
     // the rest, which the model loads by name (src/assistant/tool-loading.ts). 'all':
     // every tool in full on every request.

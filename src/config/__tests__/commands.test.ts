@@ -94,3 +94,20 @@ test('the words after `config` read the same on the line and in the CLI', async 
   expect(describeConfigValue('ui.verbs', ['a'], 'session')).toBe('["a"] · session');
   expect(describeConfigValue('ui.verbs', undefined, 'default')).toBe('no key ui.verbs · default');
 });
+
+// What the y/n block shows must be typable on the `:` line as shown: the line read back
+// through the `:` line's own parsing gives the same value. (The line joins its words with
+// one space, so a run of spaces inside quotes comes back as one — not tried here.)
+test('the config set line reads back as the value it shows', async () => {
+  const { configSetLine, parseConfigArgs, unquoteValue } = await import('../commands');
+  const { parseValue } = await import('../load');
+  const values: unknown[] = [["Don't panic"], "Don't", 'Ada Lovelace', 'a#b', ['say "hi"', "it's"], ['Thinking'], false, 42, 'plain'];
+  for (const value of values) {
+    const line = configSetLine('ui.verbs', value, 'session');
+    const args = parseConfigArgs(line.split(/\s+/).filter(Boolean).slice(1));
+    expect({ line, back: parseValue(unquoteValue(args.value ?? '')) }).toEqual({ line, back: value });
+  }
+  expect(configSetLine('user.name', "Don't", 'saved')).toBe(`config set user.name "Don't"`);
+  // A control character is drawn as its escape: the line stays one line.
+  expect(configSetLine('user.name', 'a\nb', 'saved')).toBe(`config set user.name 'a\\nb'`);
+});

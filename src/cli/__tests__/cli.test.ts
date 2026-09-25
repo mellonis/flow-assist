@@ -52,10 +52,15 @@ test('config get says where the value comes from; config set --session is the ap
     expect(out).toEqual(['no key ai.baseUrl']);
     expect(err).toEqual(['source: default']);
     out.length = 0; err.length = 0;
+    // On stderr, like the source: stdout stays for a value.
     await runConfig(['set', '--session', 'ui.verbs', '["Thinking"]'], {}, undefined, io);
-    expect(out.join('\n')).toMatch(/--session .*running app/);
-    expect(out.join('\n')).toContain(':config set --session ui.verbs');
+    expect(out).toEqual([]);
+    expect(err.join('\n')).toMatch(/--session .*running app/);
+    expect(err.join('\n')).toContain(':config set --session ui.verbs ["Thinking"]');
     expect(process.exitCode).toBe(1);
+    err.length = 0;
+    await runConfig(['unset', '--session', 'ui.verbs'], {}, undefined, io);
+    expect(err.join('\n')).toContain(':config unset --session ui.verbs');
   } finally {
     // Bun keeps a 1 through `= undefined`: put back 0 when nothing was set before.
     process.exitCode = saved ?? 0;

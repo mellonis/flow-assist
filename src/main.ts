@@ -17,10 +17,10 @@ import { TtyBackend, isInteractive } from '@flowtty/tty-backend';
 import { loadConfig } from './config/load.js';
 import {
   configSource,
-  getDeep,
+  configValue,
   parseValue,
-  saveConfigUnset,
   setConfigValue,
+  unsetConfigValue,
   configWarnings,
 } from './config/load.js';
 import { parseConfigArgs } from './config/commands.js';
@@ -145,7 +145,7 @@ export async function runConfig(args: string[], config: Record<string, unknown>,
   // The value on stdout as it has always been (`config get x | jq` reads it bare), and
   // where it comes from on stderr.
   if (sub === 'get' && key) {
-    const v = getDeep(config, key);
+    const v = configValue(config, key);
     io.out(v === undefined ? `no key ${key}` : JSON.stringify(v));
     io.err(`source: ${configSource(config, key)}`);
     return;
@@ -153,8 +153,8 @@ export async function runConfig(args: string[], config: Record<string, unknown>,
 
   // A session value lives as long as the app that holds it; this process ends with
   // the command, so there is no session here to lay it on.
-  if (sub === 'set' && session) {
-    io.out(`config: --session changes a setting for a running app only — inside it, run :config set --session ${key ?? '<key>'} ${value ?? '<value>'}`);
+  if (session) {
+    io.err(`config: --session changes a setting for a running app only — inside it, run :config ${sub} --session ${key ?? '<key>'}${sub === 'set' ? ` ${value ?? '<value>'}` : ''}`);
     process.exitCode = 1;
     return;
   }
@@ -177,8 +177,9 @@ export async function runConfig(args: string[], config: Record<string, unknown>,
   }
 
   if (sub === 'unset' && key) {
-    if (!saveConfigUnset(key)) {
-      io.out(`config: could not unset ${key} — check that the config directory is writable`);
+    const res = unsetConfigValue(config, key, { scope: 'saved' });
+    if (!res.ok) {
+      io.out(res.error);
       process.exitCode = 1;
       return;
     }

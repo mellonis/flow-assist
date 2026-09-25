@@ -39,13 +39,13 @@ import { lineTab, lineView, type TabWalk } from '../config/commandline.js';
 import { hostConfigSchema } from '../config/schema.js';
 import {
   configSource,
-  getDeep,
+  configValue,
   parseValue,
   RESTART_NOTE,
   resetSessionConfig,
   saveConfigSetting,
-  saveConfigUnset,
   setConfigValue,
+  unsetConfigValue,
 } from '../config/load.js';
 import { bindingGlyph, isKey, isMouseButton, keyGlyph } from '../playback/keys.js';
 import { ARM_MS, armHint, armKeyOf, armStep, type Arm } from './exit-keys.js';
@@ -572,7 +572,7 @@ export function renderApp(
       const parts = String(arg ?? '').trim().split(/\s+/).filter(Boolean);
       const { sub, key, value, session } = parseConfigArgs(parts);
       if (sub === 'get' && key) {
-        toast.showMessage(describeConfigValue(key, getDeep(config, key), configSource(config, key)));
+        toast.showMessage(describeConfigValue(key, configValue(config, key), configSource(config, key)));
         return;
       }
       // The one path every `config set` takes (src/config/load.ts): the schema's check,
@@ -583,9 +583,11 @@ export function renderApp(
         toast.showMessage(res.ok ? `${describeConfigValue(key, res.value, session ? 'session' : 'local')}${res.restart ? ` — ${RESTART_NOTE}` : ''}` : res.error);
         return;
       }
+      // The reverse (`unsetConfigValue`): the session's value goes, and without --session
+      // the saved one too; the line says what the key is now and where that comes from.
       if (sub === 'unset' && key) {
-        saveConfigUnset(key);
-        toast.showMessage(`config: unset ${key}`);
+        const res = unsetConfigValue(config, key, { scope: session ? 'session' : 'saved', pluginConfigs: pluginConfigs(plugins) });
+        toast.showMessage(res.ok ? `config: unset ${key} — now ${describeConfigValue(key, res.value, configSource(config, key))}${res.restart ? ` — ${RESTART_NOTE}` : ''}` : res.error);
         return;
       }
       const paths = flattenConfigPaths(config);

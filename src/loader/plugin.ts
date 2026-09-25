@@ -131,13 +131,22 @@ export type MakeFactoryConfig = {
 // injects the plugin name, its config slice (`config.plugins.<name>`) and the
 // `keys` field (default hotkeys; `keyActions` is the legacy alias for `keys`).
 // `[]` = the action is disabled.
+// The slice is the config's own object, put in place when the config has none: a value
+// set while the app runs (`config set`, the model's `config_set`) is laid on the
+// running config, and a plugin handed a detached `{}` would never see it.
 export function makeFactory(config: MakeFactoryConfig = {}) {
-  return (name: string, shape: PluginShape): Plugin => ({
-    ...shape,
-    name,
-    config: config.plugins?.[name] ?? {},
-    keys: (shape.keys ?? shape.keyActions ?? {}) as Record<string, string[]>,
-  });
+  return (name: string, shape: PluginShape): Plugin => {
+    const plugins = (config.plugins ??= {});
+    const own = plugins[name];
+    // A value that is not an object (a hand-edited `true`) is left as it is.
+    const slice = own === undefined ? (plugins[name] = {}) : own && typeof own === 'object' && !Array.isArray(own) ? own : {};
+    return {
+      ...shape,
+      name,
+      config: slice,
+      keys: (shape.keys ?? shape.keyActions ?? {}) as Record<string, string[]>,
+    };
+  };
 }
 
 export type Make = ReturnType<typeof makeFactory>;

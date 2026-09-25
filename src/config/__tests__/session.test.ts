@@ -6,7 +6,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { configSource, loadConfig, resetSessionConfig, setConfigValue, getDeep } from '../load';
+import { configSource, configValue, loadConfig, resetSessionConfig, setConfigValue, unsetConfigValue, getDeep } from '../load';
 
 afterEach(() => resetSessionConfig());
 
@@ -103,4 +103,65 @@ test('a key read only at start is reported so, in both scopes', () => {
   expect(setConfigValue(live, 'ui.mouse', false, { scope: 'session', filePath: file })).toMatchObject({ ok: true, restart: true });
   expect(setConfigValue(live, 'ui.mouse', false, { scope: 'saved', filePath: file })).toMatchObject({ ok: true, restart: true });
   expect(setConfigValue(live, 'ui.verbs', ['a'], { scope: 'session', filePath: file })).toMatchObject({ ok: true, restart: false });
+});
+
+// The model's endpoint changes together or not at all: laid on a running app one key at
+// a time, the next request would carry the old token to a new host. So the endpoint and
+// the tool list wait for the next start, and say so.
+test('the endpoint and the tool list are never laid on the running app, and say restart', () => {
+  const file = tempLocal();
+  const live: Record<string, unknown> = { ai: { baseUrl: 'https://mine.example', tokenEnv: 'MY_TOKEN', provider: 'openai', disabledTools: [] } };
+  for (const [key, value] of [['ai.baseUrl', 'https://other.example'], ['ai.tokenEnv', 'OTHER'], ['ai.provider', 'anthropic'], ['ai.disabledTools', ['shell']]] as const) {
+    expect(setConfigValue(live, key, value, { scope: 'saved', filePath: file })).toMatchObject({ ok: true, restart: true });
+    // What `config get` answers is what the next start reads.
+    expect(configValue(live, key)).toEqual(value);
+    expect(configSource(live, key)).toBe('local');
+  }
+  expect(live.ai).toEqual({ baseUrl: 'https://mine.example', tokenEnv: 'MY_TOKEN', provider: 'openai', disabledTools: [] });
+  // `ai.model` is read per request and harmless: live at once.
+  expect(setConfigValue(live, 'ai.model', 'm2', { scope: 'saved', filePath: file })).toMatchObject({ ok: true, restart: false });
+  expect(getDeep(live, 'ai.model')).toBe('m2');
+});
+
+test('unset is the reverse of set: the session value, the saved one, and the live fallback', () => {
+  const file = tempLocal({ ui: { verbs: ['Saved'] } });
+  const live = loadConfig({ localPath: file });
+  setConfigValue(live, 'ui.verbs', ['Session'], { scope: 'session', filePath: file });
+  // --session drops only this run's value: the saved one is back, live at once.
+  expect(unsetConfigValue(live, 'ui.verbs', { scope: 'session', filePath: file })).toMatchObject({ ok: true, value: ['Saved'], restart: false });
+  expect(getDeep(live, 'ui.verbs')).toEqual(['Saved']);
+  expect(configSource(live, 'ui.verbs')).toBe('local');
+  // Without it, the saved value goes too — and a session value with it.
+  setConfigValue(live, 'ui.verbs', ['Session'], { scope: 'session', filePath: file });
+  const res = unsetConfigValue(live, 'ui.verbs', { scope: 'saved', filePath: file });
+  expect(res.ok).toBe(true);
+  expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual({ ui: {} });
+  expect(configSource(live, 'ui.verbs')).not.toBe('session');
+  expect(configSource(live, 'ui.verbs')).not.toBe('local');
+  expect(getDeep(live, 'ui.verbs')).toEqual(configValue(live, 'ui.verbs'));
+  expect(getDeep(loadConfig({ localPath: file }), 'ui.verbs')).toEqual(configValue(live, 'ui.verbs'));
+});
+
+test('a config built by hand falls back to what it held before the first write', () => {
+  const file = tempLocal();
+  const live: Record<string, unknown> = { ui: { verbs: ['Own'] } };
+  setConfigValue(live, 'ui.verbs', ['Session'], { scope: 'session', filePath: file });
+  expect(unsetConfigValue(live, 'ui.verbs', { scope: 'session', filePath: file })).toMatchObject({ ok: true, value: ['Own'] });
+  expect(getDeep(live, 'ui.verbs')).toEqual(['Own']);
+  expect(configSource(live, 'ui.verbs')).toBe('config');
+  setConfigValue(live, 'ui.mouse', false, { scope: 'saved', filePath: file });
+  // A key read at start is not touched on the running app by an unset either.
+  expect(unsetConfigValue(live, 'ui.mouse', { scope: 'saved', filePath: file })).toMatchObject({ ok: true, restart: true });
+  expect(getDeep(live, 'ui.mouse')).toBeUndefined();
+  expect(configSource(live, 'ui.mouse')).toBe('default');
+});
+
+test('an array edit writes the files\' value back, never a session value', async () => {
+  const { editConfigArray } = await import('../load');
+  const file = tempLocal();
+  setConfigValue(loadConfig({ localPath: file }), 'ui.verbs', ['Session'], { scope: 'session', filePath: file });
+  // editConfigArray reads the person's own files; only what it pushed may be new.
+  const res = editConfigArray('ui.verbs', 'push', { value: 'Pushed' }, undefined, file);
+  expect(res.ok).toBe(true);
+  expect(JSON.stringify(JSON.parse(readFileSync(file, 'utf8')))).not.toContain('Session');
 });
