@@ -50,6 +50,10 @@ export interface PluginUi {
   // Whether a key types a character (@flowtty/core): never a chord, never a control
   // character — what a plugin's own field or filter accepts.
   isPrintable: (key: { name: string; ctrl?: boolean; meta?: boolean }) => boolean;
+  // Display columns of a text (@flowtty/core), measured as the grid draws it: per
+  // grapheme cluster, so a CJK character, an emoji, a flag or a ZWJ sequence takes two.
+  // A column sized from a name or a tag is measured with this, never with `.length`.
+  stringWidth: (text: string) => number;
   // flowtty's own `useInput`: every key, in flowtty's delivery order — beside the
   // host's key path, not in it. A plugin's keys go through `host.useInputHandler`.
   useInput: (handler: (key: InputKey) => void, opts?: { isActive?: boolean }) => void;

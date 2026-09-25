@@ -5,6 +5,12 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **A plugin can measure text as the screen draws it.** `ui.stringWidth(text)` is
+  flowtty's own width function, the one the host sizes its columns with: a CJK character,
+  an emoji, a flag or a joined emoji takes two cells. A plugin that sized a column from a
+  name or a tag by its `.length` drew it a cell short for each such character; measured
+  with this, it fits. It is an addition, so the host API is still 2: a plugin that must
+  also run on an earlier host checks that `ui.stringWidth` is there.
 - **A flag or a joined emoji no longer cuts a chat line short.** The chat's one-row lines
   — a folded run of steps, a tool call's line, the tools summary, the title naming what
   is on screen — and the usage column of the text-only help measured a flag, a

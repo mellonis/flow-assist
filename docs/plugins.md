@@ -250,6 +250,7 @@ Every hook of the shape — each `components[slot]` factory, `setup`, `keycaps`,
 | `Box`, `Text`, `Markdown`, `Table`, `Link`, `ScrollBox` | `store` — the channel between plugins and the host |
 | `Select`, `ListSelect`, `ListMultiSelect`, `Checkbox`, `TextInput` | `config`, `keys`, `keyCap(action)` |
 | `isPrintable(key)` (@flowtty/core) — whether a key types a character | |
+| `stringWidth(text)` (@flowtty/core) — how many cells a text takes on screen; a CJK character or an emoji takes two, so size a column from a name with this, never with `.length` (a host older than this member lacks it: check it is there) | |
 | `useInput` — flowtty's own, beside the host's key path | `useInputHandler` — the host's key path |
 | | `useSurfaceSize`, `useTerminalSize` — the room the host gives the plugin |
 | | `notify()`, `viewRegistry`, `commandRegistry`, `helpFor`, `copyToClipboard` |

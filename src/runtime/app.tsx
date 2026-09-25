@@ -10,12 +10,13 @@
 // take a second press are the App's own, before any of this: src/runtime/exit-keys.ts).
 
 import { pluginConfigs } from '../loader/tools.js';
-import { Box, Text, Markdown, Table, Link, ScrollBox, Select, ListSelect, ListMultiSelect, Checkbox, TextInput, DialogHost, render, useApp, useColorScheme, useInput, useTerminalSize, type CopyEvent } from '@flowtty/react';
+import { Box, Text, DialogHost, render, useApp, useColorScheme, useInput, useTerminalSize, type CopyEvent } from '@flowtty/react';
 import { isPrintable, type Backend } from '@flowtty/core';
 import { Fragment, createContext, createElement as h, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { HOST_API } from '../version.js';
 import type { PluginApi, PluginHost, PluginUi } from './plugin-api.js';
 import { identityToken } from './plugin-identity.js';
+import { makePluginUi } from './plugin-ui.js';
 import { createServices } from './services.js';
 import type { HostServices } from './services.js';
 import { registerInputHandler, useToast } from './hooks.js';
@@ -439,26 +440,7 @@ export function renderApp(
     const apiRef = useRef<{ ui: PluginUi; host: PluginHost } | null>(null);
     if (!apiRef.current) {
       apiRef.current = {
-        ui: {
-          h: h as unknown as PluginUi['h'],
-          useState: useState as unknown as PluginUi['useState'],
-          useEffect,
-          useRef,
-          Box,
-          Text,
-          Markdown,
-          Table,
-          Link,
-          ScrollBox,
-          Select,
-          ListSelect,
-          ListMultiSelect,
-          Checkbox,
-          TextInput,
-          Fragment,
-          isPrintable: isPrintable as unknown as PluginUi['isPrintable'],
-          useInput: useInput as unknown as PluginUi['useInput'],
-        },
+        ui: makePluginUi(),
         host: {
           hostApi: HOST_API,
           useTerminalSize: useAreaSize,
