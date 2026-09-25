@@ -951,8 +951,8 @@ export function renderApp(
 
     const isChat = (c: { key: string }) => c.key === 'assistant:chat';
     const chatComp = overlayComps.find(isChat);
-    // What floats over the whole terminal, the chat included: a fired reminder, and the
-    // keycaps panel (the keys being pressed, wherever they go).
+    // What floats over the whole terminal, the chat included: a fired reminder, the
+    // keycaps panel (the keys being pressed, wherever they go), and the pager.
     const isTop = (c: { key: string }) => c.key in TOP_LAYER;
     // A layer of no size of its own, at one corner of the terminal: what it holds places
     // itself from that corner, and the layer takes no room — and no pointer: a box that
