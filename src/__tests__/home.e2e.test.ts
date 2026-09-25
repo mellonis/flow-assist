@@ -89,6 +89,94 @@ test('a remapped key is the key the start screen names', async () => {
   (app as { unmount?: () => void }).unmount?.();
 });
 
+// A wide cluster (a CJK name, a wide emoji, a remapped key) takes two grid cells, and
+// `backend.lastFrame` omits the second one (its `char` is `''`), so a plain string
+// index is not a column — this helper walks the buffer cell by cell to find the
+// column `needle` really starts at.
+function columnOf(backend: { lastBuffer: { get(x: number, y: number): { char: string } } | null }, y: number, width: number, needle: string): number {
+  let text = '';
+  const cols: number[] = [];
+  for (let x = 0; x < width; x++) {
+    const ch = backend.lastBuffer!.get(x, y).char;
+    if (ch === '') continue; // the second cell of a wide cluster
+    cols.push(x);
+    text += ch;
+  }
+  const i = text.indexOf(needle);
+  return i < 0 ? -1 : cols[i]!;
+}
+
+test('a plugin name with a wide glyph still lines up the description column', async () => {
+  const { renderHome } = await import('../views/home');
+  const { render } = await import('@flowtty/react');
+  const { TestBackend, flush } = await import('@flowtty/core/testing');
+  const backend = new TestBackend(100, 16);
+  const app = render(renderHome({
+    title: 'flow-assist',
+    builtins: [],
+    keys: { chat: ['return'], commandLine: [], quit: ['q'] },
+    plugins: [
+      { name: '日本語', description: 'Japanese plugin' },
+      { name: 'notes', description: 'Plain notes' },
+    ],
+  }) as never, backend as never);
+  await flush();
+  const rows = backend.lastFrame.split('\n');
+  const wideY = rows.findIndex((r) => r.includes('Japanese plugin'));
+  const asciiY = rows.findIndex((r) => r.includes('Plain notes'));
+  expect(wideY).toBeGreaterThanOrEqual(0);
+  expect(asciiY).toBeGreaterThanOrEqual(0);
+  expect(columnOf(backend, wideY, 100, 'Japanese plugin')).toBe(columnOf(backend, asciiY, 100, 'Plain notes'));
+  (app as { unmount?: () => void }).unmount?.();
+});
+
+test('an entry key remapped to a wide glyph still lines up the description column', async () => {
+  const { renderHome } = await import('../views/home');
+  const { render } = await import('@flowtty/react');
+  const { TestBackend, flush } = await import('@flowtty/core/testing');
+  const backend = new TestBackend(100, 16);
+  const app = render(renderHome({
+    title: 'flow-assist',
+    builtins: [],
+    keys: { chat: ['return'], commandLine: [], quit: ['q'], wide: ['笔'], narrow: ['c'] },
+    plugins: [
+      { name: 'aaaa', description: 'Wide key plugin', entry: ['wide'] },
+      { name: 'bbbb', description: 'Narrow key plugin', entry: ['narrow'] },
+    ],
+  }) as never, backend as never);
+  await flush();
+  const rows = backend.lastFrame.split('\n');
+  const wideY = rows.findIndex((r) => r.includes('Wide key plugin'));
+  const asciiY = rows.findIndex((r) => r.includes('Narrow key plugin'));
+  expect(wideY).toBeGreaterThanOrEqual(0);
+  expect(asciiY).toBeGreaterThanOrEqual(0);
+  expect(columnOf(backend, wideY, 100, 'Wide key plugin')).toBe(columnOf(backend, asciiY, 100, 'Narrow key plugin'));
+  (app as { unmount?: () => void }).unmount?.();
+});
+
+test('a door key remapped to a wide glyph still lines up the door label column', async () => {
+  const { renderHome } = await import('../views/home');
+  const { render } = await import('@flowtty/react');
+  const { TestBackend, flush } = await import('@flowtty/core/testing');
+  const backend = new TestBackend(100, 16);
+  const app = render(renderHome({
+    title: 'flow-assist',
+    builtins: [],
+    plugins: [],
+    // `chat` remapped to a wide grapheme; `commandLine` stays a narrow one — both are
+    // "doors" the host itself draws, padded to the same column as `talk to…`/`commands…`.
+    keys: { chat: ['笔'], commandLine: [':'], quit: [] },
+  }) as never, backend as never);
+  await flush();
+  const rows = backend.lastFrame.split('\n');
+  const wideY = rows.findIndex((r) => r.includes('talk to the assistant'));
+  const asciiY = rows.findIndex((r) => r.includes('commands — try'));
+  expect(wideY).toBeGreaterThanOrEqual(0);
+  expect(asciiY).toBeGreaterThanOrEqual(0);
+  expect(columnOf(backend, wideY, 100, 'talk to the assistant')).toBe(columnOf(backend, asciiY, 100, 'commands — try'));
+  (app as { unmount?: () => void }).unmount?.();
+});
+
 test('guests are listed as name · way in · what it is, in aligned columns', async () => {
   const guests = (make: any) => [make('boards', {
     name: 'boards',

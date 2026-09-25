@@ -39,6 +39,7 @@ import {
   layoutMarkdownDetailed,
   caretPosition,
   inputRows,
+  stringWidth,
   windowAround,
   type ScrollBoxHandle,
   type ScrollMetrics,
@@ -376,7 +377,7 @@ export function typedLines(text: string | null | undefined, wrap: number, images
   const tokens = images.length ? imageTokenRanges(value, (n) => images.includes(n)) : [];
   return rows.map((row, i) => {
     const line: Line = { spans: row.text ? splitTokens(row.text, row.start, tokens).map((p) => (p.token ? { text: p.text, token: true } : { text: p.text })) : [] };
-    if (rows[i + 1]?.continuation) line.continues = { dropped: '', textWidth: Array.from(row.text).length };
+    if (rows[i + 1]?.continuation) line.continues = { dropped: '', textWidth: stringWidth(row.text) };
     return line;
   });
 }
@@ -386,8 +387,9 @@ export function typedLines(text: string | null | undefined, wrap: number, images
 // `{ before, caret, after }`. The geometry is flowtty's (`inputRows` +
 // `caretPosition`, ≥ 1.0.0-alpha.8) — the same functions its editor reducer moves
 // the caret with, so what up/down do and what is drawn cannot drift apart. `cur` is a
-// UTF-16 index into `input` resting on a code-point boundary; the column is counted
-// in characters, the grid's unit, so the caret cell holds a whole emoji.
+// UTF-16 index into `input` resting on a grapheme-cluster boundary; the column is
+// counted in display width, the grid's unit, so the caret cell holds a whole emoji
+// and a wide one takes two columns.
 export const CHAT_FIELD_MIN = 20;
 // The field's width for a terminal `width` columns wide — shared with the key
 // handler, which needs it for up/down across wrapped rows. `fullscreen` (`/fullscreen`,
@@ -948,8 +950,8 @@ function ChatMessages({ messages, rowOpts, palette: m, errorColor, onViewport, s
     // It is not part of the conversation and is never sent to the model.
     if (row.first && row.role === 'note') return h(Text, { dim: true }, '· ');
     // ƒ — F for Flow, and a function. A narrow code point every monospace font has;
-    // ∮ reads well as "a loop" but is East-Asian-ambiguous width, and flowtty counts
-    // one cell per code point, so it would shift the row in some terminals.
+    // ∮ reads well as "a loop" but is East-Asian-ambiguous width — flowtty reads it as
+    // one cell, so it would shift the row in a terminal that draws it two cells wide.
     if (row.first && row.role === 'assistant') return h(Text, { bold: true, color: m.assistantAccent }, `${ASSISTANT_MARK} `);
     // The round being written: nobody knows yet whether it is the answer, so it gets
     // a live mark instead of the answer's `ƒ`.
@@ -1850,16 +1852,16 @@ export function renderHelp({
   const boxW = Math.min(84, width - 8);
   const inner = boxW - 4;
   const bound = Object.entries(keys).map(([action, binding]) => ({ action, cap: bindingGlyph(binding), label: actionLabel(action) })).filter((k) => k.cap);
-  const capW = Math.max(0, ...bound.map((k) => Array.from(k.cap).length));
+  const capW = Math.max(0, ...bound.map((k) => stringWidth(k.cap)));
   const anywhere = HOST_ACTIONS.map((a) => bound.find((k) => k.action === a)).filter((k): k is (typeof bound)[number] => !!k);
   const inPlugins = bound.filter((k) => !HOST_ACTIONS.includes(k.action));
   const keyRow = (k: (typeof bound)[number]) => h(Box, { key: `k-${k.action}`, flexDirection: 'row', flexShrink: 0 },
-    h(Text, { bold: true, color: 'cyan' }, `  ${k.cap.padEnd(capW)}  `),
+    h(Text, { bold: true, color: 'cyan' }, `  ${k.cap}${' '.repeat(Math.max(0, capW - stringWidth(k.cap)))}  `),
     h(Text, null, k.label));
   const entries = helpEntries(commands);
   // The usage column is as wide as most usages need; one longer than that (`config
   // [get <key>|set …]`) takes a row of its own and its description goes beneath.
-  const usageW = Math.min(26, Math.max(0, ...entries.map((e) => e.usage.length)));
+  const usageW = Math.min(26, Math.max(0, ...entries.map((e) => stringWidth(e.usage))));
   // −2: the scrollbar takes the last column, and a space keeps the text off it.
   const descW = Math.max(20, inner - usageW - 5);
   const heading = (text: string) => h(Text, { key: `h-${text}`, bold: true, color: m.border }, text);
@@ -1875,12 +1877,12 @@ export function renderHelp({
         inPlugins.map(keyRow),
         inPlugins.length ? h(Box, { key: 'gap1', height: 1, flexShrink: 0 }) : null,
         heading('Commands — type : first'),
-        entries.map((e) => (e.usage.length > usageW
+        entries.map((e) => (stringWidth(e.usage) > usageW
           ? h(Box, { key: `c-${e.usage}`, flexDirection: 'column', flexShrink: 0 },
               h(Text, { bold: true, wrap: 'truncate' }, `  ${e.usage}`),
               h(Box, { marginLeft: usageW + 4, width: descW }, h(Text, { dim: true, wrap: 'wrap' }, e.description)))
           : h(Box, { key: `c-${e.usage}`, flexDirection: 'row', flexShrink: 0 },
-              h(Text, { bold: true }, `  ${e.usage.padEnd(usageW)}  `),
+              h(Text, { bold: true }, `  ${e.usage}${' '.repeat(Math.max(0, usageW - stringWidth(e.usage)))}  `),
               h(Box, { width: descW }, h(Text, { dim: true, wrap: 'wrap' }, e.description)))))),
       h(Text, { dim: true, selectable: false }, `${CAP.page} or the wheel scroll · ${CAP.esc} close`),
     ),
@@ -1907,7 +1909,7 @@ export function renderReminder({
   const m = (theme?.modals ?? {}) as Record<string, string | undefined>;
   // Size to the text (with a small inset), clamped to the terminal; a short note
   // stays small, a long one wraps rather than growing off-screen.
-  const w = Math.min(Math.max(40, [...text].length + 8), width - 8);
+  const w = Math.min(Math.max(40, stringWidth(text) + 8), width - 8);
   // Above the other modals: a reminder may fire while the chat is open.
   return h(Box, overlay(width, height, 20),
     h(Box, {

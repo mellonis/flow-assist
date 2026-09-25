@@ -96,10 +96,10 @@ export function writtenKey(name: string): string {
 
 // ─── The third vocabulary: what is DRAWN for a key ─────────────────────────────
 // A keycap is neither the terminal's name nor a config spelling — it is what is
-// printed on the key: ⏎, ␣, ⇥, ⌫, arrows. One code point each where a glyph exists
-// (flowtty counts one cell per code point), a short word where none does. The
-// keycaps panel draws the pressed keys with it, and any hint that shows a binding as
-// a symbol should too, so the same key never looks two ways on one screen.
+// printed on the key: ⏎, ␣, ⇥, ⌫, arrows. One narrow-width code point each where a
+// glyph exists, a short word where none does. The keycaps panel draws the pressed
+// keys with it, and any hint that shows a binding as a symbol should too, so the
+// same key never looks two ways on one screen.
 const KEY_GLYPHS: Record<string, string> = {
   return: '⏎',
   ' ': '␣',

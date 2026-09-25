@@ -28,7 +28,7 @@ notes/
 ```
 
 ```json
-{ "name": "notes", "version": "0.1.0", "hostApi": 2, "flowtty": ">=1.0.0-alpha.28 <1.0.0-alpha.29",
+{ "name": "notes", "version": "0.1.0", "hostApi": 2, "flowtty": ">=1.0.0-alpha.31 <1.0.0-alpha.32",
   "description": "A notebook the assistant reads and writes", "tools": ["notes"] }
 ```
 
@@ -432,14 +432,14 @@ one:
   single `ft` object, which has no `host` — `const api2 = 'host' in arg`.
 - **`flowtty`** — a semver range of the flowtty versions the plugin's screens need,
   checked against the flowtty the host runs. While flowtty is in alpha, name the one
-  alpha you built against: `>=1.0.0-alpha.28 <1.0.0-alpha.29` — an alpha may change what the next one gives. A
+  alpha you built against: `>=1.0.0-alpha.31 <1.0.0-alpha.32` — an alpha may change what the next one gives. A
   prerelease is matched only by a range that names one: `^1.0.0`, and even `*`, do not
-  take `1.0.0-alpha.28`. A plugin with no field is loaded unchecked, and the log says
+  take `1.0.0-alpha.31`. A plugin with no field is loaded unchecked, and the log says
   so — a plugin with no screens has nothing to check; the bundled ones declare it.
 
 A plugin that cannot run here is skipped — the rest load — and said so: `plugins ls`
 shows `incompatible: built for host API 1, host provides 2` (or `incompatible: needs
-flowtty ^1.1.0, host has 1.0.0-alpha.28`) beside it — a plugin linked into
+flowtty ^1.1.0, host has 1.0.0-alpha.31`) beside it — a plugin linked into
 `plugins-enabled/` from a repository of its own is listed too, marked `(linked)` — the log (`L`) has a line, and
 `plugins install` refuses it — an archive before anything is unpacked into place. A
 plugin that is a single file has no manifest, so it reads as host API 1 with no

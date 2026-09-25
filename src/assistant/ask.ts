@@ -59,9 +59,9 @@ export interface AskState {
   picked: number[]; // multi-select: option indices toggled on
   typing: boolean; // the "Other…" free-text field is open
   text: string;
-  // The caret in `text`: a UTF-16 index resting on a code-point boundary, flowtty's
-  // unit (`text.slice(0, caret)` is what is before it). Not to be confused with
-  // `cursor`, which is the ROW under the cursor in the list above.
+  // The caret in `text`: a UTF-16 index resting on a grapheme-cluster boundary,
+  // flowtty's unit (`text.slice(0, caret)` is what is before it). Not to be confused
+  // with `cursor`, which is the ROW under the cursor in the list above.
   caret: number;
   answers: AskAnswer[];
   done: boolean;

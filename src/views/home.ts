@@ -6,12 +6,12 @@
 // person opens something of its own, the screen is the HOST's: who this is, and what
 // can be done from here.
 import { createElement as h } from 'react';
-import { Box, Text } from '@flowtty/react';
+import { Box, Text, stringWidth } from '@flowtty/react';
 import { bindingGlyph } from '../playback/keys.js';
 
 // ƒ — the assistant's mark — drawn large with box-drawing characters: the hook, the
-// crossbar, the tail. Every glyph is one narrow code point (flowtty counts one cell
-// per code point), so the rows line up in any terminal.
+// crossbar, the tail. Every glyph here is a single narrow-width code point, so the
+// rows line up in any terminal.
 export const LOGO = [
   '    ╭──╮',
   '    │   ',
@@ -44,7 +44,7 @@ export function renderHome({ title, plugins, keys, builtins, width = 80, accent 
     // No key quits by default — then the way out is the command, and the screen says so.
     [cap('quit') || (cap('commandLine') ? `${cap('commandLine')}q` : ''), 'quit'],
   ].filter(([key]) => key) as Array<[string, string]>;
-  const pad = Math.max(...doors.map(([key]) => Array.from(key).length), 1);
+  const pad = Math.max(...doors.map(([key]) => stringWidth(key)), 1);
 
   // Guests: enabled plugins, and the keys each one binds — the way in to a plugin
   // that has a screen of its own. A tool-only plugin has none and is named as such.
@@ -58,8 +58,8 @@ export function renderHome({ title, plugins, keys, builtins, width = 80, accent 
     const tools = (p.tools?.length ?? 0) + (p.aiTools?.length ?? 0) > 0;
     return { name: p.name, description: p.description, keys: bound.map((b) => b.key).join(' '), tools };
   });
-  const nameW = Math.max(0, ...guests.map((g) => g.name.length));
-  const keyW = Math.max(0, ...guests.map((g) => Array.from(g.keys).length));
+  const nameW = Math.max(0, ...guests.map((g) => stringWidth(g.name)));
+  const keyW = Math.max(0, ...guests.map((g) => stringWidth(g.keys)));
   // As wide as the longest description needs, within what the screen leaves and a
   // measure that still reads as a list (not a paragraph across the terminal).
   const longest = Math.max(0, ...guests.map((g) => Array.from(g.description ?? 'tools for the assistant').length));
@@ -76,7 +76,7 @@ export function renderHome({ title, plugins, keys, builtins, width = 80, accent 
         h(Text, { dim: true }, 'an assistant in your terminal'))),
     h(Box, { flexDirection: 'column' },
       doors.map(([key, label]) => h(Box, { key: label, flexDirection: 'row' },
-        h(Text, { bold: true, color: accent }, key.padEnd(pad + 2)),
+        h(Text, { bold: true, color: accent }, key + ' '.repeat(Math.max(0, pad + 2 - stringWidth(key)))),
         h(Text, null, label)))),
     guests.length
       ? h(Box, { flexDirection: 'column' },
@@ -84,8 +84,8 @@ export function renderHome({ title, plugins, keys, builtins, width = 80, accent 
           guests.map((g) => h(Box, { key: g.name, flexDirection: 'row' },
             // Three columns — name, the key that leads in, what it is — each padded to
             // its widest cell, so the descriptions start on one vertical line.
-            h(Text, null, `  ${g.name.padEnd(nameW)}`),
-            keyW ? h(Text, { bold: true, color: accent }, `  ${g.keys.padEnd(keyW)}`) : null,
+            h(Text, null, `  ${g.name}${' '.repeat(Math.max(0, nameW - stringWidth(g.name)))}`),
+            keyW ? h(Text, { bold: true, color: accent }, `  ${g.keys}${' '.repeat(Math.max(0, keyW - stringWidth(g.keys)))}`) : null,
             // A long description WRAPS inside its column, so its next line starts under
             // its first — it neither runs off the screen nor stretches the block.
             h(Box, { width: descW, marginLeft: 2, flexShrink: 0 },

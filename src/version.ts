@@ -15,4 +15,4 @@ export const HOST_API = 2;
 // versions it needs (`flowtty`, a semver range) and is checked against this. It must
 // equal the installed `@flowtty/react` — a test holds the two together; a compiled
 // binary has no node_modules to read it from.
-export const FLOWTTY_VERSION = '1.0.0-alpha.28';
+export const FLOWTTY_VERSION = '1.0.0-alpha.31';

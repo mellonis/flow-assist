@@ -1199,9 +1199,11 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   person's side of the conversation, not their words. Colours come from `theme.modals.chat` (`accent`,
   `assistantAccent`, `userBg`, `fieldBg`, `bgAccent`, `bgBg`, `warn`, `ok`) and are
   overridable via `config.plugins.assistant.colors`.
-- A marker is ONE narrow code point: flowtty's grid counts one cell per code point,
-  so an East-Asian-ambiguous glyph (`∮`, `≈`, most of Mathematical Operators)
-  shifts the row in terminals that draw it two cells wide.
+- A marker is ONE narrow-width code point: flowtty's grid measures display width per
+  grapheme cluster and reads an East-Asian-ambiguous glyph (`∮`, `≈`, most of
+  Mathematical Operators) as one cell, so it shifts the row in a terminal that draws
+  it two cells wide. A CJK ideograph or an emoji is wide and gets its own two cells
+  (`Cell.char` is `''` for the second one).
 - Markdown in answers — tables included — is laid out by flowtty's
   `layoutMarkdown`. The host adds nothing but the soft `▍` heading marker (and keeps
   the selection marks each row carries — see the drag below); a gap in
@@ -1978,9 +1980,10 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   its render the way `chatFieldWidth` is with this one).
   - `<TextArea>` itself is not mounted: the host has ONE key dispatcher
     (`useInputHandler`), and a mounted field would be a second listener.
-  - The caret (`cursor`) is a **UTF-16 index into the value, resting on a code-point
-    boundary** — flowtty's unit. `value.slice(0, cursor)` works; `Array.from(value)`
-    indices do not. Columns are counted in characters.
+  - The caret (`cursor`) is a **UTF-16 index into the value, resting on a grapheme-
+    cluster boundary** — flowtty's unit. `value.slice(0, cursor)` works; `Array.from(value)`
+    indices do not. Columns are counted in display width, so a wide cluster (an emoji,
+    a CJK character) takes two.
   - Newline keys: **Alt+⏎** (what the hints name), Shift+⏎ where the terminal sends
     it, and backslash-then-⏎, which works everywhere.
   - In a draft ↑/↓ move the caret between rows; they walk history only while the

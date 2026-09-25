@@ -5,6 +5,23 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **flowtty 1.0.0-alpha.31.** A wide glyph — an emoji in the chat, a CJK character —
+  used to draw as two blank cells until the row was selected: the grid counted one
+  cell per code point and backed the cursor up one column after painting it, so the
+  next cell landed on its right half. It now gets the two cells it takes: paint
+  reserves the second one and nothing overlaps it. `stringWidth` measures grapheme
+  clusters — a flag, a skin-tone emoji, a ZWJ sequence are 2, not the sum of their
+  parts — and on macOS Terminal.app, which draws each code point of a cluster on its
+  own, the backend measures per code point instead; there is nothing to configure.
+  Five of the host's own columns counted UTF-16 units where the padded text can carry
+  non-ASCII — a plugin's name and its entry key on the start screen, the start
+  screen's own door keys, and a key cap and a command's usage in `:help` — and now
+  measure `stringWidth` instead, so a wide name or a remapped key still lines up its
+  column; the reminder banner's width, sized the same code-point way, is fixed too,
+  so a reminder full of wide glyphs sizes to what it needs instead of wrapping early.
+  **For plugin authors:** declare `"flowtty": ">=1.0.0-alpha.31 <1.0.0-alpha.32"` — a
+  manifest still declaring the alpha.28 range is refused as incompatible. The host
+  API number is unchanged.
 - **An MCP server's own guidance now reaches the assistant.** `initialize`'s
   `instructions` — how a server's data is shaped, its vocabulary, what to check before
   trusting it — becomes its tool group's own description: one line under the group's

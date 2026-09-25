@@ -1,9 +1,9 @@
 import { expect, test } from 'bun:test';
 import { createElement as h } from 'react';
-import { render } from '@flowtty/react';
+import { render, stringWidth } from '@flowtty/react';
 import { TestBackend } from '@flowtty/core/testing';
 import { MODAL_COLOR_DEFAULTS } from '../../playback/theme.js';
-import { condenseRuns, helpEntries, inputVisualRows, mdLines, renderChatModal, renderHelp, renderLogModal, renderReminder } from '../modals.js';
+import { condenseRuns, helpEntries, inputVisualRows, mdLines, renderChatModal, renderHelp, renderLogModal, renderReminder, typedLines } from '../modals.js';
 
 // The trail condenses a run of one tool ending one way into a count — except a call
 // that returned images, whose marks are what the person looks for.
@@ -372,6 +372,64 @@ test('help fits the screen, names the keys, and wraps what it says', async () =>
   handle.unmount();
 });
 
+// A wide cluster (a CJK usage word, a remapped key) takes two grid cells, and
+// `backend.lastFrame` omits the second one (its `char` is `''`), so a plain string
+// index is not a column — this helper walks the buffer cell by cell to find the
+// column `needle` really starts at.
+function columnOf(backend: TestBackend, y: number, width: number, needle: string): number {
+  let text = '';
+  const cols: number[] = [];
+  for (let x = 0; x < width; x++) {
+    const ch = backend.lastBuffer.get(x, y).char;
+    if (ch === '') continue; // the second cell of a wide cluster
+    cols.push(x);
+    text += ch;
+  }
+  const i = text.indexOf(needle);
+  return i < 0 ? -1 : cols[i]!;
+}
+
+test('a key remapped to a wide glyph still lines up the label column in help', async () => {
+  const backend = new TestBackend(90, 20);
+  const handle = await render(
+    h(renderHelp, {
+      width: 90,
+      height: 20,
+      theme: { modals: { bg: undefined } },
+      helpOpen: true,
+      // `chat` remapped to a wide grapheme; `log` stays a narrow one.
+      keys: { chat: ['笔'], log: ['L'] },
+    }),
+    backend,
+  );
+  const rows = backend.lastFrame.split('\n');
+  const wideY = rows.findIndex((r) => r.includes('talk to the assistant'));
+  const asciiY = rows.findIndex((r) => r.includes('the log'));
+  expect(wideY).toBeGreaterThanOrEqual(0);
+  expect(asciiY).toBeGreaterThanOrEqual(0);
+  expect(columnOf(backend, wideY, 90, 'talk to the assistant')).toBe(columnOf(backend, asciiY, 90, 'the log'));
+  handle.unmount();
+});
+
+test('a command usage with a wide glyph still lines up the description column in help', async () => {
+  const commands = [
+    { name: 'notes', usage: '记事', description: 'Open notes' },
+    { name: 'ask', usage: 'ask', description: 'Open the chat' },
+  ];
+  const backend = new TestBackend(90, 20);
+  const handle = await render(
+    h(renderHelp, { width: 90, height: 20, theme: { modals: { bg: undefined } }, helpOpen: true, commands }),
+    backend,
+  );
+  const rows = backend.lastFrame.split('\n');
+  const wideY = rows.findIndex((r) => r.includes('Open notes'));
+  const asciiY = rows.findIndex((r) => r.includes('Open the chat'));
+  expect(wideY).toBeGreaterThanOrEqual(0);
+  expect(asciiY).toBeGreaterThanOrEqual(0);
+  expect(columnOf(backend, wideY, 90, 'Open notes')).toBe(columnOf(backend, asciiY, 90, 'Open the chat'));
+  handle.unmount();
+});
+
 test('reminder banner shows the text and the dismiss hint, centered', async () => {
   const backend = new TestBackend(80, 24);
   const handle = await render(
@@ -391,6 +449,37 @@ test('reminder banner shows the text and the dismiss hint, centered', async () =
   expect(backend.lastFrame).not.toMatch(/[╔╗╚╝║═]/);
   handle.unmount();
 });
+
+test('a reminder full of wide glyphs is sized by display width, not code points', async () => {
+  // 20 CJK characters are 20 code points but 40 display columns. Sized by code
+  // points the box floors at 40 total and the text has to wrap onto two rows;
+  // sized by display width it is wide enough for the text to sit on one.
+  const text = '日'.repeat(20);
+  const backend = new TestBackend(100, 24);
+  const handle = await render(
+    h(renderReminder, { width: 100, height: 24, theme: { modals: { help: { bg: undefined } } }, text }),
+    backend,
+  );
+  const rows = backend.lastFrame.split('\n').filter((r) => r.includes('日'));
+  expect(rows.length).toBe(1);
+  expect((rows[0]!.match(/日/g) ?? []).length).toBe(20);
+  handle.unmount();
+});
+
+// A wrapped row's `continues.textWidth` is what flowtty's own `WrapContinuation`
+// documents it as — cells of the row's text — so a drag rejoins it exactly. A CJK
+// run is half as many code points as it is cells; counting code points would tell a
+// drag the row is narrower than it is.
+test('a typed line that wraps mid-run reports textWidth in cells, not code points', () => {
+  const text = '日'.repeat(10);
+  const lines = typedLines(text, 6);
+  const wrapped = lines.find((l) => l.continues);
+  expect(wrapped).toBeDefined();
+  const rowText = wrapped!.spans.map((s) => s.text).join('');
+  expect(wrapped!.continues!.textWidth).toBe(stringWidth(rowText));
+  expect(wrapped!.continues!.textWidth).not.toBe(Array.from(rowText).length);
+});
+
 test('the input keeps a blank line, and the caret can stand on it', () => {
   // Two newlines in a row are how a person separates two thoughts. The row was
   // there all along but rendered as an empty Text — zero height, so it vanished —
