@@ -78,8 +78,9 @@ export default function buildNotesPlugin({ config, make, z }) {
 
   `modelMaySet` lets the model change the key for the running app, `modelMaySave` also
   in the file — only beside `modelMaySet`. The model sees each mark and its `reason`
-  beside the key and is refused, before the person is asked, on a key without the mark
-  for what it tries. Mark only what could hurt nobody: a key holding a path, a command,
+  beside the key (`config_schema`) and changes a marked key with `config_set`, which
+  the person confirms; on a key without the mark for what it tries it is refused before
+  the person is asked. Mark only what could hurt nobody: a key holding a path, a command,
   a URL or a token stays unmarked, and a mark on `plugins.<name>.roots` — or on the
   plugin's whole `plugins.<name>` — is ignored. `appliesOnRestart` says the plugin reads
   the key only when it starts, and every `config set` of it then says so. Use these

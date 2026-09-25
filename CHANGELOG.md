@@ -24,6 +24,22 @@ What each version of flow-assist brought, newest first. The version is the one i
   ["write_file"]} first`, and a big group's refusal says `load the ones you need with
   {"names": [...]}`. A name that still looks like a list is explained, with the call to
   make instead.
+- **A setting can be changed for one run, and the assistant may change a few itself.**
+  `:config set --session <key> <value>` changes a setting for the running app only:
+  nothing is written, and the next start has the saved value again. `config set` still
+  saves, and now either kind is used at once where the app reads the setting as it
+  goes (the status line's words, the panel's side); a key read only at start says it
+  `takes effect on restart`. `config get` says where a value comes from — `session`,
+  `local`, `config` or `default` (the CLI on stderr, so `| jq` still reads the bare
+  value). The assistant gets `config_set`, but only for keys marked as its to change —
+  the status line's words, the mouse, whether the chat continues the last conversation,
+  where the chat opens and which side its panel docks on, the keycaps panel — never
+  its model, token, tools, the shell's or the web's reach or a plugin's roots. You
+  confirm each change as the `config set` line you would have typed, `/auto` never
+  answers it, and asked about any other key it gives you the command instead. A plugin
+  marks its own keys with `modelMaySet` / `modelMaySave` (and `appliesOnRestart` for one
+  it reads at start), handed to its builder beside `z`; it is an addition, so the host
+  API is still 2.
 - **A plugin can measure text as the screen draws it.** `ui.stringWidth(text)` is
   flowtty's own width function, the one the host sizes its columns with: a CJK character,
   an emoji, a flag or a joined emoji takes two cells. A plugin that sized a column from a

@@ -15,7 +15,8 @@ import { pickVerb, verbList } from '../assistant/verbs.js';
 import { NOTES_MODES, addCalls, callRun, endRound, startsWithNext, notesCommand, notesMode, notesSaid, type CallRun, type NotesMode, type TurnPart } from '../assistant/step.js';
 import { lineTab, lineView, type TabWalk } from '../config/commandline.js';
 import { completePath, completeSlash, listDirectory, type ChatCommandDef } from '../config/fieldcomplete.js';
-import type { CompleteResult } from '../config/commands.js';
+import { configSetLine, type CompleteResult } from '../config/commands.js';
+import { parseValue } from '../config/load.js';
 import { apiHistory, compactConversation, chatLanguage, requestTools, transcriptSoFar } from '../assistant/agent.js';
 import { createToolSet, toolLoadingMode } from '../assistant/tool-loading.js';
 import { llmOpts } from '../assistant/llm-endpoint.js';
@@ -114,6 +115,20 @@ export function shellCommandOf(name: string, args: string): string | null {
     const a = JSON.parse(args) as { command?: unknown; cwd?: unknown };
     if (typeof a.command !== 'string') return null;
     return typeof a.cwd === 'string' && a.cwd.trim() ? `${a.command}   # in ${a.cwd}` : a.command;
+  } catch {
+    return null;
+  }
+}
+
+// The line a `config_set` call stands for — the `config set` command the person would
+// have typed — so the y/n block reads the same as the CLI rather than as JSON. null —
+// some other tool, or arguments that do not parse.
+export function configLineOf(name: string, args: string): string | null {
+  if (name !== 'config_set' && !name.endsWith(':config_set')) return null;
+  try {
+    const a = JSON.parse(args) as { key?: unknown; value?: unknown; scope?: unknown };
+    if (typeof a.key !== 'string' || (a.scope !== 'session' && a.scope !== 'saved')) return null;
+    return configSetLine(a.key, typeof a.value === 'string' ? parseValue(a.value) : a.value, a.scope);
   } catch {
     return null;
   }
@@ -937,7 +952,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // block renders. pendingRef holds { name, args, resolve } — read by the
           // input-handler (a ref, always current); pendingAsk is only for render.
           const pendingRef = ui.useRef<{ name: string; args: string; input?: string; resolve: (ok: boolean) => void } | null>(null);
-          const [pendingAsk, setPendingAsk] = ui.useState<{ name: string; args: string; command?: string; input?: string } | null>(null);
+          const [pendingAsk, setPendingAsk] = ui.useState<{ name: string; args: string; command?: string; line?: string; input?: string } | null>(null);
           // `ask_user`: the same kind of pause, but the person picks among options.
           // askRef is what the input handler steps key by key (a ref, always current);
           // pendingQuestion mirrors it for the render.
@@ -1336,7 +1351,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 confirmWrite: (name: string, argsStr: unknown, info?: { input?: string; inputId?: string }) => new Promise<boolean>((resolve) => {
                   // The one place a confirmation may be answered without the person:
                   // the auto mode (src/assistant/auto.ts), which only `all` ever lets
-                  // say yes and never for run_command or an unlisted web_fetch. It
+                  // say yes and never for run_command, an unlisted web_fetch or config_set. It
                   // answers BEFORE anything on screen moves — a call that does not
                   // pause must not close the `/context` panel the person is reading.
                   // Nothing here relaxes what agentChat asks about: a tool with no
@@ -1345,6 +1360,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   if (autoConfirms(autoModeRef.current, name)) { resolve(true); return; }
                   const args = typeof argsStr === 'string' ? argsStr : JSON.stringify(argsStr ?? '');
                   const command = shellCommandOf(name, args);
+                  const line = configLineOf(name, args);
                   if (contextOpenRef.current) setContextOpen(false);
                   // So does a pager: the y/n is what the person must see and answer.
                   if (pagerRef.current) setPager(null);
@@ -1352,7 +1368,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   // block says where a command's stdin comes from.
                   const input = info?.input ? `${info.input}${info.inputId ? ` (${info.inputId})` : ''}` : undefined;
                   pendingRef.current = { name, args, ...(input ? { input } : {}), resolve };
-                  setPendingAsk({ name, args, ...(command != null ? { command } : {}), ...(input ? { input } : {}) });
+                  setPendingAsk({ name, args, ...(command != null ? { command } : {}), ...(line != null ? { line } : {}), ...(input ? { input } : {}) });
                   host.notify();
                 }),
                 // A view a tool opened, and every change to it. Its message is pushed on
@@ -2433,7 +2449,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             return pendingChatRows({
               width: w,
               question: askRef.current?.state ?? null,
-              confirm: c ? { name: c.name, args: c.args, command: shellCommandOf(c.name, c.args) ?? undefined, ...(c.input ? { input: c.input } : {}) } : null,
+              confirm: c ? { name: c.name, args: c.args, command: shellCommandOf(c.name, c.args) ?? undefined, line: configLineOf(c.name, c.args) ?? undefined, ...(c.input ? { input: c.input } : {}) } : null,
               todo: planRef.current.snapshot(),
               queued: queueRef.current.length,
             });

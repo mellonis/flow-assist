@@ -382,17 +382,31 @@ test('ai.disabledTools withholds a whole group', () => {
   expect(reg.tools.map(t => t.function.name)).not.toContain('gitlab:mr');
 });
 
-test('the model gets no `config` and no `log` tool — only the read-only `config_schema`', () => {
+test('the model gets no `config` and no `log` tool — a read-only `config_schema` and a `config_set` bound by the marks', () => {
   // Config is the model's own leash (disabledTools, baseUrl, tokenEnv, plugin
   // roots) and the assistant reads other people's text, so even a y/n-confirmed
   // write is one prompt injection plus one tired keypress away. The person owns
-  // the values; the model sees the structure and proposes the command.
+  // the values; the model sees the structure and proposes the command — and changes
+  // itself only a key its schema node marks, which is a write only when it will happen.
   const reg = assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
   const names = reg.tools.map((t) => t.function.name);
   expect(names).toContain('config_schema');
+  expect(names).toContain('config_set');
   expect(names).not.toContain('config');
   expect(names).not.toContain('log');
   expect(reg.tools.find((t) => t.function.name === 'config_schema')?.write).toBeUndefined();
+  const write = reg.groups.flatMap((g) => g.tools).find((t) => t.function.name === 'config_set')?.write as (a: Record<string, unknown>) => boolean;
+  expect(write({ key: 'ui.verbs', value: ['Thinking'], scope: 'session' })).toBe(true);
+  expect(write({ key: 'ai.disabledTools', value: [], scope: 'session' })).toBe(false);
+  expect(write({ key: 'shell.roots', value: ['/'], scope: 'saved' })).toBe(false);
+  expect(write({ key: 'ui.verbs', value: 'not a list', scope: 'session' })).toBe(false);
+});
+
+test('config_set refuses by throwing — a refusal returned would read as a change made', async () => {
+  const reg = assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
+  await expect(reg.exec('config_set', { key: 'ai.baseUrl', value: 'https://elsewhere.example', scope: 'saved' }, {})).rejects.toThrow(/ai\.baseUrl is not a key the model may change.*config set ai\.baseUrl https:\/\/elsewhere\.example/);
+  // A marked key with nobody to confirm it — the one-shot prompt — is refused too.
+  await expect(reg.exec('config_set', { key: 'ui.verbs', value: ['x'], scope: 'session' }, {})).rejects.toThrow(/nobody here to confirm it/);
 });
 
 test('a plugin tool\'s maxResultChars never reaches the wire-facing tool def', () => {

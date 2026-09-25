@@ -9,7 +9,8 @@
 // flagged `write` (true or a predicate `(args) => boolean`).
 
 import { hostConfigSchema } from '../config/schema.js';
-import { loadConfig, getDeep, getSchemaAtPath, describeSchema, unwrapNode, configSchemaAt, configMarks, RESTART_NOTE } from '../config/load.js';
+import { loadConfig, getDeep, getSchemaAtPath, describeSchema, unwrapNode, configSchemaAt, configMarks, parseValue, setConfigValue, validateConfigWriteValue, RESTART_NOTE } from '../config/load.js';
+import { configSetLine } from '../config/commands.js';
 import { loadMemories, saveMemories, memoryFilePath, refuseMemory } from '../runtime/services/memory.js';
 import { openInBrowser } from '../runtime/services.js';
 import { resolveIdentityToken } from '../runtime/plugin-identity.js';
@@ -261,6 +262,49 @@ export function bgActiveCount(): number {
 export type { TodoItem, TodoStatus } from '../assistant/plan.js';
 const processPlan = createPlan();
 
+// ─── The model's config write ─────────────────────────────────────────────────
+// `config_set` changes only a key its schema node marks (src/config/schema.ts), in the
+// scope the mark allows. A call it would refuse is refused BEFORE the y/n — its write
+// predicate says "not a write" and `exec` throws the refusal — so the person is never
+// asked about a change that will not happen; the refusal names the command they can
+// run themselves.
+type ConfigSetArgs = { key: string; value: unknown; scope: 'session' | 'saved' };
+function configSetArgs(args: Record<string, unknown>): ConfigSetArgs | string {
+  const key = String(args.key ?? '').trim();
+  if (!key) return 'config_set: key is required — a dot path, e.g. "ui.verbs".';
+  const scope = args.scope;
+  if (scope !== 'session' && scope !== 'saved') return 'config_set: scope is required — "session" (this run only) or "saved" (config.local.json).';
+  // A string is read as the command line reads it ("false" is false, a JSON list a list).
+  const value = typeof args.value === 'string' ? parseValue(args.value) : args.value;
+  return { key, value, scope };
+}
+export function configSetRefusal(args: Record<string, unknown>, pluginConfigs?: Record<string, unknown>): string | null {
+  const a = configSetArgs(args);
+  if (typeof a === 'string') return a;
+  const marks = configMarks(hostConfigSchema, a.key, pluginConfigs);
+  const line = configSetLine(a.key, a.value, a.scope);
+  if (!marks.maySet) {
+    return `config_set: ${a.key} is not a key the model may change — it is the person's. Give them the command: ${line}${a.scope === 'session' ? ' (on the app\'s : line)' : ''}. Nothing was changed.`;
+  }
+  if (a.scope === 'saved' && !marks.maySave) {
+    return `config_set: ${a.key} may be set for this session only (scope "session"); saving it is the person's. Give them the command: ${line}. Nothing was changed.`;
+  }
+  const check = validateConfigWriteValue(hostConfigSchema, a.key, a.value, pluginConfigs);
+  if (!check.ok) return `${check.error}. Nothing was changed.`;
+  return null;
+}
+
+// The words the model gets back once the value is set.
+function configSetDone(key: string, value: unknown, scope: 'session' | 'saved', restart: boolean): string {
+  const where = scope === 'session'
+    ? `${key} is ${JSON.stringify(value)} for this session — gone when the app exits.`
+    : `${key} is ${JSON.stringify(value)}, saved to config.local.json.`;
+  if (!restart) return `${where} It is live now.`;
+  return scope === 'session'
+    ? `${where} It ${RESTART_NOTE} — and a session value is gone by then; scope "saved" keeps it.`
+    : `${where} It ${RESTART_NOTE}.`;
+}
+
 export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record<string, string[]>, pluginConfigs?: Record<string, unknown>): ToolGroup => ({
   id: 'core',
   alwaysOn: true,
@@ -292,9 +336,27 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
       type: 'function',
       function: {
         name: 'config_schema',
-        description: 'The shape of the configuration, so you can help the person set it up: every key with its type, whether it is set, its active default, the effective key bindings and each plugin\'s own flags. It shows NO values and cannot write — the person changes config themselves with `config set <key> <value>`; answer with that exact command.',
+        description: 'The shape of the configuration, so you can help the person set it up: every key with its type, whether it is set, its active default, the effective key bindings, each plugin\'s own flags, and what you may change yourself. It shows NO values. A key marked "model may set" you may change with config_set for this session, one marked "may save" also saved; any other key the person changes — answer with the exact command, `config set <key> <value>`.',
         parameters: { type: 'object', properties: { key: { type: 'string', description: 'Optional dot path to narrow the listing to one subtree, e.g. "ai" or "plugins.<name>".' } } },
       },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'config_set',
+        description: 'WRITE: change a setting — only a key config_schema marks "model may set" (scope "session": this run only, gone at exit) or "may save" (scope "saved": written to config.local.json). The person confirms it first. Any other key is refused: give the person the command instead.',
+        parameters: {
+          type: 'object',
+          properties: {
+            key: { type: 'string', description: 'The dot path, e.g. "ui.verbs".' },
+            value: { description: 'The value, as JSON (a list, a boolean, a number, a string); a string is read as the command line reads it.' },
+            scope: { type: 'string', enum: ['session', 'saved'], description: '"session" — for this run only; "saved" — written to config.local.json.' },
+          },
+          required: ['key', 'value', 'scope'],
+        },
+      },
+      // A write only when it will happen: a refused call never reaches the y/n.
+      write: (args: Record<string, unknown>) => configSetRefusal(args, pluginConfigs) == null,
     },
     {
       type: 'function',
@@ -527,8 +589,23 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
         if (resolvedKeys && (!key || key === 'keys' || key.startsWith('keys.'))) {
           rows.push(`Effective key bindings (host defaults + plugin keys; \`keys\` is an override map): ${prettyKeys(resolvedKeys)}`);
         }
-        rows.push('You cannot read values or write config. To change something, give the person the exact command: config set <key> <value> (config unset <key> to clear).');
+        rows.push('You cannot read values. A key marked "model may set" you may change with config_set (scope "session" — this run only); one also marked "may save" with scope "saved" too; the person confirms each. For any other key, give the person the exact command: config set <key> <value> (config unset <key> to clear).');
         return rows.join('\n');
+      }
+      case 'config_set': {
+        // A write refuses by throwing: returned, the refusal would read as a change made.
+        const refusal = configSetRefusal(args, pluginConfigs);
+        if (refusal) throw new Error(refusal);
+        const a = configSetArgs(args) as ConfigSetArgs;
+        // Only a chat can ask the person: a run with nobody to ask (the one-shot prompt)
+        // never changes the config on the model's word.
+        if (!ctx.askUser) throw new Error(`config_set: there is nobody here to confirm it — give the person the command: ${configSetLine(a.key, a.value, a.scope)}. Nothing was changed.`);
+        // The same path as the person's `config set` (src/config/load.ts), laid on the
+        // config the running app reads.
+        const live = ((ctx as { config?: Record<string, unknown> }).config ?? config) as Record<string, unknown>;
+        const res = setConfigValue(live, a.key, a.value, { scope: a.scope, pluginConfigs, ...(ctx.configLocalPath ? { filePath: ctx.configLocalPath } : {}) });
+        if (!res.ok) throw new Error(`${res.error}. Nothing was changed.`);
+        return configSetDone(a.key, res.value, a.scope, res.restart);
       }
       case 'datetime': {
         // Current date/time in the requested zone (or the host local one). LLMs

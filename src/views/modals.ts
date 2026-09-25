@@ -1332,7 +1332,7 @@ export function renderChatModal({
   autoMode?: AutoMode;
   // `command`: a run_command call — shown whole and wrapped, since the person is
   // deciding on exactly that line.
-  pendingConfirm?: { name: string; args?: string | unknown; command?: string; input?: string } | null;
+  pendingConfirm?: { name: string; args?: string | unknown; command?: string; line?: string; input?: string } | null;
   pendingQuestion?: AskState | null;
   // Messages sent while an answer was coming; they go out, in order, when the turn ends
   // (a stopped or failed turn puts them back into the field). ↑ on an empty field takes
@@ -1867,10 +1867,13 @@ function askView(state: AskState, wrap: number) {
 }
 
 // The y/n block's pieces, the same way.
-function confirmView(c: { name: string; args?: string | unknown; command?: string; input?: string }) {
+// `command` is a shell command, drawn behind `$ `; `line` is a line drawn as it is (the
+// `config set` a `config_set` call stands for). Either takes the arguments' place.
+function confirmView(c: { name: string; args?: string | unknown; command?: string; line?: string; input?: string }) {
+  const cut = (t: string) => (t.length > 1000 ? `${t.slice(0, 1000)}…` : t);
   return {
     title: `⚠ Confirm write: ${c.name}`,
-    command: c.command != null ? `$ ${c.command.length > 1000 ? `${c.command.slice(0, 1000)}…` : c.command}` : null,
+    command: c.command != null ? `$ ${cut(c.command)}` : c.line != null ? cut(c.line) : null,
     // Where the call's input comes from — a command's stdin, piped from an earlier
     // call's result (src/assistant/tool-results.ts); drawn under the command line.
     input: c.input ? `${c.command != null ? 'stdin' : 'input'}: result of ${c.input}` : null,
@@ -1893,7 +1896,7 @@ const textRows = (text: string, width: number) => Math.max(1, wrapText(text, Mat
 export function pendingChatRows({ width, question, confirm, todo, queued = 0 }: {
   width: number;
   question?: AskState | null;
-  confirm?: { name: string; args?: string | unknown; command?: string; input?: string } | null;
+  confirm?: { name: string; args?: string | unknown; command?: string; line?: string; input?: string } | null;
   todo?: PlanItem[] | null;
   queued?: number;
 }): number {

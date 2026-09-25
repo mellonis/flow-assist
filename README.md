@@ -253,6 +253,13 @@ repository), recorded against a mock tracker:
   running app uses it at once where it can; a key read only at start (`ui.mouse`) waits
   for the next one. `config get <key>` says where the value comes from: `session`,
   `local` (`config.local.json`), `config` (`config.json`) or `default`.
+- **What the assistant may change itself**: nothing that decides what it can reach —
+  its model, token, tools, the shell's and the web's reach, a plugin's roots. A few
+  keys that could hurt nobody are marked as its to change (`ui.verbs`, `ui.mouse`,
+  `sessions.resume`, where the chat opens and which side its panel docks on, the
+  keycaps panel): asked, it changes one with `config_set` — for this run, or saved when
+  the key allows — and you confirm the same `config set` line you would have typed.
+  Asked about any other key, it gives you the command to run.
 - **The model**: by default an OpenAI-compatible chat-completions API —
   `config set ai.baseUrl <url>`, `config set ai.model <id>`, the token in
   `LLM_TOKEN`. For Anthropic's own Messages API:

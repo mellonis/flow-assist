@@ -556,7 +556,7 @@ there is no `/fullscreen`.
 
 ## What the model can do (the `core` tool group)
 
-`memory`, `config_schema`, `datetime`, `remind`, `background`, `todo`, `ask_user`,
+`memory`, `config_schema`, `config_set`, `datetime`, `remind`, `background`, `todo`, `ask_user`,
 `open_url`, `recall`, plus `host:plugins_list`. Three rules hold this set together:
 
 - **A plugin's config key is validated by the plugin's schema — everywhere.**
@@ -567,11 +567,27 @@ there is no `/fullscreen`.
   plugins.keycaps.enabled true` — is recognized by the tool and the commands alike,
   never known to one and "unknown key" to the other.
 - **Config is the person's.** The model gets `config_schema` — keys, types,
-  set/unset, active defaults, effective key bindings, each plugin's flags — and
-  **no values and no write**. Config is the model's own leash (`disabledTools`,
-  `baseUrl`, `tokenEnv`, plugin roots) and the assistant reads other people's text,
-  so even a y/n-confirmed write is one prompt injection plus one tired keypress
-  away. The model answers with the `config set <key> <value>` command to run.
+  set/unset, active defaults, effective key bindings, each plugin's flags and what it
+  may change itself — and **no values**. Config is the model's own leash
+  (`disabledTools`, `baseUrl`, `tokenEnv`, plugin roots) and the assistant reads other
+  people's text, so even a y/n-confirmed write is one prompt injection plus one tired
+  keypress away. So **the model writes only a MARKED key, in the scope the mark
+  allows**, through `config_set(key, value, scope)` (`scope` `session` — this run only
+  — or `saved`); for every other key it answers with the `config set <key> <value>`
+  command to run. `config_set` is `write: true` in effect — the y/n like any write, a
+  background task declines it, the auto mode never answers it — but its write flag is
+  a predicate (`configSetRefusal`) that is false for a call that will not happen: a key
+  without the mark for the scope (a saved write of a key marked for the session only), a
+  value the schema refuses. Such a call never reaches the y/n; `exec` throws the
+  refusal, naming the key and the command the person can run instead. A call with
+  nobody to ask (`ctx.askUser` absent: the one-shot prompt, which passes no
+  confirmation and so would run any write unasked) is refused the same way. The y/n
+  block shows the command line the call stands for — `config set --session ui.verbs
+  '["Thinking"]'`, `config set ui.verbs …` — drawn as it is (`configLineOf` beside
+  `shellCommandOf`, the block's `line` beside `command`), so what the person confirms
+  reads as the CLI does. A confirmed call goes through `setConfigValue`, the path the
+  person's own `config set` takes, laid on the app's live config, and answers whether the
+  value is live now or `takes effect on restart`.
   **Every key is read-only to the model unless its schema node is marked**
   (`src/config/schema.ts`): two zod registries, `modelMaySet` (the model may change the
   key for the session) and `modelMaySave` (also in config.local.json — honoured only
@@ -753,10 +769,12 @@ there is no `/fullscreen`.
   runs", and it is what the hint line then says. `all` answers a write's y/n for the
   person. The mode belongs to the CONVERSATION and is never saved: a restart, `/clear`
   and `/resume` all come back to `ask`, and the session file does not
-  hold it. Two calls are never automatic in ANY mode — `run_command` (the y/n is its
-  only guard, and the command may have been written from a page the model just read)
-  and `web_fetch` (one that reaches the confirmation at all is to a host outside
-  `web.allowlist`, which is exactly what its write flag tests). A background task is
+  hold it. Three calls are never automatic in ANY mode — `run_command` (the y/n is its
+  only guard, and the command may have been written from a page the model just read),
+  `web_fetch` (one that reaches the confirmation at all is to a host outside
+  `web.allowlist`, which is exactly what its write flag tests) and `config_set` (config
+  is the person's: even a key the model may change changes only with their yes). A
+  background task is
   untouched: it is handed a confirmation that always answers no, and the chat's mode
   never reaches it; the person's own `!command` is untouched too. The decision lives in
   the one place the chat already pauses — the `confirmWrite` closure — and it changes

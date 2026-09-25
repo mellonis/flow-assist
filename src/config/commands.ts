@@ -75,6 +75,17 @@ export function describeConfigValue(key: string, value: unknown, source: string)
   return value === undefined ? `no key ${key} · ${source}` : `${JSON.stringify(value)} · ${source}`;
 }
 
+// The `config set` line that sets `value` at `key` — what the person would type, in
+// the app's `:` line or (without `--session`) in a shell: the y/n block of the model's
+// `config_set` shows it, and a refusal names it. A string goes as its text, anything
+// else as JSON; a word with a character a shell would read is single-quoted, and the
+// `:` line takes the quotes off again (`unquoteValue`).
+export function configSetLine(key: string, value: unknown, scope: 'session' | 'saved'): string {
+  const text = typeof value === 'string' ? value : JSON.stringify(value) ?? '';
+  const word = text !== '' && /^[\w.,:/@+=%-]+$/.test(text) ? text : `'${text.replace(/'/g, `'\\''`)}'`;
+  return `config set ${scope === 'session' ? '--session ' : ''}${key} ${word}`;
+}
+
 // Returns the command metadata for a name/alias, or null.
 export function findCommand(name: string): Command | null {
   const n = String(name ?? '').toLowerCase();

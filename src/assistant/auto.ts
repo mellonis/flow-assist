@@ -17,13 +17,15 @@
 //   - `all`    — a write runs without asking too, except for what can never be
 //     automatic (below).
 //
-// Two calls are never automatic, in any mode:
+// Three calls are never automatic, in any mode:
 //   - `run_command` — the y/n is its only guard, and the command may have been written
 //     from a page or a ticket the model read a minute ago;
 //   - `web_fetch` — a fetch that reaches the confirmation at all is one to a host
 //     outside `web.allowlist` (that is exactly what its `write` flag tests), and a URL
 //     can carry out anything the model has seen. Should that flag ever become a plain
-//     `true`, this degrades to "never automatic", which is the safe direction.
+//     `true`, this degrades to "never automatic", which is the safe direction;
+//   - `config_set` — config is the person's, and even a key the model may change
+//     changes only with their yes.
 // A background task is not covered here at all: it declines writes by construction —
 // it is given a confirmation that always answers no, and the chat's mode never reaches
 // it. Nor is the person's own `!command`: they typed it.
@@ -59,21 +61,21 @@ export function autoBadge(mode: AutoMode): string {
 // The sentence said when the mode changes.
 export function autoSaid(mode: AutoMode): string {
   if (mode === 'reads') return 'auto: reads — reads run, every write still asks';
-  if (mode === 'all') return 'auto: writes — writes run without asking; run_command and an unlisted web_fetch still ask';
+  if (mode === 'all') return 'auto: writes — writes run without asking; run_command, an unlisted web_fetch and config_set still ask';
   return 'auto off — every write asks again';
 }
 
 // A tool the mode may never answer for. The name is the host's own (`plugin:tool`),
 // the one `agentChat` resolves before it asks — a plugin that declared a tool of the
 // same name gets the qualified spelling, and it is covered too.
-const NEVER_AUTO = ['run_command', 'web_fetch'];
+const NEVER_AUTO = ['run_command', 'web_fetch', 'config_set'];
 export function neverAutomatic(name: string): boolean {
   return NEVER_AUTO.some((n) => name === n || name.endsWith(`:${n}`));
 }
 
 // Does the mode answer this confirmation for the person? Only a write ever reaches
 // here (the host asks about nothing else), so only `all` can say yes — and not for the
-// two calls above.
+// three calls above.
 export function autoConfirms(mode: AutoMode, name: string): boolean {
   return mode === 'all' && !neverAutomatic(name);
 }
