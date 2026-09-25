@@ -289,6 +289,54 @@ export function listSessions(dir: string): SessionInfo[] {
   return out.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0));
 }
 
+// ─── The picker's rows ──────────────────────────────────────────────────────────
+// What the session picker lists (src/assistant/session-picker.ts). Besides the title
+// the filter reads `text`: the person's words, the answers and the commands run,
+// lower-cased — at most SEARCH_TEXT_MAX characters per session, the NEWEST kept, since
+// the word a person looks for is most often one said lately.
+export const SEARCH_TEXT_MAX = 64 * 1024;
+export interface SessionRow { id: string; title: string; updatedAt: string; turns: number; bytes: number; lock: LockState; text: string }
+
+export function searchText(messages: unknown[]): string {
+  let out = '';
+  for (let i = messages.length - 1; i >= 0 && out.length < SEARCH_TEXT_MAX; i--) {
+    const m = messages[i] as Record<string, unknown> | null;
+    if (!m || typeof m !== 'object') continue;
+    const t = m.role === 'user' && m.hostAsk !== true ? String(m.content ?? '')
+      : m.role === 'assistant' && typeof m.content === 'string' ? m.content
+      : m.role === 'shell' && typeof m.command === 'string' ? m.command
+      : '';
+    if (t) out = out ? `${t}\n${out}` : t;
+  }
+  return out.slice(-SEARCH_TEXT_MAX).toLowerCase();
+}
+
+// Newest first. One file is parsed at a time and dropped once its row is made, so the
+// list never holds every conversation at once — only each one's bounded `text`. The
+// picker reads it when it opens and after a rename or a delete, never per keystroke.
+// A file that does not parse is left out, as `listSessions` leaves it.
+export function sessionRows(dir: string, token: string, deps: LockDeps = {}): SessionRow[] {
+  let names: string[] = [];
+  try { names = fs.readdirSync(dir); } catch { return []; }
+  const out: SessionRow[] = [];
+  for (const n of names) {
+    const id = n.replace(/\.json$/, '');
+    if (!n.endsWith('.json') || !ID.test(id)) continue;
+    try {
+      const file = path.join(dir, n);
+      const bytes = fs.statSync(file).size;
+      const s = JSON.parse(fs.readFileSync(file, 'utf8')) as Partial<Session> | null;
+      if (!s || s.version !== SESSION_VERSION || !Array.isArray(s.messages) || !Array.isArray(s.api)) continue;
+      const messages = (s.messages as unknown[]).filter((m): m is Record<string, unknown> => !!m && typeof m === 'object');
+      out.push({
+        id, title: (typeof s.title === 'string' && s.title) || sessionTitle(messages), updatedAt: String(s.updatedAt ?? ''),
+        turns: messages.filter(bySomeone).length, bytes, lock: lockState(dir, id, token, deps), text: searchText(messages),
+      });
+    } catch { /* unreadable — left out */ }
+  }
+  return out.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0));
+}
+
 // `/clear`: the conversation stays on the list, but a restart does not bring it back.
 export function closeSession(dir: string, id: string): void {
   const s = loadSession(dir, id);
@@ -469,6 +517,50 @@ function isLockHeld(dir: string, id: string): boolean {
 // section comment above).
 export function makeLockToken(): string {
   return crypto.randomUUID();
+}
+
+// Read-only: whose a session is right now, for a list to say — `ours` (this token's),
+// `held` (another live chat's, here or on another host), `free` (no lock, or a stale
+// one). Never creates, unlinks or touches the lock file.
+export type LockState = 'free' | 'ours' | 'held';
+export function lockState(dir: string, id: string, token: string, deps: LockDeps = {}): LockState {
+  const c = classifyLock(lockPath(dir, id), token, deps.host ?? os.hostname(), deps.pidAlive ?? defaultPidAlive);
+  return c === 'stale' ? 'free' : c.status === 'held' ? 'held' : 'ours';
+}
+
+// Renames a session that no chat holds: the lock is taken for the write and released
+// after it, so a process opening the session meanwhile waits for neither. A session
+// another process holds is left alone (its next save would find the disk changed and
+// fork), and so is this token's own — its chat writes its own title. `updatedAt` stays
+// as it was: a rename does not move a session up the list.
+export type RenameOutcome = 'renamed' | 'held' | 'ours' | 'missing';
+export function renameSession(dir: string, id: string, title: string, token: string, deps: LockDeps = {}): RenameOutcome {
+  const lock = acquireLock(dir, id, token, deps);
+  if (lock.status === 'held') return 'held';
+  if (lock.status === 'ours') return 'ours';
+  try {
+    const s = loadSession(dir, id);
+    if (!s) return 'missing';
+    saveSession(dir, { ...s, title: cutTitle(title) });
+    return 'renamed';
+  } finally {
+    releaseLock(dir, id, token);
+  }
+}
+
+// Deletes a session that no chat holds, and the lock taken to do it. A session another
+// process holds, and this token's own, are never deleted.
+export type RemoveOutcome = 'deleted' | 'held' | 'ours';
+export function removeSession(dir: string, id: string, token: string, deps: LockDeps = {}): RemoveOutcome {
+  const lock = acquireLock(dir, id, token, deps);
+  if (lock.status === 'held') return 'held';
+  if (lock.status === 'ours') return 'ours';
+  try {
+    deleteSession(dir, id);
+    return 'deleted';
+  } finally {
+    releaseLock(dir, id, token);
+  }
 }
 
 // "16:05" for today, "2026-09-20 16:05" for any other day.

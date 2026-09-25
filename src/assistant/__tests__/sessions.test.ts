@@ -4,9 +4,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  KEEP_MESSAGES, SESSION_VERSION, TITLE_MAX, acquireLock, closeSession, cutTitle, listSessions, loadSession, lockPath,
-  makeLockToken, newSessionId, normalizeViews, pruneSessions, releaseLock, saveSession, sessionFingerprint,
-  sessionFingerprintsEqual, sessionRev, sessionTitle, sessionToContinue, sessionsDir, type Session,
+  KEEP_MESSAGES, SEARCH_TEXT_MAX, SESSION_VERSION, TITLE_MAX, acquireLock, closeSession, cutTitle, listSessions, loadSession,
+  lockPath, lockState, makeLockToken, newSessionId, normalizeViews, pruneSessions, releaseLock, removeSession, renameSession,
+  saveSession, searchText, sessionFingerprint, sessionFingerprintsEqual, sessionRev, sessionRows, sessionTitle,
+  sessionToContinue, sessionsDir, type Session,
 } from '../sessions.ts';
 
 const tmp = () => path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'sess-')), 'sessions');
@@ -347,4 +348,104 @@ test('a title is the first line the person wrote, whitespace collapsed, cut at T
   expect(cutTitle('   ')).toBe('');
   expect(sessionTitle([{ role: 'note', content: 'kept' }, { role: 'user', content: 'first line\nsecond line' }])).toBe('first line');
   expect(sessionTitle([{ role: 'shell', command: 'git status\n', content: '' }])).toBe('$ git status');
+});
+
+// ─── the picker's rows, and writes that respect the lock ─────────────────────────
+
+// Alive is only this process, as the real check would say of every lock these tests
+// write: a fake that called any pid alive would read a dead holder as held.
+const alive = {
+  host: 'h1',
+  pidAlive: (pid: number) => {
+    expect(Number.isInteger(pid) && pid > 0).toBe(true);
+    return pid === process.pid;
+  },
+};
+
+test('sessionRows: newest first, each with its title, size, message count and whose it is; a broken file is left out', () => {
+  const dir = tmp();
+  const oldest = session({ id: '2026-09-19T09-00-00-aaaa', updatedAt: '2026-09-19T09:00:00.000Z' });
+  const older = session({ id: '2026-09-20T09-00-00-bbbb', updatedAt: '2026-09-20T09:00:00.000Z' });
+  const newer = session({ id: '2026-09-21T09-00-00-cccc', updatedAt: '2026-09-21T09:00:00.000Z', title: 'Named by hand' });
+  for (const s of [oldest, older, newer]) saveSession(dir, s);
+  fs.writeFileSync(path.join(dir, '2026-09-21T11-00-00-dddd.json'), '{"version":1,"id":');
+  acquireLock(dir, older.id, 'tok-other', alive);
+  acquireLock(dir, newer.id, 'tok-me', alive);
+  const rows = sessionRows(dir, 'tok-me', alive);
+  expect(rows.map((r) => [r.id, r.title, r.lock, r.turns])).toEqual([
+    [newer.id, 'Named by hand', 'ours', 1],
+    [older.id, 'как тренд по ABC-341?', 'held', 1],
+    [oldest.id, 'как тренд по ABC-341?', 'free', 1],
+  ]);
+  expect(rows[0]!.bytes).toBe(fs.statSync(path.join(dir, `${newer.id}.json`)).size);
+  expect(rows[0]!.text).toContain('вверх.');
+  expect(sessionRows(path.join(dir, 'missing'), 'tok-me')).toEqual([]);
+});
+
+test('searchText keeps the person, the answers and the commands, lower-cased — and the NEWEST text when it runs long', () => {
+  expect(searchText([
+    { role: 'user', content: 'Fix The Build' }, { role: 'assistant', content: 'Done.' },
+    { role: 'shell', command: 'bun test', content: 'lots of output' }, { role: 'note', content: 'a note' },
+    { role: 'user', content: 'host ask', hostAsk: true }, null, 'stray',
+  ])).toBe('fix the build\ndone.\nbun test');
+  const t = searchText([{ role: 'user', content: `old-word ${'x'.repeat(SEARCH_TEXT_MAX)}` }, { role: 'user', content: 'new-word' }]);
+  expect(t.length).toBeLessThanOrEqual(SEARCH_TEXT_MAX);
+  expect(t).toContain('new-word');
+  expect(t).not.toContain('old-word');
+});
+
+test('lockState reads free, ours and held without touching the lock file', () => {
+  const dir = tmp();
+  const id = newSessionId();
+  fs.mkdirSync(dir, { recursive: true });
+  expect(lockState(dir, id, 'tok-me', alive)).toBe('free');
+  expect(fs.existsSync(lockPath(dir, id))).toBe(false);
+  acquireLock(dir, id, 'tok-me', alive);
+  expect(lockState(dir, id, 'tok-me', alive)).toBe('ours');
+  expect(lockState(dir, id, 'tok-other', alive)).toBe('held');
+  expect(lockState(dir, id, 'tok-other', { host: 'h1', pidAlive: () => false })).toBe('free'); // stale
+  expect(JSON.parse(fs.readFileSync(lockPath(dir, id), 'utf8')).token).toBe('tok-me');
+});
+
+test('renameSession writes the title into the file, keeps updatedAt and leaves no lock; it never writes a held session or this token’s own', () => {
+  const dir = tmp();
+  const s = session();
+  saveSession(dir, s);
+  expect(renameSession(dir, s.id, '  Deploy notes\nsecond line', 'tok-me', alive)).toBe('renamed');
+  const back = loadSession(dir, s.id)!;
+  expect(back.title).toBe('Deploy notes');
+  expect(back.updatedAt).toBe(s.updatedAt); // a rename does not move a session up the list
+  expect(fs.existsSync(lockPath(dir, s.id))).toBe(false);
+
+  acquireLock(dir, s.id, 'tok-other', alive);
+  expect(renameSession(dir, s.id, 'Other', 'tok-me', alive)).toBe('held');
+  expect(loadSession(dir, s.id)!.title).toBe('Deploy notes');
+  expect(JSON.parse(fs.readFileSync(lockPath(dir, s.id), 'utf8')).token).toBe('tok-other');
+  releaseLock(dir, s.id, 'tok-other');
+
+  acquireLock(dir, s.id, 'tok-me', alive);
+  expect(renameSession(dir, s.id, 'Mine', 'tok-me', alive)).toBe('ours'); // its chat saves its own title
+  expect(loadSession(dir, s.id)!.title).toBe('Deploy notes');
+  expect(fs.existsSync(lockPath(dir, s.id))).toBe(true); // our lock is not released by a refusal
+
+  const gone = newSessionId();
+  expect(renameSession(dir, gone, 'x', 'tok-me', alive)).toBe('missing');
+  expect(fs.existsSync(lockPath(dir, gone))).toBe(false);
+});
+
+test('removeSession deletes an idle session and its lock; a held one and this token’s own stay', () => {
+  const dir = tmp();
+  const idle = session({ id: '2026-09-20T09-00-00-aaaa' });
+  const held = session({ id: '2026-09-20T09-00-00-bbbb' });
+  const mine = session({ id: '2026-09-20T09-00-00-cccc' });
+  for (const s of [idle, held, mine]) saveSession(dir, s);
+  acquireLock(dir, held.id, 'tok-other', alive);
+  acquireLock(dir, mine.id, 'tok-me', alive);
+  expect(removeSession(dir, idle.id, 'tok-me', alive)).toBe('deleted');
+  expect(fs.existsSync(path.join(dir, `${idle.id}.json`))).toBe(false);
+  expect(fs.existsSync(lockPath(dir, idle.id))).toBe(false);
+  expect(removeSession(dir, held.id, 'tok-me', alive)).toBe('held');
+  expect(fs.existsSync(path.join(dir, `${held.id}.json`))).toBe(true);
+  expect(removeSession(dir, mine.id, 'tok-me', alive)).toBe('ours');
+  expect(fs.existsSync(path.join(dir, `${mine.id}.json`))).toBe(true);
 });
