@@ -31,7 +31,7 @@ import {
 } from './tool-loading.js';
 import { TOOL_RESULT_MAX_CHARS_DEFAULT, capToolResult, resolveToolResultCap } from './tool-result-cap.js';
 import { toolArgsError } from './tool-args.js';
-import { RAW_RESULT, findToolResult, type FoundResult } from './tool-results.js';
+import { RAW_OMITTED, RAW_RESULT, findToolResult, keptRaw, toolReturn, type FoundResult } from './tool-results.js';
 import type { RecallSource } from './recall.js';
 
 // A single chat message. `role` is the OpenAI role; `content` may be null when a
@@ -150,8 +150,9 @@ export interface AgentOpts {
   onLiveCommit?: (content: string, isFinal: boolean) => void;
   onReasoning?: (chunk: string) => void;
   // `info.input` names the tool whose earlier result the call takes as its input (a
-  // def's `resultInput`, run_command's `stdinFrom`) — the y/n says where it comes from.
-  confirmWrite?: (name: string, args: string, info?: { input?: string }) => boolean | Promise<boolean>;
+  // def's `resultInput`, run_command's `stdinFrom`), `info.inputId` that call's id — the
+  // y/n says where it comes from.
+  confirmWrite?: (name: string, args: string, info?: { input?: string; inputId?: string }) => boolean | Promise<boolean>;
   // Fired as each tool call ends (declined ones too), so the chat can show what a
   // write changed while the turn goes on.
   onToolRun?: (run: ToolRun) => void;
@@ -642,13 +643,14 @@ function withSystemPrompt(messages: ChatMessage[], system: (() => string | null)
 // `urls` are the turn's own (`data:` URLs resolved when the image was accepted),
 // never kept. A ref with no URL of this turn goes as its text alone, and `images`
 // never reaches a round.
-// A cut result's whole text (`RAW_RESULT`, ./tool-results.ts) is the host's alone: it is
-// taken off the round's copy here, as `apiHistory` leaves it out of a later turn's.
+// A result's data kept beside its content (`RAW_RESULT`, `RAW_OMITTED`,
+// ./tool-results.ts) is the host's alone: it is taken off the round's copy here, as
+// `apiHistory` leaves it out of a later turn's.
 function withAttachedImages(messages: ChatMessage[], urls: ReadonlyMap<string, string>): ChatMessage[] {
   return messages.map((whole) => {
     if (whole.role !== 'tool') return whole;
-    const { [RAW_RESULT]: _raw, ...m } = whole;
-    if (!Array.isArray(m.images) || !m.images.length) return RAW_RESULT in whole ? (m as ChatMessage) : whole;
+    const { [RAW_RESULT]: _raw, [RAW_OMITTED]: _omitted, ...m } = whole;
+    if (!Array.isArray(m.images) || !m.images.length) return RAW_RESULT in whole || RAW_OMITTED in whole ? (m as ChatMessage) : whole;
     const { images, ...rest } = m;
     const parts: ContentPart[] = [];
     for (const ref of images) { const url = urls.get(ref.sha256); if (url) parts.push({ type: 'image_url', image_url: { url } }); }
@@ -762,6 +764,9 @@ export async function agentChat(
     if (typeof h === 'function') { try { const got = h(); if (Array.isArray(got)) before = got as ChatMessage[]; } catch { /* the caller's trouble: fall back */ } }
     return [...before, ...current.slice(turnStart)];
   };
+  // What a tool's ctx carries: the caller's, less the history handed in for the
+  // lookup above — the host's own, not a tool's to read.
+  const { toolResultHistory: _history, ...toolCtxForTools } = toolCtx as Record<string, unknown>;
   const recallItems = () => { try { return (toolCtx as { recall?: RecallSource }).recall?.items() ?? []; } catch { return []; } };
   const say = (line: string) => { const f = (toolCtx as { pushLog?: unknown }).pushLog; if (typeof f === 'function') { try { (f as (l: string) => void)(line); } catch { /* the log's trouble */ } } };
   try {
@@ -918,8 +923,11 @@ export async function agentChat(
         // registry); ok — a non-writing tool ran. detail — the result string to the model.
         let outcome = 'ok';
         let detail: unknown = '';
+        // The data behind the result, when the tool's return says (./tool-results.ts,
+        // `toolReturn`): a string, `null` for none, `undefined` — the result is the data.
+        let whole: string | null | undefined;
         if (needsConfirm && confirm) {
-          const ok = await confirm(tc.name, tc.arguments, input ? { input: input.tool } : undefined);
+          const ok = await confirm(tc.name, tc.arguments, input ? { input: input.tool, inputId: input.id } : undefined);
           if (!ok) {
             outcome = 'declined';
             detail = 'This write operation was declined — the user must explicitly confirm before it runs.';
@@ -967,7 +975,7 @@ export async function agentChat(
           // `reportChange` collects what this call changed; a tool that throws after
           // reporting changed nothing the person should be shown as done.
           const callCtx: ToolCtx = {
-            ...toolCtx,
+            ...toolCtxForTools,
             ...(opts.signal ? { signal: opts.signal } : {}),
             reportChange: (c: Change) => {
               try { const v = changeView(c); if (v) changes.push(v); } catch { /* a bad report never fails the write */ }
@@ -1006,6 +1014,7 @@ export async function agentChat(
           // ref, and every refusal — undeclared, off, too big, too many, not an image —
           // is a line at the end of the text. Undeclared is said in the log too: the
           // model reads the note, the plugin's author reads the log.
+          ({ detail, whole } = toolReturn(detail));
           const withImages = toolImageResult(detail);
           if (withImages) {
             const declared = def?.returnsImages === true;
@@ -1033,12 +1042,12 @@ export async function agentChat(
         // plugin tool type) overrides the conversation's cap for this one tool.
         const resultCap = resolveToolResultCap(toolResultMaxChars, def?.maxResultChars);
         // A tool that threw attaches nothing: the image went with the result it was for.
-        // A result the cap cut keeps its whole text beside it, never sent — what a later
-        // call's `resultInput` reads (src/assistant/tool-results.ts); one left whole is
-        // its content, so it is not kept twice.
-        const framed = modelToolResult(outcome, detailStr);
-        const sent = capToolResult(framed, resultCap);
-        current.push({ role: 'tool', tool_call_id: tc.id, content: sent, ...(outcome !== 'error' && attached.length ? { images: attached } : {}), ...(sent !== framed && outcome !== 'error' && outcome !== 'declined' ? { [RAW_RESULT]: detailStr } : {}) });
+        // A result whose content is not its data plus the tag (cut, or framed by the
+        // tool) keeps the data beside it, never sent — what a later call's
+        // `resultInput` reads (src/assistant/tool-results.ts, `keptRaw`).
+        const sent = capToolResult(modelToolResult(outcome, detailStr), resultCap);
+        const kept = outcome === 'ok' || outcome === 'applied' ? keptRaw(sent, whole === undefined ? detailStr : whole) : {};
+        current.push({ role: 'tool', tool_call_id: tc.id, content: sent, ...(outcome !== 'error' && attached.length ? { images: attached } : {}), ...kept });
         logRun({ name: tc.name, write, outcome, detail: detailStr, args: parsed });
         const run: ToolRun = { name: tc.name, args: parsed, write, outcome, detail: detailStr };
         if (outcome !== 'error' && changes.length) run.changes = changes;

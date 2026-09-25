@@ -10,14 +10,16 @@ What each version of flow-assist brought, newest first. The version is the one i
   result and no way to give it to a command but to write it out again as an argument —
   which turns every non-breaking space into a plain one. `run_command` now takes
   `stdinFrom`, the id of an earlier tool call (or the id a recall stub names): the
-  command reads that call's result on its stdin exactly as the tool returned it —
-  before the host's own tag and before the cut a long result gets — and the
-  confirmation shows where it comes from, `stdin: result of get_poem`. An id that names
-  no call, a call that failed, or a result that is not text is an error before the
-  confirmation, and nothing runs. A cut result is kept whole beside what the model is
-  sent, so this still works after a restart. **For plugin authors:** a tool def may
-  name the argument that takes an earlier result (`resultInput`); the host resolves it
-  the same way and hands the tool the text as `ctx.resultInput`.
+  command reads that call's data on its stdin exactly as the tool returned it —
+  before the host's own tag, before the cut a long result gets, and for an MCP server's
+  tool without the frame and the clip the `mcp` plugin puts around it for the model —
+  and the confirmation shows where it comes from, `stdin: result of search (call_3)`.
+  An id that names no call, a call that failed, or a result that is not text is an
+  error before the confirmation, and nothing runs. A cut or framed result keeps its
+  data beside what the model is sent (up to 1 MiB), so this still works after a
+  restart. **For plugin authors:** a tool may return `{ text, raw }` — `text` what the
+  model reads, `raw` the bare data a later command may read as its stdin, `null` for
+  none.
 
 - **Loading a big tool group whole no longer sits in every later request unread.**
   Loading a 26-tool group and a 17-tool group for five tools actually used once cost

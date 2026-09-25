@@ -141,11 +141,15 @@ export function toolGroup(name: string, spec: ServerSpec, client: McpClient, too
     exec: async (wire: string, args: Record<string, unknown>) => {
       const tool = byWire.get(wire) ?? byWire.get(wire.replace(/__/, ':'));
       if (!tool) throw new Error(`Unknown tool: ${wire}`);
+      // `text` is what the model reads, framed; `raw` the server's own text, whole — what
+      // a later command may read as its stdin (docs/plugins.md). A failed call has none.
       try {
         const r = await client.callTool(tool, args ?? {});
-        return frame(name, tool, resultText(r), r.isError === true);
+        const text = resultText(r);
+        const failed = r.isError === true;
+        return { text: frame(name, tool, text, failed), raw: failed ? null : text };
       } catch (e) {
-        return frame(name, tool, (e as Error).message, true);
+        return { text: frame(name, tool, (e as Error).message, true), raw: null };
       }
     },
   };

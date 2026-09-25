@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { ChatMessage } from '../agent';
 import { bulkyItems } from '../recall';
-import { findToolResult, RAW_RESULT } from '../tool-results';
+import { findToolResult, keptRaw, RAW_MAX, RAW_OMITTED, RAW_RESULT, toolReturn } from '../tool-results';
 
 const call = (id: string, name: string, args: unknown = {}): ChatMessage => ({ role: 'assistant', content: null, tool_calls: [{ id, type: 'function', function: { name, arguments: JSON.stringify(args) } }] });
 const result = (id: string, content: string, extra: Record<string, unknown> = {}): ChatMessage => ({ role: 'tool', tool_call_id: id, content, ...extra });
@@ -69,5 +69,53 @@ describe('findToolResult', () => {
     expect(id.startsWith('res:')).toBe(true);
     expect(findToolResult(h, id, { items })).toMatchObject({ ok: true, id: 'c1', tool: 'get_poem' });
     expect(findToolResult(h, id.slice(0, 7), { items })).toMatchObject({ ok: true, id: 'c1' });
+  });
+
+  test('a recall alias reads the result whose content is the item\'s, not the latest with its id', () => {
+    const big = `OK: ${'x'.repeat(5000)}`;
+    const h = [call('call_0', 'get_text'), result('call_0', big), call('call_0', 'git_status'), result('call_0', 'OK: clean')];
+    const items = bulkyItems(h, 4096);
+    expect(findToolResult(h, items[0]!.id, { items })).toMatchObject({ ok: true, tool: 'get_text', text: 'x'.repeat(5000) });
+  });
+
+  test('a result the tool said has no data is refused, naming the id', () => {
+    const h = [call('c1', 'mcp_get'), result('c1', 'OK: ERROR from s:get — data from an MCP server…', { [RAW_RESULT]: null })];
+    const r = findToolResult(h, 'c1');
+    expect(r.ok).toBe(false);
+    expect(!r.ok && r.error).toContain('"c1"');
+    expect(!r.ok && r.error).toContain('no data to pipe');
+  });
+
+  test('a result too large to have been kept is refused as too large, never "call again"', () => {
+    const h = [call('c1', 'dump'), result('c1', 'OK: head\n… [cut: 2000000 characters in all — ask the tool for less: filters, a limit, one item]\ntail', { [RAW_OMITTED]: 2_000_000 })];
+    const r = findToolResult(h, 'c1');
+    expect(r.ok).toBe(false);
+    expect(!r.ok && r.error).toContain('too large to pipe');
+    expect(!r.ok && r.error).not.toContain('again');
+  });
+
+  test('content that is not a tagged result and has nothing kept beside it is refused (a stub)', () => {
+    const h = [call('c1', 'get_text'), result('c1', '[get_text — 120 lines — recall("res:1234abcd")]')];
+    expect(findToolResult(h, 'c1').ok).toBe(false);
+  });
+});
+
+describe('toolReturn and keptRaw', () => {
+  test('a string is the data; { text, raw } is the text read and the data behind it', () => {
+    expect(toolReturn('plain')).toEqual({ detail: 'plain', whole: undefined });
+    expect(toolReturn({ text: 'framed', raw: 'bare' })).toEqual({ detail: 'framed', whole: 'bare' });
+    expect(toolReturn({ text: 'failed', raw: null })).toEqual({ detail: 'failed', whole: null });
+    // An object without a `raw` key is left as it is — JSON, as before.
+    expect(toolReturn({ text: 'x', other: 1 })).toEqual({ detail: { text: 'x', other: 1 }, whole: undefined });
+    // With images: the image path gets it without `raw`; the text is the data unless `raw` says.
+    expect(toolReturn({ text: 't', images: [] })).toEqual({ detail: { text: 't', images: [] }, whole: 't' });
+    expect(toolReturn({ text: 't', images: [], raw: 'r' })).toEqual({ detail: { text: 't', images: [] }, whole: 'r' });
+  });
+
+  test('kept only when the content is not the data plus the tag, and only up to the ceiling', () => {
+    expect(keptRaw('OK: abc', 'abc')).toEqual({});
+    expect(keptRaw('OK: framed', 'abc')).toEqual({ [RAW_RESULT]: 'abc' });
+    expect(keptRaw('OK: framed', null)).toEqual({ [RAW_RESULT]: null });
+    expect(keptRaw('OK: cut', 'y'.repeat(RAW_MAX + 1))).toEqual({ [RAW_OMITTED]: RAW_MAX + 1 });
   });
 });

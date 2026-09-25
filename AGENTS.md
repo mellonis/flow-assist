@@ -593,25 +593,35 @@ there is no `/fullscreen`.
   kills the command's process group with the answer.
   **`stdinFrom` pipes an earlier result in** — the id of a tool call of this
   conversation (the `tool_call_id` the model's history carries), or the `res:` id a
-  recall stub names. The command reads that call's result on stdin byte for byte: the
-  text the TOOL returned, never the `OK:` tag and never `capToolResult`'s cut, so the
-  model processes data it already has (counts a U+00A0, saves it with `cat > file`)
-  without re-typing it as an argument. Nothing else about the call changes — the y/n,
+  recall stub names (which reads the result whose content is that item's, whatever
+  later call reused the id). The command reads that call's data on stdin byte for byte:
+  the text the TOOL returned, never the `OK:` tag, never `capToolResult`'s cut, and
+  never a frame the tool put around it for the model — a tool that frames its text
+  returns `{ text, raw }`, `raw` the bare data or `null` when there is none (the `mcp`
+  plugin: `text` its `Result of … — data from an MCP server` frame and 20k clip, `raw`
+  the server's own text whole, `null` for a failed call). So the model processes data it
+  already has (counts a U+00A0, saves it with `cat > file`) without re-typing it as an
+  argument. Nothing else about the call changes — the y/n,
   the roots, the timeout, `shell.maxChars` — and a call without it has no stdin at all
   (`runShell`'s `stdin`, closed after it is written; `!command` never passes one). The
   seam is the host's, not the shell group's: a tool def names the argument that takes
   an earlier result (`resultInput: 'stdinFrom'`, stripped before the wire like
-  `write`), and `agentChat` resolves it BEFORE the y/n with `findToolResult`
+  `write`) — the host's own field, not part of the plugin contract (a remote plugin's
+  `tool.run` would never receive the resolved text), so docs/plugins.md does not name
+  it — and `agentChat` resolves it BEFORE the y/n with `findToolResult`
   (`src/assistant/tool-results.ts`, pure) over the turns before this one as the caller
   keeps them (`toolCtx.toolResultHistory` — the chat's `apiRef`, never the stubbed copy it sends)
   and the turn so far, the latest result of a reused id winning (a provider's ids are
   not unique across rounds). An id that names nothing, a call that failed or was
-  declined, a result that is images and no text: refused as a bad argument is, naming
-  the id, and nothing runs. The resolved text reaches the tool as `ctx.resultInput`
-  (`{ id, tool, text }`); run_command given `stdinFrom` without it throws rather than
+  declined, a result with no data (`raw: null`), one that is images and no text, one
+  whose data was too large to keep (`RAW_MAX`, below), content that is not a tagged
+  result with nothing kept beside it (a stub): refused as a bad argument is, naming the
+  id, and nothing runs. The resolved text reaches the tool as `ctx.resultInput`
+  (`{ id, tool, text }`); `toolCtx.toolResultHistory` itself is the loop's and is taken
+  out of every tool's ctx. run_command given `stdinFrom` without it throws rather than
   run with an empty stdin. The y/n block says where the stdin comes from, dim under the
-  command line: `stdin: result of get_poem` (`confirmWrite`'s third argument, `{ input:
-  <tool> }`, the tool as the host names it).
+  command line: `stdin: result of search (call_3)` (`confirmWrite`'s third argument,
+  `{ input: <tool>, inputId: <id> }`, the tool as the host names it).
   **A confirmed call SHOWS what it printed**, as the person's own `!command` does: the
   tool opens a live view (`ctx.liveView`, see "A tool describes what it shows, a
   renderer draws it, the host frames it") and fills it as the command prints, and the
@@ -1228,12 +1238,16 @@ hardest. Rules the `repo` and `gitlab` plugins hold, each with a test that tries
   cap plus the note. Only what is SENT is capped: a view (`ctx.liveView`/
   `reportView`), the tool trail and `ctx.reportChange`'s diff are display and
   untouched — `run.detail` (the trail's, the log's, the session's) keeps the result
-  whole — and so does the tool message itself when the cap cut it: the whole text rides
-  beside the cut content as `raw` (`RAW_RESULT`, `src/assistant/tool-results.ts`), in
-  `apiRef` and the session but never sent (`apiHistory` whitelists fields for a later
-  turn, `withAttachedImages` takes it off each round's copy within the turn), which is
-  what `stdinFrom` reads after a restart; a result the cap left alone is its content
-  without the tag, kept once. Only the `role: 'tool'` message pushed into `current` (and so into
+  whole — and so does the tool message itself when its content is not the data plus the
+  tag (the cap cut it, or the tool framed it and returned `{ text, raw }`): the data
+  rides beside the content as `raw` (`RAW_RESULT`, `keptRaw` in
+  `src/assistant/tool-results.ts`), in `apiRef` and the session but never sent
+  (`apiHistory` whitelists fields for a later turn, `withAttachedImages` takes it off
+  each round's copy within the turn), which is what `stdinFrom` reads after a restart;
+  a result the cap left alone is its content without the tag, kept once. Data over
+  `RAW_MAX` (1 MiB of characters) is not kept — only its length, `rawOmitted` — so one
+  huge result cannot grow every session save without bound; piping it answers `too
+  large to pipe`, never "call again", which would return the same. Only the `role: 'tool'` message pushed into `current` (and so into
   `transcript`/`apiRef`) is capped, once, for good. A tool declares its own
   `maxResultChars` on the tool def (the plugin tool type, `src/loader/tools.ts`) to
   raise its OWN cap — for one whose result is large and worth the tokens — clamped to

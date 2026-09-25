@@ -48,9 +48,12 @@ export function capToolResult(text: string, max: number): string {
   const tailLen = Math.max(0, max - headLen);
   const head = text.slice(0, headLen);
   const tail = tailLen ? text.slice(text.length - tailLen) : '';
-  const note = `\n… [cut: ${text.length} characters in all — ask the tool for less: filters, a limit, one item]\n`;
-  return `${head}${note}${tail}`;
+  return `${head}${cutNote(text.length)}${tail}`;
 }
 
+// The note put where a result was cut, and the test for it — one wording for both.
+const CUT_ASK = ' characters in all — ask the tool for less: filters, a limit, one item]';
+const cutNote = (total: number): string => `\n… [cut: ${total}${CUT_ASK}\n`;
+const CUT_NOTE_RE = new RegExp(`\\n… \\[cut: \\d+${CUT_ASK.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\n`);
 // Whether `text` carries the note `capToolResult` puts where it cut.
-export const wasCut = (text: string): boolean => /\n… \[cut: \d+ characters in all — ask the tool for less: filters, a limit, one item\]\n/.test(text);
+export const wasCut = (text: string): boolean => CUT_NOTE_RE.test(text);

@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import {
   TOOL_RESULT_MAX_CHARS_CEILING, TOOL_RESULT_MAX_CHARS_DEFAULT,
-  capToolResult, resolveToolResultCap, toolResultCapFromConfig,
+  capToolResult, resolveToolResultCap, toolResultCapFromConfig, wasCut,
 } from '../tool-result-cap';
 
 test('a short result is untouched', () => {
@@ -41,4 +41,10 @@ test('a per-tool cap overrides the default, clamped to the hard ceiling', () => 
   expect(resolveToolResultCap(40_000, 0)).toBe(40_000); // not a valid override — the default stands
   expect(resolveToolResultCap(40_000, 100_000)).toBe(100_000);
   expect(resolveToolResultCap(40_000, TOOL_RESULT_MAX_CHARS_CEILING + 50_000)).toBe(TOOL_RESULT_MAX_CHARS_CEILING);
+});
+
+test('wasCut knows the note capToolResult puts where it cut, and nothing else', () => {
+  expect(wasCut(capToolResult('x'.repeat(1000), 100))).toBe(true);
+  expect(wasCut(capToolResult('short', 100))).toBe(false);
+  expect(wasCut('… [cut: characters]')).toBe(false);
 });

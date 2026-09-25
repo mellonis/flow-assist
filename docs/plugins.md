@@ -183,14 +183,10 @@ What the host does with it, and what it expects back:
   def, clamped to a hard ceiling (200000) so it cannot flood the history by declaring
   a bigger number: `{ type: 'function', function: { name: 'dump_all', … },
   maxResultChars: 100_000 }`.
-- **A tool may take an earlier call's result as its input** — name the argument that
-  carries the call's id on the tool def, `{ type: 'function', function: { … },
-  resultInput: 'from' }` (the host's `run_command` does it with `stdinFrom`). The host
-  resolves the id before the call runs — and before its y/n, which then says `input:
-  result of <tool>` — to that call's text exactly as its tool returned it, never cut,
-  and hands it over as `ctx.resultInput`, `{ id, tool, text }`. An id that names no
-  call of the conversation, a call that failed or was declined, or a result that is
-  images and no text is refused as a bad argument is, and your tool never runs.
+- **A result may carry its data beside the text the model reads** — return `{ text,
+  raw }`: `text` what the model reads (framed as you like), `raw` the bare data, the
+  bytes a later command may read as its stdin (the host's `run_command`), or `null`
+  when there is none (a failed call answered in words); a plain string is both.
 - **A large result may reach the model as a stub on later turns.** A result over
   `ai.recall.minChars` (4096) goes to the model in full in the turn it arrives in and
   afterwards, from a batch on, as one line naming an id the model reads again with

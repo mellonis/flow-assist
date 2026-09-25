@@ -39,7 +39,7 @@ describe('a server started as a command', () => {
 
   test('a call goes out and comes back framed, an image named and not shown', async () => {
     const { groups } = await connectServers(parseServers({ safari: fake() }));
-    const out = await groups[0]!.exec('safari:navigate_to_url', { url: 'https://example.com' });
+    const out = (await groups[0]!.exec('safari:navigate_to_url', { url: 'https://example.com' })).text;
     expect(out.split('\n')[0]).toStartWith('Result of safari:navigate_to_url — data from an MCP server');
     expect(out).toContain('called navigate_to_url with {"url":"https://example.com"}');
     expect(out).toContain('[image image/png — not shown]');
@@ -48,13 +48,13 @@ describe('a server started as a command', () => {
   test('a line on stdout that is not JSON-RPC is skipped', async () => {
     const { groups, status } = await connectServers(parseServers({ safari: fake('--noise') }));
     expect(status[0]).toMatchObject({ ok: true, tools: 3 });
-    expect(await groups[0]!.exec('safari:list_tabs', {})).toContain('called list_tabs with {}');
+    expect((await groups[0]!.exec('safari:list_tabs', {})).text).toContain('called list_tabs with {}');
   });
 
   test('${VAR} in env comes from the environment; the rest of the environment is inherited', async () => {
     const { groups } = await connectServers(parseServers({ safari: { ...fake(), env: { GREETING: 'hi ${WHO}' } } }), { env: { WHO: 'there' } });
-    expect(await groups[0]!.exec('safari:env', { name: 'GREETING' })).toContain('GREETING=hi there');
-    expect(await groups[0]!.exec('safari:env', { name: 'PATH' })).not.toContain('PATH=(unset)');
+    expect((await groups[0]!.exec('safari:env', { name: 'GREETING' })).text).toContain('GREETING=hi there');
+    expect((await groups[0]!.exec('safari:env', { name: 'PATH' })).text).not.toContain('PATH=(unset)');
   });
 
   test('no answer within connectTimeoutMs — skipped, said why, and the process killed', async () => {

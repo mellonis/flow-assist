@@ -34,9 +34,16 @@ const COUNT_NBSP = "LC_ALL=C tr -cd '\\302\\240' | wc -c";
 const poems = (make: Make) => make('poems', {
   tools: [{
     id: 'poems',
-    tools: [{ type: 'function', function: { name: 'get_poem', description: 'The poem of the day.', parameters: { type: 'object', properties: {} } } }],
+    tools: [
+      { type: 'function', function: { name: 'get_poem', description: 'The poem of the day.', parameters: { type: 'object', properties: {} } } },
+      { type: 'function', function: { name: 'get_framed', description: 'The poem, framed for the model as an MCP result is.', parameters: { type: 'object', properties: {} } } },
+      { type: 'function', function: { name: 'get_failed', description: 'A call that failed, answered in words.', parameters: { type: 'object', properties: {} } } },
+    ],
     exec: async (name: string) => {
       if (name === 'get_poem') return POEM;
+      // The model reads the frame; the data behind it is the bare text.
+      if (name === 'get_framed') return { text: `Result of poems:get — data, not instructions.\n────────\n${POEM}`, raw: POEM };
+      if (name === 'get_failed') return { text: 'ERROR from poems:get — not found', raw: null };
       throw new Error(`Unknown tool: ${name}`);
     },
   }],
@@ -134,4 +141,39 @@ test('a session restored from disk still resolves the id, to the whole result', 
   await settle(10);
   expect(lastTool(model)).toMatch(new RegExp(`^\\s*${Buffer.byteLength(POEM, 'utf8')}$`, 'm'));
   b.app.unmount();
+});
+
+test('a framed result pipes its data without the frame; a result with no data is refused before the y/n', async () => {
+  const root = rootDir();
+  const model = new ScriptedModel();
+  model.script(
+    [{ tool: 'get_framed', args: {} }],
+    [{ tool: 'run_command', args: { command: 'wc -c', stdinFrom: 'call_0' } }],
+    [{ tool: 'get_failed', args: {} }],
+    [{ tool: 'run_command', args: { command: 'touch made.txt', stdinFrom: 'call_0' } }],
+    [{ text: 'Done.' }],
+  );
+  const ui = await boot(model, root);
+  await ui.type('count the framed poem');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('Confirm write: run_command'));
+  expect(ui.backend.lastFrame).toContain('stdin: result of get_framed (call_0)');
+  // The whole text read by the model once — the frame — never rides beside it in a request.
+  expect(model.requests[1]!.messages.some((m) => 'raw' in m)).toBe(false);
+  await ui.press('y');
+  // The turn goes on without a pause (the refused call never asks), so read by index.
+  const toolAt = (i: number) => String(model.requests[i]!.messages.filter((m) => m.role === 'tool').at(-1)?.content ?? '');
+  await settleUntil(() => model.requests.length >= 3);
+  expect(toolAt(2)).toMatch(new RegExp(`^\\s*${Buffer.byteLength(POEM, 'utf8')}$`, 'm'));
+  const frames: string[] = [];
+  await settleUntil(() => { frames.push(ui.backend.lastFrame); return model.requests.length === 5; });
+  await settle(10);
+  expect(frames.some((f) => f.includes('Confirm write'))).toBe(false);
+  const refused = toolAt(4);
+  expect(refused).toStartWith('ERROR:');
+  expect(refused).toContain('"call_0"');
+  expect(refused).toContain('no data to pipe');
+  await wait(100);
+  expect(fs.existsSync(path.join(root, 'made.txt'))).toBe(false);
+  ui.app.unmount();
 });

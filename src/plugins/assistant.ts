@@ -1281,7 +1281,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // The y/n pause on a writing op: agentChat calls confirmWrite for tools
                 // with a write-flag, we set pendingRef + pendingAsk and wait for the
                 // input-handler to resolve the promise ('y'/Enter — yes, 'n'/Esc — no).
-                confirmWrite: (name: string, argsStr: unknown, info?: { input?: string }) => new Promise<boolean>((resolve) => {
+                confirmWrite: (name: string, argsStr: unknown, info?: { input?: string; inputId?: string }) => new Promise<boolean>((resolve) => {
                   // The one place a confirmation may be answered without the person:
                   // the auto mode (src/assistant/auto.ts), which only `all` ever lets
                   // say yes and never for run_command or an unlisted web_fetch. It
@@ -1296,7 +1296,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   if (contextOpenRef.current) setContextOpen(false);
                   // The tool whose earlier result the call takes as its input — the
                   // block says where a command's stdin comes from.
-                  const input = info?.input;
+                  const input = info?.input ? `${info.input}${info.inputId ? ` (${info.inputId})` : ''}` : undefined;
                   pendingRef.current = { name, args, ...(input ? { input } : {}), resolve };
                   setPendingAsk({ name, args, ...(command != null ? { command } : {}), ...(input ? { input } : {}) });
                   host.notify();
