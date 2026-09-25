@@ -132,28 +132,45 @@ type HostEvent =
 
 ## Running it
 
-A remote plugin's `manifest.json` names the process instead of an entry module:
+A remote plugin's `manifest.json` names the process instead of an entry module — `run`,
+or `connect` for a shared server (below) — and is enabled the same way any plugin is:
 
 ```json
 { "name": "remote-login", "version": "0.1.0", "hostApi": 2, "flowtty": ">=1.0.0-alpha.28",
   "run": ["bun", "src/index.ts"] }
 ```
 
-and is meant to be enabled the same way any plugin is, once the host reaches the
-process a manifest names:
-
 ```sh
 ln -s ../my-remote-plugin plugins-enabled/my-remote-plugin
 ```
 
-Today that wiring is not built — `transportFor` (`src/remote/transports.ts`) throws
-`remote transports are not built yet` — so a remote plugin runs through its own
-tests, or a test that hands it a transport of its own, as
-`src/__tests__/example-remote-login.e2e.test.ts` runs this package's own example
-(docs/plugins.md, "A plugin in another language").
+The host starts `run`'s command itself, without a shell, in the plugin's directory,
+and stops it with `shutdown` — `runPlugin` answers that itself — followed by stdin
+closing, then `SIGTERM`, then `SIGKILL` if it still has not gone. A crash restarts it
+after a backoff that lengthens each time another restart fails quickly, and gives up
+for good after enough failures in a row (docs/plugins.md, "Running it", has the exact
+shape and timings).
+
+## `--serve`: a shared server
+
+`connect: "unix:<name>"` in the manifest, instead of or beside `run`, makes the plugin
+a shared server several hosts can connect to over one socket — how the host reaches,
+starts and restarts it is docs/plugins.md, "Running it". On the plugin's own side,
+`runPlugin` reads `--serve <path>` from its own `argv` and switches to
+`serveConnections` (`./src/serve.ts`) in place of stdio — nothing else in `PluginDef`
+changes.
+
+Each connection served this way is its own client: its own `hello`, its own model, its
+own protocol state, exactly as `runPlugin` runs over stdio. What every connection
+shares is whatever the process holds outside `servePlugin` itself — module state, a
+file, a database — never the model. The server exits on its own once its last client
+leaves, after the idle timeout the FIRST client's `hello` carried, and also on
+`SIGTERM` or `SIGINT`; a server started by hand runs this same code and lives the same
+way.
 
 ## Writing a client in another language
 
-The wire is plain JSON-RPC 2.0 over stdin and stdout, whatever language reads it —
-docs/plugins.md, "A plugin in another language" has the message tables and a
-line-by-line transcript of this same example.
+The wire is plain JSON-RPC 2.0 over stdin and stdout, or over the shared socket
+`--serve` listens on — whatever language reads it — docs/plugins.md, "A plugin in
+another language" has the message tables and a line-by-line transcript of this same
+example.

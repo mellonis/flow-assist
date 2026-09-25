@@ -359,7 +359,8 @@ setup: ({ host }) => { /* once, before any component mounts: seed a store */ },
 
 Everything above builds a plugin in the host's own process. A plugin can instead be a
 separate process, in any language: the host talks to it over JSON-RPC 2.0, one message
-per line, on its standard input and output. The host draws; the plugin describes its
+per line, on its standard input and output, or over a shared socket several hosts
+connect to at once ("Running it", below). The host draws; the plugin describes its
 whole screen — a *frame* — and sends it again whenever it changes. `@flow-assist/remote`
 is a TypeScript package that speaks the protocol for you (`runPlugin`, below); a plugin
 in another language speaks the same lines directly.
@@ -375,18 +376,17 @@ reached:
   "run": ["bun", "src/index.ts"] }
 ```
 
-- **`run`** — the command, relative to the plugin's directory, started without a shell.
-- **`connect`** — a socket NAME under the host's own `sockets/` directory (never a path),
-  for a plugin that runs as a shared server several hosts talk to. A manifest with
-  either field is a remote plugin.
+- **`run`** — the command, started without a shell: a first word with no slash is
+  looked up on `PATH`, one that has a slash resolves against the plugin's directory.
+- **`connect`** — `"unix:<name>"`, `<name>` a socket name under the host's own
+  `sockets/` directory (never a path), for a plugin that runs as a shared server
+  several hosts talk to; `run` alongside it is how that server gets started. A
+  manifest with either field is a remote plugin.
 - **`views`** — the view kinds the plugin renders (below), so the host collects a
   renderer for each one at start, before any tool has run.
 
-Today neither field is wired into the loader: `transportFor`
-(`src/remote/transports.ts`) throws `remote transports are not built yet` for `run`
-and `connect` alike. Until a host build reaches it, a remote plugin runs through its
-own tests, or a test that hands it a transport of its own — as
-`src/__tests__/example-remote-login.e2e.test.ts` does.
+How the host reaches either field — starts it, restarts it after a crash, stops it —
+is "Running it", below.
 
 ### The example
 
@@ -676,6 +676,37 @@ stays exactly what it was, one line goes to stderr
 throws while drawing the first frame after `hello`, or on `host.redraw()`, fails the
 same way.
 
+### Running it
+
+**`run`.** The host starts the process itself, without a shell, in the plugin's
+directory. Its stderr reaches the host's own log, one line at a time; its stdout and
+stdin are the protocol, nothing else. Stopping it: stdin closes at once, then 1.5 s for
+the process to end on its own, then `SIGTERM`, then `SIGKILL` 1.5 s after that.
+
+**`connect: "unix:<name>"`.** `<name>` names a socket under the host's own `sockets/`
+directory. The first host to reach it finds nothing listening, starts the server
+itself — `run`'s command with `--serve <socket path>` appended — and waits for the
+socket to appear, up to 10 s; a second host finds the socket already there and
+connects straight to it, starting nothing. `connect` with no `run` only ever connects;
+if nothing is listening, loading the plugin fails rather than starting anything.
+
+Every connection to a shared server is its own client: its own `hello`, its own
+protocol state. What its clients share is whatever the process holds outside a single
+connection — nothing is shared automatically. The server exits on its own once its
+last client leaves, after the idle timeout the FIRST client's `hello.idleMs` carried;
+a host never kills it, only disconnects — another host may still be on it. A server
+started by hand runs the same code and lives the same way.
+
+**A crash.** However the process is reached, a death restarts it after a backoff that
+lengthens each time another restart fails quickly — within a second of starting — 1,
+2, 4, 8, then 16 s; the sixth such failure in a row gives up for good, logged as
+`disabled until restart`, while a restart that stays up longer resets the count. A
+`connect` plugin's server is not itself restarted by a host that only connects to
+it — a dead socket is found dead the next time something needs it, and started again
+then.
+
+`flow-assist plugins ls` marks a plugin reached either way `(remote)`.
+
 ### What a remote plugin cannot do
 
 - **Read another plugin's part of the store synchronously.** `host.store.get` answers
@@ -685,9 +716,6 @@ same way.
   with no change hook: a JS plugin may read it, but nothing tells it, or any other JS
   plugin, when it changes. Only a remote plugin's own writes are told to anyone — as
   `store` events to every OTHER remote plugin of the same app.
-
-Running a plugin as a shared server (`connect`, `--serve`) is documented once the
-transport that runs it exists.
 
 ## The chat's two hooks
 

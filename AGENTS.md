@@ -104,7 +104,7 @@ flow-assist/
 │   ├── notes/                 # the plugin docs/plugins.md builds; run by the host's tests
 │   └── remote-login/          # a remote plugin; docs/plugins.md, "A plugin in another language"
 ├── packages/
-│   └── remote/                # @flow-assist/remote — the protocol's types, codec, runPlugin
+│   └── remote/                # @flow-assist/remote — the protocol's types, codec, runPlugin, its shared server
 ├── plugins-available/
 │   ├── gitlab/                # glab_api tool group (no UI)
 │   ├── mcp/                   # tools of MCP servers, over HTTP or stdio (no UI)
@@ -324,9 +324,10 @@ board.
 ### Remote plugins
 
 A plugin can be a separate process, in any language, speaking JSON-RPC 2.0 over its
-stdin and stdout — the protocol as its authors read it is docs/plugins.md, "A plugin
-in another language". `remotePlugin` (`src/remote/adapter.ts`) turns that conversation
-into an ordinary `Plugin`; nothing else in the host knows a plugin is remote.
+stdin and stdout, or over a shared socket several hosts connect to at once — the
+protocol as its authors read it is docs/plugins.md, "A plugin in another language".
+`remotePlugin` (`src/remote/adapter.ts`) turns that conversation into an ordinary
+`Plugin`; nothing else in the host knows a plugin is remote.
 
 - The plugin sends its whole screen as a `frame` notification whenever it changes,
   never a diff; React reconciles it like any other render. `renderTree`
@@ -369,15 +370,46 @@ into an ordinary `Plugin`; nothing else in the host knows a plugin is remote.
   must exist before any tool has run. Each answers from a cache keyed by
   `(kind, data, width)`, behind a dim `▸ kind` placeholder while `view.render` is in
   flight.
-- `hello` runs once, at load, with a 10 s timeout; the guest rule
-  ("A plugin is a guest", above) still holds a remote plugin to it, since `keycaps`
-  reads the last frame the same way for a remote plugin as for one in the host's own
-  process.
+- `hello` runs at load, and again after every restart, each with a 10 s timeout; the
+  guest rule ("A plugin is a guest", above) still holds a remote plugin to it, since
+  `keycaps` reads the last frame the same way for a remote plugin as for one in the
+  host's own process.
 - **The `Transport` seam** (`src/remote/transport.ts`) is what the protocol layer
-  knows of a process: lines in, lines out, a close. `src/remote/transports.ts` is
-  where the loader gets one for a manifest's `run` or `connect` — a stub today
-  (`transportFor` throws `remote transports are not built yet` for either field);
-  `loadPlugins`'s tests inject their own (`LoadPluginsOptions.remoteTransport`).
+  knows of a process: lines in, lines out, a close. Three things implement it: a
+  child over stdio (`src/remote/transport-stdio.ts`), a shared server over a local
+  socket (`src/remote/transport-socket.ts`), and a pair of in-memory streams
+  `loadPlugins`'s own tests inject (`LoadPluginsOptions.remoteTransport`).
+  `src/remote/transports.ts`'s `transportFor` picks between the first two from the
+  manifest — `connect` for the socket, `run` alone for stdio — and wraps either in a
+  restarting supervisor (`src/remote/supervisor.ts`).
+- **A `run` child's rules are held here, not by the plugin**: started without a shell,
+  its stderr going to the host's log, stopped with stdin closed, then a grace period,
+  then `SIGTERM`, then `SIGKILL` — the same shape "A plugin that starts a process owns
+  its life" (above) holds any child to. `transport-stdio.ts` is a copy of
+  `plugins-available/mcp/src/stdio.ts`'s own logic, since the host imports no plugin.
+- **A `connect` server is spawned detached**, with `run`'s command plus
+  `--serve <socket path>`, and a host never kills it — only disconnects; another host
+  may still be on it. It ends itself, on its own idle timeout or a signal
+  (`packages/remote/src/serve.ts`). `shutdown` there is answered per CONNECTION, not
+  per process: each client gets its own `hello` and its own protocol state, and what a
+  server's clients share is whatever it holds outside a single connection.
+- **Two hosts starting the same server at once are serialised by a lock beside the
+  socket** (`src/remote/sockets.ts`): `<name>.lock`, holding `{ pid, at }`, taken with
+  `O_EXCL`; a lock whose pid is no longer alive is stale and taken over, the rule the
+  session lock also follows (`src/assistant/sessions.ts`).
+- **The supervisor's backoff** (`src/remote/supervisor.ts`) lengthens each time a
+  restart fails quickly — within a second of starting — 1, 2, 4, 8, then 16 s; the
+  sixth such failure in a row gives up for good, logged as `disabled until restart`; a
+  restart that stays up longer resets the count. The very first `start()` is never a
+  restart: if it fails, that rejects to the loader alone and nothing is scheduled.
+- `src/remote/sockets.ts`'s `sockets/`, under `hostStateDir()` at 0700, is the host's
+  own place for its sockets; a plugin names its socket, never a path.
+- **The host's own exit** (`src/remote/lifecycle.ts`) asks every remote plugin's
+  `shutdown` (1 s) then closes its transport, every plugin in parallel, bounded to
+  `STOP_ALL_TIMEOUT_MS` (1.5 s) so one that never answers cannot hold the exit open;
+  `src/main.ts` awaits it before its own `process.exit`. A `run` child still alive past
+  that bound is cleaned up by the process's own exit hook (`stopAllRemote`,
+  `transport-stdio.ts`), which sends it `SIGTERM`.
 - **A crash**: the transport closes, the surface says `plugin stopped`, every tool in
   flight and every new one throws it, and `onRestart` runs `hello` again from an
   empty frame.
@@ -2193,7 +2225,8 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
 
 From the host root: `bun run typecheck && bun test ./src ./scripts ./packages` (the
 path filter keeps a locally dropped-in plugin's suite out of the host run).
-`./packages` is `@flow-assist/remote`'s own suite (the protocol, its codec, `runPlugin`).
+`./packages` is `@flow-assist/remote`'s own suite (the protocol, its codec, `runPlugin`,
+`serveConnections`).
 Plugin tests: `cd plugins-available/<name> && bun test`.
 The host suite must pass with `plugins-available/` empty — a host test never loads a real plugin.
 
@@ -2233,6 +2266,11 @@ keeps both:
 - `bun scripts/eval-tool-loading.ts` — the same kind of eval for tools on demand:
   does the model find the one tool a task needs among a dozen, in how many rounds,
   `--tools all|onDemand|both` as the A/B (live; `--fake` checks the harness).
+- `src/__tests__/remote-transports.e2e.test.ts` — a remote plugin over real
+  processes, through the App: a crash and its restart past the backoff, two hosts on
+  one shared server, and the host's own exit letting the child end cleanly. The other
+  side is `src/__tests__/helpers/remote-fake-plugin.ts`, a real process that speaks
+  the protocol by hand, standalone or under `--serve`.
 - A fake for a validating route must reject what the real one rejects; prove a
   new test fails on the bug before trusting it.
 

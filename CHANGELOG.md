@@ -19,13 +19,18 @@ What each version of flow-assist brought, newest first. The version is the one i
   set, nothing is, and `cd` is refused. Under a root that is itself a link, `cd ..`
   and run_command's `cwd` now work from a directory a command left by its real path.
 - **A plugin can be a separate process, in any language.** The host talks to it over
-  JSON-RPC 2.0, one message per line, on its stdin and stdout: the host draws, the
+  JSON-RPC 2.0, one message per line, on its stdin and stdout — or through a shared
+  socket several hosts connect to at once (`connect: "unix:<name>"`, started with
+  `run … --serve <path>` the first time something needs it): the host draws, the
   plugin describes its whole screen and sends it again whenever it changes
-  (docs/plugins.md, "A plugin in another language"). `@flow-assist/remote` speaks the
-  protocol for a plugin written in TypeScript (`runPlugin`), and
-  `examples/remote-login` is a sign-in form built on it. **For plugin authors:**
-  nothing changes for a plugin in the host's own process; the host API number is
-  unchanged.
+  (docs/plugins.md, "A plugin in another language"). Either way the process runs
+  under a restarting supervisor: a crash brings it back after a backoff that
+  lengthens each time another restart fails quickly, gives up for good after enough
+  failures in a row, and `flow-assist plugins ls` marks the plugin `(remote)`.
+  `@flow-assist/remote` speaks the protocol for a plugin written in TypeScript
+  (`runPlugin`), including its `--serve` branch, and `examples/remote-login` is a
+  sign-in form built on it. **For plugin authors:** nothing changes for a plugin in
+  the host's own process; the host API number is unchanged.
 - **flowtty 1.0.0-alpha.31.** A wide glyph — an emoji in the chat, a CJK character —
   used to draw as two blank cells until the row was selected: the grid counted one
   cell per code point and backed the cursor up one column after painting it, so the
