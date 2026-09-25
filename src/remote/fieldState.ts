@@ -32,7 +32,7 @@
 import type { Tree } from '@flow-assist/remote';
 import { normalizeNode } from './frame.js';
 
-export const ECHO_QUEUE = 32;
+export const ECHO_QUEUE = 256;
 const VALUE_PROP: Record<string, string> = { TextInput: 'value', Select: 'value', ListSelect: 'value', ListMultiSelect: 'value', Checkbox: 'checked', ScrollBox: 'offset' };
 
 const same = (a: unknown, b: unknown): boolean => a === b || (typeof a === 'object' && typeof b === 'object' && JSON.stringify(a) === JSON.stringify(b));

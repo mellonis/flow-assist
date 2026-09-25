@@ -340,7 +340,7 @@ into an ordinary `Plugin`; nothing else in the host knows a plugin is remote.
   The slot components themselves stay outside it, so `RemoteModals`' key handler and
   effects survive a bad modal.
 - **A stateful node's value is the host's, not the plugin's.** `src/remote/fieldState.ts`
-  keeps it by `id` and checks a frame's value against a queue of the last 32 values the
+  keeps it by `id` and checks a frame's value against a queue of the last 256 values the
   host itself sent as events for that id: a match is the plugin echoing a moment the
   host already knows, and is not a write. The one thing asked of the plugin: a field
   whose value it ever sets carries `value` from its model in every frame, so its echoes

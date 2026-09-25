@@ -17,7 +17,7 @@ test('a value the person typed is held; the plugin echoing it back is not a writ
   expect(s.get('name')).toBe('hello');
 });
 
-test('the queue keeps the last 32 sent values', () => {
+test('the queue keeps the last ECHO_QUEUE (256) sent values', () => {
   const s = createFieldState();
   for (let i = 0; i <= ECHO_QUEUE; i++) s.set('f', `v${i}`);
   s.applyFrame(['TextInput', { id: 'f', value: 'v0' }], {}); // fell off the queue: a write
@@ -155,4 +155,15 @@ test('a ScrollBox offset is held without a queue: a frame\'s offset the person s
   expect(s.get('sb')).toBe(7);
   s.applyFrame(['ScrollBox', { id: 'sb', offset: 3 }], {}); // the plugin moves the view back
   expect(s.get('sb')).toBe(3);
+});
+
+test('an echoing plugin 40 changes behind never rewinds the field', () => {
+  const s = createFieldState();
+  const v = (i: number) => 'x'.repeat(i);
+  for (let i = 1; i <= 100; i++) {
+    s.set('q', v(i)); // Backspace or a letter on key repeat, faster than `update`
+    if (i > 40) s.applyFrame(['TextInput', { id: 'q', value: v(i - 40) }], {}); // the echo, 40 behind
+    expect(s.get('q')).toBe(v(i));
+  }
+  for (let i = 61; i <= 100; i++) { s.applyFrame(['TextInput', { id: 'q', value: v(i) }], {}); expect(s.get('q')).toBe(v(100)); }
 });

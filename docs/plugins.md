@@ -527,7 +527,7 @@ rest of the screen and the plugin's keys go on, and the next frame is drawn afre
 
 A stateful node's value — a field's text, a list's cursor, a checkbox, a scroll
 offset — lives on the host, keyed by its `id`, so typing never waits on a round trip
-to the plugin. A frame's value for that id is checked against the last 32 values the
+to the plugin. A frame's value for that id is checked against the last 256 values the
 host itself sent as an event for it: a match is the plugin echoing a moment the host
 already knows and changes nothing, while a value that is neither queued nor already
 held is a deliberate write from the plugin, applied at once. An id missing from a
@@ -538,7 +538,7 @@ from a lookup — carries `value` from the plugin's model in EVERY frame, update
 `changed`, as the example's two fields do: those echoes drain the queue, and the
 plugin's own write then lands. A plugin that sends `value` only when it wants to write
 finds that write silently taken for an echo whenever the person typed the same value
-within the last 32 changes. A field the plugin never sets carries no `value` at all,
+within the last 256 changes. A field the plugin never sets carries no `value` at all,
 and the host holds it alone. A `ScrollBox`'s offset is different: the host holds it
 without a queue, since nothing is sent for the plugin to echo, so every frame whose
 `offset` differs from the one held moves the view — send it only to move it.
