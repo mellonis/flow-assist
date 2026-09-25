@@ -256,3 +256,38 @@ test('a restart whose start takes over a second to reject still counts toward th
   expect(tm.pending.length).toBe(0);
   expect(log.at(-1)).toContain('disabled until restart');
 });
+
+// Mirrors `restartInFlight`'s no-op-before-up `close`, but for the very first attempt
+// (there is no instance 0 to distinguish it from) — for proving the same
+// close-races-an-in-flight-start gap Finding 2 fixed for a restart is also fixed for
+// the very first `start()`.
+function firstStartInFlight() {
+  let up = false;
+  const closedWith: number[] = [];
+  const onCloseFns: Array<(w: { code?: number }) => void> = [];
+  let resolveStart: () => void = () => {};
+  const factory = () => ({
+    send: () => {},
+    onLine: () => {},
+    onClose: (f: (w: { code?: number }) => void) => { onCloseFns.push(f); },
+    close: async (graceMs: number) => { if (up) closedWith.push(graceMs); }, // a no-op before this instance is actually up
+    start: () => new Promise<void>((resolve) => { resolveStart = () => { up = true; resolve(); }; }),
+  });
+  return { factory, closedWith, onCloseFns, resolveStart: () => resolveStart() };
+}
+
+test('close during the very first in-flight start closes the transport once it comes up, and start() rejects', async () => {
+  const { factory, closedWith, onCloseFns, resolveStart } = firstStartInFlight();
+  const tm = timers();
+  const s = supervise(factory, { name: 'fake', log: () => {}, timer: tm.timer });
+  let restarts = 0; s.onRestart(() => restarts++);
+  const startPromise = s.start(); // pending — the factory's start() has not resolved yet
+  await s.close(0); // close() runs while start() is still pending — a no-op on a transport not yet up
+  expect(closedWith).toEqual([]); // not actually closed yet — it was never up
+  resolveStart(); // the factory's start() now resolves — the transport is actually up
+  await expect(startPromise).rejects.toThrow(); // start() rejects rather than quietly resolving
+  expect(closedWith).toEqual([0]); // closed for real once it came up, instead of left running
+  onCloseFns.forEach((f) => f({ code: 1 })); // even if it goes on to report its own close
+  expect(restarts).toBe(0); // done blocks scheduling regardless — startedOnce never gets a chance to
+  expect(tm.pending.length).toBe(0);
+});

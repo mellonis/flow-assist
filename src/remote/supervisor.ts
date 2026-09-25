@@ -8,8 +8,9 @@
 // whether it rejects, or closes before resolving — that rejects to the caller alone;
 // nothing is scheduled and no close reaches the layer above, since nothing was ever
 // up for it to hear about. `close` stops the supervisor for good: a pending restart is
-// cleared, nothing is started after it, and a restart already spawning when `close`
-// runs is closed itself rather than left running unmanaged.
+// cleared, nothing is started after it, and an attempt already spawning when `close`
+// runs is closed itself rather than left running unmanaged — the very first `start()`
+// then rejects instead of quietly resolving.
 import type { RestartingTransport, Transport, TransportClose } from './transport.js';
 
 export const BACKOFF_MS = [1_000, 2_000, 4_000, 8_000, 16_000, 30_000];
@@ -113,7 +114,18 @@ export function supervise(factory: () => Transport & { start(): Promise<void> },
   };
 
   return {
-    start: () => bringUp().p,
+    start: () => {
+      const { t, p } = bringUp();
+      // `close()` may run while this very first `start()` is still pending: it sees
+      // `current` pointing at `t`, but a transport that has not yet resolved `start()`
+      // may no-op its own `close` (a child not yet marked spawned, say), so nothing
+      // actually stops here. Closing again once `t.start()` resolves — and rejecting
+      // rather than quietly resolving, since the caller asked to close, not to start
+      // — is what keeps this in step with the restart path's own fix above.
+      return p.then(() => {
+        if (done) { void t.close(0); throw new Error(`${opts.name}: closed while starting`); }
+      });
+    },
     send: (l) => current?.send(l),
     onLine: (f) => { lines.push(f); },
     onClose: (f) => { closes.push(f); },
