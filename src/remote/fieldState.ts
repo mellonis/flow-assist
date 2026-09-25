@@ -20,7 +20,12 @@
 // match leaves any newer, still-outstanding moment in the queue matchable in its own
 // turn, as `he` stays matchable above. A deliberate write lands after at most as many
 // frames as there are copies of its value already in the queue — bounded by
-// `ECHO_QUEUE`, not by one, since each copy is read as its own echo in turn. An id
+// `ECHO_QUEUE`, not by one, since each copy is read as its own echo in turn. So a
+// plugin that ever sets a field's value sends `value` from its model in every frame,
+// updated on each `changed`: its echoes drain the queue, and its later write lands. One
+// that sends `value` only to write would find a value typed within the queue's reach
+// taken for an echo and dropped. A ScrollBox offset is only HELD (`hold`): nothing is
+// sent for the plugin to echo, so a frame's offset that differs is a write. An id
 // absent from a whole frame loses its state. A frame's value prop may arrive as JSON
 // `null` — a plugin in a language whose "nothing" serializes that way — and is read
 // the same as the prop being absent: no value in the frame.
@@ -34,7 +39,11 @@ const same = (a: unknown, b: unknown): boolean => a === b || (typeof a === 'obje
 
 export interface FieldState {
   get(id: string): unknown;
+  // A value the host sent as an event: held, and queued for its echo.
   set(id: string, value: unknown): void;
+  // A value the host keeps and never sends (a ScrollBox offset): held, not queued, so a
+  // frame's value that differs from it is always a write.
+  hold(id: string, value: unknown): void;
   applyFrame(surface: Tree | null, modals: Record<string, Tree | null>): void;
 }
 
@@ -57,6 +66,9 @@ export function createFieldState(): FieldState {
       queue.push(value);
       if (queue.length > ECHO_QUEUE) queue.shift();
       sent.set(id, queue);
+    },
+    hold(id, value) {
+      held.set(id, value);
     },
     applyFrame(surface, modals) {
       const seen = new Map<string, { prop: string; value: unknown; has: boolean }>();

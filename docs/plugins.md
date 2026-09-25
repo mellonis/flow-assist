@@ -428,8 +428,8 @@ await runPlugin<Model, HostEvent>({
     : {
         surface: ['Box', { flexDirection: 'column', padding: 1 },
           ['Text', { bold: true }, 'Sign in'],
-          ['Text', { dim: true }, 'Name'], ['TextInput', { id: 'name', isFocused: m.focus === 'name' }],
-          ['Text', { dim: true }, 'Password'], ['TextInput', { id: 'pass', mask: true, isFocused: m.focus === 'pass' }],
+          ['Text', { dim: true }, 'Name'], ['TextInput', { id: 'name', value: m.name, isFocused: m.focus === 'name' }],
+          ['Text', { dim: true }, 'Password'], ['TextInput', { id: 'pass', value: m.pass, mask: true, isFocused: m.focus === 'pass' }],
           ['Text', { inverse: m.focus === 'login' }, '[ Log in ]'],
           ['Text', { dim: true }, m.note]],
         keycaps: [{ action: 'open', label: 'form' }, { action: 'next', label: 'next' }, { action: 'login', label: 'log in' }, { action: 'close', label: 'close' }],
@@ -514,7 +514,7 @@ point at across a process). A function prop never crosses the wire; a node with 
 | `TextInput`, `ListSelect`, `ListMultiSelect` | `value` | `changed`, `submitted`, `cancelled` |
 | `Select` | `value` | `changed` |
 | `Checkbox` | `checked` | `toggled` |
-| `ScrollBox` | `offset` | none — the offset is kept for the host's own scrolling, never told to the plugin |
+| `ScrollBox` | `offset` | none — the offset is kept for the host's own scrolling, never told to the plugin; send `offset` only on the frame that moves the view |
 
 An unknown `type` draws as one dim `▸ <type>` line, as a missing view renderer does
 (below). `props.error` on a `TextInput` is shown as its validation message. A root the
@@ -532,6 +532,16 @@ host itself sent as an event for it: a match is the plugin echoing a moment the 
 already knows and changes nothing, while a value that is neither queued nor already
 held is a deliberate write from the plugin, applied at once. An id missing from a
 whole frame loses its state.
+
+So a field whose value the plugin ever sets — clearing it after a submit, filling it
+from a lookup — carries `value` from the plugin's model in EVERY frame, updated on each
+`changed`, as the example's two fields do: those echoes drain the queue, and the
+plugin's own write then lands. A plugin that sends `value` only when it wants to write
+finds that write silently taken for an echo whenever the person typed the same value
+within the last 32 changes. A field the plugin never sets carries no `value` at all,
+and the host holds it alone. A `ScrollBox`'s offset is different: the host holds it
+without a queue, since nothing is sent for the plugin to echo, so every frame whose
+`offset` differs from the one held moves the view — send it only to move it.
 
 ### Keys
 

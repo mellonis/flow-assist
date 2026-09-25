@@ -5,7 +5,7 @@ import { renderTree, type RenderCtx } from '../tree';
 // A `ui` whose components are named markers, so the element tree is readable.
 const mark = (name: string) => Object.assign(() => null, { displayName: name });
 const ui = { h: createElement, Box: mark('Box'), Text: mark('Text'), Markdown: mark('Markdown'), Table: mark('Table'), Link: mark('Link'), ScrollBox: mark('ScrollBox'), Select: mark('Select'), ListSelect: mark('ListSelect'), ListMultiSelect: mark('ListMultiSelect'), Checkbox: mark('Checkbox'), TextInput: mark('TextInput') } as unknown as RenderCtx['ui'];
-const stubState = () => { const m = new Map<string, unknown>(); return { get: (id: string) => m.get(id), set: (id: string, v: unknown) => { m.set(id, v); }, noteFrameIds: () => {}, focusedIn: () => null }; };
+const stubState = () => { const m = new Map<string, unknown>(); const queued: string[] = []; return { queued, get: (id: string) => m.get(id), set: (id: string, v: unknown) => { m.set(id, v); queued.push(id); }, hold: (id: string, v: unknown) => { m.set(id, v); }, noteFrameIds: () => {}, focusedIn: () => null }; };
 const ctx = (over: Partial<RenderCtx> = {}): RenderCtx & { events: unknown[]; warned: string[] } => {
   const events: unknown[] = []; const warned: string[] = [];
   return { ui, hasKeyboard: true, state: stubState() as never, onEvent: (m, ev) => events.push([m, ev]), warn: (l) => warned.push(l), events, warned, ...over };
@@ -104,4 +104,13 @@ test('children and ref are reserved: dropped from the props and said once', () =
   const [text] = [].concat(el.props.children);
   expect((text as any).props.children).toBe('own');
   expect(c.warned).toEqual(['prop ref is reserved and dropped — a node\'s children follow its props', 'prop children is reserved and dropped — a node\'s children follow its props']);
+});
+
+test('a ScrollBox scrolled by the person holds its offset without queueing it: nothing is sent to echo', () => {
+  const c = ctx();
+  const el: any = renderTree(['ScrollBox', { id: 'sb' }, 'text'], c);
+  el.props.onScroll(4);
+  expect(c.state.get('sb')).toBe(4);
+  expect((c.state as any).queued).toEqual([]);
+  expect(c.events).toEqual([]);
 });

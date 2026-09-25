@@ -329,7 +329,7 @@ export async function remotePlugin(opts: RemotePluginOpts): Promise<Plugin> {
   };
 
   // ── the components ──────────────────────────────────────────────────────────
-  const treeCtx = (ui: PluginApi['ui'], hasKeyboard: boolean): RenderCtx => ({ ui, hasKeyboard, state: fields, onEvent: (m, ev) => send(m, ev), warn: (l) => once(`prop:${l}`, l) });
+  const treeCtx = (ui: PluginApi['ui'], hasKeyboard: boolean): RenderCtx => ({ ui, hasKeyboard, state: fields, onEvent: (m, ev) => send(m, ev), redraw: notify, warn: (l) => once(`prop:${l}`, l) });
   const frameFailed = (m: string) => once(`frame-failed:${m}`, `frame failed: ${m}`);
   const draw = (tree: Parameters<typeof drawFrame>[0], ctx: RenderCtx) => drawFrame(tree, ctx, frameSeq, frameFailed);
   const openModals = () => Object.entries(frame.modals ?? {}).filter(([, t]) => t);

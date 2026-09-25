@@ -128,3 +128,31 @@ test('a frame equal to the held value is not proof the plugin caught up: it may 
   s.applyFrame(['TextInput', { id: 'name', value: 'he' }], {});
   expect(s.get('name')).toBe('he');
 });
+
+test('a plugin that echoes value in every frame gets its own later write: the echoes drained the queue', () => {
+  const s = createFieldState();
+  // The person types `s`, clears it, types `h`, `hi`; the plugin echoes each from its model.
+  for (const v of ['s', '', 'h', 'hi']) { s.set('q', v); s.applyFrame(['TextInput', { id: 'q', value: v }], {}); }
+  expect(s.get('q')).toBe('hi');
+  // After submit the plugin clears the field: nothing is left in the queue to mistake it for.
+  s.applyFrame(['TextInput', { id: 'q', value: '' }], {});
+  expect(s.get('q')).toBe('');
+});
+
+test('a plugin that sends value only to write finds a value typed in the queue read as an echo — why a set field must echo', () => {
+  const s = createFieldState();
+  for (const v of ['s', '', 'h', 'hi']) s.set('q', v); // no value in any frame meanwhile
+  s.applyFrame(['TextInput', { id: 'q', value: '' }], {});
+  expect(s.get('q')).toBe('hi'); // `''` was typed a moment ago: taken as its echo, and dropped
+});
+
+test('a ScrollBox offset is held without a queue: a frame\'s offset the person scrolled through is still a write', () => {
+  const s = createFieldState();
+  s.applyFrame(['ScrollBox', { id: 'sb' }], {});
+  s.hold('sb', 3); s.hold('sb', 7);
+  expect(s.get('sb')).toBe(7);
+  s.applyFrame(['ScrollBox', { id: 'sb', offset: 7 }], {}); // equal to what is held: nothing to do
+  expect(s.get('sb')).toBe(7);
+  s.applyFrame(['ScrollBox', { id: 'sb', offset: 3 }], {}); // the plugin moves the view back
+  expect(s.get('sb')).toBe(3);
+});

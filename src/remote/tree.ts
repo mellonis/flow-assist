@@ -23,12 +23,17 @@ export type FieldEventMethod = 'changed' | 'submitted' | 'cancelled' | 'toggled'
 export interface FieldStateLike {
   get(id: string): unknown;
   set(id: string, value: unknown): void;
+  hold(id: string, value: unknown): void;
 }
 export interface RenderCtx {
   ui: PluginUi;
   hasKeyboard: boolean;
   state: FieldStateLike;
   onEvent: (method: FieldEventMethod, ev: { id: string; value?: unknown }) => void;
+  // Draws again now. A node with a held value is controlled by it, so its own change
+  // must be drawn before the next key, or keys that arrive together (a paste, key
+  // repeat) each start from the value before the last one.
+  redraw?: () => void;
   warn: (line: string) => void;
 }
 
@@ -74,11 +79,12 @@ export function renderTree(tree: Tree | null, ctx: RenderCtx): ReactElement | nu
       if (held !== undefined) props[valueProp] = held;
       const report = (method: FieldEventMethod, value?: unknown) => ctx.onEvent(method, value === undefined ? { id } : { id, value });
       if (type === 'Checkbox') {
-        props.onChange = (next: boolean) => { ctx.state.set(id, next); report('toggled', next); };
+        props.onChange = (next: boolean) => { ctx.state.set(id, next); ctx.redraw?.(); report('toggled', next); };
       } else if (type === 'ScrollBox') {
-        props.onScroll = (offset: number) => { ctx.state.set(id, offset); };
+        // Held, never sent: there is no echo to wait for (./fieldState.ts).
+        props.onScroll = (offset: number) => { ctx.state.hold(id, offset); ctx.redraw?.(); };
       } else {
-        props.onChange = (value: unknown) => { ctx.state.set(id, value); report('changed', value); };
+        props.onChange = (value: unknown) => { ctx.state.set(id, value); ctx.redraw?.(); report('changed', value); };
         if (type !== 'Select') {
           props.onSubmit = (value: unknown) => report('submitted', value);
           props.onCancel = () => report('cancelled');

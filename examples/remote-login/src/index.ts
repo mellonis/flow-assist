@@ -33,8 +33,8 @@ await runPlugin<Model, HostEvent>({
     : {
         surface: ['Box', { flexDirection: 'column', padding: 1 },
           ['Text', { bold: true }, 'Sign in'],
-          ['Text', { dim: true }, 'Name'], ['TextInput', { id: 'name', isFocused: m.focus === 'name' }],
-          ['Text', { dim: true }, 'Password'], ['TextInput', { id: 'pass', mask: true, isFocused: m.focus === 'pass' }],
+          ['Text', { dim: true }, 'Name'], ['TextInput', { id: 'name', value: m.name, isFocused: m.focus === 'name' }],
+          ['Text', { dim: true }, 'Password'], ['TextInput', { id: 'pass', value: m.pass, mask: true, isFocused: m.focus === 'pass' }],
           ['Text', { inverse: m.focus === 'login' }, '[ Log in ]'],
           ['Text', { dim: true }, m.note]],
         keycaps: [{ action: 'open', label: 'form' }, { action: 'next', label: 'next' }, { action: 'login', label: 'log in' }, { action: 'close', label: 'close' }],

@@ -340,9 +340,16 @@ into an ordinary `Plugin`; nothing else in the host knows a plugin is remote.
   The slot components themselves stay outside it, so `RemoteModals`' key handler and
   effects survive a bad modal.
 - **A stateful node's value is the host's, not the plugin's.** `src/remote/fieldState.ts`
-  keeps it by `id` and checks a frame's value against a ring of the last 32 values the
+  keeps it by `id` and checks a frame's value against a queue of the last 32 values the
   host itself sent as events for that id: a match is the plugin echoing a moment the
-  host already knows, and is not a write.
+  host already knows, and is not a write. The one thing asked of the plugin: a field
+  whose value it ever sets carries `value` from its model in every frame, so its echoes
+  drain the queue and its own write lands (without them a write of a recently typed
+  value is taken for an echo). A `ScrollBox` offset is held (`hold`), never queued —
+  nothing is sent to echo — so a frame's differing `offset` is always a write. A node
+  with a held value is CONTROLLED by it, so its own change redraws at once
+  (`RenderCtx.redraw`, the host's `notify`): keys that arrive together — a paste, key
+  repeat — would otherwise each start from the value before the last one.
 - **Keys are consumed by what the frame declares** (`src/remote/keys.ts`): an entry
   naming one of the plugin's own actions (a key of `hello.keys`) takes the person's
   effective binding for it (`host.keys[action]`), any other is a key in the binding

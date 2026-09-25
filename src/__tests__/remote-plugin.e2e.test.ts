@@ -331,3 +331,17 @@ test('a modal that cannot be drawn fails in its own place; the surface and the p
   expect(ui.backend.lastFrame).not.toContain('frame failed');
   ui.app.unmount();
 });
+
+test('a field and a ScrollBox with a held value redraw on their own change: keys typed together all land, and PgDn moves the view', async () => {
+  const { fake, ui } = await boot();
+  const lines = Array.from({ length: 40 }, (_, i) => ['Text', {}, `row ${i}`]);
+  // Both carry a value from the frame, so both are controlled by what the host holds.
+  fake.frame({ surface: ['Box', { flexDirection: 'column' }, ['TextInput', { id: 'q', value: '', isFocused: true }], ['ScrollBox', { id: 'sb', offset: 0, height: 5, isActive: true }, ['Box', { flexDirection: 'column' }, ...lines]]] as never, keycaps: ['x'] });
+  await until(ui, () => ui.backend.lastFrame.includes('row 0'), 'the form');
+  await ui.type('abc'); // three keys in one go, as a paste or key repeat delivers them
+  expect(fake.events.filter(([m]) => m === 'changed').map(([, p]) => p)).toEqual([{ id: 'q', value: 'a' }, { id: 'q', value: 'ab' }, { id: 'q', value: 'abc' }]);
+  expect(ui.backend.lastFrame).toContain('abc');
+  await ui.press('pagedown');
+  await until(ui, () => !ui.backend.lastFrame.includes('row 0'), 'the view moved');
+  ui.app.unmount();
+});
