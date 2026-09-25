@@ -2192,4 +2192,8 @@ keeps both:
   bundled plugin equal to `hostVersion()`, naming the one that drifts). A
   third-party plugin, kept in its own repository, versions itself.
   `packages/remote`'s own `package.json` version equals the host's the same way (a
-  test holds the two together).
+  test holds the two together). It is published with each release by `bun publish`
+  from `packages/remote`: `prepublishOnly` builds `dist/` (with `.d.ts`), and the
+  package ships `dist` and `src` — the `bun` export condition points at the sources —
+  but not `src/**/__tests__` (`package.test.ts` holds that, and that the package builds
+  on its own with the root's `@types/bun`).
