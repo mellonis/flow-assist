@@ -1,7 +1,8 @@
 // The `shell` tool group: run_command — the model runs a shell command in the
 // person's clone — and cd, which moves the directory commands run in. Its own group,
-// so `ai.disabledTools: ["shell"]` turns it off (core cannot be). The runner is the one `!command` uses (assistant/shell.ts); what makes
-// this safe to offer is not the runner but the pause: the tool is a write, so EVERY
+// so `ai.disabledTools: ["shell"]` turns it off (core cannot be). The runner is the
+// one `!command` uses (assistant/shell.ts); what makes this safe to offer is not the
+// runner but the pause: the tool is a write, so EVERY
 // call waits for the person's y/n with the command on screen, and a background task —
 // nobody to ask — has it declined.
 //
@@ -158,8 +159,9 @@ export const shellTools = (config: Record<string, unknown>): ToolGroup => ({
     if (name !== 'run_command') throw new Error(`Unknown tool: ${name}`);
     const cmd = String(args.command ?? '').trim();
     if (!cmd) throw new Error('run_command: command is required');
-    // The conversation's directory — shared with the person's !commands. A caller with
-    // no conversation (the one-shot CLI) starts at the default every time.
+    // The conversation's directory — shared with the person's !commands and with `cd`;
+    // the one-shot CLI carries a shell state of its own, so a `cd` holds there too. A
+    // caller with none starts at the default every time.
     const shell = (ctx as { shell?: ShellState }).shell ?? createShellState(() => config);
     const cwd = commandCwd(config, args.cwd, shell.cwd());
     if (typeof args.cwd === 'string' && args.cwd.trim()) shell.setCwd(cwd); // a cd: it holds even if the command then fails
