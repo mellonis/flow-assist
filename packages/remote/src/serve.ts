@@ -10,9 +10,12 @@
 // listening, at `defaultIdleMs` — a host that starts this process and never manages
 // to connect leaves no orphan behind. A path already served by a live process is
 // refused outright rather than stolen: only a stale file (nothing answers it) is
-// replaced. A server started by hand runs the same code and lives the same way; the
-// socket is never the host's to kill — this process ends itself, on its own idle
-// timer or on SIGTERM/SIGINT.
+// replaced — probed and unlinked here with nothing holding the path in between, so
+// two `serveConnections` racing the same fresh path can both pass the probe; closing
+// that window is the host's job (a start lock, taken before either ever calls in).
+// A server started by hand runs the same code and lives the same way; the socket is
+// never the host's to kill — this process ends itself, on its own idle timer or on
+// SIGTERM/SIGINT.
 import fs from 'node:fs';
 import { LineSplitter } from './codec.js';
 import type { PeerIo } from './peer.js';
@@ -76,6 +79,9 @@ export async function serveConnections(onConnection: (io: PeerIo) => Promise<voi
     const onSigterm = () => finish();
     const onSigint = () => finish();
     const armIdle = () => {
+      // `finish` already ran (a signal, or an earlier idle firing) — closing the
+      // remaining sockets it owns must not schedule a fresh timer behind it.
+      if (finished) return;
       if (idle) clearTimeout(idle);
       idle = setTimeout(finish, idleMs ?? opts.defaultIdleMs ?? 60_000);
     };
