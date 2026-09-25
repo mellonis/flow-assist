@@ -642,9 +642,13 @@ function withSystemPrompt(messages: ChatMessage[], system: (() => string | null)
 // `urls` are the turn's own (`data:` URLs resolved when the image was accepted),
 // never kept. A ref with no URL of this turn goes as its text alone, and `images`
 // never reaches a round.
+// A cut result's whole text (`RAW_RESULT`, ./tool-results.ts) is the host's alone: it is
+// taken off the round's copy here, as `apiHistory` leaves it out of a later turn's.
 function withAttachedImages(messages: ChatMessage[], urls: ReadonlyMap<string, string>): ChatMessage[] {
-  return messages.map((m) => {
-    if (m.role !== 'tool' || !Array.isArray(m.images) || !m.images.length) return m;
+  return messages.map((whole) => {
+    if (whole.role !== 'tool') return whole;
+    const { [RAW_RESULT]: _raw, ...m } = whole;
+    if (!Array.isArray(m.images) || !m.images.length) return RAW_RESULT in whole ? (m as ChatMessage) : whole;
     const { images, ...rest } = m;
     const parts: ContentPart[] = [];
     for (const ref of images) { const url = urls.get(ref.sha256); if (url) parts.push({ type: 'image_url', image_url: { url } }); }
@@ -749,11 +753,11 @@ export async function agentChat(
   // A line for the host's log (`L`) — the chat's ctx carries `pushLog`; a caller
   // without one (a bare ctx) is told nothing.
   // Where an earlier call's result is looked up (src/assistant/tool-results.ts): the
-  // turns before this one as the caller keeps them (`toolCtx.history`, the chat's own
+  // turns before this one as the caller keeps them (`toolCtx.toolResultHistory`, the chat's own
   // history — never the stubbed copy `messages` may be), else the messages it was given;
   // then this turn so far. The recall items give the `res:` alias.
   const resultHistory = (): ChatMessage[] => {
-    const h = (toolCtx as { history?: unknown }).history;
+    const h = (toolCtx as { toolResultHistory?: unknown }).toolResultHistory;
     let before: ChatMessage[] = current.slice(0, turnStart);
     if (typeof h === 'function') { try { const got = h(); if (Array.isArray(got)) before = got as ChatMessage[]; } catch { /* the caller's trouble: fall back */ } }
     return [...before, ...current.slice(turnStart)];

@@ -603,7 +603,7 @@ there is no `/fullscreen`.
   an earlier result (`resultInput: 'stdinFrom'`, stripped before the wire like
   `write`), and `agentChat` resolves it BEFORE the y/n with `findToolResult`
   (`src/assistant/tool-results.ts`, pure) over the turns before this one as the caller
-  keeps them (`toolCtx.history` — the chat's `apiRef`, never the stubbed copy it sends)
+  keeps them (`toolCtx.toolResultHistory` — the chat's `apiRef`, never the stubbed copy it sends)
   and the turn so far, the latest result of a reused id winning (a provider's ids are
   not unique across rounds). An id that names nothing, a call that failed or was
   declined, a result that is images and no text: refused as a bad argument is, naming
@@ -1230,7 +1230,8 @@ hardest. Rules the `repo` and `gitlab` plugins hold, each with a test that tries
   untouched — `run.detail` (the trail's, the log's, the session's) keeps the result
   whole — and so does the tool message itself when the cap cut it: the whole text rides
   beside the cut content as `raw` (`RAW_RESULT`, `src/assistant/tool-results.ts`), in
-  `apiRef` and the session but never sent (`apiHistory` whitelists fields), which is
+  `apiRef` and the session but never sent (`apiHistory` whitelists fields for a later
+  turn, `withAttachedImages` takes it off each round's copy within the turn), which is
   what `stdinFrom` reads after a restart; a result the cap left alone is its content
   without the tag, kept once. Only the `role: 'tool'` message pushed into `current` (and so into
   `transcript`/`apiRef`) is capped, once, for good. A tool declares its own

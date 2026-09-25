@@ -1246,7 +1246,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   // The model's history as the chat keeps it — whole, never stubbed —
                   // where an earlier call's result is found by its id (run_command's
                   // stdinFrom, src/assistant/tool-results.ts).
-                  history: () => apiRef.current,
+                  toolResultHistory: () => apiRef.current,
                   // What `refreshProject` read when the directory was last set — `cd`
                   // answers from it rather than reading the files a second time.
                   projectInstructions: () => projectRef.current,

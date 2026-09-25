@@ -70,7 +70,11 @@ test('a previous result reaches the command whole, before the cut, and the y/n n
   expect(frame).toContain(`$ ${COUNT_NBSP}`);
   expect(frame).toContain('stdin: result of get_poem');
   // The model itself was sent the cut result: what it has is not what the command gets.
+  // The whole text kept beside it is the host's alone — never in a request, not even in
+  // the rounds of the same turn.
   expect(lastTool(model)).toContain('[cut:');
+  expect(JSON.stringify(model.requests[1])).not.toContain(JSON.stringify(POEM).slice(1, -1));
+  expect(model.requests[1]!.messages.some((m) => 'raw' in m)).toBe(false);
   await ui.press('y');
   await settleUntil(() => model.requests.length === 3);
   await settle(10);
