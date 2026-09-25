@@ -4,16 +4,22 @@
 // is a WRITE — the plugin clearing a field, moving the cursor, replacing `hello` with
 // `goodbye` — applied without asking. But a plugin that echoes the value from its own
 // model sends frames that lag the typing (`h`, `he`, `hel` while the host holds
-// `hello`), and applying those would clobber the input. So per id the last
-// `ECHO_RING` values the host itself sent in `changed` are kept: a frame's value equal
-// to any of them is an echo and is ignored; one equal to none is applied and the ring
-// is cleared. An id absent from a whole frame loses its state. A frame's value prop
-// may arrive as JSON `null` — a plugin in a language whose "nothing" serializes that
-// way — and is read the same as the prop being absent: no value in the frame.
+// `hello`), and applying those would clobber the input. So per id the host keeps a
+// QUEUE of the last `ECHO_QUEUE` values it itself sent, oldest first, and a frame's
+// value is read against it three ways: equal to the HELD value, the plugin has caught
+// up and the queue empties, nothing changes; equal to some entry in the queue, it is
+// an echo of that moment, and that entry and every older one drain from the queue
+// while the field stays put; equal to none of it, it is a write, applied at once, and
+// the queue empties. Draining on a match is what keeps a value the person revisits
+// from poisoning the field forever: a deliberate write may be read as an echo at most
+// once, since its next frame with the same value finds no entry left and lands. An id
+// absent from a whole frame loses its state. A frame's value prop may arrive as JSON
+// `null` — a plugin in a language whose "nothing" serializes that way — and is read
+// the same as the prop being absent: no value in the frame.
 import type { Tree } from '@flow-assist/remote';
 import { normalizeNode } from './frame.js';
 
-export const ECHO_RING = 32;
+export const ECHO_QUEUE = 32;
 const VALUE_PROP: Record<string, string> = { TextInput: 'value', Select: 'value', ListSelect: 'value', ListMultiSelect: 'value', Checkbox: 'checked', ScrollBox: 'offset' };
 
 const same = (a: unknown, b: unknown): boolean => a === b || (typeof a === 'object' && typeof b === 'object' && JSON.stringify(a) === JSON.stringify(b));
@@ -39,10 +45,10 @@ export function createFieldState(): FieldState {
     get: (id) => held.get(id),
     set(id, value) {
       held.set(id, value);
-      const ring = sent.get(id) ?? [];
-      ring.push(value);
-      if (ring.length > ECHO_RING) ring.shift();
-      sent.set(id, ring);
+      const queue = sent.get(id) ?? [];
+      queue.push(value);
+      if (queue.length > ECHO_QUEUE) queue.shift();
+      sent.set(id, queue);
     },
     applyFrame(surface, modals) {
       const seen = new Map<string, { prop: string; value: unknown; has: boolean }>();
@@ -51,8 +57,10 @@ export function createFieldState(): FieldState {
       for (const id of [...held.keys()]) if (!seen.has(id)) { held.delete(id); sent.delete(id); }
       for (const [id, { value, has }] of seen) {
         if (!has || value === undefined || value === null) continue;
-        if (held.has(id) && same(held.get(id), value)) continue;
-        if ((sent.get(id) ?? []).some((v) => same(v, value))) continue; // an echo
+        if (held.has(id) && same(held.get(id), value)) { sent.delete(id); continue; } // the plugin caught up
+        const queue = sent.get(id) ?? [];
+        const idx = queue.findIndex((v) => same(v, value));
+        if (idx !== -1) { sent.set(id, queue.slice(idx + 1)); continue; } // an echo: drop it and every older entry
         held.set(id, value);
         sent.delete(id);
       }

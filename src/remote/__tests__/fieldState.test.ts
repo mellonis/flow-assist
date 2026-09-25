@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { ECHO_RING, createFieldState } from '../fieldState';
+import { ECHO_QUEUE, createFieldState } from '../fieldState';
 
 test('a value the person typed is held; the plugin echoing it back is not a write', () => {
   const s = createFieldState();
@@ -12,20 +12,20 @@ test('a value the person typed is held; the plugin echoing it back is not a writ
   // A value the person never typed is a write.
   s.applyFrame(['TextInput', { id: 'name', value: 'goodbye' }], {});
   expect(s.get('name')).toBe('goodbye');
-  // The ring was cleared by the write: the old typed values are no longer echoes.
+  // The queue was cleared by the write: the old typed values are no longer echoes.
   s.applyFrame(['TextInput', { id: 'name', value: 'hello' }], {});
   expect(s.get('name')).toBe('hello');
 });
 
-test('the ring keeps the last 32 sent values', () => {
+test('the queue keeps the last 32 sent values', () => {
   const s = createFieldState();
-  for (let i = 0; i <= ECHO_RING; i++) s.set('f', `v${i}`);
-  s.applyFrame(['TextInput', { id: 'f', value: 'v0' }], {}); // fell off the ring: a write
+  for (let i = 0; i <= ECHO_QUEUE; i++) s.set('f', `v${i}`);
+  s.applyFrame(['TextInput', { id: 'f', value: 'v0' }], {}); // fell off the queue: a write
   expect(s.get('f')).toBe('v0');
   const t = createFieldState();
-  for (let i = 0; i <= ECHO_RING; i++) t.set('f', `v${i}`);
-  t.applyFrame(['TextInput', { id: 'f', value: 'v1' }], {}); // still in the ring: an echo
-  expect(t.get('f')).toBe(`v${ECHO_RING}`);
+  for (let i = 0; i <= ECHO_QUEUE; i++) t.set('f', `v${i}`);
+  t.applyFrame(['TextInput', { id: 'f', value: 'v1' }], {}); // still in the queue: an echo
+  expect(t.get('f')).toBe(`v${ECHO_QUEUE}`);
 });
 
 test('a first frame with a value seeds the field; an empty field starts empty', () => {
@@ -68,4 +68,46 @@ test('deep equality: an object value echoed back is an echo', () => {
   expect(s.get('multi')).toEqual([1, 2]);
   s.applyFrame(['ListMultiSelect', { id: 'multi', value: [3] }], {});
   expect(s.get('multi')).toEqual([3]);
+});
+
+test('a checkbox value revisited within the queue does not poison the field: the matched entry drains, so the SAME frame repeated next is a write', () => {
+  const s = createFieldState();
+  s.set('ok', true); s.set('ok', false); s.set('ok', true);
+  s.applyFrame(['Checkbox', { id: 'ok', checked: false }], {});
+  expect(s.get('ok')).toBe(true); // consumed as an echo of the middle `false`
+  s.applyFrame(['Checkbox', { id: 'ok', checked: false }], {});
+  expect(s.get('ok')).toBe(false); // the same frame again finds no entry left: a write
+});
+
+test('a text value revisited within the queue does not poison the field: the matched entry drains, so the SAME frame repeated next is a write', () => {
+  const t = createFieldState();
+  t.set('q', 'a'); t.set('q', ''); t.set('q', 'hi');
+  t.applyFrame(['TextInput', { id: 'q', value: '' }], {});
+  expect(t.get('q')).toBe('hi'); // consumed as an echo
+  t.applyFrame(['TextInput', { id: 'q', value: '' }], {});
+  expect(t.get('q')).toBe(''); // a write
+});
+
+test('echoes drain the queue in order, oldest first', () => {
+  const s = createFieldState();
+  s.set('name', 'h'); s.set('name', 'he'); s.set('name', 'hel');
+  s.applyFrame(['TextInput', { id: 'name', value: 'h' }], {});
+  expect(s.get('name')).toBe('hel');
+  s.applyFrame(['TextInput', { id: 'name', value: 'he' }], {});
+  expect(s.get('name')).toBe('hel');
+  s.applyFrame(['TextInput', { id: 'name', value: 'hel' }], {});
+  expect(s.get('name')).toBe('hel'); // equal to the held value: the queue empties
+  // `he` is older than the head and is already gone: a write, not an echo.
+  s.applyFrame(['TextInput', { id: 'name', value: 'he' }], {});
+  expect(s.get('name')).toBe('he');
+});
+
+test('a frame equal to the held value empties the queue', () => {
+  const s = createFieldState();
+  s.set('x', 'a'); s.set('x', 'b');
+  s.applyFrame(['TextInput', { id: 'x', value: 'b' }], {});
+  expect(s.get('x')).toBe('b');
+  // `a` was in the queue, but the frame above emptied it: this is a write, not an echo.
+  s.applyFrame(['TextInput', { id: 'x', value: 'a' }], {});
+  expect(s.get('x')).toBe('a');
 });
