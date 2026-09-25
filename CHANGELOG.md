@@ -5,6 +5,14 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **Loading a big tool group whole no longer sits in every later request unread.**
+  Loading a 26-tool group and a 17-tool group for five tools actually used once cost
+  the conversation ~60k tokens of unused schemas on every round after, up from ~6k. A
+  group of more than 12 tools now shows its cost in the tool index (about how many
+  tokens loading it whole would add to every later request) and `tools_load` no
+  longer loads such a group whole by name alone — it answers with that group's own
+  index instead, so the model asks for the tools it actually needs. Naming tools
+  individually still always works, at any group size.
 - **A tool call with the wrong arguments is told what is wrong, not run with a key
   quietly `undefined`.** Before a tool runs, the host checks the call against the
   tool's own declared schema: a required parameter it left out, a value of the wrong

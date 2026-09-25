@@ -916,6 +916,20 @@ there is no `/fullscreen`.
   the tool it tests; `tool-loading.e2e.test.ts` opts in. The context meter measures
   `requestTools(...)`, what is really sent. `host:tools_list` still lists every name;
   the index made it mostly redundant.
+- **A group past `BIG_GROUP_TOOLS` (12, `tool-loading.ts`) carries its own cost and is
+  never loaded whole by `group` alone.** A session that loaded a 26-tool group and a
+  17-tool group for five actually-used tools once carried ~60k tokens of unused
+  schemas on every later round, up from ~6k. `estimateGroupTokens` (pure: the JSON
+  size of the group's tools' own `function` — name, description, parameters — divided
+  by four, rounded to the nearest 100) prices it; a group over the line gets a line of
+  its own in the index, `toolIndex`: `N tools — load the ones you need by name; the
+  whole group costs about X tokens in every later request`, above its per-tool lines.
+  `tools_load({ group })` for such a group loads nothing and answers with the same
+  cost line and the group's own index instead, so the model names what it actually
+  needs next; one of `BIG_GROUP_TOOLS` or fewer still loads whole, as before.
+  `{ names }` is untouched either way — a tool by name always loads, and so does a
+  group's name found there (`tool-loading.ts`'s existing `inGroup` fallback), whatever
+  its size — naming things individually is never the expensive path.
 - **A call is checked against the tool's own schema before it runs.** `toolArgsError`
   (`src/assistant/tool-args.ts`, pure) reads `ToolDef.function.parameters` as JSON
   Schema (`z.fromJSONSchema`, the same reader `src/remote/adapter.ts` compiles a

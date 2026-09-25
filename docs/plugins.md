@@ -160,6 +160,11 @@ What the host does with it, and what it expects back:
   `tools_load` also accepts the name qualified with its group, `<group>:<name>`, as
   well as the bare name the index shows — the index reads naturally either way, and a
   model that qualifies it is not refused for a round.
+- **A group of more than 12 tools carries its own cost in the index**, and
+  `tools_load` loads it by `group` only up to that size — a bigger one answers with
+  its own index and a line naming about how many tokens loading it whole would cost,
+  so the model asks for the tools it actually needs by name instead. Naming tools
+  individually (`names`) always works, whatever the group's size.
 - **A group may describe itself, beyond what its tools' own descriptions say** — set
   `description` on the group (`{ id, tools, exec, description }`) for guidance that
   belongs to the whole group: how its data is shaped, its vocabulary, what to check

@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 import {
-  TOOLS_LOAD, createToolSet, deferredTools, notLoadedError, runToolsLoad, sanitizeGroupDescription, toolIndex, toolLoadingMode, toolSummary, toolsToSend,
+  BIG_GROUP_TOOLS, TOOLS_LOAD, createToolSet, deferredTools, estimateGroupTokens, notLoadedError, runToolsLoad, sanitizeGroupDescription, toolIndex,
+  toolLoadingMode, toolSummary, toolsToSend,
   type CatalogEntry,
 } from '../tool-loading';
 
@@ -174,6 +175,64 @@ test('on demand, the full description arrives once, on the first tool the group 
   const readFile = sentOnDemand.find((t) => t.function.name === 'read_file')!;
   expect(listDir.function.description.startsWith('Read this before calling anything here.\n\n')).toBe(true);
   expect(readFile.function.description).toBe('read_file does a thing. More words here.');
+});
+
+// ─── A big group's cost (BIG_GROUP_TOOLS) ────────────────────────────────────────
+const bigCatalog = (n: number, group = 'big'): CatalogEntry[] => Array.from({ length: n }, (_, i) => entry(`${group}_${i}`, group));
+
+test('estimateGroupTokens is the JSON size of the tools\' own definitions, chars/4, rounded to the nearest 100', () => {
+  const es: CatalogEntry[] = Array.from({ length: 40 }, (_, i) => ({
+    name: `tool_${i}`,
+    group: 'g',
+    def: {
+      type: 'function' as const,
+      function: {
+        name: `tool_${i}`,
+        description: `Does thing number ${i}. A bit more filler text here to pad it out nicely.`,
+        parameters: { type: 'object', properties: { a: { type: 'string' }, b: { type: 'number' } }, required: ['a'] },
+      },
+    },
+  }));
+  expect(estimateGroupTokens(es)).toBe(2100);
+});
+
+test('a group over BIG_GROUP_TOOLS carries its cost in the index; a smaller one does not', () => {
+  const idx = toolIndex(deferredTools(catalog)); // repo(2) + acme(1), well under the line
+  expect(idx).not.toContain('tokens in every later request');
+
+  const big = bigCatalog(BIG_GROUP_TOOLS + 1);
+  const bigIdx = toolIndex(deferredTools(big));
+  expect(bigIdx.startsWith(`big:\n${BIG_GROUP_TOOLS + 1} tools — load the ones you need by name; the whole group costs about `)).toBe(true);
+  expect(bigIdx).toContain('tokens in every later request');
+  expect(bigIdx).toContain('- big_0 — big_0 does a thing.');
+
+  const exactly = toolIndex(deferredTools(bigCatalog(BIG_GROUP_TOOLS, 'boundary')));
+  expect(exactly).not.toContain('tokens in every later request');
+});
+
+test('tools_load { group } over BIG_GROUP_TOOLS is not loaded whole — the answer is its index and why', () => {
+  const big = bigCatalog(BIG_GROUP_TOOLS + 1);
+  const set = createToolSet();
+  const answer = runToolsLoad({ group: 'big' }, big, set);
+  expect(answer.startsWith(`"big" has ${BIG_GROUP_TOOLS + 1} tools — load the ones you need by name`)).toBe(true);
+  expect(answer).toContain('tokens in every later request');
+  expect(answer).toContain('- big_0 — big_0 does a thing.');
+  expect(answer).toContain(`- big_${BIG_GROUP_TOOLS} — big_${BIG_GROUP_TOOLS} does a thing.`);
+  expect(set.names()).toEqual([]); // refused, not loaded
+});
+
+test('a group of exactly BIG_GROUP_TOOLS still loads whole, as today', () => {
+  const twelve = bigCatalog(BIG_GROUP_TOOLS, 'boundary');
+  const set = createToolSet();
+  expect(runToolsLoad({ group: 'boundary' }, twelve, set)).toBe(`Loaded: ${twelve.map((e) => e.name).join(', ')} — call them now.`);
+  expect(set.names().length).toBe(BIG_GROUP_TOOLS);
+});
+
+test('names is unaffected by the big-group refusal: a group named there still loads whole', () => {
+  const big = bigCatalog(BIG_GROUP_TOOLS + 1);
+  const set = createToolSet();
+  expect(runToolsLoad({ names: ['big'] }, big, set)).toBe(`Loaded: ${big.map((e) => e.name).join(', ')} — call them now.`);
+  expect(set.names().length).toBe(BIG_GROUP_TOOLS + 1);
 });
 
 test('a group description is sanitized: control characters gone, a frame-like line taken out, NBSP kept', () => {

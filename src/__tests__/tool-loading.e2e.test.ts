@@ -112,3 +112,41 @@ test('ai.toolLoading all sends every tool in full and offers no tools_load', asy
   expect(toolNames(sent(model, 0))).not.toContain('tools_load');
   ui.app.unmount();
 });
+
+// A guest whose group is over BIG_GROUP_TOOLS (src/assistant/tool-loading.ts) — big
+// enough that loading it whole would carry its cost into every later round.
+const bigPlugin = (make: Make) => make('acme', {
+  tools: [{
+    id: 'acme',
+    tools: Array.from({ length: 13 }, (_, i) => ({
+      type: 'function' as const,
+      function: { name: `acme_${i}`, description: `Does thing ${i}. More words here.`, parameters: { type: 'object', properties: {} } },
+    })),
+    exec: async () => 'ok',
+  }],
+} as never);
+
+test('a group over BIG_GROUP_TOOLS is not loaded whole; the model reads its index and loads by name instead', async () => {
+  const model = new ScriptedModel();
+  model.script(
+    [{ tool: 'tools_load', args: { group: 'acme' } }],
+    [{ tool: 'tools_load', args: { names: ['acme_0', 'acme_1'] } }],
+    [{ text: 'Loaded two.' }],
+  );
+  const ui = await bootApp(model, 100, 28, (make) => [bigPlugin(make)], { ai: { baseUrl: 'http://scripted.model', model: 'scripted' }, sessions: { dir: fs.mkdtempSync(path.join(os.tmpdir(), 'fa-load-big-')) } });
+  await ui.press('F');
+  await ask(ui, model, 'load the acme tools', 3);
+
+  // Round 1: the whole-group ask is refused with the group's own index and why —
+  // never with the 13 full tool definitions.
+  const refusal = String(sent(model, 1).messages.find((m) => m.role === 'tool')!.content);
+  expect(refusal).toContain('"acme" has 13 tools');
+  expect(refusal).toContain('tokens in every later request');
+  expect(refusal).toContain('acme_0');
+  expect(toolNames(sent(model, 1))).not.toContain('acme_0');
+  // Round 3: the two named tools, and only those, are loaded.
+  expect(toolNames(sent(model, 2))).toEqual(expect.arrayContaining(['acme_0', 'acme_1']));
+  expect(toolNames(sent(model, 2))).not.toContain('acme_2');
+  expect(ui.backend.lastFrame).toContain('Loaded two.');
+  ui.app.unmount();
+});

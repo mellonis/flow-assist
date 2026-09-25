@@ -92,12 +92,40 @@ export function deferredTools(catalog: CatalogEntry[]): Map<string, CatalogEntry
   return new Map(catalog.filter((e) => e.group !== ALWAYS_LOADED_GROUP && e.name !== TOOLS_LOAD).map((e) => [e.name, e]));
 }
 
+// Above this many tools, a group is priced in the index (`toolIndex`) and
+// `tools_load { group }` no longer loads it whole (`runToolsLoad`) — a request that
+// loaded a 26-tool group and a 17-tool group for five actually-used tools once cost
+// ~60k tokens on every later round of the conversation, up from ~6k. `{ names }` is
+// unaffected either way: naming what is needed always works.
+export const BIG_GROUP_TOOLS = 12;
+
+// A rough cost of a group's tools were it loaded whole: the JSON size of their own
+// definitions (name, description, parameters — what actually rides on the wire),
+// divided by four (English/code text runs a little under four characters per token),
+// rounded to the nearest 100 so the number reads as an estimate, not a promise.
+export function estimateGroupTokens(entries: readonly CatalogEntry[]): number {
+  const chars = JSON.stringify(entries.map((e) => e.def.function)).length;
+  return Math.round(chars / 4 / 100) * 100;
+}
+
+// One line per tool, `- name — first sentence`, in the index and in the answer that
+// steers a big group's load by name instead of whole.
+function groupLines(es: readonly CatalogEntry[]): string {
+  return es.map((e) => `- ${e.name} — ${toolSummary(e.def.function.description)}`).join('\n');
+}
+
+// What a big group's cost reads as, in the index and in `runToolsLoad`'s refusal —
+// one phrase, so the two never drift apart.
+function costPhrase(es: readonly CatalogEntry[]): string {
+  return `load the ones you need by name; the whole group costs about ${estimateGroupTokens(es)} tokens in every later request`;
+}
+
 // The index: one line per group, `name — what it does` per tool, with the group's own
 // description (an MCP server's `instructions`, say — `groupDescriptions`, keyed by the
 // RAW group id as `CatalogEntry.group` carries it) as one line under its heading, cut
-// the same way a tool's first sentence is. Stable for a given set of tools — it does
-// not change as tools are loaded, so the request's prefix stays the same from turn to
-// turn.
+// the same way a tool's first sentence is, and — past `BIG_GROUP_TOOLS` — its cost as
+// a line of its own. Stable for a given set of tools — it does not change as tools are
+// loaded, so the request's prefix stays the same from turn to turn.
 export function toolIndex(deferred: Map<string, CatalogEntry>, groupDescriptions: Map<string, string> = new Map()): string {
   const byGroup = new Map<string, CatalogEntry[]>();
   for (const e of deferred.values()) {
@@ -107,7 +135,8 @@ export function toolIndex(deferred: Map<string, CatalogEntry>, groupDescriptions
   return [...byGroup].map(([g, es]) => {
     const raw = groupDescriptions.get(es[0]!.group);
     const heading = raw ? `${toolSummary(sanitizeGroupDescription(raw), 200)}\n` : '';
-    return `${g}:\n${heading}${es.map((e) => `- ${e.name} — ${toolSummary(e.def.function.description)}`).join('\n')}`;
+    const cost = es.length > BIG_GROUP_TOOLS ? `${es.length} tools — ${costPhrase(es)}\n` : '';
+    return `${g}:\n${heading}${cost}${groupLines(es)}`;
   }).join('\n');
 }
 
@@ -207,6 +236,15 @@ export function runToolsLoad(args: Record<string, unknown>, catalog: CatalogEntr
   const inGroup = (label: string) => [...deferred.values()].filter((e) => groupLabel(e.group) === label).map((e) => e.name);
   if (group) {
     const tools = inGroup(group);
+    // Past BIG_GROUP_TOOLS, `group` alone never loads it — that request is answered
+    // with the group's own index and why, so the model names what it needs next,
+    // rather than paying the whole group's cost on every round from here on. `names`
+    // is untouched by this: a group named there (below) still loads whole, and so
+    // does one of BIG_GROUP_TOOLS or fewer.
+    if (tools.length > BIG_GROUP_TOOLS) {
+      const es = [...deferred.values()].filter((e) => groupLabel(e.group) === group);
+      return `"${group}" has ${es.length} tools — ${costPhrase(es)}:\n${groupLines(es)}`;
+    }
     if (tools.length) wanted.push(...tools);
     else if (group === ALWAYS_LOADED_GROUP) always.push(`group "${group}"`);
     else unknown.push(`group "${group}"`);
