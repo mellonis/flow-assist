@@ -999,6 +999,11 @@ there is no `/fullscreen`.
   newest session is continued unless `/clear` closed it (`sessions.resume: false`
   turns this off); `/clear` starts a new one and keeps the old on
   `/resume` (`/resume <n>` opens it). The last 400 messages are kept, 50 sessions.
+  A session's `title` is fixed at its first save — the first non-empty line of the first
+  thing the person wrote (a `!command` otherwise), whitespace collapsed and cut at
+  `TITLE_MAX` (70) code points (`cutTitle` / `sessionTitle`) — and kept in the chat's
+  `titleRef`, so it never drifts as old messages are trimmed; `/title <text>` renames it,
+  `/title` alone says it. No title is ever asked of the model.
   An image is saved as a ref (`images`, `imageSeq` — see "Images" under The chat),
   never as its bytes; the e2e test asserts the file holds no base64.
   **Under `bun test` with no `sessions.dir` nothing touches disk** (`sessionsDir` →

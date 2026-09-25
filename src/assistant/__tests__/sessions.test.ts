@@ -4,9 +4,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  KEEP_MESSAGES, SESSION_VERSION, acquireLock, closeSession, listSessions, loadSession, lockPath, makeLockToken,
-  newSessionId, normalizeViews, pruneSessions, releaseLock, saveSession, sessionFingerprint, sessionFingerprintsEqual,
-  sessionRev, sessionToContinue, sessionsDir, type Session,
+  KEEP_MESSAGES, SESSION_VERSION, TITLE_MAX, acquireLock, closeSession, cutTitle, listSessions, loadSession, lockPath,
+  makeLockToken, newSessionId, normalizeViews, pruneSessions, releaseLock, saveSession, sessionFingerprint,
+  sessionFingerprintsEqual, sessionRev, sessionTitle, sessionToContinue, sessionsDir, type Session,
 } from '../sessions.ts';
 
 const tmp = () => path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'sess-')), 'sessions');
@@ -334,4 +334,17 @@ test('pruneSessions sweeps a .lock file whose session is already gone, but leave
   pruneSessions(dir, 0);
   expect(fs.existsSync(lockPath(dir, orphanId))).toBe(false);
   expect(fs.existsSync(lockPath(dir, heldOrphanId))).toBe(true);
+});
+
+// ─── titles ────────────────────────────────────────────────────────────────────
+
+test('a title is the first line the person wrote, whitespace collapsed, cut at TITLE_MAX code points', () => {
+  expect(cutTitle('  fix the build\nit fails on CI\n')).toBe('fix the build');
+  expect(cutTitle('\n\n  second   try  ')).toBe('second try');
+  const long = 'ж'.repeat(TITLE_MAX + 5);
+  expect(Array.from(cutTitle(long))).toHaveLength(TITLE_MAX);
+  expect(cutTitle(long).endsWith('…')).toBe(true);
+  expect(cutTitle('   ')).toBe('');
+  expect(sessionTitle([{ role: 'note', content: 'kept' }, { role: 'user', content: 'first line\nsecond line' }])).toBe('first line');
+  expect(sessionTitle([{ role: 'shell', command: 'git status\n', content: '' }])).toBe('$ git status');
 });

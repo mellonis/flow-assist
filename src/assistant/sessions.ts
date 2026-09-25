@@ -95,7 +95,17 @@ const fileOf = (dir: string, id: string) => {
 };
 
 // Something the person said, or a `!command` they ran.
-const bySomeone = (m: Record<string, unknown>) => m.role === 'user' || m.role === 'shell';
+export const bySomeone = (m: Record<string, unknown>) => m.role === 'user' || m.role === 'shell';
+
+// A title is ONE line: the first non-empty line of what it is made from, runs of
+// whitespace collapsed, cut at TITLE_MAX code points with an ellipsis. Nothing asks the
+// model for one.
+export const TITLE_MAX = 70;
+export function cutTitle(text: string): string {
+  const line = (text.split('\n').find((l) => l.trim()) ?? '').replace(/\s+/g, ' ').trim();
+  const points = Array.from(line);
+  return points.length > TITLE_MAX ? `${points.slice(0, TITLE_MAX - 1).join('')}…` : line;
+}
 
 // The first thing the person asked — what the list shows; a session that holds only
 // `!commands` is named by the first of them.
@@ -103,8 +113,7 @@ export function sessionTitle(messages: Record<string, unknown>[]): string {
   // The host's own ask after a `!!command` is not something the person asked.
   const first = messages.find((m) => m.role === 'user' && m.hostAsk !== true && String(m.content ?? '').trim());
   const ran = first ? undefined : messages.find((m) => m.role === 'shell' && typeof m.command === 'string');
-  const t = (first ? String(first.content ?? '') : ran ? `$ ${String(ran.command)}` : '').replace(/\s+/g, ' ').trim();
-  return t.length > 70 ? `${t.slice(0, 69)}…` : t;
+  return cutTitle(first ? String(first.content ?? '') : ran ? `$ ${String(ran.command)}` : '');
 }
 
 // A session worth keeping has something the person said or ran in it.

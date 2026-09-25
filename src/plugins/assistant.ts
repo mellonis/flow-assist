@@ -23,7 +23,7 @@ import { copyTarget, copyToClipboard } from '../assistant/copy.js';
 import { createShellState, formatShell, nextCwd, realOf, runShell, shellLimits, shellOutcome, shellRoots, tildePath, type ShellResult } from '../assistant/shell.js';
 import { findInstructions, instructionsBlock, instructionsNote, type ProjectInstructions } from '../assistant/project-instructions.js';
 import {
-  KEEP_SESSIONS, SESSION_VERSION, acquireLock, closeSession, flushOnExit, listSessions, loadSession, lockPath,
+  KEEP_SESSIONS, SESSION_VERSION, acquireLock, closeSession, cutTitle, flushOnExit, listSessions, loadSession, lockPath,
   makeLockToken, newSessionId, pruneSessions, releaseLock, saveSession, sessionFingerprint, sessionFingerprintsEqual,
   sessionTitle, sessionWhen, sessionsDir, type Session, type SessionFingerprint,
 } from '../assistant/sessions.js';
@@ -65,7 +65,7 @@ import type { PluginApi } from '../runtime/plugin-api.js';
 // sessions directory is known (`chatCommandDefs` in the chat).
 type ChatCommand = HistoryCommand & ChatCommandDef;
 const CHAT_COMMAND_DEFS: ChatCommand[] = [
-  { name: 'compact' }, { name: 'context' }, { name: 'copy' }, { name: 'image' }, { name: 'resume' }, { name: 'clear' }, { name: 'memory' },
+  { name: 'compact' }, { name: 'context' }, { name: 'copy' }, { name: 'image' }, { name: 'resume' }, { name: 'title' }, { name: 'clear' }, { name: 'memory' },
   { name: 'auto', values: ['reads', 'all', 'off'] }, { name: 'notes', values: NOTES_MODES }, { name: 'mode', values: CHAT_MODES }, { name: 'log' }, { name: 'exit' },
 ];
 const CHAT_COMMANDS = CHAT_COMMAND_DEFS.map((c) => c.name);
@@ -747,6 +747,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const sessConf = (host.config.sessions ?? {}) as { resume?: unknown; keep?: unknown };
           const sessionIdRef = ui.useRef('');
           const createdAtRef = ui.useRef('');
+          // The session's title: fixed at its first save from the first line the person
+          // wrote (`sessionTitle`), so it never drifts as the oldest messages are
+          // trimmed; `/title` sets it. '' — not decided yet.
+          const titleRef = ui.useRef('');
           const saveTimer = ui.useRef<ReturnType<typeof setTimeout> | null>(null);
           // One token for this chat instance's whole life (not per process — see
           // sessions.ts, "Ownership lock"): what makes a lock this instance's own.
@@ -770,8 +774,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               sessionIdRef.current = newSessionId(); createdAtRef.current = new Date().toISOString(); fingerprintRef.current = NO_FILE;
               if (sessDir) acquireLock(sessDir, sessionIdRef.current, lockToken); // a fresh id — nothing else could hold it
             }
+            if (!titleRef.current) titleRef.current = sessionTitle(msgsRef.current as Record<string, unknown>[]);
             return {
-              version: SESSION_VERSION, id: sessionIdRef.current, title: '', createdAt: createdAtRef.current, updatedAt: new Date().toISOString(),
+              version: SESSION_VERSION, id: sessionIdRef.current, title: titleRef.current, createdAt: createdAtRef.current, updatedAt: new Date().toISOString(),
               messages: msgsRef.current as Record<string, unknown>[], api: apiRef.current as unknown as Record<string, unknown>[],
               summary: summaryRef.current, plan: planRef.current.snapshot(), usage: usageRef.current,
               // A /command or !command in the field is being run, not drafted (it was
@@ -788,8 +793,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             };
           };
           // The fork note's text.
-          const forkNoteText = (messages: Record<string, unknown>[], id: string): string =>
-            `Session "${sessionTitle(messages) || id}" was changed elsewhere — saved this conversation as a new session.`;
+          const forkNoteText = (title: string, id: string): string =>
+            `Session "${title || id}" was changed elsewhere — saved this conversation as a new session.`;
           // `silent` — nothing shown, no notify — for the paths that write on the way
           // out (exit, unmount): the screen is not going to be read again, though the
           // fork itself (never overwrite what changed) still happens even there.
@@ -812,7 +817,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 const forked: Session = { ...snap, id: forkedId, createdAt: now, updatedAt: now };
                 const fp = saveSession(sessDir, forked);
                 sessionIdRef.current = forkedId; createdAtRef.current = now; fingerprintRef.current = fp;
-                const text = forkNoteText(snap.messages, snap.id);
+                const text = forkNoteText(snap.title, snap.id);
                 if (!opts.silent) {
                   setMessages((cur) => [...cur, { role: 'note', content: text }]);
                   host.notify();
@@ -839,6 +844,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // is instead caught — the next save finds the disk has moved and forks.
           const applySession = (s: Session, fingerprint: SessionFingerprint) => {
             sessionIdRef.current = s.id; createdAtRef.current = s.createdAt;
+            titleRef.current = s.title;
             fingerprintRef.current = fingerprint;
             apiRef.current = s.api as unknown as ChatMessage[];
             summaryRef.current = s.summary;
@@ -1998,6 +2004,23 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 host.notify();
                 return;
               }
+              case 'title': {
+                // `/title <text>` names this session — kept in its file, so a restart keeps
+                // it; `/title` alone says what it is called. Nothing is sent.
+                const text = cutTitle(arg);
+                setField('');
+                if (!text) {
+                  const now = titleRef.current || sessionTitle(msgsRef.current as Record<string, unknown>[]);
+                  (host.services as Record<string, any>).showMessage?.(now ? `This session is «${now}» — /title <text> renames it` : 'This session has no title yet — /title <text> gives it one');
+                  host.notify();
+                  return;
+                }
+                titleRef.current = text;
+                writeSession(); // nothing said yet — kept here and written with the first save
+                (host.services as Record<string, any>).showMessage?.(`Renamed to «${text}»`);
+                host.notify();
+                return;
+              }
               case 'resume': {
                 // The saved sessions; with a number — go back to that one. The session
                 // being left is written first, so it is on the list to come back to.
@@ -2050,7 +2073,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 writeSession();
                 if (sessDir && sessionIdRef.current) { try { closeSession(sessDir, sessionIdRef.current); } catch { /* not fatal */ } }
                 releaseCurrentLock();
-                sessionIdRef.current = ''; createdAtRef.current = ''; fingerprintRef.current = NO_FILE;
+                sessionIdRef.current = ''; createdAtRef.current = ''; fingerprintRef.current = NO_FILE; titleRef.current = '';
                 if (tickRef.current) { clearInterval(tickRef.current); tickRef.current = null; }
                 abortRef.current?.abort(); abortRef.current = null;
                 if (pendingRef.current) settleConfirm(false);

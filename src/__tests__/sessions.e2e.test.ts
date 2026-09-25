@@ -341,3 +341,35 @@ test('the lock is released on unmount and on /clear', async () => {
   expect(fs.readdirSync(dir2).filter((n) => n.endsWith('.lock'))).toHaveLength(0);
   second.ui.app.unmount();
 });
+
+// ─── titles ────────────────────────────────────────────────────────────────────
+
+test('/title renames the session: the name is in its file and stays through later messages and a restart', async () => {
+  const dir = dirOf();
+  const first = await talk(dir, 'как тренд по ABC-341?', 'вверх');
+  await first.ui.press('escape', 'escape'); // closing writes at once: the file exists before /title
+  await first.ui.press('F');
+  await first.ui.type('/title Тренды за неделю');
+  await first.ui.press('return');
+  await settle(4);
+  const name = fs.readdirSync(dir).find((n) => n.endsWith('.json'))!;
+  const read = () => JSON.parse(fs.readFileSync(path.join(dir, name), 'utf8'));
+  expect(read().title).toBe('Тренды за неделю');
+
+  first.model.script([{ text: 'держится' }]);
+  await first.ui.type('а по ABC-342?');
+  await first.ui.press('return');
+  await settle(20);
+  await first.ui.press('escape', 'escape'); // closing writes at once
+  expect(read().title).toBe('Тренды за неделю');
+  first.ui.app.unmount();
+
+  const ui = await bootApp(new ScriptedModel(), 100, 28, undefined, { sessions: { dir } });
+  await settle(6);
+  await ui.press('F');
+  await ui.type('/resume');
+  await ui.press('return');
+  await settle(4);
+  expect(ui.backend.lastFrame).toMatch(/1\. Тренды за неделю — /);
+  ui.app.unmount();
+});
