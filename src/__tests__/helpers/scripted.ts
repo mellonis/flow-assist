@@ -26,6 +26,7 @@ import { assembleToolRegistry } from '../../loader/tools.ts';
 import { renderApp } from '../../runtime/app.tsx';
 import type { ClipboardImage } from '../../assistant/images.ts';
 import type { InteractiveDeps } from '../../assistant/interactive.ts';
+import type { RestartingTransport } from '../../remote/transport.ts';
 import { renderChatModal, renderHelp, renderLogModal, renderReminder } from '../../views/modals.ts';
 
 export type Step =
@@ -289,8 +290,10 @@ export const settle = async (n = 10) => { for (let i = 0; i < n; i++) { await fl
 // otherwise — most tests are about what the chat draws, and their frames were written
 // against the window. `null` leaves the config as the test gave it (a fresh config
 // docks the chat as a panel), and a test whose `extra` says `mode` or `fullscreen` for
-// the assistant is left alone too.
-export async function bootApp(model: ScriptedModel, cols = 100, rows = 28, guests?: (make: Make) => Plugin[], extra: Record<string, unknown> = {}, opts: { toastMs?: number; scheme?: 'light' | 'dark' | 'unknown'; clipboardImage?: () => ClipboardImage; pluginsNote?: string; interactive?: InteractiveDeps; chatMode?: 'panel' | 'window' | 'full' | null; backend?: TestBackend } = {}) {
+// the assistant is left alone too. `opts.remote` enables one remote plugin through the
+// loader's real path: its manifest is written into a temp `plugins-enabled/<name>/`
+// and the loader is handed `transport` for it instead of starting a process.
+export async function bootApp(model: ScriptedModel, cols = 100, rows = 28, guests?: (make: Make) => Plugin[], extra: Record<string, unknown> = {}, opts: { toastMs?: number; scheme?: 'light' | 'dark' | 'unknown'; clipboardImage?: () => ClipboardImage; pluginsNote?: string; interactive?: InteractiveDeps; chatMode?: 'panel' | 'window' | 'full' | null; backend?: TestBackend; remote?: { manifest: Record<string, unknown>; transport: RestartingTransport } } = {}) {
   process.env.LLM_TOKEN = 'scripted';
   model.install();
   // Sessions go to a fresh temp dir unless a test names one: a test must never write
@@ -310,9 +313,19 @@ export async function bootApp(model: ScriptedModel, cols = 100, rows = 28, guest
   if (chatMode && !(assistant && ('mode' in assistant || 'fullscreen' in assistant))) {
     config.plugins = { ...(config.plugins as Record<string, unknown> | undefined), assistant: { ...assistant, mode: chatMode } };
   }
-  const repo = { enabledPlugins: async () => [], list: async () => [] } as never;
   const renders = { chat: renderChatModal, help: renderHelp, log: renderLogModal, reminder: renderReminder };
-  const plugins = await loadPlugins({ config, repo, renders: renders as never });
+  let enabled: string[] = [];
+  let enabledDir: string | undefined;
+  if (opts.remote) {
+    const name = String(opts.remote.manifest.name);
+    enabledDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-enabled-'));
+    fs.mkdirSync(path.join(enabledDir, name));
+    fs.writeFileSync(path.join(enabledDir, name, 'manifest.json'), JSON.stringify(opts.remote.manifest));
+    enabled = [name];
+  }
+  const repo = { enabledPlugins: async () => enabled, list: async () => [] } as never;
+  const remoteTransport = opts.remote ? () => opts.remote!.transport : undefined;
+  const plugins = await loadPlugins({ config, repo, renders: renders as never, enabledDir, remoteTransport });
   if (guests) plugins.push(...guests(makeFactory(config as never)));
   const tools = assembleToolRegistry({ plugins, config, repo });
   const backend = opts.backend ?? new TestBackend(cols, rows);

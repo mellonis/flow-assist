@@ -138,7 +138,8 @@ test('a close draws "plugin stopped" and a restart says hello again', async () =
   await tick();
   t.closeFromPlugin();
   await tick();
-  expect(p.keycaps!({} as never)).toEqual([]); // the surface is gone with the process
+  // The surface was up: it stays, saying so, its keys gone with the process.
+  expect(p.keycaps!({} as never)).toEqual(['plugin stopped (exit 1)']);
   const group = (p.tools as Array<{ exec: (n: string, a: Record<string, unknown>, c: unknown) => Promise<unknown> }>)[0];
   if (group) await expect(group.exec('check', {}, {})).rejects.toThrow('plugin stopped');
   t.restart();
@@ -228,4 +229,25 @@ test('a view kind the plugin refuses to render is asked once, not on every draw'
   render({ n: 1 }, { width: 40 });
   await tick();
   expect(asked).toBe(1);
+});
+
+test('a store write is told to the App\'s other remote plugins as their store event — never to the writer, never to another App', async () => {
+  const { remotePlugin: loaderRemotePlugin } = await import('../index');
+  const app = (store: Record<string, unknown>) => ({ ui: {}, host: { store, services: {}, notify: () => {}, config: {}, keys: {} } });
+  const one = { store: {} as Record<string, unknown> };
+  const other = { store: {} as Record<string, unknown> };
+  const heard: Record<string, unknown[]> = { a: [], b: [], c: [] };
+  const plugins: Record<string, { t: ReturnType<typeof fakeTransport> }> = {};
+  for (const [n, store] of [['a', one.store], ['b', one.store], ['c', other.store]] as const) {
+    const t = fakeTransport();
+    t.plugin.onRequest('hello', () => ({ hostApi: 2 }));
+    t.plugin.onNotify('store', (p) => heard[n]!.push(p));
+    const p = await loaderRemotePlugin({ manifest: { ...manifest, name: n }, transport: t.transport, config: {}, make: makeFactory({}) });
+    p.setup!(app(store));
+    plugins[n] = { t };
+  }
+  await plugins.a!.t.plugin.request('host.store.set', { key: 'lesson', value: 3 });
+  await tick();
+  expect(one.store.a).toEqual({ lesson: 3 });
+  expect(heard).toEqual({ a: [], b: [{ key: 'a', value: { lesson: 3 } }], c: [] });
 });

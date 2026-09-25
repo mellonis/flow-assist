@@ -14,7 +14,7 @@
 // transport restarts `hello` runs again from an empty frame.
 import { z } from 'zod';
 import type { ReactElement } from 'react';
-import { createPeer, PeerError, type ConsumeSpec, type Frame, type HelloParams, type HelloResult, type Peer, type StyledSpan, type ToolDecl, type ToolGroupDecl } from '@flow-assist/remote';
+import { createPeer, PeerError, type ConsumeSpec, type Frame, type HelloParams, type HelloResult, type Peer, type StoreEvent, type StyledSpan, type ToolDecl, type ToolGroupDecl } from '@flow-assist/remote';
 import type { Command, Make, Plugin } from '../loader/plugin.js';
 import type { PluginApi } from '../runtime/plugin-api.js';
 import type { ViewLine, ViewRenderer } from '../assistant/views.js';
@@ -34,9 +34,14 @@ export const DEFAULT_IDLE_MS = 60_000;
 // How long a transport that failed its handshake is given to stop, as the transport
 // factory gives any child it stops.
 const HELLO_FAILED_GRACE_MS = 3_000;
-// A furniture handler's priority while one of the plugin's modals is open — the level
-// the host's own modals take — so the modal hears its keys before a surface does.
+// The furniture handler's priority, by the host's convention (docs/plugins.md, keys):
+// an open modal of the plugin's — the level the host's own modals take — hears its keys
+// before any surface; the plugin's surface on screen is a base screen; off screen the
+// plugin still hears the keys that lead in. Never 0: the host's race skips a handler
+// at 0, and the plugin would hear nothing at all.
 const MODAL_PRIORITY = 100;
+const SURFACE_PRIORITY = 50;
+const ENTRY_PRIORITY = 10;
 
 export interface RemotePluginOpts {
   manifest: RemoteManifest & Record<string, unknown>;
@@ -46,6 +51,16 @@ export interface RemotePluginOpts {
   env?: Record<string, string | undefined>;
   log?: (line: string) => void;
   helloTimeoutMs?: number;
+  // Where a `host.store.set` is told to the App's other remote plugins, and where this
+  // one hears theirs (./index.ts holds the one the loader uses). Absent: nobody hears.
+  storeBus?: StoreBus;
+}
+
+export interface StoreBus {
+  // Joins the App whose `host.store` record this is; `hear` is told the others' writes.
+  join(store: object, hear: (ev: StoreEvent) => void): void;
+  // A member's write, told to every member of that App but `from`.
+  said(store: object, from: (ev: StoreEvent) => void, ev: StoreEvent): void;
 }
 
 const EMPTY: Frame & { keys: { consume: ConsumeSpec } } = { surface: null, modals: {}, keycaps: [], context: [], keys: { consume: [] } };
@@ -55,7 +70,13 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 export async function remotePlugin(opts: RemotePluginOpts): Promise<Plugin> {
   const { manifest, transport, make } = opts;
   const name = manifest.name;
-  const log = opts.log ?? (() => {});
+  // Before the App is up a line goes to the loader's `log` (stderr and the loader's
+  // notes); once `setup` has run it goes straight to the host's log, as the plugin's
+  // own line rather than as a `[console.warn]` one.
+  const log = (line: string) => {
+    const pushLog = (api?.host.services as { pushLog?: (l: string) => void } | undefined)?.pushLog;
+    if (pushLog) pushLog(line); else opts.log?.(line);
+  };
   const say = (line: string) => log(`[${name}] ${line}`);
   const saidOnce = new Set<string>();
   const once = (key: string, line: string) => { if (!saidOnce.has(key)) { saidOnce.add(key); say(line); } };
@@ -68,6 +89,9 @@ export async function remotePlugin(opts: RemotePluginOpts): Promise<Plugin> {
   let frame = EMPTY;
   let consume: Consume = canonicalConsume([]);
   let stopped: string | null = null; // `plugin stopped: …` while the process is down
+  // Whether the surface was on screen when the process went: it stays there, saying so,
+  // rather than leaving the person on the start screen with no word of what happened.
+  let stoppedOnScreen = false;
   const fields = createFieldState();
   let api: PluginApi | null = null; // the pair the App hands `setup`, for services, config and notify
   const notify = () => api?.host.notify();
@@ -108,7 +132,15 @@ export async function remotePlugin(opts: RemotePluginOpts): Promise<Plugin> {
     return { content: r?.content ?? '', transcript: r?.transcript ?? [] };
   });
   peer.onRequest('host.store.get', (p) => storeSlice()[param<string>(p, 'key', 'string')] ?? null);
-  peer.onRequest('host.store.set', (p) => { storeSlice()[param<string>(p, 'key', 'string')] = (p as { value?: unknown }).value; notify(); });
+  // Told on to the App's other remote plugins as the host.store key that changed — this
+  // plugin's name — and its slice whole (./index.ts).
+  const hearStore = (ev: StoreEvent) => send('store', ev);
+  peer.onRequest('host.store.set', (p) => {
+    const slice = storeSlice();
+    slice[param<string>(p, 'key', 'string')] = (p as { value?: unknown }).value;
+    if (api) opts.storeBus?.said(api.host.store, hearStore, { key: name, value: slice });
+    notify();
+  });
   peer.onRequest('host.cache.get', (p) => services().cache?.get?.(param<string>(p, 'key', 'string')) ?? null);
   peer.onRequest('host.cache.set', (p) => services().cache?.set?.(param<string>(p, 'key', 'string'), (p as { value?: unknown }).value));
   peer.onRequest('host.cache.del', (p) => services().cache?.del?.(param<string>(p, 'key', 'string')));
@@ -162,6 +194,11 @@ export async function remotePlugin(opts: RemotePluginOpts): Promise<Plugin> {
   // ── the events the host sends ───────────────────────────────────────────────
   const send = (method: string, params?: unknown) => { if (!stopped) peer.notify(method, params); };
   let focused: boolean | null = null; // the last `focus`/`blur` said, told again after a restart
+  // Whether the plugin's side is on screen: not while the chat is `full` and open over
+  // it (the surface stays mounted under the chat, so this is read from the chat's own
+  // `host.store.chat`, not from a mount). Assumed at start, said on change and told
+  // again after a restart.
+  let visible = true;
 
   // ── after a crash ───────────────────────────────────────────────────────────
   // A request in flight when the process goes is rejected at once rather than left to
@@ -173,6 +210,7 @@ export async function remotePlugin(opts: RemotePluginOpts): Promise<Plugin> {
   });
   transport.onClose((why: TransportClose) => {
     stopped = `plugin stopped${why.error ? `: ${why.error}` : why.signal ? ` (${why.signal})` : why.code !== undefined ? ` (exit ${why.code})` : ''}`;
+    stoppedOnScreen = (frame.keycaps ?? []).length > 0;
     frame = EMPTY;
     consume = canonicalConsume([]);
     fields.applyFrame(null, {});
@@ -187,6 +225,7 @@ export async function remotePlugin(opts: RemotePluginOpts): Promise<Plugin> {
     sayHello().then(() => {
       stopped = null;
       if (focused !== null) send(focused ? 'focus' : 'blur');
+      if (!visible) send('visible', { surface: false });
       say('restarted');
       notify();
     }, (e: unknown) => {
@@ -305,9 +344,17 @@ export async function remotePlugin(opts: RemotePluginOpts): Promise<Plugin> {
           }
         }, [terminal.width, terminal.height, surface.width, surface.height]);
         ui.useEffect(() => { focused = hasKeyboard; send(hasKeyboard ? 'focus' : 'blur'); }, [hasKeyboard]);
+        const chat = (host.store as { chat?: { open?: boolean; layout?: string } }).chat;
+        const shown = !(chat?.open && chat.layout === 'full');
+        ui.useEffect(() => { if (shown !== visible) { visible = shown; send('visible', { surface: shown }); } }, [shown]);
+        // A cache flush (`x`) counts up `services.cacheEpoch`; the plugin is told of each
+        // one, never of the count it started with.
+        const epoch = (host.services as { cacheEpoch?: number }).cacheEpoch ?? 0;
+        const seenEpoch = ui.useRef(epoch);
+        ui.useEffect(() => { if (epoch !== seenEpoch.current) { seenEpoch.current = epoch; send('cache.flushed'); } }, [epoch]);
         host.useInputHandler({
           mode: 'consume',
-          priority: (u) => (u.cmdOpen ? 0 : openModals().length ? MODAL_PRIORITY : 0),
+          priority: (u) => (u.cmdOpen ? 0 : openModals().length ? MODAL_PRIORITY : frame.keycaps?.length ? SURFACE_PRIORITY : ENTRY_PRIORITY),
           handler: (key) => {
             if (stopped || !host.hasKeyboard() || !consumes(consume, key)) return false;
             send('key', keyEventFor(key, ownBindings(host)));
@@ -339,8 +386,11 @@ export async function remotePlugin(opts: RemotePluginOpts): Promise<Plugin> {
     usesCache: registration.usesCache ?? false,
     configSchema: registration.schema,
     components,
-    setup: (a) => { api = a as PluginApi; },
+    setup: (a) => { api = a as PluginApi; opts.storeBus?.join(api.host.store, hearStore); },
+    // The guest rule reads `keycaps` alone, so a surface that was up when the process
+    // went keeps one — the stop itself — and stays mounted to say it; its keys are dead.
     keycaps: (a) => {
+      if (stopped) return stoppedOnScreen ? [stopped] : [];
       const keyCap = (a as PluginApi | undefined)?.host?.keyCap ?? (() => '');
       return (frame.keycaps ?? []).flatMap((k) => (typeof k === 'string' ? [k] : keyCap(k.action) ? [`${keyCap(k.action)} ${k.label}`] : []));
     },

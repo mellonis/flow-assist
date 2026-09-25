@@ -29,6 +29,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
 import { THIS_HOST, pluginCompat, readPluginManifest } from './compat.js';
+import { isRemoteManifest, remotePlugin, transportFor } from '../remote/index.js';
 
 // A plugin builder: `build<X>Plugin({ renders, config, make, z })` → Plugin (or a promise of one).
 // `z` is the host's zod, handed to every builder: a plugin with no bundler (and so no
@@ -92,6 +93,9 @@ export interface LoadPluginsOptions {
   // Where the loader says what it skipped and why, a line each — the host puts them in
   // its log. A skip is also said on stderr, as before the app has a screen.
   notes?: string[];
+  // How a remote plugin's process is reached (src/remote/transports.ts); a test hands
+  // in a transport over in-memory streams.
+  remoteTransport?: typeof transportFor;
 }
 
 export async function loadPlugins({
@@ -101,6 +105,7 @@ export async function loadPlugins({
   make = makeFactory(config as MakeFactoryConfig),
   enabledDir,
   notes = [],
+  remoteTransport,
 }: LoadPluginsOptions): Promise<Plugin[]> {
   const skip = (name: string, why: string) => {
     const line = `[plugins] skip ${name}: ${why}`;
@@ -127,12 +132,28 @@ export async function loadPlugins({
       continue;
     }
     // Whether it can run here is read from its manifest before any of its code runs.
-    const compat = pluginCompat(readPluginManifest(join(enabledDir, name)), THIS_HOST);
+    const manifest = readPluginManifest(join(enabledDir, name));
+    const compat = pluginCompat(manifest, THIS_HOST);
     if (!compat.ok) {
       skip(name, compat.reason);
       continue;
     }
     if (compat.note) notes.push(`[plugins] ${name} ${compat.note}`);
+    if (isRemoteManifest(manifest)) {
+      // A plugin in another language: a process the host talks to, built into a
+      // Plugin by the adapter — the rest of the loader never knows (docs/plugins.md,
+      // "A plugin in another language").
+      try {
+        const log = (line: string) => { console.warn(line); notes.push(line); };
+        const transport = (remoteTransport ?? transportFor)(manifest, join(enabledDir, name), { log });
+        const plugin = await remotePlugin({ manifest, transport, config, make, log });
+        plugin.description ??= manifestDescription(join(enabledDir, name));
+        plugins.push(plugin);
+      } catch (e) {
+        skip(name, (e as Error).message);
+      }
+      continue;
+    }
     try {
       // Import the entry FILE (not the symlinked directory), so the compiled binary
       // and the runtime resolve plugins the same way — see resolvePluginEntry.
