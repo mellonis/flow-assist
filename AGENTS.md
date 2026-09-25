@@ -96,12 +96,15 @@ past incident may motivate a rule; keep the rule, drop the incident.
 
 ```
 flow-assist/
-├── package.json               # host; workspace root for plugins-available/*
+├── package.json               # host; root of plugins-available/*, workspace root for packages/*
 ├── docs/
 │   ├── plugins.md             # "Writing a plugin" — the contract for plugin authors
 │   └── demo/                  # the README's GIFs
 ├── examples/
-│   └── notes/                 # the plugin docs/plugins.md builds; run by the host's tests
+│   ├── notes/                 # the plugin docs/plugins.md builds; run by the host's tests
+│   └── remote-login/          # a remote plugin; docs/plugins.md, "A plugin in another language"
+├── packages/
+│   └── remote/                # @flow-assist/remote — the protocol's types, codec, runPlugin
 ├── plugins-available/
 │   ├── gitlab/                # glab_api tool group (no UI)
 │   ├── mcp/                   # tools of MCP servers, over HTTP or stdio (no UI)
@@ -316,6 +319,51 @@ board.
 - The block is centred on both axes; inside it rows keep a common left edge.
 - The start screen draws keys with `bindingGlyph(keys[action])` and offers nothing
   that is unbound.
+
+### Remote plugins
+
+A plugin can be a separate process, in any language, speaking JSON-RPC 2.0 over its
+stdin and stdout — the protocol as its authors read it is docs/plugins.md, "A plugin
+in another language". `remotePlugin` (`src/remote/adapter.ts`) turns that conversation
+into an ordinary `Plugin`; nothing else in the host knows a plugin is remote.
+
+- The plugin sends its whole screen as a `frame` notification whenever it changes,
+  never a diff; React reconciles it like any other render. `renderTree`
+  (`src/remote/tree.ts`) turns a frame's tree into elements over the same `ui`
+  components a JS plugin draws with.
+- **A stateful node's value is the host's, not the plugin's.** `src/remote/fieldState.ts`
+  keeps it by `id` and checks a frame's value against a ring of the last 32 values the
+  host itself sent as events for that id: a match is the plugin echoing a moment the
+  host already knows, and is not a write.
+- **Keys are consumed by what the frame declares**, canonicalised once per frame
+  (`src/remote/keys.ts`); the `key` event carries three names — the terminal's own,
+  the canonical one bindings are compared by, and the action it resolves to under the
+  plugin's own `hello.keys` and the person's config.
+- `keycaps` with `{ action, label }` draws `` `${host.keyCap(action)} ${label}` ``, so
+  a rebound key never needs the plugin to know.
+- `viewRenderers` are built from the manifest's `views`, not `hello` — every renderer
+  must exist before any tool has run. Each answers from a cache keyed by
+  `(kind, data, width)`, behind a dim `▸ kind` placeholder while `view.render` is in
+  flight.
+- `hello` runs once, at load, with a 10 s timeout; the guest rule
+  ("A plugin is a guest", above) still holds a remote plugin to it, since `keycaps`
+  reads the last frame the same way for a remote plugin as for one in the host's own
+  process.
+- **The `Transport` seam** (`src/remote/transport.ts`) is what the protocol layer
+  knows of a process: lines in, lines out, a close. `src/remote/transports.ts` is
+  where the loader gets one for a manifest's `run` or `connect` — a stub today
+  (`transportFor` throws `remote transports are not built yet` for either field);
+  `loadPlugins`'s tests inject their own (`LoadPluginsOptions.remoteTransport`).
+- **A crash**: the transport closes, the surface says `plugin stopped`, every tool in
+  flight and every new one throws it, and `onRestart` runs `hello` again from an
+  empty frame.
+- **`host.store` has no change hook**, so a JS plugin may read another's slice but is
+  never told when it changes. **`host.store.set` by a remote plugin is different**: it
+  fans out as a `store` notification to every OTHER remote plugin of the same app
+  (`src/remote/index.ts`'s `storeBus`) — a JS plugin's own writes reach no one this
+  way.
+- `hello.locale` is read from the environment in gettext's own order
+  (`src/remote/locale.ts`): `FLOW_ASSIST_LOCALE`, then `LC_ALL`, `LC_MESSAGES`, `LANG`.
 
 ### Where the chat is: panel, window, full
 
@@ -2065,8 +2113,9 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
 
 ## Testing
 
-From the host root: `bun run typecheck && bun test ./src ./scripts` (the path
-filter keeps a locally dropped-in plugin's suite out of the host run).
+From the host root: `bun run typecheck && bun test ./src ./scripts ./packages` (the
+path filter keeps a locally dropped-in plugin's suite out of the host run).
+`./packages` is `@flow-assist/remote`'s own suite (the protocol, its codec, `runPlugin`).
 Plugin tests: `cd plugins-available/<name> && bun test`.
 The host suite must pass with `plugins-available/` empty — a host test never loads a real plugin.
 
@@ -2123,3 +2172,5 @@ keeps both:
   `manifest.json` and `package.json` alongside the host's (a test keeps every
   bundled plugin equal to `hostVersion()`, naming the one that drifts). A
   third-party plugin, kept in its own repository, versions itself.
+  `packages/remote`'s own `package.json` version equals the host's the same way (a
+  test holds the two together).

@@ -355,6 +355,302 @@ setup: ({ host }) => { /* once, before any component mounts: seed a store */ },
   modal base under `theme.modals` (`bg`, `text`, `border`, `fieldBg`, …). Where the
   terminal has not said which it is, they are `'default'`: the terminal's own.
 
+## A plugin in another language
+
+Everything above builds a plugin in the host's own process. A plugin can instead be a
+separate process, in any language: the host talks to it over JSON-RPC 2.0, one message
+per line, on its standard input and output. The host draws; the plugin describes its
+whole screen — a *frame* — and sends it again whenever it changes. `@flow-assist/remote`
+is a TypeScript package that speaks the protocol for you (`runPlugin`, below); a plugin
+in another language speaks the same lines directly.
+
+### The manifest
+
+A remote plugin's `manifest.json` carries the same `hostApi` and `flowtty` fields as any
+plugin (checked the same way — [Compatibility](#compatibility)) plus how its process is
+reached:
+
+```json
+{ "name": "remote-login", "version": "0.1.0", "hostApi": 2, "flowtty": ">=1.0.0-alpha.28",
+  "run": ["bun", "src/index.ts"] }
+```
+
+- **`run`** — the command, relative to the plugin's directory, started without a shell.
+- **`connect`** — a socket NAME under the host's own `sockets/` directory (never a path),
+  for a plugin that runs as a shared server several hosts talk to. A manifest with
+  either field is a remote plugin.
+- **`views`** — the view kinds the plugin renders (below), so the host collects a
+  renderer for each one at start, before any tool has run.
+
+Today neither field is wired into the loader: `transportFor`
+(`src/remote/transports.ts`) throws `remote transports are not built yet` for `run`
+and `connect` alike. Until a host build reaches it, a remote plugin runs through its
+own tests, or a test that hands it a transport of its own — as
+`src/__tests__/example-remote-login.e2e.test.ts` does.
+
+### The example
+
+This is the whole of `examples/remote-login/src/index.ts` — a sign-in form the person
+opens with `S`:
+
+```ts
+import { runPlugin, type HostEvent } from '@flow-assist/remote';
+
+type Model = { name: string; pass: string; focus: 'name' | 'pass' | 'login'; note: string; open: boolean };
+
+const next = (f: Model['focus']): Model['focus'] => (f === 'name' ? 'pass' : f === 'pass' ? 'login' : 'name');
+
+await runPlugin<Model, HostEvent>({
+  hello: { name: 'remote-login', keys: { open: 'S' }, entry: ['open'] },
+  init: () => ({ name: '', pass: '', focus: 'name', note: '', open: false }),
+  update: async (e, m, host) => {
+    switch (e.type) {
+      case 'key':
+        if (e.key.action === 'open' && !m.open) return { ...m, open: true };
+        if (!m.open) return m;
+        if (e.key.id === 'tab') return { ...m, focus: next(m.focus) };
+        if (e.key.id === 'escape') return { ...m, open: false };
+        if (e.key.id === 'return' && m.focus === 'login') {
+          if (!m.name || !m.pass) return { ...m, note: 'both fields are required' };
+          await host.showMessage('Signed in');
+          return { ...m, note: `signed in as ${m.name}` };
+        }
+        return m;
+      case 'changed': return e.id === 'name' ? { ...m, name: String(e.value ?? '') } : e.id === 'pass' ? { ...m, pass: String(e.value ?? '') } : m;
+      case 'submitted': return { ...m, focus: 'login' };
+      default: return m;
+    }
+  },
+  view: (m) => (!m.open
+    ? { surface: null, keycaps: [], keys: { consume: ['S'] } }
+    : {
+        surface: ['Box', { flexDirection: 'column', padding: 1 },
+          ['Text', { bold: true }, 'Sign in'],
+          ['Text', { dim: true }, 'Name'], ['TextInput', { id: 'name', isFocused: m.focus === 'name' }],
+          ['Text', { dim: true }, 'Password'], ['TextInput', { id: 'pass', mask: true, isFocused: m.focus === 'pass' }],
+          ['Text', { inverse: m.focus === 'login' }, '[ Log in ]'],
+          ['Text', { dim: true }, m.note]],
+        keycaps: [{ action: 'open', label: 'form' }, 'tab next', '⏎ log in', 'esc close'],
+        context: [{ label: 'Sign in', text: `name: ${m.name || '(empty)'} · focus: ${m.focus}` }],
+        keys: { consume: ['tab', 'enter', 'esc'] },
+      }),
+});
+```
+
+`view` returns `null` for `surface` and an empty `keycaps` while closed — a plugin's
+surface is mounted only while its `keycaps` is non-empty, the same rule any plugin's
+`view` slot follows ("Screens", above).
+
+### The conversation
+
+Every message is `{"jsonrpc": "2.0", ...}`, one per line, ids independent in each
+direction. The host makes these requests:
+
+| Request | Params | Result |
+|---|---|---|
+| `hello` | `{ hostApi, flowtty, size: { terminal, surface }, config, idleMs, locale? }` | the plugin's registration: `{ hostApi, name?, commands?, keys?, entry?, tools?, aiTools?, configSchema?, colors?, modalColors?, usesCache? }` |
+| `tool.run` | `{ name, args, call: { id } }` | `{ result, views? }` — `views` is `[{ kind, data }]`, each a block the manifest's `views` declares (below) |
+| `command.run` | `{ name, arg }` | `{}` |
+| `view.render` | `{ kind, data, width }` | `{ lines: StyledSpan[][] }` — a line is a list of spans, each `{ text, bold?, dim?, color? }`; `underline` and `background` are accepted but not drawn |
+| `shutdown` | — | `{}` |
+
+`hello` times out at 10 s; a plugin that answers late, with a `hostApi` the host does
+not carry, or whose registration is malformed (its own name, keys, tools or
+`configSchema` do not match the shape the host expects) is refused and the process is
+stopped like any other refused handshake. `shutdown` waits for an update already in
+flight up to 1 000 ms before closing the connection; a plugin over stdio also ends on
+its own once its stdin closes, which is what happens when the host that spawned it is
+gone.
+
+The host sends these notifications — what changed, told once, by itself:
+
+| Notification | Params |
+|---|---|
+| `key` | `{ name, id, ctrl?, meta?, shift?, action? }` |
+| `changed` / `submitted` / `cancelled` / `toggled` | `{ id, value? }` |
+| `resize` | `{ terminal, surface }` |
+| `focus` / `blur` | — |
+| `visible` | `{ surface }` |
+| `store` | `{ key, value }` — another remote plugin's write: `key` its name, `value` its whole `host.store` slice, told to every OTHER remote plugin of the same app |
+| `cache.flushed` | — |
+| `afterWrite` | — |
+
+The plugin sends exactly one notification back, whenever its state changes: `frame`,
+whose params are the plugin's whole visible state —
+`{ surface?, modals?, keycaps?, context?, keys? }` — never a diff. A frame over 4 MiB,
+or nested past 64 deep, is dropped whole and the previous one stays on screen.
+
+The plugin also makes requests of its own, the services `@flow-assist/remote`'s `Host`
+wraps. The host's own handlers answer most of these with nothing to report, which a
+JSON-RPC result with no value carries as `null`, never `{}`:
+
+| Request | Params | Result |
+|---|---|---|
+| `host.showMessage` | `{ text }` | `null` |
+| `host.pushLog` | `{ text }` | `null` |
+| `host.chatLLM` | `{ messages }` | `{ content, transcript }` |
+| `host.copyToClipboard` | `{ text }` | `null` |
+| `host.store.get` | `{ key }` | the plugin's own value, or `null` |
+| `host.store.set` | `{ key, value }` | `null` |
+| `host.cache.get` / `.set` / `.del` | `{ key }` / `{ key, value }` / `{ key }` | the value or `null` / `null` / `null` |
+| `host.config.get` | — | the plugin's own slice of the config |
+
+### The tree
+
+`surface` and each of `modals` is a node: `[type, props?, ...children]` — `type` one
+of the host's own components (`Box`, `Text`, `Markdown`, `Table`, `Link`, `ScrollBox`,
+`Select`, `ListSelect`, `ListMultiSelect`, `Checkbox`, `TextInput`), `props` a JSON
+object, children more nodes or strings. `props` may be left out, so `[type, child,
+...]` is also a node. Two props are reserved: `key` (a list's, React's own) and `id` —
+a stateful node's, and the source of its events. A function prop never crosses the
+wire; a node with an `id` gets its events by name instead:
+
+| Type | Value prop | Events |
+|---|---|---|
+| `TextInput`, `ListSelect`, `ListMultiSelect` | `value` | `changed`, `submitted`, `cancelled` |
+| `Select` | `value` | `changed` |
+| `Checkbox` | `checked` | `toggled` |
+| `ScrollBox` | `offset` | none — the offset is kept for the host's own scrolling, never told to the plugin |
+
+An unknown `type` draws as one dim `▸ <type>` line, as a missing view renderer does
+(below). `props.error` on a `TextInput` is shown as its validation message.
+
+### Field state and the echo rule
+
+A stateful node's value — a field's text, a list's cursor, a checkbox, a scroll
+offset — lives on the host, keyed by its `id`, so typing never waits on a round trip
+to the plugin. A frame's value for that id is checked against the last 32 values the
+host itself sent as an event for it: a match is the plugin echoing a moment the host
+already knows and changes nothing, while a value that is neither queued nor already
+held is a deliberate write from the plugin, applied at once. An id missing from a
+whole frame loses its state.
+
+### Keys
+
+A frame's `keys.consume` says which keys the plugin takes, written in the same words
+a person writes a binding in (`enter`, `esc`, `ctrl+r`), plus `'printable'` for
+anything that types a character and `'*'` for every key — canonicalised once per
+frame, so a plugin authoring `consume` never needs the terminal's own vocabulary
+(`return` for Enter, `escape` for Esc). The `key` event, in the other direction, IS in
+that vocabulary: `name` is exactly what the terminal reports, and `id` is that same
+name with any held modifiers folded in, in a fixed order (`ctrl+`, `alt+`, `shift+` —
+the last only on a named key, since Shift on a bare character is already the
+character); for an unmodified key the two are equal (`{ name: "return", id: "return"
+}`). `action` is present only when the key resolves, under the person's own config, to
+one of the actions the plugin's `hello.keys` declares. The mouse is never consumable,
+whatever `consume` says.
+
+`keycaps` is the footer's hints for the plugin's current screen: each entry is a
+literal string (drawn as it is) or `{ action, label }`, drawn as the action's CURRENT
+binding — `host.keyCap(action)` — followed by the label, and left out entirely while
+the action is unbound.
+
+### Modals
+
+`frame.modals` is `{ name: Tree | null }` — a modal that is not null is open. An open
+modal of the plugin's takes keys before its own surface, drawn as its own root over
+the plugin's own side of the screen, the same way the host's own modals are.
+
+### Views
+
+The manifest's `views` lists the kinds the plugin can draw a block for; the host
+builds a renderer for each one when the plugin loads, from `view.render` — never from
+`hello` — since every renderer must exist before any tool has run. A tool's result may
+report `{ kind, data }` views alongside its `result` (the `tool.run` table, above); a
+kind the manifest does not declare is dropped, said once. While a rendered block is
+first asked for, it draws as a dim `▸ <kind>` placeholder; the answer is cached by
+`(kind, data, width)`, a refusal (an undeclared kind, say) is not asked again, and a
+timeout is retried on the next redraw. Attaching views from `runPlugin`'s own tools —
+the TypeScript runtime below — is not yet exposed; a tool there returns its bare
+result.
+
+### Locale
+
+`hello.locale` is read the way gettext reads the environment:
+`FLOW_ASSIST_LOCALE` first, then `LC_ALL`, `LC_MESSAGES`, `LANG` — the first non-empty
+wins, `C` and `POSIX` mean no language, and a POSIX spelling becomes a BCP 47 tag
+(`ru_RU.UTF-8` → `ru-RU`). Absent when nothing says a language.
+
+### Errors
+
+A JSON-RPC error's `code`:
+
+- `-32000` — no answer inside the request's own timeout (`hello`'s 10 s, `view.render`'s
+  2 s, `command.run`'s 5 s, 60 s default for a request the plugin makes of the host).
+- `-32001` — the connection ended while the request was pending.
+- `-32601` — the method is not one either side answers.
+- `-32602` — a required field on a `host.*` request is missing or the wrong type.
+- `-32603` — a handler threw.
+
+A line that does not parse as a JSON-RPC message is dropped, never answered with an
+error.
+
+### The wire, for any language
+
+What follows is the host and the example above, captured live over stdio (frames
+trimmed where the shape repeats — the same one shown in full elsewhere in this
+transcript): `→` is the host writing to the plugin's stdin, `←` the plugin writing to
+its stdout. Nothing here is specific to `@flow-assist/remote` — a plugin in C, or any
+language that reads stdin and writes stdout, exchanges lines exactly like these:
+
+```
+→ {"jsonrpc":"2.0","id":1,"method":"hello","params":{"hostApi":2,"flowtty":"1.0.0-alpha.28","size":{"terminal":{"width":80,"height":24},"surface":{"width":80,"height":22}},"config":{},"idleMs":60000}}
+← {"jsonrpc":"2.0","method":"frame","params":{"surface":null,"keycaps":[],"keys":{"consume":["S"]}}}
+← {"jsonrpc":"2.0","id":1,"result":{"hostApi":2,"name":"remote-login","keys":{"open":"S"},"entry":["open"],"commands":[],"tools":[]}}
+→ {"jsonrpc":"2.0","method":"resize","params":{"terminal":{"width":100,"height":29},"surface":{"width":100,"height":23}}}
+→ {"jsonrpc":"2.0","method":"focus"}
+← {"jsonrpc":"2.0","method":"frame","params":{"surface":null,"keycaps":[],"keys":{"consume":["S"]}}}
+→ {"jsonrpc":"2.0","method":"key","params":{"name":"S","id":"S","action":"open"}}
+← {"jsonrpc":"2.0","method":"frame","params":{"surface":["Box",{"flexDirection":"column","padding":1},["Text",{"bold":true},"Sign in"],["Text",{"dim":true},"Name"],["TextInput",{"id":"name","isFocused":true}],["Text",{"dim":true},"Password"],["TextInput",{"id":"pass","mask":true,"isFocused":false}],["Text",{"inverse":false},"[ Log in ]"],["Text",{"dim":true},""]],"keycaps":[{"action":"open","label":"form"},"tab next","⏎ log in","esc close"],"context":[{"label":"Sign in","text":"name: (empty) · focus: name"}],"keys":{"consume":["tab","enter","esc"]}}}
+→ {"jsonrpc":"2.0","method":"changed","params":{"id":"name","value":"a"}}
+→ {"jsonrpc":"2.0","method":"changed","params":{"id":"name","value":"an"}}
+→ {"jsonrpc":"2.0","method":"changed","params":{"id":"name","value":"ann"}}
+← {"jsonrpc":"2.0","method":"frame", … "context":[{"label":"Sign in","text":"name: ann · focus: name"}], …}
+→ {"jsonrpc":"2.0","method":"key","params":{"name":"tab","id":"tab"}}
+← {"jsonrpc":"2.0","method":"frame", … "context":[{"label":"Sign in","text":"name: ann · focus: pass"}], …}
+→ {"jsonrpc":"2.0","method":"changed","params":{"id":"pass","value":"s"}}
+→ … five more "changed", one per letter of "secret" …
+→ {"jsonrpc":"2.0","method":"key","params":{"name":"tab","id":"tab"}}
+← {"jsonrpc":"2.0","method":"frame", … "context":[{"label":"Sign in","text":"name: ann · focus: login"}], …}
+→ {"jsonrpc":"2.0","method":"key","params":{"name":"return","id":"return"}}
+← {"jsonrpc":"2.0","id":1,"method":"host.showMessage","params":{"text":"Signed in"}}
+→ {"jsonrpc":"2.0","id":1,"result":null}
+← {"jsonrpc":"2.0","method":"frame","params":{"surface":["Box",{"flexDirection":"column","padding":1},["Text",{"bold":true},"Sign in"],["Text",{"dim":true},"Name"],["TextInput",{"id":"name","isFocused":false}],["Text",{"dim":true},"Password"],["TextInput",{"id":"pass","mask":true,"isFocused":false}],["Text",{"inverse":true},"[ Log in ]"],["Text",{"dim":true},"signed in as ann"]],"keycaps":[{"action":"open","label":"form"},"tab next","⏎ log in","esc close"],"context":[{"label":"Sign in","text":"name: ann · focus: login"}],"keys":{"consume":["tab","enter","esc"]}}}
+→ {"jsonrpc":"2.0","id":2,"method":"shutdown","params":{}}
+← {"jsonrpc":"2.0","id":2,"result":{}}
+```
+
+`resize` and `focus` arrive right after `hello`, before any key: the host tells a
+freshly connected plugin its real size and that it has the keyboard, once the App is
+up (a test's own defaults differ from a real terminal's). Typing `ann` sends one
+`changed` PER LETTER, not one for the whole word — this is what the echo rule above
+guards against: the host's own field already reads `ann` by the time the plugin's own
+frame catches up, and none of the three lag it back down. The host's answer to the
+plugin's own request is `null` (a JSON-RPC result with nothing in it), never `{}` —
+only the plugin answers `shutdown` that way, since it has something to send back.
+
+### The TypeScript runtime
+
+[`packages/remote/README.md`](../packages/remote/README.md) covers `runPlugin` — the
+Elm-shaped runtime that speaks this protocol for a plugin written in TypeScript, so
+its author writes `init`/`update`/`view` and never a JSON-RPC line by hand. A throwing
+`update` or `view` there — the author's own bug — fails only that one step: the model
+stays exactly what it was, one line goes to stderr
+(`[<name>] update failed: <message>`), and the next event runs normally.
+
+### What a remote plugin cannot do
+
+- **Read another plugin's part of the store synchronously.** `host.store.get` answers
+  only the calling plugin's own slice; another plugin's writes arrive as `store`
+  events instead, never as a value to fetch.
+- **Be told when a JS plugin writes to the store.** `host.store` is a plain record
+  with no change hook: a JS plugin may read it, but nothing tells it, or any other JS
+  plugin, when it changes. Only a remote plugin's own writes are told to anyone — as
+  `store` events to every OTHER remote plugin of the same app.
+
+Running a plugin as a shared server (`connect`, `--serve`) is documented once the
+transport that runs it exists.
+
 ## The chat's two hooks
 
 - `chatContext({ ui, host })` — what the plugin's screens show right now, as a list of items

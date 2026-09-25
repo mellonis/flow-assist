@@ -5,6 +5,14 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **A plugin can be a separate process, in any language.** The host talks to it over
+  JSON-RPC 2.0, one message per line, on its stdin and stdout: the host draws, the
+  plugin describes its whole screen and sends it again whenever it changes
+  (docs/plugins.md, "A plugin in another language"). `@flow-assist/remote` speaks the
+  protocol for a plugin written in TypeScript (`runPlugin`), and
+  `examples/remote-login` is a sign-in form built on it. **For plugin authors:**
+  nothing changes for a plugin in the host's own process; the host API number is
+  unchanged.
 - **flowtty 1.0.0-alpha.31.** A wide glyph — an emoji in the chat, a CJK character —
   used to draw as two blank cells until the row was selected: the grid counted one
   cell per code point and backed the cursor up one column after painting it, so the
