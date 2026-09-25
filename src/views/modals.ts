@@ -1076,8 +1076,9 @@ function ChatMessages({ messages, rowOpts, palette: m, errorColor, onViewport, s
     // line stays in view (under the pinned question). The moment the rows arriving at
     // the end would carry it past the top, the list stops with it as the top row, and
     // the rest grows below. Only that crossing stops it — the list was following, the
-    // line was in view — so a person who scrolled away, or came back to the end on
-    // their own, is left where they are, and a list mounted anew only looks first.
+    // line was in view — so a person who scrolled away is left where they are, one
+    // who comes back to the end past that line is followed from there, and a list
+    // mounted anew only looks first.
     const atEnd = x.scrollTop >= x.maxScrollTop;
     const lead = x.viewportHeight >= MIN_ROWS_TO_PIN ? 1 : 0;
     const answer = answerRow.current;

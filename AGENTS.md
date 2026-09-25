@@ -1754,12 +1754,16 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     `scrollTop` and the rest grows below, the list's own "scrolled up" state. Only
     that CROSSING stops it: the list was at the end with the row in view at its last
     measurement (`following`, false until it has measured once, so a list mounted anew
-    mid-answer only looks), so a person who scrolled away, or came back to the end on
-    their own, keeps their place, and at the end it follows again. The row is the
-    round streaming now (`liveMark`) or the answer's `first` row — never a step's, and
-    never one from before the person's last `user`/`shell` message, so a `!command`'s
-    output does not stop on an older answer; the turn's steps and trail above it
-    scroll away with the question. It counts only for a turn the list saw being
+    mid-answer only looks). So a person who scrolled away keeps their place; one who
+    comes back to the end follows the answer from there — the list stops again only
+    if the answer's first row is still in view then and later crosses the top. The
+    row is the round streaming now (`liveMark`) or the answer's `first` row — never a
+    step's, and never one from before the person's last `user`/`shell` message, so a
+    `!command`'s output does not stop on an older answer; the turn's steps and trail
+    above it scroll away with the question. A held round that turns out to carry a
+    call folds into its step row under the held position, and the box keeps that
+    position through the shrink, so the next round's answer grows under it (a test
+    holds this: it rests on flowtty's box keeping its offset). It counts only for a turn the list saw being
     written (`streaming` with that question the last thing sent — a whole answer may
     arrive in the render that ends its turn, and a resumed session is no answer
     arriving) and only while that turn's message is the LAST one, so a background

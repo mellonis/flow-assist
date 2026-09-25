@@ -156,7 +156,9 @@ test('a background result landing under an anchored answer does not move the rea
   const model = new ScriptedModel();
   model.script(
     [{ tool: 'background', args: { task: 'count the TODO comments' } }],
-    [{ text: items('answer line', 1, 40) }],
+    // The turn is held open, so the result — shown only once no turn is being
+    // written — can only land after the answer has stopped at its first line.
+    [{ text: items('answer line', 1, 40) }, { hold: true }],
     [{ text: 'There are 14 TODO comments.' }],
   );
   const ui = await bootApp(model, 100, ROWS);
@@ -165,10 +167,15 @@ test('a background result landing under an anchored answer does not move the rea
   await ui.press('return');
   await settle(40);
   expect(model.requests).toHaveLength(3);
-  const before = conversation(ui.backend.lastFrame);
   expect(topRow(ui.backend.lastFrame, 'count the TODOs in the background')).toContain('answer line 01');
-  await settle(20);
-  expect(conversation(ui.backend.lastFrame)).toEqual(before);
+  const before = conversation(ui.backend.lastFrame);
+  model.release();
+  await settle(40);
+  // The turn ended and the result landed; the reader was not moved.
+  expect(ui.backend.lastFrame).not.toContain('Esc stops');
+  // (The gutter is left out: the live mark became the answer's `ƒ`.)
+  const text = (rows: string[]) => rows.map((r) => r.slice(3));
+  expect(text(conversation(ui.backend.lastFrame))).toEqual(text(before));
   // It did land — below the fold, where the conversation ends.
   for (let i = 0; i < 4; i++) await ui.press('pagedown');
   expect(ui.backend.lastFrame).toContain('There are 14 TODO comments.');
@@ -210,5 +217,71 @@ test('a background result landing under a short answer is followed, as it always
   // the answer that grew.
   expect(ui.backend.lastFrame).toContain('There are 14 TODO comments.');
   expect(ui.backend.lastFrame).not.toContain('answer line 01');
+  ui.app.unmount();
+});
+
+test('back at the end by the wheel mid-answer, the list follows again', async () => {
+  const model = new ScriptedModel();
+  model.script([{ text: items('answer line', 1, 25) }, { hold: true }, { text: `\n${items('answer line', 26, 40)}` }]);
+  const ui = await bootApp(model, 100, ROWS);
+  await ui.press('F');
+  await ui.type('print forty lines');
+  await ui.press('return');
+  await settle(20);
+  expect(topRow(ui.backend.lastFrame, 'print forty lines')).toContain('answer line 01');
+  for (let i = 0; i < 10; i++) ui.backend.wheel('down', 20, 8);
+  await settle();
+  expect(ui.backend.lastFrame).toContain('answer line 25');
+
+  model.release();
+  await settle(20);
+  expect(ui.backend.lastFrame).toContain('answer line 40');
+  ui.app.unmount();
+});
+
+test('a session resumed with a long last answer opens at its end — no answer is arriving', async () => {
+  const model = new ScriptedModel();
+  model.script([{ text: items('answer line', 1, 40) }]);
+  const ui = await bootApp(model, 100, ROWS);
+  await ui.press('F');
+  await ui.type('print forty lines');
+  await ui.press('return');
+  await settle(20);
+  expect(topRow(ui.backend.lastFrame, 'print forty lines')).toContain('answer line 01');
+  await ui.type('/clear');
+  await ui.press('return');
+  await settle(20);
+  await ui.type('/resume 1');
+  await ui.press('return');
+  await settle(20);
+  expect(ui.backend.lastFrame).toContain('answer line 40');
+  expect(topRow(ui.backend.lastFrame, 'print forty lines')).not.toContain('answer line 01');
+  ui.app.unmount();
+});
+
+// The list holds a row by keeping the box's own scroll position once it is off the
+// end; a round that turned out to carry a call folds its rows into one step row, and
+// the box keeps that position through the shrink rather than going back to the end.
+test('an anchored round that turns into a step leaves the reader where the turn began', async () => {
+  const model = new ScriptedModel();
+  model.script(
+    [{ text: items('round one', 1, 25) }, { hold: true }, { tool: 'datetime', args: {} }],
+    [{ text: items('round two', 1, 10) }, { hold: true }, { text: `\n${items('round two', 11, 40)}` }],
+  );
+  const ui = await bootApp(model, 100, ROWS);
+  await ui.press('F');
+  await ui.type('go');
+  await ui.press('return');
+  await settle(20);
+  expect(topRow(ui.backend.lastFrame, 'go')).toContain('round one 01');
+  model.release();
+  await settle(20);
+  model.release();
+  await settle(20);
+  const top = topRow(ui.backend.lastFrame, 'go');
+  expect(top).toContain('▸');
+  expect(top).toContain('round one');
+  expect(ui.backend.lastFrame).toContain('round two 01');
+  expect(ui.backend.lastFrame).not.toContain('round two 40');
   ui.app.unmount();
 });
