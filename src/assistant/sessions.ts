@@ -308,7 +308,7 @@ export function searchText(messages: unknown[]): string {
       : '';
     if (t) out = out ? `${t}\n${out}` : t;
   }
-  return out.slice(-SEARCH_TEXT_MAX).toLowerCase();
+  return out.toLowerCase().slice(-SEARCH_TEXT_MAX); // lower-cased first: a few characters grow
 }
 
 // Newest first. One file is parsed at a time and dropped once its row is made, so the

@@ -83,6 +83,9 @@ test('^x asks y/n before a delete — n or Esc keeps it; the held one and this c
   expect(press(asked, 'n').state.mode).toBe('list');
   expect(press(asked, 'escape').actions).toEqual([]);
   expect(press(asked, 'y').actions).toEqual([{ kind: 'delete', id: 'c' }]);
+  expect(press(asked, ctrl('y')).actions).toEqual([]); // a bare letter answers, not a chord
+  expect(press(asked, { name: 'y', meta: true }).actions).toEqual([]);
+  expect(press(asked, ctrl('n')).state.mode).toBe('delete');
   const held = press(pickerStart(ROWS), 'down', ctrl('x')).state;
   expect(held.mode).toBe('list');
   expect(held.notice).toBe('"Held one" is open in another flow-assist process — it cannot be deleted');

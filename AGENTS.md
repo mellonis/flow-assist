@@ -1020,19 +1020,30 @@ there is no `/fullscreen`.
   title or that text. ⏎ opens one through `openSession`, the one path `/resume <n>` takes
   too — the session being left written first, a HELD one refused with the note below — so
   everything said here of `/resume` holds for it; ⏎ on a row marked held is refused in the
-  picker's own notice line before that. `^n` is `/new`. `^r` renames: this chat's own
+  picker's own notice line before that. A ⏎ that `openSession` refuses — an answer still
+  coming, or a session another process took since the list was read — keeps the picker
+  up, its rows read again. `^n` is `/new`. `^r` renames: this chat's own
   through its `titleRef`, another through `renameSession`, which takes the lock for the
-  write and never writes a HELD session (its next save would fork) or this chat's own.
-  `^x` deletes after a y/n line of the picker's own — `y` deletes, `n` or Esc keeps, ⏎
-  is no answer — through `removeSession`, refused for a HELD session and for this chat's
+  write and never writes a HELD session (its next save would fork) or this chat's own;
+  a session whose file went since the list was read is said to be gone.
+  `^x` deletes after a y/n line of the picker's own — a bare `y` deletes, `n` or Esc
+  keeps, ⏎ and a chord are no answer — through `removeSession`, refused for a HELD session and for this chat's
   own. A pending y/n or `ask_user` question wins over the picker — drawn in its place and
   answered first (a turn may start while it is up), the picker back once it is settled.
-  The picker holds the keys while up; a mouse button and the wheel never reach the
-  conversation it hides, and closing it mounts the conversation's list anew, at its end.
+  The picker holds the keys while up; while it is DRAWN (no y/n or question in its
+  place — the render's own condition) a mouse button and the wheel never reach the
+  conversation it hides, so a click cannot fold a block or open the pager behind it;
+  with a y/n or question drawn, a click reaches the conversation as it always does. The
+  pager is never drawn while the picker is up either (`pagerShown`). Closing the picker
+  mounts the conversation's list anew, at its end. Closing the chat drops the picker
+  (`closeChat`); the key reads the rows anew. A chat error from before is cleared when
+  the picker opens and on every picker key, since the error line stands in the picker's
+  notice line.
   The key works from the chat (its handler, after a pending y/n or question, and the
   `/context` panel, which holds every key but Esc and ⏎ while up) and from
   any other screen (a trigger of its own: `addTrigger` compares the bare name, and this
-  is a chord).
+  is a chord) — not while the pager, the `:` line or a host modal (the help, the log)
+  holds the keys.
   A session's `title` is fixed at its first save — the first non-empty line of the first
   thing the person wrote (a `!command` otherwise), whitespace collapsed and cut at
   `TITLE_MAX` (70) code points (`cutTitle` / `sessionTitle`) — and kept in the chat's

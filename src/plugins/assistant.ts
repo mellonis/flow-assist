@@ -1997,6 +1997,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             if (!sessDir) { setError('sessions are not saved here (no sessions directory)'); return; }
             if (pendingRef.current || askRef.current) return;
             writeSession();
+            // An error left from before would stand in the picker's notice line and hide
+            // every notice it gives.
+            setError(null);
             setPicker(pickerStart(sessionRows(sessDir, lockToken)));
           };
           // What a picker key asked for (session-picker.ts' `PickerAction`).
@@ -2007,15 +2010,24 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             switch (a.kind) {
               case 'close': setPicker(null); return;
               case 'new': if (startNew()) setPicker(null); return;
-              case 'open': setPicker(null); openSession(a.id, titleOf(a.id)); return;
+              case 'open': {
+                if (openSession(a.id, titleOf(a.id))) { setPicker(null); return; }
+                // Refused — an answer still coming (the error line says so), or taken by
+                // another process since the list was read: the picker stays, re-read.
+                const rows = sessionRows(sessDir, lockToken);
+                const now = rows.find((r) => r.id === a.id);
+                setPicker(pickerReload(p, rows, now?.lock === 'held' ? `"${titleOf(a.id)}" is open in another flow-assist process — it cannot be opened here` : ''));
+                return;
+              }
               case 'rename': {
                 const title = cutTitle(a.title);
+                let outcome = 'renamed';
                 if (a.id === sessionIdRef.current) { titleRef.current = title; writeSession(); }
-                else if (renameSession(sessDir, a.id, title, lockToken) === 'held') {
-                  setPicker(pickerReload(p, sessionRows(sessDir, lockToken), `"${titleOf(a.id)}" is open in another flow-assist process — it cannot be renamed here`));
-                  return;
-                }
-                setPicker(pickerReload(p, sessionRows(sessDir, lockToken), `Renamed to «${title}»`));
+                else outcome = renameSession(sessDir, a.id, title, lockToken);
+                const notice = outcome === 'held' ? `"${titleOf(a.id)}" is open in another flow-assist process — it cannot be renamed here`
+                  : outcome === 'missing' ? `"${titleOf(a.id)}" is gone — its file was removed`
+                  : `Renamed to «${title}»`;
+                setPicker(pickerReload(p, sessionRows(sessDir, lockToken), notice));
                 return;
               }
               case 'delete': {
@@ -2281,6 +2293,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const closeChat = () => {
             disarmEsc();
             setPager(null);
+            setPicker(null); // its rows were read for this visit; the key reads them anew
             writeSession(); // the draft too
             setOpen(false);
             openRef.current = false; // the background flush may fire before the next render
@@ -2422,7 +2435,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // chat decides; the `pager` slot draws it over the whole terminal, laying the
           // block out at the terminal's width through `build`.
           const pagerAt = (state: FoldState, id: string) => ({ ...rowOpts(openInFull(state, id)), viewLines: VIEW_CAPS.lines });
-          const pagerShown = !!pager && open && focused && blockRows(messages as Parameters<typeof blockRows>[0], pagerAt(folds, pager), pager).length > 0;
+          const pagerShown = !!pager && !picker && open && focused && blockRows(messages as Parameters<typeof blockRows>[0], pagerAt(folds, pager), pager).length > 0;
           pagerShownRef.current = pagerShown;
           const pagerSlot = pagerShown && pager ? {
             build: (w: number) => {
@@ -2505,9 +2518,11 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             handler: (key) => {
               if (!open) return false;
               // The picker stands in the conversation's place: a button or the wheel must
-              // not reach the list it hides.
-              if (pickerRef.current && isMouseButton(key.name)) return false;
-              if (pickerRef.current && (key.name === 'wheelup' || key.name === 'wheeldown')) return true;
+              // not reach the list it hides. A pending y/n or question is drawn with the
+              // conversation instead (the render's own condition), and a click reaches it.
+              const pickerDrawn = !!pickerRef.current && !pendingRef.current && !askRef.current;
+              if (pickerDrawn && isMouseButton(key.name)) return false;
+              if (pickerDrawn && (key.name === 'wheelup' || key.name === 'wheeldown')) return true;
               // A press, a drag or a release. It is consumed only when it actually
               // folded something: a drag that reported "handled" per dragged cell
               // would cost a re-render a cell, and every other click must be free.
@@ -2556,6 +2571,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // The picker holds the keys while it is up — after a pending question or
               // y/n, which are drawn over it and answered first.
               if (pickerRef.current) {
+                setError(null); // a new key makes the last error stale; the action may set another
                 const step = pickerKey(pickerRef.current, key, chatWrapWidth(width, fullscreenRef.current));
                 setPicker(step.state);
                 if (step.action) pickerAction(step.action);

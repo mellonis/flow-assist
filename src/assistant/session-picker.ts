@@ -66,8 +66,10 @@ export function pickerKey(state: PickerState, key: PickerKey, width = 60): Picke
   const row = pickerSelected(state);
 
   if (state.mode === 'delete') {
-    if (name === 'y' && row) return { state: { ...state, mode: 'list', notice: '' }, action: { kind: 'delete', id: row.id } };
-    if (name === 'n' || name === 'escape' || !row) return { state: { ...state, mode: 'list', notice: '' } };
+    // A bare letter answers: Ctrl+Y or Alt+Y is not a yes.
+    const bare = !key.ctrl && !key.meta;
+    if (bare && name === 'y' && row) return { state: { ...state, mode: 'list', notice: '' }, action: { kind: 'delete', id: row.id } };
+    if ((bare && name === 'n') || name === 'escape' || !row) return { state: { ...state, mode: 'list', notice: '' } };
     return { state };
   }
 

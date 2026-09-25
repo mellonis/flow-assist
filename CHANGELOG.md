@@ -6,7 +6,7 @@ What each version of flow-assist brought, newest first. The version is the one i
 ## Unreleased
 
 - **Sessions have a picker, titles, and a way to start a new one on purpose.** `/sessions`
-  (or Ctrl+S, from anywhere; `config set keys.sessions <key>` moves it) lists every saved
+  (or Ctrl+S, from any screen; `config set keys.sessions <key>` moves it) lists every saved
   session newest first — its title, when it was last used, its size, and whether another
   flow-assist process has it open — and typing filters by the title and by the words of
   the conversation itself. From the list, ⏎ opens a session (the one you are in is saved
