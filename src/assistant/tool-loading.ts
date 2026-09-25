@@ -93,9 +93,10 @@ export function deferredTools(catalog: CatalogEntry[]): Map<string, CatalogEntry
 }
 
 // Above this many tools, a group is priced in the index (`toolIndex`) and
-// `tools_load { group }` no longer loads it whole (`runToolsLoad`), so its schemas do
-// not ride on every later request for the few tools a turn actually uses. `{ names }`
-// is unaffected either way: naming what is needed always works (CHANGELOG.md).
+// `tools_load { group }` answers with its index lines instead of loading it whole
+// (`runToolsLoad`), so its schemas do not ride on every later request for the few
+// tools a turn actually uses. `{ names }` is unaffected either way: naming what is
+// needed always works (CHANGELOG.md, big groups).
 export const BIG_GROUP_TOOLS = 12;
 
 // A rough cost of a group's tools were it loaded whole: the JSON size of their own
