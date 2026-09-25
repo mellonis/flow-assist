@@ -591,7 +591,7 @@ test('the session picker draws one row per session — title, whose it is, size,
   expect(frame).toMatch(/Held elsewhere\s+in use elsewhere\s+.*500 B · 1 msg\b/);
   expect(frame).toContain('3.0 MB · 2 msgs');
   expect(frame).toContain('filter ›');
-  expect(frame).toContain('↑↓ pick · ⏎ open · ^n new · ^r rename · ^x delete · Esc close');
+  expect(frame).toContain('↑↓ pick · ⏎ open · Esc close · ^n new · ^r rename · ^x delete');
   handle.unmount();
 });
 
@@ -608,5 +608,27 @@ test('the picker counts what the filter shows, says when nothing matches, and as
   handle.unmount();
   handle = await render(h(renderChatModal, { ...baseChat, width: 100, picker: { ...pickerStart(PICKER_ROWS), cursor: 2, mode: 'delete' as const } }), backend);
   expect(backend.lastFrame).toContain('Delete «An idle one»? y deletes it for good · n keeps it');
+  handle.unmount();
+});
+
+// A docked panel is as narrow as 42 columns (the default right panel on a 120-column
+// terminal): the title still shows on a row older than today, the way out stays on the
+// hint row, and a long title never pushes the y/n keys off the delete line.
+test('the picker keeps the title, Esc and the y/n keys in a 42-column docked panel', async () => {
+  const now = Date.parse('2026-09-25T12:00:00.000Z');
+  const backend = new TestBackend(42, 24);
+  let handle = await render(h(renderChatModal, { ...baseChat, width: 42, docked: true, fullscreen: true, now, picker: { ...pickerStart(PICKER_ROWS), cursor: 2 } }), backend);
+  expect(backend.lastFrame).toMatch(/› An idle one/);
+  expect(backend.lastFrame).toMatch(/Held elsewh/);
+  expect(backend.lastFrame).toContain('↑↓ pick · ⏎ open · Esc close');
+  handle.unmount();
+  const long = PICKER_ROWS.map((r, i) => (i === 2 ? { ...r, title: 'A very long session title that would never fit in a narrow docked panel at all' } : r));
+  handle = await render(h(renderChatModal, { ...baseChat, width: 42, docked: true, fullscreen: true, now, picker: { ...pickerStart(long), cursor: 2, mode: 'delete' as const } }), backend);
+  expect(backend.lastFrame).toMatch(/Delete «A very.*…»\?/);
+  expect(backend.lastFrame).toContain('y deletes it for good · n keeps it');
+  handle.unmount();
+  const wide = new TestBackend(100, 24);
+  handle = await render(h(renderChatModal, { ...baseChat, width: 100, now, picker: { ...pickerStart(long), cursor: 2, mode: 'delete' as const } }), wide);
+  expect(wide.lastFrame).toMatch(/Delete «A very.*…»\? y deletes it for good · n keeps it/);
   handle.unmount();
 });

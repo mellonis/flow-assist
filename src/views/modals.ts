@@ -1657,31 +1657,48 @@ export function renderSessionPicker({ width, height, theme, picker, now = Date.n
   const m = (theme?.modals?.chat ?? {}) as Record<string, string | undefined>;
   const shown = pickerMatches(picker);
   const total = picker.rows.length;
+  const inner = Math.max(1, boxW - 4);
+  const message = error ? `⚠ ${error}` : picker.notice;
   // The rows the list gets: the frame's border and padding (4), the field and the hint,
-  // and the notice when there is one — each with the gap above it. The list scrolls so
-  // the cursor stays in view; the bar says there is more.
-  const listRows = Math.max(1, boxH - 4 - 4 - (error || picker.notice ? 2 : 0));
+  // and the notice when there is one (as many rows as it wraps to) — each with the gap
+  // above it. The list scrolls so the cursor stays in view; the bar says there is more.
+  const listRows = Math.max(1, boxH - 4 - 4 - (message ? 1 + textRows(message, inner) : 0));
   const offset = windowAround(shown, picker.cursor, listRows).start;
   const today = new Date(now);
   const sessionRow = (r: SessionRow, i: number) => {
     const active = i === picker.cursor;
     const meta = `${sessionWhen(r.updatedAt, today)} · ${formatBytes(r.bytes)} · ${r.turns} msg${r.turns === 1 ? '' : 's'}`;
+    const title = r.title || '(untitled)';
+    // The title is what a person picks by, so it keeps up to half the row; the meta gives
+    // way first (it shrinks far faster), then whose it is — each cut, never pushed off.
     return h(Box, { key: r.id, flexDirection: 'row', width: '100%', flexShrink: 0 },
       h(Text, { bold: true, color: m.accent, selectable: false }, active ? '› ' : '  '),
-      h(Box, { flexGrow: 1, flexShrink: 1, overflow: 'hidden' },
-        h(Text, { wrap: 'truncate', bold: active, color: active ? m.accent : undefined }, r.title || '(untitled)')),
-      r.lock === 'held' ? h(Text, { color: m.warn, selectable: false }, '  in use elsewhere')
-        : r.lock === 'ours' ? h(Text, { dim: true, selectable: false }, '  this chat') : null,
-      h(Text, { dim: true, selectable: false }, `  ${meta}`));
+      h(Box, { flexGrow: 1, flexShrink: 1, overflow: 'hidden', minWidth: Math.min(stringWidth(title), Math.floor((inner - 2) / 2)) },
+        h(Text, { wrap: 'truncate', bold: active, color: active ? m.accent : undefined }, title)),
+      r.lock === 'held' ? h(Box, { flexShrink: 1, overflow: 'hidden' }, h(Text, { color: m.warn, selectable: false, wrap: 'truncate' }, '  in use elsewhere'))
+        : r.lock === 'ours' ? h(Box, { flexShrink: 1, overflow: 'hidden' }, h(Text, { dim: true, selectable: false, wrap: 'truncate' }, '  this chat')) : null,
+      h(Box, { flexShrink: 1000, overflow: 'hidden' }, h(Text, { dim: true, selectable: false, wrap: 'truncate' }, `  ${meta}`)));
   };
+  // The y/n keys are named only here (delete mode has no hint row), so the title is
+  // what gets cut, never the keys; a frame too narrow for both on one line puts the keys
+  // on a line of their own.
+  const deleteKeys = 'y deletes it for good · n keeps it';
+  const doomed = pickerSelected(picker)?.title || '(untitled)';
+  const oneLine = inner - stringWidth(`Delete «»? ${deleteKeys}`) >= Math.min(8, stringWidth(doomed));
   const field = picker.mode === 'delete'
-    ? h(Text, { bold: true, color: 'yellow', wrap: 'truncate' }, `Delete «${pickerSelected(picker)?.title || '(untitled)'}»? y deletes it for good · n keeps it`)
+    ? oneLine
+      ? h(Text, { bold: true, color: 'yellow', wrap: 'truncate' }, `Delete «${cutStep(doomed, inner - stringWidth(`Delete «»? ${deleteKeys}`))}»? ${deleteKeys}`)
+      : h(Box, { flexDirection: 'column', width: '100%' },
+          h(Text, { bold: true, color: 'yellow', wrap: 'truncate' }, `Delete «${cutStep(doomed, Math.max(1, inner - stringWidth('Delete «»?')))}»?`),
+          h(Text, { bold: true, color: 'yellow', wrap: 'truncate' }, deleteKeys))
     : picker.mode === 'rename'
     ? pickerField('title › ', picker.name, picker.nameCaret, m)
     : pickerField('filter › ', picker.filter, picker.caret, m);
   const hint = picker.mode === 'delete' ? ''
     : picker.mode === 'rename' ? `${CAP.enter} save · ${CAP.esc} back`
-    : [`${CAP.upDown} pick`, `${CAP.enter} open`, `${CAP.pickNew} new`, `${CAP.pickRename} rename`, `${CAP.pickDelete} delete`, `${CAP.esc} close`].join(' · ');
+    // `Esc close` comes before the picker's own keys: the row is cut at the frame's
+    // width, and the way out must not be what falls off in a narrow panel.
+    : [`${CAP.upDown} pick`, `${CAP.enter} open`, `${CAP.esc} close`, `${CAP.pickNew} new`, `${CAP.pickRename} rename`, `${CAP.pickDelete} delete`].join(' · ');
   return h(Box, docked ? { width, height, flexDirection: 'column' } : overlay(width, height),
     h(Box, {
       border: 'round',
@@ -1703,7 +1720,7 @@ export function renderSessionPicker({ width, height, theme, picker, now = Date.n
         shown.length
           ? shown.map(sessionRow)
           : h(Text, { dim: true }, total ? `Nothing matches «${picker.filter}»` : 'No saved sessions yet.')),
-      error ? h(Text, { color: 'red' }, `⚠ ${error}`) : picker.notice ? h(Text, { color: m.warn, wrap: 'wrap' }, picker.notice) : null,
+      message ? h(Text, { color: error ? 'red' : m.warn, wrap: 'wrap' }, message) : null,
       h(Box, { flexDirection: 'column', width: '100%', flexShrink: 0, backgroundColor: m.fieldBg }, field),
       hint ? h(Text, { dim: true, wrap: 'truncate', selectable: false }, hint) : null));
 }
