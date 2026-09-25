@@ -73,3 +73,17 @@ test("key is React's key", () => {
   const el: any = renderTree(['Box', {}, ['Text', { key: 'a' }, 'x'], ['Text', { key: 'b' }, 'y']], ctx());
   expect(el.props.children.map((c: any) => c.key)).toEqual(['a', 'b']);
 });
+
+test('a ScrollBox has no isFocused — hasKeyboard gates isActive instead', () => {
+  const el: any = renderTree(['ScrollBox', { isFocused: true }], ctx({ hasKeyboard: false }));
+  expect(el.props.isActive).toBe(false);
+  expect(el.props.isFocused).toBeUndefined();
+});
+
+test('a ListMultiSelect with no held value renders value: [] rather than undefined', () => {
+  const c = ctx();
+  const noId: any = renderTree(['ListMultiSelect', { items: [] }], c);
+  expect(noId.props.value).toEqual([]);
+  const unset: any = renderTree(['ListMultiSelect', { id: 'tags', items: [] }], c);
+  expect(unset.props.value).toEqual([]);
+});

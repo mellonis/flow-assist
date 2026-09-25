@@ -27,7 +27,7 @@ export interface RenderCtx {
 
 const KNOWN = ['Box', 'Text', 'Markdown', 'Table', 'Link', 'ScrollBox', 'Select', 'ListSelect', 'ListMultiSelect', 'Checkbox', 'TextInput'] as const;
 const VALUE_PROP: Record<string, string> = { TextInput: 'value', Select: 'value', ListSelect: 'value', ListMultiSelect: 'value', Checkbox: 'checked', ScrollBox: 'offset' };
-const FOCUSABLE = new Set(['TextInput', 'Select', 'ListSelect', 'ListMultiSelect', 'Checkbox', 'ScrollBox']);
+const FOCUSABLE = new Set(['TextInput', 'Select', 'ListSelect', 'ListMultiSelect', 'Checkbox']);
 
 export function renderTree(tree: Tree | null, ctx: RenderCtx): ReactElement | null {
   if (!tree) return null;
@@ -50,6 +50,13 @@ export function renderTree(tree: Tree | null, ctx: RenderCtx): ReactElement | nu
     const id = typeof props.id === 'string' && props.id ? props.id : null;
     delete props.id;
     if (FOCUSABLE.has(type)) props.isFocused = !!props.isFocused && ctx.hasKeyboard;
+    // ScrollBox has no `isFocused` — it gates PgUp/PgDn and the wheel on `isActive`
+    // (default true), so a plugin's `isFocused` is dropped and `isActive` is what
+    // carries `hasKeyboard` here instead.
+    if (type === 'ScrollBox') {
+      delete props.isFocused;
+      props.isActive = (props.isActive === undefined ? true : !!props.isActive) && ctx.hasKeyboard;
+    }
     // A stateful node: the host's state is what is drawn; the plugin's own `value` in
     // the frame is applied by the field store before this render (./fieldState.ts).
     if (id && VALUE_PROP[type]) {
@@ -76,6 +83,10 @@ export function renderTree(tree: Tree | null, ctx: RenderCtx): ReactElement | nu
     }
     if (type === 'Checkbox' && props.checked === undefined) props.checked = false;
     if (type === 'Checkbox' && !props.onChange) props.onChange = () => {};
+    // flowtty's ListMultiSelect calls `value.includes(...)` unconditionally on every
+    // render, so an unset value (no id, or an id the field state hasn't populated yet)
+    // must default to an array rather than reach the component as undefined.
+    if (type === 'ListMultiSelect' && props.value === undefined) props.value = [];
     const comp = (ctx.ui as unknown as Record<string, unknown>)[type];
     return ctx.ui.h(comp, props, ...children.map(render));
   };
