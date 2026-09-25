@@ -2,6 +2,7 @@
   "name": "flow-assist",
   "version": "0.1.0",
   "type": "module",
+  "workspaces": ["packages/*"],
   "bin": {
     "flow-assist": "src/cli.ts"
   },
@@ -14,6 +15,7 @@
     "test:binary": "FLOW_ASSIST_BINARY_TEST=1 bun test src/__tests__/binary.test.ts"
   },
   "dependencies": {
+    "@flow-assist/remote": "workspace:*",
     "@flowtty/core": "^1.0.0-alpha.31",
     "@flowtty/react": "^1.0.0-alpha.31",
     "@flowtty/tty-backend": "^1.0.0-alpha.31",

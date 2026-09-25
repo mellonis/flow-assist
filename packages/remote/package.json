@@ -1,0 +1,13 @@
+{
+  "name": "@flow-assist/remote",
+  "version": "0.1.0",
+  "description": "Write a flow-assist plugin in TypeScript as a separate process: the protocol's types, the line codec, and a runtime that speaks it over stdio or a local socket.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": { ".": { "bun": "./src/index.ts", "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+  "files": ["dist", "README.md"],
+  "scripts": { "build": "tsc -p tsconfig.json", "test": "bun test" },
+  "publishConfig": { "access": "public" }
+}

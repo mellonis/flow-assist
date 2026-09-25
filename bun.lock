@@ -5,6 +5,7 @@
     "": {
       "name": "flow-assist",
       "dependencies": {
+        "@flow-assist/remote": "workspace:*",
         "@flowtty/core": "^1.0.0-alpha.31",
         "@flowtty/react": "^1.0.0-alpha.31",
         "@flowtty/tty-backend": "^1.0.0-alpha.31",
@@ -17,8 +18,14 @@
         "typescript": "^7.0.2",
       },
     },
+    "packages/remote": {
+      "name": "@flow-assist/remote",
+      "version": "0.1.0",
+    },
   },
   "packages": {
+    "@flow-assist/remote": ["@flow-assist/remote@workspace:packages/remote"],
+
     "@flowtty/core": ["@flowtty/core@1.0.0-alpha.31", "", { "dependencies": { "yoga-layout": "^3.2.1" } }, "sha512-NvEdu0tNqwQMMDOuIaI4zuHoK/MsblZAzY+EOXuKn3xvZQ+Jv/PzBBcLk2isw89ZnrPNcATtAIcP7p2xT2A5zg=="],
 
     "@flowtty/react": ["@flowtty/react@1.0.0-alpha.31", "", { "dependencies": { "@flowtty/core": "1.0.0-alpha.31" }, "peerDependencies": { "react": "^19.3.0" } }, "sha512-x/1zd67soFnBpVznwyZQO+ybKANqis9dVrtpagb1IQxtdEwumDe3ksAnt0z+2Z+8fwbw8OFnaxhkkGmXhy8s9A=="],

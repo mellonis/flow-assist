@@ -6,7 +6,7 @@
     "lib": ["ES2023"],
     "types": ["node"],
     "outDir": "dist",
-    "rootDir": "src",
+    "rootDir": ".",
     "declaration": true,
     "sourceMap": true,
     "strict": true,
@@ -15,6 +15,6 @@
     "forceConsistentCasingInFileNames": true,
     "jsx": "react-jsx"
   },
-  "include": ["src/**/*.ts"],
+  "include": ["src/**/*.ts", "packages/remote/src/**/*.ts"],
   "exclude": ["node_modules", "dist", "src/**/__tests__"]
 }
