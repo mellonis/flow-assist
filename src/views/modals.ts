@@ -26,6 +26,8 @@ import { VIEW_CAPS, frameView, isConsoleKind, viewRevision, type ViewRecord, typ
 import { groupHeadText, groupOpen, viewGroups, type GroupMsg, type ViewGroup } from '../assistant/view-groups.js';
 import { renderConsole } from '../assistant/console-view.js';
 import { CELL_FREE, CELL_FULL, CONTEXT_WARN_AT, GRID_COLS, GRID_ROWS, contextFootnote, contextGrid, contextHeading, contextLegend, tokensBadge, type ContextReading, type GridCell } from '../assistant/context-meter.js';
+import { formatBytes, pickerMatches, pickerSelected, type PickerState } from '../assistant/session-picker.js';
+import { sessionWhen, type SessionRow } from '../assistant/sessions.js';
 import { createElement as h, useEffect, useRef, useState, type ReactNode } from 'react';
 import { wrapText } from '@flowtty/core';
 import { bindingGlyph, keyGlyph } from '../playback/keys.js';
@@ -487,6 +489,10 @@ const CAP = {
   auto: keyGlyph({ name: 'tab', shift: true }),
   backspace: keyGlyph('backspace'),
   image: keyGlyph({ name: 'v', ctrl: true }),
+  // The session picker's own keys: fixed while it is up, like ⏎ and Esc.
+  pickNew: keyGlyph({ name: 'n', ctrl: true }),
+  pickRename: keyGlyph({ name: 'r', ctrl: true }),
+  pickDelete: keyGlyph({ name: 'x', ctrl: true }),
 } as const;
 // Alt+Enter: ⌥⏎ on a Mac, Alt+⏎ elsewhere.
 export const NEWLINE_KEY = keyGlyph({ name: 'return', meta: true });
@@ -1281,6 +1287,7 @@ export function renderChatModal({
   imageNumbers = [],
   imagesOn = false,
   pagerOpen = false,
+  picker = null,
 }: {
   // A block is open in the pager, over the whole terminal.
   pagerOpen?: boolean;
@@ -1390,7 +1397,12 @@ export function renderChatModal({
   imageNumbers?: number[];
   // Attaching is on (`ai.images.enabled`): the hint names the key that pastes an image.
   imagesOn?: boolean;
+  // `/sessions`: the picker, drawn in the conversation's place (null — closed).
+  picker?: PickerState | null;
 }) {
+  // A y/n or a question that arrives while the picker is up wins: the chat is drawn with
+  // it, and the picker comes back once it is answered.
+  if (picker && !pendingQuestion && !pendingConfirm) return renderSessionPicker({ width, height, theme, picker, now, error, fullscreen, docked, focused });
   const boxW = chatBoxWidth(width, fullscreen);
   const boxH = fullscreen ? height : Math.min(Math.floor(height * 0.82), height - 4);
   const wrap = chatWrapWidth(width, fullscreen);
@@ -1613,6 +1625,87 @@ export function renderChatModal({
       ),
     ),
   );
+}
+
+// ─── The session picker (pure render) ─────────────────────────────────────────
+// `/sessions` in the chat's own frame, in the conversation's place — so it is the same
+// docked, as a window and full. One row per session, each ONE terminal line: the title
+// (cut), whose it is, when it was last used, its size, how many messages. The state and
+// what a key does are src/assistant/session-picker.ts.
+const pickerField = (prompt: string, value: string, caret: number, m: Record<string, string | undefined>) => {
+  const at = Array.from(value.slice(caret))[0] ?? '';
+  return h(Box, { flexDirection: 'row', width: '100%', selectable: false },
+    h(Text, { bold: true, color: m.accent }, prompt),
+    h(Text, { wrap: 'truncate' }, value.slice(0, caret)),
+    h(Text, { inverse: true }, at || ' '),
+    h(Text, { wrap: 'truncate' }, value.slice(caret + at.length)));
+};
+
+export function renderSessionPicker({ width, height, theme, picker, now = Date.now(), error = null, fullscreen = false, docked = false, focused = true }: {
+  width: number;
+  height: number;
+  theme: Theme | undefined;
+  picker: PickerState;
+  now?: number;
+  error?: string | null;
+  fullscreen?: boolean;
+  docked?: boolean;
+  focused?: boolean;
+}) {
+  const boxW = chatBoxWidth(width, fullscreen);
+  const boxH = fullscreen ? height : Math.min(Math.floor(height * 0.82), height - 4);
+  const m = (theme?.modals?.chat ?? {}) as Record<string, string | undefined>;
+  const shown = pickerMatches(picker);
+  const total = picker.rows.length;
+  // The rows the list gets: the frame's border and padding (4), the field and the hint,
+  // and the notice when there is one — each with the gap above it. The list scrolls so
+  // the cursor stays in view; the bar says there is more.
+  const listRows = Math.max(1, boxH - 4 - 4 - (error || picker.notice ? 2 : 0));
+  const offset = windowAround(shown, picker.cursor, listRows).start;
+  const today = new Date(now);
+  const sessionRow = (r: SessionRow, i: number) => {
+    const active = i === picker.cursor;
+    const meta = `${sessionWhen(r.updatedAt, today)} · ${formatBytes(r.bytes)} · ${r.turns} msg${r.turns === 1 ? '' : 's'}`;
+    return h(Box, { key: r.id, flexDirection: 'row', width: '100%', flexShrink: 0 },
+      h(Text, { bold: true, color: m.accent, selectable: false }, active ? '› ' : '  '),
+      h(Box, { flexGrow: 1, flexShrink: 1, overflow: 'hidden' },
+        h(Text, { wrap: 'truncate', bold: active, color: active ? m.accent : undefined }, r.title || '(untitled)')),
+      r.lock === 'held' ? h(Text, { color: m.warn, selectable: false }, '  in use elsewhere')
+        : r.lock === 'ours' ? h(Text, { dim: true, selectable: false }, '  this chat') : null,
+      h(Text, { dim: true, selectable: false }, `  ${meta}`));
+  };
+  const field = picker.mode === 'delete'
+    ? h(Text, { bold: true, color: 'yellow', wrap: 'truncate' }, `Delete «${pickerSelected(picker)?.title || '(untitled)'}»? y deletes it for good · n keeps it`)
+    : picker.mode === 'rename'
+    ? pickerField('title › ', picker.name, picker.nameCaret, m)
+    : pickerField('filter › ', picker.filter, picker.caret, m);
+  const hint = picker.mode === 'delete' ? ''
+    : picker.mode === 'rename' ? `${CAP.enter} save · ${CAP.esc} back`
+    : [`${CAP.upDown} pick`, `${CAP.enter} open`, `${CAP.pickNew} new`, `${CAP.pickRename} rename`, `${CAP.pickDelete} delete`, `${CAP.esc} close`].join(' · ');
+  return h(Box, docked ? { width, height, flexDirection: 'column' } : overlay(width, height),
+    h(Box, {
+      border: 'round',
+      backgroundColor: m.bg,
+      color: m.text,
+      borderBackgroundColor: m.borderBg,
+      borderColor: docked ? (focused ? m.accent : m.idleBorder) : m.border,
+      borderTitle: cutStep(`${ASSISTANT_MARK} Flow Assist · Sessions · ${shown.length === total ? total : `${shown.length} of ${total}`}`, Math.max(0, boxW - 4)),
+      width: boxW,
+      height: boxH,
+      padding: 1,
+      flexDirection: 'column',
+      gap: 1,
+      overflow: 'hidden',
+      selectionScope: true,
+    },
+      // Keys are the picker's (`isActive: false`): the offset follows the cursor.
+      h(ScrollBox, { flexGrow: 1, flexShrink: 1, flexDirection: 'column', scrollbar: true, isActive: false, offset },
+        shown.length
+          ? shown.map(sessionRow)
+          : h(Text, { dim: true }, total ? `Nothing matches «${picker.filter}»` : 'No saved sessions yet.')),
+      error ? h(Text, { color: 'red' }, `⚠ ${error}`) : picker.notice ? h(Text, { color: m.warn, wrap: 'wrap' }, picker.notice) : null,
+      h(Box, { flexDirection: 'column', width: '100%', flexShrink: 0, backgroundColor: m.fieldBg }, field),
+      hint ? h(Text, { dim: true, wrap: 'truncate', selectable: false }, hint) : null));
 }
 
 // ─── The chat, collapsed ──────────────────────────────────────────────────────

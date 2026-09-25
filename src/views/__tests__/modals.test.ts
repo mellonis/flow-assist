@@ -5,6 +5,8 @@ import { TestBackend } from '@flowtty/core/testing';
 import { MODAL_COLOR_DEFAULTS } from '../../playback/theme.js';
 import { chatRows, condenseRuns, helpEntries, inputVisualRows, mdLines, renderChatModal, renderHelp, renderLogModal, renderReminder, typedLines, type RowOpts } from '../modals.js';
 import { bumpViewRevision } from '../../assistant/views.js';
+import { pickerStart } from '../../assistant/session-picker.js';
+import type { SessionRow } from '../../assistant/sessions.js';
 
 // The trail condenses a run of one tool ending one way into a count — except a call
 // that returned images, whose marks are what the person looks for.
@@ -570,4 +572,41 @@ test('a message with no views keeps its cached rows across a view-revision bump:
   const viewRow = (rows: typeof first) => rows.find((r) => (r.spans ?? []).some((s) => String(s.text).includes('card')));
   expect(plainRow(second)).toBe(plainRow(first)!); // the same row object: a cache hit
   expect(viewRow(second)).not.toBe(viewRow(first)!); // laid out again: a miss
+});
+
+// ─── the session picker ──────────────────────────────────────────────────────────
+
+const PICKER_ROWS: SessionRow[] = [
+  { id: '2026-09-25T10-00-00-aaaa', title: 'The current one', updatedAt: '2026-09-25T10:00:00.000Z', turns: 3, bytes: 2048, lock: 'ours', text: '' },
+  { id: '2026-09-24T10-00-00-bbbb', title: 'Held elsewhere', updatedAt: '2026-09-24T10:00:00.000Z', turns: 1, bytes: 500, lock: 'held', text: 'zebrafish' },
+  { id: '2026-09-23T10-00-00-cccc', title: 'An idle one', updatedAt: '2026-09-23T10:00:00.000Z', turns: 2, bytes: 3 * 1024 * 1024, lock: 'free', text: '' },
+];
+
+test('the session picker draws one row per session — title, whose it is, size, messages — and its keys', async () => {
+  const backend = new TestBackend(100, 24);
+  const handle = await render(h(renderChatModal, { ...baseChat, width: 100, picker: pickerStart(PICKER_ROWS) }), backend);
+  const frame = backend.lastFrame;
+  expect(frame).toContain('Sessions · 3');
+  expect(frame).toMatch(/› The current one\s+this chat\s+.*2 KB · 3 msgs/);
+  expect(frame).toMatch(/Held elsewhere\s+in use elsewhere\s+.*500 B · 1 msg\b/);
+  expect(frame).toContain('3.0 MB · 2 msgs');
+  expect(frame).toContain('filter ›');
+  expect(frame).toContain('↑↓ pick · ⏎ open · ^n new · ^r rename · ^x delete · Esc close');
+  handle.unmount();
+});
+
+test('the picker counts what the filter shows, says when nothing matches, and asks y/n before a delete', async () => {
+  const backend = new TestBackend(100, 24);
+  const filtered = { ...pickerStart(PICKER_ROWS), filter: 'zebra', caret: 5 };
+  let handle = await render(h(renderChatModal, { ...baseChat, width: 100, picker: filtered }), backend);
+  expect(backend.lastFrame).toContain('Sessions · 1 of 3');
+  expect(backend.lastFrame).toContain('Held elsewhere');
+  expect(backend.lastFrame).not.toContain('An idle one');
+  handle.unmount();
+  handle = await render(h(renderChatModal, { ...baseChat, width: 100, picker: { ...filtered, filter: 'nothing-here' } }), backend);
+  expect(backend.lastFrame).toContain('Nothing matches «nothing-here»');
+  handle.unmount();
+  handle = await render(h(renderChatModal, { ...baseChat, width: 100, picker: { ...pickerStart(PICKER_ROWS), cursor: 2, mode: 'delete' as const } }), backend);
+  expect(backend.lastFrame).toContain('Delete «An idle one»? y deletes it for good · n keeps it');
+  handle.unmount();
 });
