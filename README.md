@@ -82,6 +82,12 @@ they were made (`▸ 2 tools: read_file ×2`).
 conversation; `/notes step` goes back. To have it that way from the start:
 `config set plugins.assistant.notes open`.
 
+**A long answer stays at its first line.** The conversation follows an answer while it
+fits; once its first line would scroll out of view, the conversation stops with that
+line at the top, under your question, and the rest comes in below. PgDn or the wheel
+reads on, and at the end the conversation follows again. Scrolled somewhere else, you
+stay where you are; the next message you send brings you to the end.
+
 **The chat sits beside what you are looking at.** By default it is a panel docked to
 the right of a plugin's screen — a board and the conversation about it, both in view —
 and the plugin's screen is laid out in the rest, as on a smaller terminal. On a terminal

@@ -5,6 +5,14 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **A long answer stops at its first line, not its last.** The conversation followed an
+  answer to its end, so a long one scrolled past its own beginning and was read by going
+  back up to find where it started. Now it follows only while the answer fits: once the
+  answer's first line would leave the top, the conversation stops with that line right
+  under the pinned question and the rest grows below — PgDn or the wheel reads on, and at
+  the end the conversation follows again. A short answer, a person who had scrolled up,
+  and a message sent next are as before; a background result landing under an answer
+  being read does not move it.
 - **Sessions have a picker, titles, and a way to start a new one on purpose.** `/sessions`
   (or Ctrl+S, from any screen; `config set keys.sessions <key>` moves it) lists every saved
   session newest first — its title, when it was last used, its size, and whether another

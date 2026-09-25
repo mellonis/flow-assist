@@ -989,7 +989,8 @@ function chatRowRenderer({ palette: m, errorColor, wrap, now, detailsKey }: {
 
 // ─── The conversation: a scroll box, anchored to its bottom ───────────────────
 // flowtty's <ScrollBox> takes whatever height the column leaves and follows new
-// rows until the person scrolls up; PgUp/PgDn and the wheel are its own. Before
+// rows until the person scrolls up — or a long answer's first row reaches the top,
+// where the list stops it (below); PgUp/PgDn and the wheel are its own. Before
 // 1.0.0-alpha.7 this view added up the heights of everything around the messages
 // (error, status, plan, queue, input field, question block, the gaps between them)
 // to know how many rows fit, and sliced the list by hand — every block added to the
@@ -1002,11 +1003,14 @@ const MIN_ROWS_TO_PIN = 4;
 export function roomForBlock(height: number): number {
   return height >= MIN_ROWS_TO_PIN ? height - 1 : height;
 }
-function ChatMessages({ messages, rowOpts, palette: m, errorColor, onViewport, scrollTo, keysActive = true, wheel, hidden = false }: {
+function ChatMessages({ messages, rowOpts, palette: m, errorColor, onViewport, scrollTo, keysActive = true, wheel, hidden = false, streaming = false }: {
   messages: ChatMsg[];
   // Not drawn, and still mounted: the pager stands in its place, and the list keeps
   // its scroll for when the pager closes.
   hidden?: boolean;
+  // A turn is being written: the answer it brings is the one a long answer's first
+  // row stops the list for.
+  streaming?: boolean;
   // Whether PgUp/PgDn (and the wheel) reach the list through its own input: not while a
   // docked chat has given the keyboard to the plugin — those keys are the plugin's then.
   keysActive?: boolean;
@@ -1040,6 +1044,12 @@ function ChatMessages({ messages, rowOpts, palette: m, errorColor, onViewport, s
     if (r) onViewport?.({ ...r, scrollTop, pinned: pinnedRef.current, atEnd });
   };
   const metrics = useRef<ScrollMetrics | null>(null);
+  // Whether the list was resting at the end with the answer's first row in view when
+  // it last measured; false until it has measured once.
+  const following = useRef(false);
+  const answerRow = useRef(-1);
+  // The message whose turn this list saw being written.
+  const turn = useRef<ChatMsg | null>(null);
   if (wheel) {
     wheel.current = (up: boolean) => {
       const x = metrics.current;
@@ -1062,7 +1072,22 @@ function ChatMessages({ messages, rowOpts, palette: m, errorColor, onViewport, s
       box.current?.scrollTo(Math.max(0, x.maxScrollTop - want.row));
       return;
     }
-    tell(x.scrollTop, x.scrollTop >= x.maxScrollTop);
+    // A long answer is read from its first line: the list follows it only while that
+    // line stays in view (under the pinned question). The moment the rows arriving at
+    // the end would carry it past the top, the list stops with it as the top row, and
+    // the rest grows below. Only that crossing stops it — the list was following, the
+    // line was in view — so a person who scrolled away, or came back to the end on
+    // their own, is left where they are, and a list mounted anew only looks first.
+    const atEnd = x.scrollTop >= x.maxScrollTop;
+    const lead = x.viewportHeight >= MIN_ROWS_TO_PIN ? 1 : 0;
+    const answer = answerRow.current;
+    if (following.current && atEnd && answer >= 0 && answer < x.scrollTop + lead) {
+      following.current = false;
+      box.current?.scrollTo(Math.max(0, x.maxScrollTop - (answer - lead)));
+      return;
+    }
+    following.current = atEnd && (answer < 0 || answer >= x.scrollTop + lead);
+    tell(x.scrollTop, atEnd);
   };
   // A message the person sends brings the view back to the bottom, wherever they had
   // scrolled to: they want to see the answer to what they just asked. Rows appearing
@@ -1073,6 +1098,25 @@ function ChatMessages({ messages, rowOpts, palette: m, errorColor, onViewport, s
   const rows = chatRows(messages, rowOpts);
   let lastUserKey = -1;
   for (let i = 0; i < rows.length; i++) if (rows[i]!.role === 'user' && rows[i]!.first) lastUserKey = i;
+  // The first row of the answer to what the person last sent: the round streaming now,
+  // else the answer's own first row. Only for a turn this list saw being written — a
+  // whole answer can arrive in the very render that ends its turn, while a session
+  // opened or resumed is no answer arriving — and only while that answer is the last
+  // message: a background result landing under it is not the answer growing. Never a
+  // row from before the person's last message (a question, a `!command`), so a
+  // command's output never stops on an older answer. The steps and the trail of the
+  // turn above it scroll away with the question.
+  let sent: ChatMsg | null = null;
+  for (let mi = messages.length - 1; mi >= 0 && !sent; mi--) if (messages[mi]!.role === 'user' || messages[mi]!.role === 'shell') sent = messages[mi]!;
+  if (streaming) turn.current = sent;
+  answerRow.current = -1;
+  if (sent && turn.current === sent && messages.at(-1)?.role === 'assistant') {
+    for (let i = rows.length - 1; i >= 0; i--) {
+      const r = rows[i]!;
+      if ((r.role === 'user' || r.role === 'shell') && r.first) break;
+      if (r.liveMark || (r.role === 'assistant' && r.first && !r.step && !r.limit && !r.groupHead)) { answerRow.current = i; break; }
+    }
+  }
   let lastUserText = '';
   for (let mi = messages.length - 1; mi >= 0; mi--) {
     // The pin is one row: a question typed over several lines is shown on one there.
@@ -1448,7 +1492,7 @@ export function renderChatModal({
       },
       // Under the pager the conversation is not drawn and hears no key: PgUp/PgDn and
       // the wheel are the pager's, and the conversation stays where it was left.
-      h(ChatMessages, { messages, rowOpts: { wrap, folds, viewLines, notes, detailsKey, renderers: viewRenderers, now, palette: m, onViewFail }, palette: m, errorColor: theme?.error, onViewport, scrollTo, keysActive: focused && !pager, wheel, hidden: !!pager }),
+      h(ChatMessages, { messages, rowOpts: { wrap, folds, viewLines, notes, detailsKey, renderers: viewRenderers, now, palette: m, onViewFail }, palette: m, errorColor: theme?.error, onViewport, scrollTo, keysActive: focused && !pager, wheel, hidden: !!pager, streaming }),
       // The pager, in the conversation's place: the block's rows at the conversation's
       // width, with a scroll of their own.
       pager

@@ -315,16 +315,22 @@ test('the wheel scrolls the conversation', async () => {
   await ui.type('print forty lines');
   await ui.press('return');
   await settle(20);
-  expect(ui.backend.lastFrame).toContain('line 40');
-  expect(ui.backend.lastFrame).not.toContain('line 30\n');
+  // A long answer stops at its first line; the rest is below.
+  expect(ui.backend.lastFrame).toContain('line 1 ');
+  expect(ui.backend.lastFrame).not.toContain('line 40');
   // The question has scrolled out of view, so it is pinned above the conversation.
   expect(ui.backend.lastFrame).toContain('› print forty lines');
 
   // The scroll box answers the wheel only while the pointer is over it — as any
   // scrolling pane does. (20, 8) is inside the conversation; (0, 0) is the app title.
-  for (let i = 0; i < 6; i++) ui.backend.wheel('up', 0, 0);
+  const anchored = ui.backend.lastFrame;
+  for (let i = 0; i < 30; i++) ui.backend.wheel('down', 0, 0);
+  await settle();
+  expect(ui.backend.lastFrame).toBe(anchored);
+  for (let i = 0; i < 30; i++) ui.backend.wheel('down', 20, 8);
   await settle();
   expect(ui.backend.lastFrame).toContain('line 40');
+  expect(ui.backend.lastFrame).not.toContain('line 30\n');
   for (let i = 0; i < 6; i++) ui.backend.wheel('up', 20, 8);
   await settle();
   const up = ui.backend.lastFrame;

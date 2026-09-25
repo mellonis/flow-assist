@@ -1747,6 +1747,23 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     callback, where the box has just measured the rows the fold added or took away.
   - Following the bottom belongs to a message ARRIVING (`scrollToEnd` on the count of
     questions asked), never to rows appearing above the viewport.
+  - **A long answer stops at its first row.** While the answer fits, the list follows
+    the bottom; the moment the rows arriving would carry the answer's first row past
+    the top (under the pinned question, `MIN_ROWS_TO_PIN`), `ChatMessages` asks
+    `scrollTo` for that row once, from the metrics callback — the box then holds its
+    `scrollTop` and the rest grows below, the list's own "scrolled up" state. Only
+    that CROSSING stops it: the list was at the end with the row in view at its last
+    measurement (`following`, false until it has measured once, so a list mounted anew
+    mid-answer only looks), so a person who scrolled away, or came back to the end on
+    their own, keeps their place, and at the end it follows again. The row is the
+    round streaming now (`liveMark`) or the answer's `first` row — never a step's, and
+    never one from before the person's last `user`/`shell` message, so a `!command`'s
+    output does not stop on an older answer; the turn's steps and trail above it
+    scroll away with the question. It counts only for a turn the list saw being
+    written (`streaming` with that question the last thing sent — a whole answer may
+    arrive in the render that ends its turn, and a resumed session is no answer
+    arriving) and only while that turn's message is the LAST one, so a background
+    result landing under an answer never trips it.
   - **A block taller than the conversation opens in the pager**, not into the
     conversation. When a click would OPEN a `view`, `tools`, `steps`, `thinking` or
     `summary` block (`pageable` in `folds.ts`), the chat measures the block WHOLE — as
@@ -2245,8 +2262,9 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   `chatLLM`/`config`/`showMessage`, and `background` answered "no LLM service".
 - The conversation is a flowtty **`<ScrollList anchor="bottom" rowHeight={1}>`**
   (`ChatMessages` in `src/views/modals.ts`): it takes the rows the column leaves,
-  follows new rows until the person scrolls up, and hears PgUp/PgDn and the wheel
-  ITSELF — the chat's key handler must not. No heights are added up for the
+  follows new rows until the person scrolls up or a long answer's first row reaches
+  the top (see "Where the eye is left"), and hears PgUp/PgDn and the wheel ITSELF —
+  the chat's key handler must not. No heights are added up for the
   conversation: a new block under it needs `flexShrink: 0` — and a place in the count
   `planFit` is given, since the plan is the one block that yields rows. Sending a
   message calls `scrollToEnd()`. Needs flowtty ≥ 1.0.0-alpha.20; since alpha.22 the
