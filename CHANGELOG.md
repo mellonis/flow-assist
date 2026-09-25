@@ -5,6 +5,16 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **Sessions have a picker, titles, and a way to start a new one on purpose.** `/sessions`
+  (or Ctrl+S, from anywhere; `config set keys.sessions <key>` moves it) lists every saved
+  session newest first — its title, when it was last used, its size, and whether another
+  flow-assist process has it open — and typing filters by the title and by the words of
+  the conversation itself. From the list, ⏎ opens a session (the one you are in is saved
+  first), Ctrl+N starts a new one, Ctrl+R renames and Ctrl+X deletes after a y/n; a
+  session open in another process is neither opened, renamed nor deleted. A session is
+  named by the first line you wrote, and `/title <text>` renames it; the name is kept in
+  the session's file. `/new` starts a fresh session and leaves the current one as it was,
+  so a restart before you say anything continues it — where `/clear` also marks it done.
 - **A block taller than the chat's window opens in a pager, not into the
   conversation.** A click on a command's output, a turn's tool calls, its steps,
   its thinking or a /compact summary that would not fit the conversation's rows opens that block alone in

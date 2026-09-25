@@ -34,10 +34,19 @@ bun run src/cli.ts "summarize ABC-123"        # one-shot prompt
 ```
 
 The chat is saved as you go and continued on the next start, so a restart or an
-update loses nothing. `/clear` starts a new session and keeps the old one;
-`/resume` lists the saved sessions and `/resume <n>` opens one. Sessions live in
-`sessions/` in the config directory, readable by you only (`sessions.resume: false`
-starts every run empty; `sessions.keep` — how many are kept, 50 by default).
+update loses nothing. `/sessions` — or Ctrl+S from anywhere (`config set keys.sessions
+<key>` moves it) — lists every saved session, newest first, with its title, when it was
+last used, its size, and whether another flow-assist process has it open. Type to
+filter by the title or by any word of the conversation; ⏎ opens one (the session you are
+in is saved first), Ctrl+N starts a new one, Ctrl+R renames, Ctrl+X deletes after a y/n.
+A session open in another process can be neither opened nor renamed nor deleted from
+here. A session is named by the first line you wrote; `/title <text>` renames it.
+`/new` starts a fresh session and keeps the current one as it is — a restart before you
+say anything continues it; `/clear` does the same and marks the old one done, so a
+restart starts empty. `/resume` lists the saved sessions and `/resume <n>` opens one.
+Sessions live in `sessions/` in the config directory, readable by you only
+(`sessions.resume: false` starts every run empty; `sessions.keep` — how many are kept,
+50 by default).
 
 A message sent while an answer is still coming waits its turn (`⏎ queued`) and goes
 out when the answer ends; ↑ on an empty field takes the last one back to edit. Esc or
@@ -181,8 +190,8 @@ Like `!`, it is refused while an answer is coming.
 Shift+Tab — or `/auto reads|all|off` — says how much you want to confirm while you
 work: `auto: reads` leaves every write asking, `auto: writes` lets writes run without
 the y/n, and the chat's hint line says which is on for as long as it is. It belongs to
-the conversation you are in: a restart, `/clear`, `/resume` and a new task all go back
-to asking, and nothing about it is saved. Two things always ask, whatever you set —
+the conversation you are in: a restart, `/clear`, `/new`, opening another session and
+a new task all go back to asking, and nothing about it is saved. Two things always ask, whatever you set —
 `run_command`, and reading a page from a host that is not on `web.allowlist`. What ran
 is still shown: the ✎ diff and the tool trail are the same either way.
 
