@@ -120,17 +120,20 @@ export function shellCwd(config: RootsConfig, cwd = process.cwd()): string {
 // The directory a conversation's commands run in. Made by whoever owns the
 // conversation (the chat, a background run) and handed to run_command as `ctx.shell`;
 // `null` is "the default". A remembered directory that has since gone, or left the
-// roots, reads as the default again.
+// roots, reads as the default again. `onSet` hears every `setCwd` — `!cd`, run_command,
+// the `cd` tool, /clear, a restored session all set it here, so this is the one place
+// the chat learns the directory was set (it reads the project's instructions again,
+// ./project-instructions.ts).
 export interface ShellState {
   cwd(): string;
   setCwd(dir: string | null): void;
   saved(): string | null; // what a session keeps
 }
-export function createShellState(config: () => RootsConfig, initial: string | null = null): ShellState {
+export function createShellState(config: () => RootsConfig, initial: string | null = null, onSet?: (dir: string | null) => void): ShellState {
   let dir = initial;
   return {
     cwd: () => (dir && dirAllowed(config(), dir) ? dir : shellCwd(config())),
-    setCwd: (d) => { dir = d; },
+    setCwd: (d) => { dir = d; onSet?.(d); },
     saved: () => dir,
   };
 }

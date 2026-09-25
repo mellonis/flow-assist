@@ -194,6 +194,13 @@ export interface AgentOpts {
   // itself alone. It goes into the request only: never into the transcript, so never
   // into the caller's history. '' (or a throw) adds nothing.
   requestTail?: () => string;
+  // The system prompt as it is NOW, read before every round and laid over the round's
+  // copy of the messages — the leading system message replaced, or put first when
+  // there is none; '' (or a throw) leaves the messages as they are. The chat passes
+  // it so a tool that changes what the system prompt says (the `cd` tool, and with it
+  // the project's instructions) is seen by the next round of the same turn. A round
+  // whose text did not change sends the message it had, so the cached prefix holds.
+  systemPrompt?: () => string | null;
   // Any remaining OpenAI-ish options (tools, signal, …) — spread into the round.
   [key: string]: unknown;
 }
@@ -607,6 +614,18 @@ function withRequestTail(messages: ChatMessage[], tail: (() => string) | undefin
   return [...messages, { role: 'user', content: text, [REQUEST_TAIL]: true }];
 }
 
+// The round's messages with the system prompt as it is now (`AgentOpts.systemPrompt`).
+// A copy — the history never holds it.
+function withSystemPrompt(messages: ChatMessage[], system: (() => string | null) | undefined): ChatMessage[] {
+  if (!system) return messages;
+  let text = '';
+  try { text = String(system() ?? ''); } catch { text = ''; }
+  if (!text) return messages;
+  const first = messages[0];
+  if (first?.role === 'system') return first.content === text ? messages : [{ ...first, content: text }, ...messages.slice(1)];
+  return [{ role: 'system', content: text }, ...messages];
+}
+
 // An image a tool of THIS turn handed the model beside its result — returned as
 // `{ text, images }`, or attached through `ctx.attachImage` (the `recall` tool
 // bringing an image back). The result keeps the ref (`images`, as a person's message
@@ -645,6 +664,7 @@ export async function agentChat(
     toolResultMaxChars = TOOL_RESULT_MAX_CHARS_DEFAULT,
     imageLimits: limits = { ...IMAGE_DEFAULTS },
     requestTail,
+    systemPrompt,
     ...opts
   }: AgentOpts = {},
 ): Promise<AgentResult> {
@@ -728,7 +748,7 @@ export async function agentChat(
     for (let i = 0; i < maxRounds; i++) {
       rounds = i + 1;
       let roundContent = '';
-      const r = await chatRoundFn(withRequestTail(withAttachedImages(current, attachedUrls), requestTail), {
+      const r = await chatRoundFn(withRequestTail(withSystemPrompt(withAttachedImages(current, attachedUrls), systemPrompt), requestTail), {
         ...opts,
         tools: roundTools(),
         ...(noThinking ? { thinking: undefined } : {}),

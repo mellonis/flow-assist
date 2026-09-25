@@ -134,6 +134,18 @@ opens into each command's own block. A click on a command's line opens its last
 `runOutputLines` lines (`plugins.assistant.runOutputLines`); `^o` opens it, and
 everything else folded, in full. Limits:
 `shell.timeoutMs` (120 s) and `shell.maxChars` (20000; the end of the output is kept).
+The assistant moves the directory itself with its `cd` tool — "go to the project" —
+without a y/n, since it runs nothing, and only inside `shell.roots` (with no roots set
+it cannot move at all).
+
+Wherever the directory is — at the start, after `!cd`, `cd` or a command's own `cd` —
+the assistant is given the project's own rules: every `AGENTS.md` from that directory
+up to the `shell.roots` entry holding it, outermost first and the nearest last, so the
+nearer file wins where two disagree. They go into its instructions as a section of
+their own, each file under its path, read again whenever the directory moves; a line
+in the chat says which files were picked up (`Project instructions: ~/src/app/
+AGENTS.md`). A file over 32 KiB is cut at a line, with a note saying how many lines
+were left out. Nothing outside `shell.roots` is read — with no roots set, nothing is.
 
 `!!command` is for a program that needs the terminal — a prompt, `git add -p`, `top`,
 a login flow (`!!npm login`); or press `!` again on the still-empty line once already

@@ -225,8 +225,9 @@ the blacklist.
     takes it). An OpenAI-compatible server that refuses a user message right after
     `tool` messages would refuse the tail after a tool round; not seen yet, no switch.
     It is NOT in the system prompt (a change there would
-    invalidate the whole cached conversation) and NOT part of `assembleSystem()` (that
-    string is also the display list's system message and so lands in the session file).
+    invalidate the whole cached conversation) and NOT part of the system prompt the chat
+    joins (`joinSystem` — that string is also the display list's system message and so
+    lands in the session file).
     The chat hands `agentChat` a `requestTail` read before EVERY round (a tool that
     changes the screen is seen by the next round); the loop adds it to a COPY of the
     round's messages as a user message flagged `REQUEST_TAIL` — never to `current`, so
@@ -561,6 +562,40 @@ there is no `/fullscreen`.
   message that says more — a step of its own, a call, a change, reasoning — is never
   folded into one. A call that left a view is shown by its view and never a second
   time as a trail line.
+- **`cd` moves the shell's directory for the model** (`src/loader/tools-shell.ts`, the
+  `shell` group, so `ai.disabledTools: ["shell"]` takes it too). `{ path }`, relative to
+  the conversation's directory or absolute (`~` the home), held to `shell.roots` by the
+  same spelled-and-real check as run_command's `cwd` (`cdTarget`); outside them it
+  THROWS naming the roots, and with no roots configured it refuses — it is read-only
+  (no y/n), so nothing but the roots guards it. It sets `ctx.shell` the way `!cd` does,
+  so the hint row and every later run_command follow, and answers `now in <dir>` and
+  the AGENTS.md files the chat picks up there (or `no AGENTS.md between here and
+  <root>`) — one call enters a project.
+- **The project's instructions ride in the system prompt**
+  (`src/assistant/project-instructions.ts`, pure but for the reads). Whenever the
+  shell's directory is SET — `ShellState.setCwd`, the one place: `!cd`, run_command's
+  moves, `cd`, `/clear`, a restored session — its `onSet` listener has the chat read
+  `AGENTS.md` (exactly that name, matched in the directory's listing: a stat on a
+  case-insensitive disk finds `agents.md` too) in every directory from the shell's up
+  to, and not above, the innermost `shell.roots` entry holding it, compared by REAL
+  path; a directory that is a root has only its own. Outermost first, nearest last, so
+  the nearer wins. Nothing outside the roots is read: a directory outside them, no
+  roots at all (then not even the process's directory), a file that links out, a
+  non-file. Each file is capped at 32 KiB (`INSTRUCTIONS_CAP`), cut at a line break
+  with `… (cut at 32 KiB — N more lines)`; only the head is held, the rest counted. The
+  section is `## Project instructions` — a framing line, then each file under `###
+  <path>` — after the memory and before the plan (`joinSystem`). The rest of the system
+  prompt is taken once per message; this section is read again before EVERY round
+  (`AgentOpts.systemPrompt`, laid over the round's copy, never the history), so a `cd`
+  is seen by the next round of the same turn and an unchanged round sends the message
+  it had — re-reading the plan per round would miss the cache after every `todo`. It is
+  never a message in the history, so it is never stubbed, compacted or duplicated. The
+  chat says which files were picked up in a `note` row (`Project instructions: ~/p/
+  AGENTS.md`) only when the list changes; during a turn the note waits for the turn's
+  end (a note between rounds would split the turn's message), and a list that already
+  ends in the same note gets none (a continued session, restart after restart).
+  `applySession` and `/clear` set the directory AFTER replacing the list, or the note
+  would be replaced with it. The context meter counts the section under `system`.
 - **Whose claim excuses a y/n, and whose does not.** A tool pauses because its `write`
   flag says so, and the flag is set by whoever is entitled to say it. The `mcp` plugin
   keeps the two apart per server: `trusted` is "I believe THIS SERVER's own
@@ -682,8 +717,8 @@ there is no `/fullscreen`.
   an eval trial makes one per trial. Only a caller with no conversation of its own
   (the one-shot CLI, a bare `execChatTool`) falls back to the process-wide plan.
   The shell's directory is the same kind of state: `createShellState` in
-  `src/assistant/shell.ts`, held by the chat (`shellRef`), handed to run_command as
-  `ctx.shell`; a background run gets a fresh one.
+  `src/assistant/shell.ts`, held by the chat (`shellRef`), handed to run_command and
+  `cd` as `ctx.shell`; a background run gets a fresh one.
   **Tool state that describes a conversation is never module-level** — as a module
   variable the plan outlived `/clear`, was shared with background runs, and leaked
   from one test into the next.

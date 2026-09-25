@@ -5,6 +5,15 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **The assistant enters a project and reads its rules.** Wherever the shell's
+  directory is set — at the start, after `!cd`, or by the assistant's new `cd` tool
+  ("go to the project": relative or absolute, only inside `shell.roots`, no y/n since
+  it runs nothing) — every `AGENTS.md` from that directory up to its `shell.roots`
+  entry reaches the assistant as a "Project instructions" section of its system
+  prompt, outermost first and the nearest last, each file under its path and cut at
+  32 KiB. It is read again whenever the directory moves, the assistant sees it from its
+  very next request, and a line in the chat says which files were picked up. Nothing
+  outside `shell.roots` is read; with no roots set, nothing is, and `cd` is refused.
 - **A plugin can be a separate process, in any language.** The host talks to it over
   JSON-RPC 2.0, one message per line, on its stdin and stdout: the host draws, the
   plugin describes its whole screen and sends it again whenever it changes

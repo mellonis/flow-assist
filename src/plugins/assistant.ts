@@ -21,6 +21,7 @@ import { createToolSet, toolLoadingMode } from '../assistant/tool-loading.js';
 import { llmOpts } from '../assistant/llm-endpoint.js';
 import { copyTarget, copyToClipboard } from '../assistant/copy.js';
 import { createShellState, formatShell, nextCwd, realOf, runShell, shellLimits, shellOutcome, shellRoots, tildePath, type ShellResult } from '../assistant/shell.js';
+import { findInstructions, instructionsBlock, instructionsNote, type ProjectInstructions } from '../assistant/project-instructions.js';
 import {
   KEEP_SESSIONS, SESSION_VERSION, acquireLock, closeSession, flushOnExit, listSessions, loadSession, lockPath,
   makeLockToken, newSessionId, pruneSessions, releaseLock, saveSession, sessionFingerprint, sessionFingerprintsEqual,
@@ -302,8 +303,19 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const planRef = ui.useRef(createPlan());
           // Where this conversation's shell commands run — `!command` and the model's
           // run_command share it; `cd` moves it. The conversation's, like the plan: a
-          // background run gets its own, /clear resets it.
-          const shellRef = ui.useRef(createShellState(() => host.config as Record<string, unknown>));
+          // background run gets its own, /clear resets it. Every time it is set the
+          // project's instructions are read again (`refreshProject`, below) — through a
+          // ref, since the state is made once and the function is this render's.
+          const onShellSetRef = ui.useRef<() => void>(() => {});
+          const shellRef = ui.useRef(createShellState(() => host.config as Record<string, unknown>, null, () => onShellSetRef.current()));
+          // The AGENTS.md files for the shell's directory (src/assistant/project-
+          // instructions.ts): read when the directory is set, put in the system prompt
+          // of every request as "## Project instructions". A note waiting for the turn
+          // to end, when the directory moved in the middle of one (the `cd` tool): a
+          // note between a turn's rounds would split its message in two.
+          const projectRef = ui.useRef<ProjectInstructions>({ dir: '', root: null, files: [] });
+          const projectNoteRef = ui.useRef<string | null>(null);
+          const inTurnRef = ui.useRef(false);
           // Which turn a view belongs to — groups never span two.
           const turnRef = ui.useRef(0);
           // Live views, coalesced: the latest record per view waits here at most
@@ -806,7 +818,6 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             apiRef.current = s.api as unknown as ChatMessage[];
             summaryRef.current = s.summary;
             planRef.current.load(s.plan);
-            shellRef.current.setCwd(s.shellCwd ?? null);
             toolSetRef.current.load(s.tools);
             resetLiveViews(); // the calls they tracked belong to the conversation being left
             resetImages(s.images ?? [], s.imageSeq ?? 0);
@@ -820,6 +831,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             histAt.current = null;
             msgsRef.current = s.messages as ChatMsg[];
             setMessages(s.messages as ChatMsg[]);
+            // After the list is replaced, so the note the directory brings lands in it
+            // (said once — a session that ends in the same note is left as it is).
+            projectRef.current = { dir: '', root: null, files: [] };
+            shellRef.current.setCwd(s.shellCwd ?? null);
             setBangLevel(0); // the level is never saved — a restored draft is plain text
             setField(s.draft);
           };
@@ -978,23 +993,60 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // The tools the next request will CARRY — with tools on demand, the core ones,
               // what was loaded and the index; not every tool there is.
               // The history as it goes out: a stubbed item counts as its stub, not its content.
-              { system: baseStatic(), memory: memoryBlock(), plan: planBlock(), summary, screen: screenBlock(screen), tools: requestTools((host.services as Record<string, any>).pluginAiTools ?? [], toolLoadingMode(host.config.ai), toolSetRef.current), messages: sentHistory() },
+              { system: [baseStatic(), projectBlock()].filter(Boolean).join('\n\n'), memory: memoryBlock(), plan: planBlock(), summary, screen: screenBlock(screen), tools: requestTools((host.services as Record<string, any>).pluginAiTools ?? [], toolLoadingMode(host.config.ai), toolSetRef.current), messages: sentHistory() },
               window,
               u ? u.promptTokens + u.completionTokens : undefined,
             );
           };
 
           // The system prompt of a message = the «cheap» base (directive+identity) + fresh
-          // memory + the current plan + the summary. No network: the base is synchronous,
-          // memory a local file, the plan the tool's module state. It is also what the
-          // display list keeps as its system message (and so the session), which is one
-          // reason what the screens show is not in it; the other is the cache — it goes
-          // at the end of each request instead (`requestTail`, `screenNow`).
-          const assembleSystem = () => {
-            const summary = summaryRef.current ? `Summary of the conversation so far (older turns were compacted):\n${summaryRef.current}` : '';
-            const parts = [baseStatic(), memoryBlock(), planBlock(), summary].filter(Boolean);
+          // memory + the project's instructions + the current plan + the summary. No
+          // network: the base is synchronous, memory a local file, the instructions read
+          // when the shell's directory was last set, the plan the tool's module state. It
+          // is also what the display list keeps as its system message (and so the
+          // session), which is one reason what the screens show is not in it; the other
+          // is the cache — it goes at the end of each request instead (`requestTail`,
+          // `screenNow`). Everything but the instructions is taken once per message
+          // (`systemParts`); the instructions are read again for every round
+          // (`AgentOpts.systemPrompt`), so a `cd` mid-turn reaches the next round — a
+          // plan read per round would change the cached prefix after every `todo` call.
+          const projectBlock = () => instructionsBlock(projectRef.current);
+          const systemParts = () => ({
+            base: baseStatic(), memory: memoryBlock(), plan: planBlock(),
+            summary: summaryRef.current ? `Summary of the conversation so far (older turns were compacted):\n${summaryRef.current}` : '',
+          });
+          const joinSystem = (p: ReturnType<typeof systemParts>, project: string) => {
+            const parts = [p.base, p.memory, project, p.plan, p.summary].filter(Boolean);
             return parts.length ? parts.join('\n\n') : null;
           };
+          // A note is said once: not again when the list already ends in the same one
+          // (a continued session that said it before the restart).
+          const pushProjectNote = (note: string) => {
+            setMessages((cur) => {
+              const last = cur.findLast((m) => m.role === 'note' && String(m.content ?? '').startsWith('Project instructions:'));
+              return last?.content === note ? cur : [...cur, { role: 'note', content: note }];
+            });
+            host.notify();
+          };
+          // The shell's directory was set: read its instructions again and say so when
+          // the files picked up changed.
+          const refreshProject = () => {
+            const next = findInstructions(host.config as Record<string, unknown>, shellRef.current.cwd());
+            const note = instructionsNote(projectRef.current, next);
+            projectRef.current = next;
+            if (!note) return;
+            if (inTurnRef.current) projectNoteRef.current = note;
+            else pushProjectNote(note);
+          };
+          onShellSetRef.current = refreshProject;
+          // The start: the directory is the default (or a restored session's, which
+          // `applySession` sets). A timer made after the session's own start-up timer,
+          // so a continued session is in place first — the start-up only continues one
+          // into an empty list.
+          ui.useEffect(() => {
+            const t = setTimeout(() => onShellSetRef.current(), 0);
+            return () => clearTimeout(t);
+          }, []);
 
           // An image on its way to the provider: the bytes read when it was attached, or —
           // after a restart — read again from its path and checked against its hash. A file
@@ -1085,7 +1137,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // System context is assembled WITHOUT network on every message: replace the
             // old (role system) with a fresh one where memory is current (directive+
             // identity+memory). The chat history (user/assistant) is kept.
-            const sys = assembleSystem();
+            const sysParts = systemParts();
+            const sys = joinSystem(sysParts, projectBlock());
             // DISPLAY source vs LLM role are split: a `background` result stays role 'bg'
             // so the render labels it Background (it is NOT the user's own message, and
             // must never render as "You"), while for the model it is still a prompt to
@@ -1166,6 +1219,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // would be, in the warn colour, and it replaces the dim line under the
             // field that a wall of grey tool lines would otherwise hide.
             let roundLimit = 0;
+            inTurnRef.current = true; // a project note from here on waits for the turn's end (the `finally`)
             try {
               const chatResult = await (host.services as Record<string, any>).chatLLM(wire, {
                 ...llmOpts(ai),
@@ -1178,6 +1232,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // sent at the END of its request, after the conversation — past what the
                 // provider caches, and never into the history.
                 requestTail: () => screenBlock(screenNow()),
+                // The system prompt with the project's instructions as they are before
+                // each round — a `cd` in this turn is seen by its next round.
+                systemPrompt: () => joinSystem(sysParts, projectBlock()),
                 // What this conversation has loaded; `tools_load` adds to it mid-turn.
                 // The mode (`ai.toolLoading`) is applied by the `chatLLM` service.
                 toolSet: toolSetRef.current,
@@ -1466,6 +1523,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // streamRef now mirrors the stream lifecycle synchronously: true
               // from its top guard (line ~225), false again when the stream ends.
               streamRef.current = false;
+              // The directory moved during the turn: its note goes under the answer.
+              inTurnRef.current = false;
+              if (projectNoteRef.current) { const note = projectNoteRef.current; projectNoteRef.current = null; pushProjectNote(note); }
               // A plan finished in this turn has nothing left to show: all it would say is
               // "N done", hanging over the next question. It goes when the answer ends (as
               // in Claude Code); a plan with anything still open stays.
@@ -1964,7 +2024,6 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // A new conversation starts with no plan: the old one described work the
                 // model no longer remembers.
                 planRef.current.reset();
-                shellRef.current.setCwd(null); // back to the first root
                 toolSetRef.current.reset(); // a new conversation starts from the index
                 resetLiveViews(); // the calls they tracked are gone with the conversation
                 resetImages(); // numbering starts again at [Image #1]
@@ -1976,6 +2035,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   const kept = keptAfterClear(loadMemories(memoryFilePath(host.config)));
                   setMessages(kept ? [{ role: 'note', content: kept }] : []);
                 }
+                // Back to the first root — after the list is emptied, so the fresh
+                // conversation says which instructions it starts with.
+                projectRef.current = { dir: '', root: null, files: [] };
+                shellRef.current.setCwd(null);
                 setInput(''); inputRef.current = '';
                 setCursor(0);
                 setBangLevel(0); // a fresh conversation opens on a plain prompt

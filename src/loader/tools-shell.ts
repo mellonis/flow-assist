@@ -1,5 +1,5 @@
 // The `shell` tool group: run_command — the model runs a shell command in the
-// person's clone. Its own group, so `ai.disabledTools: ["shell"]` turns it off (core
+// person's clone — and cd, which moves the directory commands run in. Its own group, so `ai.disabledTools: ["shell"]` turns it off (core
 // cannot be). The runner is the one `!command` uses (assistant/shell.ts); what makes
 // this safe to offer is not the runner but the pause: the tool is a write, so EVERY
 // call waits for the person's y/n with the command on screen, and a background task —
@@ -10,9 +10,17 @@
 // working directory is checked anyway: it must lie inside a configured root by its
 // REAL path, so a symlink in a clone cannot carry the command out of it. It is the
 // conversation's (`ctx.shell`, shared with `!command`) and remembered between calls.
+//
+// `cd` moves that directory for the model without running anything: a read-only tool
+// (no y/n), held to the roots by the same spelled-and-real check, and refused when no
+// roots are configured — with nobody to confirm it, it may not wander the machine. Its
+// answer names the directory and the AGENTS.md files the chat will put in the system
+// prompt for it (src/assistant/project-instructions.ts), so one call enters a project.
 import { spawnSync } from 'node:child_process';
+import os from 'node:os';
 import path from 'node:path';
 import { capConsoleText, consoleData } from '../assistant/console-view.js';
+import { findInstructions } from '../assistant/project-instructions.js';
 import { createShellState, dirAllowed, formatShell, nextCwd, realOf, runShell, shellCwd, shellLimits, shellRoots, tildePath, within, type ShellState } from '../assistant/shell.js';
 import type { ToolGroup } from './tools.js';
 
@@ -36,6 +44,36 @@ export function commandCwd(config: Record<string, unknown>, asked: unknown, base
   if (!roots.map(realOf).some((r) => within(real, r))) throw new Error(`run_command: «${abs}» resolves through a link to «${real}», outside the configured roots`);
   if (!dirAllowed(config, abs)) throw new Error(`run_command: «${abs}» is not a directory`);
   return abs;
+}
+
+// Where `cd` goes: `asked` relative to `base`, or absolute (`~` the home directory) —
+// an existing directory inside a root, spelled AND real. A refusal throws and names
+// the roots, so the model knows where it may go.
+export function cdTarget(config: Record<string, unknown>, asked: unknown, base: string): string {
+  const s = typeof asked === 'string' ? asked.trim() : '';
+  if (!s) throw new Error('cd: path is required');
+  const roots = shellRoots(config);
+  if (!roots.length) throw new Error('cd: no roots are configured (shell.roots), so the directory cannot be moved');
+  const named = roots.join(', ');
+  const abs = path.resolve(base, s.replace(/^~(?=\/|$)/, os.homedir()));
+  if (!roots.some((r) => within(abs, r))) throw new Error(`cd: «${abs}» is outside the configured roots (${named})`);
+  const real = realOf(abs);
+  if (!roots.map(realOf).some((r) => within(real, r))) throw new Error(`cd: «${abs}» resolves through a link to «${real}», outside the configured roots (${named})`);
+  if (!dirAllowed(config, abs)) throw new Error(`cd: «${abs}» is not a directory`);
+  return abs;
+}
+
+// The answer: where the shell is now, and the instructions the chat picks up there.
+export function cdAnswer(config: Record<string, unknown>, dir: string): string {
+  const found = findInstructions(config, dir);
+  const lines = [`now in ${dir}`];
+  if (found.files.length) {
+    lines.push('Project instructions, in the system prompt from the next request on (outermost first):');
+    for (const f of found.files) lines.push(`- ${f.path}${f.cut ? ` (cut: ${f.cut} more lines not included)` : ''}`);
+  } else {
+    lines.push(`no AGENTS.md between here and ${found.root ?? 'the roots'}`);
+  }
+  return lines.join('\n');
 }
 
 // Which of the usual programs are on PATH — probed once per process, in ONE shell
@@ -87,8 +125,24 @@ export const shellTools = (config: Record<string, unknown>): ToolGroup => ({
       },
       write: true,
     },
+    {
+      type: 'function',
+      function: {
+        name: 'cd',
+        description: 'Move the shell\'s directory — where run_command and the person\'s !commands run — without running anything. Relative to the current directory, or absolute; only inside the configured roots. The AGENTS.md files between the new directory and its root reach you in the system prompt from the next request on ("Project instructions"); the answer lists them, so there is no need to read them.',
+        parameters: { type: 'object', properties: {
+          path: { type: 'string', description: 'The directory: relative to the current one, or absolute (~ is the home directory).' },
+        }, required: ['path'] },
+      },
+    },
   ],
   exec: async (name, args, ctx) => {
+    if (name === 'cd') {
+      const shell = (ctx as { shell?: ShellState }).shell ?? createShellState(() => config);
+      const dir = cdTarget(config, args.path, shell.cwd());
+      shell.setCwd(dir);
+      return cdAnswer(config, dir);
+    }
     if (name !== 'run_command') throw new Error(`Unknown tool: ${name}`);
     const cmd = String(args.command ?? '').trim();
     if (!cmd) throw new Error('run_command: command is required');

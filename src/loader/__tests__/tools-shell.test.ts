@@ -118,3 +118,61 @@ test('run_command opens its view and fills it as the command prints', async () =
   expect(states.at(-1)).toMatchObject({ text: 'ab', exitCode: 0 });
   expect(out).toContain('ab');
 });
+
+// ─── cd: the model moves the shell's directory ───────────────────────────────
+test('cd is a read-only tool of the shell group', () => {
+  const def = shellTools({ shell: { roots: [tmp()] } }).tools.find((t) => t.function.name === 'cd');
+  expect(def).toBeDefined();
+  expect((def as { write?: unknown }).write).toBeUndefined();
+  expect(def!.function.parameters).toMatchObject({ required: ['path'] });
+});
+
+test('cd moves the conversation\'s directory — relative to it or absolute — and names what it found', async () => {
+  const root = tmp();
+  fs.mkdirSync(path.join(root, 'proj', 'src'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'proj', 'AGENTS.md'), 'proj rules');
+  const config = { shell: { roots: [root] } };
+  const shell = createShellState(() => config);
+  const g = shellTools(config);
+  const out = await g.exec('cd', { path: 'proj' }, { shell } as never);
+  expect(shell.cwd()).toBe(path.join(root, 'proj'));
+  expect(shell.saved()).toBe(path.join(root, 'proj')); // what the session keeps
+  expect(out).toContain(`now in ${path.join(root, 'proj')}`);
+  expect(out).toContain(path.join(root, 'proj', 'AGENTS.md'));
+  await g.exec('cd', { path: 'src' }, { shell } as never);
+  expect(shell.cwd()).toBe(path.join(root, 'proj', 'src'));
+  const back = await g.exec('cd', { path: root }, { shell } as never);
+  expect(shell.cwd()).toBe(root);
+  expect(back).toContain(`now in ${root}`);
+  expect(back).toContain(`no AGENTS.md between here and ${root}`);
+});
+
+test('cd outside the roots is a tool error naming the roots, and the directory stays', async () => {
+  const root = tmp();
+  const other = tmp();
+  fs.mkdirSync(path.join(root, 'a'));
+  fs.symlinkSync(other, path.join(root, 'out'));
+  const config = { shell: { roots: [root] } };
+  const shell = createShellState(() => config);
+  const g = shellTools(config);
+  await g.exec('cd', { path: 'a' }, { shell } as never);
+  await expect(g.exec('cd', { path: other }, { shell } as never)).rejects.toThrow(root);
+  await expect(g.exec('cd', { path: '../..' }, { shell } as never)).rejects.toThrow(/outside the configured roots/);
+  await expect(g.exec('cd', { path: '../out' }, { shell } as never)).rejects.toThrow(root); // a link out
+  await expect(g.exec('cd', { path: 'missing' }, { shell } as never)).rejects.toThrow(/not a directory/);
+  await expect(g.exec('cd', { path: ' ' }, { shell } as never)).rejects.toThrow(/path is required/);
+  expect(shell.cwd()).toBe(path.join(root, 'a'));
+});
+
+test('cd with no roots configured is refused and names the key to set', async () => {
+  const shell = createShellState(() => ({}));
+  await expect(shellTools({}).exec('cd', { path: os.tmpdir() }, { shell } as never)).rejects.toThrow(/shell\.roots/);
+});
+
+test('the shell state says every time its directory is set', () => {
+  const seen: (string | null)[] = [];
+  const shell = createShellState(() => ({}), null, (d) => seen.push(d));
+  shell.setCwd('/x');
+  shell.setCwd(null);
+  expect(seen).toEqual(['/x', null]);
+});

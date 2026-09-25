@@ -645,3 +645,32 @@ test('a tool returning { text, images } gets its images stored and sent as parts
   // The trail's detail is the text, never the object with the bytes in it.
   expect(r.toolRuns[0]!.detail).toBe('two things');
 });
+
+// The system prompt a caller can change mid-turn (the project's instructions after a
+// `cd`): read before EVERY round and laid over the round's copy — never the history,
+// never the transcript — and a round whose text is unchanged is sent as it was.
+test('systemPrompt is read before every round and replaces the leading system message in the round\'s copy only', async () => {
+  assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
+  let sys = 'SYS one';
+  const extraTools = [{ type: 'function', function: { name: 'demo:move', description: 'd', parameters: { type: 'object', properties: {} } }, run: async () => { sys = 'SYS two'; return 'moved'; } }] as any;
+  const rounds: any[][] = [];
+  const chatRound = async (m: any[], o: Record<string, unknown>) => {
+    rounds.push(m);
+    expect(o.systemPrompt).toBeUndefined(); // never spread into the round's options
+    if (rounds.length === 1) return { content: '', finishReason: 'tool_calls', toolCalls: [{ id: 'c1', name: 'demo__move', arguments: '{}' }] };
+    return { content: 'ok', finishReason: 'stop', toolCalls: [] };
+  };
+  const input = [{ role: 'system', content: 'SYS one' }, { role: 'user', content: 'go' }];
+  const r = await agentChat(input as any, { baseUrl: 'http://x', model: 'm', token: 't', onLive: () => {}, onLiveCommit: () => {}, extraTools, chatRound, systemPrompt: () => sys } as any);
+  expect(rounds[0]![0]).toBe(input[0]); // unchanged: the very message, not a copy
+  expect(rounds[1]![0]).toEqual({ role: 'system', content: 'SYS two' });
+  expect(input[0]!.content).toBe('SYS one');
+  expect(r.transcript.some((m) => m.role === 'system')).toBe(false);
+  // No system message yet: one is put first; an empty answer adds none.
+  rounds.length = 0; sys = 'SYS three';
+  await agentChat([{ role: 'user', content: 'go' }] as any, { baseUrl: 'http://x', model: 'm', token: 't', onLive: () => {}, onLiveCommit: () => {}, chatRound: async (m: any[]) => { rounds.push(m); return { content: 'ok', finishReason: 'stop', toolCalls: [] }; }, systemPrompt: () => sys } as any);
+  expect(rounds[0]![0]).toEqual({ role: 'system', content: 'SYS three' });
+  rounds.length = 0;
+  await agentChat([{ role: 'user', content: 'go' }] as any, { baseUrl: 'http://x', model: 'm', token: 't', onLive: () => {}, onLiveCommit: () => {}, chatRound: async (m: any[]) => { rounds.push(m); return { content: 'ok', finishReason: 'stop', toolCalls: [] }; }, systemPrompt: () => '' } as any);
+  expect(rounds[0]!.map((m) => m.role)).toEqual(['user']);
+});
