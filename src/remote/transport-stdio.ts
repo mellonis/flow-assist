@@ -4,8 +4,9 @@
 // unref'd, so a short-lived command exits when its own work is done; stopped with the
 // program (`process.on('exit')`, and the termination signals — the handler removes
 // itself and re-raises when nobody else listens, so flowtty's own re-raise still
-// works); SIGTERM, then SIGKILL after the grace. The same logic as
-// plugins-available/mcp/src/stdio.ts — a copy, since the host imports no plugin.
+// works); SIGTERM, then SIGKILL after the grace. It follows the rules
+// plugins-available/mcp/src/stdio.ts follows, in code of its own — the host imports
+// no plugin.
 import { spawn, type ChildProcess } from 'node:child_process';
 import path from 'node:path';
 import { LineSplitter } from '@flow-assist/remote';

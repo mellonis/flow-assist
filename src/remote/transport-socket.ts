@@ -73,7 +73,12 @@ export function socketTransport(opts: SocketOpts): Transport & { start(): Promis
   // kills the writer (EPIPE). The file is opened for appending, 0600 — kept across
   // starts, so what a server said before it died is still there to read — and emptied
   // first when it has grown past `LOG_MAX_BYTES`, so it never grows without bound.
-  const startServer = () => {
+  //
+  // Returns what `start()` waits on besides the socket: set once the process has
+  // failed to start or exited, so a server that dies before it listens fails the
+  // start at once instead of holding the lock for the whole wait.
+  const startServer = (): { ended: string | null } => {
+    const state: { ended: string | null } = { ended: null };
     const [cmd, ...args] = opts.run!;
     const logFile = `${opts.socketPath}.log`;
     const fd = fs.openSync(logFile, 'a', 0o600);
@@ -82,14 +87,15 @@ export function socketTransport(opts: SocketOpts): Transport & { start(): Promis
       if (fs.fstatSync(fd).size > LOG_MAX_BYTES) fs.ftruncateSync(fd, 0);
       const c = spawn(cmd!.includes('/') ? path.resolve(opts.cwd, cmd!) : cmd!, [...args, '--serve', opts.socketPath], { cwd: opts.cwd, env: { ...process.env, ...opts.env }, detached: true, stdio: ['ignore', 'ignore', fd] });
       // A command that cannot even start (a typo in `run`, no shell to report it) fires
-      // `error`, never `exit` — an unhandled one would take the whole host down; the
-      // wait loop below times out on its own once nothing ever answers the socket.
-      c.on('error', (e) => opts.log(`[${opts.name}] failed to start: ${e.message}`));
+      // `error`, never `exit` — an unhandled one would take the whole host down.
+      c.on('error', (e) => { opts.log(`[${opts.name}] failed to start: ${e.message}`); state.ended ??= `could not start (${e.message})`; });
+      c.once('exit', (code, signal) => { state.ended ??= signal ? `exited (${signal})` : `exited (exit ${code ?? 0})`; });
       c.unref();
       opts.log(`[${opts.name}] started ${opts.run!.join(' ')} --serve (pid ${c.pid}), its stderr to ${logFile}`);
     } finally {
       fs.closeSync(fd); // the child has its own copy
     }
+    return state;
   };
 
   return {
@@ -108,9 +114,13 @@ export function socketTransport(opts: SocketOpts): Transport & { start(): Promis
           // server and split its clients across two.
           if (!(await probe(opts.socketPath))) { lock.release(); conn = await connect(); return; }
           try { fs.unlinkSync(opts.socketPath); } catch { /* nothing stale to remove */ }
-          startServer();
+          const server = startServer();
           try {
-            while (Date.now() < deadline) { if (fs.existsSync(opts.socketPath) && !(await probe(opts.socketPath))) break; await new Promise((r) => setTimeout(r, POLL_MS)); }
+            while (Date.now() < deadline) {
+              if (fs.existsSync(opts.socketPath) && !(await probe(opts.socketPath))) break;
+              if (server.ended) throw new Error(`${opts.name}: the server ${server.ended} before listening on ${opts.socketPath} (its stderr: ${opts.socketPath}.log)`);
+              await new Promise((r) => setTimeout(r, POLL_MS));
+            }
           } finally { lock.release(); }
         } else {
           // Another host is starting it: wait for the socket rather than start a second.

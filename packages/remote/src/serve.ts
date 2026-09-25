@@ -1,7 +1,8 @@
 // The shared-server mode of a remote plugin transport: one process, several hosts.
 // Each connection is a client of its own — its own `hello`, own protocol state, and
 // its own line stream — handled by `onConnection`, which resolves once that client
-// is done (its `shutdown` answered, the handler's business); what the injected
+// is done (its `shutdown` answered, or the connection gone — the `PeerIo`'s
+// `onClose`; the handler's business); what the injected
 // handler holds outside a single connection is what every client shares. The server
 // listens on the unix socket path the host passes and exits on its own `idleMs` after
 // its last client leaves: the value the FIRST hello carried, kept for the process's
@@ -129,11 +130,14 @@ export async function serveConnections(onConnection: (io: PeerIo) => Promise<voi
             }
             lines.forEach((f) => f(raw));
           });
-          const io: PeerIo = { send: (l) => { if (gone) return; queue.push(Buffer.from(`${l}\n`)); flush(); }, onLine: (f) => { lines.push(f); } };
+          // `onClose` reports the client gone — with or without its `shutdown` — so the
+          // handler (`servePlugin`) finishes and that client's state is dropped.
+          const closes: Array<() => void> = [];
+          const io: PeerIo = { send: (l) => { if (gone) return; queue.push(Buffer.from(`${l}\n`)); flush(); }, onLine: (f) => { lines.push(f); }, onClose: (f) => { closes.push(f); } };
           conn.data = {
             feed: (d) => splitter.feed(decoder.decode(d, { stream: true })),
             flush,
-            leave: () => { gone = true; queue.length = 0; clients--; if (clients === 0) armIdle(); },
+            leave: () => { gone = true; queue.length = 0; clients--; closes.forEach((f) => f()); if (clients === 0) armIdle(); },
           };
           onConnection(io).then(() => conn.end(), () => conn.end());
         },

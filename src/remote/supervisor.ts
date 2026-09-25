@@ -1,8 +1,9 @@
 // A transport that comes back. Over a factory of transports it presents ONE
 // `RestartingTransport`: lines and closes come from whichever is live, a close of a
-// transport that had started starts the next after a backoff (1 → 2 → 4 → 8 → 16 →
-// 30 s), `onRestart` tells the layer above to say `hello` again, and five failures in
-// a row give up with `disabled until restart` in the log. A run that lived longer
+// transport that had started starts the next after a backoff (1 → 2 → 4 → 8 s — four
+// steps, the most five failures in a row can reach), `onRestart` tells the layer
+// above to say `hello` again, and five failures in a row give up with `disabled until
+// restart` in the log. A run that lived longer
 // resets the count. The very first `start()` is not a restart: if it never comes up —
 // whether it rejects, or closes before resolving — that rejects to the caller alone;
 // nothing is scheduled and no close reaches the layer above, since nothing was ever
@@ -12,7 +13,7 @@
 // then rejects instead of quietly resolving.
 import type { RestartingTransport, Transport, TransportClose } from './transport.js';
 
-export const BACKOFF_MS = [1_000, 2_000, 4_000, 8_000, 16_000, 30_000];
+export const BACKOFF_MS = [1_000, 2_000, 4_000, 8_000];
 export const MAX_FAILURES = 5;
 const QUICK_DEATH_MS = 1_000;
 
@@ -94,10 +95,15 @@ export function supervise(factory: () => Transport & { start(): Promise<void> },
       closes.forEach((f) => f(why));
       scheduleRestart(up);
     });
+    const p = t.start();
     // One `.then` with both reactions, not a `.catch` chained onto the returned
     // promise: chaining would cost the caller's own `.then` an extra microtask tick
     // relative to `t.start()` settling, and `onRestart` is timed against that.
-    const p = t.start();
+    //
+    // `startedOnce` is set on success even after `close()` has run: that is safe only
+    // because the `done` latch is checked before `startedOnce` is ever read (here and
+    // in `onClose` above), so a close after the supervisor's own never reaches the
+    // restart logic, and the attempt itself is closed again by its caller.
     p.then(
       () => { up = true; startedOnce = true; },
       (e: unknown) => {

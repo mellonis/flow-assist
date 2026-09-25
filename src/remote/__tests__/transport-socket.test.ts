@@ -13,6 +13,16 @@ const until = async (ok: () => boolean, label: string, ms = 3_000) => {
   while (!ok() && Date.now() < end) await wait(10);
   if (!ok()) throw new Error(`timed out waiting for ${label}`);
 };
+const alive = (pid: number): boolean => { try { process.kill(pid, 0); return true; } catch { return false; } };
+// Everything a test's server leaves beside its socket.
+const forget = (sock: string) => { for (const f of [sock, `${sock}.lock`, `${sock}.log`, `${sock}.pid`]) fs.rmSync(f, { force: true }); };
+// Waits for the server a test started to be gone — on its own idle, or ended here.
+const serverGone = async (pidfile: string, end = false) => {
+  if (!fs.existsSync(pidfile)) return;
+  const pid = Number(fs.readFileSync(pidfile, 'utf8'));
+  if (end) { try { process.kill(pid, 'SIGTERM'); } catch { /* already gone */ } }
+  await until(() => !alive(pid), 'the server to exit');
+};
 const host = (sock: string, pidfile: string) => {
   const log: string[] = [];
   const t = socketTransport({ name: 'fake', socketPath: sock, run: FAKE, cwd, env: { FAKE_PIDFILE: pidfile }, log: (l) => log.push(l) });
@@ -22,35 +32,47 @@ const host = (sock: string, pidfile: string) => {
 
 test('the first host starts the server, the second connects to it; frames do not mix; shared state is seen by both; the server exits after the last client', async () => {
   const sock = socketPath('t1.sock'); const pidfile = `${sock}.pid`;
+  forget(sock);
   const a = host(sock, pidfile); const b = host(sock, pidfile);
-  await a.t.start();
-  const pid1 = fs.readFileSync(pidfile, 'utf8');
-  expect(await a.peer.request('hello', { hostApi: 2, config: {}, idleMs: 100 }, 5_000)).toMatchObject({ name: 'fake' });
-  await b.t.start();
-  expect(fs.readFileSync(pidfile, 'utf8')).toBe(pid1); // no second process
-  expect(await b.peer.request('hello', { hostApi: 2, config: {}, idleMs: 100 }, 5_000)).toMatchObject({ name: 'fake' });
-  const af: unknown[] = []; const bf: unknown[] = [];
-  a.peer.onNotify('frame', (f) => af.push(f)); b.peer.onNotify('frame', (f) => bf.push(f));
-  a.peer.notify('key', { name: 'b', id: 'b', action: 'bump' });
-  await wait(50);
-  expect(JSON.stringify(af.at(-1))).toContain('client 1');
-  expect(JSON.stringify(bf)).not.toContain('client 1');
-  expect(await b.peer.request('tool.run', { name: 'shared', args: {}, call: { id: '1' } }, 2_000)).toEqual({ result: 'shared=3' });
-  await a.t.close(100); await b.t.close(100);
-  await wait(300);
-  expect(fs.existsSync(sock)).toBe(false); // gone on its own idle, by the first hello's 100 ms
-  expect(a.log.some((l) => l.includes('started'))).toBe(true);
-  expect(b.log.some((l) => l.includes('started'))).toBe(false);
+  try {
+    await a.t.start();
+    const pid1 = fs.readFileSync(pidfile, 'utf8');
+    expect(await a.peer.request('hello', { hostApi: 2, config: {}, idleMs: 100 }, 5_000)).toMatchObject({ name: 'fake' });
+    await b.t.start();
+    expect(fs.readFileSync(pidfile, 'utf8')).toBe(pid1); // no second process
+    expect(await b.peer.request('hello', { hostApi: 2, config: {}, idleMs: 100 }, 5_000)).toMatchObject({ name: 'fake' });
+    const af: unknown[] = []; const bf: unknown[] = [];
+    a.peer.onNotify('frame', (f) => af.push(f)); b.peer.onNotify('frame', (f) => bf.push(f));
+    a.peer.notify('key', { name: 'b', id: 'b', action: 'bump' });
+    await until(() => JSON.stringify(af.at(-1) ?? null).includes('n=1'), "a's bump drawn");
+    expect(JSON.stringify(af.at(-1))).toContain('client 1');
+    expect(JSON.stringify(bf)).not.toContain('client 1');
+    expect(await b.peer.request('tool.run', { name: 'shared', args: {}, call: { id: '1' } }, 2_000)).toEqual({ result: 'shared=3' });
+    await a.t.close(100); await b.t.close(100);
+    await serverGone(pidfile); // on its own idle, by the first hello's 100 ms
+    expect(fs.existsSync(sock)).toBe(false);
+    expect(a.log.some((l) => l.includes('started'))).toBe(true);
+    expect(b.log.some((l) => l.includes('started'))).toBe(false);
+  } finally {
+    await serverGone(pidfile, true);
+    forget(sock);
+  }
 });
 
 test('a dead socket file is replaced by a fresh server', async () => {
-  const sock = socketPath('t2.sock');
+  const sock = socketPath('t2.sock'); const pidfile = `${sock}.pid`;
+  forget(sock);
   fs.writeFileSync(sock, '');
-  const a = host(sock, `${sock}.pid`);
-  await a.t.start();
-  expect(await a.peer.request('hello', { hostApi: 2, config: {}, idleMs: 50 }, 5_000)).toMatchObject({ name: 'fake' });
-  await a.t.close(100);
-  await wait(200);
+  const a = host(sock, pidfile);
+  try {
+    await a.t.start();
+    expect(await a.peer.request('hello', { hostApi: 2, config: {}, idleMs: 50 }, 5_000)).toMatchObject({ name: 'fake' });
+    await a.t.close(100);
+    await serverGone(pidfile);
+  } finally {
+    await serverGone(pidfile, true);
+    forget(sock);
+  }
 });
 
 test('connect with no run and nothing listening is a rejection naming the socket', async () => {
@@ -59,25 +81,36 @@ test('connect with no run and nothing listening is a rejection naming the socket
   await expect(t.start()).rejects.toThrow('t3.sock');
 });
 
-test('a run command that cannot start logs the failure and start() still rejects by waitMs, without an unhandled error', async () => {
+test('a run command that cannot start logs the failure and start() rejects at once, without an unhandled error', async () => {
   const sock = socketPath('t4.sock');
   const log: string[] = [];
   const t = socketTransport({ name: 'fake', socketPath: sock, run: ['./does-not-exist'], cwd, log: (l) => log.push(l), waitMs: 200 });
-  await expect(t.start()).rejects.toThrow('t4.sock');
-  expect(log.some((l) => l.includes('failed to start'))).toBe(true);
+  try {
+    await expect(t.start()).rejects.toThrow('t4.sock');
+    expect(log.some((l) => l.includes('failed to start'))).toBe(true);
+  } finally {
+    forget(sock);
+  }
 });
 
 test('close() fires onClose once, host-initiated; a second close() does not fire it again', async () => {
-  const sock = socketPath('t5.sock');
-  const a = host(sock, `${sock}.pid`);
-  await a.t.start();
-  await a.peer.request('hello', { hostApi: 2, config: {}, idleMs: 50 }, 5_000);
-  const closes: unknown[] = [];
-  a.t.onClose((w) => closes.push(w));
-  await a.t.close(0);
-  expect(closes).toEqual([{}]);
-  await a.t.close(0);
-  expect(closes).toEqual([{}]);
+  const sock = socketPath('t5.sock'); const pidfile = `${sock}.pid`;
+  forget(sock);
+  const a = host(sock, pidfile);
+  try {
+    await a.t.start();
+    await a.peer.request('hello', { hostApi: 2, config: {}, idleMs: 50 }, 5_000);
+    const closes: unknown[] = [];
+    a.t.onClose((w) => closes.push(w));
+    await a.t.close(0);
+    expect(closes).toEqual([{}]);
+    await a.t.close(0);
+    expect(closes).toEqual([{}]);
+    await serverGone(pidfile);
+  } finally {
+    await serverGone(pidfile, true);
+    forget(sock);
+  }
 });
 
 test('a line of over a megabyte of non-ASCII text crosses the socket whole, both ways', async () => {
@@ -111,8 +144,6 @@ test('a line of over a megabyte of non-ASCII text crosses the socket whole, both
   await until(() => !fs.existsSync(sock), 'the server to go on its idle');
 }, 15_000);
 
-const alive = (pid: number): boolean => { try { process.kill(pid, 0); return true; } catch { return false; } };
-const forget = (sock: string) => { for (const f of [sock, `${sock}.lock`, `${sock}.log`, `${sock}.pid`]) fs.rmSync(f, { force: true }); };
 
 test("a server's stderr goes to its log file beside the socket, so it outlives the host that started it", async () => {
   const sock = socketPath('t7.sock'); const pidfile = `${sock}.pid`;
@@ -226,3 +257,17 @@ test('a host that finds the start lock held waits for the server the holder star
     forget(sock);
   }
 });
+
+test('a server that exits before it listens fails start() at once with its exit code, the lock released', async () => {
+  const sock = socketPath('t11.sock');
+  forget(sock);
+  const t = socketTransport({ name: 'fake', socketPath: sock, run: ['bun', '-e', 'process.exit(7)'], cwd, log: () => {}, waitMs: 10_000 });
+  const began = Date.now();
+  try {
+    await expect(t.start()).rejects.toThrow(/t11\.sock.*exit 7|exit 7.*t11\.sock/);
+    expect(Date.now() - began).toBeLessThan(3_000);
+    expect(fs.existsSync(`${sock}.lock`)).toBe(false);
+  } finally {
+    forget(sock);
+  }
+}, 15_000);

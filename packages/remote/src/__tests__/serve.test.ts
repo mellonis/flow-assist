@@ -2,7 +2,7 @@ import { expect, spyOn, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createPeer, LineSplitter, type PeerIo } from '../index';
+import { createPeer, LineSplitter, servePlugin, type PeerIo } from '../index';
 import { serveConnections } from '../serve';
 
 function sock(): { dir: string; path: string } {
@@ -180,3 +180,22 @@ test('a --serve plugin that holds a handle of its own ends on SIGTERM, by that s
     fs.rmSync(dir, { recursive: true, force: true });
   }
 }, 10_000);
+
+test("a client that drops without shutdown ends its servePlugin, so the server drops that client's state", async () => {
+  const { dir, path: p } = sock();
+  const stop = new AbortController();
+  let ended = 0;
+  try {
+    await new Promise<void>((r) => {
+      void serveConnections((io) => servePlugin({ hello: { name: 'drop' }, init: () => ({}), update: (_e, m) => m, view: () => ({ surface: null }) }, io).then(() => { ended++; }), p, { onListening: r, signal: stop.signal });
+    });
+    const c = await client(p);
+    expect(await c.peer.request('hello', { hostApi: 2, config: {} })).toMatchObject({ name: 'drop' });
+    c.end(); // gone, no `shutdown`
+    for (let i = 0; i < 200 && ended === 0; i++) await Bun.sleep(10);
+    expect(ended).toBe(1);
+  } finally {
+    stop.abort();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

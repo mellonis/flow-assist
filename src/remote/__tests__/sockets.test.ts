@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
-import { acquireStartLock, socketPath, socketsDir } from '../sockets';
+import { acquireStartLock, socketPath, socketPathProblem, socketsDir } from '../sockets';
 import { UNREADABLE_HELD_MS } from '../../assistant/sessions';
 
 test('the sockets directory is the host\'s own, 0700, and a name is a name', () => {
@@ -27,7 +27,7 @@ test('a live lock is waited on, a stale one is taken', () => {
 });
 
 test('an unreadable lock is held while it is young — a create racing its own write — and stale once old', () => {
-  const p = socketPath('lock-unreadable.sock');
+  const p = socketPath('lock-unread.sock');
   const lock = `${p}.lock`;
   fs.writeFileSync(lock, ''); // created, not yet written
   try {
@@ -44,7 +44,7 @@ test('an unreadable lock is held while it is young — a create racing its own w
 });
 
 test("release removes only this acquire's own lock, never a successor's", () => {
-  const p = socketPath('lock-successor.sock');
+  const p = socketPath('lock-succ.sock');
   const lock = `${p}.lock`;
   try {
     const mine = acquireStartLock(p);
@@ -58,4 +58,17 @@ test("release removes only this acquire's own lock, never a successor's", () => 
   } finally {
     fs.rmSync(lock, { force: true });
   }
+});
+
+test("a socket path longer than the platform's sun_path is refused, naming the part that is too long", () => {
+  const dir = `/${'d'.repeat(80)}/sockets`; // 89 bytes
+  expect(socketPathProblem(dir, 'x'.repeat(10), 'darwin')).toBeNull(); // 100 bytes: fits in 103
+  expect(socketPathProblem(dir, 'x'.repeat(15), 'darwin')).toContain('the name');
+  expect(socketPathProblem(dir, 'x'.repeat(15), 'linux')).toBeNull(); // 105: fits in 107
+  // Multibyte: bytes are counted, not characters.
+  expect(socketPathProblem(dir, 'я'.repeat(8), 'darwin')).toContain('the name');
+  const deep = `/${'d'.repeat(100)}/sockets`;
+  const why = socketPathProblem(deep, 'a.sock', 'darwin')!;
+  expect(why).toContain('the sockets directory');
+  expect(why).toContain(deep);
 });

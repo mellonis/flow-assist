@@ -30,7 +30,29 @@ export function socketsDir(): string {
 
 export function socketPath(name: string): string {
   if (!name || name === '.' || name.length > 64 || /[/\\]/.test(name) || name.includes('..')) throw new Error(`socket name must be a plain file name under 64 characters, got ${JSON.stringify(name)}`);
-  return path.join(socketsDir(), name);
+  const dir = socketsDir();
+  const problem = socketPathProblem(dir, name);
+  if (problem) throw new Error(problem);
+  return path.join(dir, name);
+}
+
+// A unix socket binds only a path that fits in `sun_path` with its terminating NUL:
+// 104 bytes on macOS and the BSDs, 108 on Linux — so at most 103 or 107 bytes of
+// path. Past that the bind fails with an error that names neither part, so the check
+// is here, and says whether the directory or the name is what to shorten.
+const SUN_PATH_BYTES: Record<string, number> = { linux: 108, android: 108 };
+export function socketPathProblem(dir: string, name: string, platform: string = process.platform): string | null {
+  const limit = (SUN_PATH_BYTES[platform] ?? 104) - 1;
+  const full = path.join(dir, name);
+  const bytes = Buffer.byteLength(full);
+  if (bytes <= limit) return null;
+  const dirBytes = Buffer.byteLength(dir) + 1;
+  // A name of a few characters is what any socket needs; a directory that leaves less
+  // room than that is the part to move.
+  const part = limit - dirBytes < 8
+    ? `the sockets directory ${dir} takes ${dirBytes} of them — set a shorter XDG_CONFIG_HOME`
+    : `the name ${JSON.stringify(name)} takes ${Buffer.byteLength(name)} of them, and at most ${limit - dirBytes} fit after the sockets directory`;
+  return `socket path ${full} is ${bytes} bytes, over this platform's limit of ${limit}: ${part}`;
 }
 
 const alive = (pid: number): boolean => { try { process.kill(pid, 0); return true; } catch (e) { return (e as { code?: string }).code === 'EPERM'; } };

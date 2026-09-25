@@ -697,7 +697,8 @@ rarely matter:
 
 **`connect: "unix:<name>"`.** `<name>` names a socket under the host's own `sockets/`
 directory — a plain file name, at most 64 characters, never a path (no `/`, `\` or
-`..`). The first host to reach it finds nothing listening, starts the server itself —
+`..`) — and the whole path must fit the platform's limit for a socket path (103 bytes
+on macOS, 107 on Linux); a longer one is refused, naming the part to shorten. The first host to reach it finds nothing listening, starts the server itself —
 `run`'s command with `--serve <socket path>` appended — and waits for the socket to
 appear, up to 10 s; a second host finds the socket already there and connects straight
 to it, starting nothing. `connect` with no `run` only ever connects; if nothing is

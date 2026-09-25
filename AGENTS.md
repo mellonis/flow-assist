@@ -387,8 +387,9 @@ protocol as its authors read it is docs/plugins.md, "A plugin in another languag
   handshake, on the first `hello` or a restart's — gets the full stop: stdin closed,
   then a grace period, then `SIGTERM`, then `SIGKILL` — the same shape "A plugin that
   starts a process owns its life" (above) holds any child to.
-  `src/remote/transport-stdio.ts` is a copy of `plugins-available/mcp/src/stdio.ts`'s
-  own logic, since the host imports no plugin.
+  `src/remote/transport-stdio.ts` follows the same rules as
+  `plugins-available/mcp/src/stdio.ts` in code of its own, since the host imports no
+  plugin.
 - **A `connect` server is spawned detached**, with `run`'s command plus
   `--serve <socket path>`, and a host never kills it — only disconnects; another host
   may still be on it. Its stderr is `<socket>.log` beside the socket (opened for
