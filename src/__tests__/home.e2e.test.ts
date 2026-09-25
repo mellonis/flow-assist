@@ -331,3 +331,35 @@ test('a surface as tall as useSurfaceSize says fits between the title bar and th
   expect(footer).toBeGreaterThan(bottom);
   ui.app.unmount();
 });
+
+// An emoji is one code point and two cells: counted by code points, the description
+// column came out half as wide as the text and wrapped it.
+test('a description with emoji is given the cells it takes', async () => {
+  const { renderHome } = await import('../views/home');
+  const { render } = await import('@flowtty/react');
+  const { TestBackend, flush } = await import('@flowtty/core/testing');
+  const backend = new TestBackend(120, 16);
+  const description = `${'✅'.repeat(10)} \u{1F1F7}\u{1F1FA}`; // 25 cells, 13 code points
+  const app = render(renderHome({
+    title: 'flow-assist', builtins: [], keys: { chat: ['return'], commandLine: [], quit: ['q'] },
+    plugins: [{ name: 'tags', description }],
+  }) as never, backend as never);
+  await flush();
+  expect(backend.lastFrame.split('\n').some((r) => r.includes(description))).toBe(true);
+  (app as { unmount?: () => void }).unmount?.();
+});
+
+test('the no-plugins note with emoji is given the cells it takes', async () => {
+  const { renderHome } = await import('../views/home');
+  const { render } = await import('@flowtty/react');
+  const { TestBackend, flush } = await import('@flowtty/core/testing');
+  const backend = new TestBackend(120, 16);
+  const pluginsNote = `${'✅'.repeat(12)} \u{1F468}‍\u{1F469}‍\u{1F467}`; // 27 cells, 18 code points
+  const app = render(renderHome({
+    title: 'flow-assist', builtins: [], keys: { chat: ['return'], commandLine: [], quit: ['q'] },
+    plugins: [], pluginsNote,
+  }) as never, backend as never);
+  await flush();
+  expect(backend.lastFrame.split('\n').some((r) => r.includes(pluginsNote))).toBe(true);
+  (app as { unmount?: () => void }).unmount?.();
+});

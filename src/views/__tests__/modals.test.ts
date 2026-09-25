@@ -5,6 +5,7 @@ import { TestBackend } from '@flowtty/core/testing';
 import { MODAL_COLOR_DEFAULTS } from '../../playback/theme.js';
 import { chatRows, condenseRuns, helpEntries, toolSummary, inputVisualRows, mdLines, renderChatModal, renderHelp, renderLogModal, renderReminder, typedLines, type RowOpts } from '../modals.js';
 import { bumpViewRevision } from '../../assistant/views.js';
+import { cutLeft } from '../../cells.js';
 import { pickerStart } from '../../assistant/session-picker.js';
 import type { SessionRow } from '../../assistant/sessions.js';
 
@@ -682,4 +683,23 @@ test('the folded tools summary counts cells, not code points', () => {
   expect(toolSummary(runs as never, stringWidth(all))).toBe(all);
   const cut = toolSummary(runs as never, stringWidth(all) - 1);
   expect(cut).toBe(`${FAMILY}a, …`);
+});
+
+test('a path cut from the left keeps whole clusters and counts their cells', () => {
+  const path = `~/${FAMILY}/${FAMILY}/src`;
+  // 13 cells by clusters, 29 code points: it fits and is not cut.
+  expect(cutLeft(path, stringWidth(path))).toBe(path);
+  const cut = cutLeft(`~/${'✅'.repeat(10)}/src`, 10);
+  expect(stringWidth(cut)).toBeLessThanOrEqual(10);
+  expect(cut.startsWith('…')).toBe(true);
+  expect(cut.endsWith('/src')).toBe(true);
+});
+
+test('a change title that fits by clusters is not cut from the left', () => {
+  const title = `docs/${FAMILY.repeat(12)}.md`; // 32 cells, 68 code points
+  const msg = { role: 'assistant', content: 'Done.', parts: [{ kind: 'change', change: { title, diff: '', added: 1, removed: 0, hidden: 0 } }] };
+  // Room for the title and its counts, and far less than its 68 code points.
+  const wrap = stringWidth(title) + 14;
+  const rows = chatRows([msg] as never, { wrap, folds: { open: true, except: new Set() }, viewLines: 20, notes: 'step', detailsKey: '^o', renderers: {}, now: 0, palette: {} }).map(rowText);
+  expect(rows.find((r) => r.startsWith('✎'))).toContain(title);
 });

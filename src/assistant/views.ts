@@ -29,6 +29,8 @@
 //
 // Pure: no fs, no clock, no colours.
 
+import { cellWidth, cutStep } from '../cells.js';
+
 export const VIEW_CAPS = {
   // What a view KEEPS — and so what a session file holds and what ^r unfolds.
   lines: 200,
@@ -147,11 +149,6 @@ export function acceptData(data: unknown): boolean {
   }
 }
 
-const cutTo = (s: string, width: number) => {
-  const cps = Array.from(s);
-  return cps.length > width ? `${cps.slice(0, Math.max(0, width - 1)).join('')}…` : s;
-};
-
 // What reaches the screen, whatever the renderer returned: one row per line — a line
 // break inside a span is a space, and a line wider than the block is cut with `…` (a
 // wrapped row would be two terminal lines, and the list counts one) — at most
@@ -169,7 +166,7 @@ export function frameView(
 ): FramedLine[] {
   const fallback = (kind: string, why: string): FramedLine[] => {
     onFail?.(kind, why);
-    return [{ spans: [{ text: cutTo(`▸ ${sanitizeViewText(kind).replace(/\n/g, ' ')}`, ctx.width), dim: true }] }];
+    return [{ spans: [{ text: cutStep(`▸ ${sanitizeViewText(kind).replace(/\n/g, ' ')}`, ctx.width), dim: true }] }];
   };
   if (!rec || typeof rec !== 'object' || typeof rec.kind !== 'string') return fallback('view', 'not a view');
   const render = resolveRenderer(table, rec.kind);
@@ -188,8 +185,8 @@ export function frameView(
     const spans: FramedLine['spans'] = [];
     for (const s of line) {
       if (room <= 0) break;
-      const t = cutTo(sanitizeViewText(s?.text).replace(/\n/g, ' '), room);
-      room -= Array.from(t).length;
+      const t = cutStep(sanitizeViewText(s?.text).replace(/\n/g, ' '), room);
+      room -= cellWidth(t);
       if (leading && s?.chrome) chrome++; else leading = false;
       const color = typeof s?.color === 'string' && Object.hasOwn(palette, s.color) ? palette[s.color] : undefined;
       spans.push({ text: t, ...(color ? { color } : {}), ...(s?.dim ? { dim: true } : {}), ...(s?.bold ? { bold: true } : {}) });

@@ -17,7 +17,7 @@
 import { askRows, type AskRow, type AskState } from '../assistant/ask.js';
 import { autoBadge, type AutoMode } from '../assistant/auto.js';
 import { VERBS } from '../assistant/verbs.js';
-import { cellWidth, cutStep } from '../cells.js';
+import { cellWidth, cutLeft, cutStep } from '../cells.js';
 import { answerText, readParts, runMarks, runRowText, shownText, turnSegments, type NotesMode } from '../assistant/step.js';
 import { isClicked, isOpen, foldId, type FoldState } from '../assistant/folds.js';
 import { imageTokenRanges, splitTokens } from '../assistant/images.js';
@@ -195,13 +195,6 @@ interface Completion {
   others: string[];
 }
 
-// `text` cut to `max` cells from the LEFT, an ellipsis marking the cut — for a path,
-// whose tail is the part that says where one is.
-export function cutFromLeft(text: string, max: number): string {
-  const chars = Array.from(text);
-  if (chars.length <= max) return text;
-  return `…${chars.slice(chars.length - Math.max(0, max - 1)).join('')}`;
-}
 // The theme config subtree (`host.config.theme`) — a free-form object. Only `modals`
 // (the per-surface palette) and a few flat keys are read. Typed loosely so a missing/
 // deep-absent key degrades to Flowtty defaults instead of throwing on `undefined`.
@@ -301,22 +294,13 @@ function blockLines(md: string, width: number): { lines: Line[]; src: number[] }
   return { lines, src };
 }
 
-// A one-row title, cut from the LEFT when it does not fit: the end of a path is what
-// names the file, and the beginning of a long one is the part nobody reads.
-function cutHead(text: string, width: number): string {
-  const chars = Array.from(text);
-  if (width <= 0) return '';
-  if (chars.length <= width) return text;
-  return width === 1 ? '…' : `…${chars.slice(chars.length - width + 1).join('')}`;
-}
-
 // One change, as the chat draws it: a title of its own — plain text, the path in the
 // accent colour — over the hunks in a ```diff fence carrying the FILE's line numbers.
 // The numbers are chrome: dim, right-aligned in a narrow gutter before the `│ `, and
 // out of a selection, so a drag copies the code alone.
 function changeLines(v: ChangeView, inner: number): Line[] {
   const title: Line = {
-    spans: [{ text: '✎ ' }, { text: cutHead(v.title, Math.max(8, inner - changeCounts(v).length - 3)), accent: true }, { text: ` ${changeCounts(v)}`, dim: true }],
+    spans: [{ text: '✎ ' }, { text: cutLeft(v.title, Math.max(8, inner - changeCounts(v).length - 3)), accent: true }, { text: ` ${changeCounts(v)}`, dim: true }],
   };
   const md = changeMarkdown(v);
   if (!md) return [title];
@@ -1553,7 +1537,7 @@ export function renderChatModal({
               // command will run — cut from the left when long, so its tail stays; the
               // field's own row says what ⏎ does there, this one the other keys.
               : bangLevel && shellCwd
-              ? (() => { const rest = [`${CAP.tab} path`, `${CAP.upDown} history`].join(' · '); return `${cutFromLeft(shellCwd, Math.max(8, wrap - rest.length - 3))} · ${rest}`; })()
+              ? (() => { const rest = [`${CAP.tab} path`, `${CAP.upDown} history`].join(' · '); return `${cutLeft(shellCwd, Math.max(8, wrap - rest.length - 3))} · ${rest}`; })()
               : ([`${CAP.upDown} history`, `wheel or ${CAP.page} scroll`, detailsKey && `${detailsKey} details`, '/ commands',
                   imagesOn && `${CAP.image} image`, `${CAP.auto} auto`, bgCount > 0 && `${bgCount} in background`].filter(Boolean).join(' · ')))),
       // A sibling of the hint, not part of it: the left cell is the hint OR the status

@@ -25,3 +25,13 @@ export function cutStep(text: string, width: number): string {
   const clusters = graphemes(str);
   return `${clusters.slice(0, fitClusters(clusters, width - 1)).join('')}…`;
 }
+
+// The same cut from the LEFT: an ellipsis and the tail that fits — for a path, whose
+// end is the part that says where one is.
+export function cutLeft(text: string, width: number): string {
+  const str = String(text ?? '');
+  if (width <= 0) return '';
+  if (stringWidth(str) <= width) return str;
+  const clusters = graphemes(str).reverse();
+  return `…${clusters.slice(0, fitClusters(clusters, width - 1)).reverse().join('')}`;
+}

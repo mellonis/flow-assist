@@ -3,6 +3,7 @@
 // every renderer's rows go through on the way to the screen, and the text sanitising
 // that keeps a command's own output from passing for the host's.
 import { expect, test } from 'bun:test';
+import { stringWidth } from '@flowtty/core';
 import { VIEW_CAPS, VIEW_DATA_MAX, acceptData, fence, frameView, isConsoleKind, qualifyKind, readLegacyView, resolveRenderer, sanitizeViewText, type ViewRecord, type ViewRenderCtx } from '../views';
 
 test('escape sequences and control characters never reach the screen', () => {
@@ -116,4 +117,19 @@ test('prototype property lookups are prevented in palette resolution', () => {
   const [line] = frameView(rec('k'), { k: () => [[{ text: 'a', color: 'constructor' }, { text: 'b', color: 'toString' }]] }, rctx, palette);
   expect(line!.spans[0]!.color).toBeUndefined();
   expect(line!.spans[1]!.color).toBeUndefined();
+});
+
+// A frame counts cells per grapheme cluster, as the grid draws them: a ZWJ sequence is
+// one cluster of two cells, an emoji two, so a line that fits by cells is not cut and
+// one that does not is cut before it runs past the block.
+test('a line is cut by the cells it takes, per grapheme cluster', () => {
+  const family = '\u{1F468}‍\u{1F469}‍\u{1F467}';
+  const fits = family.repeat(9); // 18 cells, 45 code points
+  expect(texts(frameView(rec('k'), { k: () => [[{ text: fits }]] }, rctx, palette))).toEqual([fits]);
+  const [wide] = texts(frameView(rec('k'), { k: () => [[{ text: '✅'.repeat(15) }]] }, rctx, palette)); // 30 cells, 15 code points
+  expect(stringWidth(wide!)).toBeLessThanOrEqual(20);
+  expect(wide!.endsWith('…')).toBe(true);
+  // Spans share the row: a wide first span leaves the second only what is left.
+  const [two] = texts(frameView(rec('k'), { k: () => [[{ text: '✅'.repeat(8) }, { text: 'abcdefgh' }]] }, rctx, palette));
+  expect(stringWidth(two!)).toBeLessThanOrEqual(20);
 });

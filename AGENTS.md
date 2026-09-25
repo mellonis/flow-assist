@@ -1881,8 +1881,10 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     grapheme cluster, as the grid draws them — `cutStep` / `cellWidth` in
     `src/cells.ts`, on @flowtty/core's `stringWidth` / `fitClusters`, never a
     per-code-point or `.length` count — so a wide character, a flag or a ZWJ sequence
-    never pushes a row onto a second line and a cut never splits one; the folded
-    tools summary (`toolSummary`) and the text-only help's usage column (`helpText`)
+    never pushes a row onto a second line and a cut never splits one; `cutLeft`
+    there is the same cut keeping the tail (a path in the `!` hint row, a ✎ change's
+    title). The folded tools summary (`toolSummary`), the text-only help's usage
+    column (`helpText`), a view's rows (`frameView`) and the start screen's columns
     are measured the same way. A trail is
     numbered the same way (`foldId(at, 'tools', n)`, its cap `calls` with the same
     `n`), a step's own calls included, so an id means the same in both modes.
@@ -2092,7 +2094,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   to the root, `/resume` and a restart bring it back. Variables
   and functions are not kept — every command is a fresh shell. While the field is in
   `!` or `!!` mode the hint row under it STARTS with that directory (`~`-shortened,
-  cut from the left when long — `cutFromLeft` in `views/modals.ts`; the chat passes
+  cut from the left when long — `cutLeft` in `src/cells.ts`; the chat passes
   `shellCwd` only at a non-zero bang level, since `cwd()` checks the roots on disk), so
   where the command will run is seen while it is typed and `!cd` is seen to take
   effect before the next command. **The live block still
