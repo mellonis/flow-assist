@@ -41,7 +41,10 @@ if (process.env.FAKE_NO_HELLO) {
         setTimeout(() => peer.notify('frame', frame(m)), 0);
         return { hostApi: 2, name: 'fake', keys: { bump: 'b' } };
       });
-      peer.onRequest('shutdown', () => { resolveShutdown(); return {}; });
+      // A deferred resolve: `peer`'s own answer to this request is itself queued as a
+      // microtask right after this handler returns, and resolving synchronously here
+      // would let the connection close (or, over stdio, the process exit) ahead of it.
+      peer.onRequest('shutdown', () => { setTimeout(() => resolveShutdown(), 0); return {}; });
       peer.onRequest('tool.run', (p) => ({ result: (p as ToolRunParams).name === 'shared' ? `shared=${shared}` : null }));
       peer.onNotify('key', (e) => {
         const key = e as KeyEvent;
