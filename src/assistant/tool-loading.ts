@@ -93,10 +93,9 @@ export function deferredTools(catalog: CatalogEntry[]): Map<string, CatalogEntry
 }
 
 // Above this many tools, a group is priced in the index (`toolIndex`) and
-// `tools_load { group }` no longer loads it whole (`runToolsLoad`) — a request that
-// loaded a 26-tool group and a 17-tool group for five actually-used tools once cost
-// ~60k tokens on every later round of the conversation, up from ~6k. `{ names }` is
-// unaffected either way: naming what is needed always works.
+// `tools_load { group }` no longer loads it whole (`runToolsLoad`), so its schemas do
+// not ride on every later request for the few tools a turn actually uses. `{ names }`
+// is unaffected either way: naming what is needed always works (CHANGELOG.md).
 export const BIG_GROUP_TOOLS = 12;
 
 // A rough cost of a group's tools were it loaded whole: the JSON size of their own
@@ -234,40 +233,41 @@ export function runToolsLoad(args: Record<string, unknown>, catalog: CatalogEntr
   const always: string[] = []; // sent in full on every request anyway
   const unknown: string[] = [];
   const inGroup = (label: string) => [...deferred.values()].filter((e) => groupLabel(e.group) === label).map((e) => e.name);
-  if (group) {
-    const tools = inGroup(group);
-    // Past BIG_GROUP_TOOLS, `group` alone never loads it — that request is answered
-    // with the group's own index and why, so the model names what it needs next,
-    // rather than paying the whole group's cost on every round from here on. `names`
-    // is untouched by this: a group named there (below) still loads whole, and so
-    // does one of BIG_GROUP_TOOLS or fewer.
-    if (tools.length > BIG_GROUP_TOOLS) {
-      const es = [...deferred.values()].filter((e) => groupLabel(e.group) === group);
-      return `"${group}" has ${es.length} tools — ${costPhrase(es)}:\n${groupLines(es)}`;
-    }
-    if (tools.length) wanted.push(...tools);
-    else if (group === ALWAYS_LOADED_GROUP) always.push(`group "${group}"`);
-    else unknown.push(`group "${group}"`);
-  }
+  // `names` is handled in full BEFORE `group` — a big group's refusal (below) is
+  // never in place of whatever `names` asked for in the same call, only beside it.
   for (const n of asked) {
     if (deferred.has(n)) wanted.push(n);
     else if (n === TOOLS_LOAD || catalog.some((e) => e.name === n)) always.push(n);
     // A group's name in `names` is read as that group. The index shows the groups
     // right beside the tools, so a model reasonably passes one there; refusing it
     // with an error that lists it as a group cost a round for nothing. A tool of the
-    // same name wins, which the two branches above already decide.
+    // same name wins, which the two branches above already decide. Unlike `group`
+    // (below), a group found here loads whole at any size — `names` always works.
     else if (inGroup(n).length) wanted.push(...inGroup(n));
     else if (n === ALWAYS_LOADED_GROUP) always.push(`group "${n}"`);
     else unknown.push(n);
   }
-  if (!wanted.length && !always.length) throw new Error(`Not in the list: ${unknown.join(', ')}. Groups: ${groups.join(', ')}.`);
+  // Past BIG_GROUP_TOOLS, `group` alone never loads it — the answer names the
+  // group's own index and why instead, so the model asks for what it needs next.
+  let groupRefusal = '';
+  if (group) {
+    const tools = inGroup(group);
+    if (tools.length > BIG_GROUP_TOOLS) {
+      const es = [...deferred.values()].filter((e) => groupLabel(e.group) === group);
+      groupRefusal = `"${group}" has ${es.length} tools — ${costPhrase(es)}:\n${groupLines(es)}`;
+    } else if (tools.length) wanted.push(...tools);
+    else if (group === ALWAYS_LOADED_GROUP) always.push(`group "${group}"`);
+    else unknown.push(`group "${group}"`);
+  }
+  if (!wanted.length && !always.length && !groupRefusal) throw new Error(`Not in the list: ${unknown.join(', ')}. Groups: ${groups.join(', ')}.`);
   const fresh = set.add(wanted);
   const already = [...new Set([...wanted.filter((n) => !fresh.includes(n)), ...always])];
-  return [
+  const summary = [
     fresh.length ? `Loaded: ${fresh.join(', ')} — call them now.` : '',
     already.length ? `Already loaded: ${already.join(', ')}.` : '',
     unknown.length ? `Not in the list: ${unknown.join(', ')}.` : '',
   ].filter(Boolean).join(' ');
+  return [summary, groupRefusal].filter(Boolean).join('\n');
 }
 
 // The answer to a call of a tool the index lists but this conversation has not loaded.
