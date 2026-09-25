@@ -3,3 +3,4 @@ export * from './codec.js';
 export * from './peer.js';
 export * from './plugin.js';
 export { stdioIo } from './stdio.js';
+export * from './serve.js';

@@ -1,9 +1,95 @@
-// The shared-server mode of `runPlugin` (`--serve <socket path>`): several hosts
-// connect to one process over a local socket, each connection its own client. Plan B
-// builds it; until then it says so.
+// The shared-server mode of a remote plugin transport: one process, several hosts.
+// Each connection is a client of its own — its own `hello`, own protocol state, and
+// its own line stream — handled by `onConnection`, which resolves once that client
+// is done (its `shutdown` answered, the handler's business); what the injected
+// handler holds outside a single connection is what every client shares. The server
+// listens on the unix socket path the host passes, replacing a stale file first, and
+// exits on its own `idleMs` after its last client leaves: the value the FIRST hello
+// carried, kept for the process's life (a later host's number is not a change of
+// mind, and the server is not one host's to reconfigure). A server started by hand
+// runs the same code and lives the same way; the socket is never the host's to kill
+// — this process ends itself, on its own idle timer or on SIGTERM/SIGINT.
+import fs from 'node:fs';
+import { LineSplitter } from './codec.js';
 import type { PeerIo } from './peer.js';
 
-export async function serveConnections(_onConnection: (io: PeerIo) => Promise<void>, _socketPath: string, _opts?: { defaultIdleMs?: number; onListening?: () => void }): Promise<void> {
-  process.stderr.write('--serve is not built yet\n');
-  process.exit(2);
+export interface ServeOpts { defaultIdleMs?: number; onListening?: () => void }
+
+interface Client { feed: (chunk: string) => void; leave: () => void }
+
+// Bun's unix socket listener — the one Bun API this file needs; its full type
+// definitions are not part of the typecheck (the same convention as
+// `src/loader/compat.ts`'s `Bun.semver` declaration).
+declare const Bun: {
+  listen(opts: {
+    unix: string;
+    socket: {
+      open(socket: BunSocket): void;
+      data(socket: BunSocket, data: Uint8Array): void;
+      close(socket: BunSocket): void;
+      error(socket: BunSocket, error: Error): void;
+    };
+  }): { stop(force?: boolean): void };
+};
+interface BunSocket { data: Client | undefined; write(chunk: string): void; end(): void }
+
+export function serveConnections(onConnection: (io: PeerIo) => Promise<void>, socketPath: string, opts: ServeOpts = {}): Promise<void> {
+  if (!socketPath) throw new Error('serveConnections needs the socket path');
+  try { fs.unlinkSync(socketPath); } catch { /* nothing stale to remove */ }
+  let idleMs: number | null = null;
+  let clients = 0;
+  let idle: ReturnType<typeof setTimeout> | null = null;
+  let finished = false;
+
+  return new Promise<void>((done) => {
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      if (idle) clearTimeout(idle);
+      process.removeListener('SIGTERM', onSigterm);
+      process.removeListener('SIGINT', onSigint);
+      try { server.stop(true); } catch { /* already gone */ }
+      try { fs.unlinkSync(socketPath); } catch { /* already gone */ }
+      done();
+    };
+    const onSigterm = () => finish();
+    const onSigint = () => finish();
+    const armIdle = () => {
+      if (idle) clearTimeout(idle);
+      idle = setTimeout(finish, idleMs ?? opts.defaultIdleMs ?? 60_000);
+    };
+    const server = Bun.listen({
+      unix: socketPath,
+      socket: {
+        open(conn) {
+          clients++;
+          if (idle) { clearTimeout(idle); idle = null; }
+          const lines: Array<(l: string) => void> = [];
+          const splitter = new LineSplitter((raw) => {
+            // The first hello's idleMs is the server's, kept for the process's life.
+            if (idleMs === null) {
+              try {
+                const m = JSON.parse(raw) as { method?: string; params?: { idleMs?: unknown } };
+                if (m.method === 'hello' && typeof m.params?.idleMs === 'number') idleMs = m.params.idleMs;
+              } catch { /* not a hello line */ }
+            }
+            lines.forEach((f) => f(raw));
+          });
+          const io: PeerIo = { send: (l) => { conn.write(`${l}\n`); }, onLine: (f) => { lines.push(f); } };
+          conn.data = {
+            feed: (s) => splitter.feed(s),
+            leave: () => { clients--; if (clients === 0) armIdle(); },
+          };
+          onConnection(io).then(() => conn.end(), () => conn.end());
+        },
+        data(conn, d) { conn.data?.feed(new TextDecoder().decode(d)); },
+        close(conn) { conn.data?.leave(); },
+        error() {},
+      },
+    });
+    try { fs.chmodSync(socketPath, 0o600); } catch { /* platform without chmod semantics */ }
+    process.on('SIGTERM', onSigterm);
+    process.on('SIGINT', onSigint);
+    opts.onListening?.();
+  });
 }
