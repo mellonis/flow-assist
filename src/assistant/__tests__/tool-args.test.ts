@@ -120,6 +120,16 @@ test('an array item has no optional notion: null there is whatever the item sche
   expect(toolArgsError('t', objs, { rows: [{ id: null }] })).toContain('`rows[0].id`');
 });
 
+test('an invalid patternProperties pattern the schema reader tolerates never throws out of the check', () => {
+  // zod ignores `patternProperties` on a non-object sub-schema, so the schema compiles;
+  // the null walk must not fail on the pattern either.
+  const odd = { type: 'object', properties: { foo: { type: 'string', patternProperties: { '(': {} } } } };
+  expect(() => toolArgsError('t', odd, { foo: { a: 1 } })).not.toThrow();
+  expect(toolArgsError('t', odd, { foo: 'ok' })).toBeNull();
+  const inItems = { type: 'object', properties: { rows: { type: 'array', items: { type: 'string', patternProperties: { '(': {} } } } } };
+  expect(() => toolArgsError('t', inItems, { rows: [{ a: null }] })).not.toThrow();
+});
+
 test('null handling never mutates the arguments the tool will receive', () => {
   const nested = { type: 'object', properties: { filter: { type: 'object', properties: { status: { type: 'string' } } } } };
   const args = { filter: { status: null } };

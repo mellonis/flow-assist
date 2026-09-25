@@ -76,9 +76,13 @@ key, of the wrong type, or naming a key `properties` does not list never reaches
 matches what the schema declares. Nothing is coerced (a number sent as a string is a
 wrong type), except `null` on an OPTIONAL key — declared in `properties` or matched
 by `patternProperties`, and not in its object's `required` — read as that key left out,
-the way `args.path ?? '.'` already reads an absent one. The rule holds at every level,
-inside an object parameter as at the top; a required key sent as `null` is a wrong
-type at every level, and so is a `null` array item the item schema does not allow.
+the way `args.path ?? '.'` already reads an absent one. The rule holds at every level
+the check walks — `properties`, `patternProperties` and array `items`, not `$ref`,
+`anyOf`/`oneOf`/`allOf` or an `additionalProperties` schema — inside an object
+parameter as at the top; a required key sent as `null` is a wrong type at every level,
+and so is a `null` array item the item schema does not allow. Only the check reads the
+`null` as left out: `exec` receives the arguments as sent, so an optional key, top-level
+or nested, can still arrive as `null` and wants its own `?? default`.
 
 ```ts
 tools: [{

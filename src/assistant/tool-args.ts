@@ -84,6 +84,17 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === 'object' && !Array.isArray(v);
 }
 
+// A `patternProperties` pattern that is not a valid regular expression matches no key:
+// the schema reader tolerates one where it ignores the keyword, and a quirk there must
+// not stop the tool.
+function patternOf(source: string): RegExp | null {
+  try {
+    return new RegExp(source);
+  } catch {
+    return null;
+  }
+}
+
 // A copy of `value` with every `null` on an OPTIONAL key dropped, at every level the
 // schema walks an object's keys, so the schema validates it as omitted rather than as
 // a value of the wrong type. A key is optional when the enclosing object schema
@@ -98,7 +109,12 @@ function withoutOptionalNulls(schema: unknown, value: unknown): unknown {
   if (!isRecord(value)) return value;
   const properties = isRecord(s.properties) ? s.properties : {};
   const required = Array.isArray(s.required) ? s.required : [];
-  const patterns = isRecord(s.patternProperties) ? Object.entries(s.patternProperties).map(([p, sub]) => [new RegExp(p), sub] as const) : [];
+  const patterns = isRecord(s.patternProperties)
+    ? Object.entries(s.patternProperties).flatMap(([p, sub]) => {
+        const re = patternOf(p);
+        return re ? [[re, sub] as const] : [];
+      })
+    : [];
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(value)) {
     const sub = Object.prototype.hasOwnProperty.call(properties, k) ? properties[k] : patterns.find(([re]) => re.test(k))?.[1];
@@ -134,7 +150,7 @@ export function toolArgsError(toolName: string, parameters: ToolParameters | nul
   const missing = required.filter((k) => !Object.prototype.hasOwnProperty.call(args, k));
 
   const patternProps = schema.patternProperties && typeof schema.patternProperties === 'object' ? schema.patternProperties : null;
-  const patterns = patternProps ? Object.keys(patternProps).map((p) => new RegExp(p)) : [];
+  const patterns = patternProps ? Object.keys(patternProps).flatMap((p) => patternOf(p) ?? []) : [];
   // `additionalProperties: true`, or a schema of its own, always allows an extra key.
   // `patternProperties` alone (`additionalProperties` left unset) allows one that
   // matches no pattern too — JSON Schema's own default for that combination. An
@@ -149,8 +165,16 @@ export function toolArgsError(toolName: string, parameters: ToolParameters | nul
     : Object.keys(args).filter((k) => !Object.prototype.hasOwnProperty.call(properties, k) && !patterns.some((re) => re.test(k)));
 
   // The schema sees `args` with its optional `null`s dropped; `typeIssues` still reads
-  // the original `args`, so a required key sent as `null` is reported as present.
-  const result = zSchema.safeParse(withoutOptionalNulls(schema, args));
+  // the original `args`, so a required key sent as `null` is reported as present. The
+  // walk fails safe: should it throw on a schema shape it does not expect, the schema
+  // sees `args` as sent.
+  let forSchema: unknown;
+  try {
+    forSchema = withoutOptionalNulls(schema, args);
+  } catch {
+    forSchema = args;
+  }
+  const result = zSchema.safeParse(forSchema);
   const wrongType = result.success ? [] : typeIssues(result.error.issues, args);
 
   if (!missing.length && !unknown.length && !wrongType.length) return null;

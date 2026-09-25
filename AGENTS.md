@@ -983,9 +983,14 @@ there is no `/fullscreen`.
   coerced, except `null` on an optional key, read as that key left out (the way a
   tool's own `??` reads it) at every level: a key the enclosing object schema declares
   (`properties`, or a `patternProperties` pattern it matches) and does not list in its
-  own `required`, top-level parameter or nested inside an object parameter alike. A
-  required key sent as `null` is a wrong type at every level, and so is a `null` array
-  item whose item schema does not allow it — an item has no "optional". A schema
+  own `required`, top-level parameter or nested inside an object parameter alike (the
+  walk follows `properties`, `patternProperties` and array `items`, not `$ref`,
+  `anyOf`/`oneOf`/`allOf` or an `additionalProperties` schema; a pattern that is not a
+  valid regular expression matches nothing, and a walk that throws leaves `args` as
+  sent). Only the check sees the cleaned copy — the tool still receives the arguments as
+  sent, a `null` included. A required key sent as `null` is a wrong type at every
+  level, and so is a `null` array item whose item schema does not allow it — an item
+  has no "optional". A schema
   with no `properties` accepts anything, and one zod's JSON Schema reader cannot
   compile (an exotic keyword) is logged once and the call runs unchecked from then on
   — a plugin author's schema quirk must not stop their tool. `tools_load` has no
