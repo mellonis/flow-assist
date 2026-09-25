@@ -491,7 +491,7 @@ there is no `/fullscreen`.
   over the whole terminal for `window`/`full`). A component moved to another parent is
   mounted anew: `/mode` would lose the turn being written, the draft and the queue,
   and a plugin's screen its state. A third place holds what floats over everything,
-  the chat included — the reminder, the chat's pager and the keycaps panel
+  the chat included — the reminder and the keycaps panel
   (`TOP_LAYER`): layers of no
   size of their own at the corner each piece places itself from, because a box that
   covered the screen would be what every drag starts in, and no pane's selection
@@ -1765,25 +1765,26 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     **A y/n or a question comes first**: one arriving closes the pager (where the
     `/context` panel closes too), and while one waits a click opens nothing in the
     pager — it is answered in the conversation, which the pager would cover.
-    The pager is one window over the WHOLE terminal, as the log and the help are —
-    docked or not — in `frame()`, titled by the command (`N tool calls`, `thinking`,
-    …), its rows drawn by the conversation's own row renderer (`chatRowRenderer`, so a
-    drag copies the text and never the gutter or the `│ ` bar) in a `<ScrollList
-    scrollbar>` laid out at `pagerWrapWidth` of the terminal. The chat decides what it
-    shows and publishes it as `store.chat.pager` (a `build(width)`); the assistant's
-    `pager` slot draws it (`renderChatPager`) on the App's top layer (`TOP_LAYER`,
-    from the terminal's top-left corner), since a box inside a docked panel is
-    clipped to the panel. The slot redraws with the App, so the chat asks the App to
-    redraw whenever the pager comes, goes, or its messages change (a live view
-    printing into it). The conversation under it never remounts, and its list gets
-    `isActive: false` while it is up: PgUp/PgDn and the wheel are the pager's, and Esc
+    The pager is drawn in the conversation's place inside the chat's own frame, as the
+    session picker is — so it is the same docked, as a window and full, and a docked
+    chat's pager leaves the plugin's screen in view beside it; only in `full` mode,
+    where the frame is the terminal, does it fill the terminal. `renderChatModal`
+    takes it as `pager` (`PagerView`: the rows and the title): the frame's title names
+    the block (`N tool calls`, `thinking`, the command's line, …), its rows are drawn
+    by the conversation's own row renderer (`chatRowRenderer`, so a drag copies the
+    text and never the gutter or the `│ ` bar) in a `<ScrollList scrollbar>` laid out
+    at the conversation's width (`rowOpts`, the width it was measured against), the
+    pager's keys take the hint row, and the plan, the queue line and the field are not
+    drawn. The conversation's list stays mounted under it with `display: 'none'`
+    (`hidden`) and `isActive: false`: PgUp/PgDn and the wheel are the pager's, and Esc
     returns to the conversation exactly where it was, the block still folded. It is a
     reader: the chat's key handler takes every key while it is drawn
     (`pagerShownRef`) — Esc closes it, anything else does nothing, so nothing reaches
-    the field, the folds or the model — `mouse()` folds nothing, so a drag is the
-    pager's selection, and a press does not move a docked chat's keyboard
-    (`pointer`), since the whole screen is the pager's. Closing the chat, the keys
-    leaving a docked chat, `/clear` and `/resume` drop it. Its state is the fold id
+    the field, the folds or the model — and `mouse()` folds nothing, so a drag is the
+    pager's selection. A press follows the chat's ordinary focus rules (`pointer`): on
+    a docked chat's plugin side it hands the keys to the plugin, and the pager, read
+    with the chat's keys, closes. Closing the chat, the keys leaving a docked chat,
+    `/clear` and `/resume` drop it. Its state is the fold id
     (`pager`); a block whose id does not resolve draws no pager and holds no key.
 - **A turn is drawn in the order it happened** (`src/assistant/step.ts`, pure; the chat
   owns the parts and the view lays them out). A whole turn is one assistant message,
@@ -1944,7 +1945,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   adding a pane:
   - `selectionScope` on every pane and window: a drag that starts inside stays in its
     content rect — never onto the border, never into the neighbour. The chat's frame,
-    `frame()` (log, help, the chat's pager), the reminder and the host's bottom box (the command line)
+    `frame()` (log, help), the reminder and the host's bottom box (the command line)
     carry it; a `<ScrollBox>` (the conversation, the help's list) and a `<Table>` are
     scopes already. A plugin's panes carry it too (the tracker: the board, each column
     cell, the issue, the info panel, every modal window).
@@ -2298,9 +2299,10 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     instruction, so a key that does nothing here is not listed as if it did.
     `helpEntries` gives one entry per word a person types: a plugin's `core:quit` and
     the host's `quit` are the same word, and the described one wins.
-  - **The chat's pager** is a host modal too — `frame()`, a `<ScrollList scrollbar>`,
-    `PgUp/PgDn or the wheel scroll · Esc close` — opened by a click, never a key (see
-    "A block taller than the conversation opens in the pager" under The chat).
+  - **The chat's pager** is drawn inside the chat's own frame — a `<ScrollList
+    scrollbar>` in the conversation's place, `PgUp/PgDn or the wheel scroll · Esc close`
+    on the hint row — opened by a click, never a key (see "A block taller than the
+    conversation opens in the pager" under The chat).
   - A modal opened by a key names that key in the footer through `keycaps` (`L log`),
     and the flag the footer reads is patched synchronously AND followed by `notify()`
     on close as well as on open — the host draws the footer before the plugin re-renders.

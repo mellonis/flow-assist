@@ -63,7 +63,7 @@ it said between them, a command's capped output — opens where you click it: on
 open it, anywhere inside it to close it again. A block opens at its first row, so a
 long one starts where it starts; a drag is still a selection and never folds anything.
 A block taller than the conversation's window — a build's output, a turn of dozens of
-calls — opens in a pager instead: that block alone over the whole screen, with its own scroll
+calls — opens in a pager instead: that block alone in the conversation's place inside the chat's frame, with its own scroll
 (PgUp/PgDn, the wheel) and a drag to copy from it; Esc brings the conversation back
 where you left it, the block still folded.
 `^o` is the same thing for the whole screen: with anything folded it opens everything,

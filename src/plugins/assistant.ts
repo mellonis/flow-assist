@@ -35,7 +35,7 @@ import { capConsoleData, consoleData, renderConsole } from '../assistant/console
 import { INTERACTIVE_ASK, runInteractive, type InteractiveDeps } from '../assistant/interactive.js';
 import { editorReducer } from '@flowtty/core';
 import { z } from 'zod';
-import { anchorRow, askFieldWidth, blockRows, roomForBlock, chatFieldWidth, chatRows, chatWrapWidth, firstFoldRow, liveChatStatus, pagerTitle, renderChatPager, pagerWrapWidth, pendingChatRows, renderChatStatus, renderChatStrip, rowAnchor, viewGroupFor, type RowOpts, type Viewport } from '../views/modals.js';
+import { anchorRow, askFieldWidth, blockRows, roomForBlock, chatFieldWidth, chatRows, chatWrapWidth, firstFoldRow, liveChatStatus, pagerTitle, pendingChatRows, renderChatStatus, renderChatStrip, rowAnchor, viewGroupFor, type RowOpts, type Viewport } from '../views/modals.js';
 import { CHAT_MODES, chatModeOf, inRect, type ChatMode, type PanelLayout } from '../runtime/panel-layout.js';
 import { allFolded, flipFolds, isClicked, isOpen, openInFull, pageable, toggleFold, type FoldState } from '../assistant/folds.js';
 import { groupOpen, toggleGroup } from '../assistant/view-groups.js';
@@ -674,8 +674,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // a drag is flowtty's selection — it copies, and it must never fold.
           const CLICK_MS = 250;
           const mouse = (key: { name?: string; x?: number; y?: number }): boolean => {
-            // Over the pager a click folds nothing in the conversation under it, and a
-            // drag is flowtty's selection of the pager's own text.
+            // While the pager is drawn a click folds nothing in the conversation it
+            // stands in for, and a drag is flowtty's selection of the pager's own text.
             if (pagerShownRef.current) { pressRef.current = null; return false; }
             if (key.name === 'mousedrag') { pressRef.current = null; return false; }
             if (key.name === 'mousedown') { pressRef.current = { x: Number(key.x), y: Number(key.y), at: Date.now() }; return false; }
@@ -2358,8 +2358,6 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // A press on the screen: the keyboard goes to the pane it landed in, as a click
           // into a window does anywhere else.
           const pointer = (x: number, y: number) => {
-            // The pager covers the whole terminal: a press anywhere is in it.
-            if (pagerShownRef.current) return;
             const d = (host.services as { chatDock?: PanelLayout | null }).chatDock;
             if (layoutRef.current !== 'panel' || !openRef.current || !d || d.collapsed) return;
             const next = inRect(d.panel, x, y) ? 'chat' : 'plugin';
@@ -2431,30 +2429,15 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           };
           // The block in the pager. Drawn only while the chat has the keys (a docked chat
           // that gave them to the plugin shows its conversation) and while the block
-          // resolves (a list replaced under it shows nothing, and holds no key). The
-          // chat decides; the `pager` slot draws it over the whole terminal, laying the
-          // block out at the terminal's width through `build`.
-          const pagerAt = (state: FoldState, id: string) => ({ ...rowOpts(openInFull(state, id)), viewLines: VIEW_CAPS.lines });
-          const pagerShown = !!pager && !picker && open && focused && blockRows(messages as Parameters<typeof blockRows>[0], pagerAt(folds, pager), pager).length > 0;
+          // resolves (a list replaced under it shows nothing, and holds no key). It is
+          // drawn in the conversation's place inside the chat's own frame, laid out at the
+          // conversation's width — the width it was measured against.
+          const pagerRows = pager && !picker && open && focused
+            ? blockRows(messages as Parameters<typeof blockRows>[0], { ...rowOpts(openInFull(folds, pager)), viewLines: VIEW_CAPS.lines }, pager)
+            : [];
+          const pagerShown = !!pager && pagerRows.length > 0;
           pagerShownRef.current = pagerShown;
-          const pagerSlot = pagerShown && pager ? {
-            build: (w: number) => {
-              const rows = blockRows(messages as Parameters<typeof blockRows>[0], { ...pagerAt(folds, pager), wrap: pagerWrapWidth(w) }, pager);
-              return { rows, title: pagerTitle(rows, pager) };
-            },
-            detailsKey: firstGlyph(host.keys.details),
-          } : null;
-          (host.store as Record<string, any>).chat = { open, unread, mode, focus, openChat, closeChat, send, messages, streaming, toolLabel, cursor, escArmed, pendingConfirm: pendingAsk, ctrlKey, panelKey, pointer, statusRow: statusRow ? liveChatStatus(() => statusRef.current as never, collapsedBusy) : null, footerStatus, layout, needRows, pager: pagerSlot };
-          // The slot is another component: it redraws when the App does. So the App is
-          // asked to whenever the pager comes, goes, or what it holds changes (a live
-          // view printing) — never on a render that changed none of that.
-          const pagerSeen = ui.useRef<{ id: string | null; msgs: unknown }>({ id: null, msgs: null });
-          ui.useEffect(() => {
-            const now = { id: pagerShown ? pager : null, msgs: pagerShown ? messages : null };
-            if (now.id === pagerSeen.current.id && now.msgs === pagerSeen.current.msgs) return;
-            pagerSeen.current = now;
-            host.notify();
-          });
+          (host.store as Record<string, any>).chat = { open, unread, mode, focus, openChat, closeChat, send, messages, streaming, toolLabel, cursor, escArmed, pendingConfirm: pendingAsk, ctrlKey, panelKey, pointer, statusRow: statusRow ? liveChatStatus(() => statusRef.current as never, collapsedBusy) : null, footerStatus, layout, needRows };
           // Lands the next background result. It is SHOWN as soon as no turn is being
           // written (a streaming turn keeps rewriting the display list's last message,
           // so a result cannot be appended under it) — a half-typed draft does not hold
@@ -2853,7 +2836,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             imageNumbers: [...imagesRef.current.keys()],
             imagesOn: imageLimits(host.config.ai).enabled,
             fullscreen,
-            pagerOpen: pagerShownRef.current,
+            pager: pagerShown && pager ? { rows: pagerRows, title: pagerTitle(pagerRows, pager) } : null,
             // Docked beside the plugin's screen: the frame marks which side has the keys.
             docked: layout === 'panel',
             focused,
@@ -2895,18 +2878,6 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // LLM edits (via notify()) shows up immediately.
             todo: planRef.current.snapshot(),
           });
-        };
-      },
-      // The chat's pager, drawn on the App's top layer over the whole terminal (a box in a
-      // docked panel is clipped to the panel). What it shows is the chat's
-      // (`store.chat.pager`); the pager's own list keeps its scroll here.
-      pager: (api) => {
-        const { host } = api as PluginApi;
-        return function ChatPagerSlot() {
-          const { width, height } = host.useTerminalSize();
-          const slot = (host.store as { chat?: { pager?: { build: (w: number) => { rows: unknown[]; title: string }; detailsKey: string } | null } }).chat?.pager;
-          if (!slot) return null;
-          return renderChatPager({ pager: slot.build(width) as never, width, height, theme: host.config.theme as never, now: Date.now(), detailsKey: slot.detailsKey });
         };
       },
     },

@@ -62,9 +62,9 @@ import { FOOTER_ROWS, TITLE_ROWS, chatModeOf, panelLayout, type ChatMode, type P
 const BUILTIN_PLUGINS = ['core', 'assistant', 'keycaps', 'log'];
 // The host's furniture drawn over everything, the docked chat included, and the corner
 // of the terminal each piece places itself from: the reminder is laid out over the
-// whole terminal from its top-left corner, and so is the chat's pager; the keycaps
-// panel floats in from the bottom-right one.
-const TOP_LAYER: Record<string, 'topLeft' | 'bottomRight'> = { 'core:reminder': 'topLeft', 'keycaps:keycaps': 'bottomRight', 'assistant:pager': 'topLeft' };
+// whole terminal from its top-left corner, and the keycaps panel floats in from the
+// bottom-right one.
+const TOP_LAYER: Record<string, 'topLeft' | 'bottomRight'> = { 'core:reminder': 'topLeft', 'keycaps:keycaps': 'bottomRight' };
 
 // ─── Two-phase input dispatch ────────────────────────────────────────────────
 // Observers (mode 'observe') always run, never consume; then the consumer race
@@ -951,8 +951,8 @@ export function renderApp(
 
     const isChat = (c: { key: string }) => c.key === 'assistant:chat';
     const chatComp = overlayComps.find(isChat);
-    // What floats over the whole terminal, the chat included: a fired reminder, the
-    // keycaps panel (the keys being pressed, wherever they go), and the pager.
+    // What floats over the whole terminal, the chat included: a fired reminder and the
+    // keycaps panel (the keys being pressed, wherever they go).
     const isTop = (c: { key: string }) => c.key in TOP_LAYER;
     // A layer of no size of its own, at one corner of the terminal: what it holds places
     // itself from that corner, and the layer takes no room — and no pointer: a box that

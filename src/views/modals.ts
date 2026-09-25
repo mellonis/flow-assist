@@ -643,12 +643,6 @@ export function blockRows(messages: ChatMsg[], o: RowOpts, id: string): ChatRow[
   return messageRows(m, at, true, o).filter((r) => r.fold === id);
 }
 
-// The width the pager lays a block out in: its window fills the terminal, less the
-// border and padding (4) and the scrollbar's column (1).
-export function pagerWrapWidth(width: number): number {
-  return Math.max(20, width - 5);
-}
-
 // The first row of a block, so opening one can put it at the top of the screen: the
 // fold line itself, with its body under it. −1 when the block is not on the list.
 export function firstFoldRow(rows: readonly ChatRow[], id: string): number {
@@ -1008,8 +1002,11 @@ const MIN_ROWS_TO_PIN = 4;
 export function roomForBlock(height: number): number {
   return height >= MIN_ROWS_TO_PIN ? height - 1 : height;
 }
-function ChatMessages({ messages, rowOpts, palette: m, errorColor, onViewport, scrollTo, keysActive = true, wheel }: {
+function ChatMessages({ messages, rowOpts, palette: m, errorColor, onViewport, scrollTo, keysActive = true, wheel, hidden = false }: {
   messages: ChatMsg[];
+  // Not drawn, and still mounted: the pager stands in its place, and the list keeps
+  // its scroll for when the pager closes.
+  hidden?: boolean;
   // Whether PgUp/PgDn (and the wheel) reach the list through its own input: not while a
   // docked chat has given the keyboard to the plugin — those keys are the plugin's then.
   keysActive?: boolean;
@@ -1103,7 +1100,7 @@ function ChatMessages({ messages, rowOpts, palette: m, errorColor, onViewport, s
         h(Text, { dim: true, wrap: 'truncate' }, lastUserText.length > 60 ? `${lastUserText.slice(0, 60)}…` : lastUserText || '…'))
     : null;
   const scroll = {
-    ref: box, anchor: 'bottom' as const, isActive: keysActive, flexGrow: 1, flexShrink: 1, flexDirection: 'column' as const,
+    ref: box, anchor: 'bottom' as const, isActive: keysActive, ...(hidden ? { display: 'none' as const } : {}), flexGrow: 1, flexShrink: 1, flexDirection: 'column' as const,
     onScroll: (_o: number, x: ScrollMetrics) => see(x), onMetrics: see,
     // Where the conversation sits on the terminal, in the coordinates a mouse key is
     // reported in — so a click can be turned into the row under it.
@@ -1136,48 +1133,18 @@ function ChatMessages({ messages, rowOpts, palette: m, errorColor, onViewport, s
 }
 
 // ─── The pager ────────────────────────────────────────────────────────────────
-// A block taller than the rows the conversation has for it is read here instead: one
-// window over the whole terminal, as the log and the help are — that block alone, with
-// a scroll of its own, in the same frame. It draws the block's rows with the
-// conversation's own renderer, so a drag copies the text and leaves the gutter and
-// the bars. It is a reader: the chat's key handler swallows every key while it is up
-// and Esc brings the conversation back as it was left. The chat decides what it
-// shows; the assistant's `pager` slot draws it on the App's top layer, since a box in
-// a docked panel is clipped to the panel.
+// A block taller than the rows the conversation has for it is read here instead: that
+// block alone, with a scroll of its own, drawn in the conversation's place inside the
+// chat's own frame — so it is the same docked, as a window and full, and a docked
+// chat's pager leaves the plugin's screen beside it in view. The chat's title names
+// the block, the pager's keys take the hint row, and the field is not drawn while it
+// is up. It draws the block's rows with the conversation's own renderer, so a drag
+// copies the text and leaves the gutter and the bars. It is a reader: the chat's key
+// handler swallows every key while it is up and Esc brings the conversation back as
+// it was left — the conversation's list stays mounted under it, hidden.
 export interface PagerView {
   rows: ChatRow[];
   title: string;
-}
-function ChatPager({ pager, width, height, palette: m, errorColor, now, detailsKey }: {
-  pager: PagerView;
-  width: number;
-  height: number;
-  palette: Record<string, string | undefined>;
-  errorColor?: string;
-  now: number;
-  detailsKey: string;
-}) {
-  const renderRow = chatRowRenderer({ palette: m, errorColor, wrap: pagerWrapWidth(width), now, detailsKey });
-  return h(Box, overlay(width, height, 11),
-    h(Box, frame(m, cutStep(pager.title, Math.max(0, width - 6)), { width, height, paddingY: 0, gap: 1 }),
-      h(ScrollList<ChatRow>, {
-        items: pager.rows, rowHeight: 1, scrollbar: true, flexGrow: 1, flexShrink: 1, flexDirection: 'column',
-        keyOf: (_row: ChatRow, i: number) => `pager-${i}`,
-        renderItem: renderRow,
-      }),
-      h(Text, { dim: true, selectable: false, wrap: 'truncate' }, `${CAP.page} or the wheel scroll · ${CAP.esc} close`)));
-}
-
-export function renderChatPager({ pager, width, height, theme, now, detailsKey }: {
-  pager: PagerView;
-  width: number;
-  height: number;
-  theme: Theme | undefined;
-  now: number;
-  detailsKey: string;
-}) {
-  const m = (theme?.modals?.chat ?? {}) as Record<string, string | undefined>;
-  return h(ChatPager, { pager, width, height, palette: m, errorColor: theme?.error, now, detailsKey });
 }
 
 // What the pager's title says: a command's own line, else what the block is.
@@ -1286,11 +1253,11 @@ export function renderChatModal({
   escWord = 'close',
   imageNumbers = [],
   imagesOn = false,
-  pagerOpen = false,
+  pager = null,
   picker = null,
 }: {
-  // A block is open in the pager, over the whole terminal.
-  pagerOpen?: boolean;
+  // The block open in the pager, drawn in the conversation's place (null — none).
+  pager?: PagerView | null;
   width: number;
   height: number;
   theme: Theme | undefined;
@@ -1465,7 +1432,9 @@ export function renderChatModal({
         borderBackgroundColor: m.borderBg,
         borderColor: docked ? (focused ? m.accent : m.idleBorder) : m.border,
         // What is on screen, after the name — cut to the border, never wrapped.
-        borderTitle: subject ? cutStep(`${ASSISTANT_MARK} Flow Assist · ${subject}`, Math.max(0, boxW - 4)) : `${ASSISTANT_MARK} Flow Assist`,
+        // With the pager up, what it holds.
+        borderTitle: pager ? cutStep(`${ASSISTANT_MARK} Flow Assist · ${pager.title}`, Math.max(0, boxW - 4))
+          : subject ? cutStep(`${ASSISTANT_MARK} Flow Assist · ${subject}`, Math.max(0, boxW - 4)) : `${ASSISTANT_MARK} Flow Assist`,
         width: boxW,
         height: boxH,
         padding: 1,
@@ -1477,13 +1446,23 @@ export function renderChatModal({
         // <ScrollBox> is one), so a drag there stays in the conversation.
         selectionScope: true,
       },
-      // Under the pager the conversation hears no key: PgUp/PgDn and the wheel are the
-      // pager's, and the conversation stays where it was left.
-      h(ChatMessages, { messages, rowOpts: { wrap, folds, viewLines, notes, detailsKey, renderers: viewRenderers, now, palette: m, onViewFail }, palette: m, errorColor: theme?.error, onViewport, scrollTo, keysActive: focused && !pagerOpen, wheel }),
+      // Under the pager the conversation is not drawn and hears no key: PgUp/PgDn and
+      // the wheel are the pager's, and the conversation stays where it was left.
+      h(ChatMessages, { messages, rowOpts: { wrap, folds, viewLines, notes, detailsKey, renderers: viewRenderers, now, palette: m, onViewFail }, palette: m, errorColor: theme?.error, onViewport, scrollTo, keysActive: focused && !pager, wheel, hidden: !!pager }),
+      // The pager, in the conversation's place: the block's rows at the conversation's
+      // width, with a scroll of their own.
+      pager
+        ? h(ScrollList<ChatRow>, {
+            items: pager.rows, rowHeight: 1, scrollbar: true, flexGrow: 1, flexShrink: 1, flexDirection: 'column',
+            keyOf: (_row: ChatRow, i: number) => `pager-${i}`,
+            renderItem: chatRowRenderer({ palette: m, errorColor: theme?.error, wrap, now, detailsKey }),
+          })
+        : null,
       error ? h(Text, { color: 'red' }, `⚠ ${error}`) : null,
       // The hint on the left, how full the model's context is on the right — it stays
       // put while the hint changes, and turns yellow when it is time to /compact.
-      // Chrome, not conversation: out of every selection.
+      // Chrome, not conversation: out of every selection. The pager's keys, while it is up.
+      pager ? h(Text, { dim: true, selectable: false, wrap: 'truncate' }, `${CAP.page} or the wheel scroll · ${CAP.esc} close`) :
       h(Box, { flexDirection: 'row', width: '100%', flexShrink: 0, selectable: false },
       h(Box, { flexGrow: 1, flexShrink: 1, overflow: 'hidden' },
       (!escArmed && !armedHint && (streaming || toolLabel))
@@ -1538,7 +1517,7 @@ export function renderChatModal({
       // with too few rows for it (a small docked panel) it gives way first: ONE row,
       // `plan 2/3 · <item>`, cut to the width, and whole again once there is room. The
       // field never shrinks and the conversation keeps a row (`planFit`).
-      oneLine
+      pager ? null : oneLine
         ? h(Box, { key: 'plan', flexDirection: 'row', width: '100%', flexShrink: 0, overflow: 'hidden' },
             h(Text, { dim: true, color: 'magenta', wrap: 'truncate' }, `▸ ${oneLine.head}`),
             h(Text, { wrap: 'truncate', color: oneLine.inProgress ? 'yellow' : undefined }, oneLine.text))
@@ -1554,7 +1533,7 @@ export function renderChatModal({
             planSummary ? h(Text, { dim: true, color: 'yellow' }, planSummary) : null,
           )
         : null,
-      queued.length
+      !pager && queued.length
         ? h(Box, { flexDirection: 'row', width: '100%', flexShrink: 0 },
             h(Text, { bold: true, color: m.warn }, `${CAP.enter} queued${queued.length > 1 ? ` (${queued.length})` : ''}: `),
             h(Text, { wrap: 'truncate', color: m.warn }, `${queued.length > 1 ? '… ' : ''}${queued.at(-1)!.replace(/\s+/g, ' ').slice(0, Math.max(10, wrap - 40))}`),
@@ -1564,8 +1543,8 @@ export function renderChatModal({
         : null,
       // The input field group (the y/n confirm block or the multiline input box). It
       // never shrinks: in a small panel the plan gives way (`planFit`), the field and
-      // its hint keep their rows.
-      h(Box, { flexDirection: 'column', width: '100%', flexShrink: 0 },
+      // its hint keep their rows. Not drawn under the pager.
+      pager ? null : h(Box, { flexDirection: 'column', width: '100%', flexShrink: 0 },
         pendingQuestion
           ? renderAsk(pendingQuestion, m.bg, wrap)
           : contextPanel

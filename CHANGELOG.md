@@ -18,7 +18,7 @@ What each version of flow-assist brought, newest first. The version is the one i
 - **A block taller than the chat's window opens in a pager, not into the
   conversation.** A click on a command's output, a turn's tool calls, its steps,
   its thinking or a /compact summary that would not fit the conversation's rows opens that block alone in
-  one window over the whole screen, as the log and the help are — everything the block kept, every call of a long trail —
+  the conversation's place inside the chat's frame — docked, as a window or full — everything the block kept, every call of a long trail —
   with its own scroll (PgUp/PgDn, the wheel); a drag copies from it, nothing typed
   there reaches the field or the model, and Esc brings the conversation back exactly
   where it was, the block still folded. A block that fits opens inline as before, and

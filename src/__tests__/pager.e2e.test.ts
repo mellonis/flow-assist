@@ -2,8 +2,9 @@
 //
 // A build's output or a turn of dozens of calls opened inline pushes the rest of the
 // conversation out of reach: the person scrolls through hundreds of rows to get back
-// to what was said. A pager is one window with that block alone and its own scroll,
-// like the log and the help; closing it leaves the conversation exactly where it was.
+// to what was said. A pager shows that block alone, with its own scroll, in the
+// conversation's place inside the chat's own frame; closing it leaves the conversation
+// exactly where it was.
 //
 // These tests drive the REAL chat on a test backend, as folds.e2e.test.ts does.
 import { afterEach, expect, test } from 'bun:test';
@@ -28,6 +29,23 @@ const click = async (ui: Ui, y: number, x = 12) => {
 // The pager's own hint line — what says it is on screen.
 const PAGER_HINT = 'the wheel scroll · Esc close';
 const pagerUp = (ui: Ui) => ui.backend.lastFrame.includes(PAGER_HINT);
+// Where the chat's frame starts: the row and column of its top-left corner.
+function corner(frame: string): { row: number; col: number } {
+  const lines = frame.split('\n');
+  const row = lines.findIndex((l) => l.includes('╭─ ƒ Flow Assist'));
+  if (row < 0) throw new Error(`no chat frame on screen:\n${frame}`);
+  return { row, col: lines[row]!.indexOf('╭─ ƒ Flow Assist') };
+}
+// A drag over the pager's first rows, from the output's bar — what it copies.
+async function dragFrom101(ui: Ui, rows: number) {
+  const from = rowOf(ui, '│ 101');
+  const x = ui.backend.lastFrame.split('\n')[from]!.indexOf('│ 101');
+  ui.backend.mouse('down', x, from);
+  ui.backend.mouse('drag', x + 26, from + rows);
+  ui.backend.mouse('up', x + 26, from + rows);
+  await settle(6);
+  return ui.backend.clipboard.join('');
+}
 
 // A command the model ran, then an answer, then more conversation under it — so the
 // list can be scrolled up to the block and the block is not the last thing on it.
@@ -112,12 +130,7 @@ test('the pager is a reader: typing, ⏎, ^o and a click inside it change nothin
 test('a drag inside the pager copies its text — the output, not the bar beside it', async () => {
   const { ui } = await commandThenTalk('seq 1 300');
   await click(ui, rowOf(ui, 'seq 1 300 ·'));
-  const from = rowOf(ui, '│ 101');
-  ui.backend.mouse('down', 4, from);
-  ui.backend.mouse('drag', 30, from + 2);
-  ui.backend.mouse('up', 30, from + 2);
-  await settle(6);
-  const copied = ui.backend.clipboard.join('');
+  const copied = await dragFrom101(ui, 2);
   expect(copied).toContain('101\n102\n103');
   expect(copied).not.toContain('│');
   // A drag is a selection: the pager is still up.
@@ -145,10 +158,11 @@ test('^o opens everything inline, the tall block included — the pager is for o
   ui.app.unmount();
 });
 
-// Docked, the pager still covers the whole terminal, as the log and the help do — not
-// only the panel: on the right from 120 columns, at the bottom below that.
+// The pager is drawn inside the chat's own frame, in the conversation's place: docked,
+// the plugin's screen stays in view beside it — on the right from 120 columns, at the
+// bottom below that.
 for (const [side, cols, rows] of [['right', 140, 30], ['bottom', 100, 44]] as const) {
-  test(`from a ${side} panel the pager covers the whole terminal, and Esc hands the panel back`, async () => {
+  test(`in a ${side} panel the pager opens inside the panel, the plugin's screen beside it, and Esc gives the conversation back`, async () => {
     const model = new ScriptedModel();
     model.script([{ tool: 'run_command', args: { command: 'seq 1 300' } }], [{ text: 'Done counting.' }]);
     const ui = await bootApp(model, cols, rows, undefined, { shell: { timeoutMs: 20000 } }, { chatMode: 'panel' });
@@ -160,29 +174,60 @@ for (const [side, cols, rows] of [['right', 140, 30], ['bottom', 100, 44]] as co
     await settleUntil(() => ui.backend.lastFrame.includes('Done counting.'));
     await settle(8);
     const before = ui.backend.lastFrame;
+    const panel = corner(before);
     const y = rowOf(ui, 'seq 1 300 ·');
     const x = before.split('\n')[y]!.indexOf('seq 1 300');
     await click(ui, y, x + 2);
     expect(pagerUp(ui)).toBe(true);
-    // The window starts at the terminal's corner and spans its width.
-    const lines = ui.backend.lastFrame.split('\n');
-    expect(lines[0]!.startsWith('╭─ seq 1 300')).toBe(true);
-    expect(lines[0]!.trimEnd()).toHaveLength(cols);
+    // The chat's own frame, where the panel was, titled by the block — and the field
+    // not drawn while the pager is up.
+    const frame = ui.backend.lastFrame;
+    expect(corner(frame)).toEqual(panel);
+    expect(frame.split('\n')[panel.row]).toContain('Flow Assist · seq 1 300');
+    expect(frame).toContain('│ 101');
+    expect(frame).not.toContain('Done counting.');
+    expect(before).toContain('new line');
+    expect(frame).not.toContain('new line');
+    // The plugin's side is still on screen, beside or above the panel.
+    expect(frame).toContain('an assistant in your terminal');
+    expect(frame).toContain(': commands');
     await ui.press('escape');
     expect(ui.backend.lastFrame).toBe(before);
-    // A drag over what is the plugin's side under the pager is the pager's selection:
-    // it copies and leaves the pager up (the press does not hand the keys over).
+    // A drag inside the pager copies its text and leaves it up.
     await click(ui, y, x + 2);
-    const from = rowOf(ui, '│ 101');
-    ui.backend.mouse('down', 4, from);
-    ui.backend.mouse('drag', 30, from + 1);
-    ui.backend.mouse('up', 30, from + 1);
-    await settle(6);
-    expect(ui.backend.clipboard.join('')).toContain('101\n102');
+    expect(await dragFrom101(ui, 1)).toContain('101\n102');
     expect(pagerUp(ui)).toBe(true);
+    // A press on the plugin's side is an ordinary one: the keys go to the plugin, and
+    // the pager, read with the chat's keys, closes.
+    const plugin = rowOf(ui, 'an assistant in your terminal');
+    await click(ui, plugin, ui.backend.lastFrame.split('\n')[plugin]!.indexOf('an assistant') + 2);
+    expect(pagerUp(ui)).toBe(false);
     ui.app.unmount();
   });
 }
+
+test('with the chat taking the whole terminal, the pager fills it — the chat\'s frame does', async () => {
+  const model = new ScriptedModel();
+  model.script([{ tool: 'run_command', args: { command: 'seq 1 300' } }], [{ text: 'Done counting.' }]);
+  const cols = 100;
+  const ui = await bootApp(model, cols, 30, undefined, { shell: { timeoutMs: 20000 } }, { chatMode: 'full' });
+  await ui.press('F');
+  await ui.type('count');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('Confirm write: run_command'));
+  await ui.press('y');
+  await settleUntil(() => ui.backend.lastFrame.includes('Done counting.'));
+  await settle(8);
+  const before = ui.backend.lastFrame;
+  await click(ui, rowOf(ui, 'seq 1 300 ·'), before.split('\n')[rowOf(ui, 'seq 1 300 ·')]!.indexOf('seq 1 300') + 2);
+  expect(pagerUp(ui)).toBe(true);
+  const lines = ui.backend.lastFrame.split('\n');
+  expect(lines[0]!.startsWith('╭─ ƒ Flow Assist · seq 1 300')).toBe(true);
+  expect(lines[0]!.trimEnd()).toHaveLength(cols);
+  await ui.press('escape');
+  expect(ui.backend.lastFrame).toBe(before);
+  ui.app.unmount();
+});
 
 test('a turn of dozens of calls opens in the pager with every call, the trail\'s cap lifted', async () => {
   const model = new ScriptedModel();
@@ -258,9 +303,12 @@ test('a long reasoning opens in the pager titled thinking, reads to its end, and
   await settleUntil(() => ui.backend.lastFrame.includes('Thought it through.'));
   await settle(8);
   const before = ui.backend.lastFrame;
+  const window = corner(before);
   await click(ui, rowOf(ui, '▸ thinking'));
   expect(pagerUp(ui)).toBe(true);
-  expect(ui.backend.lastFrame.split('\n')[0]).toContain('╭─ thinking');
+  // In the chat's own window, where the conversation was, titled by the block.
+  expect(corner(ui.backend.lastFrame)).toEqual(window);
+  expect(ui.backend.lastFrame.split('\n')[window.row]).toContain('Flow Assist · thinking');
   expect(ui.backend.lastFrame).toContain('thought 1');
   expect(ui.backend.lastFrame).not.toContain('thought 60');
   for (let i = 0; i < 20; i++) await ui.press('pagedown');
