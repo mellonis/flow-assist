@@ -30,6 +30,19 @@ test('folded, a command longer than a click shows says how many lines it holds',
   expect(renderConsole(d({ text: 'a\nb\nc' }), base).map(plain)).toEqual(['bun test · ✓ 4.2 s']);
 });
 
+test('a view cut at collection remembers how much was printed, and its fold line says it holds the tail', () => {
+  const printed = Array.from({ length: 300 }, (_, i) => String(i + 1)).join('\n');
+  const once = capConsoleData({ command: 'seq 1 300', cwd: '~', text: printed, exitCode: 0, ms: 10 });
+  expect(once.lines).toBe(300);
+  expect(once.text.split('\n')).toHaveLength(VIEW_CAPS.lines);
+  // Capped again — a saved session read back, the final update of a live view — the
+  // count it was handed stands.
+  expect(capConsoleData(once).lines).toBe(300);
+  expect(renderConsole(once, base).map(plain)).toEqual(['seq 1 300 · ✓ 0.0 s · last 200 of 300 lines']);
+  // Nothing cut, nothing recorded.
+  expect(capConsoleData({ command: 'x', cwd: '~', text: 'a\nb' }).lines).toBeUndefined();
+});
+
 test('a person\'s own command also says where it ran', () => {
   expect(renderConsole(d({ showCwd: true }), base).map(plain)).toEqual(['bun test · ✓ 4.2 s · ~/app']);
 });

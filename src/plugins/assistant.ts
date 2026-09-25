@@ -34,7 +34,7 @@ import { capConsoleData, consoleData, renderConsole } from '../assistant/console
 import { INTERACTIVE_ASK, runInteractive, type InteractiveDeps } from '../assistant/interactive.js';
 import { editorReducer } from '@flowtty/core';
 import { z } from 'zod';
-import { anchorRow, askFieldWidth, blockRows, chatFieldWidth, chatRows, chatWrapWidth, firstFoldRow, liveChatStatus, pagerTitle, pagerWrapWidth, pendingChatRows, renderChatStatus, renderChatStrip, rowAnchor, viewGroupFor, type RowOpts, type Viewport } from '../views/modals.js';
+import { anchorRow, askFieldWidth, blockRows, roomForBlock, chatFieldWidth, chatRows, chatWrapWidth, firstFoldRow, liveChatStatus, pagerTitle, renderChatPager, pagerWrapWidth, pendingChatRows, renderChatStatus, renderChatStrip, rowAnchor, viewGroupFor, type RowOpts, type Viewport } from '../views/modals.js';
 import { CHAT_MODES, chatModeOf, inRect, type ChatMode, type PanelLayout } from '../runtime/panel-layout.js';
 import { allFolded, flipFolds, isClicked, isOpen, openInFull, pageable, toggleFold, type FoldState } from '../assistant/folds.js';
 import { groupOpen, toggleGroup } from '../assistant/view-groups.js';
@@ -688,12 +688,14 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // away from it; for the trail's cap, which never does, simply on.
             const opening = id.endsWith(':calls') ? !isClicked(foldsRef.current, id) : !isOpen(foldsRef.current, id);
             // A block taller than the rows the conversation has for it — measured whole,
-            // as the pager would show it — opens in the pager and stays folded here.
-            // Below that it opens inline.
-            if (opening && pageable(id)) {
+            // as the pager would show it, and at the conversation's own width, since the
+            // question is whether it fits THERE — opens in the pager and stays folded
+            // here. Below that it opens inline. Never while a y/n or a question waits:
+            // that is answered in the conversation, and a pager would cover it.
+            if (opening && pageable(id) && !pendingRef.current && !askRef.current) {
               const v = viewportRef.current;
               const whole = blockRows(drawn(), { ...rowOpts(openInFull(foldsRef.current, id)), viewLines: VIEW_CAPS.lines }, id).length;
-              if (v && whole > v.height) { setPager(id); host.notify(); return true; }
+              if (v && whole > roomForBlock(v.height)) { setPager(id); host.notify(); return true; }
             }
             applyFolds(toggleFold(foldsRef.current, id), opening ? id : null);
             return true;
@@ -1291,6 +1293,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   pluginToken: host.pluginToken,
                   askUser: (questions: AskQuestion[]) => new Promise<AskState>((resolve) => {
                     const state = askStart(questions);
+                    // A question is answered in the conversation: a pager over it closes.
+                    if (pagerRef.current) setPager(null);
                     askRef.current = { state, resolve };
                     setPendingQuestion(state);
                     host.notify();
@@ -1318,6 +1322,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   const args = typeof argsStr === 'string' ? argsStr : JSON.stringify(argsStr ?? '');
                   const command = shellCommandOf(name, args);
                   if (contextOpenRef.current) setContextOpen(false);
+                  // So does a pager: the y/n is what the person must see and answer.
+                  if (pagerRef.current) setPager(null);
                   // The tool whose earlier result the call takes as its input — the
                   // block says where a command's stdin comes from.
                   const input = info?.input ? `${info.input}${info.inputId ? ` (${info.inputId})` : ''}` : undefined;
@@ -2224,6 +2230,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // A press on the screen: the keyboard goes to the pane it landed in, as a click
           // into a window does anywhere else.
           const pointer = (x: number, y: number) => {
+            // The pager covers the whole terminal: a press anywhere is in it.
+            if (pagerShownRef.current) return;
             const d = (host.services as { chatDock?: PanelLayout | null }).chatDock;
             if (layoutRef.current !== 'panel' || !openRef.current || !d || d.collapsed) return;
             const next = inRect(d.panel, x, y) ? 'chat' : 'plugin';
@@ -2293,7 +2301,32 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               queued: queueRef.current.length,
             });
           };
-          (host.store as Record<string, any>).chat = { open, unread, mode, focus, openChat, closeChat, send, messages, streaming, toolLabel, cursor, escArmed, pendingConfirm: pendingAsk, ctrlKey, panelKey, pointer, statusRow: statusRow ? liveChatStatus(() => statusRef.current as never, collapsedBusy) : null, footerStatus, layout, needRows };
+          // The block in the pager. Drawn only while the chat has the keys (a docked chat
+          // that gave them to the plugin shows its conversation) and while the block
+          // resolves (a list replaced under it shows nothing, and holds no key). The
+          // chat decides; the `pager` slot draws it over the whole terminal, laying the
+          // block out at the terminal's width through `build`.
+          const pagerAt = (state: FoldState, id: string) => ({ ...rowOpts(openInFull(state, id)), viewLines: VIEW_CAPS.lines });
+          const pagerShown = !!pager && open && focused && blockRows(messages as Parameters<typeof blockRows>[0], pagerAt(folds, pager), pager).length > 0;
+          pagerShownRef.current = pagerShown;
+          const pagerSlot = pagerShown && pager ? {
+            build: (w: number) => {
+              const rows = blockRows(messages as Parameters<typeof blockRows>[0], { ...pagerAt(folds, pager), wrap: pagerWrapWidth(w) }, pager);
+              return { rows, title: pagerTitle(rows, pager) };
+            },
+            detailsKey: firstGlyph(host.keys.details),
+          } : null;
+          (host.store as Record<string, any>).chat = { open, unread, mode, focus, openChat, closeChat, send, messages, streaming, toolLabel, cursor, escArmed, pendingConfirm: pendingAsk, ctrlKey, panelKey, pointer, statusRow: statusRow ? liveChatStatus(() => statusRef.current as never, collapsedBusy) : null, footerStatus, layout, needRows, pager: pagerSlot };
+          // The slot is another component: it redraws when the App does. So the App is
+          // asked to whenever the pager comes, goes, or what it holds changes (a live
+          // view printing) — never on a render that changed none of that.
+          const pagerSeen = ui.useRef<{ id: string | null; msgs: unknown }>({ id: null, msgs: null });
+          ui.useEffect(() => {
+            const now = { id: pagerShown ? pager : null, msgs: pagerShown ? messages : null };
+            if (now.id === pagerSeen.current.id && now.msgs === pagerSeen.current.msgs) return;
+            pagerSeen.current = now;
+            host.notify();
+          });
           // Lands the next background result. It is SHOWN as soon as no turn is being
           // written (a streaming turn keeps rewriting the display list's last message,
           // so a result cannot be appended under it) — a half-typed draft does not hold
@@ -2637,17 +2670,6 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // started (`tabRef`), not from the field. Only with the caret at the end of a
           // one-line field, where the offer can be drawn.
           const completion = !input.includes('\n') && cursor >= input.length ? lineView(input, tabRef.current, chatComplete) : null;
-          // The block in the pager, laid out whole at the pager's width. Only while the
-          // chat has the keys: a docked chat that gave them to the plugin shows its
-          // conversation, and a block that is gone (the list replaced) shows nothing.
-          const pagerView = (() => {
-            if (!pager || !focused) return null;
-            const o = { ...rowOpts(openInFull(folds, pager)), wrap: pagerWrapWidth(width), viewLines: VIEW_CAPS.lines };
-            const rows = blockRows(messages as Parameters<typeof blockRows>[0], o, pager);
-            const at = layout === 'panel' && dock ? dock.panel : { top: 0, left: 0 };
-            return rows.length ? { rows, title: pagerTitle(rows, pager), top: at.top, left: at.left } : null;
-          })();
-          pagerShownRef.current = !!pagerView;
           return (host.viewRegistry.chat as (p: Record<string, unknown>) => unknown)({
             width, height, theme: host.config.theme, messages, input, streaming, error, toolLabel, phase, verb, cursor, escArmed,
             // An armed Ctrl+C / Ctrl+D / Ctrl+Z (the App's, `^c again to exit`) — drawn
@@ -2675,7 +2697,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             imageNumbers: [...imagesRef.current.keys()],
             imagesOn: imageLimits(host.config.ai).enabled,
             fullscreen,
-            pager: pagerView,
+            pagerOpen: pagerShownRef.current,
             // Docked beside the plugin's screen: the frame marks which side has the keys.
             docked: layout === 'panel',
             focused,
@@ -2716,6 +2738,18 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // LLM edits (via notify()) shows up immediately.
             todo: planRef.current.snapshot(),
           });
+        };
+      },
+      // The chat's pager, drawn on the App's top layer over the whole terminal (a box in a
+      // docked panel is clipped to the panel). What it shows is the chat's
+      // (`store.chat.pager`); the pager's own list keeps its scroll here.
+      pager: (api) => {
+        const { host } = api as PluginApi;
+        return function ChatPagerSlot() {
+          const { width, height } = host.useTerminalSize();
+          const slot = (host.store as { chat?: { pager?: { build: (w: number) => { rows: unknown[]; title: string }; detailsKey: string } | null } }).chat?.pager;
+          if (!slot) return null;
+          return renderChatPager({ pager: slot.build(width) as never, width, height, theme: host.config.theme as never, now: Date.now(), detailsKey: slot.detailsKey });
         };
       },
     },

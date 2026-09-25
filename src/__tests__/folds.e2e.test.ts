@@ -165,12 +165,12 @@ const underPin = (ui: Ui) => contentTop(ui) + 1;
 
 // A command with plenty of conversation under it — so the list can be scrolled to the
 // block and the block is not the last thing on it. PgUp is the scroll box's own key;
-// it takes the view to the top. `lines` — how much it prints: 9 fits the 12 rows the
-// conversation has here whole, so a click opens it inline (a block taller than that
+// it takes the view to the top. `lines` — how much it prints: 8 (10 rows) fits the
+// rows the conversation has here whole, so a click opens it inline (a block taller than that
 // opens in the pager, pager.e2e). `runOutputLines` — how many lines an OPENED block
 // shows: 3 caps it well under its whole, 40 shows all of it.
 const TAIL = Array.from({ length: 20 }, (_, i) => `Remark number ${i + 1}.`).join('\n\n');
-async function longOutput(runOutputLines = 3, lines = 9) {
+async function longOutput(runOutputLines = 3, lines = 8) {
   const model = new ScriptedModel();
   model.script(
     [{ tool: 'run_command', args: { command: `seq 1 ${lines}` } }],
@@ -201,8 +201,8 @@ test('a finished command, folded, is one line saying how it ended', async () => 
 });
 
 test('opening a block starts at its FIRST row, not its last', async () => {
-  // runOutputLines: 40 — a click opens the whole block, 11 rows (command, 9 lines,
-  // tail): as tall as fits the conversation's 12 rows whole, so it opens inline and
+  // runOutputLines: 40 — a click opens the whole block, 10 rows (command, 8 lines,
+  // tail): as tall as fits the conversation whole, so it opens inline and
   // the list has to scroll for it.
   const { ui } = await longOutput(40);
   // Nudge the fold line away from the top before clicking — longOutput() itself ends
@@ -211,11 +211,11 @@ test('opening a block starts at its FIRST row, not its last', async () => {
   // exactly that, and passed whether or not the click scrolled anything).
   // (Only when it IS at the top: a wheel step is several rows, and a fold line already
   // a row or two down would be scrolled out of the window altogether.)
-  if (rowOf(ui, 'seq 1 9 ·') === contentTop(ui)) {
+  if (rowOf(ui, 'seq 1 8 ·') === contentTop(ui)) {
     ui.backend.wheel('down', 20, 8);
     await settle(4);
   }
-  const foldRow = rowOf(ui, 'seq 1 9 ·');
+  const foldRow = rowOf(ui, 'seq 1 8 ·');
   expect(foldRow).not.toBe(contentTop(ui));
   await click(ui, foldRow);
   // Inline: it fits, so no pager.
@@ -231,23 +231,23 @@ test('opening a block starts at its FIRST row, not its last', async () => {
 
 test('closing a block leaves its first row where it was on screen', async () => {
   const { ui } = await longOutput();
-  await click(ui, rowOf(ui, 'seq 1 9 ·'));
-  const first = rowOf(ui, 'seq 1 9');
+  await click(ui, rowOf(ui, 'seq 1 8 ·'));
+  const first = rowOf(ui, 'seq 1 8');
   // A click inside the open output folds it back — and the block starts on the same
   // row as before, so the conversation does not leap under the person reading it.
   await click(ui, first + 3);
-  expect(ui.backend.lastFrame).toContain('seq 1 9 ·');
-  expect(rowOf(ui, 'seq 1 9 ·')).toBe(first);
+  expect(ui.backend.lastFrame).toContain('seq 1 8 ·');
+  expect(rowOf(ui, 'seq 1 8 ·')).toBe(first);
   ui.app.unmount();
 });
 
 test('a click opens a command capped to its last lines; ^o opens it in full', async () => {
   const { ui } = await longOutput();
-  await click(ui, rowOf(ui, 'seq 1 9 ·'));
+  await click(ui, rowOf(ui, 'seq 1 8 ·'));
   // A click shows the capped tail — the same 6 rows every open-by-click test sees.
-  expect(ui.backend.lastFrame).toContain('… 6 lines cut · ^o for all');
-  expect(ui.backend.lastFrame).toContain('│ 7');
-  expect(ui.backend.lastFrame).toContain('│ 9');
+  expect(ui.backend.lastFrame).toContain('… 5 lines cut · ^o for all');
+  expect(ui.backend.lastFrame).toContain('│ 6');
+  expect(ui.backend.lastFrame).toContain('│ 8');
   expect(ui.backend.lastFrame).not.toContain('│ 1');
   // The GLOBAL key opens every view in full — every line it kept, not the capped tail
   // a click shows — which is what makes the cut marker's own "^o for all" true.
@@ -258,7 +258,7 @@ test('a click opens a command capped to its last lines; ^o opens it in full', as
   expect(ui.backend.lastFrame).toContain('│ 1');
   ui.backend.wheel('down', 20, 8);
   await settle(4);
-  expect(ui.backend.lastFrame).toContain('│ 9');
+  expect(ui.backend.lastFrame).toContain('│ 8');
   ui.app.unmount();
 });
 

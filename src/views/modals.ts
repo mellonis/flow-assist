@@ -637,7 +637,7 @@ export function blockRows(messages: ChatMsg[], o: RowOpts, id: string): ChatRow[
   return messageRows(m, at, true, o).filter((r) => r.fold === id);
 }
 
-// The width the pager lays a block out in: its window fills the chat's area, less the
+// The width the pager lays a block out in: its window fills the terminal, less the
 // border and padding (4) and the scrollbar's column (1).
 export function pagerWrapWidth(width: number): number {
   return Math.max(20, width - 5);
@@ -996,6 +996,12 @@ function chatRowRenderer({ palette: m, errorColor, wrap, now, detailsKey }: {
 // chat was one more term to forget, and twice was.
 // Below this many rows the conversation keeps every row for itself.
 const MIN_ROWS_TO_PIN = 4;
+// The rows a block opened at the top of the conversation has: the list's height, less
+// the top row the pinned question is painted over once the list is tall enough to pin
+// (a block opened to its first row leaves the last question above the screen).
+export function roomForBlock(height: number): number {
+  return height >= MIN_ROWS_TO_PIN ? height - 1 : height;
+}
 function ChatMessages({ messages, rowOpts, palette: m, errorColor, onViewport, scrollTo, keysActive = true, wheel }: {
   messages: ChatMsg[];
   // Whether PgUp/PgDn (and the wheel) reach the list through its own input: not while a
@@ -1125,19 +1131,16 @@ function ChatMessages({ messages, rowOpts, palette: m, errorColor, onViewport, s
 
 // ─── The pager ────────────────────────────────────────────────────────────────
 // A block taller than the rows the conversation has for it is read here instead: one
-// window over the chat's whole area, that block alone, with a scroll of its own — the
-// same frame as the log and the help. It draws the block's rows with the
+// window over the whole terminal, as the log and the help are — that block alone, with
+// a scroll of its own, in the same frame. It draws the block's rows with the
 // conversation's own renderer, so a drag copies the text and leaves the gutter and
 // the bars. It is a reader: the chat's key handler swallows every key while it is up
-// and Esc brings the conversation back as it was left.
+// and Esc brings the conversation back as it was left. The chat decides what it
+// shows; the assistant's `pager` slot draws it on the App's top layer, since a box in
+// a docked panel is clipped to the panel.
 export interface PagerView {
   rows: ChatRow[];
   title: string;
-  // Where the chat's area starts on the terminal. An absolute box is placed from its
-  // nearest absolute ancestor — the terminal's corner for a docked panel, which is a
-  // plain box — so the pager says where the panel is to lie over it.
-  top: number;
-  left: number;
 }
 function ChatPager({ pager, width, height, palette: m, errorColor, now, detailsKey }: {
   pager: PagerView;
@@ -1149,7 +1152,7 @@ function ChatPager({ pager, width, height, palette: m, errorColor, now, detailsK
   detailsKey: string;
 }) {
   const renderRow = chatRowRenderer({ palette: m, errorColor, wrap: pagerWrapWidth(width), now, detailsKey });
-  return h(Box, { ...overlay(width, height, 11), top: pager.top, left: pager.left },
+  return h(Box, overlay(width, height, 11),
     h(Box, frame(m, cutStep(pager.title, Math.max(0, width - 6)), { width, height, paddingY: 0, gap: 1 }),
       h(ScrollList<ChatRow>, {
         items: pager.rows, rowHeight: 1, scrollbar: true, flexGrow: 1, flexShrink: 1, flexDirection: 'column',
@@ -1157,6 +1160,18 @@ function ChatPager({ pager, width, height, palette: m, errorColor, now, detailsK
         renderItem: renderRow,
       }),
       h(Text, { dim: true, selectable: false, wrap: 'truncate' }, `${CAP.page} or the wheel scroll · ${CAP.esc} close`)));
+}
+
+export function renderChatPager({ pager, width, height, theme, now, detailsKey }: {
+  pager: PagerView;
+  width: number;
+  height: number;
+  theme: Theme | undefined;
+  now: number;
+  detailsKey: string;
+}) {
+  const m = (theme?.modals?.chat ?? {}) as Record<string, string | undefined>;
+  return h(ChatPager, { pager, width, height, palette: m, errorColor: theme?.error, now, detailsKey });
 }
 
 // What the pager's title says: a command's own line, else what the block is.
@@ -1265,10 +1280,10 @@ export function renderChatModal({
   escWord = 'close',
   imageNumbers = [],
   imagesOn = false,
-  pager = null,
+  pagerOpen = false,
 }: {
-  // A block open in the pager, over the whole chat — null when none is.
-  pager?: PagerView | null;
+  // A block is open in the pager, over the whole terminal.
+  pagerOpen?: boolean;
   width: number;
   height: number;
   theme: Theme | undefined;
@@ -1452,7 +1467,7 @@ export function renderChatModal({
       },
       // Under the pager the conversation hears no key: PgUp/PgDn and the wheel are the
       // pager's, and the conversation stays where it was left.
-      h(ChatMessages, { messages, rowOpts: { wrap, folds, viewLines, notes, detailsKey, renderers: viewRenderers, now, palette: m, onViewFail }, palette: m, errorColor: theme?.error, onViewport, scrollTo, keysActive: focused && !pager, wheel }),
+      h(ChatMessages, { messages, rowOpts: { wrap, folds, viewLines, notes, detailsKey, renderers: viewRenderers, now, palette: m, onViewFail }, palette: m, errorColor: theme?.error, onViewport, scrollTo, keysActive: focused && !pagerOpen, wheel }),
       error ? h(Text, { color: 'red' }, `⚠ ${error}`) : null,
       // The hint on the left, how full the model's context is on the right — it stays
       // put while the hint changes, and turns yellow when it is time to /compact.
@@ -1597,9 +1612,6 @@ export function renderChatModal({
               })),
       ),
     ),
-    // Always this slot, null or the pager, so opening one never remounts the
-    // conversation under it (it keeps its scroll).
-    pager ? h(ChatPager, { pager, width, height, palette: m, errorColor: theme?.error, now, detailsKey }) : null,
   );
 }
 

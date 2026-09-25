@@ -6,14 +6,15 @@ What each version of flow-assist brought, newest first. The version is the one i
 ## Unreleased
 
 - **A block taller than the chat's window opens in a pager, not into the
-  conversation.** A click on a command's output, a turn's tool calls, its steps or
-  its thinking that would not fit the conversation's rows opens that block alone in
-  one window over the chat — everything the block kept, every call of a long trail —
+  conversation.** A click on a command's output, a turn's tool calls, its steps,
+  its thinking or a /compact summary that would not fit the conversation's rows opens that block alone in
+  one window over the whole screen, as the log and the help are — everything the block kept, every call of a long trail —
   with its own scroll (PgUp/PgDn, the wheel); a drag copies from it, nothing typed
   there reaches the field or the model, and Esc brings the conversation back exactly
   where it was, the block still folded. A block that fits opens inline as before, and
   `^o` still opens everything inline. A folded command that printed more than a click
-  shows now says how much it holds (`· 200 lines`).
+  shows now says how much it holds (`· 40 lines`, or `· last 200 of 300 lines` when
+  only the tail was kept). A y/n or a question arriving closes the pager.
 - **The assistant can hand a tool's result to a command instead of re-typing it.**
   Asked how many non-breaking spaces a text holds, the model had the text in a tool's
   result and no way to give it to a command but to write it out again as an argument —

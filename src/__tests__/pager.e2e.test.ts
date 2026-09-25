@@ -57,9 +57,9 @@ async function commandThenTalk(command: string, cols = 100, rows = 24) {
 
 test('a command of 300 lines: the fold line says how much, a click opens a pager, Esc comes back to where the conversation was', async () => {
   const { ui } = await commandThenTalk('seq 1 300');
-  // The fold line says how much there is to read — what the block kept (a view keeps
-  // its last 200 lines at collection).
-  expect(ui.backend.lastFrame).toMatch(/seq 1 300 · ✓ \d+\.\d s · 200 lines/);
+  // The fold line says how much there is to read: a view keeps the last 200 lines of
+  // what was printed, and says so.
+  expect(ui.backend.lastFrame).toMatch(/seq 1 300 · ✓ \d+\.\d s · last 200 of 300 lines/);
   const before = ui.backend.lastFrame;
   await click(ui, rowOf(ui, 'seq 1 300 ·'));
   // A pager on screen, the block from its first row — and not two hundred rows pushed
@@ -145,10 +145,10 @@ test('^o opens everything inline, the tall block included — the pager is for o
   ui.app.unmount();
 });
 
-// A docked panel is a plain box, so the pager has to be told where the panel lies:
-// on the right from 120 columns, at the bottom below that.
+// Docked, the pager still covers the whole terminal, as the log and the help do — not
+// only the panel: on the right from 120 columns, at the bottom below that.
 for (const [side, cols, rows] of [['right', 140, 30], ['bottom', 100, 44]] as const) {
-  test(`the pager covers the chat in a ${side} panel, and Esc hands the panel back`, async () => {
+  test(`from a ${side} panel the pager covers the whole terminal, and Esc hands the panel back`, async () => {
     const model = new ScriptedModel();
     model.script([{ tool: 'run_command', args: { command: 'seq 1 300' } }], [{ text: 'Done counting.' }]);
     const ui = await bootApp(model, cols, rows, undefined, { shell: { timeoutMs: 20000 } }, { chatMode: 'panel' });
@@ -160,19 +160,26 @@ for (const [side, cols, rows] of [['right', 140, 30], ['bottom', 100, 44]] as co
     await settleUntil(() => ui.backend.lastFrame.includes('Done counting.'));
     await settle(8);
     const before = ui.backend.lastFrame;
-    const lines = before.split('\n');
-    const panelTop = lines.findIndex((l) => l.includes('╭─ ƒ'));
-    const panelLeft = lines[panelTop]!.indexOf('╭─ ƒ');
     const y = rowOf(ui, 'seq 1 300 ·');
-    const x = lines[y]!.indexOf('seq 1 300');
+    const x = before.split('\n')[y]!.indexOf('seq 1 300');
     await click(ui, y, x + 2);
     expect(pagerUp(ui)).toBe(true);
-    // Over the panel, not over the plugin's side beside or above it.
-    const at = rowOf(ui, '│ 101');
-    expect(at).toBeGreaterThan(panelTop);
-    expect(ui.backend.lastFrame.split('\n')[at]!.indexOf('│ 101')).toBeGreaterThan(panelLeft);
+    // The window starts at the terminal's corner and spans its width.
+    const lines = ui.backend.lastFrame.split('\n');
+    expect(lines[0]!.startsWith('╭─ seq 1 300')).toBe(true);
+    expect(lines[0]!.trimEnd()).toHaveLength(cols);
     await ui.press('escape');
     expect(ui.backend.lastFrame).toBe(before);
+    // A drag over what is the plugin's side under the pager is the pager's selection:
+    // it copies and leaves the pager up (the press does not hand the keys over).
+    await click(ui, y, x + 2);
+    const from = rowOf(ui, '│ 101');
+    ui.backend.mouse('down', 4, from);
+    ui.backend.mouse('drag', 30, from + 1);
+    ui.backend.mouse('up', 30, from + 1);
+    await settle(6);
+    expect(ui.backend.clipboard.join('')).toContain('101\n102');
+    expect(pagerUp(ui)).toBe(true);
     ui.app.unmount();
   });
 }
@@ -199,5 +206,66 @@ test('a turn of dozens of calls opens in the pager with every call, the trail\'s
   expect(ui.backend.lastFrame.split('\n').filter((r) => /▸ (datetime|config_schema)/.test(r)).length).toBeGreaterThan(12);
   await ui.press('escape');
   expect(ui.backend.lastFrame).toContain('▸ 36 tools:');
+  ui.app.unmount();
+});
+
+test('a y/n arriving while the pager is up closes it and is answered; while it waits a click opens no pager', async () => {
+  const model = new ScriptedModel();
+  model.script(
+    [{ tool: 'run_command', args: { command: 'seq 1 300' } }],
+    [{ text: 'Done counting.' }],
+    [{ hold: true }, { tool: 'run_command', args: { command: 'echo hi' } }],
+    [{ text: 'Declined, fine.' }],
+  );
+  const ui = await bootApp(model, 100, 24, undefined, { shell: { timeoutMs: 20000 } });
+  await ui.press('F');
+  await ui.type('count');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('Confirm write: run_command'));
+  await ui.press('y');
+  await settleUntil(() => ui.backend.lastFrame.includes('Done counting.'));
+  await ui.type('say hi');
+  await ui.press('return');
+  await settle(8);
+  // The turn is held; the block is up the list.
+  for (let i = 0; i < 6 && !ui.backend.lastFrame.includes('seq 1 300 ·'); i++) await ui.press('pageup');
+  await click(ui, rowOf(ui, 'seq 1 300 ·'));
+  expect(pagerUp(ui)).toBe(true);
+  // The y/n arrives: the pager goes, and the question is on screen and answerable.
+  model.release();
+  await settleUntil(() => ui.backend.lastFrame.includes('Confirm write: run_command'));
+  expect(pagerUp(ui)).toBe(false);
+  // While it waits, a click on the tall block opens it inline, never a pager over it.
+  for (let i = 0; i < 6 && !ui.backend.lastFrame.includes('seq 1 300 ·'); i++) await ui.press('pageup');
+  await click(ui, rowOf(ui, 'seq 1 300 ·'));
+  expect(pagerUp(ui)).toBe(false);
+  expect(ui.backend.lastFrame).toContain('Confirm write: run_command');
+  const asked = model.requests.length;
+  await ui.press('n');
+  await settleUntil(() => ui.backend.lastFrame.includes('Declined, fine.'));
+  expect(model.requests.length).toBe(asked + 1);
+  ui.app.unmount();
+});
+
+test('a long reasoning opens in the pager titled thinking, reads to its end, and Esc gives the conversation back', async () => {
+  const model = new ScriptedModel();
+  const thought = Array.from({ length: 60 }, (_, i) => `thought ${i + 1}`).join('\n\n');
+  model.script([{ thinking: thought, signature: 'sig' }, { text: 'Thought it through.' }]);
+  const ui = await bootApp(model, 100, 24);
+  await ui.press('F');
+  await ui.type('think');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('Thought it through.'));
+  await settle(8);
+  const before = ui.backend.lastFrame;
+  await click(ui, rowOf(ui, '▸ thinking'));
+  expect(pagerUp(ui)).toBe(true);
+  expect(ui.backend.lastFrame.split('\n')[0]).toContain('╭─ thinking');
+  expect(ui.backend.lastFrame).toContain('thought 1');
+  expect(ui.backend.lastFrame).not.toContain('thought 60');
+  for (let i = 0; i < 20; i++) await ui.press('pagedown');
+  expect(ui.backend.lastFrame).toContain('thought 60');
+  await ui.press('escape');
+  expect(ui.backend.lastFrame).toBe(before);
   ui.app.unmount();
 });

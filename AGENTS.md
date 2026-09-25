@@ -491,7 +491,8 @@ there is no `/fullscreen`.
   over the whole terminal for `window`/`full`). A component moved to another parent is
   mounted anew: `/mode` would lose the turn being written, the draft and the queue,
   and a plugin's screen its state. A third place holds what floats over everything,
-  the chat included — the reminder and the keycaps panel (`TOP_LAYER`): layers of no
+  the chat included — the reminder, the chat's pager and the keycaps panel
+  (`TOP_LAYER`): layers of no
   size of their own at the corner each piece places itself from, because a box that
   covered the screen would be what every drag starts in, and no pane's selection
   bounds would hold.
@@ -629,7 +630,9 @@ there is no `/fullscreen`.
   shows its output and its exit code.
   Folded, the block is ONE line saying how it ended — `cmd · ✓ 4.2 s`, `✗ exit 1 · 4.2
   s`, `stopped`, `timed out` — and, when it printed more than a click shows, how much it
-  holds: `· 200 lines` (what the view KEPT, `VIEW_CAPS.lines` at most); a CLICK opens it
+  holds: `· 40 lines`, or `· last 200 of 300 lines` when the view kept only the tail of
+  what was printed (`ConsoleData.lines`, recorded at collection only when it cut —
+  past `shell.maxChars` a lower bound); a CLICK opens it
   to the last `plugins.assistant.runOutputLines` lines (20) with `… N lines cut · ^o for
   all` above them — a display cap of its own, quite apart from `shell.maxChars`, which
   is how much the MODEL is given — unless the whole block is taller than the
@@ -1696,31 +1699,39 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     `summary` block (`pageable` in `folds.ts`), the chat measures the block WHOLE — as
     the pager shows it: laid out with `openInFull` (open, a trail's earlier-calls cap
     lifted) and a view at `VIEW_CAPS.lines`, only the block's own message laid out
-    (`blockRows`) — against the rows the conversation has for it, the list's own
-    height from `onViewport` at that moment. More rows than that → the pager; as many
-    or fewer → inline, a view capped to its tail. So a view whose
-    whole kept text does not fit opens in the pager even when its 20-line tail would
-    have. A group's head and a trail's `… N earlier calls` line always open inline (the
-    first opens into one-line blocks, the second belongs to a trail that fitted). A ✎
-    diff never folds, so it never reaches the pager. **Only a click opens one**: `^o`
-    opens everything inline, the tall blocks included — the pager is for reading ONE
-    block. The pager (`ChatPager` in `src/views/modals.ts`) is one window over the
-    chat's whole area — the terminal in `window`/`full`, the panel when docked — in
-    `frame()`, titled by the command (`N tool calls`, `thinking`, …), its rows drawn by
-    the conversation's own row renderer (`chatRowRenderer`, so a drag copies the text
-    and never the gutter or the `│ ` bar) in a `<ScrollList scrollbar>` laid out at
-    `pagerWrapWidth`. An absolute box is placed from its nearest absolute ancestor,
-    and a docked panel is a plain box, so the pager is handed the panel's corner
-    (`PagerView.top/left`). It sits in a fixed slot after the chat's frame, so the
-    conversation under it never remounts, and the conversation's list gets
+    (`blockRows`), at the conversation's own width, since the question is whether it
+    fits THERE — against the rows the conversation has for it: the list's height from
+    `onViewport` at that moment, less the top row the pinned question covers once the
+    list is tall enough to pin (`roomForBlock`). More rows than that → the pager; as
+    many or fewer → inline, a view capped to its tail. So a view whose whole kept text
+    does not fit opens in the pager even when its 20-line tail would have. A group's
+    head and a trail's `… N earlier calls` line always open inline (the first opens
+    into one-line blocks, the second belongs to a trail that fitted). A ✎ diff never
+    folds, so it never reaches the pager. **Only a click opens one**: `^o` opens
+    everything inline, the tall blocks included — the pager is for reading ONE block.
+    **A y/n or a question comes first**: one arriving closes the pager (where the
+    `/context` panel closes too), and while one waits a click opens nothing in the
+    pager — it is answered in the conversation, which the pager would cover.
+    The pager is one window over the WHOLE terminal, as the log and the help are —
+    docked or not — in `frame()`, titled by the command (`N tool calls`, `thinking`,
+    …), its rows drawn by the conversation's own row renderer (`chatRowRenderer`, so a
+    drag copies the text and never the gutter or the `│ ` bar) in a `<ScrollList
+    scrollbar>` laid out at `pagerWrapWidth` of the terminal. The chat decides what it
+    shows and publishes it as `store.chat.pager` (a `build(width)`); the assistant's
+    `pager` slot draws it (`renderChatPager`) on the App's top layer (`TOP_LAYER`,
+    from the terminal's top-left corner), since a box inside a docked panel is
+    clipped to the panel. The slot redraws with the App, so the chat asks the App to
+    redraw whenever the pager comes, goes, or its messages change (a live view
+    printing into it). The conversation under it never remounts, and its list gets
     `isActive: false` while it is up: PgUp/PgDn and the wheel are the pager's, and Esc
     returns to the conversation exactly where it was, the block still folded. It is a
     reader: the chat's key handler takes every key while it is drawn
     (`pagerShownRef`) — Esc closes it, anything else does nothing, so nothing reaches
-    the field, the folds or the model — and `mouse()` folds nothing, so a drag is the
-    pager's selection. Closing the chat, the keys leaving a docked chat, `/clear` and
-    `/resume` drop it. Its state is the fold id (`pager`); a block whose id does not
-    resolve draws no pager and holds no key.
+    the field, the folds or the model — `mouse()` folds nothing, so a drag is the
+    pager's selection, and a press does not move a docked chat's keyboard
+    (`pointer`), since the whole screen is the pager's. Closing the chat, the keys
+    leaving a docked chat, `/clear` and `/resume` drop it. Its state is the fold id
+    (`pager`); a block whose id does not resolve draws no pager and holds no key.
 - **A turn is drawn in the order it happened** (`src/assistant/step.ts`, pure; the chat
   owns the parts and the view lays them out). A whole turn is one assistant message,
   its `parts` kept in the order they happened rather than grouped by CATEGORY: laying

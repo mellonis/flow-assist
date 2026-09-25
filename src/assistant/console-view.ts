@@ -4,8 +4,9 @@
 // and so does an interactive `!!command` (./interactive.ts), marked `interactive`.
 //
 // Folded, a command is ONE line: `bun test · ✓ 4.2 s` (the `$ ` is the gutter's), and
-// `· 200 lines` after it when the output is longer than a click shows — how much there
-// is to read is news only then, and a block that size may open in the chat's pager.
+// `· 40 lines` after it when the output is longer than a click shows — how much there
+// is to read is news only then, and a block that size may open in the chat's pager —
+// or `· last 200 of 300 lines` when the view kept only the tail of what was printed.
 // Open, it is the command, the last `ctx.lines` lines of output under a bar a drag
 // never copies, and the same tail. The tail says how it ended in words a person reads
 // without decoding: ✓, ✗ with the code (1 and 127 mean different things), stopped,
@@ -32,6 +33,9 @@ export interface ConsoleData {
   // The person's `!!command` (./interactive.ts): the program had the terminal, and
   // `text` is its recording. Drawn as a dim `interactive` beside the command.
   interactive?: boolean;
+  // How many lines the output had when the view kept only its last `VIEW_CAPS.lines`
+  // — present only when it was cut, so the folded line can say it holds a tail.
+  lines?: number;
 }
 
 // The tail of a text, capped in every direction: each line, the number of lines, the
@@ -43,6 +47,19 @@ export function capConsoleText(raw: string): string {
   const kept = lines.length > VIEW_CAPS.lines ? lines.slice(-VIEW_CAPS.lines) : lines;
   const text = kept.join('\n');
   return text.length > VIEW_CAPS.chars ? text.slice(-VIEW_CAPS.chars) : text;
+}
+
+// How many lines a text has, counted as `capConsoleText` counts them, when that is
+// more than a view keeps — else undefined.
+function cutLines(raw: string): number | undefined {
+  const n = sanitizeViewText(raw).replace(/\n+$/, '').split('\n').length;
+  return n > VIEW_CAPS.lines ? n : undefined;
+}
+// The count a view carries: the one it was handed, when it says more than the kept
+// text holds (a view capped once already), else the text's own.
+function linesOf(raw: string, given: unknown): number | undefined {
+  const own = cutLines(raw);
+  return typeof given === 'number' && Number.isInteger(given) && given > VIEW_CAPS.lines && given >= (own ?? 0) ? given : own;
 }
 
 const oneLine = (s: string, max: number) => {
@@ -70,6 +87,7 @@ export function capConsoleData(raw: unknown): ConsoleData {
     ...(v.movedTo ? { movedTo: oneLine(String(v.movedTo), VIEW_CAPS.command) } : {}),
     ...(v.note ? { note: oneLine(String(v.note), 80) } : {}),
     ...(v.interactive === true ? { interactive: true } : {}),
+    ...((n) => (n ? { lines: n } : {}))(linesOf(String(v.text ?? ''), v.lines)),
   };
 }
 
@@ -88,6 +106,7 @@ export function consoleData(cmd: string, r: ShellResult, cwd: string, timeoutMs:
     ...(opts.movedTo ? { movedTo: opts.movedTo } : {}),
     ...(opts.note ? { note: opts.note } : {}),
     ...(opts.interactive ? { interactive: true } : {}),
+    ...((n) => (n ? { lines: n } : {}))(cutLines(r.output)),
   };
 }
 
@@ -120,7 +139,10 @@ export const renderConsole: ViewRenderer = (raw, ctx) => {
   const head: ViewLine = [{ text: command }, ...(d.interactive ? [{ text: ' · interactive', dim: true }] : [])];
   const all = d.text ? String(d.text).split('\n') : [];
   if (ctx.folded) {
-    const size: ViewSpan[] = all.length > Math.max(1, ctx.lines) ? [{ text: ` · ${all.length} lines`, dim: true }] : [];
+    const total = typeof d.lines === 'number' && d.lines > all.length ? d.lines : 0;
+    const size: ViewSpan[] = total
+      ? [{ text: ` · last ${all.length} of ${total} lines`, dim: true }]
+      : all.length > Math.max(1, ctx.lines) ? [{ text: ` · ${all.length} lines`, dim: true }] : [];
     return [[...head, { text: ' · ', dim: true }, ...tail, ...size]];
   }
   const max = Math.max(1, ctx.lines);

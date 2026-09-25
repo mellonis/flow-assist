@@ -67,6 +67,7 @@ test('a block a click opens may go to the pager — a group head and a trail\'s 
   for (const kind of ['view', 'tools', 'steps', 'thinking', 'summary'] as const) expect(pageable(foldId(3, kind, 1))).toBe(true);
   expect(pageable(foldId(3, 'group'))).toBe(false);
   expect(pageable(foldId(3, 'calls', 1))).toBe(false);
+  for (const id of ['x', '3', '', '3:']) expect(pageable(id)).toBe(false);
 });
 
 test('read whole, a block is open — and a trail has its earlier calls too — while the state itself is untouched', () => {

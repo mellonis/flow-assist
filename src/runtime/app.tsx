@@ -62,9 +62,9 @@ import { FOOTER_ROWS, TITLE_ROWS, chatModeOf, panelLayout, type ChatMode, type P
 const BUILTIN_PLUGINS = ['core', 'assistant', 'keycaps', 'log'];
 // The host's furniture drawn over everything, the docked chat included, and the corner
 // of the terminal each piece places itself from: the reminder is laid out over the
-// whole terminal from its top-left corner, the keycaps panel floats in from the
-// bottom-right one.
-const TOP_LAYER: Record<string, 'topLeft' | 'bottomRight'> = { 'core:reminder': 'topLeft', 'keycaps:keycaps': 'bottomRight' };
+// whole terminal from its top-left corner, and so is the chat's pager; the keycaps
+// panel floats in from the bottom-right one.
+const TOP_LAYER: Record<string, 'topLeft' | 'bottomRight'> = { 'core:reminder': 'topLeft', 'keycaps:keycaps': 'bottomRight', 'assistant:pager': 'topLeft' };
 
 // ─── Two-phase input dispatch ────────────────────────────────────────────────
 // Observers (mode 'observe') always run, never consume; then the consumer race
