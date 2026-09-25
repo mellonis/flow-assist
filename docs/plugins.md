@@ -501,9 +501,11 @@ JSON-RPC result with no value carries as `null`, never `{}`:
 of the host's own components (`Box`, `Text`, `Markdown`, `Table`, `Link`, `ScrollBox`,
 `Select`, `ListSelect`, `ListMultiSelect`, `Checkbox`, `TextInput`), `props` a JSON
 object, children more nodes or strings. `props` may be left out, so `[type, child,
-...]` is also a node. Two props are reserved: `key` (a list's, React's own) and `id` —
-a stateful node's, and the source of its events. A function prop never crosses the
-wire; a node with an `id` gets its events by name instead:
+...]` is also a node. Four props are reserved: `key` (a list's, React's own), `id` —
+a stateful node's, and the source of its events — and `children` and `ref`, which are
+dropped (a node's children are the ones that follow its props, and a ref has nothing to
+point at across a process). A function prop never crosses the wire; a node with an
+`id` gets its events by name instead:
 
 | Type | Value prop | Events |
 |---|---|---|
@@ -513,7 +515,11 @@ wire; a node with an `id` gets its events by name instead:
 | `ScrollBox` | `offset` | none — the offset is kept for the host's own scrolling, never told to the plugin |
 
 An unknown `type` draws as one dim `▸ <type>` line, as a missing view renderer does
-(below). `props.error` on a `TextInput` is shown as its validation message.
+(below). `props.error` on a `TextInput` is shown as its validation message. A root the
+host cannot draw — a prop of the wrong shape that a component throws on, a
+`ListSelect` sent without `items` — draws as one dim `▸ frame failed: <message>` line
+in its own place (the surface, or that one modal), said once in the host's log; the
+rest of the screen and the plugin's keys go on, and the next frame is drawn afresh.
 
 ### Field state and the echo rule
 

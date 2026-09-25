@@ -96,3 +96,12 @@ test('a Checkbox whose checked arrives as JSON null is unchecked', () => {
   const el: any = renderTree(['Checkbox', { label: 'agree', checked: null }], ctx());
   expect(el.props.checked).toBe(false);
 });
+
+test('children and ref are reserved: dropped from the props and said once', () => {
+  const c = ctx();
+  const el: any = renderTree(['Box', { ref: 'x', children: { x: 1 } }, ['Text', { children: 'no' }, 'own']], c);
+  expect(el.props.ref).toBeUndefined();
+  const [text] = [].concat(el.props.children);
+  expect((text as any).props.children).toBe('own');
+  expect(c.warned).toEqual(['prop ref is reserved and dropped — a node\'s children follow its props', 'prop children is reserved and dropped — a node\'s children follow its props']);
+});

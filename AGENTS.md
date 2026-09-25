@@ -330,7 +330,15 @@ into an ordinary `Plugin`; nothing else in the host knows a plugin is remote.
 - The plugin sends its whole screen as a `frame` notification whenever it changes,
   never a diff; React reconciles it like any other render. `renderTree`
   (`src/remote/tree.ts`) turns a frame's tree into elements over the same `ui`
-  components a JS plugin draws with.
+  components a JS plugin draws with; `children` and `ref` in a node's props are
+  reserved and dropped.
+- **A frame the host cannot draw never takes the App down.** `drawFrame` puts each
+  root — the surface, each modal's overlay child — behind an error boundary
+  (`FrameBoundary`) that draws a dim `▸ frame failed: <message>` in its place and logs
+  it once; a new frame clears it through a frame counter passed as a prop, never a
+  React `key` (a remount per frame would lose a field's caret and a list's filter).
+  The slot components themselves stay outside it, so `RemoteModals`' key handler and
+  effects survive a bad modal.
 - **A stateful node's value is the host's, not the plugin's.** `src/remote/fieldState.ts`
   keeps it by `id` and checks a frame's value against a ring of the last 32 values the
   host itself sent as events for that id: a match is the plugin echoing a moment the

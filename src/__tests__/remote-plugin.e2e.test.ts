@@ -270,3 +270,45 @@ test('cache.flushed: a flush reaches the plugin, and nothing is said before one'
   expect(fake.events.filter(([m]) => m === 'cache.flushed')).toHaveLength(1);
   ui.app.unmount();
 });
+
+// An author's typo in a frame must not take the App down: each root (the surface, each
+// modal) is drawn behind a boundary that shows the failure in its place, and the next
+// good frame draws again.
+// `children` and `ref` are reserved and dropped, so those two draw what is left.
+for (const [what, bad, drawn] of [
+  ['a ListSelect without items', ['ListSelect', {}], '▸ frame failed: '],
+  ['a Table whose data is a number', ['Table', { data: 5 }], '▸ frame failed: '],
+  ['children given as a prop', ['Text', { children: { x: 1 } }, 'own child'], 'own child'],
+  ['a string ref', ['Box', { ref: 'x' }, ['Text', {}, 'boxed']], 'boxed'],
+] as const) {
+  test(`a frame that cannot be drawn — ${what} — fails in its place; the chat still opens and the next frame draws`, async () => {
+    const { fake, ui } = await boot();
+    fake.frame({ surface: ['Box', { flexDirection: 'column' }, ['Text', {}, 'before'], bad as never], keycaps: ['x'] });
+    await until(ui, () => ui.backend.lastFrame.includes(drawn), `${drawn} on screen`);
+    if (drawn.startsWith('▸')) expect(ui.backend.lastFrame).not.toContain('before'); // the root failed whole, in its place
+    await ui.press('F');
+    await until(ui, () => ui.backend.lastFrame.includes('╭'), 'the chat');
+    await ui.press('escape', 'escape');
+    fake.frame({ surface: ['Text', {}, 'good again'], keycaps: ['x'] });
+    await until(ui, () => ui.backend.lastFrame.includes('good again'), 'the next good frame');
+    expect(ui.backend.lastFrame).not.toContain('frame failed');
+    ui.app.unmount();
+  });
+}
+
+test('a modal that cannot be drawn fails in its own place; the surface and the plugin\'s keys stay', async () => {
+  const { fake, ui } = await boot();
+  fake.frame({ surface: ['Text', {}, 'underneath'], modals: { pick: ['ListSelect', { items: null }] }, keycaps: ['x'], keys: { consume: ['tab'] } });
+  await until(ui, () => ui.backend.lastFrame.includes('frame failed'), 'the failure in the modal\'s place');
+  expect(ui.backend.lastFrame).toContain('underneath');
+  await ui.press('tab');
+  expect(fake.events.filter(([m]) => m === 'key').map(([, p]) => p)).toEqual([{ name: 'tab', id: 'tab' }]);
+  await ui.press('L'); // said once in the host's log
+  await until(ui, () => ui.backend.lastFrame.includes('╭─ Log'), 'the log');
+  expect(ui.backend.lastFrame).toContain('[fake] frame failed: null is not an object');
+  await ui.press('escape');
+  fake.frame({ surface: ['Text', {}, 'underneath'], modals: { pick: ['Text', {}, 'picked'] }, keycaps: ['x'] });
+  await until(ui, () => ui.backend.lastFrame.includes('picked'), 'the next good modal');
+  expect(ui.backend.lastFrame).not.toContain('frame failed');
+  ui.app.unmount();
+});

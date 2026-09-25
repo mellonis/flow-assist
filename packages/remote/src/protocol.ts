@@ -7,9 +7,10 @@ export const PROTOCOL_HOST_API = 2;
 
 // ─── The tree ─────────────────────────────────────────────────────────────────
 // A node is `[type, props, ...children]`: `type` a component name from the host's
-// `ui`, `props` a JSON object (two reserved: `key` for lists, `id` for a stateful node
-// and the source of its events), children nodes or strings. A function prop never
-// crosses the boundary: `onChange` and its kin become events by name.
+// `ui`, `props` a JSON object (reserved: `key` for lists, `id` for a stateful node and
+// the source of its events, and `children` and `ref`, which the host drops), children
+// nodes or strings. A function prop never crosses the boundary: `onChange` and its kin
+// become events by name.
 export type NodeType = 'Box' | 'Text' | 'Markdown' | 'Table' | 'Link' | 'ScrollBox' | 'Select' | 'ListSelect' | 'ListMultiSelect' | 'Checkbox' | 'TextInput';
 export type Props = Record<string, unknown>;
 export type Node = [type: string, props?: Props | Node | string, ...children: (Node | string | null | undefined | false)[]];

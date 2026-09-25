@@ -21,7 +21,7 @@ import { bumpViewRevision, type ViewLine, type ViewRenderer } from '../assistant
 import { overlay } from '../views/modals.js';
 import { FLOWTTY_VERSION, HOST_API } from '../version.js';
 import { validateFrame } from './frame.js';
-import { renderTree, type RenderCtx } from './tree.js';
+import { drawFrame, type RenderCtx } from './tree.js';
 import { createFieldState } from './fieldState.js';
 import { canonicalConsume, consumes, keyEventFor, type Consume } from './keys.js';
 import { localeFromEnv } from './locale.js';
@@ -87,6 +87,8 @@ export async function remotePlugin(opts: RemotePluginOpts): Promise<Plugin> {
 
   // ── what the host draws from: the last frame ────────────────────────────────
   let frame = EMPTY;
+  // Counts the frames drawn: a root that failed to draw is tried again on the next one.
+  let frameSeq = 0;
   let consume: Consume = canonicalConsume([]);
   let stopped: string | null = null; // `plugin stopped: …` while the process is down
   // Whether the surface was on screen when the process went: it stays there, saying so,
@@ -105,6 +107,7 @@ export async function remotePlugin(opts: RemotePluginOpts): Promise<Plugin> {
     const v = validateFrame(raw, JSON.stringify(raw ?? null).length);
     if (!v.ok) { say(`frame dropped: ${v.why}`); return; }
     frame = v.frame;
+    frameSeq++;
     consume = canonicalConsume(frame.keys.consume);
     fields.applyFrame(frame.surface ?? null, frame.modals ?? {});
     stopped = null;
@@ -214,6 +217,7 @@ export async function remotePlugin(opts: RemotePluginOpts): Promise<Plugin> {
     // stop left it: only a frame says what is on screen.
     stoppedOnScreen = (frame.keycaps ?? []).length > 0 || (stoppedOnScreen && frame === EMPTY);
     frame = EMPTY;
+    frameSeq++;
     consume = canonicalConsume([]);
     fields.applyFrame(null, {});
     for (const reject of inFlight) reject(new Error(stopped));
@@ -321,6 +325,8 @@ export async function remotePlugin(opts: RemotePluginOpts): Promise<Plugin> {
 
   // ── the components ──────────────────────────────────────────────────────────
   const treeCtx = (ui: PluginApi['ui'], hasKeyboard: boolean): RenderCtx => ({ ui, hasKeyboard, state: fields, onEvent: (m, ev) => send(m, ev), warn: (l) => once(`prop:${l}`, l) });
+  const frameFailed = (m: string) => once(`frame-failed:${m}`, `frame failed: ${m}`);
+  const draw = (tree: Parameters<typeof drawFrame>[0], ctx: RenderCtx) => drawFrame(tree, ctx, frameSeq, frameFailed);
   const openModals = () => Object.entries(frame.modals ?? {}).filter(([, t]) => t);
   const components: Record<string, (a: unknown) => unknown> = {
     // The surface: mounted while the plugin's keycaps say it is on screen.
@@ -329,7 +335,7 @@ export async function remotePlugin(opts: RemotePluginOpts): Promise<Plugin> {
       return function RemoteSurface(): ReactElement | null {
         const hasKeyboard = host.hasKeyboard();
         if (stopped) return ui.h(ui.Box, { padding: 1 }, ui.h(ui.Text, { color: 'red' }, stopped));
-        return renderTree(frame.surface ?? null, treeCtx(ui, hasKeyboard));
+        return draw(frame.surface ?? null, treeCtx(ui, hasKeyboard));
       };
     },
     // Furniture, always mounted: the modals, and what the plugin hears whether or not
@@ -370,7 +376,7 @@ export async function remotePlugin(opts: RemotePluginOpts): Promise<Plugin> {
         const { width, height } = terminal;
         // Each overlay is a root of the slot, as the host's own modals are: a box around
         // them would be laid out after the surface and move their `top: 0, left: 0`.
-        return ui.h(ui.Fragment, undefined, ...open.map(([modal, tree]) => ui.h(ui.Box, { key: modal, ...overlay(width, height) }, renderTree(tree!, treeCtx(ui, hasKeyboard)))));
+        return ui.h(ui.Fragment, undefined, ...open.map(([modal, tree]) => ui.h(ui.Box, { key: modal, ...overlay(width, height) }, draw(tree!, treeCtx(ui, hasKeyboard)))));
       };
     },
   };
