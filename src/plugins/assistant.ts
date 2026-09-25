@@ -122,9 +122,11 @@ export function shellCommandOf(name: string, args: string): string | null {
 
 // The line a `config_set` call stands for — the `config set` command the person would
 // have typed — so the y/n block reads the same as the CLI rather than as JSON. null —
-// some other tool, or arguments that do not parse.
+// some other tool, or arguments that do not parse. Only the host's own tool: a plugin's
+// tool of the same name is registered qualified (`mcp:config_set`) and keeps its
+// arguments on the block, or a line would hide what it really sends.
 export function configLineOf(name: string, args: string): string | null {
-  if (name !== 'config_set' && !name.endsWith(':config_set')) return null;
+  if (name !== 'config_set') return null;
   try {
     const a = JSON.parse(args) as { key?: unknown; value?: unknown; scope?: unknown };
     if (typeof a.key !== 'string' || (a.scope !== 'session' && a.scope !== 'saved')) return null;

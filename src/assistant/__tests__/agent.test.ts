@@ -674,3 +674,36 @@ test('systemPrompt is read before every round and replaces the leading system me
   await agentChat([{ role: 'user', content: 'go' }] as any, { baseUrl: 'http://x', model: 'm', token: 't', onLive: () => {}, onLiveCommit: () => {}, chatRound: async (m: any[]) => { rounds.push(m); return { content: 'ok', finishReason: 'stop', toolCalls: [] }; }, systemPrompt: () => '' } as any);
   expect(rounds[0]!.map((m) => m.role)).toEqual(['user']);
 });
+
+// `confirmedByPerson` is the loop's fact about ONE call: true only after its own y/n
+// answered yes. A caller's toolCtx cannot forge it, and a run with no confirmation
+// (the one-shot prompt) never sets it.
+test('agentChat tells a tool whether the person said yes to this very call', async () => {
+  const seen: unknown[] = [];
+  const make = makeFactory({});
+  const plugins = [make('t', { aiTools: [
+    { type: 'function', function: { name: 't:save', description: 'save', parameters: { type: 'object', properties: {} } }, write: true, run: async (_a: unknown, ctx: Record<string, unknown>) => { seen.push(ctx.confirmedByPerson); return 'ok'; } },
+    { type: 'function', function: { name: 't:read', description: 'read', parameters: { type: 'object', properties: {} } }, run: async (_a: unknown, ctx: Record<string, unknown>) => { seen.push(ctx.confirmedByPerson); return 'ok'; } },
+  ] })];
+  assembleToolRegistry({ plugins, config: {}, repo: { list: async () => [] } as any });
+  const run = async (confirmWrite?: () => boolean) => {
+    let n = 0;
+    const fakeRound = async (_m: any[], opts: any) => {
+      if (n++ === 0) { opts.onDelta?.('a'); return { content: 'a', finishReason: 'tool_calls', toolCalls: [{ id: '1', name: 't:save', arguments: '{}' }, { id: '2', name: 't:read', arguments: '{}' }] }; }
+      opts.onDelta?.('done');
+      return { content: 'done', finishReason: 'stop', toolCalls: [] };
+    };
+    await agentChat([{ role: 'user', content: 'hi' }], {
+      baseUrl: 'http://x', model: 'm', token: 't', onLiveCommit: () => {}, onLive: () => {},
+      toolCtx: { confirmedByPerson: true } as never,
+      ...(confirmWrite ? { confirmWrite } : {}), chatRound: fakeRound,
+    });
+  };
+  await run(() => true);
+  expect(seen).toEqual([true, false]);
+  seen.length = 0;
+  // No confirmation at all: the write runs (the loop's rule), but not as confirmed —
+  // the forged `true` in the caller's toolCtx is overwritten.
+  await run();
+  expect(seen).toEqual([false, false]);
+});

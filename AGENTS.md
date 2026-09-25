@@ -579,13 +579,20 @@ there is no `/fullscreen`.
   a predicate (`configSetRefusal`) that is false for a call that will not happen: a key
   without the mark for the scope (a saved write of a key marked for the session only), a
   value the schema refuses. Such a call never reaches the y/n; `exec` throws the
-  refusal, naming the key and the command the person can run instead. A call with
-  nobody to ask (`ctx.askUser` absent: the one-shot prompt, which passes no
-  confirmation and so would run any write unasked) is refused the same way. The y/n
+  refusal, naming the key and the command the person can run instead. It runs only on
+  the loop's own word that the person said yes to THIS call: `agentChat` sets
+  `ctx.confirmedByPerson` for every call, after the caller's `toolCtx` so a caller cannot
+  forge it, true only when the call went to `confirmWrite` and the answer was yes. With
+  no confirmation — the one-shot prompt, which passes none and so would run any write
+  unasked — the call is refused the same way. The y/n
   block shows the command line the call stands for — `config set --session ui.verbs
   '["Thinking"]'`, `config set ui.verbs …` — drawn as it is (`configLineOf` beside
   `shellCommandOf`, the block's `line` beside `command`), so what the person confirms
-  reads as the CLI does. A confirmed call goes through `setConfigValue`, the path the
+  reads as the CLI does, and typed on the `:` line as shown it sets the same value
+  (`configSetLine` double-quotes a value holding an apostrophe, and `unquoteValue` reads
+  `'\''` inside single quotes as one; a control character is drawn as its escape). Only
+  the host's own bare `config_set` is drawn that way: a plugin's tool of the same name
+  is registered qualified and keeps its arguments on the block. A confirmed call goes through `setConfigValue`, the path the
   person's own `config set` takes, laid on the app's live config, and answers whether the
   value is live now or `takes effect on restart`.
   **Every key is read-only to the model unless its schema node is marked**
@@ -602,12 +609,19 @@ there is no `/fullscreen`.
   `shell`, `web`, the legacy `fs`, `plugins.<name>.roots`, and a key holding one —
   `plugins`, `plugins.<name>`). `src/config/__tests__/marks.test.ts` walks the host
   schema and the built-ins' and asserts no mark under the leash and every save mark
-  beside a set mark. The host marks `ui.verbs`, `ui.mouse`, `sessions.resume`, the
+  beside a set mark, and walks each bundled `plugins-available/*` schema (whatever is
+  there — the suite still passes with it empty) and asserts it marks nothing: a key
+  holding a path, a command, a URL or a token stays the person's. The host marks `ui.verbs`, `ui.mouse`, `sessions.resume`, the
   chat's `plugins.assistant.mode` and `panel.side`, and `plugins.keycaps.enabled`. A
   third registry, `appliesOnRestart`, marks a node whose consumer reads it only at start
-  (`ui.mouse`, `keys`, `theme`, `sessions`, the chat's `mode`, `keycaps.enabled`),
-  covering every key under it; every `config set` of such a key says `takes effect on
-  restart`. `config_schema` prints the marks beside the key — `· model may set · may
+  (`ui.mouse`, `keys`, `theme`, `sessions`, the chat's `mode`, `keycaps.enabled`, and on
+  the leash `ai.provider`, `ai.baseUrl`, `ai.tokenEnv` and `ai.disabledTools`), covering
+  every key under it; every `config set` of such a key says `takes effect on restart`,
+  and its value is never laid on the running app (below).
+  **Not for the model: everything under `ai`.** The model's endpoint, token, model and
+  tools stay unmarkable whatever else changes. A later change that describes models as a
+  map may let the model point a role at an entry the person described there — never
+  name a new model or endpoint of its own. `config_schema` prints the marks beside the key — `· model may set · may
   save — <reason>` and `· takes effect on restart`. A remote plugin's JSON-Schema
   `configSchema` carries no mark.
 - **`web_fetch` reads the web — and the web is both a way out and a way in**
@@ -2510,19 +2524,32 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   goes into the SESSION map, never a file. The map is one overlay laid over what
   `loadConfig()` merges, so a later `loadConfig()` answers with it; and either scope is
   also laid on the config object the caller holds — the running app's, which `host.config`,
-  a tool's `ctx.config` and `:config get` read — so a value is live at once wherever its
-  consumer reads the config when it acts (`ui.verbs` per request, the panel's side per
-  draw), and a key read only at start (`ui.mouse`) waits for the next one. A saved value
-  takes over from a session value on the same key. `theme` is never laid on the live
-  object: it holds the palette resolved at start, so its value waits for the next start.
+  a tool's `ctx.config` and a plugin's `config` slice read — so a value is live at once
+  wherever its consumer reads the config when it acts (`ui.verbs` per request, the
+  panel's side per draw). **A key marked `appliesOnRestart` is never laid on it**: its
+  value is written (or kept for the session) and read at the next start, and the answer
+  says so. That is what keeps the endpoint whole — laid one key at a time, a saved
+  `ai.baseUrl` would send the next request, with the old `ai.tokenEnv`'s token, to the
+  new host — keeps `theme` (the palette resolved at start) whole, and keeps
+  `ai.disabledTools` from reading as done while the tool is still there. A saved value
+  takes over from a session value on the same key. A plugin's slice is the config's own
+  object (`makeFactory` puts one in place when the config has none), so a value set
+  while the app runs reaches a plugin that had no section at start.
+  `config unset` is the reverse (`unsetConfigValue`): `:config unset --session <key>`
+  drops only the session's value, and without it the key also leaves config.local.json;
+  the value it falls back to (config.json's, or none) is laid on the running app at
+  once, or waits for a restart as `set` does.
   `renderApp` resets the map as an app starts — every app the scripted rig boots in one
   process starts on an empty session (two alive at once share it), and a test that sets a
   session value outside an app resets it (`resetSessionConfig`). The CLI refuses
   `--session` and names the `:` line, since its own process ends with the command.
   `config get` says where a value comes from — `session`, `local` (config.local.json),
   `config` (config.json) or `default` (neither) — from the layers `loadConfig()` kept
-  beside its result (`configSource`; a config built by hand, a test's, reads as `config`),
-  never a second read of the files; the CLI prints it on stderr, so `config get x | jq`
+  beside its result (`configSource`, and `configValue` for the value: for a key read at
+  start, the one the next start reads; a config built by hand, a test's, reads as
+  `config`, and its layers start at its first write), never a second read of the files.
+  `editConfigArray` reads the files without the session (`loadConfig({ session: false })`),
+  so a session value never reaches a file through it; the CLI prints it on stderr, so `config get x | jq`
   still reads the bare value. On the `:` line a value loses one layer of surrounding
   quotes (`unquoteValue`), as a shell takes it off, so a line reads the same in both
   places.

@@ -58,6 +58,9 @@ export interface CoreCtx {
   // and how to read an attached image's bytes again (src/assistant/recall.ts). Absent
   // where there is no conversation (a background task, the one-shot prompt).
   recall?: RecallSource;
+  // Set by `agentChat` for each call: true only when this call was put to the y/n and
+  // answered yes. A caller's own `toolCtx` cannot set it.
+  confirmedByPerson?: boolean;
 }
 
 // Resolves the memory `plugin` scope to the owning plugin name from the host-issued
@@ -597,9 +600,11 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
         const refusal = configSetRefusal(args, pluginConfigs);
         if (refusal) throw new Error(refusal);
         const a = configSetArgs(args) as ConfigSetArgs;
-        // Only a chat can ask the person: a run with nobody to ask (the one-shot prompt)
-        // never changes the config on the model's word.
-        if (!ctx.askUser) throw new Error(`config_set: there is nobody here to confirm it — give the person the command: ${configSetLine(a.key, a.value, a.scope)}. Nothing was changed.`);
+        // Only after the person's own yes to this call (`confirmedByPerson`, set by
+        // agentChat when its y/n was answered yes): a run with nobody to ask — the one-shot
+        // prompt, a caller with no confirmation — never changes the config on the model's
+        // word.
+        if (ctx.confirmedByPerson !== true) throw new Error(`config_set: there is nobody here to confirm it — give the person the command: ${configSetLine(a.key, a.value, a.scope)}. Nothing was changed.`);
         // The same path as the person's `config set` (src/config/load.ts), laid on the
         // config the running app reads.
         const live = ((ctx as { config?: Record<string, unknown> }).config ?? config) as Record<string, unknown>;

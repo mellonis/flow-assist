@@ -137,10 +137,13 @@ test('the auto mode never answers it', async () => {
 
 test('a plugin\'s marked key is the model\'s to set; its unmarked key is refused', async () => {
   const model = new ScriptedModel();
+  // The guest has no section in the config at start: it is handed the config's own
+  // slice all the same, so the value set while the app runs reaches it.
+  let guest: { config?: Record<string, unknown> } | undefined;
   const ui = await ask(model, [
     { key: 'plugins.notes.file', value: '/etc/passwd', scope: 'saved' },
     { key: 'plugins.notes.wide', value: true, scope: 'saved' },
-  ], (make) => [notes(make)]);
+  ], (make) => [guest = notes(make) as never]);
   // The first call never asked; the second does.
   expect(ui.backend.lastFrame).toContain('config set plugins.notes.wide true');
   await ui.press('y');
@@ -148,7 +151,30 @@ test('a plugin\'s marked key is the model\'s to set; its unmarked key is refused
   const msgs = model.requests[1]!.messages as { role: string; content?: unknown }[];
   const results = msgs.filter((m) => m.role === 'tool').map((m) => String(m.content));
   expect(results[0]).toContain('config set plugins.notes.file /etc/passwd');
-  expect(results[1]).toMatch(/plugins\.notes\.wide is true, saved/);
+  expect(results[1]).toMatch(/plugins\.notes\.wide is true, saved.*It is live now/);
+  expect(guest?.config?.wide).toBe(true);
   expect(JSON.parse(readSaved() ?? '{}')).toMatchObject({ plugins: { notes: { wide: true } } });
   ui.app.unmount();
+});
+
+test('the line on the block is one the person can type on the `:` line as shown — an apostrophe too', async () => {
+  const model = new ScriptedModel();
+  const ui = await ask(model, [{ key: 'ui.verbs', value: ["Don't panic"], scope: 'session' }]);
+  const shown = `config set --session ui.verbs '["Don'\\''t panic"]'`;
+  expect(ui.backend.lastFrame).toContain(shown);
+  await ui.press('n');
+  await settleUntil(() => model.requests.length === 2);
+  await ui.press('escape', 'escape');
+  await ui.press(':');
+  await ui.type(shown);
+  await ui.press('return');
+  expect(lastRow(ui)).toContain(`["Don't panic"] · session`);
+  ui.app.unmount();
+});
+
+test('only the host\'s own config_set is drawn as a config set line: a plugin\'s keeps its arguments', async () => {
+  const { configLineOf } = await import('../plugins/assistant');
+  const args = JSON.stringify({ key: 'ui.verbs', value: ['x'], scope: 'session', extra: 'rm -rf' });
+  expect(configLineOf('config_set', args)).toBe(`config set --session ui.verbs '["x"]'`);
+  expect(configLineOf('mcp:config_set', args)).toBeNull();
 });

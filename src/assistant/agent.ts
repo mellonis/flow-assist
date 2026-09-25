@@ -926,6 +926,7 @@ export async function agentChat(
         // The data behind the result, when the tool's return says (./tool-results.ts,
         // `toolReturn`): a string, `null` for none, `undefined` — the result is the data.
         let whole: string | null | undefined;
+        let confirmedByPerson = false;
         if (needsConfirm && confirm) {
           const ok = await confirm(tc.name, tc.arguments, input ? { input: input.tool, inputId: input.id } : undefined);
           if (!ok) {
@@ -938,6 +939,7 @@ export async function agentChat(
             opts.onToolRun?.(run);
             continue;
           }
+          confirmedByPerson = true;
         }
         const changes: ChangeView[] = [];
         // The images this call attaches to its result (`ctx.attachImage`): the refs go
@@ -977,6 +979,11 @@ export async function agentChat(
           const callCtx: ToolCtx = {
             ...toolCtxForTools,
             ...(opts.signal ? { signal: opts.signal } : {}),
+            // Whether THIS call was put to the y/n and answered yes (`confirmWrite` — which
+            // the auto mode answers only for a tool it may). Set after the caller's
+            // fields, so a `toolCtx` that carries one of its own never passes for it. A
+            // tool that must never run on the model's word alone (`config_set`) reads it.
+            confirmedByPerson,
             reportChange: (c: Change) => {
               try { const v = changeView(c); if (v) changes.push(v); } catch { /* a bad report never fails the write */ }
             },

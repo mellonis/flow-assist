@@ -405,8 +405,17 @@ test('the model gets no `config` and no `log` tool — a read-only `config_schem
 test('config_set refuses by throwing — a refusal returned would read as a change made', async () => {
   const reg = assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
   await expect(reg.exec('config_set', { key: 'ai.baseUrl', value: 'https://elsewhere.example', scope: 'saved' }, {})).rejects.toThrow(/ai\.baseUrl is not a key the model may change.*config set ai\.baseUrl https:\/\/elsewhere\.example/);
-  // A marked key with nobody to confirm it — the one-shot prompt — is refused too.
+  // A marked key runs only on the loop's own word that the person said yes to this call:
+  // with nobody to confirm it (the one-shot prompt), or a chat's hooks but no yes, it is
+  // refused.
   await expect(reg.exec('config_set', { key: 'ui.verbs', value: ['x'], scope: 'session' }, {})).rejects.toThrow(/nobody here to confirm it/);
+  await expect(reg.exec('config_set', { key: 'ui.verbs', value: ['x'], scope: 'session' }, { askUser: async () => ({ answers: [], cancelled: false }) } as never)).rejects.toThrow(/nobody here to confirm it/);
+  const { resetSessionConfig } = await import('../../config/load');
+  try {
+    expect(String(await reg.exec('config_set', { key: 'ui.verbs', value: ['x'], scope: 'session' }, { confirmedByPerson: true }))).toMatch(/ui\.verbs is \["x"\] for this session/);
+  } finally {
+    resetSessionConfig();
+  }
 });
 
 test('a plugin tool\'s maxResultChars never reaches the wire-facing tool def', () => {
