@@ -599,10 +599,12 @@ export function buildRepoGroup({ clip, roots, homeDir = os.homedir() }: RepoDeps
         }
         case 'git_status': case 'git_branches': case 'git_log':
         case 'git_ls_tree': case 'git_show': case 'git_diff': {
-          // Whether `path` picks the REPOSITORY (status/branches/log) rather than a
-          // file or subtree (ls_tree/show/diff, whose args.path is a path inside it).
+          // Whether `path` picks the REPOSITORY (status/branches/log — their schema
+          // declares no `repo`, so `path` is the only way in) rather than a file or
+          // subtree (ls_tree/show/diff, whose `path` is inside the ref and whose own
+          // `repo` picks the repository instead).
           const pathIsRepo = name === 'git_status' || name === 'git_branches' || name === 'git_log';
-          const repoArg = args.repo ?? (pathIsRepo ? args.path : null) ?? '.';
+          const repoArg = pathIsRepo ? (args.path ?? '.') : (args.repo ?? '.');
           const gr = await gitRepo(repoArg, all);
           if (gr.error) return clip(gr.error);
           const repo = gr.repo;
