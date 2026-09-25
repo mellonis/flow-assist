@@ -8,7 +8,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { TestBackend } from '@flowtty/core/testing';
 import { ScriptedModel, bootApp, settle } from './helpers/scripted';
 import { chatRows, chatWrapWidth, type RowOpts } from '../views/modals';
-import { cellWidth } from '../assistant/step';
+import { cellWidth } from '../cells';
 
 const realFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = realFetch; });

@@ -27,7 +27,7 @@
 //     line starting `Next:` before a tool call — the sentence after it is the step,
 //     the token is protocol. The answer is drawn exactly as written (`answerText`).
 
-import { charWidth } from '@flowtty/core';
+import { cellWidth, cutStep } from '../cells.js';
 import type { ChangeView } from './diff.js';
 import { imageMark, isImageMark, type ImageMark } from './tool-images.js';
 
@@ -297,28 +297,4 @@ export function runMarks(calls: readonly (StepCalls | null)[], diffAfter: boolea
   // only the last step's write can have one.
   const wrote = calls.some((c, i) => (c?.runs ?? []).some((r) => r.write && r.outcome === 'applied') && !(i === calls.length - 1 && diffAfter));
   return { failed, wrote };
-}
-
-// How many terminal cells a string takes (a wide character two).
-export function cellWidth(text: string): number {
-  let w = 0;
-  for (const ch of String(text ?? '')) w += charWidth(ch.codePointAt(0)!);
-  return w;
-}
-
-// A line of chrome takes exactly ONE terminal row, so what does not fit is cut with an
-// ellipsis rather than wrapped — by the cells it takes, so a wide character counts two.
-export function cutStep(text: string, width: number): string {
-  const str = String(text ?? '');
-  if (width <= 0) return '';
-  if (cellWidth(str) <= width) return str;
-  let out = '';
-  let used = 0;
-  for (const ch of str) {
-    const w = charWidth(ch.codePointAt(0)!);
-    if (used + w > width - 1) break;
-    out += ch;
-    used += w;
-  }
-  return `${out}…`;
 }

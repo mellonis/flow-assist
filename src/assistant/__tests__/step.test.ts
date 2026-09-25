@@ -5,8 +5,6 @@ import {
   addCalls,
   answerText,
   callRun,
-  cellWidth,
-  cutStep,
   runMarks,
   startsWithNext,
   summarizeArgs,
@@ -128,11 +126,12 @@ test('the row is one terminal row, and the count always fits', () => {
   expect(row).toContain('…');
 });
 
-test('a line of chrome is cut to one row', () => {
-  expect(cutStep('short', 20)).toBe('short');
-  expect(cutStep('a very long sentence indeed', 10)).toBe('a very lo…');
-  expect(Array.from(cutStep('a very long sentence indeed', 10)).length).toBe(10);
-  expect(cutStep('anything', 0)).toBe('');
+// A ZWJ sequence is one grapheme cluster, two cells wide — what the grid draws.
+// Summed per code point it reads as six.
+const FAMILY = '\u{1F468}\u200D\u{1F469}\u200D\u{1F467}';
+
+test('a folded run with a ZWJ sequence in its step is not cut early', () => {
+  expect(runRowText([`${FAMILY} found it`], 13)).toBe(`▸ ${FAMILY} found it`);
 });
 
 // ─── Parts as a session gave them ─────────────────────────────────────────────
@@ -193,12 +192,4 @@ test('a folded run is marked when a call failed, or a write showed no diff', () 
   expect(runMarks([c(0, { name: 'w', outcome: 'applied', write: true })], true).wrote).toBe(false);
   expect(runMarks([c(0, { name: 'w', outcome: 'applied', write: true })], false).wrote).toBe(true);
   expect(runMarks([c(0, { name: 'w', outcome: 'applied', write: true }), c(1, { name: 'a', outcome: 'ok' })], true).wrote).toBe(true);
-});
-
-test('a cut counts the cells a character takes — a wide one two', () => {
-  expect(cellWidth('漢字')).toBe(4);
-  const cut = cutStep('漢字漢字漢字', 7);
-  expect(cellWidth(cut)).toBeLessThanOrEqual(7);
-  expect(cut.endsWith('…')).toBe(true);
-  expect(cutStep('short', 20)).toBe('short');
 });

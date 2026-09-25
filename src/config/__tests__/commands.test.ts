@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
-import { BASE_COMMANDS, completeCommand, parseCommand, validateCommand, argCount, findCommand } from '../commands';
+import { stringWidth } from '@flowtty/core';
+import { BASE_COMMANDS, completeCommand, parseCommand, validateCommand, argCount, findCommand, helpText } from '../commands';
 
 test('BASE_COMMANDS has only generic host commands', () => {
   const names = BASE_COMMANDS.map(c => c.name);
@@ -53,4 +54,19 @@ test('a command that declares values has its first argument completed from them'
   expect(completeCommand('help ', cmds).candidates).toEqual([]);
   // A function that throws is an empty list, not a broken line.
   expect(completeCommand('x ', [{ name: 'x', usage: 'x', minArgs: 0, maxArgs: 1, description: '', values: () => { throw new Error('no'); } }]).candidates).toEqual([]);
+});
+// A plugin's usage may carry a flag or a ZWJ sequence: one cluster, two cells. The
+// descriptions start in one column, counted in cells, not in UTF-16 units.
+test('helpText pads usage to one column by cells', () => {
+  const family = '\u{1F468}‍\u{1F469}‍\u{1F467}';
+  const flag = '\u{1F1F7}\u{1F1FA}';
+  const lines = helpText([
+    { name: 'a', usage: `a ${family}`, description: 'first' },
+    { name: 'b', usage: `b ${flag}`, description: 'second' },
+    { name: 'c', usage: 'c', description: 'third' },
+  ] as never).split('\n');
+  for (const [i, d] of [[0, 'first'], [1, 'second'], [2, 'third']] as const) {
+    const line = lines[i]!;
+    expect(stringWidth(line.slice(0, line.indexOf(d)))).toBe(25);
+  }
 });

@@ -1873,9 +1873,13 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     run carries marks after its text so what happened inside is seen without a click
     (`runMarks`): `✗` in the error colour when one of its calls failed or was
     declined, `✎` in the warn colour when a write ran and showed no diff; the summary
-    is cut to leave them room. Every cut in the chat's chrome counts cells, not code
-    units (`cutStep` / `cellWidth` on flowtty's `charWidth`), so a wide character
-    never pushes a row onto a second line. A trail is
+    is cut to leave them room. Every cut in the chat's chrome counts cells per
+    grapheme cluster, as the grid draws them — `cutStep` / `cellWidth` in
+    `src/cells.ts`, on @flowtty/core's `stringWidth` / `fitClusters`, never a
+    per-code-point or `.length` count — so a wide character, a flag or a ZWJ sequence
+    never pushes a row onto a second line and a cut never splits one; the folded
+    tools summary (`toolSummary`) and the text-only help's usage column (`helpText`)
+    are measured the same way. A trail is
     numbered the same way (`foldId(at, 'tools', n)`, its cap `calls` with the same
     `n`), a step's own calls included, so an id means the same in both modes.
   - **`open` draws every step in full, in the normal colour** — steps do not fold, and

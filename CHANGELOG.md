@@ -5,6 +5,12 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **A flag or a joined emoji no longer cuts a chat line short.** The chat's one-row lines
+  — a folded run of steps, a tool call's line, the tools summary, the title naming what
+  is on screen — and the usage column of the text-only help measured a flag, a
+  skin-tone emoji or a family emoji as several characters, so a line that fitted was cut
+  early, a cut could leave half of one behind, and the help's columns came out uneven.
+  They are measured as the screen draws them: one such emoji takes two cells.
 - **`null` on an optional key reads as left out at every level, not only the top.** A
   client that sends `null` for a field it left blank was already fine on a top-level
   parameter; the same `null` inside an object parameter, or on a key matched by

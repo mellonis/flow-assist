@@ -11,6 +11,7 @@
 // part of the host command registry; they move to the tracker plugin.
 
 import { hostConfigSchema } from './schema.js';
+import { cellWidth } from '../cells.js';
 
 // One value a command's argument takes: the word itself, or the word with a label
 // shown beside it (`{ value: '3', label: 'fix the build' }` — the label is never
@@ -331,14 +332,15 @@ export function helpText(commands: Command[] = BASE_COMMANDS): string {
     .map(c => {
       const alias = (c.aliases ?? []).filter(a => a !== c.name).join('/');
       // A command may omit `usage` (some plugins define only name+description);
-      // fall back to the name so `padEnd` never runs on undefined and crashes
+      // fall back to the name so the padding never runs on undefined and crashes
       // the help modal (a real latent defect). For a namespaced plugin command
       // (`core:help`) the prefix is stripped so the list reads `help`/`ask` —
       // matching what the user actually types, since findIn's bare-name fallback
       // resolves those too (a `:core:help` entry would be uninvokable-looking).
       const usage = c.usage ?? (c.name.includes(':') ? c.name.slice(c.name.indexOf(':') + 1) : c.name);
       const label = alias ? `${usage} (${alias})` : usage;
-      return `${label.padEnd(24)} ${c.description}`;
+      // Padded by cells: a usage may hold a wide character, a flag or a ZWJ sequence.
+      return `${label}${' '.repeat(Math.max(0, 24 - cellWidth(label)))} ${c.description}`;
     })
     .join('\n');
 }

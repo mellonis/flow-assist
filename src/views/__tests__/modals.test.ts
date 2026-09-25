@@ -3,7 +3,7 @@ import { createElement as h } from 'react';
 import { render, stringWidth } from '@flowtty/react';
 import { TestBackend } from '@flowtty/core/testing';
 import { MODAL_COLOR_DEFAULTS } from '../../playback/theme.js';
-import { chatRows, condenseRuns, helpEntries, inputVisualRows, mdLines, renderChatModal, renderHelp, renderLogModal, renderReminder, typedLines, type RowOpts } from '../modals.js';
+import { chatRows, condenseRuns, helpEntries, toolSummary, inputVisualRows, mdLines, renderChatModal, renderHelp, renderLogModal, renderReminder, typedLines, type RowOpts } from '../modals.js';
 import { bumpViewRevision } from '../../assistant/views.js';
 import { pickerStart } from '../../assistant/session-picker.js';
 import type { SessionRow } from '../../assistant/sessions.js';
@@ -635,4 +635,51 @@ test('the picker keeps the title, Esc and the y/n keys in a 42-column docked pan
   handle = await render(h(renderChatModal, { ...baseChat, width: 100, now, picker: { ...pickerStart(long), cursor: 2, mode: 'delete' as const } }), wide);
   expect(wide.lastFrame).toMatch(/Delete «A very.*…»\? y deletes it for good · n keeps it/);
   handle.unmount();
+});
+
+// ─── Cuts count cells per grapheme cluster ────────────────────────────────────
+// A ZWJ sequence is one cluster, two cells — what the grid draws. Summed per code
+// point it reads as six, and a cut lands early.
+const FAMILY = '\u{1F468}‍\u{1F469}‍\u{1F467}';
+const rowText = (r: { spans?: { text?: unknown }[] }) => (r.spans ?? []).map((sp) => String(sp.text ?? '')).join('');
+
+test('a tool-trail line that fits by clusters is not cut', () => {
+  const msg = { role: 'assistant', content: 'Done.', parts: [{ kind: 'tools', runs: [{ name: 'search', outcome: 'ok', args: { q: `${FAMILY}${FAMILY}${FAMILY}` } }] }] };
+  const line = `▸ search (${FAMILY}${FAMILY}${FAMILY}) → ok`;
+  // The line is cut to the row less one cell, and the row is `wrap` less the gutter.
+  const o: RowOpts = { wrap: stringWidth(line) + 3, folds: { open: true, except: new Set() }, viewLines: 20, notes: 'step', detailsKey: '^o', renderers: {}, now: 0, palette: {} };
+  const rows = chatRows([msg] as never, o).map(rowText);
+  expect(rows).toContain(line);
+});
+
+test('a folded run with a failed call keeps its marks and a ZWJ step uncut', () => {
+  const msg = {
+    role: 'assistant', content: 'Done.',
+    parts: [{ kind: 'text', text: `${FAMILY} looked` }, { kind: 'tools', runs: [{ name: 'search', outcome: 'error', detail: 'no' }] }],
+  };
+  const text = `▸ ${FAMILY} looked`;
+  // The row is laid out in `wrap` less the two-cell gutter: exactly the row and its mark.
+  const wrap = 2 + stringWidth(text) + stringWidth(' ✗');
+  const rows = chatRows([msg] as never, { wrap, folds: { open: false, except: new Set() }, viewLines: 20, notes: 'step', detailsKey: '^o', renderers: {}, now: 0, palette: {} }).map(rowText);
+  const row = rows.find((r) => r.startsWith('▸'));
+  expect(row).toBe(`${text} ✗`);
+});
+
+test('the chat title that fits by clusters is not cut', async () => {
+  // 46 cells by clusters, 106 summed per code point; the title has 72.
+  const subject = FAMILY.repeat(15);
+  const backend = new TestBackend(80, 12);
+  const handle = await render(h(renderChatModal, { ...baseChat, height: 12, subject }), backend);
+  const top = backend.lastFrame.split('\n').find((l) => l.includes('Flow Assist')) ?? '';
+  expect(top).toContain(`ƒ Flow Assist · ${subject}`);
+  expect(top).not.toContain('…');
+  handle.unmount();
+});
+
+test('the folded tools summary counts cells, not code points', () => {
+  const runs = [{ name: `${FAMILY}a`, outcome: 'ok' }, { name: `${FAMILY}b`, outcome: 'ok' }];
+  const all = `${FAMILY}a, ${FAMILY}b`;
+  expect(toolSummary(runs as never, stringWidth(all))).toBe(all);
+  const cut = toolSummary(runs as never, stringWidth(all) - 1);
+  expect(cut).toBe(`${FAMILY}a, …`);
 });

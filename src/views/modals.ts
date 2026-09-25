@@ -17,7 +17,8 @@
 import { askRows, type AskRow, type AskState } from '../assistant/ask.js';
 import { autoBadge, type AutoMode } from '../assistant/auto.js';
 import { VERBS } from '../assistant/verbs.js';
-import { answerText, cellWidth, cutStep, readParts, runMarks, runRowText, shownText, turnSegments, type NotesMode } from '../assistant/step.js';
+import { cellWidth, cutStep } from '../cells.js';
+import { answerText, readParts, runMarks, runRowText, shownText, turnSegments, type NotesMode } from '../assistant/step.js';
 import { isClicked, isOpen, foldId, type FoldState } from '../assistant/folds.js';
 import { imageTokenRanges, splitTokens } from '../assistant/images.js';
 import { markText, type ImageMark } from '../assistant/tool-images.js';
@@ -501,16 +502,16 @@ export const NEWLINE_KEY = keyGlyph({ name: 'return', meta: true });
 // them cost in calls. The line is ONE terminal row like every other, so a turn of
 // fifty tools ends in `…` rather than wrapping: what is worth reading there is which
 // tools carried the turn, and those are the ones named first.
-function toolSummary(runs: ToolRun[], width = 0): string {
+export function toolSummary(runs: ToolRun[], width = 0): string {
   const count = new Map<string, number>();
   for (const r of runs) count.set(r.name, (count.get(r.name) ?? 0) + 1);
   const parts = [...count].map(([name, n]) => (n > 1 ? `${name} ×${n}` : name));
   const all = parts.join(', ');
-  if (!width || Array.from(all).length <= width) return all;
+  if (!width || cellWidth(all) <= width) return all;
   const kept: string[] = [];
   let used = 0;
   for (const part of parts) {
-    const cost = Array.from(part).length + (kept.length ? 2 : 0);
+    const cost = cellWidth(part) + (kept.length ? 2 : 0);
     if (used + cost > width - 3) break;
     kept.push(part);
     used += cost;
