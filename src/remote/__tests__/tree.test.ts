@@ -78,6 +78,8 @@ test('a ScrollBox has no isFocused — hasKeyboard gates isActive instead', () =
   const el: any = renderTree(['ScrollBox', { isFocused: true }], ctx({ hasKeyboard: false }));
   expect(el.props.isActive).toBe(false);
   expect(el.props.isFocused).toBeUndefined();
+  const nullActive: any = renderTree(['ScrollBox', { isActive: null }], ctx());
+  expect(nullActive.props.isActive).toBe(true);
 });
 
 test('a ListMultiSelect with no held value renders value: [] rather than undefined', () => {
@@ -86,4 +88,11 @@ test('a ListMultiSelect with no held value renders value: [] rather than undefin
   expect(noId.props.value).toEqual([]);
   const unset: any = renderTree(['ListMultiSelect', { id: 'tags', items: [] }], c);
   expect(unset.props.value).toEqual([]);
+  const nullValue: any = renderTree(['ListMultiSelect', { items: [], value: null }], c);
+  expect(nullValue.props.value).toEqual([]);
+});
+
+test('a Checkbox whose checked arrives as JSON null is unchecked', () => {
+  const el: any = renderTree(['Checkbox', { label: 'agree', checked: null }], ctx());
+  expect(el.props.checked).toBe(false);
 });

@@ -51,11 +51,11 @@ export function renderTree(tree: Tree | null, ctx: RenderCtx): ReactElement | nu
     delete props.id;
     if (FOCUSABLE.has(type)) props.isFocused = !!props.isFocused && ctx.hasKeyboard;
     // ScrollBox has no `isFocused` — it gates PgUp/PgDn and the wheel on `isActive`
-    // (default true), so a plugin's `isFocused` is dropped and `isActive` is what
-    // carries `hasKeyboard` here instead.
+    // (default true, and a JSON `null` reads as unset), so a plugin's `isFocused` is
+    // dropped and `isActive` is what carries `hasKeyboard` here instead.
     if (type === 'ScrollBox') {
       delete props.isFocused;
-      props.isActive = (props.isActive === undefined ? true : !!props.isActive) && ctx.hasKeyboard;
+      props.isActive = (props.isActive == null ? true : !!props.isActive) && ctx.hasKeyboard;
     }
     // A stateful node: the host's state is what is drawn; the plugin's own `value` in
     // the frame is applied by the field store before this render (./fieldState.ts).
@@ -81,12 +81,13 @@ export function renderTree(tree: Tree | null, ctx: RenderCtx): ReactElement | nu
       delete props.error;
       props.validate = () => error;
     }
-    if (type === 'Checkbox' && props.checked === undefined) props.checked = false;
+    // A JSON `null` is a plugin's "nothing" in many languages, read as the prop unset.
+    if (type === 'Checkbox' && props.checked == null) props.checked = false;
     if (type === 'Checkbox' && !props.onChange) props.onChange = () => {};
     // flowtty's ListMultiSelect calls `value.includes(...)` unconditionally on every
     // render, so an unset value (no id, or an id the field state hasn't populated yet)
-    // must default to an array rather than reach the component as undefined.
-    if (type === 'ListMultiSelect' && props.value === undefined) props.value = [];
+    // must default to an array rather than reach the component as undefined or null.
+    if (type === 'ListMultiSelect' && props.value == null) props.value = [];
     const comp = (ctx.ui as unknown as Record<string, unknown>)[type];
     return ctx.ui.h(comp, props, ...children.map(render));
   };

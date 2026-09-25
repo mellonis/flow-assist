@@ -1,0 +1,301 @@
+// A remote plugin as an ordinary `Plugin`. The loader hands this a transport to a
+// process that speaks the protocol (docs/plugins.md, "A plugin in another language")
+// and gets back the same object it gets from a JS module: `components.view` draws the
+// last frame's `surface`, a furniture slot draws its modals and hears its keys,
+// `keycaps` and `chatContext` read the last frame synchronously, `tools` and
+// `commands` proxy to `tool.run` / `command.run`, `viewRenderers` answer from a cache
+// filled by `view.render` (a placeholder until then), `configSchema` is the plugin's
+// JSON Schema as zod. Nothing outside this file knows a plugin is remote.
+//
+// The frame is the plugin's whole visible state, sent whole whenever it wants; keys are
+// consumed by what the frame declares (./keys.ts) and sent as events; a field's state
+// is the host's (./fieldState.ts). A crash: the transport closes, the surface says
+// `plugin stopped`, every tool throws that — one in flight included — and when the
+// transport restarts `hello` runs again from an empty frame.
+import { z } from 'zod';
+import type { ReactElement } from 'react';
+import { createPeer, PeerError, type ConsumeSpec, type Frame, type HelloParams, type HelloResult, type Peer, type StyledSpan, type ToolDecl, type ToolGroupDecl } from '@flow-assist/remote';
+import type { Command, Make, Plugin } from '../loader/plugin.js';
+import type { PluginApi } from '../runtime/plugin-api.js';
+import type { ViewLine, ViewRenderer } from '../assistant/views.js';
+import { overlay } from '../views/modals.js';
+import { FLOWTTY_VERSION, HOST_API } from '../version.js';
+import { validateFrame } from './frame.js';
+import { renderTree, type RenderCtx } from './tree.js';
+import { createFieldState } from './fieldState.js';
+import { canonicalConsume, consumes, keyEventFor, type Consume } from './keys.js';
+import { localeFromEnv } from './locale.js';
+import type { RemoteManifest, RestartingTransport, TransportClose } from './transport.js';
+
+export const HELLO_TIMEOUT_MS = 10_000;
+export const VIEW_RENDER_TIMEOUT_MS = 2_000;
+export const COMMAND_TIMEOUT_MS = 5_000;
+export const DEFAULT_IDLE_MS = 60_000;
+// How long a transport that failed its handshake is given to stop, as the transport
+// factory gives any child it stops.
+const HELLO_FAILED_GRACE_MS = 3_000;
+// A furniture handler's priority while one of the plugin's modals is open — the level
+// the host's own modals take — so the modal hears its keys before a surface does.
+const MODAL_PRIORITY = 100;
+
+export interface RemotePluginOpts {
+  manifest: RemoteManifest & Record<string, unknown>;
+  transport: RestartingTransport;
+  config: Record<string, unknown>;
+  make: Make;
+  env?: Record<string, string | undefined>;
+  log?: (line: string) => void;
+  helloTimeoutMs?: number;
+}
+
+const EMPTY: Frame & { keys: { consume: ConsumeSpec } } = { surface: null, modals: {}, keycaps: [], context: [], keys: { consume: [] } };
+
+const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+export async function remotePlugin(opts: RemotePluginOpts): Promise<Plugin> {
+  const { manifest, transport, make } = opts;
+  const name = manifest.name;
+  const log = opts.log ?? (() => {});
+  const say = (line: string) => log(`[${name}] ${line}`);
+  const saidOnce = new Set<string>();
+  const once = (key: string, line: string) => { if (!saidOnce.has(key)) { saidOnce.add(key); say(line); } };
+
+  // ── the conversation ────────────────────────────────────────────────────────
+  const peer: Peer = createPeer({ send: (l) => transport.send(l), onLine: (f) => transport.onLine(f) });
+  peer.onUnknown((line) => once('unknown-line', `wrote a line that is not a message (skipped): ${line.slice(0, 120)}`));
+
+  // ── what the host draws from: the last frame ────────────────────────────────
+  let frame = EMPTY;
+  let consume: Consume = canonicalConsume([]);
+  let stopped: string | null = null; // `plugin stopped: …` while the process is down
+  const fields = createFieldState();
+  let api: PluginApi | null = null; // the pair the App hands `setup`, for services, config and notify
+  const notify = () => api?.host.notify();
+  // The plugin's slice of the config: the App's resolved config once `setup` has run,
+  // the loader's before (the first `hello`).
+  const pluginConfig = () => {
+    const config = (api?.host.config ?? opts.config) as { plugins?: Record<string, unknown> };
+    return (config.plugins?.[name] ?? {}) as Record<string, unknown>;
+  };
+  peer.onNotify('frame', (raw) => {
+    const v = validateFrame(raw, JSON.stringify(raw ?? null).length);
+    if (!v.ok) { say(`frame dropped: ${v.why}`); return; }
+    frame = v.frame;
+    consume = canonicalConsume(frame.keys.consume);
+    fields.applyFrame(frame.surface ?? null, frame.modals ?? {});
+    stopped = null;
+    notify();
+  });
+
+  // ── host.* — the services as requests ───────────────────────────────────────
+  const services = () => (api?.host.services ?? {}) as Record<string, any>;
+  const storeSlice = () => {
+    const store = (api?.host.store ?? {}) as Record<string, unknown>;
+    return ((store[name] ??= {}) as Record<string, unknown>);
+  };
+  const param = <T,>(p: unknown, key: string, type: string): T => {
+    const v = (p as Record<string, unknown> | null)?.[key];
+    if (typeof v !== type) throw new PeerError(`${key} (${type}) is required`, PeerError.INVALID_PARAMS);
+    return v as T;
+  };
+  peer.onRequest('host.showMessage', (p) => { services().showMessage?.(param<string>(p, 'text', 'string')); });
+  peer.onRequest('host.pushLog', (p) => { services().pushLog?.(`[${name}] ${param<string>(p, 'text', 'string')}`); });
+  peer.onRequest('host.copyToClipboard', (p) => { services().copyToClipboard?.(param<string>(p, 'text', 'string')); });
+  peer.onRequest('host.chatLLM', async (p) => {
+    const messages = (p as { messages?: unknown })?.messages;
+    if (!Array.isArray(messages)) throw new PeerError('messages (array) is required', PeerError.INVALID_PARAMS);
+    const r = await services().chatLLM?.(messages, {});
+    return { content: r?.content ?? '', transcript: r?.transcript ?? [] };
+  });
+  peer.onRequest('host.store.get', (p) => storeSlice()[param<string>(p, 'key', 'string')] ?? null);
+  peer.onRequest('host.store.set', (p) => { storeSlice()[param<string>(p, 'key', 'string')] = (p as { value?: unknown }).value; notify(); });
+  peer.onRequest('host.cache.get', (p) => services().cache?.get?.(param<string>(p, 'key', 'string')) ?? null);
+  peer.onRequest('host.cache.set', (p) => services().cache?.set?.(param<string>(p, 'key', 'string'), (p as { value?: unknown }).value));
+  peer.onRequest('host.cache.del', (p) => services().cache?.del?.(param<string>(p, 'key', 'string')));
+  peer.onRequest('host.config.get', () => pluginConfig());
+
+  // ── hello ───────────────────────────────────────────────────────────────────
+  let sizes = { terminal: { width: 80, height: 24 }, surface: { width: 80, height: 22 } };
+  const helloTimeout = opts.helloTimeoutMs ?? HELLO_TIMEOUT_MS;
+  const helloParams = (): HelloParams => {
+    const locale = localeFromEnv(opts.env ?? process.env);
+    return { hostApi: HOST_API, flowtty: FLOWTTY_VERSION, size: sizes, config: pluginConfig(), idleMs: DEFAULT_IDLE_MS, ...(locale ? { locale } : {}) };
+  };
+  // Every way a handshake fails reads `hello: …` — the peer's own timeout already does.
+  const sayHello = async (): Promise<HelloResult> => {
+    let r: HelloResult | null;
+    try { r = (await peer.request('hello', helloParams(), helloTimeout)) as HelloResult | null; }
+    catch (e) { const m = message(e); throw new Error(m.startsWith('hello:') ? m : `hello: ${m}`); }
+    if (!r || typeof r !== 'object') throw new Error('hello: the plugin answered with nothing');
+    if (typeof r.name === 'string' && r.name !== name) throw new Error(`hello: the plugin says it is "${r.name}", the manifest says "${name}"`);
+    const apis = Array.isArray(r.hostApi) ? r.hostApi : [r.hostApi];
+    if (!apis.includes(HOST_API)) throw new Error(`hello: built for host API ${apis.join(', ')}, host provides ${HOST_API}`);
+    return r;
+  };
+  await transport.start();
+  let registration: HelloResult;
+  try { registration = await sayHello(); } catch (e) {
+    await transport.close(HELLO_FAILED_GRACE_MS);
+    throw e;
+  }
+
+  // ── the events the host sends ───────────────────────────────────────────────
+  const send = (method: string, params?: unknown) => { if (!stopped) peer.notify(method, params); };
+  let focused: boolean | null = null; // the last `focus`/`blur` said, told again after a restart
+
+  // ── after a crash ───────────────────────────────────────────────────────────
+  // A request in flight when the process goes is rejected at once rather than left to
+  // its timeout: the answer it waits for cannot come.
+  const inFlight = new Set<(e: Error) => void>();
+  const untilStopped = <T,>(p: Promise<T>): Promise<T> => new Promise<T>((resolve, reject) => {
+    inFlight.add(reject);
+    p.then(resolve, reject).finally(() => inFlight.delete(reject));
+  });
+  transport.onClose((why: TransportClose) => {
+    stopped = `plugin stopped${why.error ? `: ${why.error}` : why.signal ? ` (${why.signal})` : why.code !== undefined ? ` (exit ${why.code})` : ''}`;
+    frame = EMPTY;
+    consume = canonicalConsume([]);
+    fields.applyFrame(null, {});
+    for (const reject of inFlight) reject(new Error(stopped));
+    inFlight.clear();
+    say(stopped);
+    notify();
+  });
+  // The frame is not reset here: it was emptied at the close, and a frame the new
+  // process sends before answering `hello` is its first.
+  transport.onRestart(() => {
+    sayHello().then(() => {
+      stopped = null;
+      if (focused !== null) send(focused ? 'focus' : 'blur');
+      say('restarted');
+      notify();
+    }, (e: unknown) => say(`restart failed: ${message(e)}`));
+  });
+
+  // ── tools: proxies to tool.run ──────────────────────────────────────────────
+  let callSeq = 0;
+  const runTool = async (toolName: string, args: Record<string, unknown>): Promise<unknown> => {
+    if (stopped) throw new Error(stopped);
+    let answer: unknown;
+    try { answer = await untilStopped(peer.request('tool.run', { name: toolName, args, call: { id: `${name}-${++callSeq}` } })); }
+    catch (e) { throw new Error(message(e)); }
+    if (typeof answer === 'string') return answer;
+    if (answer && typeof answer === 'object' && 'result' in (answer as object)) return (answer as { result: unknown }).result;
+    throw new Error(`${toolName}: the plugin answered with ${JSON.stringify(answer)}, not { result }`);
+  };
+  const toolGroups = (registration.tools ?? []).map((g: ToolGroupDecl) => ({
+    id: g.id,
+    tools: g.tools,
+    exec: (n: string, args: Record<string, unknown>) => runTool(n, args),
+  }));
+  const aiTools = (registration.aiTools ?? []).map((t: ToolDecl) => ({ ...t, run: (args: Record<string, unknown>) => runTool(t.function.name, args) }));
+
+  // ── commands ────────────────────────────────────────────────────────────────
+  const commands: Command[] = (registration.commands ?? []).map((c) => ({
+    ...c,
+    run: async (_ctx?: unknown, arg?: string) => {
+      if (stopped) { services().showMessage?.(stopped); return; }
+      try { await untilStopped(peer.request('command.run', { name: c.name, arg: arg ?? '' }, COMMAND_TIMEOUT_MS)); }
+      catch (e) { services().showMessage?.(`${c.name}: ${message(e)}`); }
+    },
+  }));
+
+  // ── view renderers: a cache behind a placeholder ────────────────────────────
+  const rendered = new Map<string, ViewLine[]>();
+  const asked = new Set<string>();
+  const viewRenderers: Record<string, ViewRenderer> = {};
+  const toViewLines = (lines: unknown): ViewLine[] => (Array.isArray(lines) ? lines.map((l) => (Array.isArray(l) ? l.filter((s): s is StyledSpan => !!s && typeof s === 'object' && typeof (s as StyledSpan).text === 'string').map((s) => ({ text: s.text, ...(s.color ? { color: s.color } : {}), ...(s.dim ? { dim: true } : {}), ...(s.bold ? { bold: true } : {}) })) : [])) : []);
+  const renderer = (kind: string): ViewRenderer => (data, ctx) => {
+    const key = `${kind}\u0000${JSON.stringify(data)}\u0000${ctx.width}`;
+    const hit = rendered.get(key);
+    if (hit) return hit;
+    if (!asked.has(key) && !stopped) {
+      asked.add(key);
+      peer.request('view.render', { kind, data, width: ctx.width }, VIEW_RENDER_TIMEOUT_MS).then((r) => {
+        rendered.set(key, toViewLines((r as { lines?: unknown } | null)?.lines));
+        notify();
+      }, (e: unknown) => { asked.delete(key); once(`view:${kind}`, `view.render ${kind}: ${message(e)}`); });
+    }
+    return [[{ text: `▸ ${kind}`, dim: true }]];
+  };
+  // The kinds come from the manifest, not `hello`: the host collects every renderer at
+  // App start, before any tool has run.
+  const kinds = Array.isArray(manifest.views) ? manifest.views.filter((k): k is string => typeof k === 'string') : [];
+  for (const kind of kinds) viewRenderers[kind] = renderer(kind);
+
+  // ── keys ────────────────────────────────────────────────────────────────────
+  // The key event names an action only among the plugin's own (`hello.keys`), bound as
+  // the person's config resolves them.
+  const ownActions = Object.keys(registration.keys ?? {});
+  const ownBindings = (host: PluginApi['host']) => Object.fromEntries(ownActions.map((a) => [a, host.keys[a] ?? []]));
+
+  // ── the components ──────────────────────────────────────────────────────────
+  const treeCtx = (ui: PluginApi['ui'], hasKeyboard: boolean): RenderCtx => ({ ui, hasKeyboard, state: fields, onEvent: (m, ev) => send(m, ev), warn: (l) => once(`prop:${l}`, l) });
+  const openModals = () => Object.entries(frame.modals ?? {}).filter(([, t]) => t);
+  const components: Record<string, (a: unknown) => unknown> = {
+    // The surface: mounted while the plugin's keycaps say it is on screen.
+    view: (a) => {
+      const { ui, host } = a as PluginApi;
+      return function RemoteSurface(): ReactElement | null {
+        const hasKeyboard = host.hasKeyboard();
+        if (stopped) return ui.h(ui.Box, { padding: 1 }, ui.h(ui.Text, { color: 'red' }, stopped));
+        return renderTree(frame.surface ?? null, treeCtx(ui, hasKeyboard));
+      };
+    },
+    // Furniture, always mounted: the modals, and what the plugin hears whether or not
+    // its surface is up — its keys (the one that leads in from the start screen too),
+    // its size and whether it has the keyboard.
+    modals: (a) => {
+      const { ui, host } = a as PluginApi;
+      return function RemoteModals(): ReactElement | null {
+        const hasKeyboard = host.hasKeyboard();
+        const terminal = host.useTerminalSize();
+        const surface = host.useSurfaceSize();
+        ui.useEffect(() => {
+          if (terminal.width !== sizes.terminal.width || terminal.height !== sizes.terminal.height || surface.width !== sizes.surface.width || surface.height !== sizes.surface.height) {
+            sizes = { terminal: { width: terminal.width, height: terminal.height }, surface: { width: surface.width, height: surface.height } };
+            send('resize', sizes);
+          }
+        }, [terminal.width, terminal.height, surface.width, surface.height]);
+        ui.useEffect(() => { focused = hasKeyboard; send(hasKeyboard ? 'focus' : 'blur'); }, [hasKeyboard]);
+        host.useInputHandler({
+          mode: 'consume',
+          priority: (u) => (u.cmdOpen ? 0 : openModals().length ? MODAL_PRIORITY : 0),
+          handler: (key) => {
+            if (stopped || !host.hasKeyboard() || !consumes(consume, key)) return false;
+            send('key', keyEventFor(key, ownBindings(host)));
+            return true;
+          },
+        });
+        const open = openModals();
+        if (!open.length) return null;
+        const { width, height } = terminal;
+        return ui.h(ui.Box, undefined, ...open.map(([modal, tree]) => ui.h(ui.Box, { key: modal, ...overlay(width, height) }, renderTree(tree!, treeCtx(ui, hasKeyboard)))));
+      };
+    },
+  };
+
+  const keys = Object.fromEntries(Object.entries(registration.keys ?? {}).map(([a, b]) => [a, Array.isArray(b) ? b : [b]]));
+  return make(name, {
+    name,
+    keys,
+    entry: registration.entry,
+    description: typeof manifest.description === 'string' ? manifest.description : undefined,
+    commands,
+    tools: toolGroups,
+    aiTools,
+    viewRenderers: viewRenderers as Plugin['viewRenderers'],
+    colors: registration.colors,
+    modalColors: registration.modalColors,
+    usesCache: registration.usesCache ?? false,
+    configSchema: registration.configSchema ? z.fromJSONSchema(registration.configSchema as never).optional() : undefined,
+    components,
+    setup: (a) => { api = a as PluginApi; },
+    keycaps: (a) => {
+      const keyCap = (a as PluginApi | undefined)?.host?.keyCap ?? (() => '');
+      return (frame.keycaps ?? []).flatMap((k) => (typeof k === 'string' ? [k] : keyCap(k.action) ? [`${keyCap(k.action)} ${k.label}`] : []));
+    },
+    chatContext: () => frame.context ?? [],
+    afterWrite: () => { send('afterWrite'); },
+  });
+}

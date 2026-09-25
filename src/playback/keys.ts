@@ -15,6 +15,8 @@
 // against the decoder's name would simply never fire: a plugin's
 // `open: 'enter'` replacing the host's `['enter','return']` would leave Enter dead.
 // (What is DRAWN for a key — ⏎, ␣ — is a third thing, the plugins' keycaps.)
+import { isPrintable } from '@flowtty/core';
+
 const KEY_SPELLINGS: Record<string, string> = {
   enter: 'return',
   space: ' ',
@@ -131,6 +133,9 @@ const KEY_GLYPHS: Record<string, string> = {
 export function isMouseButton(name: string | undefined): boolean {
   return name === 'mousedown' || name === 'mousedrag' || name === 'mouseup';
 }
+// Whether a key types a character: @flowtty/core's own rule, the one `PluginUi.isPrintable`
+// hands plugins — never a chord, never a control character.
+export const isPrintableKey = (key: { name: string; ctrl?: boolean; meta?: boolean }): boolean => isPrintable(key as never);
 // The cap for a key as the terminal reported it — or for a terminal-side NAME alone
 // (a resolved binding). Modifiers are part of what was pressed: `^r` is not `r`.
 // Shift is shown only with a named key (⇧⇥): for a character the character already

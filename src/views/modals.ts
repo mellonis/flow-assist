@@ -215,7 +215,7 @@ interface Theme {
 // painted under it — characters and colours stay, the screen behind the modal steps
 // back. Dim is a flag on a cell, not an opacity, so a modal over a modal (a reminder
 // over the chat) never darkens anything twice.
-const overlay = (width: number, height: number, zIndex = 10) => ({
+export const overlay = (width: number, height: number, zIndex = 10) => ({
   position: 'absolute' as const,
   top: 0,
   left: 0,
