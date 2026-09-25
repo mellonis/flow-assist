@@ -1453,6 +1453,8 @@ export function renderChatModal({
       // width, with a scroll of their own.
       pager
         ? h(ScrollList<ChatRow>, {
+            // Its keys and the wheel only while the chat has the keyboard.
+            isActive: focused,
             items: pager.rows, rowHeight: 1, scrollbar: true, flexGrow: 1, flexShrink: 1, flexDirection: 'column',
             keyOf: (_row: ChatRow, i: number) => `pager-${i}`,
             renderItem: chatRowRenderer({ palette: m, errorColor: theme?.error, wrap, now, detailsKey }),

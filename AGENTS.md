@@ -1782,9 +1782,11 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     (`pagerShownRef`) — Esc closes it, anything else does nothing, so nothing reaches
     the field, the folds or the model — and `mouse()` folds nothing, so a drag is the
     pager's selection. A press follows the chat's ordinary focus rules (`pointer`): on
-    a docked chat's plugin side it hands the keys to the plugin, and the pager, read
-    with the chat's keys, closes. Closing the chat, the keys leaving a docked chat,
-    `/clear` and `/resume` drop it. Its state is the fold id
+    a docked chat's plugin side it hands the keys to the plugin, and the pager stays,
+    as the picker and the `/context` panel do — drawn with the idle border, its list
+    `isActive: false`, the wheel over it scrolling neither it nor the conversation it
+    hides — and is live again once a press or Ctrl+] brings the keys back. Opening the
+    picker, closing the chat, `/clear` and `/resume` drop it. Its state is the fold id
     (`pager`); a block whose id does not resolve draws no pager and holds no key.
 - **A turn is drawn in the order it happened** (`src/assistant/step.ts`, pure; the chat
   owns the parts and the view lays them out). A whole turn is one assistant message,
@@ -2299,10 +2301,6 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     instruction, so a key that does nothing here is not listed as if it did.
     `helpEntries` gives one entry per word a person types: a plugin's `core:quit` and
     the host's `quit` are the same word, and the described one wins.
-  - **The chat's pager** is drawn inside the chat's own frame — a `<ScrollList
-    scrollbar>` in the conversation's place, `PgUp/PgDn or the wheel scroll · Esc close`
-    on the hint row — opened by a click, never a key (see "A block taller than the
-    conversation opens in the pager" under The chat).
   - A modal opened by a key names that key in the footer through `keycaps` (`L log`),
     and the flag the footer reads is patched synchronously AND followed by `notify()`
     on close as well as on open — the host draws the footer before the plugin re-renders.

@@ -193,15 +193,29 @@ for (const [side, cols, rows] of [['right', 140, 30], ['bottom', 100, 44]] as co
     expect(frame).toContain(': commands');
     await ui.press('escape');
     expect(ui.backend.lastFrame).toBe(before);
+    // A press on the plugin's side hands it the keys, as it always does — and the pager
+    // stays, as the picker does: PgDn, Esc and the wheel over it are not the chat's now,
+    // and move neither the pager nor the conversation it stands in for.
+    await click(ui, y, x + 2);
+    const live = ui.backend.lastFrame;
+    const plugin = rowOf(ui, 'an assistant in your terminal');
+    await click(ui, plugin, ui.backend.lastFrame.split('\n')[plugin]!.indexOf('an assistant') + 2);
+    expect(pagerUp(ui)).toBe(true);
+    const idle = ui.backend.lastFrame;
+    await ui.press('pagedown');
+    await ui.press('escape');
+    ui.backend.wheel('down', x + 2, rowOf(ui, '│ 105'));
+    await settle(4);
+    expect(ui.backend.lastFrame).toBe(idle);
+    // A press back inside the panel gives the chat its keys and the pager as it was.
+    await click(ui, rowOf(ui, '│ 105'), x + 2);
+    expect(ui.backend.lastFrame).toBe(live);
+    await ui.press('escape');
+    expect(ui.backend.lastFrame).toBe(before);
     // A drag inside the pager copies its text and leaves it up.
     await click(ui, y, x + 2);
     expect(await dragFrom101(ui, 1)).toContain('101\n102');
     expect(pagerUp(ui)).toBe(true);
-    // A press on the plugin's side is an ordinary one: the keys go to the plugin, and
-    // the pager, read with the chat's keys, closes.
-    const plugin = rowOf(ui, 'an assistant in your terminal');
-    await click(ui, plugin, ui.backend.lastFrame.split('\n')[plugin]!.indexOf('an assistant') + 2);
-    expect(pagerUp(ui)).toBe(false);
     ui.app.unmount();
   });
 }
@@ -315,5 +329,81 @@ test('a long reasoning opens in the pager titled thinking, reads to its end, and
   expect(ui.backend.lastFrame).toContain('thought 60');
   await ui.press('escape');
   expect(ui.backend.lastFrame).toBe(before);
+  ui.app.unmount();
+});
+
+// The conversation is held, not drawn, under the pager: what arrives while it is up is
+// there when the pager closes, and the list is where it would have been had it been on
+// screen — at its end if it was following, on the same rows if it was scrolled up.
+const LATE = Array.from({ length: 8 }, (_, i) => `Late line ${i + 1}.`).join('\n\n');
+test('an answer arriving while the pager is up: Esc shows it, the list following to its end', async () => {
+  const model = new ScriptedModel();
+  model.script(
+    [{ tool: 'run_command', args: { command: 'seq 1 300' } }],
+    [{ text: 'Done counting.' }],
+    [{ hold: true }, { text: LATE }],
+  );
+  const ui = await bootApp(model, 100, 24, undefined, { shell: { timeoutMs: 20000 } });
+  await ui.press('F');
+  await ui.type('count');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('Confirm write: run_command'));
+  await ui.press('y');
+  await settleUntil(() => ui.backend.lastFrame.includes('Done counting.'));
+  await ui.type('go on');
+  await ui.press('return');
+  await settle(8);
+  // At the end of the list, the block in view, the turn held.
+  await click(ui, rowOf(ui, 'seq 1 300 ·'));
+  expect(pagerUp(ui)).toBe(true);
+  model.release();
+  await settle(20);
+  expect(pagerUp(ui)).toBe(true);
+  expect(ui.backend.lastFrame).not.toContain('Late line');
+  await ui.press('escape');
+  expect(pagerUp(ui)).toBe(false);
+  expect(ui.backend.lastFrame).toContain('Late line 8.');
+  ui.app.unmount();
+});
+
+test('an answer arriving while the pager is up over a list scrolled up: Esc gives back the same rows', async () => {
+  const model = new ScriptedModel();
+  model.script(
+    [{ tool: 'run_command', args: { command: 'seq 1 300' } }],
+    [{ text: 'Done counting.' }],
+    [{ text: TAIL }],
+    [{ hold: true }, { text: LATE }],
+  );
+  const ui = await bootApp(model, 100, 24, undefined, { shell: { timeoutMs: 20000 } });
+  await ui.press('F');
+  await ui.type('count');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('Confirm write: run_command'));
+  await ui.press('y');
+  await settleUntil(() => ui.backend.lastFrame.includes('Done counting.'));
+  await ui.type('and remark on it');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('Remark number 12.'));
+  await ui.type('go on');
+  await ui.press('return');
+  await settle(8);
+  for (let i = 0; i < 8 && !ui.backend.lastFrame.includes('seq 1 300 ·'); i++) await ui.press('pageup');
+  const y = rowOf(ui, 'seq 1 300 ·');
+  const lines = ui.backend.lastFrame.split('\n');
+  const top = corner(ui.backend.lastFrame).row + 2;
+  const shown = lines.slice(top, y + 1);
+  await click(ui, y);
+  expect(pagerUp(ui)).toBe(true);
+  model.release();
+  await settle(20);
+  await ui.press('escape');
+  expect(pagerUp(ui)).toBe(false);
+  // The same rows, from the list's top down to the block's fold line.
+  expect(rowOf(ui, 'seq 1 300 ·')).toBe(y);
+  expect(ui.backend.lastFrame.split('\n').slice(top, y + 1)).toEqual(shown);
+  expect(ui.backend.lastFrame).not.toContain('Late line 8.');
+  // The answer is there, under the rows in view.
+  for (let i = 0; i < 20 && !ui.backend.lastFrame.includes('Late line 8.'); i++) await ui.press('pagedown');
+  expect(ui.backend.lastFrame).toContain('Late line 8.');
   ui.app.unmount();
 });

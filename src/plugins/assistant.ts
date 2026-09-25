@@ -437,9 +437,6 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const pagerRef = ui.useRef<string | null>(null);
           const pagerShownRef = ui.useRef(false);
           const setPager = (id: string | null) => { pagerRef.current = id; if (!id) pagerShownRef.current = false; setPagerState(id); };
-          // The keys leaving the chat (a docked chat giving them to the plugin) close it
-          // too: it is read with the chat's keys, and would otherwise wait unseen.
-          ui.useEffect(() => { if (!focused && pagerRef.current) setPager(null); }, [focused]);
           // Process indicator: spinner + the seconds of whatever is running NOW.
           // t0Ref — when the turn started, which is what the finished answer's quiet
           // line says (`· 12.4s`). segRef — when the thing on the status line started:
@@ -2000,6 +1997,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // An error left from before would stand in the picker's notice line and hide
             // every notice it gives.
             setError(null);
+            // The picker takes the conversation's place, where a pager left open while
+            // the plugin had the keys stands: the pager goes.
+            setPager(null);
             setPicker(pickerStart(sessionRows(sessDir, lockToken)));
           };
           // What a picker key asked for (session-picker.ts' `PickerAction`).
@@ -2427,12 +2427,12 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               queued: queueRef.current.length,
             });
           };
-          // The block in the pager. Drawn only while the chat has the keys (a docked chat
-          // that gave them to the plugin shows its conversation) and while the block
-          // resolves (a list replaced under it shows nothing, and holds no key). It is
+          // The block in the pager. Drawn while the block resolves (a list replaced under
+          // it shows nothing, and holds no key); a docked chat that gives the keys to the
+          // plugin keeps it on screen, as it keeps the picker, and gets it back live. It is
           // drawn in the conversation's place inside the chat's own frame, laid out at the
           // conversation's width — the width it was measured against.
-          const pagerRows = pager && !picker && open && focused
+          const pagerRows = pager && !picker && open
             ? blockRows(messages as Parameters<typeof blockRows>[0], { ...rowOpts(openInFull(folds, pager)), viewLines: VIEW_CAPS.lines }, pager)
             : [];
           const pagerShown = !!pager && pagerRows.length > 0;
@@ -2520,11 +2520,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               }
               if (!focused) {
                 // The conversation's own list does not hear the wheel while the plugin
-                // has the keys; over the list it still scrolls it.
+                // has the keys; over the list it still scrolls it. Over the pager (drawn
+                // in the list's place) the wheel scrolls nothing — the conversation it
+                // hides stays where it was left — and reaches no one else either.
                 const v = viewportRef.current;
                 if ((key.name === 'wheelup' || key.name === 'wheeldown') && v && typeof key.x === 'number' && typeof key.y === 'number'
                   && key.x >= v.left && key.x < v.left + v.width && key.y >= v.top && key.y < v.top + v.height) {
-                  wheelRef.current?.(key.name === 'wheelup');
+                  if (!pagerShownRef.current) wheelRef.current?.(key.name === 'wheelup');
                   return true;
                 }
                 return false;
