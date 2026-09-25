@@ -96,3 +96,11 @@ test('the resolved theme the app holds is never overwritten under it', () => {
   expect(live.theme).toBe(palette);
   expect(getDeep(loadConfig({ localPath: file }), 'theme')).toEqual({ accent: 'red' });
 });
+
+test('a key read only at start is reported so, in both scopes', () => {
+  const file = tempLocal();
+  const live = loadConfig({ localPath: file });
+  expect(setConfigValue(live, 'ui.mouse', false, { scope: 'session', filePath: file })).toMatchObject({ ok: true, restart: true });
+  expect(setConfigValue(live, 'ui.mouse', false, { scope: 'saved', filePath: file })).toMatchObject({ ok: true, restart: true });
+  expect(setConfigValue(live, 'ui.verbs', ['a'], { scope: 'session', filePath: file })).toMatchObject({ ok: true, restart: false });
+});

@@ -742,3 +742,26 @@ test('a background run carries the project\'s instructions for its own shell dir
   expect(system()).toContain('## Project instructions');
   expect(system()).toContain('BG RULE');
 });
+
+// The model is told what it may change, and why, beside the key — and what waits for a
+// restart — so it knows what to do itself and what to hand back as a command.
+test('config_schema prints the marks beside a key, with the reason', async () => {
+  const { modelMaySet, modelMaySave } = await import('../../config/schema');
+  const make = makeFactory({});
+  const plugins = [make('notes', { configSchema: z.object({
+    compact: z.boolean().register(modelMaySet, { reason: 'a display flag' }).optional(),
+    wide: z.boolean().register(modelMaySet, { reason: 'the width' }).register(modelMaySave, { reason: 'the width' }).optional(),
+    file: z.string().optional(),
+  }).optional() })];
+  const reg = assembleToolRegistry({ plugins, config: {}, repo: { list: async () => [] } as any });
+  const out = String(await reg.exec('config_schema', {}, { configLocalPath: join(mkdtempSync(join(tmpdir(), 'fa-marks-')), 'none.json') }));
+  const row = (key: string) => out.split('\n').find((r) => r.startsWith(`- ${key}:`)) ?? '';
+  expect(row('ui.verbs')).toMatch(/ · model may set · may save — the words on the status line/);
+  expect(row('ui.mouse')).toMatch(/ · model may set · may save — .* · takes effect on restart/);
+  expect(row('plugins.notes.compact')).toMatch(/ · model may set — a display flag/);
+  expect(row('plugins.notes.compact')).not.toMatch(/may save/);
+  expect(row('plugins.notes.wide')).toMatch(/ · model may set · may save — the width/);
+  expect(row('plugins.notes.file')).not.toMatch(/model may/);
+  expect(row('ai.model')).not.toMatch(/model may/);
+  expect(row('keys')).toMatch(/takes effect on restart/);
+});

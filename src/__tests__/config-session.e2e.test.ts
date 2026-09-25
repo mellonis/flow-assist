@@ -86,3 +86,15 @@ test(':config set without --session saves the value — and it is live at once t
   expect(await wordWhileWorking(ui, model)).toBe('Keeping');
   ui.app.unmount();
 });
+
+test('a key read only at start says so, in both scopes', async () => {
+  const ui = await bootApp(new ScriptedModel(), 110, 28);
+  await command(ui, 'config set --session ui.mouse false');
+  expect(lastRow(ui)).toContain('false · session — takes effect on restart');
+  await command(ui, 'config set --session ui.verbs ["Now"]');
+  expect(lastRow(ui)).not.toContain('restart');
+  await command(ui, 'config set ui.mouse false');
+  expect(lastRow(ui)).toContain('false · local — takes effect on restart');
+  saveConfigUnset('ui.mouse');
+  ui.app.unmount();
+});

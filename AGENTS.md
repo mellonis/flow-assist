@@ -146,13 +146,19 @@ failure). A manifest.json that does not parse says `manifest.json is not valid J
 `examples/notes` declare both fields (a test). A plugin reads the number it runs under
 from `host.hostApi`.
 
-A plugin module default-exports `build<Name>Plugin({ renders, config, make, z })`.
+A plugin module default-exports `build<Name>Plugin({ renders, config, make, z,
+modelMaySet, modelMaySave, appliesOnRestart })`.
 The builder may be **async** — the loader awaits it — for a plugin whose tools are known
 only after it has asked someone (the `mcp` plugin connects to its servers first, over
 Streamable HTTP or, for a server that is a command, its stdin and stdout); it is
 the plugin's job to bound that wait, since the app starts after it. `z` is the host's
 zod: a plugin with no bundler, and so no runtime dependencies (the compiled binary
-cannot import a package from disk), still declares its `configSchema` with it.
+cannot import a package from disk), still declares its `configSchema` with it. The
+three registries beside it are the host's config marks (`src/config/schema.ts`, "Config
+is the person's" below): a plugin registers a key of its own schema in them, and a mark
+is found by its node in the host's registry, so it must be these. They are an addition:
+`HOST_API` stays as it is, and a plugin that must also run on an older host checks that
+they are there.
 `make(name, shape)` injects `config.plugins.<name>` and qualified keys. The
 returned `shape` has optional: `commands`, `keys`, `keyActions`, `views`,
 `surface`, `modals`, `colors`, `modalColors`, `configSchema`, `components`, `tools`,
@@ -566,6 +572,28 @@ there is no `/fullscreen`.
   `baseUrl`, `tokenEnv`, plugin roots) and the assistant reads other people's text,
   so even a y/n-confirmed write is one prompt injection plus one tired keypress
   away. The model answers with the `config set <key> <value>` command to run.
+  **Every key is read-only to the model unless its schema node is marked**
+  (`src/config/schema.ts`): two zod registries, `modelMaySet` (the model may change the
+  key for the session) and `modelMaySave` (also in config.local.json — honoured only
+  beside `modelMaySet`), each `{ reason }`, a node opting in with
+  `.register(modelMaySet, { reason })`. Not `z.readonly()`: that marks a frozen parsed
+  value, and a leash built from it would leave every NEW key writable until someone
+  remembered to wrap it — the default has to be read-only, the safe keys the exception.
+  `configMarks` walks the key's resolved path (a plugin's key through the plugin's
+  schema, as `configSchemaAt` resolves it), looks for the mark on the key's own node
+  through every wrapper (`optional`, `nullable`, `default` — `.partial()` wraps each field
+  anew), and honours none on the model's leash (`isLeashKey`: anything under `ai`,
+  `shell`, `web`, the legacy `fs`, `plugins.<name>.roots`, and a key holding one —
+  `plugins`, `plugins.<name>`). `src/config/__tests__/marks.test.ts` walks the host
+  schema and the built-ins' and asserts no mark under the leash and every save mark
+  beside a set mark. The host marks `ui.verbs`, `ui.mouse`, `sessions.resume`, the
+  chat's `plugins.assistant.mode` and `panel.side`, and `plugins.keycaps.enabled`. A
+  third registry, `appliesOnRestart`, marks a node whose consumer reads it only at start
+  (`ui.mouse`, `keys`, `theme`, `sessions`, the chat's `mode`, `keycaps.enabled`),
+  covering every key under it; every `config set` of such a key says `takes effect on
+  restart`. `config_schema` prints the marks beside the key — `· model may set · may
+  save — <reason>` and `· takes effect on restart`. A remote plugin's JSON-Schema
+  `configSchema` carries no mark.
 - **`web_fetch` reads the web — and the web is both a way out and a way in**
   (`src/assistant/web-fetch.ts`, pure; resolver and fetch injected, tests offline).
   It is a tool group of its own, `web` (`src/loader/tools-web.ts`), on by default and

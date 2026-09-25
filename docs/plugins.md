@@ -39,8 +39,8 @@ see [Compatibility](#compatibility).
 
 ## The builder
 
-The entry default-exports a function that gets `{ renders, config, make, z }` and
-returns `make(name, shape)`:
+The entry default-exports a function that gets `{ renders, config, make, z,
+modelMaySet, modelMaySave, appliesOnRestart }` and returns `make(name, shape)`:
 
 ```ts
 export default function buildNotesPlugin({ config, make, z }) {
@@ -61,6 +61,29 @@ export default function buildNotesPlugin({ config, make, z }) {
 - `z` is the host's zod. `configSchema` describes `config.plugins.<name>`: the host
   validates every `config set` against it and shows it to the model, so the
   assistant can tell the person which key to set.
+- **Every key is the person's unless its node says otherwise.** The model reads
+  `configSchema` but changes nothing in it — unless a key is marked with one of the
+  host's registries, the three handed to the builder beside `z`:
+
+  ```ts
+  configSchema: z.object({
+    compact: z.boolean()
+      .register(modelMaySet, { reason: 'a display flag, undone with one command' })  // for this run
+      .register(modelMaySave, { reason: 'a display flag, undone with one command' }) // and in config.local.json
+      .optional(),
+    columns: z.number().register(appliesOnRestart, {}).optional(),                   // read at start
+    file: z.string().optional(),                                                     // the person's only
+  }).optional(),
+  ```
+
+  `modelMaySet` lets the model change the key for the running app, `modelMaySave` also
+  in the file — only beside `modelMaySet`. The model sees each mark and its `reason`
+  beside the key and is refused, before the person is asked, on a key without the mark
+  for what it tries. Mark only what could hurt nobody: a key holding a path, a command,
+  a URL or a token stays unmarked, and a mark on `plugins.<name>.roots` — or on the
+  plugin's whole `plugins.<name>` — is ignored. `appliesOnRestart` says the plugin reads
+  the key only when it starts, and every `config set` of it then says so. Use these
+  registries, never ones of your own: a mark is looked up by its node in the host's.
 - `make` fills in what the host owns — the name, the config slice, the keys.
 - The builder may be `async` (the `mcp` plugin asks its servers for their tools
   first); bound the wait yourself, the app starts after it.
@@ -256,6 +279,7 @@ Every hook of the shape — each `components[slot]` factory, `setup`, `keycaps`,
 | | `notify()`, `viewRegistry`, `commandRegistry`, `helpFor`, `copyToClipboard` |
 | | `hasKeyboard()` — whether the plugin's side has the keyboard now |
 | | `pluginToken` — the plugin's identity; `hostApi` — the host API it runs under |
+| | Not on `host` but handed to the builder beside `z`: `modelMaySet`, `modelMaySave`, `appliesOnRestart` — the marks on a key of `configSchema` ([The builder](#the-builder)) |
 
 The services stay on `host.services` and are read when they are called
 (`host.services.showMessage('saved')`): the host rebinds some of them on every render,
@@ -762,6 +786,9 @@ give up that host's own attempts until some other host's restart revives the ser
 `flow-assist plugins ls` marks a plugin reached either way `(remote)`.
 
 ### What a remote plugin cannot do
+
+- **Mark a config key for the model.** Its `configSchema` is JSON Schema, read into the
+  host's zod, and carries no mark: every key of a remote plugin is the person's to set.
 
 - **Read another plugin's part of the store synchronously.** `host.store.get` answers
   only the calling plugin's own slice; another plugin's writes arrive as `store`

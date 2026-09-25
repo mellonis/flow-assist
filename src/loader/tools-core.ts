@@ -9,7 +9,7 @@
 // flagged `write` (true or a predicate `(args) => boolean`).
 
 import { hostConfigSchema } from '../config/schema.js';
-import { loadConfig, getDeep, getSchemaAtPath, describeSchema, unwrapNode, configSchemaAt } from '../config/load.js';
+import { loadConfig, getDeep, getSchemaAtPath, describeSchema, unwrapNode, configSchemaAt, configMarks, RESTART_NOTE } from '../config/load.js';
 import { loadMemories, saveMemories, memoryFilePath, refuseMemory } from '../runtime/services/memory.js';
 import { openInBrowser } from '../runtime/services.js';
 import { resolveIdentityToken } from '../runtime/plugin-identity.js';
@@ -499,7 +499,12 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
           const parents = path.split('.').map((_, i, all) => all.slice(0, all.length - i).join('.'));
           const dflt = parents.map((p) => KEY_DEFAULTS[p]).find(Boolean) ?? KEY_DEFAULTS[top];
           const note = state === 'unset' && dflt ? ` (default: ${dflt})` : '';
-          rows.push(`- ${path}: ${describeSchema(node)} — ${state}${note}`);
+          // What the model may do with the key itself, and why (src/config/schema.ts),
+          // and whether it waits for a restart.
+          const marks = configMarks(hostConfigSchema, path, pluginConfigs);
+          const may = marks.maySet ? ` · model may set${marks.maySave ? ' · may save' : ''} — ${marks.maySet.reason}` : '';
+          const restart = marks.restart ? ` · ${RESTART_NOTE}` : '';
+          rows.push(`- ${path}: ${describeSchema(node)} — ${state}${may}${restart}${note}`);
         };
         const walk = (path: string, node: unknown) => {
           const shape = unwrapNode(node)?.shape as Record<string, unknown> | undefined;

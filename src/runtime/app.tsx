@@ -41,6 +41,7 @@ import {
   configSource,
   getDeep,
   parseValue,
+  RESTART_NOTE,
   resetSessionConfig,
   saveConfigSetting,
   saveConfigUnset,
@@ -579,7 +580,7 @@ export function renderApp(
       // value is live at once wherever it is read when it is used.
       if (sub === 'set' && key && value !== undefined) {
         const res = setConfigValue(config, key, parseValue(unquoteValue(value)), { scope: session ? 'session' : 'saved', pluginConfigs: pluginConfigs(plugins) });
-        toast.showMessage(res.ok ? describeConfigValue(key, res.value, session ? 'session' : 'local') : res.error);
+        toast.showMessage(res.ok ? `${describeConfigValue(key, res.value, session ? 'session' : 'local')}${res.restart ? ` — ${RESTART_NOTE}` : ''}` : res.error);
         return;
       }
       if (sub === 'unset' && key) {

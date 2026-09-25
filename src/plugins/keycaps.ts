@@ -3,6 +3,7 @@
 // without consuming it.
 
 import { z } from 'zod';
+import { appliesOnRestart, modelMaySave, modelMaySet } from '../config/schema.js';
 import type { Make } from '../loader/plugin.js';
 import type { Plugin } from '../loader/plugin.js';
 import { isMouseButton, keyGlyph } from '../playback/keys.js';
@@ -34,8 +35,17 @@ export function buildKeycapsPlugin({ renders, config, make }: BuildKeycapsParams
     // panel follows the terminal between light and dark.
     colors: { bg: '${panelBg}' },
     // Schema of the config.plugins.keycaps namespace: enabled — show the panel at
-    // startup, colors — palette override (→ theme.keycaps).
-    configSchema: z.object({ enabled: z.boolean().optional(), colors: z.record(z.string(), z.unknown()).optional() }).optional(),
+    // startup (read when the panel mounts; `:keycaps on|off` switches it for the run),
+    // colors — palette override (→ theme.keycaps). The model may change `enabled`: a
+    // display flag.
+    configSchema: z.object({
+      enabled: z.boolean()
+        .register(modelMaySet, { reason: 'whether the panel of pressed keys is shown — a display flag' })
+        .register(modelMaySave, { reason: 'whether the panel of pressed keys is shown — a display flag' })
+        .register(appliesOnRestart, {})
+        .optional(),
+      colors: z.record(z.string(), z.unknown()).optional(),
+    }).optional(),
     components: {
       keycaps: (api) => {
         const { ui, host } = api as PluginApi;

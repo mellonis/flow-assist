@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { hostConfigSchema } from './schema.js';
+import { appliesOnRestart, hostConfigSchema, isLeashKey, modelMaySave, modelMaySet } from './schema.js';
 import { llmOpts } from '../assistant/llm-endpoint.js';
 
 // Config files live outside the repo, under the user's home config dir (or the
@@ -154,7 +154,12 @@ export function configSource(config: Record<string, unknown>, key: string): Conf
 const DERIVED_AT_START = ['theme'];
 const derivedAtStart = (key: string) => DERIVED_AT_START.some((k) => key === k || key.startsWith(`${k}.`));
 
-export type ConfigSetResult = { ok: true; value: unknown } | { ok: false; error: string };
+// `restart` — the key's consumer reads it when the app starts (`appliesOnRestart`):
+// the caller says the value takes effect then.
+export type ConfigSetResult = { ok: true; value: unknown; restart: boolean } | { ok: false; error: string };
+
+// The words a caller adds after a value whose key is read at start.
+export const RESTART_NOTE = 'takes effect on restart';
 
 // The one way a value is set — `config set` in the CLI, `:config set` in the app and
 // the model's `config_set` alike: checked against the schema (a plugin's key against
@@ -180,7 +185,8 @@ export function setConfigValue(
     setDeep(layersOf(config).local, key, structuredClone(check.value));
   }
   if (!derivedAtStart(key)) setDeep(config, key, structuredClone(check.value));
-  return { ok: true, value: check.value };
+  const rootSchema = opts.rootSchema ?? hostConfigSchema;
+  return { ok: true, value: check.value, restart: configMarks(rootSchema, key, opts.pluginConfigs).restart };
 }
 
 // Strips zod wrappers (optional/nullable/default) off a node: in v4 they hide
@@ -246,6 +252,73 @@ export function configSchemaAt(rootSchema: any, key: string, pluginConfigs?: Rec
   const pluginSchema = m?.[1] && pluginConfigs?.[m[1]];
   if (pluginSchema) return m?.[2] ? getSchemaAtPath(pluginSchema, m[2]) : pluginSchema;
   return hostNode ?? null;
+}
+
+// A node and each wrapper it sits in (optional, nullable, default — `.partial()`
+// wraps every field anew): a mark may be on any layer.
+function layersOfNode(node: unknown): any[] {
+  const out: any[] = [];
+  let cur = node as any;
+  while (cur) {
+    out.push(cur);
+    if (cur.type === 'optional' || cur.type === 'nullable' || cur.type === 'default') cur = cur.unwrap();
+    else break;
+  }
+  return out;
+}
+
+// The nodes a key passes through, root first and the key's own node last, resolved as
+// `configSchemaAt` resolves it (a plugin's key through the plugin's schema); null when
+// the key does not resolve.
+function nodesAlong(rootSchema: any, key: string, pluginConfigs?: Record<string, unknown>): any[] | null {
+  const walk = (schema: any, path: string): any[] | null => {
+    const out = [schema];
+    if (!path) return out;
+    let cur = schema;
+    for (const part of path.split('.')) {
+      cur = unwrapNode(cur);
+      if (cur?.shape) cur = cur.shape[part];
+      else if (cur?.type === 'record') cur = cur.valueType;
+      else return null;
+      if (!cur) return null;
+      out.push(cur);
+    }
+    return out;
+  };
+  const m = /^plugins\.([^.]+)(?:\.(.*))?$/.exec(key);
+  const pluginSchema = m?.[1] && pluginConfigs?.[m[1]];
+  if (m && pluginSchema) {
+    const host = walk(rootSchema, 'plugins');
+    const own = walk(pluginSchema, m[2] ?? '');
+    return host && own ? [...host, ...own] : null;
+  }
+  return walk(rootSchema, key);
+}
+
+export type ConfigMarks = {
+  // The model may set the key for the session / also save it; null — it may not.
+  maySet: { reason: string } | null;
+  maySave: { reason: string } | null;
+  // The key's consumer reads it when the app starts.
+  restart: boolean;
+};
+
+// What the model may do with a key (src/config/schema.ts): the marks on the key's own
+// node, seen through every wrapper, honoured only when no part of the key is the
+// model's leash; `maySave` only beside `maySet`. `restart` — a node on the way to the
+// key carries `appliesOnRestart`.
+export function configMarks(rootSchema: any, key: string, pluginConfigs?: Record<string, unknown>): ConfigMarks {
+  const along = nodesAlong(rootSchema, key, pluginConfigs);
+  if (!along) return { maySet: null, maySave: null, restart: false };
+  const restart = along.some((n) => layersOfNode(n).some((l) => appliesOnRestart.has(l)));
+  const own = layersOfNode(along.at(-1));
+  const find = (reg: typeof modelMaySet) => {
+    const hit = own.find((l) => reg.has(l));
+    return hit ? { reason: String(reg.get(hit)?.reason ?? '') } : null;
+  };
+  const maySet = isLeashKey(key) ? null : find(modelMaySet);
+  const maySave = maySet ? find(modelMaySave) : null;
+  return { maySet, maySave, restart };
 }
 
 export function validateConfigWriteValue(rootSchema: any, key: string, value: unknown, pluginConfigs?: Record<string, unknown>): WriteResult {

@@ -2,7 +2,8 @@
 // `src/plugins/`) and DOES fs-resolve the enabled plugin set at startup. `loadPlugins`
 // always builds the four built-ins (core/assistant/keycaps/log), then loads every
 // enabled plugin from `plugins-enabled/` (import its default builder, call it with
-// `{ renders, config, make, z }` and await it — a builder may be async). A broken
+// `{ renders, config, make, z }` and the host's mark registries, and await it — a
+// builder may be async). A broken
 // plugin is skipped with `console.warn`.
 //
 // `renders` is the renderer bundle ({ help, chat, log }) that the runtime
@@ -28,14 +29,22 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
+import { appliesOnRestart, modelMaySave, modelMaySet } from '../config/schema.js';
 import { THIS_HOST, pluginCompat, readPluginManifest } from './compat.js';
 import { isRemoteManifest, remotePlugin, transportFor } from '../remote/index.js';
 
-// A plugin builder: `build<X>Plugin({ renders, config, make, z })` → Plugin (or a promise of one).
+// A plugin builder: `build<X>Plugin({ renders, config, make, z, modelMaySet, modelMaySave,
+// appliesOnRestart })` → Plugin (or a promise of one).
 // `z` is the host's zod, handed to every builder: a plugin with no bundler (and so no
 // runtime dependencies — the compiled binary cannot import a package from disk) still
-// declares its `configSchema`, and it is the same zod the host validates with.
-type BuiltinBuilder = (ctx: { renders: Record<string, unknown>; config: Record<string, unknown>; make: Make; z: typeof z }) => Plugin;
+// declares its `configSchema`, and it is the same zod the host validates with. The
+// three registries beside it are the host's marks (src/config/schema.ts): a plugin
+// registers a key of its own `configSchema` in them — what the model may set or save,
+// what is read only at start. A mark is found by its node in the host's registry, so
+// it must be these, never a registry of the plugin's own.
+const MARKS = { modelMaySet, modelMaySave, appliesOnRestart };
+type BuilderCtx = { renders: Record<string, unknown>; config: Record<string, unknown>; make: Make; z: typeof z } & typeof MARKS;
+type BuiltinBuilder = (ctx: BuilderCtx) => Plugin;
 
 const BUILTINS: BuiltinBuilder[] = [buildCorePlugin, buildAssistantPlugin, buildKeycapsPlugin, buildLogPlugin];
 
@@ -118,7 +127,7 @@ export async function loadPlugins({
   // symlink set).
   for (const build of BUILTINS) {
     try {
-      plugins.push(build({ renders, config, make, z }));
+      plugins.push(build({ renders, config, make, z, ...MARKS }));
     } catch (e) {
       console.warn(`[plugins] builtin skipped: ${(e as Error).message}`);
     }
@@ -165,7 +174,7 @@ export async function loadPlugins({
         // A builder may be async: a plugin whose tools are known only after it has asked
         // someone (an MCP server lists its tools once connected) returns a promise. It is
         // the plugin's job to bound that wait — the app starts only after it.
-        const plugin = await (build as (ctx: Parameters<BuiltinBuilder>[0]) => Plugin | Promise<Plugin>)({ renders, config, make, z });
+        const plugin = await (build as (ctx: BuilderCtx) => Plugin | Promise<Plugin>)({ renders, config, make, z, ...MARKS });
         // What the plugin IS, in its author's words, for the start screen — from its
         // manifest, unless the shape says it itself.
         plugin.description ??= manifestDescription(join(enabledDir, name));

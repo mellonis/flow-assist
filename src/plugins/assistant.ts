@@ -35,6 +35,7 @@ import { capConsoleData, consoleData, renderConsole } from '../assistant/console
 import { INTERACTIVE_ASK, runInteractive, type InteractiveDeps } from '../assistant/interactive.js';
 import { editorReducer } from '@flowtty/core';
 import { z } from 'zod';
+import { appliesOnRestart, modelMaySave, modelMaySet } from '../config/schema.js';
 import { anchorRow, askFieldWidth, blockRows, roomForBlock, chatFieldWidth, chatRows, chatWrapWidth, firstFoldRow, liveChatStatus, pagerTitle, pendingChatRows, renderChatStatus, renderChatStrip, rowAnchor, viewGroupFor, type RowOpts, type Viewport } from '../views/modals.js';
 import { CHAT_MODES, chatModeOf, inRect, type ChatMode, type PanelLayout } from '../runtime/panel-layout.js';
 import { allFolded, flipFolds, isClicked, isOpen, openInFull, pageable, toggleFold, type FoldState } from '../assistant/folds.js';
@@ -207,10 +208,20 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
     // (src/playback/theme.ts); `runOutputLines` — how many lines of a command's output
     // a click on its block shows (a display cap of its own, quite apart from
     // `shell.maxChars`, which is how much the MODEL is given); `^o` opens it in full.
+    // The model may change where the chat opens and which side the panel docks on — a
+    // layout the person undoes with one command. `mode` is read when the chat mounts
+    // (`/mode` moves it for the run); `panel.side` on every draw.
     configSchema: z.object({
-      mode: z.enum(['panel', 'window', 'full']).optional(),
+      mode: z.enum(['panel', 'window', 'full'])
+        .register(modelMaySet, { reason: 'where the chat opens — a layout, undone with one command' })
+        .register(modelMaySave, { reason: 'where the chat opens — a layout, undone with one command' })
+        .register(appliesOnRestart, {})
+        .optional(),
       panel: z.object({
-        side: z.enum(['right', 'bottom']).optional(),
+        side: z.enum(['right', 'bottom'])
+          .register(modelMaySet, { reason: 'which side the chat\'s panel docks on — a layout, undone with one command' })
+          .register(modelMaySave, { reason: 'which side the chat\'s panel docks on — a layout, undone with one command' })
+          .optional(),
         size: z.number().int().min(10).max(90).optional(),
       }).optional(),
       // Read as `mode: full` (true) — a legacy key; there is no `/fullscreen` command.
