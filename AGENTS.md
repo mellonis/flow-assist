@@ -383,10 +383,12 @@ protocol as its authors read it is docs/plugins.md, "A plugin in another languag
   manifest — `connect` for the socket, `run` alone for stdio — and wraps either in a
   restarting supervisor (`src/remote/supervisor.ts`).
 - **A `run` child's rules are held here, not by the plugin**: started without a shell,
-  its stderr going to the host's log, stopped with stdin closed, then a grace period,
-  then `SIGTERM`, then `SIGKILL` — the same shape "A plugin that starts a process owns
-  its life" (above) holds any child to. `transport-stdio.ts` is a copy of
-  `plugins-available/mcp/src/stdio.ts`'s own logic, since the host imports no plugin.
+  its stderr going to the host's log. A close the host WAITS for — a refused
+  handshake, on the first `hello` or a restart's — gets the full stop: stdin closed,
+  then a grace period, then `SIGTERM`, then `SIGKILL` — the same shape "A plugin that
+  starts a process owns its life" (above) holds any child to.
+  `src/remote/transport-stdio.ts` is a copy of `plugins-available/mcp/src/stdio.ts`'s
+  own logic, since the host imports no plugin.
 - **A `connect` server is spawned detached**, with `run`'s command plus
   `--serve <socket path>`, and a host never kills it — only disconnects; another host
   may still be on it. It ends itself, on its own idle timeout or a signal
@@ -398,20 +400,21 @@ protocol as its authors read it is docs/plugins.md, "A plugin in another languag
   `O_EXCL`; a lock whose pid is no longer alive is stale and taken over, the rule the
   session lock also follows (`src/assistant/sessions.ts`).
 - **The supervisor's backoff** (`src/remote/supervisor.ts`) lengthens each time
-  another failure comes quickly — within a second of starting — 1, 2, 4, 8, then
-  16 s; a sixth quick failure in a row gives up for good, logged as `disabled until
-  restart`; a restart that stays up longer resets the count. A restart whose `hello`
-  fails ends it the same way, at once (`./adapter.ts`'s `onRestart`). The very first
-  `start()` is never a restart: if it fails, that rejects to the loader alone and
-  nothing is scheduled.
+  another failure comes quickly — within a second of starting — 1, 2, 4, then 8 s; a
+  fifth quick failure in a row gives up for good, logged as `disabled until restart`
+  (the first of the five need not itself have been quick); a restart that stays up
+  longer resets the count. A restart whose `hello` fails ends it the same way, at once
+  (`src/remote/adapter.ts`'s `onRestart`). The very first `start()` is never a
+  restart: if it fails, that rejects to the loader alone and nothing is scheduled.
 - `src/remote/sockets.ts`'s `sockets/`, under `hostStateDir()` at 0700, is the host's
   own place for its sockets; a plugin names its socket, never a path.
 - **The host's own exit** (`src/remote/lifecycle.ts`) asks every remote plugin's
   `shutdown` (1 s) then closes its transport, every plugin in parallel, bounded to
   `STOP_ALL_TIMEOUT_MS` (1.5 s) so one that never answers cannot hold the exit open;
-  `src/main.ts` awaits it before its own `process.exit`. A `run` child still alive past
-  that bound is cleaned up by the process's own exit hook (`stopAllRemote`,
-  `transport-stdio.ts`), which sends it `SIGTERM`.
+  `src/main.ts` awaits it before its own `process.exit`. This is NOT the full stop
+  above: the host does not wait past its own bound, so a `run` child still alive at it
+  only ever gets the process's own exit hook's `SIGTERM` (`stopAllRemote`,
+  `src/remote/transport-stdio.ts`) — never a `SIGKILL` from the host's own exit.
 - **A crash**: the transport closes, the surface says `plugin stopped`, every tool in
   flight and every new one throws it, and `onRestart` runs `hello` again from an
   empty frame.

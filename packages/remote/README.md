@@ -144,14 +144,10 @@ or `connect` for a shared server (below) — and is enabled the same way any plu
 ln -s ../my-remote-plugin plugins-enabled/my-remote-plugin
 ```
 
-The host starts `run`'s command itself, without a shell, in the plugin's directory. On
-its own exit it asks the plugin to answer `shutdown`, closes stdin, and sends
-`SIGTERM` to whatever is still alive — nothing further, since it does not wait past
-its own bound. `runPlugin` already answers `shutdown` and exits on its own, so none of
-this ordinarily matters; a process that ignores both instead meets the fuller
-stop sequence a refused handshake gets (docs/plugins.md, "Running it", has the exact
-shape and timings, along with the crash-and-backoff cycle every remote plugin runs
-under).
+The host starts `run`'s command itself, without a shell, in the plugin's directory.
+`runPlugin` answers `shutdown` and exits on its own, so how the host stops one that
+doesn't — at its own exit, or on a refused handshake — and the crash-and-backoff cycle
+every remote plugin runs under are docs/plugins.md, "Running it".
 
 ## `--serve`: a shared server
 
@@ -165,10 +161,11 @@ changes.
 Each connection served this way is its own client: its own `hello`, its own model, its
 own protocol state, exactly as `runPlugin` runs over stdio. What every connection
 shares is whatever the process holds outside `servePlugin` itself — module state, a
-file, a database — never the model. The server exits on its own once its last client
-leaves, after the idle timeout the FIRST client's `hello` carried, and also on
-`SIGTERM` or `SIGINT`; a server started by hand runs this same code and lives the same
-way.
+file, a database — never the model. The idle timer that ends the server is armed the
+moment it starts listening, at 60 s, so one no host ever reaches still exits; the
+FIRST client's own `hello.idleMs` replaces that default from then on, for the rest of
+the process's life. It also ends on `SIGTERM` or `SIGINT`; a server started by hand
+runs this same code and lives the same way.
 
 ## Writing a client in another language
 

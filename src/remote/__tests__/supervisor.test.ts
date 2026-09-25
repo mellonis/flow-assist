@@ -43,9 +43,11 @@ test('five consecutive failures give up and say so; close during backoff spawns 
   const { factory, made } = scripted(); const tm = timers(); const log: string[] = [];
   const s = supervise(factory, { name: 'fake', log: (l) => log.push(l), timer: tm.timer });
   await s.start();
-  for (let i = 0; i < MAX_FAILURES; i++) { made.at(-1)!.close({ code: 1 }); tm.fire(); await Promise.resolve(); }
-  expect(made.length).toBe(MAX_FAILURES + 1);
-  made.at(-1)!.close({ code: 1 });
+  // The first death plus four more restarts that each fail quickly is five in a row —
+  // the fifth ends it, so only four restarts ever get spawned.
+  for (let i = 0; i < MAX_FAILURES - 1; i++) { made.at(-1)!.close({ code: 1 }); tm.fire(); await Promise.resolve(); }
+  expect(made.length).toBe(MAX_FAILURES);
+  made.at(-1)!.close({ code: 1 }); // the fifth failure in a row
   expect(tm.pending.length).toBe(0);
   expect(log.at(-1)).toContain('disabled until restart');
   const { factory: f2, made: m2 } = scripted(); const tm2 = timers();
