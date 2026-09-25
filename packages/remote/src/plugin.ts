@@ -114,6 +114,9 @@ export async function runPlugin<M, Msg = HostEvent>(def: PluginDef<M, Msg>, io?:
     const { serveConnections } = await import('./serve.js');
     return serveConnections((io) => servePlugin(def, io), argv[at + 1] ?? '');
   }
+  // Stdin closing means the host is gone (its end of the pipe closed, or it was
+  // killed): with no host left to answer, there is nothing left to serve.
+  process.stdin.on('end', () => process.exit(0));
   await servePlugin(def, stdioIo());
   process.exit(0);
 }

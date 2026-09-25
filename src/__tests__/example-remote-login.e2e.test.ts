@@ -50,3 +50,18 @@ test('the login example runs as a real process: its form draws, typing reaches i
   ui.app.unmount();
   await transport.close(500);
 });
+
+test('the plugin process exits once its stdin closes, as it does when the host that spawned it dies', async () => {
+  const dir = path.resolve(import.meta.dir, '../../examples/remote-login');
+  const proc = Bun.spawn(['bun', 'src/index.ts'], { cwd: dir, stdin: 'pipe', stdout: 'pipe', stderr: 'inherit' });
+  try {
+    await proc.stdin.end();
+    const code = await Promise.race([
+      proc.exited,
+      new Promise<'timeout'>((r) => setTimeout(() => r('timeout'), 2000)),
+    ]);
+    expect(code).toBe(0);
+  } finally {
+    if (proc.exitCode === null) proc.kill();
+  }
+});
