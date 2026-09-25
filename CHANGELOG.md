@@ -16,7 +16,7 @@ What each version of flow-assist brought, newest first. The version is the one i
   and the confirmation shows where it comes from, `stdin: result of search (call_3)`.
   An id that names no call, a call that failed, or a result that is not text is an
   error before the confirmation, and nothing runs. A cut or framed result keeps its
-  data beside what the model is sent (up to 1 MiB), so this still works after a
+  data beside what the model is sent (up to a million characters), so this still works after a
   restart. **For plugin authors:** a tool may return `{ text, raw }` — `text` what the
   model reads, `raw` the bare data a later command may read as its stdin, `null` for
   none.
