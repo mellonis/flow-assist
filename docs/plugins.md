@@ -391,7 +391,9 @@ own tests, or a test that hands it a transport of its own — as
 ### The example
 
 This is the whole of `examples/remote-login/src/index.ts` — a sign-in form the person
-opens with `S`:
+opens with `S`. Every key it acts on is one of its own actions, consumed and matched by
+action and drawn in the footer as `{ action, label }`, so a person who binds `open` to
+another key in `config.keys` opens it with that key and sees it in the caps:
 
 ```ts
 import { runPlugin, type HostEvent } from '@flow-assist/remote';
@@ -401,16 +403,16 @@ type Model = { name: string; pass: string; focus: 'name' | 'pass' | 'login'; not
 const next = (f: Model['focus']): Model['focus'] => (f === 'name' ? 'pass' : f === 'pass' ? 'login' : 'name');
 
 await runPlugin<Model, HostEvent>({
-  hello: { name: 'remote-login', keys: { open: 'S' }, entry: ['open'] },
+  hello: { name: 'remote-login', keys: { open: 'S', next: 'tab', login: 'enter', close: 'esc' }, entry: ['open'] },
   init: () => ({ name: '', pass: '', focus: 'name', note: '', open: false }),
   update: async (e, m, host) => {
     switch (e.type) {
       case 'key':
         if (e.key.action === 'open' && !m.open) return { ...m, open: true };
         if (!m.open) return m;
-        if (e.key.id === 'tab') return { ...m, focus: next(m.focus) };
-        if (e.key.id === 'escape') return { ...m, open: false };
-        if (e.key.id === 'return' && m.focus === 'login') {
+        if (e.key.action === 'next') return { ...m, focus: next(m.focus) };
+        if (e.key.action === 'close') return { ...m, open: false };
+        if (e.key.action === 'login' && m.focus === 'login') {
           if (!m.name || !m.pass) return { ...m, note: 'both fields are required' };
           await host.showMessage('Signed in');
           return { ...m, note: `signed in as ${m.name}` };
@@ -422,7 +424,7 @@ await runPlugin<Model, HostEvent>({
     }
   },
   view: (m) => (!m.open
-    ? { surface: null, keycaps: [], keys: { consume: ['S'] } }
+    ? { surface: null, keycaps: [], keys: { consume: ['open'] } }
     : {
         surface: ['Box', { flexDirection: 'column', padding: 1 },
           ['Text', { bold: true }, 'Sign in'],
@@ -430,9 +432,9 @@ await runPlugin<Model, HostEvent>({
           ['Text', { dim: true }, 'Password'], ['TextInput', { id: 'pass', mask: true, isFocused: m.focus === 'pass' }],
           ['Text', { inverse: m.focus === 'login' }, '[ Log in ]'],
           ['Text', { dim: true }, m.note]],
-        keycaps: [{ action: 'open', label: 'form' }, 'tab next', '⏎ log in', 'esc close'],
+        keycaps: [{ action: 'open', label: 'form' }, { action: 'next', label: 'next' }, { action: 'login', label: 'log in' }, { action: 'close', label: 'close' }],
         context: [{ label: 'Sign in', text: `name: ${m.name || '(empty)'} · focus: ${m.focus}` }],
-        keys: { consume: ['tab', 'enter', 'esc'] },
+        keys: { consume: ['open', 'next', 'login', 'close'] },
       }),
 });
 ```
@@ -533,17 +535,22 @@ whole frame loses its state.
 
 ### Keys
 
-A frame's `keys.consume` says which keys the plugin takes, written in the same words
-a person writes a binding in (`enter`, `esc`, `ctrl+r`), plus `'printable'` for
-anything that types a character and `'*'` for every key — canonicalised once per
-frame, so a plugin authoring `consume` never needs the terminal's own vocabulary
-(`return` for Enter, `escape` for Esc). The `key` event, in the other direction, IS in
-that vocabulary: `name` is exactly what the terminal reports, and `id` is that same
+A frame's `keys.consume` says which keys the plugin takes. An entry that names one of
+the plugin's own actions — a key of `hello.keys` — takes whatever key the person has
+bound that action to, so `consume: ["open"]` follows a remap and the plugin never
+learns which key it is; any other entry is a key written in the same words a person
+writes a binding in (`enter`, `esc`, `ctrl+r`); `'printable'` takes anything that
+types a character and `'*'` every key. Every entry is resolved once per frame, so a
+plugin authoring `consume` never needs the terminal's own vocabulary (`return` for
+Enter, `escape` for Esc). Consume by action wherever the plugin has one: a key consumed
+by name stays that key after a remap, while the footer's cap for the action moves.
+
+The `key` event, in the other direction, IS in that vocabulary: `name` is exactly what the terminal reports, and `id` is that same
 name with any held modifiers folded in, in a fixed order (`ctrl+`, `alt+`, `shift+` —
 the last only on a named key, since Shift on a bare character is already the
 character); for an unmodified key the two are equal (`{ name: "return", id: "return"
-}`). `action` is present only when the key resolves, under the person's own config, to
-one of the actions the plugin's `hello.keys` declares. The mouse is never consumable,
+}`). `action` is present whenever the key is the person's effective binding for one of
+the actions the plugin's `hello.keys` declares — match on it, never on a letter. The mouse is never consumable,
 whatever `consume` says.
 
 `keycaps` is the footer's hints for the plugin's current screen: each entry is a

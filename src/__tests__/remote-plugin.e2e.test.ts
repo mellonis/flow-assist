@@ -17,9 +17,11 @@ const until = async (ui: Ui, ok: () => boolean, what: string, n = 200) => {
 // The plugin side's footer — the row of hints; a docked chat's strip may sit under it.
 const footer = (ui: Ui) => ui.backend.lastFrame.split('\n').find((r) => r.includes(': commands')) ?? '';
 
-async function boot(hello: Parameters<typeof fakeRemote>[0] = {}, manifest: Parameters<typeof fakeRemote>[1] = {}, opts: { chatMode?: 'panel' | 'window' | 'full' | null } = {}) {
+// `opts.extra` is merged into the config, as `bootApp`'s own `extra` is.
+async function boot(hello: Parameters<typeof fakeRemote>[0] = {}, manifest: Parameters<typeof fakeRemote>[1] = {}, opts: { chatMode?: 'panel' | 'window' | 'full' | null; extra?: Record<string, unknown> } = {}) {
   const fake = fakeRemote({ keys: { open: 'S' }, entry: ['open'], ...hello }, manifest);
-  const ui = await bootApp(new ScriptedModel(), 100, 30, undefined, {}, { chatMode: null, ...opts, remote: { manifest: fake.manifest, transport: fake.transport } });
+  const { extra = {}, ...rest } = opts;
+  const ui = await bootApp(new ScriptedModel(), 100, 30, undefined, extra, { chatMode: null, ...rest, remote: { manifest: fake.manifest, transport: fake.transport } });
   return { fake, ui };
 }
 
@@ -59,6 +61,23 @@ test('a key in consume is taken and sent with its action; one not in consume goe
   expect(fake.events.filter(([m]) => m === 'key').map(([, p]) => p)).toEqual([{ name: 'tab', id: 'tab' }, { name: 'S', id: 'S', action: 'open' }]);
   await ui.press('L'); // not consumed: the host's log opens
   expect(ui.backend.lastFrame).toContain('╭─ Log');
+  ui.app.unmount();
+});
+
+test('an action in consume follows the person\'s remap: the remapped key reaches the plugin with its action, the default does not, and the caps show it', async () => {
+  const { fake, ui } = await boot({}, {}, { extra: { keys: { open: 'O' } } });
+  fake.frame({ surface: null, keycaps: [], keys: { consume: ['open'] } });
+  await settle(5);
+  expect(ui.backend.lastFrame).toMatch(/fake\s+O\s/); // the start screen leads in with the remapped key
+  await ui.press('S');
+  expect(fake.events.filter(([m]) => m === 'key')).toEqual([]);
+  await ui.press('O');
+  await until(ui, () => fake.events.some(([m]) => m === 'key'), 'the key');
+  expect(fake.events.filter(([m]) => m === 'key').map(([, p]) => p)).toEqual([{ name: 'O', id: 'O', action: 'open' }]);
+  fake.frame({ surface: ['Text', {}, 'form'], keycaps: [{ action: 'open', label: 'form' }], keys: { consume: ['open', 'tab'] } });
+  await until(ui, () => ui.backend.lastFrame.includes('form'), 'the surface');
+  expect(footer(ui)).toContain('O form');
+  expect(footer(ui)).not.toContain('S form');
   ui.app.unmount();
 });
 

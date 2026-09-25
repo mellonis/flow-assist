@@ -1,22 +1,28 @@
-// Which keys a remote plugin takes, and what it is told about one. `consume` in a frame
-// is written the way a person writes a binding (`enter`, `esc`, `ctrl+r`) and
-// canonicalised once per frame with the host's own `canonicalBinding`, so the plugin
-// never learns that the terminal says `return`. The event it gets carries all three
-// names: the terminal's, the canonical id bindings are compared by, and the action
-// from `hello.keys` the key resolves to under the person's `config.keys`.
+// Which keys a remote plugin takes, and what it is told about one. An entry of `consume`
+// in a frame is either one of the plugin's OWN actions (a key of `hello.keys`) — taken
+// as the person's effective binding for it, so a remap moves what is consumed and the
+// plugin never learns the key — or a key written the way a person writes a binding
+// (`enter`, `esc`, `ctrl+r`), canonicalised with the host's own `canonicalBinding`, so
+// the plugin never learns that the terminal says `return`. Either way it is resolved
+// once per frame. The event the plugin gets carries all three names: the terminal's,
+// the canonical id bindings are compared by, and the action from `hello.keys` the key
+// resolves to under the person's `config.keys`.
 import { canonicalBinding, isMouseButton, isPrintableKey, keyId } from '../playback/keys.js';
 import type { ConsumeSpec, KeyEvent } from '@flow-assist/remote';
 
 export interface InputKey { name: string; ctrl?: boolean; meta?: boolean; shift?: boolean }
 export type Consume = { all: true } | { all: false; ids: Set<string>; printable: boolean };
 
-export function canonicalConsume(spec: ConsumeSpec): Consume {
+// `actions` is the plugin's own actions with their effective bindings, already
+// canonical (`host.keys`, narrowed as for `keyEventFor`).
+export function canonicalConsume(spec: ConsumeSpec, actions: Record<string, string[]> = {}): Consume {
   if (spec === '*') return { all: true };
   const ids = new Set<string>();
   let printable = false;
   for (const s of spec) {
     if (s === 'printable') { printable = true; continue; }
-    for (const id of canonicalBinding(s)) ids.add(id);
+    const own = Object.hasOwn(actions, s) ? actions[s] : undefined;
+    for (const id of own ?? canonicalBinding(s)) ids.add(id);
   }
   return { all: false, ids, printable };
 }

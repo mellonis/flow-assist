@@ -343,10 +343,14 @@ into an ordinary `Plugin`; nothing else in the host knows a plugin is remote.
   keeps it by `id` and checks a frame's value against a ring of the last 32 values the
   host itself sent as events for that id: a match is the plugin echoing a moment the
   host already knows, and is not a write.
-- **Keys are consumed by what the frame declares**, canonicalised once per frame
-  (`src/remote/keys.ts`); the `key` event carries three names — the terminal's own,
-  the canonical one bindings are compared by, and the action it resolves to under the
-  plugin's own `hello.keys` and the person's config.
+- **Keys are consumed by what the frame declares** (`src/remote/keys.ts`): an entry
+  naming one of the plugin's own actions (a key of `hello.keys`) takes the person's
+  effective binding for it (`host.keys[action]`), any other is a key in the binding
+  vocabulary — resolved once per frame, in the key handler, since a frame may arrive
+  before `setup` hands over `host.keys`. The `key` event carries three names — the
+  terminal's own, the canonical one bindings are compared by, and the action whenever
+  the key is a declared action's effective binding. A plugin's actions share the one
+  keymap with the host's and every other plugin's (`buildKeys`), as a JS plugin's do.
 - `keycaps` with `{ action, label }` draws `` `${host.keyCap(action)} ${label}` ``, so
   a rebound key never needs the plugin to know.
 - `viewRenderers` are built from the manifest's `views`, not `hello` — every renderer

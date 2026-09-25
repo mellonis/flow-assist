@@ -89,7 +89,10 @@ export async function remotePlugin(opts: RemotePluginOpts): Promise<Plugin> {
   let frame = EMPTY;
   // Counts the frames drawn: a root that failed to draw is tried again on the next one.
   let frameSeq = 0;
-  let consume: Consume = canonicalConsume([]);
+  // What the last frame consumes, resolved against the person's bindings once per
+  // frame — in the key handler, where they are at hand (a frame may come before
+  // `setup`).
+  let consume: { of: typeof frame; keys: Consume } | null = null;
   let stopped: string | null = null; // `plugin stopped: …` while the process is down
   // Whether the surface was on screen when the process went: it stays there, saying so,
   // rather than leaving the person on the start screen with no word of what happened.
@@ -108,7 +111,6 @@ export async function remotePlugin(opts: RemotePluginOpts): Promise<Plugin> {
     if (!v.ok) { say(`frame dropped: ${v.why}`); return; }
     frame = v.frame;
     frameSeq++;
-    consume = canonicalConsume(frame.keys.consume);
     fields.applyFrame(frame.surface ?? null, frame.modals ?? {});
     stopped = null;
     notify();
@@ -218,7 +220,6 @@ export async function remotePlugin(opts: RemotePluginOpts): Promise<Plugin> {
     stoppedOnScreen = (frame.keycaps ?? []).length > 0 || (stoppedOnScreen && frame === EMPTY);
     frame = EMPTY;
     frameSeq++;
-    consume = canonicalConsume([]);
     fields.applyFrame(null, {});
     for (const reject of inFlight) reject(new Error(stopped));
     inFlight.clear();
@@ -322,6 +323,10 @@ export async function remotePlugin(opts: RemotePluginOpts): Promise<Plugin> {
   // the person's config resolves them.
   const ownActions = Object.keys(registration.keys ?? {});
   const ownBindings = (host: PluginApi['host']) => Object.fromEntries(ownActions.map((a) => [a, host.keys[a] ?? []]));
+  const consumeOf = (host: PluginApi['host']): Consume => {
+    if (consume?.of !== frame) consume = { of: frame, keys: canonicalConsume(frame.keys.consume, ownBindings(host)) };
+    return consume.keys;
+  };
 
   // ── the components ──────────────────────────────────────────────────────────
   const treeCtx = (ui: PluginApi['ui'], hasKeyboard: boolean): RenderCtx => ({ ui, hasKeyboard, state: fields, onEvent: (m, ev) => send(m, ev), warn: (l) => once(`prop:${l}`, l) });
@@ -366,7 +371,7 @@ export async function remotePlugin(opts: RemotePluginOpts): Promise<Plugin> {
           mode: 'consume',
           priority: (u) => (u.cmdOpen ? 0 : openModals().length ? MODAL_PRIORITY : frame.keycaps?.length ? SURFACE_PRIORITY : ENTRY_PRIORITY),
           handler: (key) => {
-            if (stopped || !host.hasKeyboard() || !consumes(consume, key)) return false;
+            if (stopped || !host.hasKeyboard() || !consumes(consumeOf(host), key)) return false;
             send('key', keyEventFor(key, ownBindings(host)));
             return true;
           },

@@ -24,3 +24,15 @@ test('the key event carries the terminal name, the canonical id and the action t
   expect(keyEventFor({ name: 'n', ctrl: true }, { open: ['return'], next: ['ctrl+n'] })).toEqual({ name: 'n', id: 'ctrl+n', ctrl: true, action: 'next' });
   expect(keyEventFor({ name: 'x' }, { open: ['return'] })).toEqual({ name: 'x', id: 'x' });
 });
+
+test('an entry naming one of the plugin\'s own actions consumes that action\'s effective binding, not its name', () => {
+  const own = { open: ['O'], next: ['tab'] };
+  const spec = canonicalConsume(['open', 'next', 'esc'], own);
+  expect(consumes(spec, { name: 'O' })).toBe(true);
+  expect(consumes(spec, { name: 'tab' })).toBe(true);
+  expect(consumes(spec, { name: 'escape' })).toBe(true); // not an action: a binding, as before
+  expect(consumes(spec, { name: 'o' })).toBe(false);
+  expect(consumes(spec, { name: 'S' })).toBe(false);
+  // An unbound action consumes nothing.
+  expect(consumes(canonicalConsume(['open'], { open: [] }), { name: 'o' })).toBe(false);
+});

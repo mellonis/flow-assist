@@ -8,16 +8,16 @@ type Model = { name: string; pass: string; focus: 'name' | 'pass' | 'login'; not
 const next = (f: Model['focus']): Model['focus'] => (f === 'name' ? 'pass' : f === 'pass' ? 'login' : 'name');
 
 await runPlugin<Model, HostEvent>({
-  hello: { name: 'remote-login', keys: { open: 'S' }, entry: ['open'] },
+  hello: { name: 'remote-login', keys: { open: 'S', next: 'tab', login: 'enter', close: 'esc' }, entry: ['open'] },
   init: () => ({ name: '', pass: '', focus: 'name', note: '', open: false }),
   update: async (e, m, host) => {
     switch (e.type) {
       case 'key':
         if (e.key.action === 'open' && !m.open) return { ...m, open: true };
         if (!m.open) return m;
-        if (e.key.id === 'tab') return { ...m, focus: next(m.focus) };
-        if (e.key.id === 'escape') return { ...m, open: false };
-        if (e.key.id === 'return' && m.focus === 'login') {
+        if (e.key.action === 'next') return { ...m, focus: next(m.focus) };
+        if (e.key.action === 'close') return { ...m, open: false };
+        if (e.key.action === 'login' && m.focus === 'login') {
           if (!m.name || !m.pass) return { ...m, note: 'both fields are required' };
           await host.showMessage('Signed in');
           return { ...m, note: `signed in as ${m.name}` };
@@ -29,7 +29,7 @@ await runPlugin<Model, HostEvent>({
     }
   },
   view: (m) => (!m.open
-    ? { surface: null, keycaps: [], keys: { consume: ['S'] } }
+    ? { surface: null, keycaps: [], keys: { consume: ['open'] } }
     : {
         surface: ['Box', { flexDirection: 'column', padding: 1 },
           ['Text', { bold: true }, 'Sign in'],
@@ -37,8 +37,8 @@ await runPlugin<Model, HostEvent>({
           ['Text', { dim: true }, 'Password'], ['TextInput', { id: 'pass', mask: true, isFocused: m.focus === 'pass' }],
           ['Text', { inverse: m.focus === 'login' }, '[ Log in ]'],
           ['Text', { dim: true }, m.note]],
-        keycaps: [{ action: 'open', label: 'form' }, 'tab next', '⏎ log in', 'esc close'],
+        keycaps: [{ action: 'open', label: 'form' }, { action: 'next', label: 'next' }, { action: 'login', label: 'log in' }, { action: 'close', label: 'close' }],
         context: [{ label: 'Sign in', text: `name: ${m.name || '(empty)'} · focus: ${m.focus}` }],
-        keys: { consume: ['tab', 'enter', 'esc'] },
+        keys: { consume: ['open', 'next', 'login', 'close'] },
       }),
 });

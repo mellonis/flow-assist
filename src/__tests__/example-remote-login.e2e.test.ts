@@ -43,6 +43,10 @@ test('the login example runs as a real process: its form draws, typing reaches i
     await until(() => ui.backend.lastFrame.includes('remote-login'), 'the plugin on the start screen');
     await ui.press('S');
     await until(() => ui.backend.lastFrame.includes('Sign in'), 'the form');
+    // Every cap is an action's, drawn with the key it is bound to.
+    const footer = ui.backend.lastFrame.split('\n').find((r) => r.includes(': commands')) ?? '';
+    expect(footer).toContain('S form');
+    expect(footer).toContain('⏎ log in');
     await ui.type('ann');
     await ui.press('tab');
     await ui.type('secret');
@@ -51,6 +55,34 @@ test('the login example runs as a real process: its form draws, typing reaches i
     await until(() => ui.backend.lastFrame.includes('signed in as ann'), 'the signed-in note');
     expect(ui.backend.lastFrame).toContain('Signed in'); // the toast
     expect(ui.backend.lastFrame).not.toContain('secret'); // masked
+  } finally {
+    ui.app.unmount();
+    await transport.close(500);
+  }
+});
+
+test('the example follows a remap: its own actions are consumed on the keys the person bound them to', async () => {
+  const dir = path.resolve(import.meta.dir, '../../examples/remote-login');
+  const transport = spawnTransport(['bun', 'src/index.ts'], dir);
+  const ui = await bootApp(new ScriptedModel(), 100, 30, undefined, { keys: { open: 'O', next: 'ctrl+n' } }, { chatMode: null, remote: { manifest, transport } });
+  try {
+    await until(() => ui.backend.lastFrame.includes('remote-login'), 'the plugin on the start screen');
+    await ui.press('S'); // the default no longer opens it
+    await settle(20);
+    expect(ui.backend.lastFrame).not.toContain('Sign in');
+    await ui.press('O');
+    await until(() => ui.backend.lastFrame.includes('Sign in'), 'the form');
+    const footer = ui.backend.lastFrame.split('\n').find((r) => r.includes(': commands')) ?? '';
+    expect(footer).toContain('O form');
+    expect(footer).toContain('^n next');
+    await ui.type('ann');
+    ui.backend.press({ name: 'n', ctrl: true });
+    await settle(20);
+    await ui.type('pw'); // into the password field: ^n moved the focus
+    await settle(20);
+    expect(ui.backend.lastFrame).toContain('ann');
+    expect(ui.backend.lastFrame).not.toContain('annpw');
+    expect(ui.backend.lastFrame).not.toContain('pw');
   } finally {
     ui.app.unmount();
     await transport.close(500);
