@@ -1763,11 +1763,11 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     above it scroll away with the question. A held round that turns out to carry a
     call folds into its step row under the held position, and the box keeps that
     position through the shrink, so the next round's answer grows under it (a test
-    holds this: it rests on flowtty's box keeping its offset). It counts only for a turn the list saw being
-    written (`streaming` with that question the last thing sent — a whole answer may
-    arrive in the render that ends its turn, and a resumed session is no answer
-    arriving) and only while that turn's message is the LAST one, so a background
-    result landing under an answer never trips it.
+    holds this: it rests on flowtty's box keeping its offset). It counts only for a
+    turn the list saw being written (`streaming` with that question the last thing
+    sent — a whole answer may arrive in the render that ends its turn, and a resumed
+    session is no answer arriving) and only while that turn's message is the LAST
+    one, so a background result landing under an answer never trips it.
   - **A block taller than the conversation opens in the pager**, not into the
     conversation. When a click would OPEN a `view`, `tools`, `steps`, `thinking` or
     `summary` block (`pageable` in `folds.ts`), the chat measures the block WHOLE — as

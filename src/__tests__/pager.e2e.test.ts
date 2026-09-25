@@ -334,9 +334,10 @@ test('a long reasoning opens in the pager titled thinking, reads to its end, and
 
 // The conversation is held, not drawn, under the pager: what arrives while it is up is
 // there when the pager closes, and the list is where it would have been had it been on
-// screen — at its end if it was following, on the same rows if it was scrolled up.
+// screen — a long answer anchored at its first line if it was following, on the same
+// rows if it was scrolled up.
 const LATE = Array.from({ length: 8 }, (_, i) => `Late line ${i + 1}.`).join('\n\n');
-test('an answer arriving while the pager is up: Esc shows it, the list following to its end', async () => {
+test('a long answer arriving while the pager is up: Esc shows it anchored at its first line', async () => {
   const model = new ScriptedModel();
   model.script(
     [{ tool: 'run_command', args: { command: 'seq 1 300' } }],
@@ -362,6 +363,13 @@ test('an answer arriving while the pager is up: Esc shows it, the list following
   expect(ui.backend.lastFrame).not.toContain('Late line');
   await ui.press('escape');
   expect(pagerUp(ui)).toBe(false);
+  // The answer's first line is the row under the pinned question; the rest is below.
+  const lines = ui.backend.lastFrame.split('\n');
+  const pin = lines.findIndex((l) => l.includes('› go on'));
+  expect(pin).toBeGreaterThanOrEqual(0);
+  expect(lines[pin + 1]).toContain('Late line 1.');
+  expect(ui.backend.lastFrame).not.toContain('Late line 8.');
+  await ui.press('pagedown');
   expect(ui.backend.lastFrame).toContain('Late line 8.');
   ui.app.unmount();
 });
