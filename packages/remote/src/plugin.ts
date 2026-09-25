@@ -82,8 +82,11 @@ export function servePlugin<M, Msg = HostEvent>(def: PluginDef<M, Msg>, io: Peer
       if (finished) return;
       finished = true;
       const settled = queue.then(() => {}, () => {});
-      const capped = new Promise<void>((r) => setTimeout(r, DRAIN_MS));
-      void Promise.race([settled, capped]).then(() => { peer.close(); done(); });
+      let timer: ReturnType<typeof setTimeout>;
+      const capped = new Promise<void>((r) => { timer = setTimeout(r, DRAIN_MS); });
+      // Cleared once either side of the race wins, so a closed connection never keeps
+      // the event loop alive for the rest of `DRAIN_MS` on its own.
+      void Promise.race([settled, capped]).then(() => { clearTimeout(timer); peer.close(); done(); });
     };
     peer.onRequest('hello', (params) => {
       model = def.init(params as HelloParams);

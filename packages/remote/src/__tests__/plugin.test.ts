@@ -85,7 +85,7 @@ test('shutdown waits, bounded, for an update already in flight to finish its own
     init: () => ({ n: 0 }),
     update: async (msg, m) => {
       if (msg.type !== 'afterWrite') return m;
-      await new Promise((r) => setTimeout(r, 40)); // the update's own side effect
+      await new Promise((r) => setTimeout(r, 150)); // the update's own side effect
       settled = true;
       return { n: m.n + 1 };
     },
@@ -93,7 +93,7 @@ test('shutdown waits, bounded, for an update already in flight to finish its own
   }, pluginIo);
   await host.request('hello', { hostApi: 2, config: {} });
   host.notify('afterWrite'); // starts the update; nothing else is awaiting a host reply
-  await tick(); // the update is now mid-flight, awaiting its own 40 ms timer
+  await tick(); // the update is now mid-flight, awaiting its own 150 ms timer
   await host.request('shutdown'); // answered at once — it does not wait on the drain
   expect(settled).toBe(false); // the update's side effect has not landed yet
   await run; // resolves once the update settles (well inside the 1 000 ms bound)
@@ -109,7 +109,7 @@ test('over stdio, an update in flight gets the same bounded chance to finish whe
     init: () => ({ n: 0 }),
     update: async (msg, m) => {
       if (msg.type !== 'afterWrite') return m;
-      await new Promise((r) => setTimeout(r, 40));
+      await new Promise((r) => setTimeout(r, 150));
       settled = true;
       return { n: m.n + 1 };
     },
