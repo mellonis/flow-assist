@@ -37,6 +37,7 @@ export function stdioTransport(opts: StdioOpts): Transport & { start(): Promise<
   let child: ChildProcess | undefined;
   let closedWith: TransportClose | undefined;
   let exited = false; // the OS process, specifically — set only by the exit event, so close() never re-arms a kill on a process it has already seen die
+  let spawned = false; // a child that failed to start (ENOENT) fires `error`, never `exit` — close() must not wait on an exit that is never coming
   const closeOnce = (why: TransportClose) => { if (closedWith) return; closedWith = why; live.delete(child!); for (const f of closes) f(why); };
   const splitter = new LineSplitter((l) => lines.forEach((f) => f(l)), (n) => opts.log(`[${opts.name}] a line of ${n} bytes was dropped`));
   return {
@@ -50,6 +51,7 @@ export function stdioTransport(opts: StdioOpts): Transport & { start(): Promise<
       // say) must still be heard, or it has no listener and crashes the host.
       c.on('error', (e) => { reject(new Error(`${opts.name}: cannot start ${opts.command.join(' ')}: ${e.message}`)); closeOnce({ error: e.message }); });
       c.once('spawn', () => {
+        spawned = true;
         live.add(c);
         c.unref();
         for (const s of [c.stdin, c.stdout, c.stderr]) (s as { unref?: () => void } | null)?.unref?.();
@@ -69,7 +71,7 @@ export function stdioTransport(opts: StdioOpts): Transport & { start(): Promise<
     onLine: (f) => { lines.push(f); },
     onClose: (f) => { closes.push(f); },
     close: async (graceMs) => {
-      if (!child || exited) return;
+      if (!child || exited || !spawned) return;
       const c = child;
       const done = new Promise<void>((r) => c.once('exit', () => r()));
       // One timer handle, whichever stage is current: cleared unconditionally on

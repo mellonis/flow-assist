@@ -41,6 +41,10 @@ test('a crash closes with its exit code; stderr goes to the log line by line; st
 test('a command that cannot start is a rejection, not a crash', async () => {
   const t = stdioTransport({ name: 'fake', command: ['./no-such-binary'], cwd, log: () => {} });
   await expect(t.start()).rejects.toThrow('./no-such-binary');
+  // A child that never spawned fires `error`, never `exit` — close() must not wait
+  // on an exit that is never coming.
+  const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('close() hung')), 1_500));
+  await expect(Promise.race([t.close(100), timeout])).resolves.toBeUndefined();
 });
 
 test('close kills a child that ignores shutdown', async () => {
