@@ -110,7 +110,7 @@ export function frame(server: string, tool: string, text: string, isError: boole
   ].join('\n');
 }
 
-export function toolGroup(name: string, spec: ServerSpec, client: McpClient, tools: McpTool[]) {
+export function toolGroup(name: string, spec: ServerSpec, client: McpClient, tools: McpTool[], instructions?: string) {
   const byWire = new Map<string, string>();
   const personSays = claimedReadOnly(spec);
   const defs = tools.map((t) => {
@@ -133,6 +133,10 @@ export function toolGroup(name: string, spec: ServerSpec, client: McpClient, too
   return {
     id: `mcp:${name}`,
     alwaysOn: false,
+    // The server's own guidance from `initialize` (how its data is shaped, its
+    // vocabulary, what to check) — where the model reads the group's tools, trusted
+    // the way a tool's own description is: this is a server the person configured.
+    ...(instructions ? { description: instructions } : {}),
     tools: defs,
     exec: async (wire: string, args: Record<string, unknown>) => {
       const tool = byWire.get(wire) ?? byWire.get(wire.replace(/__/, ':'));
@@ -176,7 +180,7 @@ export async function connectServers(
       const tools = await client.listTools();
       const unknown = unknownReadOnly(spec, tools);
       return {
-        group: toolGroup(name, spec, client, tools),
+        group: toolGroup(name, spec, client, tools, info.instructions),
         status: {
           name, ok: true, tools: tools.length,
           detail: `${info.serverName ?? 'server'}${info.serverVersion ? ` ${info.serverVersion}` : ''}, ${tools.length} tools`,

@@ -15,7 +15,7 @@
 // ─── Types ────────────────────────────────────────────────────────────────────
 import crypto from 'node:crypto';
 import type { ToolDef, ToolCtx } from '../loader/tools.js';
-import { chatTools, execChatTool, chatToolDefs, chatToolGroupOf } from '../loader/tools.js';
+import { chatTools, execChatTool, chatToolDefs, chatToolGroupOf, chatGroupDescriptions } from '../loader/tools.js';
 import type { ToolRunEntry } from '../runtime/services/log.js';
 import { changeView, type Change, type ChangeView } from './diff.js';
 import { acceptData, isConsoleKind, readLegacyView, type ViewRecord } from './views.js';
@@ -581,7 +581,7 @@ export function toolCatalog(extraTools: ToolDef[] = []): CatalogEntry[] {
 // What the NEXT request will carry — for the context meter, which must measure what
 // is sent, not everything that could be.
 export function requestTools(extraTools: ToolDef[], mode: ToolLoading = 'all', set: ToolSet = createToolSet()): ToolDef[] {
-  return toolsToSend(toolCatalog(extraTools), mode, set);
+  return toolsToSend(toolCatalog(extraTools), mode, set, chatGroupDescriptions());
 }
 
 // ─── Agent loop ───────────────────────────────────────────────────────────────
@@ -687,8 +687,9 @@ export async function agentChat(
   // it is not loaded.
   const deferred = deferredTools(catalog);
   const onDemand = toolLoading === 'onDemand' && deferred.size > 0;
+  const groupDescriptions = chatGroupDescriptions();
   for (const e of catalog) onWire(e.def);
-  const roundTools = (): ToolDef[] => toolsToSend(catalog, toolLoading, toolSet).map(onWire);
+  const roundTools = (): ToolDef[] => toolsToSend(catalog, toolLoading, toolSet, groupDescriptions).map(onWire);
   let content = ''; // final answer (last round without tool_calls)
   let process = ''; // narration of moves from rounds WITH tool_calls — folded
   const toolRuns: ToolRun[] = []; // trace of executed tools

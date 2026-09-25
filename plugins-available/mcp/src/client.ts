@@ -44,6 +44,23 @@ export interface McpClientOptions {
 
 export class McpError extends Error {}
 
+// `initialize`'s `instructions`, kept whole up to this many code points — cut never
+// splits a surrogate pair, matching the cap other pieces of text the model sees use
+// (`docs/plugins.md`, results). The rest is said, not silently dropped.
+const MAX_INSTRUCTIONS = 2_000;
+
+// Trimmed, and capped by code points with a note when it does not fit — nothing else:
+// the app's own framing and control characters are taken out where the model actually
+// reads it (`ToolGroup.description`, `src/assistant/tool-loading.ts`'s
+// `sanitizeGroupDescription`), the one place every group's description passes through,
+// not here, where a plugin loaded from source has no host module to call.
+function capInstructions(raw: string): string {
+  const trimmed = raw.trim();
+  const cps = Array.from(trimmed);
+  if (cps.length <= MAX_INSTRUCTIONS) return trimmed;
+  return `${cps.slice(0, MAX_INSTRUCTIONS).join('')}\n… (${cps.length - MAX_INSTRUCTIONS} more characters not shown)`;
+}
+
 // What the protocol needs of a transport: send one JSON-RPC message and, when it is a
 // request (`expectResponse`), resolve with the raw message answering it — the protocol
 // unwraps `result` / `error` itself. A transport rejects with an McpError: `no answer in
@@ -76,16 +93,17 @@ export function createProtocol(transport: McpTransport, opts: ProtocolOptions, o
   const notify = (method: string) => transport.send({ jsonrpc: '2.0', method }, false, connectTimeoutMs);
 
   return {
-    async initialize(): Promise<{ serverName?: string; serverVersion?: string; protocolVersion: string }> {
+    async initialize(): Promise<{ serverName?: string; serverVersion?: string; protocolVersion: string; instructions?: string }> {
       const r = (await request('initialize', {
         protocolVersion: PROTOCOL_VERSION,
         capabilities: {},
         clientInfo: { name: 'flow-assist', version: opts.clientVersion ?? '0' },
-      }, connectTimeoutMs)) as { protocolVersion?: string; serverInfo?: { name?: string; version?: string } };
+      }, connectTimeoutMs)) as { protocolVersion?: string; serverInfo?: { name?: string; version?: string }; instructions?: string };
       const protocol = r?.protocolVersion ?? PROTOCOL_VERSION;
       onProtocol?.(protocol);
       await notify('notifications/initialized');
-      return { serverName: r?.serverInfo?.name, serverVersion: r?.serverInfo?.version, protocolVersion: protocol };
+      const instructions = typeof r?.instructions === 'string' && r.instructions.trim() ? capInstructions(r.instructions) : undefined;
+      return { serverName: r?.serverInfo?.name, serverVersion: r?.serverInfo?.version, protocolVersion: protocol, ...(instructions ? { instructions } : {}) };
     },
     async listTools(): Promise<McpTool[]> {
       const tools: McpTool[] = [];

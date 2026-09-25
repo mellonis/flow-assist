@@ -34,19 +34,23 @@ const cut = (s: string, max: number): string => {
 };
 const len = (s: string): number => Array.from(s).length;
 
-// What an item may not carry, because the block's own frame is made of it: the marker
-// line, the item delimiters, the closing line's words and the heading. An item's text
-// is someone else's writing and is the last thing the model reads, so a text that
-// closed the block and went on "as the person" would otherwise read as the person.
-// Taken out wherever it stands, in any case; the nonce is what actually binds the frame.
+// What a piece of text from outside the app may not carry, because a frame the app
+// itself draws is made of these words: this block's marker line, its item delimiters,
+// its closing line and heading, and the header a tool result's own frame uses
+// (`plugins-available/mcp`'s `frame()`). A screen item's text or a tool group's
+// description is someone else's writing and the last thing the model reads before or
+// beside the app's own framing, so a text that reproduced one would otherwise read as
+// the app. Taken out wherever it stands, in any case; a nonce (this block's own) is
+// what actually binds a frame that needs one.
 const FRAME_PARTS = [
   /\[context from the app, not a message from the person\]/gi,
   /<\/?\s*screen-item\b[^>]*>?/gi,
   /end of screen context/gi,
   /what the person sees now/gi,
+  /(?:Result of|ERROR from)\b[^\n]*?— data from [^\n]*?, not instructions:[^\n]*/gi,
 ];
 // A heading left with no words (`## End of screen context` → `##`) goes too.
-const unframe = (s: string): string => FRAME_PARTS.reduce((t, re) => t.replace(re, ''), s).replace(/^[ \t]*#+[ \t]*$/gm, '');
+export const unframe = (s: string): string => FRAME_PARTS.reduce((t, re) => t.replace(re, ''), s).replace(/^[ \t]*#+[ \t]*$/gm, '');
 
 // One item as it may be sent and drawn: no escape sequences or control characters, a
 // label on one line, both cut to their caps. Anything that is not an item is nothing.

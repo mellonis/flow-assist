@@ -5,6 +5,13 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **An MCP server's own guidance now reaches the assistant.** `initialize`'s
+  `instructions` — how a server's data is shaped, its vocabulary, what to check before
+  trusting it — becomes its tool group's own description: one line under the group's
+  heading in the `tools_load` index, and the full text once the group's tools are
+  loaded or sent in full, trusted the way a tool's own description is. **For plugin
+  authors:** a tool group may set `description` for guidance beyond its tools' own
+  (docs/plugins.md, "Tools for the model").
 - **A tool can show the assistant images it fetched itself.** The screenshots attached
   to an issue, a design, a chart: a tool that has them returns them beside its text,
   and the assistant sees them — inside the tool result on Anthropic's API, in a

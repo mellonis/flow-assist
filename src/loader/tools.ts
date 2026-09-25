@@ -71,6 +71,13 @@ export interface ToolGroup {
   alwaysOn?: boolean;
   tools: ToolDef[];
   exec(name: string, args: Record<string, unknown>, ctx: ToolCtx): Promise<ToolResult>;
+  // What the group is, beyond its tools' own descriptions — an MCP server's
+  // `instructions`, say: how its data is shaped, its vocabulary, what to check before
+  // trusting it. Read where the model reads the group's tools (tools on demand: the
+  // index line under the group's heading, and the full text once the group is loaded
+  // or sent in full — src/assistant/tool-loading.ts), sanitized the same way a tool
+  // description is. Absent for a group that is just its tools.
+  description?: string;
 }
 
 export interface ToolRegistry {
@@ -289,6 +296,13 @@ export function chatToolDefs(): ToolDef[] {
 // index the rest by group (src/assistant/tool-loading.ts).
 export function chatToolGroupOf(): Map<string, string> {
   return new Map(currentRegistry?.groups.flatMap((g) => g.tools.map((t) => [t.function.name, g.id] as [string, string])) ?? []);
+}
+
+// A group's own description, by its id — raw, as the group set it: tools on demand
+// sanitizes and shapes it (src/assistant/tool-loading.ts). A group with none is absent,
+// not an empty string.
+export function chatGroupDescriptions(): Map<string, string> {
+  return new Map(currentRegistry?.groups.flatMap((g) => (g.description ? [[g.id, g.description] as [string, string]] : [])) ?? []);
 }
 
 // Dispatches a tool call to the current registry (source-faithful, module-level).

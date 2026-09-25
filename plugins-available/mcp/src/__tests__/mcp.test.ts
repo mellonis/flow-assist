@@ -8,7 +8,7 @@ type Call = { url: string; headers: Record<string, string>; body: any };
 
 // A fake server: answers initialize / tools/list / tools/call; `sse` answers as an event
 // stream with a notification first; `pages` splits the tool list.
-function fakeServer(opts: { tools?: any[]; sse?: boolean; pages?: number; session?: string; callResult?: any; fail?: 'http' | 'rpc' } = {}) {
+function fakeServer(opts: { tools?: any[]; sse?: boolean; pages?: number; session?: string; callResult?: any; fail?: 'http' | 'rpc'; instructions?: string } = {}) {
   const calls: Call[] = [];
   const tools = opts.tools ?? [{ name: 'get_file_text', description: 'Read a file', inputSchema: { type: 'object', properties: { path: { type: 'string' } } }, annotations: { readOnlyHint: true } }, { name: 'replace_text', description: 'Edit a file' }];
   const fetch: Fetcher = async (url, init) => {
@@ -20,7 +20,7 @@ function fakeServer(opts: { tools?: any[]; sse?: boolean; pages?: number; sessio
     if (body.id === undefined) return new Response(null, { status: 202 });
     let msg: any;
     if (opts.fail === 'rpc') msg = { jsonrpc: '2.0', id: body.id, error: { code: -32601, message: 'Method not found' } };
-    else if (body.method === 'initialize') msg = { jsonrpc: '2.0', id: body.id, result: { protocolVersion: PROTOCOL_VERSION, serverInfo: { name: 'WebStorm', version: '2026.2' }, capabilities: { tools: {} } } };
+    else if (body.method === 'initialize') msg = { jsonrpc: '2.0', id: body.id, result: { protocolVersion: PROTOCOL_VERSION, serverInfo: { name: 'WebStorm', version: '2026.2' }, capabilities: { tools: {} }, ...(opts.instructions !== undefined ? { instructions: opts.instructions } : {}) } };
     else if (body.method === 'tools/list') {
       const per = Math.ceil(tools.length / (opts.pages ?? 1));
       const at = Number(body.params?.cursor ?? 0);
@@ -77,6 +77,27 @@ describe('the client', () => {
   test('results as text: text kept, images and resources named', () => {
     expect(resultText({ content: [{ type: 'text', text: 'a' }, { type: 'image', mimeType: 'image/png', data: 'x' }, { type: 'resource', resource: { uri: 'file:///a', text: 'body' } }, { type: 'resource_link', uri: 'file:///b' }] })).toBe('a\n[image image/png — not shown]\nbody\n[link file:///b]');
     expect(resultText({ structuredContent: { n: 1 } })).toContain('"n": 1');
+  });
+
+  test('initialize\'s instructions are kept, trimmed and capped; a server with none leaves it unset', async () => {
+    const s = fakeServer({ instructions: '  Statuses are numeric ids: 1 open, 2 done.  ' });
+    const c = createMcpClient({ url: 'http://x', fetch: s.fetch });
+    expect((await c.initialize()).instructions).toBe('Statuses are numeric ids: 1 open, 2 done.');
+
+    const long = fakeServer({ instructions: 'x'.repeat(2500) });
+    const c2 = createMcpClient({ url: 'http://x', fetch: long.fetch });
+    const capped = (await c2.initialize()).instructions!;
+    expect(capped.length).toBeLessThan(2500);
+    expect(capped.startsWith('x'.repeat(2000))).toBe(true);
+    expect(capped).toContain('more characters not shown');
+
+    const none = fakeServer();
+    const c3 = createMcpClient({ url: 'http://x', fetch: none.fetch });
+    expect((await c3.initialize()).instructions).toBeUndefined();
+
+    const blank = fakeServer({ instructions: '   ' });
+    const c4 = createMcpClient({ url: 'http://x', fetch: blank.fetch });
+    expect((await c4.initialize()).instructions).toBeUndefined();
   });
 });
 
@@ -156,6 +177,14 @@ describe('the tool group', () => {
     const n = toolName('a-very-long-server-name-indeed', 'tool.with/odd chars-and-a-very-long-name-that-goes-on-and-on');
     expect(n.replace(':', '__').length).toBeLessThanOrEqual(64);
     expect(n).toMatch(/^[A-Za-z0-9_-]+:[A-Za-z0-9_-]+$/);
+  });
+
+  test('a server\'s instructions become the group\'s own description; a server with none leaves it unset', () => {
+    const c = createMcpClient({ url: 'http://x', fetch: fakeServer().fetch });
+    const withInstructions = toolGroup('webstorm', { url: 'http://x' }, c, tools, 'Statuses are numeric ids: 1 open, 2 done.');
+    expect(withInstructions.description).toBe('Statuses are numeric ids: 1 open, 2 done.');
+    const withoutInstructions = toolGroup('webstorm', { url: 'http://x' }, c, tools);
+    expect(withoutInstructions.description).toBeUndefined();
   });
 });
 

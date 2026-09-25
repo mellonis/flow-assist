@@ -156,6 +156,13 @@ What the host does with it, and what it expects back:
   `tools_load` also accepts the name qualified with its group, `<group>:<name>`, as
   well as the bare name the index shows — the index reads naturally either way, and a
   model that qualifies it is not refused for a round.
+- **A group may describe itself, beyond what its tools' own descriptions say** — set
+  `description` on the group (`{ id, tools, exec, description }`) for guidance that
+  belongs to the whole group: how its data is shaped, its vocabulary, what to check
+  before trusting it. It shows as one line under the group's heading in the index,
+  cut the same way a tool's first sentence is, and in full once the group's tools are
+  loaded or sent — never repeated per tool. Sanitized the same way a tool description
+  is; trust it the same way too.
 - **A result over `ai.toolResultMaxChars` (default 40000) is cut before it joins the
   conversation** — the head kept, a short tail too, and a note in between saying how
   much was cut (src/assistant/tool-result-cap.ts). Only what is SENT is capped: a

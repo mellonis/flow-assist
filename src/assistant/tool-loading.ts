@@ -20,6 +20,8 @@
 // with the session and empties it on /clear; a background run and the one-shot CLI get
 // a fresh one. Everything here is pure; `agentChat` does the wiring.
 import type { ToolDef } from '../loader/tools.js';
+import { unframe } from './screen-context.js';
+import { sanitizeViewText } from './views.js';
 
 export type ToolLoading = 'all' | 'onDemand';
 
@@ -77,24 +79,39 @@ export function toolSummary(description: string, max = 110): string {
   return first.length > max ? `${first.slice(0, max - 1).trimEnd()}…` : first;
 }
 
+// A group's description as the model may read it: control characters and escape
+// sequences gone (`sanitizeViewText`), and the app's own frame words taken out
+// (`unframe`) — a server's own text (an MCP server's `instructions`, say) is trusted
+// like a tool description, but not trusted to reproduce the app's own framing.
+export function sanitizeGroupDescription(raw: string): string {
+  return unframe(sanitizeViewText(raw)).trim();
+}
+
 // The tools that are NOT always sent, by name.
 export function deferredTools(catalog: CatalogEntry[]): Map<string, CatalogEntry> {
   return new Map(catalog.filter((e) => e.group !== ALWAYS_LOADED_GROUP && e.name !== TOOLS_LOAD).map((e) => [e.name, e]));
 }
 
-// The index: one line per group, `name — what it does` per tool. Stable for a given
-// set of tools — it does not change as tools are loaded, so the request's prefix stays
-// the same from turn to turn.
-export function toolIndex(deferred: Map<string, CatalogEntry>): string {
+// The index: one line per group, `name — what it does` per tool, with the group's own
+// description (an MCP server's `instructions`, say — `groupDescriptions`, keyed by the
+// RAW group id as `CatalogEntry.group` carries it) as one line under its heading, cut
+// the same way a tool's first sentence is. Stable for a given set of tools — it does
+// not change as tools are loaded, so the request's prefix stays the same from turn to
+// turn.
+export function toolIndex(deferred: Map<string, CatalogEntry>, groupDescriptions: Map<string, string> = new Map()): string {
   const byGroup = new Map<string, CatalogEntry[]>();
   for (const e of deferred.values()) {
     const g = groupLabel(e.group);
     byGroup.set(g, [...(byGroup.get(g) ?? []), e]);
   }
-  return [...byGroup].map(([g, es]) => `${g}:\n${es.map((e) => `- ${e.name} — ${toolSummary(e.def.function.description)}`).join('\n')}`).join('\n');
+  return [...byGroup].map(([g, es]) => {
+    const raw = groupDescriptions.get(es[0]!.group);
+    const heading = raw ? `${toolSummary(sanitizeGroupDescription(raw), 200)}\n` : '';
+    return `${g}:\n${heading}${es.map((e) => `- ${e.name} — ${toolSummary(e.def.function.description)}`).join('\n')}`;
+  }).join('\n');
 }
 
-export function toolsLoadDef(deferred: Map<string, CatalogEntry>): ToolDef {
+export function toolsLoadDef(deferred: Map<string, CatalogEntry>, groupDescriptions: Map<string, string> = new Map()): ToolDef {
   return {
     type: 'function',
     function: {
@@ -103,7 +120,7 @@ export function toolsLoadDef(deferred: Map<string, CatalogEntry>): ToolDef {
         'Load tools before calling them. Only the tools you already see in full can be called; the ones below are listed by name and what they do. ' +
         'Pass `names` (tool names) or `group` (a group name — loads all of its tools). A loaded tool joins your tool list for the next step and stays for the rest of the conversation. ' +
         'Load what the task needs, not everything.\n\n' +
-        toolIndex(deferred),
+        toolIndex(deferred, groupDescriptions),
       parameters: {
         type: 'object',
         properties: {
@@ -115,17 +132,37 @@ export function toolsLoadDef(deferred: Map<string, CatalogEntry>): ToolDef {
   };
 }
 
+// A described group's full text, once — on the first tool of that group in `entries`,
+// in the order they are about to be sent; never on the rest, so it is not repeated per
+// tool. Builds new defs only where a description actually lands; everything else is
+// the same `ToolDef` reference the catalog already holds.
+function withGroupDescriptions(entries: CatalogEntry[], groupDescriptions: Map<string, string>): ToolDef[] {
+  if (!groupDescriptions.size) return entries.map((e) => e.def);
+  const seen = new Set<string>();
+  return entries.map((e) => {
+    const raw = groupDescriptions.get(e.group);
+    if (!raw || seen.has(e.group)) return e.def;
+    seen.add(e.group);
+    return { ...e.def, function: { ...e.def.function, description: `${sanitizeGroupDescription(raw)}\n\n${e.def.function.description}` } };
+  });
+}
+
 // What one request carries. The order keeps what was sent before as the head of what
 // is sent now — core, then `tools_load` with the index, then the loaded tools in the
 // order they were loaded — so a load only APPENDS: a provider's prompt cache, which
 // holds up to the first byte that changed, keeps everything sent before it.
-export function toolsToSend(catalog: CatalogEntry[], mode: ToolLoading, set: ToolSet): ToolDef[] {
+// `groupDescriptions` (a group's own text, keyed by its raw id) rides on the group's
+// first tool once that tool is actually SENT in full — in `'all'`, that is its first
+// tool in the catalog; on demand, its first LOADED tool, so the text arrives exactly
+// when the group's tools do, in the index before that and nowhere once every tool of
+// the group has been seen.
+export function toolsToSend(catalog: CatalogEntry[], mode: ToolLoading, set: ToolSet, groupDescriptions: Map<string, string> = new Map()): ToolDef[] {
   const deferred = deferredTools(catalog);
-  if (mode === 'all' || !deferred.size) return catalog.map((e) => e.def);
+  if (mode === 'all' || !deferred.size) return withGroupDescriptions(catalog, groupDescriptions);
   return [
-    ...catalog.filter((e) => !deferred.has(e.name)).map((e) => e.def),
-    toolsLoadDef(deferred),
-    ...set.names().flatMap((n) => { const e = deferred.get(n); return e ? [e.def] : []; }),
+    ...withGroupDescriptions(catalog.filter((e) => !deferred.has(e.name)), groupDescriptions),
+    toolsLoadDef(deferred, groupDescriptions),
+    ...withGroupDescriptions(set.names().flatMap((n) => { const e = deferred.get(n); return e ? [e] : []; }), groupDescriptions),
   ];
 }
 

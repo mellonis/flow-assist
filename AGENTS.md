@@ -729,7 +729,12 @@ there is no `/fullscreen`.
   is actually in — a name already in the list, bare or genuinely qualified by a
   clash, is tried first and never rewritten) avoids the round `ERROR: Not in the
   list` would otherwise cost. An unknown name still errors, listing
-  the groups. The loaded set is a `ToolSet` owned like the plan: the chat's `toolSetRef`
+  the groups. A group may carry its own description too — guidance beyond any one
+  tool's, an MCP server's `initialize` `instructions`, say (`ToolGroup.description`,
+  `src/loader/tools.ts`) — shown as one line under the group's heading in the index
+  and, once the group's tools are loaded (or sent in full under `'all'`), in full on the
+  group's first tool; sanitized (`sanitizeGroupDescription`: control characters and the
+  app's own frame words out) and trusted the same way a tool's own description is. The loaded set is a `ToolSet` owned like the plan: the chat's `toolSetRef`
   (saved as the session's `tools`, kept by `/compact`, emptied by `/clear`); a background run and the one-shot CLI start from an empty one.
   `agentChat`'s own default is `'all'` — the mode is applied by `services.chatLLM`
   and `runPrompt` from config — and `bootApp` pins `'all'` so an e2e script can call

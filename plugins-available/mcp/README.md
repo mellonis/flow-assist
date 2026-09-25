@@ -59,6 +59,11 @@ Each server is a tool group `mcp:<name>` — `ai.disabledTools: ["mcp:webstorm"]
 one off — and its tools are named `<name>:<tool>` (`webstorm:get_file_text`): two
 servers often offer the same tool, and which one answered is worth knowing.
 
+A server that answers `initialize` with `instructions` (how its data is shaped, its
+vocabulary, what to check before trusting it) has that text become its tool group's own
+description — the model sees it in the `tools_load` index and in full once the group's
+tools are loaded, trusted the way a tool's own description is.
+
 ## Safety
 
 A server's tools run code on its side, and the `readOnlyHint` a tool carries is the
