@@ -77,6 +77,56 @@ test('null on a required parameter still fails, as any other wrong type would', 
   expect(toolArgsError('get_issue', schema, { issueCode: null })).toBe('wrong arguments for get_issue — `issueCode` must be string. Nothing was run.');
 });
 
+test('null on an optional key inside an object parameter is read as omitted too, at any depth', () => {
+  const nested = {
+    type: 'object',
+    properties: {
+      filter: {
+        type: 'object',
+        properties: { status: { type: 'string' }, sort: { type: 'object', properties: { by: { type: 'string' }, desc: { type: 'boolean' } }, required: ['by'] } },
+        required: ['sort'],
+      },
+    },
+    required: ['filter'],
+  };
+  expect(toolArgsError('t', nested, { filter: { status: null, sort: { by: 'date' } } })).toBeNull();
+  expect(toolArgsError('t', nested, { filter: { sort: { by: 'date', desc: null } } })).toBeNull();
+});
+
+test('null on a required key inside an object parameter still fails, naming its path', () => {
+  const nested = {
+    type: 'object',
+    properties: { filter: { type: 'object', properties: { status: { type: 'string' }, sort: { type: 'object', properties: { by: { type: 'string' } }, required: ['by'] } }, required: ['sort'] } },
+  };
+  const deep = toolArgsError('t', nested, { filter: { sort: { by: null } } });
+  expect(deep).toContain('`filter.sort.by`');
+  expect(deep).toContain('Nothing was run.');
+  expect(toolArgsError('t', nested, { filter: { sort: null } })).toContain('`filter.sort`');
+});
+
+test('null on a key matched only by patternProperties is read as omitted, at the top and nested', () => {
+  const top = { type: 'object', properties: { a: { type: 'string' } }, patternProperties: { '^x-': { type: 'string' } }, additionalProperties: false };
+  expect(toolArgsError('t', top, { a: 'ok', 'x-trace': null })).toBeNull();
+  const nested = { type: 'object', properties: { headers: { type: 'object', patternProperties: { '^x-': { type: 'string' } }, additionalProperties: false } } };
+  expect(toolArgsError('t', nested, { headers: { 'x-trace': null, 'x-id': 'abc' } })).toBeNull();
+  expect(toolArgsError('t', nested, { headers: { 'x-id': 1 } })).toContain('`headers.x-id`');
+});
+
+test('an array item has no optional notion: null there is whatever the item schema says', () => {
+  const list = { type: 'object', properties: { tags: { type: 'array', items: { type: 'string' } } } };
+  expect(toolArgsError('t', list, { tags: ['a', null] })).toContain('`tags[1]`');
+  const objs = { type: 'object', properties: { rows: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, note: { type: 'string' } }, required: ['id'] } } } };
+  expect(toolArgsError('t', objs, { rows: [{ id: '1', note: null }] })).toBeNull();
+  expect(toolArgsError('t', objs, { rows: [{ id: null }] })).toContain('`rows[0].id`');
+});
+
+test('null handling never mutates the arguments the tool will receive', () => {
+  const nested = { type: 'object', properties: { filter: { type: 'object', properties: { status: { type: 'string' } } } } };
+  const args = { filter: { status: null } };
+  expect(toolArgsError('t', nested, args)).toBeNull();
+  expect(args).toEqual({ filter: { status: null } });
+});
+
 test('values are never coerced: a number sent as a string is a wrong type', () => {
   expect(toolArgsError('get_issue', schema, { issueCode: 'ABC-1', count: '3' })).toBe('wrong arguments for get_issue — `count` must be number. Nothing was run.');
 });

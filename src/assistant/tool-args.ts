@@ -12,7 +12,7 @@
 // opt IN to extra keys with `additionalProperties: true` (or a schema of its own, or
 // `patternProperties`). Nothing about a value is ever coerced: a number sent as the
 // string `"3"` is a wrong type, not a value quietly accepted. `null` on a declared
-// OPTIONAL parameter is the one exception — read as the parameter left out (below),
+// OPTIONAL key, at any level, is the one exception — read as the key left out (below),
 // since that is how a tool already reads an absent one (`args.path ?? '.'`) and how an
 // OpenAI-style client sends one it left blank.
 import { z } from 'zod';
@@ -78,6 +78,37 @@ function typeIssues(issues: readonly z.core.$ZodIssue[], args: Record<string, un
   return out;
 }
 
+type ObjectSchema = { properties?: unknown; required?: unknown; patternProperties?: unknown; items?: unknown };
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return !!v && typeof v === 'object' && !Array.isArray(v);
+}
+
+// A copy of `value` with every `null` on an OPTIONAL key dropped, at every level the
+// schema walks an object's keys, so the schema validates it as omitted rather than as
+// a value of the wrong type. A key is optional when the enclosing object schema
+// declares it (`properties`, or a `patternProperties` pattern it matches) and does not
+// list it in its own `required`. A REQUIRED key sent as `null` stays and fails like any
+// other wrong type. An array item has no notion of optional, so a `null` item stays
+// too; only the objects inside the items are walked. `value` itself is never mutated.
+function withoutOptionalNulls(schema: unknown, value: unknown): unknown {
+  if (!isRecord(schema)) return value;
+  const s = schema as ObjectSchema;
+  if (Array.isArray(value)) return isRecord(s.items) ? value.map((item) => withoutOptionalNulls(s.items, item)) : value;
+  if (!isRecord(value)) return value;
+  const properties = isRecord(s.properties) ? s.properties : {};
+  const required = Array.isArray(s.required) ? s.required : [];
+  const patterns = isRecord(s.patternProperties) ? Object.entries(s.patternProperties).map(([p, sub]) => [new RegExp(p), sub] as const) : [];
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(value)) {
+    const sub = Object.prototype.hasOwnProperty.call(properties, k) ? properties[k] : patterns.find(([re]) => re.test(k))?.[1];
+    const declared = sub !== undefined;
+    if (v === null && declared && !required.includes(k)) continue;
+    out[k] = declared ? withoutOptionalNulls(sub, v) : v;
+  }
+  return out;
+}
+
 const MAX_LISTED = 3;
 
 // Up to the first three names, `` `a`, `b`, `c` ``, with the rest counted rather than
@@ -117,17 +148,9 @@ export function toolArgsError(toolName: string, parameters: ToolParameters | nul
     ? []
     : Object.keys(args).filter((k) => !Object.prototype.hasOwnProperty.call(properties, k) && !patterns.some((re) => re.test(k)));
 
-  // A declared OPTIONAL parameter sent as `null` is dropped before the schema sees
-  // it — never mutating `args` itself, only this copy — so it validates as omitted,
-  // not as a value of the wrong type. A REQUIRED one stays, and fails like any other
-  // wrong type (`typeIssues`, against the original `args`, still reports it).
-  const forSchema: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(args)) {
-    if (v === null && Object.prototype.hasOwnProperty.call(properties, k) && !required.includes(k)) continue;
-    forSchema[k] = v;
-  }
-
-  const result = zSchema.safeParse(forSchema);
+  // The schema sees `args` with its optional `null`s dropped; `typeIssues` still reads
+  // the original `args`, so a required key sent as `null` is reported as present.
+  const result = zSchema.safeParse(withoutOptionalNulls(schema, args));
   const wrongType = result.success ? [] : typeIssues(result.error.issues, args);
 
   if (!missing.length && !unknown.length && !wrongType.length) return null;

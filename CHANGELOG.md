@@ -5,6 +5,12 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **`null` on an optional key reads as left out at every level, not only the top.** A
+  client that sends `null` for a field it left blank was already fine on a top-level
+  parameter; the same `null` inside an object parameter, or on a key matched by
+  `patternProperties`, was refused as a wrong type. Now any optional key sent as `null`
+  is read as omitted wherever it sits. A required key sent as `null` is still refused,
+  at every level, and so is a `null` array item the item schema does not allow.
 - **A long answer stops at its first line, not its last.** The conversation followed an
   answer to its end, so a long one scrolled past its own beginning and was read by going
   back up to find where it started. Now it follows only while the answer fits: once the

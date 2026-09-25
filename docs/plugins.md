@@ -74,8 +74,11 @@ checks `args` against the tool's own `parameters` first: a call missing a requir
 key, of the wrong type, or naming a key `properties` does not list never reaches
 `exec` — the model gets a one-line error instead, so `args` here always already
 matches what the schema declares. Nothing is coerced (a number sent as a string is a
-wrong type), except `null` on a declared OPTIONAL parameter, read as that parameter
-left out — the way `args.path ?? '.'` already reads an absent one.
+wrong type), except `null` on an OPTIONAL key — declared in `properties` or matched
+by `patternProperties`, and not in its object's `required` — read as that key left out,
+the way `args.path ?? '.'` already reads an absent one. The rule holds at every level,
+inside an object parameter as at the top; a required key sent as `null` is a wrong
+type at every level, and so is a `null` array item the item schema does not allow.
 
 ```ts
 tools: [{

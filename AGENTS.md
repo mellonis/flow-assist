@@ -979,7 +979,13 @@ there is no `/fullscreen`.
   a schema is read as refusing an unlisted key rather than JSON Schema's own default
   of allowing it — a key not in `properties` is nearly always a required one
   misspelled, said as unknown `code` — did you mean `issueCode`? when exactly one
-  required key is missing and exactly one unknown key sits beside it. A schema
+  required key is missing and exactly one unknown key sits beside it. Nothing is
+  coerced, except `null` on an optional key, read as that key left out (the way a
+  tool's own `??` reads it) at every level: a key the enclosing object schema declares
+  (`properties`, or a `patternProperties` pattern it matches) and does not list in its
+  own `required`, top-level parameter or nested inside an object parameter alike. A
+  required key sent as `null` is a wrong type at every level, and so is a `null` array
+  item whose item schema does not allow it — an item has no "optional". A schema
   with no `properties` accepts anything, and one zod's JSON Schema reader cannot
   compile (an exotic keyword) is logged once and the call runs unchecked from then on
   — a plugin author's schema quirk must not stop their tool. `tools_load` has no
