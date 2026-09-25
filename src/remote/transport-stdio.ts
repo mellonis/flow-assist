@@ -92,6 +92,7 @@ export function stdioTransport(opts: StdioOpts): Transport & { start(): Promise<
         };
         if (stderrEnded) { report(); return; }
         const late = setTimeout(report, STDERR_LATE_MS);
+        late.unref?.(); // like every handle here, it never keeps the program alive
         c.stderr!.once('end', () => { clearTimeout(late); report(); });
       });
     }),
