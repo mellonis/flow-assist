@@ -50,3 +50,12 @@ test('close kills a child that ignores shutdown', async () => {
   await t.close(100);
   expect((await closed).signal).toMatch(/SIGTERM|SIGKILL/);
 });
+
+test('a send after the child is gone is a no-op, never an unhandled error', async () => {
+  const { t, peer } = boot({ FAKE_CRASH_AFTER_HELLO: '1' });
+  const closed = new Promise((r) => t.onClose(r));
+  await t.start();
+  await peer.request('hello', { hostApi: 2, config: {} }, 5_000);
+  await closed;
+  for (let i = 0; i < 5; i++) t.send('{"jsonrpc":"2.0","method":"key"}');
+});

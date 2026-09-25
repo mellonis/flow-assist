@@ -54,12 +54,15 @@ export function stdioTransport(opts: StdioOpts): Transport & { start(): Promise<
       });
       c.stdout!.setEncoding('utf8');
       c.stdout!.on('data', (chunk: string) => splitter.feed(chunk));
+      // A write to a child that has just died fails with EPIPE; the exit event says
+      // what happened, in better words, so the error is swallowed here.
+      c.stdin?.on('error', () => {});
       let err = '';
       c.stderr!.setEncoding('utf8');
       c.stderr!.on('data', (chunk: string) => { err += chunk; let nl; while ((nl = err.indexOf('\n')) !== -1) { const line = err.slice(0, nl).trimEnd(); err = err.slice(nl + 1); if (line) opts.log(`[${opts.name}] ${line}`); } });
       c.once('exit', (code, signal) => closeOnce(signal ? { signal } : { code: code ?? 0 }));
     }),
-    send: (line) => { if (!closedWith && child?.stdin?.writable) child.stdin.write(`${line}\n`); },
+    send: (line) => { if (closedWith || !child?.stdin?.writable) return; try { child.stdin.write(`${line}\n`); } catch {} },
     onLine: (f) => { lines.push(f); },
     onClose: (f) => { closes.push(f); },
     close: async (graceMs) => {
