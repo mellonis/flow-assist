@@ -28,6 +28,7 @@ import {
 } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { THIS_HOST, pluginCompat, readPluginManifest } from './compat.js';
+import { isRemoteManifest } from '../remote/transport.js';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -136,8 +137,10 @@ function writeSourceMarker(pluginDir: string): void {
 // Where a plugin came from: 'registry' (downloaded by name), 'archive' (installed
 // from a .tar.gz file or URL — archive-install.ts), 'git' (checked out, or unmarked).
 // `linked` — enabled by a link to a plugin kept outside `plugins-available/` (a
-// plugin in a repository of its own).
-export type PluginSource = 'git' | 'registry' | 'archive' | 'linked';
+// plugin in a repository of its own). `remote` — a plugin in another language, run as
+// a process (docs/plugins.md); what a manifest IS matters more than how it got here,
+// so a remote plugin says `remote` even when it is also `linked`.
+export type PluginSource = 'git' | 'registry' | 'archive' | 'linked' | 'remote';
 
 // Provenance for a plugin dir, read from its `.flow-assist-source` marker; 'git' when
 // there is none.
@@ -379,7 +382,7 @@ export function createPluginRepo({ availableDir, enabledDir, projectRoot, fetchP
           active: existsSync(join(enabledDir, dirEntry.name)),
           missingDeps: missingDepsFor(pluginDir),
           missingSettings: missingSettingsFor(pluginDir),
-          source: sourceFor(pluginDir),
+          source: isRemoteManifest(manifest) ? 'remote' : sourceFor(pluginDir),
         };
         const compat = pluginCompat(readPluginManifest(pluginDir), THIS_HOST);
         if (!compat.ok) entry.incompatible = compat.reason;
@@ -412,7 +415,7 @@ export function createPluginRepo({ availableDir, enabledDir, projectRoot, fetchP
             active: true,
             missingDeps: [],
             missingSettings: missingSettingsFor(target),
-            source: 'linked',
+            source: isRemoteManifest(parsed) ? 'remote' : 'linked',
           };
           const compat = pluginCompat(parsed, THIS_HOST);
           if (!compat.ok) entry.incompatible = compat.reason;

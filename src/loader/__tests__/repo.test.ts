@@ -23,6 +23,17 @@ test('list shows available, active, and built-in exclusion', async () => {
   expect(list.find(e => e.name === 'tracker')?.active).toBe(false);
 });
 
+// A plugin in another language (docs/plugins.md): its manifest carries `run`, so it
+// lists as `remote` — what it IS, not how it got enabled.
+test('an enabled plugin whose manifest carries run lists as source: remote', async () => {
+  const { repo, avail, enabled } = fakeRepo();
+  mkdirSync(join(avail, 'fake'), { recursive: true });
+  writeFileSync(join(avail, 'fake', 'manifest.json'), JSON.stringify({ name: 'fake', hostApi: HOST_API, version: '1.0.0', run: ['bun', 'index.ts'] }));
+  symlinkSync(join(avail, 'fake'), join(enabled, 'fake'));
+  const list = await repo.list();
+  expect(list.find((e) => e.name === 'fake')?.source).toBe('remote');
+});
+
 // plugins-enabled/ is gitignored, so a fresh checkout has none: the first install made it
 // fail with ENOENT.
 test('install works in a fresh checkout — plugins-enabled/ is created', async () => {

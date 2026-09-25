@@ -190,7 +190,7 @@ async function runPlugins(args: string[], config: Record<string, unknown>, repo:
     const entries = await repo.list();
     for (const e of entries) {
       const state = e.active ? 'active' : 'inactive';
-      const source = e.source === 'registry' || e.source === 'archive' || e.source === 'linked' ? ` (${e.source})` : '';
+      const source = e.source && e.source !== 'git' ? ` (${e.source})` : '';
       const missing = e.missingDeps.length ? `  missing: ${e.missingDeps.join(',')}` : '';
       const settingMiss = e.missingSettings?.length ? `  missing settings: ${e.missingSettings.join(',')}` : '';
       const incompatible = e.broken ? '  broken link' : e.incompatible ? `  ${e.incompatible}` : '';

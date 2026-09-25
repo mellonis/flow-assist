@@ -10,6 +10,7 @@ if (process.env.FAKE_STDERR) process.stderr.write(`${process.env.FAKE_STDERR}\n`
 if (process.env.FAKE_STDOUT_NOISE) process.stdout.write('starting up\n');
 if (process.env.FAKE_PIDFILE) fs.writeFileSync(process.env.FAKE_PIDFILE, String(process.pid));
 if (process.env.FAKE_IGNORE_SIGTERM) process.on('SIGTERM', () => {}); // only SIGKILL ends it
+if (process.env.FAKE_KEEPALIVE) setInterval(() => {}, 1_000); // stdin EOF alone does not end it
 
 const serveIdx = process.argv.indexOf('--serve');
 const servePath = serveIdx !== -1 ? process.argv[serveIdx + 1] : undefined;

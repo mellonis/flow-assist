@@ -91,6 +91,10 @@ export function socketTransport(opts: SocketOpts): Transport & { start(): Promis
     // synchronously, inside the `end()` call itself, and that would otherwise report
     // `{ error: 'connection closed' }` for a close the host asked for. The shared
     // once-guard then makes that later call, and a second `close()`, no-ops.
-    close: async () => { closeOnce({}); if (conn) { conn.end(); conn = null; } },
+    //
+    // `graceMs` is taken, for the one `Transport` interface every transport shares,
+    // and ignored: a disconnect needs no grace period, and the server behind it is
+    // never this transport's to stop — another host may still be on it.
+    close: async (_graceMs) => { closeOnce({}); if (conn) { conn.end(); conn = null; } },
   };
 }
