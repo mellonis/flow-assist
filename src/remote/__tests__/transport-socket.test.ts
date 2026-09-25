@@ -271,3 +271,17 @@ test('a server that exits before it listens fails start() at once with its exit 
     forget(sock);
   }
 }, 15_000);
+
+test('a log file that cannot be opened fails start() and leaves no lock behind', async () => {
+  const sock = socketPath('t12.sock');
+  forget(sock);
+  fs.mkdirSync(`${sock}.log`); // a directory: opening it for appending fails
+  const t = socketTransport({ name: 'fake', socketPath: sock, run: FAKE, cwd, log: () => {}, waitMs: 2_000 });
+  try {
+    await expect(t.start()).rejects.toThrow();
+    expect(fs.existsSync(`${sock}.lock`)).toBe(false);
+  } finally {
+    fs.rmSync(`${sock}.log`, { recursive: true, force: true });
+    forget(sock);
+  }
+});

@@ -698,12 +698,13 @@ rarely matter:
 **`connect: "unix:<name>"`.** `<name>` names a socket under the host's own `sockets/`
 directory — a plain file name, at most 64 characters, never a path (no `/`, `\` or
 `..`) — and the whole path must fit the platform's limit for a socket path (103 bytes
-on macOS, 107 on Linux); a longer one is refused, naming the part to shorten. The first host to reach it finds nothing listening, starts the server itself —
-`run`'s command with `--serve <socket path>` appended — and waits for the socket to
-appear, up to 10 s; a second host finds the socket already there and connects straight
-to it, starting nothing. `connect` with no `run` only ever connects; if nothing is
-listening, loading the plugin fails rather than starting anything. Started by a host,
-the server's stdout is discarded and its stderr is appended to `<name>.log` beside the
+on macOS, 107 on Linux); a longer one is refused, naming the part to shorten. The
+first host to reach it finds nothing listening, starts the server itself — `run`'s
+command with `--serve <socket path>` appended — and waits for the socket to appear, up
+to 10 s; a second host finds the socket already there and connects straight to it,
+starting nothing. `connect` with no `run` only ever connects; if nothing is listening,
+loading the plugin fails rather than starting anything. Started by a host, the
+server's stdout is discarded and its stderr is appended to `<name>.log` beside the
 socket (0600; emptied at a start once it has grown past 1 MiB) — a file, not the
 starting host's log, since the server outlives that host and every other host is
 another client of it; started by hand instead — `<run's command> --serve <config

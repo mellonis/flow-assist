@@ -15,7 +15,8 @@ const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 async function client(socketPath: string): Promise<{ peer: ReturnType<typeof createPeer>; end: () => void }> {
   const lines: Array<(l: string) => void> = [];
   const splitter = new LineSplitter((l) => lines.forEach((f) => f(l)));
-  const conn = await Bun.connect({ unix: socketPath, socket: { data: (_s, d) => splitter.feed(new TextDecoder().decode(d)), open() {}, close() {}, error() {} } });
+  const decoder = new TextDecoder();
+  const conn = await Bun.connect({ unix: socketPath, socket: { data: (_s, d) => splitter.feed(decoder.decode(d, { stream: true })), open() {}, close() {}, error() {} } });
   const io: PeerIo = { send: (l) => { conn.write(`${l}\n`); }, onLine: (f) => { lines.push(f); } };
   return { peer: createPeer(io), end: () => conn.end() };
 }
@@ -199,3 +200,28 @@ test("a client that drops without shutdown ends its servePlugin, so the server d
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("a client's last answers reach it whole: the connection ends only once what is queued for it has been written", async () => {
+  const { dir, path: p } = sock();
+  const stop = new AbortController();
+  const big = 'кадр '.repeat(400_000); // ~2.4 MB, far past the socket's buffer
+  try {
+    await new Promise<void>((r) => {
+      void serveConnections(async (io) => {
+        const peer = createPeer(io);
+        await new Promise<void>((done) => {
+          // A frame, then the answer queued behind it, then the connection is done.
+          peer.onRequest('shutdown', () => { peer.notify('frame', big); setTimeout(done, 0); return {}; });
+        });
+      }, p, { onListening: r, signal: stop.signal });
+    });
+    const c = await client(p);
+    const frames: unknown[] = [];
+    c.peer.onNotify('frame', (f) => frames.push(f));
+    expect(await c.peer.request('shutdown', {}, 5_000)).toEqual({});
+    expect(frames).toEqual([big]);
+  } finally {
+    stop.abort();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}, 10_000);

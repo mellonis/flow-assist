@@ -114,8 +114,9 @@ export function socketTransport(opts: SocketOpts): Transport & { start(): Promis
           // server and split its clients across two.
           if (!(await probe(opts.socketPath))) { lock.release(); conn = await connect(); return; }
           try { fs.unlinkSync(opts.socketPath); } catch { /* nothing stale to remove */ }
-          const server = startServer();
           try {
+            // Inside the `try`: opening the log can fail too, and the lock must go.
+            const server = startServer();
             while (Date.now() < deadline) {
               if (fs.existsSync(opts.socketPath) && !(await probe(opts.socketPath))) break;
               if (server.ended) throw new Error(`${opts.name}: the server ${server.ended} before listening on ${opts.socketPath} (its stderr: ${opts.socketPath}.log)`);

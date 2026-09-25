@@ -28,6 +28,10 @@ import type { PeerIo } from './peer.js';
 
 export interface ServeOpts { defaultIdleMs?: number; onListening?: () => void; signal?: AbortSignal }
 
+// How long a finished connection waits for its queued bytes to be read before it is
+// ended anyway.
+const END_DRAIN_MS = 5_000;
+
 interface Client { feed: (chunk: Uint8Array) => void; flush: () => void; leave: () => void }
 
 // Bun's unix socket API — the two calls this file needs; its full type definitions
@@ -111,6 +115,11 @@ export async function serveConnections(onConnection: (io: PeerIo) => Promise<voi
           // sent while anything waits joins the back, and nothing is sent after close.
           const queue: Uint8Array[] = [];
           let gone = false;
+          // Set once the handler is done: the connection ends when the queue is empty —
+          // its last answer (`shutdown`'s) may sit behind a large frame — or after
+          // `END_DRAIN_MS`, so a host that stops reading cannot hold it open forever.
+          let ending: ReturnType<typeof setTimeout> | null = null;
+          const end = () => { if (ending) clearTimeout(ending); ending = null; conn.end(); };
           const flush = () => {
             while (!gone && queue.length) {
               const head = queue[0]!;
@@ -119,6 +128,7 @@ export async function serveConnections(onConnection: (io: PeerIo) => Promise<voi
               if (n > 0) queue[0] = head.subarray(n);
               return;
             }
+            if (ending && !gone) end();
           };
           const splitter = new LineSplitter((raw) => {
             // The first hello's idleMs is the server's, kept for the process's life.
@@ -137,9 +147,14 @@ export async function serveConnections(onConnection: (io: PeerIo) => Promise<voi
           conn.data = {
             feed: (d) => splitter.feed(decoder.decode(d, { stream: true })),
             flush,
-            leave: () => { gone = true; queue.length = 0; clients--; closes.forEach((f) => f()); if (clients === 0) armIdle(); },
+            leave: () => { gone = true; queue.length = 0; if (ending) { clearTimeout(ending); ending = null; } clients--; closes.forEach((f) => f()); if (clients === 0) armIdle(); },
           };
-          onConnection(io).then(() => conn.end(), () => conn.end());
+          const done = () => {
+            if (gone) return;
+            if (!queue.length) { conn.end(); return; }
+            ending = setTimeout(end, END_DRAIN_MS);
+          };
+          onConnection(io).then(done, done);
         },
         data(conn, d) { conn.data?.feed(d); },
         drain(conn) { conn.data?.flush(); },
