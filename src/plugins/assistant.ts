@@ -1969,7 +1969,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               const outcome = acquireLock(sessDir, id, lockToken);
               if (outcome.status === 'held') {
                 setMessages((cur) => [...cur, { role: 'note', content: `Session "${title || id}" is open in another flow-assist process. (lock: ${lockPath(sessDir, id)})` }]);
-                setField('');
+                // `/resume <n>` in the field is the command, done; from the picker the
+                // field holds the person's draft, which stays.
+                if (/^\s*\//.test(inputRef.current)) setField('');
                 host.notify();
                 return false;
               }
@@ -1986,7 +1988,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // The picker: the list is read here and after a rename or a delete — never per
           // keystroke; the filter runs over what was read. The conversation in this chat
           // is written first, so it is listed as it is now. A pending y/n or question is
-          // answered before anything else: the chat opens on it and the picker waits.
+          // answered before anything else: the chat opens on it, and the key is pressed
+          // again once it is answered.
           const openPicker = () => {
             // Closed, collapsed, or docked with the plugin at the keys: the chat opens and
             // takes the keyboard, or the picker would draw where no key reaches it.

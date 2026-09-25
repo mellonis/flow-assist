@@ -2040,7 +2040,8 @@ const ACTION_LABELS: Record<string, string> = {
   commandLine: 'command line', quit: 'quit', back: 'back / close', prev: 'previous', next: 'next',
   open: 'open', openBrowser: 'open in the browser', clearCache: 'flush the cache', chat: 'talk to the assistant', sessions: 'saved sessions', log: 'the log',
 };
-// Keys the HOST acts on from anywhere. Everything else in the key map belongs to a
+// Keys the HOST acts on from anywhere — the assistant's `chat` and `sessions` included,
+// whose keys work on every screen. Everything else in the key map belongs to a
 // plugin's own screen (`prev`/`next`/`open`/`openBrowser` are shared bindings the host
 // merely defines a default for) — listed separately, because on the start screen they
 // do nothing and a key in a help list is an instruction.

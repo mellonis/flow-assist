@@ -1029,7 +1029,8 @@ there is no `/fullscreen`.
   answered first (a turn may start while it is up), the picker back once it is settled.
   The picker holds the keys while up; a mouse button and the wheel never reach the
   conversation it hides, and closing it mounts the conversation's list anew, at its end.
-  The key works from the chat (its handler, after a pending y/n or question) and from
+  The key works from the chat (its handler, after a pending y/n or question, and the
+  `/context` panel, which holds every key but Esc and ⏎ while up) and from
   any other screen (a trigger of its own: `addTrigger` compares the bare name, and this
   is a chord).
   A session's `title` is fixed at its first save — the first non-empty line of the first
@@ -2278,7 +2279,8 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     decides how loud it is: a failure red, `[bg]` the background's colour, the
     model-round bookkeeping and the stamp dim.
   - **The help** answers two questions — which keys, which commands. Keys are drawn
-    with `bindingGlyph` and split in two: the ones the HOST acts on anywhere
+    with `bindingGlyph` and split in two: the ones the HOST acts on anywhere — the
+    assistant's `chat` and `sessions` included, whose keys work on every screen —
     (`HOST_ACTIONS`), and the ones that belong to a plugin's own screen (`prev`, `next`,
     `open`, … — the host only gives them a default). A key in a help list is an
     instruction, so a key that does nothing here is not listed as if it did.

@@ -368,7 +368,9 @@ test('help fits the screen, names the keys, and wraps what it says', async () =>
   const anywhere = rows.findIndex((r) => r.includes('Keys — anywhere'));
   const plugins = rows.findIndex((r) => r.includes("on a plugin's own screen"));
   const open = rows.findIndex((r) => /⏎\s+open/.test(r));
-  expect(rows.findIndex((r) => /\^s\s+saved sessions/.test(r))).toBeLessThan(plugins);
+  const saved = rows.findIndex((r) => /\^s\s+saved sessions/.test(r));
+  expect(saved).toBeGreaterThan(anywhere);
+  expect(saved).toBeLessThan(plugins);
   expect(anywhere).toBeGreaterThanOrEqual(0);
   expect(open).toBeGreaterThan(plugins);
   // An unbound action is not offered at all.

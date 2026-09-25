@@ -205,3 +205,28 @@ test('a question that arrives while the picker is up is drawn over it and answer
   expect(ui.backend.lastFrame).toContain('Sessions ·');
   ui.app.unmount();
 });
+
+test('a write’s y/n that arrives while the picker is up is drawn over it and answered first — `n` declines, it is not typed into the filter', async () => {
+  const dir = dirOf();
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-picker-yn-')));
+  const model = new ScriptedModel();
+  model.script([{ hold: true }, { tool: 'run_command', args: { command: 'echo hi' } }], [{ text: 'declined, fine' }]);
+  const ui = await bootApp(model, 100, 28, undefined, { sessions: { dir }, shell: { roots: [root] } });
+  await ui.press('F');
+  await ui.type('run it');
+  await ui.press('return');
+  await settle(4); // the turn is running, held
+  ui.backend.press({ name: 's', ctrl: true });
+  await settle();
+  expect(ui.backend.lastFrame).toContain('Sessions ·');
+  model.release();
+  for (let i = 0; i < 100 && !ui.backend.lastFrame!.includes('echo hi'); i++) await settle(2);
+  expect(ui.backend.lastFrame).toContain('echo hi');
+  expect(ui.backend.lastFrame).not.toContain('Sessions ·');
+  await ui.press('n'); // declines the write
+  await settle(20);
+  const frame = ui.backend.lastFrame!;
+  expect(frame).toContain('Sessions ·');
+  expect(rowOf(frame, 'filter ›')).toMatch(/filter ›\s*│/);
+  ui.app.unmount();
+});
