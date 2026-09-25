@@ -214,3 +214,45 @@ test('close during an in-flight restart fires no onRestart and closes the transp
   expect(restarts).toBe(0); // no onRestart after close()
   expect(made[1]!.closedWith).toEqual([0]); // closed for real once it came up, instead of left running
 });
+
+// Instance 0 starts cleanly, so `startedOnce` is true before anything else happens.
+// Every later attempt is a restart whose `start()` rejects only after the fake clock
+// has advanced past the quick-death threshold, with no accompanying `onClose` — so
+// `scheduleRestart`'s `!hadStarted ||` is what stops that elapsed time from reading
+// as a run that lived, on a restart rather than the first attempt.
+function slowCrashAfterFirstStart(clock: { value: number }) {
+  const closesOf: Array<Array<(w: { code?: number }) => void>> = [];
+  let calls = 0;
+  const factory = () => {
+    const idx = calls++;
+    const closes: Array<(w: { code?: number }) => void> = [];
+    closesOf.push(closes);
+    return {
+      send: () => {},
+      onLine: () => {},
+      onClose: (f: (w: { code?: number }) => void) => { closes.push(f); },
+      close: async () => {},
+      start: () => {
+        if (idx === 0) return Promise.resolve();
+        clock.value += 1_500;
+        return Promise.reject(new Error('timed out'));
+      },
+    };
+  };
+  return { factory, closesOf };
+}
+
+test('a restart whose start takes over a second to reject still counts toward the failure limit', async () => {
+  const clock = { value: 0 };
+  const { factory, closesOf } = slowCrashAfterFirstStart(clock);
+  const tm = timers(); const log: string[] = [];
+  const s = supervise(factory, { name: 'fake', log: (l) => log.push(l), timer: tm.timer, now: () => clock.value });
+  await s.start(); // instance 0, starts cleanly
+  closesOf[0]!.forEach((f) => f({ code: 1 })); // close it — schedules the first restart
+  for (let i = 0; i < MAX_FAILURES + 2 && tm.pending.length > 0; i++) {
+    tm.fire();
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+  }
+  expect(tm.pending.length).toBe(0);
+  expect(log.at(-1)).toContain('disabled until restart');
+});

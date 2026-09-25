@@ -1,9 +1,10 @@
 // A transport that comes back. Over a factory of transports it presents ONE
 // `RestartingTransport`: lines and closes come from whichever is live, a close of a
 // transport that had started starts the next after a backoff (1 → 2 → 4 → 8 → 16 →
-// 30 s), `onRestart` tells the layer above to say `hello` again, and five failures in
-// a row give up with `disabled until restart` in the log. A run that lived longer
-// resets the count. The very first `start()` is not a restart: if it never comes up —
+// 30 s), `onRestart` tells the layer above to say `hello` again, and more than five
+// failures in a row — six, with the defaults — give up with `disabled until restart`
+// in the log. A run that lived longer resets the count. The very first `start()` is
+// not a restart: if it never comes up —
 // whether it rejects, or closes before resolving — that rejects to the caller alone;
 // nothing is scheduled and no close reaches the layer above, since nothing was ever
 // up for it to hear about. `close` stops the supervisor for good: a pending restart is
