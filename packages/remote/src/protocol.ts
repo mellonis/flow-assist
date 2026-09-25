@@ -63,7 +63,7 @@ export interface StoreEvent { key: string; value: unknown }
 
 // ─── Requests the host makes ──────────────────────────────────────────────────
 export interface ToolRunParams { name: string; args: Record<string, unknown>; call: { id: string } }
-export interface ToolRunResult { result: unknown }
+export interface ToolRunResult { result: unknown; views?: Array<{ kind: string; data: unknown }> }
 export interface CommandRunParams { name: string; arg: string }
 export interface StyledSpan { text: string; bold?: boolean; dim?: boolean; underline?: boolean; color?: string; background?: string }
 export interface ViewRenderParams { kind: string; data: unknown; width: number }
