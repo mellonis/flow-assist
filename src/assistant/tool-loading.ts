@@ -242,7 +242,7 @@ function readNames(raw: unknown): string[] {
   if (typeof v === 'string') return [v];
   if (!Array.isArray(v)) return [raw];
   const bad = v.find((n) => typeof n !== 'string');
-  if (bad !== undefined) throw new Error(`\`names\` must be tool names (strings); got ${bad === null ? 'null' : `a ${Array.isArray(bad) ? 'list' : typeof bad}`} in ${raw}.`);
+  if (bad !== undefined) throw new Error(`\`names\` must be tool names (strings); got ${bad === null ? 'null' : Array.isArray(bad) ? 'a list' : typeof bad === 'object' ? 'an object' : `a ${typeof bad}`} in ${raw}.`);
   return v as string[];
 }
 
