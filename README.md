@@ -134,6 +134,10 @@ opens into each command's own block. A click on a command's line opens its last
 `runOutputLines` lines (`plugins.assistant.runOutputLines`); `^o` opens it, and
 everything else folded, in full. Limits:
 `shell.timeoutMs` (120 s) and `shell.maxChars` (20000; the end of the output is kept).
+A command the assistant runs may read an earlier tool result on its stdin — the text
+exactly as the tool returned it, never cut — so it can count, search or save data it
+already has without typing it out again; the confirmation says where the stdin comes
+from (`stdin: result of get_poem`).
 The assistant moves the directory itself with its `cd` tool — "go to the project" —
 without a y/n, since it runs nothing, and only inside `shell.roots` (with no roots set
 it cannot move at all).

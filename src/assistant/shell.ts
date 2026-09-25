@@ -9,8 +9,10 @@
 //
 // The command goes through `/bin/sh -c` (a shell is intended — pipes, globs, `&&`),
 // in its own process group, so a timeout or Esc kills everything it started, not just
-// the shell. Nothing reads its stdin, and a pager or a credential prompt nobody sees
-// must fail instead of hanging: PAGER / GIT_PAGER are `cat`, GIT_TERMINAL_PROMPT is 0.
+// the shell. Its stdin is closed — or, for a run_command given `stdinFrom`, the earlier
+// tool result the host pipes in, and then closed — and a pager or a credential prompt
+// nobody sees must fail instead of hanging: PAGER / GIT_PAGER are `cat`,
+// GIT_TERMINAL_PROMPT is 0.
 //
 // The working directory is REMEMBERED between commands, as a terminal would: `cd sub`
 // and the next command runs in `sub`. Variables and functions are not — each command
@@ -57,6 +59,8 @@ export interface ShellOptions {
   // Every chunk as it arrives, in order — what a live view shows. Never called once
   // the result is given.
   onOutput?: (chunk: string) => void;
+  // What the command reads on stdin, written as UTF-8 and closed; absent — no stdin.
+  stdin?: string;
 }
 
 type RootsConfig = { shell?: { roots?: unknown }; fs?: { roots?: unknown } } | Record<string, unknown> | undefined;
@@ -193,7 +197,7 @@ export function runShell(cmd: string, opts: ShellOptions): Promise<ShellResult> 
     const child = spawn('/bin/sh', ['-c', script], {
       cwd: opts.cwd,
       detached: true, // its own process group: `kill(-pid)` reaches everything it started
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: [opts.stdin != null ? 'pipe' : 'ignore', 'pipe', 'pipe'],
       env: { ...process.env, PAGER: 'cat', GIT_PAGER: 'cat', GIT_TERMINAL_PROMPT: '0' },
     });
     const killGroup = () => {
@@ -217,6 +221,12 @@ export function runShell(cmd: string, opts: ShellOptions): Promise<ShellResult> 
       try { fs.rmSync(pwdDir, { recursive: true, force: true }); } catch { /* a temp dir */ }
       resolve({ code: timedOut || stopped ? null : code, output, cut, timedOut, stopped, ms: Date.now() - t0, pid: child.pid, ...(error ? { error } : {}), ...(pwd ? { pwd } : {}) });
     };
+    if (opts.stdin != null && child.stdin) {
+      // A command that never reads its stdin (`true`, `exit 4`) closes the pipe under a
+      // write still in flight: EPIPE, which is the command's business, not an error here.
+      child.stdin.on('error', () => {});
+      child.stdin.end(Buffer.from(opts.stdin, 'utf8'));
+    }
     child.stdout!.setEncoding('utf8').on('data', take);
     child.stderr!.setEncoding('utf8').on('data', take);
     child.on('error', (e) => finish(null, e.message));

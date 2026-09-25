@@ -31,6 +31,8 @@ import {
 } from './tool-loading.js';
 import { TOOL_RESULT_MAX_CHARS_DEFAULT, capToolResult, resolveToolResultCap } from './tool-result-cap.js';
 import { toolArgsError } from './tool-args.js';
+import { RAW_RESULT, findToolResult, type FoundResult } from './tool-results.js';
+import type { RecallSource } from './recall.js';
 
 // A single chat message. `role` is the OpenAI role; `content` may be null when a
 // message carries tool_calls. Extra fields (tool_calls, tool_call_id) ride along.
@@ -147,7 +149,9 @@ export interface AgentOpts {
   onLive?: (delta: string) => void;
   onLiveCommit?: (content: string, isFinal: boolean) => void;
   onReasoning?: (chunk: string) => void;
-  confirmWrite?: (name: string, args: string) => boolean | Promise<boolean>;
+  // `info.input` names the tool whose earlier result the call takes as its input (a
+  // def's `resultInput`, run_command's `stdinFrom`) — the y/n says where it comes from.
+  confirmWrite?: (name: string, args: string, info?: { input?: string }) => boolean | Promise<boolean>;
   // Fired as each tool call ends (declined ones too), so the chat can show what a
   // write changed while the turn goes on.
   onToolRun?: (run: ToolRun) => void;
@@ -581,7 +585,7 @@ function modelToolResult(outcome: string, detail: unknown): string {
 export function toolCatalog(extraTools: ToolDef[] = []): CatalogEntry[] {
   const sent = new Map<string, ToolDef>();
   for (const t of chatTools()) sent.set(t.function.name, t);
-  for (const { write: _w, run: _r, maxResultChars: _m, returnsImages: _i, ...rest } of extraTools) sent.set(rest.function.name, rest);
+  for (const { write: _w, run: _r, maxResultChars: _m, returnsImages: _i, resultInput: _in, ...rest } of extraTools) sent.set(rest.function.name, rest);
   const groupOf = chatToolGroupOf();
   return [...sent.values()].map((def) => ({ name: def.function.name, group: groupOf.get(def.function.name) ?? 'other', def }));
 }
@@ -744,6 +748,17 @@ export async function agentChat(
   const attachedUrls = new Map<string, string>();
   // A line for the host's log (`L`) — the chat's ctx carries `pushLog`; a caller
   // without one (a bare ctx) is told nothing.
+  // Where an earlier call's result is looked up (src/assistant/tool-results.ts): the
+  // turns before this one as the caller keeps them (`toolCtx.history`, the chat's own
+  // history — never the stubbed copy `messages` may be), else the messages it was given;
+  // then this turn so far. The recall items give the `res:` alias.
+  const resultHistory = (): ChatMessage[] => {
+    const h = (toolCtx as { history?: unknown }).history;
+    let before: ChatMessage[] = current.slice(0, turnStart);
+    if (typeof h === 'function') { try { const got = h(); if (Array.isArray(got)) before = got as ChatMessage[]; } catch { /* the caller's trouble: fall back */ } }
+    return [...before, ...current.slice(turnStart)];
+  };
+  const recallItems = () => { try { return (toolCtx as { recall?: RecallSource }).recall?.items() ?? []; } catch { return []; } };
   const say = (line: string) => { const f = (toolCtx as { pushLog?: unknown }).pushLog; if (typeof f === 'function') { try { (f as (l: string) => void)(line); } catch { /* the log's trouble */ } } };
   try {
     for (let i = 0; i < maxRounds; i++) {
@@ -865,7 +880,17 @@ export async function agentChat(
         // read from `TOOLS_LOAD_PARAMETERS` directly. Skipped when `notLoaded`: "load it
         // first" is the error that matters for a call that will not run either way.
         const schemaToCheck = onDemand && tc.name === TOOLS_LOAD ? TOOLS_LOAD_PARAMETERS : def?.function.parameters;
-        const argsError = notLoaded ? null : toolArgsError(tc.name, schemaToCheck, parsed);
+        let argsError = notLoaded ? null : toolArgsError(tc.name, schemaToCheck, parsed);
+        // A call that takes an earlier call's result as its input (`def.resultInput`,
+        // run_command's `stdinFrom`) has it resolved here, before the y/n: an id that
+        // names nothing usable is refused like a bad argument, and nothing runs.
+        const inputArg = !notLoaded && !argsError && def?.resultInput && parsed[def.resultInput] != null ? def.resultInput : null;
+        let input: Extract<FoundResult, { ok: true }> | null = null;
+        if (inputArg) {
+          const found = findToolResult(resultHistory(), parsed[inputArg], { items: recallItems(), nameOf: (w) => realName.get(w) ?? w });
+          if (found.ok) input = found;
+          else argsError = `${tc.name}: ${inputArg} — ${found.error}`;
+        }
         if (argsError) {
           // A call whose arguments already miss the mark never reaches the tool — no
           // y/n either, since a call this malformed will not run regardless of the
@@ -890,7 +915,7 @@ export async function agentChat(
         let outcome = 'ok';
         let detail: unknown = '';
         if (needsConfirm && confirm) {
-          const ok = await confirm(tc.name, tc.arguments);
+          const ok = await confirm(tc.name, tc.arguments, input ? { input: input.tool } : undefined);
           if (!ok) {
             outcome = 'declined';
             detail = 'This write operation was declined — the user must explicitly confirm before it runs.';
@@ -953,6 +978,8 @@ export async function agentChat(
             },
             // A view the tool keeps open and updates while it runs.
             liveView: (kind: string, data: unknown) => open(kind, data),
+            // The earlier result this call takes as its input, resolved above.
+            ...(input ? { resultInput: { id: input.id, tool: input.tool, text: input.text } } : {}),
             // A one-off view: opened and left; it becomes final with the call. The
             // one-argument form is how a console block was reported before renderers.
             reportView: (kind: unknown, data?: unknown) => {
@@ -1002,7 +1029,12 @@ export async function agentChat(
         // plugin tool type) overrides the conversation's cap for this one tool.
         const resultCap = resolveToolResultCap(toolResultMaxChars, def?.maxResultChars);
         // A tool that threw attaches nothing: the image went with the result it was for.
-        current.push({ role: 'tool', tool_call_id: tc.id, content: capToolResult(modelToolResult(outcome, detailStr), resultCap), ...(outcome !== 'error' && attached.length ? { images: attached } : {}) });
+        // A result the cap cut keeps its whole text beside it, never sent — what a later
+        // call's `resultInput` reads (src/assistant/tool-results.ts); one left whole is
+        // its content, so it is not kept twice.
+        const framed = modelToolResult(outcome, detailStr);
+        const sent = capToolResult(framed, resultCap);
+        current.push({ role: 'tool', tool_call_id: tc.id, content: sent, ...(outcome !== 'error' && attached.length ? { images: attached } : {}), ...(sent !== framed && outcome !== 'error' && outcome !== 'declined' ? { [RAW_RESULT]: detailStr } : {}) });
         logRun({ name: tc.name, write, outcome, detail: detailStr, args: parsed });
         const run: ToolRun = { name: tc.name, args: parsed, write, outcome, detail: detailStr };
         if (outcome !== 'error' && changes.length) run.changes = changes;

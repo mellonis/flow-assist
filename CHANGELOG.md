@@ -5,6 +5,20 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **The assistant can hand a tool's result to a command instead of re-typing it.**
+  Asked how many non-breaking spaces a text holds, the model had the text in a tool's
+  result and no way to give it to a command but to write it out again as an argument —
+  which turns every non-breaking space into a plain one. `run_command` now takes
+  `stdinFrom`, the id of an earlier tool call (or the id a recall stub names): the
+  command reads that call's result on its stdin exactly as the tool returned it —
+  before the host's own tag and before the cut a long result gets — and the
+  confirmation shows where it comes from, `stdin: result of get_poem`. An id that names
+  no call, a call that failed, or a result that is not text is an error before the
+  confirmation, and nothing runs. A cut result is kept whole beside what the model is
+  sent, so this still works after a restart. **For plugin authors:** a tool def may
+  name the argument that takes an earlier result (`resultInput`); the host resolves it
+  the same way and hands the tool the text as `ctx.resultInput`.
+
 - **Loading a big tool group whole no longer sits in every later request unread.**
   Loading a 26-tool group and a 17-tool group for five tools actually used once cost
   the conversation ~60k tokens of unused schemas on every round after, up from ~6k. A

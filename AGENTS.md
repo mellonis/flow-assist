@@ -591,6 +591,27 @@ there is no `/fullscreen`.
   test), framed as data; a refusal (cwd outside the roots) or a shell that cannot start
   throws. The turn's AbortSignal reaches tools as `ctx.signal` (`agentChat`), so Esc
   kills the command's process group with the answer.
+  **`stdinFrom` pipes an earlier result in** — the id of a tool call of this
+  conversation (the `tool_call_id` the model's history carries), or the `res:` id a
+  recall stub names. The command reads that call's result on stdin byte for byte: the
+  text the TOOL returned, never the `OK:` tag and never `capToolResult`'s cut, so the
+  model processes data it already has (counts a U+00A0, saves it with `cat > file`)
+  without re-typing it as an argument. Nothing else about the call changes — the y/n,
+  the roots, the timeout, `shell.maxChars` — and a call without it has no stdin at all
+  (`runShell`'s `stdin`, closed after it is written; `!command` never passes one). The
+  seam is the host's, not the shell group's: a tool def names the argument that takes
+  an earlier result (`resultInput: 'stdinFrom'`, stripped before the wire like
+  `write`), and `agentChat` resolves it BEFORE the y/n with `findToolResult`
+  (`src/assistant/tool-results.ts`, pure) over the turns before this one as the caller
+  keeps them (`toolCtx.history` — the chat's `apiRef`, never the stubbed copy it sends)
+  and the turn so far, the latest result of a reused id winning (a provider's ids are
+  not unique across rounds). An id that names nothing, a call that failed or was
+  declined, a result that is images and no text: refused as a bad argument is, naming
+  the id, and nothing runs. The resolved text reaches the tool as `ctx.resultInput`
+  (`{ id, tool, text }`); run_command given `stdinFrom` without it throws rather than
+  run with an empty stdin. The y/n block says where the stdin comes from, dim under the
+  command line: `stdin: result of get_poem` (`confirmWrite`'s third argument, `{ input:
+  <tool> }`, the tool as the host names it).
   **A confirmed call SHOWS what it printed**, as the person's own `!command` does: the
   tool opens a live view (`ctx.liveView`, see "A tool describes what it shows, a
   renderer draws it, the host frames it") and fills it as the command prints, and the
@@ -1207,7 +1228,11 @@ hardest. Rules the `repo` and `gitlab` plugins hold, each with a test that tries
   cap plus the note. Only what is SENT is capped: a view (`ctx.liveView`/
   `reportView`), the tool trail and `ctx.reportChange`'s diff are display and
   untouched — `run.detail` (the trail's, the log's, the session's) keeps the result
-  whole; only the `role: 'tool'` message pushed into `current` (and so into
+  whole — and so does the tool message itself when the cap cut it: the whole text rides
+  beside the cut content as `raw` (`RAW_RESULT`, `src/assistant/tool-results.ts`), in
+  `apiRef` and the session but never sent (`apiHistory` whitelists fields), which is
+  what `stdinFrom` reads after a restart; a result the cap left alone is its content
+  without the tag, kept once. Only the `role: 'tool'` message pushed into `current` (and so into
   `transcript`/`apiRef`) is capped, once, for good. A tool declares its own
   `maxResultChars` on the tool def (the plugin tool type, `src/loader/tools.ts`) to
   raise its OWN cap — for one whose result is large and worth the tokens — clamped to

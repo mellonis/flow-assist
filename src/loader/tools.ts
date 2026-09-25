@@ -54,6 +54,13 @@ export interface ToolDef {
   // not say so are dropped with a note in the result (docs/plugins.md). Never sent to
   // the provider: stripped like `write`/`run`/`maxResultChars`.
   returnsImages?: boolean;
+  // The argument that names an earlier tool call whose result the tool takes as its
+  // input — `run_command`'s `stdinFrom`. The host resolves it before the y/n (an id it
+  // cannot resolve is an error, and nothing runs), names the source in the y/n, and
+  // hands the tool the call's whole text as `ctx.resultInput`
+  // (src/assistant/tool-results.ts). Never sent to the provider: stripped like
+  // `write`/`run`.
+  resultInput?: string;
 }
 
 export type AiToolDef = ToolDef & { run: (...args: unknown[]) => unknown };

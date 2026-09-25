@@ -213,3 +213,17 @@ test('output is handed over as it arrives, before the command ends', async () =>
   expect(seen.length).toBeGreaterThanOrEqual(2);
   expect(r.output).toBe('ab');
 });
+
+test('stdin, when given, reaches the command byte for byte; without it the command reads nothing', async () => {
+  const text = `a b c — ✓\n`;
+  const r = await runShell('od -An -tx1 | tr -d " \\n"', { cwd: tmp(), stdin: text });
+  expect(r.code).toBe(0);
+  expect(r.output.trim()).toBe(Buffer.from(text, 'utf8').toString('hex'));
+  const none = await runShell('wc -c', { cwd: tmp() });
+  expect(none.output.trim()).toBe('0');
+});
+
+test('a command that never reads a large stdin still ends with its own exit code', async () => {
+  const r = await runShell('exit 4', { cwd: tmp(), stdin: 'x'.repeat(4 * 1024 * 1024) });
+  expect(r.code).toBe(4);
+});

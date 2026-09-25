@@ -58,6 +58,7 @@ export interface BulkyItem {
   lines: number;
   content?: string; // `out` / `res`: the text `recall` returns
   ref?: ImageRef; // `img`: what `recall` sends again as an image
+  callId?: string; // `res`: the call whose result it is — its first, when several share the content
 }
 
 // What a `!command`'s message carries beside its text (`ShellMeta` on the `shell`
@@ -146,7 +147,7 @@ export function bulkyItems(api: ChatMessage[], minChars: number): BulkyItem[] {
     if (m.role === 'tool' && typeof m.content === 'string' && m.content.length >= minChars) {
       const hash = hashOf(m.content);
       const id = itemId('res', hash);
-      add({ id, hash, kind: 'res', stub: resultStub(id, m.content, calls.get(String(m.tool_call_id)) ?? null), chars: m.content.length, lines: countLines(m.content), content: m.content });
+      add({ id, hash, kind: 'res', stub: resultStub(id, m.content, calls.get(String(m.tool_call_id)) ?? null), chars: m.content.length, lines: countLines(m.content), content: m.content, ...(typeof m.tool_call_id === 'string' ? { callId: m.tool_call_id } : {}) });
     }
   }
   return [...out.values()];

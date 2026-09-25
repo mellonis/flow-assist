@@ -1233,7 +1233,7 @@ export function renderChatModal({
   autoMode?: AutoMode;
   // `command`: a run_command call — shown whole and wrapped, since the person is
   // deciding on exactly that line.
-  pendingConfirm?: { name: string; args?: string | unknown; command?: string } | null;
+  pendingConfirm?: { name: string; args?: string | unknown; command?: string; input?: string } | null;
   pendingQuestion?: AskState | null;
   // Messages sent while an answer was coming; they go out, in order, when the turn ends
   // (a stopped or failed turn puts them back into the field). ↑ on an empty field takes
@@ -1466,6 +1466,7 @@ export function renderChatModal({
               confirmAsk.command != null
                 ? h(Text, { wrap: 'wrap' }, confirmAsk.command)
                 : h(Text, { dim: true, wrap: 'truncate' }, confirmAsk.args),
+              confirmAsk.input != null ? h(Text, { dim: true, wrap: 'wrap' }, confirmAsk.input) : null,
               h(Text, { color: theme?.error, selectable: false }, confirmAsk.hint))
           // The field is where the person types — its caret, prompt and placeholder are
           // not text to copy, and a drag over it must not pick them up.
@@ -1648,10 +1649,13 @@ function askView(state: AskState, wrap: number) {
 }
 
 // The y/n block's pieces, the same way.
-function confirmView(c: { name: string; args?: string | unknown; command?: string }) {
+function confirmView(c: { name: string; args?: string | unknown; command?: string; input?: string }) {
   return {
     title: `⚠ Confirm write: ${c.name}`,
     command: c.command != null ? `$ ${c.command.length > 1000 ? `${c.command.slice(0, 1000)}…` : c.command}` : null,
+    // Where the call's input comes from — a command's stdin, piped from an earlier
+    // call's result (src/assistant/tool-results.ts); drawn under the command line.
+    input: c.input ? `${c.command != null ? 'stdin' : 'input'}: result of ${c.input}` : null,
     args: typeof c.args === 'string'
       ? (c.args.length > 120 ? `${c.args.slice(0, 120)}…` : c.args)
       : JSON.stringify(c.args ?? ''),
@@ -1671,7 +1675,7 @@ const textRows = (text: string, width: number) => Math.max(1, wrapText(text, Mat
 export function pendingChatRows({ width, question, confirm, todo, queued = 0 }: {
   width: number;
   question?: AskState | null;
-  confirm?: { name: string; args?: string | unknown; command?: string } | null;
+  confirm?: { name: string; args?: string | unknown; command?: string; input?: string } | null;
   todo?: PlanItem[] | null;
   queued?: number;
 }): number {
@@ -1693,8 +1697,8 @@ function askBlockRows(state: AskState, wrap: number): number {
 }
 function confirmBlockRows(v: ReturnType<typeof confirmView>, wrap: number): number {
   const inner = wrap - 2;
-  // Three pieces with a gap between each.
-  return 2 + 1 + 1 + (v.command != null ? textRows(v.command, inner) : 1) + 1 + textRows(v.hint, inner);
+  // Three pieces with a gap between each — four, with the input line.
+  return 2 + 1 + 1 + (v.command != null ? textRows(v.command, inner) : 1) + 1 + textRows(v.hint, inner) + (v.input != null ? 1 + textRows(v.input, inner) : 0);
 }
 function contextPanelRows(r: ContextReading, wrap: number, cacheLine: string, recallLine = ''): number {
   const legend = contextLegend(r).length;

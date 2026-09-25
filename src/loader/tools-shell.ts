@@ -113,7 +113,7 @@ export function runCommandDescription(config: Record<string, unknown>, found: st
   const { timeoutMs } = shellLimits(config);
   return [
     'Run a shell command in the person\'s clone, after the person confirms it (every call pauses for y/n; a background task cannot run it). Returns the exit code, duration and the end of the output; a non-zero exit is a result, not a failure of the tool.',
-    `Machine: ${platformLine()}; run through /bin/sh -c, no stdin, no TTY. The directory is remembered between calls (and the person's own !commands) like a terminal's — a \`cd\` or the cwd argument moves it, within the roots; variables are not kept. It starts at ${roots[0] ?? 'the process\'s directory'}${roots.length > 1 ? ` (other roots: ${roots.slice(1).join(', ')})` : ''}.`,
+    `Machine: ${platformLine()}; run through /bin/sh -c, no TTY; no stdin unless stdinFrom names an earlier tool call's id — then that call's result, exactly as the tool returned it (never cut), is the stdin: to count, search or save data you already have without re-typing it (\`wc -m\`, \`python3 -\`, \`cat > file\`). The directory is remembered between calls (and the person's own !commands) like a terminal's — a \`cd\` or the cwd argument moves it, within the roots; variables are not kept. It starts at ${roots[0] ?? 'the process\'s directory'}${roots.length > 1 ? ` (other roots: ${roots.slice(1).join(', ')})` : ''}.`,
     found.length ? `Installed: ${found.join(', ')}.` : '',
     'Before guessing a build/test command, read the project\'s package.json scripts / Makefile / README with read_file. Prefer the dedicated tools (git_*, read_file, search, list_dir) when they fit. Never for interactive programs (editors, pagers, prompts); a long-running server is killed at the time limit' + ` (${Math.round(timeoutMs / 1000)} s).`,
   ].filter(Boolean).join(' ');
@@ -131,9 +131,11 @@ export const shellTools = (config: Record<string, unknown>): ToolGroup => ({
         parameters: { type: 'object', properties: {
           command: { type: 'string', description: 'The command line, as typed in a shell.' },
           cwd: { type: 'string', description: 'A cd before the command: relative to the current directory, or absolute; must be inside a configured root, and stays the directory afterwards.' },
+          stdinFrom: { type: 'string', description: 'The id of an earlier tool call of this conversation (or the recall id its stub names): its result is piped into the command\'s stdin byte for byte.' },
         }, required: ['command'] },
       },
       write: true,
+      resultInput: 'stdinFrom',
     },
     {
       type: 'function',
@@ -162,6 +164,12 @@ export const shellTools = (config: Record<string, unknown>): ToolGroup => ({
     // The conversation's directory — shared with the person's !commands and with `cd`;
     // the one-shot CLI carries a shell state of its own, so a `cd` holds there too. A
     // caller with none starts at the default every time.
+    // `stdinFrom` is resolved by the host before the y/n (`resultInput` above) and
+    // handed over as `ctx.resultInput`; a caller that did not resolve it never runs the
+    // command with an empty stdin in its place.
+    const input = (ctx as { resultInput?: { text?: unknown } }).resultInput;
+    if (args.stdinFrom != null && typeof input?.text !== 'string') throw new Error(`run_command: stdinFrom «${String(args.stdinFrom)}» was not resolved to a result — nothing ran`);
+    const stdin = args.stdinFrom != null ? (input!.text as string) : undefined;
     const shell = (ctx as { shell?: ShellState }).shell ?? createShellState(() => config);
     const cwd = commandCwd(config, args.cwd, shell.cwd());
     if (typeof args.cwd === 'string' && args.cwd.trim()) shell.setCwd(cwd); // a cd: it holds even if the command then fails
@@ -176,7 +184,7 @@ export const shellTools = (config: Record<string, unknown>): ToolGroup => ({
     const onOutput = live
       ? (chunk: string) => { raw += chunk; if (raw.length > maxChars * 2) raw = raw.slice(-maxChars); live.update({ command: cmd, cwd: tildePath(cwd), text: capConsoleText(raw) }); }
       : undefined;
-    const r = await runShell(cmd, { cwd, timeoutMs, maxChars, signal, ...(onOutput ? { onOutput } : {}) });
+    const r = await runShell(cmd, { cwd, timeoutMs, maxChars, signal, ...(onOutput ? { onOutput } : {}), ...(stdin != null ? { stdin } : {}) });
     if (r.error) throw new Error(`run_command: could not start /bin/sh: ${r.error}`);
     live?.update(consoleData(cmd, r, cwd, timeoutMs));
     const move = nextCwd(config, cwd, r.pwd);

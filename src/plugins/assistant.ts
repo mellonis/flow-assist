@@ -886,8 +886,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // confirmWrite): while the promise hangs, input pauses and a confirmation
           // block renders. pendingRef holds { name, args, resolve } — read by the
           // input-handler (a ref, always current); pendingAsk is only for render.
-          const pendingRef = ui.useRef<{ name: string; args: string; resolve: (ok: boolean) => void } | null>(null);
-          const [pendingAsk, setPendingAsk] = ui.useState<{ name: string; args: string; command?: string } | null>(null);
+          const pendingRef = ui.useRef<{ name: string; args: string; input?: string; resolve: (ok: boolean) => void } | null>(null);
+          const [pendingAsk, setPendingAsk] = ui.useState<{ name: string; args: string; command?: string; input?: string } | null>(null);
           // `ask_user`: the same kind of pause, but the person picks among options.
           // askRef is what the input handler steps key by key (a ref, always current);
           // pendingQuestion mirrors it for the render.
@@ -1243,6 +1243,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 toolCtx: {
                   plan: planRef.current,
                   shell: shellRef.current,
+                  // The model's history as the chat keeps it — whole, never stubbed —
+                  // where an earlier call's result is found by its id (run_command's
+                  // stdinFrom, src/assistant/tool-results.ts).
+                  history: () => apiRef.current,
                   // What `refreshProject` read when the directory was last set — `cd`
                   // answers from it rather than reading the files a second time.
                   projectInstructions: () => projectRef.current,
@@ -1277,7 +1281,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // The y/n pause on a writing op: agentChat calls confirmWrite for tools
                 // with a write-flag, we set pendingRef + pendingAsk and wait for the
                 // input-handler to resolve the promise ('y'/Enter — yes, 'n'/Esc — no).
-                confirmWrite: (name: string, argsStr: unknown) => new Promise<boolean>((resolve) => {
+                confirmWrite: (name: string, argsStr: unknown, info?: { input?: string }) => new Promise<boolean>((resolve) => {
                   // The one place a confirmation may be answered without the person:
                   // the auto mode (src/assistant/auto.ts), which only `all` ever lets
                   // say yes and never for run_command or an unlisted web_fetch. It
@@ -1290,8 +1294,11 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   const args = typeof argsStr === 'string' ? argsStr : JSON.stringify(argsStr ?? '');
                   const command = shellCommandOf(name, args);
                   if (contextOpenRef.current) setContextOpen(false);
-                  pendingRef.current = { name, args, resolve };
-                  setPendingAsk({ name, args, ...(command != null ? { command } : {}) });
+                  // The tool whose earlier result the call takes as its input — the
+                  // block says where a command's stdin comes from.
+                  const input = info?.input;
+                  pendingRef.current = { name, args, ...(input ? { input } : {}), resolve };
+                  setPendingAsk({ name, args, ...(command != null ? { command } : {}), ...(input ? { input } : {}) });
                   host.notify();
                 }),
                 // A view a tool opened, and every change to it. Its message is pushed on
@@ -2255,7 +2262,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             return pendingChatRows({
               width: w,
               question: askRef.current?.state ?? null,
-              confirm: c ? { name: c.name, args: c.args, command: shellCommandOf(c.name, c.args) ?? undefined } : null,
+              confirm: c ? { name: c.name, args: c.args, command: shellCommandOf(c.name, c.args) ?? undefined, ...(c.input ? { input: c.input } : {}) } : null,
               todo: planRef.current.snapshot(),
               queued: queueRef.current.length,
             });

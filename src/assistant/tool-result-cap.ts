@@ -51,3 +51,6 @@ export function capToolResult(text: string, max: number): string {
   const note = `\n… [cut: ${text.length} characters in all — ask the tool for less: filters, a limit, one item]\n`;
   return `${head}${note}${tail}`;
 }
+
+// Whether `text` carries the note `capToolResult` puts where it cut.
+export const wasCut = (text: string): boolean => /\n… \[cut: \d+ characters in all — ask the tool for less: filters, a limit, one item\]\n/.test(text);
