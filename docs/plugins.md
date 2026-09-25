@@ -69,7 +69,11 @@ export default function buildNotesPlugin({ config, make, z }) {
 
 A tool group is `{ id, tools, exec }`. `tools` are OpenAI-format function
 definitions; `exec(name, args, ctx)` runs one and returns a string for the model — or,
-for a tool that has images to show, text with the images beside it (below).
+for a tool that has images to show, text with the images beside it (below). The host
+checks `args` against the tool's own `parameters` first: a call missing a required
+key, of the wrong type, or naming a key `properties` does not list never reaches
+`exec` — the model gets a one-line error instead, so `args` here always already
+matches what the schema declares.
 
 ```ts
 tools: [{

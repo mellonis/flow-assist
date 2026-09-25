@@ -5,6 +5,17 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **A tool call with the wrong arguments is told what is wrong, not run with a key
+  quietly `undefined`.** Before a tool runs, the host checks the call against the
+  tool's own declared schema: a required parameter it left out, a value of the wrong
+  type, a key it misspelled. A mismatch never reaches the tool — the model reads one
+  line back naming it (unknown `code` — did you mean `issueCode`? when a required
+  parameter is missing and an unrecognized one sits right beside it) instead of the
+  tool failing on the wire for a reason it cannot see. A call that already
+  matches goes through exactly as sent. **For plugin authors:** your tool's declared
+  `parameters` is now enforced — a tool that read a key it never listed in
+  `properties` must add it, and a schema silent on `additionalProperties` now treats
+  any key not listed as unknown; opt out with `additionalProperties: true`.
 - **The assistant enters a project and reads its rules.** Wherever the shell's
   directory is set — at the start, after `!cd`, or by the assistant's new `cd` tool
   ("go to the project": relative or absolute, only inside `shell.roots`, no y/n since

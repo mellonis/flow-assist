@@ -916,6 +916,23 @@ there is no `/fullscreen`.
   the tool it tests; `tool-loading.e2e.test.ts` opts in. The context meter measures
   `requestTools(...)`, what is really sent. `host:tools_list` still lists every name;
   the index made it mostly redundant.
+- **A call is checked against the tool's own schema before it runs.** `toolArgsError`
+  (`src/assistant/tool-args.ts`, pure) reads `ToolDef.function.parameters` as JSON
+  Schema (`z.fromJSONSchema`, the same reader `src/remote/adapter.ts` compiles a
+  remote plugin's `configSchema` with) and refuses a call whose arguments do not
+  satisfy it — a missing `required` key, a value of the wrong type, a key `properties`
+  does not list — right where `agentChat` already checks `notLoaded`: BEFORE the y/n
+  and before either `def.run` (a plugin ai-tool) or `execChatTool` (a group tool) is
+  reached, so neither path runs an unchecked call. `additionalProperties` absent from
+  a schema is read as refusing an unlisted key rather than JSON Schema's own default
+  of allowing it — a key not in `properties` is nearly always a required one
+  misspelled, said as unknown `code` — did you mean `issueCode`? when exactly one
+  required key is missing and exactly one unknown key sits beside it. A schema
+  with no `properties` accepts anything, and one zod's JSON Schema reader cannot
+  compile (an exotic keyword) is logged once and the call runs unchecked from then on
+  — a plugin author's schema quirk must not stop their tool. `tools_load` has no
+  `ToolDef` of its own in the registry (it is the loop's own tool), so it is checked
+  against `TOOLS_LOAD_PARAMETERS` (`tool-loading.ts`) directly.
 - **Sessions survive a restart** (`src/assistant/sessions.ts`, one JSON per session
   in `<config dir>/sessions/`, dir 700 / files 600 — they hold tracker and MR text).
   A session is ONE object: the screen list, `apiRef` (what the model is sent),

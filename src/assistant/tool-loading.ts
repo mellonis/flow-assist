@@ -19,7 +19,7 @@
 // The loaded set belongs to a CONVERSATION, like the plan: the chat holds one, saves it
 // with the session and empties it on /clear; a background run and the one-shot CLI get
 // a fresh one. Everything here is pure; `agentChat` does the wiring.
-import type { ToolDef } from '../loader/tools.js';
+import type { ToolDef, ToolParameters } from '../loader/tools.js';
 import { unframe } from './screen-context.js';
 import { sanitizeViewText } from './views.js';
 
@@ -111,6 +111,16 @@ export function toolIndex(deferred: Map<string, CatalogEntry>, groupDescriptions
   }).join('\n');
 }
 
+// `tools_load`'s own schema — read by `toolArgsError` too, since it is the loop's own
+// tool and never sits in a `ToolGroup`'s defs (`src/assistant/agent.ts`).
+export const TOOLS_LOAD_PARAMETERS: ToolParameters = {
+  type: 'object',
+  properties: {
+    names: { type: 'array', items: { type: 'string' }, description: 'Tool names from the list.' },
+    group: { type: 'string', description: 'A group name from the list; loads every tool in it.' },
+  },
+};
+
 export function toolsLoadDef(deferred: Map<string, CatalogEntry>, groupDescriptions: Map<string, string> = new Map()): ToolDef {
   return {
     type: 'function',
@@ -121,13 +131,7 @@ export function toolsLoadDef(deferred: Map<string, CatalogEntry>, groupDescripti
         'Pass `names` (tool names) or `group` (a group name — loads all of its tools). A loaded tool joins your tool list for the next step and stays for the rest of the conversation. ' +
         'Load what the task needs, not everything.\n\n' +
         toolIndex(deferred, groupDescriptions),
-      parameters: {
-        type: 'object',
-        properties: {
-          names: { type: 'array', items: { type: 'string' }, description: 'Tool names from the list.' },
-          group: { type: 'string', description: 'A group name from the list; loads every tool in it.' },
-        },
-      },
+      parameters: TOOLS_LOAD_PARAMETERS,
     },
   };
 }

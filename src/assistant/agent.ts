@@ -26,10 +26,11 @@ import { llmErrorMessage } from './llm-error.js';
 import { ANTHROPIC_CONTENT, REQUEST_TAIL, anthropicChatRound, anthropicCompact } from './anthropic.js';
 import type { ThinkingConfig } from './llm-endpoint.js';
 import {
-  TOOLS_LOAD, createToolSet, deferredTools, notLoadedError, runToolsLoad, toolsToSend,
+  TOOLS_LOAD, TOOLS_LOAD_PARAMETERS, createToolSet, deferredTools, notLoadedError, runToolsLoad, toolsToSend,
   type CatalogEntry, type ToolLoading, type ToolSet,
 } from './tool-loading.js';
 import { TOOL_RESULT_MAX_CHARS_DEFAULT, capToolResult, resolveToolResultCap } from './tool-result-cap.js';
+import { toolArgsError } from './tool-args.js';
 
 // A single chat message. `role` is the OpenAI role; `content` may be null when a
 // message carries tool_calls. Extra fields (tool_calls, tool_call_id) ride along.
@@ -859,6 +860,24 @@ export async function agentChat(
         // Known from the index, not loaded: refused before anything else — a write is
         // not put to the person for a call that will not run.
         const notLoaded = onDemand && deferred.has(tc.name) && !toolSet.has(tc.name);
+        // Checked against the tool's own declared schema next — `def` is undefined for
+        // `tools_load` (the loop's own tool, never in the registry), so its schema is
+        // read from `TOOLS_LOAD_PARAMETERS` directly. Skipped when `notLoaded`: "load it
+        // first" is the error that matters for a call that will not run either way.
+        const schemaToCheck = onDemand && tc.name === TOOLS_LOAD ? TOOLS_LOAD_PARAMETERS : def?.function.parameters;
+        const argsError = notLoaded ? null : toolArgsError(tc.name, schemaToCheck, parsed);
+        if (argsError) {
+          // A call whose arguments already miss the mark never reaches the tool — no
+          // y/n either, since a call this malformed will not run regardless of the
+          // answer.
+          const detail = `Error: ${argsError}`;
+          current.push({ role: 'tool', tool_call_id: tc.id, content: modelToolResult('error', detail) });
+          logRun({ name: tc.name, write: false, outcome: 'error', detail, args: parsed });
+          const run: ToolRun = { name: tc.name, args: parsed, write: false, outcome: 'error', detail };
+          toolRuns.push(run);
+          opts.onToolRun?.(run);
+          continue;
+        }
         const confirm = opts.confirmWrite;
         const needsConfirm =
           !notLoaded &&

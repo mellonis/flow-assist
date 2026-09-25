@@ -45,7 +45,7 @@ async function click(ui: Ui, y: number) {
 const editor = (make: Make) => [make('clone', {
   tools: [{
     id: 'clone',
-    tools: [{ type: 'function', function: { name: 'edit_app', description: 'Edit app.ts.', parameters: { type: 'object', properties: { b: { type: 'number' } } } } }],
+    tools: [{ type: 'function', function: { name: 'edit_app', description: 'Edit app.ts.', parameters: { type: 'object', properties: { b: { type: 'number' }, file: { type: 'string' }, content: { type: 'string' } } } } }],
     exec: async (_name: string, args: Record<string, unknown>, ctx: Record<string, unknown>) => {
       (ctx as { reportChange?: (c: unknown) => void }).reportChange?.({ title: `clone/app${args.file ?? ''}.ts`, before: 'const a = 1;\nconst b = 2;\n', after: `const a = 1;\nconst b = ${Number(args.b)};\n` });
       return 'edited';
