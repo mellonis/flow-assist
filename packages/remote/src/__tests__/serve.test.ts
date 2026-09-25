@@ -77,3 +77,23 @@ test('a stale socket file is replaced, and ending leaves no signal listener behi
   expect(process.listenerCount('SIGINT')).toBe(before.int);
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test('a server no client ever reaches still idle-exits, on the default idle armed at listen time', async () => {
+  const { dir, path: p } = sock();
+  await serveConnections(handleConnection, p, { defaultIdleMs: 50 });
+  await expect(Bun.connect({ unix: p, socket: { data() {}, open() {}, close() {}, error() {} } })).rejects.toThrow();
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('a live server keeps its socket: a second serveConnections on the same path is refused, and the first still answers a client', async () => {
+  const { dir, path: p } = sock();
+  const listening = new Promise<void>((r) => { serveConnections(handleConnection, p, { onListening: r, defaultIdleMs: 50 }); });
+  await listening;
+  await expect(serveConnections(handleConnection, p, { defaultIdleMs: 50 })).rejects.toThrow(`${p} is already served`);
+  const c = await client(p);
+  expect(await c.peer.request('hello', { hostApi: 2, config: {} })).toMatchObject({ name: 'fake' });
+  c.end();
+  await wait(100);
+  await expect(Bun.connect({ unix: p, socket: { data() {}, open() {}, close() {}, error() {} } })).rejects.toThrow();
+  fs.rmSync(dir, { recursive: true, force: true });
+});
