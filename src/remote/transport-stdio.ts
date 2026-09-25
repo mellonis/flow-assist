@@ -36,6 +36,7 @@ export function stdioTransport(opts: StdioOpts): Transport & { start(): Promise<
   const closes: Array<(w: TransportClose) => void> = [];
   let child: ChildProcess | undefined;
   let closedWith: TransportClose | undefined;
+  let exited = false; // the OS process, specifically — set only by the exit event, so close() never re-arms a kill on a process it has already seen die
   const closeOnce = (why: TransportClose) => { if (closedWith) return; closedWith = why; live.delete(child!); for (const f of closes) f(why); };
   const splitter = new LineSplitter((l) => lines.forEach((f) => f(l)), (n) => opts.log(`[${opts.name}] a line of ${n} bytes was dropped`));
   return {
@@ -45,7 +46,9 @@ export function stdioTransport(opts: StdioOpts): Transport & { start(): Promise<
       const [cmd, ...args] = opts.command;
       const c = spawn(path.isAbsolute(cmd!) || cmd!.includes('/') ? path.resolve(opts.cwd, cmd!) : cmd!, args, { cwd: opts.cwd, env: { ...process.env, ...opts.env }, stdio: ['pipe', 'pipe', 'pipe'] });
       child = c;
-      c.once('error', (e) => { reject(new Error(`${opts.name}: cannot start ${opts.command.join(' ')}: ${e.message}`)); closeOnce({ error: e.message }); });
+      // `.on`, not `.once`: a second error after a successful spawn (a failed kill,
+      // say) must still be heard, or it has no listener and crashes the host.
+      c.on('error', (e) => { reject(new Error(`${opts.name}: cannot start ${opts.command.join(' ')}: ${e.message}`)); closeOnce({ error: e.message }); });
       c.once('spawn', () => {
         live.add(c);
         c.unref();
@@ -60,18 +63,26 @@ export function stdioTransport(opts: StdioOpts): Transport & { start(): Promise<
       let err = '';
       c.stderr!.setEncoding('utf8');
       c.stderr!.on('data', (chunk: string) => { err += chunk; let nl; while ((nl = err.indexOf('\n')) !== -1) { const line = err.slice(0, nl).trimEnd(); err = err.slice(nl + 1); if (line) opts.log(`[${opts.name}] ${line}`); } });
-      c.once('exit', (code, signal) => closeOnce(signal ? { signal } : { code: code ?? 0 }));
+      c.once('exit', (code, signal) => { exited = true; closeOnce(signal ? { signal } : { code: code ?? 0 }); });
     }),
     send: (line) => { if (closedWith || !child?.stdin?.writable) return; try { child.stdin.write(`${line}\n`); } catch {} },
     onLine: (f) => { lines.push(f); },
     onClose: (f) => { closes.push(f); },
     close: async (graceMs) => {
-      if (!child || closedWith) return;
-      const exited = new Promise<void>((r) => child!.once('exit', () => r()));
-      try { child.stdin?.end(); } catch {}
-      const timer = setTimeout(() => { try { child!.kill('SIGTERM'); } catch {} setTimeout(() => { try { child!.kill('SIGKILL'); } catch {} }, Math.max(100, graceMs / 2)); }, Math.max(0, graceMs / 2));
-      await exited;
-      clearTimeout(timer);
+      if (!child || exited) return;
+      const c = child;
+      const done = new Promise<void>((r) => c.once('exit', () => r()));
+      // One timer handle, whichever stage is current: cleared unconditionally on
+      // exit, so a child that ends on its own, or from SIGTERM, never leaves a
+      // SIGKILL armed against a process that is already gone (mcp's own model).
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      c.once('exit', () => clearTimeout(timer));
+      try { c.stdin?.end(); } catch {}
+      timer = setTimeout(() => {
+        try { c.kill('SIGTERM'); } catch {}
+        timer = setTimeout(() => { try { c.kill('SIGKILL'); } catch {} }, Math.max(100, graceMs / 2));
+      }, Math.max(0, graceMs / 2));
+      await done;
     },
   };
 }

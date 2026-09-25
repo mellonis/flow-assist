@@ -6,6 +6,7 @@ import { createPeer, LineSplitter, type Frame, type KeyEvent, type ToolRunParams
 if (process.env.FAKE_STDERR) process.stderr.write(`${process.env.FAKE_STDERR}\n`);
 if (process.env.FAKE_STDOUT_NOISE) process.stdout.write('starting up\n');
 if (process.env.FAKE_PIDFILE) fs.writeFileSync(process.env.FAKE_PIDFILE, String(process.pid));
+if (process.env.FAKE_IGNORE_SIGTERM) process.on('SIGTERM', () => {}); // only SIGKILL ends it
 
 if (process.env.FAKE_NO_HELLO) {
   setInterval(() => {}, 1_000); // stays up, says nothing

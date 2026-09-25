@@ -59,3 +59,13 @@ test('a send after the child is gone is a no-op, never an unhandled error', asyn
   await closed;
   for (let i = 0; i < 5; i++) t.send('{"jsonrpc":"2.0","method":"key"}');
 });
+
+test('a child that ignores SIGTERM is ended by SIGKILL, and is really gone', async () => {
+  const { t } = boot({ FAKE_NO_HELLO: '1', FAKE_IGNORE_SIGTERM: '1' });
+  const closed = new Promise<{ signal?: string }>((r) => t.onClose(r));
+  await t.start();
+  const pid = t.pid()!;
+  await t.close(200);
+  expect((await closed).signal).toBe('SIGKILL');
+  expect(() => process.kill(pid, 0)).toThrow(); // ESRCH: the OS process is gone
+});
