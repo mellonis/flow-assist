@@ -130,7 +130,9 @@ What the host does with it, and what it expects back:
     `viewRenderers: { card: (data, ctx) => [[{ text: '✎ ', color: 'accent' }, { text: data.title }]] }`.
     `ctx` says `folded`, `live`, `failed`, `width`, `elapsedMs`, `lines`, `moreKey`;
     draw both the folded and the open state. The host qualifies the kind by your
-    plugin's name (`notes:card`), so your tool names it bare.
+    plugin's name (`notes:card`), so your tool names it bare. An open block taller
+    than the chat's conversation is read in the chat's pager, a window of its own, and
+    is drawn there with `lines` at everything the view kept.
   - A colour is a token of the chat palette (`accent`, `ok`, `warn`, `shell`, `text`),
     never a literal — right on a dark and a light terminal alike. A leading span
     marked `chrome: true` is painted and never copied.

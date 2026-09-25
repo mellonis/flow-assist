@@ -327,31 +327,34 @@ test('a long output stays one line folded; a click shows its last lines, cut; ^o
   const root = rootDir();
   const model = new ScriptedModel();
   model.script(
-    [{ tool: 'run_command', args: { command: 'for i in $(seq 1 40); do echo "line $i"; done' } }],
-    [{ text: 'Forty lines.' }],
+    // Short enough to fit the conversation whole, so a click opens it inline; a block
+    // taller than that opens in the pager (pager.e2e).
+    [{ tool: 'run_command', args: { command: 'for i in $(seq 1 12); do echo "line $i"; done' } }],
+    [{ text: 'Twelve lines.' }],
   );
   const ui = await boot(model, root, { plugins: { assistant: { runOutputLines: 5 } } });
-  await ui.type('count to forty');
+  await ui.type('count to twelve');
   await ui.press('return');
   await settle(10);
   await ui.press('y');
   await settleUntil(() => model.requests.length === 2);
   await settle(10);
 
-  // Folded: nothing of the forty lines is on screen, whatever their number.
+  // Folded: nothing of the twelve lines is on screen — the fold line says how many.
   const folded = unfence(ui.backend.lastFrame);
   expect(folded).not.toContain('lines cut');
-  expect(folded).not.toContain('line 40');
+  expect(folded).not.toContain('line 12');
+  expect(folded).toContain('· 12 lines');
 
   // A click opens it capped to its last runOutputLines lines — the same cap the
   // fold's own model ("… N lines cut · ^o for all") points past, at the global key.
-  const foldRow = ui.backend.lastFrame.split('\n').findIndex((r) => r.includes('for i in $(seq 1 40)'));
+  const foldRow = ui.backend.lastFrame.split('\n').findIndex((r) => r.includes('for i in $(seq 1 12)'));
   ui.backend.mouse('down', 12, foldRow);
   ui.backend.mouse('up', 12, foldRow);
   await settle(6);
   let opened = unfence(ui.backend.lastFrame);
-  expect(opened).toContain('… 35 lines cut · ^o for all');
-  expect(opened).toContain('line 40');
+  expect(opened).toContain('… 7 lines cut · ^o for all');
+  expect(opened).toContain('line 12');
   expect(opened).not.toContain('line 3 ');
   // The model still got the whole of it — the cap here is the screen's, not its.
   expect(String(sentTo(model).find((m) => m.role === 'tool')?.content)).toContain('line 3\n');
@@ -362,7 +365,7 @@ test('a long output stays one line folded; a click shows its last lines, cut; ^o
   await settle(5);
   opened = unfence(ui.backend.lastFrame);
   expect(opened).not.toContain('lines cut');
-  expect(opened).toContain('line 40');
+  expect(opened).toContain('line 12');
   ui.app.unmount();
 });
 

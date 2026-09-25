@@ -51,6 +51,10 @@ when pressed twice: the first press says `^c again to exit`.
 it said between them, a command's capped output — opens where you click it: on its fold line to
 open it, anywhere inside it to close it again. A block opens at its first row, so a
 long one starts where it starts; a drag is still a selection and never folds anything.
+A block taller than the conversation's window — a build's output, a turn of dozens of
+calls — opens in a pager instead: that block alone over the chat, with its own scroll
+(PgUp/PgDn, the wheel) and a drag to copy from it; Esc brings the conversation back
+where you left it, the block still folded.
 `^o` is the same thing for the whole screen: with anything folded it opens everything,
 pressed again it closes everything (`config set keys.details <key>` moves it; `^r`
 works too).
@@ -130,9 +134,11 @@ between them, as in a terminal (`!cd pkg`; only within the roots; variables are 
 kept). The assistant can run commands too — `run_command`, in the same directory and
 drawn the same live way, and only after you confirm each one (`ai.disabledTools:
 ["shell"]` turns it off); several in a row fold under one head, `Ran N commands`, that
-opens into each command's own block. A click on a command's line opens its last
-`runOutputLines` lines (`plugins.assistant.runOutputLines`); `^o` opens it, and
-everything else folded, in full. Limits:
+opens into each command's own block. A folded command that printed more than that
+says how much it holds (`· 200 lines`). A click on a command's line opens its last
+`runOutputLines` lines (`plugins.assistant.runOutputLines`), or the whole of it in the
+pager when it is taller than the conversation's window; `^o` opens it, and everything
+else folded, in full. Limits:
 `shell.timeoutMs` (120 s) and `shell.maxChars` (20000; the end of the output is kept).
 A command the assistant runs may read an earlier tool result on its stdin — the text
 exactly as the tool returned it, never cut — so it can count, search or save data it

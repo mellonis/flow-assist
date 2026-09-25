@@ -2,7 +2,7 @@
 // opens EVERYTHING and a click opens ONE block, and after either the person must be
 // able to say what the screen is showing.
 import { expect, test } from 'bun:test';
-import { allFolded, flipFolds, foldId, isOpen, toggleFold } from '../folds';
+import { allFolded, flipFolds, foldId, isClicked, isOpen, openInFull, pageable, toggleFold } from '../folds';
 
 const a = foldId(0, 'tools');
 const b = foldId(1, 'tools');
@@ -61,4 +61,22 @@ test('the state a click makes is a new object — the chat never mutates what it
   const next = toggleFold(s, a);
   expect(next).not.toBe(s);
   expect(isOpen(s, a)).toBe(false);
+});
+
+test('a block a click opens may go to the pager — a group head and a trail\'s earlier calls may not', () => {
+  for (const kind of ['view', 'tools', 'steps', 'thinking', 'summary'] as const) expect(pageable(foldId(3, kind, 1))).toBe(true);
+  expect(pageable(foldId(3, 'group'))).toBe(false);
+  expect(pageable(foldId(3, 'calls', 1))).toBe(false);
+});
+
+test('read whole, a block is open — and a trail has its earlier calls too — while the state itself is untouched', () => {
+  const s = allFolded();
+  const tools = foldId(2, 'tools', 1);
+  const whole = openInFull(s, tools);
+  expect(isOpen(whole, tools)).toBe(true);
+  expect(isClicked(whole, foldId(2, 'calls', 1))).toBe(true);
+  expect(isOpen(s, tools)).toBe(false);
+  // Already open because everything is: left open, not toggled shut.
+  const all = flipFolds(s);
+  expect(isOpen(openInFull(all, foldId(2, 'view', 0)), foldId(2, 'view', 0))).toBe(true);
 });

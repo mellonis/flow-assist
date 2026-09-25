@@ -34,9 +34,9 @@ import { capConsoleData, consoleData, renderConsole } from '../assistant/console
 import { INTERACTIVE_ASK, runInteractive, type InteractiveDeps } from '../assistant/interactive.js';
 import { editorReducer } from '@flowtty/core';
 import { z } from 'zod';
-import { anchorRow, askFieldWidth, chatFieldWidth, chatRows, chatWrapWidth, firstFoldRow, liveChatStatus, pendingChatRows, renderChatStatus, renderChatStrip, rowAnchor, viewGroupFor, type RowOpts, type Viewport } from '../views/modals.js';
+import { anchorRow, askFieldWidth, blockRows, chatFieldWidth, chatRows, chatWrapWidth, firstFoldRow, liveChatStatus, pagerTitle, pagerWrapWidth, pendingChatRows, renderChatStatus, renderChatStrip, rowAnchor, viewGroupFor, type RowOpts, type Viewport } from '../views/modals.js';
 import { CHAT_MODES, chatModeOf, inRect, type ChatMode, type PanelLayout } from '../runtime/panel-layout.js';
-import { allFolded, flipFolds, isClicked, isOpen, toggleFold, type FoldState } from '../assistant/folds.js';
+import { allFolded, flipFolds, isClicked, isOpen, openInFull, pageable, toggleFold, type FoldState } from '../assistant/folds.js';
 import { groupOpen, toggleGroup } from '../assistant/view-groups.js';
 import { bindingGlyph, firstGlyph, isKey, isMouseButton, keyGlyph } from '../playback/keys.js';
 import { askKey, askStart, type AskQuestion, type AskState } from '../assistant/ask.js';
@@ -418,6 +418,18 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // The mouse press a click may still come out of: the cell it landed on and
           // when. A drag clears it — a drag is a selection and never a fold.
           const pressRef = ui.useRef<{ x: number; y: number; at: number } | null>(null);
+          // The block open in the pager (its fold id), or null — a block a click opened
+          // that is taller than the rows the conversation has for it. The conversation's,
+          // like the folds: Esc closes it, and closing the chat, /clear and /resume drop
+          // it. `pagerShownRef` says whether the last render drew it: only a pager on
+          // screen holds the keys.
+          const [pager, setPagerState] = ui.useState<string | null>(null);
+          const pagerRef = ui.useRef<string | null>(null);
+          const pagerShownRef = ui.useRef(false);
+          const setPager = (id: string | null) => { pagerRef.current = id; if (!id) pagerShownRef.current = false; setPagerState(id); };
+          // The keys leaving the chat (a docked chat giving them to the plugin) close it
+          // too: it is read with the chat's keys, and would otherwise wait unseen.
+          ui.useEffect(() => { if (!focused && pagerRef.current) setPager(null); }, [focused]);
           // Process indicator: spinner + the seconds of whatever is running NOW.
           // t0Ref — when the turn started, which is what the finished answer's quiet
           // line says (`· 12.4s`). segRef — when the thing on the status line started:
@@ -652,6 +664,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // a drag is flowtty's selection — it copies, and it must never fold.
           const CLICK_MS = 250;
           const mouse = (key: { name?: string; x?: number; y?: number }): boolean => {
+            // Over the pager a click folds nothing in the conversation under it, and a
+            // drag is flowtty's selection of the pager's own text.
+            if (pagerShownRef.current) { pressRef.current = null; return false; }
             if (key.name === 'mousedrag') { pressRef.current = null; return false; }
             if (key.name === 'mousedown') { pressRef.current = { x: Number(key.x), y: Number(key.y), at: Date.now() }; return false; }
             const down = pressRef.current;
@@ -672,6 +687,14 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // Which way this click goes: for a block that follows the global state,
             // away from it; for the trail's cap, which never does, simply on.
             const opening = id.endsWith(':calls') ? !isClicked(foldsRef.current, id) : !isOpen(foldsRef.current, id);
+            // A block taller than the rows the conversation has for it — measured whole,
+            // as the pager would show it — opens in the pager and stays folded here.
+            // Below that it opens inline.
+            if (opening && pageable(id)) {
+              const v = viewportRef.current;
+              const whole = blockRows(drawn(), { ...rowOpts(openInFull(foldsRef.current, id)), viewLines: VIEW_CAPS.lines }, id).length;
+              if (v && whole > v.height) { setPager(id); host.notify(); return true; }
+            }
             applyFolds(toggleFold(foldsRef.current, id), opening ? id : null);
             return true;
           };
@@ -826,6 +849,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             setNotes(configNotes()); // and its own answer to how the steps are drawn
             resetRound(); // the round being written belonged to the conversation being left
             setFolds(allFolded()); // and the exceptions pointed into a conversation that is gone
+            setPager(null);
             usageRef.current = s.usage;
             historyRef.current = s.prompts.slice();
             histAt.current = null;
@@ -2065,6 +2089,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 setToolLabel('');
                 setElapsedMs(0);
                 setFolds(allFolded()); // everything folded again, and no exceptions left over
+                setPager(null);
                 setStreaming(false);
                 disarmEsc();
                 host.notify();
@@ -2134,6 +2159,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // `/exit` cannot be typed while one is up.
           const closeChat = () => {
             disarmEsc();
+            setPager(null);
             writeSession(); // the draft too
             setOpen(false);
             openRef.current = false; // the background flush may fire before the next render
@@ -2335,6 +2361,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // would cost a re-render a cell, and every other click must be free.
               // A click in the panel folds whichever side has the keyboard.
               if (isMouseButton(key.name)) return mouse(key);
+              // The pager is a reader: Esc brings the conversation back, and every other
+              // key stops here — nothing reaches the field, the folds or the model.
+              // PgUp/PgDn and the wheel are its own list's, which hears them first.
+              if (focused && pagerShownRef.current) {
+                if (key.name === 'escape') { setPager(null); host.notify(); }
+                return true;
+              }
               if (!focused) {
                 // The conversation's own list does not hear the wheel while the plugin
                 // has the keys; over the list it still scrolls it.
@@ -2604,6 +2637,17 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // started (`tabRef`), not from the field. Only with the caret at the end of a
           // one-line field, where the offer can be drawn.
           const completion = !input.includes('\n') && cursor >= input.length ? lineView(input, tabRef.current, chatComplete) : null;
+          // The block in the pager, laid out whole at the pager's width. Only while the
+          // chat has the keys: a docked chat that gave them to the plugin shows its
+          // conversation, and a block that is gone (the list replaced) shows nothing.
+          const pagerView = (() => {
+            if (!pager || !focused) return null;
+            const o = { ...rowOpts(openInFull(folds, pager)), wrap: pagerWrapWidth(width), viewLines: VIEW_CAPS.lines };
+            const rows = blockRows(messages as Parameters<typeof blockRows>[0], o, pager);
+            const at = layout === 'panel' && dock ? dock.panel : { top: 0, left: 0 };
+            return rows.length ? { rows, title: pagerTitle(rows, pager), top: at.top, left: at.left } : null;
+          })();
+          pagerShownRef.current = !!pagerView;
           return (host.viewRegistry.chat as (p: Record<string, unknown>) => unknown)({
             width, height, theme: host.config.theme, messages, input, streaming, error, toolLabel, phase, verb, cursor, escArmed,
             // An armed Ctrl+C / Ctrl+D / Ctrl+Z (the App's, `^c again to exit`) — drawn
@@ -2631,6 +2675,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             imageNumbers: [...imagesRef.current.keys()],
             imagesOn: imageLimits(host.config.ai).enabled,
             fullscreen,
+            pager: pagerView,
             // Docked beside the plugin's screen: the frame marks which side has the keys.
             docked: layout === 'panel',
             focused,

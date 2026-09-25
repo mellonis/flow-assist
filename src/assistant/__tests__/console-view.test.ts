@@ -25,6 +25,11 @@ test('folded, a command is one line; the $ is the gutter\'s, not the renderer\'s
   expect(renderConsole(d({ text: 'a\nb\nc' }), base).map(plain)).toEqual(['bun test · ✓ 4.2 s']);
 });
 
+test('folded, a command longer than a click shows says how many lines it holds', () => {
+  expect(renderConsole(d({ text: 'a\nb\nc\nd' }), base).map(plain)).toEqual(['bun test · ✓ 4.2 s · 4 lines']);
+  expect(renderConsole(d({ text: 'a\nb\nc' }), base).map(plain)).toEqual(['bun test · ✓ 4.2 s']);
+});
+
 test('a person\'s own command also says where it ran', () => {
   expect(renderConsole(d({ showCwd: true }), base).map(plain)).toEqual(['bun test · ✓ 4.2 s · ~/app']);
 });

@@ -5,6 +5,15 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **A block taller than the chat's window opens in a pager, not into the
+  conversation.** A click on a command's output, a turn's tool calls, its steps or
+  its thinking that would not fit the conversation's rows opens that block alone in
+  one window over the chat — everything the block kept, every call of a long trail —
+  with its own scroll (PgUp/PgDn, the wheel); a drag copies from it, nothing typed
+  there reaches the field or the model, and Esc brings the conversation back exactly
+  where it was, the block still folded. A block that fits opens inline as before, and
+  `^o` still opens everything inline. A folded command that printed more than a click
+  shows now says how much it holds (`· 200 lines`).
 - **The assistant can hand a tool's result to a command instead of re-typing it.**
   Asked how many non-breaking spaces a text holds, the model had the text in a tool's
   result and no way to give it to a command but to write it out again as an argument —
@@ -20,7 +29,6 @@ What each version of flow-assist brought, newest first. The version is the one i
   restart. **For plugin authors:** a tool may return `{ text, raw }` — `text` what the
   model reads, `raw` the bare data a later command may read as its stdin, `null` for
   none.
-
 - **Loading a big tool group whole no longer sits in every later request unread.**
   Loading a 26-tool group and a 17-tool group for five tools actually used once cost
   the conversation ~60k tokens of unused schemas on every round after, up from ~6k. A

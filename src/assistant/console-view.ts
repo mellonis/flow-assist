@@ -3,7 +3,9 @@
 // no drawing path of its own. `run_command` and the person's `!command` both use it,
 // and so does an interactive `!!command` (./interactive.ts), marked `interactive`.
 //
-// Folded, a command is ONE line: `bun test · ✓ 4.2 s` (the `$ ` is the gutter's).
+// Folded, a command is ONE line: `bun test · ✓ 4.2 s` (the `$ ` is the gutter's), and
+// `· 200 lines` after it when the output is longer than a click shows — how much there
+// is to read is news only then, and a block that size may open in the chat's pager.
 // Open, it is the command, the last `ctx.lines` lines of output under a bar a drag
 // never copies, and the same tail. The tail says how it ended in words a person reads
 // without decoding: ✓, ✗ with the code (1 and 127 mean different things), stopped,
@@ -116,8 +118,11 @@ export const renderConsole: ViewRenderer = (raw, ctx) => {
   const command = String(d.command ?? '');
   const tail = consoleTail(d, ctx);
   const head: ViewLine = [{ text: command }, ...(d.interactive ? [{ text: ' · interactive', dim: true }] : [])];
-  if (ctx.folded) return [[...head, { text: ' · ', dim: true }, ...tail]];
   const all = d.text ? String(d.text).split('\n') : [];
+  if (ctx.folded) {
+    const size: ViewSpan[] = all.length > Math.max(1, ctx.lines) ? [{ text: ` · ${all.length} lines`, dim: true }] : [];
+    return [[...head, { text: ' · ', dim: true }, ...tail, ...size]];
+  }
   const max = Math.max(1, ctx.lines);
   const cutN = all.length > max ? all.length - max : 0;
   const bar: ViewSpan = { text: '│ ', chrome: true, dim: true };

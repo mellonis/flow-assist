@@ -626,6 +626,23 @@ export function viewGroupFor(messages: ChatMsg[], o: RowOpts, id: string): ViewG
   return viewGroups(drawn as GroupMsg[], o.notes).find((g) => g.head === at);
 }
 
+// The rows of ONE block, laid out on their own — what the pager shows, and how tall
+// a block is measured to be before it opens. Only the message that owns the block is
+// laid out (a whole conversation laid out again at another width would cost what the
+// row cache saves), and only the rows that carry the block's id are kept.
+export function blockRows(messages: ChatMsg[], o: RowOpts, id: string): ChatRow[] {
+  const at = Number(id.split(':')[0]);
+  const m = messages.filter((msg) => msg.role !== 'system')[at];
+  if (!Number.isInteger(at) || !m) return [];
+  return messageRows(m, at, true, o).filter((r) => r.fold === id);
+}
+
+// The width the pager lays a block out in: its window fills the chat's area, less the
+// border and padding (4) and the scrollbar's column (1).
+export function pagerWrapWidth(width: number): number {
+  return Math.max(20, width - 5);
+}
+
 // The first row of a block, so opening one can put it at the top of the screen: the
 // fold line itself, with its body under it. −1 when the block is not on the list.
 export function firstFoldRow(rows: readonly ChatRow[], id: string): number {
@@ -841,6 +858,135 @@ function buildMessageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): Ch
   return rows;
 }
 
+// One row of the conversation as the screen draws it — shared by the conversation
+// and the pager, so a block read in the pager keeps every mark a drag reads: the gutter
+// and a code block's bar are chrome, a wrapped paragraph copies as one line.
+function chatRowRenderer({ palette: m, errorColor, wrap, now, detailsKey }: {
+  palette: Record<string, string | undefined>;
+  errorColor?: string;
+  wrap: number;
+  now: number;
+  detailsKey: string;
+}): (row: ChatRow, i: number) => ReactNode {
+  // Who is speaking is said by a marker in the gutter and by the ground under the
+  // message — not by a label. The person's marker is the input field's own prompt.
+  // A `!command` is the person's own action, so it sits on the person's ground.
+  const groundOf = (role?: string) => (role === 'user' || role === 'shell' ? m.userBg : role === 'bg' ? m.bgBg : undefined);
+  // The gutter is frame, never copied: a drag across an answer returns its text
+  // without the `ƒ ` (or `› `, `$ `, `◆ `) in front of it.
+  const gutter = (row: ChatRow) => h(Box, { selectable: false, flexShrink: 0 }, marker(row));
+  const marker = (row: ChatRow) => {
+    if (row.first && row.role === 'user') return row.quiet ? h(Text, { dim: true, color: m.accent }, '› ') : h(Text, { bold: true, color: m.accent }, '› ');
+    // Same colour as the shell-mode prompt below — a command reads as one thing
+    // from the `! ` it was typed with to the `$ ` its result appears under. A
+    // `view` is a command the MODEL ran and the person confirmed: the same `$ ` in
+    // the same colour, on no ground of its own, so whose command it was is still
+    // told apart at a glance. A view that is not a command (`plainGutter`, e.g. a
+    // plugin's own block) draws no `$` — it falls through to the blank gutter below.
+    if (row.first && (row.role === 'shell' || row.role === 'view') && !row.plainGutter) return h(Text, { bold: true, color: m.shell }, '$ ');
+    if (row.first && row.role === 'bg') return h(Text, { bold: true, color: m.bgAccent }, '◆ ');
+    // A note is the HOST speaking to the person (what /memory found, what /clear kept).
+    // It is not part of the conversation and is never sent to the model.
+    if (row.first && row.role === 'note') return h(Text, { dim: true }, '· ');
+    // ƒ — F for Flow, and a function. A narrow code point every monospace font has;
+    // ∮ reads well as "a loop" but is East-Asian-ambiguous width — flowtty reads it as
+    // one cell, so it would shift the row in a terminal that draws it two cells wide.
+    if (row.first && row.role === 'assistant') return h(Text, { bold: true, color: m.assistantAccent }, `${ASSISTANT_MARK} `);
+    // The round being written: nobody knows yet whether it is the answer, so it gets
+    // a live mark instead of the answer's `ƒ`.
+    if (row.liveMark) return h(Text, { dim: true, color: m.assistantAccent }, `${spin(now) ?? '·'} `);
+    return h(Text, null, ' '.repeat(GUTTER));
+  };
+
+  // A row's text in a box of its own, beside the gutter — the box flowtty's
+  // `<Markdown>` draws a row as, so the layout's selection marks mean the same here:
+  // `wrapContinues` rejoins a soft-wrapped paragraph into one line on copy (without
+  // it every row pastes as its own line), and the leading `chrome` spans (a code
+  // block's bar) are painted but never copied.
+  const content = (row: ChatRow, span: (s: Span, j: number) => ReactNode) =>
+    h(Box, { flexDirection: 'row', flexShrink: 0, wrapContinues: row.continues }, (row.spans || []).map(span));
+  // A row that is frame from edge to edge (a fence label) leaves the selection WHOLE —
+  // its blank cells to the right included, or a copy returns it as an empty line.
+  const frameRow = (row: ChatRow) => (row.frame === true ? { selectable: false } : {});
+
+  // One row of the conversation. `<ScrollList>` calls it only for the rows near the
+  // screen, so a long conversation costs what a short one costs.
+  const renderRow = (row: ChatRow, i: number) => {
+      const key = `chat-${i}`;
+      if (row.gap) return h(Box, { key, height: 1, flexShrink: 0 });
+      if (row.reasonHeader) return h(Text, { key, dim: true, color: 'magenta', selectable: false }, `${' '.repeat(GUTTER)}${row.open ? '▾' : '▸'} ${row.label}`);
+      // A group's head is a one-row line like a folded run — chrome, cut to one row —
+      // but it carries several spans (`Ran 3 commands · ✗ 1 failed · 34.0 s`) and the
+      // `ƒ ` mark a run's row never draws: a span's own colour (the failed count's warn) wins
+      // over the line's forced dim, or a red count would read as grey.
+      if (row.step && row.groupHead) return h(Box, { key, flexDirection: 'row', flexShrink: 0, selectable: false },
+        gutter(row),
+        h(Box, { flexDirection: 'row', flexShrink: 1, overflow: 'hidden' },
+          (row.spans || []).map((s, j) => h(Text, {
+            key: j, dim: s.dim, color: s.color, wrap: 'truncate',
+          }, String(s.text ?? '')))));
+      // A folded run of steps. Chrome, like the `N tools` line and the gutter: a drag
+      // across the answer returns what the model SAID, never the host's one-line
+      // account of it. It is cut to the width above, and truncated here as well so
+      // that it can never take a second row — the whole conversation is laid out one
+      // terminal line per row.
+      if (row.step) return h(Box, { key, flexDirection: 'row', flexShrink: 0, selectable: false },
+        h(Text, null, ' '.repeat(GUTTER)),
+        h(Box, { flexDirection: 'row', flexShrink: 1, overflow: 'hidden' },
+          (row.spans || []).map((s, j) => h(Text, {
+            key: j, wrap: 'truncate',
+            ...(s.mark === 'failed' ? { color: errorColor } : s.mark === 'wrote' ? { color: m.warn } : { dim: true }),
+          }, String(s.text ?? '')))));
+      if (row.reason) return h(Box, { key, flexDirection: 'row', flexShrink: 0, ...frameRow(row) },
+        gutter(row),
+        content(row, (s, j) => h(Text, { key: j, dim: true, bold: s.bold, underline: s.underline, color: s.color, selectable: j < (row.chrome ?? 0) ? false : undefined }, String(s.text ?? ''))));
+      if (row.toolRun) return h(Box, { key, flexDirection: 'row', flexShrink: 0 },
+        h(Text, null, ' '.repeat(GUTTER)),
+        (row.spans || []).map((s, j) => h(Text, { key: j, dim: true, wrap: 'truncate' }, String(s.text ?? ''))));
+      // The turn ran out of rounds: said in the warn colour, where the answer it never
+      // wrote would have been. Chrome — it is the host's account of the turn, not
+      // something the model said.
+      if (row.limit) return h(Box, { key, flexDirection: 'row', flexShrink: 0, selectable: false },
+        h(Text, { bold: true, color: m.assistantAccent }, `${ASSISTANT_MARK} `),
+        h(Text, { color: m.warn, wrap: 'truncate' }, String(row.spans?.[0]?.text ?? '')));
+      if (row.meta) {
+        const runs = row.runs ?? [];
+        const wrote = runs.some((r) => r.outcome === 'applied');
+        const failed = runs.some((r) => r.outcome === 'error' || r.outcome === 'declined');
+        // How long it took and which tools ran — about the answer, not part of it.
+        return h(Box, { key, flexDirection: 'row', flexShrink: 0, selectable: false },
+          h(Text, null, ' '.repeat(GUTTER)),
+          row.duration ? h(Text, { dim: true }, `${fmtSec(row.duration)}${runs.length || row.stopped ? ' · ' : ''}`) : null,
+          row.stopped ? h(Text, { color: m.warn }, `stopped (${row.stoppedBy ?? CAP.esc})${runs.length ? ' · ' : ''}`) : null,
+          runs.length ? h(Text, { dim: !failed, color: failed ? errorColor : wrote ? m.warn : m.ok }, `${row.open ? '▾' : '▸'} ${runs.length} tool${runs.length === 1 ? '' : 's'}${wrote ? ' ✎' : ''}: `) : null,
+          // The summary is a row like any other: cut it to what is left of the width,
+          // or a turn of fifty tools takes a second line and the list's arithmetic
+          // (one terminal line per row) is wrong.
+          runs.length ? h(Text, { dim: true, wrap: 'truncate' }, `${toolSummary(runs, Math.max(10, wrap - 30))}${row.open || !detailsKey ? '' : ` · ${detailsKey}`}`) : null,
+          // What the turn cost the provider — the turn's, not the conversation's.
+          row.tokens ? h(Text, { dim: true }, `${row.duration || runs.length || row.stopped ? ' · ' : ''}${tokensBadge(row.tokens)}`) : null);
+      }
+      const ground = groundOf(row.role);
+      const groundStyle = ground ? { width: '100%', backgroundColor: ground } : {};
+      if (row.spans && row.spans.length) {
+        return h(Box, { key, flexDirection: 'row', flexShrink: 0, ...groundStyle, ...frameRow(row) }, gutter(row),
+          content(row, (s, j) => h(Text, {
+            key: j,
+            bold: s.bold,
+            // A note is the host's; what the model wrote on the way stays where it
+            // was drawn but steps back, so the answer under it is what the eye lands on.
+            dim: s.dim || row.role === 'note' || row.quiet === true,
+            underline: s.underline,
+            color: s.token || s.accent ? m.accent : s.color,
+            selectable: j < (row.chrome ?? 0) ? false : undefined,
+          }, String(s.text ?? ''))));
+      }
+      // A blank line inside a message keeps the message's ground.
+      return h(Box, { key, height: 1, flexShrink: 0, ...groundStyle });
+  };
+  return renderRow;
+}
+
 // ─── The conversation: a scroll box, anchored to its bottom ───────────────────
 // flowtty's <ScrollBox> takes whatever height the column leaves and follows new
 // rows until the person scrolls up; PgUp/PgDn and the wheel are its own. Before
@@ -932,46 +1078,7 @@ function ChatMessages({ messages, rowOpts, palette: m, errorColor, onViewport, s
   // not on the row under it — what the chat is told, so it leaves that row alone.
   pinnedRef.current = pinned;
 
-  // Who is speaking is said by a marker in the gutter and by the ground under the
-  // message — not by a label. The person's marker is the input field's own prompt.
-  // A `!command` is the person's own action, so it sits on the person's ground.
-  const groundOf = (role?: string) => (role === 'user' || role === 'shell' ? m.userBg : role === 'bg' ? m.bgBg : undefined);
-  // The gutter is frame, never copied: a drag across an answer returns its text
-  // without the `ƒ ` (or `› `, `$ `, `◆ `) in front of it.
-  const gutter = (row: ChatRow) => h(Box, { selectable: false, flexShrink: 0 }, marker(row));
-  const marker = (row: ChatRow) => {
-    if (row.first && row.role === 'user') return row.quiet ? h(Text, { dim: true, color: m.accent }, '› ') : h(Text, { bold: true, color: m.accent }, '› ');
-    // Same colour as the shell-mode prompt below — a command reads as one thing
-    // from the `! ` it was typed with to the `$ ` its result appears under. A
-    // `view` is a command the MODEL ran and the person confirmed: the same `$ ` in
-    // the same colour, on no ground of its own, so whose command it was is still
-    // told apart at a glance. A view that is not a command (`plainGutter`, e.g. a
-    // plugin's own block) draws no `$` — it falls through to the blank gutter below.
-    if (row.first && (row.role === 'shell' || row.role === 'view') && !row.plainGutter) return h(Text, { bold: true, color: m.shell }, '$ ');
-    if (row.first && row.role === 'bg') return h(Text, { bold: true, color: m.bgAccent }, '◆ ');
-    // A note is the HOST speaking to the person (what /memory found, what /clear kept).
-    // It is not part of the conversation and is never sent to the model.
-    if (row.first && row.role === 'note') return h(Text, { dim: true }, '· ');
-    // ƒ — F for Flow, and a function. A narrow code point every monospace font has;
-    // ∮ reads well as "a loop" but is East-Asian-ambiguous width — flowtty reads it as
-    // one cell, so it would shift the row in a terminal that draws it two cells wide.
-    if (row.first && row.role === 'assistant') return h(Text, { bold: true, color: m.assistantAccent }, `${ASSISTANT_MARK} `);
-    // The round being written: nobody knows yet whether it is the answer, so it gets
-    // a live mark instead of the answer's `ƒ`.
-    if (row.liveMark) return h(Text, { dim: true, color: m.assistantAccent }, `${spin(rowOpts.now) ?? '·'} `);
-    return h(Text, null, ' '.repeat(GUTTER));
-  };
-
-  // A row's text in a box of its own, beside the gutter — the box flowtty's
-  // `<Markdown>` draws a row as, so the layout's selection marks mean the same here:
-  // `wrapContinues` rejoins a soft-wrapped paragraph into one line on copy (without
-  // it every row pastes as its own line), and the leading `chrome` spans (a code
-  // block's bar) are painted but never copied.
-  const content = (row: ChatRow, span: (s: Span, j: number) => ReactNode) =>
-    h(Box, { flexDirection: 'row', flexShrink: 0, wrapContinues: row.continues }, (row.spans || []).map(span));
-  // A row that is frame from edge to edge (a fence label) leaves the selection WHOLE —
-  // its blank cells to the right included, or a copy returns it as an empty line.
-  const frameRow = (row: ChatRow) => (row.frame === true ? { selectable: false } : {});
+  const renderRow = chatRowRenderer({ palette: m, errorColor, wrap, now: rowOpts.now, detailsKey: rowOpts.detailsKey });
 
   // An absolute child of a scroll box is an overlay: it stays put while the rows move
   // under it, so pinning does not shift what the person is reading. Needs flowtty
@@ -983,82 +1090,6 @@ function ChatMessages({ messages, rowOpts, palette: m, errorColor, onViewport, s
         h(Text, { bold: true, dim: true, color: m.accent }, '› '),
         h(Text, { dim: true, wrap: 'truncate' }, lastUserText.length > 60 ? `${lastUserText.slice(0, 60)}…` : lastUserText || '…'))
     : null;
-  // One row of the conversation. `<ScrollList>` calls it only for the rows near the
-  // screen, so a long conversation costs what a short one costs.
-  const renderRow = (row: ChatRow, i: number) => {
-      const key = `chat-${i}`;
-      if (row.gap) return h(Box, { key, height: 1, flexShrink: 0 });
-      if (row.reasonHeader) return h(Text, { key, dim: true, color: 'magenta', selectable: false }, `${' '.repeat(GUTTER)}${row.open ? '▾' : '▸'} ${row.label}`);
-      // A group's head is a one-row line like a folded run — chrome, cut to one row —
-      // but it carries several spans (`Ran 3 commands · ✗ 1 failed · 34.0 s`) and the
-      // `ƒ ` mark a run's row never draws: a span's own colour (the failed count's warn) wins
-      // over the line's forced dim, or a red count would read as grey.
-      if (row.step && row.groupHead) return h(Box, { key, flexDirection: 'row', flexShrink: 0, selectable: false },
-        gutter(row),
-        h(Box, { flexDirection: 'row', flexShrink: 1, overflow: 'hidden' },
-          (row.spans || []).map((s, j) => h(Text, {
-            key: j, dim: s.dim, color: s.color, wrap: 'truncate',
-          }, String(s.text ?? '')))));
-      // A folded run of steps. Chrome, like the `N tools` line and the gutter: a drag
-      // across the answer returns what the model SAID, never the host's one-line
-      // account of it. It is cut to the width above, and truncated here as well so
-      // that it can never take a second row — the whole conversation is laid out one
-      // terminal line per row.
-      if (row.step) return h(Box, { key, flexDirection: 'row', flexShrink: 0, selectable: false },
-        h(Text, null, ' '.repeat(GUTTER)),
-        h(Box, { flexDirection: 'row', flexShrink: 1, overflow: 'hidden' },
-          (row.spans || []).map((s, j) => h(Text, {
-            key: j, wrap: 'truncate',
-            ...(s.mark === 'failed' ? { color: errorColor } : s.mark === 'wrote' ? { color: m.warn } : { dim: true }),
-          }, String(s.text ?? '')))));
-      if (row.reason) return h(Box, { key, flexDirection: 'row', flexShrink: 0, ...frameRow(row) },
-        gutter(row),
-        content(row, (s, j) => h(Text, { key: j, dim: true, bold: s.bold, underline: s.underline, color: s.color, selectable: j < (row.chrome ?? 0) ? false : undefined }, String(s.text ?? ''))));
-      if (row.toolRun) return h(Box, { key, flexDirection: 'row', flexShrink: 0 },
-        h(Text, null, ' '.repeat(GUTTER)),
-        (row.spans || []).map((s, j) => h(Text, { key: j, dim: true, wrap: 'truncate' }, String(s.text ?? ''))));
-      // The turn ran out of rounds: said in the warn colour, where the answer it never
-      // wrote would have been. Chrome — it is the host's account of the turn, not
-      // something the model said.
-      if (row.limit) return h(Box, { key, flexDirection: 'row', flexShrink: 0, selectable: false },
-        h(Text, { bold: true, color: m.assistantAccent }, `${ASSISTANT_MARK} `),
-        h(Text, { color: m.warn, wrap: 'truncate' }, String(row.spans?.[0]?.text ?? '')));
-      if (row.meta) {
-        const runs = row.runs ?? [];
-        const wrote = runs.some((r) => r.outcome === 'applied');
-        const failed = runs.some((r) => r.outcome === 'error' || r.outcome === 'declined');
-        // How long it took and which tools ran — about the answer, not part of it.
-        return h(Box, { key, flexDirection: 'row', flexShrink: 0, selectable: false },
-          h(Text, null, ' '.repeat(GUTTER)),
-          row.duration ? h(Text, { dim: true }, `${fmtSec(row.duration)}${runs.length || row.stopped ? ' · ' : ''}`) : null,
-          row.stopped ? h(Text, { color: m.warn }, `stopped (${row.stoppedBy ?? CAP.esc})${runs.length ? ' · ' : ''}`) : null,
-          runs.length ? h(Text, { dim: !failed, color: failed ? errorColor : wrote ? m.warn : m.ok }, `${row.open ? '▾' : '▸'} ${runs.length} tool${runs.length === 1 ? '' : 's'}${wrote ? ' ✎' : ''}: `) : null,
-          // The summary is a row like any other: cut it to what is left of the width,
-          // or a turn of fifty tools takes a second line and the list's arithmetic
-          // (one terminal line per row) is wrong.
-          runs.length ? h(Text, { dim: true, wrap: 'truncate' }, `${toolSummary(runs, Math.max(10, wrap - 30))}${row.open || !rowOpts.detailsKey ? '' : ` · ${rowOpts.detailsKey}`}`) : null,
-          // What the turn cost the provider — the turn's, not the conversation's.
-          row.tokens ? h(Text, { dim: true }, `${row.duration || runs.length || row.stopped ? ' · ' : ''}${tokensBadge(row.tokens)}`) : null);
-      }
-      const ground = groundOf(row.role);
-      const groundStyle = ground ? { width: '100%', backgroundColor: ground } : {};
-      if (row.spans && row.spans.length) {
-        return h(Box, { key, flexDirection: 'row', flexShrink: 0, ...groundStyle, ...frameRow(row) }, gutter(row),
-          content(row, (s, j) => h(Text, {
-            key: j,
-            bold: s.bold,
-            // A note is the host's; what the model wrote on the way stays where it
-            // was drawn but steps back, so the answer under it is what the eye lands on.
-            dim: s.dim || row.role === 'note' || row.quiet === true,
-            underline: s.underline,
-            color: s.token || s.accent ? m.accent : s.color,
-            selectable: j < (row.chrome ?? 0) ? false : undefined,
-          }, String(s.text ?? ''))));
-      }
-      // A blank line inside a message keeps the message's ground.
-      return h(Box, { key, height: 1, flexShrink: 0, ...groundStyle });
-  };
-
   const scroll = {
     ref: box, anchor: 'bottom' as const, isActive: keysActive, flexGrow: 1, flexShrink: 1, flexDirection: 'column' as const,
     onScroll: (_o: number, x: ScrollMetrics) => see(x), onMetrics: see,
@@ -1090,6 +1121,53 @@ function ChatMessages({ messages, rowOpts, palette: m, errorColor, onViewport, s
     rowHeight: 1,
     renderItem: renderRow,
   }, sticky);
+}
+
+// ─── The pager ────────────────────────────────────────────────────────────────
+// A block taller than the rows the conversation has for it is read here instead: one
+// window over the chat's whole area, that block alone, with a scroll of its own — the
+// same frame as the log and the help. It draws the block's rows with the
+// conversation's own renderer, so a drag copies the text and leaves the gutter and
+// the bars. It is a reader: the chat's key handler swallows every key while it is up
+// and Esc brings the conversation back as it was left.
+export interface PagerView {
+  rows: ChatRow[];
+  title: string;
+  // Where the chat's area starts on the terminal. An absolute box is placed from its
+  // nearest absolute ancestor — the terminal's corner for a docked panel, which is a
+  // plain box — so the pager says where the panel is to lie over it.
+  top: number;
+  left: number;
+}
+function ChatPager({ pager, width, height, palette: m, errorColor, now, detailsKey }: {
+  pager: PagerView;
+  width: number;
+  height: number;
+  palette: Record<string, string | undefined>;
+  errorColor?: string;
+  now: number;
+  detailsKey: string;
+}) {
+  const renderRow = chatRowRenderer({ palette: m, errorColor, wrap: pagerWrapWidth(width), now, detailsKey });
+  return h(Box, { ...overlay(width, height, 11), top: pager.top, left: pager.left },
+    h(Box, frame(m, cutStep(pager.title, Math.max(0, width - 6)), { width, height, paddingY: 0, gap: 1 }),
+      h(ScrollList<ChatRow>, {
+        items: pager.rows, rowHeight: 1, scrollbar: true, flexGrow: 1, flexShrink: 1, flexDirection: 'column',
+        keyOf: (_row: ChatRow, i: number) => `pager-${i}`,
+        renderItem: renderRow,
+      }),
+      h(Text, { dim: true, selectable: false, wrap: 'truncate' }, `${CAP.page} or the wheel scroll · ${CAP.esc} close`)));
+}
+
+// What the pager's title says: a command's own line, else what the block is.
+export function pagerTitle(rows: readonly ChatRow[], id: string): string {
+  const kind = id.split(':')[1];
+  if (kind === 'view') return (rows[0]?.spans ?? []).map((sp) => String(sp.text ?? '')).join('').trim() || 'output';
+  if (kind === 'tools') {
+    const n = rows[0]?.runs?.length ?? 0;
+    return `${n} tool call${n === 1 ? '' : 's'}`;
+  }
+  return kind === 'thinking' ? 'thinking' : kind === 'summary' ? 'summary' : 'steps';
 }
 
 // ─── Chat modal (pure render) ──────────────────────────────────────────────────
@@ -1187,7 +1265,10 @@ export function renderChatModal({
   escWord = 'close',
   imageNumbers = [],
   imagesOn = false,
+  pager = null,
 }: {
+  // A block open in the pager, over the whole chat — null when none is.
+  pager?: PagerView | null;
   width: number;
   height: number;
   theme: Theme | undefined;
@@ -1369,7 +1450,9 @@ export function renderChatModal({
         // <ScrollBox> is one), so a drag there stays in the conversation.
         selectionScope: true,
       },
-      h(ChatMessages, { messages, rowOpts: { wrap, folds, viewLines, notes, detailsKey, renderers: viewRenderers, now, palette: m, onViewFail }, palette: m, errorColor: theme?.error, onViewport, scrollTo, keysActive: focused, wheel }),
+      // Under the pager the conversation hears no key: PgUp/PgDn and the wheel are the
+      // pager's, and the conversation stays where it was left.
+      h(ChatMessages, { messages, rowOpts: { wrap, folds, viewLines, notes, detailsKey, renderers: viewRenderers, now, palette: m, onViewFail }, palette: m, errorColor: theme?.error, onViewport, scrollTo, keysActive: focused && !pager, wheel }),
       error ? h(Text, { color: 'red' }, `⚠ ${error}`) : null,
       // The hint on the left, how full the model's context is on the right — it stays
       // put while the hint changes, and turns yellow when it is time to /compact.
@@ -1514,6 +1597,9 @@ export function renderChatModal({
               })),
       ),
     ),
+    // Always this slot, null or the pager, so opening one never remounts the
+    // conversation under it (it keeps its scroll).
+    pager ? h(ChatPager, { pager, width, height, palette: m, errorColor: theme?.error, now, detailsKey }) : null,
   );
 }
 

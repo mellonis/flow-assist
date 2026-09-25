@@ -628,12 +628,15 @@ there is no `/fullscreen`.
   chat draws the `$ …` block. A declined call leaves none — nothing ran; a failed one
   shows its output and its exit code.
   Folded, the block is ONE line saying how it ended — `cmd · ✓ 4.2 s`, `✗ exit 1 · 4.2
-  s`, `stopped`, `timed out`; a CLICK opens it to the last
-  `plugins.assistant.runOutputLines` lines (20) with `… N lines cut · ^o for all` above
-  them — a display cap of its own, quite apart from `shell.maxChars`, which is how much
-  the MODEL is given; `^o` opens every block in full (`VIEW_CAPS.lines`, everything the
-  view kept), which is what makes `^o for all` true rather than a second, still-capped
-  state. Consecutive commands of a turn (no other call between them) fold under one
+  s`, `stopped`, `timed out` — and, when it printed more than a click shows, how much it
+  holds: `· 200 lines` (what the view KEPT, `VIEW_CAPS.lines` at most); a CLICK opens it
+  to the last `plugins.assistant.runOutputLines` lines (20) with `… N lines cut · ^o for
+  all` above them — a display cap of its own, quite apart from `shell.maxChars`, which
+  is how much the MODEL is given — unless the whole block is taller than the
+  conversation's rows, when the click opens it in the pager instead (see "A block
+  taller than the conversation opens in the pager" under The chat); `^o` opens every
+  block in full inline (`VIEW_CAPS.lines`, everything the view kept), which is what
+  makes `^o for all` true rather than a second, still-capped state. Consecutive commands of a turn (no other call between them) fold under one
   `ƒ Ran N commands · ✓ 34.0 s` head — `Running N commands · $ cmd · 4 s` while one runs —
   which also takes in the rounds between them that said nothing but their plan (a
   step that is only its `Next:` line, `isPlanOnly`: the head says what ran, which is
@@ -1688,6 +1691,36 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     callback, where the box has just measured the rows the fold added or took away.
   - Following the bottom belongs to a message ARRIVING (`scrollToEnd` on the count of
     questions asked), never to rows appearing above the viewport.
+  - **A block taller than the conversation opens in the pager**, not into the
+    conversation. When a click would OPEN a `view`, `tools`, `steps`, `thinking` or
+    `summary` block (`pageable` in `folds.ts`), the chat measures the block WHOLE — as
+    the pager shows it: laid out with `openInFull` (open, a trail's earlier-calls cap
+    lifted) and a view at `VIEW_CAPS.lines`, only the block's own message laid out
+    (`blockRows`) — against the rows the conversation has for it, the list's own
+    height from `onViewport` at that moment. More rows than that → the pager; as many
+    or fewer → inline, a view capped to its tail. So a view whose
+    whole kept text does not fit opens in the pager even when its 20-line tail would
+    have. A group's head and a trail's `… N earlier calls` line always open inline (the
+    first opens into one-line blocks, the second belongs to a trail that fitted). A ✎
+    diff never folds, so it never reaches the pager. **Only a click opens one**: `^o`
+    opens everything inline, the tall blocks included — the pager is for reading ONE
+    block. The pager (`ChatPager` in `src/views/modals.ts`) is one window over the
+    chat's whole area — the terminal in `window`/`full`, the panel when docked — in
+    `frame()`, titled by the command (`N tool calls`, `thinking`, …), its rows drawn by
+    the conversation's own row renderer (`chatRowRenderer`, so a drag copies the text
+    and never the gutter or the `│ ` bar) in a `<ScrollList scrollbar>` laid out at
+    `pagerWrapWidth`. An absolute box is placed from its nearest absolute ancestor,
+    and a docked panel is a plain box, so the pager is handed the panel's corner
+    (`PagerView.top/left`). It sits in a fixed slot after the chat's frame, so the
+    conversation under it never remounts, and the conversation's list gets
+    `isActive: false` while it is up: PgUp/PgDn and the wheel are the pager's, and Esc
+    returns to the conversation exactly where it was, the block still folded. It is a
+    reader: the chat's key handler takes every key while it is drawn
+    (`pagerShownRef`) — Esc closes it, anything else does nothing, so nothing reaches
+    the field, the folds or the model — and `mouse()` folds nothing, so a drag is the
+    pager's selection. Closing the chat, the keys leaving a docked chat, `/clear` and
+    `/resume` drop it. Its state is the fold id (`pager`); a block whose id does not
+    resolve draws no pager and holds no key.
 - **A turn is drawn in the order it happened** (`src/assistant/step.ts`, pure; the chat
   owns the parts and the view lays them out). A whole turn is one assistant message,
   its `parts` kept in the order they happened rather than grouped by CATEGORY: laying
@@ -1847,7 +1880,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   adding a pane:
   - `selectionScope` on every pane and window: a drag that starts inside stays in its
     content rect — never onto the border, never into the neighbour. The chat's frame,
-    `frame()` (log, help), the reminder and the host's bottom box (the command line)
+    `frame()` (log, help, the chat's pager), the reminder and the host's bottom box (the command line)
     carry it; a `<ScrollBox>` (the conversation, the help's list) and a `<Table>` are
     scopes already. A plugin's panes carry it too (the tracker: the board, each column
     cell, the issue, the info panel, every modal window).
@@ -2199,6 +2232,9 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     instruction, so a key that does nothing here is not listed as if it did.
     `helpEntries` gives one entry per word a person types: a plugin's `core:quit` and
     the host's `quit` are the same word, and the described one wins.
+  - **The chat's pager** is a host modal too — `frame()`, a `<ScrollList scrollbar>`,
+    `PgUp/PgDn or the wheel scroll · Esc close` — opened by a click, never a key (see
+    "A block taller than the conversation opens in the pager" under The chat).
   - A modal opened by a key names that key in the footer through `keycaps` (`L log`),
     and the flag the footer reads is patched synchronously AND followed by `notify()`
     on close as well as on open — the host draws the footer before the plugin re-renders.

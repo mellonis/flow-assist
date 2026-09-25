@@ -23,7 +23,9 @@ const many = () => [
 test('consecutive calls of one tool are one line with a count, and the open trail is capped', async () => {
   const model = new ScriptedModel();
   model.script(many(), [{ text: 'Done at last.' }]);
-  const ui = await bootApp(model, 110, 40);
+  // Tall enough for the whole trail (25 rows) to fit the conversation, so a click opens
+  // it inline, where the cap holds; a taller trail opens in the pager (pager.e2e).
+  const ui = await bootApp(model, 110, 44);
   await ui.press('F');
   await ui.type('do a lot');
   await ui.press('return');

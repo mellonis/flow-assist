@@ -68,6 +68,28 @@ export function clickedOpen(state: FoldState, id: string): boolean {
   return state.except.has(id) && isOpen(state, id);
 }
 
+// The blocks a click may open in the chat's pager rather than into the conversation,
+// when the block is taller than the rows the conversation has for it. A group's head
+// opens into one-line blocks of its own, and the earlier calls of a trail belong to a
+// trail that already fitted, so both always open where they are.
+const PAGEABLE: ReadonlySet<string> = new Set(['view', 'tools', 'steps', 'thinking', 'summary']);
+export function pageable(id: string): boolean {
+  return PAGEABLE.has(id.split(':')[1] ?? '');
+}
+
+// The fold state a block is laid out with to be read WHOLE — how the pager draws it and
+// how tall it is measured to be: the block open, and for a trail its cap on earlier
+// calls lifted too. A view's own cap is the caller's (`RowOpts.viewLines`).
+export function openInFull(state: FoldState, id: string): FoldState {
+  let next = isOpen(state, id) ? state : toggleFold(state, id);
+  const m = /^(\d+):tools:(\d+)$/.exec(id);
+  if (m) {
+    const calls = foldId(Number(m[1]), 'calls', Number(m[2]));
+    if (!isClicked(next, calls)) next = toggleFold(next, calls);
+  }
+  return next;
+}
+
 // The blocks a message can have. `thinking` is its reasoning, `steps` one run of the
 // text it wrote between tool calls (src/assistant/step.ts — a message can hold
 // several runs, `n` says which), `tools` one stretch of the calls it made, behind its
