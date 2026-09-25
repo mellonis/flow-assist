@@ -13,7 +13,8 @@ import { LineSplitter } from '@flow-assist/remote';
 import { acquireStartLock, isSocketDead } from './sockets.js';
 import type { Transport, TransportClose } from './transport.js';
 
-export interface SocketOpts { name: string; socketPath: string; run?: string[]; cwd: string; env?: Record<string, string>; log: (line: string) => void; waitMs?: number }
+// `isSocketDead` is ./sockets.ts's own probe unless a test times the race itself.
+export interface SocketOpts { name: string; socketPath: string; run?: string[]; cwd: string; env?: Record<string, string>; log: (line: string) => void; waitMs?: number; isSocketDead?: (socketPath: string) => Promise<boolean> }
 const POLL_MS = 50;
 const LOG_MAX_BYTES = 1024 * 1024;
 
@@ -94,16 +95,22 @@ export function socketTransport(opts: SocketOpts): Transport & { start(): Promis
   return {
     async start() {
       const waitMs = opts.waitMs ?? 10_000;
+      const probe = opts.isSocketDead ?? isSocketDead;
       const deadline = Date.now() + waitMs;
       for (;;) {
-        if (!(await isSocketDead(opts.socketPath))) { conn = await connect(); return; }
+        if (!(await probe(opts.socketPath))) { conn = await connect(); return; }
         if (!opts.run) throw new Error(`${opts.name}: nothing listens on ${opts.socketPath} and the manifest has no run`);
         const lock = acquireStartLock(opts.socketPath);
         if (lock.ok) {
+          // Probed again under the lock: another host may have started the server
+          // between this host's first probe and its taking the lock (released by that
+          // host the moment its server answered). Unlinking then would orphan a live
+          // server and split its clients across two.
+          if (!(await probe(opts.socketPath))) { lock.release(); conn = await connect(); return; }
           try { fs.unlinkSync(opts.socketPath); } catch { /* nothing stale to remove */ }
           startServer();
           try {
-            while (Date.now() < deadline) { if (fs.existsSync(opts.socketPath) && !(await isSocketDead(opts.socketPath))) break; await new Promise((r) => setTimeout(r, POLL_MS)); }
+            while (Date.now() < deadline) { if (fs.existsSync(opts.socketPath) && !(await probe(opts.socketPath))) break; await new Promise((r) => setTimeout(r, POLL_MS)); }
           } finally { lock.release(); }
         } else {
           // Another host is starting it: wait for the socket rather than start a second.

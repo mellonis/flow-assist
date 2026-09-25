@@ -3,10 +3,16 @@
 // temp dir): `sockets/`, 0700, and a plugin names its socket, never a path — nothing
 // a plugin says can put a listener elsewhere on the machine. The lock is
 // `<socket>.lock`, created O_EXCL with `{ pid, at }`; a lock whose pid is not alive
-// is stale and taken over — the session lock's rule (src/assistant/sessions.ts).
+// is stale and taken over — the session lock's rule (src/assistant/sessions.ts),
+// including its rule for a lock that will not parse: an `O_EXCL` create exists empty
+// for an instant before its write lands, so an unreadable lock is held while it is
+// younger than `UNREADABLE_HELD_MS` and stale after. `release` removes the lock only
+// while it is still the one this acquire wrote — a host judged stale and taken over
+// must not delete its successor's.
 import fs from 'node:fs';
 import path from 'node:path';
 import { hostStateDir } from '../config/load.js';
+import { UNREADABLE_HELD_MS } from '../assistant/sessions.js';
 
 // Bun's unix-connect API — the one call this file needs; its full type definitions
 // are not part of the typecheck (the same convention as `src/loader/compat.ts`'s
@@ -32,13 +38,21 @@ const alive = (pid: number): boolean => { try { process.kill(pid, 0); return tru
 export function acquireStartLock(sock: string, deps: { pidAlive?: (pid: number) => boolean } = {}): { ok: true; release(): void } | { ok: false; heldBy: number } {
   const lock = `${sock}.lock`;
   const isAlive = deps.pidAlive ?? alive;
-  const tryTake = (): boolean => { try { fs.writeFileSync(lock, JSON.stringify({ pid: process.pid, at: Date.now() }), { flag: 'wx', mode: 0o600 }); return true; } catch { return false; } };
-  if (tryTake()) return { ok: true, release: () => { try { fs.unlinkSync(lock); } catch { /* already gone */ } } };
+  const mine = JSON.stringify({ pid: process.pid, at: Date.now() });
+  const tryTake = (): boolean => { try { fs.writeFileSync(lock, mine, { flag: 'wx', mode: 0o600 }); return true; } catch { return false; } };
+  const release = () => { try { if (fs.readFileSync(lock, 'utf8') === mine) fs.unlinkSync(lock); } catch { /* already gone */ } };
+  if (tryTake()) return { ok: true, release };
   let holder = 0;
-  try { holder = Number((JSON.parse(fs.readFileSync(lock, 'utf8')) as { pid?: unknown }).pid) || 0; } catch { /* unreadable — treated as no one to identify */ }
+  let readable = false;
+  try { holder = Number((JSON.parse(fs.readFileSync(lock, 'utf8')) as { pid?: unknown }).pid) || 0; readable = true; } catch { /* missing, or not yet written */ }
   if (holder && isAlive(holder)) return { ok: false, heldBy: holder };
+  if (!readable) {
+    let mtimeMs: number | null = null;
+    try { mtimeMs = fs.statSync(lock).mtimeMs; } catch { /* gone meanwhile */ }
+    if (mtimeMs !== null && Date.now() - mtimeMs <= UNREADABLE_HELD_MS) return { ok: false, heldBy: 0 };
+  }
   try { fs.unlinkSync(lock); } catch { /* already gone */ }
-  if (tryTake()) return { ok: true, release: () => { try { fs.unlinkSync(lock); } catch { /* already gone */ } } };
+  if (tryTake()) return { ok: true, release };
   return { ok: false, heldBy: holder };
 }
 

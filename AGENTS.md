@@ -403,7 +403,11 @@ protocol as its authors read it is docs/plugins.md, "A plugin in another languag
 - **Two hosts starting the same server at once are serialised by a lock beside the
   socket** (`src/remote/sockets.ts`): `<name>.lock`, holding `{ pid, at }`, taken with
   `O_EXCL`; a lock whose pid is no longer alive is stale and taken over, the rule the
-  session lock also follows (`src/assistant/sessions.ts`).
+  session lock also follows (`src/assistant/sessions.ts`) — an unreadable lock, a
+  create whose write has not landed yet, is held while younger than that file's
+  `UNREADABLE_HELD_MS`. The host that takes it probes the socket again before
+  unlinking anything (the server may have come up in between), and releases only the
+  lock it wrote itself.
 - **The supervisor's backoff** (`src/remote/supervisor.ts`) lengthens each time
   another failure comes quickly — within a second of starting — 1, 2, 4, then 8 s; a
   fifth quick failure in a row gives up for good, logged as `disabled until restart`

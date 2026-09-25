@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createPeer, serveConnections } from '@flow-assist/remote';
-import { socketPath } from '../sockets';
+import { isSocketDead, socketPath } from '../sockets';
 import { socketTransport } from '../transport-socket';
 
 const FAKE = ['bun', path.resolve(import.meta.dir, '../../__tests__/helpers/remote-fake-plugin.ts')];
@@ -153,6 +153,44 @@ test("a server's log file over 1 MiB is emptied before the next start", async ()
     const pid = Number(fs.readFileSync(pidfile, 'utf8'));
     try { process.kill(pid, 'SIGTERM'); } catch { /* already gone */ }
     await until(() => !alive(pid), 'the server to exit');
+    forget(sock);
+  }
+});
+
+test('a server that starts listening between the probe and the lock is connected to, not replaced', async () => {
+  const sock = socketPath('t9.sock'); const pidfile = `${sock}.pid`;
+  forget(sock);
+  const stop = new AbortController();
+  const listening = new Promise<void>((r) => {
+    void serveConnections(async (io) => {
+      const peer = createPeer(io);
+      await new Promise<void>((leave) => {
+        peer.onRequest('hello', () => ({ hostApi: 2, name: 'in-process' }));
+        io.onClose?.(leave);
+      });
+    }, sock, { onListening: r, signal: stop.signal });
+  });
+  await listening;
+  // The first probe saw nothing — the other host's server was not up yet — and by the
+  // time this host holds the lock it is: the re-probe under the lock must find it.
+  let probes = 0;
+  const log: string[] = [];
+  const t = socketTransport({ name: 'fake', socketPath: sock, run: FAKE, cwd, env: { FAKE_PIDFILE: pidfile }, log: (l) => log.push(l), isSocketDead: async (s) => (probes++ === 0 ? true : isSocketDead(s)) });
+  const peer = createPeer({ send: (l) => t.send(l), onLine: (f) => t.onLine(f) });
+  try {
+    await t.start();
+    expect(await peer.request('hello', { hostApi: 2, config: {} }, 2_000)).toMatchObject({ name: 'in-process' });
+    expect(log.some((l) => l.includes('started'))).toBe(false);
+    expect(fs.existsSync(pidfile)).toBe(false);
+    expect(fs.existsSync(`${sock}.lock`)).toBe(false);
+  } finally {
+    await t.close(0);
+    stop.abort();
+    if (fs.existsSync(pidfile)) {
+      const pid = Number(fs.readFileSync(pidfile, 'utf8'));
+      try { process.kill(pid, 'SIGTERM'); } catch { /* already gone */ }
+      await until(() => !alive(pid), 'the second server to exit');
+    }
     forget(sock);
   }
 });

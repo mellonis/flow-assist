@@ -369,7 +369,7 @@ export type LockOutcome =
 
 export const lockPath = (dir: string, id: string): string => path.join(dir, `${id}.lock`);
 
-const UNREADABLE_HELD_MS = 5000;
+export const UNREADABLE_HELD_MS = 5000;
 // What an unreadable lock's `holder` reads as — there is nothing real to report,
 // but `LockOutcome`'s `held` case always carries one.
 const UNREADABLE_HOLDER: LockInfo = { pid: 0, host: '', token: '', at: '' };
