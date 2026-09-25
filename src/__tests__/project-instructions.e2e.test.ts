@@ -155,3 +155,28 @@ test('/clear goes back to the root and says which instructions the fresh convers
   expect(ui.backend.lastFrame).toContain(`Project instructions: ${shown(path.join(root, 'AGENTS.md'))}`);
   ui.app.unmount();
 });
+
+test('a restored session reads its directory anew: a file written since it was saved is picked up and said', async () => {
+  const root = rootDir();
+  const proj = path.join(root, 'proj');
+  fs.mkdirSync(proj);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-instr-sess-'));
+  const cfg = { shell: { roots: [root] }, sessions: { dir } };
+  const first = new ScriptedModel();
+  first.script([{ tool: 'cd', args: { path: 'proj' } }], [{ text: 'In.' }]);
+  const a = await bootApp(first, 160, 32, undefined, cfg);
+  await a.press('F');
+  await a.type('enter the project');
+  await a.press('return');
+  await settleUntil(() => a.backend.lastFrame.includes('In.'));
+  expect(a.backend.lastFrame).not.toContain('Project instructions');
+  await wait(350); // the debounced save
+  a.app.unmount();
+
+  fs.writeFileSync(path.join(proj, 'AGENTS.md'), 'WRITTEN LATER');
+  const b = await bootApp(new ScriptedModel(), 160, 32, undefined, cfg);
+  await b.press('F');
+  await settleUntil(() => b.backend.lastFrame.includes('Project instructions:'));
+  expect(b.backend.lastFrame).toContain(`Project instructions: ${shown(path.join(proj, 'AGENTS.md'))}`);
+  b.app.unmount();
+});

@@ -164,3 +164,11 @@ test('the note: said when the files change, silent when they do not', () => {
   expect(instructionsNote(src, none)).toBe(`Project instructions: none — no AGENTS.md between ${shown(root)} and its root`);
   expect(instructionsSummary(app)).toBe(shown(path.join(root, 'app', 'AGENTS.md')));
 });
+
+test('a file that links to one already found is sent once', () => {
+  const root = tmp();
+  write(path.join(root, 'AGENTS.md'), 'root rules');
+  fs.mkdirSync(path.join(root, 'sub'));
+  fs.symlinkSync(path.join(root, 'AGENTS.md'), path.join(root, 'sub', 'AGENTS.md'));
+  expect(findInstructions({ shell: { roots: [root] } }, path.join(root, 'sub')).files.map((f) => f.path)).toEqual([path.join(root, 'AGENTS.md')]);
+});

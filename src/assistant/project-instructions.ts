@@ -1,7 +1,7 @@
 // The project's own instructions for the model: the `AGENTS.md` files between the
 // shell's directory and the `shell.roots` entry that holds it. The chat reads them
 // whenever the shell's directory is set and puts them in the system prompt as a
-// section of their own (README.md (the shell's directory and project instructions)).
+// section of their own — README.md (project instructions).
 //
 // - From the directory up to, and not above, its root — the innermost root when roots
 //   nest — outermost first, nearest last, so the nearer file is read last and wins
@@ -103,6 +103,7 @@ export function findInstructions(config: Parameters<typeof shellRoots>[0], dir: 
     if (!names.includes(INSTRUCTIONS_FILE)) continue;
     const file = realOf(path.join(d, INSTRUCTIONS_FILE));
     if (!roots.some((r) => within(file, r))) continue; // a link out of the roots
+    if (files.some((f) => f.path === file)) continue; // a link to a file already found
     try {
       if (!fs.statSync(file).isFile()) continue; // a directory, a FIFO — never read
       files.push({ path: file, ...readCapped(file) });
