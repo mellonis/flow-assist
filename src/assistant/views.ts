@@ -185,8 +185,11 @@ export function frameView(
     const spans: FramedLine['spans'] = [];
     for (const s of line) {
       if (room <= 0) break;
-      const t = cutStep(sanitizeViewText(s?.text).replace(/\n/g, ' '), room);
-      room -= cellWidth(t);
+      const text = sanitizeViewText(s?.text).replace(/\n/g, ' ');
+      const t = cutStep(text, room);
+      // A cut ends the row: its `…` is the last thing on it, even when a wide cluster
+      // left a cell short.
+      room = t === text ? room - cellWidth(t) : 0;
       if (leading && s?.chrome) chrome++; else leading = false;
       const color = typeof s?.color === 'string' && Object.hasOwn(palette, s.color) ? palette[s.color] : undefined;
       spans.push({ text: t, ...(color ? { color } : {}), ...(s?.dim ? { dim: true } : {}), ...(s?.bold ? { bold: true } : {}) });

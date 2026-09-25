@@ -701,5 +701,5 @@ test('a change title that fits by clusters is not cut from the left', () => {
   // Room for the title and its counts, and far less than its 68 code points.
   const wrap = stringWidth(title) + 14;
   const rows = chatRows([msg] as never, { wrap, folds: { open: true, except: new Set() }, viewLines: 20, notes: 'step', detailsKey: '^o', renderers: {}, now: 0, palette: {} }).map(rowText);
-  expect(rows.find((r) => r.startsWith('✎'))).toContain(title);
+  expect(rows.find((r) => r.startsWith('✎'))).toBe(`✎ ${title} · +1 −0`);
 });

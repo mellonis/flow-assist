@@ -11,13 +11,14 @@ import { makePluginUi } from '../plugin-ui.js';
 const here = path.dirname(new URL(import.meta.url).pathname);
 const read = (rel: string) => fs.readFileSync(path.join(here, rel), 'utf8');
 
-// The member names `interface PluginUi { … }` declares, in order.
+// The member names `interface PluginUi { … }` declares, in order — a property or a
+// method.
 function declaredMembers(): string[] {
   const src = read('../plugin-api.ts');
   const start = src.indexOf('export interface PluginUi {');
   expect(start).toBeGreaterThanOrEqual(0);
   const body = src.slice(start, src.indexOf('\n}\n', start));
-  return [...body.matchAll(/^ {2}(\w+)\??:/gm)].map((m) => m[1]!);
+  return [...body.matchAll(/^ {2}(\w+)\??[:(]/gm)].map((m) => m[1]!);
 }
 
 test('the ui object carries every member PluginUi declares, and nothing else', () => {
@@ -31,7 +32,8 @@ test('the ui object carries every member PluginUi declares, and nothing else', (
 test('the plugin guide names every member of ui', () => {
   const doc = read('../../../docs/plugins.md');
   const section = doc.slice(doc.indexOf('## What a plugin is given'), doc.indexOf('## Commands, keys and the footer'));
-  for (const name of declaredMembers()) expect(section).toContain(`\`${name}`);
+  // A whole name: `h` must not pass on `host`, nor `useInput` on `useInputHandler`.
+  for (const name of declaredMembers()) expect(section).toMatch(new RegExp(`\`${name}[\`(]`));
 });
 
 // A flag and a ZWJ sequence are one cluster of two cells: what a column a plugin

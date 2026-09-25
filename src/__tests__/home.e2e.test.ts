@@ -333,7 +333,7 @@ test('a surface as tall as useSurfaceSize says fits between the title bar and th
 });
 
 // An emoji is one code point and two cells: counted by code points, the description
-// column came out half as wide as the text and wrapped it.
+// column would be half as wide as the text, and wrap it.
 test('a description with emoji is given the cells it takes', async () => {
   const { renderHome } = await import('../views/home');
   const { render } = await import('@flowtty/react');

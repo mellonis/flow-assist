@@ -132,4 +132,8 @@ test('a line is cut by the cells it takes, per grapheme cluster', () => {
   // Spans share the row: a wide first span leaves the second only what is left.
   const [two] = texts(frameView(rec('k'), { k: () => [[{ text: '✅'.repeat(8) }, { text: 'abcdefgh' }]] }, rctx, palette));
   expect(stringWidth(two!)).toBeLessThanOrEqual(20);
+  // A span cut on a wide cluster leaves a cell short; the row ends at its one `…`, and
+  // the next span is not drawn as a second.
+  const [cut] = texts(frameView(rec('k'), { k: () => [[{ text: '✅'.repeat(15) }, { text: 'abcdefgh' }]] }, rctx, palette));
+  expect(cut).toBe(`${'✅'.repeat(9)}…`);
 });

@@ -21,7 +21,7 @@ export function cellWidth(text: string): number {
 export function cutStep(text: string, width: number): string {
   const str = String(text ?? '');
   if (width <= 0) return '';
-  if (stringWidth(str) <= width) return str;
+  if (cellWidth(str) <= width) return str;
   const clusters = graphemes(str);
   return `${clusters.slice(0, fitClusters(clusters, width - 1)).join('')}…`;
 }
@@ -31,7 +31,7 @@ export function cutStep(text: string, width: number): string {
 export function cutLeft(text: string, width: number): string {
   const str = String(text ?? '');
   if (width <= 0) return '';
-  if (stringWidth(str) <= width) return str;
+  if (cellWidth(str) <= width) return str;
   const clusters = graphemes(str).reverse();
   return `…${clusters.slice(0, fitClusters(clusters, width - 1)).reverse().join('')}`;
 }
