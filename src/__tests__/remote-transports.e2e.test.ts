@@ -1,6 +1,7 @@
 // A remote plugin over real processes, through the App: a crash and its restart, two
-// hosts on one shared server, and the host's own stop letting the child end cleanly
-// (docs/plugins.md, "A plugin in another language").
+// hosts on one shared server and that server crashing under both, a server ending on
+// its idle, and the host's own stop letting the child end cleanly (docs/plugins.md, "A
+// plugin in another language").
 import { afterEach, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -144,6 +145,49 @@ test('a shared server whose process holds a handle of its own still ends on its 
     delete process.env.FAKE_PIDFILE;
     delete process.env.FAKE_KEEPALIVE;
     if (pid && isAlive(pid)) { process.kill(pid, 'SIGKILL'); await until(() => !isAlive(pid), 'the server to be gone'); }
+    for (const f of [sock, `${sock}.lock`, `${sock}.log`, pidfile]) fs.rmSync(f, { force: true });
+  }
+});
+
+test('a shared server that crashes under two hosts: both see the stop, both come back, and exactly one new server starts', async () => {
+  const sock = socketPath('crash.sock'); const pidfile = `${sock}.pid`;
+  const manifest = { name: 'fake', hostApi: 2, run: RUN, connect: 'unix:crash.sock' };
+  process.env.FAKE_PIDFILE = pidfile;
+  process.env.FAKE_CRASH_ON_KEY = 'b';
+  const logA: string[] = []; const logB: string[] = [];
+  const t1 = transportFor(manifest, FAKE_DIR, { log: (l) => logA.push(l) });
+  const t2 = transportFor(manifest, FAKE_DIR, { log: (l) => logB.push(l) });
+  const started = () => [...logA, ...logB].filter((l) => l.includes('--serve (pid')).length;
+  const pids: number[] = [];
+  try {
+    const a = await bootApp(new ScriptedModel(), 100, 30, undefined, {}, { chatMode: null, remote: { manifest, transport: t1 } });
+    const b = await bootApp(new ScriptedModel(), 100, 30, undefined, {}, { chatMode: null, remote: { manifest, transport: t2 } });
+    try {
+      pids.push(Number(fs.readFileSync(pidfile, 'utf8')));
+      await until(() => a.backend.lastFrame.includes('client 1') && b.backend.lastFrame.includes('client 2'), 'both clients registered');
+      expect(started()).toBe(1);
+      await a.press('b'); // the server exits(3) on it
+      await until(() => a.backend.lastFrame.includes('plugin stopped') && b.backend.lastFrame.includes('plugin stopped'), 'the stop on both hosts');
+      await until(() => a.backend.lastFrame.includes('n=0') && b.backend.lastFrame.includes('n=0'), 'both hosts back on a server', 3_000);
+      pids.push(Number(fs.readFileSync(pidfile, 'utf8')));
+      expect(pids[1]).not.toBe(pids[0]);
+      expect(isAlive(pids[1]!)).toBe(true);
+      expect(started()).toBe(2); // one new server between the two of them
+      // Both are clients of that one server: its client count has reached 2.
+      expect([a.backend.lastFrame, b.backend.lastFrame].some((f) => f.includes('client 2'))).toBe(true);
+    } finally {
+      b.app.unmount();
+      a.app.unmount();
+    }
+  } finally {
+    await t1.close(100);
+    await t2.close(100);
+    delete process.env.FAKE_PIDFILE;
+    delete process.env.FAKE_CRASH_ON_KEY;
+    for (const pid of pids) {
+      try { process.kill(pid, 'SIGTERM'); } catch { /* already gone */ }
+      await until(() => !isAlive(pid), 'the server to exit');
+    }
     for (const f of [sock, `${sock}.lock`, `${sock}.log`, pidfile]) fs.rmSync(f, { force: true });
   }
 });

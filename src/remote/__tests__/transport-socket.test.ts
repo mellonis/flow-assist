@@ -194,3 +194,35 @@ test('a server that starts listening between the probe and the lock is connected
     forget(sock);
   }
 });
+
+test('a host that finds the start lock held waits for the server the holder starts, and starts none itself', async () => {
+  const sock = socketPath('t10.sock'); const pidfile = `${sock}.pid`;
+  forget(sock);
+  // Another host is starting the server: its lock, a live pid inside.
+  fs.writeFileSync(`${sock}.lock`, JSON.stringify({ pid: process.pid, at: 0 }));
+  let probes = 0;
+  const log: string[] = [];
+  const t = socketTransport({ name: 'fake', socketPath: sock, run: FAKE, cwd, env: { FAKE_PIDFILE: pidfile }, log: (l) => log.push(l), isSocketDead: (s) => { probes++; return isSocketDead(s); } });
+  const peer = createPeer({ send: (l) => t.send(l), onLine: (f) => t.onLine(f) });
+  const stop = new AbortController();
+  try {
+    const starting = t.start();
+    await until(() => probes >= 3, 'the waiting host to poll');
+    // The holder's server comes up, and the holder lets go of the lock.
+    await new Promise<void>((r) => {
+      void serveConnections(async (io) => {
+        const p = createPeer(io);
+        await new Promise<void>((leave) => { p.onRequest('hello', () => ({ hostApi: 2, name: 'in-process' })); io.onClose?.(leave); });
+      }, sock, { onListening: r, signal: stop.signal });
+    });
+    fs.rmSync(`${sock}.lock`);
+    await starting;
+    expect(await peer.request('hello', { hostApi: 2, config: {} }, 2_000)).toMatchObject({ name: 'in-process' });
+    expect(log.some((l) => l.includes('started'))).toBe(false);
+    expect(fs.existsSync(pidfile)).toBe(false);
+  } finally {
+    await t.close(0);
+    stop.abort();
+    forget(sock);
+  }
+});

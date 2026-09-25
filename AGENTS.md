@@ -2282,7 +2282,9 @@ keeps both:
   `--tools all|onDemand|both` as the A/B (live; `--fake` checks the harness).
 - `src/__tests__/remote-transports.e2e.test.ts` — a remote plugin over real
   processes, through the App: a crash and its restart past the backoff, two hosts on
-  one shared server, and the host's own exit letting the child end cleanly. The other
+  one shared server, that server crashing under both (each comes back, one new server
+  between them), a server ending on its idle, and the host's own exit letting the
+  child end cleanly. The other
   side is `src/__tests__/helpers/remote-fake-plugin.ts`, a real process that speaks
   the protocol by hand, standalone or under `--serve`.
 - A fake for a validating route must reject what the real one rejects; prove a
