@@ -222,7 +222,7 @@ Every hook of the shape — each `components[slot]` factory, `setup`, `keycaps`,
 
 | `ui` | `host` |
 |---|---|
-| `h`, `useState`, `useEffect`, `useRef` (React) | `services` — the host's (`showMessage`, `pushLog`, `chatLLM`, `cache`, …) with the plugin's own under them |
+| `h`, `useState`, `useEffect`, `useRef`, `Fragment` (React) | `services` — the host's (`showMessage`, `pushLog`, `chatLLM`, `cache`, …) with the plugin's own under them |
 | `Box`, `Text`, `Markdown`, `Table`, `Link`, `ScrollBox` | `store` — the channel between plugins and the host |
 | `Select`, `ListSelect`, `ListMultiSelect`, `Checkbox`, `TextInput` | `config`, `keys`, `keyCap(action)` |
 | `isPrintable(key)` (@flowtty/core) — whether a key types a character | |

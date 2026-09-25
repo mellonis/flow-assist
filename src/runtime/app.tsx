@@ -455,6 +455,7 @@ export function renderApp(
           ListMultiSelect,
           Checkbox,
           TextInput,
+          Fragment,
           isPrintable: isPrintable as unknown as PluginUi['isPrintable'],
           useInput: useInput as unknown as PluginUi['useInput'],
         },

@@ -25,6 +25,9 @@ export interface PluginUi {
   useState: <T>(init: T | (() => T)) => [T, (v: T | ((prev: T) => T)) => void];
   useEffect: (fn: () => void | (() => void), deps?: unknown[]) => void;
   useRef: <T>(init: T) => { current: T };
+  // React's `Fragment`: siblings with no box around them — what an overlay that must be
+  // the root of its slot is returned in.
+  Fragment: unknown;
   // flowtty's components. The pickers (flowtty's docs/components.md, Choosing):
   // `Select` is a dropdown — a one-line field whose popup the host's <DialogHost>
   // opens; `ListSelect` and `ListMultiSelect` are the inline lists. The pickers,

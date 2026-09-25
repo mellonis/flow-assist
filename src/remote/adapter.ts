@@ -121,8 +121,28 @@ export async function remotePlugin(opts: RemotePluginOpts): Promise<Plugin> {
     const locale = localeFromEnv(opts.env ?? process.env);
     return { hostApi: HOST_API, flowtty: FLOWTTY_VERSION, size: sizes, config: pluginConfig(), idleMs: DEFAULT_IDLE_MS, ...(locale ? { locale } : {}) };
   };
+  // What a registration must be to be used: a malformed one fails the handshake rather
+  // than the loader, so the process is stopped like any other refused `hello`.
+  const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
+  const listOf = (r: HelloResult, field: keyof HelloResult, ok: (v: unknown) => boolean, what: string) => {
+    const v = r[field];
+    if (v === undefined) return;
+    if (!Array.isArray(v) || !v.every(ok)) throw new Error(`hello: ${field} is not a list of ${what}`);
+  };
+  const isToolDecl = (t: unknown) => isObj(t) && isObj(t.function) && typeof t.function.name === 'string';
+  const checkRegistration = (r: HelloResult): { schema: unknown } => {
+    listOf(r, 'tools', (g) => isObj(g) && typeof g.id === 'string' && Array.isArray(g.tools) && g.tools.every(isToolDecl), 'tool groups ({ id, tools })');
+    listOf(r, 'aiTools', isToolDecl, 'tools');
+    listOf(r, 'commands', (c) => isObj(c) && typeof c.name === 'string', 'commands ({ name })');
+    listOf(r, 'entry', (e) => typeof e === 'string', 'action names');
+    if (r.keys !== undefined && (!isObj(r.keys) || !Object.values(r.keys).every((b) => typeof b === 'string' || (Array.isArray(b) && b.every((k) => typeof k === 'string'))))) throw new Error('hello: keys is not a map of action to key or keys');
+    if (r.configSchema === undefined) return { schema: undefined };
+    if (!isObj(r.configSchema)) throw new Error('hello: configSchema is not a JSON Schema object');
+    try { return { schema: z.fromJSONSchema(r.configSchema as never).optional() }; }
+    catch (e) { throw new Error(`hello: configSchema is not a JSON Schema zod reads: ${message(e)}`); }
+  };
   // Every way a handshake fails reads `hello: …` — the peer's own timeout already does.
-  const sayHello = async (): Promise<HelloResult> => {
+  const sayHello = async (): Promise<HelloResult & { schema: unknown }> => {
     let r: HelloResult | null;
     try { r = (await peer.request('hello', helloParams(), helloTimeout)) as HelloResult | null; }
     catch (e) { const m = message(e); throw new Error(m.startsWith('hello:') ? m : `hello: ${m}`); }
@@ -130,10 +150,10 @@ export async function remotePlugin(opts: RemotePluginOpts): Promise<Plugin> {
     if (typeof r.name === 'string' && r.name !== name) throw new Error(`hello: the plugin says it is "${r.name}", the manifest says "${name}"`);
     const apis = Array.isArray(r.hostApi) ? r.hostApi : [r.hostApi];
     if (!apis.includes(HOST_API)) throw new Error(`hello: built for host API ${apis.join(', ')}, host provides ${HOST_API}`);
-    return r;
+    return { ...r, ...checkRegistration(r) };
   };
   await transport.start();
-  let registration: HelloResult;
+  let registration: HelloResult & { schema: unknown };
   try { registration = await sayHello(); } catch (e) {
     await transport.close(HELLO_FAILED_GRACE_MS);
     throw e;
@@ -169,26 +189,51 @@ export async function remotePlugin(opts: RemotePluginOpts): Promise<Plugin> {
       if (focused !== null) send(focused ? 'focus' : 'blur');
       say('restarted');
       notify();
-    }, (e: unknown) => say(`restart failed: ${message(e)}`));
+    }, (e: unknown) => {
+      // The new process refused its handshake: it is stopped, and the close that follows
+      // is the supervisor's to count.
+      say(`restart failed: ${message(e)}`);
+      void transport.close(HELLO_FAILED_GRACE_MS);
+    });
   });
+
+  // The view kinds the plugin renders. They come from the manifest, not `hello`: the
+  // host collects every renderer at App start, before any tool has run.
+  const kinds = Array.isArray(manifest.views) ? manifest.views.filter((k): k is string => typeof k === 'string') : [];
 
   // ── tools: proxies to tool.run ──────────────────────────────────────────────
   let callSeq = 0;
-  const runTool = async (toolName: string, args: Record<string, unknown>): Promise<unknown> => {
+  // A tool may answer `{ result, views: [{ kind, data }] }`: each view is reported on the
+  // call's own `ctx.reportView`, as a JS tool reports one — a kind the manifest does not
+  // declare has no renderer and is dropped, said once.
+  const reportViews = (views: unknown, ctx: Record<string, unknown> | undefined) => {
+    if (!Array.isArray(views)) return;
+    const report = ctx?.reportView as ((kind: string, data: unknown) => unknown) | undefined;
+    for (const v of views) {
+      if (!v || typeof v !== 'object' || typeof (v as { kind?: unknown }).kind !== 'string') continue;
+      const { kind, data } = v as { kind: string; data?: unknown };
+      if (!kinds.includes(kind)) { once(`view-undeclared:${kind}`, `tool reported view "${kind}", which the manifest's views do not declare (dropped)`); continue; }
+      report?.(kind, data);
+    }
+  };
+  const runTool = async (toolName: string, args: Record<string, unknown>, ctx?: Record<string, unknown>): Promise<unknown> => {
     if (stopped) throw new Error(stopped);
     let answer: unknown;
     try { answer = await untilStopped(peer.request('tool.run', { name: toolName, args, call: { id: `${name}-${++callSeq}` } })); }
     catch (e) { throw new Error(message(e)); }
     if (typeof answer === 'string') return answer;
-    if (answer && typeof answer === 'object' && 'result' in (answer as object)) return (answer as { result: unknown }).result;
+    if (answer && typeof answer === 'object' && 'result' in (answer as object)) {
+      reportViews((answer as { views?: unknown }).views, ctx);
+      return (answer as { result: unknown }).result;
+    }
     throw new Error(`${toolName}: the plugin answered with ${JSON.stringify(answer)}, not { result }`);
   };
   const toolGroups = (registration.tools ?? []).map((g: ToolGroupDecl) => ({
     id: g.id,
     tools: g.tools,
-    exec: (n: string, args: Record<string, unknown>) => runTool(n, args),
+    exec: (n: string, args: Record<string, unknown>, ctx?: Record<string, unknown>) => runTool(n, args, ctx),
   }));
-  const aiTools = (registration.aiTools ?? []).map((t: ToolDecl) => ({ ...t, run: (args: Record<string, unknown>) => runTool(t.function.name, args) }));
+  const aiTools = (registration.aiTools ?? []).map((t: ToolDecl) => ({ ...t, run: (args: Record<string, unknown>, ctx?: Record<string, unknown>) => runTool(t.function.name, args, ctx) }));
 
   // ── commands ────────────────────────────────────────────────────────────────
   const commands: Command[] = (registration.commands ?? []).map((c) => ({
@@ -214,13 +259,15 @@ export async function remotePlugin(opts: RemotePluginOpts): Promise<Plugin> {
       peer.request('view.render', { kind, data, width: ctx.width }, VIEW_RENDER_TIMEOUT_MS).then((r) => {
         rendered.set(key, toViewLines((r as { lines?: unknown } | null)?.lines));
         notify();
-      }, (e: unknown) => { asked.delete(key); once(`view:${kind}`, `view.render ${kind}: ${message(e)}`); });
+      }, (e: unknown) => {
+        // A timeout is asked again on the next draw; a refusal (`-32601` and its kin) is
+        // the plugin's answer, and asking on every redraw would not change it.
+        if (!(e instanceof PeerError) || e.code === PeerError.TIMEOUT || e.code === PeerError.CLOSED) asked.delete(key);
+        once(`view:${kind}`, `view.render ${kind}: ${message(e)}`);
+      });
     }
     return [[{ text: `▸ ${kind}`, dim: true }]];
   };
-  // The kinds come from the manifest, not `hello`: the host collects every renderer at
-  // App start, before any tool has run.
-  const kinds = Array.isArray(manifest.views) ? manifest.views.filter((k): k is string => typeof k === 'string') : [];
   for (const kind of kinds) viewRenderers[kind] = renderer(kind);
 
   // ── keys ────────────────────────────────────────────────────────────────────
@@ -270,7 +317,9 @@ export async function remotePlugin(opts: RemotePluginOpts): Promise<Plugin> {
         const open = openModals();
         if (!open.length) return null;
         const { width, height } = terminal;
-        return ui.h(ui.Box, undefined, ...open.map(([modal, tree]) => ui.h(ui.Box, { key: modal, ...overlay(width, height) }, renderTree(tree!, treeCtx(ui, hasKeyboard)))));
+        // Each overlay is a root of the slot, as the host's own modals are: a box around
+        // them would be laid out after the surface and move their `top: 0, left: 0`.
+        return ui.h(ui.Fragment, undefined, ...open.map(([modal, tree]) => ui.h(ui.Box, { key: modal, ...overlay(width, height) }, renderTree(tree!, treeCtx(ui, hasKeyboard)))));
       };
     },
   };
@@ -288,7 +337,7 @@ export async function remotePlugin(opts: RemotePluginOpts): Promise<Plugin> {
     colors: registration.colors,
     modalColors: registration.modalColors,
     usesCache: registration.usesCache ?? false,
-    configSchema: registration.configSchema ? z.fromJSONSchema(registration.configSchema as never).optional() : undefined,
+    configSchema: registration.schema,
     components,
     setup: (a) => { api = a as PluginApi; },
     keycaps: (a) => {

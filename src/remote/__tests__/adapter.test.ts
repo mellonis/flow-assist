@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { createPeer, PROTOCOL_HOST_API, type Peer } from '@flow-assist/remote';
+import { createPeer, PeerError, PROTOCOL_HOST_API, type Peer } from '@flow-assist/remote';
 import { makeFactory } from '../../loader/plugin';
 import { HELLO_TIMEOUT_MS, remotePlugin } from '../adapter';
 import type { RestartingTransport } from '../transport';
@@ -177,4 +177,55 @@ test('a tool in flight when the process goes throws "plugin stopped"; after a re
   t.restart();
   await tick(); await tick();
   expect(await group.exec('check', {}, {})).toBe('ok');
+});
+
+test('a malformed registration fails the handshake: the transport is stopped and the error says hello:', async () => {
+  for (const bad of [{ tools: 'x' }, { configSchema: 42 }, { configSchema: { type: 'nonsense' } }]) {
+    const t = fakeTransport();
+    t.plugin.onRequest('hello', () => ({ hostApi: 2, ...bad }));
+    await expect(remotePlugin({ manifest, transport: t.transport, config: {}, make: makeFactory({}) })).rejects.toThrow(/^hello: /);
+    expect(t.closedWith).toEqual([3_000]);
+  }
+});
+
+test('a restarted process that refuses hello is stopped, and the plugin stays stopped', async () => {
+  const t = fakeTransport();
+  let hellos = 0;
+  t.plugin.onRequest('hello', () => ({ hostApi: ++hellos === 1 ? 2 : 1, tools: [{ id: 'tutor', tools: [{ type: 'function', function: { name: 'check', description: 'Check', parameters: {} } }] }] }));
+  t.plugin.onRequest('tool.run', () => ({ result: 'ran' }));
+  const p = await remotePlugin({ manifest, transport: t.transport, config: {}, make: makeFactory({}) });
+  t.closeFromPlugin();
+  t.restart();
+  await tick(); await tick();
+  expect(hellos).toBe(2);
+  expect(t.closedWith).toEqual([3_000]);
+  const group = (p.tools as Array<{ exec: (n: string, a: Record<string, unknown>, c: unknown) => Promise<unknown> }>)[0]!;
+  await expect(group.exec('check', {}, {})).rejects.toThrow('plugin stopped');
+});
+
+test('a tool answering with views reports each on the call\'s ctx; an undeclared kind is dropped', async () => {
+  const { transport, plugin } = fakeTransport();
+  hello(plugin);
+  plugin.onRequest('tool.run', () => ({ result: 'done', views: [{ kind: 'exercise', data: { n: 1 } }, { kind: 'other', data: 2 }] }));
+  const lines: string[] = [];
+  const p = await remotePlugin({ manifest: { ...manifest, views: ['exercise'] }, transport, config: {}, make: makeFactory({}), log: (l) => lines.push(l) });
+  const group = (p.tools as Array<{ exec: (n: string, a: Record<string, unknown>, c: unknown) => Promise<unknown> }>)[0]!;
+  const reported: unknown[] = [];
+  expect(await group.exec('check', {}, { reportView: (kind: string, data: unknown) => reported.push([kind, data]) })).toBe('done');
+  expect(reported).toEqual([['exercise', { n: 1 }]]);
+  expect(lines.some((l) => l.includes('"other"'))).toBe(true);
+});
+
+test('a view kind the plugin refuses to render is asked once, not on every draw', async () => {
+  const { transport, plugin } = fakeTransport();
+  hello(plugin);
+  let asked = 0;
+  plugin.onRequest('view.render', () => { asked++; throw new PeerError('no such kind', PeerError.METHOD_NOT_FOUND); });
+  const p = await remotePlugin({ manifest: { ...manifest, views: ['exercise'] }, transport, config: {}, make: makeFactory({}) });
+  const render = p.viewRenderers!.exercise! as (d: unknown, c: { width: number }) => unknown;
+  expect(render({ n: 1 }, { width: 40 })).toEqual([[{ text: '▸ exercise', dim: true }]]);
+  await tick();
+  render({ n: 1 }, { width: 40 });
+  await tick();
+  expect(asked).toBe(1);
 });
