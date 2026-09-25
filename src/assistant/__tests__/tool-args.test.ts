@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
 import { toolArgsError } from '../tool-args';
+import { TOOLS_LOAD_PARAMETERS } from '../tool-loading';
 
 const schema = {
   type: 'object',
@@ -68,6 +69,12 @@ test('caps at a few problems and says how many more', () => {
   const msg = toolArgsError('t', many, {})!;
   expect(msg).toContain('… 2 more');
   expect(msg.endsWith('Nothing was run.')).toBe(true);
+});
+
+test('tools_load\'s own names takes an array or a single bare name, as runToolsLoad always has', () => {
+  expect(toolArgsError('tools_load', TOOLS_LOAD_PARAMETERS, { names: ['get_issue'] })).toBeNull();
+  expect(toolArgsError('tools_load', TOOLS_LOAD_PARAMETERS, { names: 'get_issue' })).toBeNull();
+  expect(toolArgsError('tools_load', TOOLS_LOAD_PARAMETERS, { group: 'repo' })).toBeNull();
 });
 
 test('args are never mutated', () => {

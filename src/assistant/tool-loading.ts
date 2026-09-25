@@ -116,7 +116,13 @@ export function toolIndex(deferred: Map<string, CatalogEntry>, groupDescriptions
 export const TOOLS_LOAD_PARAMETERS: ToolParameters = {
   type: 'object',
   properties: {
-    names: { type: 'array', items: { type: 'string' }, description: 'Tool names from the list.' },
+    // `runToolsLoad` itself accepts one bare name as a string, not only an array —
+    // the schema says so too, or a model that sent one would be told its call is
+    // wrong for something the tool has always taken.
+    names: {
+      anyOf: [{ type: 'array', items: { type: 'string' } }, { type: 'string' }],
+      description: 'Tool names from the list — an array, or a single name as a bare string.',
+    },
     group: { type: 'string', description: 'A group name from the list; loads every tool in it.' },
   },
 };
