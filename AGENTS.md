@@ -397,11 +397,13 @@ protocol as its authors read it is docs/plugins.md, "A plugin in another languag
   socket** (`src/remote/sockets.ts`): `<name>.lock`, holding `{ pid, at }`, taken with
   `O_EXCL`; a lock whose pid is no longer alive is stale and taken over, the rule the
   session lock also follows (`src/assistant/sessions.ts`).
-- **The supervisor's backoff** (`src/remote/supervisor.ts`) lengthens each time a
-  restart fails quickly — within a second of starting — 1, 2, 4, 8, then 16 s; the
-  sixth such failure in a row gives up for good, logged as `disabled until restart`; a
-  restart that stays up longer resets the count. The very first `start()` is never a
-  restart: if it fails, that rejects to the loader alone and nothing is scheduled.
+- **The supervisor's backoff** (`src/remote/supervisor.ts`) lengthens each time
+  another failure comes quickly — within a second of starting — 1, 2, 4, 8, then
+  16 s; a sixth quick failure in a row gives up for good, logged as `disabled until
+  restart`; a restart that stays up longer resets the count. A restart whose `hello`
+  fails ends it the same way, at once (`./adapter.ts`'s `onRestart`). The very first
+  `start()` is never a restart: if it fails, that rejects to the loader alone and
+  nothing is scheduled.
 - `src/remote/sockets.ts`'s `sockets/`, under `hostStateDir()` at 0700, is the host's
   own place for its sockets; a plugin names its socket, never a path.
 - **The host's own exit** (`src/remote/lifecycle.ts`) asks every remote plugin's

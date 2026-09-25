@@ -680,30 +680,45 @@ same way.
 
 **`run`.** The host starts the process itself, without a shell, in the plugin's
 directory. Its stderr reaches the host's own log, one line at a time; its stdout and
-stdin are the protocol, nothing else. Stopping it: stdin closes at once, then 1.5 s for
-the process to end on its own, then `SIGTERM`, then `SIGKILL` 1.5 s after that.
+stdin are the protocol, nothing else. On the host's own exit, the plugin is asked to
+answer `shutdown` (up to 1 s), then its stdin closes, then anything still alive gets
+`SIGTERM` — nothing further, since the host does not wait past its own bound.
+Answering `shutdown` and exiting, or exiting once stdin closes, is what a well-behaved
+process does — `runPlugin` does exactly that — so none of this ordinarily matters. A
+process that ignores both instead meets the fuller sequence a refused handshake gets
+(a bad `hello`, or a restart whose `hello` fails): stdin closed, then 1.5 s, `SIGTERM`,
+then `SIGKILL` 1.5 s after that.
 
 **`connect: "unix:<name>"`.** `<name>` names a socket under the host's own `sockets/`
-directory. The first host to reach it finds nothing listening, starts the server
-itself — `run`'s command with `--serve <socket path>` appended — and waits for the
-socket to appear, up to 10 s; a second host finds the socket already there and
-connects straight to it, starting nothing. `connect` with no `run` only ever connects;
-if nothing is listening, loading the plugin fails rather than starting anything.
+directory — a plain file name, at most 64 characters, never a path (no `/`, `\` or
+`..`). The first host to reach it finds nothing listening, starts the server itself —
+`run`'s command with `--serve <socket path>` appended — and waits for the socket to
+appear, up to 10 s; a second host finds the socket already there and connects straight
+to it, starting nothing. `connect` with no `run` only ever connects; if nothing is
+listening, loading the plugin fails rather than starting anything. Started by hand,
+the same server is `<run's command> --serve <config directory>/sockets/<name>`; its
+stdout is discarded and its stderr reaches only the log of whichever host started it.
 
 Every connection to a shared server is its own client: its own `hello`, its own
 protocol state. What its clients share is whatever the process holds outside a single
 connection — nothing is shared automatically. The server exits on its own once its
-last client leaves, after the idle timeout the FIRST client's `hello.idleMs` carried;
-a host never kills it, only disconnects — another host may still be on it. A server
-started by hand runs the same code and lives the same way.
+last client leaves, after the idle timeout the FIRST client's `hello.idleMs` carried
+(60 s, this host's own value); a host never kills it, only disconnects — another host
+may still be on it. A live socket refuses a second server outright; only a stale one
+(nothing answers it) is replaced.
 
 **A crash.** However the process is reached, a death restarts it after a backoff that
-lengthens each time another restart fails quickly — within a second of starting — 1,
-2, 4, 8, then 16 s; the sixth such failure in a row gives up for good, logged as
+lengthens with each further failure that comes quickly — within a second of starting —
+1, 2, 4, 8, then 16 s; a sixth quick failure in a row ends it for good, logged as
 `disabled until restart`, while a restart that stays up longer resets the count. A
-`connect` plugin's server is not itself restarted by a host that only connects to
-it — a dead socket is found dead the next time something needs it, and started again
-then.
+restart whose `hello` is refused ends it the same way, at once. None of this covers a
+plugin that never starts in the first place — that failure is the loader's own to
+report, and nothing is scheduled after it. A `connect` plugin's shared server
+restarts the same way its clients do: each host reconnects after its own backoff, and
+whichever host's attempt finds the socket dead takes the start lock and spawns a fresh
+one from ITS OWN manifest's `run` — the others just reconnect to it. A host whose
+manifest has `connect` alone, with no `run`, cannot start that server itself: its own
+restarts keep failing until some other host's does.
 
 `flow-assist plugins ls` marks a plugin reached either way `(remote)`.
 

@@ -144,12 +144,14 @@ or `connect` for a shared server (below) — and is enabled the same way any plu
 ln -s ../my-remote-plugin plugins-enabled/my-remote-plugin
 ```
 
-The host starts `run`'s command itself, without a shell, in the plugin's directory,
-and stops it with `shutdown` — `runPlugin` answers that itself — followed by stdin
-closing, then `SIGTERM`, then `SIGKILL` if it still has not gone. A crash restarts it
-after a backoff that lengthens each time another restart fails quickly, and gives up
-for good after enough failures in a row (docs/plugins.md, "Running it", has the exact
-shape and timings).
+The host starts `run`'s command itself, without a shell, in the plugin's directory. On
+its own exit it asks the plugin to answer `shutdown`, closes stdin, and sends
+`SIGTERM` to whatever is still alive — nothing further, since it does not wait past
+its own bound. `runPlugin` already answers `shutdown` and exits on its own, so none of
+this ordinarily matters; a process that ignores both instead meets the fuller
+stop sequence a refused handshake gets (docs/plugins.md, "Running it", has the exact
+shape and timings, along with the crash-and-backoff cycle every remote plugin runs
+under).
 
 ## `--serve`: a shared server
 
