@@ -39,7 +39,7 @@ test('the login example runs as a real process: its form draws, typing reaches i
 
 test('the example follows a remap: its own actions are consumed on the keys the person bound them to', async () => {
   const dir = path.resolve(import.meta.dir, '../../examples/remote-login');
-  const transport = spawnTransport(['bun', 'src/index.ts'], dir);
+  const transport = transportFor(manifest, dir, { log: () => {} });
   const ui = await bootApp(new ScriptedModel(), 100, 30, undefined, { keys: { open: 'O', next: 'ctrl+n' } }, { chatMode: null, remote: { manifest, transport } });
   try {
     await until(() => ui.backend.lastFrame.includes('remote-login'), 'the plugin on the start screen');
