@@ -59,7 +59,7 @@ import type { PluginApi } from '../runtime/plugin-api.js';
 // `history: false` would keep a command out of the ↑/↓ history, which is saved with the
 // session — for a command whose argument may carry a secret
 // (src/assistant/prompt-history.ts). None of these takes one: a path, a number, a
-// mode word.
+// mode word, a session's name.
 // `values` is what a command's argument may be, and Tab completes it from them
 // (src/config/fieldcomplete.ts). `/resume`'s are the saved sessions, read where the
 // sessions directory is known (`chatCommandDefs` in the chat).
@@ -2006,12 +2006,15 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               }
               case 'title': {
                 // `/title <text>` names this session — kept in its file, so a restart keeps
-                // it; `/title` alone says what it is called. Nothing is sent.
+                // it; `/title` alone says what it is called, as a note (display only, like
+                // `/mode`'s): a toast is drawn under a chat that covers the whole terminal.
+                // Nothing is sent.
                 const text = cutTitle(arg);
                 setField('');
                 if (!text) {
                   const now = titleRef.current || sessionTitle(msgsRef.current as Record<string, unknown>[]);
-                  (host.services as Record<string, any>).showMessage?.(now ? `This session is «${now}» — /title <text> renames it` : 'This session has no title yet — /title <text> gives it one');
+                  const said = now ? `This session is «${now}» — /title <text> renames it` : 'This session has no title yet — /title <text> gives it one';
+                  setMessages((cur) => [...cur, { role: 'note', content: said }]);
                   host.notify();
                   return;
                 }

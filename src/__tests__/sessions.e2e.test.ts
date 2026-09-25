@@ -373,3 +373,62 @@ test('/title renames the session: the name is in its file and stays through late
   expect(ui.backend.lastFrame).toMatch(/1\. Тренды за неделю — /);
   ui.app.unmount();
 });
+
+test('an un-renamed session keeps the title of its first save — through later messages, a trimmed file and a fork', async () => {
+  // A file whose oldest messages were trimmed away: its title is the first line the
+  // person wrote, which is no longer among its messages.
+  const dir = dirOf();
+  const id = newSessionId();
+  const now = new Date().toISOString();
+  saveSession(dir, {
+    version: SESSION_VERSION, id, title: 'самый первый вопрос', createdAt: now, updatedAt: now,
+    messages: [{ role: 'user', content: 'поздний вопрос' }, { role: 'assistant', content: 'поздний ответ' }],
+    api: [{ role: 'user', content: 'поздний вопрос' }, { role: 'assistant', content: 'поздний ответ' }],
+    summary: '', plan: [], usage: null, prompts: [], draft: '',
+  });
+  const model = new ScriptedModel();
+  model.script([{ text: 'ещё ответ' }]);
+  const ui = await bootApp(model, 100, 28, undefined, { sessions: { dir } });
+  await settle(6);
+  await ui.press('F');
+  await ui.type('ещё вопрос');
+  await ui.press('return');
+  await settle(20);
+  await ui.press('escape', 'escape'); // closing writes at once
+  expect(JSON.parse(fs.readFileSync(path.join(dir, `${id}.json`), 'utf8')).title).toBe('самый первый вопрос');
+  ui.app.unmount();
+
+  // A new session's title is fixed at its first save and is what a fork note names.
+  const dir2 = dirOf();
+  const first = await talk(dir2, 'первый вопрос', 'ответ');
+  await first.ui.press('escape', 'escape'); // the first save — the title is fixed here
+  const name = fs.readdirSync(dir2).find((n) => n.endsWith('.json'))!;
+  const file = path.join(dir2, name);
+  const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+  expect(raw.title).toBe('первый вопрос');
+  fs.writeFileSync(file, JSON.stringify({ ...raw, rev: Number(raw.rev) + 5 })); // a foreign write — the next save forks
+  first.model.script([{ text: 'ответ 2' }]);
+  await first.ui.press('F');
+  await first.ui.type('следующий вопрос');
+  await first.ui.press('return');
+  await settle(20);
+  await first.ui.press('escape', 'escape');
+  await first.ui.press('F');
+  expect(flat(first.ui.backend.lastFrame!)).toContain(flat('Session "первый вопрос" was changed elsewhere'));
+  const forked = fs.readdirSync(dir2).find((n) => n.endsWith('.json') && n !== name)!;
+  expect(JSON.parse(fs.readFileSync(path.join(dir2, forked), 'utf8')).title).toBe('первый вопрос');
+  first.ui.app.unmount();
+});
+
+test('bare /title says the name in the conversation, where a full-screen chat shows it', async () => {
+  const dir = dirOf();
+  const { ui } = await talk(dir, 'как тренд по ABC-341?', 'вверх');
+  await ui.type('/mode full');
+  await ui.press('return');
+  await settle(4);
+  await ui.type('/title');
+  await ui.press('return');
+  await settle(4);
+  expect(flat(ui.backend.lastFrame!)).toContain(flat('This session is «как тренд по ABC-341?» — /title <text> renames it'));
+  ui.app.unmount();
+});
