@@ -62,7 +62,34 @@ export function servePlugin<M, Msg = HostEvent>(def: PluginDef<M, Msg>, io: Peer
   let queue: Promise<void> = Promise.resolve();
   const frame = () => { if (model !== undefined) peer.notify('frame', def.view(model)); };
   const host = hostOver(peer, frame);
-  const fold = (msg: Msg) => { queue = queue.then(async () => { if (model === undefined) return; model = await def.update(msg, model, host); frame(); }); };
+  const pluginName = def.hello.name ?? 'plugin';
+  const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
+  // Queues one step of the model against `queue`, isolating its own failure: a
+  // plugin author's bug in `update` or a command handler must not take the whole
+  // runtime down with it. On success the model advances and a frame follows; on
+  // failure the model stays exactly what it was, the error is reported once (stderr
+  // is the author's log — the host forwards it), and no frame is sent, since nothing
+  // changed. `queue` itself is never left rejected — every `.catch` here keeps it a
+  // settled, reusable chain — so one bad step never silences the steps after it; the
+  // promise this function returns still rejects, for a caller (`command.run`) that
+  // needs to answer with the failure rather than swallow it.
+  const step = (run: (m: M) => M | Promise<M>): Promise<void> => {
+    const outcome = queue.then(async () => {
+      if (model === undefined) return;
+      const before = model;
+      try {
+        model = await run(before);
+      } catch (e) {
+        model = before;
+        process.stderr.write(`[${pluginName}] update failed: ${message(e)}\n`);
+        throw e;
+      }
+      frame();
+    });
+    queue = outcome.catch(() => {});
+    return outcome;
+  };
+  const fold = (msg: Msg) => { void step((m) => def.update(msg, m, host)); };
   const event = (e: HostEvent) => { const m = def.msg ? def.msg(e) : (e as unknown as Msg); if (m !== null && m !== undefined) fold(m); };
 
   const toolDecls = def.hello.tools ?? (def.tools ? [{ id: def.hello.name ?? 'tools', tools: Object.keys(def.tools).map((n) => ({ type: 'function' as const, function: { name: n, description: n, parameters: { type: 'object', properties: {} } } })) }] : []);
@@ -103,7 +130,10 @@ export function servePlugin<M, Msg = HostEvent>(def: PluginDef<M, Msg>, io: Peer
       const { name, arg } = p as { name: string; arg: string };
       const c = def.commands?.[name];
       if (!c) throw new PeerError(`unknown command: ${name}`, PeerError.METHOD_NOT_FOUND);
-      await (queue = queue.then(async () => { if (model === undefined) return; model = await c(arg, model, host); frame(); }));
+      // A throwing handler reaches here (`step` still rejects its own promise, even
+      // though `queue` stays usable) and becomes this request's own error answer —
+      // the peer's usual shape — rather than a hang.
+      await step((m) => c(arg, m, host));
       return {};
     });
     peer.onRequest('view.render', (p) => {

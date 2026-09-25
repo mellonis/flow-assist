@@ -124,3 +124,69 @@ test('over stdio, an update in flight gets the same bounded chance to finish whe
   await run;
   expect(settled).toBe(true);
 });
+
+test('a throwing update is caught: the model stays, stderr gets one line, no frame follows, and the next event still updates', async () => {
+  const [hostIo, pluginIo] = pair();
+  const host = createPeer(hostIo);
+  const frames: unknown[] = [];
+  host.onNotify('frame', (f) => frames.push(f));
+  const stderr: string[] = [];
+  const realWrite = process.stderr.write.bind(process.stderr);
+  process.stderr.write = ((chunk: string) => { stderr.push(chunk); return true; }) as typeof process.stderr.write;
+  let calls = 0;
+  const run = runPlugin<{ n: number }, { type: string }>({
+    hello: { name: 'flaky' },
+    init: () => ({ n: 0 }),
+    update: (msg, m) => {
+      calls++;
+      if (calls === 1) throw new Error('nope'); // the first event's update fails
+      return { n: m.n + 1 }; // the second one succeeds
+    },
+    view: (m) => ({ surface: ['Text', {}, `n=${m.n}`] }),
+  }, pluginIo);
+  try {
+    await host.request('hello', { hostApi: 2, config: {} });
+    await tick();
+    const framesAfterHello = frames.length;
+    host.notify('afterWrite'); // the failing update
+    await tick();
+    expect(frames.length).toBe(framesAfterHello); // the model did not change, so no frame
+    expect(stderr.some((l) => l.includes('[flaky] update failed: nope'))).toBe(true);
+    host.notify('afterWrite'); // the chain is still usable
+    await tick();
+    expect(frames.at(-1)).toMatchObject({ surface: ['Text', {}, 'n=1'] }); // n stayed 0 through the failure, then advanced once
+    await host.request('shutdown');
+    await run;
+  } finally {
+    process.stderr.write = realWrite;
+  }
+});
+
+test('a command whose handler throws answers an error, and the connection keeps serving afterward', async () => {
+  const [hostIo, pluginIo] = pair();
+  const host = createPeer(hostIo);
+  const frames: unknown[] = [];
+  host.onNotify('frame', (f) => frames.push(f));
+  const stderr: string[] = [];
+  const realWrite = process.stderr.write.bind(process.stderr);
+  process.stderr.write = ((chunk: string) => { stderr.push(chunk); return true; }) as typeof process.stderr.write;
+  const run = runPlugin<{ n: number }, { type: string }>({
+    hello: { name: 'flaky-cmd' },
+    init: () => ({ n: 0 }),
+    update: (msg, m) => (msg.type === 'afterWrite' ? { n: m.n + 1 } : m),
+    view: (m) => ({ surface: ['Text', {}, `n=${m.n}`] }),
+    commands: { boom: () => { throw new Error('cmd nope'); } },
+  }, pluginIo);
+  try {
+    await host.request('hello', { hostApi: 2, config: {} });
+    await expect(host.request('command.run', { name: 'boom', arg: '' })).rejects.toThrow('cmd nope');
+    expect(stderr.some((l) => l.includes('[flaky-cmd] update failed: cmd nope'))).toBe(true);
+    host.notify('afterWrite'); // the connection still serves after the failed command
+    await tick();
+    expect(frames.at(-1)).toMatchObject({ surface: ['Text', {}, 'n=1'] });
+    await host.request('shutdown');
+    await run;
+  } finally {
+    process.stderr.write = realWrite;
+  }
+});
