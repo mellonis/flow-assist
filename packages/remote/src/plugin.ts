@@ -79,12 +79,12 @@ export function servePlugin<M, Msg = HostEvent>(def: PluginDef<M, Msg>, io: Peer
       const before = model;
       try {
         model = await run(before);
+        frame(); // drawing is part of the same step: a throwing `view` fails it too
       } catch (e) {
         model = before;
         process.stderr.write(`[${pluginName}] update failed: ${message(e)}\n`);
         throw e;
       }
-      frame();
     });
     queue = outcome.catch(() => {});
     return outcome;

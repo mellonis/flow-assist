@@ -190,3 +190,39 @@ test('a command whose handler throws answers an error, and the connection keeps 
     process.stderr.write = realWrite;
   }
 });
+
+test('a throwing view fails the whole step, not just the update: the model stays, stderr gets one line, no frame follows', async () => {
+  const [hostIo, pluginIo] = pair();
+  const host = createPeer(hostIo);
+  const frames: unknown[] = [];
+  host.onNotify('frame', (f) => frames.push(f));
+  const stderr: string[] = [];
+  const realWrite = process.stderr.write.bind(process.stderr);
+  process.stderr.write = ((chunk: string) => { stderr.push(chunk); return true; }) as typeof process.stderr.write;
+  let thrown = false;
+  const run = runPlugin<{ n: number }, { type: string }>({
+    hello: { name: 'flaky-view' },
+    init: () => ({ n: 0 }),
+    update: (msg, m) => (msg.type === 'afterWrite' ? { n: m.n + 1 } : m),
+    view: (m) => {
+      if (m.n === 1 && !thrown) { thrown = true; throw new Error('cannot draw'); } // once only
+      return { surface: ['Text', {}, `n=${m.n}`] };
+    },
+  }, pluginIo);
+  try {
+    await host.request('hello', { hostApi: 2, config: {} });
+    await tick();
+    const framesAfterHello = frames.length;
+    host.notify('afterWrite'); // update succeeds (n: 0 -> 1), but view throws
+    await tick();
+    expect(frames.length).toBe(framesAfterHello); // the whole step failed, so no frame
+    expect(stderr.some((l) => l.includes('[flaky-view] update failed: cannot draw'))).toBe(true);
+    host.notify('afterWrite'); // the model was restored to 0; this step succeeds
+    await tick();
+    expect(frames.at(-1)).toMatchObject({ surface: ['Text', {}, 'n=1'] });
+    await host.request('shutdown');
+    await run;
+  } finally {
+    process.stderr.write = realWrite;
+  }
+});
