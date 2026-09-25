@@ -700,9 +700,11 @@ directory — a plain file name, at most 64 characters, never a path (no `/`, `\
 appear, up to 10 s; a second host finds the socket already there and connects straight
 to it, starting nothing. `connect` with no `run` only ever connects; if nothing is
 listening, loading the plugin fails rather than starting anything. Started by a host,
-the server's stdout is discarded and its stderr reaches only that host's own log;
-started by hand instead — `<run's command> --serve <config directory>/sockets/<name>`
-— its stdout and stderr are whatever terminal ran it.
+the server's stdout is discarded and its stderr is appended to `<name>.log` beside the
+socket (0600; emptied at a start once it has grown past 1 MiB) — a file, not the
+starting host's log, since the server outlives that host and every other host is
+another client of it; started by hand instead — `<run's command> --serve <config
+directory>/sockets/<name>` — its stdout and stderr are whatever terminal ran it.
 
 Every connection to a shared server is its own client: its own `hello`, its own
 protocol state. What its clients share is whatever the process holds outside a single

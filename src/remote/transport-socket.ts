@@ -15,6 +15,7 @@ import type { Transport, TransportClose } from './transport.js';
 
 export interface SocketOpts { name: string; socketPath: string; run?: string[]; cwd: string; env?: Record<string, string>; log: (line: string) => void; waitMs?: number }
 const POLL_MS = 50;
+const LOG_MAX_BYTES = 1024 * 1024;
 
 // Bun's unix-connect API — the one call this file needs; its full type definitions
 // are not part of the typecheck (the same convention as `src/loader/compat.ts`'s
@@ -66,19 +67,28 @@ export function socketTransport(opts: SocketOpts): Transport & { start(): Promis
     return c;
   };
 
+  // The server's stderr goes to `<socket>.log`, never a pipe to this host: the server
+  // outlives the host that started it, and a write to a pipe whose reader is gone
+  // kills the writer (EPIPE). The file is opened for appending, 0600 — kept across
+  // starts, so what a server said before it died is still there to read — and emptied
+  // first when it has grown past `LOG_MAX_BYTES`, so it never grows without bound.
   const startServer = () => {
     const [cmd, ...args] = opts.run!;
-    const c = spawn(cmd!.includes('/') ? path.resolve(opts.cwd, cmd!) : cmd!, [...args, '--serve', opts.socketPath], { cwd: opts.cwd, env: { ...process.env, ...opts.env }, detached: true, stdio: ['ignore', 'ignore', 'pipe'] });
-    // A command that cannot even start (a typo in `run`, no shell to report it) fires
-    // `error`, never `exit` — an unhandled one would take the whole host down; the
-    // wait loop below times out on its own once nothing ever answers the socket.
-    c.on('error', (e) => opts.log(`[${opts.name}] failed to start: ${e.message}`));
-    c.stderr!.setEncoding('utf8');
-    let err = '';
-    c.stderr!.on('data', (chunk: string) => { err += chunk; let nl; while ((nl = err.indexOf('\n')) !== -1) { const line = err.slice(0, nl).trimEnd(); err = err.slice(nl + 1); if (line) opts.log(`[${opts.name}] ${line}`); } });
-    (c.stderr as { unref?: () => void } | null)?.unref?.();
-    c.unref();
-    opts.log(`[${opts.name}] started ${opts.run!.join(' ')} --serve (pid ${c.pid})`);
+    const logFile = `${opts.socketPath}.log`;
+    const fd = fs.openSync(logFile, 'a', 0o600);
+    try {
+      try { fs.fchmodSync(fd, 0o600); } catch { /* platform without chmod semantics */ }
+      if (fs.fstatSync(fd).size > LOG_MAX_BYTES) fs.ftruncateSync(fd, 0);
+      const c = spawn(cmd!.includes('/') ? path.resolve(opts.cwd, cmd!) : cmd!, [...args, '--serve', opts.socketPath], { cwd: opts.cwd, env: { ...process.env, ...opts.env }, detached: true, stdio: ['ignore', 'ignore', fd] });
+      // A command that cannot even start (a typo in `run`, no shell to report it) fires
+      // `error`, never `exit` — an unhandled one would take the whole host down; the
+      // wait loop below times out on its own once nothing ever answers the socket.
+      c.on('error', (e) => opts.log(`[${opts.name}] failed to start: ${e.message}`));
+      c.unref();
+      opts.log(`[${opts.name}] started ${opts.run!.join(' ')} --serve (pid ${c.pid}), its stderr to ${logFile}`);
+    } finally {
+      fs.closeSync(fd); // the child has its own copy
+    }
   };
 
   return {

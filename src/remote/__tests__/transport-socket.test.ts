@@ -110,3 +110,49 @@ test('a line of over a megabyte of non-ASCII text crosses the socket whole, both
   await t.close(0);
   await until(() => !fs.existsSync(sock), 'the server to go on its idle');
 }, 15_000);
+
+const alive = (pid: number): boolean => { try { process.kill(pid, 0); return true; } catch { return false; } };
+const forget = (sock: string) => { for (const f of [sock, `${sock}.lock`, `${sock}.log`, `${sock}.pid`]) fs.rmSync(f, { force: true }); };
+
+test("a server's stderr goes to its log file beside the socket, so it outlives the host that started it", async () => {
+  const sock = socketPath('t7.sock'); const pidfile = `${sock}.pid`;
+  forget(sock);
+  // The starting host is a process of its own, gone before the server writes anything.
+  const starter = Bun.spawn(['bun', path.resolve(import.meta.dir, '../../__tests__/helpers/remote-start-and-leave.ts'), sock, ...FAKE], { cwd, env: { ...process.env, FAKE_PIDFILE: pidfile, FAKE_STDERR_ON_KEY: 'x' }, stdout: 'pipe', stderr: 'inherit' });
+  expect(await starter.exited).toBe(0);
+  const pid = Number(fs.readFileSync(pidfile, 'utf8'));
+  try {
+    const b = host(sock, pidfile);
+    await b.t.start();
+    await b.peer.request('hello', { hostApi: 2, config: {}, idleMs: 100 }, 5_000);
+    b.peer.notify('key', { name: 'x', id: 'x' });
+    await until(() => fs.existsSync(`${sock}.log`) && fs.readFileSync(`${sock}.log`, 'utf8').includes('stderr on key x'), 'the line in the log file');
+    expect(fs.statSync(`${sock}.log`).mode & 0o777).toBe(0o600);
+    // Still answering after its stderr write: the write went to a file, not a pipe to
+    // a process that is gone.
+    expect(await b.peer.request('tool.run', { name: 'shared', args: {}, call: { id: '1' } }, 2_000)).toEqual({ result: 'shared=1' });
+    expect(alive(pid)).toBe(true);
+    await b.t.close(0);
+  } finally {
+    try { process.kill(pid, 'SIGTERM'); } catch { /* already gone */ }
+    await until(() => !alive(pid), 'the server to exit');
+    forget(sock);
+  }
+});
+
+test("a server's log file over 1 MiB is emptied before the next start", async () => {
+  const sock = socketPath('t8.sock'); const pidfile = `${sock}.pid`;
+  forget(sock);
+  fs.writeFileSync(`${sock}.log`, 'x'.repeat(1_100_000));
+  const a = host(sock, pidfile);
+  try {
+    await a.t.start();
+    await a.t.close(0);
+    expect(fs.statSync(`${sock}.log`).size).toBeLessThan(1_000);
+  } finally {
+    const pid = Number(fs.readFileSync(pidfile, 'utf8'));
+    try { process.kill(pid, 'SIGTERM'); } catch { /* already gone */ }
+    await until(() => !alive(pid), 'the server to exit');
+    forget(sock);
+  }
+});

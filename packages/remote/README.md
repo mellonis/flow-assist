@@ -165,7 +165,9 @@ file, a database — never the model. The idle timer that ends the server is arm
 moment it starts listening, at 60 s, so one no host ever reaches still exits; the
 FIRST client's own `hello.idleMs` replaces that default from then on, for the rest of
 the process's life. It also ends on `SIGTERM` or `SIGINT`; a server started by hand
-runs this same code and lives the same way.
+runs this same code and lives the same way. A server a host started writes its stderr
+— `update failed` lines included — to `<socket>.log` beside the socket, not to any
+host's log; one started by hand writes it to the terminal that ran it.
 
 ## Writing a client in another language
 

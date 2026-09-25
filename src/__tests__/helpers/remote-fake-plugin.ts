@@ -50,6 +50,7 @@ if (process.env.FAKE_NO_HELLO) {
       peer.onNotify('key', (e) => {
         const key = e as KeyEvent;
         if (key.name === process.env.FAKE_CRASH_ON_KEY) process.exit(3);
+        if (key.name === process.env.FAKE_STDERR_ON_KEY) process.stderr.write(`stderr on key ${key.name}\n`);
         if (!self || key.action !== 'bump') return;
         shared++; self.n++;
         peer.notify('frame', frame(self));

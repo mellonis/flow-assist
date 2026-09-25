@@ -391,7 +391,9 @@ protocol as its authors read it is docs/plugins.md, "A plugin in another languag
   own logic, since the host imports no plugin.
 - **A `connect` server is spawned detached**, with `run`'s command plus
   `--serve <socket path>`, and a host never kills it — only disconnects; another host
-  may still be on it. It ends itself, on its own idle timeout or a signal
+  may still be on it. Its stderr is `<socket>.log` beside the socket (opened for
+  appending, 0600, emptied at a start past 1 MiB), never a pipe: the server outlives
+  the host that started it, and a write to a pipe with no reader kills the writer. It ends itself, on its own idle timeout or a signal
   (`packages/remote/src/serve.ts`). `shutdown` there is answered per CONNECTION, not
   per process: each client gets its own `hello` and its own protocol state, and what a
   server's clients share is whatever it holds outside a single connection.
