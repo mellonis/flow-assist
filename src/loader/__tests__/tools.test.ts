@@ -411,6 +411,29 @@ test('a plugin tool\'s maxResultChars never reaches the wire-facing tool def', (
   expect((wireDef as Record<string, unknown>).maxResultChars).toBeUndefined();
 });
 
+test('background\'s description promises only what the default keeps: a result in the chat, read on the next turn', () => {
+  const reg = assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
+  const desc = reg.tools.find((t) => t.function.name === 'background')!.function.description;
+  // With ai.backgroundFollowUp off (the default) no turn starts for a result, so
+  // nothing may say the assistant reacts to one by itself.
+  // Nor may an example ask for a report the host does not make ("tell me when it is done").
+  for (const promise of [/analy[sz]es it/i, /when idle/i, /opens it/i, /reports? back/i, /tell me when/i, /скажи,? когда/i, /отчитайся/i]) expect(desc).not.toMatch(promise);
+  expect(desc).toContain('next turn');
+  expect(desc).toContain('ai.backgroundFollowUp');
+  expect(desc).toMatch(/do not promise/i);
+  expect(desc).toMatch(/open(s)? with what came back/i);
+});
+
+test('config_schema says what ai.backgroundFollowUp does, from the config side', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'fa-cfgschema-bg-'));
+  const local = join(dir, 'config.local.json');
+  writeFileSync(local, '{}');
+  const reg = assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
+  const out = await reg.exec('config_schema', { key: 'ai' }, { configLocalPath: local });
+  expect(out).toMatch(/- ai\.backgroundFollowUp: true\|false — unset \(default: false — a background task's result lands in the chat .* reaches the model on its next turn, which starts when the person writes again/);
+  expect(out).toMatch(/config set ai\.backgroundFollowUp true/);
+});
+
 test('config_schema shows structure, defaults and set/unset — never a value', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'fa-cfgschema-'));
   const local = join(dir, 'config.local.json');

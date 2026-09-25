@@ -89,6 +89,7 @@ const KEY_DEFAULTS: Record<string, string> = {
   'ai.maxTokens': `${DEFAULT_MAX_TOKENS} — the longest answer one request may get, with ai.provider anthropic only (that API requires one; thinking counts against it). A fixed thinking budget that leaves the answer less than 1024 under it is lowered to fit (the log says so)`,
   'ai.thinking': 'unset — the model thinks as it does by default (the current Claude models decide for themselves; their thinking is not shown). With ai.provider anthropic: config set ai.thinking \'{"adaptive":true}\' asks for adaptive thinking and shows a summary of it in the chat\'s thinking fold; {"budgetTokens":N} (at least 1024) is a fixed budget, for older models only — the current ones refuse it',
   'ai.toolLoading': `onDemand — each request carries the core tools in full and only an index (name and one line) of the others; the model loads what it needs with ${TOOLS_LOAD}, and a loaded tool stays for the rest of the conversation (/clear empties the set). config set ai.toolLoading all sends every tool in full on every request — more tokens per request, for a model that does not load tools well`,
+  'ai.backgroundFollowUp': 'false — a background task\'s result lands in the chat as a message of its own (counted as unread in the footer while the chat is closed) and reaches the model on its next turn, which starts when the person writes again; no turn is spent on a result by itself, so the assistant does not react to one until then. config set ai.backgroundFollowUp true starts a turn per result — only with the chat open, the field empty and nothing queued — so the assistant answers each one as it arrives',
   'ai.toolResultMaxChars': `${TOOL_RESULT_MAX_CHARS_DEFAULT} — a tool result longer than this is cut before it joins the conversation: the head is kept, a short tail too, and a note in between says how much was cut and asks for less (a filter, a limit, one item). Only what is SENT is capped — a command's own block and the tool trail always show what really happened. A tool may declare its own higher cap for one call, up to ${TOOL_RESULT_MAX_CHARS_CEILING}. config set ai.toolResultMaxChars 80000 raises the default`,
   // Said in full: "can I show it a screenshot?" is asked of the assistant, and so is
   // "why was my image refused?".
@@ -319,7 +320,7 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
       type: 'function',
       function: {
         name: 'background',
-        description: 'Run a task in the BACKGROUND: offload a self-contained job to a separate agent run that has tool access, return immediately (the chat stays usable), and report the result when it completes — as a toast + log entry AND a message returned into the chat (the assistant opens it and, when idle, analyzes it in the conversation). Call when the user wants something done later without blocking the conversation — e.g. "запусти сборку в фоне и скажи когда готово", "посмотри что в репо и отчитайся позже". `task` (required): the work to do, in natural language. `label`: a short name for the task/notification (default: the task, clipped). `in`/`at`: an optional delay before it starts (a duration like "10 seconds", or a clock time). The task runs read-only (write tools are declined) and bounded (up to 12 tool rounds). You may spawn a follow-up `background` task for a further step, but keep the chain to ONE level. The chat shows how many background tasks are in flight.',
+        description: 'Run a task in the BACKGROUND: offload a self-contained job to a separate agent run that has tool access; the call returns at once and the chat stays usable. When the task ends, its result lands in the chat as a message of its own (`<label> finished:` and the result, or `<label> failed:` and the error): the person sees it arrive, and you see it at the start of your next turn — which begins when the person writes again. No turn starts for a result by itself (unless the person set `ai.backgroundFollowUp: true`), so do not promise to act on results when they arrive ("when they report, I will save each one"): say the person will see them come in and can ask you to carry on. When results have arrived since your last answer, your next answer opens with what came back — a line per task — before anything else. Call when the user wants something done later without blocking the conversation — e.g. "count the tests in src in the background", "запусти сборку в фоне". `task` (required): the work to do, in natural language. `label`: a short name for the task/notification (default: the task, clipped). `in`/`at`: an optional delay before it starts (a duration like "10 seconds", or a clock time). The task runs read-only (write tools are declined) and bounded (up to 12 tool rounds). You may spawn a follow-up `background` task for a further step, but keep the chain to ONE level. The chat shows how many background tasks are in flight.',
         parameters: { type: 'object', properties: {
           task: { type: 'string', description: 'The work to do in the background, in natural language — e.g. "count the tests in src and report the number".' },
           label: { type: 'string', description: 'Optional short name for the task/notification (default: the task, clipped to ~40 chars).' },
@@ -627,8 +628,8 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
               (ctx as { showMessage?: (m: string) => void }).showMessage?.(`⏳ ${label} done`);
               (ctx as { pushLog?: (e: string) => void }).pushLog?.(`[bg] ${label}: ${result}`);
               // Return the result to the chat too (the assistant registers `postToChat`):
-              // it opens the chat and, when idle, feeds the result through `send`, so the
-              // assistant analyzes it in the conversation rather than only toasting it.
+              // it lands there as a message of its own and joins the model's history, read
+              // with the next turn; only `ai.backgroundFollowUp: true` starts a turn for it.
               // The `Background` role label (render) already marks it as a background
               // result, so the text itself does NOT repeat the "[background]" prefix.
               (ctx as { postToChat?: (t: string) => void }).postToChat?.(`${label} finished:\n${result}`);
@@ -643,7 +644,7 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
             }
           });
         }, ms);
-        return `Background task started (${label}) — will report when done${ms ? ` in ${Math.round(ms / 1000)}s` : ''}.`;
+        return `Background task started (${label})${ms ? `, to begin in ${Math.round(ms / 1000)}s` : ''} — the result appears in the chat when it ends, and you see it on your next turn.`;
       }
       case 'todo': {
         // Not write-confirmed (like memory): a y/n pause on every `todo add` would

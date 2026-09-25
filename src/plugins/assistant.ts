@@ -2475,9 +2475,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // (e.g. a `background` task's result). Registered per render (idempotent) so
           // a detached timer reads the latest closure — the same live-reference pattern
           // as the React-bound services. Reads live state via refs, so an old closure is
-          // still current. Results are QUEUED, not dropped: if the chat is busy (mid-
-          // answer or drafting), the result waits here and is auto-analyzed when the
-          // chat goes idle — so a back-to-back burst of background tasks all land.
+          // still current. Results are QUEUED, not dropped: while a turn is being
+          // written the result waits here and lands (`flushPending`) as soon as it ends —
+          // so a back-to-back burst of background tasks all land.
           (host.services as Record<string, any>).postToChat = (text: string) => {
             const q = String(text ?? '').trim();
             if (!q) return;

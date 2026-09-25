@@ -29,6 +29,10 @@ export const hostConfigSchema = z.object({
     // the rest, which the model loads by name (src/assistant/tool-loading.ts). 'all':
     // every tool in full on every request.
     toolLoading: z.enum(['all', 'onDemand']).optional(),
+    // A background task's result lands in the chat and reaches the model on its next
+    // turn (src/plugins/assistant.ts, `flushPending`); `true` starts a turn per result
+    // instead — with the chat open, the field empty and nothing queued.
+    backgroundFollowUp: z.boolean().optional(),
     // The cap on ONE tool result before it joins the model's history (default 40000
     // characters, src/assistant/tool-result-cap.ts). A longer result is cut, the head
     // kept and a short tail, with a note naming how much was cut. Display — a view, the

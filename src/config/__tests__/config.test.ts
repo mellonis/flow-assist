@@ -28,6 +28,12 @@ test('config write validation rejects an unknown key and a bad type', () => {
   expect(validateConfigWriteValue(hostConfigSchema, 'cache.enabled', true).ok).toBe(true);
 });
 
+test('config set ai.backgroundFollowUp takes a boolean — what the chat reads with `=== true`', () => {
+  expect(validateConfigWriteValue(hostConfigSchema, 'ai.backgroundFollowUp', true)).toEqual({ ok: true, value: true });
+  expect(validateConfigWriteValue(hostConfigSchema, 'ai.backgroundFollowUp', false)).toEqual({ ok: true, value: false });
+  expect(validateConfigWriteValue(hostConfigSchema, 'ai.backgroundFollowUp', 'yes').ok).toBe(false);
+});
+
 // The shell's roots are the host's own key; the legacy `fs.roots` is still accepted, so
 // a config file that sets it is not refused.
 test('shell.roots is a host key; a config that still sets fs.roots is accepted', () => {

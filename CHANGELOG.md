@@ -5,6 +5,15 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **The assistant no longer promises to act on background results by itself.** The
+  `background` tool told the model a result is "analyzed when idle", so it promised
+  things like "when they report, I will save each into a file" — but by default a
+  result only lands in the chat and reaches the model with the person's next message;
+  nothing happened until the person wrote again. The tool now describes what happens:
+  the result appears in the chat, the model sees it on its next turn, a turn per
+  result needs `ai.backgroundFollowUp: true`, and the next answer opens with what came
+  back. `config_schema` lists `ai.backgroundFollowUp` and says the same from the config
+  side.
 - **A list of tool names sent as a string loads those tools.** The answer to a call of
   a tool that was not loaded showed the fix as prose — `call tools_load with names
   ["write_file"] first` — and a model copied the list into the call as a string. The

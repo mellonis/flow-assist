@@ -2292,6 +2292,18 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   `useApp()`; tests read `TestBackend.notifications` / `bells`.
   `ai.backgroundFollowUp: true` opts back into a turn per result, and then only
   with the chat open, the field empty and nothing queued.
+  - **The model is told this contract, not a kinder one.** `background`'s description
+    (`src/loader/tools-core.ts`) says a result lands in the chat as `<label>
+    finished:` (or `failed:`) and reaches the model at the start of its next turn,
+    which the person's next message starts; that a turn per result needs
+    `ai.backgroundFollowUp: true`; that the model must not promise to act on results
+    when they arrive, only say the person will see them and can ask it to carry on;
+    and that when results arrived since its last answer, the next answer opens with
+    what came back, a line per task. The call's own answer says the same (`the result
+    appears in the chat when it ends, and you see it on your next turn`), and so does
+    `config_schema`'s note for `ai.backgroundFollowUp` (`KEY_DEFAULTS`, the key is in
+    `hostConfigSchema`'s `ai`). A description that promises a reaction the default
+    does not make is what the model repeats to the person as its own promise.
 - What the footer reads from a plugin (`host.store.<x>`) must be patched
   synchronously when it changes: the host draws its footer BEFORE the plugin's
   component re-renders, so a value assigned during render is one frame stale.

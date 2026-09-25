@@ -376,6 +376,10 @@ test('a background result shows at once — a half-typed draft does not hold it 
   expect(frame).toContain('There are 14 TODO comments.');
   expect(frame).toContain('› meanwhile, half a th');
   expect(model.requests).toHaveLength(3);
+  // What the tool told the model promises no report of its own.
+  const started = (model.requests[1]!.messages as { role: string; content: string }[]).find((m) => m.role === 'tool')!.content;
+  expect(started).toContain('the result appears in the chat');
+  expect(started).not.toMatch(/will report/);
   // The chat is open — the result is in front of the person, the terminal stays quiet.
   expect(ui.backend.notifications).toEqual([]);
   expect(ui.backend.bells).toBe(0);
@@ -387,7 +391,12 @@ test('a background result shows at once — a half-typed draft does not hold it 
   await ui.press('return');
   await settle(20);
   const sent = model.requests.at(-1)!.messages as { role: string; content: string }[];
-  expect(sent.some((m) => m.role === 'user' && String(m.content).includes('There are 14 TODO comments.'))).toBe(true);
+  const result = sent.findIndex((m) => m.role === 'user' && String(m.content).includes('There are 14 TODO comments.'));
+  const question = sent.findIndex((m) => m.role === 'user' && String(m.content).includes('how many was that'));
+  expect(result).toBeGreaterThan(-1);
+  // It is labelled as a finished task, and it comes before the person's new message.
+  expect(sent[result]!.content).toMatch(/finished:\nThere are 14 TODO comments\./);
+  expect(question).toBeGreaterThan(result);
   ui.app.unmount();
 });
 
