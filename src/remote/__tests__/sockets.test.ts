@@ -8,7 +8,7 @@ test('the sockets directory is the host\'s own, 0700, and a name is a name', () 
   expect(dir.endsWith(path.join('sockets'))).toBe(true);
   expect(fs.statSync(dir).mode & 0o777).toBe(0o700);
   expect(socketPath('tutor.sock')).toBe(path.join(dir, 'tutor.sock'));
-  for (const bad of ['', '../x', 'a/b', 'a\\b', 'x'.repeat(65)]) expect(() => socketPath(bad)).toThrow('socket name');
+  for (const bad of ['', '../x', 'a/b', 'a\\b', 'x'.repeat(65), '.']) expect(() => socketPath(bad)).toThrow('socket name');
 });
 
 test('a live lock is waited on, a stale one is taken', () => {

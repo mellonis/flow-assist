@@ -23,7 +23,7 @@ export function socketsDir(): string {
 }
 
 export function socketPath(name: string): string {
-  if (!name || name.length > 64 || /[/\\]/.test(name) || name.includes('..')) throw new Error(`socket name must be a plain file name under 64 characters, got ${JSON.stringify(name)}`);
+  if (!name || name === '.' || name.length > 64 || /[/\\]/.test(name) || name.includes('..')) throw new Error(`socket name must be a plain file name under 64 characters, got ${JSON.stringify(name)}`);
   return path.join(socketsDir(), name);
 }
 
