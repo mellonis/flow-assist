@@ -141,35 +141,76 @@ test('a run that lived longer than a second resets the backoff to the first step
   expect(tm.fire()).toBe(BACKOFF_MS[0]); // long run resets to the first step
 });
 
-// Rejects every attempt, and only after the fake clock has advanced past the
-// quick-death threshold — so an unmodified `now`-based "quick" check would read
-// each one as a long-lived run instead of a failure to start at all.
-function slowCrash(clock: { value: number }) {
+// A transport whose very first `start()` dies via both `onClose` and a rejection —
+// the same double-fire shape `crashingOnRestart` uses for a later attempt, but here
+// on the very first attempt: nothing has ever come up, so the death is the caller's
+// own `start()` rejection to deal with, not the supervisor's restart loop.
+function crashingOnFirstStart() {
   let calls = 0;
+  const closes: Array<(w: { error?: string }) => void> = [];
   const factory = () => {
     calls++;
     return {
       send: () => {},
       onLine: () => {},
-      onClose: () => {},
+      onClose: (f: (w: { error?: string }) => void) => { closes.push(f); },
       close: async () => {},
-      start: () => { clock.value += 1_500; return Promise.reject(new Error('timed out')); },
+      start: () => { closes.forEach((f) => f({ error: 'boom' })); return Promise.reject(new Error('boom')); },
     };
   };
   return { factory, calls: () => calls };
 }
 
-test('a start that takes over a second to reject still counts toward the failure limit', async () => {
-  const clock = { value: 0 };
-  const { factory, calls } = slowCrash(clock);
+test('a first start that dies via onClose and a rejection schedules no restart and forwards no close', async () => {
+  const { factory, calls } = crashingOnFirstStart();
   const tm = timers(); const log: string[] = [];
-  const s = supervise(factory, { name: 'fake', log: (l) => log.push(l), timer: tm.timer, now: () => clock.value });
-  await expect(s.start()).rejects.toThrow('timed out');
-  for (let i = 0; i < MAX_FAILURES + 2 && tm.pending.length > 0; i++) {
-    tm.fire();
-    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
-  }
-  expect(tm.pending.length).toBe(0);
-  expect(log.at(-1)).toContain('disabled until restart');
-  expect(calls()).toBe(MAX_FAILURES + 1); // the initial start plus one restart per failure up to the limit
+  const s = supervise(factory, { name: 'fake', log: (l) => log.push(l), timer: tm.timer });
+  const closesSeen: unknown[] = []; s.onClose((w) => closesSeen.push(w));
+  await expect(s.start()).rejects.toThrow('boom');
+  expect(tm.pending.length).toBe(0); // no restart scheduled
+  expect(calls()).toBe(1); // the factory ran once — no auto-retry
+  expect(closesSeen).toEqual([]); // nothing was ever up, so the layer above hears nothing
+  expect(log).toEqual([]); // no restart bookkeeping for a plugin that never came up once
+});
+
+// A transport whose `close()` mirrors a real one's no-op-before-spawn guard (it does
+// nothing until `start()` has actually resolved), and whose `start()` the test
+// resolves by hand — for proving a restart still spawning when `close()` runs is
+// closed for real once it comes up, rather than left running unmanaged.
+function restartInFlight() {
+  const made: Array<{ closedWith: number[]; onCloseFns: Array<(w: { code?: number }) => void>; resolveStart?: () => void }> = [];
+  let calls = 0;
+  const factory = () => {
+    const idx = calls++;
+    const onCloseFns: Array<(w: { code?: number }) => void> = [];
+    const closedWith: number[] = [];
+    const entry: (typeof made)[number] = { closedWith, onCloseFns };
+    let up = idx === 0;
+    made.push(entry);
+    return {
+      send: () => {},
+      onLine: () => {},
+      onClose: (f: (w: { code?: number }) => void) => { onCloseFns.push(f); },
+      close: async (graceMs: number) => { if (up) closedWith.push(graceMs); }, // a no-op before this instance is actually up
+      start: idx === 0
+        ? async () => {}
+        : () => new Promise<void>((resolve) => { entry.resolveStart = () => { up = true; resolve(); }; }),
+    };
+  };
+  return { factory, made };
+}
+
+test('close during an in-flight restart fires no onRestart and closes the transport once it comes up', async () => {
+  const { factory, made } = restartInFlight(); const tm = timers();
+  const s = supervise(factory, { name: 'fake', log: () => {}, timer: tm.timer });
+  let restarts = 0; s.onRestart(() => restarts++);
+  await s.start();
+  made[0]!.onCloseFns.forEach((f) => f({ code: 1 })); // schedule a restart
+  tm.fire(); // spawns instance 1 — its start() is pending until resolveStart is called
+  await s.close(0); // close() runs while instance 1 has not yet resolved start()
+  expect(made[1]!.closedWith).toEqual([]); // not actually closed — it was never up
+  made[1]!.resolveStart!();
+  await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+  expect(restarts).toBe(0); // no onRestart after close()
+  expect(made[1]!.closedWith).toEqual([0]); // closed for real once it came up, instead of left running
 });
