@@ -245,7 +245,7 @@ the blacklist.
     (`ƒ Flow Assist · Board: Frontend · Issue ABC-1`), the plain name with none.
     **The screen changing never switches the session**: opening the chat continues
     the conversation whatever is on screen (switching lost the dialogue for the
-    person); `/clear` is how a fresh one starts. The session never writes
+    person); `/new` (or `/clear`) is how a fresh one starts. The session never writes
     `subject`; a session file that carries `subject` (or `issue`) is read and the
     field ignored.
   - `chatSubject` → deprecated, for one release: a short id, read as ONE item
@@ -994,11 +994,18 @@ there is no `/fullscreen`.
   three views of one conversation, saved together or not at all. Not saved: an answer
   in progress (`live`), a pending y/n or question, the queues. Saves: 250 ms after a
   question, an answer's end, `/compact`, a background result; at once on closing the
-  chat, `/clear`, `/resume`, and at process exit (`flushOnExit`). A
+  chat, `/clear`, `/new`, `/resume`, and at process exit (`flushOnExit`). A
   write is temp file + rename; a file that does not parse is skipped. On start the
   newest session is continued unless `/clear` closed it (`sessions.resume: false`
   turns this off); `/clear` starts a new one and keeps the old on
-  `/resume` (`/resume <n>` opens it). The last 400 messages are kept, 50 sessions.
+  `/resume` (`/resume <n>` opens it).
+  `/new` starts a new one the same way and leaves the old one OPEN (not closed), so a
+  restart before anything is said in the new one continues the old. Both reset the
+  conversation through one function (`resetConversation` in `src/plugins/assistant.ts`):
+  everything this file says `/clear` resets — the plan, the loaded tools, the recall
+  state, the images' numbering, the auto mode, the notes mode, the folds, the live views,
+  the shell's directory — `/new` resets too. `/new` is refused while an answer or a
+  `!command` runs. The last 400 messages are kept, 50 sessions.
   A session's `title` is fixed at its first save — the first non-empty line of the first
   thing the person wrote (a `!command` otherwise), whitespace collapsed and cut at
   `TITLE_MAX` (70) code points (`cutTitle` / `sessionTitle`) — and kept in the chat's
@@ -1029,7 +1036,7 @@ there is no `/fullscreen`.
   unreadable lock has sat there longer than that — is STALE and is taken over. The
   lock is acquired when a session first gets its id (a fresh one, or the one a
   start-up/`/resume` continues) and released — after the final save — on exit
-  (`flushOnExit`), `/clear`, `/resume` to another session, and
+  (`flushOnExit`), `/clear`, `/new`, `/resume` to another session, and
   component unmount. `pruneSessions` leaves a HELD session's file alone regardless
   of the keep count (deleting it out from under a live process would be a second
   way to lose data) and separately sweeps any `.lock` whose session file is already

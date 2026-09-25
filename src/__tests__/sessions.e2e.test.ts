@@ -432,3 +432,47 @@ test('bare /title says the name in the conversation, where a full-screen chat sh
   expect(flat(ui.backend.lastFrame!)).toContain(flat('This session is «как тренд по ABC-341?» — /title <text> renames it'));
   ui.app.unmount();
 });
+
+// ─── /new ──────────────────────────────────────────────────────────────────────
+
+test('/new starts a fresh session: the model is sent nothing of the old one, which stays on disk and open', async () => {
+  const dir = dirOf();
+  const first = await talk(dir, 'старый вопрос', 'старый ответ');
+  first.model.script([{ text: 'новый ответ' }]);
+  await first.ui.type('/new');
+  await first.ui.press('return');
+  await settle(4);
+  expect(first.ui.backend.lastFrame).not.toContain('старый ответ');
+  const files = fs.readdirSync(dir).filter((n) => n.endsWith('.json'));
+  expect(files).toHaveLength(1);
+  const old = JSON.parse(fs.readFileSync(path.join(dir, files[0]!), 'utf8'));
+  expect(old.messages.some((m: { content: unknown }) => m.content === 'старый ответ')).toBe(true);
+  expect(old.closed).not.toBe(true); // what /clear would have set
+
+  await first.ui.type('новый вопрос');
+  await first.ui.press('return');
+  await settle(20);
+  const sent = sentTo(first.model);
+  expect(sent.some((m) => m.content === 'старый вопрос')).toBe(false);
+  expect(sent.at(-1)).toMatchObject({ role: 'user', content: 'новый вопрос' });
+  await first.ui.press('escape', 'escape');
+  expect(fs.readdirSync(dir).filter((n) => n.endsWith('.json'))).toHaveLength(2);
+  first.ui.app.unmount();
+});
+
+test('after /new with nothing said, a restart continues the session before it', async () => {
+  const dir = dirOf();
+  const first = await talk(dir, 'старый вопрос', 'старый ответ');
+  await first.ui.type('/new');
+  await first.ui.press('return');
+  await settle(4);
+  first.ui.app.unmount();
+
+  const model = new ScriptedModel();
+  model.script([{ text: 'продолжаем' }]);
+  const ui = await bootApp(model, 100, 28, undefined, { sessions: { dir } });
+  await settle(6);
+  await ui.press('F');
+  expect(ui.backend.lastFrame).toContain('старый ответ');
+  ui.app.unmount();
+});

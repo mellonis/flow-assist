@@ -65,7 +65,7 @@ import type { PluginApi } from '../runtime/plugin-api.js';
 // sessions directory is known (`chatCommandDefs` in the chat).
 type ChatCommand = HistoryCommand & ChatCommandDef;
 const CHAT_COMMAND_DEFS: ChatCommand[] = [
-  { name: 'compact' }, { name: 'context' }, { name: 'copy' }, { name: 'image' }, { name: 'resume' }, { name: 'title' }, { name: 'clear' }, { name: 'memory' },
+  { name: 'compact' }, { name: 'context' }, { name: 'copy' }, { name: 'image' }, { name: 'resume' }, { name: 'new' }, { name: 'title' }, { name: 'clear' }, { name: 'memory' },
   { name: 'auto', values: ['reads', 'all', 'off'] }, { name: 'notes', values: NOTES_MODES }, { name: 'mode', values: CHAT_MODES }, { name: 'log' }, { name: 'exit' },
 ];
 const CHAT_COMMANDS = CHAT_COMMAND_DEFS.map((c) => c.name);
@@ -1939,6 +1939,73 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // an image has nowhere to go there, and a pasted path is the command's argument.
           const fieldTakesImages = () => !bangLevelRef.current && !/^\s*[/!]/.test(inputRef.current);
 
+          // A fresh conversation in this chat — `/clear` and `/new` both: everything that
+          // would survive a rebuild is reset — emptyNotice, the tool name/counter, the time,
+          // the stream/tick, the context, the title. The session's id and lock are the caller's.
+          const resetConversation = () => {
+            if (tickRef.current) { clearInterval(tickRef.current); tickRef.current = null; }
+            abortRef.current?.abort(); abortRef.current = null;
+            if (pendingRef.current) settleConfirm(false);
+            dismissAsk();
+            contentRef.current = '';
+            titleRef.current = ''; // the next session is named by its own first line
+            // A fresh conversation must not have an earlier background result surface in
+            // it: drop any queued-but-unsent delivery and stop the flush interval. (A task
+            // still RUNNING delivers afterwards — that is a new, legitimate result; only
+            // already-queued pending ones are stale.)
+            bgQueueRef.current = [];
+            clearFlush();
+            apiRef.current = []; summaryRef.current = ''; queueRef.current = []; setQueued([]);
+            // A new conversation starts with no plan: the old one described work the
+            // model no longer remembers.
+            planRef.current.reset();
+            toolSetRef.current.reset(); // a new conversation starts from the index
+            resetLiveViews(); // the calls they tracked are gone with the conversation
+            resetImages(); // numbering starts again at [Image #1]
+            recallRef.current = createRecallState(); // nothing is stubbed in a fresh conversation
+            usageRef.current = null; // measured for a conversation that is gone
+            // The conversation ends, not the memory — and it says so, or the assistant
+            // "still knowing" an earlier prompt reads as the reset failing.
+            {
+              const kept = keptAfterClear(loadMemories(memoryFilePath(host.config)));
+              setMessages(kept ? [{ role: 'note', content: kept }] : []);
+            }
+            // Back to the first root — after the list is emptied, so the fresh
+            // conversation says which instructions it starts with; a note still waiting
+            // for the turn's end was the old conversation's.
+            projectNoteRef.current = null;
+            projectRef.current = { dir: '', root: null, files: [] };
+            shellRef.current.setCwd(null);
+            setInput(''); inputRef.current = '';
+            setCursor(0);
+            setBangLevel(0); // a fresh conversation opens on a plain prompt
+            setAutoMode('ask'); // and asks again: the mode was granted for the work left behind
+            setNotes(configNotes()); // the steps go back to what the config asks for
+            resetRound(); // the round being written belonged to work that is gone
+            setError(null);
+            setEmptyNotice('');
+            setToolCount(0);
+            setToolLabel('');
+            setElapsedMs(0);
+            setFolds(allFolded()); // everything folded again, and no exceptions left over
+            setPager(null);
+            setStreaming(false);
+            disarmEsc();
+            host.notify();
+          };
+          // `/new`: a fresh session, the one being left written and kept as it is — not
+          // closed (what `/clear` does), so a restart with nothing said since continues
+          // it. Refused while an answer or a `!command` runs, as a switch is.
+          const startNew = (): boolean => {
+            if (streamRef.current) { setError('an answer is still coming — stop it (Esc) before starting a new session'); return false; }
+            writeSession();
+            releaseCurrentLock();
+            sessionIdRef.current = ''; createdAtRef.current = ''; fingerprintRef.current = NO_FILE;
+            resetConversation();
+            (host.services as Record<string, any>).showMessage?.('New session — /resume lists the others');
+            return true;
+          };
+
           const runChatCommand = (cmd: string) => {
             const [name, ...rest] = cmd.split(/\s+/);
             const arg = rest.join(' ');
@@ -2068,63 +2135,16 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 return;
               }
               case 'clear':
-                // Full session reset: clear not only messages but everything that would
-                // survive a rebuild — emptyNotice, the tool name/counter, the time, the
-                // stream/tick, the context. The session is written and left for /resume
-                // — closed, so a restart does not bring back what was just cleared;
-                // what follows is a new one.
+                // The session is written and left for /resume — closed, so a restart does
+                // not bring back what was just cleared; what follows is a new one.
                 writeSession();
                 if (sessDir && sessionIdRef.current) { try { closeSession(sessDir, sessionIdRef.current); } catch { /* not fatal */ } }
                 releaseCurrentLock();
-                sessionIdRef.current = ''; createdAtRef.current = ''; fingerprintRef.current = NO_FILE; titleRef.current = '';
-                if (tickRef.current) { clearInterval(tickRef.current); tickRef.current = null; }
-                abortRef.current?.abort(); abortRef.current = null;
-                if (pendingRef.current) settleConfirm(false);
-                dismissAsk();
-                contentRef.current = '';
-                // A cleared session must not have a pre-clear background result surface in
-                // the fresh chat: drop any queued-but-unsent delivery and stop the flush
-                // interval. (A task still RUNNING delivers after /clear — that is a new,
-                // legitimate result; only already-queued pending ones are stale.)
-                bgQueueRef.current = [];
-                clearFlush();
-                apiRef.current = []; summaryRef.current = ''; queueRef.current = []; setQueued([]);
-                // A new conversation starts with no plan: the old one described work the
-                // model no longer remembers.
-                planRef.current.reset();
-                toolSetRef.current.reset(); // a new conversation starts from the index
-                resetLiveViews(); // the calls they tracked are gone with the conversation
-                resetImages(); // numbering starts again at [Image #1]
-                recallRef.current = createRecallState(); // nothing is stubbed in a fresh conversation
-                usageRef.current = null; // measured for a conversation that is gone
-                // /clear ends the conversation, not the memory — and says so, or the
-                // assistant "still knowing" an earlier prompt reads as /clear failing.
-                {
-                  const kept = keptAfterClear(loadMemories(memoryFilePath(host.config)));
-                  setMessages(kept ? [{ role: 'note', content: kept }] : []);
-                }
-                // Back to the first root — after the list is emptied, so the fresh
-                // conversation says which instructions it starts with; a note still waiting
-                // for the turn's end was the cleared conversation's.
-                projectNoteRef.current = null;
-                projectRef.current = { dir: '', root: null, files: [] };
-                shellRef.current.setCwd(null);
-                setInput(''); inputRef.current = '';
-                setCursor(0);
-                setBangLevel(0); // a fresh conversation opens on a plain prompt
-                setAutoMode('ask'); // and asks again: the mode was granted for the work just cleared
-                setNotes(configNotes()); // the steps go back to what the config asks for
-                resetRound(); // the round being written belonged to work that is gone
-                setError(null);
-                setEmptyNotice('');
-                setToolCount(0);
-                setToolLabel('');
-                setElapsedMs(0);
-                setFolds(allFolded()); // everything folded again, and no exceptions left over
-                setPager(null);
-                setStreaming(false);
-                disarmEsc();
-                host.notify();
+                sessionIdRef.current = ''; createdAtRef.current = ''; fingerprintRef.current = NO_FILE;
+                resetConversation();
+                return;
+              case 'new':
+                startNew();
                 return;
               case 'context':
                 // For the person; nothing is sent and nothing joins the conversation.
