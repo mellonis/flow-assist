@@ -2456,6 +2456,30 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
 ## Config & environment
 
 - Config: `~/.config/flow-assist/config.json` (schema from each plugin's `configSchema`).
+- **A value is set in one of two scopes, through one path** (`setConfigValue`,
+  `src/config/load.ts` — the CLI's `config set`, the app's `:config set` and the model's
+  `config_set` all call it). `config set <key> <value>` SAVES: checked against the
+  schema (a plugin's key against the plugin's), written to `config.local.json` under
+  `hostStateDir()`. `:config set --session <key> <value>` is for this run only: the value
+  goes into the SESSION map, never a file. The map is one overlay laid over what
+  `loadConfig()` merges, so a later `loadConfig()` answers with it; and either scope is
+  also laid on the config object the caller holds — the running app's, which `host.config`,
+  a tool's `ctx.config` and `:config get` read — so a value is live at once wherever its
+  consumer reads the config when it acts (`ui.verbs` per request, the panel's side per
+  draw), and a key read only at start (`ui.mouse`) waits for the next one. A saved value
+  takes over from a session value on the same key. `theme` is never laid on the live
+  object: it holds the palette resolved at start, so its value waits for the next start.
+  `renderApp` resets the map as an app starts — every app the scripted rig boots in one
+  process starts on an empty session (two alive at once share it), and a test that sets a
+  session value outside an app resets it (`resetSessionConfig`). The CLI refuses
+  `--session` and names the `:` line, since its own process ends with the command.
+  `config get` says where a value comes from — `session`, `local` (config.local.json),
+  `config` (config.json) or `default` (neither) — from the layers `loadConfig()` kept
+  beside its result (`configSource`; a config built by hand, a test's, reads as `config`),
+  never a second read of the files; the CLI prints it on stderr, so `config get x | jq`
+  still reads the bare value. On the `:` line a value loses one layer of surrounding
+  quotes (`unquoteValue`), as a shell takes it off, so a line reads the same in both
+  places.
 - Environment: the host reads `LLM_TOKEN` (or `ai.tokenEnv`; `ANTHROPIC_API_KEY` with `ai.provider: 'anthropic'`) and the optional `FLOW_ASSIST_PLUGIN_REGISTRY_URL` / `FLOW_ASSIST_PLUGIN_REGISTRY_PROJECT` / `FLOW_ASSIST_PLUGIN_REGISTRY_TOKEN`; host variables take the `FLOW_ASSIST_` prefix. A plugin owns its own variables and declares them in `requiredSettings`.
 - `ai.images` (`enabled` true, `maxBytes` 5 MB, `maxPerMessage` 4) — images in the
   chat. On by default: the API cannot be asked whether a model takes images, so a

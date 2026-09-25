@@ -247,6 +247,12 @@ repository), recorded against a mock tracker:
 
 - **Config**: `~/.config/flow-assist/config.json` — schema comes from each
   plugin's `configSchema` (see `config get`).
+- **Setting a value**: `config set <key> <value>` saves it to `config.local.json`;
+  inside the app, `:config set --session <key> <value>` changes it for that run only —
+  nothing is written, and the next start has the saved value again. Either way a
+  running app uses it at once where it can; a key read only at start (`ui.mouse`) waits
+  for the next one. `config get <key>` says where the value comes from: `session`,
+  `local` (`config.local.json`), `config` (`config.json`) or `default`.
 - **The model**: by default an OpenAI-compatible chat-completions API —
   `config set ai.baseUrl <url>`, `config set ai.model <id>`, the token in
   `LLM_TOKEN`. For Anthropic's own Messages API:

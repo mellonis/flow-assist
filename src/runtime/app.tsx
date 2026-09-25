@@ -34,15 +34,17 @@ import {
   partitionInput,
   runConsumers,
 } from '../loader/registry.js';
-import { completeCommand, flattenConfigPaths } from '../config/commands.js';
+import { completeCommand, describeConfigValue, flattenConfigPaths, parseConfigArgs, unquoteValue } from '../config/commands.js';
 import { lineTab, lineView, type TabWalk } from '../config/commandline.js';
 import { hostConfigSchema } from '../config/schema.js';
 import {
+  configSource,
   getDeep,
   parseValue,
-  validateConfigWriteValue,
+  resetSessionConfig,
   saveConfigSetting,
   saveConfigUnset,
+  setConfigValue,
 } from '../config/load.js';
 import { bindingGlyph, isKey, isMouseButton, keyGlyph } from '../playback/keys.js';
 import { ARM_MS, armHint, armKeyOf, armStep, type Arm } from './exit-keys.js';
@@ -326,6 +328,9 @@ export function renderApp(
   // Without this the modals degrade to empty Flowtty defaults — no borders, no colors.
   // The person's own theme is kept apart: the scheme can change while the app runs
   // (App re-resolves then), and their colours go on top of every scheme.
+  // An app starts on an empty session: a value `config set --session` laid over the
+  // files belongs to the run that set it (src/config/load.ts).
+  resetSessionConfig();
   const userTheme = config.theme as Theme | undefined;
   let themeScheme: ColorScheme = root.colorScheme?.().scheme ?? 'unknown';
   config.theme = resolveAppTheme(userTheme, plugins, config, themeScheme);
@@ -564,19 +569,17 @@ export function renderApp(
     };
     const runConfigCmd = (arg: string): void => {
       const parts = String(arg ?? '').trim().split(/\s+/).filter(Boolean);
-      const sub = (parts[0] ?? '').toLowerCase();
-      const key = parts[1];
+      const { sub, key, value, session } = parseConfigArgs(parts);
       if (sub === 'get' && key) {
-        const v = getDeep(config, key);
-        toast.showMessage(v === undefined ? `no key ${key}` : JSON.stringify(v));
+        toast.showMessage(describeConfigValue(key, getDeep(config, key), configSource(config, key)));
         return;
       }
-      if (sub === 'set' && key && parts.length >= 3) {
-        const parsed = parseValue(parts.slice(2).join(' '));
-        const check = validateConfigWriteValue(hostConfigSchema, key, parsed, pluginConfigs(plugins));
-        if (!check.ok) { toast.showMessage(check.error); return; }
-        saveConfigSetting(key, check.value);
-        toast.showMessage(JSON.stringify(check.value));
+      // The one path every `config set` takes (src/config/load.ts): the schema's check,
+      // then the session or config.local.json, and the running app's config — so the
+      // value is live at once wherever it is read when it is used.
+      if (sub === 'set' && key && value !== undefined) {
+        const res = setConfigValue(config, key, parseValue(unquoteValue(value)), { scope: session ? 'session' : 'saved', pluginConfigs: pluginConfigs(plugins) });
+        toast.showMessage(res.ok ? describeConfigValue(key, res.value, session ? 'session' : 'local') : res.error);
         return;
       }
       if (sub === 'unset' && key) {

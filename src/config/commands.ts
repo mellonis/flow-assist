@@ -44,10 +44,36 @@ export const BASE_COMMANDS: Command[] = [
   { name: 'clear', aliases: ['clear-cache'], usage: 'clear', minArgs: 0, maxArgs: 0, description: 'Flush the cache' },
   { name: 'quit', aliases: ['q'], usage: 'quit', minArgs: 0, maxArgs: 0, description: 'Quit' },
   // Not remembered: a value set may be a secret — an MCP server's `headers` or `env`.
-  { name: 'config', aliases: [], usage: 'config [get <key>|set <key> <value>|unset <key>|help]', minArgs: 0, maxArgs: -1, description: 'Show the whole config; get/set/unset a key (writes config.local.json); help — what the keys are', history: false },
+  { name: 'config', aliases: [], usage: 'config [get <key>|set [--session] <key> <value>|unset <key>|help]', minArgs: 0, maxArgs: -1, description: 'Show the whole config; get a key and where its value comes from; set a key (config.local.json, or with --session for this run only); unset a key; help — what the keys are', history: false },
   { name: 'cache', aliases: [], usage: 'cache [on|off]', minArgs: 0, maxArgs: 1, description: 'Turn the cache on or off (config.cache.enabled)' },
   { name: 'help', aliases: ['?'], usage: 'help', minArgs: 0, maxArgs: 0, description: 'List the commands' },
 ];
+
+// The words after `config`, read the same way on the `:` line and in the CLI:
+// `get <key>`, `set [--session] <key> <value…>`, `unset <key>`. `value` is the rest
+// of the words joined by one space — still text, `parseValue` reads it.
+export type ConfigArgs = { sub: string; key?: string; value?: string; session: boolean };
+export function parseConfigArgs(words: string[]): ConfigArgs {
+  const sub = (words[0] ?? '').toLowerCase();
+  const rest = words.slice(1);
+  const session = sub === 'set' && rest[0] === '--session';
+  if (session) rest.shift();
+  return { sub, key: rest[0], ...(rest.length > 1 ? { value: rest.slice(1).join(' ') } : {}), session };
+}
+
+// A value typed on the `:` line loses one layer of surrounding quotes, as a shell
+// takes it off: `config set ui.verbs '["Thinking"]'` reads the same in both places.
+export function unquoteValue(text: string): string {
+  const t = text.trim();
+  return t.length >= 2 && (t[0] === "'" || t[0] === '"') && t.at(-1) === t[0] ? t.slice(1, -1) : t;
+}
+
+// What `config get` answers: the value and where it comes from — `session`, `local`
+// (config.local.json), `config` (config.json) or `default` (neither: the consumer's
+// own default).
+export function describeConfigValue(key: string, value: unknown, source: string): string {
+  return value === undefined ? `no key ${key} · ${source}` : `${JSON.stringify(value)} · ${source}`;
+}
 
 // Returns the command metadata for a name/alias, or null.
 export function findCommand(name: string): Command | null {
@@ -165,6 +191,17 @@ export function completeConfigCommand(text: string, config?: unknown, configSche
     }
     const best = matches.find(s => s !== lower) ?? matches[0] ?? '';
     return { head: first, hasSpace: false, best, candidates: matches };
+  }
+  if (lower === 'set') {
+    // `--session` is a flag before the key: the key after it completes as it does
+    // without it, and a word starting with `-` is offered the flag itself.
+    const rest = m![2] ?? '';
+    const flag = /^--session\s+([\s\S]*)$/.exec(rest);
+    if (flag) return completeConfigArgs(flag[1]!, config, configSchema);
+    if (/^-\S*$/.test(rest)) {
+      const hit = '--session'.startsWith(rest) ? ['--session'] : [];
+      return { head: rest, hasSpace: false, best: hit[0] ?? '', candidates: hit };
+    }
   }
   if (lower === 'get' || lower === 'set' || lower === 'unset') {
     return completeConfigArgs(m![2] ?? '', config, configSchema);

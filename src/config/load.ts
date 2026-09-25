@@ -73,15 +73,114 @@ function asConfigObject(v: unknown): Record<string, unknown> | null {
   return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
 }
 
+// ─── The session scope ───────────────────────────────────────────────────────
+// `config set --session <key> <value>` changes a setting for this run only: the value
+// goes into this map, never into a file, and a new run starts without it. The map is
+// laid over what `loadConfig()` merges — one point every reader passes through — and
+// over the config object the running app holds (`setConfigValue`), so the commands,
+// a plugin's `host.config` and the model's tools all see the same value.
+//
+// It is the process's: `renderApp` resets it as an app starts, which is what gives
+// every app the scripted rig boots in one process an empty session of its own (two
+// apps alive in one process at once share it). A test that sets a session value
+// outside an app resets it itself.
+let SESSION = new Map<string, unknown>();
+
+// Forgets every session value — an app starting.
+export function resetSessionConfig(): void {
+  SESSION = new Map();
+}
+
+// Where a value comes from, for `config get`: the session, config.local.json,
+// config.json, or neither (the consumer's own default).
+export type ConfigSource = 'session' | 'local' | 'config' | 'default';
+
+// The two files as `loadConfig()` read them, kept per loaded object, so `config get`
+// names a value's source without reading the files a second time. Clones: nothing
+// laid over the merged result may reach them.
+type ConfigLayers = { base: Record<string, unknown>; local: Record<string, unknown> };
+const LAYERS = new WeakMap<object, ConfigLayers>();
+
 // Loads the effective host config: config.json deep-merged with the local
-// overrides in config.local.json. Missing files simply fall back to the other
-// side (or an empty object), never throwing.
+// overrides in config.local.json, and the session's values laid over both. Missing
+// files simply fall back to the other side (or an empty object), never throwing.
 // `localPath` swaps the local overrides file — tests point it at a temp file.
 export function loadConfig(opts?: { localPath?: string }): Record<string, unknown> {
   const base = asConfigObject(readConfigFile(CONFIG_PATH)) ?? {};
-  const local = asConfigObject(readConfigFile(opts?.localPath ?? CONFIG_LOCAL_PATH));
-  if (local == null) return base;
-  return deepMerge(base, local);
+  const local = asConfigObject(readConfigFile(opts?.localPath ?? CONFIG_LOCAL_PATH)) ?? {};
+  const merged = deepMerge(structuredClone(base), structuredClone(local));
+  for (const [key, value] of SESSION) setDeep(merged, key, structuredClone(value));
+  LAYERS.set(merged, { base, local });
+  return merged;
+}
+
+// Whether the session holds `key`, a key above it or one under it — then the value
+// read at `key` is the session's, in part or whole.
+function sessionHolds(key: string): boolean {
+  for (const k of SESSION.keys()) {
+    if (k === key || key.startsWith(`${k}.`) || k.startsWith(`${key}.`)) return true;
+  }
+  return false;
+}
+
+// The layers of a config the caller built itself are started at its first saved
+// write: what it held then is its base, and what is saved from then on is `local`.
+function layersOf(config: Record<string, unknown>): ConfigLayers {
+  let layers = LAYERS.get(config);
+  if (!layers) {
+    let base: Record<string, unknown> = {};
+    try { base = JSON.parse(JSON.stringify(config)) as Record<string, unknown>; } catch { /* not plain data — no base */ }
+    layers = { base, local: {} };
+    LAYERS.set(config, layers);
+  }
+  return layers;
+}
+
+// Where the value at `key` of `config` comes from. A config the caller built itself
+// (a test's, never read from the files) has no layers: what it holds is `config`.
+export function configSource(config: Record<string, unknown>, key: string): ConfigSource {
+  if (sessionHolds(key)) return 'session';
+  const layers = LAYERS.get(config);
+  if (!layers) return getDeep(config, key) === undefined ? 'default' : 'config';
+  if (getDeep(layers.local, key) !== undefined) return 'local';
+  if (getDeep(layers.base, key) !== undefined) return 'config';
+  return 'default';
+}
+
+// The part of the running app's config that is not the person's values but derived
+// from them at start: `theme` holds the palette resolved for the terminal's scheme,
+// and a value laid over it would leave a partial one. It is written (a session value
+// into the map, a saved one into the file) and read at the next start.
+const DERIVED_AT_START = ['theme'];
+const derivedAtStart = (key: string) => DERIVED_AT_START.some((k) => key === k || key.startsWith(`${k}.`));
+
+export type ConfigSetResult = { ok: true; value: unknown } | { ok: false; error: string };
+
+// The one way a value is set — `config set` in the CLI, `:config set` in the app and
+// the model's `config_set` alike: checked against the schema (a plugin's key against
+// the plugin's), then either laid over the session (`session`) or written to
+// config.local.json (`saved`), and laid on `config` — the object the caller reads —
+// so it is live at once wherever the consumer reads it when it acts. A saved value
+// takes over from a session value on the same key: it is what the key is now.
+export function setConfigValue(
+  config: Record<string, unknown>,
+  key: string,
+  value: unknown,
+  opts: { scope: 'session' | 'saved'; rootSchema?: unknown; pluginConfigs?: Record<string, unknown>; filePath?: string },
+): ConfigSetResult {
+  const check = validateConfigWriteValue(opts.rootSchema ?? hostConfigSchema, key, value, opts.pluginConfigs);
+  if (!check.ok) return check;
+  if (opts.scope === 'session') {
+    SESSION.set(key, structuredClone(check.value));
+  } else {
+    if (!saveConfigSetting(key, check.value, opts.filePath)) {
+      return { ok: false, error: `config: could not write ${key} — check that the config directory is writable` };
+    }
+    for (const k of [...SESSION.keys()]) if (k === key || k.startsWith(`${key}.`)) SESSION.delete(k);
+    setDeep(layersOf(config).local, key, structuredClone(check.value));
+  }
+  if (!derivedAtStart(key)) setDeep(config, key, structuredClone(check.value));
+  return { ok: true, value: check.value };
 }
 
 // Strips zod wrappers (optional/nullable/default) off a node: in v4 they hide

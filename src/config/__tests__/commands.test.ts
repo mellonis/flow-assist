@@ -70,3 +70,27 @@ test('helpText pads usage to one column by cells', () => {
     expect(stringWidth(line.slice(0, line.indexOf(d)))).toBe(25);
   }
 });
+
+// `--session` is a flag, not a key: the key after it completes as it does without it,
+// and the flag itself is offered where a key would start with `-`.
+test('config set --session completes the key after the flag, and offers the flag', () => {
+  const cfg = { ui: { verbs: ['x'] } };
+  const key = completeCommand('config set --session ui.v', BASE_COMMANDS, cfg);
+  expect(key).toMatchObject({ head: 'ui.v', best: 'ui.verbs' });
+  const flag = completeCommand('config set --se', BASE_COMMANDS, cfg);
+  expect(flag).toMatchObject({ head: '--se', best: '--session', candidates: ['--session'] });
+  // A value after the flag and the key completes like any other value.
+  expect(completeCommand('config set --session cache.enabled t', BASE_COMMANDS, { cache: { enabled: true } })).toMatchObject({ best: 'true' });
+});
+
+test('the words after `config` read the same on the line and in the CLI', async () => {
+  const { parseConfigArgs, unquoteValue, describeConfigValue } = await import('../commands');
+  expect(parseConfigArgs(['set', '--session', 'ui.verbs', '["a",', '"b"]'])).toEqual({ sub: 'set', key: 'ui.verbs', value: '["a", "b"]', session: true });
+  expect(parseConfigArgs(['set', 'ui.mouse', 'false'])).toEqual({ sub: 'set', key: 'ui.mouse', value: 'false', session: false });
+  expect(parseConfigArgs(['get', 'ui.mouse'])).toEqual({ sub: 'get', key: 'ui.mouse', session: false });
+  expect(unquoteValue(`'["Thinking"]'`)).toBe('["Thinking"]');
+  expect(unquoteValue('"Ada Lovelace"')).toBe('Ada Lovelace');
+  expect(unquoteValue(`'half"`)).toBe(`'half"`);
+  expect(describeConfigValue('ui.verbs', ['a'], 'session')).toBe('["a"] · session');
+  expect(describeConfigValue('ui.verbs', undefined, 'default')).toBe('no key ui.verbs · default');
+});

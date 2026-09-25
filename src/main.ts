@@ -15,15 +15,15 @@ import { projectRoot, availableDir, enabledDir } from './install.js';
 import { existsSync } from 'node:fs';
 import { TtyBackend, isInteractive } from '@flowtty/tty-backend';
 import { loadConfig } from './config/load.js';
-import { hostConfigSchema } from './config/schema.js';
 import {
+  configSource,
   getDeep,
   parseValue,
-  validateConfigWriteValue,
-  saveConfigSetting,
   saveConfigUnset,
+  setConfigValue,
   configWarnings,
 } from './config/load.js';
+import { parseConfigArgs } from './config/commands.js';
 import { createPluginRepo } from './loader/repo.js';
 import { stopRemotePlugins } from './remote/lifecycle.js';
 import { noPluginsNote } from './loader/install-root.js';
@@ -135,46 +135,54 @@ export async function main(argv: string[]): Promise<void> {
 }
 
 // ─── config subcommand ────────────────────────────────────────────────────────
-async function runConfig(args: string[], config: Record<string, unknown>, repo?: PluginRepo): Promise<void> {
-  const sub = (args[0] ?? '').toLowerCase();
-  const key = args[1];
+// `io` is where the lines go — the console, or a test's own lists.
+type ConfigIo = { out: (line: string) => void; err: (line: string) => void };
+const consoleIo: ConfigIo = { out: (l) => console.log(l), err: (l) => console.error(l) };
 
+export async function runConfig(args: string[], config: Record<string, unknown>, repo?: PluginRepo, io: ConfigIo = consoleIo): Promise<void> {
+  const { sub, key, value, session } = parseConfigArgs(args);
+
+  // The value on stdout as it has always been (`config get x | jq` reads it bare), and
+  // where it comes from on stderr.
   if (sub === 'get' && key) {
-    const value = getDeep(config, key);
-    if (value === undefined) console.log(`no key ${key}`);
-    else console.log(JSON.stringify(value));
+    const v = getDeep(config, key);
+    io.out(v === undefined ? `no key ${key}` : JSON.stringify(v));
+    io.err(`source: ${configSource(config, key)}`);
     return;
   }
 
-  if (sub === 'set' && key && args.length >= 3) {
-    const parsed = parseValue(args.slice(2).join(' '));
+  // A session value lives as long as the app that holds it; this process ends with
+  // the command, so there is no session here to lay it on.
+  if (sub === 'set' && session) {
+    io.out(`config: --session changes a setting for a running app only — inside it, run :config set --session ${key ?? '<key>'} ${value ?? '<value>'}`);
+    process.exitCode = 1;
+    return;
+  }
+
+  if (sub === 'set' && key && value !== undefined) {
     // A plugin's key is validated by the plugin's own schema — so the plugins are loaded
     // (only for such a key: everything else needs none of them).
     const schemas = key.startsWith('plugins.') && repo ? pluginConfigs(await loadPlugins({ config, repo, renders, enabledDir })) : undefined;
-    const check = validateConfigWriteValue(hostConfigSchema, key, parsed, schemas);
-    if (!check.ok) {
-      console.log(check.error);
+    // The one path every `config set` takes (src/config/load.ts). A value is only
+    // echoed once it is really on disk: printing it before a failed write would read
+    // as "saved".
+    const res = setConfigValue(config, key, parseValue(value), { scope: 'saved', pluginConfigs: schemas });
+    if (!res.ok) {
+      io.out(res.error);
       process.exitCode = 1;
       return;
     }
-    // A value is only echoed once it is really on disk: printing it before a
-    // failed write would read as "saved".
-    if (!saveConfigSetting(key, check.value)) {
-      console.log(`config: could not write ${key} — check that the config directory is writable`);
-      process.exitCode = 1;
-      return;
-    }
-    console.log(JSON.stringify(check.value));
+    io.out(JSON.stringify(res.value));
     return;
   }
 
   if (sub === 'unset' && key) {
     if (!saveConfigUnset(key)) {
-      console.log(`config: could not unset ${key} — check that the config directory is writable`);
+      io.out(`config: could not unset ${key} — check that the config directory is writable`);
       process.exitCode = 1;
       return;
     }
-    console.log(`config: unset ${key}`);
+    io.out(`config: unset ${key}`);
     return;
   }
 
@@ -375,8 +383,10 @@ function printConfigHelp(): void {
   console.log(
     [
       'config subcommands:',
-      '  config get <key>            Print the value at a dot path (or "no key <key>")',
-      '  config set <key> <value>    Set a value (validated against the host schema)',
+      '  config get <key>            Print the value at a dot path (or "no key <key>");',
+      '                              where it comes from (local, config, default) on stderr',
+      '  config set <key> <value>    Save a value to config.local.json (validated against the schema)',
+      '                              Inside the app, :config set --session <key> <value> sets it for that run only',
       '  config unset <key>          Remove a key from config.local.json',
       '  config help                 Show this help',
       '',

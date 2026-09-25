@@ -33,3 +33,31 @@ test('the interactive screen is refused without a terminal, in a sentence — no
   // stdin redirected: keys cannot arrive, and without this the app would quit at once, silently.
   expect(interactiveRefusal({ isTTY: true }, { isTTY: false }, yes)).toContain('needs a terminal');
 });
+
+// `config get` names where the value comes from — on stderr, so `config get x | jq`
+// still reads the bare value; `--session` belongs to a running app, and the CLI's own
+// process ends with the command, so it is refused with the way that works.
+test('config get says where the value comes from; config set --session is the app\'s', async () => {
+  const { runConfig } = await import('../../main');
+  const out: string[] = [];
+  const err: string[] = [];
+  const io = { out: (l: string) => out.push(l), err: (l: string) => err.push(l) };
+  const saved = process.exitCode;
+  try {
+    await runConfig(['get', 'ai.model'], { ai: { model: 'm1' } }, undefined, io);
+    expect(out).toEqual(['"m1"']);
+    expect(err).toEqual(['source: config']);
+    out.length = 0; err.length = 0;
+    await runConfig(['get', 'ai.baseUrl'], { ai: {} }, undefined, io);
+    expect(out).toEqual(['no key ai.baseUrl']);
+    expect(err).toEqual(['source: default']);
+    out.length = 0; err.length = 0;
+    await runConfig(['set', '--session', 'ui.verbs', '["Thinking"]'], {}, undefined, io);
+    expect(out.join('\n')).toMatch(/--session .*running app/);
+    expect(out.join('\n')).toContain(':config set --session ui.verbs');
+    expect(process.exitCode).toBe(1);
+  } finally {
+    // Bun keeps a 1 through `= undefined`: put back 0 when nothing was set before.
+    process.exitCode = saved ?? 0;
+  }
+});
