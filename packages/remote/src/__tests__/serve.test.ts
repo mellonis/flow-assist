@@ -110,21 +110,23 @@ test('a live server keeps its socket: a second serveConnections on the same path
   }
 });
 
-test('SIGTERM with clients still attached ends cleanly and leaves no dangling idle timer behind', async () => {
+test('a stop with clients still attached ends cleanly and leaves no dangling idle timer behind', async () => {
   const { dir, path: p } = sock();
   const setTimeoutSpy = spyOn(globalThis, 'setTimeout');
   try {
     let resolveListening: () => void = () => {};
     const listening = new Promise<void>((r) => { resolveListening = r; });
-    const finished = serveConnections(handleConnection, p, { onListening: () => resolveListening(), defaultIdleMs: 60_000 });
+    const stop = new AbortController();
+    const finished = serveConnections(handleConnection, p, { onListening: () => resolveListening(), defaultIdleMs: 60_000, signal: stop.signal });
     await listening;
     const a = await client(p); const b = await client(p);
     await a.peer.request('hello', { hostApi: 2, config: {} });
     await b.peer.request('hello', { hostApi: 2, config: {} });
     const callsBefore = setTimeoutSpy.mock.calls.length;
-    // The SIGTERM path, exercised directly rather than by sending a real signal to
-    // this test process: it runs the exact listener `serveConnections` registered.
-    process.emit('SIGTERM');
+    // The stop seam runs the same `finish` a signal does, without signalling this test
+    // process (a real SIGTERM would re-raise and end it); the signal path itself is
+    // the keepalive child's test below.
+    stop.abort();
     await finished;
     // Bun's forced close of the two still-open sockets runs their `close` handlers
     // asynchronously; give any buggy re-arm a chance to happen before checking.
@@ -137,3 +139,44 @@ test('SIGTERM with clients still attached ends cleanly and leaves no dangling id
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// `runPlugin --serve` in a process of its own, whose author keeps a timer running.
+const KEEPALIVE = path.join(import.meta.dir, 'fixtures', 'keepalive-serve.ts');
+const exitOf = async (proc: ReturnType<typeof Bun.spawn>, ms = 3_000) => {
+  const r = await Promise.race([proc.exited.then(() => 'exited' as const), Bun.sleep(ms).then(() => 'timeout' as const)]);
+  if (r === 'timeout') { proc.kill('SIGKILL'); await proc.exited; }
+  return { r, code: proc.exitCode, signal: proc.signalCode };
+};
+async function listeningOn(p: string): Promise<void> {
+  for (let i = 0; i < 200 && !fs.existsSync(p); i++) await Bun.sleep(10);
+  if (!fs.existsSync(p)) throw new Error(`nothing listened on ${p}`);
+}
+
+test('a --serve plugin that holds a handle of its own still exits once its idle timer ends it', async () => {
+  const { dir, path: p } = sock();
+  const proc = Bun.spawn(['bun', KEEPALIVE, '--serve', p], { stdout: 'ignore', stderr: 'inherit' });
+  try {
+    await listeningOn(p);
+    const c = await client(p);
+    await c.peer.request('hello', { hostApi: 2, config: {}, idleMs: 50 });
+    c.end();
+    expect(await exitOf(proc)).toEqual({ r: 'exited', code: 0, signal: null });
+    expect(fs.existsSync(p)).toBe(false);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}, 10_000);
+
+test('a --serve plugin that holds a handle of its own ends on SIGTERM, by that signal, its socket removed', async () => {
+  const { dir, path: p } = sock();
+  const proc = Bun.spawn(['bun', KEEPALIVE, '--serve', p], { stdout: 'ignore', stderr: 'inherit' });
+  try {
+    await listeningOn(p);
+    proc.kill('SIGTERM');
+    const { r, signal } = await exitOf(proc);
+    expect({ r, signal }).toEqual({ r: 'exited', signal: 'SIGTERM' });
+    expect(fs.existsSync(p)).toBe(false);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}, 10_000);

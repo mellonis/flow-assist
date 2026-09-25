@@ -15,12 +15,17 @@
 // that window is the host's job (a start lock, taken before either ever calls in).
 // A server started by hand runs the same code and lives the same way; the socket is
 // never the host's to kill — this process ends itself, on its own idle timer or on
-// SIGTERM/SIGINT.
+// SIGTERM/SIGINT. Listening for a signal takes away its default of ending the process,
+// so after its cleanup the server removes its own listeners and raises the signal
+// again when no other listener is left — the process ends by it even while something
+// else of the author's (a timer, a connection) holds the event loop. On idle it only
+// resolves: ending the process then is the caller's (`runPlugin` exits). `opts.signal`
+// stops it the same way without any signal at all (a test's own stop).
 import fs from 'node:fs';
 import { LineSplitter } from './codec.js';
 import type { PeerIo } from './peer.js';
 
-export interface ServeOpts { defaultIdleMs?: number; onListening?: () => void }
+export interface ServeOpts { defaultIdleMs?: number; onListening?: () => void; signal?: AbortSignal }
 
 interface Client { feed: (chunk: Uint8Array) => void; flush: () => void; leave: () => void }
 
@@ -67,24 +72,27 @@ export async function serveConnections(onConnection: (io: PeerIo) => Promise<voi
   let finished = false;
 
   return new Promise<void>((done) => {
-    const finish = () => {
+    const finish = (sig?: 'SIGTERM' | 'SIGINT') => {
       if (finished) return;
       finished = true;
       if (idle) clearTimeout(idle);
       process.removeListener('SIGTERM', onSigterm);
       process.removeListener('SIGINT', onSigint);
+      opts.signal?.removeEventListener('abort', onAbort);
       try { server.stop(true); } catch { /* already gone */ }
       try { fs.unlinkSync(socketPath); } catch { /* already gone */ }
       done();
+      if (sig && process.listenerCount(sig) === 0) process.kill(process.pid, sig);
     };
-    const onSigterm = () => finish();
-    const onSigint = () => finish();
+    const onSigterm = () => finish('SIGTERM');
+    const onSigint = () => finish('SIGINT');
+    const onAbort = () => finish();
     const armIdle = () => {
       // `finish` already ran (a signal, or an earlier idle firing) — closing the
       // remaining sockets it owns must not schedule a fresh timer behind it.
       if (finished) return;
       if (idle) clearTimeout(idle);
-      idle = setTimeout(finish, idleMs ?? opts.defaultIdleMs ?? 60_000);
+      idle = setTimeout(() => finish(), idleMs ?? opts.defaultIdleMs ?? 60_000);
     };
     const server = Bun.listen({
       unix: socketPath,
@@ -138,6 +146,7 @@ export async function serveConnections(onConnection: (io: PeerIo) => Promise<voi
     try { fs.chmodSync(socketPath, 0o600); } catch { /* platform without chmod semantics */ }
     process.on('SIGTERM', onSigterm);
     process.on('SIGINT', onSigint);
+    opts.signal?.addEventListener('abort', onAbort);
     armIdle(); // a host that never manages to connect leaves no orphan behind.
     opts.onListening?.();
   });

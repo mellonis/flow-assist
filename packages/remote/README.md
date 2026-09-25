@@ -165,7 +165,11 @@ file, a database — never the model. The idle timer that ends the server is arm
 moment it starts listening, at 60 s, so one no host ever reaches still exits; the
 FIRST client's own `hello.idleMs` replaces that default from then on, for the rest of
 the process's life. It also ends on `SIGTERM` or `SIGINT`; a server started by hand
-runs this same code and lives the same way. A server a host started writes its stderr
+runs this same code and lives the same way. Either way the PROCESS ends, whatever else
+the plugin still holds open (a timer, a connection of its own): `runPlugin` exits once
+the server is done, and a signal is raised again after the socket is removed, so the
+process ends by it. A server built on `serveConnections` directly gets the same signal
+behaviour; on idle the promise resolves, and exiting is its own caller's step. A server a host started writes its stderr
 — `update failed` lines included — to `<socket>.log` beside the socket, not to any
 host's log; one started by hand writes it to the terminal that ran it.
 

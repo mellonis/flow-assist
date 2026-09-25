@@ -59,7 +59,9 @@ if (process.env.FAKE_NO_HELLO) {
   }
 
   if (servePath) {
-    void serveConnections((io) => handle(io), servePath);
+    // Ends the process once the server is done, as `runPlugin` does: `FAKE_KEEPALIVE`
+    // would otherwise hold it open past its own idle.
+    void serveConnections((io) => handle(io), servePath).then(() => process.exit(0));
   } else {
     let feed: (line: string) => void = () => {};
     const splitter = new LineSplitter((line) => feed(line));

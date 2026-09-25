@@ -393,10 +393,13 @@ protocol as its authors read it is docs/plugins.md, "A plugin in another languag
   `--serve <socket path>`, and a host never kills it — only disconnects; another host
   may still be on it. Its stderr is `<socket>.log` beside the socket (opened for
   appending, 0600, emptied at a start past 1 MiB), never a pipe: the server outlives
-  the host that started it, and a write to a pipe with no reader kills the writer. It ends itself, on its own idle timeout or a signal
-  (`packages/remote/src/serve.ts`). `shutdown` there is answered per CONNECTION, not
-  per process: each client gets its own `hello` and its own protocol state, and what a
-  server's clients share is whatever it holds outside a single connection.
+  the host that started it, and a write to a pipe with no reader kills the writer. It
+  ends itself, on its own idle timeout or a signal (`packages/remote/src/serve.ts`):
+  `runPlugin` exits once `serveConnections` resolves, and a signal is re-raised after
+  the cleanup when no other listener is left, so a handle the author holds never keeps
+  an orphan alive with its socket gone. `shutdown` there is answered per CONNECTION,
+  not per process: each client gets its own `hello` and its own protocol state, and
+  what a server's clients share is whatever it holds outside a single connection.
 - **Two hosts starting the same server at once are serialised by a lock beside the
   socket** (`src/remote/sockets.ts`): `<name>.lock`, holding `{ pid, at }`, taken with
   `O_EXCL`; a lock whose pid is no longer alive is stale and taken over, the rule the

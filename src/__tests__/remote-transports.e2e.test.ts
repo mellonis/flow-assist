@@ -11,6 +11,7 @@ import { stdioTransport } from '../remote/transport-stdio';
 import { supervise } from '../remote/supervisor';
 import { stopRemotePlugins } from '../remote/lifecycle';
 import type { TransportClose } from '../remote/transport';
+import { createPeer } from '@flow-assist/remote';
 
 const realFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = realFetch; });
@@ -121,5 +122,28 @@ test("the host's own stop lets the child exit cleanly, not by a signal", async (
     expect(closedWith).toEqual({ code: 0 });
   } finally {
     await transport.close(200);
+  }
+});
+
+test('a shared server whose process holds a handle of its own still ends on its idle', async () => {
+  const sock = socketPath('keepalive.sock'); const pidfile = `${sock}.pid`;
+  const manifest = { name: 'fake', hostApi: 2, run: RUN, connect: 'unix:keepalive.sock' };
+  process.env.FAKE_PIDFILE = pidfile;
+  process.env.FAKE_KEEPALIVE = '1';
+  const t = transportFor(manifest, FAKE_DIR, { log: () => {} });
+  let pid = 0;
+  try {
+    await t.start();
+    pid = Number(fs.readFileSync(pidfile, 'utf8'));
+    const peer = createPeer({ send: (l) => t.send(l), onLine: (f) => t.onLine(f) });
+    await peer.request('hello', { hostApi: 2, config: {}, idleMs: 100 }, 5_000);
+    await t.close(0);
+    await until(() => !isAlive(pid), 'the server to end on its idle');
+    expect(fs.existsSync(sock)).toBe(false);
+  } finally {
+    delete process.env.FAKE_PIDFILE;
+    delete process.env.FAKE_KEEPALIVE;
+    if (pid && isAlive(pid)) { process.kill(pid, 'SIGKILL'); await until(() => !isAlive(pid), 'the server to be gone'); }
+    for (const f of [sock, `${sock}.lock`, `${sock}.log`, pidfile]) fs.rmSync(f, { force: true });
   }
 });

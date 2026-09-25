@@ -174,7 +174,11 @@ export async function runPlugin<M, Msg = HostEvent>(def: PluginDef<M, Msg>, io?:
   const at = argv.indexOf('--serve');
   if (at !== -1) {
     const { serveConnections } = await import('./serve.js');
-    return serveConnections((io) => servePlugin(def, io), argv[at + 1] ?? '');
+    await serveConnections((io) => servePlugin(def, io), argv[at + 1] ?? '');
+    // The server is done (its idle timer, or a signal with another listener still
+    // present): the process ends here, as the stdio branch's does, whatever else the
+    // author still holds open.
+    process.exit(0);
   }
   // `stdioIo`'s own `onClose` reports stdin ending (the host is gone, or was killed),
   // and `servePlugin` closes on that exactly as it does on `shutdown` — so this exits
