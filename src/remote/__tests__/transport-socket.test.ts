@@ -53,3 +53,24 @@ test('connect with no run and nothing listening is a rejection naming the socket
   const t = socketTransport({ name: 'fake', socketPath: sock, cwd, log: () => {}, waitMs: 50 });
   await expect(t.start()).rejects.toThrow('t3.sock');
 });
+
+test('a run command that cannot start logs the failure and start() still rejects by waitMs, without an unhandled error', async () => {
+  const sock = socketPath('t4.sock');
+  const log: string[] = [];
+  const t = socketTransport({ name: 'fake', socketPath: sock, run: ['./does-not-exist'], cwd, log: (l) => log.push(l), waitMs: 200 });
+  await expect(t.start()).rejects.toThrow('t4.sock');
+  expect(log.some((l) => l.includes('failed to start'))).toBe(true);
+});
+
+test('close() fires onClose once, host-initiated; a second close() does not fire it again', async () => {
+  const sock = socketPath('t5.sock');
+  const a = host(sock, `${sock}.pid`);
+  await a.t.start();
+  await a.peer.request('hello', { hostApi: 2, config: {}, idleMs: 50 }, 5_000);
+  const closes: unknown[] = [];
+  a.t.onClose((w) => closes.push(w));
+  await a.t.close(0);
+  expect(closes).toEqual([{}]);
+  await a.t.close(0);
+  expect(closes).toEqual([{}]);
+});

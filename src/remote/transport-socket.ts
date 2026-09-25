@@ -23,7 +23,7 @@ declare const Bun: {
   connect(opts: {
     unix: string;
     socket: { data(socket: unknown, data: Uint8Array): void; open(): void; close(): void; error(socket: unknown, error: Error): void };
-  }): Promise<{ write(chunk: string): void; end(): void }>;
+  }): Promise<{ write(chunk: string): void; end(): void; unref(): void }>;
 };
 
 export function socketTransport(opts: SocketOpts): Transport & { start(): Promise<void> } {
@@ -34,16 +34,27 @@ export function socketTransport(opts: SocketOpts): Transport & { start(): Promis
   const closeOnce = (why: TransportClose) => { if (closedWith) return; closedWith = why; for (const f of closes) f(why); };
   const splitter = new LineSplitter((l) => lines.forEach((f) => f(l)), (n) => opts.log(`[${opts.name}] a line of ${n} bytes was dropped`));
 
-  const connect = () => Bun.connect({ unix: opts.socketPath, socket: {
-    data: (_s, d) => splitter.feed(new TextDecoder().decode(d)),
-    open() {},
-    close: () => closeOnce({ error: 'connection closed' }),
-    error: (_s, e) => closeOnce({ error: e.message }),
-  } });
+  const connect = async () => {
+    const c = await Bun.connect({ unix: opts.socketPath, socket: {
+      data: (_s, d) => splitter.feed(new TextDecoder().decode(d)),
+      open() {},
+      close: () => closeOnce({ error: 'connection closed' }),
+      error: (_s, e) => closeOnce({ error: e.message }),
+    } });
+    // A short-lived one-shot process (`config get`, a one-shot prompt) still exits
+    // when its own work is done — the same rule every long-lived child follows
+    // (AGENTS.md, "A plugin that starts a process owns its life").
+    c.unref();
+    return c;
+  };
 
   const startServer = () => {
     const [cmd, ...args] = opts.run!;
     const c = spawn(cmd!.includes('/') ? path.resolve(opts.cwd, cmd!) : cmd!, [...args, '--serve', opts.socketPath], { cwd: opts.cwd, env: { ...process.env, ...opts.env }, detached: true, stdio: ['ignore', 'ignore', 'pipe'] });
+    // A command that cannot even start (a typo in `run`, no shell to report it) fires
+    // `error`, never `exit` — an unhandled one would take the whole host down; the
+    // wait loop below times out on its own once nothing ever answers the socket.
+    c.on('error', (e) => opts.log(`[${opts.name}] failed to start: ${e.message}`));
     c.stderr!.setEncoding('utf8');
     let err = '';
     c.stderr!.on('data', (chunk: string) => { err += chunk; let nl; while ((nl = err.indexOf('\n')) !== -1) { const line = err.slice(0, nl).trimEnd(); err = err.slice(nl + 1); if (line) opts.log(`[${opts.name}] ${line}`); } });
@@ -76,6 +87,10 @@ export function socketTransport(opts: SocketOpts): Transport & { start(): Promis
     send: (line) => { if (!closedWith) conn?.write(`${line}\n`); },
     onLine: (f) => { lines.push(f); },
     onClose: (f) => { closes.push(f); },
-    close: async () => { if (conn && !closedWith) { closedWith = {}; conn.end(); conn = null; } },
+    // Reported BEFORE `end()`: ending the connection can run its own `close` handler
+    // synchronously, inside the `end()` call itself, and that would otherwise report
+    // `{ error: 'connection closed' }` for a close the host asked for. The shared
+    // once-guard then makes that later call, and a second `close()`, no-ops.
+    close: async () => { closeOnce({}); if (conn) { conn.end(); conn = null; } },
   };
 }
