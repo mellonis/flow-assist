@@ -17,7 +17,7 @@ import type { ReactElement } from 'react';
 import { createPeer, PeerError, type ConsumeSpec, type Frame, type HelloParams, type HelloResult, type Peer, type StoreEvent, type StyledSpan, type ToolDecl, type ToolGroupDecl } from '@flow-assist/remote';
 import type { Command, Make, Plugin } from '../loader/plugin.js';
 import type { PluginApi } from '../runtime/plugin-api.js';
-import type { ViewLine, ViewRenderer } from '../assistant/views.js';
+import { bumpViewRevision, type ViewLine, type ViewRenderer } from '../assistant/views.js';
 import { overlay } from '../views/modals.js';
 import { FLOWTTY_VERSION, HOST_API } from '../version.js';
 import { validateFrame } from './frame.js';
@@ -210,7 +210,9 @@ export async function remotePlugin(opts: RemotePluginOpts): Promise<Plugin> {
   });
   transport.onClose((why: TransportClose) => {
     stopped = `plugin stopped${why.error ? `: ${why.error}` : why.signal ? ` (${why.signal})` : why.code !== undefined ? ` (exit ${why.code})` : ''}`;
-    stoppedOnScreen = (frame.keycaps ?? []).length > 0;
+    // A process that goes again before its first frame leaves the screen as the last
+    // stop left it: only a frame says what is on screen.
+    stoppedOnScreen = (frame.keycaps ?? []).length > 0 || (stoppedOnScreen && frame === EMPTY);
     frame = EMPTY;
     consume = canonicalConsume([]);
     fields.applyFrame(null, {});
@@ -297,6 +299,8 @@ export async function remotePlugin(opts: RemotePluginOpts): Promise<Plugin> {
       asked.add(key);
       peer.request('view.render', { kind, data, width: ctx.width }, VIEW_RENDER_TIMEOUT_MS).then((r) => {
         rendered.set(key, toViewLines((r as { lines?: unknown } | null)?.lines));
+        // The chat keeps a finished message's rows; this is what makes them miss.
+        bumpViewRevision();
         notify();
       }, (e: unknown) => {
         // A timeout is asked again on the next draw; a refusal (`-32601` and its kin) is
@@ -376,7 +380,7 @@ export async function remotePlugin(opts: RemotePluginOpts): Promise<Plugin> {
     name,
     keys,
     entry: registration.entry,
-    description: typeof manifest.description === 'string' ? manifest.description : undefined,
+    description: typeof manifest.description === 'string' ? manifest.description.trim() || undefined : undefined,
     commands,
     tools: toolGroups,
     aiTools,

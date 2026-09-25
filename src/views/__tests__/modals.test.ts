@@ -3,7 +3,8 @@ import { createElement as h } from 'react';
 import { render, stringWidth } from '@flowtty/react';
 import { TestBackend } from '@flowtty/core/testing';
 import { MODAL_COLOR_DEFAULTS } from '../../playback/theme.js';
-import { condenseRuns, helpEntries, inputVisualRows, mdLines, renderChatModal, renderHelp, renderLogModal, renderReminder, typedLines } from '../modals.js';
+import { chatRows, condenseRuns, helpEntries, inputVisualRows, mdLines, renderChatModal, renderHelp, renderLogModal, renderReminder, typedLines, type RowOpts } from '../modals.js';
+import { bumpViewRevision } from '../../assistant/views.js';
 
 // The trail condenses a run of one tool ending one way into a count — except a call
 // that returned images, whose marks are what the person looks for.
@@ -540,4 +541,20 @@ test('a long line of fenced code wraps to the width — every chat row is one te
   // Nothing was dropped on the way (since alpha.14 every code row, a wrapped one too,
   // starts with the fence's `│ ` bar).
   expect(lines.map((l) => l.spans.map((s) => s.text).join('')).join('').replace(/[\s│]/g, '')).toContain('x'.repeat(120));
+});
+
+// A done view's rows are cached with its message; a renderer that answers late (a remote
+// plugin's `view.render`) bumps the view revision, and only then is it asked again.
+test('a finished message\'s view rows miss the cache once the view revision is bumped, and only then', () => {
+  let text = '▸ card';
+  const renderers = { card: () => [[{ text }]] };
+  const msg = { role: 'view', content: '', views: [{ kind: 'card', data: {}, phase: 'done', startedAt: 0 }] };
+  const o: RowOpts = { wrap: 60, folds: { open: true, except: new Set() }, viewLines: 20, notes: 'step', detailsKey: '^o', renderers, now: 0, palette: {} };
+  const drawn = () => chatRows([msg] as never, o).map((r) => (r.spans ?? []).map((sp) => String(sp.text ?? '')).join('')).join('\n');
+  expect(drawn()).toContain('▸ card');
+  text = 'the card, rendered';
+  expect(drawn()).toContain('▸ card'); // cached: the renderer is not asked again
+  bumpViewRevision();
+  expect(drawn()).toContain('the card, rendered');
+  expect(drawn()).not.toContain('▸ card');
 });

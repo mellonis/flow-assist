@@ -104,6 +104,16 @@ export interface ViewRenderCtx {
   moreKey: string;   // the cap of the key that opens everything, from its binding
 }
 export type ViewRenderer = (data: unknown, ctx: ViewRenderCtx) => ViewLine[];
+
+// A renderer that answers later than it is asked (a remote plugin's, whose lines come
+// back from `view.render`) draws a placeholder first. The chat caches a message's rows,
+// and nothing else in their key changes once a view is done, so such a renderer bumps
+// this when its answer lands and the chat's key reads it. Module state on purpose:
+// renderers are collected once per process and the chat reads them from anywhere; one
+// counter makes every cached message miss once, which is what the answer needs.
+let revision = 0;
+export const viewRevision = (): number => revision;
+export const bumpViewRevision = (): void => { revision += 1; };
 export type ViewRenderers = Record<string, ViewRenderer>;
 export interface FramedLine { spans: { text: string; color?: string; dim?: boolean; bold?: boolean }[]; chrome?: number }
 

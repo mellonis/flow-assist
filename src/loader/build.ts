@@ -146,9 +146,7 @@ export async function loadPlugins({
       try {
         const log = (line: string) => { console.warn(line); notes.push(line); };
         const transport = (remoteTransport ?? transportFor)(manifest, join(enabledDir, name), { log });
-        const plugin = await remotePlugin({ manifest, transport, config, make, log });
-        plugin.description ??= manifestDescription(join(enabledDir, name));
-        plugins.push(plugin);
+        plugins.push(await remotePlugin({ manifest, transport, config, make, log }));
       } catch (e) {
         skip(name, (e as Error).message);
       }

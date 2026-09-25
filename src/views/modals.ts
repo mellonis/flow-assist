@@ -22,7 +22,7 @@ import { isClicked, isOpen, foldId, type FoldState } from '../assistant/folds.js
 import { imageTokenRanges, splitTokens } from '../assistant/images.js';
 import { markText, type ImageMark } from '../assistant/tool-images.js';
 import { changeCounts, changeMarkdown, diffRows, type ChangeView } from '../assistant/diff.js';
-import { VIEW_CAPS, frameView, isConsoleKind, type ViewRecord, type ViewRenderers } from '../assistant/views.js';
+import { VIEW_CAPS, frameView, isConsoleKind, viewRevision, type ViewRecord, type ViewRenderers } from '../assistant/views.js';
 import { groupHeadText, groupOpen, viewGroups, type GroupMsg, type ViewGroup } from '../assistant/view-groups.js';
 import { renderConsole } from '../assistant/console-view.js';
 import { CELL_FREE, CELL_FULL, CONTEXT_WARN_AT, GRID_COLS, GRID_ROWS, contextFootnote, contextGrid, contextHeading, contextLegend, tokensBadge, type ContextReading, type GridCell } from '../assistant/context-meter.js';
@@ -567,7 +567,9 @@ function messageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): ChatRow
   // renderer names (`accent`, `shell`, `text`, a plugin's own…), so a scheme change
   // that moved any of them — not only the two console-tail colours — must still miss
   // the cache.
-  const key = `${o.wrap}:${open}:${o.folds.open ? 1 : 0}:${last ? 1 : 0}:${o.viewLines}:${o.notes}:${o.detailsKey}:${at}:${clock}:${Object.values(o.palette).join(',')}`;
+  // `viewRevision()`: a renderer's late answer (views.ts) — a done view's rows are
+  // otherwise laid out once, and its placeholder would stay.
+  const key = `${o.wrap}:${open}:${o.folds.open ? 1 : 0}:${viewRevision()}:${last ? 1 : 0}:${o.viewLines}:${o.notes}:${o.detailsKey}:${at}:${clock}:${Object.values(o.palette).join(',')}`;
   let byKey = rowCache.get(m);
   if (!byKey) rowCache.set(m, (byKey = new Map()));
   let rows = byKey.get(key);

@@ -169,15 +169,8 @@ test('a view a tool reports is drawn behind a placeholder until view.render answ
   await until(ui, () => ui.backend.lastFrame.includes('▸ exercise'), 'the placeholder');
   expect(asked[0]).toMatchObject({ kind: 'exercise', data: { n: 3 } });
   answer({ lines: [[{ text: 'exercise 3: ' }, { text: 'passed', bold: true }]] });
-  await settle(10);
-  // The observed gap: the chat caches a finished message's rows (views.ts' frameView,
-  // under modals.ts' messageRows), so a renderer that answers late is not asked again —
-  // the placeholder stays after view.render has answered and the adapter has said so.
-  // When the host's row cache learns to miss on a renderer's news, this line fails.
-  expect(ui.backend.lastFrame).toContain('▸ exercise');
-  // Anything that lays the message out again (^o, every block open) draws the answer:
-  // the adapter's own cache holds it.
-  ui.backend.press({ name: 'o', ctrl: true });
+  // The answer replaces the placeholder on its own: the adapter bumps the view revision,
+  // so the chat's cached rows for the finished message miss.
   await until(ui, () => ui.backend.lastFrame.includes('exercise 3: passed'), 'the rendered view');
   expect(ui.backend.lastFrame).not.toContain('▸ exercise');
   ui.app.unmount();
@@ -212,6 +205,24 @@ test('a crash says plugin stopped and a restart says hello again', async () => {
   fake.frame({ surface: ['Text', {}, 'back'], keycaps: ['x'] });
   await until(ui, () => ui.backend.lastFrame.includes('back'), 'the new process\'s frame');
   expect(ui.backend.lastFrame).not.toContain('plugin stopped');
+  ui.app.unmount();
+});
+
+test('a process that crashes again before its first frame still leaves plugin stopped on screen', async () => {
+  const { fake, ui } = await boot();
+  fake.frame({ surface: ['Text', {}, 'alive'], keycaps: ['x'] });
+  await until(ui, () => ui.backend.lastFrame.includes('alive'), 'the surface');
+  fake.crash();
+  await until(ui, () => ui.backend.lastFrame.includes('plugin stopped'), 'plugin stopped');
+  let hellos = 0;
+  fake.peer.onRequest('hello', () => { hellos++; return fake.hello; });
+  fake.restart();
+  await until(ui, () => hellos === 1, 'a second hello');
+  await settle(5);
+  fake.crash(); // before the new process sent any frame
+  await settle(10);
+  const said = ui.backend.lastFrame.split('\n').filter((r) => r.includes('plugin stopped (exit 1)'));
+  expect(said.length).toBe(2); // on the surface and in the footer, as after the first crash
   ui.app.unmount();
 });
 
