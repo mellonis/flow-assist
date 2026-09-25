@@ -10,8 +10,11 @@
 // anything not listed" — but an extra key is, in practice, almost always a typo of a
 // required one, so this host treats "absent" as "report it" and requires a schema to
 // opt IN to extra keys with `additionalProperties: true` (or a schema of its own, or
-// `patternProperties`). Nothing about `args` is ever coerced or stripped: a schema
-// that would accept the call sees it unchanged.
+// `patternProperties`). Nothing about a value is ever coerced: a number sent as the
+// string `"3"` is a wrong type, not a value quietly accepted. `null` on a declared
+// OPTIONAL parameter is the one exception — read as the parameter left out (below),
+// since that is how a tool already reads an absent one (`args.path ?? '.'`) and how an
+// OpenAI-style client sends one it left blank.
 import { z } from 'zod';
 import type { ToolParameters } from '../loader/tools.js';
 
@@ -56,7 +59,13 @@ function formatPath(path: readonly PropertyKey[]): string {
 function typeIssues(issues: readonly z.core.$ZodIssue[], args: Record<string, unknown>): string[] {
   const out: string[] = [];
   for (const issue of issues) {
-    if (issue.code === 'unrecognized_keys') continue; // ours, below — args says this better than zod's own message
+    // The call's own unknown-key check (below) already covers the object's OWN top
+    // level (`path: []`) — args says that better than zod's default message. A NESTED
+    // one — inside a declared property's own object schema, `path` non-empty — is
+    // never computed there, so it surfaces here instead: a plugin's own
+    // `additionalProperties: false` on a nested shape (an MCP schema does this) is
+    // enforced, not swallowed by the top-level check.
+    if (issue.code === 'unrecognized_keys' && issue.path.length === 0) continue;
     if (issue.code === 'invalid_type' && issue.path.length === 1) {
       const key = String(issue.path[0]);
       if (!Object.prototype.hasOwnProperty.call(args, key)) continue; // missing — counted from `required` below
@@ -92,13 +101,33 @@ export function toolArgsError(toolName: string, parameters: ToolParameters | nul
   const properties = schema.properties && typeof schema.properties === 'object' ? schema.properties : {};
   const required = Array.isArray(schema.required) ? schema.required.filter((k): k is string => typeof k === 'string') : [];
   const missing = required.filter((k) => !Object.prototype.hasOwnProperty.call(args, k));
+
+  const patternProps = schema.patternProperties && typeof schema.patternProperties === 'object' ? schema.patternProperties : null;
+  const patterns = patternProps ? Object.keys(patternProps).map((p) => new RegExp(p)) : [];
+  // `additionalProperties: true`, or a schema of its own, always allows an extra key.
+  // `patternProperties` alone (`additionalProperties` left unset) allows one that
+  // matches no pattern too — JSON Schema's own default for that combination. An
+  // EXPLICIT `false` means what it says regardless of `patternProperties`: only a
+  // name in `properties` or matching a pattern is not unknown.
   const allowsExtra =
     schema.additionalProperties === true ||
     (typeof schema.additionalProperties === 'object' && schema.additionalProperties !== null) ||
-    schema.patternProperties !== undefined;
-  const unknown = allowsExtra ? [] : Object.keys(args).filter((k) => !Object.prototype.hasOwnProperty.call(properties, k));
+    (patterns.length > 0 && schema.additionalProperties !== false);
+  const unknown = allowsExtra
+    ? []
+    : Object.keys(args).filter((k) => !Object.prototype.hasOwnProperty.call(properties, k) && !patterns.some((re) => re.test(k)));
 
-  const result = zSchema.safeParse(args);
+  // A declared OPTIONAL parameter sent as `null` is dropped before the schema sees
+  // it — never mutating `args` itself, only this copy — so it validates as omitted,
+  // not as a value of the wrong type. A REQUIRED one stays, and fails like any other
+  // wrong type (`typeIssues`, against the original `args`, still reports it).
+  const forSchema: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(args)) {
+    if (v === null && Object.prototype.hasOwnProperty.call(properties, k) && !required.includes(k)) continue;
+    forSchema[k] = v;
+  }
+
+  const result = zSchema.safeParse(forSchema);
   const wrongType = result.success ? [] : typeIssues(result.error.issues, args);
 
   if (!missing.length && !unknown.length && !wrongType.length) return null;

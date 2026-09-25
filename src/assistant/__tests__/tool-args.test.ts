@@ -51,6 +51,36 @@ test('patternProperties opts a schema into keys it matches', () => {
   expect(toolArgsError('t', patterned, { x_1: 'a' })).toBeNull();
 });
 
+test('an explicit additionalProperties: false still reports a key matching no patternProperties pattern', () => {
+  const patterned = { type: 'object', properties: { a: { type: 'string' } }, patternProperties: { '^x_': { type: 'string' } }, additionalProperties: false };
+  expect(toolArgsError('t', patterned, { a: '1', x_1: 'ok' })).toBeNull();
+  expect(toolArgsError('t', patterned, { a: '1', x_1: 'ok', bogus: 'no' })).toBe('wrong arguments for t — unknown parameter `bogus`. Nothing was run.');
+});
+
+test('a nested additionalProperties: false is enforced, not swallowed by the top-level check', () => {
+  const nested = {
+    type: 'object',
+    properties: { a: { type: 'string' }, obj: { type: 'object', properties: { x: { type: 'string' } }, additionalProperties: false } },
+  };
+  expect(toolArgsError('t', nested, { a: 'ok', obj: { x: '1' } })).toBeNull();
+  const msg = toolArgsError('t', nested, { a: 'ok', obj: { x: '1', y: 'bad' } });
+  expect(msg).toContain('`obj`');
+  expect(msg).toContain('"y"');
+});
+
+test('null on a declared optional parameter is read as omitted, the way a tool\'s own `?? default` already reads an absent one', () => {
+  const withOptional = { type: 'object', properties: { issueCode: { type: 'string' }, path: { type: 'string' } }, required: ['issueCode'] };
+  expect(toolArgsError('t', withOptional, { issueCode: 'ABC-1', path: null })).toBeNull();
+});
+
+test('null on a required parameter still fails, as any other wrong type would', () => {
+  expect(toolArgsError('get_issue', schema, { issueCode: null })).toBe('wrong arguments for get_issue — `issueCode` must be string. Nothing was run.');
+});
+
+test('values are never coerced: a number sent as a string is a wrong type', () => {
+  expect(toolArgsError('get_issue', schema, { issueCode: 'ABC-1', count: '3' })).toBe('wrong arguments for get_issue — `count` must be number. Nothing was run.');
+});
+
 test('a schema zod cannot compile runs the call unchecked, logged once', () => {
   const exotic = { type: 'object', properties: { a: { type: 'string' } }, if: { properties: { a: { const: 'x' } } }, then: {} };
   const warn = console.warn;

@@ -73,7 +73,9 @@ for a tool that has images to show, text with the images beside it (below). The 
 checks `args` against the tool's own `parameters` first: a call missing a required
 key, of the wrong type, or naming a key `properties` does not list never reaches
 `exec` — the model gets a one-line error instead, so `args` here always already
-matches what the schema declares.
+matches what the schema declares. Nothing is coerced (a number sent as a string is a
+wrong type), except `null` on a declared OPTIONAL parameter, read as that parameter
+left out — the way `args.path ?? '.'` already reads an absent one.
 
 ```ts
 tools: [{
