@@ -88,7 +88,8 @@ test('two hosts share one server: one process, frames apart, state shared', asyn
     const serverPid = Number(fs.readFileSync(pidfile, 'utf8'));
     try { process.kill(serverPid, 'SIGTERM'); } catch { /* already gone */ }
     await until(() => !isAlive(serverPid), 'the shared server to exit');
-    try { fs.unlinkSync(pidfile); } catch { /* already gone */ }
+    const sock = socketPath('shared.sock');
+    for (const f of [sock, `${sock}.lock`, `${sock}.log`, pidfile]) fs.rmSync(f, { force: true });
     delete process.env.FAKE_PIDFILE;
   }
 });
