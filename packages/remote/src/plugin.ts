@@ -50,7 +50,12 @@ export function hostOver(peer: Peer, redraw: () => void): Host {
   };
 }
 
-// Serves one host connection. Resolves when the host says `shutdown`.
+// How long a close waits for an update already in flight, once there is no host left
+// to answer anything it might still be waiting on.
+const DRAIN_MS = 1_000;
+
+// Serves one host connection. Resolves when the host says `shutdown`, or — over a
+// transport that reports it (`PeerIo.onClose`, stdio's own) — once the host is gone.
 export function servePlugin<M, Msg = HostEvent>(def: PluginDef<M, Msg>, io: PeerIo): Promise<void> {
   const peer = createPeer(io);
   let model: M | undefined;
@@ -64,6 +69,22 @@ export function servePlugin<M, Msg = HostEvent>(def: PluginDef<M, Msg>, io: Peer
   const commandDecls = def.hello.commands ?? Object.keys(def.commands ?? {}).map((n) => ({ name: n }));
 
   return new Promise<void>((done) => {
+    // A running update may itself be awaiting a `host.*` request (its own side effect
+    // in progress, or genuinely stuck waiting on the host). Once there is no host left
+    // to answer anything — `shutdown` said so, or the transport reports the host is
+    // gone — a request already in flight will never be answered, so waiting for it
+    // forever would be wrong; but the update may also have real, local work left (a
+    // file write, say) that deserves the chance to finish. `finish` gives it that
+    // chance, bounded: the connection closes once the update in flight settles, or
+    // after `DRAIN_MS`, whichever comes first.
+    let finished = false;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      const settled = queue.then(() => {}, () => {});
+      const capped = new Promise<void>((r) => setTimeout(r, DRAIN_MS));
+      void Promise.race([settled, capped]).then(() => { peer.close(); done(); });
+    };
     peer.onRequest('hello', (params) => {
       model = def.init(params as HelloParams);
       queueMicrotask(frame);
@@ -89,10 +110,10 @@ export function servePlugin<M, Msg = HostEvent>(def: PluginDef<M, Msg>, io: Peer
       return { lines: r(data, width) };
     });
     // The answer itself goes out through the same peer, in a microtask queued after
-    // this handler returns — closing on a `setTimeout` waits for the next macrotask,
-    // safely after that microtask, so the answer is never dropped by a peer already
-    // marked closed.
-    peer.onRequest('shutdown', () => { setTimeout(() => { peer.close(); done(); }, 0); return {}; });
+    // this handler returns — deferring `finish` to a `setTimeout` waits for the next
+    // macrotask, safely after that microtask, so the answer is never dropped by a peer
+    // already marked closed.
+    peer.onRequest('shutdown', () => { setTimeout(finish, 0); return {}; });
     peer.onNotify('key', (p) => event({ type: 'key', key: p as KeyEvent }));
     for (const t of ['changed', 'submitted', 'cancelled', 'toggled'] as const) peer.onNotify(t, (p) => event({ type: t, ...(p as { id: string; value?: unknown }) }));
     peer.onNotify('resize', (p) => event({ type: 'resize', ...(p as { terminal: Size; surface: Size }) }));
@@ -102,6 +123,9 @@ export function servePlugin<M, Msg = HostEvent>(def: PluginDef<M, Msg>, io: Peer
     peer.onNotify('store', (p) => event({ type: 'store', ...(p as { key: string; value: unknown }) }));
     peer.onNotify('cache.flushed', () => event({ type: 'cache.flushed' }));
     peer.onNotify('afterWrite', () => event({ type: 'afterWrite' }));
+    // No answer to send here — the transport itself is gone — so `finish` runs at
+    // once rather than behind a `setTimeout`.
+    io.onClose?.(finish);
   });
 }
 
@@ -114,9 +138,9 @@ export async function runPlugin<M, Msg = HostEvent>(def: PluginDef<M, Msg>, io?:
     const { serveConnections } = await import('./serve.js');
     return serveConnections((io) => servePlugin(def, io), argv[at + 1] ?? '');
   }
-  // Stdin closing means the host is gone (its end of the pipe closed, or it was
-  // killed): with no host left to answer, there is nothing left to serve.
-  process.stdin.on('end', () => process.exit(0));
+  // `stdioIo`'s own `onClose` reports stdin ending (the host is gone, or was killed),
+  // and `servePlugin` closes on that exactly as it does on `shutdown` — so this exits
+  // once either one resolves the promise, with no separate listener needed here.
   await servePlugin(def, stdioIo());
   process.exit(0);
 }

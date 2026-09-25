@@ -4,7 +4,11 @@
 // method with -32601. Lines that are not messages go to `onUnknown` and nowhere else.
 import { formatMessage, parseLine, type Message, type Request, type Response } from './codec.js';
 
-export interface PeerIo { send(line: string): void; onLine(fn: (line: string) => void): void }
+// `onClose` is optional: a transport that can outlive its other side (a shared
+// server's socket, an in-memory pair in a test) has nothing to report; one that
+// cannot (a plugin's own stdio, closed when the host that spawned it is gone) reports
+// it here, so a peer over it can react to the other side vanishing without a message.
+export interface PeerIo { send(line: string): void; onLine(fn: (line: string) => void): void; onClose?(fn: () => void): void }
 export interface PeerOpts { defaultTimeoutMs?: number }
 
 export class PeerError extends Error {

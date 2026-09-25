@@ -6,7 +6,10 @@ import manifest from '../../examples/remote-login/manifest.json';
 
 const realFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = realFetch; });
-const until = async (ok: () => boolean, n = 300) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
+const until = async (ok: () => boolean, label: string, n = 300) => {
+  for (let i = 0; i < n && !ok(); i++) await settle(1);
+  if (!ok()) throw new Error(`timed out waiting for ${label}`);
+};
 
 function spawnTransport(cmd: string[], cwd: string): RestartingTransport {
   const lines: Array<(l: string) => void> = []; const closes: Array<(w: { code?: number }) => void> = [];
@@ -36,19 +39,22 @@ test('the login example runs as a real process: its form draws, typing reaches i
   const dir = path.resolve(import.meta.dir, '../../examples/remote-login');
   const transport = spawnTransport(['bun', 'src/index.ts'], dir);
   const ui = await bootApp(new ScriptedModel(), 100, 30, undefined, {}, { chatMode: null, remote: { manifest, transport } });
-  await until(() => ui.backend.lastFrame.includes('remote-login'));
-  await ui.press('S');
-  await until(() => ui.backend.lastFrame.includes('Sign in'));
-  await ui.type('ann');
-  await ui.press('tab');
-  await ui.type('secret');
-  await ui.press('tab');
-  await ui.press('return');
-  await until(() => ui.backend.lastFrame.includes('signed in as ann'));
-  expect(ui.backend.lastFrame).toContain('Signed in'); // the toast
-  expect(ui.backend.lastFrame).not.toContain('secret'); // masked
-  ui.app.unmount();
-  await transport.close(500);
+  try {
+    await until(() => ui.backend.lastFrame.includes('remote-login'), 'the plugin on the start screen');
+    await ui.press('S');
+    await until(() => ui.backend.lastFrame.includes('Sign in'), 'the form');
+    await ui.type('ann');
+    await ui.press('tab');
+    await ui.type('secret');
+    await ui.press('tab');
+    await ui.press('return');
+    await until(() => ui.backend.lastFrame.includes('signed in as ann'), 'the signed-in note');
+    expect(ui.backend.lastFrame).toContain('Signed in'); // the toast
+    expect(ui.backend.lastFrame).not.toContain('secret'); // masked
+  } finally {
+    ui.app.unmount();
+    await transport.close(500);
+  }
 });
 
 test('the plugin process exits once its stdin closes, as it does when the host that spawned it dies', async () => {

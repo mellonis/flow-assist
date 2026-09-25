@@ -8,5 +8,12 @@ export function stdioIo(input: NodeJS.ReadableStream = process.stdin, output: No
   const splitter = new LineSplitter((line) => listeners.forEach((f) => f(line)));
   input.setEncoding?.('utf8');
   input.on('data', (chunk: string | Buffer) => splitter.feed(chunk.toString()));
-  return { send: (line) => { output.write(`${line}\n`); }, onLine: (f) => { listeners.push(f); } };
+  const closes: Array<() => void> = [];
+  // Stdin ending means the host is gone: its end of the pipe closed, or it was killed.
+  input.on('end', () => closes.forEach((f) => f()));
+  return {
+    send: (line) => { output.write(`${line}\n`); },
+    onLine: (f) => { listeners.push(f); },
+    onClose: (f) => { closes.push(f); },
+  };
 }

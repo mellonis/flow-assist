@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 import { createPeer, type PeerIo } from '../peer';
-import { runPlugin } from '../plugin';
+import { runPlugin, servePlugin, type HostEvent } from '../plugin';
+import { stdioIo } from '../stdio';
 
 function pair(): [PeerIo, PeerIo] {
   const a2b: Array<(l: string) => void> = []; const b2a: Array<(l: string) => void> = [];
@@ -57,4 +58,69 @@ test('an update may be async and call host services; a throwing tool is an error
   await expect(host.request('tool.run', { name: 'fail', args: {}, call: { id: '1' } })).rejects.toThrow('no');
   await host.request('shutdown');
   await run;
+});
+
+// A fake `NodeJS.ReadableStream`/`WritableStream` pair, just enough for `stdioIo`:
+// `on('data'|'end', …)` and `write`. Drives the stdin-EOF path without a real process.
+function fakeStdio() {
+  const handlers: Record<string, Array<(...a: unknown[]) => void>> = {};
+  const written: string[] = [];
+  const input = {
+    setEncoding: () => {},
+    on: (event: string, cb: (...a: unknown[]) => void) => { (handlers[event] ??= []).push(cb); },
+  };
+  const emit = (event: string, ...a: unknown[]) => { (handlers[event] ?? []).forEach((f) => f(...a)); };
+  const output = { write: (s: string) => { written.push(s); } };
+  return { input, output, emit, written };
+}
+
+test('shutdown waits, bounded, for an update already in flight to finish its own side effects', async () => {
+  const [hostIo, pluginIo] = pair();
+  const host = createPeer(hostIo);
+  const frames: unknown[] = [];
+  host.onNotify('frame', (f) => frames.push(f));
+  let settled = false;
+  const run = runPlugin<{ n: number }, { type: string }>({
+    hello: { name: 'slow' },
+    init: () => ({ n: 0 }),
+    update: async (msg, m) => {
+      if (msg.type !== 'afterWrite') return m;
+      await new Promise((r) => setTimeout(r, 40)); // the update's own side effect
+      settled = true;
+      return { n: m.n + 1 };
+    },
+    view: (m) => ({ surface: ['Text', {}, `n=${m.n}`] }),
+  }, pluginIo);
+  await host.request('hello', { hostApi: 2, config: {} });
+  host.notify('afterWrite'); // starts the update; nothing else is awaiting a host reply
+  await tick(); // the update is now mid-flight, awaiting its own 40 ms timer
+  await host.request('shutdown'); // answered at once — it does not wait on the drain
+  expect(settled).toBe(false); // the update's side effect has not landed yet
+  await run; // resolves once the update settles (well inside the 1 000 ms bound)
+  expect(settled).toBe(true);
+  expect(frames.at(-1)).toMatchObject({ surface: ['Text', {}, 'n=1'] }); // its frame reached the host
+});
+
+test('over stdio, an update in flight gets the same bounded chance to finish when stdin ends — no real process needed to show it', async () => {
+  const { input, output, emit } = fakeStdio();
+  let settled = false;
+  const run = servePlugin<{ n: number }, HostEvent>({
+    hello: { name: 'slow' },
+    init: () => ({ n: 0 }),
+    update: async (msg, m) => {
+      if (msg.type !== 'afterWrite') return m;
+      await new Promise((r) => setTimeout(r, 40));
+      settled = true;
+      return { n: m.n + 1 };
+    },
+    view: (m) => ({ surface: ['Text', {}, `n=${m.n}`] }),
+  }, stdioIo(input as unknown as NodeJS.ReadableStream, output as unknown as NodeJS.WritableStream));
+  emit('data', `${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'hello', params: { hostApi: 2, config: {} } })}\n`);
+  await tick();
+  emit('data', `${JSON.stringify({ jsonrpc: '2.0', method: 'afterWrite' })}\n`);
+  await tick(); // the update is mid-flight
+  emit('end'); // the host's end of the pipe closed — no `shutdown` was ever sent
+  expect(settled).toBe(false);
+  await run;
+  expect(settled).toBe(true);
 });
