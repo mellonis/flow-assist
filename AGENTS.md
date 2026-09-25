@@ -1027,9 +1027,10 @@ there is no `/fullscreen`.
   write and never writes a HELD session (its next save would fork) or this chat's own;
   a session whose file went since the list was read is said to be gone.
   `^x` deletes after a y/n line of the picker's own — a bare `y` deletes, `n` or Esc
-  keeps, ⏎ and a chord are no answer — through `removeSession`, refused for a HELD session and for this chat's
-  own. A pending y/n or `ask_user` question wins over the picker — drawn in its place and
-  answered first (a turn may start while it is up), the picker back once it is settled.
+  keeps, ⏎ and a chord are no answer — through `removeSession`, refused for a HELD
+  session and for this chat's own. A pending y/n or `ask_user` question wins over the
+  picker — drawn in its place and answered first (a turn may start while it is up), the
+  picker back once it is settled.
   The picker holds the keys while up; while it is DRAWN (no y/n or question in its
   place — the render's own condition) a mouse button and the wheel never reach the
   conversation it hides, so a click cannot fold a block or open the pager behind it;
