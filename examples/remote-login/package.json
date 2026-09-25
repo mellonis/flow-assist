@@ -1,0 +1,1 @@
+{ "name": "remote-login", "private": true, "type": "module", "main": "src/index.ts", "dependencies": { "@flow-assist/remote": "file:../../packages/remote" } }
