@@ -832,7 +832,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             msgsRef.current = s.messages as ChatMsg[];
             setMessages(s.messages as ChatMsg[]);
             // After the list is replaced, so the note the directory brings lands in it
-            // (said once — a session that ends in the same note is left as it is).
+            // (said once — a session that ends in the same note is left as it is). A note
+            // still waiting for a turn's end described the conversation being left.
+            projectNoteRef.current = null;
             projectRef.current = { dir: '', root: null, files: [] };
             shellRef.current.setCwd(s.shellCwd ?? null);
             setBangLevel(0); // the level is never saved — a restored draft is plain text
@@ -1241,6 +1243,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 toolCtx: {
                   plan: planRef.current,
                   shell: shellRef.current,
+                  // What `refreshProject` read when the directory was last set — `cd`
+                  // answers from it rather than reading the files a second time.
+                  projectInstructions: () => projectRef.current,
                   // What `recall` can bring back: the items of the turns before this one
                   // (this turn's own are still in full), an image read again from its
                   // path with the hash checked — a file gone is the tool's answer, not a
@@ -2036,7 +2041,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   setMessages(kept ? [{ role: 'note', content: kept }] : []);
                 }
                 // Back to the first root — after the list is emptied, so the fresh
-                // conversation says which instructions it starts with.
+                // conversation says which instructions it starts with; a note still waiting
+                // for the turn's end was the cleared conversation's.
+                projectNoteRef.current = null;
                 projectRef.current = { dir: '', root: null, files: [] };
                 shellRef.current.setCwd(null);
                 setInput(''); inputRef.current = '';

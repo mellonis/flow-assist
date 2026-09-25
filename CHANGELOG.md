@@ -11,9 +11,13 @@ What each version of flow-assist brought, newest first. The version is the one i
   it runs nothing) — every `AGENTS.md` from that directory up to its `shell.roots`
   entry reaches the assistant as a "Project instructions" section of its system
   prompt, outermost first and the nearest last, each file under its path and cut at
-  32 KiB. It is read again whenever the directory moves, the assistant sees it from its
-  very next request, and a line in the chat says which files were picked up. Nothing
-  outside `shell.roots` is read; with no roots set, nothing is, and `cd` is refused.
+  32 KiB, quoted as the repository's words, which never override yours. It is read
+  again whenever the directory moves, the assistant sees it from its very next
+  request, a move inside the same project leaves it unchanged, and a line in the chat
+  says which files were picked up. A background task and a one-shot prompt read it
+  for their own directory too. Nothing outside `shell.roots` is read; with no roots
+  set, nothing is, and `cd` is refused. Under a root that is itself a link, `cd ..`
+  and run_command's `cwd` now work from a directory a command left by its real path.
 - **A plugin can be a separate process, in any language.** The host talks to it over
   JSON-RPC 2.0, one message per line, on its stdin and stdout: the host draws, the
   plugin describes its whole screen and sends it again whenever it changes

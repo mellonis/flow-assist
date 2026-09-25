@@ -564,13 +564,19 @@ there is no `/fullscreen`.
   time as a trail line.
 - **`cd` moves the shell's directory for the model** (`src/loader/tools-shell.ts`, the
   `shell` group, so `ai.disabledTools: ["shell"]` takes it too). `{ path }`, relative to
-  the conversation's directory or absolute (`~` the home), held to `shell.roots` by the
-  same spelled-and-real check as run_command's `cwd` (`cdTarget`); outside them it
-  THROWS naming the roots, and with no roots configured it refuses — it is read-only
-  (no y/n), so nothing but the roots guards it. It sets `ctx.shell` the way `!cd` does,
-  so the hint row and every later run_command follow, and answers `now in <dir>` and
-  the AGENTS.md files the chat picks up there (or `no AGENTS.md between here and
-  <root>`) — one call enters a project.
+  the conversation's directory or absolute (`~` the home). It is held to `shell.roots`
+  by `insideRoots`, the check run_command's `cwd` shares: the REAL path inside a root's
+  real path is the guard, and the spelling is not held to the spelled roots — under a
+  root that is itself a link, a directory stored real (`pwd -P`) is spelled by its real
+  path, and `cd ..` from it must still work. Outside, it THROWS naming the roots (a
+  link out says where it leads); a missing path "does not exist", a file "is not a
+  directory"; with no roots configured it refuses — it is read-only (no y/n), so
+  nothing but the roots guards it. It sets `ctx.shell` the way `!cd` does, so the hint
+  row and every later run_command follow, and answers `now in <dir>` and the AGENTS.md
+  files picked up there (or `no AGENTS.md between here and <root>`) — from the chat's
+  own reading when the ctx carries one (`ctx.projectInstructions`), else read itself.
+  Once the group is loaded (under tools on demand that is a `tools_load` first, since
+  `shell` is not core), one call enters a project.
 - **The project's instructions ride in the system prompt**
   (`src/assistant/project-instructions.ts`, pure but for the reads). Whenever the
   shell's directory is SET — `ShellState.setCwd`, the one place: `!cd`, run_command's
@@ -581,21 +587,34 @@ there is no `/fullscreen`.
   path; a directory that is a root has only its own. Outermost first, nearest last, so
   the nearer wins. Nothing outside the roots is read: a directory outside them, no
   roots at all (then not even the process's directory), a file that links out, a
-  non-file. Each file is capped at 32 KiB (`INSTRUCTIONS_CAP`), cut at a line break
-  with `… (cut at 32 KiB — N more lines)`; only the head is held, the rest counted. The
-  section is `## Project instructions` — a framing line, then each file under `###
-  <path>` — after the memory and before the plan (`joinSystem`). The rest of the system
-  prompt is taken once per message; this section is read again before EVERY round
-  (`AgentOpts.systemPrompt`, laid over the round's copy, never the history), so a `cd`
-  is seen by the next round of the same turn and an unchanged round sends the message
-  it had — re-reading the plan per round would miss the cache after every `todo`. It is
-  never a message in the history, so it is never stubbed, compacted or duplicated. The
+  non-file; a file reached twice through a link is sent once. Each file is capped at
+  32 KiB (`INSTRUCTIONS_CAP`), cut at a line break with `… (cut at 32 KiB — N more
+  lines)`; only the head is held, the rest counted; there is no cap on the whole, so
+  five nested files cost up to five times that. The section is `## Project
+  instructions` — a framing line naming the ROOT, never the shell's directory (a move
+  inside a project must keep the section byte for byte, or every `cd src` misses the
+  cache; the model learns the directory from `cd`'s answer and run_command's output),
+  and saying these are the repository's words, not the person's or the host's, never
+  overriding either; then each file under `### <path>`, quoted in a fence longer than
+  any backtick run it holds, so its own headings can never read as the host's
+  sections; a cut is noted outside the fence. It sits after the memory and before the
+  plan (`joinSystem`). The rest of the system prompt is taken once per message; this
+  section is read again before EVERY round (`AgentOpts.systemPrompt`, laid over the
+  round's copy, never the history), so a `cd` is seen by the next round of the same
+  turn, and a round whose text did not change sends the message it had — re-reading
+  the plan per round would miss the cache after every `todo`. It is never a message in
+  the history, so it is never stubbed, compacted or duplicated. A background run and
+  the one-shot prompt have no chat to read it on `setCwd`: each has a shell state of
+  its own (`ctx.shell`, so `cd` holds between calls) and passes `instructionsPrompt`,
+  which reads the section for that state's directory before every round, under the
+  caller's own base prompt; a background run is never handed the chat's reading. The
   chat says which files were picked up in a `note` row (`Project instructions: ~/p/
   AGENTS.md`) only when the list changes; during a turn the note waits for the turn's
   end (a note between rounds would split the turn's message), and a list that already
   ends in the same note gets none (a continued session, restart after restart).
-  `applySession` and `/clear` set the directory AFTER replacing the list, or the note
-  would be replaced with it. The context meter counts the section under `system`.
+  `applySession` and `/clear` drop a waiting note and set the directory AFTER replacing
+  the list, or the note would be replaced with it. The context meter counts the
+  section under `system`.
 - **Whose claim excuses a y/n, and whose does not.** A tool pauses because its `write`
   flag says so, and the flag is set by whoever is entitled to say it. The `mcp` plugin
   keeps the two apart per server: `trusted` is "I believe THIS SERVER's own

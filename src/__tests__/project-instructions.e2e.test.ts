@@ -42,7 +42,7 @@ test('cd into a project: the next request carries its AGENTS.md, the chat says s
   // The second — the next round of the same turn — carries it, the file under its path.
   const sys = systemOf(model, 1);
   expect(sys).toContain('## Project instructions');
-  expect(sys).toContain(`### ${path.join(proj, 'AGENTS.md')}\n# Proj\nPROJECT RULE 42: tests before commits.`);
+  expect(sys).toContain(`### ${path.join(proj, 'AGENTS.md')}\n\`\`\`markdown\n# Proj\nPROJECT RULE 42: tests before commits.\n\`\`\``);
   // After the memory's place, before nothing it should follow: the base comes first.
   expect(sys.indexOf('## Project instructions')).toBeGreaterThan(sys.indexOf('Always respond in'));
   // The cd's own answer names the directory and the file.
@@ -62,6 +62,10 @@ test('cd into a project: the next request carries its AGENTS.md, the chat says s
   expect(frame.indexOf('Project instructions:')).toBeGreaterThan(frame.indexOf('In the project.'));
   expect(frame.split('Project instructions:').length - 1).toBe(1);
 
+  // The hint row follows the move: in shell mode it starts with the project.
+  await ui.type('!');
+  expect(ui.backend.lastFrame).toContain(`${shown(proj)} · `);
+  await ui.press('backspace');
   // The next message is sent with the section too — it stays until the directory moves.
   model.script([{ text: 'Still here.' }]);
   await ui.type('and now?');

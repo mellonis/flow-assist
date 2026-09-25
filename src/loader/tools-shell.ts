@@ -1,6 +1,6 @@
 // The `shell` tool group: run_command — the model runs a shell command in the
-// person's clone — and cd, which moves the directory commands run in. Its own group, so `ai.disabledTools: ["shell"]` turns it off (core
-// cannot be). The runner is the one `!command` uses (assistant/shell.ts); what makes
+// person's clone — and cd, which moves the directory commands run in. Its own group,
+// so `ai.disabledTools: ["shell"]` turns it off (core cannot be). The runner is the one `!command` uses (assistant/shell.ts); what makes
 // this safe to offer is not the runner but the pause: the tool is a write, so EVERY
 // call waits for the person's y/n with the command on screen, and a background task —
 // nobody to ask — has it declined.
@@ -14,13 +14,15 @@
 // `cd` moves that directory for the model without running anything: a read-only tool
 // (no y/n), held to the roots by the same spelled-and-real check, and refused when no
 // roots are configured — with nobody to confirm it, it may not wander the machine. Its
-// answer names the directory and the AGENTS.md files the chat will put in the system
-// prompt for it (src/assistant/project-instructions.ts), so one call enters a project.
+// answer names the directory and the AGENTS.md files the system prompt carries for it
+// (src/assistant/project-instructions.ts), so once the group is loaded (`tools_load`
+// under tools on demand) one call enters a project.
 import { spawnSync } from 'node:child_process';
+import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { capConsoleText, consoleData } from '../assistant/console-view.js';
-import { findInstructions } from '../assistant/project-instructions.js';
+import { findInstructions, type ProjectInstructions } from '../assistant/project-instructions.js';
 import { createShellState, dirAllowed, formatShell, nextCwd, realOf, runShell, shellCwd, shellLimits, shellRoots, tildePath, within, type ShellState } from '../assistant/shell.js';
 import type { ToolGroup } from './tools.js';
 
@@ -38,34 +40,41 @@ export function commandCwd(config: Record<string, unknown>, asked: unknown, base
     return base;
   }
   if (!roots.length) throw new Error('run_command: no roots are configured (shell.roots), so cwd cannot be given — omit it');
-  const abs = path.resolve(base, s);
-  if (!roots.some((r) => within(abs, r))) throw new Error(`run_command: «${abs}» is outside the configured roots`);
+  return insideRoots('run_command', config, path.resolve(base, s));
+}
+
+// The one check a directory the model names is held to, by run_command's `cwd` and by
+// `cd`: its REAL path inside a root's real path — the guard, since a link in a clone
+// must not carry the shell out of it. The spelling is not held to the spelled roots: a
+// directory stored as `pwd -P` left it, under a root that is itself a link, is spelled
+// by its real path, and `cd ..` from there is still inside. A refusal names the roots.
+function insideRoots(tool: string, config: Record<string, unknown>, abs: string): string {
+  const roots = shellRoots(config);
+  const named = roots.join(', ');
   const real = realOf(abs);
-  if (!roots.map(realOf).some((r) => within(real, r))) throw new Error(`run_command: «${abs}» resolves through a link to «${real}», outside the configured roots`);
-  if (!dirAllowed(config, abs)) throw new Error(`run_command: «${abs}» is not a directory`);
+  if (!roots.map(realOf).some((r) => within(real, r))) {
+    if (roots.some((r) => within(abs, r))) throw new Error(`${tool}: «${abs}» resolves through a link to «${real}», outside the configured roots (${named})`);
+    throw new Error(`${tool}: «${abs}» is outside the configured roots (${named})`);
+  }
+  if (!fs.existsSync(abs)) throw new Error(`${tool}: «${abs}» does not exist`);
+  if (!dirAllowed(config, abs)) throw new Error(`${tool}: «${abs}» is not a directory`);
   return abs;
 }
 
 // Where `cd` goes: `asked` relative to `base`, or absolute (`~` the home directory) —
-// an existing directory inside a root, spelled AND real. A refusal throws and names
-// the roots, so the model knows where it may go.
+// an existing directory inside a root (`insideRoots`). A refusal throws and names the
+// roots, so the model knows where it may go.
 export function cdTarget(config: Record<string, unknown>, asked: unknown, base: string): string {
   const s = typeof asked === 'string' ? asked.trim() : '';
   if (!s) throw new Error('cd: path is required');
   const roots = shellRoots(config);
   if (!roots.length) throw new Error('cd: no roots are configured (shell.roots), so the directory cannot be moved');
-  const named = roots.join(', ');
-  const abs = path.resolve(base, s.replace(/^~(?=\/|$)/, os.homedir()));
-  if (!roots.some((r) => within(abs, r))) throw new Error(`cd: «${abs}» is outside the configured roots (${named})`);
-  const real = realOf(abs);
-  if (!roots.map(realOf).some((r) => within(real, r))) throw new Error(`cd: «${abs}» resolves through a link to «${real}», outside the configured roots (${named})`);
-  if (!dirAllowed(config, abs)) throw new Error(`cd: «${abs}» is not a directory`);
-  return abs;
+  return insideRoots('cd', config, path.resolve(base, s.replace(/^~(?=\/|$)/, os.homedir())));
 }
 
-// The answer: where the shell is now, and the instructions the chat picks up there.
-export function cdAnswer(config: Record<string, unknown>, dir: string): string {
-  const found = findInstructions(config, dir);
+// The answer: where the shell is now, and the instructions picked up there — `found`
+// when the caller already read them (the chat does, whenever the directory is set).
+export function cdAnswer(config: Record<string, unknown>, dir: string, found: ProjectInstructions = findInstructions(config, dir)): string {
   const lines = [`now in ${dir}`];
   if (found.files.length) {
     lines.push('Project instructions, in the system prompt from the next request on (outermost first):');
@@ -141,7 +150,10 @@ export const shellTools = (config: Record<string, unknown>): ToolGroup => ({
       const shell = (ctx as { shell?: ShellState }).shell ?? createShellState(() => config);
       const dir = cdTarget(config, args.path, shell.cwd());
       shell.setCwd(dir);
-      return cdAnswer(config, dir);
+      // The chat reads the instructions when the directory is set (`onSet`); its ctx
+      // hands them over rather than having them read twice.
+      const read = (ctx as { projectInstructions?: () => ProjectInstructions }).projectInstructions?.();
+      return cdAnswer(config, dir, read);
     }
     if (name !== 'run_command') throw new Error(`Unknown tool: ${name}`);
     const cmd = String(args.command ?? '').trim();

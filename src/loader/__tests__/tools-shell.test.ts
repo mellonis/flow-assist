@@ -60,7 +60,7 @@ test('a cwd outside the roots is refused by THROWING', () => {
   expect(() => commandCwd({ fs: { roots: [root] } }, '/etc')).toThrow(/outside the configured roots/);
   expect(() => commandCwd({ fs: { roots: [root] } }, '../..')).toThrow(/outside the configured roots/);
   expect(() => commandCwd({}, '/tmp')).toThrow(/no roots are configured/);
-  expect(() => commandCwd({ fs: { roots: [root] } }, 'missing')).toThrow(/not a directory/);
+  expect(() => commandCwd({ fs: { roots: [root] } }, 'missing')).toThrow(/does not exist/);
 });
 
 test('a symlink in the clone that points out of it is refused', () => {
@@ -159,7 +159,7 @@ test('cd outside the roots is a tool error naming the roots, and the directory s
   await expect(g.exec('cd', { path: other }, { shell } as never)).rejects.toThrow(root);
   await expect(g.exec('cd', { path: '../..' }, { shell } as never)).rejects.toThrow(/outside the configured roots/);
   await expect(g.exec('cd', { path: '../out' }, { shell } as never)).rejects.toThrow(root); // a link out
-  await expect(g.exec('cd', { path: 'missing' }, { shell } as never)).rejects.toThrow(/not a directory/);
+  await expect(g.exec('cd', { path: 'missing' }, { shell } as never)).rejects.toThrow(/does not exist/);
   await expect(g.exec('cd', { path: ' ' }, { shell } as never)).rejects.toThrow(/path is required/);
   expect(shell.cwd()).toBe(path.join(root, 'a'));
 });
@@ -175,4 +175,54 @@ test('the shell state says every time its directory is set', () => {
   shell.setCwd('/x');
   shell.setCwd(null);
   expect(seen).toEqual(['/x', null]);
+});
+
+test('a root that is a link: once the directory is stored real (pwd -P), cd .. and the real path are inside it', async () => {
+  const real = tmp();
+  fs.mkdirSync(path.join(real, 'a'));
+  const holder = tmp();
+  const link = path.join(holder, 'work');
+  fs.symlinkSync(real, link);
+  const other = tmp();
+  fs.symlinkSync(other, path.join(real, 'out'));
+  const config = { shell: { roots: [link] } };
+  const shell = createShellState(() => config);
+  shell.setCwd(path.join(real, 'a')); // what a command's `pwd -P` leaves
+  const g = shellTools(config);
+  await g.exec('cd', { path: '..' }, { shell } as never);
+  expect(shell.cwd()).toBe(real);
+  await g.exec('cd', { path: path.join(real, 'a') }, { shell } as never);
+  expect(shell.cwd()).toBe(path.join(real, 'a'));
+  await g.exec('cd', { path: path.join(link, 'a') }, { shell } as never); // spelled through the link
+  expect(shell.cwd()).toBe(path.join(link, 'a'));
+  // run_command's cwd follows the same rule.
+  expect(commandCwd(config, '..', path.join(real, 'a'))).toBe(real);
+  expect(commandCwd(config, real, path.join(real, 'a'))).toBe(real);
+  // The real path is still the guard: a link out of the root is refused either way.
+  await expect(g.exec('cd', { path: path.join(real, 'out') }, { shell } as never)).rejects.toThrow(/outside the configured roots/);
+  expect(() => commandCwd(config, path.join(link, 'out'))).toThrow(/outside the configured roots/);
+});
+
+test('cd: ~ is the home directory; a file is not a directory; a missing path does not exist', async () => {
+  const root = tmp();
+  fs.writeFileSync(path.join(root, 'file.txt'), 'x');
+  const home = createShellState(() => ({ shell: { roots: [os.homedir()] } }));
+  await shellTools({ shell: { roots: [os.homedir()] } }).exec('cd', { path: '~' }, { shell: home } as never);
+  expect(home.cwd()).toBe(os.homedir());
+  const config = { shell: { roots: [root] } };
+  const shell = createShellState(() => config);
+  const g = shellTools(config);
+  await expect(g.exec('cd', { path: '~' }, { shell } as never)).rejects.toThrow(root); // outside: the roots named
+  await expect(g.exec('cd', { path: 'file.txt' }, { shell } as never)).rejects.toThrow(/is not a directory/);
+  await expect(g.exec('cd', { path: 'nowhere' }, { shell } as never)).rejects.toThrow(/does not exist/);
+});
+
+test('cd answers with the instructions its caller already read, when the ctx carries them', async () => {
+  const root = tmp();
+  fs.mkdirSync(path.join(root, 'p'));
+  const config = { shell: { roots: [root] } };
+  const shell = createShellState(() => config);
+  const read = { dir: path.join(root, 'p'), root, files: [{ path: '/already/read/AGENTS.md', text: 't', cut: 0 }] };
+  const out = await shellTools(config).exec('cd', { path: 'p' }, { shell, projectInstructions: () => read } as never);
+  expect(out).toContain('- /already/read/AGENTS.md');
 });

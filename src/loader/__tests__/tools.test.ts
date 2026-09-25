@@ -1,4 +1,7 @@
 import { expect, test } from 'bun:test';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { z } from 'zod';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -693,4 +696,26 @@ test('the memory tool says how an entry is written, and refuses a near-copy of o
   const updated = String(await reg.exec('memory', { action: 'update', id, text: 'This repo rebases; it never merges.' }, ctx));
   expect(updated).toContain('updated');
   expect(loadMemories(memFile)[0]!.text).toBe('This repo rebases; it never merges.');
+});
+
+test('a background run carries the project\'s instructions for its own shell directory, and cd there answers from its own reading', async () => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-bg-instr-')));
+  fs.mkdirSync(path.join(root, 'proj'));
+  fs.writeFileSync(path.join(root, 'proj', 'AGENTS.md'), 'BG RULE');
+  const config = { shell: { roots: [root] } };
+  const reg = assembleToolRegistry({ plugins: [], config, repo: { list: async () => [] } as any });
+  let opts: Record<string, unknown> | undefined;
+  const chatLLM = async (_m: unknown[], o: Record<string, unknown>) => { opts = o; return { content: 'done' }; };
+  // The chat's own reading must not leak into the background run's answers.
+  const chats = () => ({ dir: '/chat', root: '/chat', files: [{ path: '/chat/AGENTS.md', text: 'x', cut: 0 }] });
+  await reg.exec('background', { task: 'look at proj' }, { chatLLM, config, projectInstructions: chats, postToChat: () => {} } as any);
+  for (let i = 0; i < 20 && !opts; i++) await new Promise((r) => setTimeout(r, 5));
+  const nested = opts!.toolCtx as Record<string, any>;
+  expect(nested.projectInstructions).toBeUndefined();
+  const system = opts!.systemPrompt as () => string;
+  expect(system()).not.toContain('## Project instructions');
+  const answer = await reg.exec('cd', { path: 'proj' }, nested as any);
+  expect(answer).toContain(path.join(root, 'proj', 'AGENTS.md'));
+  expect(system()).toContain('## Project instructions');
+  expect(system()).toContain('BG RULE');
 });

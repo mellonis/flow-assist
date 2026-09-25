@@ -19,6 +19,7 @@ import { createPlan, type Plan } from '../assistant/plan.js';
 import type { ToolGroup, ToolDef } from './tools.js';
 import { WEB_DEFAULTS } from '../assistant/web-fetch.js';
 import { SHELL_DEFAULTS, createShellState } from '../assistant/shell.js';
+import { instructionsPrompt } from '../assistant/project-instructions.js';
 import { parseAskArgs, askResult, type AskQuestion, type AskState } from '../assistant/ask.js';
 import type { Change } from '../assistant/diff.js';
 import { TOOLS_LOAD } from '../assistant/tool-loading.js';
@@ -594,7 +595,11 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
         // So are its loaded tools: it is given no `toolSet`, so it starts from the index
         // and loads what it needs, and nothing it loads reaches the chat's set.
         const bgConfig = ((ctx as { config?: Record<string, unknown> }).config ?? {}) as Record<string, unknown>;
-        const toolCtx = { ...(ctx as Record<string, unknown>), _bgDepth: depth + 1, askUser: undefined, plan: createPlan(), shell: createShellState(() => bgConfig) };
+        // It reads the project's instructions for that directory itself, before every
+        // round (`instructionsPrompt`) — never the chat's reading, which describes the
+        // chat's directory.
+        const bgShell = createShellState(() => bgConfig);
+        const toolCtx = { ...(ctx as Record<string, unknown>), _bgDepth: depth + 1, askUser: undefined, plan: createPlan(), shell: bgShell, projectInstructions: undefined };
         // The nested run needs its OWN LLM credentials — the same way the chat's
         // send() derives them (`llmOpts(ai)`: the provider, base URL, model, token).
         // `ctx` is the chat's toolCtx (config + host services), so read ai.* from it;
@@ -615,6 +620,7 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
               const res = await chatLLM(
                 [{ role: 'system', content: prompt }, { role: 'user', content: task }],
                 { extraTools: extraTools as ToolDef[], toolCtx, maxRounds: 12, confirmWrite: () => false,
+                  systemPrompt: instructionsPrompt(bgConfig, bgShell, prompt),
                   ...llmOpts(ai) },
               );
               const result = String(res?.content ?? '').trim() || '(no output)';

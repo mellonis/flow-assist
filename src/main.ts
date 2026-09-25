@@ -35,6 +35,8 @@ import { assembleToolRegistry, pluginConfigs } from './loader/tools.js';
 import { renderApp } from './runtime/app.js';
 import { consoleBridge } from './runtime/console-log.js';
 import { agentChat } from './assistant/agent.js';
+import { createShellState } from './assistant/shell.js';
+import { instructionsPrompt } from './assistant/project-instructions.js';
 import { toolLoadingMode } from './assistant/tool-loading.js';
 import { toolResultCapFromConfig } from './assistant/tool-result-cap.js';
 import { imageLimits } from './assistant/images.js';
@@ -272,13 +274,18 @@ async function runPrompt(args: string[], config: Record<string, unknown>, repo: 
   // (open_browser spawns `open`, not a tracker no-op stub) that one-shot lacks.
   const services = createServices({ config, tools: registry, repo, onExit: () => {} });
 
+  // The one-shot prompt's own shell directory, so `cd` holds from one call to the next,
+  // and the project's instructions for it, read before every round
+  // (src/assistant/project-instructions.ts).
+  const shell = createShellState(() => config);
   const result = await agentChat([{ role: 'user', content: prompt }], {
     ...llmOpts(ai),
+    systemPrompt: instructionsPrompt(config, shell),
     extraTools: aiTools,
     toolLoading: toolLoadingMode(ai),
     toolResultMaxChars: toolResultCapFromConfig(ai),
     imageLimits: imageLimits(ai),
-    toolCtx: services as never,
+    toolCtx: { ...services, shell } as never,
     logToolRun: log.logToolRun,
     onLive: (delta: string) => process.stdout.write(delta),
   });
