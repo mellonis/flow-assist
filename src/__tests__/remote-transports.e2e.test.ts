@@ -18,6 +18,7 @@ const until = async (ok: () => boolean, label: string, n = 600) => {
   for (let i = 0; i < n && !ok(); i++) await settle(1);
   if (!ok()) throw new Error(`timed out waiting for ${label}`);
 };
+const isAlive = (pid: number): boolean => { try { process.kill(pid, 0); return true; } catch { return false; } };
 const FAKE_DIR = path.resolve(import.meta.dir, 'helpers');
 const RUN = ['bun', 'remote-fake-plugin.ts'];
 
@@ -80,8 +81,11 @@ test('two hosts share one server: one process, frames apart, state shared', asyn
     // The shared server outlives both transports (its idle timer is 60 s, the
     // adapter's DEFAULT_IDLE_MS — this test does not exercise its own exit, Task 4's
     // transport test drives idleMs directly): end it by hand so it never leaks into
-    // another test's `pgrep`.
-    try { process.kill(Number(fs.readFileSync(pidfile, 'utf8')), 'SIGTERM'); } catch { /* already gone */ }
+    // another test's `pgrep`. Waited for, not just signalled — the next test's own
+    // `pgrep`/socket check must not race this one's server on its way out.
+    const serverPid = Number(fs.readFileSync(pidfile, 'utf8'));
+    try { process.kill(serverPid, 'SIGTERM'); } catch { /* already gone */ }
+    await until(() => !isAlive(serverPid), 'the shared server to exit');
     try { fs.unlinkSync(pidfile); } catch { /* already gone */ }
     delete process.env.FAKE_PIDFILE;
   }
