@@ -532,7 +532,8 @@ export function lockState(dir: string, id: string, token: string, deps: LockDeps
 // after it, so a process opening the session meanwhile waits for neither. A session
 // another process holds is left alone (its next save would find the disk changed and
 // fork), and so is this token's own — its chat writes its own title. `updatedAt` stays
-// as it was: a rename does not move a session up the list.
+// as it was: a rename does not move a session up the list. The write goes through
+// `loadSession`/`saveSession`, as `closeSession` does, so it bumps `rev`.
 export type RenameOutcome = 'renamed' | 'held' | 'ours' | 'missing';
 export function renameSession(dir: string, id: string, title: string, token: string, deps: LockDeps = {}): RenameOutcome {
   const lock = acquireLock(dir, id, token, deps);

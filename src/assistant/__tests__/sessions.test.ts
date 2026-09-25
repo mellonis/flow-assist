@@ -379,6 +379,7 @@ test('sessionRows: newest first, each with its title, size, message count and wh
   ]);
   expect(rows[0]!.bytes).toBe(fs.statSync(path.join(dir, `${newer.id}.json`)).size);
   expect(rows[0]!.text).toContain('вверх.');
+  expect(fs.existsSync(lockPath(dir, oldest.id))).toBe(false); // listing only reads the locks
   expect(sessionRows(path.join(dir, 'missing'), 'tok-me')).toEqual([]);
 });
 
@@ -446,6 +447,8 @@ test('removeSession deletes an idle session and its lock; a held one and this to
   expect(fs.existsSync(lockPath(dir, idle.id))).toBe(false);
   expect(removeSession(dir, held.id, 'tok-me', alive)).toBe('held');
   expect(fs.existsSync(path.join(dir, `${held.id}.json`))).toBe(true);
+  expect(JSON.parse(fs.readFileSync(lockPath(dir, held.id), 'utf8')).token).toBe('tok-other');
   expect(removeSession(dir, mine.id, 'tok-me', alive)).toBe('ours');
   expect(fs.existsSync(path.join(dir, `${mine.id}.json`))).toBe(true);
+  expect(JSON.parse(fs.readFileSync(lockPath(dir, mine.id), 'utf8')).token).toBe('tok-me'); // the open chat stays protected
 });
