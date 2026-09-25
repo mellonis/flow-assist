@@ -36,7 +36,7 @@ if (process.env.FAKE_NO_HELLO) {
     });
     return new Promise<void>((resolveShutdown) => {
       peer.onRequest('hello', () => {
-        if (process.env.FAKE_CRASH_AFTER_HELLO) setTimeout(() => process.exit(3), 10);
+        if (process.env.FAKE_CRASH_AFTER_HELLO) setTimeout(() => { if (process.env.FAKE_CRASH_SAYS) process.stderr.write(process.env.FAKE_CRASH_SAYS); process.exit(3); }, 10);
         self = { n: 0, client: ++shared };
         const m = self;
         setTimeout(() => peer.notify('frame', frame(m)), 0);
@@ -49,7 +49,11 @@ if (process.env.FAKE_NO_HELLO) {
       peer.onRequest('tool.run', (p) => ({ result: (p as ToolRunParams).name === 'shared' ? `shared=${shared}` : null }));
       peer.onNotify('key', (e) => {
         const key = e as KeyEvent;
-        if (key.name === process.env.FAKE_CRASH_ON_KEY) process.exit(3);
+        if (key.name === process.env.FAKE_CRASH_ON_KEY) {
+          // Last words without a newline, as a program that dies mid-line leaves them.
+          if (process.env.FAKE_CRASH_SAYS) process.stderr.write(process.env.FAKE_CRASH_SAYS);
+          process.exit(3);
+        }
         if (key.name === process.env.FAKE_STDERR_ON_KEY) process.stderr.write(`stderr on key ${key.name}\n`);
         if (!self || key.action !== 'bump') return;
         shared++; self.n++;

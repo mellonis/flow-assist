@@ -34,8 +34,18 @@ test('a crash closes with its exit code; stderr goes to the log line by line; st
   const closed = new Promise((r) => t.onClose(r));
   await t.start();
   expect(await peer.request('hello', { hostApi: 2, config: {} }, 5_000)).toMatchObject({ name: 'fake' });
-  expect(await closed).toEqual({ code: 3 });
+  expect(await closed).toEqual({ code: 3, stderr: ['warming up'] });
   expect(log).toContain('[fake] warming up');
+});
+
+test("a crash's close carries the last five lines of stderr, 200 characters each, a last line without a newline included", async () => {
+  const long = 'x'.repeat(300);
+  const { t, peer, log } = boot({ FAKE_CRASH_AFTER_HELLO: '1', FAKE_STDERR: ['one', 'two', 'three', 'four', long, 'six'].join('\n'), FAKE_CRASH_SAYS: 'fatal: last words' });
+  const closed = new Promise((r) => t.onClose(r));
+  await t.start();
+  await peer.request('hello', { hostApi: 2, config: {} }, 5_000);
+  expect(await closed).toEqual({ code: 3, stderr: ['three', 'four', 'x'.repeat(200), 'six', 'fatal: last words'] });
+  expect(log).toContain('[fake] fatal: last words');
 });
 
 test('a command that cannot start is a rejection, not a crash', async () => {

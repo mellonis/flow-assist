@@ -20,6 +20,9 @@ export interface TransportClose {
   code?: number;
   signal?: string;
   error?: string;
+  // The last lines a child wrote to its stderr (a few, each cut short), when it wrote
+  // any — what a crash left to say; the adapter draws them under the stop.
+  stderr?: string[];
 }
 
 export interface Transport {

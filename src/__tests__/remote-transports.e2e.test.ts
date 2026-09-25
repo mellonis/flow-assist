@@ -191,3 +191,37 @@ test('a shared server that crashes under two hosts: both see the stop, both come
     for (const f of [sock, `${sock}.lock`, `${sock}.log`, pidfile]) fs.rmSync(f, { force: true });
   }
 });
+
+test("a crash draws the stop with the last lines the plugin wrote to stderr", async () => {
+  const manifest = { name: 'fake', hostApi: 2, run: RUN };
+  const log: string[] = [];
+  const transport = transportFor(manifest, FAKE_DIR, { log: (l) => log.push(l) });
+  process.env.FAKE_CRASH_ON_KEY = 'b';
+  process.env.FAKE_STDERR = 'warming up';
+  process.env.FAKE_CRASH_SAYS = 'fatal: the disk is gone';
+  try {
+    const ui = await bootApp(new ScriptedModel(), 100, 30, undefined, {}, { chatMode: null, remote: { manifest, transport } });
+    try {
+      await until(() => ui.backend.lastFrame.includes('n=0'), 'the first frame');
+      await ui.press('b');
+      await until(() => ui.backend.lastFrame.includes('plugin stopped'), 'the stop note');
+      const rows = ui.backend.lastFrame.split('\n');
+      const at = rows.findIndex((r) => r.includes('plugin stopped (exit 3)'));
+      expect(at).toBeGreaterThan(-1);
+      expect(rows[at + 1]).toContain('warming up');
+      expect(rows[at + 2]).toContain('fatal: the disk is gone');
+      // Dim, below the red stop line.
+      const y = at + 2;
+      const x = rows[y]!.indexOf('fatal');
+      expect(ui.backend.lastBuffer!.get(x, y).style.dim).toBe(true);
+      expect(log).toContain('[fake] fatal: the disk is gone');
+    } finally {
+      ui.app.unmount();
+      await transport.close(3_000);
+    }
+  } finally {
+    delete process.env.FAKE_CRASH_ON_KEY;
+    delete process.env.FAKE_STDERR;
+    delete process.env.FAKE_CRASH_SAYS;
+  }
+});

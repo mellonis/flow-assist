@@ -10,8 +10,9 @@
 // The frame is the plugin's whole visible state, sent whole whenever it wants; keys are
 // consumed by what the frame declares (./keys.ts) and sent as events; a field's state
 // is the host's (./fieldState.ts). A crash: the transport closes, the surface says
-// `plugin stopped`, every tool throws that — one in flight included — and when the
-// transport restarts `hello` runs again from an empty frame.
+// `plugin stopped` over the last lines of the process's stderr, every tool throws the
+// stop — one in flight included — and when the transport restarts `hello` runs again
+// from an empty frame.
 import { z } from 'zod';
 import type { ReactElement } from 'react';
 import { createPeer, PeerError, type ConsumeSpec, type Frame, type HelloParams, type HelloResult, type Peer, type StoreEvent, type StyledSpan, type ToolDecl, type ToolGroupDecl } from '@flow-assist/remote';
@@ -101,6 +102,9 @@ export async function remotePlugin(opts: RemotePluginOpts): Promise<Plugin> {
   // `setup`).
   let consume: { of: typeof frame; keys: Consume } | null = null;
   let stopped: string | null = null; // `plugin stopped: …` while the process is down
+  // The last lines the process wrote to stderr before it stopped (the transport's own
+  // few, each cut short), drawn dim under the stop, one row each.
+  let stoppedTail: string[] = [];
   // Whether the surface was on screen when the process went: it stays there, saying so,
   // rather than leaving the person on the start screen with no word of what happened.
   let stoppedOnScreen = false;
@@ -124,6 +128,7 @@ export async function remotePlugin(opts: RemotePluginOpts): Promise<Plugin> {
     }
     fields.applyFrame(frame.surface ?? null, frame.modals ?? {});
     stopped = null;
+    stoppedTail = [];
     notify();
   });
 
@@ -245,6 +250,7 @@ export async function remotePlugin(opts: RemotePluginOpts): Promise<Plugin> {
   });
   transport.onClose((why: TransportClose) => {
     stopped = `plugin stopped${why.error ? `: ${why.error}` : why.signal ? ` (${why.signal})` : why.code !== undefined ? ` (exit ${why.code})` : ''}`;
+    stoppedTail = why.stderr ?? [];
     // A process that goes again before its first frame leaves the screen as the last
     // stop left it: only a frame says what is on screen.
     stoppedOnScreen = (frame.keycaps ?? []).length > 0 || (stoppedOnScreen && frame === EMPTY);
@@ -261,6 +267,7 @@ export async function remotePlugin(opts: RemotePluginOpts): Promise<Plugin> {
   transport.onRestart(() => {
     sayHello().then(() => {
       stopped = null;
+      stoppedTail = [];
       if (focused !== null) send(focused ? 'focus' : 'blur');
       if (!visible) send('visible', { surface: false });
       say('restarted');
@@ -373,7 +380,7 @@ export async function remotePlugin(opts: RemotePluginOpts): Promise<Plugin> {
         // An open modal of the plugin's has the keyboard, as the host's own modals do over
         // a surface: a focused field under it must not hear what is typed into the modal.
         const hasKeyboard = host.hasKeyboard() && openModals().length === 0;
-        if (stopped) return ui.h(ui.Box, { padding: 1 }, ui.h(ui.Text, { color: 'red' }, stopped));
+        if (stopped) return ui.h(ui.Box, { padding: 1, flexDirection: 'column' }, ui.h(ui.Text, { color: 'red' }, stopped), ...stoppedTail.map((l, i) => ui.h(ui.Text, { key: i, dim: true, wrap: 'truncate' }, l)));
         return draw(frame.surface ?? null, treeCtx(ui, hasKeyboard));
       };
     },

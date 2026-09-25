@@ -679,8 +679,10 @@ same way.
 ### Running it
 
 **`run`.** The host starts the process itself, without a shell, in the plugin's
-directory. Its stderr reaches the host's own log, one line at a time; its stdout and
-stdin are the protocol, nothing else. `runPlugin` answers `shutdown` and exits on its
+directory. Its stderr reaches the host's own log, one line at a time, and when the
+process dies its last few lines (a last one without a newline included) are drawn
+under `plugin stopped` on its surface; its stdout and stdin are the protocol, nothing
+else. `runPlugin` answers `shutdown` and exits on its
 own, which is what a well-behaved process does, so the two ways the host can end one
 rarely matter:
 

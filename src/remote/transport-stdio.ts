@@ -12,6 +12,9 @@ import { LineSplitter } from '@flow-assist/remote';
 import type { Transport, TransportClose } from './transport.js';
 
 const live = new Set<ChildProcess>();
+const TAIL_LINES = 5;
+const TAIL_LINE_CHARS = 200;
+const STDERR_LATE_MS = 100;
 const SIGNALS = ['SIGTERM', 'SIGHUP', 'SIGINT'] as const;
 let hooked = false;
 
@@ -62,10 +65,34 @@ export function stdioTransport(opts: StdioOpts): Transport & { start(): Promise<
       // A write to a child that has just died fails with EPIPE; the exit event says
       // what happened, in better words, so the error is swallowed here.
       c.stdin?.on('error', () => {});
+      // Each stderr line goes to the log; the last few are kept for the close, which
+      // is what the adapter draws under `plugin stopped` — the words a crash left.
       let err = '';
+      const tail: string[] = [];
+      const said = (raw: string) => {
+        const line = raw.trimEnd();
+        if (!line) return;
+        opts.log(`[${opts.name}] ${line}`);
+        tail.push(line.slice(0, TAIL_LINE_CHARS));
+        if (tail.length > TAIL_LINES) tail.shift();
+      };
+      let stderrEnded = false;
       c.stderr!.setEncoding('utf8');
-      c.stderr!.on('data', (chunk: string) => { err += chunk; let nl; while ((nl = err.indexOf('\n')) !== -1) { const line = err.slice(0, nl).trimEnd(); err = err.slice(nl + 1); if (line) opts.log(`[${opts.name}] ${line}`); } });
-      c.once('exit', (code, signal) => { exited = true; closeOnce(signal ? { signal } : { code: code ?? 0 }); });
+      c.stderr!.on('data', (chunk: string) => { err += chunk; let nl; while ((nl = err.indexOf('\n')) !== -1) { said(err.slice(0, nl)); err = err.slice(nl + 1); } });
+      c.stderr!.once('end', () => { stderrEnded = true; });
+      c.once('exit', (code, signal) => {
+        exited = true;
+        // A last line with no newline is still a line. The pipe usually ends before
+        // `exit`; when it has not yet, its last bytes get a moment to arrive.
+        const report = () => {
+          said(err); err = '';
+          const why: TransportClose = signal ? { signal } : { code: code ?? 0 };
+          closeOnce(tail.length ? { ...why, stderr: [...tail] } : why);
+        };
+        if (stderrEnded) { report(); return; }
+        const late = setTimeout(report, STDERR_LATE_MS);
+        c.stderr!.once('end', () => { clearTimeout(late); report(); });
+      });
     }),
     send: (line) => { if (closedWith || !child?.stdin?.writable) return; try { child.stdin.write(`${line}\n`); } catch {} },
     onLine: (f) => { lines.push(f); },

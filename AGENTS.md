@@ -424,9 +424,11 @@ protocol as its authors read it is docs/plugins.md, "A plugin in another languag
   above: the host does not wait past its own bound, so a `run` child still alive at it
   only ever gets the process's own exit hook's `SIGTERM` (`stopAllRemote`,
   `src/remote/transport-stdio.ts`) — never a `SIGKILL` from the host's own exit.
-- **A crash**: the transport closes, the surface says `plugin stopped`, every tool in
-  flight and every new one throws it, and `onRestart` runs `hello` again from an
-  empty frame.
+- **A crash**: the transport closes, the surface says `plugin stopped` with the last
+  lines a `run` child wrote to stderr dim below it (`TransportClose.stderr`: five
+  lines at most, 200 characters each, a last line without a newline included), every
+  tool in flight and every new one throws the stop, and `onRestart` runs `hello` again
+  from an empty frame.
 - **`host.store` has no change hook**, so a JS plugin may read another's slice but is
   never told when it changes. **`host.store.set` by a remote plugin is different**: it
   fans out as a `store` notification to every OTHER remote plugin of the same app
