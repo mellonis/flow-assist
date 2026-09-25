@@ -22,8 +22,8 @@ const POLL_MS = 50;
 declare const Bun: {
   connect(opts: {
     unix: string;
-    socket: { data(socket: unknown, data: Uint8Array): void; open(): void; close(): void; error(socket: unknown, error: Error): void };
-  }): Promise<{ write(chunk: string): void; end(): void; unref(): void }>;
+    socket: { data(socket: unknown, data: Uint8Array): void; open(): void; close(): void; error(socket: unknown, error: Error): void; drain(): void };
+  }): Promise<{ write(chunk: Uint8Array): number; end(): void; unref(): void }>;
 };
 
 export function socketTransport(opts: SocketOpts): Transport & { start(): Promise<void> } {
@@ -31,12 +31,30 @@ export function socketTransport(opts: SocketOpts): Transport & { start(): Promis
   const closes: Array<(w: TransportClose) => void> = [];
   let conn: Awaited<ReturnType<typeof Bun.connect>> | null = null;
   let closedWith: TransportClose | undefined;
-  const closeOnce = (why: TransportClose) => { if (closedWith) return; closedWith = why; for (const f of closes) f(why); };
+  const queue: Uint8Array[] = []; // bytes still to write — see `flush`
+  const closeOnce = (why: TransportClose) => { if (closedWith) return; closedWith = why; queue.length = 0; for (const f of closes) f(why); };
   const splitter = new LineSplitter((l) => lines.forEach((f) => f(l)), (n) => opts.log(`[${opts.name}] a line of ${n} bytes was dropped`));
+  // One decoder for the connection's whole life, streaming: a character split across
+  // two chunks is completed by the next one rather than read as two broken halves.
+  const decoder = new TextDecoder();
+  // Bun's socket `write` takes only what fits in the kernel's buffer and returns how
+  // many bytes that was — the rest is not kept anywhere. So lines go out through a
+  // queue of bytes: whatever does not fit waits for `drain`, and a line sent while
+  // anything waits joins the back of the queue, so lines never overtake each other.
+  const flush = () => {
+    while (conn && queue.length) {
+      const head = queue[0]!;
+      const n = conn.write(head);
+      if (n >= head.length) { queue.shift(); continue; }
+      if (n > 0) queue[0] = head.subarray(n);
+      return;
+    }
+  };
 
   const connect = async () => {
     const c = await Bun.connect({ unix: opts.socketPath, socket: {
-      data: (_s, d) => splitter.feed(new TextDecoder().decode(d)),
+      data: (_s, d) => splitter.feed(decoder.decode(d, { stream: true })),
+      drain: () => flush(),
       open() {},
       close: () => closeOnce({ error: 'connection closed' }),
       error: (_s, e) => closeOnce({ error: e.message }),
@@ -84,7 +102,7 @@ export function socketTransport(opts: SocketOpts): Transport & { start(): Promis
         if (Date.now() >= deadline) throw new Error(`${opts.name}: no server answered on ${opts.socketPath} within ${waitMs} ms`);
       }
     },
-    send: (line) => { if (!closedWith) conn?.write(`${line}\n`); },
+    send: (line) => { if (closedWith || !conn) return; queue.push(Buffer.from(`${line}\n`)); flush(); },
     onLine: (f) => { lines.push(f); },
     onClose: (f) => { closes.push(f); },
     // Reported BEFORE `end()`: ending the connection can run its own `close` handler

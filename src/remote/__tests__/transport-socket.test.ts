@@ -1,13 +1,18 @@
 import { expect, test } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
-import { createPeer } from '@flow-assist/remote';
+import { createPeer, serveConnections } from '@flow-assist/remote';
 import { socketPath } from '../sockets';
 import { socketTransport } from '../transport-socket';
 
 const FAKE = ['bun', path.resolve(import.meta.dir, '../../__tests__/helpers/remote-fake-plugin.ts')];
 const cwd = path.resolve(import.meta.dir, '../../..');
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const until = async (ok: () => boolean, label: string, ms = 3_000) => {
+  const end = Date.now() + ms;
+  while (!ok() && Date.now() < end) await wait(10);
+  if (!ok()) throw new Error(`timed out waiting for ${label}`);
+};
 const host = (sock: string, pidfile: string) => {
   const log: string[] = [];
   const t = socketTransport({ name: 'fake', socketPath: sock, run: FAKE, cwd, env: { FAKE_PIDFILE: pidfile }, log: (l) => log.push(l) });
@@ -74,3 +79,34 @@ test('close() fires onClose once, host-initiated; a second close() does not fire
   await a.t.close(0);
   expect(closes).toEqual([{}]);
 });
+
+test('a line of over a megabyte of non-ASCII text crosses the socket whole, both ways', async () => {
+  const sock = socketPath('t6.sock');
+  // Cyrillic, two bytes a character: well past the socket's own buffer, and a chunk
+  // boundary falls inside a character somewhere along it.
+  const big = 'проверка '.repeat(70_000);
+  expect(Buffer.byteLength(big)).toBeGreaterThan(1_000_000);
+  const serverGot: string[] = [];
+  const listening = new Promise<void>((r) => {
+    void serveConnections(async (io) => {
+      await new Promise<void>((leave) => {
+        io.onLine((l) => { serverGot.push(l); io.send(`back:${l}`); io.send('after'); });
+        io.onClose?.(leave);
+      });
+    }, sock, { onListening: r, defaultIdleMs: 50 });
+  });
+  await listening;
+  const t = socketTransport({ name: 'big', socketPath: sock, cwd, log: () => {} });
+  const got: string[] = [];
+  t.onLine((l) => got.push(l));
+  await t.start();
+  t.send(big);
+  t.send('next');
+  await until(() => serverGot.length >= 2, 'both lines at the server', 5_000);
+  await until(() => got.length >= 4, 'both lines back', 5_000);
+  expect(serverGot).toEqual([big, 'next']);
+  expect(got[0] === `back:${big}`).toBe(true);
+  expect(got.slice(1)).toEqual(['after', 'back:next', 'after']);
+  await t.close(0);
+  await until(() => !fs.existsSync(sock), 'the server to go on its idle');
+}, 15_000);

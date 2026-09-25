@@ -22,7 +22,7 @@ import type { PeerIo } from './peer.js';
 
 export interface ServeOpts { defaultIdleMs?: number; onListening?: () => void }
 
-interface Client { feed: (chunk: string) => void; leave: () => void }
+interface Client { feed: (chunk: Uint8Array) => void; flush: () => void; leave: () => void }
 
 // Bun's unix socket API — the two calls this file needs; its full type definitions
 // are not part of the typecheck (the same convention as `src/loader/compat.ts`'s
@@ -35,6 +35,7 @@ declare const Bun: {
       data(socket: BunSocket, data: Uint8Array): void;
       close(socket: BunSocket): void;
       error(socket: BunSocket, error: Error): void;
+      drain(socket: BunSocket): void;
     };
   }): { stop(force?: boolean): void };
   connect(opts: {
@@ -42,7 +43,7 @@ declare const Bun: {
     socket: { open(): void; data(): void; close(): void; error(): void };
   }): Promise<{ end(): void }>;
 };
-interface BunSocket { data: Client | undefined; write(chunk: string): void; end(): void }
+interface BunSocket { data: Client | undefined; write(chunk: Uint8Array): number; end(): void }
 
 // Whether some other process already answers `socketPath` — a live server accepts
 // the probe connection, a stale file (or no file at all) refuses it.
@@ -92,6 +93,24 @@ export async function serveConnections(onConnection: (io: PeerIo) => Promise<voi
           clients++;
           if (idle) { clearTimeout(idle); idle = null; }
           const lines: Array<(l: string) => void> = [];
+          // One streaming decoder per connection: a character split across two chunks
+          // is completed by the next one rather than read as two broken halves.
+          const decoder = new TextDecoder();
+          // Bun's socket `write` takes only what fits in the kernel's buffer and returns
+          // how many bytes that was — the rest is not kept anywhere. So lines go out
+          // through a queue of bytes: whatever does not fit waits for `drain`, a line
+          // sent while anything waits joins the back, and nothing is sent after close.
+          const queue: Uint8Array[] = [];
+          let gone = false;
+          const flush = () => {
+            while (!gone && queue.length) {
+              const head = queue[0]!;
+              const n = conn.write(head);
+              if (n >= head.length) { queue.shift(); continue; }
+              if (n > 0) queue[0] = head.subarray(n);
+              return;
+            }
+          };
           const splitter = new LineSplitter((raw) => {
             // The first hello's idleMs is the server's, kept for the process's life.
             if (idleMs === null) {
@@ -102,14 +121,16 @@ export async function serveConnections(onConnection: (io: PeerIo) => Promise<voi
             }
             lines.forEach((f) => f(raw));
           });
-          const io: PeerIo = { send: (l) => { conn.write(`${l}\n`); }, onLine: (f) => { lines.push(f); } };
+          const io: PeerIo = { send: (l) => { if (gone) return; queue.push(Buffer.from(`${l}\n`)); flush(); }, onLine: (f) => { lines.push(f); } };
           conn.data = {
-            feed: (s) => splitter.feed(s),
-            leave: () => { clients--; if (clients === 0) armIdle(); },
+            feed: (d) => splitter.feed(decoder.decode(d, { stream: true })),
+            flush,
+            leave: () => { gone = true; queue.length = 0; clients--; if (clients === 0) armIdle(); },
           };
           onConnection(io).then(() => conn.end(), () => conn.end());
         },
-        data(conn, d) { conn.data?.feed(new TextDecoder().decode(d)); },
+        data(conn, d) { conn.data?.feed(d); },
+        drain(conn) { conn.data?.flush(); },
         close(conn) { conn.data?.leave(); },
         error() {},
       },
