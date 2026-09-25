@@ -26,14 +26,21 @@ import { createFieldState } from './fieldState.js';
 import { canonicalConsume, consumes, keyEventFor, type Consume } from './keys.js';
 import { localeFromEnv } from './locale.js';
 import type { RemoteManifest, RestartingTransport, TransportClose } from './transport.js';
+import { registerRemoteStop } from './lifecycle.js';
 
 export const HELLO_TIMEOUT_MS = 10_000;
 export const VIEW_RENDER_TIMEOUT_MS = 2_000;
 export const COMMAND_TIMEOUT_MS = 5_000;
 export const DEFAULT_IDLE_MS = 60_000;
-// How long a transport that failed its handshake is given to stop, as the transport
-// factory gives any child it stops.
-const HELLO_FAILED_GRACE_MS = 3_000;
+// How long a transport is given to stop once the host has asked it to: on a failed
+// handshake (this file, both on the first `hello` and on a restart's), and on the
+// host's own exit (./lifecycle.ts) — the same grace either way, since it is the
+// transport factory's own stdio child that is being given time to go
+// (./transports.ts).
+const STOP_GRACE_MS = 3_000;
+// How long the host waits for `shutdown` to be answered before giving up on it and
+// closing the transport anyway — a dead plugin needs no asking.
+const SHUTDOWN_REQUEST_TIMEOUT_MS = 1_000;
 // The furniture handler's priority, by the host's convention (docs/plugins.md, keys):
 // an open modal of the plugin's — the level the host's own modals take — hears its keys
 // before any surface; the plugin's surface on screen is a base screen; off screen the
@@ -203,9 +210,21 @@ export async function remotePlugin(opts: RemotePluginOpts): Promise<Plugin> {
   await transport.start();
   let registration: HelloResult & { schema: unknown };
   try { registration = await sayHello(); } catch (e) {
-    await transport.close(HELLO_FAILED_GRACE_MS);
+    await transport.close(STOP_GRACE_MS);
     throw e;
   }
+
+  // ── the host's own stop, for when the App exits (./lifecycle.ts) ────────────
+  // `shutdown` first, so the plugin gets the chance to say it — its answer is not
+  // read, only waited for, briefly; a plugin already stopped, or one that never
+  // answers, needs no more than the transport's own close. Unregistered once run, and
+  // also once a restart's handshake fails below: past that point the supervisor is
+  // closed for good and there is nothing left to stop.
+  const unregisterStop = registerRemoteStop(async () => {
+    unregisterStop();
+    if (!stopped) { try { await peer.request('shutdown', {}, SHUTDOWN_REQUEST_TIMEOUT_MS); } catch { /* a dead plugin needs no asking */ } }
+    await transport.close(STOP_GRACE_MS);
+  });
 
   // ── the events the host sends ───────────────────────────────────────────────
   const send = (method: string, params?: unknown) => { if (!stopped) peer.notify(method, params); };
@@ -248,9 +267,11 @@ export async function remotePlugin(opts: RemotePluginOpts): Promise<Plugin> {
       notify();
     }, (e: unknown) => {
       // The new process refused its handshake: it is stopped, and the close that follows
-      // is the supervisor's to count.
+      // is the supervisor's to count. The supervisor is done for good once this close
+      // resolves, so the host's own stop above has nothing left to do.
       say(`restart failed: ${message(e)}`);
-      void transport.close(HELLO_FAILED_GRACE_MS);
+      unregisterStop();
+      void transport.close(STOP_GRACE_MS);
     });
   });
 

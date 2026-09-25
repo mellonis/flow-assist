@@ -25,6 +25,7 @@ import {
   configWarnings,
 } from './config/load.js';
 import { createPluginRepo } from './loader/repo.js';
+import { stopRemotePlugins } from './remote/lifecycle.js';
 import { noPluginsNote } from './loader/install-root.js';
 import { fetchPluginFromRegistry } from './loader/registry-download.js';
 import { installPluginArchive, isArchiveSource } from './loader/archive-install.js';
@@ -331,14 +332,23 @@ async function runInteractive(config: Record<string, unknown>, repo: PluginRepo)
   const backend = new TtyBackend(process.stdout, process.stdin, { mouse: mouseEnabled(config), onConsole: consoleLog.onConsole });
 
   let handle: { unmount(): void } | undefined;
+  // Guards against a second call landing while the first is still waiting on remote
+  // plugins to stop — the exit path runs once.
+  let exiting = false;
   const onExit = () => {
+    if (exiting) return;
+    exiting = true;
     handle?.unmount();
     backend.dispose?.();
     // What was printed through the console while the app ran, now that the terminal is
     // the shell's again: the log that showed it is gone with the app.
     const printed = consoleLog.kept();
     if (printed.length) process.stderr.write(`${printed.join('\n')}\n`);
-    process.exit(0);
+    // Every remote plugin gets a chance to say `shutdown` and its transport a chance
+    // to close cleanly (./remote/lifecycle.ts) before the process itself goes; the
+    // exit hook (./remote/transport-stdio.ts) is the backstop for whatever this
+    // leaves running.
+    void stopRemotePlugins().then(() => process.exit(0));
   };
   const pluginsNote = await missingPluginsNote(repo);
   handle = await renderApp(backend, { plugins, config, renders: {}, tools: registry, onExit, pluginsNote: pluginsNote ?? undefined, loadNotes, consoleLog });
