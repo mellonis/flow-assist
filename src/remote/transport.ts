@@ -25,7 +25,9 @@ export interface TransportClose {
 export interface Transport {
   // One line, without its newline. Nothing is sent after `onClose` has fired.
   send(line: string): void;
-  // Every line the other side writes, without its newline, in order.
+  // Every line the other side writes, without its newline, in order — split by
+  // `@flow-assist/remote`'s `LineSplitter`, which is where the 64 MiB line guard lives;
+  // the peer above has no cap of its own.
   onLine(fn: (line: string) => void): void;
   // Fires once, when the other side is gone.
   onClose(fn: (why: TransportClose) => void): void;

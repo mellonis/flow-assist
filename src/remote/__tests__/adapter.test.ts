@@ -266,3 +266,35 @@ test('several focused nodes in one root are said once; one per root, a surface\'
   await tick();
   expect(lines.filter((l) => l.includes('focused'))).toEqual(['[fake] the surface has 2 focused nodes — only one can have the keyboard']);
 });
+
+test('the frame limit is in bytes: a frame of two-byte characters over 4 MiB is dropped though its length is under it', async () => {
+  const { transport, plugin } = fakeTransport();
+  hello(plugin);
+  const lines: string[] = [];
+  const p = await remotePlugin({ manifest, transport, config: {}, make: makeFactory({}), log: (l) => lines.push(l) });
+  plugin.notify('frame', { surface: ['Text', {}, 'kept'], keycaps: ['kept'] });
+  await tick();
+  const text = 'я'.repeat(2_100_000); // 2.1 M code units, 4.2 MB as UTF-8
+  plugin.notify('frame', { surface: ['Text', {}, text], keycaps: ['big'] });
+  await tick();
+  expect(p.keycaps!({} as never)).toEqual(['kept']);
+  expect(lines.some((l) => l.includes('frame dropped') && l.includes('MiB'))).toBe(true);
+});
+
+test('host.store refuses the keys that reach an object\'s prototype, for set and get alike', async () => {
+  const { transport, plugin } = fakeTransport();
+  hello(plugin);
+  const p = await remotePlugin({ manifest, transport, config: {}, make: makeFactory({}) });
+  const store: Record<string, unknown> = {};
+  p.setup!({ host: { store, services: {}, notify: () => {} } } as never);
+  for (const key of ['__proto__', 'constructor', 'prototype']) {
+    const set = await plugin.request('host.store.set', { key, value: { polluted: true } }).then(() => null, (e: PeerError) => e);
+    expect(set?.code).toBe(PeerError.INVALID_PARAMS);
+    const get = await plugin.request('host.store.get', { key }).then(() => null, (e: PeerError) => e);
+    expect(get?.code).toBe(PeerError.INVALID_PARAMS);
+  }
+  expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+  expect(Object.getPrototypeOf((store as Record<string, object>).fake)).toBe(Object.prototype);
+  await plugin.request('host.store.set', { key: 'ok', value: 1 });
+  expect(await plugin.request('host.store.get', { key: 'ok' })).toBe(1);
+});

@@ -61,9 +61,14 @@ export function servePlugin<M, Msg = HostEvent>(def: PluginDef<M, Msg>, io: Peer
   let model: M | undefined;
   let queue: Promise<void> = Promise.resolve();
   const frame = () => { if (model !== undefined) peer.notify('frame', def.view(model)); };
-  const host = hostOver(peer, frame);
   const pluginName = def.hello.name ?? 'plugin';
   const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
+  // The author's log is stderr (the host forwards it): one line per failed step.
+  const failed = (e: unknown) => { process.stderr.write(`[${pluginName}] update failed: ${message(e)}\n`); };
+  // A frame drawn outside a step — the first one, after `hello`, and `host.redraw()` —
+  // fails the way a step does: nothing is sent, the model is untouched, one line.
+  const draw = () => { try { frame(); } catch (e) { failed(e); } };
+  const host = hostOver(peer, draw);
   // Queues one step of the model against `queue`, isolating its own failure: a
   // plugin author's bug in `update` or a command handler must not take the whole
   // runtime down with it. On success the model advances and a frame follows; on
@@ -82,7 +87,7 @@ export function servePlugin<M, Msg = HostEvent>(def: PluginDef<M, Msg>, io: Peer
         frame(); // drawing is part of the same step: a throwing `view` fails it too
       } catch (e) {
         model = before;
-        process.stderr.write(`[${pluginName}] update failed: ${message(e)}\n`);
+        failed(e);
         throw e;
       }
     });
@@ -117,7 +122,7 @@ export function servePlugin<M, Msg = HostEvent>(def: PluginDef<M, Msg>, io: Peer
     };
     peer.onRequest('hello', (params) => {
       model = def.init(params as HelloParams);
-      queueMicrotask(frame);
+      queueMicrotask(draw);
       return { hostApi: PROTOCOL_HOST_API, ...def.hello, commands: commandDecls, tools: toolDecls };
     });
     peer.onRequest('tool.run', async (p) => {

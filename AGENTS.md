@@ -384,7 +384,8 @@ into an ordinary `Plugin`; nothing else in the host knows a plugin is remote.
   never told when it changes. **`host.store.set` by a remote plugin is different**: it
   fans out as a `store` notification to every OTHER remote plugin of the same app
   (`src/remote/index.ts`'s `storeBus`) — a JS plugin's own writes reach no one this
-  way.
+  way. A slice is a plain object, so `host.store.get`/`set` refuse `__proto__`,
+  `constructor` and `prototype` as keys (`-32602`).
 - `hello.locale` is read from the environment in gettext's own order
   (`src/remote/locale.ts`): `FLOW_ASSIST_LOCALE`, then `LC_ALL`, `LC_MESSAGES`, `LANG`.
 

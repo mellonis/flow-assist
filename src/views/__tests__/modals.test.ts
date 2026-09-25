@@ -558,3 +558,16 @@ test('a finished message\'s view rows miss the cache once the view revision is b
   expect(drawn()).toContain('the card, rendered');
   expect(drawn()).not.toContain('▸ card');
 });
+
+test('a message with no views keeps its cached rows across a view-revision bump: the cache does not grow per late answer', () => {
+  const plain = { role: 'assistant', content: 'plain words' };
+  const withView = { role: 'view', content: '', views: [{ kind: 'card', data: {}, phase: 'done', startedAt: 0 }] };
+  const o: RowOpts = { wrap: 60, folds: { open: true, except: new Set() }, viewLines: 20, notes: 'step', detailsKey: '^o', renderers: { card: () => [[{ text: 'card' }]] }, now: 0, palette: {} };
+  const first = chatRows([plain, withView] as never, o);
+  bumpViewRevision();
+  const second = chatRows([plain, withView] as never, o);
+  const plainRow = (rows: typeof first) => rows.find((r) => (r.spans ?? []).some((s) => String(s.text).includes('plain words')));
+  const viewRow = (rows: typeof first) => rows.find((r) => (r.spans ?? []).some((s) => String(s.text).includes('card')));
+  expect(plainRow(second)).toBe(plainRow(first)!); // the same row object: a cache hit
+  expect(viewRow(second)).not.toBe(viewRow(first)!); // laid out again: a miss
+});

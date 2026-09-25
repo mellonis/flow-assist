@@ -226,3 +226,43 @@ test('a throwing view fails the whole step, not just the update: the model stays
     process.stderr.write = realWrite;
   }
 });
+
+test('a view that throws on the first frame or on host.redraw() is caught the same way: one stderr line, the model kept, the plugin serving', async () => {
+  const [hostIo, pluginIo] = pair();
+  const host = createPeer(hostIo);
+  const frames: unknown[] = [];
+  host.onNotify('frame', (f) => frames.push(f));
+  const stderr: string[] = [];
+  const realWrite = process.stderr.write.bind(process.stderr);
+  process.stderr.write = ((chunk: string) => { stderr.push(chunk); return true; }) as typeof process.stderr.write;
+  let broken = true;
+  let redraw: () => void = () => {};
+  try {
+    const run = runPlugin<{ n: number }, HostEvent>({
+      hello: { name: 'shaky' },
+      init: () => ({ n: 0 }),
+      update: (e, m, h) => { redraw = h.redraw; return e.type === 'key' ? { n: m.n + 1 } : m; },
+      view: (m) => { if (broken) throw new Error('first draw'); return { surface: ['Text', {}, `n=${m.n}`] }; },
+    }, pluginIo);
+    await host.request('hello', { hostApi: 2, config: {} });
+    await tick();
+    expect(frames).toEqual([]);
+    expect(stderr.filter((l) => l.includes('[shaky] update failed: first draw'))).toHaveLength(1);
+    broken = false;
+    host.notify('key', { name: 'k', id: 'k' });
+    await tick();
+    expect(frames.at(-1)).toEqual({ surface: ['Text', {}, 'n=1'] });
+    broken = true;
+    redraw();
+    await tick();
+    expect(stderr.filter((l) => l.includes('[shaky] update failed: first draw'))).toHaveLength(2);
+    broken = false;
+    host.notify('key', { name: 'k', id: 'k' });
+    await tick();
+    expect(frames.at(-1)).toEqual({ surface: ['Text', {}, 'n=2'] }); // the model was kept through the failed redraw
+    await host.request('shutdown');
+    await run;
+  } finally {
+    process.stderr.write = realWrite;
+  }
+});

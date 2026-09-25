@@ -568,8 +568,9 @@ function messageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): ChatRow
   // that moved any of them — not only the two console-tail colours — must still miss
   // the cache.
   // `viewRevision()`: a renderer's late answer (views.ts) — a done view's rows are
-  // otherwise laid out once, and its placeholder would stay.
-  const key = `${o.wrap}:${open}:${o.folds.open ? 1 : 0}:${viewRevision()}:${last ? 1 : 0}:${o.viewLines}:${o.notes}:${o.detailsKey}:${at}:${clock}:${Object.values(o.palette).join(',')}`;
+  // otherwise laid out once, and its placeholder would stay. Only a message that has
+  // views reads it: every other message would gain a cache entry per late answer.
+  const key = `${o.wrap}:${open}:${o.folds.open ? 1 : 0}:${views.length ? viewRevision() : ''}:${last ? 1 : 0}:${o.viewLines}:${o.notes}:${o.detailsKey}:${at}:${clock}:${Object.values(o.palette).join(',')}`;
   let byKey = rowCache.get(m);
   if (!byKey) rowCache.set(m, (byKey = new Map()));
   let rows = byKey.get(key);

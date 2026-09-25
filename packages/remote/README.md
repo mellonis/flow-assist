@@ -55,7 +55,8 @@ await runPlugin<Model, HostEvent>({
 
 `update` is folded one event at a time — an author's own bug in it, or a thrown
 promise, fails only that step: the model stays what it was, one line goes to stderr,
-and the plugin keeps serving the events after it.
+and the plugin keeps serving the events after it. A `view` that throws fails the same
+way, whether it draws after a step, the first frame after `hello`, or `host.redraw()`.
 
 ## `runPlugin`
 

@@ -107,7 +107,7 @@ export async function remotePlugin(opts: RemotePluginOpts): Promise<Plugin> {
     return (config.plugins?.[name] ?? {}) as Record<string, unknown>;
   };
   peer.onNotify('frame', (raw) => {
-    const v = validateFrame(raw, JSON.stringify(raw ?? null).length);
+    const v = validateFrame(raw, Buffer.byteLength(JSON.stringify(raw ?? null)));
     if (!v.ok) { say(`frame dropped: ${v.why}`); return; }
     frame = v.frame;
     frameSeq++;
@@ -140,13 +140,20 @@ export async function remotePlugin(opts: RemotePluginOpts): Promise<Plugin> {
     const r = await services().chatLLM?.(messages, {});
     return { content: r?.content ?? '', transcript: r?.transcript ?? [] };
   });
-  peer.onRequest('host.store.get', (p) => storeSlice()[param<string>(p, 'key', 'string')] ?? null);
+  // A slice is a plain object, so a key that names its prototype would read or replace
+  // what every object inherits rather than a value of the plugin's.
+  const storeKey = (p: unknown): string => {
+    const key = param<string>(p, 'key', 'string');
+    if (key === '__proto__' || key === 'constructor' || key === 'prototype') throw new PeerError(`key "${key}" is reserved`, PeerError.INVALID_PARAMS);
+    return key;
+  };
+  peer.onRequest('host.store.get', (p) => { const key = storeKey(p); return Object.hasOwn(storeSlice(), key) ? storeSlice()[key] ?? null : null; });
   // Told on to the App's other remote plugins as the host.store key that changed — this
   // plugin's name — and its slice whole (./index.ts).
   const hearStore = (ev: StoreEvent) => send('store', ev);
   peer.onRequest('host.store.set', (p) => {
     const slice = storeSlice();
-    slice[param<string>(p, 'key', 'string')] = (p as { value?: unknown }).value;
+    slice[storeKey(p)] = (p as { value?: unknown }).value;
     if (api) opts.storeBus?.said(api.host.store, hearStore, { key: name, value: slice });
     notify();
   });

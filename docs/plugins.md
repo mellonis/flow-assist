@@ -479,8 +479,9 @@ The host sends these notifications — what changed, told once, by itself:
 
 The plugin sends exactly one notification back, whenever its state changes: `frame`,
 whose params are the plugin's whole visible state —
-`{ surface?, modals?, keycaps?, context?, keys? }` — never a diff. A frame over 4 MiB,
-or nested past 64 deep, is dropped whole and the previous one stays on screen.
+`{ surface?, modals?, keycaps?, context?, keys? }` — never a diff. A frame over 4 MiB
+(its JSON, counted in UTF-8 bytes), or nested past 64 deep, is dropped whole and the
+previous one stays on screen.
 
 The plugin also makes requests of its own, the services `@flow-assist/remote`'s `Host`
 wraps. The host's own handlers answer most of these with nothing to report, which a
@@ -493,7 +494,7 @@ JSON-RPC result with no value carries as `null`, never `{}`:
 | `host.chatLLM` | `{ messages }` | `{ content, transcript }` |
 | `host.copyToClipboard` | `{ text }` | `null` |
 | `host.store.get` | `{ key }` | the plugin's own value, or `null` |
-| `host.store.set` | `{ key, value }` | `null` |
+| `host.store.set` | `{ key, value }` | `null` — `__proto__`, `constructor` and `prototype` are refused as keys, for `get` too |
 | `host.cache.get` / `.set` / `.del` | `{ key }` / `{ key, value }` / `{ key }` | the value or `null` / `null` / `null` |
 | `host.config.get` | — | the plugin's own slice of the config |
 
@@ -606,7 +607,8 @@ A JSON-RPC error's `code`:
   2 s, `command.run`'s 5 s, 60 s default for a request the plugin makes of the host).
 - `-32001` — the connection ended while the request was pending.
 - `-32601` — the method is not one either side answers.
-- `-32602` — a required field on a `host.*` request is missing or the wrong type.
+- `-32602` — a required field on a `host.*` request is missing or the wrong type, or a
+  `host.store` key is one of the reserved three.
 - `-32603` — a handler threw.
 
 A line that does not parse as a JSON-RPC message is dropped, never answered with an
@@ -621,38 +623,45 @@ its stdout. Nothing here is specific to `@flow-assist/remote` — a plugin in C,
 language that reads stdin and writes stdout, exchanges lines exactly like these:
 
 ```
-→ {"jsonrpc":"2.0","id":1,"method":"hello","params":{"hostApi":2,"flowtty":"1.0.0-alpha.28","size":{"terminal":{"width":80,"height":24},"surface":{"width":80,"height":22}},"config":{},"idleMs":60000}}
-← {"jsonrpc":"2.0","method":"frame","params":{"surface":null,"keycaps":[],"keys":{"consume":["S"]}}}
-← {"jsonrpc":"2.0","id":1,"result":{"hostApi":2,"name":"remote-login","keys":{"open":"S"},"entry":["open"],"commands":[],"tools":[]}}
+→ {"jsonrpc":"2.0","id":1,"method":"hello","params":{"hostApi":2,"flowtty":"1.0.0-alpha.31","size":{"terminal":{"width":80,"height":24},"surface":{"width":80,"height":22}},"config":{},"idleMs":60000}}
+← {"jsonrpc":"2.0","method":"frame","params":{"surface":null,"keycaps":[],"keys":{"consume":["open"]}}}
+← {"jsonrpc":"2.0","id":1,"result":{"hostApi":2,"name":"remote-login","keys":{"open":"S","next":"tab","login":"enter","close":"esc"},"entry":["open"],"commands":[],"tools":[]}}
 → {"jsonrpc":"2.0","method":"resize","params":{"terminal":{"width":100,"height":29},"surface":{"width":100,"height":23}}}
 → {"jsonrpc":"2.0","method":"focus"}
-← {"jsonrpc":"2.0","method":"frame","params":{"surface":null,"keycaps":[],"keys":{"consume":["S"]}}}
+← {"jsonrpc":"2.0","method":"frame","params":{"surface":null,"keycaps":[],"keys":{"consume":["open"]}}}
+← {"jsonrpc":"2.0","method":"frame","params":{"surface":null,"keycaps":[],"keys":{"consume":["open"]}}}
 → {"jsonrpc":"2.0","method":"key","params":{"name":"S","id":"S","action":"open"}}
-← {"jsonrpc":"2.0","method":"frame","params":{"surface":["Box",{"flexDirection":"column","padding":1},["Text",{"bold":true},"Sign in"],["Text",{"dim":true},"Name"],["TextInput",{"id":"name","isFocused":true}],["Text",{"dim":true},"Password"],["TextInput",{"id":"pass","mask":true,"isFocused":false}],["Text",{"inverse":false},"[ Log in ]"],["Text",{"dim":true},""]],"keycaps":[{"action":"open","label":"form"},"tab next","⏎ log in","esc close"],"context":[{"label":"Sign in","text":"name: (empty) · focus: name"}],"keys":{"consume":["tab","enter","esc"]}}}
+← {"jsonrpc":"2.0","method":"frame","params":{"surface":["Box",{"flexDirection":"column","padding":1},["Text",{"bold":true},"Sign in"],["Text",{"dim":true},"Name"],["TextInput",{"id":"name","value":"","isFocused":true}],["Text",{"dim":true},"Password"],["TextInput",{"id":"pass","value":"","mask":true,"isFocused":false}],["Text",{"inverse":false},"[ Log in ]"],["Text",{"dim":true},""]],"keycaps":[{"action":"open","label":"form"},{"action":"next","label":"next"},{"action":"login","label":"log in"},{"action":"close","label":"close"}],"context":[{"label":"Sign in","text":"name: (empty) · focus: name"}],"keys":{"consume":["open","next","login","close"]}}}
 → {"jsonrpc":"2.0","method":"changed","params":{"id":"name","value":"a"}}
 → {"jsonrpc":"2.0","method":"changed","params":{"id":"name","value":"an"}}
 → {"jsonrpc":"2.0","method":"changed","params":{"id":"name","value":"ann"}}
-← {"jsonrpc":"2.0","method":"frame", … "context":[{"label":"Sign in","text":"name: ann · focus: name"}], …}
-→ {"jsonrpc":"2.0","method":"key","params":{"name":"tab","id":"tab"}}
+← {"jsonrpc":"2.0","method":"frame", … ["TextInput",{"id":"name","value":"a","isFocused":true}], … "context":[{"label":"Sign in","text":"name: a · focus: name"}], …}
+← {"jsonrpc":"2.0","method":"frame", … ["TextInput",{"id":"name","value":"an","isFocused":true}], … "context":[{"label":"Sign in","text":"name: an · focus: name"}], …}
+← {"jsonrpc":"2.0","method":"frame", … ["TextInput",{"id":"name","value":"ann","isFocused":true}], … "context":[{"label":"Sign in","text":"name: ann · focus: name"}], …}
+→ {"jsonrpc":"2.0","method":"key","params":{"name":"tab","id":"tab","action":"next"}}
 ← {"jsonrpc":"2.0","method":"frame", … "context":[{"label":"Sign in","text":"name: ann · focus: pass"}], …}
 → {"jsonrpc":"2.0","method":"changed","params":{"id":"pass","value":"s"}}
 → … five more "changed", one per letter of "secret" …
-→ {"jsonrpc":"2.0","method":"key","params":{"name":"tab","id":"tab"}}
+← … six frames, one per "changed", each echoing the password's "value" as the plugin saw it …
+→ {"jsonrpc":"2.0","method":"key","params":{"name":"tab","id":"tab","action":"next"}}
 ← {"jsonrpc":"2.0","method":"frame", … "context":[{"label":"Sign in","text":"name: ann · focus: login"}], …}
-→ {"jsonrpc":"2.0","method":"key","params":{"name":"return","id":"return"}}
+→ {"jsonrpc":"2.0","method":"key","params":{"name":"return","id":"return","action":"login"}}
 ← {"jsonrpc":"2.0","id":1,"method":"host.showMessage","params":{"text":"Signed in"}}
 → {"jsonrpc":"2.0","id":1,"result":null}
-← {"jsonrpc":"2.0","method":"frame","params":{"surface":["Box",{"flexDirection":"column","padding":1},["Text",{"bold":true},"Sign in"],["Text",{"dim":true},"Name"],["TextInput",{"id":"name","isFocused":false}],["Text",{"dim":true},"Password"],["TextInput",{"id":"pass","mask":true,"isFocused":false}],["Text",{"inverse":true},"[ Log in ]"],["Text",{"dim":true},"signed in as ann"]],"keycaps":[{"action":"open","label":"form"},"tab next","⏎ log in","esc close"],"context":[{"label":"Sign in","text":"name: ann · focus: login"}],"keys":{"consume":["tab","enter","esc"]}}}
+← {"jsonrpc":"2.0","method":"frame","params":{"surface":["Box",{"flexDirection":"column","padding":1},["Text",{"bold":true},"Sign in"],["Text",{"dim":true},"Name"],["TextInput",{"id":"name","value":"ann","isFocused":false}],["Text",{"dim":true},"Password"],["TextInput",{"id":"pass","value":"secret","mask":true,"isFocused":false}],["Text",{"inverse":true},"[ Log in ]"],["Text",{"dim":true},"signed in as ann"]],"keycaps":[{"action":"open","label":"form"},{"action":"next","label":"next"},{"action":"login","label":"log in"},{"action":"close","label":"close"}],"context":[{"label":"Sign in","text":"name: ann · focus: login"}],"keys":{"consume":["open","next","login","close"]}}}
 → {"jsonrpc":"2.0","id":2,"method":"shutdown","params":{}}
 ← {"jsonrpc":"2.0","id":2,"result":{}}
 ```
 
 `resize` and `focus` arrive right after `hello`, before any key: the host tells a
 freshly connected plugin its real size and that it has the keyboard, once the App is
-up (a test's own defaults differ from a real terminal's). Typing `ann` sends one
-`changed` PER LETTER, not one for the whole word — this is what the echo rule above
-guards against: the host's own field already reads `ann` by the time the plugin's own
-frame catches up, and none of the three lag it back down. The host's answer to the
+up (a test's own defaults differ from a real terminal's); `runPlugin` answers every
+event with a frame, changed or not. Every key the example acts on arrives with its
+`action` — `open`, `next`, `login` — which is all it matches. Typing `ann` sends one
+`changed` PER LETTER, not one for the whole word, and the plugin's frames echo each
+`value` in turn — `a`, `an`, `ann` — after the host's own field already reads `ann`:
+this is what the echo rule above guards against, and none of the three lag it back
+down. The host's answer to the
 plugin's own request is `null` (a JSON-RPC result with nothing in it), never `{}` —
 only the plugin answers `shutdown` that way, since it has something to send back.
 
@@ -663,7 +672,9 @@ Elm-shaped runtime that speaks this protocol for a plugin written in TypeScript,
 its author writes `init`/`update`/`view` and never a JSON-RPC line by hand. A throwing
 `update` or `view` there — the author's own bug — fails only that one step: the model
 stays exactly what it was, one line goes to stderr
-(`[<name>] update failed: <message>`), and the next event runs normally.
+(`[<name>] update failed: <message>`), and the next event runs normally. A `view` that
+throws while drawing the first frame after `hello`, or on `host.redraw()`, fails the
+same way.
 
 ### What a remote plugin cannot do
 
