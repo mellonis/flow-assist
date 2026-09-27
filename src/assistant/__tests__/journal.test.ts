@@ -201,3 +201,23 @@ test('a command\'s output goes to the journal in chunks as it arrives, capped wi
   q.end();
   expect(quiet).toEqual([{ t: 'shell-out', text: 'ok\n' }]);
 });
+
+test('a command that never ended is drawn in its place, said not to have finished; a background y/n reads as it was answered', () => {
+  const md = exportMarkdown([
+    { t: 'start', id: 'x' },
+    { t: 'shell', command: 'make' },
+    { t: 'shell-out', text: 'building…\n' },
+    { t: 'row', role: 'user', text: 'после рестарта' },
+    { t: 'call-start', id: 'b1', name: 'write_file', args: {}, confirm: true, task: 'фон' },
+    { t: 'confirm', id: 'b1', name: 'write_file', answer: 'yes', by: 'background', task: 'фон' },
+    { t: 'call', id: 'b1', name: 'write_file', args: {}, outcome: 'applied', result: 'ok', task: 'фон' },
+    { t: 'call-start', id: 'c1', name: 'run_command', args: { command: 'x' }, confirm: true },
+    { t: 'confirm', id: 'c1', name: 'run_command', answer: 'no', by: 'reset' },
+    { t: 'call', id: 'c1', name: 'run_command', args: { command: 'x' }, outcome: 'declined', result: 'declined' },
+  ], { title: 't', id: 'x' });
+  expect(md.indexOf('building…')).toBeLessThan(md.indexOf('после рестарта'));
+  expect(md.indexOf('did not finish')).toBeLessThan(md.indexOf('после рестарта'));
+  expect(md).toContain('answered yes by the background task');
+  expect(md).not.toContain('declines every write');
+  expect(md).toContain('answered no by a reset of the conversation');
+});

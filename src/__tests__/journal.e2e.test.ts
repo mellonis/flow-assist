@@ -354,7 +354,7 @@ test('a model tool call is journaled when it starts — waiting on a y/n — and
   const start = events.find((e) => e.t === 'call-start')!;
   expect(events.find((e) => e.t === 'confirm')).toMatchObject({ id: start.id, name: 'run_command', answer: 'yes', by: 'person' });
   expect(events.find((e) => e.t === 'call')).toMatchObject({ id: start.id, outcome: 'applied' });
-  expect(events.map((e) => e.t).filter((t) => t.startsWith('call') || t === 'confirm')).toEqual(['call-start', 'confirm', 'call']);
+  expect(events.map((e) => e.t).filter((t) => (t.startsWith('call') && t !== 'call-out') || t === 'confirm')).toEqual(['call-start', 'confirm', 'call']);
   ui.app.unmount();
 });
 
@@ -403,5 +403,70 @@ test('a background task\'s own calls are journaled in the session that started i
   expect(events.find((e) => e.t === 'call-start' && e.task === 'часы')).toMatchObject({ name: 'datetime', args: {} });
   expect(events.find((e) => e.t === 'call' && e.task === 'часы')).toMatchObject({ name: 'datetime', outcome: 'ok' });
   expect(String(events.find((e) => e.t === 'call' && e.task === 'часы')!.result)).toContain('iso-utc');
+  ui.app.unmount();
+});
+
+test('after a fork, reopening the session it came from writes to that session\'s own journal again', async () => {
+  const dir = dirOf();
+  const model = new ScriptedModel();
+  model.script([{ text: 'ответ' }], [{ text: 'ответ 2' }], [{ text: 'ответ в форке' }], [{ text: 'ответ в родителе' }]);
+  const ui = await boot(dir, model);
+  await ask(ui, 'первый вопрос');
+  await ui.press('escape', 'escape');
+  const name = fs.readdirSync(dir).find((n) => n.endsWith('.json'))!;
+  const parent = name.replace(/\.json$/, '');
+  const file = path.join(dir, name);
+  const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+  fs.writeFileSync(file, JSON.stringify({ ...raw, rev: Number(raw.rev) + 5 })); // a foreign write — the next save forks
+  await ui.press('F');
+  await ask(ui, 'второй вопрос');
+  await ui.press('escape', 'escape'); // the save that forks
+  await ui.press('F');
+  await ask(ui, 'вопрос в форке');
+  const forkedName = journals(dir).find((n) => !n.startsWith(parent))!;
+  expect(journalOf(dir, forkedName).some((e) => e.text === 'ответ в форке')).toBe(true);
+  // Back to the parent — the older of the two, so the last on /resume's list.
+  await ask(ui, '/resume 2', 6);
+  await ask(ui, 'снова в родителе');
+  expect(journalOf(dir, `${parent}.log.jsonl`).some((e) => e.t === 'row' && e.text === 'снова в родителе')).toBe(true);
+  expect(journalOf(dir, forkedName).some((e) => e.text === 'снова в родителе')).toBe(false);
+  ui.app.unmount();
+});
+
+test('a model\'s run_command streams its whole output into the journal, beside the capped result the model got', async () => {
+  const dir = dirOf();
+  const root = rootOf();
+  const model = new ScriptedModel();
+  model.script([{ tool: 'run_command', args: { command: 'seq 1 3000' } }], [{ text: 'Готово.' }]);
+  const ui = await bootApp(model, 100, 28, undefined, { sessions: { dir }, shell: { roots: [root], maxChars: 100 } });
+  await ui.press('F');
+  await ui.type('посчитай');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('Confirm write: run_command'));
+  await ui.press('y');
+  await settleUntil(() => journalOf(dir).some((e) => e.t === 'end'), 400);
+  const events = journalOf(dir);
+  const whole = Array.from({ length: 3000 }, (_, i) => `${i + 1}\n`).join('');
+  const call = events.find((e) => e.t === 'call')!;
+  expect(events.filter((e) => e.t === 'call-out' && e.id === call.id).map((e) => e.text).join('')).toBe(whole);
+  expect(String(call.result).length).toBeLessThan(1000); // what the model got stays capped
+  await ask(ui, '/export out.md', 6);
+  expect(fs.readFileSync(path.join(root, 'out.md'), 'utf8')).toContain(whole.trimEnd());
+  ui.app.unmount();
+});
+
+test('a y/n settled by a stop is recorded as the stop, not as the person\'s no', async () => {
+  const dir = dirOf();
+  const root = rootOf();
+  const model = new ScriptedModel();
+  model.script([{ tool: 'run_command', args: { command: 'echo x' } }], [{ text: 'после' }]);
+  const ui = await bootApp(model, 100, 28, undefined, { sessions: { dir }, shell: { roots: [root] } });
+  await ui.press('F');
+  await ui.type('сделай');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('Confirm write: run_command'));
+  ui.backend.press({ name: 'c', ctrl: true });
+  await settleUntil(() => journalOf(dir).some((e) => e.t === 'end'), 400);
+  expect(journalOf(dir).find((e) => e.t === 'confirm')).toMatchObject({ answer: 'no', by: 'stop' });
   ui.app.unmount();
 });

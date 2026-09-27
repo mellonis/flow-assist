@@ -15,8 +15,10 @@
 //   answer   the final text of a turn
 //   call-start  a tool call beginning: `id`, `name`, `args` whole, `confirm` — whether
 //            it waits on a y/n (so a crash mid-call still records what was running)
-//   confirm  the y/n's answer: `answer` yes or no, `by` the person, the auto mode, or a
-//            background task (which declines every write)
+//   confirm  the y/n's answer: `answer` yes or no, and `by` — the person, the auto mode,
+//            a background task's run, a stop (Esc or Ctrl+C on the turn), a reset
+//   call-out the output of the host's run_command as it arrives (`id`, `text`), whole, as
+//            `shell-out` is for a `!command`, with the same cap and note
 //   call     one tool call ended: `name`, `args`, `outcome`, `result` (the text the tool
 //            returned), `raw` (the data behind a framed result, whole; `null` — none),
 //            the `images` it returned (names and sizes), what it `changes`d, the
@@ -227,15 +229,22 @@ const when = (at: unknown) => {
 };
 const asText = (v: unknown) => (typeof v === 'string' ? v : JSON.stringify(v, null, 2) ?? '');
 
+// Who settled a y/n, in words.
+const CONFIRMED_BY: Record<string, string> = {
+  person: 'the person', auto: 'the auto mode', background: 'the background task',
+  stop: 'a stop (the turn was stopped)', reset: 'a reset of the conversation',
+};
+
 // `confirm` — the y/n's answer, when the call waited on one.
 function callBlock(ev: Record<string, unknown>, confirm?: Record<string, unknown>): string {
   const outcome = ev.t === 'call-start' ? 'did not finish' : String(ev.outcome ?? '');
   const head = `${String(ev.name ?? 'call')} · ${outcome}${ev.write ? ' · write' : ''}${typeof ev.task === 'string' ? ` · background task «${ev.task}»` : ''}`;
   const out = ['<details>', `<summary>${head.replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' })[c]!)}</summary>`, ''];
   out.push('Arguments:', '', block(asText(ev.args ?? {}), 'json'), '');
-  if (confirm) out.push(`Asked y/n — answered ${String(confirm.answer)} by ${confirm.by === 'person' ? 'the person' : confirm.by === 'auto' ? 'the auto mode' : 'the background task (it declines every write)'}.`, '');
+  if (confirm) out.push(`Asked y/n — answered ${String(confirm.answer)} by ${CONFIRMED_BY[String(confirm.by)] ?? String(confirm.by)}.`, '');
   else if (ev.t === 'call-start' && ev.confirm) out.push('It was waiting on a y/n.', '');
   if (ev.result !== undefined) out.push('Result:', '', block(asText(ev.result)), '');
+  if (typeof ev.output === 'string' && ev.output) out.push('Output, whole:', '', block(ev.output, 'console'), '', ...(ev.outputNote ? [String(ev.outputNote), ''] : []));
   if (ev.raw === null) out.push('Data: none.', '');
   else if (typeof ev.raw === 'string') out.push('Data:', '', block(ev.raw), '');
   for (const im of Array.isArray(ev.images) ? ev.images as { name?: unknown; width?: unknown; height?: unknown }[] : []) out.push(`Image: ${String(im.name ?? '')}${im.width ? ` · ${String(im.width)}×${String(im.height)}` : ''}`, '');
@@ -259,14 +268,23 @@ export function exportMarkdown(events: JournalEvent[], opts: { title: string; id
   // the next command begins, for one that never did).
   let output = '';
   let outputNote = '';
-  const flushOutput = () => {
+  let shellOpen = false;
+  // `unfinished` — the command never ended (a crash): said where it stands.
+  const flushOutput = (unfinished = false) => {
     if (output) out.push(block(output, 'console'), '');
     if (outputNote) out.push(outputNote, '');
-    output = ''; outputNote = '';
+    if (unfinished) out.push('*did not finish — the journal has no end for this command*', '');
+    output = ''; outputNote = ''; shellOpen = false;
   };
+  // A call's output, stitched the same way, by the call's key.
+  const callOut = new Map<string, { text: string; note: string }>();
   const keyOf = (ev: JournalEvent) => `${String(ev.task ?? '')}\u0000${String(ev.id ?? '')}\u0000${String(ev.name ?? '')}`;
   for (const ev of events) {
     const at = when(ev.at);
+    // Anything of the conversation after a command that never ended: its output is
+    // drawn where it stands, not below what came after. A background task's calls run
+    // beside a command and do not close it.
+    if (shellOpen && ev.t !== 'shell-out' && ev.t !== 'shell-end' && typeof ev.task !== 'string') flushOutput(true);
     const text = typeof ev.text === 'string' ? ev.text : '';
     switch (ev.t) {
       case 'row':
@@ -285,13 +303,25 @@ export function exportMarkdown(events: JournalEvent[], opts: { title: string; id
       case 'answer': out.push(`**Assistant**${at}`, '', text, ''); break;
       case 'call-start': open.set(keyOf(ev), { slot: out.length, start: ev }); out.push('', ''); break;
       case 'confirm': { const o = open.get(keyOf(ev)); if (o) o.confirm = ev; break; }
+      case 'call-out': {
+        const k = keyOf(ev);
+        const c = callOut.get(k) ?? { text: '', note: '' };
+        if (typeof ev.text === 'string') c.text += ev.text;
+        if (ev.capped) c.note = `*the journal keeps the first ${formatBytes(OUTPUT_CAP)} of this output — ${String(ev.total)} bytes in all*`;
+        callOut.set(k, c);
+        break;
+      }
       case 'call': {
-        const o = open.get(keyOf(ev));
-        if (o) { out[o.slot] = callBlock(ev, o.confirm); open.delete(keyOf(ev)); } else out.push(callBlock(ev), '');
+        const k = keyOf(ev);
+        const o = open.get(k);
+        const c = callOut.get(k);
+        callOut.delete(k);
+        const whole = c ? { ...ev, output: c.text, outputNote: c.note } : ev;
+        if (o) { out[o.slot] = callBlock(whole, o.confirm); open.delete(k); } else out.push(callBlock(whole), '');
         break;
       }
       case 'shell':
-        flushOutput();
+        shellOpen = true;
         out.push(`**$ ${String(ev.command ?? '')}**${at}`, '');
         // A command from a state file carries the output that file kept.
         if (typeof ev.output === 'string') out.push(block(ev.output, 'console'), '');
@@ -314,7 +344,7 @@ export function exportMarkdown(events: JournalEvent[], opts: { title: string; id
       default: break;
     }
   }
-  flushOutput();
-  for (const o of open.values()) out[o.slot] = callBlock(o.start, o.confirm);
+  if (shellOpen) flushOutput(true);
+  for (const [k, o] of open) { const c = callOut.get(k); out[o.slot] = callBlock(c ? { ...o.start, output: c.text, outputNote: c.note } : o.start, o.confirm); }
   return `${out.join('\n').trimEnd()}\n`;
 }

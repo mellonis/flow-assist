@@ -196,9 +196,16 @@ const shellGroup = (config: Record<string, unknown>): ToolGroup => ({
     // src/assistant/views.ts): a line in the chat that a click opens. Display only:
     // the model reads the output through the result below, never a second copy.
     const live = (ctx as { liveView?: (k: string, d: unknown) => { update(d: unknown): void } }).liveView?.('console', { command: cmd, cwd: tildePath(cwd), text: '' });
+    // Everything it prints, as it prints, to the host's record (the chat's journal) —
+    // more than the view and the result keep.
+    const report = (ctx as { reportOutput?: (chunk: string) => void }).reportOutput;
     let raw = '';
-    const onOutput = live
-      ? (chunk: string) => { raw += chunk; if (raw.length > maxChars * 2) raw = raw.slice(-maxChars); live.update({ command: cmd, cwd: tildePath(cwd), text: capConsoleText(raw) }); }
+    const onOutput = live || report
+      ? (chunk: string) => {
+        report?.(chunk);
+        if (!live) return;
+        raw += chunk; if (raw.length > maxChars * 2) raw = raw.slice(-maxChars); live.update({ command: cmd, cwd: tildePath(cwd), text: capConsoleText(raw) });
+      }
       : undefined;
     const r = await runShell(cmd, { cwd, timeoutMs, maxChars, signal, ...(onOutput ? { onOutput } : {}), ...(stdin != null ? { stdin } : {}) });
     if (r.error) throw new Error(`run_command: could not start /bin/sh: ${r.error}`);

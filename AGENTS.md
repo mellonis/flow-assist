@@ -1130,9 +1130,11 @@ there is no `/fullscreen`.
     before its y/n: the provider's call id, the name, the arguments as parsed, and
     `confirm`, whether it waits on a y/n. A crash mid-call or at an open y/n still
     records what was running.
-  - `confirm` — the y/n's answer, `yes`/`no`, and `by`: `person`, `auto` (the auto mode
-    answered) or `background` (a background task declines every write). The call id
-    reaches `confirmWrite` as `info.id`.
+  - `confirm` — the y/n's answer, `yes`/`no`, and `by`: `person` (their key), `auto`
+    (the auto mode answered), `background` (a background task's run answered — the
+    `background` tool's declines every write), `stop` (Ctrl+C stopped the turn while it
+    was up) or `reset` (`/clear` or `/new` closed it). The call id reaches
+    `confirmWrite` as `info.id`.
   - `call` — from `onToolRun`: the arguments, the outcome, `result` as the tool returned
     it (`ToolRun.detail`, before `capToolResult` and any recall stub), `raw` — the data
     behind a result the tool framed for the model (`{ text, raw }`, `ToolRun.raw`: an
@@ -1149,8 +1151,11 @@ there is no `/fullscreen`.
     it goes to the same session whatever reset came meanwhile. The screen and the model
     keep what they always did — the last `shell.maxChars`; the journal is the only
     place the rest lives. An interactive `!!command` has no stream: its recording is
-    written when it ends. run_command's `result` is its own capped tail, with its cut
-    note in the text.
+    written when it ends.
+  - `call-out` — the same for the model's `run_command`: everything it prints, whole,
+    as it prints, under the same cap and note, beside a `result` that stays the capped
+    tail the model got. Only the host's own bare `run_command` is handed
+    `ctx.reportOutput` (`AgentOpts.onToolOutput`), and a chunk is always that call's.
   - `compact` — the summary; `end` — how the turn ended: duration, tokens, stopped or
     failed, and the text of a round cut off, which never reached `onLiveCommit`.
   A turn's events go to the session its question was journaled in (`journalId`, taken
@@ -1158,7 +1163,9 @@ there is no `/fullscreen`.
   different: the conversation goes on in the fork, so `journalTo` follows `forkedTo`
   (parent id → fork id, set where `writeSession` forks) and the rest of a turn in
   flight, a `!command` still running and a background task's calls land in the fork's
-  journal, never in the parent's, which another writer holds now. **No tool writes to
+  journal, never in the parent's, which another writer holds now. The redirect is for
+  what was in flight: opening the parent again (`applySession`) drops it, and from
+  then on the parent writes its own journal. **No tool writes to
   the journal** — it is the host's record, and a tool's ctx (a plugin's, a remote
   plugin's, a core tool's) carries nothing that writes there; the host writes every line
   from its own hooks. A background task's own calls (`call-start`, `confirm`, `call`)
@@ -1202,7 +1209,9 @@ there is no `/fullscreen`.
   in a fence longer than any backtick run it holds (`fence`). A call is drawn once,
   where it began: its `call-start` holds the place its `call` fills, with the y/n's
   answer and the `raw` data under "Data:"; a start that never ended is drawn as `did
-  not finish`. The path is resolved in
+  not finish`; a command's output is stitched back from its chunks, and a command
+  with no end (a crash) is drawn where it stands, said not to have finished, before
+  whatever came after it. The path is resolved in
   the shell's directory (`~` the home); with none, `session-<id>.md` there. It is the
   PERSON's command, typed by them, so it takes no y/n (that pause guards what the MODEL
   writes); it never overwrites — an existing file is refused (`flag: 'wx'`), and the

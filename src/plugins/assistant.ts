@@ -963,6 +963,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const applySession = (s: Session, fingerprint: SessionFingerprint) => {
             sessionIdRef.current = s.id; createdAtRef.current = s.createdAt;
             journalBuf.current = []; // held for the conversation being left
+            // Opened again, a session writes its own journal: a fork's redirect was for
+            // what was in flight when it forked, not for the session for good.
+            forkedTo.current.delete(s.id);
             let journaled = true;
             try { journaled = !sessDir || fs.existsSync(journalPath(sessDir, s.id)); } catch { /* not an id — nothing to journal */ }
             journalImport.current = journaled ? null : (s.messages as Record<string, unknown>[]).filter((m) => m.role !== 'system');
@@ -1041,7 +1044,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // confirmWrite): while the promise hangs, input pauses and a confirmation
           // block renders. pendingRef holds { name, args, resolve } — read by the
           // input-handler (a ref, always current); pendingAsk is only for render.
-          const pendingRef = ui.useRef<{ name: string; args: string; input?: string; resolve: (ok: boolean) => void } | null>(null);
+          const pendingRef = ui.useRef<{ name: string; args: string; input?: string; resolve: (ok: boolean, by?: 'person' | 'stop' | 'reset') => void } | null>(null);
           const [pendingAsk, setPendingAsk] = ui.useState<{ name: string; args: string; command?: string; line?: string; input?: string } | null>(null);
           // `ask_user`: the same kind of pause, but the person picks among options.
           // askRef is what the input handler steps key by key (a ref, always current);
@@ -1076,12 +1079,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
 
           // Resolves the y/n pause: ok=true confirms the writing op (tool runs),
           // ok=false declines it (agentChat returns «declined» as the tool result).
-          const settleConfirm = (ok: boolean) => {
+          // `by` — who settled it: the person's key, or a stop or reset that closed it.
+          const settleConfirm = (ok: boolean, by: 'person' | 'stop' | 'reset' = 'person') => {
             const p = pendingRef.current;
             if (!p) return;
             pendingRef.current = null;
             setPendingAsk(null);
-            p.resolve(ok);
+            p.resolve(ok, by);
             host.notify();
           };
 
@@ -1345,6 +1349,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // and its reasoning so far.
             let roundText = '';
             let roundReasoning = '';
+            // The output streams of this turn's run_command calls, by call.
+            const callOutputs = new Map<string, ReturnType<typeof outputJournal>>();
             // An UPDATER, over the list as it is — not a list built from `msgsRef`, which
             // is what was last DRAWN. A message sent from a zero-delay timer (the queue
             // after a turn, a `!command` or a slash command; the ask after `!!`) can run
@@ -1487,8 +1493,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   // block says where a command's stdin comes from.
                   const input = info?.input ? `${info.input}${info.inputId ? ` (${info.inputId})` : ''}` : undefined;
                   // The answer goes into the journal as it is given.
-                  const answered = (ok: boolean) => {
-                    journalTo(journalId, { t: 'confirm', ...(info?.id ? { id: info.id } : {}), name, answer: ok ? 'yes' : 'no', by: 'person' });
+                  const answered = (ok: boolean, by: 'person' | 'stop' | 'reset' = 'person') => {
+                    journalTo(journalId, { t: 'confirm', ...(info?.id ? { id: info.id } : {}), name, answer: ok ? 'yes' : 'no', by });
                     resolve(ok);
                   };
                   pendingRef.current = { name, args, ...(input ? { input } : {}), resolve: answered };
@@ -1502,9 +1508,20 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // What a write changed goes on the answer being written the moment the
                 // write lands — a block of its own that stays in the chat. Only on the
                 // display message: `apiRef` gets the transcript, which never holds it.
+                // What the host's run_command prints, whole, as it arrives — a stream per
+                // call, ended when the call ends.
+                onToolOutput: (call: { id?: string; name: string }, chunk: string) => {
+                  const key = `${call.id ?? ''}\u0000${call.name}`;
+                  let o = callOutputs.get(key);
+                  if (!o) { o = outputJournal((ev) => journalTo(journalId, { ...ev, t: 'call-out', ...(call.id ? { id: call.id } : {}), name: call.name })); callOutputs.set(key, o); }
+                  o.push(chunk);
+                },
                 // A call that will run, or wait on a y/n: in the journal before it does.
                 onToolStart: (call: { id?: string; name: string; args: Record<string, unknown>; confirm: boolean }) => journalTo(journalId, callStartEvent(call)),
                 onToolRun: (run: ToolRun) => {
+                  const outKey = `${run.id ?? ''}\u0000${run.name}`;
+                  callOutputs.get(outKey)?.end();
+                  callOutputs.delete(outKey);
                   // The call whole — its arguments as the model wrote them, its result as
                   // the tool returned it, before the cap and before any stub.
                   journalTo(journalId, callEndEvent(run, viewRenderers));
@@ -2231,7 +2248,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const resetConversation = () => {
             if (tickRef.current) { clearInterval(tickRef.current); tickRef.current = null; }
             abortRef.current?.abort(); abortRef.current = null;
-            if (pendingRef.current) settleConfirm(false);
+            if (pendingRef.current) settleConfirm(false, 'reset');
             dismissAsk();
             contentRef.current = '';
             titleRef.current = ''; // the next session is named by its own first line
@@ -2596,7 +2613,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             if (!openRef.current || (layoutRef.current === 'panel' && focusRef.current !== 'chat')) return undefined;
             disarmEsc();
             if (key.name === 'c' && canStop()) {
-              if (pendingRef.current) settleConfirm(false);
+              if (pendingRef.current) settleConfirm(false, 'stop');
               dismissAsk();
               stopKeyRef.current = keyGlyph({ name: 'c', ctrl: true });
               abortRef.current?.abort();

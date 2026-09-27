@@ -167,6 +167,10 @@ export interface AgentOpts {
   // checked, before the y/n: `confirm` says whether it waits on one. A call refused
   // before that (arguments that do not parse or do not fit) has only its `onToolRun`.
   onToolStart?: (call: { id?: string; name: string; args: Record<string, unknown>; confirm: boolean }) => void;
+  // What the host's own run_command printed, as it arrives and whole — the result the
+  // model gets is its capped tail. Only that tool is handed `ctx.reportOutput`, and a
+  // chunk is always this call's: the caller keeps it (the chat's journal).
+  onToolOutput?: (call: { id?: string; name: string }, chunk: string) => void;
   // Fired as each tool call ends (declined ones too), so the chat can show what a
   // write changed while the turn goes on.
   onToolRun?: (run: ToolRun) => void;
@@ -1012,6 +1016,9 @@ export async function agentChat(
             },
             // A view the tool keeps open and updates while it runs.
             liveView: (kind: string, data: unknown) => open(kind, data),
+            // The host's own run_command (the bare name — a plugin's tool of that name is
+            // registered qualified) reports what it prints, to its caller alone.
+            ...(tc.name === 'run_command' && opts.onToolOutput ? { reportOutput: (chunk: string) => { try { opts.onToolOutput?.({ id: tc.id, name: tc.name }, chunk); } catch { /* the caller's trouble */ } } } : {}),
             // The earlier result this call takes as its input, resolved above.
             ...(input ? { resultInput: { id: input.id, tool: input.tool, text: input.text } } : {}),
             // A one-off view: opened and left; it becomes final with the call. The
