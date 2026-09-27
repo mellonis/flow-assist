@@ -803,7 +803,8 @@ there is no `/fullscreen`.
     consents — so never `config_set`, an unlisted `web_fetch` or a plugin's
     `run_command`) and says each write it
     lets through on stderr as it runs (`[write] $ <command>`, else the tool and its
-    arguments);
+    arguments — through `sanitizeViewText`, each further line marked `[write]   `, so
+    an escape code or a carriage return in the command cannot hide the line);
   - a plugin's `services.chatLLM` — declines unless the plugin passes a `confirmWrite`
     of its own (one that can ask the person);
   - a remote plugin's `host.chatLLM` (`src/remote/adapter.ts`) — always declines: a

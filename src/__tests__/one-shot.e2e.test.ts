@@ -66,6 +66,22 @@ test('with --allow-writes a write runs and is said on stderr; config_set still d
   expect(err).not.toContain('config set');
 });
 
+// The stderr line is the flag's only safeguard, so a command cannot hide on it: an
+// escape sequence or a carriage return written into the command is dropped, and every
+// line of a command of several lines is marked as the write's.
+test('with --allow-writes the stderr line keeps no escape code or carriage return, and marks every line of the command', async () => {
+  const model = new ScriptedModel();
+  model.script(
+    [{ tool: 'run_command', args: { command: 'echo made > made.txt\u001b[1A\u001b[2K\rtrue\necho two' } }],
+    [{ text: 'All done.' }],
+  );
+  const { err } = await oneShot(model, true);
+  expect(err).not.toContain('\u001b');
+  expect(err).not.toContain('\r');
+  const lines = err.trimEnd().split('\n').filter((l) => !l.startsWith('[plugins]'));
+  expect(lines).toEqual(['[write] $ echo made > made.txt', '[write]   true', '[write]   echo two']);
+});
+
 test('--allow-writes is read before the prompt and is not a word of it', () => {
   expect(parseCli(['--allow-writes', 'fix', 'it'])).toEqual({ cmd: 'prompt', args: ['fix', 'it'], allowWrites: true });
   expect(parseCli(['fix', 'it'])).toEqual({ cmd: 'prompt', args: ['fix', 'it'] });

@@ -38,6 +38,7 @@ import { consoleBridge } from './runtime/console-log.js';
 import { agentChat } from './assistant/agent.js';
 import { neverAutomatic } from './assistant/auto.js';
 import { shellCommandOf } from './plugins/assistant.js';
+import { sanitizeViewText } from './assistant/views.js';
 import { createShellState } from './assistant/shell.js';
 import { instructionsPrompt } from './assistant/project-instructions.js';
 import { toolLoadingMode } from './assistant/tool-loading.js';
@@ -325,7 +326,7 @@ export async function runPrompt(args: string[], config: Record<string, unknown>,
     // `web_fetch` — and each write it lets through is said on stderr as it runs.
     ...(deps.allowWrites ? { confirmWrite: (name: string, argsText: string, info?: { hostShell?: boolean }) => {
       if (neverAutomatic(name, { autoRun: true, hostShell: !!info?.hostShell })) return false;
-      err(`[write] ${writeLine(name, argsText)}\n`);
+      err(`${writeLine(name, argsText)}\n`);
       return true;
     } } : {}),
     onLive: (delta: string) => out(delta),
@@ -334,10 +335,14 @@ export async function runPrompt(args: string[], config: Record<string, unknown>,
 }
 
 // A write as the one-shot run says it on stderr: the command line of a `run_command`,
-// else the tool and its arguments.
+// else the tool and its arguments. The line is the flag's only safeguard, so it is
+// cleaned as a view's text is (`sanitizeViewText`: no escape code, a carriage return a
+// line break) and each line after the first is marked too — a command cannot erase
+// its own line or pass a line of its own off as other output.
 function writeLine(name: string, argsText: string): string {
   const command = shellCommandOf(name, argsText);
-  return command !== null ? `$ ${command}` : `${name} ${argsText}`;
+  const text = sanitizeViewText(command !== null ? `$ ${command}` : `${name} ${argsText}`);
+  return text.split('\n').map((line, i) => (i ? `[write]   ${line}` : `[write] ${line}`)).join('\n');
 }
 
 // ─── interactive TUI ──────────────────────────────────────────────────────────
