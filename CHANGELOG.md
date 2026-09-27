@@ -5,6 +5,15 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **An MCP server that is not there at start is tried again, not dropped for the run.**
+  A server that fails to connect — a gateway that answered 502 just then, an IDE not open
+  yet — or drops later is tried again in the background after 5 s, 15 s and 60 s, then
+  every 5 minutes. When it answers, its tools join at your next message with no restart,
+  and the chat says `mcp: <name> connected — N tools`. A 401 or 403 is not tried again:
+  the reason says it is the token. A server started as a command that exits is started
+  again the same way.
+- **For plugin authors:** a plugin whose tool groups change while the app runs sets
+  `tools` on its plugin object and calls `toolsChanged()`, handed to its builder.
 - **The assistant has a workspace of its own per project.** Drafts, notes, plans and
   findings it was asked to keep go to `artifacts/` in the project's agent workspace
   (`projects/` in the config directory, under a mirror of the project's path), written

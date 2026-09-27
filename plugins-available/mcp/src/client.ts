@@ -42,7 +42,18 @@ export interface McpClientOptions {
   clientVersion?: string;
 }
 
-export class McpError extends Error {}
+// `status` — the HTTP status a server answered with; `lost` — the connection itself
+// failed (a network error, a server process gone), as against one call that failed or
+// timed out. What the plugin retries, and what it takes for the token, is read from these.
+export class McpError extends Error {
+  status?: number;
+  lost?: boolean;
+  constructor(message: string, info: { status?: number; lost?: boolean } = {}) {
+    super(message);
+    if (info.status !== undefined) this.status = info.status;
+    if (info.lost) this.lost = true;
+  }
+}
 
 // `initialize`'s `instructions`, kept whole up to this many code points — cut never
 // splits a surrogate pair, matching the cap other pieces of text the model sees use
@@ -147,14 +158,15 @@ export function createMcpClient(opts: McpClientOptions) {
       });
       const sid = res.headers.get('mcp-session-id');
       if (sid) session = sid;
-      if (!res.ok) throw new McpError(`HTTP ${res.status}${(await res.text().catch(() => '')).slice(0, 200).replace(/^/, ': ')}`);
+      if (!res.ok) throw new McpError(`HTTP ${res.status}${(await res.text().catch(() => '')).slice(0, 200).replace(/^/, ': ')}`, { status: res.status });
       if (!expectResponse) return undefined;
       const id = (body as { id?: number }).id;
       const type = res.headers.get('content-type') ?? '';
       return type.includes('text/event-stream') ? await fromSse(res, id) : await res.json();
     } catch (e) {
       if (ctl.signal.aborted) throw new McpError(`no answer in ${timeoutMs} ms`);
-      throw e instanceof McpError ? e : new McpError((e as Error).message);
+      // What fetch itself throws is the line down: nothing reached the server.
+      throw e instanceof McpError ? e : new McpError((e as Error).message, { lost: true });
     } finally {
       clearTimeout(timer);
     }

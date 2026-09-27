@@ -120,3 +120,67 @@ test('a server\'s `initialize` instructions become its tool group\'s description
   expect(replaceText.function.description).not.toContain('Statuses are numeric ids');
   app.app.unmount();
 });
+
+// A server behind a gateway that answers 502 at the moment the app starts: tried again in
+// the background, and once it answers its group is in the very next request's tools_load
+// index — no restart — and the chat says it connected.
+test('a server that failed at start connects later: its group is in the next request\'s index, and the chat says so', async () => {
+  const { default: buildMcpPlugin } = await import('../../plugins-available/mcp/src/index.ts');
+  const { refreshToolRegistry } = await import('../loader/tools');
+  let up = false;
+  const methods: string[] = [];
+  const flaky = Bun.serve({
+    port: 0, hostname: '127.0.0.1',
+    async fetch(req) {
+      const body = await req.json() as { id?: number; method: string };
+      methods.push(body.method);
+      if (!up) return new Response('bad gateway', { status: 502 });
+      if (body.id === undefined) return new Response(null, { status: 202 });
+      const result = body.method === 'initialize' ? { protocolVersion: '2025-06-18', serverInfo: { name: 'Tracker', version: '1' }, capabilities: { tools: {} } }
+        : { tools: [{ name: 'find_issue', description: 'Find an issue by its key.', inputSchema: { type: 'object', properties: {} } }] };
+      return Response.json({ jsonrpc: '2.0', id: body.id, result });
+    },
+  });
+  try {
+    const config = { plugins: { mcp: { servers: { tracker: { url: `http://127.0.0.1:${flaky.port}/mcp` } } } } };
+    const shape = await buildMcpPlugin({ make: makeFactory(config as never) as never, config, toolsChanged: refreshToolRegistry, retry: { delays: [60], every: 60 } } as never);
+    const model = new ScriptedModel();
+    model.script([{ text: 'first' }], [{ text: 'second' }]);
+    const app = await bootApp(model, 110, 30, () => [shape as never], { ...config, ai: { baseUrl: 'http://scripted.model', model: 'scripted', toolLoading: 'onDemand' } });
+    await app.press('F');
+    await app.type('one');
+    await app.press('return');
+    await new Promise((r) => setTimeout(r, 30));
+    const index = (i: number) => JSON.stringify((model.requests[i] as { tools?: unknown[] }).tools ?? []);
+    expect(index(0)).not.toContain('find_issue');
+    up = true;
+    for (let i = 0; i < 50 && !app.backend.lastFrame.includes('mcp: tracker connected — 1 tools'); i++) { await new Promise((r) => setTimeout(r, 20)); await app.press('end'); }
+    expect(app.backend.lastFrame).toContain('mcp: tracker connected — 1 tools');
+    await app.type('two');
+    await app.press('return');
+    await new Promise((r) => setTimeout(r, 30));
+    // In the index of tools_load, the group's own heading and its tool.
+    expect(index(1)).toContain('mcp:tracker');
+    expect(index(1)).toContain('find_issue');
+    app.app.unmount();
+  } finally {
+    flaky.stop(true);
+  }
+});
+
+test('a server that answers 401 is not tried again: the reason names the token', async () => {
+  const { default: buildMcpPlugin } = await import('../../plugins-available/mcp/src/index.ts');
+  let asked = 0;
+  const locked = Bun.serve({ port: 0, hostname: '127.0.0.1', fetch() { asked++; return new Response('unauthorized', { status: 401 }); } });
+  try {
+    const config = { plugins: { mcp: { servers: { tracker: { url: `http://127.0.0.1:${locked.port}/mcp` } } } } };
+    const shape = await buildMcpPlugin({ make: makeFactory(config as never) as never, config, retry: { delays: [20], every: 20 } } as never) as { setup: (a: unknown) => void };
+    const lines: string[] = [];
+    shape.setup({ ui: {}, host: { services: { pushLog: (m: string) => lines.push(m) } } });
+    await new Promise((r) => setTimeout(r, 150));
+    expect(asked).toBe(1);
+    expect(lines.join('\n')).toContain('tracker: not connected — HTTP 401 — the server refuses the token');
+  } finally {
+    locked.stop(true);
+  }
+});

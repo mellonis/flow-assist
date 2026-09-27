@@ -278,9 +278,10 @@ the blacklist.
 ### A plugin that starts a process owns its life
 
 The `mcp` plugin starts a server given as a `command` and talks MCP over its stdin and
-stdout (`plugins-available/mcp/src/stdio.ts`). One process per server for the whole run —
-process-level state on purpose, unlike a conversation's — and the rules any plugin that
-spawns something long-lived follows:
+stdout (`plugins-available/mcp/src/stdio.ts`). One process per server at a time —
+process-level state on purpose, unlike a conversation's; one that dies is started again
+by the plugin's retry (below) — and the rules any plugin that spawns something
+long-lived follows:
 
 - **It never keeps the program alive.** The child and its pipes are unref'd, so
   `config set plugins.…` and a one-shot prompt still exit when their own work is done
@@ -295,6 +296,25 @@ spawns something long-lived follows:
   one by COUNTING listeners — with a second listener present it unmounts and leaves the
   signal to the app, and the app would then live through Ctrl+C. So the handler stops
   its processes, removes ITSELF, and re-raises only when no listener is left.
+
+### A server that is not there is tried again
+
+`plugins-available/mcp/src/servers.ts` holds each MCP server's life: `connecting`,
+`connected`, `failed`, `disabled`. A server that fails to connect — at start or later —
+or DROPS (a call's error is the line's: `McpError.lost` from a fetch that threw or a
+stdio process gone through `onDead`, a 5xx, a 404 for a session no longer known) loses
+its group and is tried again on `RETRY`: 5 s, 15 s, 60 s, then every 5 minutes. A
+401/403 is the token and is never tried again (`authReason` says so and names `/mcp
+restart`). Every attempt carries the server's generation; `disable`, `restart`,
+`remove` and a drop start a new one, so an attempt that finishes under an older one lets
+go of its client and brings back nothing. A connect after the start calls `onChange`:
+the plugin sets `plugin.tools` and calls the host's `toolsChanged` (the group is in the
+next message's index), logs it and says `mcp: <name> connected — N tools` through
+`services.chatNote`. Timers are unref'd and cleared at exit (`process.once('exit')`
+stops every manager). The clock and the schedule are injected (`timers`, `retry` —
+builder options the loader never passes), so the tests run the schedule without waiting
+it; `src/__tests__/mcp.e2e.test.ts` holds the late group reaching the index of the next
+request and a 401 asked once.
 
 ### A handled key is followed by a redraw
 

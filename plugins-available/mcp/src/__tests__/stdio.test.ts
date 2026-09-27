@@ -175,3 +175,24 @@ describe('the settings', () => {
     ]);
   });
 });
+
+// A server process that dies is started again, as a new process, by the plugin's
+// manager — its group goes in between, and comes back when the new one answers.
+test('a server process that dies is started again in the background', async () => {
+  const { createServerManager } = await import('../servers.ts');
+  let changes = 0;
+  const m = createServerManager([{ name: 'safari', spec: fake('--die-on-call') }], { schedule: { delays: [50], every: 50 }, onChange: () => { changes++; } });
+  await m.start();
+  const first = liveServerPids()[0]!;
+  const out = await m.groups()[0]!.exec('safari:list_tabs', {});
+  expect(out.text).toContain('ERROR from safari:list_tabs');
+  for (let i = 0; i < 100 && m.list()[0]!.state !== 'failed'; i++) await Bun.sleep(10);
+  expect(m.groups()).toEqual([]);
+  for (let i = 0; i < 200 && m.list()[0]!.state !== 'connected'; i++) await Bun.sleep(10);
+  expect(m.list()[0]!.state).toBe('connected');
+  const second = liveServerPids()[0]!;
+  expect(second).not.toBe(first);
+  expect(changes).toBeGreaterThan(1);
+  m.stop();
+  expect(await gone(second)).toBe(true);
+});

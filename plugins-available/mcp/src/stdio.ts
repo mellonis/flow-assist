@@ -11,14 +11,15 @@
 // `sh -c` — with the assistant's environment plus the server's `env` on top.
 //
 // Its life:
-// - It is started when the plugin is built and lives for the whole run: one process per
-//   server, shared by every conversation. That is process-level state on purpose (the
-//   set of live servers below is module-level for that reason), unlike a conversation's
-//   tool state.
+// - It is started when the plugin is built and lives until it dies, is turned off or
+//   the run ends: one process per server at a time, shared by every conversation. That
+//   is process-level state on purpose (the set of live servers below is module-level
+//   for that reason), unlike a conversation's tool state.
 // - A server that does not answer the handshake in time is stopped by the caller
-//   (`close`), as an unreachable HTTP server is skipped.
-// - A server that dies is not restarted: every call after that, and every call that was
-//   waiting, fails naming the server and what it last wrote to stderr.
+//   (`close`), as an unreachable HTTP server is.
+// - A server that dies fails every call that was waiting, and every call after, naming
+//   the server and what it last wrote to stderr, and says so to `onDead`: the plugin
+//   then starts it again in the background (servers.ts), as a new process.
 // - It never keeps the assistant running. The process and its pipes are unref'd, so a
 //   short-lived command that built the plugin (`config set plugins.…`, a one-shot prompt)
 //   exits once its own work is done. A request in flight holds the program through its
@@ -45,6 +46,8 @@ export interface StdioClientOptions extends ProtocolOptions {
   env?: Record<string, string>;
   // How long `close` waits after SIGTERM before SIGKILL.
   killGraceMs?: number;
+  // Hears the server go — it exited or could not start — unless `close` stopped it.
+  onDead?: (err: McpError) => void;
 }
 
 const STDERR_KEPT = 4096;
@@ -105,6 +108,7 @@ export function createStdioClient(opts: StdioClientOptions) {
   let heardFromServer = false;
   let dead: McpError | undefined;
   let exited = false;
+  let closing = false;
   let child: ChildProcess | undefined;
 
   const stderrTail = () => {
@@ -117,6 +121,7 @@ export function createStdioClient(opts: StdioClientOptions) {
   // one at once.
   const die = (err: McpError) => {
     if (dead) return;
+    err.lost = true;
     dead = err;
     if (child) live.delete(child);
     for (const [id, p] of pending) {
@@ -124,6 +129,7 @@ export function createStdioClient(opts: StdioClientOptions) {
       pending.delete(id);
       p.reject(err);
     }
+    if (!closing) opts.onDead?.(err);
   };
 
   try {
@@ -242,6 +248,7 @@ export function createStdioClient(opts: StdioClientOptions) {
       });
     },
     close() {
+      closing = true;
       const c = child;
       if (!c || exited) return;
       try { c.stdin?.destroy(); } catch { /* already gone */ }

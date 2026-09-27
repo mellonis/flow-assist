@@ -26,14 +26,16 @@
 // `${VAR}` in a url, a header or a stdio server's `env` is taken from the environment: a
 // token lives in env, never in the config file. A command and its arguments are taken
 // literally — they are an argv, and a variable expanded into one could split or smuggle
-// an argument the person never wrote. A server that does not answer is skipped and said
-// so in the log; the rest of the app starts as usual.
+// an argument the person never wrote. A server that does not answer is said so in the
+// log and tried again in the background (servers.ts); the rest of the app starts as
+// usual, and the server's tools join when it answers.
 //
 // No runtime dependencies: a plugin loaded from source by the compiled binary cannot
 // import a package from disk. Its settings schema is built with the host's zod (`ctx.z`).
 
 import { createMcpClient, resultText, type Fetcher, type McpClient, type McpTool } from './client.ts';
 import { createStdioClient } from './stdio.ts';
+import { createServerManager, realTimers, type RetrySchedule, type ServerManager, type ServerView, type Timers } from './servers.ts';
 
 export type ServerSpec = {
   url?: string;
@@ -110,7 +112,10 @@ export function frame(server: string, tool: string, text: string, isError: boole
   ].join('\n');
 }
 
-export function toolGroup(name: string, spec: ServerSpec, client: McpClient, tools: McpTool[], instructions?: string) {
+// `onFail` hears every call that failed with an error of the line or the server (not a
+// tool's own `isError` answer): the server's manager reads from it whether the
+// connection is gone (servers.ts).
+export function toolGroup(name: string, spec: ServerSpec, client: McpClient, tools: McpTool[], instructions?: string, onFail?: (e: unknown) => void) {
   const byWire = new Map<string, string>();
   const personSays = claimedReadOnly(spec);
   const defs = tools.map((t) => {
@@ -149,6 +154,7 @@ export function toolGroup(name: string, spec: ServerSpec, client: McpClient, too
         const failed = r.isError === true;
         return { text: frame(name, tool, text, failed), raw: failed ? null : text };
       } catch (e) {
+        onFail?.(e);
         return { text: frame(name, tool, (e as Error).message, true), raw: null };
       }
     },
@@ -227,31 +233,99 @@ function configSchema(z: any) {
   return z.object({ servers: z.record(z.string(), server).optional() }).optional();
 }
 
-export async function buildMcpPlugin({ make, config, z }: { make: (name: string, shape: Record<string, unknown>) => unknown; config: Record<string, unknown>; z?: unknown }) {
-  const servers = parseServers((config?.plugins as Record<string, { servers?: unknown }> | undefined)?.mcp?.servers);
+// Every configured server, a disabled one too — `/mcp` lists it, and `enable` needs it.
+export function allServers(raw: unknown): Array<{ name: string; spec: ServerSpec }> {
+  if (!raw || typeof raw !== 'object') return [];
+  return Object.entries(raw as Record<string, unknown>)
+    .filter(([, v]) => v && typeof v === 'object')
+    .map(([name, v]) => ({ name, spec: v as ServerSpec }));
+}
+
+// How long until a time, said in whole seconds (`12 s`).
+export const inSeconds = (at: number, now: number) => `${Math.max(0, Math.ceil((at - now) / 1000))} s`;
+
+// A server's line in the log: what it answered, or why not and what happens next.
+export function statusLine(v: ServerView, now: number): string {
+  if (v.state === 'connected') return `${v.name}: ${v.detail ?? 'server'}, ${v.tools.length} tools`;
+  if (v.state === 'disabled') return `${v.name}: disabled`;
+  if (v.state === 'connecting') return `${v.name}: connecting…`;
+  return `${v.name}: not connected — ${v.reason ?? 'no answer'}${v.nextAt !== undefined ? ` · retrying in ${inSeconds(v.nextAt, now)}` : ''}`;
+}
+
+// Every live manager, so the program's exit clears their timers and lets their servers go.
+const managers = new Set<ServerManager>();
+let exitHooked = false;
+const stopManagers = () => { for (const m of managers) m.stop(); managers.clear(); };
+
+type BuildCtx = {
+  make: (name: string, shape: Record<string, unknown>) => unknown;
+  config: Record<string, unknown>;
+  z?: unknown;
+  // The host's: the registry reads the plugin's `tools` again (docs/plugins.md). Absent
+  // on an older host — a server that connects late then waits for a restart.
+  toolsChanged?: () => void;
+  // Tests only: when a server that is not there is tried again, and the clock.
+  retry?: RetrySchedule;
+  timers?: Timers;
+};
+
+export async function buildMcpPlugin({ make, config, z, toolsChanged, retry, timers }: BuildCtx) {
+  const servers = allServers((config?.plugins as Record<string, { servers?: unknown }> | undefined)?.mcp?.servers);
   // The fetch of the moment the plugin was built — a later replacement of the global
   // (a test's scripted model is one) must not take the servers' traffic.
   const fetchAtBuild = globalThis.fetch.bind(globalThis);
-  const { groups, status } = await connectServers(servers, { fetch: (u, i) => fetchAtBuild(u, i) });
+  // The host's services, from `setup` on: the log, the chat's notes, a redraw.
+  let services: Record<string, any> | undefined;
+  let plugin: { tools?: unknown[] } | undefined;
+  const clock = timers ?? realTimers;
+  const log = (line: string) => services?.pushLog?.(`[mcp] ${line}`);
+  const manager = createServerManager(servers, {
+    fetch: (u, i) => fetchAtBuild(u, i),
+    schedule: retry,
+    timers: clock,
+    onChange: (event) => {
+      if (!plugin) return;
+      plugin.tools = manager.groups();
+      toolsChanged?.();
+      if (event?.kind === 'connected') {
+        const line = `${event.name} connected — ${event.tools} tools`;
+        log(line);
+        services?.chatNote?.(`mcp: ${line}`);
+      } else if (event?.kind === 'dropped') {
+        log(`${event.name}: lost — ${event.reason}`);
+      } else if (event?.kind === 'failed') {
+        log(`${event.name}: not connected — ${event.reason}${event.retryInMs !== undefined ? ` · retrying in ${Math.ceil(event.retryInMs / 1000)} s` : ''}`);
+      }
+      services?.notify?.();
+    },
+  });
+  managers.add(manager);
+  if (!exitHooked) { exitHooked = true; process.once('exit', stopManagers); }
+  await manager.start();
+  const now = clock.now();
+  const views = manager.list();
   // One line per server, plus — once, at start — a line for every name on a `readOnly`
   // list the server turned out not to offer: a mistyped name is a setting that would
   // otherwise do nothing at all, quietly.
-  const summary = status.flatMap((s) => [
-    `${s.name}: ${s.ok ? s.detail : `not connected — ${s.detail}`}`,
-    ...(s.unknownReadOnly?.length ? [`${s.name}: readOnly names ${s.unknownReadOnly.length === 1 ? 'a tool' : 'tools'} this server does not offer — ${s.unknownReadOnly.join(', ')}`] : []),
+  const summary = views.flatMap((v) => [
+    statusLine(v, now),
+    ...(v.unknownReadOnly?.length ? [`${v.name}: readOnly names ${v.unknownReadOnly.length === 1 ? 'a tool' : 'tools'} this server does not offer — ${v.unknownReadOnly.join(', ')}`] : []),
   ]);
-  return make('mcp', {
+  const enabled = views.filter((v) => v.state !== 'disabled');
+  plugin = make('mcp', {
     name: 'mcp',
-    tools: groups,
+    tools: manager.groups(),
     surface: undefined,
     configSchema: configSchema(z),
-    description: servers.length ? `MCP — ${status.filter((s) => s.ok).length} of ${status.length} servers connected` : 'MCP servers — none configured (plugins.mcp.servers)',
+    description: servers.length ? `MCP — ${enabled.filter((v) => v.state === 'connected').length} of ${enabled.length} servers connected` : 'MCP servers — none configured (plugins.mcp.servers)',
     // What happened to each server, in the log (L): the start screen only has room for
     // the count.
-    setup: ({ host }: { host: { services?: { pushLog?: (m: string) => void } } }) => {
+    setup: ({ host }: { host: { services?: Record<string, any> } }) => {
+      services = host.services;
       for (const line of summary) host.services?.pushLog?.(`[mcp] ${line}`);
     },
-  });
+  }) as { tools?: unknown[] };
+  return plugin;
 }
 
 export default buildMcpPlugin;
