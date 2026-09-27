@@ -7,6 +7,7 @@
 //     see AGENTS.md, plugin contract) — the chat names no plugin's data.
 //   - the chat's language is `ai.assistantLanguage` (chatLanguage).
 
+import fs from 'node:fs';
 import { addTrigger, chatUser } from '../loader/registry.js';
 import { bgActiveCount } from '../loader/tools-core.js';
 import { autoBadge, autoCommand, autoConfirms, autoSaid, nextAutoMode, type AutoMode } from '../assistant/auto.js';
@@ -24,12 +25,13 @@ import { copyTarget, copyToClipboard } from '../assistant/copy.js';
 import { createShellState, formatShell, nextCwd, realOf, runShell, shellAutoRun, shellLimits, shellOutcome, shellRoots, tildePath, type ShellResult } from '../assistant/shell.js';
 import { findInstructions, instructionsBlock, instructionsNote, type ProjectInstructions } from '../assistant/project-instructions.js';
 import {
-  KEEP_SESSIONS, SESSION_VERSION, acquireLock, closeSession, cutTitle, flushOnExit, listSessions, loadSession, lockPath,
+  JOURNAL_DAYS, KEEP_SESSIONS, SESSION_VERSION, acquireLock, closeSession, cutTitle, flushOnExit, journalPath, listSessions, loadSession, lockPath,
   makeLockToken, newSessionId, pruneSessions, releaseLock, removeSession, renameSession, saveSession, sessionFingerprint,
-  sessionFingerprintsEqual, sessionRows, sessionTitle, sessionWhen, sessionsDir, type Session, type SessionFingerprint,
+  sessionFingerprintsEqual, sessionRows, sessionTitle, sessionWhen, sessionsDir, sweepJournals, type Session, type SessionFingerprint,
 } from '../assistant/sessions.js';
+import { appendJournal, rowOf, viewEntry, type JournalEvent } from '../assistant/journal.js';
 import { pickerKey, pickerReload, pickerStart, type PickerAction, type PickerState } from '../assistant/session-picker.js';
-import type { ChatMessage, TokenUsage } from '../assistant/agent.js';
+import type { ChatMessage, TokenUsage, ToolRun } from '../assistant/agent.js';
 import type { ChangeView } from '../assistant/diff.js';
 import { VIEW_CAPS, type ViewRecord, type ViewRenderers } from '../assistant/views.js';
 import { capConsoleData, consoleData, renderConsole } from '../assistant/console-view.js';
@@ -779,7 +781,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const chatComplete = (text: string): CompleteResult => (bangLevelRef.current
             ? completePath(text, { cwd: shellRef.current.cwd(), roots: shellRoots(host.config as Record<string, unknown>).map(realOf), list: listDirectory, real: realOf })
             : completeSlash(text, chatCommandDefs));
-          const sessConf = (host.config.sessions ?? {}) as { resume?: unknown; keep?: unknown };
+          const sessConf = (host.config.sessions ?? {}) as { resume?: unknown; keep?: unknown; journalDays?: unknown };
           const sessionIdRef = ui.useRef('');
           const createdAtRef = ui.useRef('');
           // The session's title: fixed at its first save from the first line the person
@@ -804,11 +806,17 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // before overwriting it (sessions.ts, "sessionFingerprint").
           const fingerprintRef = ui.useRef<SessionFingerprint>(NO_FILE);
           const releaseCurrentLock = () => { if (sessDir && sessionIdRef.current) releaseLock(sessDir, sessionIdRef.current, lockToken); };
-          const snapshotSession = (): Session => {
+          // A session gets its id — and its lock — when it first has something to keep:
+          // its first save, or the first thing its journal records.
+          const ensureSessionId = (): string => {
             if (!sessionIdRef.current) {
               sessionIdRef.current = newSessionId(); createdAtRef.current = new Date().toISOString(); fingerprintRef.current = NO_FILE;
               if (sessDir) acquireLock(sessDir, sessionIdRef.current, lockToken); // a fresh id — nothing else could hold it
             }
+            return sessionIdRef.current;
+          };
+          const snapshotSession = (): Session => {
+            ensureSessionId();
             if (!titleRef.current) titleRef.current = sessionTitle(msgsRef.current as Record<string, unknown>[]);
             return {
               version: SESSION_VERSION, id: sessionIdRef.current, title: titleRef.current, createdAt: createdAtRef.current, updatedAt: new Date().toISOString(),
@@ -826,6 +834,44 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               recall: saveRecallState(recallRef.current),
               closed: false, // written means in use — a resumed cleared session is open again
             };
+          };
+          // ── The journal (src/assistant/journal.ts) ── one line per event, appended as
+          // it happens. Events before the session has an id (a note said at start, the
+          // memory note after /clear) wait in `journalBuf` for the first thing the person
+          // says or runs, which gives it one — a start with nothing said leaves no
+          // journal. A session opened from a state file with no journal beside it (saved
+          // before journals, or its journal swept by retention) brings the rows it holds
+          // into the journal it starts (`journalImport`), marked `imported`.
+          const journalBuf = ui.useRef<JournalEvent[]>([]);
+          const journalImport = ui.useRef<Record<string, unknown>[] | null>(null);
+          const journalTo = (id: string, ev: JournalEvent) => {
+            if (!sessDir || !id) return;
+            try { appendJournal(journalPath(sessDir, id), ev); }
+            catch (e) { (host.services as Record<string, any>).pushLog?.(`[session] journal not written: ${(e as Error).message}`); }
+          };
+          // `person` — the event is something the person said or ran (or the question a
+          // turn starts from): the session gets its id if it has none.
+          const journal = (ev: JournalEvent, opts: { person?: boolean } = {}): string => {
+            if (!sessDir) return '';
+            const stamped = { ...ev, at: ev.at ?? new Date().toISOString() };
+            if (!sessionIdRef.current && !opts.person) { journalBuf.current.push(stamped); return ''; }
+            const id = ensureSessionId();
+            let fresh = false;
+            try { fresh = !fs.existsSync(journalPath(sessDir, id)); } catch { /* an id that is not one — journalTo says so */ }
+            if (fresh) {
+              const imported = journalImport.current ?? [];
+              journalTo(id, { t: 'start', id, ...(imported.length ? { continued: true } : {}) });
+              for (const m of imported) { const row = rowOf(m, viewRenderers); if (row) journalTo(id, { ...row, imported: true }); }
+            }
+            journalImport.current = null;
+            for (const held of journalBuf.current.splice(0)) journalTo(id, held);
+            journalTo(id, stamped);
+            return id;
+          };
+          // A row the host says to the person: drawn and journaled.
+          const pushNote = (content: string) => {
+            journal({ t: 'row', role: 'note', text: content });
+            setMessages((cur) => [...cur, { role: 'note', content }]);
           };
           // The fork note's text.
           const forkNoteText = (title: string, id: string): string =>
@@ -852,9 +898,12 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 const forked: Session = { ...snap, id: forkedId, createdAt: now, updatedAt: now };
                 const fp = saveSession(sessDir, forked);
                 sessionIdRef.current = forkedId; createdAtRef.current = now; fingerprintRef.current = fp;
+                // The fork's journal begins with where it came from; what came before is
+                // in that session's journal.
+                journalTo(forkedId, { t: 'start', id: forkedId, parent: snap.id });
                 const text = forkNoteText(snap.title, snap.id);
                 if (!opts.silent) {
-                  setMessages((cur) => [...cur, { role: 'note', content: text }]);
+                  pushNote(text);
                   host.notify();
                 }
                 return;
@@ -879,6 +928,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // is instead caught — the next save finds the disk has moved and forks.
           const applySession = (s: Session, fingerprint: SessionFingerprint) => {
             sessionIdRef.current = s.id; createdAtRef.current = s.createdAt;
+            journalBuf.current = []; // held for the conversation being left
+            let journaled = true;
+            try { journaled = !sessDir || fs.existsSync(journalPath(sessDir, s.id)); } catch { /* not an id — nothing to journal */ }
+            journalImport.current = journaled ? null : (s.messages as Record<string, unknown>[]).filter((m) => m.role !== 'system');
             titleRef.current = s.title;
             fingerprintRef.current = fingerprint;
             apiRef.current = s.api as unknown as ChatMessage[];
@@ -917,6 +970,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             unhookExitRef.current = flushOnExit(() => { writeRef.current({ silent: true }); releaseCurrentLock(); });
             setTimeout(() => {
               try { pruneSessions(sessDir, Number.isInteger(sessConf.keep) ? Number(sessConf.keep) : KEEP_SESSIONS); } catch { /* not fatal */ }
+              try { sweepJournals(sessDir, typeof sessConf.journalDays === 'number' ? sessConf.journalDays : JOURNAL_DAYS); } catch { /* not fatal */ }
               if (sessConf.resume === false || msgsRef.current.length) return;
               const last = listSessions(sessDir)[0];
               if (!last || last.closed) return;
@@ -927,7 +981,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               if (!s) return;
               const outcome = acquireLock(sessDir, s.id, lockToken);
               if (outcome.status === 'held') {
-                setMessages((cur) => [...cur, { role: 'note', content: `Session "${s.title || s.id}" is open in another flow-assist process — started a new one. (lock: ${lockPath(sessDir, s.id)})` }]);
+                pushNote(`Session "${s.title || s.id}" is open in another flow-assist process — started a new one. (lock: ${lockPath(sessDir, s.id)})`);
                 host.notify();
                 return;
               }
@@ -1091,6 +1145,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // A note is said once: not again when the list already ends in the same one
           // (a continued session that said it before the restart).
           const pushProjectNote = (note: string) => {
+            const said = msgsRef.current.findLast((m) => m.role === 'note' && String(m.content ?? '').startsWith('Project instructions:'));
+            if (said?.content !== note) journal({ t: 'row', role: 'note', text: note });
             setMessages((cur) => {
               const last = cur.findLast((m) => m.role === 'note' && String(m.content ?? '').startsWith('Project instructions:'));
               return last?.content === note ? cur : [...cur, { role: 'note', content: note }];
@@ -1241,6 +1297,20 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // The question joins the model's history now, so a failed or cancelled
             // turn still leaves it on record; the turn's transcript follows on success.
             apiRef.current = [...apiRef.current, asked];
+            // And the journal, before anything of the turn can happen: the notes, then the
+            // question, which gives the session its id. The turn's own events go to that
+            // session's journal even when a reset (/clear) lands while it runs — they
+            // happened there.
+            for (const m of added.slice(0, -1)) journal({ t: 'row', role: 'note', text: String(m.content ?? '') });
+            const journalId = journal({
+              t: 'row', role: opts.fromBackground ? 'bg' : 'user', text: q,
+              ...(images.length ? { images: images.map((r) => ({ n: r.n, name: r.name, path: r.path })) } : {}),
+              ...(opts.hostAsk ? { hostAsk: true } : {}),
+            }, { person: true });
+            // The round being written, for a turn cut off before the round ends: its text
+            // and its reasoning so far.
+            let roundText = '';
+            let roundReasoning = '';
             // An UPDATER, over the list as it is — not a list built from `msgsRef`, which
             // is what was last DRAWN. A message sent from a zero-delay timer (the queue
             // after a turn, a `!command` or a slash command; the ask after `!!`) can run
@@ -1284,6 +1354,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             stopKeyRef.current = '';
             const ai = (host.config.ai ?? {}) as Record<string, any>;
             let failed = false, aborted = false;
+            let failure = '';
             // The loop ran out of rounds with no answer. It is said where the answer
             // would be, in the warn colour, and it replaces the dim line under the
             // field that a wall of grey tool lines would otherwise hide.
@@ -1383,7 +1454,15 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // What a write changed goes on the answer being written the moment the
                 // write lands — a block of its own that stays in the chat. Only on the
                 // display message: `apiRef` gets the transcript, which never holds it.
-                onToolRun: (run: { changes?: ChangeView[]; views?: unknown[] }) => {
+                onToolRun: (run: ToolRun) => {
+                  // The call whole — its arguments as the model wrote them, its result as
+                  // the tool returned it, before the cap and before any stub.
+                  journalTo(journalId, {
+                    t: 'call', ...(run.id ? { id: run.id } : {}), name: run.name, args: run.args, outcome: run.outcome, ...(run.write ? { write: true } : {}),
+                    result: typeof run.detail === 'string' ? run.detail : JSON.stringify(run.detail ?? ''),
+                    ...(run.changes?.length ? { changes: run.changes } : {}),
+                    ...(run.views?.length ? { views: run.views.map((v) => viewEntry(v, viewRenderers)) } : {}),
+                  });
                   // A call whose result arrives after a LATER reset (/clear mid-turn,
                   // most often): the conversation it ran in is gone from both the screen
                   // and `apiRef`, and every one of this callback's effects — the status
@@ -1457,6 +1536,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 },
                 onLive: (delta: string) => {
                   if (!delta) return;
+                  roundText += delta;
                   endToolSegment(); // the tool is done: the model is writing
                   setPhase('writing');
                   // Read now, not in the updater (see `roundToolsRef`): a tool call that
@@ -1473,6 +1553,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // reasoning and content arrive in one chunk as parallel streams: we
                 // accumulate reasoning in a separate message field (not content!).
                 onReasoning: (delta: string) => {
+                  roundReasoning += delta;
                   endToolSegment(); // the tool is done: the model is thinking
                   setPhase('thinking');
                   setMessages(cur => {
@@ -1492,6 +1573,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   // finally right after await — there it would still be empty, and the
                   // «limit of steps» warning popped even on a normal answer.
                   if (isAnswer) contentRef.current = text;
+                  // A round's text once, when it is known what it is.
+                  if (isAnswer || text.trim() || roundReasoning) journalTo(journalId, { t: isAnswer ? 'answer' : 'step', text, ...(roundReasoning ? { reasoning: roundReasoning } : {}) });
+                  roundText = ''; roundReasoning = '';
                   // The next round starts knowing nothing — reset here, where the
                   // callback fires, never in the updater below.
                   resetRound();
@@ -1538,6 +1622,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 (host.services as Record<string, any>).pushLog?.('[chat] aborted by user');
               } else {
                 failed = true;
+                failure = String((e as Error)?.message ?? e);
                 setError((e as Error).message);
                 (host.services as Record<string, any>).pushLog?.(`[chat] error: ${(e as Error).message}`);
                 // A model that cannot take images answers the first one with a 400. Said
@@ -1546,7 +1631,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 const why = String((e as Error)?.message ?? '');
                 if (wireHasImages && isImageRefusal(why) && !imageRefusalSaidRef.current) {
                   imageRefusalSaidRef.current = true;
-                  setMessages((cur) => [...cur, { role: 'note', content: `The provider refused the image: ${why.slice(0, 300)}\nIf this model cannot take images: config set ai.images.enabled false — images already in the conversation then go as their names only.` }]);
+                  pushNote(`The provider refused the image: ${why.slice(0, 300)}\nIf this model cannot take images: config set ai.images.enabled false — images already in the conversation then go as their names only.`);
                 }
               }
               // The question is already in the model's history; left there alone it is a
@@ -1574,6 +1659,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // the line under it says it was stopped.
               const spent = turnTokensRef.current;
               const cachedSpent = turnCachedRef.current;
+              journalTo(journalId, {
+                t: 'end', ms: finalMs, ...(spent ? { tokens: spent } : {}),
+                ...(aborted ? { stopped: stopKeyRef.current || keyGlyph('escape') } : {}), ...(failed ? { failed: failure } : {}),
+                ...(roundLimit ? { roundLimit } : {}),
+                // A round cut off by Esc or an error never reached `onLiveCommit`.
+                ...(roundText ? { cut: roundText } : {}), ...(roundReasoning ? { reasoning: roundReasoning } : {}),
+              });
               setMessages(cur => {
                 // A round cut off by Esc or an error never said what it was. Its text
                 // stays where it was drawn: a round known to carry a tool call — or
@@ -1761,12 +1853,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // recall.ts): the command, how it ended, how long, how many lines.
                 const printed = r.output.replace(/\n+$/, '');
                 const meta: ShellMeta = { command: cmd, outcome: shellOutcome(r, timeoutMs), ms: r.ms, lines: printed ? printed.split('\n').length : 0 };
+                journal({ t: 'shell', command: cmd, cwd: tildePath(cwd), output: r.output, status: meta.outcome, ms: r.ms, ...(interactive ? { interactive: true } : {}) }, { person: true });
                 if (seen) apiRef.current = [...apiRef.current, { role: 'shell', content: forModel, shell: meta }];
                 if (interactive && !r.error && !seen) {
                   const why = recorded
                     ? 'Nothing was printed outside the full-screen program — the assistant was not asked.'
                     : 'No usable `script` on PATH — the program ran with the terminal, but nothing was recorded, so the assistant was not asked.';
-                  setMessages((cur) => [...cur, { role: 'note', content: why }]);
+                  pushNote(why);
                 }
                 ask = interactive && seen;
               }
@@ -1774,6 +1867,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             } catch (e) {
               stopped = true; // a command that could not run keeps the queue, as a failed turn does
               setError(`!: ${(e as Error).message}`);
+              if (epoch === epochRef.current) journal({ t: 'shell', command: cmd, cwd: tildePath(cwd), output: '', status: `could not run: ${(e as Error).message}` }, { person: true });
               // The block stops ticking rather than waiting forever for a completion
               // that is never coming — marked failed in place, keeping whatever it had
               // already shown (the way a tool's own thrown view does, agent.ts).
@@ -1902,6 +1996,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // reading `ctx N%` shows) — with the summary it was given folded under it.
               const after = contextReading().used;
               const sizes = before > 0 && after > 0 ? ` · ~${shortTokens(before)} → ~${shortTokens(after)} tokens` : '';
+              journal({ t: 'compact', summary, note: `── compacted${sizes} ──` });
               setMessages((cur) => [...cur, { role: 'note', content: `── compacted${sizes} ──`, summary }]);
               persist();
               (host.services as Record<string, any>).showMessage?.('History compacted');
@@ -1997,7 +2092,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             if (id !== sessionIdRef.current) {
               const outcome = acquireLock(sessDir, id, lockToken);
               if (outcome.status === 'held') {
-                setMessages((cur) => [...cur, { role: 'note', content: `Session "${title || id}" is open in another flow-assist process. (lock: ${lockPath(sessDir, id)})` }]);
+                pushNote(`Session "${title || id}" is open in another flow-assist process. (lock: ${lockPath(sessDir, id)})`);
                 // `/resume <n>` in the field is the command, done; from the picker the
                 // field holds the person's draft, which stays.
                 if (/^\s*\//.test(inputRef.current)) setField('');
@@ -2100,7 +2195,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // The conversation ends, not the memory — and it says so, or the assistant
             // "still knowing" an earlier prompt reads as the reset failing.
             {
+              // What the journal held back belonged to the conversation being left.
+              journalBuf.current = []; journalImport.current = null;
               const kept = keptAfterClear(loadMemories(memoryFilePath(host.config)));
+              if (kept) journal({ t: 'row', role: 'note', text: kept });
               setMessages(kept ? [{ role: 'note', content: kept }] : []);
             }
             // Back to the first root — after the list is emptied, so the fresh
@@ -2179,7 +2277,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 setField('');
                 if (!v) {
                   const small = modeRef.current === 'panel' && layoutRef.current !== 'panel' ? ' (drawn as a window: the terminal is too small for a panel)' : '';
-                  setMessages((cur) => [...cur, { role: 'note', content: `the chat is in ${modeRef.current} mode${small} · /mode ${CHAT_MODES.join('|')}` }]);
+                  pushNote(`the chat is in ${modeRef.current} mode${small} · /mode ${CHAT_MODES.join('|')}`);
                   host.notify();
                   return;
                 }
@@ -2199,7 +2297,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 const file = memoryFilePath(host.config);
                 const res = memoryCommand(arg, loadMemories(file));
                 if (res.next) saveMemories(res.next, file);
-                setMessages((cur) => [...cur, { role: 'note', content: res.note }]);
+                pushNote(res.note);
                 setField('');
                 host.notify();
                 return;
@@ -2214,7 +2312,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 if (!text) {
                   const now = titleRef.current || sessionTitle(msgsRef.current as Record<string, unknown>[]);
                   const said = now ? `This session is «${now}» — /title <text> renames it` : 'This session has no title yet — /title <text> gives it one';
-                  setMessages((cur) => [...cur, { role: 'note', content: said }]);
+                  pushNote(said);
                   host.notify();
                   return;
                 }
@@ -2233,7 +2331,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 const n = Number(arg.trim());
                 if (!arg.trim()) {
                   const lines = list.slice(0, 15).map((s, i) => `${i + 1}. ${s.title || '(untitled)'} — ${sessionWhen(s.updatedAt)}, ${s.turns} message${s.turns === 1 ? '' : 's'}${s.id === sessionIdRef.current ? ' · this one' : ''}`);
-                  setMessages((cur) => [...cur, { role: 'note', content: lines.length ? `Sessions (newest first) — /resume <number> opens one:\n${lines.join('\n')}` : 'No saved sessions yet.' }]);
+                  pushNote(lines.length ? `Sessions (newest first) — /resume <number> opens one:\n${lines.join('\n')}` : 'No saved sessions yet.');
                   setField('');
                   host.notify();
                   return;
@@ -2491,6 +2589,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               return;
             }
             bgQueueRef.current.shift();
+            journal({ t: 'row', role: 'bg', text: q });
             setMessages((cur) => [...cur, { role: 'bg', content: q }]);
             apiRef.current = [...apiRef.current, { role: 'bg', content: q }];
             persist();

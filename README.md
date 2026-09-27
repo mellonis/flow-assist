@@ -48,7 +48,12 @@ coming and marks the old session done, so a restart starts empty. `/resume` list
 saved sessions and `/resume <n>` opens one.
 Sessions live in `sessions/` in the config directory, readable by you only
 (`sessions.resume: false` starts every run empty; `sessions.keep` — how many are kept,
-50 by default).
+50 by default). What a restart restores is bounded — the last 400 messages of the
+conversation, fewer of the commands' output blocks — but each session also keeps a
+journal beside it, `<id>.log.jsonl`: everything as it happened, every tool call with
+its whole arguments and result, every `/compact` summary, written line by line so a
+crash loses nothing and never trimmed. It goes with its session, or after
+`sessions.journalDays` days without a write (30; 0 keeps it forever).
 
 A message sent while an answer is still coming waits its turn (`⏎ queued`) and goes
 out when the answer ends; ↑ on an empty field takes the last one back to edit. Esc or

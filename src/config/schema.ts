@@ -112,12 +112,14 @@ export const hostConfigSchema = z.object({
   }).optional(),
   memory: z.object({ file: z.string() }).optional(),
   // Chat sessions on disk (src/assistant/sessions.ts): where, whether the app
-  // continues the latest one on start, how many are kept.
+  // continues the latest one on start, how many are kept, and for how many days a
+  // session's journal is kept (0 — forever).
   // Read when the chat starts.
   sessions: z.object({
     dir: z.string(),
     resume: z.boolean().register(modelMaySet, RESUME).register(modelMaySave, RESUME),
     keep: z.number().int().positive(),
+    journalDays: z.number().int().nonnegative(),
   }).partial().register(appliesOnRestart, {}).optional(),
   // Legacy: `shell.roots` and `plugins.repo.roots` replace this. Still accepted and
   // read for one release —

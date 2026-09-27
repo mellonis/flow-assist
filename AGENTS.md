@@ -1116,6 +1116,43 @@ there is no `/fullscreen`.
   history that starts with a result whose call is gone reaches the provider as one
   that starts with an assistant message, and the Anthropic API refuses it; a last turn
   longer than the cap by itself is kept whole, from where it began.
+  **The journal is the record; the state file is what a restart restores**
+  (`src/assistant/journal.ts`). Beside each session, `<id>.log.jsonl` (600): one JSON
+  event per line, appended with `appendFileSync` AS IT HAPPENS — never at a save, never
+  trimmed — so a crash loses at most the line being written. The events: `start` (the
+  first line; `parent` for a fork, `continued` when the journal began after the session
+  did), `row` (user, bg, note — every row the person was shown, the question with its
+  images' names), `step` and `answer` (a round's text once, when `onLiveCommit` says
+  what it was, with its reasoning), `call` (from `onToolRun`: the provider's call id,
+  the arguments as parsed, the result as the tool returned it — `ToolRun.detail`, before
+  `capToolResult` and any recall stub — what it changed, and the views it left in their
+  FINAL phase with the text their renderer draws, so a view is recorded once, never per
+  live update), `shell` (a `!command` with its whole output, once it has ended),
+  `compact` (the summary) and `end` (how the turn ended: duration, tokens, stopped or
+  failed, and the text of a round cut off, which never reached `onLiveCommit`). A turn's
+  events go to the session its question was journaled in (`journalId`, taken in
+  `send()`), even when a `/clear` lands mid-turn — they happened there. A line over
+  `JOURNAL_LINE_MAX` (4 MiB) is written with its largest fields replaced by a note of
+  their size and named in `omitted` (`journalLine`). A background task's own calls are
+  not journaled: only its result row is, when it is shown.
+  The journal needs the session's id, which is given when the session first has
+  something to keep (`ensureSessionId`): events before the person has said or run
+  anything — the project-instructions note at start, the memory note after `/clear` —
+  wait in `journalBuf` and are written ahead of the first thing the person does, so a
+  start with nothing said leaves no journal. A session opened from a state file with no
+  journal beside it (saved by an older host, or its journal swept) brings the rows its
+  file still holds into the journal it starts (`rowOf`, marked `imported`, the start
+  line `continued`). A fork's journal starts with `parent` naming the session it left;
+  what came before is in that one's journal. `/new` and `/clear` start a new session and
+  so a new journal. A delete (the picker, `pruneSessions`) takes the state file and the
+  journal together (`deleteSession`). Retention is `sessions.journalDays` (30; 0 keeps
+  every journal forever): at start, beside `pruneSessions`, `sweepJournals` removes a
+  journal not written to for longer than that, unless a live chat holds its session —
+  the state file stays, and a journal starts again from it if the session is opened. A
+  journal whose state file was never written (a crash in the session's first 250 ms)
+  is swept by its age like any other, never sooner. `debug.logTools`' `tools.log` is a
+  debugging aid beside it (arguments and results clipped to 300 characters, only when
+  switched on), not a record.
   **The picker** (`/sessions`, and the assistant's `sessions` key — `^s`, `config.keys.sessions`
   moves it) lists every saved session newest first, one row each: the title, `this chat`
   or `in use elsewhere` (`lockState`: ours / held), `sessionWhen`, the file's size
@@ -2015,7 +2052,8 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     arguments SUMMARISED (`summarizeArgs` — a string cut to 80 characters, a list as
     `[N items]`, an object as a 40-character JSON cut) — never a write_file's
     `content` or an edit's `old`/`new` in every save (the model's own history, `api`,
-    keeps the call as it was made; it is sent it again). A session file saved by an older host keeps the text of the tool
+    keeps the call as it was made; it is sent it again, and the session's journal keeps
+    it whole, its result too). A session file saved by an older host keeps the text of the tool
     rounds (`process`, or `shown`), the turn's `changes` and its whole trail
     (`toolRuns`); it reads as those parts in that order — the text, the changes,
     then the calls as one trail of its own just before the answer, an empty step put

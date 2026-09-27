@@ -87,6 +87,8 @@ export interface ChatRoundResult {
 // A trace of one executed tool call — what actually ran, so the chat UI can show
 // a persistent trail and distinguish a real write from a narrator's retelling.
 export interface ToolRun {
+  // The provider's id for the call — what the model's history pairs the result with.
+  id?: string;
   name: string;
   args: Record<string, unknown>;
   write?: boolean;
@@ -868,7 +870,7 @@ export async function agentChat(
           const detail = `Error: the arguments were not valid JSON (${callParse.error.slice(0, 120)}) — nothing was run; call ${tc.name} again with a JSON object.`;
           current.push({ role: 'tool', tool_call_id: tc.id, content: modelToolResult('error', detail) });
           logRun({ name: tc.name, write: false, outcome: 'error', detail, args: {} });
-          const run: ToolRun = { name: tc.name, args: {}, write: false, outcome: 'error', detail };
+          const run: ToolRun = { id: tc.id, name: tc.name, args: {}, write: false, outcome: 'error', detail };
           toolRuns.push(run);
           opts.onToolRun?.(run);
           continue;
@@ -910,7 +912,7 @@ export async function agentChat(
           const detail = `Error: ${argsError}`;
           current.push({ role: 'tool', tool_call_id: tc.id, content: modelToolResult('error', detail) });
           logRun({ name: tc.name, write: false, outcome: 'error', detail, args: parsed });
-          const run: ToolRun = { name: tc.name, args: parsed, write: false, outcome: 'error', detail };
+          const run: ToolRun = { id: tc.id, name: tc.name, args: parsed, write: false, outcome: 'error', detail };
           toolRuns.push(run);
           opts.onToolRun?.(run);
           continue;
@@ -937,7 +939,7 @@ export async function agentChat(
             detail = 'This write operation was declined — the user must explicitly confirm before it runs.';
             current.push({ role: 'tool', tool_call_id: tc.id, content: modelToolResult('declined', detail) });
             logRun({ name: tc.name, write, outcome, detail, args: parsed });
-            const run: ToolRun = { name: tc.name, args: parsed, write, outcome, detail };
+            const run: ToolRun = { id: tc.id, name: tc.name, args: parsed, write, outcome, detail };
             toolRuns.push(run);
             opts.onToolRun?.(run);
             continue;
@@ -1059,7 +1061,7 @@ export async function agentChat(
         const kept = outcome === 'ok' || outcome === 'applied' ? keptRaw(sent, whole === undefined ? detailStr : whole) : {};
         current.push({ role: 'tool', tool_call_id: tc.id, content: sent, ...(outcome !== 'error' && attached.length ? { images: attached } : {}), ...kept });
         logRun({ name: tc.name, write, outcome, detail: detailStr, args: parsed });
-        const run: ToolRun = { name: tc.name, args: parsed, write, outcome, detail: detailStr };
+        const run: ToolRun = { id: tc.id, name: tc.name, args: parsed, write, outcome, detail: detailStr };
         if (outcome !== 'error' && changes.length) run.changes = changes;
         if (views.length) run.views = views;
         if (outcome !== 'error' && attached.length) run.images = attached.map(imageMark);

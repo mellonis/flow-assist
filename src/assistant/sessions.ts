@@ -99,6 +99,15 @@ const fileOf = (dir: string, id: string) => {
   return path.join(dir, `${id}.json`);
 };
 
+// The session's journal (./journal.ts): beside its state file, never trimmed, removed
+// with the session or once it is older than `sessions.journalDays`.
+const JOURNAL_EXT = '.log.jsonl';
+export function journalPath(dir: string, id: string): string {
+  if (!ID.test(id)) throw new Error(`not a session id: ${id}`);
+  return path.join(dir, `${id}${JOURNAL_EXT}`);
+}
+export const JOURNAL_DAYS = 30;
+
 // The screen list as the state file keeps it: the latest `keep` conversation rows —
 // every row but a `view` — and, among them, the latest `keepViews` view rows in their
 // places.
@@ -384,8 +393,33 @@ export function sessionToContinue(dir: string): Session | null {
   return loadSession(dir, last.id);
 }
 
+// The state file and the journal go together.
 export function deleteSession(dir: string, id: string): void {
   try { fs.unlinkSync(fileOf(dir, id)); } catch { /* already gone */ }
+  try { fs.unlinkSync(journalPath(dir, id)); } catch { /* none, or already gone */ }
+}
+
+// Retention, swept at start: a journal not written to for more than `days` days goes —
+// its session's state file stays, and a journal starts again from it if the session is
+// opened. 0 (or less) keeps every journal. A journal whose session a live chat holds
+// is left alone, and so is one whose state file never got written (a crash in the
+// first moments of a session): it goes by its age like any other, never sooner.
+export function sweepJournals(dir: string, days = JOURNAL_DAYS, now = Date.now()): number {
+  if (!(days > 0)) return 0;
+  let names: string[] = [];
+  try { names = fs.readdirSync(dir); } catch { return 0; }
+  let removed = 0;
+  for (const n of names) {
+    if (!n.endsWith(JOURNAL_EXT)) continue;
+    const id = n.slice(0, -JOURNAL_EXT.length);
+    if (!ID.test(id)) continue;
+    const file = path.join(dir, n);
+    let mtimeMs: number;
+    try { mtimeMs = fs.statSync(file).mtimeMs; } catch { continue; }
+    if (now - mtimeMs <= days * 24 * 60 * 60 * 1000 || isLockHeld(dir, id)) continue;
+    try { fs.unlinkSync(file); removed++; } catch { /* already gone */ }
+  }
+  return removed;
 }
 
 // Keeps the newest `keep`; returns how many session files went. A session whose

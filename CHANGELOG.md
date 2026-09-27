@@ -5,8 +5,13 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
-- **A long session keeps its conversation, and comes back after a restart on any
-  provider.** The saved session counts its limit of 400 in messages of the
+- **Every session keeps a journal of everything that happened in it.** Beside the
+  saved session, `sessions/<id>.log.jsonl` records each row you saw, each tool call
+  with its whole arguments and result (not the cut the model was given), each
+  `/compact` with its summary — line by line as it happens, so a crash loses nothing,
+  and never trimmed: a long session's beginning is no longer lost. A journal goes with
+  its session, or after `sessions.journalDays` days without a write (30; 0 keeps it
+  forever). The saved session itself counts its limit of 400 in messages of the
   conversation: the blocks of the commands the assistant ran have a smaller limit of
   their own (100), so a session that runs many commands no longer loses what was said
   twice as fast. The model's side of it is cut where a turn begins, never between a
