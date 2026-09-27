@@ -556,9 +556,10 @@ there is no `/fullscreen`.
 
 ## What the model can do (the `core` tool group)
 
-`memory`, `workspace_write`, `workspace_read`, `workspace_list`, `config_schema`,
-`config_set`, `datetime`, `remind`, `background`, `todo`, `ask_user`, `open_url`,
-`recall`, plus `host:plugins_list`. Three rules hold this set together:
+`memory`, `workspace_read`, `config_schema`, `config_set`, `datetime`, `remind`,
+`background`, `todo`, `ask_user`, `open_url`, `recall`, plus `host:plugins_list`;
+`workspace_write` and `workspace_list` are the on-demand `workspace` group. Three rules
+hold this set together:
 
 - **A plugin's config key is validated by the plugin's schema — everywhere.**
   `configSchemaAt` (`src/config/load.ts`) resolves a key through the host schema and,
@@ -883,8 +884,12 @@ there is no `/fullscreen`.
   and read the inner one's memory; everything is confined to the leaf. It holds
   `memory/` (the facts, below) and `artifacts/` — the model's working files: drafts,
   notes, plans, findings, a patch it was asked to keep. Directories 0700, files 0600.
-  - `workspace_write(path, content, scope?)`, `workspace_read(path, scope?)`,
-    `workspace_list(path?, scope?)`: a path is relative to the workspace, holds no `..`,
+  - `workspace_read(path, scope?)` is core — the memory index in every prompt points at
+    it, and loading it per fact would cost a round each time — while
+    `workspace_write(path, content, scope?)` and `workspace_list(path?, scope?)` are the
+    `workspace` group (`workspaceTools`, one body `workspaceExec`), loaded on demand
+    like any other and off with `ai.disabledTools: ["workspace"]`; the read tool's
+    description names the `tools_load` call for them. A path is relative to the workspace, holds no `..`,
     is never absolute or `~`, and its REAL location — every link followed, a path not
     there yet through its nearest existing parent — lies inside the workspace's real
     location (`resolveInWorkspace`, on the host's `realOf`/`within`). A write goes under
@@ -917,7 +922,8 @@ there is no `/fullscreen`.
     only, never sent to the model: what the model wrote there is not the person's
     message. A path out of the workspace answers with the tools' own refusal.
   - The `repo` plugin's `write_file` refused outside its roots adds one sentence naming
-    the workspace as the place for a draft (`DRAFT_HINT`): a write aimed at `/tmp` is
+    the workspace as the place for a draft, with the `tools_load` call as JSON
+    (`DRAFT_HINT`): a write aimed at `/tmp` is
     most often the model's own note, and a refusal that names no way on ends the turn.
 - **The memory is the person's too.** The `memory` tool is the model's: a stored fact
   is a file in the agent workspace (`src/assistant/memory-store.ts`, "The agent

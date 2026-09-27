@@ -880,3 +880,16 @@ test('moving a fact to another scope is held to that scope\'s cap and to the dup
   expect(readFacts(g)).toHaveLength(100);
   expect(readFacts(a).some((f) => f.id === one.id)).toBe(true);
 });
+
+test('workspace_read is core — the memory index points at it — while workspace_write and workspace_list are the on-demand workspace group', () => {
+  const { reg } = memSetup();
+  const groupOf = (name: string) => reg.groups.find((g) => g.tools.some((t) => t.function.name === name));
+  expect(groupOf('workspace_read')!.id).toBe('core');
+  expect(groupOf('workspace_write')!.id).toBe('workspace');
+  expect(groupOf('workspace_list')!.id).toBe('workspace');
+  expect(groupOf('workspace_write')!.alwaysOn).toBe(false);
+  // The read tool says how to reach the other two.
+  const read = reg.tools.find((t) => t.function.name === 'workspace_read')!.function.description!;
+  expect(read).toContain('tools_load');
+  expect(read).toContain('workspace_write');
+});

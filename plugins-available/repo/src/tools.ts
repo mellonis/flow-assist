@@ -253,7 +253,7 @@ export function buildRepoGroup({ clip, roots, homeDir = os.homedir() }: RepoDeps
   // A file the model writes outside the roots is most often a draft of its own (a
   // note, a plan, findings) aimed at /tmp: the refusal names the place for those — the
   // host's workspace for the project — so the turn goes on there rather than ending.
-  const DRAFT_HINT = '. A draft or a working note of your own goes to your workspace instead: workspace_write with a path under artifacts/';
+  const DRAFT_HINT = '. A draft or a working note of your own goes to your workspace instead: workspace_write with a path under artifacts/ (load it first when it is not loaded: tools_load {"names": ["workspace_write"]})';
   const writeFile = (args: any, all: string[], ctx?: any) => {
     const r = resolveRead(args.path, all);
     if (r.error) refuse(/outside the configured roots|under no configured root/.test(r.error) ? `${r.error}${DRAFT_HINT}` : r.error);

@@ -15,7 +15,7 @@
 // group) lets `exec(name, args, ctx)` dispatch to the group that owns the tool.
 
 import type { Plugin } from './plugin.js';
-import { coreTools } from './tools-core.js';
+import { coreTools, workspaceTools } from './tools-core.js';
 import type { CoreCtx } from './tools-core.js';
 import { hostGroupTools } from './host-group.js';
 import { webTools } from './tools-web.js';
@@ -163,7 +163,9 @@ export function assembleToolRegistry({ plugins, config, repo }: AssembledToolReg
   const web = disabled.includes('web') ? null : webTools(config);
   // run_command likewise — and every call of it waits for the person's y/n.
   const shell = disabled.includes('shell') ? null : shellTools(config);
-  const groups: ToolGroup[] = [core, host, ...(web ? [web] : []), ...(shell ? [shell] : [])];
+  // The model's own files beyond reading one: loaded when it needs them.
+  const workspace = disabled.includes('workspace') ? null : workspaceTools(config);
+  const groups: ToolGroup[] = [core, host, ...(web ? [web] : []), ...(shell ? [shell] : []), ...(workspace ? [workspace] : [])];
   const nameToGroup = new Map<string, ToolGroup>();
   // ─── How a tool gets its name ───────────────────────────────────────────────
   // The model sees the name the plugin gave: `get_issue`, `open_issue`, `read_file`.
@@ -198,6 +200,7 @@ export function assembleToolRegistry({ plugins, config, repo }: AssembledToolReg
   register(host);
   if (web) register(web);
   if (shell) register(shell);
+  if (workspace) register(workspace);
 
   for (const p of plugins) {
     // Plugin-supplied tool groups — used as-is (the plugin author namespaces the
