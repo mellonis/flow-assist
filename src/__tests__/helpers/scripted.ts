@@ -360,8 +360,13 @@ export async function bootApp(model: ScriptedModel, cols = 100, rows = 28, guest
   // that only configures roots for some OTHER reason (a project, a `!cd` destination)
   // would see the new start-up note and an extra journaled row it never asked about.
   // A test of the start directory itself always names `startDir` explicitly.
+  // The first root itself may not exist yet (a test that configures a root before
+  // creating it, or one that never means to) — an injected start that is not a real
+  // directory would run commands nowhere, where the real `process.cwd()` fallback
+  // (`?? null`) always is one.
   const rootsHere = shellRoots(config);
-  setStartDirForTests(opts.startDir ?? rootsHere[0] ?? null);
+  const firstRoot = rootsHere[0];
+  setStartDirForTests(opts.startDir ?? (firstRoot && fs.existsSync(firstRoot) ? firstRoot : null));
   let app: Awaited<ReturnType<typeof renderApp>>;
   try {
     app = await renderApp(backend, { plugins, config, tools, onExit: () => { exits++; }, toastMs: opts.toastMs, pluginsNote: opts.pluginsNote, clipboardImage: opts.clipboardImage ?? (() => ({ ok: false, none: true, error: 'no image on the clipboard' })),
