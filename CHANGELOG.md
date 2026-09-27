@@ -6,19 +6,24 @@ What each version of flow-assist brought, newest first. The version is the one i
 ## Unreleased
 
 - **Every session keeps a journal of everything that happened in it.** Beside the
-  saved session, `sessions/<id>.log.jsonl` records each row you saw, each tool call
-  with its whole arguments and result (not the cut the model was given), each
-  `/compact` with its summary — line by line as it happens, so a crash loses nothing,
-  and never trimmed: a long session's beginning is no longer lost. A `!command` is
-  recorded when it starts and again, with its exit and output, when it ends. A journal
-  lives exactly as long as its session; `sessions.journalDays` (0 by default) removes
-  one not written to for that many days, and the session says so in a note. `/export [path]` turns it into a markdown document to read — each tool call
-  folded with its arguments and result, the summaries in place — in the shell's
-  directory unless you name a path, never over a file that is there. The saved session itself counts its limit of 400 in messages of the
-  conversation: the blocks of the commands the assistant ran have a smaller limit of
-  their own (100), so a session that runs many commands no longer loses what was said
-  twice as fast. The model's side of it is cut where a turn begins, never between a
-  tool call and its result — a cut there left a session the Anthropic API refused on
+  saved session, `sessions/<id>.log.jsonl` records each row you saw; each tool call
+  when it starts, the y/n you answered, and when it ends, with its whole arguments and
+  result (not the cut the model was given — and for a tool that frames its answer, such
+  as an MCP server's, the data behind the frame); the calls of the background tasks
+  it started, under each task's name; each `/compact` with its summary — line by line
+  as it happens, so a crash loses nothing, and never trimmed: a long session's
+  beginning is no longer lost. A `!command` is recorded when it starts and again, with
+  its exit and output, when it ends; when it printed more than `shell.maxChars`, the
+  journal says how much was cut. A journal lives exactly as long as its session;
+  `sessions.journalDays` (0 by default) removes one not written to for that many
+  days, and the session says so in a note. `/export [path]` turns it into a markdown
+  document to read — each tool call folded with its arguments and result, the
+  summaries in place — in the shell's directory unless you name a path, never over a
+  file that is there. The saved session itself counts its limit of 400 in messages of
+  the conversation: the blocks of the commands the assistant ran have a smaller limit
+  of their own (100), so a session that runs many commands no longer loses what was
+  said twice as fast. The model's side of it is cut where a turn begins, never between
+  a tool call and its result — a cut there left a session the Anthropic API refused on
   the next message after a restart.
 - **Commands can run without asking, when you say so twice.** `config set shell.autoRun
   true` together with `/auto all` (or ⇧⇥ to `all`) lets the assistant's `run_command` run

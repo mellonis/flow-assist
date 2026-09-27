@@ -1119,52 +1119,82 @@ there is no `/fullscreen`.
   **The journal is the record; the state file is what a restart restores**
   (`src/assistant/journal.ts`). Beside each session, `<id>.log.jsonl` (600): one JSON
   event per line, appended with `appendFileSync` AS IT HAPPENS — never at a save, never
-  trimmed — so a crash loses at most the line being written. The events: `start` (the
-  first line; `parent` for a fork, `continued` when the journal began after the session
-  did), `row` (user, bg, note — every row the person was shown, the question with its
-  images' names), `step` and `answer` (a round's text once, when `onLiveCommit` says
-  what it was, with its reasoning), `call` (from `onToolRun`: the provider's call id,
-  the arguments as parsed, the result as the tool returned it — `ToolRun.detail`, before
-  `capToolResult` and any recall stub — what it changed, and the views it left in their
-  FINAL phase with the text their renderer draws, so a view is recorded once, never per
-  live update), `shell` (a `!command`'s line and directory, written when it STARTS, so a crash
-  mid-command still records what ran) and `shell-end` (its exit, duration and whole
-  output, written when it ends, to the same session whatever reset came meanwhile),
-  `compact` (the summary) and `end` (how the turn ended: duration, tokens, stopped or
-  failed, and the text of a round cut off, which never reached `onLiveCommit`). A turn's
-  events go to the session its question was journaled in (`journalId`, taken in
-  `send()`), even when a `/clear` lands mid-turn — they happened there. A line over
+  trimmed — so a crash loses at most the line being written. The events:
+  - `start` — the first line; `parent` for a fork, `continued` when the journal began
+    after the session did.
+  - `row` — user, bg, note: every row the person was shown, the question with its
+    images' names.
+  - `step` and `answer` — a round's text once, when `onLiveCommit` says what it was,
+    with its reasoning.
+  - `call-start` — from `onToolStart`, fired once a call's arguments are checked and
+    before its y/n: the provider's call id, the name, the arguments as parsed, and
+    `confirm`, whether it waits on a y/n. A crash mid-call or at an open y/n still
+    records what was running.
+  - `confirm` — the y/n's answer, `yes`/`no`, and `by`: `person`, `auto` (the auto mode
+    answered) or `background` (a background task declines every write). The call id
+    reaches `confirmWrite` as `info.id`.
+  - `call` — from `onToolRun`: the arguments, the outcome, `result` as the tool returned
+    it (`ToolRun.detail`, before `capToolResult` and any recall stub), `raw` — the data
+    behind a result the tool framed for the model (`{ text, raw }`, `ToolRun.raw`: an
+    MCP server's own text, whole, where the frame is clipped; `null` for a call with no
+    data) — the images it returned (names and sizes), what it changed, and the views it
+    left in their FINAL phase with the text their renderer draws, so a view is recorded
+    once, never per live update. A call refused before it starts (arguments that do not
+    parse or fit) has only its `call`.
+  - `shell` — a `!command`'s line and directory, written when it STARTS; `shell-end` —
+    its exit, duration and output, written when it ends, to the same session whatever
+    reset came meanwhile. The host never holds more of a command's output than its last
+    `shell.maxChars` (`runShell` keeps the tail as it reads), so `output` is that tail;
+    when the command printed more, `cut` is how many characters before it were dropped
+    and `total` how many it printed, and the export says so above the output.
+    run_command's `result` is the same capped tail, with its own cut note in the text.
+  - `compact` — the summary; `end` — how the turn ended: duration, tokens, stopped or
+    failed, and the text of a round cut off, which never reached `onLiveCommit`.
+  A turn's events go to the session its question was journaled in (`journalId`, taken
+  in `send()`), even when a `/clear` lands mid-turn — they happened there. A FORK is
+  different: the conversation goes on in the fork, so `journalTo` follows `forkedTo`
+  (parent id → fork id, set where `writeSession` forks) and the rest of a turn in
+  flight, a `!command` still running and a background task's calls land in the fork's
+  journal, never in the parent's, which another writer holds now. A background task's
+  own calls (`call-start`, `confirm`, `call`) are journaled through `ctx.journal`, which
+  the chat hands its tools, in the session whose turn started the task, each tagged
+  `task` with the task's label; the one-shot prompt has no journal. A line over
   `JOURNAL_LINE_MAX` (4 MiB) is written with its largest fields replaced by a note of
-  their size and named in `omitted` (`journalLine`). A background task's own calls are
-  not journaled: only its result row is, when it is shown.
+  their size and named in `omitted` (`journalLine`).
   The journal needs the session's id, which is given when the session first has
   something to keep (`ensureSessionId`): events before the person has said or run
   anything — the project-instructions note at start, the memory note after `/clear` —
   wait in `journalBuf` and are written ahead of the first thing the person does, so a
   start with nothing said leaves no journal. A session opened from a state file with no
-  journal beside it (saved by an older host, or its journal swept) brings the rows its
+  journal beside it (saved by an older host, or its journal removed) brings the rows its
   file still holds into the journal it starts (`rowOf`, marked `imported`, the start
   line `continued`). A fork's journal starts with `parent` naming the session it left;
   what came before is in that one's journal. `/new` and `/clear` start a new session and
-  so a new journal. A delete (the picker, `pruneSessions`) takes the state file and the
-  journal together (`deleteSession`) — so does `KEEP_SESSIONS` pruning. **A journal
-  lives as long as its session**: a session the person can still open keeps its
-  evidence, so nothing removes a journal by age unless the person asks —
+  so a new journal. Opening another session writes nothing to its journal: the next
+  event's time shows where it was picked up.
+  **A journal lives as long as its session.** Every delete — the picker's, `/sessions`'
+  `KEEP_SESSIONS` pruning (`pruneSessions`) — takes the state file and the journal
+  together (`deleteSession`). Nothing removes a journal by age unless the person asks:
   `sessions.journalDays` defaults to 0. Set, `sweepJournals` (at start, beside
-  `pruneSessions`) removes a journal not written to for longer than that, unless a live
-  chat holds its session, and appends a note row to that session's state file, `Journal
-  removed after N days without a write (sessions.journalDays) — this session's full
-  record is gone.`, so a state file whose record is gone never passes for one that
-  still has it; a journal starts again from the state file if the session is opened. A
-  journal whose state file was never written (a crash in the session's first 250 ms)
-  goes only by that same age. `debug.logTools`' `tools.log` is a
-  debugging aid beside it (arguments and results clipped to 300 characters, only when
-  switched on), not a record.
+  `pruneSessions`) removes a journal not written to for longer than that — taking the
+  session's lock for it, as a rename does, and leaving alone one a live chat holds —
+  and appends a note row to that session's state file, `Journal removed after N days
+  without a write (sessions.journalDays) — this session's full record is gone.`, so a
+  state file whose record is gone never passes for one that still has it; a journal
+  starts again from the state file if the session is opened. A journal whose state file
+  was never written (a crash in the session's first 250 ms) is listed nowhere and goes
+  only by that same age. `debug.logTools`' `tools.log` is a debugging aid beside it
+  (arguments and results clipped to 300 characters, only when switched on), not a
+  record. One turn is bounded by `maxRounds` (64), not by `KEEP_MESSAGES`, which is why
+  the state cap keeps an over-long last turn whole.
   **`/export [path]`** writes the current session as a markdown document
   (`exportMarkdown`): the conversation in order, each tool call a `<details>` block with
   its arguments and result, each change's diff and each view's text, the `/compact`
   summaries where they happened, how a stopped or failed turn ended — everything quoted
-  in a fence longer than any backtick run it holds (`fence`). The path is resolved in
+  in a fence longer than any backtick run it holds (`fence`). A call is drawn once,
+  where it began: its `call-start` holds the place its `call` fills, with the y/n's
+  answer and the `raw` data under "Data:"; a start that never ended is drawn as `did
+  not finish`. The path is resolved in
   the shell's directory (`~` the home); with none, `session-<id>.md` there. It is the
   PERSON's command, typed by them, so it takes no y/n (that pause guards what the MODEL
   writes); it never overwrites — an existing file is refused (`flag: 'wx'`), and the

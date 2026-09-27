@@ -50,9 +50,11 @@ Sessions live in `sessions/` in the config directory, readable by you only
 (`sessions.resume: false` starts every run empty; `sessions.keep` — how many are kept,
 50 by default). What a restart restores is bounded — the last 400 messages of the
 conversation, fewer of the commands' output blocks — but each session also keeps a
-journal beside it, `<id>.log.jsonl`: everything as it happened, every tool call with
-its whole arguments and result, every `/compact` summary, written line by line so a
-crash loses nothing and never trimmed. It lives exactly as long as its session and
+journal beside it, `<id>.log.jsonl`: everything as it happened — every tool call with
+its whole arguments and result and the y/n you gave it, a background task's calls
+under its name, every `!command` (the last `shell.maxChars` of its output, and how much
+was cut before that), every `/compact` summary — written line by line so a crash loses
+nothing, and never trimmed. It lives exactly as long as its session and
 goes when the session is deleted; `sessions.journalDays` (0 by default) removes one not
 written to for that many days, and the session then says so in a note. `/export [path]`
 turns the journal into a markdown document you can read — the conversation, each tool

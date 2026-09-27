@@ -31,7 +31,7 @@ import {
   makeLockToken, newSessionId, pruneSessions, releaseLock, removeSession, renameSession, saveSession, sessionFingerprint,
   sessionFingerprintsEqual, sessionRows, sessionTitle, sessionWhen, sessionsDir, sweepJournals, type Session, type SessionFingerprint,
 } from '../assistant/sessions.js';
-import { appendJournal, exportMarkdown, readJournal, rowOf, viewEntry, type JournalEvent } from '../assistant/journal.js';
+import { appendJournal, callEndEvent, callStartEvent, exportMarkdown, readJournal, rowOf, type JournalEvent } from '../assistant/journal.js';
 import { pickerKey, pickerReload, pickerStart, type PickerAction, type PickerState } from '../assistant/session-picker.js';
 import type { ChatMessage, TokenUsage, ToolRun } from '../assistant/agent.js';
 import type { ChangeView } from '../assistant/diff.js';
@@ -846,7 +846,15 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // into the journal it starts (`journalImport`), marked `imported`.
           const journalBuf = ui.useRef<JournalEvent[]>([]);
           const journalImport = ui.useRef<Record<string, unknown>[] | null>(null);
-          const journalTo = (id: string, ev: JournalEvent) => {
+          // A fork continues the conversation under a new id: whatever was still writing
+          // to the session left — a turn in flight, a `!command`, a background task —
+          // goes on in the fork's journal, never in the parent's, which someone else is
+          // writing now. `/clear` and `/new` are not forks: what ran before them stays
+          // in the session it ran in.
+          const forkedTo = ui.useRef(new Map<string, string>());
+          const journalTo = (from: string, ev: JournalEvent) => {
+            let id = from;
+            for (let i = 0; i < 64 && forkedTo.current.has(id); i++) id = forkedTo.current.get(id)!;
             if (!sessDir || !id) return;
             try { appendJournal(journalPath(sessDir, id), ev); }
             catch (e) { (host.services as Record<string, any>).pushLog?.(`[session] journal not written: ${(e as Error).message}`); }
@@ -903,6 +911,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // The fork's journal begins with where it came from; what came before is
                 // in that session's journal.
                 journalTo(forkedId, { t: 'start', id: forkedId, parent: snap.id });
+                forkedTo.current.set(snap.id, forkedId);
                 const text = forkNoteText(snap.title, snap.id);
                 if (!opts.silent) {
                   pushNote(text);
@@ -1400,6 +1409,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                     onRecalled: (id: string) => { recallRef.current.recalled.add(id); },
                   } satisfies RecallSource,
                   memoryFile: memoryFilePath(host.config),
+                  // Where a background task this turn starts journals its own calls: the
+                  // session the turn runs in (following a fork).
+                  journal: (ev: JournalEvent) => journalTo(journalId, ev),
                   // The plugin's OWN host-issued token. The CALLER never supplies a
                   // name here — a raw plugin-name string is ignored by the memory
                   // tool (it resolves `plugin` scope only through a token the host
@@ -1423,7 +1435,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // The y/n pause on a writing op: agentChat calls confirmWrite for tools
                 // with a write-flag, we set pendingRef + pendingAsk and wait for the
                 // input-handler to resolve the promise ('y'/Enter — yes, 'n'/Esc — no).
-                confirmWrite: (name: string, argsStr: unknown, info?: { input?: string; inputId?: string; hostShell?: boolean }) => new Promise<boolean>((resolve) => {
+                confirmWrite: (name: string, argsStr: unknown, info?: { input?: string; inputId?: string; hostShell?: boolean; id?: string }) => new Promise<boolean>((resolve) => {
                   // The one place a confirmation may be answered without the person:
                   // the auto mode (src/assistant/auto.ts), which only `all` ever lets
                   // say yes, never for an unlisted web_fetch or config_set, and for
@@ -1435,7 +1447,11 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   // Nothing here relaxes what agentChat asks about: a tool with no
                   // write flag never reaches this function, and the trail and the ✎
                   // diff block still show what ran.
-                  if (autoConfirms(autoModeRef.current, name, { autoRun: shellAutoRun(host.config as { shell?: unknown }), hostShell: info?.hostShell === true })) { resolve(true); return; }
+                  if (autoConfirms(autoModeRef.current, name, { autoRun: shellAutoRun(host.config as { shell?: unknown }), hostShell: info?.hostShell === true })) {
+                    journalTo(journalId, { t: 'confirm', ...(info?.id ? { id: info.id } : {}), name, answer: 'yes', by: 'auto' });
+                    resolve(true);
+                    return;
+                  }
                   const args = typeof argsStr === 'string' ? argsStr : JSON.stringify(argsStr ?? '');
                   const command = shellCommandOf(name, args);
                   const line = configLineOf(name, args);
@@ -1445,7 +1461,12 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   // The tool whose earlier result the call takes as its input — the
                   // block says where a command's stdin comes from.
                   const input = info?.input ? `${info.input}${info.inputId ? ` (${info.inputId})` : ''}` : undefined;
-                  pendingRef.current = { name, args, ...(input ? { input } : {}), resolve };
+                  // The answer goes into the journal as it is given.
+                  const answered = (ok: boolean) => {
+                    journalTo(journalId, { t: 'confirm', ...(info?.id ? { id: info.id } : {}), name, answer: ok ? 'yes' : 'no', by: 'person' });
+                    resolve(ok);
+                  };
+                  pendingRef.current = { name, args, ...(input ? { input } : {}), resolve: answered };
                   setPendingAsk({ name, args, ...(command != null ? { command } : {}), ...(line != null ? { line } : {}), ...(input ? { input } : {}) });
                   host.notify();
                 }),
@@ -1456,15 +1477,12 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // What a write changed goes on the answer being written the moment the
                 // write lands — a block of its own that stays in the chat. Only on the
                 // display message: `apiRef` gets the transcript, which never holds it.
+                // A call that will run, or wait on a y/n: in the journal before it does.
+                onToolStart: (call: { id?: string; name: string; args: Record<string, unknown>; confirm: boolean }) => journalTo(journalId, callStartEvent(call)),
                 onToolRun: (run: ToolRun) => {
                   // The call whole — its arguments as the model wrote them, its result as
                   // the tool returned it, before the cap and before any stub.
-                  journalTo(journalId, {
-                    t: 'call', ...(run.id ? { id: run.id } : {}), name: run.name, args: run.args, outcome: run.outcome, ...(run.write ? { write: true } : {}),
-                    result: typeof run.detail === 'string' ? run.detail : JSON.stringify(run.detail ?? ''),
-                    ...(run.changes?.length ? { changes: run.changes } : {}),
-                    ...(run.views?.length ? { views: run.views.map((v) => viewEntry(v, viewRenderers)) } : {}),
-                  });
+                  journalTo(journalId, callEndEvent(run, viewRenderers));
                   // A call whose result arrives after a LATER reset (/clear mid-turn,
                   // most often): the conversation it ran in is gone from both the screen
                   // and `apiRef`, and every one of this callback's effects — the status
@@ -1829,7 +1847,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               stopped = r.stopped;
               if (r.stopped && stopKeyRef.current) r.stoppedBy = stopKeyRef.current;
               // Its end, whatever happened to the conversation meanwhile — it ran there.
-              journalTo(journalId, { t: 'shell-end', command: cmd, output: r.output, status: shellOutcome(r, timeoutMs), ms: r.ms });
+              // `output` is what the host holds: the last `shell.maxChars` of it.
+              journalTo(journalId, { t: 'shell-end', command: cmd, output: r.output, status: shellOutcome(r, timeoutMs), ms: r.ms, ...(r.cut ? { cut: r.cut, total: r.cut + r.output.length } : {}) });
               const move = nextCwd(host.config as Record<string, unknown>, cwd, r.pwd);
               const { display, forModel } = formatShell(cmd, r, cwd, timeoutMs, { after: move.cwd, note: move.note, ...(interactive ? { interactive: { recorded } } : {}) });
               // Everything from here on is display/model-facing state for THIS

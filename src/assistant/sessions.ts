@@ -418,10 +418,19 @@ export function sweepJournals(dir: string, days = JOURNAL_DAYS, now = Date.now()
     const file = path.join(dir, n);
     let mtimeMs: number;
     try { mtimeMs = fs.statSync(file).mtimeMs; } catch { continue; }
-    if (now - mtimeMs <= days * 24 * 60 * 60 * 1000 || isLockHeld(dir, id)) continue;
-    try { fs.unlinkSync(file); removed++; } catch { continue; }
-    const s = loadSession(dir, id);
-    if (s) saveSession(dir, { ...s, messages: [...s.messages, { role: 'note', content: `Journal removed after ${days} days without a write (sessions.journalDays) — this session's full record is gone.` }] });
+    if (now - mtimeMs <= days * 24 * 60 * 60 * 1000) continue;
+    // The session's lock is taken for the removal and the note, as a rename takes it:
+    // a process opening the session meanwhile waits for neither, and one that holds it
+    // is left alone.
+    const token = makeLockToken();
+    if (acquireLock(dir, id, token).status !== 'acquired') continue;
+    try {
+      try { fs.unlinkSync(file); removed++; } catch { continue; }
+      const s = loadSession(dir, id);
+      if (s) saveSession(dir, { ...s, messages: [...s.messages, { role: 'note', content: `Journal removed after ${days} days without a write (sessions.journalDays) — this session's full record is gone.` }] });
+    } finally {
+      releaseLock(dir, id, token);
+    }
   }
   return removed;
 }

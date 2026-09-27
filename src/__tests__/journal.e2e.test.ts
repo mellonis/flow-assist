@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { readJournal, type JournalEvent } from '../assistant/journal.ts';
 import { ScriptedModel, bootApp, settle } from './helpers/scripted';
+import type { Make } from '../loader/plugin.ts';
 
 const realFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = realFetch; });
@@ -53,7 +54,7 @@ test('a crash before any save leaves every row and every call — whole, before 
   expect(events.find((e) => e.t === 'answer')).toMatchObject({ text: 'Схема на месте.' });
   expect(events.at(-1)).toMatchObject({ t: 'end' });
   // The order is the order it happened in.
-  expect(events.map((e) => e.t)).toEqual(['start', 'row', 'step', 'call', 'answer', 'end']);
+  expect(events.map((e) => e.t)).toEqual(['start', 'row', 'step', 'call-start', 'call', 'answer', 'end']);
   await settle(10);
   expect(ui.backend.lastFrame).toContain('Схема на месте.');
   ui.app.unmount();
@@ -248,5 +249,135 @@ test('a !command is in the journal from the moment it starts; its end adds the e
   expect(end).toMatchObject({ command: 'sleep 1; echo готово', status: expect.stringContaining('exit 0') });
   expect(String(end.output)).toContain('готово');
   expect(typeof end.ms).toBe('number');
+  ui.app.unmount();
+});
+
+// A tool that frames its result for the model, as the mcp plugin does: the model reads
+// the frame, cut; the data behind it is `raw`.
+const BIG = Array.from({ length: 800 }, (_, i) => `row ${i}: ${'data '.repeat(9)}`).join('\n');
+const framed = (make: Make) => make('framed', {
+  tools: [{
+    id: 'framed',
+    tools: [
+      { type: 'function', function: { name: 'get_big', description: 'Big data, framed.', parameters: { type: 'object', properties: {} } } },
+      { type: 'function', function: { name: 'get_none', description: 'A failure answered in words.', parameters: { type: 'object', properties: {} } } },
+    ],
+    exec: async (name: string) => {
+      if (name === 'get_big') return { text: `Result of framed:get — data from a server.\n${BIG.slice(0, 2000)}\n… (clipped)`, raw: BIG };
+      if (name === 'get_none') return { text: 'ERROR from framed:get — not found', raw: null };
+      throw new Error(`Unknown tool: ${name}`);
+    },
+  }],
+});
+
+test('a framed result: the journal and the export keep the data behind the frame, whole', async () => {
+  expect(BIG.length).toBeGreaterThan(40_000);
+  const dir = dirOf();
+  const root = rootOf();
+  const model = new ScriptedModel();
+  model.script([{ tool: 'get_big', args: {} }, { tool: 'get_none', args: {} }], [{ text: 'ок' }]);
+  const ui = await bootApp(model, 100, 28, (make) => [framed(make)], { sessions: { dir }, shell: { roots: [root] } });
+  await ui.press('F');
+  await ask(ui, 'дай данные');
+  const calls = journalOf(dir).filter((e) => e.t === 'call');
+  expect(calls[0]).toMatchObject({ name: 'get_big', raw: BIG });
+  expect(String(calls[0]!.result)).toContain('(clipped)');
+  expect(calls[1]).toMatchObject({ name: 'get_none', raw: null });
+  await ask(ui, '/export out.md', 6);
+  const md = fs.readFileSync(path.join(root, 'out.md'), 'utf8');
+  expect(md).toContain('Data:');
+  expect(md).toContain(BIG.split('\n').at(-1)!);
+  ui.app.unmount();
+});
+
+test('a !command whose output was longer than the host keeps: the journal says how much was cut, and so does the export', async () => {
+  const dir = dirOf();
+  const root = rootOf();
+  const ui = await bootApp(new ScriptedModel(), 100, 28, undefined, { sessions: { dir }, shell: { roots: [root], maxChars: 100 } });
+  await ui.press('F');
+  await ui.type('!');
+  await ui.type('seq 1 300');
+  await ui.press('return');
+  await settleUntil(() => journals(dir).length > 0 && journalOf(dir).some((e) => e.t === 'shell-end'), 400);
+  const end = journalOf(dir).find((e) => e.t === 'shell-end')!;
+  const whole = Array.from({ length: 300 }, (_, i) => `${i + 1}\n`).join('');
+  expect(Number(end.cut)).toBeGreaterThan(0);
+  expect(end.total).toBe(whole.length);
+  expect(String(end.output).length + Number(end.cut)).toBe(whole.length);
+  await ask(ui, '/export out.md', 6);
+  const md = fs.readFileSync(path.join(root, 'out.md'), 'utf8');
+  expect(md).toContain(`${end.cut} characters before this were not kept (shell.maxChars)`);
+  ui.app.unmount();
+});
+
+test('a model tool call is journaled when it starts — waiting on a y/n — and the answer and its end follow', async () => {
+  const dir = dirOf();
+  const root = rootOf();
+  const model = new ScriptedModel();
+  model.script([{ tool: 'run_command', args: { command: 'echo привет' } }], [{ text: 'Готово.' }]);
+  const ui = await bootApp(model, 100, 28, undefined, { sessions: { dir }, shell: { roots: [root] } });
+  await ui.press('F');
+  await ui.type('скажи привет');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('Confirm write: run_command'));
+  // What a crash now would leave: the call that was about to run, and that it waited.
+  const waiting = journalOf(dir);
+  expect(waiting.find((e) => e.t === 'call-start')).toMatchObject({ name: 'run_command', args: { command: 'echo привет' }, confirm: true });
+  expect(waiting.some((e) => e.t === 'call' || e.t === 'confirm')).toBe(false);
+  await ui.press('y');
+  await settleUntil(() => journalOf(dir).some((e) => e.t === 'end'));
+  const events = journalOf(dir);
+  const start = events.find((e) => e.t === 'call-start')!;
+  expect(events.find((e) => e.t === 'confirm')).toMatchObject({ id: start.id, name: 'run_command', answer: 'yes', by: 'person' });
+  expect(events.find((e) => e.t === 'call')).toMatchObject({ id: start.id, outcome: 'applied' });
+  expect(events.map((e) => e.t).filter((t) => t.startsWith('call') || t === 'confirm')).toEqual(['call-start', 'confirm', 'call']);
+  ui.app.unmount();
+});
+
+test('a fork in the middle of a turn: the rest of the turn lands in the fork\'s journal, not the parent\'s', async () => {
+  const dir = dirOf();
+  const model = new ScriptedModel();
+  model.script([{ text: 'первый ответ' }], [{ hold: true }, { text: 'второй ответ' }]);
+  const ui = await boot(dir, model);
+  await ask(ui, 'первый вопрос');
+  await ui.press('escape', 'escape'); // the first save
+  await ui.press('F');
+  const name = fs.readdirSync(dir).find((n) => n.endsWith('.json'))!;
+  const parent = name.replace(/\.json$/, '');
+  const file = path.join(dir, name);
+  const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+  fs.writeFileSync(file, JSON.stringify({ ...raw, rev: Number(raw.rev) + 5 })); // a foreign write
+  await ui.type('второй вопрос');
+  await ui.press('return');
+  await new Promise((r) => setTimeout(r, 400)); // the question's own save forks, mid-turn
+  await settle(4);
+  const forkedName = journals(dir).find((n) => !n.startsWith(parent))!;
+  expect(forkedName).toBeDefined();
+  model.release();
+  await settleUntil(() => journalOf(dir, forkedName).some((e) => e.t === 'end'));
+  const parentJournal = journalOf(dir, `${parent}.log.jsonl`);
+  expect(parentJournal.some((e) => e.text === 'второй ответ')).toBe(false);
+  const forked = journalOf(dir, forkedName);
+  expect(forked[0]).toMatchObject({ t: 'start', parent });
+  expect(forked.some((e) => e.t === 'answer' && e.text === 'второй ответ')).toBe(true);
+  ui.app.unmount();
+});
+
+test('a background task\'s own calls are journaled in the session that started it, under the task\'s label', async () => {
+  const dir = dirOf();
+  const model = new ScriptedModel();
+  model.script(
+    [{ tool: 'background', args: { task: 'узнать время', label: 'часы' } }],
+    [{ text: 'Запустил.' }],
+    [{ tool: 'datetime', args: {} }],
+    [{ text: 'Сейчас полдень.' }],
+  );
+  const ui = await boot(dir, model);
+  await ask(ui, 'узнай время в фоне');
+  await settleUntil(() => journalOf(dir).some((e) => e.t === 'call' && e.task === 'часы'), 400);
+  const events = journalOf(dir);
+  expect(events.find((e) => e.t === 'call-start' && e.task === 'часы')).toMatchObject({ name: 'datetime', args: {} });
+  expect(events.find((e) => e.t === 'call' && e.task === 'часы')).toMatchObject({ name: 'datetime', outcome: 'ok' });
+  expect(String(events.find((e) => e.t === 'call' && e.task === 'часы')!.result)).toContain('iso-utc');
   ui.app.unmount();
 });

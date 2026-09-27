@@ -100,6 +100,10 @@ export interface ToolRun {
   // The views the call left — in their final phase, never a discarded one; drawn in
   // the chat, never sent to the model.
   views?: ViewRecord[];
+  // The data behind the result when the tool framed it for the model (`{ text, raw }`,
+  // ./tool-results.ts): the data whole, or `null` for a call with none. Absent — the
+  // result is the data.
+  raw?: string | null;
   // The images the call handed the model beside its result (returned, or attached
   // through `ctx.attachImage`), as marks — a name and a size, drawn one row each in
   // the chat; the bytes are in the host's store (src/assistant/tool-images.ts).
@@ -156,8 +160,13 @@ export interface AgentOpts {
   // def's `resultInput`, run_command's `stdinFrom`), `info.inputId` that call's id — the
   // y/n says where it comes from. `info.hostShell` is true when the call is the host's
   // own shell tool (by the def's identity, `isHostShellTool`), never a plugin's tool of
-  // the same name — what the auto mode's `shell.autoRun` may answer.
-  confirmWrite?: (name: string, args: string, info?: { input?: string; inputId?: string; hostShell?: boolean }) => boolean | Promise<boolean>;
+  // the same name — what the auto mode's `shell.autoRun` may answer. `info.id` is the
+  // call's own id, as `onToolStart` and `onToolRun` carry it.
+  confirmWrite?: (name: string, args: string, info?: { input?: string; inputId?: string; hostShell?: boolean; id?: string }) => boolean | Promise<boolean>;
+  // Fired as a call that will run (or wait on a y/n) begins — after its arguments are
+  // checked, before the y/n: `confirm` says whether it waits on one. A call refused
+  // before that (arguments that do not parse or do not fit) has only its `onToolRun`.
+  onToolStart?: (call: { id?: string; name: string; args: Record<string, unknown>; confirm: boolean }) => void;
   // Fired as each tool call ends (declined ones too), so the chat can show what a
   // write changed while the turn goes on.
   onToolRun?: (run: ToolRun) => void;
@@ -932,8 +941,9 @@ export async function agentChat(
         // `toolReturn`): a string, `null` for none, `undefined` — the result is the data.
         let whole: string | null | undefined;
         let confirmedByPerson = false;
+        try { opts.onToolStart?.({ id: tc.id, name: tc.name, args: parsed, confirm: !!(needsConfirm && confirm) }); } catch { /* the caller's trouble, not the call's */ }
         if (needsConfirm && confirm) {
-          const ok = await confirm(tc.name, tc.arguments, { ...(input ? { input: input.tool, inputId: input.id } : {}), ...(isHostShellTool(def) ? { hostShell: true } : {}) });
+          const ok = await confirm(tc.name, tc.arguments, { ...(input ? { input: input.tool, inputId: input.id } : {}), ...(isHostShellTool(def) ? { hostShell: true } : {}), id: tc.id });
           if (!ok) {
             outcome = 'declined';
             detail = 'This write operation was declined — the user must explicitly confirm before it runs.';
@@ -1065,6 +1075,7 @@ export async function agentChat(
         if (outcome !== 'error' && changes.length) run.changes = changes;
         if (views.length) run.views = views;
         if (outcome !== 'error' && attached.length) run.images = attached.map(imageMark);
+        if (outcome !== 'error' && whole !== undefined) run.raw = whole;
         toolRuns.push(run);
         opts.onToolRun?.(run);
       }

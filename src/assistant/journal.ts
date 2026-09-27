@@ -13,11 +13,20 @@
 //   row      a row of the conversation — `role` user, bg, note, assistant, view
 //   step     the text of a round that went on to call tools
 //   answer   the final text of a turn
-//   call     one tool call: `name`, `args`, `outcome`, `result`, what it `changes`d,
-//            the `views` it left in their final state with their text
+//   call-start  a tool call beginning: `id`, `name`, `args` whole, `confirm` — whether
+//            it waits on a y/n (so a crash mid-call still records what was running)
+//   confirm  the y/n's answer: `answer` yes or no, `by` the person, the auto mode, or a
+//            background task (which declines every write)
+//   call     one tool call ended: `name`, `args`, `outcome`, `result` (the text the tool
+//            returned), `raw` (the data behind a framed result, whole; `null` — none),
+//            the `images` it returned (names and sizes), what it `changes`d, the
+//            `views` it left in their final state with their text
+//            A call made by a background task carries `task`, the task's label.
 //   shell    a `!command` the person ran, written when it starts: `command`, `cwd`
 //            (from a state file: with its `output` too)
-//   shell-end  how it ended: `output`, `status` (the exit), `ms`
+//   shell-end  how it ended: `output`, `status` (the exit), `ms`; the host keeps only the
+//            last `shell.maxChars` of a command's output, so `cut` says how many
+//            characters before it were dropped and `total` how many there were
 //   compact  a `/compact`: the `summary` the model was given from then on
 //   end      how a turn ended: its duration, what it cost, stopped or failed, and the
 //            text of a round cut off
@@ -105,6 +114,23 @@ export function viewEntry(rec: ViewRecord, renderers: ViewRenderers): Record<str
   return { kind: rec.kind, phase: rec.phase, data: rec.data, text: viewText(rec, renderers) };
 }
 
+// A call's two events, from what the agent loop reports (./agent.ts `onToolStart`,
+// `onToolRun`). `extra` — `task` for a background task's call.
+export function callStartEvent(call: { id?: string; name: string; args: Record<string, unknown>; confirm: boolean }, extra: Record<string, unknown> = {}): JournalEvent {
+  return { t: 'call-start', ...(call.id ? { id: call.id } : {}), name: call.name, args: call.args, confirm: call.confirm, ...extra };
+}
+export function callEndEvent(run: { id?: string; name: string; args: Record<string, unknown>; outcome: string; write?: boolean; detail: unknown; raw?: string | null; images?: unknown[]; changes?: unknown[]; views?: ViewRecord[] }, renderers: ViewRenderers, extra: Record<string, unknown> = {}): JournalEvent {
+  return {
+    t: 'call', ...(run.id ? { id: run.id } : {}), name: run.name, args: run.args, outcome: run.outcome, ...(run.write ? { write: true } : {}),
+    result: typeof run.detail === 'string' ? run.detail : JSON.stringify(run.detail ?? ''),
+    ...(run.raw !== undefined ? { raw: run.raw } : {}),
+    ...(run.images?.length ? { images: run.images } : {}),
+    ...(run.changes?.length ? { changes: run.changes } : {}),
+    ...(run.views?.length ? { views: run.views.map((v) => viewEntry(v, renderers)) } : {}),
+    ...extra,
+  };
+}
+
 // A row as the screen list keeps it, as a journal event — how a session saved before it
 // had a journal brings what its state file still holds into the journal it starts. null
 // for what the person never saw (the system prompt).
@@ -151,11 +177,18 @@ const when = (at: unknown) => {
 };
 const asText = (v: unknown) => (typeof v === 'string' ? v : JSON.stringify(v, null, 2) ?? '');
 
-function callBlock(ev: Record<string, unknown>): string {
-  const head = `${String(ev.name ?? 'call')} · ${String(ev.outcome ?? '')}${ev.write ? ' · write' : ''}`;
+// `confirm` — the y/n's answer, when the call waited on one.
+function callBlock(ev: Record<string, unknown>, confirm?: Record<string, unknown>): string {
+  const outcome = ev.t === 'call-start' ? 'did not finish' : String(ev.outcome ?? '');
+  const head = `${String(ev.name ?? 'call')} · ${outcome}${ev.write ? ' · write' : ''}${typeof ev.task === 'string' ? ` · background task «${ev.task}»` : ''}`;
   const out = ['<details>', `<summary>${head.replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' })[c]!)}</summary>`, ''];
   out.push('Arguments:', '', block(asText(ev.args ?? {}), 'json'), '');
+  if (confirm) out.push(`Asked y/n — answered ${String(confirm.answer)} by ${confirm.by === 'person' ? 'the person' : confirm.by === 'auto' ? 'the auto mode' : 'the background task (it declines every write)'}.`, '');
+  else if (ev.t === 'call-start' && ev.confirm) out.push('It was waiting on a y/n.', '');
   if (ev.result !== undefined) out.push('Result:', '', block(asText(ev.result)), '');
+  if (ev.raw === null) out.push('Data: none.', '');
+  else if (typeof ev.raw === 'string') out.push('Data:', '', block(ev.raw), '');
+  for (const im of Array.isArray(ev.images) ? ev.images as { name?: unknown; width?: unknown; height?: unknown }[] : []) out.push(`Image: ${String(im.name ?? '')}${im.width ? ` · ${String(im.width)}×${String(im.height)}` : ''}`, '');
   for (const c of Array.isArray(ev.changes) ? ev.changes as { title?: unknown; diff?: unknown }[] : []) out.push(`Changed ${String(c.title ?? '')}:`, '', block(String(c.diff ?? ''), 'diff'), '');
   for (const v of Array.isArray(ev.views) ? ev.views as { kind?: unknown; text?: unknown }[] : []) if (v.text) out.push(`Shown (${String(v.kind ?? 'view')}):`, '', block(String(v.text)), '');
   out.push('</details>');
@@ -168,6 +201,11 @@ export function exportMarkdown(events: JournalEvent[], opts: { title: string; id
   if (opts.noJournal) out.push('> This session has no journal (it was saved before journals were kept, or its journal was removed after `sessions.journalDays`): it is rendered from its saved state, whose beginning may be missing and whose tool calls are kept only in short.', '');
   else if (start?.continued) out.push('> The journal began partway through this session: the part before it comes from its saved state, whose beginning may be missing and whose tool calls are kept only in short.', '');
   if (typeof start?.parent === 'string') out.push(`> This session was forked from \`${start.parent}\` — what came before is in that session's journal and its export.`, '');
+  // A call is drawn once, where it began: its start holds a place the end fills; a
+  // start never ended is drawn as not finished. Keyed by call id and name — a provider
+  // may reuse an id in a later round, after the first call with it has ended.
+  const open = new Map<string, { slot: number; start: JournalEvent; confirm?: JournalEvent }>();
+  const keyOf = (ev: JournalEvent) => `${String(ev.task ?? '')}\u0000${String(ev.id ?? '')}\u0000${String(ev.name ?? '')}`;
   for (const ev of events) {
     const at = when(ev.at);
     const text = typeof ev.text === 'string' ? ev.text : '';
@@ -186,12 +224,21 @@ export function exportMarkdown(events: JournalEvent[], opts: { title: string; id
         break;
       case 'step': out.push(`*Step${at}:* ${text}`, ''); break;
       case 'answer': out.push(`**Assistant**${at}`, '', text, ''); break;
-      case 'call': out.push(callBlock(ev), ''); break;
+      case 'call-start': open.set(keyOf(ev), { slot: out.length, start: ev }); out.push('', ''); break;
+      case 'confirm': { const o = open.get(keyOf(ev)); if (o) o.confirm = ev; break; }
+      case 'call': {
+        const o = open.get(keyOf(ev));
+        if (o) { out[o.slot] = callBlock(ev, o.confirm); open.delete(keyOf(ev)); } else out.push(callBlock(ev), '');
+        break;
+      }
       case 'shell':
         out.push(`**$ ${String(ev.command ?? '')}**${at}`, '');
         if (typeof ev.output === 'string') out.push(block(ev.output, 'console'), '');
         break;
-      case 'shell-end': out.push(block(String(ev.output ?? ''), 'console'), '', `*${String(ev.status ?? 'ended')}${typeof ev.ms === 'number' ? ` · ${(ev.ms / 1000).toFixed(1)} s` : ''}*`, ''); break;
+      case 'shell-end':
+        if (typeof ev.cut === 'number' && ev.cut > 0) out.push(`*${ev.cut} characters before this were not kept (shell.maxChars)${typeof ev.total === 'number' ? ` — ${ev.total} in all` : ''}*`, '');
+        out.push(block(String(ev.output ?? ''), 'console'), '', `*${String(ev.status ?? 'ended')}${typeof ev.ms === 'number' ? ` · ${(ev.ms / 1000).toFixed(1)} s` : ''}*`, '');
+        break;
       case 'compact': out.push('---', '', `**Compacted**${at} — from here on the model was given this summary instead of the conversation above:`, '', quoted(String(ev.summary ?? '')), '', '---', ''); break;
       case 'end': {
         if (typeof ev.cut === 'string' && ev.cut) out.push(`**Assistant**${at} (cut off)`, '', ev.cut, '');
@@ -202,5 +249,6 @@ export function exportMarkdown(events: JournalEvent[], opts: { title: string; id
       default: break;
     }
   }
+  for (const o of open.values()) out[o.slot] = callBlock(o.start, o.confirm);
   return `${out.join('\n').trimEnd()}\n`;
 }

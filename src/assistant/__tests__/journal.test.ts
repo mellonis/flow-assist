@@ -151,3 +151,23 @@ test('the export is readable markdown: the conversation, each call folded with i
   expect(exportMarkdown([], { title: '', id: 'x', noJournal: true })).toContain('beginning may be missing');
   expect(exportMarkdown([{ t: 'start', id: 'x', parent: '2026-09-27T09-00-00-aaaa' }], { title: '', id: 'x' })).toContain('2026-09-27T09-00-00-aaaa');
 });
+
+test('the export pairs a call\'s start with its end, says when one never ended, shows the data behind a frame and a cut output', () => {
+  const md = exportMarkdown([
+    { t: 'start', id: 'x' },
+    { t: 'call-start', id: 'c1', name: 'get', args: { q: 1 }, confirm: false },
+    { t: 'call', id: 'c1', name: 'get', args: { q: 1 }, outcome: 'ok', result: 'frame', raw: 'THE DATA' },
+    { t: 'call-start', id: 'c2', name: 'run_command', args: { command: 'make' }, confirm: true },
+    { t: 'confirm', id: 'c2', name: 'run_command', answer: 'yes', by: 'person' },
+    { t: 'call-start', id: 'c3', name: 'datetime', args: {}, task: 'часы' },
+    { t: 'shell', command: 'seq 1 9' },
+    { t: 'shell-end', command: 'seq 1 9', output: '9\n', status: 'exit 0', cut: 16, total: 18 },
+  ], { title: 't', id: 'x' });
+  expect(md.match(/<details>/g)).toHaveLength(3);
+  expect(md).toContain('Data:');
+  expect(md).toContain('THE DATA');
+  expect(md).toContain('<summary>run_command · did not finish</summary>');
+  expect(md).toContain('answered yes by the person');
+  expect(md).toContain('background task «часы»');
+  expect(md).toContain('16 characters before this were not kept (shell.maxChars)');
+});
