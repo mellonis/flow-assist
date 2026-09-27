@@ -2987,7 +2987,7 @@ The host suite must pass with `plugins-available/` empty — a host test never l
 **A test never reaches the person's own files.** `hostStateDir()` (`src/config/load.ts`)
 is where the host keeps what it writes for itself, and where it reads its settings:
 the config directory normally, a temporary directory of this process under `bun test`.
-The memory, the tool log and both settings files — `config.json` and
+The agent workspaces (`projects/`), the legacy memory file, the tool log and both settings files — `config.json` and
 `config.local.json`, read by `loadConfig` and written by `config set` — all resolve
 through it, so no test runs with the person's own settings; the cache keeps its
 store in memory and writes no file at all under a test, and the sessions have their own
@@ -3001,9 +3001,11 @@ writes by default keeps both:
   own directory for the whole suite: their memory grew a copy of the same fact per run,
   and pressing `x` in an e2e test emptied their cache.
 - **A temp directory is the floor; a file of the test's own is the isolation.**
-  `bootApp` names both a sessions dir and a memory file of its own, so one test's
-  stored fact cannot ride into the next test's system prompt; a test that reads the
-  file back names it through `extra`.
+  `bootApp` names a sessions dir, a legacy memory file and a workspace root
+  (`workspace.dir`) of its own, so one test's stored fact or draft cannot ride into the
+  next test's system prompt — every boot is in the same project (the checkout), and the
+  host's state is one directory for the whole process; a test that reads the files back
+  names them through `extra`.
 
 - `src/__tests__/helpers/scripted.ts` — a scripted model and a booted app: the
   REAL TUI on a test backend with only the network replaced. Steps are text,

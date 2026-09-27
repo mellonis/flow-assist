@@ -121,7 +121,12 @@ export const hostConfigSchema = z.object({
     mouse: z.boolean().register(modelMaySet, MOUSE).register(modelMaySave, MOUSE).register(appliesOnRestart, {}).optional(),
     verbs: z.array(z.string()).register(modelMaySet, VERBS).register(modelMaySave, VERBS).optional(),
   }).optional(),
+  // `file` — the memory list an older host kept; it is moved into the global workspace
+  // once, at start (src/assistant/memory-store.ts, `migrateMemoryJson`).
   memory: z.object({ file: z.string() }).optional(),
+  // The agent workspace (src/assistant/workspace.ts): `dir` is where every project's
+  // workspace lives, `projects/` under the host's state by default.
+  workspace: z.object({ dir: z.string() }).partial().optional(),
   // Chat sessions on disk (src/assistant/sessions.ts): where, whether the app
   // continues the latest one on start, how many are kept, and for how many days a
   // session's journal may outlast its last write (0 — as long as the session).

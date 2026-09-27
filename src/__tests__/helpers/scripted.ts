@@ -304,10 +304,14 @@ export async function bootApp(model: ScriptedModel, cols = 100, rows = 28, guest
   // `memoryFilePath` already keeps a test off the person's file; a file per boot is
   // what keeps the tests apart. A test that reads the file names its own through `extra`.
   const memory = { file: path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-memory-')), 'memory.json') };
+  // The workspace too: under `bun test` the host's state is one directory for the whole
+  // process and every boot is in the same project (the checkout), so without a root of
+  // its own one test's facts and drafts would be the next test's.
+  const workspace = { dir: fs.mkdtempSync(path.join(os.tmpdir(), 'fa-workspace-')) };
   // Every tool in full (`toolLoading: 'all'`): a script calls whatever tool its test is
   // about, as a model that sees the whole list would. Tools on demand are tested on
   // their own, with `extra` giving an `ai` that does not say 'all'.
-  const config: Record<string, unknown> = { ai: { baseUrl: 'http://scripted.model', model: 'scripted', toolLoading: 'all' }, sessions, memory, ...extra };
+  const config: Record<string, unknown> = { ai: { baseUrl: 'http://scripted.model', model: 'scripted', toolLoading: 'all' }, sessions, memory, workspace, ...extra };
   const chatMode = opts.chatMode === undefined ? 'window' : opts.chatMode;
   const assistant = (extra.plugins as Record<string, Record<string, unknown> | undefined> | undefined)?.assistant;
   if (chatMode && !(assistant && ('mode' in assistant || 'fullscreen' in assistant))) {
