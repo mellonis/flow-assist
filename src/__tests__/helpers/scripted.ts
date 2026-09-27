@@ -24,7 +24,7 @@ import { loadPlugins } from '../../loader/build.ts';
 import { makeFactory, type Make, type Plugin } from '../../loader/plugin.ts';
 import { assembleToolRegistry } from '../../loader/tools.ts';
 import { renderApp } from '../../runtime/app.tsx';
-import { setStartDirForTests } from '../../assistant/shell.ts';
+import { setStartDirForTests, shellRoots } from '../../assistant/shell.ts';
 import type { ClipboardImage } from '../../assistant/images.ts';
 import type { InteractiveDeps } from '../../assistant/interactive.ts';
 import type { RestartingTransport } from '../../remote/transport.ts';
@@ -354,7 +354,14 @@ export async function bootApp(model: ScriptedModel, cols = 100, rows = 28, guest
   // before the chat's own `useRef(createShellState(...))` runs), so the injected start
   // directory only needs to be in place for this one call — reset right after,
   // whether it threw or not, so it never leaks into a later test in the same process.
-  setStartDirForTests(opts.startDir ?? null);
+  // A test that does not name its own `startDir` gets the FIRST configured root
+  // (`shell.roots`, or legacy `fs.roots`) when there is one — this checkout's real
+  // `process.cwd()` is outside every test's own tmp root, so without this every test
+  // that only configures roots for some OTHER reason (a project, a `!cd` destination)
+  // would see the new start-up note and an extra journaled row it never asked about.
+  // A test of the start directory itself always names `startDir` explicitly.
+  const rootsHere = shellRoots(config);
+  setStartDirForTests(opts.startDir ?? rootsHere[0] ?? null);
   let app: Awaited<ReturnType<typeof renderApp>>;
   try {
     app = await renderApp(backend, { plugins, config, tools, onExit: () => { exits++; }, toastMs: opts.toastMs, pluginsNote: opts.pluginsNote, clipboardImage: opts.clipboardImage ?? (() => ({ ok: false, none: true, error: 'no image on the clipboard' })),

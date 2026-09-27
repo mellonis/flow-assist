@@ -36,7 +36,10 @@ test('started inside a root\'s repo: !pwd runs there, its AGENTS.md is picked up
   expect(ui.backend.lastFrame).not.toContain('outside shell.roots');
   await ui.type('!pwd');
   await ui.press('return');
-  await settleUntil(() => ui.backend.lastFrame.includes('pwd · ✓') || /pwd\s*·/.test(ui.backend.lastFrame));
+  await settleUntil(() => /pwd\s*·/.test(ui.backend.lastFrame));
+  // The command actually ran in the repo — not the root, not the default.
+  const cmdLine = ui.backend.lastFrame!.split('\n').find((l) => l.includes('$ pwd'))!;
+  expect(cmdLine).toContain(repo);
   // The project's own instructions are in the system prompt of the next request.
   await ui.type('go');
   await ui.press('return');
