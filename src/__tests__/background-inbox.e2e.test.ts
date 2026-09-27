@@ -10,6 +10,8 @@ import path from 'node:path';
 import { acceptedConfigPath, guardConfigFiles, hostStateDir, loadConfig, resetSessionConfig, unguardConfigFiles } from '../config/load.ts';
 import { ScriptedModel, bootApp, settle } from './helpers/scripted';
 import type { Make } from '../loader/plugin';
+import { readJournal, type JournalEvent } from '../assistant/journal.ts';
+import { listTree } from './helpers/session-files';
 
 const realFetch = globalThis.fetch;
 const local = () => path.join(hostStateDir(), 'config.local.json');
@@ -29,6 +31,10 @@ const pastTick = () => new Promise((r) => setTimeout(r, 500)).then(() => settle(
 type Msg = { role: string; content: unknown; tool_calls?: unknown[] };
 const messages = (model: ScriptedModel, i: number) => (model.requests[i] as { messages: Msg[] }).messages;
 const text = (m: Msg) => (typeof m.content === 'string' ? m.content : JSON.stringify(m.content));
+const journalIn = (dir: string): JournalEvent[] => {
+  const name = listTree(dir).find((n) => n.endsWith('.log.jsonl'));
+  return name ? readJournal(path.join(dir, name)) ?? [] : [];
+};
 const fieldRow = (frame: string) => frame.split('\n').filter((r) => r.includes('› ')).at(-1) ?? '';
 
 // The chat's own channel for a result from outside, taken from a tool's ctx: `courier_arm`
@@ -75,7 +81,8 @@ test('three results arriving during one turn land after it, and ONE follow-up tu
     [{ text: 'Working on it.' }],
     [{ text: 'All three are in.' }],
   );
-  const ui = await boot(model);
+  const sessions = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-inbox-journal-'));
+  const ui = await boot(model, { sessions: { dir: sessions } });
   await ui.press('F');
   await ui.type('go');
   await ui.press('return');
@@ -105,6 +112,19 @@ test('three results arriving during one turn land after it, and ONE follow-up tu
   expect(frame.match(/◆ /g)?.length).toBe(3);
   expect(frame.indexOf('Working on it.')).toBeLessThan(frame.indexOf('result A'));
   expect(frame.indexOf('result C')).toBeLessThan(frame.indexOf('All three are in.'));
+
+  // The journal: the call and its end first, then the three rows as `bg` — never the
+  // person's — and the follow-up turn's answer after them.
+  await settleUntil(() => journalIn(sessions).filter((e) => e.t === 'end').length === 2);
+  const events = journalIn(sessions);
+  const seq = events.map((e) => (e.t === 'row' ? `row:${e.role}:${String(e.text ?? '').split('\n')[0]}` : e.t === 'answer' ? `answer:${e.text}` : e.t));
+  const firstEnd = seq.indexOf('end');
+  const rows = ['a', 'b', 'c'].map((k) => seq.indexOf(`row:bg:${k} finished:`));
+  expect(seq.indexOf('call')).toBeLessThan(firstEnd);
+  for (const i of rows) expect(i).toBeGreaterThan(firstEnd);
+  expect(rows).toEqual([...rows].sort((x, y) => x - y));
+  expect(seq.indexOf('answer:All three are in.')).toBeGreaterThan(rows[2]!);
+  expect(seq.filter((x) => /^row:user:.*finished:/.test(x))).toEqual([]);
   ui.app.unmount();
 });
 
@@ -169,6 +189,30 @@ test('a closed chat does not hold a result: the turn runs, and the unread count 
   ui.app.unmount();
 });
 
+test('several results landing together with the chat closed raise ONE alert: the first line and how many more', async () => {
+  const { model, ui } = await armed();
+  // The follow-up turn for the first result runs closed, and holds: two more arrive.
+  model.script([{ hold: true }, { text: 'Read K.' }], [{ text: 'Read L and M.' }]);
+  await ui.press('escape', 'escape');
+  post!('k finished:\nresult K');
+  await settleUntil(() => model.requests.length === 3);
+  post!('l finished:\nresult L');
+  post!('m finished:\nresult M');
+  // Past the terminal's one-alert-a-second.
+  await new Promise((r) => setTimeout(r, 1100));
+  model.release();
+  await settleUntil(() => model.requests.length === 4);
+  await pastTick();
+  expect(model.requests).toHaveLength(4);
+  expect(ui.backend.notifications).toEqual([
+    { title: 'flow-assist', body: 'k finished:' },
+    { title: 'flow-assist', body: 'l finished: (+1 more)' },
+  ]);
+  await settleUntil(() => /◆ 3 new/.test(ui.backend.lastFrame), 400);
+  expect(ui.backend.lastFrame).toMatch(/◆ 3 new/);
+  ui.app.unmount();
+});
+
 test('a pending y/n holds the inbox; the result lands and its turn runs once it is answered', async () => {
   fs.mkdirSync(hostStateDir(), { recursive: true });
   fs.rmSync(acceptedConfigPath(), { force: true });
@@ -207,6 +251,30 @@ test('a turn stopped with Esc lands what waited as rows and starts no turn for i
   await pastTick();
   expect(ui.backend.lastFrame).toContain('stopped (Esc)');
   expect(model.requests).toHaveLength(3);
+  ui.app.unmount();
+});
+
+test('a turn that ends at ai.maxRounds lands what waited as rows, keeps ⏎ continue, and the continued turn reads them', async () => {
+  const model = new ScriptedModel();
+  model.script([{ tool: 'courier_post', args: {} }], [{ tool: 'datetime', args: {} }], [{ text: 'Carried on.' }]);
+  const ui = await boot(model, { ai: { ...AI, maxRounds: 2 } });
+  await ui.press('F');
+  await ui.type('work for a while');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('stopped after'));
+  await settleUntil(() => ui.backend.lastFrame.includes('result C'));
+  await pastTick();
+  // No turn of its own: the offer to carry on is still the one on the field.
+  expect(model.requests).toHaveLength(2);
+  expect(ui.backend.lastFrame).toContain('result A');
+  expect(ui.backend.lastFrame).toMatch(/⏎ continue · \S+ new line/);
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('Carried on.'));
+  const sent = messages(model, 2);
+  expect(sent.at(-1)).toEqual({ role: 'user', content: 'continue' });
+  const at = ['A', 'B', 'C'].map((k) => sent.findIndex((m) => m.role === 'user' && text(m).includes(`result ${k}`)));
+  for (const i of at) expect(i).toBeGreaterThan(-1);
+  expect(Math.max(...at)).toBeLessThan(sent.length - 1);
   ui.app.unmount();
 });
 

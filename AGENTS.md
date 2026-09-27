@@ -3037,7 +3037,11 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     `TestBackend.notifications` / `bells`.
   - **A stopped or failed turn lands the inbox as rows only**: the person's queue comes
     back into the field (`restoreQueue`), and no turn starts right after the person
-    stopped one or a request failed.
+    stopped one or a request failed. **So does a turn that ended at a limit**
+    (`ai.maxRounds`, `ai.maxTurnTokens`; `afterTurn`'s `atLimit`) when nothing is
+    queued: a follow-up turn would take the place of its `⏎ continue` offer, which
+    stays, and the continued turn reads the landed rows. A queued message still goes
+    out after a limit and carries them, as after any turn.
   - `ai.backgroundFollowUp` (read `!== false`, so true when unset) is what starts the
     follow-up turn; `false` keeps rows only — the items land the same way and are read
     with the person's next message. `/clear`, `/new` and opening another session empty

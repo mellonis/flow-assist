@@ -2190,7 +2190,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               setStreaming(false);
               setToolLabel('');
               abortRef.current = null;
-              afterTurn(!aborted && !failed);
+              afterTurn(!aborted && !failed, !!roundLimit);
             }
             return true;
           };
@@ -3234,8 +3234,11 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // just ahead of it, so the model reads them together and no turn is spent on
           // them alone. With nothing queued the inbox is taken as it is. A stopped or
           // failed run puts the queue back into the field (`restoreQueue`) and lands the
-          // inbox as rows only: the person has just stopped the work, or it failed.
-          const afterTurn = (ok: boolean) => {
+          // inbox as rows only: the person has just stopped the work, or it failed. A
+          // turn that ended at a limit (`atLimit`) sends the queue as usual, but with
+          // nothing queued lands the inbox as rows only too: a follow-up turn would take
+          // the place of its `⏎ continue`, and the continued turn reads the rows.
+          const afterTurn = (ok: boolean, atLimit = false) => {
             if (ok && queueRef.current.length) {
               setTimeout(() => {
                 const next = queueRef.current.shift();
@@ -3247,7 +3250,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               }, 0);
             } else {
               restoreQueue();
-              if (ok) setTimeout(() => takeInboxRef.current(), 0);
+              if (ok && !atLimit) setTimeout(() => takeInboxRef.current(), 0);
               else takeInboxRef.current('rows');
             }
           };
