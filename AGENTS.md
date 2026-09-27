@@ -98,8 +98,11 @@ past incident may motivate a rule; keep the rule, drop the incident.
 flow-assist/
 ├── package.json               # host; root of plugins-available/*, workspace root for packages/*
 ├── docs/
+│   ├── usage.md               # the user manual: working in the chat
+│   ├── safety.md              # the user manual: what the assistant may do, and the limits of that
+│   ├── config.md              # the user manual: config, scopes, environment, installing plugins
 │   ├── plugins.md             # "Writing a plugin" — the contract for plugin authors
-│   └── demo/                  # the README's GIFs
+│   └── demo/                  # the GIFs of the README and docs/usage.md
 ├── examples/
 │   ├── notes/                 # the plugin docs/plugins.md builds; run by the host's tests
 │   └── remote-login/          # a remote plugin; docs/plugins.md, "A plugin in another language"

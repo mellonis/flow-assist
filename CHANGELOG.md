@@ -5,6 +5,8 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- The README is short; the manual lives in docs/usage.md, docs/safety.md and
+  docs/config.md.
 - **What a click acts on shows it under the pointer.** A fold line in the chat — a
   turn's `▸ N tools`, a folded run of steps, the thinking header, a command's line and
   its `… N lines cut` — is underlined while the pointer is over it, the look flowtty
@@ -47,7 +49,7 @@ What each version of flow-assist brought, newest first. The version is the one i
   once per conversation; `shell.passEnv` (yours to set, never the assistant's) lists
   the ones a command may see. Your own `!command` keeps the whole environment. Like the
   redaction, this stops accidental exposure, not a command written to find a token
-  (the README says how one could); running commands unasked stays your trust decision.
+  (docs/safety.md says how one could); running commands unasked stays your trust decision.
 - **A settings file changed behind the app's back is asked about, not applied.** The
   app remembers the settings it accepted; a change to `config.local.json` or
   `config.json` it did not make — a command's, another terminal's, an edit while it

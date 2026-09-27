@@ -238,7 +238,7 @@ What the host does with it, and what it expects back:
 - **A large result may reach the model as a stub on later turns.** A result over
   `ai.recall.minChars` (4096) goes to the model in full in the turn it arrives in and
   afterwards, from a batch on, as one line naming an id the model reads again with
-  the host's `recall` tool (README, "Bulky content"); what the tool returned is
+  the host's `recall` tool (usage.md, "Bulky content"); what the tool returned is
   unchanged, and the screen keeps it.
 - **A tool can return images** — screenshots attached to an issue, a design, a chart —
   when it fetched them itself: the host never reads a path or a URL named in text as

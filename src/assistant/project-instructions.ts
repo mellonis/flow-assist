@@ -1,7 +1,7 @@
 // The project's own instructions for the model: the `AGENTS.md` files between the
 // shell's directory and the `shell.roots` entry that holds it. The chat reads them
 // whenever the shell's directory is set and puts them in the system prompt as a
-// section of their own — README.md (project instructions).
+// section of their own — docs/usage.md (project instructions).
 //
 // - From the directory up to, and not above, its root — the innermost root when roots
 //   nest — outermost first, nearest last, so the nearer file is read last and wins
