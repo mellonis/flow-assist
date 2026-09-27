@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { ScriptedModel, bootApp, settle } from './helpers/scripted';
-import { acquireLock, lockPath } from '../assistant/sessions';
+import { acquireLock, journalPath, lockPath, projectHome } from '../assistant/sessions';
 import { homeIn, listTree, sessionIdOf } from './helpers/session-files';
 
 const realFetch = globalThis.fetch;
@@ -370,4 +370,82 @@ test('a session taken by another process after the list was read: ⏎ is refused
   expect(flat(frame)).toContain(flat('"taken question" is gone — its file was removed'));
   expect(frame).not.toContain('Renamed to');
   t.ui.app.unmount();
+});
+
+test('^p moves a session from another project into the current one, journal included — a held one and this chat\'s own are refused', async () => {
+  const dir = dirOf();
+  const appA = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-picker-projA-')));
+  const appB = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-picker-projB-')));
+
+  // A session in project A, left with no live lock (the process closed).
+  const modelA = new ScriptedModel();
+  modelA.script([{ text: 'answer from a' }], [{ text: 'answer from a2' }]);
+  const uiA = await bootApp(modelA, 100, 28, undefined, { sessions: { dir }, shell: { roots: [appA] } });
+  await uiA.press('F');
+  await uiA.type('question in a');
+  await uiA.press('return');
+  await settle(20);
+  await uiA.type('/new'); // a second session in the same project, to hold and refuse a move on
+  await uiA.press('return');
+  await settle(4);
+  await uiA.type('held question in a');
+  await uiA.press('return');
+  await settle(20);
+  await uiA.press('escape', 'escape');
+  uiA.app.unmount();
+
+  const homeA = homeIn(dir, sessionIdOf(fileWith(dir, 'question in a')!.n));
+  const heldId = sessionIdOf(fileWith(dir, 'held question in a')!.n);
+  expect(acquireLock(homeA, heldId, 'another-process').status).toBe('acquired'); // simulates a live process holding it
+
+  // The current chat, in project B, with its own open session.
+  const modelB = new ScriptedModel();
+  modelB.script([{ text: 'answer from b' }]);
+  const uiB = await bootApp(modelB, 100, 28, undefined, { sessions: { dir }, shell: { roots: [appB] } });
+  await uiB.press('F');
+  await uiB.type('question in b');
+  await uiB.press('return');
+  await settle(20);
+  const chord = async (name: string) => { uiB.backend.press({ name, ctrl: true }); await settle(); };
+
+  await chord('s'); // opens the picker, on this project (B) only
+  await uiB.press('tab'); // all projects, current one's group first
+  let frame = uiB.backend.lastFrame!;
+  expect(frame).toContain('Sessions · all · 3');
+
+  // Row 0: this chat's own (B) — refused.
+  await chord('p');
+  frame = uiB.backend.lastFrame!;
+  expect(flat(frame)).toContain(flat('"question in b" is the session in this chat — switch away first'));
+  expect(fs.existsSync(path.join(homeIn(dir, sessionIdOf(fileWith(dir, 'question in b')!.n)), `${sessionIdOf(fileWith(dir, 'question in b')!.n)}.json`))).toBe(true);
+
+  // Row 1: project A's newest session — held elsewhere — refused.
+  await uiB.press('down');
+  expect(uiB.backend.lastFrame).toContain('held question in a');
+  await chord('p');
+  frame = uiB.backend.lastFrame!;
+  expect(flat(frame)).toContain(flat('"held question in a" is open in another flow-assist process — it cannot be moved'));
+  expect(fs.existsSync(path.join(homeA, `${heldId}.json`))).toBe(true);
+
+  // Row 2: project A's free session — moves. (The active row, marked '›', is now the
+  // one below "held question in a" — the plain "question in a".)
+  await uiB.press('down');
+  await chord('p');
+  frame = uiB.backend.lastFrame!;
+  expect(flat(frame)).toContain(flat('Moved «question in a» to'));
+  expect(flat(frame)).toContain(flat(appB));
+  const movedId = sessionIdOf(fileWith(dir, 'question in a')!.n);
+  const homeB = projectHome(dir, appB);
+  expect(fs.existsSync(path.join(homeB, `${movedId}.json`))).toBe(true);
+  expect(JSON.parse(fs.readFileSync(path.join(homeB, `${movedId}.json`), 'utf8')).project).toBe(appB);
+  expect(fs.existsSync(journalPath(homeB, movedId))).toBe(true);
+  expect(fs.existsSync(path.join(homeA, `${movedId}.json`))).toBe(false); // gone from where it was
+
+  // Now shown in the project-only scope too (it belongs here now).
+  await uiB.press('tab'); // back to this project only
+  frame = uiB.backend.lastFrame!;
+  expect(frame).toContain('Sessions · 2');
+  expect(frame).toContain('question in a');
+
+  uiB.app.unmount();
 });

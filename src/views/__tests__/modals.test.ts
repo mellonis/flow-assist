@@ -657,7 +657,7 @@ test('the session picker draws one row per session — title, whose it is, size,
   expect(frame).toMatch(/Held elsewhere\s+in use elsewhere\s+.*500 B · 1 msg\b/);
   expect(frame).toContain('3.0 MB · 2 msgs');
   expect(frame).toContain('filter ›');
-  expect(frame).toContain('↑↓ pick · ⏎ open · Esc close · ⇥ all · ^n new · ^r rename · ^x delete');
+  expect(frame).toContain('↑↓ pick · ⏎ open · Esc close · ⇥ all · ^n new · ^r rename · ^p move here · ^x delete');
   handle.unmount();
 });
 

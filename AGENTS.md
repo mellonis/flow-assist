@@ -1397,8 +1397,10 @@ hold this set together:
   root does not count); outside every root the nearest repository; else none — by real
   path. It is decided once,
   when the session gets its id (`ensureSessionId`, its first message — the journal and
-  the lock start there too), recorded in the file as `project`, and never changed: a
-  `cd` into another project later leaves the session where it is. Its state file,
+  the lock start there too), recorded in the file as `project`, and never changed on its
+  own: a `cd` into another project later leaves the session where it is. The one
+  deliberate exception is the picker's own move, `^p` (below) — a person's choice, held
+  to the same lock every other write to a session is. Its state file,
   journal and lock sit together under a mirror of that path (`projectHome`:
   `sessions/Users/me/app/<id>.json`), a session with no project at the top level. Every
   `(dir, id)` function in sessions.ts takes a session's OWN directory; the readers of
@@ -1406,11 +1408,15 @@ hold this set together:
   the root and walk the tree (`sessionDirs`, never following a link), and each row they
   return carries `dir` and `project`. The chat keeps the directory of every session it
   has held (`homes`, by id), so a turn, a `!command` or a background task still writing
-  to a session it has left, or a fork, finds its journal. A flat file an older host
-  wrote loads where it is, as a session with no project, and is NEVER moved: another
-  process may hold its lock beside it, and a move would part the file from its lock
-  (and from a journal that process is still appending to). The current project is the
-  chat's session's once it has one, else where the shell is (`currentProject`).
+  to a session it has left, or a fork, finds its journal — the picker's move (below)
+  updates this map too, when the id it moved is one this chat still holds, so a
+  background task that outlives the move still finds where it went. A flat file an
+  older host wrote loads where it is, as a session with no project, and is NEVER moved
+  ON ITS OWN: another process may hold its lock beside it, and a move would part the
+  file from its lock (and from a journal that process is still appending to) — the
+  picker's own move takes the lock first, precisely so it never does that. The current
+  project is the chat's session's once it has one, else where the shell is
+  (`currentProject`).
   A session is ONE object: the screen list, `apiRef` (what the model is sent),
   `summaryRef`, the plan, the usage reading, the ↑/↓ prompts, the unsent draft, the
   loaded tools (`tools`) and the
@@ -1604,11 +1610,28 @@ hold this set together:
   through its `titleRef`, another through `renameSession`, which takes the lock for the
   write and never writes a HELD session (its next save would fork) or this chat's own;
   a session whose file went since the list was read is said to be gone.
+  `^p` moves the row under the cursor into the
+  CURRENT project (`state.project`, fixed for the picker's life, so a move mid-Tab
+  still targets where it opened on) — no y/n, unlike delete: it changes nothing a
+  session held, only where its files live. Refused purely, off the row (no disk read),
+  the same way `^r`/`^x` refuse: a HELD one (`it cannot be moved`), this chat's own
+  (`switch away first` — its OWN files are not to be moved from under the very
+  conversation writing them), and one already in the current project. The actual move
+  (`moveSessionToProject`, sessions.ts) re-checks all three with the lock — a row can
+  be stale by the time the key lands — then moves the state file, the journal, and a
+  `.sub` directory beside it if it has one (nothing writes one yet), rewrites the
+  file's own `project` field in place (a parse, a patch, a temp file, a rename — every
+  other field untouched, not `saveSession`, which would also re-trim the screen and
+  bump `rev`), and never overwrites anything already at the destination. The lock is
+  taken before any of this and released after, AT THE SOURCE, so a process with the
+  session open never has its files moved from under it. On success the picker's own
+  mirror-directory cleanup runs too (`dropEmptyDirs`, the same one delete uses), and
+  `homes` (above) is updated if this chat still holds the id.
   `^x` deletes after a y/n line of the picker's own — a bare `y` deletes, `n` or Esc
   keeps, ⏎ and a chord are no answer — through `removeSession`, refused for a HELD
-  session and for this chat's own. A pending y/n or `ask_user` question wins over the
-  picker — drawn in its place and answered first (a turn may start while it is up), the
-  picker back once it is settled.
+  session and for this chat's own. A pending y/n or
+  `ask_user` question wins over the picker — drawn in its place and answered first (a
+  turn may start while it is up), the picker back once it is settled.
   The picker holds the keys while up; while it is DRAWN (no y/n or question in its
   place — the render's own condition) a mouse button and the wheel never reach the
   conversation it hides, so a click cannot fold a block or open the pager behind it;

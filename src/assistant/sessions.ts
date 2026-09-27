@@ -9,8 +9,10 @@
 // state file, journal and lock sit side by side; the ones that read every session
 // (`listSessions`, `sessionRows`, `pruneSessions`, `sweepJournals`) take the root and walk
 // the tree. A file written flat by an older host is read where it is, as a session with
-// no project, and never moved: another process may hold its lock beside it, and a
-// move would part the file from that lock.
+// no project, and never moved ON ITS OWN: another process may hold its lock beside it,
+// and a move would part the file from that lock. The one deliberate exception is the
+// picker's own move (`moveSessionToProject`), which takes the lock itself before
+// touching anything, precisely so it never parts a file from a lock someone else holds.
 //
 // A session is ONE object: what is on screen, what the model sees, the summary a
 // `/compact` left, the plan and the last usage reading. They are three views of one
@@ -762,6 +764,49 @@ export function removeSession(dir: string, id: string, token: string, deps: Lock
   try {
     deleteSession(dir, id);
     return 'deleted';
+  } finally {
+    releaseLock(dir, id, token);
+  }
+}
+
+// Moves a session — from the picker, into another project's mirror directory
+// (`projectHome`) — that no chat holds: the lock is taken FIRST, so a process with the
+// session open (this token's own included — 'ours' means this very chat, refused the
+// same way rename/remove refuse it) never has its files moved from under it, and
+// released after, at the SOURCE (the file is gone from there by then). Moves the state
+// file, the journal, and a `.sub` directory beside it if it has one — nothing here
+// writes one yet, but a session already carries this shape for whatever might — and
+// rewrites the `project` field in place, every other field untouched (a plain parse,
+// patch, temp file, rename — not `saveSession`, which would also re-trim the screen and
+// bump `rev`; a move is not a content edit). Never overwrites anything already at the
+// destination — `exists` refuses rather than picking a side.
+export type MoveOutcome = 'moved' | 'held' | 'ours' | 'missing' | 'here' | 'exists';
+export function moveSessionToProject(dir: string, id: string, root: string, project: string | null, token: string, deps: LockDeps = {}): MoveOutcome {
+  const lock = acquireLock(dir, id, token, deps);
+  if (lock.status === 'held') return 'held';
+  if (lock.status === 'ours') return 'ours';
+  try {
+    const file = fileOf(dir, id);
+    let raw: Record<string, unknown>;
+    try { raw = JSON.parse(fs.readFileSync(file, 'utf8')) as Record<string, unknown>; } catch { return 'missing'; }
+    if (projectRead(raw.project) === (project ?? null)) return 'here';
+    const dest = projectHome(root, project);
+    const destFile = fileOf(dest, id);
+    const jrnl = journalPath(dir, id);
+    const destJrnl = journalPath(dest, id);
+    const sub = path.join(dir, `${id}.sub`);
+    const destSub = path.join(dest, `${id}.sub`);
+    if (fs.existsSync(destFile) || fs.existsSync(destJrnl) || fs.existsSync(destSub)) return 'exists';
+    fs.mkdirSync(dest, { recursive: true, mode: 0o700 });
+    const body: Record<string, unknown> = { ...raw };
+    if (project) body.project = project; else delete body.project;
+    const tmp = `${destFile}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(body), { mode: 0o600 });
+    fs.renameSync(tmp, destFile);
+    fs.unlinkSync(file);
+    if (fs.existsSync(jrnl)) { fs.linkSync(jrnl, destJrnl); fs.unlinkSync(jrnl); }
+    if (fs.existsSync(sub)) fs.renameSync(sub, destSub);
+    return 'moved';
   } finally {
     releaseLock(dir, id, token);
   }

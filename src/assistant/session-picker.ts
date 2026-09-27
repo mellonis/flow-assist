@@ -30,7 +30,8 @@ export type PickerAction =
   | { kind: 'open'; id: string }
   | { kind: 'new' }
   | { kind: 'rename'; id: string; title: string }
-  | { kind: 'delete'; id: string };
+  | { kind: 'delete'; id: string }
+  | { kind: 'move'; id: string };
 export interface PickerStep { state: PickerState; action?: PickerAction }
 
 export const pickerStart = (rows: SessionRow[], project: string | null = null): PickerState =>
@@ -134,6 +135,18 @@ export function pickerKey(state: PickerState, key: PickerKey, width = 60): Picke
     if (row.lock === 'held') return { state: { ...state, notice: held(row, 'deleted') } };
     if (row.lock === 'ours') return { state: { ...state, notice: `"${label(row)}" is the session in this chat — open another one or start a new one (${NEW_CAP}) first` } };
     return { state: { ...state, mode: 'delete', notice: '' } };
+  }
+  // Move it to the CURRENT project (`state.project`, fixed for the picker's life). The
+  // chat's own open session and one another process holds are refused here, purely,
+  // the same way rename/delete refuse them — the actual move (sessions.ts,
+  // `moveSessionToProject`) re-checks both with the lock, since a picker row can be
+  // stale by the time a key is pressed.
+  if (key.ctrl && name === 'p') {
+    if (!row) return { state };
+    if (row.lock === 'held') return { state: { ...state, notice: held(row, 'moved') } };
+    if (row.lock === 'ours') return { state: { ...state, notice: `"${label(row)}" is the session in this chat — switch away first` } };
+    if ((row.project ?? null) === state.project) return { state: { ...state, notice: `"${label(row)}" is already in this project` } };
+    return { state, action: { kind: 'move', id: row.id } };
   }
   const act = editorReducer({ value: state.filter, cursor: state.caret }, oneLine(key) as EditorKey, { multiline: false, width });
   if (act.kind === 'edit') return { state: { ...state, filter: act.state.value, caret: act.state.cursor, cursor: 0, notice: '' } };

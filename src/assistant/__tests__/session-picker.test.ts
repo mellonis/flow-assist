@@ -94,6 +94,26 @@ test('^x asks y/n before a delete — n or Esc keeps it; the held one and this c
   expect(own.notice).toBe('"Current chat" is the session in this chat — open another one or start a new one (^n) first');
 });
 
+test('^p moves the row under the cursor to the current project — refused for a held row, this chat\'s own, or one already here', () => {
+  const rows = [
+    row({ id: 'a', title: 'Current chat', lock: 'ours', project: '/repo/here' }),
+    row({ id: 'b', title: 'Held one', lock: 'held', project: '/repo/there' }),
+    row({ id: 'c', title: 'Elsewhere', project: '/repo/there' }),
+    row({ id: 'd', title: 'Already here', project: '/repo/here' }),
+  ];
+  // Another project's row is not shown in the picker's own project scope at all —
+  // Tab to `all` to reach it, the current project's group listed first.
+  const start = { ...pickerStart(rows, '/repo/here'), scope: 'all' as const };
+  expect(pickerMatches(start).map((r) => r.id)).toEqual(['a', 'd', 'b', 'c']);
+  expect(press(start, 'down', 'down', 'down', ctrl('p')).actions).toEqual([{ kind: 'move', id: 'c' }]);
+  const held = press(start, 'down', 'down', ctrl('p')).state;
+  expect(held.notice).toBe('"Held one" is open in another flow-assist process — it cannot be moved');
+  const own = press(start, ctrl('p')).state;
+  expect(own.notice).toBe('"Current chat" is the session in this chat — switch away first');
+  const here = press(start, 'down', ctrl('p')).state;
+  expect(here.notice).toBe('"Already here" is already in this project');
+});
+
 test('pickerReload keeps the filter and pulls the cursor back into a shorter list', () => {
   const s = press(pickerStart(ROWS), 'down', 'down').state;
   const next = pickerReload(s, ROWS.slice(0, 2), 'Deleted «Idle one»');

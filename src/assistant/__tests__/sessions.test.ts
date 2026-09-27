@@ -4,8 +4,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  KEEP_MESSAGES, KEEP_VIEWS, SEARCH_TEXT_MAX, SESSION_VERSION, TITLE_MAX, acquireLock, closeSession, cutTitle, listSessions, loadSession,
-  lockPath, lockState, makeLockToken, newSessionId, normalizeViews, pruneSessions, releaseLock, removeSession, renameSession,
+  KEEP_MESSAGES, KEEP_VIEWS, SEARCH_TEXT_MAX, SESSION_VERSION, TITLE_MAX, acquireLock, closeSession, cutTitle, journalPath, listSessions, loadSession,
+  lockPath, lockState, makeLockToken, moveSessionToProject, newSessionId, normalizeViews, pruneSessions, releaseLock, removeSession, renameSession,
   saveSession, searchText, sessionFingerprint, sessionFingerprintsEqual, sessionRev, sessionRows, sessionTitle,
   dropEmptyDirs, pickToContinue, projectHome, projectOf, sessionToContinue, sessionsDir, trimHistory, trimScreen, unseenAnswer, type Session,
 } from '../sessions.ts';
@@ -498,6 +498,65 @@ test('removeSession deletes an idle session and its lock; a held one and this to
 });
 
 // ─── sessions per project ─────────────────────────────────────────────────────
+
+test('moveSessionToProject moves the state file, its journal and a .sub directory into another project\'s mirror, rewriting `project` and leaving every other field untouched', () => {
+  const root = tmp();
+  const fromHome = projectHome(root, '/Users/me/from');
+  const toHome = projectHome(root, '/Users/me/to');
+  const s = session({ id: '2026-09-21T09-00-00-aaaa', project: '/Users/me/from' });
+  saveSession(fromHome, s);
+  fs.writeFileSync(journalPath(fromHome, s.id), '{"t":"start"}\n');
+  fs.mkdirSync(path.join(fromHome, `${s.id}.sub`));
+  fs.writeFileSync(path.join(fromHome, `${s.id}.sub`, 'a.bin'), 'x');
+  const before = JSON.parse(fs.readFileSync(path.join(fromHome, `${s.id}.json`), 'utf8'));
+
+  expect(moveSessionToProject(fromHome, s.id, root, '/Users/me/to', 'tok-me', alive)).toBe('moved');
+
+  expect(fs.existsSync(path.join(fromHome, `${s.id}.json`))).toBe(false);
+  expect(fs.existsSync(journalPath(fromHome, s.id))).toBe(false);
+  expect(fs.existsSync(path.join(fromHome, `${s.id}.sub`))).toBe(false);
+  expect(fs.existsSync(lockPath(fromHome, s.id))).toBe(false); // released, at the source
+  const after = JSON.parse(fs.readFileSync(path.join(toHome, `${s.id}.json`), 'utf8'));
+  expect(after).toEqual({ ...before, project: '/Users/me/to' }); // every other field untouched
+  expect(fs.existsSync(journalPath(toHome, s.id))).toBe(true);
+  expect(fs.readFileSync(path.join(toHome, `${s.id}.sub`, 'a.bin'), 'utf8')).toBe('x');
+  expect(loadSession(toHome, s.id)!.project).toBe('/Users/me/to');
+});
+
+test('moveSessionToProject refuses a held session or this token\'s own, without moving anything', () => {
+  const root = tmp();
+  const fromHome = projectHome(root, '/Users/me/from');
+  const held = session({ id: '2026-09-20T09-00-00-bbbb', project: '/Users/me/from' });
+  const mine = session({ id: '2026-09-20T09-00-00-cccc', project: '/Users/me/from' });
+  saveSession(fromHome, held);
+  saveSession(fromHome, mine);
+  acquireLock(fromHome, held.id, 'tok-other', alive);
+  acquireLock(fromHome, mine.id, 'tok-me', alive);
+
+  expect(moveSessionToProject(fromHome, held.id, root, '/Users/me/to', 'tok-me', alive)).toBe('held');
+  expect(fs.existsSync(path.join(fromHome, `${held.id}.json`))).toBe(true);
+  expect(JSON.parse(fs.readFileSync(lockPath(fromHome, held.id), 'utf8')).token).toBe('tok-other');
+
+  expect(moveSessionToProject(fromHome, mine.id, root, '/Users/me/to', 'tok-me', alive)).toBe('ours');
+  expect(fs.existsSync(path.join(fromHome, `${mine.id}.json`))).toBe(true);
+  expect(fs.existsSync(lockPath(fromHome, mine.id))).toBe(true); // this chat's own lock is left in place
+});
+
+test('moveSessionToProject refuses when already in that project, and when the destination already holds a file, never overwriting it', () => {
+  const root = tmp();
+  const fromHome = projectHome(root, '/Users/me/from');
+  const toHome = projectHome(root, '/Users/me/to');
+  const s = session({ id: '2026-09-20T09-00-00-dddd', project: '/Users/me/from' });
+  saveSession(fromHome, s);
+  expect(moveSessionToProject(fromHome, s.id, root, '/Users/me/from', 'tok-me', alive)).toBe('here');
+  expect(fs.existsSync(lockPath(fromHome, s.id))).toBe(false); // released after a refusal too
+
+  const clash = session({ id: s.id, project: '/Users/me/to', title: 'already there' });
+  saveSession(toHome, clash);
+  expect(moveSessionToProject(fromHome, s.id, root, '/Users/me/to', 'tok-me', alive)).toBe('exists');
+  expect(loadSession(toHome, s.id)!.title).toBe('already there'); // untouched
+  expect(fs.existsSync(path.join(fromHome, `${s.id}.json`))).toBe(true); // the source is untouched too
+});
 
 test('projectOf: the nearest git root inside the innermost root, else that root; outside every root the nearest git root; else none — by real path', () => {
   const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'proj-')));

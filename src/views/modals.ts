@@ -494,6 +494,7 @@ const CAP = {
   // The session picker's own keys: fixed while it is up, like ⏎ and Esc.
   pickNew: keyGlyph({ name: 'n', ctrl: true }),
   pickRename: keyGlyph({ name: 'r', ctrl: true }),
+  pickMove: keyGlyph({ name: 'p', ctrl: true }),
   pickDelete: keyGlyph({ name: 'x', ctrl: true }),
 } as const;
 // Alt+Enter: ⌥⏎ on a Mac, Alt+⏎ elsewhere.
@@ -1825,7 +1826,7 @@ export function renderSessionPicker({ width, height, theme, picker, own = 'idle'
     : picker.mode === 'rename' ? `${CAP.enter} save · ${CAP.esc} back`
     // `Esc close` comes before the picker's own keys: the row is cut at the frame's
     // width, and the way out must not be what falls off in a narrow panel.
-    : [`${CAP.upDown} pick`, `${CAP.enter} open`, `${CAP.esc} close`, `${CAP.tab} ${all ? 'this project' : 'all'}`, `${CAP.pickNew} new`, `${CAP.pickRename} rename`, `${CAP.pickDelete} delete`].join(' · ');
+    : [`${CAP.upDown} pick`, `${CAP.enter} open`, `${CAP.esc} close`, `${CAP.tab} ${all ? 'this project' : 'all'}`, `${CAP.pickNew} new`, `${CAP.pickRename} rename`, `${CAP.pickMove} move here`, `${CAP.pickDelete} delete`].join(' · ');
   return h(Box, docked ? { width, height, flexDirection: 'column' } : overlay(width, height),
     h(Box, {
       border: 'round',

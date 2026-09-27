@@ -31,7 +31,7 @@ import { cdChatTarget, createShellState, formatShell, nextCwd, realOf, runShell,
 import { findInstructions, instructionsBlock, instructionsNote, type ProjectInstructions } from '../assistant/project-instructions.js';
 import {
   JOURNAL_DAYS, KEEP_SESSIONS, SESSION_VERSION, acquireLock, closeSession, cutTitle, flushOnExit, journalPath, listSessions, loadSession, lockPath,
-  makeLockToken, newSessionId, dropEmptyDirs, pickToContinue, projectHome, projectSessions, projectOf, pruneSessions, releaseLock, removeSession, renameSession, saveSession, sessionFingerprint,
+  makeLockToken, newSessionId, dropEmptyDirs, moveSessionToProject, pickToContinue, projectHome, projectSessions, projectOf, pruneSessions, releaseLock, removeSession, renameSession, saveSession, sessionFingerprint,
   sessionFingerprintsEqual, sessionRows, sessionTitle, sessionWhen, sessionsDir, sweepJournals, type Session, type SessionFingerprint,
 } from '../assistant/sessions.js';
 import { appendJournal, callEndEvent, callStartEvent, exportMarkdown, outputJournal, readJournal, rowOf, type JournalEvent } from '../assistant/journal.js';
@@ -2614,6 +2614,29 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 const notice = done === 'deleted' ? `Deleted «${titleOf(a.id)}»`
                   : done === 'held' ? `"${titleOf(a.id)}" is open in another flow-assist process — it cannot be deleted`
                   : `"${titleOf(a.id)}" is the session in this chat — it cannot be deleted from here`;
+                setPicker(pickerReload(p, sessionRows(sessDir, lockToken), notice));
+                return;
+              }
+              case 'move': {
+                // The picker itself already refused a held row, this chat's own, and one
+                // already here (session-picker.ts, purely, off the row it read); this
+                // re-checks all three with the lock, since that row can be stale by the
+                // time the key lands, and does the actual move (sessions.ts).
+                const from = dirOf(a.id);
+                const dest = currentProject();
+                const outcome = moveSessionToProject(from, a.id, sessDir, dest, lockToken);
+                if (outcome === 'moved') {
+                  dropEmptyDirs(from, sessDir); // the project's last session there, its mirror dir too
+                  // A background task, or a fork, still writing to this id by its OLD home
+                  // would otherwise miss it (AGENTS.md, "sessions per project" — `homes`).
+                  if (homes.current.has(a.id)) homes.current.set(a.id, projectHome(sessDir, dest));
+                }
+                const notice = outcome === 'moved' ? `Moved «${titleOf(a.id)}» to ${dest ? tildePath(dest) : 'no project'}`
+                  : outcome === 'held' ? `"${titleOf(a.id)}" is open in another flow-assist process — it cannot be moved`
+                  : outcome === 'ours' ? `"${titleOf(a.id)}" is the session in this chat — switch away first`
+                  : outcome === 'here' ? `"${titleOf(a.id)}" is already in this project`
+                  : outcome === 'missing' ? `"${titleOf(a.id)}" is gone — its file was removed`
+                  : `"${titleOf(a.id)}" could not be moved — a session already exists there`;
                 setPicker(pickerReload(p, sessionRows(sessDir, lockToken), notice));
                 return;
               }
