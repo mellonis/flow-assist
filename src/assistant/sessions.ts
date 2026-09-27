@@ -43,9 +43,14 @@ import type { ChangeView } from './diff.js';
 import type { TokenUsage } from './agent.js';
 
 export const SESSION_VERSION = 1;
-// What is kept of a long conversation: the summary plus this many latest messages
-// on each side (screen, model). Older turns are what `/compact` is for.
+// What the state file keeps of a long conversation: the summary plus this many latest
+// messages on each side (screen, model). Older turns are what `/compact` is for, and
+// the journal beside the file (./journal.ts) keeps all of it. On the screen side only
+// the conversation counts: a command's block (a `view` row) is kept under a smaller cap
+// of its own, so a session that runs many commands keeps as much of what was said as
+// one that runs none.
 export const KEEP_MESSAGES = 400;
+export const KEEP_VIEWS = 100;
 export const KEEP_SESSIONS = 50;
 
 export interface Session {
@@ -93,6 +98,35 @@ const fileOf = (dir: string, id: string) => {
   if (!ID.test(id)) throw new Error(`not a session id: ${id}`);
   return path.join(dir, `${id}.json`);
 };
+
+// The screen list as the state file keeps it: the latest `keep` conversation rows —
+// every row but a `view` — and, among them, the latest `keepViews` view rows in their
+// places.
+export function trimScreen(messages: Record<string, unknown>[], keep = KEEP_MESSAGES, keepViews = KEEP_VIEWS): Record<string, unknown>[] {
+  let start = 0;
+  for (let i = messages.length - 1, n = 0; i >= 0; i--) {
+    if (messages[i]!.role === 'view') continue;
+    if (++n > keep) { start = i + 1; break; }
+  }
+  const tail = messages.slice(start);
+  let views = tail.filter((m) => m.role === 'view').length;
+  return views <= keepViews ? tail : tail.filter((m) => m.role !== 'view' || views-- <= keepViews);
+}
+
+// The model's history as the state file keeps it: about the latest `keep` messages,
+// cut where a turn begins — something the person said or ran, or a background result —
+// never between a call and its result, which a provider refuses to be sent. The cut
+// moves forward to the next turn; when the last turn alone is longer than `keep`, it is
+// kept whole, from where it began.
+export function trimHistory(api: Record<string, unknown>[], keep = KEEP_MESSAGES): Record<string, unknown>[] {
+  if (api.length <= keep) return api;
+  const begins = (m: Record<string, unknown>) => m.role === 'user' || m.role === 'bg' || m.role === 'shell';
+  const cut = api.length - keep;
+  const next = api.findIndex((m, i) => i >= cut && begins(m));
+  if (next >= 0) return api.slice(next);
+  const last = api.findLastIndex(begins);
+  return api.slice(Math.max(0, last));
+}
 
 // Something the person said, or a `!command` they ran.
 export const bySomeone = (m: Record<string, unknown>) => m.role === 'user' || m.role === 'shell';
@@ -175,8 +209,8 @@ export function saveSession(dir: string, s: Session): SessionFingerprint {
     title: s.title || sessionTitle(s.messages),
     rev,
     // `live` is the half-written text of a round in progress — not a message yet.
-    messages: s.messages.slice(-KEEP_MESSAGES).map(({ live: _live, liveQuiet: _quiet, ...m }) => m),
-    api: s.api.slice(-KEEP_MESSAGES),
+    messages: trimScreen(s.messages).map(({ live: _live, liveQuiet: _quiet, ...m }) => m),
+    api: trimHistory(s.api),
   };
   const tmp = `${file}.${process.pid}.tmp`;
   fs.writeFileSync(tmp, JSON.stringify(body), { mode: 0o600 });

@@ -4,10 +4,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  KEEP_MESSAGES, SEARCH_TEXT_MAX, SESSION_VERSION, TITLE_MAX, acquireLock, closeSession, cutTitle, listSessions, loadSession,
+  KEEP_MESSAGES, KEEP_VIEWS, SEARCH_TEXT_MAX, SESSION_VERSION, TITLE_MAX, acquireLock, closeSession, cutTitle, listSessions, loadSession,
   lockPath, lockState, makeLockToken, newSessionId, normalizeViews, pruneSessions, releaseLock, removeSession, renameSession,
   saveSession, searchText, sessionFingerprint, sessionFingerprintsEqual, sessionRev, sessionRows, sessionTitle,
-  sessionToContinue, sessionsDir, type Session,
+  sessionToContinue, sessionsDir, trimHistory, trimScreen, type Session,
 } from '../sessions.ts';
 
 const tmp = () => path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'sess-')), 'sessions');
@@ -64,6 +64,50 @@ test('a long conversation keeps its latest messages', () => {
   const back = loadSession(dir, s.id)!;
   expect(back.messages).toHaveLength(KEEP_MESSAGES);
   expect(back.messages.at(-1)).toEqual(many.at(-1));
+});
+
+test('views do not push conversation messages out of the state file; they have a smaller cap of their own', () => {
+  // Every question ran a command: half the rows are views.
+  const rows = Array.from({ length: KEEP_MESSAGES }, (_, i) => [
+    { role: i % 2 ? 'assistant' : 'user', content: `m${i}` },
+    { role: 'view', content: '', views: [{ kind: 'console', data: { command: `c${i}` }, phase: 'done' }] },
+  ]).flat();
+  const kept = trimScreen(rows);
+  expect(kept.filter((m) => m.role !== 'view')).toHaveLength(KEEP_MESSAGES);
+  expect(kept[0]).toEqual({ role: 'user', content: 'm0' });
+  expect(kept.filter((m) => m.role === 'view')).toHaveLength(KEEP_VIEWS);
+  // The views kept are the newest ones, in their places.
+  expect(kept.at(-1)).toEqual(rows.at(-1));
+  const dir = tmp();
+  const s = session({ messages: rows });
+  saveSession(dir, s);
+  expect(loadSession(dir, s.id)!.messages.filter((m) => m.role !== 'view')).toHaveLength(KEEP_MESSAGES);
+});
+
+test('the model\'s history is cut at a whole turn — never between a call and its result', () => {
+  const turn = (n: number, calls: number) => [
+    { role: 'user', content: `q${n}` },
+    { role: 'assistant', content: null, tool_calls: Array.from({ length: calls }, (_, i) => ({ id: `c${n}_${i}`, type: 'function', function: { name: 'datetime', arguments: '{}' } })) },
+    ...Array.from({ length: calls }, (_, i) => ({ role: 'tool', tool_call_id: `c${n}_${i}`, content: 'OK: now' })),
+    { role: 'assistant', content: `a${n}` },
+  ];
+  // 3 + 150 + 3 + 150 + 3 + 150 = 459: a plain cut of the last 400 starts among turn 1's results.
+  const api = [...turn(0, 150), ...turn(1, 150), ...turn(2, 150)];
+  const kept = trimHistory(api);
+  expect(kept.length).toBeLessThanOrEqual(KEEP_MESSAGES);
+  expect(kept[0]).toEqual({ role: 'user', content: 'q1' });
+  const dir = tmp();
+  const s = session({ api });
+  saveSession(dir, s);
+  expect(loadSession(dir, s.id)!.api[0]).toMatchObject({ role: 'user', content: 'q1' });
+  // A last turn longer than the cap by itself is kept whole — a history that starts
+  // with an orphan result is refused by a provider.
+  const long = [...turn(0, 1), ...turn(1, KEEP_MESSAGES + 10)];
+  const whole = trimHistory(long);
+  expect(whole[0]).toEqual({ role: 'user', content: 'q1' });
+  expect(whole).toHaveLength(KEEP_MESSAGES + 13);
+  // A short history is left as it is.
+  expect(trimHistory(turn(0, 2))).toEqual(turn(0, 2));
 });
 
 test('the list is newest first and skips a file that does not parse; a start continues the newest unless it was cleared', () => {

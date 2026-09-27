@@ -1106,7 +1106,16 @@ there is no `/fullscreen`.
   everything this file says `/clear` resets — the plan, the loaded tools, the recall
   state, the images' numbering, the auto mode, the notes mode, the folds, the live views,
   the shell's directory — `/new` resets too. `/new` is refused while an answer or a
-  `!command` runs. The last 400 messages are kept, 50 sessions.
+  `!command` runs. 50 sessions are kept. **The state file is bounded** (`trimScreen`,
+  `trimHistory`): the screen list keeps its last `KEEP_MESSAGES` (400) CONVERSATION
+  rows — every row but a `view` — and among them the newest `KEEP_VIEWS` (100) view
+  rows in their places, so a session that runs many commands keeps as much of what was
+  said as one that runs none. The model's history keeps about its last 400 messages,
+  cut where a turn begins (something the person said or ran, a background result) —
+  the cut moves forward to the next turn, never between a call and its result, since a
+  history that starts with a result whose call is gone reaches the provider as one
+  that starts with an assistant message, and the Anthropic API refuses it; a last turn
+  longer than the cap by itself is kept whole, from where it began.
   **The picker** (`/sessions`, and the assistant's `sessions` key — `^s`, `config.keys.sessions`
   moves it) lists every saved session newest first, one row each: the title, `this chat`
   or `in use elsewhere` (`lockState`: ours / held), `sessionWhen`, the file's size

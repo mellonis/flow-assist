@@ -476,3 +476,46 @@ test('after /new with nothing said, a restart continues the session before it', 
   expect(ui.backend.lastFrame).toContain('старый ответ');
   ui.app.unmount();
 });
+
+test('a history longer than the cap is cut at a whole turn: after a restart the Anthropic API takes it', async () => {
+  const key = process.env.ANTHROPIC_API_KEY;
+  process.env.ANTHROPIC_API_KEY = 'sk-ant-scripted';
+  try {
+    const dir = dirOf();
+    const ai = { provider: 'anthropic', model: 'claude-sonnet-5', toolLoading: 'all' };
+    const many = (n: number) => Array.from({ length: n }, () => ({ tool: 'datetime', args: {} }));
+    const model = new ScriptedModel();
+    model.wire = 'anthropic';
+    // Two turns of 150 calls each and a short one: 459 messages — the last 400 begin
+    // among the second turn's results.
+    model.script(many(150), [{ text: 'первый готов' }], many(150), [{ text: 'второй готов' }], many(150), [{ text: 'третий готов' }]);
+    const ui = await bootApp(model, 100, 28, undefined, { sessions: { dir }, ai });
+    await ui.press('F');
+    for (const q of ['раз', 'два', 'три']) {
+      await ui.type(q);
+      await ui.press('return');
+      await settle(40);
+    }
+    expect(ui.backend.lastFrame).toContain('третий готов');
+    await ui.press('escape', 'escape'); // written at once
+    ui.app.unmount();
+    const file = fs.readdirSync(dir).find((n) => n.endsWith('.json'))!;
+    const saved = JSON.parse(fs.readFileSync(path.join(dir, file), 'utf8'));
+    expect(saved.api[0]).toMatchObject({ role: 'user', content: 'два' });
+
+    const next = new ScriptedModel();
+    next.wire = 'anthropic';
+    next.script([{ text: 'продолжаем' }]);
+    const again = await bootApp(next, 100, 28, undefined, { sessions: { dir }, ai });
+    await settle(6);
+    await again.press('F');
+    await again.type('дальше');
+    await again.press('return');
+    await settle(20);
+    expect(again.backend.lastFrame).not.toContain('LLM 400');
+    expect(again.backend.lastFrame).toContain('продолжаем');
+    again.app.unmount();
+  } finally {
+    if (key === undefined) delete process.env.ANTHROPIC_API_KEY; else process.env.ANTHROPIC_API_KEY = key;
+  }
+});

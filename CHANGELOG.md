@@ -5,6 +5,13 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **A long session keeps its conversation, and comes back after a restart on any
+  provider.** The saved session counts its limit of 400 in messages of the
+  conversation: the blocks of the commands the assistant ran have a smaller limit of
+  their own (100), so a session that runs many commands no longer loses what was said
+  twice as fast. The model's side of it is cut where a turn begins, never between a
+  tool call and its result — a cut there left a session the Anthropic API refused on
+  the next message after a restart.
 - **Commands can run without asking, when you say so twice.** `config set shell.autoRun
   true` together with `/auto all` (or ⇧⇥ to `all`) lets the assistant's `run_command` run
   without the y/n; the hint line then says `auto: writes + commands`. Either alone
