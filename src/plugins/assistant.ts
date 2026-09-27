@@ -2663,7 +2663,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             const fail = (e: unknown) => { setError(`/${name}: ${(e as Error)?.message ?? String(e)}`); host.notify(); };
             const ctx = {
               surface: 'chat',
-              say: (text: string) => { pushNote(String(text ?? '')); host.notify(); },
+              // The command's plugin speaks: its name in front, held while a turn runs.
+              say: (text: string) => pluginNote(`[${cmd.name.includes(':') ? cmd.name.slice(0, cmd.name.indexOf(':')) : name}] ${String(text ?? '')}`),
               showMessage: (text: string) => (host.services as Record<string, any>).showMessage?.(text),
               error: (text: string) => { setError(String(text ?? '')); host.notify(); },
               openPanel,

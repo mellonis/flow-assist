@@ -117,16 +117,19 @@ export interface HostServices {
   // Bound by the App from the mounted plugins; absent means only `console` renders.
   viewRenderers?: ViewRenderers;
   // A line of a plugin's news in the chat, as a note — display only, never sent to the
-  // model (`mcp: webstorm connected — 23 tools`). One that arrives while a turn runs is
-  // held until the turn ends: a note in the middle would split the turn's message. The
-  // App binds it to the chat; the default drops it (a one-shot prompt has no chat —
-  // say it in the log too).
+  // model — drawn with the plugin's name in front (`[mcp] webstorm connected — 23
+  // tools`). One that arrives while a turn runs is held until the turn ends: a note in
+  // the middle would split the turn's message. The App binds it per plugin, in the
+  // services view each plugin is given; the default drops it (a one-shot prompt has no
+  // chat — say it in the log too).
   chatNote: (text: string) => void;
   // A config value set the way `config set` sets it (src/config/load.ts,
-  // `setConfigValue`): checked against the schema, a plugin's key against the plugin's,
-  // saved to config.local.json — or kept for this run only with `session` — and laid on
-  // the running config. `unsetConfig` is `config unset`. For a plugin's own command that
-  // changes a setting of its own; the App binds both, and the default refuses.
+  // `setConfigValue`): checked against the schema, saved to config.local.json — or kept
+  // for this run only with `session` — and laid on the running config. `unsetConfig` is
+  // `config unset`, its key checked against the schema too. Bound per plugin and held
+  // to that plugin's own `plugins.<name>` (`ownSettingsRefusal`): a plugin never
+  // reaches the model's endpoint, the shell or another plugin's settings. The default
+  // refuses.
   setConfig: (key: string, value: unknown, opts?: { session?: boolean }) => { ok: true; value: unknown; restart: boolean } | { ok: false; error: string };
   unsetConfig: (key: string, opts?: { session?: boolean }) => { ok: true; value: unknown; restart: boolean } | { ok: false; error: string };
 }
@@ -136,6 +139,13 @@ export interface CreateServicesOptions {
   tools?: ToolRegistry;
   repo?: PluginRepo;
   onExit: () => void;
+}
+
+// Why a plugin may not set `key` through its config services, or null: only its own
+// settings, `plugins.<plugin>` and below, are its to change.
+export function ownSettingsRefusal(plugin: string, key: string): string | null {
+  const own = `plugins.${plugin}`;
+  return key === own || key.startsWith(`${own}.`) ? null : `config: a plugin changes only its own settings — ${key} is not under ${own}`;
 }
 
 // Opens a URL in the system browser (the generic primitive). The tracker builds

@@ -91,9 +91,10 @@ export default function buildNotesPlugin({ config, make, z, modelMaySet, modelMa
 - **Tools that change while the app runs** — a server that connects after the start,
   one turned off — are set on the plugin object `make` returned, followed by a call to
   `toolsChanged()`: the host reads every plugin's `tools` again, `ai.disabledTools`
-  with them. What a message carries is read when its turn starts, so a group that
+  with them. The list a message sends is fixed when its turn starts, so a group that
   arrives mid-turn is offered from the next message on, in the `tools_load` index like
-  any other.
+  any other; a call runs against the tools as they are, and a call to a tool whose group
+  left since still reaches that group — its `exec` says why it no longer answers.
 
   ```ts
   const plugin = make('late', { tools: [] });
@@ -381,15 +382,19 @@ entry: ['notes'],                     // the key that leads in, on the start scr
   promise of either. A y/n or a question the model asks is drawn over it, and closing
   the chat, `/clear` or `/resume` put it away.
 - `host.services.chatNote(text)` is a note from outside a command — a server that
-  connected in the background: it is held while a turn runs and said under its answer,
-  since a note in the middle would split the turn. A one-shot prompt has no chat, so
-  say it in the log as well.
+  connected in the background — drawn with your plugin's name in front (`[mcp] tracker
+  connected — 12 tools`; write the text without it). It is held while a turn runs and
+  said under its answer, since a note in the middle would split the turn; so is
+  `ctx.say` from a command. A one-shot prompt has no chat, so say it in the log as
+  well.
 - `host.services.setConfig(key, value, { session })` and `unsetConfig(key, { session })`
   change a setting the way `config set` / `config unset` do — checked against the
   schema (yours for your key), saved to `config.local.json` or kept for this run with
   `session: true`, laid on the running config — and answer `{ ok, value, restart }` or
-  `{ ok: false, error }`. For a command of yours that turns a setting of yours on or
-  off; never for a key the person did not ask to change.
+  `{ ok: false, error }`. They reach your own settings only — `plugins.<your name>`
+  and below; any other key (`ai.*`, `shell.*`, another plugin's) is refused. For a
+  command of yours that turns a setting of yours on or off; never for a key the person
+  did not ask to change.
 - The `:` line remembers what was run, for ↑/↓. A command whose argument may be a
   secret — a token, a password, a header — says `history: false` and is never kept:
   `{ name: 'login', usage: 'login <token>', history: false, run: … }`. It is part of
@@ -869,6 +874,9 @@ give up that host's own attempts until some other host's restart revives the ser
 - **Be a chat command or open a panel.** `chat`, `complete` and `ctx.openPanel` are a
   JS plugin's: a remote plugin's commands are the `:` line's, and its argument
   completes from `values` alone.
+- **Say a note in the chat, change a setting, or change its tools while it runs.**
+  `chatNote`, `setConfig` / `unsetConfig` and `toolsChanged` are a JS plugin's; a remote
+  plugin's tools are the ones its `hello` gave.
 
 - **Mark a config key for the model.** Its `configSchema` is JSON Schema, read into the
   host's zod, and carries no mark: every key of a remote plugin is the person's to set.

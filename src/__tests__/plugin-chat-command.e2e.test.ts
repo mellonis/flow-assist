@@ -56,7 +56,7 @@ test('/name runs a plugin command marked for the chat; its later words complete;
   await ui.press('tab');
   await ui.press('return');
   expect(state.ran).toEqual(['chat:restart safari']);
-  expect(frame(ui)).toContain('restarting safari');
+  expect(frame(ui)).toContain('[srv] restarting safari');
   ui.app.unmount();
   // An unknown command names the plugin's among the ones there are.
   const wide = await bootApp(new ScriptedModel(), 260, 30, guest({ ran: [] }));
@@ -112,19 +112,25 @@ test('chatNote says a plugin\'s news in the chat — after the turn, when one ru
   model.script([{ hold: true }, { text: 'Done.' }]);
   const ui = await bootApp(model, 110, 30, guest(state));
   await ui.press('F');
-  state.host!.services.chatNote('srv: safari connected — 17 tools');
+  state.host!.services.chatNote('safari connected — 17 tools');
   await settle();
-  expect(frame(ui)).toContain('safari connected — 17 tools');
+  // Drawn as the plugin's: the host puts its name in front, never the plugin.
+  expect(frame(ui)).toContain('[srv] safari connected — 17 tools');
   await ui.type('hi');
   await ui.press('return');
-  state.host!.services.chatNote('srv: webstorm connected — 23 tools');
+  state.host!.services.chatNote('webstorm connected — 23 tools');
+  // A command's own note waits the same way.
+  await ui.type('/srv restart ide');
+  await ui.press('return');
   await settle();
   // Held: a note in the middle would split the turn's message.
   expect(frame(ui)).not.toContain('webstorm connected');
+  expect(frame(ui)).not.toContain('restarting ide');
   model.release();
   await settle(20);
   expect(frame(ui)).toContain('Done.');
-  expect(frame(ui)).toContain('webstorm connected — 23 tools');
+  expect(frame(ui)).toContain('[srv] webstorm connected — 23 tools');
+  expect(frame(ui)).toContain('[srv] restarting ide');
   ui.app.unmount();
 });
 
@@ -143,6 +149,31 @@ test('setConfig writes a plugin\'s key the way config set does — saved, or for
   const again = JSON.parse(fs.readFileSync(path.join(hostStateDir(), 'config.local.json'), 'utf8'));
   expect(again.plugins.srv.other).toBeUndefined();
   expect(svc.unsetConfig('plugins.srv.flag').ok).toBe(true);
+  // An unset is checked against the schema too.
+  expect(svc.unsetConfig('plugins.srv.nope').ok).toBe(false);
   expect(JSON.parse(fs.readFileSync(path.join(hostStateDir(), 'config.local.json'), 'utf8')).plugins?.srv?.flag).toBeUndefined();
+  ui.app.unmount();
+});
+
+// A plugin's config services reach its own settings and nothing else: not the model's
+// endpoint or leash, not the shell, not another plugin's settings.
+test('setConfig and unsetConfig refuse every key outside the calling plugin\'s own', async () => {
+  const state = { ran: [] as string[] } as { ran: string[]; host?: { services: Record<string, any> } };
+  let other: Record<string, any> | undefined;
+  const ui = await bootApp(new ScriptedModel(), 110, 30, (make) => [
+    ...guest(state)(make),
+    make('other', { name: 'other', configSchema: z.object({ flag: z.boolean().optional() }).optional(), setup: ({ host }: { host: { services: Record<string, any> } }) => { other = host.services; } } as never),
+  ]);
+  const svc = state.host!.services;
+  for (const [key, value] of [['ai.model', 'evil'], ['ai.disabledTools', []], ['shell.autoRun', true], ['plugins.other.flag', true], ['plugins', {}], ['plugins.srvx.flag', true]] as const) {
+    const res = svc.setConfig(key, value, { session: true });
+    expect([key, res.ok]).toEqual([key, false]);
+    expect(res.error).toContain('plugins.srv');
+    expect([key, svc.unsetConfig(key, { session: true }).ok]).toEqual([key, false]);
+  }
+  // Its own key works, and the other plugin reaches its own.
+  expect(svc.setConfig('plugins.srv.flag', true, { session: true }).ok).toBe(true);
+  expect(other!.setConfig('plugins.other.flag', true, { session: true }).ok).toBe(true);
+  expect(other!.setConfig('plugins.srv.flag', false, { session: true }).ok).toBe(false);
   ui.app.unmount();
 });

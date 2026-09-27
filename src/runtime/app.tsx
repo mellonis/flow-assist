@@ -17,7 +17,7 @@ import { HOST_API } from '../version.js';
 import type { PluginApi, PluginHost, PluginUi } from './plugin-api.js';
 import { identityToken } from './plugin-identity.js';
 import { makePluginUi } from './plugin-ui.js';
-import { createServices } from './services.js';
+import { createServices, ownSettingsRefusal } from './services.js';
 import type { HostServices } from './services.js';
 import { registerInputHandler, useToast } from './hooks.js';
 import type { LazyInputEntry } from './hooks.js';
@@ -44,6 +44,7 @@ import {
   RESTART_NOTE,
   resetSessionConfig,
   saveConfigSetting,
+  configSchemaAt,
   setConfigValue,
   unsetConfigValue,
 } from '../config/load.js';
@@ -338,12 +339,6 @@ export function renderApp(
   const services = createServices({ config, tools, onExit });
   (services as unknown as HostServices).clipboardImage = clipboardImage ?? (() => readClipboardImage());
   if (interactive) (services as unknown as HostServices).interactive = interactive;
-  // A plugin's own setting, set the way `:config set` sets it — with every plugin's
-  // schema, so a plugin's key is checked against its own.
-  (services as unknown as HostServices).setConfig = (key, value, opts) =>
-    setConfigValue(config, key, value, { scope: opts?.session ? 'session' : 'saved', pluginConfigs: pluginConfigs(plugins) });
-  (services as unknown as HostServices).unsetConfig = (key, opts) =>
-    unsetConfigValue(config, key, { scope: opts?.session ? 'session' : 'saved', pluginConfigs: pluginConfigs(plugins) });
   if (pluginsNote) services.log.append(`[plugins] ${pluginsNote}`);
   for (const line of loadNotes) services.log.append(line);
   // A config that still sets the roots as `fs.roots` is read, and said once in the log.
@@ -473,9 +468,6 @@ export function renderApp(
       };
     }
     const { ui: pluginUi, host: hostBase } = apiRef.current;
-    // A plugin's news in the chat: the chat publishes how it says a note (held while a
-    // turn runs) on its store.
-    (services as unknown as HostServices).chatNote = (text) => (hostBase.store as { chat?: { note?: (t: string) => void } }).chat?.note?.(String(text ?? ''));
 
     // Mount each plugin's `components[slot]` factory EXACTLY once: memoize only
     // the component FUNCTION (stable identity → no remount, state preserved),
@@ -513,6 +505,21 @@ export function renderApp(
               if (desc) Object.defineProperty(pServices, key, desc);
             }
           }
+          // The services that act for a plugin are bound to it, as own props of its view:
+          // its news in the chat carries its name, and its config writes reach only its
+          // own settings (`ownSettingsRefusal`), set the way `:config set` sets them.
+          const name = p.name;
+          const scope = (key: string, unset: boolean): string | null => ownSettingsRefusal(name, key)
+            ?? (unset && !configSchemaAt(hostConfigSchema, key, pluginConfigs(plugins)) ? `config: unknown key ${key}` : null);
+          pServices.chatNote = (text: unknown) => (hostBase.store as { chat?: { note?: (t: string) => void } }).chat?.note?.(`[${name}] ${String(text ?? '')}`);
+          pServices.setConfig = (key: string, value: unknown, opts?: { session?: boolean }) => {
+            const no = scope(key, false);
+            return no ? { ok: false, error: no } : setConfigValue(config, key, value, { scope: opts?.session ? 'session' : 'saved', pluginConfigs: pluginConfigs(plugins) });
+          };
+          pServices.unsetConfig = (key: string, opts?: { session?: boolean }) => {
+            const no = scope(key, true);
+            return no ? { ok: false, error: no } : unsetConfigValue(config, key, { scope: opts?.session ? 'session' : 'saved', pluginConfigs: pluginConfigs(plugins) });
+          };
           // `setup` seeds the plugin's cross-component store BEFORE any component
           // mounts, so hooks reading the store during render don't throw.
           const api: PluginApi = { ui: pluginUi, host: { ...hostBase, services: pServices, pluginToken: identityToken(p.name) } };

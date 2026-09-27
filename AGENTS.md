@@ -164,9 +164,12 @@ plugin's servers connect late, drop, are turned off): it sets `tools` on the plu
 object `make` returned and calls it, and `refreshToolRegistry` (`src/loader/tools.ts`)
 assembles every group again INTO the registry object already handed out — the App, its
 services and the context meter hold that object, so it is never replaced — with
-`ai.disabledTools` read again and a name clash said once per registry. `agentChat` reads
-the catalog when a turn starts, so a group that arrives mid-turn is sent (and indexed)
-from the next message on: the index stays stable within a turn.
+`ai.disabledTools` read again and a name clash said once per registry. `agentChat` fixes
+the list it sends when a turn starts, so a group that arrives mid-turn is sent (and
+indexed) from the next message on: the index stays stable within a turn. A call runs
+against the registry as it is; one to a tool a refresh took away reaches the group that
+last held it (`left` in `assembleToolRegistry`), which says why — an MCP server's
+`<name> is not connected — retrying in N s` — never a bare `Unknown tool`.
 `make(name, shape)` injects `config.plugins.<name>` and qualified keys. The
 returned `shape` has optional: `commands`, `keys`, `keyActions`, `views`,
 `surface`, `modals`, `colors`, `modalColors`, `configSchema`, `components`, `tools`,
@@ -302,18 +305,20 @@ long-lived follows:
 `plugins-available/mcp/src/servers.ts` holds each MCP server's life: `connecting`,
 `connected`, `failed`, `disabled`. A server that fails to connect — at start or later —
 or DROPS (a call's error is the transport's: `McpError.lost` from a fetch that threw or
-a stdio process gone through `onDead`, a 502/503/504; a call that timed out or got
-another 5xx asks the server `ping` within `connectTimeoutMs` and drops it only when that
-gets no answer too — a JSON-RPC error is an answer — while a 404 or a 401 is that call's
-error alone) loses its group and is tried again on `RETRY`: 5 s, 15 s, 60 s, then every 5 minutes. A
+a stdio process gone through `onDead`, a 502/503/504; a call that timed out, got another
+5xx or a 404 asks the server `ping` within `connectTimeoutMs` — a JSON-RPC result or
+error is an answer, and keeps it with the call's error for the model; a 404 to the ping
+is a session the server forgot, so the client drops its session id, initializes anew
+and the call is made again, once; anything else — no answer in time, the line down, any
+other non-2xx — drops it — while a 401 or 400 is that call's error alone) loses its group and is tried again on `RETRY`: 5 s, 15 s, 60 s, then every 5 minutes. A
 401/403 is the token and is never tried again (`authReason` says so and names `/mcp
 restart`). Every attempt carries the server's generation; `disable`, `restart`,
 `remove` and a drop start a new one, so an attempt that finishes under an older one lets
 go of its client and brings back nothing. A connect after the start calls `onChange`:
 the plugin sets `plugin.tools` and calls the host's `toolsChanged` (the group is in the
 next message's index), keeps the start screen's `N of M servers connected` current,
-logs it and says `mcp: <name> connected — 1 tool` / `N tools` through
-`services.chatNote`. `:mcp help`, too long for the one-row toast, opens the chat and is
+logs it and says `<name> connected — 1 tool` / `N tools` through `services.chatNote`,
+which the host draws as `[mcp] …`. `:mcp help`, too long for the one-row toast, opens the chat and is
 said there as a note. Timers are unref'd and cleared at exit (`process.once('exit')`
 stops every manager). The clock and the schedule are injected (`timers`, `retry` —
 builder options the loader never passes), so the tests run the schedule without waiting
@@ -2832,10 +2837,15 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   notice), a spec (opened over it, Esc goes back) or a promise of either; an answer
   that lands after its panel went is dropped.
   **`services.chatNote(text)`** is a plugin's news from outside a command: the chat
-  publishes `note` on `store.chat` and the App binds the service to it; during a turn
-  it waits in `laterNotesRef` and is said under the answer, where the project's
-  instructions note is. **`services.setConfig` / `unsetConfig`** are `setConfigValue`
-  / `unsetConfigValue` with every plugin's schema, bound by `renderApp`.
+  publishes `note` on `store.chat`, and the App binds the service PER PLUGIN (an own
+  prop of the plugin's services view) with `[<plugin>] ` in front, so no plugin's note
+  passes for the host's; during a turn it waits in `laterNotesRef` and is said under
+  the answer, where the project's instructions note is — and so does a command's
+  `ctx.say`, prefixed the same way. **`services.setConfig` / `unsetConfig`** are bound
+  per plugin too: `setConfigValue` / `unsetConfigValue` with every plugin's schema,
+  refused for any key not at or under `plugins.<that plugin>` (`ownSettingsRefusal`,
+  `src/runtime/services.ts`) — never `ai.*`, `shell.*` or another plugin's — and an
+  unset's key checked against the schema (`configSchemaAt`).
 - **The field completes inline, through the `:` line's own `lineView` / `lineTab`** —
   one vocabulary: the untyped rest of the offer after the caret in the dimmed accent,
   its label beside it, the other candidates as `⇥ a · b`, Tab taking the offer and then

@@ -932,5 +932,8 @@ test('refreshToolRegistry re-reads every plugin\'s tools into the registry alrea
   plugin.tools = [];
   refreshToolRegistry();
   expect(reg.tools.map((t) => t.function.name)).not.toContain('late_ping');
-  await expect(reg.exec('late_ping', {}, {})).rejects.toThrow(/Unknown tool/);
+  // A turn fixed its tool list before the group left: a call it makes still reaches the
+  // group, which says for itself why it no longer answers.
+  expect(await reg.exec('late_ping', {}, {})).toBe('pong');
+  await expect(reg.exec('never_there', {}, {})).rejects.toThrow(/Unknown tool/);
 });

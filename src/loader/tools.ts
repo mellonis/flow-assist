@@ -144,19 +144,31 @@ export function assembleToolRegistry(input: AssembledToolRegistryInput): ToolReg
     console.warn(line);
   };
   let state = assemble(input, warn);
+  // The tools a refresh took away, each with the group that last held it: a turn fixes
+  // the list it sends when it starts, so it may still call one — the group answers for
+  // itself (an MCP server's says it is not connected and when it is tried next), and the
+  // model never reads a bare "Unknown tool" for a tool it was offered.
+  const left = new Map<string, { group: ToolGroup; own: string }>();
   const registry: ToolRegistry = {
     groups: state.groups,
     tools: state.tools,
     exec: async (name, args, ctx) => {
       const group = state.nameToGroup.get(name);
-      if (!group) throw new Error(`Unknown tool: ${name}`);
-      return group.exec(state.ownName.get(name) ?? name, args ?? {}, ctx);
+      if (group) return group.exec(state.ownName.get(name) ?? name, args ?? {}, ctx);
+      const gone = left.get(name);
+      if (gone) return gone.group.exec(gone.own, args ?? {}, ctx);
+      throw new Error(`Unknown tool: ${name}`);
     },
   };
   // A refresh swaps what this object holds, never the object: the app, its services and
   // the context meter keep the one they were handed.
   refreshCurrent = () => {
+    const before = state;
     state = assemble(input, warn);
+    for (const [name, group] of before.nameToGroup) {
+      if (!state.nameToGroup.has(name)) left.set(name, { group, own: before.ownName.get(name) ?? name });
+    }
+    for (const name of state.nameToGroup.keys()) left.delete(name);
     registry.groups = state.groups;
     registry.tools = state.tools;
   };
@@ -168,9 +180,10 @@ export function assembleToolRegistry(input: AssembledToolRegistryInput): ToolReg
 // plugin whose groups change while the app runs (an MCP server that connects after the
 // start, or is turned off): the plugin sets `tools` on its plugin object and calls this,
 // handed to its builder as `toolsChanged`. `ai.disabledTools` is read again with it.
-// What a request carries is read from the registry when its turn starts (`agentChat`),
-// so a change reaches the next message, never the middle of a turn. A no-op before any
-// registry is assembled.
+// The list a turn sends is fixed when it starts (`agentChat`), so a change reaches the
+// next message's list; a call runs against the registry as it is, and a call to a tool
+// that left since reaches the group that last held it. A no-op before any registry is
+// assembled.
 export function refreshToolRegistry(): void {
   refreshCurrent?.();
 }
