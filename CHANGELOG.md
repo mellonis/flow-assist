@@ -5,6 +5,13 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **flowtty 1.0.0-alpha.34.** Scrolling and typing in a long conversation are
+  lighter: a re-render no longer re-applies the layout of every box it touched, only
+  of the boxes whose layout changed, so a wheel flick or a keystroke no longer lays
+  the whole visible part of the conversation out again.
+  **For plugin authors:** declare `"flowtty": ">=1.0.0-alpha.34 <1.0.0-alpha.35"` — a
+  manifest still declaring the alpha.33 range is refused as incompatible. The host
+  API number is unchanged.
 - The README is short; the manual lives in docs/usage.md, docs/safety.md and
   docs/config.md.
 - **What a click acts on shows it under the pointer.** A fold line in the chat — a
