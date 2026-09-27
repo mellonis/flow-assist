@@ -470,3 +470,20 @@ test('a y/n settled by a stop is recorded as the stop, not as the person\'s no',
   expect(journalOf(dir).find((e) => e.t === 'confirm')).toMatchObject({ answer: 'no', by: 'stop' });
   ui.app.unmount();
 });
+
+test('a run_command the auto mode lets run (shell.autoRun with /auto all) is journaled as answered by the auto mode', async () => {
+  const dir = dirOf();
+  const root = rootOf();
+  const model = new ScriptedModel();
+  model.script([{ tool: 'run_command', args: { command: 'echo сам' } }], [{ text: 'Готово.' }]);
+  const ui = await bootApp(model, 100, 28, undefined, { sessions: { dir }, shell: { roots: [root], autoRun: true } });
+  await ui.press('F');
+  await ask(ui, '/auto all', 6);
+  await ask(ui, 'выполни сам');
+  await settleUntil(() => journals(dir).length > 0 && journalOf(dir).some((e) => e.t === 'end'), 400);
+  const events = journalOf(dir);
+  expect(events.find((e) => e.t === 'call-start')).toMatchObject({ name: 'run_command', confirm: true });
+  expect(events.find((e) => e.t === 'confirm')).toMatchObject({ name: 'run_command', answer: 'yes', by: 'auto' });
+  expect(events.find((e) => e.t === 'call')).toMatchObject({ name: 'run_command', outcome: 'applied' });
+  ui.app.unmount();
+});
