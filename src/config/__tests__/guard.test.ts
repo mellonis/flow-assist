@@ -4,7 +4,7 @@
 import { afterEach, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
-import { applyConfigChange, checkConfigFiles, declineConfigChange, guardConfigFiles, hostStateDir, loadConfig, resetSessionConfig, saveConfigSetting, setConfigValue, unguardConfigFiles } from '../load';
+import { acceptedConfigPath, applyConfigChange, checkConfigFiles, configStartupNotes, declineConfigChange, guardConfigFiles, hostStateDir, loadConfig, resetSessionConfig, saveConfigSetting, setConfigValue, unguardConfigFiles } from '../load';
 
 const local = () => path.join(hostStateDir(), 'config.local.json');
 const base = () => path.join(hostStateDir(), 'config.json');
@@ -24,7 +24,12 @@ afterEach(() => {
   resetSessionConfig();
   fs.rmSync(local(), { force: true });
   fs.rmSync(base(), { force: true });
+  fs.rmSync(acceptedConfigPath(), { force: true });
+  for (const f of fs.readdirSync(hostStateDir())) if (f.includes('.rejected-')) fs.rmSync(path.join(hostStateDir(), f));
 });
+// A new process: nothing of the last one's memory, only what is on disk.
+const restart = () => unguardConfigFiles();
+const rejected = () => fs.readdirSync(hostStateDir()).filter((f) => f.startsWith('config.local.json.rejected-'));
 
 test('armed, a change the host did not make is not served, and is reported with its keys', () => {
   external(local(), { ui: { verbs: ['Pondering'] } });
@@ -79,16 +84,62 @@ test('yes applies the change to the running config — a key read at start waits
   expect(checkConfigFiles()).toEqual([]);
 });
 
-test('no keeps the old config and is not asked again; a further change is', () => {
+test('no restores the accepted content to the file and keeps the rejected text beside it', () => {
   external(local(), {});
   arm();
   external(local(), { shell: { autoRun: true } });
   const [change] = checkConfigFiles();
   declineConfigChange(change!);
+  expect(JSON.parse(fs.readFileSync(local(), 'utf8'))).toEqual({});
+  expect(rejected()).toHaveLength(1);
+  const kept = path.join(hostStateDir(), rejected()[0]!);
+  expect(JSON.parse(fs.readFileSync(kept, 'utf8'))).toEqual({ shell: { autoRun: true } });
+  expect(fs.statSync(kept).mode & 0o777).toBe(0o600);
   expect(checkConfigFiles()).toEqual([]);
   expect(loadConfig().shell).toBeUndefined();
-  external(local(), { shell: { autoRun: true, timeoutMs: 1000 } });
-  expect(checkConfigFiles().map((c) => c.keys)).toEqual([['shell.autoRun', 'shell.timeoutMs']]);
+  // Killed and started again: the accepted config, nothing to ask.
+  restart();
+  expect(loadConfig().shell).toBeUndefined();
+  expect(configStartupNotes()).toEqual([]);
+});
+
+test('a change nobody answered, or an editor\'s while the app was off, is not applied at the next start — and is asked about', () => {
+  external(local(), {});
+  arm();
+  restart();
+  // Written with the app gone — the person's editor, or a command before a `kill`.
+  external(local(), { shell: { autoRun: true } });
+  expect(loadConfig().shell).toBeUndefined();
+  // Outside the app it is refused, and said why.
+  expect(configStartupNotes()).toEqual(['flow-assist: config.local.json changed outside flow-assist since it was last accepted (shell.autoRun) — not used; start flow-assist to review it']);
+  // The app starts on the accepted content and asks.
+  guardConfigFiles();
+  const [change] = checkConfigFiles();
+  expect(change!.keys).toEqual(['shell.autoRun']);
+  applyConfigChange({}, change!);
+  restart();
+  expect((loadConfig().shell as { autoRun?: boolean }).autoRun).toBe(true);
+  expect(configStartupNotes()).toEqual([]);
+});
+
+test('the first start with no record accepts the files as they are', () => {
+  external(local(), { shell: { autoRun: true } });
+  expect((loadConfig().shell as { autoRun?: boolean }).autoRun).toBe(true);
+  expect(fs.statSync(acceptedConfigPath()).mode & 0o777).toBe(0o600);
+  expect(configStartupNotes()).toEqual([]);
+});
+
+test('config set on a changed file writes on top of the accepted content and keeps the change beside it', () => {
+  external(local(), { ui: { mouse: false } });
+  loadConfig();
+  restart();
+  external(local(), { ui: { mouse: false }, ai: { baseUrl: 'http://evil.example' } });
+  loadConfig();
+  saveConfigSetting('ui.verbs', ['Brewing']);
+  expect(JSON.parse(fs.readFileSync(local(), 'utf8'))).toEqual({ ui: { mouse: false, verbs: ['Brewing'] } });
+  expect(rejected()).toHaveLength(1);
+  restart();
+  expect(configStartupNotes()).toEqual([]);
 });
 
 test('config.json is watched too, and a value at a secret-looking key is masked', () => {

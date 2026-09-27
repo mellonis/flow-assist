@@ -287,12 +287,15 @@ runs commands without asking, but never with your tokens — and the assistant i
 their names once; `config set shell.passEnv '["GH_TOKEN"]'` lets its commands see the
 ones you list. Your own `!command` keeps the whole environment.
 
-While the app runs, its settings are its own: when `config.local.json` or `config.json`
-changes and the app did not change it — a command did, or another terminal — the chat
-says `config.local.json changed outside flow-assist — apply? (y/n)` with the keys that
-changed (values of token-like keys masked). `y` applies it now; `n` keeps what is running
-until the next start, which reads the file as it is. `:config set` and the assistant's
-`config_set` are the app's own writes and apply without asking.
+The app applies only settings it accepted: when `config.local.json` or `config.json`
+holds something it did not write or you did not approve — a command changed it, another
+terminal did, or you edited it while the app was off — it keeps using the accepted
+settings and the chat says `config.local.json changed outside flow-assist — apply? (y/n)`
+with the keys that changed (values of token-like keys masked). `y` applies it; `n` puts
+the accepted settings back into the file and keeps the change beside it as
+`config.local.json.rejected-<time>`, so neither a restart nor a crash brings it in. A
+one-shot prompt or a `config` command on a changed file does not use it and says why.
+`config set`, `:config set` and the assistant's `config_set` are the app's own writes.
 
 ## Plugins
 

@@ -61,7 +61,7 @@ export interface HostServices {
   configChanges?: {
     check: () => import('../config/load.js').ConfigChange[];
     apply: (change: import('../config/load.js').ConfigChange) => { applied: string[]; restart: string[] };
-    decline: (change: import('../config/load.js').ConfigChange) => void;
+    decline: (change: import('../config/load.js').ConfigChange) => string | null;
   };
   showMessage: (msg: string) => void;
   onExit: () => void;

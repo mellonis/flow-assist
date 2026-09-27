@@ -66,3 +66,23 @@ test('config get says where the value comes from; config set --session is the ap
     process.exitCode = saved ?? 0;
   }
 });
+
+test('outside the app a settings file changed since it was last accepted is not used, and the CLI says why', async () => {
+  const { spawnSync } = await import('node:child_process');
+  const fs = await import('node:fs');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const xdg = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-cli-guard-'));
+  const dir = path.join(xdg, 'flow-assist');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'config.local.json'), JSON.stringify({ ui: { verbs: ['Pondering'] } }));
+  const cli = path.join(import.meta.dir, '..', '..', 'cli.ts');
+  const env = { ...process.env, XDG_CONFIG_HOME: xdg, NODE_ENV: 'production' };
+  const run = () => spawnSync('bun', [cli, 'config', 'get', 'ui.verbs'], { env, encoding: 'utf8' });
+  expect(run().stdout).toContain('Pondering'); // the first start accepts the file
+  fs.writeFileSync(path.join(dir, 'config.local.json'), JSON.stringify({ ui: { verbs: ['Scheming'] } }));
+  const second = run();
+  expect(second.stdout).toContain('Pondering');
+  expect(second.stdout).not.toContain('Scheming');
+  expect(second.stderr).toContain('flow-assist: config.local.json changed outside flow-assist since it was last accepted (ui.verbs) — not used; start flow-assist to review it');
+});

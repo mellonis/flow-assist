@@ -1258,7 +1258,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const configAskRef = ui.useRef<Promise<void> | null>(null);
           const askConfigChanges = (): Promise<void> => {
             if (configAskRef.current) return configAskRef.current;
-            const svc = (host.services as { configChanges?: { check(): ConfigChange[]; apply(c: ConfigChange): { applied: string[]; restart: string[] }; decline(c: ConfigChange): void } }).configChanges;
+            const svc = (host.services as { configChanges?: { check(): ConfigChange[]; apply(c: ConfigChange): { applied: string[]; restart: string[] }; decline(c: ConfigChange): string | null } }).configChanges;
             if (!svc || pendingRef.current || askRef.current) return Promise.resolve();
             const changes = svc.check();
             if (!changes.length) return Promise.resolve();
@@ -1274,14 +1274,17 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   const r = svc.apply(change);
                   pushNote(`Applied ${change.file}: ${[...r.applied, ...r.restart.map((k) => `${k} (${RESTART_NOTE})`)].join(', ')}.`);
                 } else {
-                  svc.decline(change);
-                  pushNote(`Kept the running config — ${change.file} is read as it is at the next start.`);
+                  const kept = svc.decline(change);
+                  pushNote(`Put the accepted ${change.file} back${kept ? ` — the change is kept in ${path.basename(kept)}` : ''}.`);
                 }
               }
             })().finally(() => { configAskRef.current = null; });
             configAskRef.current = run;
             return run;
           };
+
+          // A file changed while the app was off is asked about as the app starts.
+          ui.useEffect(() => { const t = setTimeout(() => { void askConfigChanges(); }, 0); return () => clearTimeout(t); }, []);
 
           const settleConfirm = (ok: boolean, by: 'person' | 'stop' | 'reset' = 'person') => {
             const p = pendingRef.current;

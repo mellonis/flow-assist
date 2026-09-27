@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { getDeep, setDeep, unsetDeep, parseValue, validateConfigWriteValue, configWarnings, saveConfigSetting, saveConfigUnset, configDir, hostStateDir, loadConfig } from '../load';
+import { getDeep, setDeep, unsetDeep, parseValue, validateConfigWriteValue, configWarnings, saveConfigSetting, saveConfigUnset, configDir, hostStateDir, loadConfig, acceptedConfigPath } from '../load';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -144,6 +144,8 @@ test('under bun test the config is read from the run\'s own directory, never fro
     fs.writeFileSync(path.join(configDir(), 'config.local.json'), JSON.stringify({ personLocal: 'theirs' }));
     fs.writeFileSync(files[0]!, JSON.stringify({ runBase: 'ours' }));
     fs.writeFileSync(files[1]!, JSON.stringify({ runLocal: 'ours' }));
+    // A first start: no accepted record yet, so the files are taken as they are.
+    fs.rmSync(acceptedConfigPath(), { force: true });
     const read = loadConfig();
     expect(read.personBase).toBeUndefined();
     expect(read.personLocal).toBeUndefined();
@@ -152,5 +154,6 @@ test('under bun test the config is read from the run\'s own directory, never fro
   } finally {
     if (was === undefined) delete process.env.XDG_CONFIG_HOME; else process.env.XDG_CONFIG_HOME = was;
     files.forEach((f, i) => (kept[i] === null ? fs.rmSync(f, { force: true }) : fs.writeFileSync(f, kept[i]!)));
+    fs.rmSync(acceptedConfigPath(), { force: true });
   }
 });

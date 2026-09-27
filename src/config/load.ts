@@ -108,21 +108,58 @@ const LAYERS = new WeakMap<object, ConfigLayers>();
 
 // ─── The guard ───────────────────────────────────────────────────────────────
 // Config is the person's, and a command the model runs can write a file as well as
-// anyone. So the host records what it last read or wrote of each settings file — its
-// mtime and size, a hash of its text, the object it holds (`SEEN`) — and, once the
-// running app arms the guard (`guardConfigFiles`, in `runInteractive`), serves only
-// that: a change it did not make itself is NOT applied. `checkConfigFiles` — a stat per
-// file, the file read only when the stat moved — reports it with the keys it changes,
-// and the chat asks the person; yes applies it (`applyConfigChange`), no keeps the
-// running config (`declineConfigChange`, not asked again for that content). The host's
-// own writes (`config set` in the app, `config_set`, the saves below) are made on top of
-// the accepted content and accepted as they are made. Unarmed — a start, the CLI, a
-// one-shot prompt — the files are read as they are: a restart reads the person's file.
+// anyone. So the host keeps, in its own state (`config.accepted.json`, 0600), the text
+// hash and the content of each settings file as it last ACCEPTED it — its own writes,
+// the CLI's `config set` among them, and a change the person said yes to — and in
+// memory what it last read or wrote (`SEEN`: mtime, size, hash, content).
+// - At a start (`loadConfig`, unarmed) a file whose hash is the accepted one is read as
+//   it is. One that differs is NOT applied: the accepted content is served instead —
+//   the app then asks about it (the guard, below); the CLI and the one-shot prompt say
+//   why (`configStartupNotes`). With no record yet (a first start) the files are
+//   accepted as they are.
+// - Once the running app arms the guard (`guardConfigFiles`, in `runInteractive`),
+//   `loadConfig` serves `SEEN` only, and `checkConfigFiles` — a stat per file, the file
+//   read only when the stat moved — reports a change the host did not make, with the
+//   keys it changes; the chat asks the person. Yes applies it and accepts it
+//   (`applyConfigChange`); no puts the accepted content back into the file and keeps the
+//   rejected text beside it, `<file>.rejected-<time>`, 0600 (`declineConfigChange`), so
+//   a restart — a `kill` included — starts on the accepted config.
+// - A write of the host's is made on top of the accepted content; a file that held
+//   something else has that text kept beside it first, never lost.
 type Seen = { mtimeMs: number; size: number; hash: string; content: Record<string, unknown> | null };
 const SEEN = new Map<string, Seen>();
 const PENDING = new Map<string, ConfigChange>();
 const DECLINED = new Map<string, { mtimeMs: number; size: number; hash: string }>();
 let GUARDED = false;
+
+// The accepted record: per file name, the hash of its text and the object it held.
+type Accepted = { hash: string; content: Record<string, unknown> | null };
+export const acceptedConfigPath = (): string => path.join(hostStateDir(), 'config.accepted.json');
+function readAccepted(): Record<string, Accepted> {
+  try {
+    const v = JSON.parse(fs.readFileSync(acceptedConfigPath(), 'utf8'));
+    return v && typeof v === 'object' && !Array.isArray(v) ? v : {};
+  } catch { return {}; }
+}
+function recordAccepted(p: string, a: Accepted): void {
+  try {
+    const all = readAccepted();
+    all[path.basename(p)] = a;
+    const file = acceptedConfigPath();
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const tmp = `${file}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(all, null, 2), { mode: 0o600 });
+    fs.renameSync(tmp, file);
+  } catch { /* the record is best-effort; the file itself was written */ }
+}
+// Keeps a settings file's text beside it before the host puts other content there.
+function keepRejected(p: string, raw: string): string | null {
+  try {
+    const kept = `${p}.rejected-${new Date().toISOString().replace(/[:.]/g, '-')}`;
+    fs.writeFileSync(kept, raw, { mode: 0o600, flag: 'wx' });
+    return kept;
+  } catch { return null; }
+}
 
 // A change to a settings file the host did not make: which file, the keys it changes
 // and a line per key saying how (`key: old → new`, a value at a secret-looking key
@@ -136,6 +173,7 @@ export interface ConfigChange {
   mtimeMs: number;
   size: number;
   content: Record<string, unknown> | null;
+  raw: string | null;
 }
 
 const hashOf = (text: string | null): string => (text === null ? 'missing' : crypto.createHash('sha256').update(text).digest('hex'));
@@ -218,7 +256,7 @@ function checkFile(p: string): ConfigChange | null {
   const lines = keys.map((k) => `${k}: ${shownValue(k, getDeep(seen.content ?? {}, k))} → ${shownValue(k, getDeep(content ?? {}, k))}`);
   if (raw !== null && content === null) lines.push('the file does not hold a JSON object — applied, it reads as empty');
   if (!keys.length && !lines.length) { SEEN.set(p, { ...st, hash, content }); PENDING.delete(p); return null; }
-  const change: ConfigChange = { file: path.basename(p) as ConfigChange['file'], path: p, keys, lines, hash, ...st, content };
+  const change: ConfigChange = { file: path.basename(p) as ConfigChange['file'], path: p, keys, lines, hash, ...st, content, raw };
   PENDING.set(p, change);
   return change;
 }
@@ -238,6 +276,7 @@ export function applyConfigChange(
   opts: { rootSchema?: unknown; pluginConfigs?: Record<string, unknown> } = {},
 ): { applied: string[]; restart: string[] } {
   SEEN.set(change.path, { mtimeMs: change.mtimeMs, size: change.size, hash: change.hash, content: change.content });
+  recordAccepted(change.path, { hash: change.hash, content: change.content });
   PENDING.delete(change.path);
   DECLINED.delete(change.path);
   const layers = LAYERS.get(config);
@@ -260,11 +299,39 @@ export function applyConfigChange(
   return { applied, restart };
 }
 
-// No: the running config stays as it is until a restart, and this content of the file
-// is not asked about again.
-export function declineConfigChange(change: ConfigChange): void {
-  DECLINED.set(change.path, { mtimeMs: change.mtimeMs, size: change.size, hash: change.hash });
+// No: the accepted content goes back into the file — the host's own write — and the
+// rejected text is kept beside it; returns where. Should the file not be writable, the
+// running config still stays as it is and this content is not asked about again.
+export function declineConfigChange(change: ConfigChange): string | null {
   PENDING.delete(change.path);
+  const accepted = SEEN.get(change.path);
+  const kept = change.raw !== null ? keepRejected(change.path, change.raw) : null;
+  try {
+    if (!accepted || accepted.hash === 'missing') {
+      fs.rmSync(change.path, { force: true });
+      SEEN.set(change.path, observe(change.path));
+      recordAccepted(change.path, { hash: 'missing', content: null });
+    } else {
+      writeSettings(change.path, accepted.content ?? {}, { rejectedKept: true });
+    }
+  } catch {
+    DECLINED.set(change.path, { mtimeMs: change.mtimeMs, size: change.size, hash: change.hash });
+  }
+  return kept;
+}
+
+// The start's own word on a settings file that changed since it was last accepted,
+// for a caller with no chat to ask in (the CLI, the one-shot prompt): the file is not
+// used, and this says why. Empty when nothing changed.
+export function configStartupNotes(): string[] {
+  const out: string[] = [];
+  for (const p of guardedPaths()) {
+    const seen = SEEN.get(p);
+    if (!seen || !Number.isNaN(seen.mtimeMs)) continue;
+    const change = checkFile(p);
+    if (change) out.push(`flow-assist: ${change.file} changed outside flow-assist since it was last accepted (${change.keys.join(', ') || 'unreadable'}) — not used; start flow-assist to review it`);
+  }
+  return out;
 }
 
 // A settings file as the host reads it: armed, the accepted content (and a check that
@@ -277,24 +344,41 @@ function readSettings(p: string): Record<string, unknown> | null {
     return c ? structuredClone(c) : null;
   }
   const seen = observe(p);
-  SEEN.set(p, seen);
-  return seen.content ? structuredClone(seen.content) : null;
+  const accepted = readAccepted()[path.basename(p)];
+  if (!accepted || accepted.hash === seen.hash) {
+    if (!accepted) recordAccepted(p, { hash: seen.hash, content: seen.content });
+    SEEN.set(p, seen);
+    return seen.content ? structuredClone(seen.content) : null;
+  }
+  // Changed since it was accepted: the accepted content is what is served, and a stat
+  // that can match no file (NaN) makes the next check report the change.
+  SEEN.set(p, { mtimeMs: Number.NaN, size: -1, hash: accepted.hash, content: accepted.content });
+  return accepted.content ? structuredClone(accepted.content) : null;
 }
 
-// What a save starts from: the accepted content while the guard is armed — a write of
-// the host's must never carry in a change it did not accept — else the file.
+// What a save starts from: for a settings file, the accepted content — a write of the
+// host's must never carry in a change it did not accept — else the file.
 function settingsBase(filePath: string): Record<string, unknown> {
-  if (GUARDED && isGuardedPath(filePath)) return structuredClone(SEEN.get(filePath)?.content ?? {});
+  if (isGuardedPath(filePath)) {
+    if (!SEEN.has(filePath)) readSettings(filePath);
+    return structuredClone(SEEN.get(filePath)?.content ?? {});
+  }
   const current = fs.existsSync(filePath) ? JSON.parse(fs.readFileSync(filePath, 'utf8')) : {};
   return current && typeof current === 'object' ? current : {};
 }
-// Writes a settings file and records it as seen: the host's own write is accepted.
-function writeSettings(filePath: string, next: Record<string, unknown>): void {
+// Writes a settings file and records it as seen and accepted: the host's own write. A
+// file that held text other than the accepted has it kept beside it first.
+function writeSettings(filePath: string, next: Record<string, unknown>, opts: { rejectedKept?: boolean } = {}): void {
   const text = JSON.stringify(next, null, 2);
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  if (isGuardedPath(filePath) && !opts.rejectedKept) {
+    const raw = readRaw(filePath);
+    if (raw !== null && hashOf(raw) !== SEEN.get(filePath)?.hash) keepRejected(filePath, raw);
+  }
   fs.writeFileSync(filePath, text, 'utf8');
   if (isGuardedPath(filePath)) {
     SEEN.set(filePath, { ...statOf(filePath), hash: hashOf(text), content: structuredClone(next) });
+    recordAccepted(filePath, { hash: hashOf(text), content: structuredClone(next) });
     PENDING.delete(filePath);
     DECLINED.delete(filePath);
   }

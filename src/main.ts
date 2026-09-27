@@ -14,7 +14,7 @@
 import { projectRoot, availableDir, enabledDir } from './install.js';
 import { existsSync } from 'node:fs';
 import { TtyBackend, isInteractive } from '@flowtty/tty-backend';
-import { guardConfigFiles, loadConfig } from './config/load.js';
+import { configStartupNotes, guardConfigFiles, loadConfig } from './config/load.js';
 import {
   configSource,
   configValue,
@@ -117,6 +117,11 @@ export async function main(argv: string[]): Promise<void> {
   // The secrets this config and the environment name, taken out of every text the
   // model, the screen and the records see (src/assistant/secrets.ts).
   refreshSecrets(config);
+  // A settings file changed since it was last accepted is not used (src/config/load.ts,
+  // the guard): the app asks about it; with no chat to ask in, the reason is said.
+  if (parsed.cmd === 'config' || parsed.cmd === 'plugins' || parsed.cmd === 'prompt') {
+    for (const note of configStartupNotes()) console.error(note);
+  }
   const repo = createPluginRepo({ availableDir, enabledDir, projectRoot, fetchPlugin });
 
   switch (parsed.cmd) {
