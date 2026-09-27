@@ -17,6 +17,8 @@ export interface Host {
   showMessage(text: string): Promise<void>;
   pushLog(text: string): Promise<void>;
   copyToClipboard(text: string): Promise<void>;
+  // The host's agent loop. Every write the model calls is declined: a remote plugin
+  // cannot ask the person.
   chatLLM(messages: unknown[]): Promise<{ content: string }>;
   store: { get(key: string): Promise<unknown>; set(key: string, value: unknown): Promise<void> };
   cache: { get(key: string): Promise<unknown>; set(key: string, value: unknown): Promise<void>; del(key: string): Promise<void> };

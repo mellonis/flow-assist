@@ -105,7 +105,7 @@ interface Host {
   showMessage(text: string): Promise<void>;
   pushLog(text: string): Promise<void>;
   copyToClipboard(text: string): Promise<void>;
-  chatLLM(messages: unknown[]): Promise<{ content: string }>;
+  chatLLM(messages: unknown[]): Promise<{ content: string }>; // writes declined: nobody to ask
   store: { get(key: string): Promise<unknown>; set(key: string, value: unknown): Promise<void> };
   cache: { get(key: string): Promise<unknown>; set(key: string, value: unknown): Promise<void>; del(key: string): Promise<void> };
   config(): Promise<Record<string, unknown>>;

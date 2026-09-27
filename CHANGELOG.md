@@ -5,6 +5,11 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **A plugin that asks the model something no longer lets it write.** A plugin's
+  `chatLLM` — and a remote plugin's `host.chatLLM` — ran every write the model called
+  without asking you. Now each write there is declined unless the plugin asks you
+  itself (a JS plugin passes its own `confirmWrite`; a remote plugin cannot, so its
+  writes are always declined).
 - **A one-shot prompt no longer runs writes without asking.** `flow-assist "<prompt>"`
   has nobody to answer a y/n, yet it ran every write the model called — a command, a
   file edit, a tracker change — so one instruction planted in a page or a ticket it read

@@ -287,6 +287,13 @@ The services stay on `host.services` and are read when they are called
 so a copy taken once is stale. The two parts are built once, so a component factory
 runs once and its component is mounted for the app's life.
 
+`host.services.chatLLM(messages, opts)` runs the host's agent loop — the model the
+person configured, with every tool in the registry. A call from a plugin cannot ask
+the person, so **every write the model calls is declined**: the tool never runs and the
+model is told the person can do it in the chat; reads run. A plugin that can ask — it
+shows its own y/n and waits for the answer — passes `opts.confirmWrite(name, args)`,
+which returns (a promise of) `true` for yes; a write runs only on that yes.
+
 ## Commands, keys and the footer
 
 ```ts
@@ -541,7 +548,7 @@ JSON-RPC result with no value carries as `null`, never `{}`:
 |---|---|---|
 | `host.showMessage` | `{ text }` | `null` |
 | `host.pushLog` | `{ text }` | `null` |
-| `host.chatLLM` | `{ messages }` | `{ content, transcript }` |
+| `host.chatLLM` | `{ messages }` | `{ content, transcript }` — every write the model calls is declined: a remote plugin cannot ask the person |
 | `host.copyToClipboard` | `{ text }` | `null` |
 | `host.store.get` | `{ key }` | the plugin's own value, or `null` |
 | `host.store.set` | `{ key, value }` | `null` — `__proto__`, `constructor` and `prototype` are refused as keys, for `get` too |

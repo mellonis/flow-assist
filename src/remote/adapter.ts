@@ -149,6 +149,8 @@ export async function remotePlugin(opts: RemotePluginOpts): Promise<Plugin> {
   peer.onRequest('host.chatLLM', async (p) => {
     const messages = (p as { messages?: unknown })?.messages;
     if (!Array.isArray(messages)) throw new PeerError('messages (array) is required', PeerError.INVALID_PARAMS);
+    // No `confirmWrite`: a function cannot cross the wire, so a remote plugin's run can
+    // never ask the person, and the loop declines every write in it.
     const r = await services().chatLLM?.(messages, {});
     return { content: r?.content ?? '', transcript: r?.transcript ?? [] };
   });

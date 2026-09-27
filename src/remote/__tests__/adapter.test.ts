@@ -298,3 +298,42 @@ test('host.store refuses the keys that reach an object\'s prototype, for set and
   await plugin.request('host.store.set', { key: 'ok', value: 1 });
   expect(await plugin.request('host.store.get', { key: 'ok' })).toBe(1);
 });
+
+// A remote plugin reaches the model through `host.chatLLM` with the host's own LLM
+// service. It cannot hand a function over the wire, so it can never ask the person: a
+// write the model calls there is declined and never runs.
+test('host.chatLLM declines every write the model calls', async () => {
+  const { ScriptedModel } = await import('../../__tests__/helpers/scripted');
+  const { assembleToolRegistry } = await import('../../loader/tools');
+  const { createServices } = await import('../../runtime/services');
+  const fs = await import('node:fs'); const os = await import('node:os'); const path = await import('node:path');
+  const realFetch = globalThis.fetch;
+  try {
+    process.env.LLM_TOKEN = 'scripted';
+    const ran: string[] = [];
+    const make = makeFactory({});
+    const writer = make('w', { aiTools: [
+      { type: 'function', function: { name: 'w:save', description: 'save', parameters: { type: 'object', properties: {} } }, write: true, run: async () => { ran.push('save'); return 'saved'; } },
+    ] });
+    const memory = { file: path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-remote-llm-')), 'memory.json') };
+    const config: Record<string, unknown> = { ai: { baseUrl: 'http://scripted.model', model: 'scripted', toolLoading: 'all' }, memory };
+    const tools = assembleToolRegistry({ plugins: [writer], config, repo: { list: async () => [] } as never });
+    const services = createServices({ config, tools, onExit: () => {} });
+    const model = new ScriptedModel();
+    model.install();
+    model.script([{ tool: 'w:save', args: {} }], [{ text: 'done' }]);
+
+    const { transport, plugin } = fakeTransport();
+    hello(plugin);
+    const p = await remotePlugin({ manifest, transport, config: {}, make: makeFactory({}) });
+    p.setup!({ ui: {}, host: { services, store: {}, notify: () => {}, config: {} } } as never);
+    const answer = await plugin.request('host.chatLLM', { messages: [{ role: 'user', content: 'save it' }] }) as { content: string; transcript: { role: string; content: unknown }[] };
+    expect(answer.content).toBe('done');
+    expect(ran).toEqual([]);
+    const result = String(answer.transcript.find((m) => m.role === 'tool')?.content);
+    expect(result).toStartWith('DECLINED:');
+    expect(result).toContain('cannot ask the person');
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});

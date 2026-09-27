@@ -181,7 +181,9 @@ export function createServices({ config, tools, repo, onExit }: CreateServicesOp
     // `ai.toolLoading` is applied here, once, for the chat and a background task alike;
     // a caller that names a mode keeps it. So is the endpoint (`llmOpts`: the provider,
     // base URL, model, token): a plugin that passes only some of it still reaches the
-    // model the person configured, on the wire they chose.
+    // model the person configured, on the wire they chose. A write goes to the caller's
+    // `confirmWrite` — the chat's y/n, a background task's always-no — and with none it
+    // is declined: a plugin that cannot ask the person gets no writes.
     chatLLM: (messages, opts) => agentChat(messages, {
       toolLoading: toolLoadingMode(config.ai),
       toolResultMaxChars: toolResultCapFromConfig(config.ai),
