@@ -55,10 +55,10 @@ What each version of flow-assist brought, newest first. The version is the one i
 - **For plugin authors:** a plugin whose tool groups change while the app runs sets
   `tools` on its plugin object and calls `toolsChanged()`, handed to its builder.
 - **The session picker can move a session into the current project (`^p`).** Its state
-  file, journal and any attached files move under the current project's mirror
-  directory, its `project` field is rewritten, and an empty source directory is
-  cleaned up. Refused for a session another process holds, this chat's own open one
-  ("switch away first"), or one already in this project.
+  file and journal move under the current project's mirror directory, its `project`
+  field is rewritten, and an empty source directory is cleaned up. Refused for a
+  session another process holds, this chat's own open one ("switch away first"), or
+  one already in this project.
 - **`/cd <dir>` moves the shell's directory yourself, without asking the assistant.**
   It follows `!cd`'s own rule (free to go anywhere with no `shell.roots` configured,
   held to them by the real path otherwise), Tab completes to directories inside the
