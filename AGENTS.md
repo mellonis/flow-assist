@@ -1617,7 +1617,9 @@ host, so it recovers on its next request.
 
 **A tool call written as text is asked for again, once, as a real call**
 (`src/assistant/tool-markup.ts`, pure: `hasToolMarkup`, `stripToolMarkup`,
-`markupToolNames` — the one detector a compaction's summary is cleaned with too). A
+`markupToolNames` — the one detector a compaction's summary is cleaned with too; code
+is never markup: fenced blocks and inline spans are set aside before it looks, so an
+answer or a handoff that SHOWS the tags stays whole). A
 model sometimes writes its call as TEXT — DeepSeek's DSML `<｜DSML｜function_calls>`,
 `<tool_call>`, `<function_calls>`, a bare `<invoke …>` — and the round ends with no
 call at all. Taken as the answer, the turn would end on markup and nothing done. So a

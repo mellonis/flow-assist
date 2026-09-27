@@ -882,6 +882,8 @@ export async function agentChat(
           else if (kept) onProcess?.(kept);
           opts.onNote?.('tool call written as text — asked again');
           if (kept) current.push({ role: 'assistant', content: kept });
+          // The round's reported size covers what it wrote; the line below joins after it.
+          if (r.usage) usageAt = current.length;
           const known = new Set([...toolByName.keys(), ...realName.keys()]);
           const unknown = markupToolNames(roundContent).filter((n) => !known.has(n));
           const have = unknown.length ? ` There is no tool named ${unknown.join(', ')}; the tools you have: ${roundTools().map((t) => t.function.name).join(', ')}.` : '';

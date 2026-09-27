@@ -10,11 +10,27 @@ const OPEN = /<(?:｜DSML｜)?(function_calls|tool_calls?|invoke)\b[^>]*>/;
 // A stray DSML-family token: `<｜DSML｜…>`, `</｜DSML｜…>`, `<｜tool▁calls▁begin｜>`.
 const STRAY = /<\/?｜[^<>\n]*>/g;
 
+// Code is never markup: a fenced block or an inline span that shows the tags — an
+// answer or a handoff about this very detector — is set aside before looking, and put
+// back as it was. A placeholder is a run of private-use characters no model writes.
+const CODE = /```[^]*?(?:```|$)|`[^`\n]+`/g;
+function masked(text: string): { text: string; restore: (s: string) => string } {
+  const kept: string[] = [];
+  const out = text.replace(CODE, (m) => `\uE000${kept.push(m) - 1}\uE001`);
+  return { text: out, restore: (s) => s.replace(/\uE000(\d+)\uE001/g, (_, i) => kept[Number(i)]!) };
+}
+
 export function hasToolMarkup(text: string): boolean {
-  return OPEN.test(text) || /<\/?｜[^<>\n]*>/.test(text);
+  const t = masked(text).text;
+  return OPEN.test(t) || /<\/?｜[^<>\n]*>/.test(t);
 }
 
 export function stripToolMarkup(text: string): string {
+  const m0 = masked(text);
+  return m0.restore(stripMasked(m0.text));
+}
+
+function stripMasked(text: string): string {
   let out = text;
   for (;;) {
     const m = OPEN.exec(out);
@@ -31,7 +47,8 @@ export function stripToolMarkup(text: string): string {
 
 // The tool names the markup names: `<invoke name="x">` (either family) and the
 // `"name": "x"` of a `<tool_call>` body.
-export function markupToolNames(text: string): string[] {
+export function markupToolNames(raw: string): string[] {
+  const text = masked(raw).text;
   const names = new Set<string>();
   for (const m of text.matchAll(/<(?:｜DSML｜)?invoke\b[^>]*\bname\s*=\s*"([^"]+)"/g)) names.add(m[1]!);
   for (const m of text.matchAll(/<tool_calls?>\s*\{[^]*?"name"\s*:\s*"([^"]+)"/g)) names.add(m[1]!);

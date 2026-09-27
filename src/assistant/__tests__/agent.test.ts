@@ -827,3 +827,31 @@ test('beforeRequest may append messages after a round\'s results; they join the 
   expect(sent[1]!.at(-1).content).toBe('also this');
   expect(res.transcript.map((m) => m.role)).toEqual(['assistant', 'tool', 'user', 'assistant']);
 });
+
+test('an answer that shows the tags as code is an answer, with no corrective round', async () => {
+  let n = 0;
+  const text = 'Use `<tool_call>` for that, e.g.\n```\n<invoke name="x">\n```';
+  const chatRound = async (_m: any[], opts: any) => { n++; opts.onDelta?.(text); return { content: text, toolCalls: [], finishReason: 'stop' }; };
+  const res = await agentChat([{ role: 'user', content: 'q' }], { baseUrl: 'http://x', model: 'm', token: 't', onLive: () => {}, onLiveCommit: () => {}, chatRound });
+  expect(n).toBe(1);
+  expect(res.content).toBe(text);
+});
+
+test('after a corrective round the next boundary measures from that round\'s usage, not the whole history again', async () => {
+  assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
+  let n = 0;
+  const big = 'S'.repeat(40_000); // ~10k tokens of system prompt, inside the reported prompt
+  const chatRound = async (_m: any[], opts: any) => {
+    n++;
+    const content = n === 1 ? DSML('memory') : 'done';
+    opts.onDelta?.(content);
+    return { content, toolCalls: [], finishReason: 'stop', usage: { promptTokens: 10_050, completionTokens: 50 } };
+  };
+  const seen: (number | undefined)[] = [];
+  await agentChat([{ role: 'system', content: big }, { role: 'user', content: 'q' }], {
+    baseUrl: 'http://x', model: 'm', token: 't', onLive: () => {}, onLiveCommit: () => {}, chatRound,
+    beforeRequest: async ({ measured }) => { seen.push(measured); },
+  });
+  expect(seen[1]).toBeGreaterThan(10_100);
+  expect(seen[1]).toBeLessThan(10_300); // the reported figure and the corrective line — not the system prompt again
+});

@@ -97,3 +97,15 @@ test('the tools a markup block names are read from either family', () => {
   expect(markupToolNames('<invoke name="a"></invoke><invoke name="b"></invoke>')).toEqual(['a', 'b']);
   expect(markupToolNames('no markup')).toEqual([]);
 });
+
+test('tags shown as code are not markup: an answer or a handoff about them stays whole', () => {
+  const inline = 'The stripper handles `<tool_call>` and `<invoke name="x">` blocks, closed or not.';
+  expect(hasToolMarkup(inline)).toBe(false);
+  expect(stripToolMarkup(inline)).toBe(inline);
+  const fenced = 'Example:\n```\n<function_calls>\n<invoke name="ls">\n```\nAnd after it, more.';
+  expect(hasToolMarkup(fenced)).toBe(false);
+  expect(stripToolMarkup(fenced)).toBe(fenced);
+  expect(markupToolNames(fenced)).toEqual([]);
+  // Real markup beside code still goes; the code stays.
+  expect(stripToolMarkup('see `<tool_call>`\n<tool_call>{"name":"x"}</tool_call>')).toBe('see `<tool_call>`');
+});

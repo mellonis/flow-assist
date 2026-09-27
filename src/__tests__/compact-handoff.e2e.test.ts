@@ -146,3 +146,17 @@ test('a saved summary with tool-call markup in it is read without the markup', a
   expect(system(model, 0)).toContain('OLD-SUMMARY');
   expect(system(model, 0)).not.toContain('tool_call');
 });
+
+test('a handoff that names the tags as code is stored whole', async () => {
+  const model = new ScriptedModel();
+  const about = `${handoff('CODE-TAGS')}\n- the detector skips \`<tool_call>\` and \`<function_calls>\` shown as code\n- LAST-FACT`;
+  model.script([{ text: 'The first answer.' }], [{ text: about }], [{ text: 'The second answer.' }]);
+  const ui = await bootApp(model, 110, 30);
+  await ui.press('F');
+  await ask(ui, 'the first question');
+  await compact(ui);
+  await ask(ui, 'the second question');
+  expect(model.requests).toHaveLength(3); // no retry
+  expect(system(model, 2)).toContain('`<tool_call>`');
+  expect(system(model, 2)).toContain('LAST-FACT');
+});
