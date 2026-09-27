@@ -287,6 +287,15 @@ The services stay on `host.services` and are read when they are called
 so a copy taken once is stale. The two parts are built once, so a component factory
 runs once and its component is mounted for the app's life.
 
+`host.services.memory` is what the assistant remembers for every project, as one list:
+`load()` gives `{ id, text, scope, label, ts }` entries (`scope` is `global`, or the name
+of the plugin a fact was kept for; `label` its type), and `save(list)` writes the list
+back — an entry left out is forgotten, a changed text rewritten, a new entry stored under
+the same rules the assistant's own `memory` tool follows (one short fact, no copy of one
+already there; a refused entry is not stored). Each fact is a file in the host's global
+workspace; `filePath()` is its directory. A plugin that keeps notes of its own keeps
+them in its own store — this list rides in the model's prompt in every project.
+
 `host.services.chatLLM(messages, opts)` runs the host's agent loop — the model the
 person configured, with every tool in the registry. A call from a plugin cannot ask
 the person, so **every write the model calls is declined**: the tool never runs and the

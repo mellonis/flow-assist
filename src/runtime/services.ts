@@ -8,7 +8,7 @@
 import { spawn } from 'node:child_process';
 import { createCacheService } from './services/cache.js';
 import { createLogService } from './services/log.js';
-import { loadMemories, saveMemories, memoryFilePath } from './services/memory.js';
+import { globalMemoryService } from './services/memory.js';
 import { agentChat, maxRoundsOf, maxTurnTokensOf } from '../assistant/agent.js';
 import { copyToClipboard as platformCopy } from '../assistant/copy.js';
 import { toolLoadingMode } from '../assistant/tool-loading.js';
@@ -24,8 +24,9 @@ import type { Memory } from './services/memory.js';
 import type { ViewRenderers } from '../assistant/views.js';
 import type { ContextItem } from '../assistant/screen-context.js';
 
-// The assistant memory: a plugin reads/updates the memory file. `filePath` is
-// resolved from config.memory.file (default under the host config dir).
+// The assistant memory as a plugin reads and updates it: the global workspace's facts
+// as one list (./services/memory.ts, `globalMemoryService`); `filePath` is the global
+// `memory/` directory.
 export interface MemoryService {
   load(): Memory[];
   save(list: Memory[]): void;
@@ -160,11 +161,7 @@ export function copyToClipboard(text: string): void {
 export function createServices({ config, tools, repo, onExit }: CreateServicesOptions): HostServices {
   const cache = createCacheService(config);
   const log = createLogService(config);
-  const memory: MemoryService = {
-    load: () => loadMemories(memoryFilePath(config)),
-    save: (list) => saveMemories(list, memoryFilePath(config)),
-    filePath: () => memoryFilePath(config),
-  };
+  const memory: MemoryService = globalMemoryService(config);
   const pluginAiTools = (tools?.groups ?? [])
     .filter((g) => g.id.endsWith(':aiTools'))
     .flatMap((g) => g.tools as AiToolDef[]);

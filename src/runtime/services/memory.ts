@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { hostStateDir } from '../../config/load.js';
-import { normalizeMemoryText, readFacts, removeFact } from '../../assistant/memory-store.js';
+import { addFact, MEMORY_DIR, normalizeMemoryText, readFacts, removeFact, saveFact, type Fact } from '../../assistant/memory-store.js';
 import { workspaceFor } from '../../assistant/workspace.js';
 
 // The memory list an older host kept, one JSON file for every project. It is read to
@@ -122,4 +122,37 @@ export function purgePluginMemories(config: Record<string, unknown> | undefined,
   const global = workspaceFor(config, null, 'global');
   for (const f of readFacts(global)) if (f.plugin === pluginName && removeFact(global, f.id)) removed++;
   return removed;
+}
+
+// `services.memory` for a plugin: the list shape it has always had, over the global
+// workspace's facts — what one list for every project means there. `load` maps each
+// fact (`scope` its plugin's name, else `global`; `label` its type); `save` takes the
+// list back and applies the difference by id — an entry gone is removed, a changed one
+// rewritten, a new one added under the memory tool's own guards (`refuseMemory`: a
+// refused entry is not stored). `filePath` is the global `memory/` directory.
+const asEntry = (f: Fact): Memory => ({ id: f.id, text: f.text, scope: f.plugin ?? 'global', label: f.type, ts: f.mtimeMs });
+const pluginOf = (scope: unknown) => (typeof scope === 'string' && scope && scope !== 'global' && scope !== 'host' ? scope : undefined);
+export function globalMemoryService(config: Record<string, unknown> | undefined) {
+  const dir = () => workspaceFor(config, null, 'global');
+  return {
+    load: (): Memory[] => readFacts(dir()).map(asEntry),
+    save: (list: Memory[]): void => {
+      const ws = dir();
+      const current = new Map(readFacts(ws).map((f) => [f.id, f]));
+      const wanted = new Set(list.map((m) => m.id));
+      for (const id of current.keys()) if (!wanted.has(id)) { removeFact(ws, id); current.delete(id); }
+      for (const m of list) {
+        const f = current.get(m.id);
+        if (!f || typeof m.text !== 'string') continue;
+        if (f.text !== m.text.trim() || (m.label && m.label !== f.type)) saveFact(ws, { ...f, text: m.text.trim(), ...(f.description === f.text ? { description: m.text.trim() } : {}), ...(m.label ? { type: m.label } : {}) });
+      }
+      for (const m of list) {
+        if (current.has(m.id) || typeof m.text !== 'string' || !m.text.trim()) continue;
+        const have = readFacts(ws).map((f) => ({ id: f.id, text: f.text, ts: f.mtimeMs }));
+        if (refuseMemory(have, m.text)) continue;
+        addFact(ws, { text: m.text, ...(m.label ? { type: m.label } : {}), ...(pluginOf(m.scope) ? { plugin: pluginOf(m.scope) } : {}) });
+      }
+    },
+    filePath: (): string => path.join(dir(), MEMORY_DIR),
+  };
 }

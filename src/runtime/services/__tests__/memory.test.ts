@@ -1,5 +1,7 @@
 // Where the memory file is, and what the host refuses to put in it.
 import { expect, test } from 'bun:test';
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { configDir } from '../../../config/load';
 import {
@@ -62,4 +64,28 @@ test('a full memory is refused, and the oldest entries are named', () => {
   expect(refusal).not.toContain(`m-${MEMORY_MAX_ENTRIES - 1}`);
   // One short of the cap still takes a new fact.
   expect(refuseMemory(full.slice(1), 'one more fact')).toBeNull();
+});
+
+test('services.memory is the global workspace\'s facts, as the list a plugin knows: load maps them, save adds, edits and removes under the tool\'s guards', async () => {
+  const { createServices } = await import('../../services.js');
+  const { addFact, readFacts } = await import('../../../assistant/memory-store.js');
+  const { workspaceDir } = await import('../../../assistant/workspace.js');
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-svc-mem-')));
+  const g = workspaceDir(root, null);
+  addFact(g, { text: 'Prefers rebase.', type: 'preference' });
+  addFact(g, { text: 'Keycaps stay off.', plugin: 'keycaps' });
+  const memory = createServices({ config: { workspace: { dir: root } } } as never).memory;
+  expect(memory.filePath()).toBe(path.join(g, 'memory'));
+  const list = memory.load();
+  expect(list.map((m) => [m.text, m.scope, m.label])).toEqual([['Keycaps stay off.', 'keycaps', 'fact'], ['Prefers rebase.', 'global', 'preference']]);
+  const [keycaps, rebase] = list;
+  memory.save([
+    { ...rebase!, text: 'Prefers rebase, always.' },
+    { id: 'new', text: 'Answers briefly.', scope: 'global', ts: 1 },
+    { id: 'dup', text: 'answers briefly', scope: 'global', ts: 2 },
+    { id: 'long', text: 'y'.repeat(400), scope: 'global', ts: 3 },
+  ]);
+  const after = readFacts(g);
+  expect(after.map((f) => f.text).sort()).toEqual(['Answers briefly.', 'Prefers rebase, always.']);
+  expect(after.some((f) => f.id === keycaps!.id)).toBe(false);
 });

@@ -997,8 +997,12 @@ there is no `/fullscreen`.
     reached the tool appended to the person's own file, 32 copies of one fact. Uninstalling
     a plugin removes what an older host kept for it (`purgePluginMemories`: the list's
     entries scoped to its name, and the global facts whose `plugin` names it).
-    `services.memory` (load/save of that list) is on the host's services and nothing
-    reads it.
+    `services.memory` keeps the list shape a plugin knows over the GLOBAL workspace —
+    what one list for every project means there (`globalMemoryService`): `load` maps
+    each fact (`scope` its `plugin`, else `global`; `label` its type), `save` applies the
+    difference by id — gone removed, changed rewritten, new added under `refuseMemory`
+    — and `filePath` is the global `memory/` directory. No `HOST_API` change: the shape
+    is the one it had (docs/plugins.md).
 - **How full the context is, is shown — and says where the number came from.** The
   chat's hint line ends in `ctx N%` (yellow from 80%), and `/context` opens a PANEL in
   the field's place, like a write confirmation — a look at the conversation, not a
