@@ -57,8 +57,10 @@ first, with their titles, when each was last used, its size, and what it is doin
 flow-assist process has it open, `done` when its last answer came while you were not
 looking; Tab shows every session, grouped under each project's path. Type to filter by
 the title or by any word of the conversation; ⏎ opens one (the session you are in is
-saved first), Ctrl+N starts a new one, Ctrl+R renames, Ctrl+X deletes after a y/n. A
-session open in another process can be neither opened nor renamed nor deleted from here.
+saved first), Ctrl+N starts a new one, Ctrl+R renames, Ctrl+P moves it into the current
+project (its file, journal and any attached files with it), Ctrl+X deletes after a y/n.
+A session open in another process can be neither opened, renamed, moved nor deleted
+from here, and your own open session refuses a move too — switch away from it first.
 A session is named by the first line you wrote; `/title <text>` renames it. `/new`
 starts a fresh session and keeps the current one as it is — a restart before you say
 anything continues it; while an answer is still coming it says to stop it (Esc) first.
