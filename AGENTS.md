@@ -3266,10 +3266,12 @@ commands; docs and hints never present either mechanism as a boundary.
   (`config.accepted.json`, 0600), the hash and the content of `config.json` and
   `config.local.json` as it last ACCEPTED them — its own writes (`saveConfigSetting`,
   `saveConfigUnset`, `saveConfig`: `:config set`, `config_set`, `editConfigArray`, a
-  plugin's own `services.setConfig` / `unsetConfig` — a plugin runs in the host's
-  process, so its write is the host's — and the CLI's `config set`) and a change the
-  person said yes to; a first start with no
-  record accepts the files as they are. At a start a file whose hash differs is not
+  plugin's own `services.setConfig` / `unsetConfig`, and the CLI's `config set`) and a
+  change the person said yes to; a first start with no record accepts the files as
+  they are. A plugin runs in the host's process, so its write is the host's — which is
+  why a plugin tool the MODEL can call never calls `setConfig` / `unsetConfig` without
+  the person's y/n on that call (a `write` tool): otherwise it is a way round
+  `config_set`'s marks. At a start a file whose hash differs is not
   applied: `loadConfig` serves the accepted content; the app asks about it, the CLI
   and the one-shot prompt print why (`configStartupNotes`) and go on without it. Once
   `runInteractive` arms the guard (`guardConfigFiles`), `loadConfig()` serves what the
@@ -3298,8 +3300,9 @@ commands; docs and hints never present either mechanism as a boundary.
   writes the file but never updates the accepted record, and says the change waits for
   the person's yes, so the running app and the next start ask. The person's `!command`
   does not set it. Like the rest of this section it stops the accident, not intent: a
-  same-user process that unsets the variable, or writes `config.accepted.json` itself,
-  can still forge the record.
+  same-user process that unsets the variable (`env -u FLOW_ASSIST_MODEL_SHELL`), writes
+  `config.accepted.json` itself, or deletes it — the next start is then a first start,
+  which accepts the files as they are — can still forge the record.
 - The test rig builds the set from what a test set itself (`setSecretsEnv` in
   `src/__tests__/helpers/scripted.ts`), never from the machine's own tokens, and its
   `LLM_TOKEN` starts with `^`, a character no streamed test text ends in.

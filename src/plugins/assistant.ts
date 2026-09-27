@@ -1267,7 +1267,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               for (const change of changes) {
                 const answer = await new Promise<boolean | null>((resolve) => {
                   pendingRef.current = { name: 'config', args: '', resolve: (ok, by = 'person') => resolve(by === 'person' ? ok : null) };
-                  setPendingAsk({ name: 'config', args: '', title: `⚠ ${change.file} changed outside flow-assist — apply? (y/n)`, line: change.lines.join('\n'), whole: true, hint: `y applies it now · n keeps the running config until restart` });
+                  setPendingAsk({ name: 'config', args: '', title: `⚠ ${change.file} changed outside flow-assist — apply? (y/n)`, line: change.lines.join('\n'), whole: true, hint: `y applies it now · n puts the accepted settings back and keeps the change beside the file` });
                   host.notify();
                 });
                 if (answer === null) break;

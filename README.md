@@ -306,6 +306,9 @@ the accepted settings back into the file and keeps the change beside it as
 one-shot prompt or a `config` command on a changed file does not use it and says why.
 `config set`, `:config set` and the assistant's `config_set` are the app's own writes;
 a `flow-assist config set` the assistant runs as a command is not — it waits for your yes.
+Like the token rules above, this stops accidents, not a command that sets out to get
+round it: one running as you can also rewrite or delete the app's own record of what
+you accepted.
 
 ## Plugins
 
