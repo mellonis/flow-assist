@@ -131,6 +131,49 @@ test('Tab completes a path in shell mode: a unique match whole, a directory with
   fs.rmSync(elsewhere, { recursive: true, force: true });
 }, 20_000);
 
+test('/cd completes to directories only, moves the shell like !cd, and /cd - goes back', async () => {
+  const root = rootDir();
+  fs.mkdirSync(path.join(root, 'sub'));
+  fs.mkdirSync(path.join(root, 'subdir2'));
+  fs.writeFileSync(path.join(root, 'sub.txt'), '');
+  const ui = await bootApp(new ScriptedModel(), root.length + 80, 32, undefined, { shell: { roots: [root] } });
+  await ui.press('F');
+  const field = () => fieldRow(ui);
+
+  // Only the two directories are offered — never the file of a similar name.
+  await ui.type('/cd su');
+  expect(field()).toContain('› /cd sub');
+  expect(field()).toContain('⇥ subdir2/');
+  expect(field()).not.toContain('sub.txt');
+  await ui.press('tab');
+  expect(field()).toContain('› /cd sub/');
+  await ui.press('return');
+  await settle(4);
+  expect(ui.backend.lastFrame).toContain(`now in ${path.join(root, 'sub')}`);
+  await ui.type('!');
+  expect(ui.backend.lastFrame).toContain(`${short(path.join(root, 'sub'))} · ⇥ path`);
+  await leaveShell(ui);
+
+  // `/cd -` returns to where it was before.
+  await ui.type('/cd -');
+  await ui.press('return');
+  await settle(4);
+  expect(ui.backend.lastFrame).toContain(`now in ${root}`);
+  await ui.type('!');
+  expect(ui.backend.lastFrame).toContain(`${short(root)} · ⇥ path`);
+  await leaveShell(ui);
+
+  // Refused outside the roots, the roots named; the directory does not move.
+  await ui.type('/cd /');
+  await ui.press('return');
+  await settle(4);
+  expect(ui.backend.lastFrame).toContain('outside the configured roots');
+  expect(ui.backend.lastFrame).toContain(root);
+  await ui.type('!');
+  expect(ui.backend.lastFrame).toContain(`${short(root)} · ⇥ path`);
+  ui.app.unmount();
+});
+
 test('/notes and /mode complete their argument: `/notes ` offers step, `/notes o` open, `/mode ` walks the three', async () => {
   const ui = await bootApp(new ScriptedModel(), 100, 24);
   await ui.press('F');

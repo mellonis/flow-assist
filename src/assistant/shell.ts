@@ -159,8 +159,8 @@ export function startNote(config: RootsConfig, start = startDir()): string | nul
 // conversation (the chat, a background run) and handed to run_command as `ctx.shell`;
 // `null` is "the default". A remembered directory that has since gone, or left the
 // roots, reads as the default again. `onSet` hears every `setCwd` — `!cd`, run_command,
-// the `cd` tool, /clear, a restored session all set it here, so this is the one place
-// the chat learns the directory was set (it reads the project's instructions again,
+// the `cd` tool, `/cd`, /clear, a restored session all set it here, so this is the one
+// place the chat learns the directory was set (it reads the project's instructions again,
 // ./project-instructions.ts). `start` is captured once, at creation — from `startDir()`
 // unless the caller (a test, a background run building on its parent's directory)
 // gives one — so `/clear` and `/new`, which reset to `null`, come back to the SAME
@@ -173,17 +173,35 @@ export interface ShellState {
   setCwd(dir: string | null): void;
   saved(): string | null; // what a session keeps
   start(): string; // the captured start directory (or what stands in for it)
+  previous(): string | null; // where it was before the last `setCwd` — `/cd -`
   told: Set<string>;
 }
 export function createShellState(config: () => RootsConfig, initial: string | null = null, onSet?: (dir: string | null) => void, start = startDir()): ShellState {
   let dir = initial;
+  let prev: string | null = null;
+  const effective = () => (dir && dirAllowed(config(), dir) ? dir : shellCwd(config(), start));
   return {
-    cwd: () => (dir && dirAllowed(config(), dir) ? dir : shellCwd(config(), start)),
-    setCwd: (d) => { dir = d; onSet?.(d); },
+    cwd: effective,
+    setCwd: (d) => { prev = effective(); dir = d; onSet?.(d); },
     saved: () => dir,
     start: () => start,
+    previous: () => prev,
     told: new Set(),
   };
+}
+
+// Where `/cd` goes — the PERSON typing it, so it follows `!cd`'s rule, not the model's
+// `cd` tool's: held to the roots by the REAL path when any are configured, but free to
+// go anywhere when there are none (nobody needs to be asked; they typed it themselves).
+// A refusal throws, naming the roots when that is why they were refused.
+export function cdChatTarget(config: RootsConfig, asked: string, base: string): string {
+  const abs = path.resolve(base, asked.replace(/^~(?=\/|$)/, os.homedir()));
+  if (dirAllowed(config, abs)) return abs;
+  const roots = shellRoots(config);
+  if (roots.length && !roots.map(realOf).some((r) => within(realOf(abs), r))) {
+    throw new Error(`«${abs}» is outside the configured roots (${roots.join(', ')})`);
+  }
+  throw new Error(`«${abs}» is not a directory`);
 }
 
 // Where the shell ended up, if that may be remembered: `{ cwd }` to move to, or a

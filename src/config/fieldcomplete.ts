@@ -56,6 +56,8 @@ export interface PathDeps {
   real: (abs: string) => string;
   // What `~` stands for; the person's home by default.
   home?: string;
+  // `/cd`'s own completion: directories only — a file is never an argument to it.
+  dirsOnly?: boolean;
 }
 
 // The last word of the line, with `\ ` read as a space inside it — the shell's own
@@ -94,6 +96,7 @@ export function completePath(text: string, deps: PathDeps): CompleteResult {
   if (!entries) return NONE(word);
   const candidates = entries
     .filter((e) => e.name.startsWith(base) && (base.startsWith('.') || !e.name.startsWith('.')))
+    .filter((e) => !deps.dirsOnly || e.dir)
     .filter((e) => !e.link || allowed(deps.real(path.join(absDir, e.name)), deps.roots))
     // Plain code-unit order, as `ls` sorts in the C locale — the same on every machine.
     .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))

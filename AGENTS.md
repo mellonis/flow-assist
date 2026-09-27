@@ -2867,12 +2867,28 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   directory gets `/`, hidden entries only for a word starting with `.`, a name with a
   space escaped `\ `, and nothing outside `shell.roots` by REAL path — the listed
   directory itself, and any link that leads out (`dirAllowed`'s rule; only the
-  directory and its links are resolved, never every entry). The listing and the
+  directory and its links are resolved, never every entry). `/cd`'s own argument
+  (`chatComplete`'s `CD_ARG`, checked before `completeSlash`) completes the same way,
+  `dirsOnly: true` on `PathDeps` so a file is never offered. The listing and the
   real-path check are injected (`listDirectory`, `realOf`), so the tests use a
   directory of their own. Only with the caret at the end of a one-line field; the walk
   is `tabRef` (a `TabWalk`), over the moment the field is anything else. In the field,
   dim means "offered, not yours yet" — the person's own text is never dimmed, on
   either side of the caret.
+- **`/cd <dir>` is the person's own move, typed rather than asked of the model** —
+  `runChatCommand`'s `cd` case in `src/plugins/assistant.ts`, resolved by
+  `cdChatTarget` (`src/assistant/shell.ts`). It follows `!cd`'s rule, not the model's
+  `cd` tool's: relative to the shell's current directory or absolute (`~` the home),
+  held to `shell.roots` by the REAL path when any are configured, but free to go
+  anywhere when there are none — nobody needs to be asked, since the person typed it
+  themselves. A refusal names the roots (or says the path is not a directory) and
+  leaves the directory where it was. It goes through the SAME `setCwd` every other
+  mover does, so the project's instructions are read again and the hint row shows the
+  new directory at once. Bare `/cd` goes back to the default (`setCwd(null)`, the same
+  one `/clear`/`/new` reset to — the start directory, or the first root); `/cd -` goes
+  to `ShellState.previous()`, the directory the last `setCwd` moved FROM (updated by
+  every mover, so `!cd`, run_command's own `cd` and the `cd` tool feed it too) —
+  re-checked against the roots on the way back, since they may have changed since.
 - The **status line** while a turn runs says what happens NOW: a running tool's label
   (`⚙ name(args)…`, `$ command`) pulses through bright colours; once the tool ends
   (`onToolRun`) the label goes. With no tool running the line says a WORD — a gerund

@@ -27,7 +27,7 @@ import { stripToolMarkup } from '../assistant/tool-markup.js';
 import { createToolSet, toolLoadingMode } from '../assistant/tool-loading.js';
 import { llmOpts } from '../assistant/llm-endpoint.js';
 import { copyTarget, copyToClipboard } from '../assistant/copy.js';
-import { createShellState, formatShell, nextCwd, realOf, runShell, shellAutoRun, shellLimits, shellOutcome, shellRoots, startNote, tildePath, type ShellResult } from '../assistant/shell.js';
+import { cdChatTarget, createShellState, formatShell, nextCwd, realOf, runShell, shellAutoRun, shellLimits, shellOutcome, shellRoots, startNote, tildePath, type ShellResult } from '../assistant/shell.js';
 import { findInstructions, instructionsBlock, instructionsNote, type ProjectInstructions } from '../assistant/project-instructions.js';
 import {
   JOURNAL_DAYS, KEEP_SESSIONS, SESSION_VERSION, acquireLock, closeSession, cutTitle, flushOnExit, journalPath, listSessions, loadSession, lockPath,
@@ -80,6 +80,9 @@ import type { Command as PluginCommand } from '../loader/plugin.js';
 type ChatCommand = HistoryCommand & ChatCommandDef;
 const CHAT_COMMAND_DEFS: ChatCommand[] = [
   { name: 'compact' }, { name: 'context' }, { name: 'copy' }, { name: 'image' }, { name: 'resume' }, { name: 'sessions' }, { name: 'new' }, { name: 'title' }, { name: 'export' }, { name: 'clear' }, { name: 'memory', values: ['project', 'global', 'forget'] }, { name: 'workspace' },
+  // `cd`'s own argument is a path, not a fixed set of values — its completion is
+  // special-cased in `chatComplete`, the way shell mode's own path completion is.
+  { name: 'cd' },
   { name: 'auto', values: ['reads', 'all', 'off'] }, { name: 'notes', values: NOTES_MODES }, { name: 'mode', values: CHAT_MODES }, { name: 'log' }, { name: 'exit' },
 ];
 const CHAT_COMMANDS = CHAT_COMMAND_DEFS.map((c) => c.name);
@@ -877,12 +880,18 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const historyCommands = () => [...CHAT_COMMAND_DEFS, ...pluginChatCommands().map(({ name, cmd }) => ({ name, history: cmd.history }))];
           // What the field completes, from its text alone: in shell mode the word being
           // typed as a path under the shell's directory (nothing outside the roots by
-          // real path — `dirAllowed`'s own rule); otherwise a `/command` and its
-          // argument. Drawn and walked through `lineView` / `lineTab`, exactly as the
+          // real path — `dirAllowed`'s own rule); `/cd`'s own argument the same way, but
+          // directories only — a file is never where it goes; otherwise a `/command` and
+          // its argument. Drawn and walked through `lineView` / `lineTab`, exactly as the
           // `:` line is.
-          const chatComplete = (text: string): CompleteResult => (bangLevelRef.current
-            ? completePath(text, { cwd: shellRef.current.cwd(), roots: shellRoots(host.config as Record<string, unknown>).map(realOf), list: listDirectory, real: realOf })
-            : completeSlash(text, chatCommandDefs));
+          const CD_ARG = /^\/cd(?:\s([\s\S]*))?$/i;
+          const chatComplete = (text: string): CompleteResult => {
+            const pathDeps = { cwd: shellRef.current.cwd(), roots: shellRoots(host.config as Record<string, unknown>).map(realOf), list: listDirectory, real: realOf };
+            if (bangLevelRef.current) return completePath(text, pathDeps);
+            const cd = CD_ARG.exec(text);
+            if (cd && cd[1] !== undefined) return completePath(cd[1], { ...pathDeps, dirsOnly: true });
+            return completeSlash(text, chatCommandDefs);
+          };
           const sessConf = (host.config.sessions ?? {}) as { resume?: unknown; keep?: unknown; journalDays?: unknown };
           const sessionIdRef = ui.useRef('');
           const createdAtRef = ui.useRef('');
@@ -2797,6 +2806,38 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 const svc = host.services as Record<string, any>;
                 const shared = logShareMessage((svc.log?.read?.() ?? svc.logs ?? []) as string[], arg);
                 if (shared) void send(shared); else setError('the log is empty — nothing to share');
+                return;
+              }
+              case 'cd': {
+                // The person's own move — like `!cd`, not the model's `cd` tool: free to
+                // go anywhere with no roots configured, held to them by the real path
+                // otherwise. It goes through the SAME `setCwd` as `!cd`, run_command's own
+                // `cd` and the `cd` tool, so the project's instructions are read again
+                // (`onShellSetRef` → `refreshProject`) and the hint row shows it at once.
+                const asked = arg.trim();
+                setField('');
+                const config = host.config as Record<string, unknown>;
+                if (!asked) {
+                  // Bare `/cd`: back to the start directory (or the first root) — the
+                  // same default `/clear` and `/new` reset to.
+                  shellRef.current.setCwd(null);
+                  pushNote(`now in ${shellRef.current.cwd()}`);
+                  host.notify();
+                  return;
+                }
+                const target = asked === '-' ? shellRef.current.previous() : asked;
+                if (asked === '-' && !target) { setError('/cd -: nowhere to go back to yet'); return; }
+                try {
+                  // `target` is already absolute for `-`; `cdChatTarget`'s `path.resolve`
+                  // leaves an absolute path as it is, so this still re-checks it against
+                  // the roots (they may have changed since it was left).
+                  const dir = cdChatTarget(config, target!, shellRef.current.cwd());
+                  shellRef.current.setCwd(dir);
+                  pushNote(`now in ${dir}`);
+                  host.notify();
+                } catch (e) {
+                  setError(`/cd: ${(e as Error).message}`);
+                }
                 return;
               }
               case 'workspace': {

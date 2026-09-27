@@ -4,7 +4,7 @@ import { expect, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createShellState, dirAllowed, formatShell, legacyRootsNote, nextCwd, runShell, setStartDirForTests, shellCwd, shellLimits, shellRoots, startNote, tildePath } from '../shell.ts';
+import { cdChatTarget, createShellState, dirAllowed, formatShell, legacyRootsNote, nextCwd, runShell, setStartDirForTests, shellCwd, shellLimits, shellRoots, startNote, tildePath } from '../shell.ts';
 
 const tmp = () => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-shell-')));
 const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
@@ -147,6 +147,36 @@ test('the start directory is injectable for tests, and read once by shellCwd/cre
     setStartDirForTests(root);
     expect(shellCwd({ shell: { roots: [root] } })).toBe(root);
   } finally { setStartDirForTests(null); }
+});
+
+// ─── `/cd` (the person's own, not the model's `cd` tool) ───────────────────────
+
+test('cdChatTarget: held to the roots, by the real path, when any are configured', () => {
+  const root = tmp();
+  const outside = tmp();
+  fs.mkdirSync(path.join(root, 'sub'));
+  expect(cdChatTarget({ shell: { roots: [root] } }, 'sub', root)).toBe(path.join(root, 'sub'));
+  expect(() => cdChatTarget({ shell: { roots: [root] } }, outside, root)).toThrow('outside the configured roots');
+  expect(() => cdChatTarget({ shell: { roots: [root] } }, 'nope', root)).toThrow('is not a directory');
+});
+
+// Unlike the model's `cd` tool (refused with no roots — nobody to confirm it), `/cd`
+// is the person's own, so with no roots it follows `!cd`: free to go anywhere.
+test('cdChatTarget with no roots configured: free to go anywhere, like !cd', () => {
+  const anywhere = tmp();
+  expect(cdChatTarget({}, anywhere, tmp())).toBe(anywhere);
+});
+
+test('a shell state remembers where it was before the last setCwd, for /cd -', () => {
+  const root = tmp();
+  fs.mkdirSync(path.join(root, 'a'));
+  fs.mkdirSync(path.join(root, 'b'));
+  const s = createShellState(() => ({ shell: { roots: [root] } }));
+  expect(s.previous()).toBeNull(); // nothing yet
+  s.setCwd(path.join(root, 'a'));
+  expect(s.previous()).toBe(root); // where it was — the default — before this move
+  s.setCwd(path.join(root, 'b'));
+  expect(s.previous()).toBe(path.join(root, 'a'));
 });
 
 test('a shell state keeps the start it was given even if the injected default later changes', () => {

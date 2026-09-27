@@ -63,6 +63,11 @@ test('a name with a space is escaped, and the escaped word is read as one word',
   expect(completePath('cat a\\ b', deps)).toMatchObject({ head: 'a\\ b', best: 'a\\ b.txt' });
 });
 
+test('dirsOnly (/cd\'s own completion) offers directories and never a file', () => {
+  expect(completePath('', { ...deps, dirsOnly: true }).candidates).toEqual(['sandbox/', 'snake-project/']);
+  expect(completePath('R', { ...deps, dirsOnly: true }).candidates).toEqual([]);
+});
+
 test('a directory that cannot be listed offers nothing', () => {
   expect(completePath('ls nowhere/', deps).candidates).toEqual([]);
 });

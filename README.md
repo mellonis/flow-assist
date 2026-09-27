@@ -233,7 +233,9 @@ already has without typing it out again; the confirmation says where the stdin c
 from (`stdin: result of search (call_3)`).
 The assistant moves the directory itself with its `cd` tool — "go to the project" —
 without a y/n, since it runs nothing, and only inside `shell.roots` (with no roots set
-it cannot move at all).
+it cannot move at all). You can move it the same way with `/cd <dir>` — like `!cd`, so
+with no roots set it goes anywhere; Tab completes to directories only, inside the roots.
+`/cd` alone goes back to the starting directory, `/cd -` to the one before the last move.
 
 Wherever the directory is — at the start, after `!cd`, `cd` or a command's own `cd` —
 the assistant is given the project's own rules: every `AGENTS.md` from that directory

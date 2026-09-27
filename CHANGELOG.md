@@ -54,6 +54,11 @@ What each version of flow-assist brought, newest first. The version is the one i
   settings only) are new services.
 - **For plugin authors:** a plugin whose tool groups change while the app runs sets
   `tools` on its plugin object and calls `toolsChanged()`, handed to its builder.
+- **`/cd <dir>` moves the shell's directory yourself, without asking the assistant.**
+  It follows `!cd`'s own rule (free to go anywhere with no `shell.roots` configured,
+  held to them by the real path otherwise), Tab completes to directories inside the
+  roots only, `/cd` alone goes back to the starting directory, and `/cd -` to the one
+  before the last move.
 - **The shell starts where you started flow-assist, not always in the first root.**
   Started inside a project already under a `shell.roots` entry, commands, the project's
   own `AGENTS.md`, the session and every memory fact now land in that project, not in
