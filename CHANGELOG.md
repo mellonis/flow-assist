@@ -5,6 +5,14 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **The assistant reacts when background work comes back.** A background task's result
+  waits until the answer being written ends — it never cuts into a turn — then lands in
+  the chat, and the assistant takes it up: in one turn for everything that came back
+  together, or in the turn of a message you had queued, which it reads with them. A
+  draft in the field stays put and a closed chat still gets the turn (with `◆ N new` and
+  a notification); a y/n or a question waiting for you holds the results until you
+  answer, and a turn you stop lands them without a new turn.
+  `config set ai.backgroundFollowUp false` keeps them as messages only.
 - **Known secrets never reach the assistant or the records.** Every token the app
   knows — the variables the config names (`${VAR}`, `ai.tokenEnv`), any variable whose
   name says it is a token, key, secret, password or cookie, a credential written into

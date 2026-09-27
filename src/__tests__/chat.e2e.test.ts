@@ -406,20 +406,21 @@ test('the wheel scrolls the conversation', async () => {
 });
 
 // A turn that hands work to the background: the model calls `background`, says so,
-// and the nested run answers with RESULT. Three requests in all — a fourth would be
-// the chat spending a turn on the result by itself.
+// and the nested run answers with RESULT. Three requests in all — with
+// `ai.backgroundFollowUp: false`, a fourth would be the chat spending a turn on the
+// result by itself.
 const backgroundScript = (model: ScriptedModel, result: string) => model.script(
   [{ tool: 'background', args: { task: 'count the TODO comments' } }],
   [{ text: 'Started it in the background.' }],
   [{ text: result }],
 );
 
-test('a background result shows at once — a half-typed draft does not hold it back, and no turn is spent on it', async () => {
+test('with ai.backgroundFollowUp false a background result shows at once — a half-typed draft does not hold it back — and no turn is spent on it', async () => {
   // Waiting for an EMPTY field with nothing on screen saying so would mean: type half
   // a line, stop to think, and a finished task stays invisible indefinitely.
   const model = new ScriptedModel();
   backgroundScript(model, 'There are 14 TODO comments.');
-  const ui = await bootApp(model, 100, 28);
+  const ui = await bootApp(model, 100, 28, undefined, { ai: { baseUrl: 'http://scripted.model', model: 'scripted', toolLoading: 'all', backgroundFollowUp: false } });
   await ui.press('F');
   await ui.type('count the TODOs in the background');
   await ui.press('return');

@@ -118,6 +118,17 @@ everything you typed, `/commands` and `!commands` included, and the history is s
 with the session. Ctrl+C (or Ctrl+D on an empty field) quits and Ctrl+Z suspends only
 when pressed twice: the first press says `^c again to exit`.
 
+**Work in the background comes back by itself.** Ask for something "in the background"
+and the assistant hands it to a task of its own; the chat stays yours meanwhile. A
+task's result never cuts into an answer being written: it waits until that answer ends,
+then lands as a `◆` message, and the assistant reacts — in one turn for everything that
+came back together, or, when you have a message queued, in that message's turn. A
+half-typed message in the field stays where it is; a y/n or a question waiting for
+you holds the results until you answer. With the chat closed the turn still runs,
+and the footer's `◆ N new` and a desktop notification say something came in.
+`config set ai.backgroundFollowUp false` keeps the results as messages only, read with
+your next message.
+
 **Click what you want to read.** Everything the chat folds — a turn's tool calls, what
 it said between them, a command's capped output — opens where you click it: on its fold line to
 open it, anywhere inside it to close it again. A block opens at its first row, so a

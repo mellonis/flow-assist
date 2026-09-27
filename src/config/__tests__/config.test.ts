@@ -31,7 +31,7 @@ test('config write validation rejects an unknown key and a bad type', () => {
   expect(validateConfigWriteValue(hostConfigSchema, 'cache.enabled', true).ok).toBe(true);
 });
 
-test('config set ai.backgroundFollowUp takes a boolean — what the chat reads with `=== true`', () => {
+test('config set ai.backgroundFollowUp takes a boolean — what the chat reads with `!== false`', () => {
   expect(validateConfigWriteValue(hostConfigSchema, 'ai.backgroundFollowUp', true)).toEqual({ ok: true, value: true });
   expect(validateConfigWriteValue(hostConfigSchema, 'ai.backgroundFollowUp', false)).toEqual({ ok: true, value: false });
   expect(validateConfigWriteValue(hostConfigSchema, 'ai.backgroundFollowUp', 'yes').ok).toBe(false);

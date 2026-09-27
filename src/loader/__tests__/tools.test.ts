@@ -430,15 +430,17 @@ test('a plugin tool\'s maxResultChars never reaches the wire-facing tool def', (
   expect((wireDef as Record<string, unknown>).maxResultChars).toBeUndefined();
 });
 
-test('background\'s description promises only what the default keeps: a result in the chat, read on the next turn', () => {
+test('background\'s description promises only what the default keeps: the results land after the turn, and one turn reads them', () => {
   const reg = assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
   const desc = reg.tools.find((t) => t.function.name === 'background')!.function.description;
-  // With ai.backgroundFollowUp off (the default) no turn starts for a result, so
-  // nothing may say the assistant reacts to one by itself.
-  // Nor may an example ask for a report the host does not make ("tell me when it is done").
-  for (const promise of [/analy[sz]es it/i, /when idle/i, /opens it/i, /reports? back/i, /tell me when/i, /скажи,? когда/i, /отчитайся/i]) expect(desc).not.toMatch(promise);
-  expect(desc).toContain('next turn');
-  expect(desc).toContain('ai.backgroundFollowUp');
+  // By default a turn follows once the results have landed — one for all that
+  // arrived, never inside a running one; `ai.backgroundFollowUp: false` turns it off,
+  // so the model may not promise a report the person may have switched off.
+  // Nor may an example ask for a report ("tell me when it is done").
+  for (const promise of [/analy[sz]es it/i, /when idle/i, /opens it/i, /reports? back/i, /tell me when/i, /скажи,? когда/i, /отчитайся/i, /as (soon as )?it arrives/i, /a turn per result/i]) expect(desc).not.toMatch(promise);
+  expect(desc).toMatch(/when (the|your) (current )?turn ends/i);
+  expect(desc).toMatch(/one turn .* all/i);
+  expect(desc).toContain('ai.backgroundFollowUp: false');
   expect(desc).toMatch(/do not promise/i);
   expect(desc).toMatch(/open(s)? with what came back/i);
 });
@@ -449,8 +451,8 @@ test('config_schema says what ai.backgroundFollowUp does, from the config side',
   writeFileSync(local, '{}');
   const reg = assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
   const out = await reg.exec('config_schema', { key: 'ai' }, { configLocalPath: local });
-  expect(out).toMatch(/- ai\.backgroundFollowUp: true\|false — unset \(default: false — a background task's result lands in the chat .* reaches the model on its next turn, which starts when the person writes again/);
-  expect(out).toMatch(/config set ai\.backgroundFollowUp true/);
+  expect(out).toMatch(/- ai\.backgroundFollowUp: true\|false — unset \(default: true — a background task's result lands in the chat .* when the turn running ends, never inside it.* one turn for all of them/);
+  expect(out).toMatch(/config set ai\.backgroundFollowUp false/);
 });
 
 test('config_schema says what ai.autoCompact does, and the model may not set it', async () => {

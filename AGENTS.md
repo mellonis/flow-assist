@@ -2171,7 +2171,8 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   turn's end instead, and ⇥ again lets it go at the next step; a message naming an
   image waits for the turn's end too (it goes as a message of its own, images and
   all). What is left when the turn ends goes out in order then — a turn with no
-  further round (an answer) delivers nothing mid-turn. The line over the field shows
+  further round (an answer) delivers nothing mid-turn — and the first of it carries
+  whatever waited in the inbox (the two queues, below). The line over the field shows
   the LAST one and what it waits for — `reaches the model after this step · ↑ back ·
   ⇥ hold to end`, or `held to the turn's end · ↑ back · ⇥ release` — in a turn
   (`queueWaits`), and `↑ takes it back` outside one (a slash command's wait); ↑ and ⇥
@@ -3000,30 +3001,60 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   (`CONTINUE_WORD`) and the field's hint reads `⏎ continue`; the offer
   (`continueOfferRef`) goes with the next message and wherever the empty-answer notice
   is reset.
-- A **background result** (the `background` tool's nested run finishing) is SHOWN as
-  soon as no turn is being written — a half-typed draft does not hold it back. It
-  does not open the chat and does not spend a model turn: it joins the model's
-  history and is read with the person's next message. Landing while the chat is
-  closed, it is counted as unread; the host footer shows `F chat · ◆ N new` through
-  the chat plugin's `keycaps`, and opening the chat clears the count. It also calls
-  `services.alert(title, body)` — flowtty's `notify`: a desktop notification, or the
-  bell where none reaches the terminal (tmux, a bare console), at most one a second.
-  A fired reminder alerts the same way, chat open or not. The App binds `alert` from
-  `useApp()`; tests read `TestBackend.notifications` / `bells`.
-  `ai.backgroundFollowUp: true` opts back into a turn per result, and then only
-  with the chat open, the field empty and nothing queued.
+- **Two queues: the person's and the inbox.** The person's queue (`queueRef`) is
+  delivered at the next round boundary (the ⏎ bullet above). The **inbox** (`inboxRef`,
+  `src/plugins/assistant.ts`) holds what reaches the chat from outside the conversation
+  and is not the person's — a **background result** (the `background` tool's nested
+  run finishing, through `services.postToChat`), and any later source of the same kind
+  goes through it too. The inbox **never enters a running turn**: no round and no tool
+  call is interrupted, and nothing lands between a call and its result. It is taken
+  only when nothing runs — at a turn's end, a `!command`'s or a slash command's
+  (`afterTurn`), or at once when it arrives idle (`takeInboxRef`, reassigned every
+  render; a 400 ms interval retries while something holds it and clears itself once
+  the inbox is empty). Then **every waiting item lands at once**, each as its own `◆`
+  row — on screen, in the model's history as role `bg` (sent as the user's, framed by
+  its own `<label> finished:` / `failed:` line, never as the person's words), in the
+  journal (`landInbox`) — and:
+  - **the person's queued messages go first**, in order, and the first carries the
+    landed items: their rows land just ahead of it (`afterTurn` shifts the message and
+    lands the inbox in the same zero-delay timer), so the model reads the results
+    with what the person said and no turn is spent on them alone. While a queued
+    message is about to go out the inbox is held, so no follow-up turn can take its
+    place and drop it;
+  - otherwise **ONE follow-up turn** runs for all of them: the items before the last
+    land as rows, and the last goes as `send(q, { fromBackground: true })` — a `bg` row
+    too, kept as role `bg` — so the request carries every one of them.
+  - **A pending y/n or question holds the inbox** (`inboxHeld`); it lands once
+    answered (`settleConfirm` / `settleAsk` take it). **A draft in the field does not
+    hold it**, and a follow-up turn leaves the field and its ↑ walk alone. **A closed
+    chat does not hold it**: the turn runs, and each landed item counts as unread —
+    the host footer shows `F chat · ◆ N new` through the chat plugin's `keycaps`,
+    opening the chat clears the count — with one `services.alert(title, body)` per
+    landing (the first item's first line, `(+N more)` for the rest): flowtty's
+    `notify`, a desktop notification or the bell where none reaches the terminal
+    (tmux, a bare console), at most one a second. A fired reminder alerts the same way,
+    chat open or not. The App binds `alert` from `useApp()`; tests read
+    `TestBackend.notifications` / `bells`.
+  - **A stopped or failed turn lands the inbox as rows only**: the person's queue comes
+    back into the field (`restoreQueue`), and no turn starts right after the person
+    stopped one or a request failed.
+  - `ai.backgroundFollowUp` (read `!== false`, so true when unset) is what starts the
+    follow-up turn; `false` keeps rows only — the items land the same way and are read
+    with the person's next message. `/clear`, `/new` and opening another session empty
+    the inbox (a task still running delivers into the new conversation).
   - **The model is told this contract, not a kinder one.** `background`'s description
     (`src/loader/tools-core.ts`) says a result lands in the chat as `<label>
-    finished:` (or `failed:`) and reaches the model at the start of its next turn,
-    which the person's next message starts; that a turn per result needs
-    `ai.backgroundFollowUp: true`; that the model must not promise to act on results
-    when they arrive, only say the person will see them and can ask it to carry on;
-    and that when results arrived since its last answer, the next answer opens with
-    what came back, a line per task. The call's own answer says the same (`the result
-    appears in the chat when it ends, and you see it on your next turn`), and so does
-    `config_schema`'s note for `ai.backgroundFollowUp` (`KEY_DEFAULTS`, the key is in
-    `hostConfigSchema`'s `ai`). A description that promises a reaction the default
-    does not make is what the model repeats to the person as its own promise.
+    finished:` (or `failed:`) when the current turn ends, never in the middle of it;
+    that one turn then follows for all the results that landed (or the person's queued
+    message carries them); that `ai.backgroundFollowUp: false` turns that off, so the
+    model must not promise to act on results when they arrive, only say they will come
+    into the chat and it will look at them then; and that when results arrived since
+    its last answer, the next answer opens with what came back, a line per task. The
+    call's own answer says the same (`the result appears in the chat when it ends, and
+    you see it on your next turn`), and so does `config_schema`'s note for
+    `ai.backgroundFollowUp` (`KEY_DEFAULTS`, the key is in `hostConfigSchema`'s `ai`).
+    A description that promises a reaction the default does not make is what the
+    model repeats to the person as its own promise.
 - What the footer reads from a plugin (`host.store.<x>`) must be patched
   synchronously when it changes: the host draws its footer BEFORE the plugin's
   component re-renders, so a value assigned during render is one frame stale.

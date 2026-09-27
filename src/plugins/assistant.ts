@@ -579,16 +579,20 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // a display-only `system` message would be dropped by `send` and lost.
           const summaryRef = ui.useRef<string>('');
           const streamRef = ui.useRef(streaming); streamRef.current = streaming;
-          // Background-result queue (populated by `postToChat`, see below): results are
-          // NOT dropped when the chat is busy — they wait here and are auto-fed through
-          // `send` (analyzed) one at a time once the chat is idle. A short interval
-          // drives the flush; it self-clears when the queue empties.
-          const bgQueueRef = ui.useRef<string[]>([]);
-          const flushTimer = ui.useRef<ReturnType<typeof setInterval> | null>(null);
-          const clearFlush = () => {
-            if (flushTimer.current) { clearInterval(flushTimer.current); flushTimer.current = null; }
+          // The inbox: what reaches the chat from outside the conversation — a background
+          // task's result — and is not the person's. It is a queue of its own, apart from
+          // the person's (`queueRef`): it never enters a running turn and is taken only
+          // when one ends (`takeInboxRef`, below). A short interval retries while something
+          // holds it (a y/n, a question) and clears itself once the inbox is empty.
+          const inboxRef = ui.useRef<string[]>([]);
+          const inboxTimer = ui.useRef<ReturnType<typeof setInterval> | null>(null);
+          const clearInboxTimer = () => {
+            if (inboxTimer.current) { clearInterval(inboxTimer.current); inboxTimer.current = null; }
           };
-          let flushPending: () => void = () => {};
+          // Reassigned every render: a timer, a tool's ctx and a turn's end made in an
+          // earlier render all reach the current one. `rows` lands what waits and starts
+          // no turn for it.
+          const takeInboxRef = ui.useRef<(mode?: 'turn' | 'rows') => void>(() => {});
           // Input field caret — an index (codepoint) in `input`. Kept in a ref so the
           // handler reads a fresh value.
           const [cursor, setCursor] = ui.useState(0);
@@ -1236,6 +1240,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             setPendingQuestion(null);
             a.resolve(done);
             host.notify();
+            // The inbox the question held lands now (a turn still running holds it on).
+            setTimeout(() => takeInboxRef.current(), 0);
           };
           // Leaving the chat or resetting it must not leave the tool hanging: an
           // unanswered question is reported to the model as dismissed.
@@ -1303,6 +1309,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             setPendingAsk(null);
             p.resolve(ok, by);
             host.notify();
+            // The inbox the y/n held lands now (a turn still running holds it on).
+            setTimeout(() => takeInboxRef.current(), 0);
           };
 
           // The «cheap» synchronous base: a directive about the reply (language/
@@ -1566,9 +1574,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             const q = (text ?? inputRef.current).trim();
             if (!q || streamRef.current) return false;
             // Close the re-entrancy window SYNCHRONOUSLY, before any await: send() is
-            // called from the input handler, the background flush, and the slash
-            // command. Without this, a `background` result flushed while the chat is
-            // about to go idle could double-fire. (The render also syncs
+            // called from the input handler, the inbox, and the slash command. Without
+            // this, a follow-up turn for the inbox started while the chat is about to go
+            // idle could double-fire. (The render also syncs
             // `streamRef.current = streaming`, but that only runs after React commits.)
             streamRef.current = true;
             // System context is assembled WITHOUT network on every message: replace the
@@ -1577,9 +1585,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             const sysParts = systemParts();
             const sys = joinSystem(sysParts, projectBlock());
             // DISPLAY source vs LLM role are split: a `background` result stays role 'bg'
-            // so the render labels it Background (it is NOT the user's own message, and
-            // must never render as "You"), while for the model it is still a prompt to
-            // answer — apiMsgs maps 'bg' → 'user'. History messages are re-mapped too.
+            // on screen and in the kept history (it is NOT the person's own message), while
+            // for the model it is still a prompt to answer — `apiHistory` maps 'bg' →
+            // 'user', framed by its own `<label> finished:` line.
             // Every bulky item a batch has stubbed goes as its stub (src/assistant/
             // recall.ts); what this turn adds — the question's images, a `!command` run
             // since the last turn — is not in the set yet and goes in full.
@@ -1589,9 +1597,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // React applies it (below), never onto what was last drawn.
             const added: ChatMsg[] = [];
             if (sys) apiMsgs.unshift({ role: 'system', content: sys });
+            // Only a message from the field touches the field's history walk: a follow-up
+            // turn for the inbox leaves whatever is being typed, or recalled, as it is.
             if (!opts.fromBackground && !opts.hostAsk) pushHistory(historyRef.current, q);
-            histAt.current = null;
-            histShown.current = '';
+            if (!opts.fromBackground) {
+              histAt.current = null;
+              histShown.current = '';
+            }
             // The images the text names, in the order it names them. A background result
             // is the model's writing and carries none.
             const images = opts.fromBackground || opts.hostAsk ? [] : imagesInText(q, imagesRef.current);
@@ -1608,7 +1620,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             added.push({ role: opts.fromBackground ? 'bg' : 'user', content: q, ...(images.length ? { images: images.map((r) => r.n) } : {}), ...(opts.hostAsk ? { hostAsk: true } : {}) });
             // The question joins the model's history now, so a failed or cancelled
             // turn still leaves it on record; the turn's transcript follows on success.
-            apiRef.current = [...apiRef.current, asked];
+            apiRef.current = [...apiRef.current, opts.fromBackground ? { ...asked, role: 'bg' } : asked];
             // And the journal, before anything of the turn can happen: the notes, then the
             // question, which gives the session its id. The turn's own events go to that
             // session's journal even when a reset (/clear) lands while it runs — they
@@ -1638,9 +1650,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // final flush): a mismatch means the conversation it was for is gone.
             const epoch = epochRef.current;
             persist(); // the question survives a restart even if the answer does not
-            // The host's ask did not come from the field: whatever is being typed there
-            // (keys pressed right as the program handed the terminal back) stays.
-            if (!opts.hostAsk) {
+            // Neither the host's ask nor a follow-up turn for the inbox came from the
+            // field: whatever is being typed there (keys pressed right as the program
+            // handed the terminal back, a half-written message) stays.
+            if (!opts.hostAsk && !opts.fromBackground) {
               setInput('');
               inputRef.current = '';
               setCursor(0);
@@ -2142,7 +2155,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // (line ~128 streamRef.current = streaming). If a render is ever
               // skipped — chat closed mid-turn, a runtime batching quirk, an
               // aborted turn that does not commit — streamRef would stay true
-              // forever and flushPending would defer EVERY background result
+              // forever and the inbox would hold EVERY background result
               // permanently (the chat "stops working" after the first answer).
               // streamRef now mirrors the stream lifecycle synchronously: true
               // from its top guard (line ~225), false again when the stream ends.
@@ -2177,19 +2190,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               setStreaming(false);
               setToolLabel('');
               abortRef.current = null;
-              // The person's queued messages go first, in order; a stopped or failed
-              // turn puts them back into the field instead (`restoreQueue`) rather than
-              // firing them into a conversation just stopped.
-              if (!aborted && !failed && queueRef.current.length) {
-                const nextQueued = queueRef.current.shift()!.text;
-                syncQueue();
-                setTimeout(() => { void send(nextQueued); }, 0);
-              } else {
-                restoreQueue();
-                // A background result that arrived mid-turn lands the moment the turn
-                // ends, not on the flush timer's next 400 ms tick.
-                setTimeout(() => flushPending(), 0);
-              }
+              afterTurn(!aborted && !failed);
             }
             return true;
           };
@@ -2197,7 +2198,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // ── `!command` — the person runs a shell command (src/assistant/shell.ts) ──
           // The chat is busy exactly as while an answer is written — the same spinner,
           // and Esc stops it — but no model turn is spent: the result joins the model's
-          // history and is read with the person's next message, as a background result is.
+          // history and is read with the person's next message.
           // `interactive` is `!!command` (src/assistant/interactive.ts): the program gets
           // the terminal, what it printed is recorded, and once it is back the recording
           // lands the same way — and a turn starts at once with the host's ask to look at
@@ -2368,14 +2369,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               }
               // What the person queued meanwhile goes out now — unless they stopped the
               // command: then it comes back into the field, as after a stopped answer.
-              else if (!stopped && queueRef.current.length) {
-                const nextQueued = queueRef.current.shift()!.text;
-                syncQueue();
-                setTimeout(() => { void send(nextQueued); }, 0);
-              } else {
-                restoreQueue();
-                setTimeout(() => flushPending(), 0);
-              }
+              else afterTurn(!stopped);
               host.notify();
             }
           };
@@ -2425,11 +2419,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 setToolLabel('');
                 // What was queued meanwhile goes out now, as after an answer — unless the
                 // command was stopped or failed: then it comes back into the field.
-                if (ok && queueRef.current.length) {
-                  const nextQueued = queueRef.current.shift()!.text;
-                  syncQueue();
-                  setTimeout(() => { void send(nextQueued); }, 0);
-                } else restoreQueue();
+                afterTurn(ok);
                 host.notify();
               });
           };
@@ -2555,7 +2545,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               }
             }
             dismissAsk();
-            queueRef.current = []; setQueued([]); bgQueueRef.current = [];
+            queueRef.current = []; setQueued([]); inboxRef.current = []; clearInboxTimer();
             setError(null); setEmptyNotice(''); setContinueOffer(false); setToolLabel(''); setToolCount(0);
             if (id !== sessionIdRef.current) releaseCurrentLock(); // leaving the old one
             applySession(s, fp, dir);
@@ -2662,8 +2652,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // it: drop any queued-but-unsent delivery and stop the flush interval. (A task
             // still RUNNING delivers afterwards — that is a new, legitimate result; only
             // already-queued pending ones are stale.)
-            bgQueueRef.current = [];
-            clearFlush();
+            inboxRef.current = [];
+            clearInboxTimer();
             apiRef.current = []; summaryRef.current = ''; queueRef.current = []; setQueued([]);
             // A new conversation starts with no plan: the old one described work the
             // model no longer remembers.
@@ -3193,53 +3183,84 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const pagerShown = !!pager && pagerRows.length > 0;
           pagerShownRef.current = pagerShown;
           (host.store as Record<string, any>).chat = { open, unread, mode, focus, openChat, closeChat, send, messages, streaming, toolLabel, cursor, escArmed, pendingConfirm: pendingAsk, ctrlKey, panelKey, pointer, note: pluginNote, statusRow: statusRow ? liveChatStatus(() => statusRef.current as never, collapsedBusy) : null, footerStatus, layout, needRows };
-          // Lands the next background result. It is SHOWN as soon as no turn is being
-          // written (a streaming turn keeps rewriting the display list's last message,
-          // so a result cannot be appended under it) — a half-typed draft does not hold
-          // it back, the chat is not opened for it, and no model turn is spent on it:
-          // the result joins the model's history and is read with the person's next
-          // message. With the chat closed it is counted as unread for the footer.
-          //
-          // `ai.backgroundFollowUp: true` opts back into the assistant reacting by
-          // itself — a turn per result — and then only with the chat open, the field
-          // empty and nothing queued, so it never talks over the person.
-          flushPending = () => {
-            if (streamRef.current) return;
-            const q = bgQueueRef.current[0];
-            if (q == null) { clearFlush(); return; }
-            const followUp = (host.config.ai as { backgroundFollowUp?: unknown } | undefined)?.backgroundFollowUp === true;
-            if (followUp && openRef.current && !inputRef.current && !queueRef.current.length) {
-              bgQueueRef.current.shift();
-              void send(q, { fromBackground: true });
-              return;
+          // ── Two queues meet at a turn's end: the person's (`queueRef`, delivered at
+          // the next round boundary) and the inbox (`inboxRef`, never inside a turn).
+          // Every item waiting in the inbox lands at once, each as its own row — on
+          // screen, in the model's history (role 'bg', its `<label> finished:` line
+          // saying what it is), in the journal — and, with the chat closed, in the
+          // unread count and one alert. `keepLast` leaves the last item to `send`, which
+          // draws it as the follow-up turn's message. Returns what it took.
+          const landInbox = (keepLast = false): string[] => {
+            const items = inboxRef.current;
+            if (!items.length) return [];
+            inboxRef.current = [];
+            clearInboxTimer();
+            const rows = keepLast ? items.slice(0, -1) : items;
+            if (rows.length) {
+              for (const q of rows) journal({ t: 'row', role: 'bg', text: q });
+              setMessages((cur) => [...cur, ...rows.map((q): ChatMsg => ({ role: 'bg', content: q }))]);
+              apiRef.current = [...apiRef.current, ...rows.map((q): ChatMessage => ({ role: 'bg', content: q }))];
+              persist();
             }
-            bgQueueRef.current.shift();
-            journal({ t: 'row', role: 'bg', text: q });
-            setMessages((cur) => [...cur, { role: 'bg', content: q }]);
-            apiRef.current = [...apiRef.current, { role: 'bg', content: q }];
-            persist();
             if (!openRef.current) {
-              unreadRef.current += 1;
+              unreadRef.current += items.length;
               setUnread(unreadRef.current);
               publish({ unread: unreadRef.current });
               // Nobody is looking at the chat: say so beyond the footer counter.
-              (host.services as { alert?: (title: string, body?: string) => void }).alert?.('flow-assist', String(q).split('\n')[0].slice(0, 120));
+              const first = String(items[0]).split('\n')[0]!.slice(0, 120);
+              (host.services as { alert?: (title: string, body?: string) => void }).alert?.('flow-assist', items.length > 1 ? `${first} (+${items.length - 1} more)` : first);
             }
             host.notify();
+            return items;
           };
-          // A host-reachable channel to inject a message into the chat from OUTSIDE
-          // (e.g. a `background` task's result). Registered per render (idempotent) so
-          // a detached timer reads the latest closure — the same live-reference pattern
-          // as the React-bound services. Reads live state via refs, so an old closure is
-          // still current. Results are QUEUED, not dropped: while a turn is being
-          // written the result waits here and lands (`flushPending`) as soon as it ends —
-          // so a back-to-back burst of background tasks all land.
+          // A y/n or a question waiting for the person holds the inbox (it lands once
+          // answered); so does a running turn, a `!command` or a slash command, and a
+          // queued message about to go out, which carries the inbox itself. A draft
+          // in the field and a closed chat hold nothing.
+          const inboxHeld = () => streamRef.current || !!pendingRef.current || !!askRef.current || queueRef.current.length > 0;
+          // Takes the inbox when nothing holds it: the items land, and ONE follow-up turn
+          // runs for all of them (`ai.backgroundFollowUp`, true unless set false; false
+          // keeps the rows, read with the person's next message).
+          takeInboxRef.current = (mode = 'turn') => {
+            if (!inboxRef.current.length) { clearInboxTimer(); return; }
+            if (inboxHeld()) return;
+            const followUp = (host.config.ai as { backgroundFollowUp?: unknown } | undefined)?.backgroundFollowUp !== false;
+            if (mode === 'rows' || !followUp) { landInbox(); return; }
+            const last = landInbox(true).at(-1)!;
+            void send(last, { fromBackground: true });
+          };
+          // A turn, a `!command` or a slash command has ended. The person's queued
+          // messages go first, in order, and the first carries the inbox: its rows land
+          // just ahead of it, so the model reads them together and no turn is spent on
+          // them alone. With nothing queued the inbox is taken as it is. A stopped or
+          // failed run puts the queue back into the field (`restoreQueue`) and lands the
+          // inbox as rows only: the person has just stopped the work, or it failed.
+          const afterTurn = (ok: boolean) => {
+            if (ok && queueRef.current.length) {
+              setTimeout(() => {
+                const next = queueRef.current.shift();
+                // ↑ took it back meanwhile.
+                if (!next) { takeInboxRef.current(); return; }
+                syncQueue();
+                if (!pendingRef.current && !askRef.current) landInbox();
+                void send(next.text);
+              }, 0);
+            } else {
+              restoreQueue();
+              if (ok) setTimeout(() => takeInboxRef.current(), 0);
+              else takeInboxRef.current('rows');
+            }
+          };
+          // A host-reachable channel to put a message into the chat from OUTSIDE
+          // (a `background` task's result). Registered per render (idempotent) and
+          // reading only refs, so a detached timer holding an older copy is still
+          // current. An item is never dropped: it waits in the inbox until it can land.
           (host.services as Record<string, any>).postToChat = (text: string) => {
             const q = String(text ?? '').trim();
             if (!q) return;
-            bgQueueRef.current.push(q);
-            if (!flushTimer.current) flushTimer.current = setInterval(() => flushPending(), 400);
-            flushPending();
+            inboxRef.current.push(q);
+            if (!inboxTimer.current) inboxTimer.current = setInterval(() => takeInboxRef.current(), 400);
+            takeInboxRef.current();
           };
           // While the chat is open it owns the KEYBOARD: priority 100 (like log/tags).
           // The host dims the overlay-detail via ui.modalActive, so its consumer (also
