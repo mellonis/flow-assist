@@ -738,3 +738,57 @@ test('beforeRequest runs at every request boundary, after a round\'s results, an
   // And the turn's transcript starts after it.
   expect(res.transcript.map((m) => [m.role, m.content])).toEqual([['assistant', 'done']]);
 });
+
+const DSML = (name: string) => `Let me look.\n<｜DSML｜function_calls>\n<｜DSML｜invoke name="${name}">\n<｜DSML｜parameter name="action" string="true">list</｜DSML｜parameter>\n</｜DSML｜invoke>\n</｜DSML｜function_calls>`;
+
+test('an answer holding a tool call written as text gets one corrective round, and the markup is never kept', async () => {
+  assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
+  const sent: any[][] = [];
+  const replies = [
+    { content: DSML('search_in_files'), toolCalls: [] },
+    { content: '', toolCalls: [{ id: '1', name: 'memory', arguments: '{"action":"list"}' }] },
+    { content: 'Nothing remembered.', toolCalls: [] },
+  ];
+  const chatRound = async (messages: any[], opts: any) => {
+    sent.push(messages);
+    const r = replies[sent.length - 1]!;
+    if (r.content) opts.onDelta?.(r.content);
+    return { ...r, finishReason: r.toolCalls.length ? 'tool_calls' : 'stop' };
+  };
+  const notes: string[] = [];
+  const commits: [string, boolean][] = [];
+  const res = await agentChat([{ role: 'user', content: 'what do you remember?' }], {
+    baseUrl: 'http://x', model: 'm', token: 't', onLive: () => {}, chatRound,
+    onLiveCommit: (t, final) => { commits.push([t, final]); },
+    onNote: (n: string) => { notes.push(n); },
+  });
+  expect(sent).toHaveLength(3);
+  // The corrective round: told in one line, the unknown name answered with the tools that exist.
+  const told = String(sent[1]!.at(-1).content);
+  expect(sent[1]!.at(-1).role).toBe('user');
+  expect(told).toMatch(/written as text/);
+  expect(told).toMatch(/search_in_files/);
+  expect(told).toMatch(/memory/);
+  expect(notes).toEqual(['tool call written as text — asked again']);
+  // What stays is the text around the markup, as a step — never the markup, never the answer.
+  expect(commits[0]).toEqual(['Let me look.', false]);
+  expect(res.content).toBe('Nothing remembered.');
+  expect(JSON.stringify(res.transcript)).not.toContain('DSML');
+});
+
+test('a second call written as text in a row ends the turn with the note', async () => {
+  assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
+  let n = 0;
+  const chatRound = async (_m: any[], opts: any) => { n++; opts.onDelta?.(DSML('memory')); return { content: DSML('memory'), toolCalls: [], finishReason: 'stop' }; };
+  const notes: string[] = [];
+  const res = await agentChat([{ role: 'user', content: 'q' }], {
+    baseUrl: 'http://x', model: 'm', token: 't', onLive: () => {}, onLiveCommit: () => {}, chatRound,
+    onNote: (x: string) => { notes.push(x); },
+  });
+  expect(n).toBe(2);
+  expect(notes).toEqual(['tool call written as text — asked again', 'tool call written as text again — the turn ends']);
+  expect(res.content).toBe('Let me look.');
+  expect(JSON.stringify(res.transcript)).not.toContain('DSML');
+  // The known name is not called unknown.
+  expect(JSON.stringify(res.transcript)).not.toMatch(/no tool named/);
+});

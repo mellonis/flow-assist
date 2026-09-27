@@ -21,7 +21,8 @@ import { completePath, completeSlash, listDirectory, type ChatCommandDef } from 
 import { configSetLine, type CompleteResult } from '../config/commands.js';
 import { parseValue } from '../config/load.js';
 import { apiHistory, compactConversation, chatLanguage, requestTools, transcriptSoFar } from '../assistant/agent.js';
-import { RESUMED_NOTE, autoCompactLimits, overThreshold, stripToolMarkup } from '../assistant/compaction.js';
+import { RESUMED_NOTE, autoCompactLimits, overThreshold } from '../assistant/compaction.js';
+import { stripToolMarkup } from '../assistant/tool-markup.js';
 import { createToolSet, toolLoadingMode } from '../assistant/tool-loading.js';
 import { llmOpts } from '../assistant/llm-endpoint.js';
 import { copyTarget, copyToClipboard } from '../assistant/copy.js';
@@ -1447,6 +1448,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // The summary is read fresh too: an automatic compaction between two
                 // rounds replaces it.
                 systemPrompt: () => joinSystem({ ...sysParts, summary: summaryBlock() }, projectBlock()),
+                // A line about the turn itself (a tool call the model wrote as text), a
+                // note in the conversation where it happened.
+                onNote: (text: string) => {
+                  if (epoch !== epochRef.current) return;
+                  setMessages((cur) => [...cur, { role: 'note', content: text }]);
+                  host.notify();
+                },
                 // Before every request of the turn: past `ai.autoCompact.threshold` of the
                 // window, the conversation is compacted first — at a request boundary, so
                 // every call made so far has its result. The person's message stays, the

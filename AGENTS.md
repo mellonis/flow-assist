@@ -1615,6 +1615,21 @@ naming the parse failure, and the history keeps `"{}"` in the call's place so it
 valid JSON. `apiHistory()` repairs the same shape found in a session saved by an older
 host, so it recovers on its next request.
 
+**A tool call written as text is asked for again, once, as a real call**
+(`src/assistant/tool-markup.ts`, pure: `hasToolMarkup`, `stripToolMarkup`,
+`markupToolNames` — the one detector a compaction's summary is cleaned with too). A
+model sometimes writes its call as TEXT — DeepSeek's DSML `<｜DSML｜function_calls>`,
+`<tool_call>`, `<function_calls>`, a bare `<invoke …>` — and the round ends with no
+call at all. Taken as the answer, the turn would end on markup and nothing done. So a
+round with no real call whose text holds the markup does not end the turn: the text
+around the markup is kept as a step (`onLiveCommit(…, false)`), the markup nowhere — not
+the screen, not `current`, not the transcript — and a user line tells the model its call
+was written as text and nothing ran, naming the tools it has when the markup named one
+that does not exist; then one more round. At most once in a row (`askedAgain`, cleared
+by a round with a real call): a second such round ends the turn on the text around the
+markup. `AgentOpts.onNote` carries a line about it (`tool call written as text — asked
+again`, `… again — the turn ends`), drawn as a dim note where it happened.
+
 **A turn that did not finish is closed in the model's history too.** The question
 joins `apiRef` before the request, so it stays on record whatever happens. Left there
 alone after Esc, it read to the model as a question still waiting: the next request

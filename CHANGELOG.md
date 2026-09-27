@@ -5,6 +5,13 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **A tool call the model writes as text is asked for again instead of ending the
+  turn.** Some models now and then write their call as text in the answer — DSML,
+  `<tool_call>`, `<function_calls>` — so nothing runs and the turn stops on raw markup.
+  The chat now tells the model once that its call was written as text (naming the tools
+  it has when it named one that does not exist) and gives it another round; the screen
+  shows a dim `tool call written as text — asked again` in place of the markup, and the
+  markup is never kept in the conversation. A second such answer in a row ends the turn.
 - **The chat compacts the conversation by itself before it overflows.** Before a request
   that would pass 80% of the context window, the chat folds the conversation into a
   handoff first — the same as `/compact`, with its row marked `── compacted · auto ──` —

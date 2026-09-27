@@ -1,9 +1,9 @@
 // What a compaction asks for and what it accepts back (src/assistant/compaction.ts).
 import { expect, test } from 'bun:test';
 import {
-  HANDOFF_SECTIONS, SHORT_CHARS, autoCompactLimits, compactionInstruction, hasToolMarkup, overThreshold, retryNote,
-  stripToolMarkup, summaryProblem,
+  HANDOFF_SECTIONS, SHORT_CHARS, autoCompactLimits, compactionInstruction, overThreshold, retryNote, summaryProblem,
 } from '../compaction.js';
+import { hasToolMarkup, markupToolNames, stripToolMarkup } from '../tool-markup.js';
 
 const handoff = (extra = '') => [
   '## Goal', 'Port the engine to the new toolchain.',
@@ -89,4 +89,11 @@ test('overThreshold compares the next request to the share of the window', () =>
   expect(overThreshold(81_000, 100_000, on)).toBe(true);
   expect(overThreshold(80_000, 100_000, on)).toBe(false);
   expect(overThreshold(99_000, 100_000, { ...on, enabled: false })).toBe(false);
+});
+
+test('the tools a markup block names are read from either family', () => {
+  expect(markupToolNames('<｜DSML｜function_calls>\n<｜DSML｜invoke name="search_in_files">\n</｜DSML｜invoke>')).toEqual(['search_in_files']);
+  expect(markupToolNames('<tool_call>{"name": "read_file", "arguments": {}}</tool_call>')).toEqual(['read_file']);
+  expect(markupToolNames('<invoke name="a"></invoke><invoke name="b"></invoke>')).toEqual(['a', 'b']);
+  expect(markupToolNames('no markup')).toEqual([]);
 });

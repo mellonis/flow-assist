@@ -1,6 +1,6 @@
 // Compaction, the pure parts: what the model is asked to write when the conversation
-// is folded into a summary, what is accepted back, and the tool-call markup a model
-// sometimes writes as text instead of calling a tool.
+// is folded into a summary, what is accepted back, and when the chat compacts by itself.
+// Tool-call markup is stripped from a summary by ./tool-markup.ts.
 //
 // The summary is a HANDOFF — written for the model that continues the work, never
 // for the person: fixed sections, no question, no pleasantries. It REPLACES the
@@ -81,31 +81,3 @@ export function overThreshold(tokens: number, window: number, limits: AutoCompac
 // What the person's message says to the model once the work on it so far was folded
 // into the handoff mid-turn: the question alone would read as not yet begun.
 export const RESUMED_NOTE = '[The work on this message so far was compacted into the handoff in the system context — continue from its next step; do not start over.]';
-
-// ── Tool-call markup written as text ──
-// Blocks a model writes when it means to call a tool and the call comes out as text:
-// DeepSeek's DSML (`<｜DSML｜function_calls>…`, the bar is U+FF5C), `<tool_call>`,
-// `<function_calls>` and a bare `<invoke …>`. A block with no closing tag runs to the
-// end of the text — a cut-off call is still a call.
-const OPEN = /<(?:｜DSML｜)?(function_calls|tool_calls?|invoke)\b[^>]*>/;
-// A stray DSML-family token: `<｜DSML｜…>`, `</｜DSML｜…>`, `<｜tool▁calls▁begin｜>`.
-const STRAY = /<\/?｜[^<>\n]*>/g;
-
-export function hasToolMarkup(text: string): boolean {
-  return OPEN.test(text) || /<\/?｜[^<>\n]*>/.test(text);
-}
-
-export function stripToolMarkup(text: string): string {
-  let out = text;
-  for (;;) {
-    const m = OPEN.exec(out);
-    if (!m) break;
-    const close = new RegExp(`</(?:｜DSML｜)?${m[1]}>`);
-    const rest = out.slice(m.index + m[0].length);
-    const c = close.exec(rest);
-    const end = c ? m.index + m[0].length + c.index + c[0].length : out.length;
-    out = out.slice(0, m.index) + out.slice(end);
-  }
-  out = out.replace(STRAY, '');
-  return out.replace(/\n{3,}/g, '\n\n').replace(/[ \t]+\n/g, '\n').trim();
-}

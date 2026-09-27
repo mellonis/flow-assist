@@ -25,7 +25,8 @@ import { IMAGE_DEFAULTS, contentText, type ContentPart, type ImageLimits, type I
 import { acceptToolImages, imageMark, imageStoreDir, toolImageResult, type ImageMark } from './tool-images.js';
 import { llmErrorMessage } from './llm-error.js';
 import { ANTHROPIC_CONTENT, REQUEST_TAIL, anthropicChatRound, anthropicCompact, summaryHistory } from './anthropic.js';
-import { compactionInstruction, retryNote, stripToolMarkup, summaryProblem } from './compaction.js';
+import { compactionInstruction, retryNote, summaryProblem } from './compaction.js';
+import { hasToolMarkup, markupToolNames, stripToolMarkup } from './tool-markup.js';
 import { estimateTokens } from './context-meter.js';
 import type { ThinkingConfig } from './llm-endpoint.js';
 import {
@@ -201,6 +202,9 @@ export interface AgentOpts {
   // and undefined before the first round. Returning `messages` replaces everything
   // sent from here on — what the chat's automatic compaction does — and the turn's
   // transcript then starts after them.
+  // A line for the person about the turn itself, drawn dim in the conversation — a
+  // tool call the model wrote as text, said when it is asked again.
+  onNote?: (text: string) => void;
   beforeRequest?: (info: { round: number; transcript: ChatMessage[]; measured?: number }) => Promise<{ messages: ChatMessage[] } | void>;
   // Tools on demand (src/assistant/tool-loading.ts). 'all' — every tool in full on
   // every request, the default here, so a caller that does not say keeps what it had;
@@ -780,6 +784,10 @@ export async function agentChat(
   // Where the history stood when the last reported usage was taken: what joined after
   // it (the round's tool results) is not in that figure.
   let usageAt = 0;
+  // The last round was an answer holding a tool call written as TEXT
+  // (./tool-markup.ts), and the model was asked again: a second one in a row ends the
+  // turn rather than asking forever.
+  let askedAgain = false;
   // Set once a round came back `thinkingDropped`: the rest of the turn asks for none.
   let noThinking = false;
   // The images tools of this turn returned or attached to their results, by hash →
@@ -850,6 +858,29 @@ export async function agentChat(
         contentLen: r.content.length,
         ...(r.usage ? { usage: r.usage } : {}),
       });
+      if (!r.toolCalls.length && hasToolMarkup(roundContent)) {
+        // A tool call written as text: nothing ran, and the markup is neither the answer
+        // nor kept anywhere — what the model wrote around it stays, as a step. Once in a
+        // row the model is told in one line and asked again (an unknown name answered
+        // with the tools it has); a second time the turn ends on what text there was.
+        const kept = stripToolMarkup(roundContent);
+        if (!askedAgain) {
+          askedAgain = true;
+          process += kept;
+          if (opts.onLiveCommit) opts.onLiveCommit(kept, false);
+          else if (kept) onProcess?.(kept);
+          opts.onNote?.('tool call written as text — asked again');
+          if (kept) current.push({ role: 'assistant', content: kept });
+          const known = new Set([...toolByName.keys(), ...realName.keys()]);
+          const unknown = markupToolNames(roundContent).filter((n) => !known.has(n));
+          const have = unknown.length ? ` There is no tool named ${unknown.join(', ')}; the tools you have: ${roundTools().map((t) => t.function.name).join(', ')}.` : '';
+          current.push({ role: 'user', content: `Your tool call was written as text in your answer, so nothing ran. Make it as a real tool call.${have}` });
+          continue;
+        }
+        opts.onNote?.('tool call written as text again — the turn ends');
+        roundContent = kept;
+      }
+      if (r.toolCalls.length) askedAgain = false;
       if (!r.toolCalls.length) {
         // Final round — the answer: already shown live via onLive, fix it as the
         // content. If the caller does not use onLiveCommit, fall back to chunked
