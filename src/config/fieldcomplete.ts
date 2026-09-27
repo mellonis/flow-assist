@@ -10,7 +10,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { within } from '../assistant/shell.js';
+import { unescape, within } from '../assistant/shell.js';
 import { completeValues, completeWords, type ArgComplete, type ArgValues, type CompleteResult } from './commands.js';
 
 const NONE = (head = ''): CompleteResult => ({ head, hasSpace: true, best: '', candidates: [] });
@@ -72,7 +72,6 @@ export function lastWord(text: string): string {
   return text.slice(i);
 }
 const escapeName = (name: string) => name.replace(/\\/g, '\\\\').replace(/ /g, '\\ ');
-const unescape = (word: string) => word.replace(/\\(.)/g, '$1');
 
 const allowed = (real: string, roots: readonly string[]) => !roots.length || roots.some((r) => within(real, r));
 

@@ -2915,7 +2915,12 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   `cd` tool's: relative to the shell's current directory or absolute (`~` the home),
   held to `shell.roots` by the REAL path when any are configured, but free to go
   anywhere when there are none — nobody needs to be asked, since the person typed it
-  themselves. A refusal names the roots (or says the path is not a directory) and
+  themselves. `asked` is unescaped first (`unescape`, shared with `fieldcomplete.ts`'s
+  own — that module imports FROM `shell.ts`, so the escaping helper lives here, not
+  there, to avoid a cycle): a name with a space, typed or Tab-completed as `a\ b`
+  (`escapeName`'s own spelling), resolves as the real directory. `!cd` never needed
+  this — its text reaches a real shell, which unescapes its own argument; `/cd` is
+  never run through one. A refusal names the roots (or says the path is not a directory) and
   leaves the directory where it was. It goes through the SAME `setCwd` every other
   mover does, so the project's instructions are read again and the hint row shows the
   new directory at once. Bare `/cd` goes back to the default (`setCwd(null)`, the same

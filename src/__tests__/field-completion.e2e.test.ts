@@ -174,6 +174,26 @@ test('/cd completes to directories only, moves the shell like !cd, and /cd - goe
   ui.app.unmount();
 });
 
+test('/cd completes and accepts a directory name with a space', async () => {
+  const root = rootDir();
+  fs.mkdirSync(path.join(root, 'a b'));
+  const ui = await bootApp(new ScriptedModel(), root.length + 80, 32, undefined, { shell: { roots: [root] } });
+  await ui.press('F');
+  const field = () => fieldRow(ui);
+
+  await ui.type('/cd a');
+  expect(field()).toContain('› /cd a\\ b');
+  await ui.press('tab');
+  expect(field()).toContain('› /cd a\\ b/');
+  await ui.press('return');
+  await settle(4);
+  // Tab-completed and accepted — not refused as "not a directory" because the
+  // backslash it offered was never unescaped.
+  expect(ui.backend.lastFrame).toContain(`now in ${path.join(root, 'a b')}`);
+  expect(ui.backend.lastFrame).not.toContain('is not a directory');
+  ui.app.unmount();
+});
+
 test('/notes and /mode complete their argument: `/notes ` offers step, `/notes o` open, `/mode ` walks the three', async () => {
   const ui = await bootApp(new ScriptedModel(), 100, 24);
   await ui.press('F');

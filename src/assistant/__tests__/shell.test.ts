@@ -160,6 +160,20 @@ test('cdChatTarget: held to the roots, by the real path, when any are configured
   expect(() => cdChatTarget({ shell: { roots: [root] } }, 'nope', root)).toThrow('is not a directory');
 });
 
+// A name with a space arrives escaped — typed that way, or Tab-completed to it
+// (fieldcomplete.ts's `escapeName`, the same convention `!` shell mode's own
+// completion uses) — and must resolve to the real directory, not be refused as
+// "not a directory" because the backslash is still in the path `!cd` never sees it:
+// a real shell unescapes its own argument, `cdChatTarget` has to do it itself.
+test('cdChatTarget unescapes a name with a space, the way completePath spelled it', () => {
+  const root = tmp();
+  fs.mkdirSync(path.join(root, 'a b'));
+  expect(cdChatTarget({ shell: { roots: [root] } }, 'a\\ b', root)).toBe(path.join(root, 'a b'));
+  // A literal backslash, doubled, still unescapes to one.
+  fs.mkdirSync(path.join(root, 'a\\b'));
+  expect(cdChatTarget({ shell: { roots: [root] } }, 'a\\\\b', root)).toBe(path.join(root, 'a\\b'));
+});
+
 // Unlike the model's `cd` tool (refused with no roots — nobody to confirm it), `/cd`
 // is the person's own, so with no roots it follows `!cd`: free to go anywhere.
 test('cdChatTarget with no roots configured: free to go anywhere, like !cd', () => {

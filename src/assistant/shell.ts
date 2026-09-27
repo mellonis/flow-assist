@@ -94,6 +94,12 @@ export function legacyRootsNote(config: RootsConfig): string | null {
   return `fs.roots is read as shell.roots / plugins.repo.roots — move it: config set shell.roots '${list}' (and plugins.repo.roots, if repo should see other directories)`;
 }
 export const within = (p: string, root: string) => p === root || p.startsWith(root.endsWith(path.sep) ? root : root + path.sep);
+// The inverse of `fieldcomplete.ts`'s own `escapeName` (`a b` → `a\ b`): a space or a
+// backslash typed or Tab-completed into the field arrives here still escaped —
+// `cdChatTarget` needs a real path, not the field's own spelling of one. Shared here,
+// not re-exported from `fieldcomplete.ts`, since that module already imports FROM this
+// one (`within`) and a path back would cycle.
+export const unescape = (word: string) => word.replace(/\\(.)/g, '$1');
 // The real location of a path, following every link on the way; a path that does not
 // exist yet is resolved through its nearest existing parent.
 export function realOf(abs: string): string {
@@ -193,9 +199,11 @@ export function createShellState(config: () => RootsConfig, initial: string | nu
 // Where `/cd` goes — the PERSON typing it, so it follows `!cd`'s rule, not the model's
 // `cd` tool's: held to the roots by the REAL path when any are configured, but free to
 // go anywhere when there are none (nobody needs to be asked; they typed it themselves).
-// A refusal throws, naming the roots when that is why they were refused.
+// `asked` is unescaped first — a name with a space, typed or Tab-completed as `a\ b`
+// the way the field spells one, resolves as `a b`, the real directory. A refusal
+// throws, naming the roots when that is why they were refused.
 export function cdChatTarget(config: RootsConfig, asked: string, base: string): string {
-  const abs = path.resolve(base, asked.replace(/^~(?=\/|$)/, os.homedir()));
+  const abs = path.resolve(base, unescape(asked).replace(/^~(?=\/|$)/, os.homedir()));
   if (dirAllowed(config, abs)) return abs;
   const roots = shellRoots(config);
   if (roots.length && !roots.map(realOf).some((r) => within(realOf(abs), r))) {
