@@ -208,8 +208,9 @@ export interface AgentOpts {
   // is while it is still being written rather than after the round has ended.
   onRoundKind?: (kind: 'tools') => void;
   // A line for the person about the turn itself, drawn dim in the conversation — a
-  // tool call the model wrote as text, said when it is asked again.
-  onNote?: (text: string) => void;
+  // tool call the model wrote as text, said when it is asked again; `markup` is the
+  // round's text as it came, the evidence (for the session's journal, never the screen).
+  onNote?: (text: string, detail?: { markup?: string }) => void;
   // Called before EVERY request of the turn — the first, and each after a round's tool
   // results are all in, so a call is never parted from its result. `transcript` is the
   // turn so far (the question is the last of the messages handed in, not in it);
@@ -905,7 +906,7 @@ export async function agentChat(
           process += kept;
           if (opts.onLiveCommit) opts.onLiveCommit(kept, false);
           else if (kept) onProcess?.(kept);
-          opts.onNote?.('tool call written as text — asked again');
+          opts.onNote?.('tool call written as text — asked again', { markup: roundContent });
           if (kept) current.push({ role: 'assistant', content: kept });
           // The round's reported size covers what it wrote; the line below joins after it.
           if (r.usage) usageAt = current.length;
@@ -915,7 +916,7 @@ export async function agentChat(
           current.push({ role: 'user', content: `Your tool call was written as text in your answer, so nothing ran. Make it as a real tool call.${have}` });
           continue;
         }
-        opts.onNote?.('tool call written as text again — the turn ends');
+        opts.onNote?.('tool call written as text again — the turn ends', { markup: roundContent });
         roundContent = kept;
       }
       if (r.toolCalls.length) {

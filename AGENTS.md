@@ -1187,7 +1187,8 @@ there is no `/fullscreen`.
   - `start` — the first line; `parent` for a fork, `continued` when the journal began
     after the session did.
   - `row` — user, bg, note: every row the person was shown, the question with its
-    images' names.
+    images' names; a queued message delivered mid-turn is a `user` row with `midTurn`,
+    written where it reached the model (after the round's calls, before the next).
   - `step` and `answer` — a round's text once, when `onLiveCommit` says what it was,
     with its reasoning.
   - `call-start` — from `onToolStart`, fired once a call's arguments are checked and
@@ -1220,8 +1221,12 @@ there is no `/fullscreen`.
     as it prints, under the same cap and note, beside a `result` that stays the capped
     tail the model got. Only the host's own bare `run_command` is handed
     `ctx.reportOutput` (`AgentOpts.onToolOutput`), and a chunk is always that call's.
-  - `compact` — the summary; `end` — how the turn ended: duration, tokens, stopped or
-    failed, and the text of a round cut off, which never reached `onLiveCommit`.
+  - `markup` — a tool call the model wrote as text: the note and `markup`, the round's
+    text as it came (the evidence the screen and the history never keep).
+  - `compact` — the summary and its row, `auto` when the chat compacted by itself;
+    `end` — how the turn ended: duration, tokens, stopped or failed, `roundLimit` with
+    `lastStep` (and `limitBy: 'tokens'`, `turnTokens` when the token budget ended it),
+    and the text of a round cut off, which never reached `onLiveCommit`.
   A turn's events go to the session its question was journaled in (`journalId`, taken
   in `send()`), even when a `/clear` lands mid-turn — they happened there. A FORK is
   different: the conversation goes on in the fork, so `journalTo` follows `forkedTo`

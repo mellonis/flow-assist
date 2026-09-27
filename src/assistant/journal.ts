@@ -288,7 +288,7 @@ export function exportMarkdown(events: JournalEvent[], opts: { title: string; id
     const text = typeof ev.text === 'string' ? ev.text : '';
     switch (ev.t) {
       case 'row':
-        if (ev.role === 'user') out.push(`**${ev.hostAsk ? 'The host asked' : 'You'}**${at}`, '', text, '');
+        if (ev.role === 'user') out.push(`**${ev.hostAsk ? 'The host asked' : 'You'}**${at}${ev.midTurn ? ' (during the turn, after its last step)' : ''}`, '', text, '');
         else if (ev.role === 'bg') out.push(`**Background result**${at}`, '', text, '');
         else if (ev.role === 'note') out.push(`*Note${at}:* ${text.split('\n')[0]}`, ...(text.includes('\n') ? ['', block(text.split('\n').slice(1).join('\n'))] : []), '');
         else if (ev.role === 'view') for (const v of Array.isArray(ev.views) ? ev.views as { text?: unknown }[] : []) out.push(block(String(v.text ?? '')), '');
@@ -334,10 +334,11 @@ export function exportMarkdown(events: JournalEvent[], opts: { title: string; id
         flushOutput();
         out.push(`*${String(ev.status ?? 'ended')}${typeof ev.ms === 'number' ? ` · ${(ev.ms / 1000).toFixed(1)} s` : ''}*`, '');
         break;
-      case 'compact': out.push('---', '', `**Compacted**${at} — from here on the model was given this summary instead of the conversation above:`, '', quoted(String(ev.summary ?? '')), '', '---', ''); break;
+      case 'markup': out.push(`*Note${at}:* ${String(ev.note ?? '')} — the model wrote:`, '', block(String(ev.markup ?? '')), ''); break;
+      case 'compact': out.push('---', '', `**Compacted${ev.auto ? ' automatically' : ''}**${at} — from here on the model was given this summary instead of the conversation above:`, '', quoted(String(ev.summary ?? '')), '', '---', ''); break;
       case 'end': {
         if (typeof ev.cut === 'string' && ev.cut) out.push(`**Assistant**${at} (cut off)`, '', ev.cut, '');
-        const how = [ev.stopped ? `stopped (${String(ev.stopped)})` : '', ev.failed ? `failed: ${String(ev.failed)}` : '', ev.roundLimit ? `stopped after ${String(ev.roundLimit)} rounds — no answer` : ''].filter(Boolean);
+        const how = [ev.stopped ? `stopped (${String(ev.stopped)})` : '', ev.failed ? `failed: ${String(ev.failed)}` : '', ev.roundLimit ? `stopped after ${ev.limitBy === 'tokens' ? `${String(ev.turnTokens)} tokens (ai.maxTurnTokens)` : `${String(ev.roundLimit)} rounds (ai.maxRounds)`} — no answer${ev.lastStep ? `; last step: ${String(ev.lastStep)}` : ''}` : ''].filter(Boolean);
         if (how.length) out.push(`*${how.join(' · ')}*`, '');
         break;
       }

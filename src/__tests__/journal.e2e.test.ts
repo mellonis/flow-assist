@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { readJournal, type JournalEvent } from '../assistant/journal.ts';
-import { ScriptedModel, bootApp, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, handoff, settle } from './helpers/scripted';
 import type { Make } from '../loader/plugin.ts';
 
 const realFetch = globalThis.fetch;
@@ -82,14 +82,14 @@ test('a session longer than the cap: the state file lost its first question, the
 test('a compact writes its summary to the journal, and the journal keeps what was compacted', async () => {
   const dir = dirOf();
   const model = new ScriptedModel();
-  model.script([{ text: 'Тренд — вверх.' }], [{ text: 'Итог: тренд вверх.' }]);
+  model.script([{ text: 'Тренд — вверх.' }], [{ text: handoff('Итог: тренд вверх.') }]);
   const ui = await boot(dir, model);
   await ask(ui, 'как тренд?');
   await ask(ui, '/compact');
   expect(ui.backend.lastFrame).toContain('compacted');
   const events = journalOf(dir);
   const at = events.findIndex((e) => e.t === 'compact');
-  expect(events[at]).toMatchObject({ summary: 'Итог: тренд вверх.' });
+  expect(events[at]).toMatchObject({ summary: handoff('Итог: тренд вверх.') });
   expect(events.slice(0, at).some((e) => e.t === 'answer' && e.text === 'Тренд — вверх.')).toBe(true);
   ui.app.unmount();
 });
@@ -168,7 +168,8 @@ test('/export renders the journal to markdown in the shell\'s directory — ever
   const model = new ScriptedModel();
   model.script(
     [{ tool: 'datetime', args: {} }, { tool: 'config_schema', args: {} }], [{ text: 'Первый ответ.' }],
-    [{ text: 'Итог беседы.' }],
+    // Long enough for what it replaces (a config_schema result among it).
+    [{ text: handoff(`Итог беседы. ${'подробно '.repeat(200)}`) }],
     [{ tool: 'todo', args: { action: 'add', text: 'проверить' } }], [{ text: 'Второй ответ.' }],
   );
   const ui = await bootApp(model, 100, 28, undefined, { sessions: { dir }, shell: { roots: [root] } });
@@ -486,4 +487,53 @@ test('a run_command the auto mode lets run (shell.autoRun with /auto all) is jou
   expect(events.find((e) => e.t === 'confirm')).toMatchObject({ name: 'run_command', answer: 'yes', by: 'auto' });
   expect(events.find((e) => e.t === 'call')).toMatchObject({ name: 'run_command', outcome: 'applied' });
   ui.app.unmount();
+});
+
+test('the journal keeps a turn stopped at a limit, a corrective round with its markup, and a queued message delivered mid-turn', async () => {
+  const dir = dirOf();
+  const model = new ScriptedModel();
+  const markup = 'Checking.\n<｜DSML｜function_calls>\n<｜DSML｜invoke name="clock">\n</｜DSML｜invoke>\n</｜DSML｜function_calls>';
+  model.script([{ text: markup }], [{ tool: 'datetime', args: {} }, { hold: true }], [{ tool: 'datetime', args: {} }]);
+  const ui = await boot(dir, model, { ai: { baseUrl: 'http://scripted.model', model: 'scripted', toolLoading: 'all', maxRounds: 3 } });
+  await ui.type('what time is it?');
+  await ui.press('return');
+  await settleUntil(() => model.requests.length >= 2);
+  await settle(4);
+  await ui.type('in UTC');
+  await ui.press('return');
+  model.release();
+  await settleUntil(() => journals(dir).length > 0 && journalOf(dir).some((e) => e.t === 'end'));
+  const events = journalOf(dir);
+  // The corrective round, with the markup that caused it as evidence.
+  expect(events.find((e) => e.t === 'markup')).toMatchObject({ note: 'tool call written as text — asked again', markup });
+  // The queued message, as the person's, at the moment it reached the model: after the
+  // second round's call, before the third round's.
+  const at = events.findIndex((e) => e.t === 'row' && e.role === 'user' && e.text === 'in UTC');
+  expect(events[at]).toMatchObject({ midTurn: true });
+  const calls = events.map((e, i) => (e.t === 'call' ? i : -1)).filter((i) => i >= 0);
+  expect(calls[0]!).toBeLessThan(at);
+  expect(calls[1]!).toBeGreaterThan(at);
+  // The turn stopped at the round cap, with where.
+  expect(events.find((e) => e.t === 'end')).toMatchObject({ roundLimit: 3, lastStep: 'datetime {}' });
+});
+
+test('the journal keeps an automatic compaction with its summary, and a turn ended by the token budget', async () => {
+  const dir = dirOf();
+  const model = new ScriptedModel();
+  model.script([{ text: 'short' }]);
+  const window = 20_000;
+  const ui = await boot(dir, model, { ai: { baseUrl: 'http://scripted.model', model: 'scripted', toolLoading: 'all', contextWindow: window, maxTurnTokens: 1 } });
+  await ask(ui, 'first');
+  const base = Math.ceil(JSON.stringify(model.requests[0]).length / 4);
+  model.script([{ text: `BIG ${'b'.repeat(Math.ceil((window * 0.85 - base) * 4))}` }]);
+  await ask(ui, 'tell me everything');
+  const summary = `## Goal\nJOURNALED ${'f'.repeat(1500)}\n## Done\n-\n## In progress\n-\n## Open decisions\nnone\n## Facts learned\n-`;
+  model.usage = { prompt_tokens: 50, completion_tokens: 5, prompt_tokens_details: { cached_tokens: 0 } };
+  model.script([{ text: summary }], [{ tool: 'datetime', args: {} }], [{ text: 'never' }]);
+  await ask(ui, 'go on');
+  await settleUntil(() => journalOf(dir).filter((e) => e.t === 'end').length >= 3);
+  const events = journalOf(dir);
+  expect(events.find((e) => e.t === 'compact')).toMatchObject({ auto: true });
+  expect(String(events.find((e) => e.t === 'compact')!.summary)).toContain('JOURNALED');
+  expect(events.filter((e) => e.t === 'end').at(-1)).toMatchObject({ roundLimit: 1, limitBy: 'tokens', lastStep: 'datetime {}' });
 });

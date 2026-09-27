@@ -1336,7 +1336,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             const sizes = before > 0 && after > 0 ? ` · ~${shortTokens(before)} → ~${shortTokens(after)} tokens` : '';
             const kept = incomplete ? ' · incomplete, previous kept' : '';
             const note = `── compacted${auto ? ' · auto' : ''}${sizes}${kept} ──`;
-            journal({ t: 'compact', summary, note });
+            journal({ t: 'compact', summary, note, ...(auto ? { auto: true } : {}) });
             setMessages((cur) => [...cur, { role: 'note', content: note, summary }]);
           };
 
@@ -1473,7 +1473,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 systemPrompt: () => joinSystem({ ...sysParts, summary: summaryBlock() }, projectBlock()),
                 // A line about the turn itself (a tool call the model wrote as text), a
                 // note in the conversation where it happened.
-                onNote: (text: string) => {
+                onNote: (text: string, detail?: { markup?: string }) => {
+                  // The journal keeps the markup the note is about, as evidence.
+                  if (detail?.markup) journalTo(journalId, { t: 'markup', note: text, markup: detail.markup });
                   if (epoch !== epochRef.current) return;
                   setMessages((cur) => [...cur, { role: 'note', content: text }]);
                   host.notify();
@@ -1500,7 +1502,11 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                     if (now.length) {
                       queueRef.current = queueRef.current.filter((m) => !now.includes(m));
                       syncQueue();
-                      for (const m of now) pushHistory(historyRef.current, m.text);
+                      for (const m of now) {
+                        pushHistory(historyRef.current, m.text);
+                        // In the journal as the person's message, where it reached the model.
+                        journalTo(journalId, { t: 'row', role: 'user', text: m.text, midTurn: true });
+                      }
                       delivered.push(...now.map((m): ChatMessage => ({ role: 'user', content: m.text })));
                       setMessages((cur) => [...cur, ...now.map((m): ChatMsg => ({ role: 'user', content: m.text }))]);
                       host.notify();
@@ -1856,7 +1862,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               journalTo(journalId, {
                 t: 'end', ms: finalMs, ...(spent ? { tokens: spent } : {}),
                 ...(aborted ? { stopped: stopKeyRef.current || keyGlyph('escape') } : {}), ...(failed ? { failed: failure } : {}),
-                ...(roundLimit ? { roundLimit } : {}),
+                ...(roundLimit ? { roundLimit, ...(lastStep ? { lastStep } : {}), ...(limitTokens !== undefined ? { limitBy: 'tokens', turnTokens: limitTokens } : {}) } : {}),
                 // A round cut off by Esc or an error never reached `onLiveCommit`.
                 ...(roundText ? { cut: roundText } : {}), ...(roundReasoning ? { reasoning: roundReasoning } : {}),
               });
