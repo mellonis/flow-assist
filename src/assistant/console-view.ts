@@ -7,11 +7,17 @@
 // `· 40 lines` after it when the output is longer than a click shows — how much there
 // is to read is news only then, and a block that size may open in the chat's pager —
 // or `· last 200 of 300 lines` when the view kept only the tail of what was printed.
-// Open, it is the command, the last `ctx.lines` lines of output under a bar a drag
-// never copies, and the same tail. The tail says how it ended in words a person reads
-// without decoding: ✓, ✗ with the code (1 and 127 mean different things), stopped,
-// timed out, or ✗ failed — the tool threw, or a restart found this block still live
-// (the process ended mid-command, so its own true ending was never recorded).
+// The command itself is kept WHOLE up to `VIEW_CAPS.command` — it is text someone
+// typed. A folded row that has no room for it is cut with `cutStep`, reserving space
+// for the outcome first, so the duration and how it ended stay on screen even when
+// the command does not fit; the open block never cuts it, wrapping it across its own
+// rows instead (`wrapCells`). Open, it is the (possibly wrapped) command, the last
+// `ctx.lines` lines of output under a bar a drag never copies, and the same tail. The
+// tail says how it ended in words a person reads without decoding: ✓, ✗ with the code
+// (1 and 127 mean different things), stopped, timed out, or ✗ failed — the tool
+// threw, or a restart found this block still live (the process ended mid-command, so
+// its own true ending was never recorded).
+import { cellWidth, cutStep, wrapCells } from '../cells.js';
 import { VIEW_CAPS, sanitizeViewText, type ViewLine, type ViewRenderCtx, type ViewRenderer, type ViewSpan } from './views.js';
 import { shellOutcome, tildePath, type ShellResult } from './shell.js';
 
@@ -78,13 +84,13 @@ export function capConsoleData(raw: unknown): ConsoleData {
   const ms = Number(v.ms);
   return {
     command: oneLine(String(v.command ?? ''), VIEW_CAPS.command),
-    cwd: oneLine(String(v.cwd ?? ''), VIEW_CAPS.command),
+    cwd: oneLine(String(v.cwd ?? ''), VIEW_CAPS.path),
     text: capConsoleText(String(v.text ?? '')),
     ...(v.exitCode === undefined ? {} : { exitCode: typeof v.exitCode === 'number' ? v.exitCode : null }),
     ...(v.ms === undefined ? {} : Number.isFinite(ms) && ms >= 0 ? { ms } : {}),
     ...(v.status ? { status: oneLine(String(v.status), 80) } : {}),
     ...(v.showCwd === true ? { showCwd: true } : {}),
-    ...(v.movedTo ? { movedTo: oneLine(String(v.movedTo), VIEW_CAPS.command) } : {}),
+    ...(v.movedTo ? { movedTo: oneLine(String(v.movedTo), VIEW_CAPS.path) } : {}),
     ...(v.note ? { note: oneLine(String(v.note), 80) } : {}),
     ...(v.interactive === true ? { interactive: true } : {}),
     ...((n) => (n ? { lines: n } : {}))(linesOf(String(v.text ?? ''), v.lines)),
@@ -132,25 +138,47 @@ export function consoleTail(d: ConsoleData, ctx: Pick<ViewRenderCtx, 'live' | 'f
   return [{ text: word, color: 'warn' }, { text: ` · ${secs(ms)}`, dim: true }, ...where];
 }
 
+const INTERACTIVE_LABEL = ' · interactive';
+
 export const renderConsole: ViewRenderer = (raw, ctx) => {
   const d = (raw ?? {}) as ConsoleData;
   const command = String(d.command ?? '');
   const tail = consoleTail(d, ctx);
-  const head: ViewLine = [{ text: command }, ...(d.interactive ? [{ text: ' · interactive', dim: true }] : [])];
+  const marker: ViewSpan[] = d.interactive ? [{ text: INTERACTIVE_LABEL, dim: true }] : [];
   const all = d.text ? String(d.text).split('\n') : [];
   if (ctx.folded) {
     const total = typeof d.lines === 'number' && d.lines > all.length ? d.lines : 0;
     const size: ViewSpan[] = total
       ? [{ text: ` · last ${all.length} of ${total} lines`, dim: true }]
       : all.length > Math.max(1, ctx.lines) ? [{ text: ` · ${all.length} lines`, dim: true }] : [];
-    return [[...head, { text: ' · ', dim: true }, ...tail, ...size]];
+    // A folded row is ONE line: what does not fit is cut, but the duration and the
+    // outcome are news every time, so they are reserved first and the COMMAND gives
+    // up its room, not them. Only the OUTCOME itself (its icon/word and, unless the
+    // tail ended there already, its duration) is reserved — a person's own
+    // `!command` also appends where it ran (`showCwd`), which is a bonus and may be
+    // the one thing cut instead when a long directory would otherwise squeeze the
+    // command down to nothing.
+    const outcome = tail.slice(0, ctx.failed || ctx.live ? 1 : 2);
+    const rest = [...marker, { text: ' · ' }, ...outcome];
+    const restWidth = rest.reduce((w, s) => w + cellWidth(String(s.text ?? '')), 0);
+    const cmd = cutStep(command, ctx.width - restWidth);
+    return [[{ text: cmd }, ...marker, { text: ' · ', dim: true }, ...tail, ...size]];
   }
   const max = Math.max(1, ctx.lines);
   const cutN = all.length > max ? all.length - max : 0;
   const bar: ViewSpan = { text: '│ ', chrome: true, dim: true };
+  // The command is kept WHOLE: wrapped across as many rows as it needs, never cut
+  // with an ellipsis. The interactive label rides the last row when there is room
+  // for it there, or gets a row of its own otherwise.
+  const cmdRows = wrapCells(command, ctx.width);
+  const lastRow = cmdRows[cmdRows.length - 1]!;
+  const markerFits = marker.length > 0 && cellWidth(INTERACTIVE_LABEL) <= ctx.width - cellWidth(lastRow);
+  const head: ViewLine[] = cmdRows.map((line, i): ViewLine =>
+    i === cmdRows.length - 1 && markerFits ? [{ text: line }, ...marker] : [{ text: line }]);
+  if (marker.length > 0 && !markerFits) head.push([{ text: INTERACTIVE_LABEL.trimStart(), dim: true }]);
   const body: ViewLine[] = [
     ...(cutN ? [[bar, { text: `… ${cutN} line${cutN === 1 ? '' : 's'} cut${ctx.moreKey ? ` · ${ctx.moreKey} for all` : ''}`, dim: true }]] : []),
     ...(cutN ? all.slice(-max) : all).map((l): ViewLine => [bar, { text: l }]),
   ];
-  return [head, ...body, tail];
+  return [...head, ...body, tail];
 };

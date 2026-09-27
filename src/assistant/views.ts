@@ -39,7 +39,14 @@ export const VIEW_CAPS = {
   // protects the screen: a fenced line longer than the window is hard-wrapped into
   // several rows, so a few very long lines cost more rows than many short ones.
   lineChars: 200,
-  command: 300,
+  // A command is text someone typed (the person's own, or the model's confirmed
+  // one) — kept WHOLE at collection, a generous cap rather than a display limit.
+  // A folded row may still cut it with `cutStep` to leave room for the outcome;
+  // the opened block never does, wrapping it across its own rows instead.
+  command: 16 * 1024,
+  // A path (a command's cwd, or where a `cd` inside it left the directory) — short
+  // by nature, so it keeps the old, tighter cap.
+  path: 300,
   // How many lines an open console block shows.
   folded: 20,
   // How many rows any block may take, whatever its renderer returns.

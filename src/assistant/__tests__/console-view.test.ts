@@ -1,7 +1,7 @@
 // The host's own renderer: a command, folded to one line, opened to its last lines.
 import { expect, test } from 'bun:test';
 import { capConsoleData, capConsoleText, consoleTail, renderConsole, type ConsoleData } from '../console-view';
-import { VIEW_CAPS, type ViewRenderCtx } from '../views';
+import { frameView, VIEW_CAPS, type ViewRecord, type ViewRenderCtx } from '../views';
 
 const base: ViewRenderCtx = { width: 60, folded: true, live: false, failed: false, elapsedMs: 0, lines: 3, moreKey: '^o' };
 const d = (over: Partial<ConsoleData> = {}): ConsoleData => ({ command: 'bun test', cwd: '~/app', text: '', exitCode: 0, ms: 4200, status: 'exit 0', ...over });
@@ -41,6 +41,25 @@ test('a view cut at collection remembers how much was printed, and its fold line
   expect(renderConsole(once, base).map(plain)).toEqual(['seq 1 300 · ✓ 0.0 s · last 200 of 300 lines']);
   // Nothing cut, nothing recorded.
   expect(capConsoleData({ command: 'x', cwd: '~', text: 'a\nb' }).lines).toBeUndefined();
+});
+
+test('a folded row at a narrow width cuts the command, never the duration and the outcome', () => {
+  const rec: ViewRecord = { kind: 'console', data: d({ command: 'x'.repeat(300) }), phase: 'done', startedAt: 0 };
+  const framed = frameView(rec, { console: renderConsole }, { ...base, width: 24 }, {});
+  const text = framed.map((l) => l.spans.map((s) => s.text).join('')).join('\n');
+  expect(text).toContain('✓ 4.2 s');
+  expect(text).toContain('…');
+});
+
+test('the opened block never cuts the command, however long — it wraps across its own rows', () => {
+  const command = Array.from({ length: 2000 }, (_, i) => String(i % 10)).join('');
+  const rec: ViewRecord = { kind: 'console', data: d({ command, text: '' }), phase: 'done', startedAt: 0 };
+  const framed = frameView(rec, { console: renderConsole }, { ...base, width: 80, folded: false }, {});
+  const rows = framed.map((l) => l.spans.map((s) => s.text).join(''));
+  const tail = rows.pop(); // the outcome row, `✓ 4.2 s`
+  expect(tail).toBe('✓ 4.2 s');
+  expect(rows.join('')).toBe(command);
+  expect(rows.some((r) => r.includes('…'))).toBe(false);
 });
 
 test('a person\'s own command also says where it ran', () => {
@@ -94,8 +113,9 @@ test('capConsoleData caps a console view like a confirmed run_command does', () 
 });
 
 test('capConsoleData caps movedTo and note the way it caps every other field', () => {
-  const capped = capConsoleData({ command: 'cd sub', cwd: '~', movedTo: 'm'.repeat(VIEW_CAPS.command + 50), note: 'n'.repeat(200) } as unknown);
-  expect(capped.movedTo).toHaveLength(VIEW_CAPS.command + 1);
+  // A path (movedTo) keeps the tighter cap; only the command itself is generous.
+  const capped = capConsoleData({ command: 'cd sub', cwd: '~', movedTo: 'm'.repeat(VIEW_CAPS.path + 50), note: 'n'.repeat(200) } as unknown);
+  expect(capped.movedTo).toHaveLength(VIEW_CAPS.path + 1);
   expect(capped.note).toHaveLength(81);
   // Absent stays absent — no field a session file has to carry for every command.
   expect(capConsoleData({ command: 'x', cwd: '~' }).movedTo).toBeUndefined();

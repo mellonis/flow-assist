@@ -690,6 +690,11 @@ there is no `/fullscreen`.
   renderer draws it, the host frames it") and fills it as the command prints, and the
   chat draws the `$ …` block. A declined call leaves none — nothing ran; a failed one
   shows its output and its exit code.
+  **The command itself is kept WHOLE**, up to `VIEW_CAPS.command` (16 KiB — it is text
+  someone typed, never a display cap): a folded row that has no room for it cuts it
+  with `cutStep`, reserving space for the outcome first so the duration and how it
+  ended stay on screen; the opened block never cuts it, wrapping it across its own
+  rows instead (`wrapCells`, `src/cells.ts`).
   Folded, the block is ONE line saying how it ended — `cmd · ✓ 4.2 s`, `✗ exit 1 · 4.2
   s`, `stopped`, `timed out` — and, when it printed more than a click shows, how much it
   holds: `· 40 lines`, or `· last 200 of 300 lines` when the view kept only the tail of

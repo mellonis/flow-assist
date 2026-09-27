@@ -35,3 +35,21 @@ export function cutLeft(text: string, width: number): string {
   const clusters = graphemes(str).reverse();
   return `…${clusters.slice(0, fitClusters(clusters, width - 1)).reverse().join('')}`;
 }
+
+// `text` split into rows of at most `width` cells each, whole clusters only and
+// nothing dropped — for text that must stay COMPLETE across several terminal rows
+// rather than being cut with an ellipsis (an open command block, never a folded
+// one). Unlike `wrapText` from `@flowtty/core`, this never drops the space at a
+// word break: joining the rows back together reproduces the input exactly.
+export function wrapCells(text: string, width: number): string[] {
+  const w = Math.max(1, width);
+  const clusters = graphemes(String(text ?? ''));
+  if (!clusters.length) return [''];
+  const rows: string[] = [];
+  for (let i = 0; i < clusters.length; ) {
+    const n = Math.max(1, fitClusters(clusters, w, i));
+    rows.push(clusters.slice(i, i + n).join(''));
+    i += n;
+  }
+  return rows;
+}
