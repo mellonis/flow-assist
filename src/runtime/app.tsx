@@ -38,8 +38,11 @@ import { completeCommand, describeConfigValue, flattenConfigPaths, parseConfigAr
 import { lineTab, lineView, type TabWalk } from '../config/commandline.js';
 import { hostConfigSchema } from '../config/schema.js';
 import {
+  applyConfigChange,
+  checkConfigFiles,
   configSource,
   configValue,
+  declineConfigChange,
   parseValue,
   RESTART_NOTE,
   resetSessionConfig,
@@ -343,6 +346,13 @@ export function renderApp(
   const services = createServices({ config, tools, onExit });
   (services as unknown as HostServices).clipboardImage = clipboardImage ?? (() => readClipboardImage());
   if (interactive) (services as unknown as HostServices).interactive = interactive;
+  // A settings file changed outside the host is asked about in the chat before it is
+  // applied (src/config/load.ts, the guard; armed by `runInteractive`).
+  (services as unknown as HostServices).configChanges = {
+    check: () => checkConfigFiles(),
+    apply: (change) => applyConfigChange(config, change, { pluginConfigs: pluginConfigs(plugins) }),
+    decline: (change) => declineConfigChange(change),
+  };
   if (pluginsNote) services.log.append(`[plugins] ${pluginsNote}`);
   for (const line of loadNotes) services.log.append(line);
   // A config that still sets the roots as `fs.roots` is read, and said once in the log.

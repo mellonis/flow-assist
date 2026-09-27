@@ -15,6 +15,11 @@ What each version of flow-assist brought, newest first. The version is the one i
   secret variable the app knows taken out of its environment and says which, by name,
   once per conversation; `shell.passEnv` (yours to set, never the assistant's) lists
   the ones a command may see. Your own `!command` keeps the whole environment.
+- **A settings file changed behind the app's back is asked about, not applied.** While
+  the app runs, a change to `config.local.json` or `config.json` it did not make itself
+  — a command's, another terminal's — leaves the running config as it was, and the chat
+  asks `… changed outside flow-assist — apply? (y/n)` with the keys that changed; yes
+  applies it, no keeps it off until the next start. The app's own writes apply as ever.
 - **An MCP server that is not there at start is tried again, not dropped for the run.**
   A server that fails to connect — a gateway that answered 502 just then, an IDE not open
   yet — or drops later (refused, reset, a gateway's 502/503/504, a process that exits;

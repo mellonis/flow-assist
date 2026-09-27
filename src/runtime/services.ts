@@ -55,6 +55,14 @@ export interface HostServices {
   // What `!!command` runs with (src/assistant/interactive.ts): which `script` there is,
   // the process, the signals. Only tests pass one; absent means the machine's own.
   interactive?: import('../assistant/interactive.js').InteractiveDeps;
+  // The settings files changed outside the host (src/config/load.ts, the guard):
+  // `check` lists what waits for the person's answer, `apply` lays a change on the
+  // running config, `decline` keeps it off until restart. Bound by `renderApp`.
+  configChanges?: {
+    check: () => import('../config/load.js').ConfigChange[];
+    apply: (change: import('../config/load.js').ConfigChange) => { applied: string[]; restart: string[] };
+    decline: (change: import('../config/load.js').ConfigChange) => void;
+  };
   showMessage: (msg: string) => void;
   onExit: () => void;
   clearCache: () => void;

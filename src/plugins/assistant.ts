@@ -19,7 +19,7 @@ import { NOTES_MODES, addCalls, callRun, endRound, startsWithNext, notesCommand,
 import { lineTab, lineView, type TabWalk } from '../config/commandline.js';
 import { completePath, completeSlash, listDirectory, type ChatCommandDef } from '../config/fieldcomplete.js';
 import { configSetLine, type CompleteResult } from '../config/commands.js';
-import { parseValue } from '../config/load.js';
+import { RESTART_NOTE, parseValue, type ConfigChange } from '../config/load.js';
 import { apiHistory, compactConversation, chatLanguage, requestTools, transcriptSoFar } from '../assistant/agent.js';
 import { RESUMED_NOTE, autoCompactLimits, overThreshold } from '../assistant/compaction.js';
 import { stripToolMarkup } from '../assistant/tool-markup.js';
@@ -1213,7 +1213,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // block renders. pendingRef holds { name, args, resolve } — read by the
           // input-handler (a ref, always current); pendingAsk is only for render.
           const pendingRef = ui.useRef<{ name: string; args: string; input?: string; resolve: (ok: boolean, by?: 'person' | 'stop' | 'reset') => void } | null>(null);
-          const [pendingAsk, setPendingAsk] = ui.useState<{ name: string; args: string; command?: string; line?: string; input?: string } | null>(null);
+          const [pendingAsk, setPendingAsk] = ui.useState<{ name: string; args: string; command?: string; line?: string; input?: string; title?: string; hint?: string } | null>(null);
           // `ask_user`: the same kind of pause, but the person picks among options.
           // askRef is what the input handler steps key by key (a ref, always current);
           // pendingQuestion mirrors it for the render.
@@ -1248,6 +1248,41 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // Resolves the y/n pause: ok=true confirms the writing op (tool runs),
           // ok=false declines it (agentChat returns «declined» as the tool result).
           // `by` — who settled it: the person's key, or a stop or reset that closed it.
+          // A settings file changed outside the host (src/config/load.ts, the guard) is
+          // put to the person as a y/n of its own, in the confirmation's place: yes lays
+          // it on the running config, no keeps it off until restart. Never answered by
+          // the auto mode — it does not go through `confirmWrite`. A stop or a reset that
+          // closes it answers nothing: the next check asks again. Asked between a round's
+          // results and the next request (`beforeRequest` waits for it), after a
+          // `!command` and after a turn — never over another pending y/n or question.
+          const configAskRef = ui.useRef<Promise<void> | null>(null);
+          const askConfigChanges = (): Promise<void> => {
+            if (configAskRef.current) return configAskRef.current;
+            const svc = (host.services as { configChanges?: { check(): ConfigChange[]; apply(c: ConfigChange): { applied: string[]; restart: string[] }; decline(c: ConfigChange): void } }).configChanges;
+            if (!svc || pendingRef.current || askRef.current) return Promise.resolve();
+            const changes = svc.check();
+            if (!changes.length) return Promise.resolve();
+            const run = (async () => {
+              for (const change of changes) {
+                const answer = await new Promise<boolean | null>((resolve) => {
+                  pendingRef.current = { name: 'config', args: '', resolve: (ok, by = 'person') => resolve(by === 'person' ? ok : null) };
+                  setPendingAsk({ name: 'config', args: '', title: `⚠ ${change.file} changed outside flow-assist — apply? (y/n)`, line: change.lines.join('\n'), hint: `y applies it now · n keeps the running config until restart` });
+                  host.notify();
+                });
+                if (answer === null) break;
+                if (answer) {
+                  const r = svc.apply(change);
+                  pushNote(`Applied ${change.file}: ${[...r.applied, ...r.restart.map((k) => `${k} (${RESTART_NOTE})`)].join(', ')}.`);
+                } else {
+                  svc.decline(change);
+                  pushNote(`Kept the running config — ${change.file} is read as it is at the next start.`);
+                }
+              }
+            })().finally(() => { configAskRef.current = null; });
+            configAskRef.current = run;
+            return run;
+          };
+
           const settleConfirm = (ok: boolean, by: 'person' | 'stop' | 'reset' = 'person') => {
             const p = pendingRef.current;
             if (!p) return;
@@ -1648,6 +1683,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // fails is logged and the request goes as it is; Esc stops it with the turn.
                 beforeRequest: async ({ round, transcript, measured }: { round: number; transcript: ChatMessage[]; measured?: number }) => {
                   if (epoch !== epochRef.current) return;
+                  // A settings file a command just changed is answered before the model
+                  // reads another word (the guard, above).
+                  await askConfigChanges();
+                  if (epoch !== epochRef.current) return;
                   // First what the person queued since the last request: it reaches the
                   // model now, after the round's results, as their message — each one
                   // whose wait is the next step (`queueWait`). On screen it stands where
@@ -2035,6 +2074,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // A round cut off by Esc or an error never reached `onLiveCommit`.
                 ...(roundText ? { cut: roundText } : {}), ...(roundReasoning ? { reasoning: roundReasoning } : {}),
               });
+              // A command the turn ran may have changed a settings file (the guard).
+              void askConfigChanges();
               setMessages(cur => {
                 // A round cut off by Esc or an error never said what it was. Its text
                 // stays where it was drawn: a round known to carry a tool call — or
@@ -2287,6 +2328,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               if (epoch === epochRef.current) flushLive();
               persist();
               if (!askNow) setStreaming(false);
+              // A command of the person's may have changed a settings file (the guard).
+              void askConfigChanges();
               setToolLabel('');
               abortRef.current = null;
               if (askNow) {

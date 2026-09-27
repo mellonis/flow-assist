@@ -1,9 +1,10 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { appliesOnRestart, hostConfigSchema, isLeashKey, modelMaySave, modelMaySet } from './schema.js';
 import { llmOpts } from '../assistant/llm-endpoint.js';
-import { refreshSecrets } from '../assistant/secrets.js';
+import { redactSecrets, refreshSecrets } from '../assistant/secrets.js';
 
 // Config files live outside the repo, under the user's home config dir (or the
 // XDG override). config.json is the committed/default base; config.local.json
@@ -105,15 +106,210 @@ export type ConfigSource = 'session' | 'local' | 'config' | 'default';
 type ConfigLayers = { base: Record<string, unknown>; local: Record<string, unknown> };
 const LAYERS = new WeakMap<object, ConfigLayers>();
 
+// ─── The guard ───────────────────────────────────────────────────────────────
+// Config is the person's, and a command the model runs can write a file as well as
+// anyone. So the host records what it last read or wrote of each settings file — its
+// mtime and size, a hash of its text, the object it holds (`SEEN`) — and, once the
+// running app arms the guard (`guardConfigFiles`, in `runInteractive`), serves only
+// that: a change it did not make itself is NOT applied. `checkConfigFiles` — a stat per
+// file, the file read only when the stat moved — reports it with the keys it changes,
+// and the chat asks the person; yes applies it (`applyConfigChange`), no keeps the
+// running config (`declineConfigChange`, not asked again for that content). The host's
+// own writes (`config set` in the app, `config_set`, the saves below) are made on top of
+// the accepted content and accepted as they are made. Unarmed — a start, the CLI, a
+// one-shot prompt — the files are read as they are: a restart reads the person's file.
+type Seen = { mtimeMs: number; size: number; hash: string; content: Record<string, unknown> | null };
+const SEEN = new Map<string, Seen>();
+const PENDING = new Map<string, ConfigChange>();
+const DECLINED = new Map<string, { mtimeMs: number; size: number; hash: string }>();
+let GUARDED = false;
+
+// A change to a settings file the host did not make: which file, the keys it changes
+// and a line per key saying how (`key: old → new`, a value at a secret-looking key
+// masked).
+export interface ConfigChange {
+  file: 'config.json' | 'config.local.json';
+  path: string;
+  keys: string[];
+  lines: string[];
+  hash: string;
+  mtimeMs: number;
+  size: number;
+  content: Record<string, unknown> | null;
+}
+
+const hashOf = (text: string | null): string => (text === null ? 'missing' : crypto.createHash('sha256').update(text).digest('hex'));
+const statOf = (p: string): { mtimeMs: number; size: number } => {
+  try { const s = fs.statSync(p); return { mtimeMs: s.mtimeMs, size: s.size }; } catch { return { mtimeMs: -1, size: -1 }; }
+};
+const readRaw = (p: string): string | null => { try { return fs.readFileSync(p, 'utf8'); } catch { return null; } };
+const parseObject = (raw: string | null): Record<string, unknown> | null => {
+  if (raw === null) return null;
+  try { return asConfigObject(JSON.parse(raw)); } catch { return null; }
+};
+// The stat is taken BEFORE the read: a write landing between them is then a state the
+// host never saw, and the next check reports it.
+function observe(p: string): Seen {
+  const st = statOf(p);
+  const raw = readRaw(p);
+  return { ...st, hash: hashOf(raw), content: parseObject(raw) };
+}
+const guardedPaths = (): string[] => [configPath(), configLocalPath()];
+const isGuardedPath = (p: string): boolean => guardedPaths().includes(p);
+
+// Arms the guard: from now on the settings files are served as the host last read or
+// wrote them. The running app arms it after its start has read the config.
+export function guardConfigFiles(): void {
+  GUARDED = true;
+  for (const p of guardedPaths()) if (!SEEN.has(p)) SEEN.set(p, observe(p));
+}
+// Disarms it and forgets what was seen — a test's cleanup.
+export function unguardConfigFiles(): void {
+  GUARDED = false;
+  SEEN.clear();
+  PENDING.clear();
+  DECLINED.clear();
+}
+
+// A value as the change's line shows it: masked at a secret-looking key, a known
+// secret redacted, cut short.
+const MASK_KEY = /TOKEN|SECRET|PASSWORD|PASSWD|COOKIE|API_?KEY|_KEY$|^authorization$|^headers$|^env$/i;
+function shownValue(key: string, v: unknown): string {
+  if (v === undefined) return '(unset)';
+  if (key.split('.').some((seg) => MASK_KEY.test(seg))) return '‹masked›';
+  const s = redactSecrets(JSON.stringify(v) ?? String(v));
+  return s.length > 80 ? `${s.slice(0, 79)}…` : s;
+}
+const isPlain = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
+// The leaf keys whose values differ between two objects, sorted.
+function changedKeys(a: unknown, b: unknown, prefix = ''): string[] {
+  if (isPlain(a) || isPlain(b)) {
+    const x = isPlain(a) ? a : {};
+    const y = isPlain(b) ? b : {};
+    if (!isPlain(a) && a !== undefined) return [prefix];
+    if (!isPlain(b) && b !== undefined) return [prefix];
+    return [...new Set([...Object.keys(x), ...Object.keys(y)])].sort()
+      .flatMap((k) => changedKeys(x[k], y[k], prefix ? `${prefix}.${k}` : k));
+  }
+  return JSON.stringify(a) === JSON.stringify(b) ? [] : [prefix];
+}
+
+// Whether the file at `p` holds something the host did not accept: the change, or null.
+function checkFile(p: string): ConfigChange | null {
+  const seen = SEEN.get(p) ?? observe(p);
+  if (!SEEN.has(p)) SEEN.set(p, seen);
+  const st = statOf(p);
+  if (st.mtimeMs === seen.mtimeMs && st.size === seen.size) { PENDING.delete(p); return null; }
+  const pending = PENDING.get(p);
+  if (pending && pending.mtimeMs === st.mtimeMs && pending.size === st.size) return pending;
+  const declined = DECLINED.get(p);
+  if (declined && declined.mtimeMs === st.mtimeMs && declined.size === st.size) return null;
+  const raw = readRaw(p);
+  const hash = hashOf(raw);
+  if (hash === seen.hash) {
+    // Touched, not changed: the same text under a new stat.
+    SEEN.set(p, { ...seen, ...st });
+    PENDING.delete(p);
+    return null;
+  }
+  if (declined?.hash === hash) { DECLINED.set(p, { ...st, hash }); return null; }
+  const content = parseObject(raw);
+  const keys = changedKeys(seen.content ?? {}, content ?? {});
+  const lines = keys.map((k) => `${k}: ${shownValue(k, getDeep(seen.content ?? {}, k))} → ${shownValue(k, getDeep(content ?? {}, k))}`);
+  if (raw !== null && content === null) lines.push('the file does not hold a JSON object — applied, it reads as empty');
+  if (!keys.length && !lines.length) { SEEN.set(p, { ...st, hash, content }); PENDING.delete(p); return null; }
+  const change: ConfigChange = { file: path.basename(p) as ConfigChange['file'], path: p, keys, lines, hash, ...st, content };
+  PENDING.set(p, change);
+  return change;
+}
+
+// Every settings file that holds a change the host did not make and the person has not
+// answered — a stat per file when nothing changed. Empty while the guard is not armed.
+export function checkConfigFiles(): ConfigChange[] {
+  if (!GUARDED) return [];
+  return guardedPaths().map(checkFile).filter((c): c is ConfigChange => c !== null);
+}
+
+// Yes: the change is accepted and laid on `config` — the running app's — key by key,
+// but a key read at start (`appliesOnRestart`) waits for the restart. Returns which.
+export function applyConfigChange(
+  config: Record<string, unknown>,
+  change: ConfigChange,
+  opts: { rootSchema?: unknown; pluginConfigs?: Record<string, unknown> } = {},
+): { applied: string[]; restart: string[] } {
+  SEEN.set(change.path, { mtimeMs: change.mtimeMs, size: change.size, hash: change.hash, content: change.content });
+  PENDING.delete(change.path);
+  DECLINED.delete(change.path);
+  const layers = LAYERS.get(config);
+  if (layers) {
+    if (change.file === 'config.json') layers.base = structuredClone(change.content ?? {});
+    else layers.local = structuredClone(change.content ?? {});
+  }
+  const merged = deepMerge(structuredClone(SEEN.get(configPath())?.content ?? {}), structuredClone(SEEN.get(configLocalPath())?.content ?? {}));
+  for (const [k, v] of SESSION) setDeep(merged, k, structuredClone(v));
+  const applied: string[] = [];
+  const restart: string[] = [];
+  for (const key of change.keys) {
+    if (configMarks(opts.rootSchema ?? hostConfigSchema, key, opts.pluginConfigs).restart) { restart.push(key); continue; }
+    const v = getDeep(merged, key);
+    if (v === undefined) unsetDeep(config, key);
+    else setDeep(config, key, structuredClone(v));
+    applied.push(key);
+  }
+  refreshSecrets(configValueView(config));
+  return { applied, restart };
+}
+
+// No: the running config stays as it is until a restart, and this content of the file
+// is not asked about again.
+export function declineConfigChange(change: ConfigChange): void {
+  DECLINED.set(change.path, { mtimeMs: change.mtimeMs, size: change.size, hash: change.hash });
+  PENDING.delete(change.path);
+}
+
+// A settings file as the host reads it: armed, the accepted content (and a check that
+// reports a change); otherwise the file as it is, recorded.
+function readSettings(p: string): Record<string, unknown> | null {
+  if (!isGuardedPath(p)) return asConfigObject(readConfigFile(p));
+  if (GUARDED) {
+    checkFile(p);
+    const c = SEEN.get(p)?.content;
+    return c ? structuredClone(c) : null;
+  }
+  const seen = observe(p);
+  SEEN.set(p, seen);
+  return seen.content ? structuredClone(seen.content) : null;
+}
+
+// What a save starts from: the accepted content while the guard is armed — a write of
+// the host's must never carry in a change it did not accept — else the file.
+function settingsBase(filePath: string): Record<string, unknown> {
+  if (GUARDED && isGuardedPath(filePath)) return structuredClone(SEEN.get(filePath)?.content ?? {});
+  const current = fs.existsSync(filePath) ? JSON.parse(fs.readFileSync(filePath, 'utf8')) : {};
+  return current && typeof current === 'object' ? current : {};
+}
+// Writes a settings file and records it as seen: the host's own write is accepted.
+function writeSettings(filePath: string, next: Record<string, unknown>): void {
+  const text = JSON.stringify(next, null, 2);
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, text, 'utf8');
+  if (isGuardedPath(filePath)) {
+    SEEN.set(filePath, { ...statOf(filePath), hash: hashOf(text), content: structuredClone(next) });
+    PENDING.delete(filePath);
+    DECLINED.delete(filePath);
+  }
+}
+
 // Loads the effective host config: config.json deep-merged with the local
 // overrides in config.local.json, and the session's values laid over both. Missing
 // files simply fall back to the other side (or an empty object), never throwing.
 // `localPath` swaps the local overrides file — tests point it at a temp file.
 // `session: false` reads the files alone — for a caller that writes the result back to
-// a file, which must never carry a session value into it.
+// a file, which must never carry a session value into it. With the guard armed each
+// file is what the host last accepted (above).
 export function loadConfig(opts?: { localPath?: string; session?: boolean }): Record<string, unknown> {
-  const base = asConfigObject(readConfigFile(configPath())) ?? {};
-  const local = asConfigObject(readConfigFile(opts?.localPath ?? configLocalPath())) ?? {};
+  const base = readSettings(configPath()) ?? {};
+  const local = readSettings(opts?.localPath ?? configLocalPath()) ?? {};
   const merged = deepMerge(structuredClone(base), structuredClone(local));
   if (opts?.session !== false) for (const [key, value] of SESSION) setDeep(merged, key, structuredClone(value));
   LAYERS.set(merged, { base, local });
@@ -483,10 +679,8 @@ const configLocalWritePath = configLocalPath;
 // overrides. Returns the resulting object (or null on a write error).
 export function saveConfig(merge: Record<string, unknown>, filePath: string = configLocalWritePath()): Record<string, unknown> | null {
   try {
-    const current = fs.existsSync(filePath) ? JSON.parse(fs.readFileSync(filePath, 'utf8')) : {};
-    const next = { ...current, ...merge };
-    fs.mkdirSync(path.dirname(filePath), { recursive: true });
-    fs.writeFileSync(filePath, JSON.stringify(next, null, 2), 'utf8');
+    const next = { ...settingsBase(filePath), ...merge };
+    writeSettings(filePath, next);
     return next;
   } catch {
     return null;
@@ -497,11 +691,8 @@ export function saveConfig(merge: Record<string, unknown>, filePath: string = co
 // overrides. Returns the resulting object or null.
 export function saveConfigSetting(key: string, value: unknown, filePath: string = configLocalWritePath()): Record<string, unknown> | null {
   try {
-    const current = fs.existsSync(filePath) ? JSON.parse(fs.readFileSync(filePath, 'utf8')) : {};
-    const base: Record<string, unknown> = current && typeof current === 'object' ? current : {};
-    const next = setDeep(base, key, value);
-    fs.mkdirSync(path.dirname(filePath), { recursive: true });
-    fs.writeFileSync(filePath, JSON.stringify(next, null, 2), 'utf8');
+    const next = setDeep(settingsBase(filePath), key, value);
+    writeSettings(filePath, next);
     return next;
   } catch {
     return null;
@@ -512,11 +703,8 @@ export function saveConfigSetting(key: string, value: unknown, filePath: string 
 // Returns the resulting object (even if the key was absent — a no-op) or null.
 export function saveConfigUnset(key: string, filePath: string = configLocalWritePath()): Record<string, unknown> | null {
   try {
-    const current = fs.existsSync(filePath) ? JSON.parse(fs.readFileSync(filePath, 'utf8')) : {};
-    const base: Record<string, unknown> = current && typeof current === 'object' ? current : {};
-    const next = unsetDeep(base, key);
-    fs.mkdirSync(path.dirname(filePath), { recursive: true });
-    fs.writeFileSync(filePath, JSON.stringify(next, null, 2), 'utf8');
+    const next = unsetDeep(settingsBase(filePath), key);
+    writeSettings(filePath, next);
     return next;
   } catch {
     return null;

@@ -3115,6 +3115,8 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
 ## Config & environment
 
 - Config: `~/.config/flow-assist/config.json` (schema from each plugin's `configSchema`).
+  While the app runs, a change to either settings file that it did not make itself is
+  asked about before it applies ("Secrets", the guard).
 - **A value is set in one of two scopes, through one path** (`setConfigValue`,
   `src/config/load.ts` — the CLI's `config set`, the app's `:config set` and the model's
   `config_set` all call it). `config set <key> <value>` SAVES: checked against the
@@ -3228,6 +3230,30 @@ a new path for text keeps to it.
   `/new` and opening another session. A background task has a shell state of its own
   and is told again. The person's own `!command` and `!!command` keep the whole
   environment; their output is still redacted.
+- **A settings file the host did not write is not applied while the app runs**
+  (`src/config/load.ts`, the guard). The host records what it last read or wrote of
+  `config.json` and `config.local.json` — mtime, size, a hash of the text, the object —
+  and `runInteractive` arms the guard (`guardConfigFiles`) once `main` has read them;
+  from then on `loadConfig()` serves the accepted content, and every save
+  (`saveConfigSetting`, `saveConfigUnset`, `saveConfig` — so `:config set`,
+  `config_set`, `editConfigArray`) writes on top of it and is accepted as it is made,
+  never carrying in a change it did not accept. The session overlay is in memory and
+  laid over as ever. `checkConfigFiles` is a stat per file, the file read only when the
+  stat moved (a touch with the same text is no change); a change is reported with its
+  changed key paths, a value at a secret-looking key (`TOKEN`, `KEY`, `authorization`,
+  `headers`, `env`, …) masked. The chat asks — `config.local.json changed outside
+  flow-assist — apply? (y/n)` in the confirmation's place (`ConfirmAsk.title` /
+  `hint`), through the `configChanges` host service `renderApp` binds — before the next
+  request of a turn (`beforeRequest` awaits it), after a `!command` and after a turn;
+  no timer. Yes (`applyConfigChange`) lays each key on the running config, a key marked
+  `appliesOnRestart` left for the restart; no (`declineConfigChange`) keeps the running
+  config and is not asked again for that content — a further change is. The auto mode
+  never answers it (it is not `confirmWrite`), and a stop or reset that closes it
+  answers nothing, so the next check asks again. Unarmed — a restart, the CLI, the
+  one-shot prompt — the files are read as they are: they are the person's. Only this
+  process's own writes are accepted unasked: a `flow-assist config set` from another
+  terminal is a change the running app did not make, asked about like any other — the
+  app cannot tell it from the same command run by the model.
 - The test rig builds the set from what a test set itself (`setSecretsEnv` in
   `src/__tests__/helpers/scripted.ts`), never from the machine's own tokens, and its
   `LLM_TOKEN` starts with `^`, a character no streamed test text ends in.

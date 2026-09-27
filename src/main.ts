@@ -14,7 +14,7 @@
 import { projectRoot, availableDir, enabledDir } from './install.js';
 import { existsSync } from 'node:fs';
 import { TtyBackend, isInteractive } from '@flowtty/tty-backend';
-import { loadConfig } from './config/load.js';
+import { guardConfigFiles, loadConfig } from './config/load.js';
 import {
   configSource,
   configValue,
@@ -378,6 +378,9 @@ async function runInteractive(config: Record<string, unknown>, repo: PluginRepo)
     console.error(refusal);
     process.exit(1);
   }
+  // From here on the settings files are what `main` read: a change the app does not make
+  // itself is asked about in the chat before it is applied (src/config/load.ts).
+  guardConfigFiles();
   // What the loader skipped, and why, goes into the app's log too.
   const loadNotes: string[] = [];
   const plugins = await loadPlugins({ config, repo, renders, enabledDir, notes: loadNotes });
