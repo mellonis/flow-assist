@@ -434,7 +434,9 @@ test('an answer that ran to the end carries no stop mark', async () => {
 test('a fired reminder asks the terminal for attention as well as drawing its banner', async () => {
   const model = new ScriptedModel();
   model.script(
-    [{ tool: 'remind', args: { in: '0.2 seconds', text: 'blink' } }],
+    // Far enough out that the turn settles before it fires, even on a loaded machine:
+    // the first check is that nothing has fired yet.
+    [{ tool: 'remind', args: { in: '1.5 seconds', text: 'blink' } }],
     [{ text: 'Will do.' }],
   );
   const ui = await bootApp(model, 100, 28);
@@ -443,7 +445,7 @@ test('a fired reminder asks the terminal for attention as well as drawing its ba
   await ui.press('return');
   await settle(20);
   expect(ui.backend.notifications).toEqual([]);
-  await new Promise((r) => setTimeout(r, 300));
+  await new Promise((r) => setTimeout(r, 1600));
   await settle(4);
   expect(ui.backend.lastFrame).toContain('blink');
   expect(ui.backend.notifications).toEqual([{ title: '⏰ Reminder', body: 'blink' }]);
