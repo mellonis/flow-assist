@@ -38,7 +38,7 @@ test('started inside a root\'s repo: !pwd runs there, its AGENTS.md is picked up
   await ui.press('return');
   await settleUntil(() => /pwd\s*·/.test(ui.backend.lastFrame));
   // The command actually ran in the repo — not the root, not the default.
-  const cmdLine = ui.backend.lastFrame!.split('\n').find((l) => l.includes('$ pwd'))!;
+  const cmdLine = ui.backend.lastFrame!.split('\n').find((l) => l.includes('! pwd'))!;
   expect(cmdLine).toContain(repo);
   // The project's own instructions are in the system prompt of the next request.
   await ui.type('go');
@@ -72,7 +72,7 @@ test('started outside every root: the first one takes over, and the chat says so
   await settleUntil(() => /pwd\s*·/.test(ui.backend.lastFrame));
   // The command itself ran in the first root, not the start directory — the note
   // above is the only place `outside` legitimately appears.
-  const cmdLine = ui.backend.lastFrame!.split('\n').find((l) => l.includes('$ pwd'))!;
+  const cmdLine = ui.backend.lastFrame!.split('\n').find((l) => l.includes('! pwd'))!;
   expect(cmdLine).toContain(root);
   expect(cmdLine).not.toContain(outside);
   ui.app.unmount();
