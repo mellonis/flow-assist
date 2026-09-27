@@ -29,12 +29,13 @@ import { MODEL_SHELL_ENV } from '../config/load.js';
 import { createShellState, dirAllowed, formatShell, nextCwd, realOf, runShell, shellCwd, shellLimits, shellPassEnv, shellRoots, tildePath, within, type ShellState } from '../assistant/shell.js';
 import type { ToolGroup } from './tools.js';
 
-// Where a call runs. No `cwd` — the conversation's directory (`base`). A `cwd` is a
-// `cd` before the command: relative to `base`, or absolute, and it stays the
-// conversation's directory afterwards. It must be an existing directory inside a
-// root, spelled AND real. With roots configured, `base` itself must be inside them
-// too (a first root that is missing falls back to the process's directory, which is
-// not). A refusal throws: the host counts whatever a write tool returns as done.
+// Where a call runs. No `cwd` — the conversation's directory (`base`, the default when
+// none was set: the app's start directory when it lies inside a root, else the first
+// root — `shellCwd`). A `cwd` is a `cd` before the command: relative to `base`, or
+// absolute, and it stays the conversation's directory afterwards. It must be an
+// existing directory inside a root, spelled AND real. With roots configured, `base`
+// itself must be inside them too. A refusal throws: the host counts whatever a write
+// tool returns as done.
 export function commandCwd(config: Record<string, unknown>, asked: unknown, base: string = shellCwd(config)): string {
   const roots = shellRoots(config);
   const s = typeof asked === 'string' ? asked.trim() : '';

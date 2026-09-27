@@ -4,7 +4,7 @@ import { expect, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createShellState, dirAllowed, formatShell, legacyRootsNote, nextCwd, runShell, shellCwd, shellLimits, shellRoots, tildePath } from '../shell.ts';
+import { createShellState, dirAllowed, formatShell, legacyRootsNote, nextCwd, runShell, setStartDirForTests, shellCwd, shellLimits, shellRoots, startNote, tildePath } from '../shell.ts';
 
 const tmp = () => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-shell-')));
 const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
@@ -77,12 +77,88 @@ test('runs in the cwd it is given; no stdin, pagers are cat, git never prompts',
   expect(r.output).toBe(`${dir}\ncat cat 0\ndone\n`);
 });
 
-test('the cwd is the first root when it is a directory, else the process directory', () => {
+// Rig note: `dir, '/elsewhere'` here are fresh tmp directories, never an ancestor of
+// the real `process.cwd()` bun test runs from — so the DEFAULT start (nothing passed)
+// reads the real process directory, finds it outside these roots, and still falls
+// back to the first one; the assertions below hold either way. Only the `'~'` case
+// (home really IS an ancestor of the checkout this runs from) needs an explicit start
+// outside it — the rig is adjusted there, not the assertion.
+test('with no start given: the real process directory decides, same as an explicit one outside the roots', () => {
   const dir = tmp();
   expect(shellCwd({ fs: { roots: [dir, '/elsewhere'] } })).toBe(dir);
   expect(shellCwd({ fs: { roots: [path.join(dir, 'missing')] } }, '/proc-cwd')).toBe('/proc-cwd');
   expect(shellCwd({}, '/proc-cwd')).toBe('/proc-cwd');
-  expect(shellCwd({ fs: { roots: ['~'] } })).toBe(os.homedir());
+  // Rig: an explicit start outside '~' — the real process directory happens to lie
+  // under the home directory this checkout is cloned into, which would otherwise be
+  // read as "the start directory is inside the root" and defeat this case.
+  expect(shellCwd({ fs: { roots: ['~'] } }, '/proc-cwd')).toBe(os.homedir());
+});
+
+// The default: the start directory itself when it lies inside a configured root, or
+// when there are no roots at all; otherwise the first root, since the start directory
+// is not where the person's work is.
+test('the default start directory: inside a root it is kept; outside, the first root; with no roots, always the start', () => {
+  const root = tmp();
+  const outside = tmp();
+  fs.mkdirSync(path.join(root, 'sub'));
+  expect(shellCwd({ shell: { roots: [root] } }, root)).toBe(root);
+  expect(shellCwd({ shell: { roots: [root] } }, path.join(root, 'sub'))).toBe(path.join(root, 'sub'));
+  expect(shellCwd({ shell: { roots: [root] } }, outside)).toBe(root);
+  // No roots: the start directory itself, whether or not it exists.
+  expect(shellCwd({}, outside)).toBe(outside);
+  expect(shellCwd({}, '/does/not/exist')).toBe('/does/not/exist');
+  // The first root is not a directory: falls back to the start.
+  expect(shellCwd({ shell: { roots: [path.join(root, 'missing')] } }, outside)).toBe(outside);
+});
+
+test('a symlinked start directory follows the REAL path rule, like everywhere else', () => {
+  const root = tmp();
+  const outside = tmp();
+  fs.symlinkSync(root, path.join(outside, 'into-root'));
+  fs.symlinkSync(outside, path.join(root, 'out-link'));
+  // A link outside every root that points INTO one is allowed — the real path decides.
+  expect(shellCwd({ shell: { roots: [root] } }, path.join(outside, 'into-root'))).toBe(path.join(outside, 'into-root'));
+  // A link INSIDE a root that points OUT of it is not — the root is used instead.
+  expect(shellCwd({ shell: { roots: [root] } }, path.join(root, 'out-link'))).toBe(root);
+});
+
+// The one-line note the chat's start-up says, only when a root took over because the
+// start directory was outside every one of them.
+test('the start-up note: silent inside a root or with none configured; names both directories otherwise', () => {
+  const root = tmp();
+  const outside = tmp();
+  expect(startNote({ shell: { roots: [root] } }, root)).toBeNull();
+  expect(startNote({}, outside)).toBeNull();
+  const note = startNote({ shell: { roots: [root] } }, outside);
+  expect(note).toContain(tildePath(outside));
+  expect(note).toContain(tildePath(root));
+});
+
+// The start directory is captured once, not read from `process.cwd()` live at every
+// call — the test rig injects it through `setStartDirForTests` (nothing in this
+// codebase calls `process.chdir`, so this only matters for tests).
+test('the start directory is injectable for tests, and read once by shellCwd/createShellState with no explicit start', () => {
+  const root = tmp();
+  const outside = tmp();
+  setStartDirForTests(outside);
+  try {
+    expect(shellCwd({ shell: { roots: [root] } })).toBe(root);
+    expect(createShellState(() => ({ shell: { roots: [root] } })).cwd()).toBe(root);
+    setStartDirForTests(root);
+    expect(shellCwd({ shell: { roots: [root] } })).toBe(root);
+  } finally { setStartDirForTests(null); }
+});
+
+test('a shell state keeps the start it was given even if the injected default later changes', () => {
+  const root = tmp();
+  const outside = tmp();
+  const s = createShellState(() => ({ shell: { roots: [root] } }), null, undefined, outside);
+  expect(s.start()).toBe(outside);
+  expect(s.cwd()).toBe(root); // outside at creation → the first root
+  setStartDirForTests(root);
+  try {
+    expect(s.cwd()).toBe(root); // unchanged — start was captured, not re-read live
+  } finally { setStartDirForTests(null); }
 });
 
 // `shell.roots` is the shell's own key; `fs.roots` — a host key only the repo plugin

@@ -27,7 +27,7 @@ import { stripToolMarkup } from '../assistant/tool-markup.js';
 import { createToolSet, toolLoadingMode } from '../assistant/tool-loading.js';
 import { llmOpts } from '../assistant/llm-endpoint.js';
 import { copyTarget, copyToClipboard } from '../assistant/copy.js';
-import { createShellState, formatShell, nextCwd, realOf, runShell, shellAutoRun, shellLimits, shellOutcome, shellRoots, tildePath, type ShellResult } from '../assistant/shell.js';
+import { createShellState, formatShell, nextCwd, realOf, runShell, shellAutoRun, shellLimits, shellOutcome, shellRoots, startNote, tildePath, type ShellResult } from '../assistant/shell.js';
 import { findInstructions, instructionsBlock, instructionsNote, type ProjectInstructions } from '../assistant/project-instructions.js';
 import {
   JOURNAL_DAYS, KEEP_SESSIONS, SESSION_VERSION, acquireLock, closeSession, cutTitle, flushOnExit, journalPath, listSessions, loadSession, lockPath,
@@ -1424,6 +1424,15 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // into an empty list.
           ui.useEffect(() => {
             const t = setTimeout(() => {
+              // Said once, before the project note that follows from `onShellSetRef`:
+              // only when nothing already set the directory (a continued session's own
+              // `shellCwd` decides where it goes instead, ./sessions.ts `applySession`,
+              // whose start-up timer runs first) and the app's start directory was
+              // outside every configured root, so the first one took over instead.
+              if (!shellRef.current.saved()) {
+                const note = startNote(host.config as Record<string, unknown>, shellRef.current.start());
+                if (note) pushNote(note);
+              }
               onShellSetRef.current();
               // The memory an older host kept in one list moves into the global
               // workspace once (src/assistant/memory-store.ts), and the person is told —
@@ -2637,7 +2646,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               if (kept) journal({ t: 'row', role: 'note', text: kept });
               setMessages(kept ? [{ role: 'note', content: kept }] : []);
             }
-            // Back to the first root — after the list is emptied, so the fresh
+            // Back to the default directory (the start directory, or the first root when
+            // that lies outside every one) — after the list is emptied, so the fresh
             // conversation says which instructions it starts with; a note still waiting
             // for the turn's end was the old conversation's.
             projectNoteRef.current = null;

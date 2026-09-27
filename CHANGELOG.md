@@ -54,6 +54,13 @@ What each version of flow-assist brought, newest first. The version is the one i
   settings only) are new services.
 - **For plugin authors:** a plugin whose tool groups change while the app runs sets
   `tools` on its plugin object and calls `toolsChanged()`, handed to its builder.
+- **The shell starts where you started flow-assist, not always in the first root.**
+  Started inside a project already under a `shell.roots` entry, commands, the project's
+  own `AGENTS.md`, the session and every memory fact now land in that project, not in
+  the root's — started outside every root, the first one still takes over, and the chat
+  says so once at start-up. `/clear` and `/new` return to that same starting directory,
+  and a background task now starts where its parent conversation's shell currently is,
+  never at that default.
 - **The assistant has a workspace of its own per project.** Drafts, notes, plans and
   findings it was asked to keep go to `artifacts/` in the project's agent workspace
   (`projects/` in the config directory, under a mirror of the project's path), written

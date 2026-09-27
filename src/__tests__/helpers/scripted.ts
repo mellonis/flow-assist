@@ -24,6 +24,7 @@ import { loadPlugins } from '../../loader/build.ts';
 import { makeFactory, type Make, type Plugin } from '../../loader/plugin.ts';
 import { assembleToolRegistry } from '../../loader/tools.ts';
 import { renderApp } from '../../runtime/app.tsx';
+import { setStartDirForTests } from '../../assistant/shell.ts';
 import type { ClipboardImage } from '../../assistant/images.ts';
 import type { InteractiveDeps } from '../../assistant/interactive.ts';
 import type { RestartingTransport } from '../../remote/transport.ts';
@@ -303,7 +304,7 @@ const testEnv = (): Record<string, string | undefined> =>
   Object.fromEntries(Object.entries(process.env).filter(([k, v]) => MACHINE_ENV[k] !== v));
 setSecretsEnv(testEnv);
 
-export async function bootApp(model: ScriptedModel, cols = 100, rows = 28, guests?: (make: Make) => Plugin[], extra: Record<string, unknown> = {}, opts: { toastMs?: number; scheme?: 'light' | 'dark' | 'unknown'; clipboardImage?: () => ClipboardImage; pluginsNote?: string; interactive?: InteractiveDeps; chatMode?: 'panel' | 'window' | 'full' | null; backend?: TestBackend; remote?: { manifest: Record<string, unknown>; transport: RestartingTransport } } = {}) {
+export async function bootApp(model: ScriptedModel, cols = 100, rows = 28, guests?: (make: Make) => Plugin[], extra: Record<string, unknown> = {}, opts: { toastMs?: number; scheme?: 'light' | 'dark' | 'unknown'; clipboardImage?: () => ClipboardImage; pluginsNote?: string; interactive?: InteractiveDeps; chatMode?: 'panel' | 'window' | 'full' | null; backend?: TestBackend; remote?: { manifest: Record<string, unknown>; transport: RestartingTransport }; startDir?: string } = {}) {
   process.env.LLM_TOKEN = '^scripted-llm-token';
   model.install();
   // Sessions go to a fresh temp dir unless a test names one: a test must never write
@@ -349,11 +350,21 @@ export async function bootApp(model: ScriptedModel, cols = 100, rows = 28, guest
   if (scheme !== 'unknown') backend.setColorScheme(scheme, scheme === 'dark' ? '#000000' : '#ffffff');
   // How many times the app asked to exit — a key that quits is visible to a test.
   let exits = 0;
-  const app = await renderApp(backend, { plugins, config, tools, onExit: () => { exits++; }, toastMs: opts.toastMs, pluginsNote: opts.pluginsNote, clipboardImage: opts.clipboardImage ?? (() => ({ ok: false, none: true, error: 'no image on the clipboard' })),
-    // `!!command` never reaches the machine's own `script` or signals from a test: with
-    // no `interactive` given, there is no `script`, the program "runs" at once and
-    // exits 0, and the signal hold works on an emitter of its own.
-    interactive: opts.interactive ?? { detect: () => null, spawn: async () => ({ code: 0, signal: null }), signals: new EventEmitter() } });
+  // `renderApp` mounts the plugin tree synchronously (there is no `await` inside it
+  // before the chat's own `useRef(createShellState(...))` runs), so the injected start
+  // directory only needs to be in place for this one call — reset right after,
+  // whether it threw or not, so it never leaks into a later test in the same process.
+  setStartDirForTests(opts.startDir ?? null);
+  let app: Awaited<ReturnType<typeof renderApp>>;
+  try {
+    app = await renderApp(backend, { plugins, config, tools, onExit: () => { exits++; }, toastMs: opts.toastMs, pluginsNote: opts.pluginsNote, clipboardImage: opts.clipboardImage ?? (() => ({ ok: false, none: true, error: 'no image on the clipboard' })),
+      // `!!command` never reaches the machine's own `script` or signals from a test: with
+      // no `interactive` given, there is no `script`, the program "runs" at once and
+      // exits 0, and the signal hold works on an emitter of its own.
+      interactive: opts.interactive ?? { detect: () => null, spawn: async () => ({ code: 0, signal: null }), signals: new EventEmitter() } });
+  } finally {
+    setStartDirForTests(null);
+  }
   await settle();
   const press = async (...names: string[]) => { for (const name of names) backend.press({ name }); await settle(); };
   const type = async (text: string) => { backend.type(text); await settle(); };

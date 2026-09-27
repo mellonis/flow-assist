@@ -119,11 +119,40 @@ export function dirAllowed(config: RootsConfig, dir: string): boolean {
   return roots.map(realOf).some((r) => within(real, r));
 }
 
-// Where a conversation's commands start: the first configured root when it is a
-// directory — that is where the person's work is — else the process's own directory.
-export function shellCwd(config: RootsConfig, cwd = process.cwd()): string {
-  const first = shellRoots(config)[0];
-  return first && isDir(first) ? first : cwd;
+// The directory the process was started in, captured once — nothing in this codebase
+// calls `process.chdir`, but reading it here, once, rather than `process.cwd()` live at
+// every call, is what makes it a fixed default for a conversation's whole life instead
+// of whatever the process's directory happens to be at the moment something asks. Test
+// only: `setStartDirForTests` lets the e2e rig simulate a different start directory
+// without spawning a real process; passing `null` goes back to the real one.
+const realStartDir = process.cwd();
+let testStartDir: string | null = null;
+export function setStartDirForTests(dir: string | null): void { testStartDir = dir; }
+export function startDir(): string { return testStartDir ?? realStartDir; }
+
+// Where a conversation's commands start by default: the start directory itself, when
+// it lies inside a configured root (by its REAL path, `dirAllowed`'s own rule) or when
+// there are no roots at all — that is where the person asked for help. Otherwise the
+// first configured root that is a directory, since the start directory is not where
+// the person's work is; `startNote` says so, once, when this happens.
+export function shellCwd(config: RootsConfig, start = startDir()): string {
+  const roots = shellRoots(config);
+  if (!roots.length || dirAllowed(config, start)) return start;
+  const first = roots[0];
+  return isDir(first) ? first : start;
+}
+
+// The chat's start-up note, when the start directory is why the person is not where
+// they expected: only when roots are configured, the start directory is outside all of
+// them, AND a root actually took over instead (a missing first root leaves the start
+// directory in charge, and nothing needs explaining then).
+export function startNote(config: RootsConfig, start = startDir()): string | null {
+  const roots = shellRoots(config);
+  if (!roots.length || dirAllowed(config, start)) return null;
+  const first = roots[0];
+  const used = isDir(first) ? first : start;
+  if (used === start) return null;
+  return `started in ${tildePath(start)}, outside shell.roots — working in ${tildePath(used)} instead`;
 }
 
 // The directory a conversation's commands run in. Made by whoever owns the
@@ -132,7 +161,10 @@ export function shellCwd(config: RootsConfig, cwd = process.cwd()): string {
 // roots, reads as the default again. `onSet` hears every `setCwd` — `!cd`, run_command,
 // the `cd` tool, /clear, a restored session all set it here, so this is the one place
 // the chat learns the directory was set (it reads the project's instructions again,
-// ./project-instructions.ts).
+// ./project-instructions.ts). `start` is captured once, at creation — from `startDir()`
+// unless the caller (a test, a background run building on its parent's directory)
+// gives one — so `/clear` and `/new`, which reset to `null`, come back to the SAME
+// default every time, not to wherever the process happens to be when they run.
 // `told` is what the conversation's commands have already told the model once (the
 // variables withheld from them): its owner empties it where a conversation starts
 // anew — /clear, /new, another session.
@@ -140,14 +172,16 @@ export interface ShellState {
   cwd(): string;
   setCwd(dir: string | null): void;
   saved(): string | null; // what a session keeps
+  start(): string; // the captured start directory (or what stands in for it)
   told: Set<string>;
 }
-export function createShellState(config: () => RootsConfig, initial: string | null = null, onSet?: (dir: string | null) => void): ShellState {
+export function createShellState(config: () => RootsConfig, initial: string | null = null, onSet?: (dir: string | null) => void, start = startDir()): ShellState {
   let dir = initial;
   return {
-    cwd: () => (dir && dirAllowed(config(), dir) ? dir : shellCwd(config())),
+    cwd: () => (dir && dirAllowed(config(), dir) ? dir : shellCwd(config(), start)),
     setCwd: (d) => { dir = d; onSet?.(d); },
     saved: () => dir,
+    start: () => start,
     told: new Set(),
   };
 }

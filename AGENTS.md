@@ -1194,7 +1194,9 @@ hold this set together:
     round of `todo` alone (laying out the plan) is not work and carries none.
   The shell's directory is the same kind of state: `createShellState` in
   `src/assistant/shell.ts`, held by the chat (`shellRef`), handed to run_command and
-  `cd` as `ctx.shell`; a background run gets a fresh one.
+  `cd` as `ctx.shell`; a background run gets a fresh one — its own to move, so its `cd`
+  never moves the parent's — started where the parent conversation's shell is at the
+  moment `background` is called, not at the app's own default.
   **Tool state that describes a conversation is never module-level** — as a module
   variable the plan outlived `/clear`, was shared with background runs, and leaked
   from one test into the next.
@@ -2704,12 +2706,17 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   paragraph above). The bang level itself is UI state of the field only, never saved
   and never restored across a restart; a `!…`/`!!…` or a non-zero-level field is not
   a draft. **The directory is remembered**
-  between commands, as in a terminal, and shared with `run_command`: it starts at the
-  first `shell.roots` directory (else the process's), a `cd` moves it only within the
+  between commands, as in a terminal, and shared with `run_command`: it starts where
+  the app was started (`startDir`, captured once — nothing here calls
+  `process.chdir`) when that lies inside a configured root, real path, by
+  `shellCwd`/`dirAllowed`'s rule — else the first configured root that is a directory
+  (`startNote` says so, once, at start-up, only then); with no roots at all, always
+  the start directory. A `cd` moves it only within the
   roots by real path (the shell writes `pwd -P` to a private temp file after the
   command — a 4th stdio pipe under Bun lost the report now and then), `exit N` or a
-  kill keeps it, run_command's `cwd` argument is a `cd` that stays, `/clear` goes back
-  to the root, `/resume` and a restart bring it back. Variables
+  kill keeps it, run_command's `cwd` argument is a `cd` that stays, `/clear` and `/new`
+  go back to that same start-derived default, `/resume` and a restart bring back
+  whatever the session had saved. Variables
   and functions are not kept — every command is a fresh shell. While the field is in
   `!` or `!!` mode the hint row under it STARTS with that directory (`~`-shortened,
   cut from the left when long — `cutLeft` in `src/cells.ts`; the chat passes
