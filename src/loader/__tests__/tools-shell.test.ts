@@ -98,6 +98,19 @@ test('the description tells the model the machine: platform, default cwd, what i
   expect(platformLine('linux', 'x64')).toBe('Linux x64');
 });
 
+test('the description says the true default — the app\'s start directory when it is inside a root — never just the first root', () => {
+  const first = tmp();
+  const second = tmp();
+  fs.mkdirSync(path.join(second, 'sub'));
+  const config = { shell: { roots: [first, second] } };
+  // Started inside the SECOND root's own subdirectory — the old text always said the
+  // first root regardless; the description now says where it actually starts.
+  const d = runCommandDescription(config, [], path.join(second, 'sub'));
+  expect(d).toContain(`It starts at ${path.join(second, 'sub')}`);
+  expect(d).not.toContain(`It starts at ${first}`);
+  expect(d).toContain(`shell.roots: ${first}, ${second}`);
+});
+
 test('the probe finds programs on PATH and does not throw on an empty PATH', () => {
   expect(probePrograms()).toContain('git');
   expect(probePrograms({ PATH: '' })).toEqual([]);
