@@ -134,9 +134,15 @@ export function saveFact(ws: string, fact: Fact): void {
   writeIndex(ws);
 }
 
+// Removes a fact by its file's name — any name `readFacts` reads, a hand-made one
+// included — and never anything else: no separator, no `..`, not the index, not a link.
+// False when there was nothing to remove.
 export function removeFact(ws: string, id: string): boolean {
-  if (!/^[a-z0-9-]+$/.test(id)) return false;
-  try { fs.unlinkSync(factPath(ws, id)); } catch { return false; }
+  if (!id || /[\\/]/.test(id) || id === '.' || id === '..' || `${id}.md`.toLowerCase() === MEMORY_INDEX.toLowerCase()) return false;
+  try {
+    if (!fs.lstatSync(factPath(ws, id)).isFile()) return false;
+    fs.unlinkSync(factPath(ws, id));
+  } catch { return false; }
   writeIndex(ws);
   return true;
 }

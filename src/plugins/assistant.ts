@@ -2647,8 +2647,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // model. A `note` is a display-only message: `apiRef` — the model's
                 // history — is not touched.
                 const res = memoryCommand(arg, memoryLists());
-                for (const f of res.forget ?? []) removeFact(workspaceFor(host.config, currentProject(), f.scope), f.id);
-                pushNote(res.note);
+                // Said as it happened: a fact whose file could not be removed is named.
+                const failed = (res.forget ?? []).filter((f) => !removeFact(workspaceFor(host.config, currentProject(), f.scope), f.id));
+                pushNote(failed.length ? `${res.note}\nNot removed (the file could not be deleted): ${failed.map((f) => `memory/${f.id}.md`).join(', ')}.` : res.note);
                 setField('');
                 host.notify();
                 return;

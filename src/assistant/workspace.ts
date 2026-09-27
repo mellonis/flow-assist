@@ -57,9 +57,11 @@ export const ensureWorkspace = ensureDir;
 // refusal names the workspace, so the model knows where a path must lead.
 export function resolveInWorkspace(ws: string, rel: string): { abs: string } | { error: string } {
   const s = String(rel ?? '').trim();
-  const where = `paths are relative to the workspace, ${ws}`;
-  if (path.isAbsolute(s) || /^~(?=\/|$)/.test(s) || /^[a-zA-Z]:[\\/]/.test(s)) return { error: `«${s}» is not in the workspace — ${where} (e.g. artifacts/notes.md)` };
-  if (s.split(/[\\/]+/).includes('..')) return { error: `«${s}» leads out of the workspace — ${where}, and never contain ..` };
+  // The path to use instead, whole — a model copies what a refusal shows.
+  const use = `artifacts/${path.basename(s.replace(/[\\/]+$/, '')).replace(/^\.+$/, '') || 'notes.md'}`;
+  const where = `paths are relative to the workspace, ${ws} — e.g. ${use}`;
+  if (path.isAbsolute(s) || /^~(?=\/|$)/.test(s) || /^[a-zA-Z]:[\\/]/.test(s)) return { error: `«${s}» is not in the workspace — ${where}` };
+  if (s.split(/[\\/]+/).includes('..')) return { error: `«${s}» leads out of the workspace — ${where}; a path never holds ..` };
   const abs = s ? path.join(ws, s) : ws;
   if (!within(realOf(abs), realOf(ws))) return { error: `«${s}» resolves through a link to ${realOf(abs)}, outside the workspace — ${where}` };
   return { abs };

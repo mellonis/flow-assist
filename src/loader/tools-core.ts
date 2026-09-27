@@ -5,7 +5,7 @@
 //
 // Contract of a group: { id, alwaysOn, tools, exec(name, args, ctx) } where
 // `args` is an already-parsed object and `ctx` is the runtime context
-// ({ memoryFile, configLocalPath }). Each writing tool is
+// (`CoreCtx`). Each writing tool is
 // flagged `write` (true or a predicate `(args) => boolean`).
 
 import { hostConfigSchema } from '../config/schema.js';
@@ -581,7 +581,7 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
           const found = find(id);
           if (!found) return `Memory ${id} not found.`;
           if (action === 'forget') {
-            removeFact(dir(found.scope), id);
+            if (!removeFact(dir(found.scope), id)) return `Memory ${id} could not be removed — nothing was changed; the person can remove it with /memory.`;
             return `Memory ${id} deleted.`;
           }
           const edits = ['text', 'name', 'description', 'type'].filter((k) => opt(k) !== undefined);

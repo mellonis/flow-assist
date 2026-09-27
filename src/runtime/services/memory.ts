@@ -7,7 +7,7 @@ import { workspaceFor } from '../../assistant/workspace.js';
 
 // The memory list an older host kept, one JSON file for every project. It is read to
 // be moved into the global workspace once (src/assistant/memory-store.ts,
-// `migrateMemoryJson`); the facts themselves live as files in the workspaces now.
+// `migrateMemoryJson`); the facts themselves are files in the workspaces.
 //
 // The assistant's memory lives outside the repo, beside the rest of what the host
 // keeps for itself, so personal notes never end up in git. `hostStateDir()` is the one

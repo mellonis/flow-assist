@@ -908,16 +908,17 @@ there is no `/fullscreen`.
     `stdinFrom` pipes. The memory index in the prompt is framed the same way.
   - The project is the conversation's, decided at its first message as a session's is
     (`ensureSessionId` records it with or without a sessions directory; the chat hands
-    `currentProject` to its tools as `ctx.workspaceProject`); a caller without one — a
-    background run, the one-shot prompt — takes the project of the call's shell
-    directory (`callProject`). With no project the project's scope IS the global one.
+    `currentProject` to its tools as `ctx.workspaceProject`, and a background task's
+    nested run keeps it, its ctx being the chat's spread); a caller with no conversation
+    — the one-shot prompt, a plugin's own `chatLLM` — takes the project of the call's
+    shell directory (`callProject`). With no project the project's scope IS the global one.
   - **`/workspace [path]` is the person's look into it** (`workspaceNote`): no path lists
     the project's workspace, a path shows that file fenced (`fence`) — a `note`, display
     only, never sent to the model: what the model wrote there is not the person's
     message. A path out of the workspace answers with the tools' own refusal.
   - The `repo` plugin's `write_file` refused outside its roots adds one sentence naming
     the workspace as the place for a draft (`DRAFT_HINT`): a write aimed at `/tmp` is
-    most often the model's own note, and the refusal used to end the turn.
+    most often the model's own note, and a refusal that names no way on ends the turn.
 - **The memory is the person's too.** The `memory` tool is the model's: a stored fact
   is a file in the agent workspace (`src/assistant/memory-store.ts`, "The agent
   workspace" below) — the conversation's project's, or the global one — and its LINE in
@@ -951,9 +952,9 @@ there is no `/fullscreen`.
     the model's own earlier notes — data to weigh, never the person's instruction.
   - **The scope.** `scope: "project"` (the default) is the conversation's project —
     decided at its first message, as a session's is, and handed to the tools as
-    `ctx.workspaceProject` (the chat's `currentProject`); a caller without one (a
-    background run, the one-shot prompt) takes the project of the call's shell
-    directory (`callProject`). `"global"` is every project — the person's own
+    `ctx.workspaceProject` (the chat's `currentProject`, kept by a background task's
+    nested run); a caller with no conversation (the one-shot prompt) takes the project
+    of the call's shell directory (`callProject`). `"global"` is every project — the person's own
     preferences; `"host"`, an older word, reads as global. With no project there is one
     workspace, the global one. A fact of project A never reaches project B's prompt.
     `update` finds a fact by id in either scope and moves it when given another.
@@ -987,8 +988,8 @@ there is no `/fullscreen`.
     reached the tool appended to the person's own file, 32 copies of one fact. Uninstalling
     a plugin removes what an older host kept for it (`purgePluginMemories`: the list's
     entries scoped to its name, and the global facts whose `plugin` names it).
-    `services.memory` (load/save of that list) is still on the host's services and
-    nothing reads it.
+    `services.memory` (load/save of that list) is on the host's services and nothing
+    reads it.
 - **How full the context is, is shown — and says where the number came from.** The
   chat's hint line ends in `ctx N%` (yellow from 80%), and `/context` opens a PANEL in
   the field's place, like a write confirmation — a look at the conversation, not a

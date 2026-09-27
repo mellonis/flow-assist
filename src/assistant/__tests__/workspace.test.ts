@@ -80,6 +80,9 @@ test('a write that would leave artifacts/ is refused by throwing, naming the pat
   fs.symlinkSync(path.join(outside, 'x.md'), path.join(dir, 'artifacts', 'link.md'));
   const refused = (rel: string) => { try { writeArtifact(dir, rel, 'x'); return ''; } catch (e) { return (e as Error).message; } };
   expect(refused('/tmp/draft.md')).toContain(dir);
+  // The path to use is named whole, as the model would write it.
+  expect(refused('/tmp/draft.md')).toContain('artifacts/draft.md');
+  expect(refused('../draft.md')).toContain('artifacts/draft.md');
   expect(refused('../draft.md')).toContain('Nothing was changed');
   expect(refused('draft.md')).toContain('artifacts/draft.md');
   // The memory has its own tool and its own guards.

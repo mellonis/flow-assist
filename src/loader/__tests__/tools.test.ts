@@ -834,3 +834,28 @@ test('the workspace tools write, read and list the project\'s workspace — a wr
   await reg.exec('workspace_write', { path: 'artifacts/everywhere.md', content: 'g', scope: 'global' }, ctxA);
   expect(String(await reg.exec('workspace_list', { scope: 'global' }, inProject('/p/b')))).toContain('artifacts/everywhere.md');
 });
+
+test('a background task works in its conversation\'s project, not in the one its fresh shell starts in', async () => {
+  const { root, reg } = memSetup();
+  let opts: Record<string, unknown> | undefined;
+  const chatLLM = async (_m: unknown[], o: Record<string, unknown>) => { opts = o; return { content: 'done' }; };
+  await reg.exec('background', { task: 'remember it' }, { chatLLM, workspaceProject: () => '/p/a', postToChat: () => {} } as any);
+  for (let i = 0; i < 20 && !opts; i++) await new Promise((r) => setTimeout(r, 5));
+  const nested = opts!.toolCtx as Record<string, any>;
+  expect(nested.workspaceProject()).toBe('/p/a');
+  await reg.exec('memory', { action: 'add', text: 'Found by the background task.' }, nested as any);
+  expect(readFacts(workspaceDir(root, '/p/a')).map((f) => f.text)).toEqual(['Found by the background task.']);
+});
+
+test('a fact under a hand-made file name is forgotten too, and a name that leads out is never one', async () => {
+  const { root, reg, inProject } = memSetup();
+  const ws = workspaceDir(root, '/p/a');
+  addFact(ws, { text: 'kept by the tool' });
+  // A file the person made by hand, under a name that is not a slug.
+  fs.writeFileSync(path.join(ws, 'memory', 'My_Note.md'), '---\nname: mine\ndescription: d\ntype: fact\n---\nA hand-made note.\n');
+  const listed = String(await reg.exec('memory', { action: 'list' }, inProject('/p/a')));
+  expect(listed).toContain('A hand-made note.');
+  expect(String(await reg.exec('memory', { action: 'forget', id: 'My_Note' }, inProject('/p/a')))).toContain('deleted');
+  expect(fs.existsSync(path.join(ws, 'memory', 'My_Note.md'))).toBe(false);
+  expect(String(await reg.exec('memory', { action: 'forget', id: '../../x' }, inProject('/p/a')))).toContain('not found');
+});
