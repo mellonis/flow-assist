@@ -323,7 +323,9 @@ export async function remotePlugin(opts: RemotePluginOpts): Promise<Plugin> {
   const aiTools = (registration.aiTools ?? []).map((t: ToolDecl) => ({ ...t, run: (args: Record<string, unknown>, ctx?: Record<string, unknown>) => runTool(t.function.name, args, ctx) }));
 
   // ── commands ────────────────────────────────────────────────────────────────
-  const commands: Command[] = (registration.commands ?? []).map((c) => ({
+  // A remote command is the `:` line's alone: `chat` and `complete` are a JS plugin's
+  // (a panel's keys and a completion function cannot cross the wire).
+  const commands: Command[] = (registration.commands ?? []).map(({ chat: _chat, complete: _complete, ...c }: Command) => ({
     ...c,
     run: async (_ctx?: unknown, arg?: string) => {
       if (stopped) { services().showMessage?.(stopped); return; }

@@ -111,3 +111,20 @@ test('the config set line reads back as the value it shows', async () => {
   // A control character is drawn as its escape: the line stays one line.
   expect(configSetLine('user.name', 'a\nb', 'saved')).toBe(`config set user.name 'a\\nb'`);
 });
+
+// A command whose later words take values too (`mcp disable <server>`) declares
+// `complete(words)`: given the words before the one being typed, the values it may be.
+test('complete(words) completes every word of a command\'s argument, each from the words before it', () => {
+  const servers = ['webstorm', 'safari'];
+  const cmd = {
+    name: 'mcp:mcp', usage: 'mcp', minArgs: 0, maxArgs: -1, description: '',
+    complete: (words: string[]) => (words.length === 0 ? ['disable', 'enable', 'tools'] : words.length === 1 && words[0] !== 'add' ? servers.map((s) => ({ value: s, label: 'http' })) : []),
+  };
+  expect(completeCommand('mcp ', [cmd] as never)).toMatchObject({ head: '', best: 'disable', candidates: ['disable', 'enable', 'tools'] });
+  expect(completeCommand('mcp di', [cmd] as never)).toMatchObject({ head: 'di', best: 'disable' });
+  expect(completeCommand('mcp disable ', [cmd] as never)).toMatchObject({ head: '', best: 'webstorm', candidates: ['webstorm', 'safari'], labels: { webstorm: 'http', safari: 'http' } });
+  expect(completeCommand('mcp disable sa', [cmd] as never)).toMatchObject({ head: 'sa', best: 'safari', candidates: ['safari'] });
+  expect(completeCommand('mcp disable safari ', [cmd] as never).candidates).toEqual([]);
+  // A throwing `complete` is no values.
+  expect(completeCommand('mcp ', [{ ...cmd, complete: () => { throw new Error('x'); } }] as never).candidates).toEqual([]);
+});

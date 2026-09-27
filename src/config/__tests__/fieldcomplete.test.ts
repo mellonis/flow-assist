@@ -138,3 +138,10 @@ test('values from a function carry labels: the offered one is said beside the fi
   // A function that throws offers nothing.
   expect(completeSlash('/x ', [{ name: 'x', values: () => { throw new Error('no'); } }]).candidates).toEqual([]);
 });
+
+test('a /command that declares complete(words) completes its later words in the chat too', () => {
+  const defs = [{ name: 'mcp', complete: (words: string[]) => (words.length === 0 ? ['restart', 'tools'] : words.length === 1 ? ['webstorm', 'safari'] : []) }];
+  expect(completeSlash('/mcp ', defs)).toMatchObject({ head: '', best: 'restart', candidates: ['restart', 'tools'] });
+  expect(completeSlash('/mcp tools w', defs)).toMatchObject({ head: 'w', best: 'webstorm', candidates: ['webstorm'] });
+  expect(completeSlash('/mcp tools webstorm ', defs).candidates).toEqual([]);
+});

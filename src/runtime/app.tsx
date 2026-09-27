@@ -338,6 +338,12 @@ export function renderApp(
   const services = createServices({ config, tools, onExit });
   (services as unknown as HostServices).clipboardImage = clipboardImage ?? (() => readClipboardImage());
   if (interactive) (services as unknown as HostServices).interactive = interactive;
+  // A plugin's own setting, set the way `:config set` sets it — with every plugin's
+  // schema, so a plugin's key is checked against its own.
+  (services as unknown as HostServices).setConfig = (key, value, opts) =>
+    setConfigValue(config, key, value, { scope: opts?.session ? 'session' : 'saved', pluginConfigs: pluginConfigs(plugins) });
+  (services as unknown as HostServices).unsetConfig = (key, opts) =>
+    unsetConfigValue(config, key, { scope: opts?.session ? 'session' : 'saved', pluginConfigs: pluginConfigs(plugins) });
   if (pluginsNote) services.log.append(`[plugins] ${pluginsNote}`);
   for (const line of loadNotes) services.log.append(line);
   // A config that still sets the roots as `fs.roots` is read, and said once in the log.
@@ -467,6 +473,9 @@ export function renderApp(
       };
     }
     const { ui: pluginUi, host: hostBase } = apiRef.current;
+    // A plugin's news in the chat: the chat publishes how it says a note (held while a
+    // turn runs) on its store.
+    (services as unknown as HostServices).chatNote = (text) => (hostBase.store as { chat?: { note?: (t: string) => void } }).chat?.note?.(String(text ?? ''));
 
     // Mount each plugin's `components[slot]` factory EXACTLY once: memoize only
     // the component FUNCTION (stable identity → no remount, state preserved),
@@ -685,6 +694,9 @@ export function renderApp(
           // config/cache handlers. Before, most were no-ops/absent, so
           // `:help`/`:config`/`:back`/`:cache`/`:view` were silent.
           const ctx = {
+            // Where the command runs: here, the `:` line — the chat runs a command marked
+            // `chat` with `surface: 'chat'` and its own `say` / `openPanel`.
+            surface: 'line',
             showMessage: (m: string) => toast.showMessage(m),
             setView: (v: string) => { ui.view = v; notify(); },
             onExit,

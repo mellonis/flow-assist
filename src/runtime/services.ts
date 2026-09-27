@@ -116,6 +116,19 @@ export interface HostServices {
   // `console` plus each plugin's, qualified `<plugin>:<kind>` (src/loader/registry.ts).
   // Bound by the App from the mounted plugins; absent means only `console` renders.
   viewRenderers?: ViewRenderers;
+  // A line of a plugin's news in the chat, as a note — display only, never sent to the
+  // model (`mcp: webstorm connected — 23 tools`). One that arrives while a turn runs is
+  // held until the turn ends: a note in the middle would split the turn's message. The
+  // App binds it to the chat; the default drops it (a one-shot prompt has no chat —
+  // say it in the log too).
+  chatNote: (text: string) => void;
+  // A config value set the way `config set` sets it (src/config/load.ts,
+  // `setConfigValue`): checked against the schema, a plugin's key against the plugin's,
+  // saved to config.local.json — or kept for this run only with `session` — and laid on
+  // the running config. `unsetConfig` is `config unset`. For a plugin's own command that
+  // changes a setting of its own; the App binds both, and the default refuses.
+  setConfig: (key: string, value: unknown, opts?: { session?: boolean }) => { ok: true; value: unknown; restart: boolean } | { ok: false; error: string };
+  unsetConfig: (key: string, opts?: { session?: boolean }) => { ok: true; value: unknown; restart: boolean } | { ok: false; error: string };
 }
 
 export interface CreateServicesOptions {
@@ -216,6 +229,9 @@ export function createServices({ config, tools, repo, onExit }: CreateServicesOp
     chatDock: null,
     chatContext: () => [],
     afterWrite: async () => {},
+    chatNote: () => {},
+    setConfig: () => ({ ok: false, error: 'config: no app to set it in' }),
+    unsetConfig: () => ({ ok: false, error: 'config: no app to unset it in' }),
   };
   // Read the LIVE channels at fire time (the App reassigns showMessage/pushLog/
   // notify each render), so the reminder is delivered even if a render happened

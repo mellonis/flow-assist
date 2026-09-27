@@ -21,6 +21,10 @@ export type ArgValue = string | { value: string; label?: string };
 // the line is drawn — for a list that changes (the saved sessions). A function that
 // throws reads as no values.
 export type ArgValues = readonly ArgValue[] | (() => readonly ArgValue[]);
+// What ANY word of a command's argument may be, given the words before it (none for the
+// first): `mcp disable <server>` offers the servers after `disable`. Read when the line
+// is drawn; a throw reads as no values. Takes over from `values` when both are given.
+export type ArgComplete = (words: string[]) => readonly ArgValue[];
 
 export type Command = {
   name: string;
@@ -34,6 +38,8 @@ export type Command = {
   history?: boolean;
   // The values the first argument takes; the line completes it from them.
   values?: ArgValues;
+  // The values of every word of the argument, from the words before it.
+  complete?: ArgComplete;
 };
 
 // Basic host command set. `maxArgs = -1` means an unlimited argument count.
@@ -330,6 +336,19 @@ export function completeValues(text: string, values: ArgValues | undefined): Com
   return { head, hasSpace: true, best, candidates: matches.map((v) => v.value), ...(Object.keys(labels).length ? { labels } : {}) };
 }
 
+// Completion of the word being typed in a command's argument from `complete(words)`:
+// `text` is the argument text, and the words before the last one are what `complete`
+// is given. The last word is completed as `completeValues` completes the first.
+export function completeWords(text: string, complete: ArgComplete): CompleteResult {
+  const raw = String(text ?? '');
+  const words = raw.split(/\s+/);
+  const last = words.pop() ?? '';
+  const before = words.filter(Boolean);
+  let values: readonly ArgValue[];
+  try { values = complete(before); } catch { values = []; }
+  return completeValues(last, values);
+}
+
 // Completion of a command name/alias by the first word's prefix. Returns:
 //   head      — the typed prefix (first word up to the space);
 //   hasSpace  — whether a space follows (after the first word);
@@ -343,8 +362,9 @@ export function completeValues(text: string, values: ArgValues | undefined): Com
 // For `config get|set|unset <key> [value]` it delegates the arguments to
 // completeConfigCommand (config — the actual config object, configSchema — the
 // schema for plugin namespaces, both optional); for any other command that declares
-// `values`, the first argument is completed from them (completeValues). The first
-// command word is still the ordinary completion.
+// `complete`, the word being typed is completed from it (completeWords), else the first
+// argument from its `values` (completeValues). The first command word is still the
+// ordinary completion.
 export function completeCommand(text: string, commands: Command[] = BASE_COMMANDS, config?: unknown, configSchema: any = hostConfigSchema): CompleteResult {
   const raw = String(text ?? '');
   const m = raw.match(/^(\S*)(?:\s([\s\S]*))?$/);
@@ -359,6 +379,7 @@ export function completeCommand(text: string, commands: Command[] = BASE_COMMAND
     const lower = head.toLowerCase();
     const bare = (n: string) => (n.includes(':') ? n.slice(n.lastIndexOf(':') + 1) : n).toLowerCase();
     const cmd = commands.find((c) => bare(c.name) === lower || (c.aliases ?? []).some((a) => a.toLowerCase() === lower));
+    if (cmd?.complete) return completeWords(m![2] ?? '', cmd.complete);
     if (cmd?.values) return completeValues(m![2] ?? '', cmd.values);
     return { head, hasSpace, best: '', candidates: [] };
   }

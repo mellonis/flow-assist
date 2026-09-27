@@ -1339,6 +1339,7 @@ export function renderChatModal({
   pager = null,
   picker = null,
   pickerOwn = 'idle',
+  panel = null,
 }: {
   // The block open in the pager, drawn in the conversation's place (null — none).
   pager?: PagerView | null;
@@ -1462,10 +1463,13 @@ export function renderChatModal({
   picker?: PickerState | null;
   // What this chat is doing, for its own row in the picker.
   pickerOwn?: OwnStatus;
+  // A plugin command's panel, drawn in the conversation's place (null — none).
+  panel?: CommandPanelView | null;
 }) {
   // A y/n or a question that arrives while the picker is up wins: the chat is drawn with
-  // it, and the picker comes back once it is answered.
+  // it, and the picker comes back once it is answered. So for a plugin's panel.
   if (picker && !pendingQuestion && !pendingConfirm) return renderSessionPicker({ width, height, theme, picker, own: pickerOwn, now, error, fullscreen, docked, focused });
+  if (panel && !pendingQuestion && !pendingConfirm) return renderCommandPanel({ width, height, theme, panel, error, fullscreen, docked, focused });
   const boxW = chatBoxWidth(width, fullscreen);
   const boxH = fullscreen ? height : Math.min(Math.floor(height * 0.82), height - 4);
   const wrap = chatWrapWidth(width, fullscreen);
@@ -1844,6 +1848,81 @@ export function renderSessionPicker({ width, height, theme, picker, own = 'idle'
       message ? h(Text, { color: error ? 'red' : m.warn, wrap: 'wrap' }, message) : null,
       h(Box, { flexDirection: 'column', width: '100%', flexShrink: 0, backgroundColor: m.fieldBg }, field),
       hint ? h(Text, { dim: true, wrap: 'truncate', selectable: false }, hint) : null));
+}
+
+// ─── A plugin command's panel (pure render) ────────────────────────────────────
+// `/mcp` and the like: a plugin's list in the chat's own frame, in the conversation's
+// place — the same docked, as a window and full, as the session picker. One row per
+// item, each ONE terminal line: the cursor mark, the text, the detail dim (or in its
+// tone's colour) and cut first. The notice under the list, then the keys: the panel's
+// own and the plugin's. The state and what a key does are src/assistant/command-panel.ts.
+export type CommandPanelView = {
+  title: string;
+  rows: Array<{ id: string; text: string; detail?: string; tone?: 'ok' | 'warn' | 'error' }>;
+  cursor: number;
+  notice: string;
+  empty: string;
+  keys: Array<{ cap: string; label: string }>;
+  // A panel opened over another: Esc goes back rather than closing.
+  nested?: boolean;
+};
+
+export function renderCommandPanel({ width, height, theme, panel, error = null, fullscreen = false, docked = false, focused = true }: {
+  width: number;
+  height: number;
+  theme: Theme | undefined;
+  panel: CommandPanelView;
+  error?: string | null;
+  fullscreen?: boolean;
+  docked?: boolean;
+  focused?: boolean;
+}) {
+  const boxW = chatBoxWidth(width, fullscreen);
+  const boxH = fullscreen ? height : Math.min(Math.floor(height * 0.82), height - 4);
+  const m = (theme?.modals?.chat ?? {}) as Record<string, string | undefined>;
+  const inner = Math.max(1, boxW - 4);
+  const message = error ? `⚠ ${error}` : panel.notice;
+  const listRows = Math.max(1, boxH - 4 - 2 - (message ? 1 + textRows(message, inner) : 0));
+  const toneColor = (tone?: string) => (tone === 'ok' ? m.ok ?? 'green' : tone === 'warn' ? m.warn : tone === 'error' ? 'red' : undefined);
+  // The texts form a column as wide as the widest, up to half the row, so the details
+  // line up.
+  const textCol = Math.min(Math.max(0, ...panel.rows.map((r) => cellWidth(r.text))), Math.floor((inner - 2) / 2));
+  const lines = panel.rows.map((r, i) => {
+    const active = i === panel.cursor;
+    const color = toneColor(r.tone);
+    return h(Box, { key: r.id, flexDirection: 'row', width: '100%', flexShrink: 0 },
+      h(Text, { bold: true, color: m.accent, selectable: false }, active ? '› ' : '  '),
+      h(Box, { flexShrink: 0, overflow: 'hidden', width: textCol },
+        h(Text, { wrap: 'truncate', bold: active, color: active ? m.accent : undefined }, r.text)),
+      r.detail ? h(Box, { flexShrink: 1000, overflow: 'hidden' }, h(Text, { ...(color ? { color } : { dim: true }), wrap: 'truncate' }, `  ${r.detail}`)) : null);
+  });
+  const offset = windowAround(lines, panel.cursor, listRows).start;
+  const headRoom = Math.max(0, boxW - 4);
+  const heading = `${ASSISTANT_MARK} Flow Assist · ${panel.title}`;
+  // Esc first: the row is cut at the frame's width, and the way out must not be what
+  // falls off in a narrow panel.
+  const hint = [`${CAP.esc} ${panel.nested ? 'back' : 'close'}`, ...(panel.rows.length > 1 ? [`${CAP.upDown} pick`] : []), ...panel.keys.map((k) => `${k.cap} ${k.label}`)].join(' · ');
+  return h(Box, docked ? { width, height, flexDirection: 'column' } : overlay(width, height),
+    h(Box, {
+      border: 'round',
+      backgroundColor: m.bg,
+      color: m.text,
+      borderBackgroundColor: m.borderBg,
+      borderColor: docked ? (focused ? m.accent : m.idleBorder) : m.border,
+      borderTitle: cutStep(heading, headRoom),
+      width: boxW,
+      height: boxH,
+      padding: 1,
+      flexDirection: 'column',
+      gap: 1,
+      overflow: 'hidden',
+      selectionScope: true,
+    },
+      // Keys are the panel's (`isActive: false`): the offset follows the cursor.
+      h(ScrollBox, { flexGrow: 1, flexShrink: 1, flexDirection: 'column', scrollbar: true, isActive: false, offset },
+        lines.length ? lines : h(Text, { dim: true }, panel.empty || 'Nothing to show.')),
+      message ? h(Text, { color: error || message.startsWith('⚠') ? 'red' : m.warn, wrap: 'wrap' }, message) : null,
+      h(Text, { dim: true, wrap: 'truncate', selectable: false }, hint)));
 }
 
 // ─── The chat, collapsed ──────────────────────────────────────────────────────

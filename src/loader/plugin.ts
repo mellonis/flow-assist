@@ -5,7 +5,7 @@
 // disabled). Extracted into its own module so the registry (`registry.ts`) and
 // the plugins themselves can both import it without a cycle.
 import type { ContextItem } from '../assistant/screen-context.js';
-import type { ArgValues } from '../config/commands.js';
+import type { ArgComplete, ArgValues } from '../config/commands.js';
 
 export type { ContextItem };
 
@@ -91,6 +91,13 @@ export type Command = {
   // a value may be `{ value, label }` to show a word beside it (docs/plugins.md,
   // "Commands, keys and the footer"). Optional, so a plugin without it is unchanged.
   values?: ArgValues;
+  // The values of every word of the argument, given the words before it — for a later
+  // word that takes a value too (`mcp disable <server>`). Takes over from `values`.
+  complete?: ArgComplete;
+  // `true` — the command is also the chat's `/name`, run with the chat's ctx (`surface:
+  // 'chat'`, `say`, `openPanel` — docs/plugins.md, "Commands, keys and the footer"). The
+  // chat's own commands keep their names.
+  chat?: boolean;
   run?: (ctx?: unknown, arg?: string) => unknown;
 };
 

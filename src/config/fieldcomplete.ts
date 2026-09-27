@@ -11,18 +11,19 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { within } from '../assistant/shell.js';
-import { completeValues, type ArgValues, type CompleteResult } from './commands.js';
+import { completeValues, completeWords, type ArgComplete, type ArgValues, type CompleteResult } from './commands.js';
 
 const NONE = (head = ''): CompleteResult => ({ head, hasSpace: true, best: '', candidates: [] });
 
 // ─── a `/command` and its argument ───────────────────────────────────────────
-export type ChatCommandDef = { name: string; values?: ArgValues };
+export type ChatCommandDef = { name: string; values?: ArgValues; complete?: ArgComplete };
 
 // `/co` completes the command's name — in the declared order, since the chat's
 // commands are listed by what they are for, not alphabetically; a bare `/` lists them
 // all (the field's own rule: a slash is a request for the list). `/notes o` completes
-// the argument from the command's values (completeValues). Anything that is not a
-// `/command` completes nothing.
+// the argument from the command's values (completeValues), and a command that declares
+// `complete` has every word of its argument completed from it (completeWords). Anything
+// that is not a `/command` completes nothing.
 export function completeSlash(text: string, commands: readonly ChatCommandDef[]): CompleteResult {
   if (!text.startsWith('/')) return NONE();
   const rest = text.slice(1);
@@ -35,6 +36,7 @@ export function completeSlash(text: string, commands: readonly ChatCommandDef[])
     return { head, hasSpace: false, best, candidates: matches };
   }
   const cmd = commands.find((c) => c.name.toLowerCase() === head.toLowerCase());
+  if (cmd?.complete) return completeWords(m![2], cmd.complete);
   return cmd?.values ? completeValues(m![2], cmd.values) : NONE();
 }
 

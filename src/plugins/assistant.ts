@@ -64,6 +64,8 @@ import type { Make } from '../loader/plugin.js';
 import { decodeBangLine, encodeBangLine, keptInHistory, pushHistory, type HistoryCommand } from '../assistant/prompt-history.js';
 import type { Plugin } from '../loader/plugin.js';
 import type { PluginApi } from '../runtime/plugin-api.js';
+import { isPanelSpec, panelAnswer, panelKey as commandPanelKey, panelKeys, panelRows, panelStart, panelTop, type PanelSpec, type PanelState } from '../assistant/command-panel.js';
+import type { Command as PluginCommand } from '../loader/plugin.js';
 
 // Slash-commands of the chat — a single source for runChatCommand and Tab-completion.
 // `/analyze` is a tracker slash command and is removed.
@@ -431,6 +433,23 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // (`markSeen`, through a ref — it is defined further down).
           const markSeenRef = ui.useRef<() => void>(() => {});
           const setPicker = (next: PickerState | null) => { pickerRef.current = next; setPickerState(next); if (!next) markSeenRef.current(); host.notify(); };
+          // A plugin command's panel (`ctx.openPanel`, src/assistant/command-panel.ts),
+          // drawn in the conversation's place as the picker is; null — none. Its rows are
+          // the plugin's and read at every draw, and a tick redraws it every second while
+          // it is up, so what it says of time (`retrying in 12 s`) moves.
+          const panelRef = ui.useRef<PanelState | null>(null);
+          const [panel, setPanelState] = ui.useState<PanelState | null>(null);
+          const setPanel = (next: PanelState | null) => { panelRef.current = next; setPanelState(next); if (!next) markSeenRef.current(); host.notify(); };
+          const [, setPanelTick] = ui.useState(0);
+          ui.useEffect(() => {
+            if (!panel) return;
+            const t = setInterval(() => { setPanelTick((n: number) => n + 1); host.notify(); }, 1000);
+            (t as { unref?: () => void }).unref?.();
+            return () => clearInterval(t);
+          }, [!!panel]);
+          // A plugin's news said while a turn runs waits for the turn's end (`note` on the
+          // store, bound to `services.chatNote` by the App).
+          const laterNotesRef = ui.useRef<string[]>([]);
           const [messages, setMessages] = ui.useState<ChatMsg[]>([]);
           const [input, setInput] = ui.useState('');
           const [streaming, setStreaming] = ui.useState(false);
@@ -830,9 +849,31 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // The chat's commands with `/resume`'s values filled in: the saved sessions,
           // newest first, numbered as `/resume` lists them, each number labelled with
           // its title. Read when the field is drawn, so the list is the one on disk.
-          const chatCommandDefs: ChatCommandDef[] = CHAT_COMMAND_DEFS.map((c) => (c.name === 'resume'
-            ? { ...c, values: () => resumeList().slice(0, 15).map((s, i) => ({ value: String(i + 1), label: s.title || '(untitled)' })) }
-            : c));
+          // The plugins' commands marked for the chat (`chat: true`), by the bare name the
+          // person types, after the chat's own; a name the chat's own commands have stays
+          // the chat's, and the first plugin to claim a name keeps it.
+          const pluginChatCommands = (): Array<{ name: string; cmd: PluginCommand }> => {
+            const reg = (Array.isArray(host.commandRegistry) ? host.commandRegistry : []) as PluginCommand[];
+            const taken = new Set<string>(CHAT_COMMANDS);
+            const out: Array<{ name: string; cmd: PluginCommand }> = [];
+            for (const c of reg) {
+              if (!c || c.chat !== true || typeof c.run !== 'function' || typeof c.name !== 'string') continue;
+              const bare = (c.name.includes(':') ? c.name.slice(c.name.lastIndexOf(':') + 1) : c.name).toLowerCase();
+              if (!bare || taken.has(bare)) continue;
+              taken.add(bare);
+              out.push({ name: bare, cmd: c });
+            }
+            return out;
+          };
+          const chatCommandDefs: ChatCommandDef[] = [
+            ...CHAT_COMMAND_DEFS.map((c) => (c.name === 'resume'
+              ? { ...c, values: () => resumeList().slice(0, 15).map((s, i) => ({ value: String(i + 1), label: s.title || '(untitled)' })) }
+              : c)),
+            ...pluginChatCommands().map(({ name, cmd }) => ({ name, values: cmd.values, complete: cmd.complete })),
+          ];
+          // What the ↑/↓ history asks of a command: the chat's own, and a plugin's as it
+          // declares (`history: false` for one whose argument may be a secret).
+          const historyCommands = () => [...CHAT_COMMAND_DEFS, ...pluginChatCommands().map(({ name, cmd }) => ({ name, history: cmd.history }))];
           // What the field completes, from its text alone: in shell mode the word being
           // typed as a path under the shell's directory (nothing outside the roots by
           // real path — `dirAllowed`'s own rule); otherwise a `/command` and its
@@ -1047,7 +1088,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const writeRef = ui.useRef(writeSession); writeRef.current = writeSession;
           // Whether the conversation is on screen: the chat open, and neither the picker
           // nor the pager drawn in its place.
-          const conversationShown = () => openRef.current && !pickerRef.current && !pagerRef.current;
+          const conversationShown = () => openRef.current && !pickerRef.current && !pagerRef.current && !panelRef.current;
           // The chat shows the session's end: an answer that came before now is seen,
           // and the file says so at the next save.
           const markSeen = () => {
@@ -1093,6 +1134,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             resetRound(); // the round being written belonged to the conversation being left
             setFolds(allFolded()); // and the exceptions pointed into a conversation that is gone
             setPager(null);
+            setPanel(null);
             usageRef.current = s.usage;
             historyRef.current = s.prompts.slice();
             histAt.current = null;
@@ -2038,6 +2080,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // The directory moved during the turn: its note goes under the answer.
               inTurnRef.current = false;
               if (projectNoteRef.current) { const note = projectNoteRef.current; projectNoteRef.current = null; pushProjectNote(note); }
+              // A plugin's news that came while the turn ran goes under its answer.
+              if (laterNotesRef.current.length) { const notes = laterNotesRef.current; laterNotesRef.current = []; for (const n of notes) pushNote(n); }
               // A plan finished in this turn has nothing left to show: all it would say is
               // "N done", hanging over the next question. It goes when the answer ends (as
               // in Claude Code); a plan with anything still open stays.
@@ -2463,8 +2507,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // every notice it gives.
             setError(null);
             // The picker takes the conversation's place, where a pager left open while
-            // the plugin had the keys stands: the pager goes.
+            // the plugin had the keys stands: the pager goes, and so does a panel.
             setPager(null);
+            setPanel(null);
             setPicker(pickerStart(sessionRows(sessDir, lockToken), currentProject()));
           };
           // What a picker key asked for (session-picker.ts' `PickerAction`).
@@ -2562,6 +2607,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             setElapsedMs(0);
             setFolds(allFolded()); // everything folded again, and no exceptions left over
             setPager(null);
+            setPanel(null);
             setStreaming(false);
             disarmEsc();
             host.notify();
@@ -2579,6 +2625,63 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             return true;
           };
 
+          // A plugin's panel takes the conversation's place, as the picker does: the chat
+          // opens and takes the keyboard for it, and a pending y/n or question is answered
+          // first.
+          const openPanel = (spec: PanelSpec) => {
+            if (!isPanelSpec(spec)) return;
+            if (!focusedRef.current) openChat();
+            if (pendingRef.current || askRef.current) return;
+            setError(null);
+            setPager(null);
+            setPicker(null);
+            setPanel(panelStart(spec));
+          };
+          // A panel key's answer: a line for its notice, or a panel over it — laid on the
+          // panel it ran in, and dropped when that one has gone meanwhile (an answer that
+          // came after Esc).
+          const panelStep = (step: ReturnType<typeof commandPanelKey>) => {
+            setPanel(step.state);
+            if (!step.run || !step.state) return;
+            const at = panelTop(step.state);
+            const apply = (answer: unknown) => {
+              const cur = panelRef.current;
+              if (!cur || panelTop(cur) !== at) return;
+              setPanel(panelAnswer(cur, answer));
+            };
+            const fail = (e: unknown) => apply(`⚠ ${(e as Error)?.message ?? String(e)}`);
+            try {
+              const r = step.run.def.run(step.run.id);
+              if (r && typeof (r as Promise<unknown>).then === 'function') (r as Promise<unknown>).then(apply, fail);
+              else apply(r);
+            } catch (e) { fail(e); }
+          };
+          // A plugin's command run from the chat: what it says is a note (display only,
+          // never sent), a failure the chat's error line, and it may open a panel.
+          const runPluginCommand = (name: string, cmd: PluginCommand, arg: string) => {
+            setField('');
+            const fail = (e: unknown) => { setError(`/${name}: ${(e as Error)?.message ?? String(e)}`); host.notify(); };
+            const ctx = {
+              surface: 'chat',
+              say: (text: string) => { pushNote(String(text ?? '')); host.notify(); },
+              showMessage: (text: string) => (host.services as Record<string, any>).showMessage?.(text),
+              error: (text: string) => { setError(String(text ?? '')); host.notify(); },
+              openPanel,
+              config: host.config,
+            };
+            try {
+              const r = cmd.run?.(ctx, arg) as unknown;
+              if (r && typeof (r as Promise<unknown>).then === 'function') (r as Promise<unknown>).catch(fail);
+            } catch (e) { fail(e); }
+            host.notify();
+          };
+          // A plugin's news: a note now, or under the turn's answer when one runs.
+          const pluginNote = (text: string) => {
+            if (!text) return;
+            if (inTurnRef.current) { laterNotesRef.current.push(text); return; }
+            pushNote(text);
+            host.notify();
+          };
           const runChatCommand = (cmd: string) => {
             const [name, ...rest] = cmd.split(/\s+/);
             const arg = rest.join(' ');
@@ -2778,7 +2881,12 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               }
               case 'compact': compactNow(); return;
               case 'exit': closeChat(); return;
-              default: setError(`unknown command /${name} — available: ${CHAT_COMMANDS.map(c => `/${c}`).join(', ')}`); return;
+              default: {
+                const plugin = pluginChatCommands().find((p) => p.name === String(name ?? '').toLowerCase());
+                if (plugin) { runPluginCommand(plugin.name, plugin.cmd, arg); return; }
+                setError(`unknown command /${name} — available: ${[...CHAT_COMMANDS, ...pluginChatCommands().map((p) => p.name)].map(c => `/${c}`).join(', ')}`);
+                return;
+              }
             }
           };
 
@@ -2806,6 +2914,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             disarmEsc();
             setPager(null);
             setPicker(null); // its rows were read for this visit; the key reads them anew
+            setPanel(null);
             writeSession(); // the draft too
             setOpen(false);
             openRef.current = false; // the background flush may fire before the next render
@@ -2950,7 +3059,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             : [];
           const pagerShown = !!pager && pagerRows.length > 0;
           pagerShownRef.current = pagerShown;
-          (host.store as Record<string, any>).chat = { open, unread, mode, focus, openChat, closeChat, send, messages, streaming, toolLabel, cursor, escArmed, pendingConfirm: pendingAsk, ctrlKey, panelKey, pointer, statusRow: statusRow ? liveChatStatus(() => statusRef.current as never, collapsedBusy) : null, footerStatus, layout, needRows };
+          (host.store as Record<string, any>).chat = { open, unread, mode, focus, openChat, closeChat, send, messages, streaming, toolLabel, cursor, escArmed, pendingConfirm: pendingAsk, ctrlKey, panelKey, pointer, note: pluginNote, statusRow: statusRow ? liveChatStatus(() => statusRef.current as never, collapsedBusy) : null, footerStatus, layout, needRows };
           // Lands the next background result. It is SHOWN as soon as no turn is being
           // written (a streaming turn keeps rewriting the display list's last message,
           // so a result cannot be appended under it) — a half-typed draft does not hold
@@ -3017,7 +3126,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // The picker stands in the conversation's place: a button or the wheel must
               // not reach the list it hides. A pending y/n or question is drawn with the
               // conversation instead (the render's own condition), and a click reaches it.
-              const pickerDrawn = !!pickerRef.current && !pendingRef.current && !askRef.current;
+              const pickerDrawn = (!!pickerRef.current || !!panelRef.current) && !pendingRef.current && !askRef.current;
               if (pickerDrawn && isMouseButton(key.name)) return false;
               if (pickerDrawn && (key.name === 'wheelup' || key.name === 'wheeldown')) return true;
               // A press, a drag or a release. It is consumed only when it actually
@@ -3065,6 +3174,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               if (pendingRef.current) {
                 if (key.name === 'escape' || key.name === 'n') { settleConfirm(false); return true; }
                 if (key.name === 'y' || key.name === 'return') { settleConfirm(true); return true; }
+                return true;
+              }
+              // A plugin's panel holds the keys while it is up, as the picker does: ↑/↓, Esc
+              // and the plugin's own keys, nothing else — after a pending question or y/n.
+              if (panelRef.current) {
+                setError(null);
+                panelStep(commandPanelKey(panelRef.current, key));
                 return true;
               }
               // The picker holds the keys while it is up — after a pending question or
@@ -3262,7 +3378,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   // false`) — before it runs, and again after if it replaced the
                   // history: `/resume 2` loads that session's own, and ↑ there should
                   // still offer the `/resume` that led to it.
-                  const kept = keptInHistory(cmd, CHAT_COMMAND_DEFS);
+                  const kept = keptInHistory(cmd, historyCommands());
                   if (kept) pushHistory(historyRef.current, cmd);
                   histAt.current = null;
                   histShown.current = '';
@@ -3373,6 +3489,17 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             pendingConfirm: pendingAsk,
             pendingQuestion,
             picker,
+            // A plugin command's panel: its rows as the plugin gives them now, its keys
+            // with their caps.
+            panel: panel ? (() => {
+              const { rows, error: rowsError } = panelRows(panel);
+              const top = panelTop(panel);
+              return {
+                title: top.title, rows, cursor: Math.min(panel.cursor, Math.max(0, rows.length - 1)),
+                notice: rowsError ? `⚠ ${rowsError}` : panel.notice, empty: top.empty ?? '',
+                keys: panelKeys(panel).map((k) => ({ cap: keyGlyph(k.key), label: k.label })), nested: panel.stack.length > 1,
+              };
+            })() : null,
             // What this chat is doing, for its own row: a y/n or a question waits, or a
             // turn or a `!command` runs.
             pickerOwn: pendingAsk || pendingQuestion ? 'waiting' : streaming ? 'working' : 'idle',

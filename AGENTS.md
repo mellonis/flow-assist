@@ -2023,7 +2023,9 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   label is said beside the offer, dim, never inserted (`LineView.label`); a walk over a
   single candidate completes anew, which is what lets Tab walk INTO a directory in the
   chat. A plugin declares it on its command (docs/plugins.md); the host's own `:`
-  commands declare none.
+  commands declare none. `Command.complete(words)` completes EVERY word of the argument
+  from the words before it (`completeWords`), over `values` when both are given —
+  `mcp disable <server>`; the chat's `completeSlash` reads it the same way.
 - **↑/↓ recall what was run** (in memory, for this run). A command declared with
   `history: false` is never kept — the host's `config` is (a value set may be a
   secret: an MCP server's `headers` or `env`), and a plugin's command may say it on its
@@ -2775,6 +2777,29 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   (`InteractiveDeps`: `detect`, `spawn`, `signals` — `renderApp`'s `interactive`,
   `bootApp`'s `opts.interactive`; by default a test has no `script` and a spawn that
   exits 0) and never reach the machine's `script` or the process's signals.
+- **A plugin's command is the chat's too when it says `chat: true`**
+  (`pluginChatCommands` in `src/plugins/assistant.ts`, read from `host.commandRegistry`
+  by its bare name; a name the chat's own commands have stays theirs, the first plugin
+  to claim a name keeps it). `runChatCommand`'s `default` runs it with the chat's ctx —
+  `surface: 'chat'`, `say` (a `note`, display only), `error` (the error line, where a
+  throw or a rejection lands too), `showMessage`, `openPanel`; the `:` line's ctx says
+  `surface: 'line'`. It completes and is kept in ↑/↓ by its own `values`, `complete`
+  and `history`, and the unknown-command line lists it.
+  **Its panel** (`ctx.openPanel(spec)`, `src/assistant/command-panel.ts`, pure; drawn by
+  `renderCommandPanel` in `src/views/modals.ts`) stands in the conversation's place
+  under the picker's rules: it opens the chat and takes the keyboard, a pending y/n or
+  question is drawn over it and answered first, it holds every key while drawn (↑/↓,
+  Esc, the spec's own keys — `up`/`down`/`escape` are never the plugin's), a mouse
+  button and the wheel never reach the conversation it hides, and closing the chat,
+  `/clear`, `/new`, `/resume` and opening the picker drop it. `rows()` is read at every
+  draw and a 1 s tick redraws it while up. A key's `run(id)` may answer a line (the
+  notice), a spec (opened over it, Esc goes back) or a promise of either; an answer
+  that lands after its panel went is dropped.
+  **`services.chatNote(text)`** is a plugin's news from outside a command: the chat
+  publishes `note` on `store.chat` and the App binds the service to it; during a turn
+  it waits in `laterNotesRef` and is said under the answer, where the project's
+  instructions note is. **`services.setConfig` / `unsetConfig`** are `setConfigValue`
+  / `unsetConfigValue` with every plugin's schema, bound by `renderApp`.
 - **The field completes inline, through the `:` line's own `lineView` / `lineTab`** —
   one vocabulary: the untyped rest of the offer after the caret in the dimmed accent,
   its label beside it, the other candidates as `⇥ a · b`, Tab taking the offer and then

@@ -349,8 +349,47 @@ entry: ['notes'],                     // the key that leads in, on the start scr
   `values: () => boards().map((b, i) => ({ value: String(i + 1), label: b.name }))` —
   a value is a word, or `{ value, label }` when a word alone says too little (a
   number): the label is shown beside it, dim, and never inserted. The values are the
-  first argument's; a second word is not completed. Optional: a command without it
+  first argument's. A command whose later words take values too says `complete(words)`
+  instead — given the words before the one being typed, the values it may be:
+  `complete: (w) => w.length === 0 ? ['restart', 'tools'] : w.length === 1 ? servers() : []`
+  completes `restart <server>` in both places. Optional: a command without either
   completes its name and nothing more.
+- **A command can be the chat's too.** `chat: true` makes it `/name` in the chat as well
+  as `:name` on the command line (the chat's own commands keep their names). `run(ctx,
+  arg)` tells the two apart by `ctx.surface` — `'line'` or `'chat'`. On the `:` line
+  `ctx.showMessage(text)` is the one-line toast; in the chat `ctx.say(text)` puts a note
+  in the conversation — shown to the person, never sent to the model —
+  `ctx.error(text)` is the chat's error line, and a thrown error (or a rejected promise)
+  lands there too.
+- **In the chat a command may open a panel** in the conversation's place, as the
+  session picker is drawn — a list with a cursor and keys of the plugin's own:
+
+  ```ts
+  ctx.openPanel({
+    title: 'Servers',
+    rows: () => servers().map((s) => ({ id: s.name, text: s.name, detail: s.state, tone: s.ok ? 'ok' : 'error' })),
+    keys: [{ key: 'r', label: 'restart', run: (id) => { restart(id); return `restarting ${id}`; } }],
+    empty: 'No servers.',
+  });
+  ```
+
+  `rows` is read at every draw (the panel redraws each second while it is up), so it
+  follows what changes under it. ↑/↓ move the cursor and Esc closes; a key is named as
+  the terminal names it (`d`, `return`), and `up`, `down` and `escape` stay the
+  panel's. A key's `run` gets the id of the row under the cursor and may answer a line
+  (the panel's notice), another panel (opened over this one — Esc goes back), or a
+  promise of either. A y/n or a question the model asks is drawn over it, and closing
+  the chat, `/clear` or `/resume` put it away.
+- `host.services.chatNote(text)` is a note from outside a command — a server that
+  connected in the background: it is held while a turn runs and said under its answer,
+  since a note in the middle would split the turn. A one-shot prompt has no chat, so
+  say it in the log as well.
+- `host.services.setConfig(key, value, { session })` and `unsetConfig(key, { session })`
+  change a setting the way `config set` / `config unset` do — checked against the
+  schema (yours for your key), saved to `config.local.json` or kept for this run with
+  `session: true`, laid on the running config — and answer `{ ok, value, restart }` or
+  `{ ok: false, error }`. For a command of yours that turns a setting of yours on or
+  off; never for a key the person did not ask to change.
 - The `:` line remembers what was run, for ↑/↓. A command whose argument may be a
   secret — a token, a password, a header — says `history: false` and is never kept:
   `{ name: 'login', usage: 'login <token>', history: false, run: … }`. It is part of
@@ -826,6 +865,10 @@ give up that host's own attempts until some other host's restart revives the ser
 `flow-assist plugins ls` marks a plugin reached either way `(remote)`.
 
 ### What a remote plugin cannot do
+
+- **Be a chat command or open a panel.** `chat`, `complete` and `ctx.openPanel` are a
+  JS plugin's: a remote plugin's commands are the `:` line's, and its argument
+  completes from `values` alone.
 
 - **Mark a config key for the model.** Its `configSchema` is JSON Schema, read into the
   host's zod, and carries no mark: every key of a remote plugin is the person's to set.
