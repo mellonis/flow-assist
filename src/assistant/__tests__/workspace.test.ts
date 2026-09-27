@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { hostStateDir } from '../../config/load.js';
 import { projectHome } from '../sessions.js';
-import { ensureWorkspace, resolveInWorkspace, workspaceDir, workspaceRoot, WORKSPACE_LEAF } from '../workspace.js';
+import { ensureWorkspace, listWorkspace, readWorkspaceFile, resolveInWorkspace, workspaceDir, workspaceRoot, writeArtifact, WORKSPACE_LEAF } from '../workspace.js';
 
 const tmp = (p: string) => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), p)));
 
@@ -54,4 +54,51 @@ test('a path is confined to the workspace: no absolute path, no .., no link that
     // Every refusal names the workspace, so the model knows where to write instead.
     expect((r as { error: string }).error).toContain(dir);
   }
+});
+
+const fresh = () => {
+  const dir = workspaceDir(tmp('fa-ws-'), '/p/app');
+  ensureWorkspace(dir);
+  return dir;
+};
+
+test('a working file is written under artifacts/, 0600, whole — and says what was there before', () => {
+  const dir = fresh();
+  const first = writeArtifact(dir, 'artifacts/notes/plan.md', 'one\n');
+  expect(first).toEqual({ abs: path.join(dir, 'artifacts', 'notes', 'plan.md'), before: null });
+  expect(fs.readFileSync(first.abs, 'utf8')).toBe('one\n');
+  expect(fs.statSync(first.abs).mode & 0o777).toBe(0o600);
+  expect(fs.statSync(path.join(dir, 'artifacts', 'notes')).mode & 0o777).toBe(0o700);
+  expect(writeArtifact(dir, 'artifacts/notes/plan.md', 'two\n').before).toBe('one\n');
+});
+
+test('a write that would leave artifacts/ is refused by throwing, naming the path to use', () => {
+  const dir = fresh();
+  const outside = tmp('fa-out-');
+  fs.mkdirSync(path.join(dir, 'artifacts'), { recursive: true });
+  fs.symlinkSync(outside, path.join(dir, 'artifacts', 'out'));
+  fs.symlinkSync(path.join(outside, 'x.md'), path.join(dir, 'artifacts', 'link.md'));
+  const refused = (rel: string) => { try { writeArtifact(dir, rel, 'x'); return ''; } catch (e) { return (e as Error).message; } };
+  expect(refused('/tmp/draft.md')).toContain(dir);
+  expect(refused('../draft.md')).toContain('Nothing was changed');
+  expect(refused('draft.md')).toContain('artifacts/draft.md');
+  // The memory has its own tool and its own guards.
+  expect(refused('memory/fact.md')).toContain('memory tool');
+  expect(refused('artifacts/out/x.md')).toContain('outside the workspace');
+  expect(refused('artifacts/link.md')).toContain('link');
+  expect(fs.readdirSync(outside)).toEqual([]);
+});
+
+test('reading gives the file\'s text; listing walks the workspace and never follows a link', () => {
+  const dir = fresh();
+  writeArtifact(dir, 'artifacts/plan.md', 'the plan\n');
+  fs.symlinkSync('/etc', path.join(dir, 'artifacts', 'etc'));
+  expect(readWorkspaceFile(dir, 'artifacts/plan.md')).toBe('the plan\n');
+  expect(() => readWorkspaceFile(dir, 'artifacts/etc/hosts')).toThrow('outside the workspace');
+  expect(() => readWorkspaceFile(dir, 'artifacts/none.md')).toThrow('no such file');
+  const listing = listWorkspace(dir, '');
+  expect(listing).toContain('artifacts/plan.md (9 B)');
+  expect(listing).toContain('artifacts/etc → a link, not followed');
+  expect(listing).not.toContain('hosts');
+  expect(listWorkspace(fresh(), '')).toContain('empty');
 });

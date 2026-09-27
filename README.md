@@ -94,6 +94,14 @@ another. `/memory` lists them, this project's first; `/memory forget <n>` remove
 `/memory forget project`, `global` or `all` a whole list — without asking the model.
 `/clear` says how many it kept.
 
+**The assistant keeps its own work in its own place.** Each project has an agent
+workspace, `projects/<the project's path>/_workspace/` in the config directory
+(`_global/_workspace/` for what holds everywhere), holding its memory and `artifacts/`:
+the drafts, notes, plans and findings you asked it to keep. It writes there without a
+y/n — nothing of yours is touched — and each write shows in the chat as a change with its
+path, and in the session's journal. The tools reach nothing outside the workspace, and
+what the assistant reads back from it is its own earlier note, not your instruction.
+
 A message sent while an answer is still coming is queued (`⏎ queued`) and reaches the
 assistant after its current step — between two tool rounds — so a correction lands
 while the work it means to steer is still going; ↑ on an empty field takes the last one

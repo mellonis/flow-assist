@@ -83,3 +83,81 @@ export function readScope(raw: unknown): { scope: WorkspaceScope } | { error: st
   if (s === 'global' || s === 'host') return { scope: 'global' };
   return { error: `invalid scope '${s}' — expected "project" or "global"` };
 }
+
+// A file written whole or not at all, 0600: a temp file beside it, renamed over it —
+// the rename also replaces a link in the file's place rather than writing through it.
+export function writePrivate(file: string, content: string): void {
+  ensureDir(path.dirname(file));
+  const tmp = `${file}.${process.pid}.${Math.random().toString(36).slice(2, 8)}.tmp`;
+  fs.writeFileSync(tmp, content, { mode: 0o600 });
+  fs.renameSync(tmp, file);
+}
+
+// ─── The model's working files ────────────────────────────────────────────────────
+// `workspace_write` / `workspace_read` / `workspace_list` (src/loader/tools-core.ts).
+// A write goes under `artifacts/` only: `memory/` is the memory tool's, whose guards a
+// plain write would pass by. Reading reaches the whole workspace — a fact is read that
+// way. Every refusal throws, naming what to use instead, and a write's says nothing
+// was changed (AGENTS.md, "A write tool refuses by throwing").
+export const ARTIFACTS_DIR = 'artifacts';
+export const WORKSPACE_FILE_MAX = 2 * 1024 * 1024;
+const LIST_MAX = 500;
+
+const refuseWrite = (msg: string): never => { throw new Error(`workspace_write: ${msg}. Nothing was changed.`); };
+
+export function writeArtifact(ws: string, rel: string, content: string): { abs: string; before: string | null } {
+  const r = resolveInWorkspace(ws, rel);
+  if ('error' in r) return refuseWrite(r.error);
+  const segs = path.relative(ws, r.abs).split(path.sep).filter(Boolean);
+  if (segs[0] === 'memory') refuseWrite(`memory/ is kept by the memory tool, which holds each fact to its rules — store a fact with memory action=add`);
+  if (segs[0] !== ARTIFACTS_DIR || segs.length < 2) refuseWrite(`working files go under ${ARTIFACTS_DIR}/ — write it as ${ARTIFACTS_DIR}/${segs.filter((s) => s !== ARTIFACTS_DIR).join('/') || 'notes.md'} (the workspace is ${ws})`);
+  if (Buffer.byteLength(content, 'utf8') > WORKSPACE_FILE_MAX) refuseWrite(`the content is ${Buffer.byteLength(content, 'utf8')} bytes, and a workspace file may hold at most ${WORKSPACE_FILE_MAX}`);
+  let before: string | null = null;
+  try {
+    const st = fs.lstatSync(r.abs);
+    if (st.isSymbolicLink()) refuseWrite(`«${rel}» is a link — a workspace file is written in place, never through a link`);
+    if (!st.isFile()) refuseWrite(`«${rel}» is a directory`);
+    before = fs.readFileSync(r.abs, 'utf8');
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
+  }
+  ensureDir(path.dirname(r.abs));
+  // The directories just made are checked again: nothing on the way may lead out.
+  if (!within(realOf(path.dirname(r.abs)), realOf(ws))) refuseWrite(`«${rel}» leads outside the workspace, ${ws}`);
+  writePrivate(r.abs, content);
+  return { abs: r.abs, before };
+}
+
+export function readWorkspaceFile(ws: string, rel: string): string {
+  const r = resolveInWorkspace(ws, rel);
+  if ('error' in r) throw new Error(`workspace_read: ${r.error}`);
+  let st: fs.Stats;
+  try { st = fs.statSync(r.abs); } catch { throw new Error(`workspace_read: no such file «${rel}» — workspace_list shows what is there`); }
+  if (!st.isFile()) throw new Error(`workspace_read: «${rel}» is not a file — workspace_list shows what is in it`);
+  if (st.size > WORKSPACE_FILE_MAX) throw new Error(`workspace_read: «${rel}» is ${st.size} bytes, over ${WORKSPACE_FILE_MAX}`);
+  return fs.readFileSync(r.abs, 'utf8');
+}
+
+// Every entry under `rel`, as paths from the workspace's root: a file with its size, a
+// directory once with a slash, a link named and never followed.
+export function listWorkspace(ws: string, rel = ''): string {
+  const r = resolveInWorkspace(ws, rel);
+  if ('error' in r) throw new Error(`workspace_list: ${r.error}`);
+  const out: string[] = [];
+  let more = 0;
+  const walk = (dir: string) => {
+    let entries: fs.Dirent[];
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries.sort((a, b) => (a.name < b.name ? -1 : 1))) {
+      const abs = path.join(dir, e.name);
+      const shown = path.relative(ws, abs).split(path.sep).join('/');
+      if (out.length >= LIST_MAX) { more++; continue; }
+      if (e.isSymbolicLink()) out.push(`${shown} → a link, not followed`);
+      else if (e.isDirectory()) { out.push(`${shown}/`); walk(abs); }
+      else if (e.isFile()) { let size = 0; try { size = fs.lstatSync(abs).size; } catch { /* gone */ } out.push(`${shown} (${size} B)`); }
+    }
+  };
+  walk(r.abs);
+  if (!out.length) return `The workspace${rel ? ` at ${rel}` : ''} is empty (${ws}). Write working files under ${ARTIFACTS_DIR}/ with workspace_write.`;
+  return [`${ws}${rel ? `/${rel}` : ''}:`, ...out, ...(more ? [`… ${more} more`] : [])].join('\n');
+}

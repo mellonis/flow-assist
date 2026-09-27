@@ -32,6 +32,19 @@ describe('repo tool group: the ways round the allowlist', () => {
     return { base, root, outside, group };
   };
 
+  it('a file written outside the roots is refused, naming the workspace as the place for a draft', async () => {
+    const { outside, group } = setup();
+    for (const target of [path.join(outside, 'draft.md'), '/tmp/flow-assist-draft.md']) {
+      const err = await group.exec('write_file', { path: target, content: 'x' }, {}).then(() => null, (e: Error) => e.message);
+      expect(err).toContain('outside the configured roots');
+      expect(err).toContain('workspace_write');
+      expect(err).toContain('Nothing was changed.');
+    }
+    // An edit or a delete of someone's file is not a draft: those refusals stay as they are.
+    const edit = await group.exec('edit_file', { path: path.join(outside, 'secret.txt'), old: 'the', new: 'a' }, {}).then(() => null, (e: Error) => e.message);
+    expect(edit).not.toContain('workspace_write');
+  });
+
   it('a symlink inside the root does not lead out of it — read, write or delete', async () => {
     const { root, outside, group } = setup();
     fs.symlinkSync(outside, path.join(root, 'docs'));

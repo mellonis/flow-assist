@@ -15,7 +15,7 @@
 // matter early and write a line of its own into the index.
 import fs from 'node:fs';
 import path from 'node:path';
-import { ensureDir } from './workspace.js';
+import { writePrivate } from './workspace.js';
 
 export const MEMORY_DIR = 'memory';
 export const MEMORY_INDEX = 'MEMORY.md';
@@ -103,15 +103,6 @@ export function readFacts(ws: string): Fact[] {
     } catch { /* unreadable — not a fact */ }
   }
   return out.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-}
-
-// A file written whole or not at all: a temp file beside it, renamed over it — the
-// rename also replaces a link in the file's place rather than writing through it.
-export function writePrivate(file: string, content: string): void {
-  ensureDir(path.dirname(file));
-  const tmp = `${file}.${process.pid}.${Math.random().toString(36).slice(2, 8)}.tmp`;
-  fs.writeFileSync(tmp, content, { mode: 0o600 });
-  fs.renameSync(tmp, file);
 }
 
 export function indexLine(f: Fact, prefix = ''): string {

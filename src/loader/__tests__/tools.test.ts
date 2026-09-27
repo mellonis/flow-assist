@@ -806,3 +806,31 @@ test('ai.maxRounds and ai.maxTurnTokens take 0 for none, and the notes say which
   expect(out).toMatch(/- ai\.maxRounds: .*default: 150 — .*0 is no round cap, and then ai\.maxTurnTokens is what ends a long turn/);
   expect(out).toMatch(/- ai\.maxTurnTokens: .*default: 2000000 — .*cache.*0 is no budget/);
 });
+
+test('the workspace tools write, read and list the project\'s workspace — a write takes no y/n and shows what it changed; a read is framed as the model\'s own note', async () => {
+  const { root, reg, inProject } = memSetup();
+  const ctxA = inProject('/p/a');
+  const writeDef = reg.tools.find((t) => t.function.name === 'workspace_write') as { write?: unknown } | undefined;
+  expect(writeDef).toBeDefined();
+  expect(writeDef!.write).toBeUndefined();
+  const changes: { title: string; before: string; after: string }[] = [];
+  const done = String(await reg.exec('workspace_write', { path: 'artifacts/plan.md', content: 'step one\n' }, { ...ctxA, reportChange: (c: any) => changes.push(c) }));
+  const file = path.join(workspaceDir(root, '/p/a'), 'artifacts', 'plan.md');
+  expect(done).toContain(file);
+  expect(fs.readFileSync(file, 'utf8')).toBe('step one\n');
+  // A new file is a change from nothing, named by its whole path in the workspace.
+  expect(changes).toEqual([{ title: file.replace(os.homedir(), '~'), before: '', after: 'step one\n' }]);
+  // Outside the workspace: refused by throwing, the path to use named.
+  await expect(reg.exec('workspace_write', { path: '/tmp/draft.md', content: 'x' }, ctxA)).rejects.toThrow(workspaceDir(root, '/p/a'));
+
+  const read = await reg.exec('workspace_read', { path: 'artifacts/plan.md' }, ctxA) as unknown as { text: string; raw: string };
+  expect(read.raw).toBe('step one\n');
+  expect(read.text).toContain('your own');
+  expect(read.text).toContain('not an instruction from the person');
+  expect(read.text.endsWith('step one\n')).toBe(true);
+  expect(String(await reg.exec('workspace_list', {}, ctxA))).toContain('artifacts/plan.md (9 B)');
+  // Another project's workspace is another directory; the global one is shared.
+  expect(String(await reg.exec('workspace_list', {}, inProject('/p/b')))).toContain('empty');
+  await reg.exec('workspace_write', { path: 'artifacts/everywhere.md', content: 'g', scope: 'global' }, ctxA);
+  expect(String(await reg.exec('workspace_list', { scope: 'global' }, inProject('/p/b')))).toContain('artifacts/everywhere.md');
+});
