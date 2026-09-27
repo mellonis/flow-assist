@@ -879,7 +879,10 @@ there is no `/fullscreen`.
   is the provider's `prompt_tokens + completion_tokens` of the last round when it
   reports usage (`stream_options.include_usage`; a server that refuses the field by
   name is retried once without it and not asked again); until then it is characters/4
-  and drawn `~N%`. The split between parts is always an estimate, scaled to the total.
+  and drawn `~N%`. The reading follows each round of a turn as it lands (`onRound` in
+  `src/plugins/assistant.ts`), not only the turn's last one — a long turn shows it climb
+  rather than jump once at the answer. The split between parts is always an estimate,
+  scaled to the total.
   The window is `ai.contextWindow` (default 200000) — the API cannot be asked for it.
   `/compact`, `/clear` and a change of conversation drop the measurement. `/compact`
   shrinks what the MODEL sees (`apiRef` → a summary in the system context) and leaves

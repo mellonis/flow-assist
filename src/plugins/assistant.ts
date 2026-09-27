@@ -1719,7 +1719,17 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   // answer, and a turn is several rounds. Only what the provider
                   // actually reported is counted — one that reports nothing leaves the
                   // figure off the screen rather than putting a guess there.
-                  if (info.usage) setTurnTokens(turnTokensRef.current + info.usage.promptTokens + info.usage.completionTokens);
+                  if (info.usage) {
+                    // `ctx N%` (the context meter) is the size of the NEXT request,
+                    // from the last round alone — set here too, not only once the turn's
+                    // answer arrives, so a long turn shows it climbing round by round.
+                    usageRef.current = info.usage;
+                    setTurnTokens(turnTokensRef.current + info.usage.promptTokens + info.usage.completionTokens);
+                    // `setTurnTokens` above skips its re-render when the sum does not
+                    // change (a provider reporting usage with zero new tokens this
+                    // round) — notify explicitly so the reading still redraws.
+                    host.notify();
+                  }
                   if (typeof info.usage?.cachedTokens === 'number') turnCachedRef.current += info.usage.cachedTokens;
                   (host.services as Record<string, any>).pushLog?.(`[round ${info.index}] finish=${info.finishReason} toolCalls=${info.toolCalls} content=${info.contentLen}ch${info.usage ? ` tokens=${info.usage.promptTokens + info.usage.completionTokens}` : ''}`);
                 },

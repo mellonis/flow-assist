@@ -5,6 +5,10 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **`ctx N%` climbs with a long turn instead of jumping once at the end.** Each round
+  of a turn already reported its usage; now the reading is drawn from it right away,
+  so you see the context fill up round by round rather than only when the answer
+  arrives. A provider that reports no usage still shows the estimate.
 - **A message you send while the assistant works reaches it after the current step.**
   It used to wait for the whole turn to end, so a correction arrived after the work it
   meant to steer. Now it goes in between two rounds of tool calls, as your message, and

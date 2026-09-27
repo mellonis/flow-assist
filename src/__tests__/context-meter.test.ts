@@ -100,6 +100,61 @@ test('the chat shows the estimate first and the measured figure after an answer;
   expect(JSON.stringify(model.requests.at(-1))).not.toContain('of 100k tokens');
 });
 
+// `onRound` (AGENTS.md, "How full the context is, is shown"): the reading is drawn
+// from the last ROUND's usage, not only the turn's final one — a held multi-round
+// turn shows it rise after each round, before the answer.
+test('a multi-round turn shows the reading rising after each round, before the answer', async () => {
+  const model = new ScriptedModel();
+  model.script(
+    [{ tool: 'datetime', args: {} }, { hold: true }],
+    [{ tool: 'datetime', args: {} }, { hold: true }],
+    [{ hold: true }, { text: 'Done.' }],
+  );
+  const ui = await bootApp(model, 110, 30, undefined, { ai: { baseUrl: 'http://scripted.model', model: 'scripted', toolLoading: 'all', contextWindow: 20_000 } });
+  await ui.press('F');
+  const pct = () => /ctx ~?\d+%/.exec(ui.backend.lastFrame)?.[0];
+  const before = pct();
+
+  model.usage = { prompt_tokens: 4_000, completion_tokens: 0 };
+  await ui.type('work for a while');
+  await ui.press('return');
+  await settle(20); // round 1 is held after its tool call, before it reports usage
+  expect(pct()).toBe(before); // nothing reported yet — still the estimate
+
+  model.release(); // round 1 ends: its usage lands, and the reading redraws at once
+  await settle(20);
+  expect(pct()).toBe('ctx 20%');
+
+  model.usage = { prompt_tokens: 10_000, completion_tokens: 0 };
+  model.release(); // round 2 ends the same way — its request is held before round 3's
+  await settle(20);
+  expect(pct()).toBe('ctx 50%'); // up-to-date before round 3's answer has streamed a word
+
+  model.usage = { prompt_tokens: 14_000, completion_tokens: 0 };
+  model.release(); // the answer streams, and the turn ends on round 3's own usage
+  await settle(20);
+  expect(ui.backend.lastFrame).toContain('Done.');
+  expect(pct()).toBe('ctx 70%');
+});
+
+// A provider that never reports usage (AGENTS.md, "a provider that reports no usage
+// leaves the estimate up"): the reading never gets stuck mid-turn either — it just
+// stays the character estimate, round after round.
+test('a provider without usage keeps the estimate through a multi-round turn', async () => {
+  const model = new ScriptedModel();
+  model.script(
+    [{ tool: 'datetime', args: {} }],
+    [{ text: 'Done.' }],
+  );
+  const ui = await bootApp(model, 110, 30, undefined, { ai: { baseUrl: 'http://scripted.model', model: 'scripted', toolLoading: 'all', contextWindow: 20_000 } });
+  await ui.press('F');
+  await ui.type('work for a while');
+  await ui.press('return');
+  await settle(20);
+  expect(ui.backend.lastFrame).toContain('Done.');
+  expect(ui.backend.lastFrame).toMatch(/ctx ~\d+%/);
+});
+
 test('/compact shrinks what the model sees and leaves the screen alone', async () => {
   const model = new ScriptedModel();
   model.script([{ text: 'The first answer.' }], [{ text: handoff('SUMMARY: they greeted each other.') }], [{ text: 'The second answer.' }]);
