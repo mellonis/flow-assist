@@ -1,7 +1,7 @@
 # flow-assist
 
 A standalone, domain-agnostic TUI/CLI assistant host. It ships no domain logic
-of its own — plugins (the bundled `gitlab` and `repo`, or your own) deliver
+of its own — plugins (the bundled `gitlab`, `repo` and `mcp`, or your own) deliver
 surfaces, commands, and LLM tool groups.
 
 ![The chat reads a repository, edits its README behind a y/n, and leaves the diff in the conversation](docs/demo/host.gif)
