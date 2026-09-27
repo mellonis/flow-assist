@@ -881,7 +881,10 @@ hold this set together:
   call. The `_workspace` leaf is there because mirrors nest: a repository inside a
   workspace root is a project of its own and its mirror sits inside the outer
   project's, so with the mirror itself as the workspace the outer project could list
-  and read the inner one's memory; everything is confined to the leaf. It holds
+  and read the inner one's memory; everything is confined to the leaf. In the mirror a
+  path segment that starts with `_` gets one more (`_x` → `__x`, one-to-one), so no
+  project — a repository named `_workspace`, a directory `/_global` — lands on another's
+  leaf or on the global workspace. It holds
   `memory/` (the facts, below) and `artifacts/` — the model's working files: drafts,
   notes, plans, findings, a patch it was asked to keep. Directories 0700, files 0600.
   - `workspace_read(path, scope?)` is core — the memory index in every prompt points at
@@ -893,11 +896,17 @@ hold this set together:
     is never absolute or `~`, and its REAL location — every link followed, a path not
     there yet through its nearest existing parent — lies inside the workspace's real
     location (`resolveInWorkspace`, on the host's `realOf`/`within`). A write goes under
-    `artifacts/` only: `memory/` is the memory tool's, whose guards a plain write would
-    pass by; the refusal names the path to use. It never writes through a link in the
-    file's place (temp file + rename), re-checks the directories it made, and holds a
+    `artifacts/` only — the first segment checked as spelled AND by its real path, so a
+    link planted as `artifacts` that leads to `memory/` carries nothing past the
+    memory's guards: `memory/` is the memory tool's, whose guards a plain write would
+    pass by, and a `memory/` that is itself a link is read as no facts; the refusal names
+    the path to use. It never writes through a link in the file's place (a temp file
+    opened exclusive, `wx`, then renamed), refuses in its own words when a link on the
+    way leads nowhere, re-checks the directories it made, and holds a
     file to 2 MiB (`WORKSPACE_FILE_MAX`). Every refusal THROWS ("A write tool refuses by
-    throwing"). A listing walks the tree and names a link without following it.
+    throwing"). A listing walks the tree and names a link without following it. Not
+    closed: another process of the person's own swapping a directory for a link between
+    the last check and the write — a race inside the person's own 0700 tree.
   - **A write takes no y/n** — it is not `write`-flagged: nothing of the person's is
     touched, and a place the model can keep its work in without asking is the point.
     It is SHOWN instead: the tool reports the change (`ctx.reportChange`, `before` `''`
@@ -964,7 +973,11 @@ hold this set together:
     `ctx.workspaceProject` (the chat's `currentProject`, kept by a background task's
     nested run); a caller with no conversation (the one-shot prompt) takes the project
     of the call's shell directory (`callProject`). `"global"` is every project — the person's own
-    preferences; `"host"`, an older word, reads as global. With no project there is one
+    preferences; `"host"` is read as global. `"plugin"` keeps a GLOBAL fact for the
+    plugin whose tool calls, named only through the identity token the host issued it
+    (`resolveIdentityToken`; a raw name in the ctx counts for nothing, and a call with no
+    token is refused), as the fact's `plugin` field — so uninstalling the plugin removes
+    it (`purgePluginMemories`), and `list` with that scope shows the plugin's own. With no project there is one
     workspace, the global one. A fact of project A never reaches project B's prompt.
     `update` finds a fact by id in either scope and moves it when given another.
   - **A fact that rides on every request forever is worth writing well**, so the

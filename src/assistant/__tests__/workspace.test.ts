@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { hostStateDir } from '../../config/load.js';
 import { projectHome } from '../sessions.js';
+import { readFacts } from '../memory-store.js';
 import { ensureWorkspace, listWorkspace, readWorkspaceFile, resolveInWorkspace, workspaceDir, workspaceRoot, writeArtifact, WORKSPACE_LEAF } from '../workspace.js';
 
 const tmp = (p: string) => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), p)));
@@ -104,4 +105,36 @@ test('reading gives the file\'s text; listing walks the workspace and never foll
   expect(listing).toContain('artifacts/etc → a link, not followed');
   expect(listing).not.toContain('hosts');
   expect(listWorkspace(fresh(), '')).toContain('empty');
+});
+
+test('a link planted as artifacts/ cannot carry a write into memory/, and a linked memory/ is never read as facts', () => {
+  const dir = fresh();
+  fs.mkdirSync(path.join(dir, 'memory'), { recursive: true });
+  fs.symlinkSync(path.join(dir, 'memory'), path.join(dir, 'artifacts'));
+  expect(() => writeArtifact(dir, 'artifacts/planted.md', '---\nname: x\n---\nplanted')).toThrow('memory tool');
+  expect(fs.readdirSync(path.join(dir, 'memory'))).toEqual([]);
+  const other = fresh();
+  const facts = fresh();
+  fs.mkdirSync(path.join(facts, 'memory'));
+  fs.writeFileSync(path.join(facts, 'memory', 'x.md'), '---\nname: x\ndescription: d\ntype: fact\n---\nfrom elsewhere\n');
+  fs.symlinkSync(path.join(facts, 'memory'), path.join(other, 'memory'));
+  expect(readFacts(other)).toEqual([]);
+});
+
+test('a dangling link on the way is refused in the tool\'s own words', () => {
+  const dir = fresh();
+  fs.mkdirSync(path.join(dir, 'artifacts'));
+  fs.symlinkSync(path.join(dir, 'nowhere'), path.join(dir, 'artifacts', 'sub'));
+  expect(() => writeArtifact(dir, 'artifacts/sub/x.md', 'x')).toThrow(/^workspace_write: .*Nothing was changed\.$/);
+});
+
+test('a path segment starting with _ is escaped in the mirror, so no project lands on _workspace or _global', () => {
+  const root = '/state/projects';
+  // A repository named _workspace inside a project is not inside that project's workspace.
+  const outer = workspaceDir(root, '/p/app');
+  expect(workspaceDir(root, '/p/app/_workspace').startsWith(outer + path.sep)).toBe(false);
+  // A project at /_global is not the global workspace.
+  expect(workspaceDir(root, '/_global')).not.toBe(workspaceDir(root, null));
+  // Escaping is one-to-one: _x and __x stay apart.
+  expect(workspaceDir(root, '/p/_x')).not.toBe(workspaceDir(root, '/p/__x'));
 });

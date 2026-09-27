@@ -16,6 +16,7 @@ import { addFact, readFacts, removeFact, saveFact, type Fact } from '../assistan
 import { callProject, ensureWorkspace, listWorkspace, readScope, readWorkspaceFile, workspaceFor, writeArtifact, type WorkspaceScope } from '../assistant/workspace.js';
 import { tildePath } from '../assistant/shell.js';
 import { openInBrowser } from '../runtime/services.js';
+import { resolveIdentityToken } from '../runtime/plugin-identity.js';
 import { DEFAULT_THEME } from '../playback/theme.js';
 import { writtenKey } from '../playback/keys.js';
 import { createPlan, type Plan } from '../assistant/plan.js';
@@ -377,7 +378,7 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
             name: { type: 'string', description: 'A short title for the index (add/update); by default the first words of the text. The file is named after it.' },
             description: { type: 'string', description: 'One line for the index saying when the fact matters (add/update); by default the text itself.' },
             type: { type: 'string', description: 'What kind of fact: preference, convention, fact or reference (default fact).' },
-            scope: { type: 'string', enum: ['project', 'global'], description: '"project" (default) — this project only; "global" — every project. For update: the scope to move the fact to. For list: only that scope.' },
+            scope: { type: 'string', enum: ['project', 'global', 'plugin'], description: '"project" (default) — this project only; "global" — every project; "plugin" — a global fact kept for the plugin whose tool is calling (removed when it is uninstalled). For update: the scope to move the fact to. For list: only that scope.' },
             id: { type: 'string', description: 'The fact\'s id — its file name without .md (for update/forget; from action=list).' },
           },
           required: ['action'],
@@ -557,12 +558,18 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
         const action = String(args.action ?? '').trim();
         const { project, dir, facts } = memoryScopes(config, ctx);
         const hasScope = args.scope != null && String(args.scope).trim() !== '';
-        const asked = readScope(args.scope);
+        // `plugin` — a fact kept for the calling plugin, named only by the identity token
+        // the host issued it (a caller cannot name another plugin): a global fact whose
+        // `plugin` field makes uninstalling the plugin remove it.
+        const forPlugin = String(args.scope ?? '').trim().toLowerCase() === 'plugin';
+        const plugin = forPlugin && ctx.pluginToken !== undefined ? resolveIdentityToken(ctx.pluginToken) : undefined;
+        if (forPlugin && !plugin && (action === 'add' || action === 'list')) return 'scope "plugin" needs a plugin to keep the fact for, and this call carries none — use "project" or "global".';
+        const asked = forPlugin ? { scope: 'global' as WorkspaceScope } : readScope(args.scope);
         if ('error' in asked) return asked.error;
         const read = { scope: project ? asked.scope : 'global' as WorkspaceScope };
         if (action === 'list') {
           const scopes: WorkspaceScope[] = hasScope ? [read.scope] : ['project', 'global'];
-          const rows = scopes.flatMap((sc) => facts(sc).map((f) => `[${f.id}] (${sc}, memory/${f.id}.md${f.type && f.type !== 'fact' ? `, ${f.type}` : ''}) ${f.text}`));
+          const rows = scopes.flatMap((sc) => facts(sc).filter((f) => !plugin || f.plugin === plugin).map((f) => `[${f.id}] (${f.plugin ? `plugin ${f.plugin}` : sc}, memory/${f.id}.md${f.type && f.type !== 'fact' ? `, ${f.type}` : ''}) ${f.text}`));
           return rows.length ? rows.join('\n') : 'No memories stored yet.';
         }
         const find = (id: string): { scope: WorkspaceScope; fact: Fact } | null => {
@@ -584,7 +591,7 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
           const refusal = refuseMemory(facts(read.scope).map(asMemory), text, facts(other).map(asMemory));
           if (refusal) return refusal;
           ensureWorkspace(dir(read.scope));
-          const f = addFact(dir(read.scope), { text, name: opt('name'), description: opt('description'), type: opt('type') });
+          const f = addFact(dir(read.scope), { text, name: opt('name'), description: opt('description'), type: opt('type'), ...(plugin ? { plugin } : {}) });
           return `Memory stored (${f.id}, scope ${read.scope}, memory/${f.id}.md). Its line joins the index in the system prompt of later messages.`;
         }
         if (action === 'update' || action === 'forget') {

@@ -893,3 +893,18 @@ test('workspace_read is core — the memory index points at it — while workspa
   expect(read).toContain('tools_load');
   expect(read).toContain('workspace_write');
 });
+
+test('scope "plugin" keeps a fact for the calling plugin — named by its host-issued token only — and uninstalling the plugin removes it', async () => {
+  const { root, reg, inProject } = memSetup();
+  const g = workspaceDir(root, null);
+  // A raw name beside the real token: only the token counts.
+  const ctx = { ...inProject('/p/a'), pluginName: 'tracker', pluginToken: identityToken('keycaps') };
+  expect(String(await reg.exec('memory', { action: 'add', text: 'The keycaps panel stays off.', scope: 'plugin' }, ctx))).toContain('Memory stored');
+  expect(readFacts(g).map((f) => [f.text, f.plugin])).toEqual([['The keycaps panel stays off.', 'keycaps']]);
+  expect(String(await reg.exec('memory', { action: 'list', scope: 'plugin' }, ctx))).toContain('keycaps panel');
+  // Without a token there is no plugin to keep it for.
+  expect(String(await reg.exec('memory', { action: 'add', text: 'x', scope: 'plugin' }, inProject('/p/a')))).toContain('plugin');
+  expect(readFacts(g)).toHaveLength(1);
+  await reg.exec('host:plugins_remove', { name: 'keycaps' }, {});
+  expect(readFacts(g)).toEqual([]);
+});

@@ -34,8 +34,12 @@ export function workspaceRoot(config: Record<string, unknown> | undefined, env: 
 }
 
 // A project's workspace under a root; `null` — no project — is the global one.
+// Every segment of the project's path that starts with `_` gets one more in the
+// mirror (`_x` → `__x`, one-to-one), so no project's mirror can be the `_workspace`
+// leaf of another or the `_global` one.
+const escapeSegments = (project: string) => project.split(/([\\/])/).map((seg) => (seg.startsWith('_') ? `_${seg}` : seg)).join('');
 export function workspaceDir(root: string, project: string | null): string {
-  return path.join(project ? projectHome(root, project) : path.join(root, GLOBAL_PROJECT), WORKSPACE_LEAF);
+  return path.join(project ? projectHome(root, escapeSegments(project)) : path.join(root, GLOBAL_PROJECT), WORKSPACE_LEAF);
 }
 
 // The workspace a call works in: the project's, or the global one.
@@ -77,8 +81,8 @@ export function callProject(config: Record<string, unknown> | undefined, ctx: { 
   try { return projectOf(cwd, shellRoots((config ?? {}) as Parameters<typeof shellRoots>[0])); } catch { return null; }
 }
 
-// A scope as the model wrote it: `project` (the default) or `global`; `host`, the word
-// an older host used for "everywhere", reads as global.
+// A scope as the model wrote it: `project` (the default) or `global`; `host` is read as
+// global.
 export function readScope(raw: unknown): { scope: WorkspaceScope } | { error: string } {
   const s = String(raw ?? '').trim().toLowerCase();
   if (!s || s === 'project') return { scope: 'project' };
@@ -91,7 +95,7 @@ export function readScope(raw: unknown): { scope: WorkspaceScope } | { error: st
 export function writePrivate(file: string, content: string): void {
   ensureDir(path.dirname(file));
   const tmp = `${file}.${process.pid}.${Math.random().toString(36).slice(2, 8)}.tmp`;
-  fs.writeFileSync(tmp, content, { mode: 0o600 });
+  fs.writeFileSync(tmp, content, { mode: 0o600, flag: 'wx' });
   fs.renameSync(tmp, file);
 }
 
@@ -110,9 +114,12 @@ const refuseWrite = (msg: string): never => { throw new Error(`workspace_write: 
 export function writeArtifact(ws: string, rel: string, content: string): { abs: string; before: string | null } {
   const r = resolveInWorkspace(ws, rel);
   if ('error' in r) return refuseWrite(r.error);
+  // The first segment is checked as spelled AND as it really is: a link planted as
+  // `artifacts` that leads to `memory/` must not carry a write past the memory's guards.
   const segs = path.relative(ws, r.abs).split(path.sep).filter(Boolean);
-  if (segs[0] === 'memory') refuseWrite(`memory/ is kept by the memory tool, which holds each fact to its rules — store a fact with memory action=add`);
-  if (segs[0] !== ARTIFACTS_DIR || segs.length < 2) refuseWrite(`working files go under ${ARTIFACTS_DIR}/ — write it as ${ARTIFACTS_DIR}/${segs.filter((s) => s !== ARTIFACTS_DIR).join('/') || 'notes.md'} (the workspace is ${ws})`);
+  const real = path.relative(realOf(ws), realOf(r.abs)).split(path.sep).filter(Boolean);
+  if (segs[0] === 'memory' || real[0] === 'memory') refuseWrite(`memory/ is kept by the memory tool, which holds each fact to its rules — store a fact with memory action=add`);
+  if (segs[0] !== ARTIFACTS_DIR || real[0] !== ARTIFACTS_DIR || segs.length < 2) refuseWrite(`working files go under ${ARTIFACTS_DIR}/ — write it as ${ARTIFACTS_DIR}/${segs.filter((s) => s !== ARTIFACTS_DIR).join('/') || 'notes.md'} (the workspace is ${ws})`);
   if (Buffer.byteLength(content, 'utf8') > WORKSPACE_FILE_MAX) refuseWrite(`the content is ${Buffer.byteLength(content, 'utf8')} bytes, and a workspace file may hold at most ${WORKSPACE_FILE_MAX}`);
   let before: string | null = null;
   try {
@@ -123,8 +130,12 @@ export function writeArtifact(ws: string, rel: string, content: string): { abs: 
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
   }
-  ensureDir(path.dirname(r.abs));
-  // The directories just made are checked again: nothing on the way may lead out.
+  try { ensureDir(path.dirname(r.abs)); } catch (e) {
+    refuseWrite(`the directories for «${rel}» cannot be made (${(e as NodeJS.ErrnoException).code ?? (e as Error).message}) — a link on the way leads nowhere, or a file stands where a directory should`);
+  }
+  // The directories just made are checked again: nothing on the way may lead out. What
+  // this cannot close is another process of the person's own swapping a directory for a
+  // link between this check and the write below; the temp file is opened exclusive.
   if (!within(realOf(path.dirname(r.abs)), realOf(ws))) refuseWrite(`«${rel}» leads outside the workspace, ${ws}`);
   writePrivate(r.abs, content);
   return { abs: r.abs, before };

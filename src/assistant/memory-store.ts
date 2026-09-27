@@ -91,7 +91,11 @@ export function parseFact(id: string, content: string, mtimeMs = 0): Fact | null
 // that is not a `.md` file the host can read are not facts.
 export function readFacts(ws: string): Fact[] {
   let names: fs.Dirent[];
-  try { names = fs.readdirSync(memDir(ws), { withFileTypes: true }); } catch { return []; }
+  // A `memory/` that is itself a link is not this workspace's memory.
+  try {
+    if (!fs.lstatSync(memDir(ws)).isDirectory()) return [];
+    names = fs.readdirSync(memDir(ws), { withFileTypes: true });
+  } catch { return []; }
   const out: Fact[] = [];
   for (const e of names) {
     if (!e.isFile() || !e.name.endsWith('.md') || e.name.toLowerCase() === MEMORY_INDEX.toLowerCase()) continue;
