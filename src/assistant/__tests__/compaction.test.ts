@@ -1,0 +1,76 @@
+// What a compaction asks for and what it accepts back (src/assistant/compaction.ts).
+import { expect, test } from 'bun:test';
+import {
+  HANDOFF_SECTIONS, SHORT_CHARS, compactionInstruction, hasToolMarkup, retryNote, stripToolMarkup, summaryProblem,
+} from '../compaction.js';
+
+const handoff = (extra = '') => [
+  '## Goal', 'Port the engine to the new toolchain.',
+  '## Done', '- commit a1b2c3d "engine: moves" — src/engine.pm; `pmt build` works.',
+  '## In progress', 'Castling. Next step: run `pmt test castling`.',
+  '## Open decisions', 'none',
+  '## Facts learned', '- `pmt` needs `--std 2`.',
+  extra,
+].join('\n');
+
+test('the instruction names every section, and asks for no question and no pleasantries', () => {
+  const text = compactionInstruction();
+  for (const s of HANDOFF_SECTIONS) expect(text).toContain(`## ${s}`);
+  expect(text).toMatch(/handoff/i);
+  expect(text).toMatch(/no question/i);
+  expect(text).toMatch(/carry forward/i);
+});
+
+test('a handoff with every section and a sensible size passes', () => {
+  expect(summaryProblem(handoff(), 2_000)).toBeNull();
+});
+
+test('headings are found loosely: bold, a colon, another case', () => {
+  const loose = '**Goal:** x\n**done**: y\nIN PROGRESS — z\nOpen questions: none\nFacts learned:\n- w';
+  expect(summaryProblem(loose, 100)).toBeNull();
+});
+
+test('a summary without the sections is refused, naming the missing ones', () => {
+  const p = summaryProblem('Отлично! Какой следующий шаг предпочитаете?', 100);
+  expect(p).toMatch(/missing the sections/);
+  expect(p).toContain('Goal');
+  expect(p).toContain('Facts learned');
+  const partial = summaryProblem('## Goal\nx\n## Done\ny', 100);
+  expect(partial).not.toContain('Goal,');
+  expect(partial).toContain('In progress');
+});
+
+test('short is under 1% of the compacted tokens AND under the character floor', () => {
+  // ~60 tokens of summary for 125k compacted: 0.05% — and far under the floor.
+  const small = handoff();
+  expect(small.length).toBeLessThan(SHORT_CHARS);
+  expect(summaryProblem(small, 125_000)).toMatch(/too short/);
+  // The same text for 5k compacted is over 1%: fine.
+  expect(summaryProblem(small, 5_000)).toBeNull();
+  // Over the floor is never short, however much was compacted.
+  const long = handoff('x'.repeat(SHORT_CHARS));
+  expect(summaryProblem(long, 10_000_000)).toBeNull();
+});
+
+test('the retry note says what was wrong', () => {
+  expect(retryNote('it is too short')).toContain('it is too short');
+  expect(retryNote('x')).toMatch(/again/);
+});
+
+test('tool-call markup is detected and stripped, closed or cut off', () => {
+  const dsml = 'Checking.\n<｜DSML｜function_calls>\n<｜DSML｜invoke name="read_file">\n<｜DSML｜parameter name="path" string="true">a.ts</｜DSML｜parameter>\n</｜DSML｜invoke>\n</｜DSML｜function_calls>\nThen more.';
+  expect(hasToolMarkup(dsml)).toBe(true);
+  expect(stripToolMarkup(dsml)).toBe('Checking.\n\nThen more.');
+  const tagged = 'a <tool_call>{"name":"x","arguments":{}}</tool_call> b';
+  expect(stripToolMarkup(tagged)).toBe('a  b');
+  const fc = 'x\n<function_calls>\n<invoke name="ls">\n<parameter name="p">.</parameter>\n</invoke>\n</function_calls>';
+  expect(stripToolMarkup(fc)).toBe('x');
+  const bare = 'y\n<invoke name="ls"><parameter name="p">.</parameter></invoke>\nz';
+  expect(stripToolMarkup(bare)).toBe('y\n\nz');
+  // Cut off mid-call: everything from the opening tag goes.
+  expect(stripToolMarkup('keep\n<｜DSML｜function_calls>\n<｜DSML｜invoke name="x">')).toBe('keep');
+  // Stray tokens of the DSML family go too.
+  expect(stripToolMarkup('p <｜tool▁calls▁begin｜> q')).toBe('p  q');
+  expect(hasToolMarkup('plain text with <b>html</b> and a < b')).toBe(false);
+  expect(stripToolMarkup('plain text with <b>html</b>')).toBe('plain text with <b>html</b>');
+});

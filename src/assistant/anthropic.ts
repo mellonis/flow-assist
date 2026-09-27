@@ -442,13 +442,16 @@ export async function anthropicChatRound(
   return { ...round.result(), ...(thinkingDropped ? { thinkingDropped } : {}) };
 }
 
-// What /compact sends: the system messages (the instruction) and ONE user message
-// holding the whole conversation as text, ending with the request for the summary.
-// Sent as turns, it would end with the assistant's last answer — which the Messages
-// API reads as a PREFILL, the start of its own answer to continue (a 400 with thinking
-// on, and the newest models refuse a prefill outright). Calls and results are text too:
-// the request carries no tools, and the API refuses tool blocks without them.
-export function summaryHistory(messages: ChatMessage[]): ChatMessage[] {
+// What a compaction sends, on either wire: the system messages (the instruction) and
+// ONE user message holding the previous handoff, when there is one, and the whole
+// conversation as text, ending with the request for the handoff — and, on a second
+// attempt, what was wrong with the first (`note`). Sent as turns, it would end with the
+// assistant's last answer — which the Messages API reads as a PREFILL, the start of its
+// own answer to continue (a 400 with thinking on, and the newest models refuse a
+// prefill outright), and which a chat-completions model simply answers as the next
+// turn of the chat. Calls and results are text too: the request carries no tools, and
+// the API refuses tool blocks without them.
+export function summaryHistory(messages: ChatMessage[], o: { previous?: string; note?: string } = {}): ChatMessage[] {
   const system = messages.filter((m) => m.role === 'system');
   const lines: string[] = [];
   for (const m of messages) {
@@ -466,12 +469,15 @@ export function summaryHistory(messages: ChatMessage[]): ChatMessage[] {
     }
   }
   const conversation = lines.length ? lines.join('\n\n') : '(nothing yet)';
-  return [...system, { role: 'user', content: `The conversation:\n\n${conversation}\n\nCompress it now, as instructed.` }];
+  const previous = o.previous ? `The previous handoff (replaced by yours — carry forward what still holds):\n\n${o.previous}\n\n` : '';
+  const note = o.note ? `\n\n${o.note}` : '';
+  return [...system, { role: 'user', content: `${previous}The conversation:\n\n${conversation}\n\nWrite the handoff now, as instructed.${note}` }];
 }
 
-// /compact's one-shot: the same conversion, not streamed, the answer's text blocks.
+// A compaction's one-shot: `summaryHistory`'s messages, not streamed, the answer's
+// text blocks.
 export async function anthropicCompact(messages: ChatMessage[], o: AnthropicOpts): Promise<string> {
-  const body = anthropicRequest(summaryHistory(messages), { model: o.model, maxTokens: o.maxTokens ?? 8192, thinking: o.thinking, stream: false });
+  const body = anthropicRequest(messages, { model: o.model, maxTokens: o.maxTokens ?? 8192, thinking: o.thinking, stream: false });
   const { res } = await post(body, o);
   const data = (await res.json()) as { content?: Array<{ type?: string; text?: string }> };
   return (data?.content ?? []).filter((b) => b?.type === 'text').map((b) => b.text ?? '').join('');

@@ -24,7 +24,9 @@ import { capConsoleData } from './console-view.js';
 import { IMAGE_DEFAULTS, contentText, type ContentPart, type ImageLimits, type ImageRef } from './images.js';
 import { acceptToolImages, imageMark, imageStoreDir, toolImageResult, type ImageMark } from './tool-images.js';
 import { llmErrorMessage } from './llm-error.js';
-import { ANTHROPIC_CONTENT, REQUEST_TAIL, anthropicChatRound, anthropicCompact } from './anthropic.js';
+import { ANTHROPIC_CONTENT, REQUEST_TAIL, anthropicChatRound, anthropicCompact, summaryHistory } from './anthropic.js';
+import { compactionInstruction, retryNote, stripToolMarkup, summaryProblem } from './compaction.js';
+import { estimateTokens } from './context-meter.js';
 import type { ThinkingConfig } from './llm-endpoint.js';
 import {
   TOOLS_LOAD, TOOLS_LOAD_PARAMETERS, createToolSet, deferredTools, notLoadedError, runToolsLoad, toolsToSend,
@@ -1110,33 +1112,48 @@ function compactable(m: ChatMessage): ChatMessage {
   return { ...rest, content: named ? `${text}${text ? ' ' : ''}${named}` : Array.isArray(m.content) ? text : m.content };
 }
 
-// One-shot non-streaming call for /compact: compresses the history into a compact
-// system context (key facts, decisions, open questions). No tools.
+// What a compaction gives back: the summary to store — it REPLACES the previous one —
+// and, when no attempt came back as a usable handoff, why (`incomplete`): the summary
+// is then the previous one with the new text after it, so nothing held before is lost.
+export interface CompactResult { summary: string; incomplete?: string }
+
+// One-shot non-streaming call for /compact and the automatic compaction: the whole
+// history the model saw becomes a HANDOFF (./compaction.ts) — fixed sections, written
+// for the model that continues. The previous summary is shown to it to carry forward.
+// An answer that is not a handoff (a section missing, or too short for what it
+// replaces) is asked for once more, told why; tool-call markup is stripped before
+// anything is kept. No tools.
 export async function compactConversation(
   messages: ChatMessage[],
-  { baseUrl, model, token, tokenEnv, provider, maxTokens, thinking, signal }: { baseUrl?: string; model?: string; token?: string; tokenEnv?: string; provider?: string; maxTokens?: number; thinking?: ThinkingConfig; signal?: AbortSignal },
-): Promise<string> {
+  { baseUrl, model, token, tokenEnv, provider, maxTokens, thinking, signal, previous = '' }: { baseUrl?: string; model?: string; token?: string; tokenEnv?: string; provider?: string; maxTokens?: number; thinking?: ThinkingConfig; signal?: AbortSignal; previous?: string },
+): Promise<CompactResult> {
   requireAiOpts({ baseUrl, model, token, tokenEnv });
-  const instruction: ChatMessage = {
-    role: 'system',
-    content:
-      'Compress the chat history below into a compact system context (up to ~400 words). Keep the key facts, decisions made and open questions. Return only the compressed text.',
+  const instruction: ChatMessage = { role: 'system', content: compactionInstruction() };
+  const history = messages.filter((m) => m.role !== 'system').map(compactable);
+  const before = stripToolMarkup(previous);
+  const compacted = estimateTokens(history.map((m) => contentText(m.content) + JSON.stringify(m.tool_calls ?? '')).join('\n'));
+  const ask = async (note?: string): Promise<string> => {
+    const sent = summaryHistory([instruction, ...history], { ...(before ? { previous: before } : {}), ...(note ? { note } : {}) });
+    if (provider === 'anthropic') return anthropicCompact(sent, { baseUrl, model, token, maxTokens, thinking, signal });
+    const res = await fetch(`${baseUrl}/chat/completions`, {
+      method: 'POST',
+      signal,
+      headers: LLM_HEADERS(token as string),
+      body: JSON.stringify({ model, messages: sent }),
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      throw new Error(llmErrorMessage(res.status, body, { model, requestId: res.headers.get('x-request-id'), statusText: res.statusText }));
+    }
+    const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
+    return data?.choices?.[0]?.message?.content ?? '';
   };
-  const history = messages.filter((m) => m.role !== 'system').slice(-30).map(compactable);
-  if (provider === 'anthropic') return anthropicCompact([instruction, ...history], { baseUrl, model, token, maxTokens, thinking, signal });
-  const res = await fetch(`${baseUrl}/chat/completions`, {
-    method: 'POST',
-    signal,
-    headers: LLM_HEADERS(token as string),
-    body: JSON.stringify({
-      model,
-      messages: [instruction, ...history],
-    }),
-  });
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(llmErrorMessage(res.status, body, { model, requestId: res.headers.get('x-request-id'), statusText: res.statusText }));
-  }
-  const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
-  return data?.choices?.[0]?.message?.content ?? '';
+  const first = stripToolMarkup(await ask());
+  const problem = summaryProblem(first, compacted);
+  if (!problem) return { summary: first };
+  const second = stripToolMarkup(await ask(retryNote(problem)));
+  const still = summaryProblem(second, compacted);
+  if (!still) return { summary: second };
+  const text = second || first;
+  return { summary: [before, text].filter(Boolean).join('\n\n'), incomplete: still };
 }

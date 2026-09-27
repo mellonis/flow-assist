@@ -887,7 +887,28 @@ there is no `/fullscreen`.
   where the model's view now begins; wiping the screen read as `/clear`. The note is ONE
   row, `── compacted · ~58k → ~2.1k tokens ──` (the `ctx N%` reading before and after;
   a size not known is left out), with the summary the model was given folded under it
-  (`summary` on the note, fold kind `summary`). A note whose text already carries the
+  (`summary` on the note, fold kind `summary`).
+- **The summary is a HANDOFF, and the new one REPLACES the old**
+  (`compactConversation` in `src/assistant/agent.ts` on the pure
+  `src/assistant/compaction.ts`). Asked merely to compress the chat, a model writes a
+  chat reply ("…which next step do you prefer?"), and the model reading it later loses
+  its place. So the instruction asks for fixed sections, written for the model that
+  continues and never for the person (no question, no pleasantries): `## Goal`,
+  `## Done` (commits, paths, commands that worked), `## In progress` (and its exact next
+  step), `## Open decisions`, `## Facts learned` (pitfalls, conventions of the project).
+  The WHOLE history the model saw is sent — never its last N messages: what the old
+  summary did not hold would be lost for good. The previous summary goes in the same
+  request, to carry forward what still holds, and the answer takes its place in
+  `summaryRef` (the session's `summary`) — never appended: appended, every later system
+  context carried each old summary, stale questions included. An answer that is not a
+  handoff (`summaryProblem`: a section heading missing — matched loosely, any case, `#`
+  or `**` or a colon — or too short: under 1% of the compacted tokens AND under 1500
+  characters) is asked for ONCE more, told why (`retryNote`); if that fails too, the
+  previous summary stays with the new text after it, and the row ends `· incomplete,
+  previous kept`. Tool-call markup written as text (`stripToolMarkup`: DeepSeek's DSML
+  `<｜DSML｜…>`, `<tool_call>`, `<function_calls>`, `<invoke …>`, closed or cut off) is
+  stripped from the answer, from the previous summary it is shown, and from a summary
+  read back from a saved session. A note whose text already carries the
   summary inline (an older format) is drawn as saved, without folding it. There is no
   `/refresh-context`: the system prompt is assembled anew for every message, so the
   command had nothing to refresh.
@@ -1626,11 +1647,12 @@ block, `thinking_delta` → `onReasoning` → the thinking fold; an empty one sa
 usage is `input + cache_creation + cache_read` as the prompt, since the meter measures
 what is sent. An SSE `error` event carries no status, so its type stands for one
 (`overloaded_error` → 529) and the line is `llmErrorMessage`'s, with the `request-id`
-header. `/compact` sends the instruction as `system` and the whole conversation as ONE
-user message of text ending with the request for the summary (`summaryHistory`: `user:`,
-`assistant:` with `[called name {…}]`, `tool result:`) — sent as turns it would end with
-the assistant's answer, which the API reads as a prefill, and its tool blocks would need
-tools the request does not carry. **Thinking blocks go
+header. A compaction sends the instruction as `system` and the whole conversation as ONE
+user message of text ending with the request for the handoff (`summaryHistory`: the
+previous handoff first when there is one, then `user:`, `assistant:` with `[called name
+{…}]`, `tool result:`) — on both wires: sent as turns it would end with the assistant's
+answer, which the Messages API reads as a prefill and a chat-completions model answers as
+the chat's next turn, and its tool blocks would need tools the request does not carry. **Thinking blocks go
 back unchanged within a turn**: a round that thought AND
 called a tool keeps its blocks as they came (`ChatRoundResult.blocks`), the loop puts them
 on that round's assistant message (`anthropicContent`), and the conversion replays that

@@ -345,3 +345,13 @@ export async function bootApp(model: ScriptedModel, cols = 100, rows = 28, guest
   const type = async (text: string) => { backend.type(text); await settle(); };
   return { backend, app, press, type, exits: () => exits };
 }
+
+// A summary in the shape a compaction accepts (src/assistant/compaction.ts): every
+// section under its heading, `mark` in the goal so a test can tell two apart.
+export const handoff = (mark: string): string => [
+  `## Goal\n${mark}`,
+  '## Done\n- nothing committed yet',
+  '## In progress\nNext step: answer the next question.',
+  '## Open decisions\nnone',
+  '## Facts learned\n- none yet',
+].join('\n');

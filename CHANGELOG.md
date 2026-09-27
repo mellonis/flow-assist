@@ -5,6 +5,17 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **`/compact` writes a handoff for the model that goes on, not a reply to you.** The
+  summary comes in fixed sections — the goal, what is done (with commits, paths and the
+  commands that worked), what is in progress and its exact next step, the open
+  decisions, the facts learned — with no question to you and no pleasantries, so the
+  assistant keeps its place after a compaction. It is made from the whole conversation
+  rather than its last thirty messages, and it replaces the previous summary instead of
+  piling up after it: the model is shown the old one and carries forward what still
+  holds. A summary that comes back without the sections, or far too short for what it
+  replaces, is asked for once more; if that fails too the old summary is kept with the
+  new text and the `── compacted ──` row says `incomplete, previous kept`. Tool-call text
+  a model wrote by mistake (`<tool_call>`, DSML and the like) never reaches the summary.
 - **A command block keeps the whole command.** The command a person or the model ran
   is kept whole, up to 16 KiB rather than the old 300 characters, its own line breaks
   included: a folded row still cuts it (reserving room for the duration and the

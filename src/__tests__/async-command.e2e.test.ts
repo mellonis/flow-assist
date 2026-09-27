@@ -3,7 +3,7 @@
 // and still goes into ↑. What was queued meanwhile goes out after it, or comes back
 // into the field when it is stopped.
 import { afterEach, expect, test } from 'bun:test';
-import { ScriptedModel, bootApp, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, handoff, settle } from './helpers/scripted';
 
 const realFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = realFetch; });
@@ -13,7 +13,7 @@ const fieldRow = (ui: UI) => ui.backend.lastFrame.split('\n').filter((r) => r.in
 const settleUntil = async (ok: () => boolean, n = 200) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
 
 // A conversation with one answer in it; the next request (/compact's) waits for `go()`.
-async function talkedThenHeld(summary = 'SUMMARY: a greeting.') {
+async function talkedThenHeld(summary = handoff('SUMMARY: a greeting.')) {
   const model = new ScriptedModel();
   model.script([{ text: 'Sure.' }]);
   const ui = await bootApp(model, 100, 28);

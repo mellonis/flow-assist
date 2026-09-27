@@ -21,6 +21,7 @@ import { completePath, completeSlash, listDirectory, type ChatCommandDef } from 
 import { configSetLine, type CompleteResult } from '../config/commands.js';
 import { parseValue } from '../config/load.js';
 import { apiHistory, compactConversation, chatLanguage, requestTools, transcriptSoFar } from '../assistant/agent.js';
+import { stripToolMarkup } from '../assistant/compaction.js';
 import { createToolSet, toolLoadingMode } from '../assistant/tool-loading.js';
 import { llmOpts } from '../assistant/llm-endpoint.js';
 import { copyTarget, copyToClipboard } from '../assistant/copy.js';
@@ -972,7 +973,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             titleRef.current = s.title;
             fingerprintRef.current = fingerprint;
             apiRef.current = s.api as unknown as ChatMessage[];
-            summaryRef.current = s.summary;
+            // A summary saved with tool-call markup in it is read without it: it rides in
+            // every later system context.
+            summaryRef.current = stripToolMarkup(s.summary ?? '');
             planRef.current.load(s.plan);
             toolSetRef.current.load(s.tools);
             resetLiveViews(); // the calls they tracked belong to the conversation being left
@@ -2057,9 +2060,12 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               const before = contextReading().used;
               // Compact what the MODEL saw (tool results included, a stubbed item as its
               // stub), not the display list.
-              const summary = await compactConversation(sentHistory(), { ...llmOpts(ai), signal });
+              // The new summary REPLACES the previous one, which the model was shown to
+              // carry forward (`compactConversation`, a handoff).
+              const { summary, incomplete } = await compactConversation(sentHistory(), { ...llmOpts(ai), signal, previous: summaryRef.current });
               if (signal.aborted) return; // stopped: the history stays as it was
-              summaryRef.current = summaryRef.current ? `${summaryRef.current}\n\n${summary}` : summary;
+              if (incomplete) (host.services as Record<string, any>).pushLog?.(`[compact] no usable handoff after a retry: ${incomplete}`);
+              summaryRef.current = summary;
               usageRef.current = null; // the measured size was of the history just replaced
               apiRef.current = [];
               // The loaded tools stay (`toolSetRef`): the work the summary describes goes on
@@ -2071,8 +2077,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // reading `ctx N%` shows) — with the summary it was given folded under it.
               const after = contextReading().used;
               const sizes = before > 0 && after > 0 ? ` · ~${shortTokens(before)} → ~${shortTokens(after)} tokens` : '';
-              journal({ t: 'compact', summary, note: `── compacted${sizes} ──` });
-              setMessages((cur) => [...cur, { role: 'note', content: `── compacted${sizes} ──`, summary }]);
+              const kept = incomplete ? ' · incomplete, previous kept' : '';
+              journal({ t: 'compact', summary, note: `── compacted${sizes}${kept} ──` });
+              setMessages((cur) => [...cur, { role: 'note', content: `── compacted${sizes}${kept} ──`, summary }]);
               persist();
               (host.services as Record<string, any>).showMessage?.('History compacted');
             });

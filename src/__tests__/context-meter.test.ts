@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { CELL_FREE, CELL_FULL, CELL_PART, contextBadge, contextGrid, contextHeading, contextLegend, estimateTokens, readContext } from '../assistant/context-meter.js';
-import { ScriptedModel, bootApp, settle } from './helpers/scripted.js';
+import { ScriptedModel, bootApp, handoff, settle } from './helpers/scripted.js';
 
 const parts = (over: Partial<Parameters<typeof readContext>[0]> = {}) => ({
   system: 'x'.repeat(4000), memory: '', plan: '', summary: '', tools: [], messages: [], ...over,
@@ -102,8 +102,8 @@ test('the chat shows the estimate first and the measured figure after an answer;
 
 test('/compact shrinks what the model sees and leaves the screen alone', async () => {
   const model = new ScriptedModel();
-  model.script([{ text: 'The first answer.' }], [{ text: 'SUMMARY: they greeted each other.' }], [{ text: 'The second answer.' }]);
-  const ui = await bootApp(model, 110, 30);
+  model.script([{ text: 'The first answer.' }], [{ text: handoff('SUMMARY: they greeted each other.') }], [{ text: 'The second answer.' }]);
+  const ui = await bootApp(model, 110, 50); // tall enough for the unfolded handoff
   await ui.press('F');
   await ui.type('the first question');
   await ui.press('return');

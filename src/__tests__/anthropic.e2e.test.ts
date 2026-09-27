@@ -5,7 +5,7 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { ScriptedModel, bootApp, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, handoff, settle } from './helpers/scripted';
 import { png } from './helpers/image-fixtures';
 
 const realFetch = globalThis.fetch;
@@ -231,7 +231,7 @@ test('an HTTP 4xx is read out of Anthropic\'s error body, with its request-id he
 
 test('/compact asks /messages once, not streamed, and the summary is its text', async () => {
   const model = new ScriptedModel();
-  model.script([{ text: 'The first answer.' }], [{ text: 'SUMMARY: they greeted each other.' }], [{ text: 'The second answer.' }]);
+  model.script([{ text: 'The first answer.' }], [{ text: handoff('SUMMARY: they greeted each other.') }], [{ text: 'The second answer.' }]);
   const ui = await boot(model);
   await ask(ui, 'the first question');
   await ui.type('/compact');
@@ -240,11 +240,11 @@ test('/compact asks /messages once, not streamed, and the summary is its text', 
   expect(model.urls[1]).toBe('https://api.anthropic.com/v1/messages');
   const compact = sent(model, 1);
   expect(compact.stream).toBeUndefined();
-  expect(compact.system![0]!.text).toMatch(/^Compress the chat history/);
+  expect(compact.system![0]!.text).toMatch(/^You are writing a HANDOFF/);
   // One user message, the conversation as text — never an assistant turn last, which
   // the API would take for the start of its own answer.
   expect(compact.messages.map((m) => m.role)).toEqual(['user']);
-  expect(compact.messages[0]!.content[0]!.text).toBe('The conversation:\n\nuser: the first question\n\nassistant: The first answer.\n\nCompress it now, as instructed.');
+  expect(compact.messages[0]!.content[0]!.text).toBe('The conversation:\n\nuser: the first question\n\nassistant: The first answer.\n\nWrite the handoff now, as instructed.');
   expect(ui.backend.lastFrame).toContain('── compacted');
 
   await ask(ui, 'the second question');
@@ -256,7 +256,7 @@ test('/compact asks /messages once, not streamed, and the summary is its text', 
 
 test('/compact after a tool round sends the calls and results as text — the request has no tools to define them', async () => {
   const model = new ScriptedModel();
-  model.script([{ tool: 'datetime', args: {} }], [{ text: 'It is noon.' }], [{ text: 'SUMMARY: asked the time.' }]);
+  model.script([{ tool: 'datetime', args: {} }], [{ text: 'It is noon.' }], [{ text: handoff('SUMMARY: asked the time.') }]);
   const ui = await boot(model);
   await ask(ui, 'what time is it?');
   await settleUntil(() => model.requests.length === 2);
@@ -268,7 +268,7 @@ test('/compact after a tool round sends the calls and results as text — the re
   expect('tools' in compact).toBe(false);
   expect(JSON.stringify(compact.messages)).not.toMatch(/tool_use|tool_result/);
   expect(compact.messages.map((m) => m.role)).toEqual(['user']);
-  expect(String(compact.messages[0]!.content[0]!.text)).toMatch(/^The conversation:\n\nuser: what time is it\?\n\nassistant: \[called datetime \{\}\]\n\ntool result: OK: .*\n\nassistant: It is noon\.\n\nCompress it now, as instructed\.$/s);
+  expect(String(compact.messages[0]!.content[0]!.text)).toMatch(/^The conversation:\n\nuser: what time is it\?\n\nassistant: \[called datetime \{\}\]\n\ntool result: OK: .*\n\nassistant: It is noon\.\n\nWrite the handoff now, as instructed\.$/s);
   expect(ui.backend.lastFrame).toContain('── compacted');
 });
 

@@ -221,7 +221,7 @@ test('stop reasons and usage in the loop\'s words', () => {
   expect(usageOf(undefined)).toBeUndefined();
 });
 
-test('what /compact sends: the instruction, and the conversation as ONE user message that ends asking for the summary', () => {
+test('what a compaction sends: the instruction, and the conversation as ONE user message that ends asking for the handoff', () => {
   const out = summaryHistory([
     { role: 'system', content: 'Compress.' },
     { role: 'tool', tool_call_id: 'gone', content: 'OK: orphan' },
@@ -232,7 +232,7 @@ test('what /compact sends: the instruction, and the conversation as ONE user mes
   ]);
   expect(out).toEqual([
     { role: 'system', content: 'Compress.' },
-    { role: 'user', content: 'The conversation:\n\ntool result: OK: orphan\n\nuser: read a\n\nassistant: Next: look.\n[called read_file {"path":"a"}]\n\ntool result: OK: aaa\n\nassistant: Done.\n\nCompress it now, as instructed.' },
+    { role: 'user', content: 'The conversation:\n\ntool result: OK: orphan\n\nuser: read a\n\nassistant: Next: look.\n[called read_file {"path":"a"}]\n\ntool result: OK: aaa\n\nassistant: Done.\n\nWrite the handoff now, as instructed.' },
   ]);
   // The API takes it: no tools needed, no prefill.
   expect(anthropicRefusal(anthropicRequest(out, { maxTokens: 100, stream: false, thinking: { budgetTokens: 1024 } }) as never, { 'x-api-key': 'k', 'anthropic-version': 'v' })).toBeNull();
