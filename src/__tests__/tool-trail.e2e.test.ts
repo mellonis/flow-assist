@@ -124,18 +124,18 @@ test('a condensed group of failures still says why it failed', async () => {
 test('a turn that runs out of rounds says so where the answer would be, in the warn colour', async () => {
   const model = new ScriptedModel();
   // Every round carries a tool call, so the loop never reaches an answer.
-  model.script(...Array.from({ length: 70 }, () => [{ tool: 'datetime', args: {} }]));
-  const ui = await bootApp(model, 110, 30);
+  model.script(...Array.from({ length: 7 }, () => [{ tool: 'datetime', args: {} }]));
+  const ui = await bootApp(model, 110, 30, undefined, { ai: { baseUrl: 'http://scripted.model', model: 'scripted', toolLoading: 'all', maxRounds: 5 } });
   await ui.press('F');
   await ui.type('go round for ever');
   await ui.press('return');
   await settleUntil(() => ui.backend.lastFrame.includes('stopped after'), 900);
   await settle(8);
   const frame = ui.backend.lastFrame;
-  expect(frame).toContain('stopped after 64 rounds — no answer; say "continue" to carry on');
+  expect(frame).toContain('stopped after 5 rounds (ai.maxRounds) at datetime {} — ⏎ continue');
   // In the conversation, not on the dim hint line a wall of grey would otherwise hide.
   expect(frame).not.toContain('ran out of steps');
-  const y = frame.split('\n').findIndex((r) => r.includes('stopped after 64 rounds'));
+  const y = frame.split('\n').findIndex((r) => r.includes('stopped after 5 rounds'));
   const x = Array.from(frame.split('\n')[y]!.slice(0, frame.split('\n')[y]!.indexOf('stopped'))).length;
   const cell = (ui.backend as unknown as { lastBuffer: { get(x: number, y: number): { style: { fg?: string; dim?: boolean } } } }).lastBuffer.get(x, y);
   expect(cell.style.fg).toBe('yellow'); // the chat's warn colour

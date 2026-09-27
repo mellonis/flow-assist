@@ -2542,11 +2542,20 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   over `… N earlier calls`, which only a click opens (see the fold model above). The
   folded summary (`toolSummary`) carries the counts too and is cut to the width —
   every `ChatRow` is one terminal line, and fifty tool names would take two.
-- **A turn that ran out of rounds says so where the answer would be.** `agentChat`
-  reports `roundLimit` when the loop ends with no round that was an answer, and the
-  chat draws `stopped after N rounds — no answer; say "continue" to carry on` in the
-  warn colour, in the conversation. It replaces the dim "ran out of steps" line under
-  the field, which the wall of grey above it hid.
+- **A turn that ran out of rounds says where it stopped, and one key carries it on.**
+  The cap is `ai.maxRounds` (`maxRoundsOf`, default `MAX_ROUNDS_DEFAULT` = 150 — a guard
+  against a loop that never ends, high enough for long ordinary work; `services.chatLLM`
+  applies it, and a caller naming its own keeps it: a background task runs 12). It
+  counts per turn. `agentChat` reports `roundLimit` when the loop ends with no round
+  that was an answer, with `lastStep` — the last round's calls, `name {args}`, cut to
+  80. The chat draws `stopped after N rounds (ai.maxRounds) at <lastStep> — ⏎ continue`
+  in the warn colour, in the conversation (not as a dim line under the field, which the
+  wall of grey above it would hide), and closes the turn in the model's history with
+  the host's line in the model's voice (`roundCapTurn`: where it stopped, not finished,
+  picked up on "continue"). Then Enter on the EMPTY field sends `continue`
+  (`CONTINUE_WORD`) and the field's hint reads `⏎ continue`; the offer
+  (`continueOfferRef`) goes with the next message and wherever the empty-answer notice
+  is reset.
 - A **background result** (the `background` tool's nested run finishing) is SHOWN as
   soon as no turn is being written — a half-typed draft does not hold it back. It
   does not open the chat and does not spend a model turn: it joins the model's

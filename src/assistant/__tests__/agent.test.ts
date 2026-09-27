@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
 import { chatLanguage } from '../agent';
-import { agentChat, apiHistory, openAiMessages, transcriptSoFar } from '../agent';
+import { MAX_ROUNDS_DEFAULT, agentChat, apiHistory, maxRoundsOf, openAiMessages, transcriptSoFar } from '../agent';
 import { toAnthropicMessages } from '../anthropic';
 import { sha256, type ImageRef } from '../images';
 import { hostStateDir } from '../../config/load';
@@ -791,4 +791,21 @@ test('a second call written as text in a row ends the turn with the note', async
   expect(JSON.stringify(res.transcript)).not.toContain('DSML');
   // The known name is not called unknown.
   expect(JSON.stringify(res.transcript)).not.toMatch(/no tool named/);
+});
+
+test('the round cap is 150 by default, and a capped turn says its last step', async () => {
+  let n = 0;
+  const chatRound = async () => { n++; return { content: '', finishReason: 'tool_calls', toolCalls: [{ id: `c${n}`, name: 'no_such_tool', arguments: '{"n":1}' }] }; };
+  const res = await agentChat([{ role: 'user', content: 'loop' }], { baseUrl: 'http://x', model: 'm', token: 't', onLive: () => {}, onLiveCommit: () => {}, chatRound });
+  expect(n).toBe(MAX_ROUNDS_DEFAULT);
+  expect(MAX_ROUNDS_DEFAULT).toBe(150);
+  expect(res.roundLimit).toBe(150);
+  expect(res.lastStep).toBe('no_such_tool {"n":1}');
+});
+
+test('ai.maxRounds: a positive whole number, else the default', () => {
+  expect(maxRoundsOf(undefined)).toBe(150);
+  expect(maxRoundsOf({ maxRounds: 40 })).toBe(40);
+  expect(maxRoundsOf({ maxRounds: 0 })).toBe(150);
+  expect(maxRoundsOf({ maxRounds: 2.5 })).toBe(150);
 });

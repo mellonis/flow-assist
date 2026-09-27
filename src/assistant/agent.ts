@@ -27,6 +27,9 @@ import { llmErrorMessage } from './llm-error.js';
 import { ANTHROPIC_CONTENT, REQUEST_TAIL, anthropicChatRound, anthropicCompact, summaryHistory } from './anthropic.js';
 import { compactionInstruction, retryNote, summaryProblem } from './compaction.js';
 import { hasToolMarkup, markupToolNames, stripToolMarkup } from './tool-markup.js';
+import { MAX_ROUNDS_DEFAULT } from './rounds.js';
+
+export { MAX_ROUNDS_DEFAULT, maxRoundsOf } from './rounds.js';
 import { estimateTokens } from './context-meter.js';
 import type { ThinkingConfig } from './llm-endpoint.js';
 import {
@@ -127,6 +130,9 @@ export interface AgentResult {
   // say it where the answer would have been: a turn that ends with nothing said is
   // otherwise only visible as a wall of grey tool lines with no answer under it.
   roundLimit?: number;
+  // With `roundLimit`: the last step taken — the last round's calls, `name {args}`,
+  // cut — so the chat can say where the turn stopped.
+  lastStep?: string;
   // What the provider reported for the LAST round, when it reports usage at all.
   usage?: TokenUsage;
 }
@@ -697,7 +703,7 @@ export async function agentChat(
   {
     onTool = () => {},
     toolCtx = {},
-    maxRounds = 64,
+    maxRounds = MAX_ROUNDS_DEFAULT,
     onProcess = () => {},
     extraTools = [],
     logTools = false,
@@ -788,6 +794,8 @@ export async function agentChat(
   // (./tool-markup.ts), and the model was asked again: a second one in a row ends the
   // turn rather than asking forever.
   let askedAgain = false;
+  // The last round's calls, for a turn that runs out of rounds to say where it stopped.
+  let lastStep = '';
   // Set once a round came back `thinkingDropped`: the rest of the turn asks for none.
   let noThinking = false;
   // The images tools of this turn returned or attached to their results, by hash →
@@ -880,7 +888,11 @@ export async function agentChat(
         opts.onNote?.('tool call written as text again — the turn ends');
         roundContent = kept;
       }
-      if (r.toolCalls.length) askedAgain = false;
+      if (r.toolCalls.length) {
+        askedAgain = false;
+        const step = r.toolCalls.map((tc) => `${realName.get(tc.name) ?? tc.name} ${tc.arguments || '{}'}`).join(', ');
+        lastStep = step.length > 80 ? `${step.slice(0, 79)}…` : step;
+      }
       if (!r.toolCalls.length) {
         // Final round — the answer: already shown live via onLive, fix it as the
         // content. If the caller does not use onLiveCommit, fall back to chunked
@@ -1154,7 +1166,7 @@ export async function agentChat(
   }
   return {
     content, process, toolRuns, transcript: current.slice(turnStart),
-    ...(answered ? {} : { roundLimit: rounds }),
+    ...(answered ? {} : { roundLimit: rounds, ...(lastStep ? { lastStep } : {}) }),
     ...(usage ? { usage } : {}),
   };
 }

@@ -103,7 +103,14 @@ export function logShareMessage(lines: readonly string[], arg = ''): string | nu
 // How a turn that did not finish ends in the MODEL's history — an assistant message,
 // read as the model's own previous turn. A question left there unanswered was answered
 // with the next one: the model went back to what the person had stopped.
+// What ⏎ on the empty field sends after a turn stopped at `ai.maxRounds`.
+export const CONTINUE_WORD = 'continue';
 export const STOPPED_TURN = '(Stopped by the person before I finished. I am not resuming this request unless they ask me to.)';
+// What the model's history says of a turn the host stopped at `ai.maxRounds`: in the
+// model's voice, where it stopped — so a "continue" after it reads as picking up there.
+export function roundCapTurn(rounds: number, lastStep?: string): string {
+  return `(The host stopped this turn after ${rounds} rounds, its limit for one turn (ai.maxRounds)${lastStep ? `; my last step was ${lastStep}` : ''}. The work is not finished: on "continue" I pick up from there.)`;
+}
 export function failedTurn(message: unknown): string {
   const why = String(message ?? '').replace(/\s+/g, ' ').trim().slice(0, 200);
   return `(This turn failed before I could finish${why ? `: ${why}` : ''}.)`;
@@ -506,6 +513,12 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // decide «empty?» and show an amber status message.
           const contentRef = ui.useRef('');
           const [emptyNotice, setEmptyNotice] = ui.useState('');
+          // The last turn stopped at `ai.maxRounds`: Enter on the empty field sends
+          // "continue", and the field's hint says so. Gone with the next message, and
+          // wherever the notice above is reset.
+          const continueOfferRef = ui.useRef(false);
+          const [continueOffer, setContinueOfferState] = ui.useState(false);
+          const setContinueOffer = (v: boolean) => { continueOfferRef.current = v; setContinueOfferState(v); };
           const [toolCount, setToolCount] = ui.useState(0); // tool calls in this turn (for the status)
           const abortRef = ui.useRef<AbortController | null>(null);
           // Which key stopped the running turn or `!command`: '' for Esc (and for a
@@ -1409,7 +1422,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             t0Ref.current = Date.now();
             setElapsedMs(0);
             contentRef.current = '';
-            setEmptyNotice('');
+            setEmptyNotice(''); setContinueOffer(false);
             setToolCount(0);
             setTurnTokens(0); // what the last turn cost is not what this one costs
             turnCachedRef.current = 0;
@@ -1430,6 +1443,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // would be, in the warn colour, and it replaces the dim line under the
             // field that a wall of grey tool lines would otherwise hide.
             let roundLimit = 0;
+            let lastStep = '';
             inTurnRef.current = true; // a project note from here on waits for the turn's end (the `finally`)
             try {
               const chatResult = await (host.services as Record<string, any>).chatLLM(wire, {
@@ -1739,13 +1753,18 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               });
               (host.services as Record<string, any>).pushLog?.(`[chat] ${q.slice(0, 40)}… → ${q.length} chars${images.length ? ` + ${images.length} image${images.length === 1 ? '' : 's'}` : ''}`);
               roundLimit = Number((chatResult as { roundLimit?: number } | undefined)?.roundLimit ?? 0);
+              lastStep = String((chatResult as { lastStep?: string } | undefined)?.lastStep ?? '');
               const turn = (chatResult as { transcript?: ChatMessage[]; content?: string } | undefined);
               const reported = (chatResult as { usage?: TokenUsage } | undefined)?.usage;
               if (reported) usageRef.current = reported;
               apiRef.current = [
                 ...apiRef.current,
                 ...(turn?.transcript?.length ? turn.transcript : [{ role: 'assistant', content: turn?.content ?? '' }]),
+                // Stopped at the cap: the turn is closed in the model's history by the
+                // host's line saying where, and the person is offered ⏎ continue.
+                ...(roundLimit ? [{ role: 'assistant', content: roundCapTurn(roundLimit, lastStep || undefined) } as ChatMessage] : []),
               ];
+              if (roundLimit) setContinueOffer(true);
               // The calls are already in the turn, where they were made (`onToolRun`).
               const runs = (chatResult as { toolRuns?: unknown[] } | undefined)?.toolRuns ?? [];
               // After a real write the plugins reload what they show — otherwise an open
@@ -1820,7 +1839,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                     : { ...rest, content: `${rest.content ?? ''}${live}` };
                 });
                 const at = answerAt(next);
-                if (at >= 0) next[at] = { ...next[at]!, duration: finalMs, ...(spent ? { tokens: spent } : {}), ...(cachedSpent ? { cached: cachedSpent } : {}), ...(aborted ? { stopped: true, ...(stopKeyRef.current ? { stoppedBy: stopKeyRef.current } : {}) } : {}), ...(roundLimit ? { roundLimit } : {}) };
+                if (at >= 0) next[at] = { ...next[at]!, duration: finalMs, ...(spent ? { tokens: spent } : {}), ...(cachedSpent ? { cached: cachedSpent } : {}), ...(aborted ? { stopped: true, ...(stopKeyRef.current ? { stoppedBy: stopKeyRef.current } : {}) } : {}), ...(roundLimit ? { roundLimit, ...(lastStep ? { roundLimitAt: lastStep } : {}) } : {}) };
                 return next;
               });
               // Empty answer: the model gave only reasoning but no final text — say so
@@ -1907,7 +1926,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // The field is emptied now: the command is in its block from here on.
             setInput(''); inputRef.current = ''; setCursor(0);
             setError(null);
-            setEmptyNotice('');
+            setEmptyNotice(''); setContinueOffer(false);
             setToolCount(0);
             setStreaming(true);
             setToolLabel(`$ ${cmd.length > 60 ? `${cmd.slice(0, 60)}…` : cmd}`);
@@ -2245,7 +2264,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             }
             dismissAsk();
             queueRef.current = []; setQueued([]); bgQueueRef.current = [];
-            setError(null); setEmptyNotice(''); setToolLabel(''); setToolCount(0);
+            setError(null); setEmptyNotice(''); setContinueOffer(false); setToolLabel(''); setToolCount(0);
             if (id !== sessionIdRef.current) releaseCurrentLock(); // leaving the old one
             applySession(s, fp);
             (host.services as Record<string, any>).showMessage?.(`Resumed «${s.title || 'session'}»`);
@@ -2357,7 +2376,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             setNotes(configNotes()); // the steps go back to what the config asks for
             resetRound(); // the round being written belonged to work that is gone
             setError(null);
-            setEmptyNotice('');
+            setEmptyNotice(''); setContinueOffer(false);
             setToolCount(0);
             setToolLabel('');
             setElapsedMs(0);
@@ -3065,7 +3084,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 else if (streamRef.current) {
                   // An answer is coming: queue instead of dropping the keypress.
                   if (cmd) { queueRef.current.push(cmd); setField(''); syncQueue(); }
-                } else send();
+                } else if (!cmd && continueOfferRef.current) void send(CONTINUE_WORD);
+                else send();
                 return true;
               }
               if (act.kind === 'edit') {
@@ -3156,7 +3176,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             queued,
             // The title names what is on screen — the items' labels.
             subject: contextTitle(screen),
-            elapsed: elapsedMs, emptyNotice, toolCount, completion,
+            elapsed: elapsedMs, emptyNotice, toolCount, completion, continueOffer,
             // What the turn has cost so far, as the provider reported it (0 — nothing
             // reported, and nothing is drawn).
             turnTokens,

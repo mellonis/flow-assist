@@ -63,6 +63,8 @@ interface ChatMsg {
   reasoning?: string;
   // The turn ran out of rounds after this many, with no answer.
   roundLimit?: number;
+  // The last step of a turn that stopped at the cap — where it stopped.
+  roundLimitAt?: string;
   duration?: number;
   stopped?: boolean;
   // The cap of the key that stopped the turn when it was not Esc (`^c`). A session
@@ -818,7 +820,8 @@ function buildMessageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): Ch
       // under the field would instead be hidden by a wall of grey tool lines.
       const answer = answerText(String(m.content ?? ''));
       if (Number(m.roundLimit) > 0 && !answer) {
-        rows.push({ role, limit: true, first: true, spans: [{ text: cutStep(`stopped after ${Number(m.roundLimit)} rounds — no answer; say "continue" to carry on`, inner) }] });
+        const at = typeof m.roundLimitAt === 'string' && m.roundLimitAt ? ` at ${m.roundLimitAt}` : '';
+        rows.push({ role, limit: true, first: true, spans: [{ text: cutStep(`stopped after ${Number(m.roundLimit)} rounds (ai.maxRounds)${at} — ${CAP.enter} continue`, inner) }] });
       }
       // The answer, exactly as written — the rows the round was drawn with while it
       // streamed (a `Next:` it held reflows by a word), now in the normal colour
@@ -1291,6 +1294,7 @@ export function renderChatModal({
   queued = [],
   elapsed = 0,
   emptyNotice = '',
+  continueOffer = false,
   toolCount = 0,
   turnTokens = 0,
   viewLines = VIEW_CAPS.folded,
@@ -1376,6 +1380,8 @@ export function renderChatModal({
   // otherwise. The turn's own total is on the finished answer's quiet line.
   elapsed?: number;
   emptyNotice?: string;
+  // The last turn stopped at the round cap: Enter on the empty field sends "continue".
+  continueOffer?: boolean;
   toolCount?: number;
   // What the provider has reported this TURN costing (0 — nothing reported, and no
   // figure is drawn: an invented one would be worse than none).
@@ -1661,7 +1667,7 @@ export function renderChatModal({
                         ? ` ${CAP.enter} run with the terminal · ${CAP.backspace} on empty back to !`
                         : bangLevel === 1
                         ? ` ${CAP.enter} run · ! again gets the terminal · ${CAP.backspace} on empty leaves ! mode`
-                        : streaming ? ` an answer is coming — ${CAP.enter} queues your next message` : ` ${CAP.enter} send · ${NEWLINE_KEY} new line · ${CAP.esc} ${CAP.esc} ${escWord}`)
+                        : streaming ? ` an answer is coming — ${CAP.enter} queues your next message` : ` ${CAP.enter} ${continueOffer ? 'continue' : 'send'} · ${NEWLINE_KEY} new line · ${CAP.esc} ${CAP.esc} ${escWord}`)
                     // Text after the caret is the person's own text — drawn like the rest
                     // of it, never the placeholder's dim, or it would grey out whenever
                     // the caret moved back.
