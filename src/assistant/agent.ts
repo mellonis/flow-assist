@@ -193,6 +193,15 @@ export interface AgentOpts {
   // arrives, so a caller drawing the round's text as it streams learns what that text
   // is while it is still being written rather than after the round has ended.
   onRoundKind?: (kind: 'tools') => void;
+  // Called before EVERY request of the turn — the first, and each after a round's tool
+  // results are all in, so a call is never parted from its result. `transcript` is the
+  // turn so far (the question is the last of the messages handed in, not in it);
+  // `measured` is the size of the coming request when the provider reported the last
+  // round's usage (its prompt and answer, plus what joined after it, as an estimate),
+  // and undefined before the first round. Returning `messages` replaces everything
+  // sent from here on — what the chat's automatic compaction does — and the turn's
+  // transcript then starts after them.
+  beforeRequest?: (info: { round: number; transcript: ChatMessage[]; measured?: number }) => Promise<{ messages: ChatMessage[] } | void>;
   // Tools on demand (src/assistant/tool-loading.ts). 'all' — every tool in full on
   // every request, the default here, so a caller that does not say keeps what it had;
   // the chat, a background task and the one-shot CLI pass `ai.toolLoading`.
@@ -706,7 +715,9 @@ export async function agentChat(
   // service; `logTools`/`logToolsPath` are kept for source compatibility but are
   // NOT used for the actual write (no toolsLogFile computed here).
   let current: ChatMessage[] = messages.slice();
-  const turnStart = current.length;
+  // Where this turn's own messages begin — moved when `beforeRequest` replaces what
+  // came before.
+  let turnStart = current.length;
   // Writing tools (write flag: true or a predicate (args) => boolean) ask for
   // confirmation via opts.confirmWrite (a y/n pause in chat) before running. In the
   // API we send tools WITHOUT the service fields write/run (a strict server may
@@ -766,6 +777,9 @@ export async function agentChat(
   // the caller has nothing to show for the turn but the trail.
   let answered = false;
   let rounds = 0;
+  // Where the history stood when the last reported usage was taken: what joined after
+  // it (the round's tool results) is not in that figure.
+  let usageAt = 0;
   // Set once a round came back `thinkingDropped`: the rest of the turn asks for none.
   let noThinking = false;
   // The images tools of this turn returned or attached to their results, by hash →
@@ -792,6 +806,16 @@ export async function agentChat(
   try {
     for (let i = 0; i < maxRounds; i++) {
       rounds = i + 1;
+      if (opts.beforeRequest) {
+        const measured = usage ? usage.promptTokens + usage.completionTokens + estimateTokens(JSON.stringify(current.slice(usageAt))) : undefined;
+        const replaced = await opts.beforeRequest({ round: i, transcript: current.slice(turnStart), ...(measured !== undefined ? { measured } : {}) });
+        if (replaced?.messages) {
+          current = replaced.messages.slice();
+          turnStart = current.length;
+          // The figure was of the history just replaced.
+          usage = undefined;
+        }
+      }
       let roundContent = '';
       const r = await chatRoundFn(withRequestTail(withSystemPrompt(withAttachedImages(current, attachedUrls), systemPrompt), requestTail), {
         ...opts,
@@ -869,6 +893,7 @@ export async function agentChat(
         // Not once the turn has gone without thinking: none is sent back from then on.
         ...(r.blocks?.length && !noThinking ? { [ANTHROPIC_CONTENT]: r.blocks } : {}),
       });
+      if (r.usage) usageAt = current.length;
       for (let idx = 0; idx < r.toolCalls.length; idx++) {
         const called = r.toolCalls[idx]!;
         const callParse = callParses[idx]!;

@@ -707,3 +707,34 @@ test('agentChat tells a tool whether the person said yes to this very call', asy
   await run();
   expect(seen).toEqual([false, false]);
 });
+
+test('beforeRequest runs at every request boundary, after a round\'s results, and may replace what is sent', async () => {
+  assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
+  const sent: any[][] = [];
+  const chatRound = async (messages: any[], opts: any) => {
+    sent.push(messages);
+    if (sent.length === 1) {
+      opts.onDelta?.('looking');
+      return { content: 'looking', finishReason: 'tool_calls', toolCalls: [{ id: '1', name: 'memory', arguments: '{"action":"list"}' }], usage: { promptTokens: 100, completionTokens: 10 } };
+    }
+    opts.onDelta?.('done');
+    return { content: 'done', finishReason: 'stop', toolCalls: [] };
+  };
+  const seen: { round: number; roles: string[]; measured?: number }[] = [];
+  const res = await agentChat([{ role: 'system', content: 'S' }, { role: 'user', content: 'Q' }], {
+    baseUrl: 'http://x', model: 'm', token: 't', onLive: () => {}, onLiveCommit: () => {}, chatRound,
+    beforeRequest: async ({ round, transcript, measured }) => {
+      seen.push({ round, roles: transcript.map((m) => m.role), measured });
+      if (round === 1) return { messages: [{ role: 'system', content: 'S2' }, { role: 'user', content: 'Q2' }] };
+    },
+  });
+  // Round 0 has nothing measured yet; at round 1 the call and its result are both in.
+  expect(seen[0]).toEqual({ round: 0, roles: [], measured: undefined });
+  expect(seen[1]!.round).toBe(1);
+  expect(seen[1]!.roles).toEqual(['assistant', 'tool']);
+  expect(seen[1]!.measured).toBeGreaterThan(110); // the round's figure and the result after it
+  // What the hook gave is what the next round is sent — no call left without its result.
+  expect(sent[1]!.map((m: any) => m.content)).toEqual(['S2', 'Q2']);
+  // And the turn's transcript starts after it.
+  expect(res.transcript.map((m) => [m.role, m.content])).toEqual([['assistant', 'done']]);
+});

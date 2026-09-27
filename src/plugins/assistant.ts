@@ -21,7 +21,7 @@ import { completePath, completeSlash, listDirectory, type ChatCommandDef } from 
 import { configSetLine, type CompleteResult } from '../config/commands.js';
 import { parseValue } from '../config/load.js';
 import { apiHistory, compactConversation, chatLanguage, requestTools, transcriptSoFar } from '../assistant/agent.js';
-import { stripToolMarkup } from '../assistant/compaction.js';
+import { RESUMED_NOTE, autoCompactLimits, overThreshold, stripToolMarkup } from '../assistant/compaction.js';
 import { createToolSet, toolLoadingMode } from '../assistant/tool-loading.js';
 import { llmOpts } from '../assistant/llm-endpoint.js';
 import { copyTarget, copyToClipboard } from '../assistant/copy.js';
@@ -50,7 +50,7 @@ import { bindingGlyph, firstGlyph, isKey, isMouseButton, keyGlyph } from '../pla
 import { askKey, askStart, type AskQuestion, type AskState } from '../assistant/ask.js';
 import { loadMemories, memoryFilePath, saveMemories } from '../runtime/services/memory.js';
 import { keptAfterClear, memoryCommand } from '../assistant/memory-command.js';
-import { CONTEXT_WARN_AT, DEFAULT_CONTEXT_WINDOW, cacheLine, contextBadge, readContext, short as shortTokens } from '../assistant/context-meter.js';
+import { CONTEXT_WARN_AT, DEFAULT_CONTEXT_WINDOW, cacheLine, contextBadge, estimateTokens, readContext, short as shortTokens } from '../assistant/context-meter.js';
 import { applyRecall, bulkyItems, createRecallState, decideBatch, recallLimits, recallLine, saveRecallState, type BulkyItem, type RecallSource, type ShellMeta } from '../assistant/recall.js';
 import { contextTitle, screenBlock, type ContextItem } from '../assistant/screen-context.js';
 import {
@@ -1148,17 +1148,22 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const screenNow = (): ContextItem[] => {
             try { return (host.services as { chatContext?: () => ContextItem[] }).chatContext?.() ?? []; } catch { return []; }
           };
-          // How full the model's context is (assistant/context-meter.ts).
-          const contextReading = (screen: ContextItem[] = screenNow()) => {
-            const summary = summaryRef.current ? `Summary of the conversation so far (older turns were compacted):\n${summaryRef.current}` : '';
-            const window = Number((host.config.ai as { contextWindow?: unknown } | undefined)?.contextWindow) || DEFAULT_CONTEXT_WINDOW;
-            const u = usageRef.current;
+          // The compacted part of the conversation, as the system context carries it —
+          // read fresh wherever it is used: an automatic compaction mid-turn changes it
+          // between two rounds of one message.
+          const summaryBlock = () => (summaryRef.current ? `Summary of the conversation so far (older turns were compacted):\n${summaryRef.current}` : '');
+          const contextWindowOf = () => Number((host.config.ai as { contextWindow?: unknown } | undefined)?.contextWindow) || DEFAULT_CONTEXT_WINDOW;
+          // How full the model's context is (assistant/context-meter.ts). `extra` is what
+          // the history will hold beyond `apiRef` (a turn's transcript so far), and
+          // `measure: false` asks for the estimate even when a figure was reported.
+          const contextReading = (screen: ContextItem[] = screenNow(), extra: ChatMessage[] = [], measure = true) => {
+            const u = measure ? usageRef.current : null;
             return readContext(
               // The tools the next request will CARRY — with tools on demand, the core ones,
               // what was loaded and the index; not every tool there is.
               // The history as it goes out: a stubbed item counts as its stub, not its content.
-              { system: [baseStatic(), projectBlock()].filter(Boolean).join('\n\n'), memory: memoryBlock(), plan: planBlock(), summary, screen: screenBlock(screen), tools: requestTools((host.services as Record<string, any>).pluginAiTools ?? [], toolLoadingMode(host.config.ai), toolSetRef.current), messages: sentHistory() },
-              window,
+              { system: [baseStatic(), projectBlock()].filter(Boolean).join('\n\n'), memory: memoryBlock(), plan: planBlock(), summary: summaryBlock(), screen: screenBlock(screen), tools: requestTools((host.services as Record<string, any>).pluginAiTools ?? [], toolLoadingMode(host.config.ai), toolSetRef.current), messages: [...sentHistory(), ...extra] },
+              contextWindowOf(),
               u ? u.promptTokens + u.completionTokens : undefined,
             );
           };
@@ -1177,7 +1182,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const projectBlock = () => instructionsBlock(projectRef.current);
           const systemParts = () => ({
             base: baseStatic(), memory: memoryBlock(), plan: planBlock(),
-            summary: summaryRef.current ? `Summary of the conversation so far (older turns were compacted):\n${summaryRef.current}` : '',
+            summary: summaryBlock(),
           });
           const joinSystem = (p: ReturnType<typeof systemParts>, project: string) => {
             const parts = [p.base, p.memory, project, p.plan, p.summary].filter(Boolean);
@@ -1291,6 +1296,28 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // `hostAsk`: the text is the HOST's request, sent as the person's message (after
           // an interactive `!!command`, "look at what it printed") — drawn as the host's,
           // never kept in ↑/↓.
+          // ── Compaction ── /compact and the automatic one alike: the model's view becomes
+          // a handoff (`compactConversation`) that REPLACES the previous summary, which it
+          // was shown to carry forward. What the PERSON sees stays — the conversation above
+          // is theirs to scroll (wiping it down to the last message instead would read as
+          // /clear); a note marks where the model's view now begins, one row with how big
+          // that view was and is now (the reading `ctx N%` shows), `auto` when nobody
+          // asked, and the summary folded under it.
+          const foldIntoHandoff = async (history: ChatMessage[], signal: AbortSignal) => {
+            const ai = (host.config.ai ?? {}) as Record<string, any>;
+            const result = await compactConversation(history, { ...llmOpts(ai), signal, previous: summaryRef.current });
+            if (!signal.aborted && result.incomplete) (host.services as Record<string, any>).pushLog?.(`[compact] no usable handoff after a retry: ${result.incomplete}`);
+            return result;
+          };
+          const markCompacted = (before: number, summary: string, incomplete: string | undefined, auto: boolean) => {
+            const after = contextReading().used;
+            const sizes = before > 0 && after > 0 ? ` · ~${shortTokens(before)} → ~${shortTokens(after)} tokens` : '';
+            const kept = incomplete ? ' · incomplete, previous kept' : '';
+            const note = `── compacted${auto ? ' · auto' : ''}${sizes}${kept} ──`;
+            journal({ t: 'compact', summary, note });
+            setMessages((cur) => [...cur, { role: 'note', content: note, summary }]);
+          };
+
           const send = async (text: string | null = null, opts: { fromBackground?: boolean; hostAsk?: boolean } = {}) => {
             const q = (text ?? inputRef.current).trim();
             if (!q || streamRef.current) return false;
@@ -1417,7 +1444,46 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 requestTail: () => screenBlock(screenNow()),
                 // The system prompt with the project's instructions as they are before
                 // each round — a `cd` in this turn is seen by its next round.
-                systemPrompt: () => joinSystem(sysParts, projectBlock()),
+                // The summary is read fresh too: an automatic compaction between two
+                // rounds replaces it.
+                systemPrompt: () => joinSystem({ ...sysParts, summary: summaryBlock() }, projectBlock()),
+                // Before every request of the turn: past `ai.autoCompact.threshold` of the
+                // window, the conversation is compacted first — at a request boundary, so
+                // every call made so far has its result. The person's message stays, the
+                // rest becomes the handoff; mid-turn the message says the work on it
+                // goes on from the handoff, so it is not begun again. A compaction that
+                // fails is logged and the request goes as it is; Esc stops it with the turn.
+                beforeRequest: async ({ round, transcript, measured }: { round: number; transcript: ChatMessage[]; measured?: number }) => {
+                  const limits = autoCompactLimits(host.config.ai);
+                  if (!limits.enabled || epoch !== epochRef.current) return;
+                  if (round === 0 && apiRef.current.length < 2) return; // nothing but the question to fold
+                  let next: number;
+                  if (typeof measured === 'number') next = measured;
+                  else if (round === 0) { const r = contextReading(); next = r.measured ? r.used + estimateTokens(q) : r.used; }
+                  else next = contextReading(undefined, transcript, false).used;
+                  if (!overThreshold(next, contextWindowOf(), limits)) return;
+                  setToolLabel('⚙ compact…');
+                  let result: Awaited<ReturnType<typeof foldIntoHandoff>>;
+                  try {
+                    result = await foldIntoHandoff([...sentHistory(), ...transcript], abort.signal);
+                  } catch (e) {
+                    if (abort.signal.aborted || (e as Error)?.name === 'AbortError') throw e;
+                    (host.services as Record<string, any>).pushLog?.(`[compact] the automatic compaction failed, the request goes as it is: ${(e as Error)?.message}`);
+                    return;
+                  } finally {
+                    setToolLabel('');
+                  }
+                  if (abort.signal.aborted) throw new DOMException('The operation was aborted.', 'AbortError');
+                  if (epoch !== epochRef.current) return;
+                  const resumed: ChatMessage = round === 0 ? asked : { ...asked, content: `${q}\n\n${RESUMED_NOTE}` };
+                  summaryRef.current = result.summary;
+                  usageRef.current = null; // the measured size was of the history just replaced
+                  apiRef.current = [resumed];
+                  markCompacted(next, result.summary, result.incomplete, true);
+                  persist();
+                  const sysNow = joinSystem({ ...sysParts, summary: summaryBlock() }, projectBlock());
+                  return { messages: wireMessages([...(sysNow ? [{ role: 'system', content: sysNow } as ChatMessage] : []), resumed], (ref) => resolveImage(ref, [])) };
+                },
                 // What this conversation has loaded; `tools_load` adds to it mid-turn.
                 // The mode (`ai.toolLoading`) is applied by the `chatLLM` service.
                 toolSet: toolSetRef.current,
@@ -2055,31 +2121,18 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // The command body; the spinner/label/elapsed-tick live in
             // runAsyncCommand, which clears streaming/toolLabel on completion.
             runAsyncCommand('compact', async (signal) => {
-              const ai = (host.config.ai ?? {}) as Record<string, any>;
               // How big the model's view was — as `ctx N%` read it.
               const before = contextReading().used;
               // Compact what the MODEL saw (tool results included, a stubbed item as its
               // stub), not the display list.
-              // The new summary REPLACES the previous one, which the model was shown to
-              // carry forward (`compactConversation`, a handoff).
-              const { summary, incomplete } = await compactConversation(sentHistory(), { ...llmOpts(ai), signal, previous: summaryRef.current });
+              const { summary, incomplete } = await foldIntoHandoff(sentHistory(), signal);
               if (signal.aborted) return; // stopped: the history stays as it was
-              if (incomplete) (host.services as Record<string, any>).pushLog?.(`[compact] no usable handoff after a retry: ${incomplete}`);
               summaryRef.current = summary;
               usageRef.current = null; // the measured size was of the history just replaced
               apiRef.current = [];
               // The loaded tools stay (`toolSetRef`): the work the summary describes goes on
               // with them, and loading them again would spend a round for nothing.
-              // What the MODEL sees shrank to the summary; what the PERSON sees stays —
-              // the conversation above is theirs to scroll. (Wiping it down to
-              // the last message instead would read as /clear.) A note marks where the model's
-              // view now begins — one row, how big that view was and is now (the same
-              // reading `ctx N%` shows) — with the summary it was given folded under it.
-              const after = contextReading().used;
-              const sizes = before > 0 && after > 0 ? ` · ~${shortTokens(before)} → ~${shortTokens(after)} tokens` : '';
-              const kept = incomplete ? ' · incomplete, previous kept' : '';
-              journal({ t: 'compact', summary, note: `── compacted${sizes}${kept} ──` });
-              setMessages((cur) => [...cur, { role: 'note', content: `── compacted${sizes}${kept} ──`, summary }]);
+              markCompacted(before, summary, incomplete, false);
               persist();
               (host.services as Record<string, any>).showMessage?.('History compacted');
             });

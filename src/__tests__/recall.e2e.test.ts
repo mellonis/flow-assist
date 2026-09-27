@@ -30,8 +30,9 @@ const idOf = (file: string) => `img:${crypto.createHash('sha256').update(fs.read
 // A request's messages are a prefix of the next one's — nothing before the new turn moved.
 const isPrefix = (prev: Req, next: Req) => { expect(next.messages.slice(0, prev.messages.length)).toEqual(prev.messages); };
 
-// A 1000-token window: `usage` says how full it reads after each answer.
-const AI = { baseUrl: 'http://scripted.model', model: 'scripted', toolLoading: 'all', contextWindow: 1000 };
+// A 1000-token window: `usage` says how full it reads after each answer. The window is
+// this small to move the recall threshold, so the automatic compaction is off.
+const AI = { baseUrl: 'http://scripted.model', model: 'scripted', toolLoading: 'all', contextWindow: 1000, autoCompact: { enabled: false } };
 const under = { prompt_tokens: 100, completion_tokens: 10 }; // 11% — no batch
 const over = { prompt_tokens: 600, completion_tokens: 10 }; // 61% — past the threshold
 
@@ -115,7 +116,7 @@ test('the same on the Anthropic wire: the stub replaces the image block, and rec
   model.wire = 'anthropic';
   model.anthropicUsage = { input_tokens: 100, output_tokens: 10 };
   model.script([{ text: 'A screenshot.' }], [{ text: 'Noted.' }]);
-  const ui = await bootApp(model, 120, 36, undefined, { ai: { provider: 'anthropic', model: 'claude-sonnet-5', toolLoading: 'all', contextWindow: 1000, recall: { everyTurns: 0 } } });
+  const ui = await bootApp(model, 120, 36, undefined, { ai: { provider: 'anthropic', model: 'claude-sonnet-5', toolLoading: 'all', contextWindow: 1000, autoCompact: { enabled: false }, recall: { everyTurns: 0 } } });
   await ui.press('F');
   ui.backend.paste(file);
   await settle();

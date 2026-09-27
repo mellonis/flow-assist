@@ -152,6 +152,15 @@ the window (`ai.recall.threshold`) or every ten turns (`ai.recall.everyTurns`), 
 provider's prompt cache is missed rarely; `/context` says how many items are stubbed.
 `config set ai.recall.enabled false` sends everything in full every time.
 
+`/compact` folds the conversation the assistant sees into a handoff — the goal, what is
+done (commits, paths, commands that worked), what is in progress and its next step, the
+open decisions, the facts learned — and a `── compacted ──` row marks the place; the
+screen keeps everything, and the summary opens under the row. The chat does it by
+itself before a request would pass 80% of the window (`ai.autoCompact.threshold`,
+0.5–0.95 of `ai.contextWindow`), between two requests so no tool call is parted from
+its result, and marks the row `auto`; `config set ai.autoCompact.enabled false` leaves
+it to `/compact`.
+
 `!command` in the chat runs a shell command yourself (`!bun test src/features`): it is
 one folded line while it runs (`bun test src/features · 3 s`) and stays folded, its tail
 settled, once it ends (`· ✓ 4.2 s`); the output lands in the conversation and the

@@ -1,7 +1,8 @@
 // What a compaction asks for and what it accepts back (src/assistant/compaction.ts).
 import { expect, test } from 'bun:test';
 import {
-  HANDOFF_SECTIONS, SHORT_CHARS, compactionInstruction, hasToolMarkup, retryNote, stripToolMarkup, summaryProblem,
+  HANDOFF_SECTIONS, SHORT_CHARS, autoCompactLimits, compactionInstruction, hasToolMarkup, overThreshold, retryNote,
+  stripToolMarkup, summaryProblem,
 } from '../compaction.js';
 
 const handoff = (extra = '') => [
@@ -73,4 +74,19 @@ test('tool-call markup is detected and stripped, closed or cut off', () => {
   expect(stripToolMarkup('p <｜tool▁calls▁begin｜> q')).toBe('p  q');
   expect(hasToolMarkup('plain text with <b>html</b> and a < b')).toBe(false);
   expect(stripToolMarkup('plain text with <b>html</b>')).toBe('plain text with <b>html</b>');
+});
+
+test('ai.autoCompact: on at 0.8 by default, the threshold held to 0.5–0.95', () => {
+  expect(autoCompactLimits(undefined)).toEqual({ enabled: true, threshold: 0.8 });
+  expect(autoCompactLimits({ autoCompact: { enabled: false } })).toEqual({ enabled: false, threshold: 0.8 });
+  expect(autoCompactLimits({ autoCompact: { threshold: 0.2 } }).threshold).toBe(0.5);
+  expect(autoCompactLimits({ autoCompact: { threshold: 1 } }).threshold).toBe(0.95);
+  expect(autoCompactLimits({ autoCompact: { threshold: 'x' } }).threshold).toBe(0.8);
+});
+
+test('overThreshold compares the next request to the share of the window', () => {
+  const on = { enabled: true, threshold: 0.8 };
+  expect(overThreshold(81_000, 100_000, on)).toBe(true);
+  expect(overThreshold(80_000, 100_000, on)).toBe(false);
+  expect(overThreshold(99_000, 100_000, { ...on, enabled: false })).toBe(false);
 });

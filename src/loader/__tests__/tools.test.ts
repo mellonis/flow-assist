@@ -457,6 +457,19 @@ test('config_schema says what ai.backgroundFollowUp does, from the config side',
   expect(out).toMatch(/config set ai\.backgroundFollowUp true/);
 });
 
+test('config_schema says what ai.autoCompact does, and the model may not set it', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'fa-cfgschema-ac-'));
+  const local = join(dir, 'config.local.json');
+  writeFileSync(local, '{}');
+  const reg = assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
+  const out = String(await reg.exec('config_schema', { key: 'ai.autoCompact' }, { configLocalPath: local }));
+  expect(out).toMatch(/- ai\.autoCompact\.enabled: true\|false — unset \(default: enabled: true, threshold: 0\.8 — before a request that would pass threshold of ai\.contextWindow/);
+  expect(out).toMatch(/- ai\.autoCompact\.threshold: .*unset/);
+  expect(out).toContain('config set ai.autoCompact.enabled false');
+  expect(out).not.toContain('· model may set');
+  await expect(reg.exec('config_set', { key: 'ai.autoCompact.enabled', value: false, scope: 'session' }, { configLocalPath: local })).rejects.toThrow();
+});
+
 test('config_schema shows structure, defaults and set/unset — never a value', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'fa-cfgschema-'));
   const local = join(dir, 'config.local.json');

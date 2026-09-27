@@ -60,6 +60,28 @@ export function retryNote(problem: string): string {
   return `Your first answer was not a usable handoff: ${problem}. Write it again — all five sections under their headings, with the specifics that let the work go on.`;
 }
 
+// ── Automatic compaction (`ai.autoCompact`) ──
+// Before a request that would pass `threshold` of `ai.contextWindow`, the conversation
+// is compacted first. On unless `enabled` is false; the threshold is held to 0.5–0.95
+// — lower compacts all the time, higher leaves no room for the answer.
+export interface AutoCompact { enabled: boolean; threshold: number }
+export const AUTO_COMPACT_DEFAULTS: AutoCompact = { enabled: true, threshold: 0.8 };
+
+export function autoCompactLimits(ai: unknown): AutoCompact {
+  const c = (ai as { autoCompact?: { enabled?: unknown; threshold?: unknown } } | undefined)?.autoCompact ?? {};
+  const t = typeof c.threshold === 'number' && Number.isFinite(c.threshold) ? Math.min(0.95, Math.max(0.5, c.threshold)) : AUTO_COMPACT_DEFAULTS.threshold;
+  return { enabled: c.enabled !== false, threshold: t };
+}
+
+// Would a request of `tokens` pass the threshold?
+export function overThreshold(tokens: number, window: number, limits: AutoCompact): boolean {
+  return limits.enabled && window > 0 && tokens > limits.threshold * window;
+}
+
+// What the person's message says to the model once the work on it so far was folded
+// into the handoff mid-turn: the question alone would read as not yet begun.
+export const RESUMED_NOTE = '[The work on this message so far was compacted into the handoff in the system context — continue from its next step; do not start over.]';
+
 // ── Tool-call markup written as text ──
 // Blocks a model writes when it means to call a tool and the call comes out as text:
 // DeepSeek's DSML (`<｜DSML｜function_calls>…`, the bar is U+FF5C), `<tool_call>`,

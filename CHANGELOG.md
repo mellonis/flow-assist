@@ -5,6 +5,13 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **The chat compacts the conversation by itself before it overflows.** Before a request
+  that would pass 80% of the context window, the chat folds the conversation into a
+  handoff first — the same as `/compact`, with its row marked `── compacted · auto ──` —
+  and then sends. It happens between two requests, never between a tool call and its
+  result, so a long turn can compact in its middle and carry on from where it was.
+  `ai.autoCompact.threshold` moves the point (0.5 to 0.95 of `ai.contextWindow`), and
+  `config set ai.autoCompact.enabled false` leaves compaction to `/compact` alone.
 - **`/compact` writes a handoff for the model that goes on, not a reply to you.** The
   summary comes in fixed sections — the goal, what is done (with commits, paths and the
   commands that worked), what is in progress and its exact next step, the open

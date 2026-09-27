@@ -908,7 +908,29 @@ there is no `/fullscreen`.
   previous kept`. Tool-call markup written as text (`stripToolMarkup`: DeepSeek's DSML
   `<｜DSML｜…>`, `<tool_call>`, `<function_calls>`, `<invoke …>`, closed or cut off) is
   stripped from the answer, from the previous summary it is shown, and from a summary
-  read back from a saved session. A note whose text already carries the
+  read back from a saved session.
+- **The chat compacts by itself before the context overflows** (`ai.autoCompact`:
+  `enabled`, default true; `threshold`, 0.5–0.95 of `ai.contextWindow`, default 0.8;
+  `autoCompactLimits` / `overThreshold` in `src/assistant/compaction.ts`). The place is
+  `AgentOpts.beforeRequest`, which `agentChat` calls before EVERY request of a turn —
+  the first, and each after a round's tool results are all in — so a compaction never
+  parts a call from its result. It is handed the turn so far and `measured`: the last
+  round's reported prompt and answer plus an estimate of what joined after it
+  (undefined before the first round and when the provider reports nothing; the chat then
+  reads `ctx N%`'s own figure, the question added, or estimates the history with the
+  turn's transcript). Past the threshold the chat compacts `[...sentHistory(),
+  ...transcript]` through the same path as `/compact` (`foldIntoHandoff`,
+  `markCompacted`, the row `── compacted · auto · ~X → ~Y tokens ──`) and hands back
+  what is sent from then on: the system context with the new summary and the person's
+  message — on its own before the first round; after one, with `RESUMED_NOTE` appended,
+  so the model goes on from the handoff's next step rather than beginning again.
+  `apiRef` becomes that message, the turn's transcript starts after it (`turnStart`
+  moves), and the measured usage is dropped with the history it measured. The
+  per-round `systemPrompt` reads the summary fresh (`summaryBlock`), since it changes
+  between two rounds of one message. A compaction that fails is logged and the request
+  goes as it is; Esc stops it with the turn. Only the chat passes the hook: a
+  background run and the one-shot CLI never compact. `ai` is under the model's leash,
+  so the key carries no mark — `config_set` refuses it. A note whose text already carries the
   summary inline (an older format) is drawn as saved, without folding it. There is no
   `/refresh-context`: the system prompt is assembled anew for every message, so the
   command had nothing to refresh.

@@ -95,6 +95,11 @@ export const hostConfigSchema = z.object({
     // the context passes `threshold` (0.5 of `ai.contextWindow`) or every `everyTurns`
     // turns (10; 0 — the threshold alone). `enabled: false` sends everything in full.
     recall: z.object({ enabled: z.boolean(), threshold: z.number().positive().max(1), minChars: z.number().int().positive(), everyTurns: z.number().int().min(0) }).partial().optional(),
+    // Before a request that would pass `threshold` (0.8) of `contextWindow`, the chat
+    // compacts the conversation into a handoff first — the /compact path, its row marked
+    // `auto` — at a request boundary, never between a call and its result
+    // (src/assistant/compaction.ts). `enabled: false` leaves it to /compact alone.
+    autoCompact: z.object({ enabled: z.boolean(), threshold: z.number().min(0.5).max(0.95) }).partial().optional(),
   }).optional(),
   user: z.object({ name: z.string().optional(), login: z.string().optional() }).optional(),
   // `mouse` reports the mouse to the app: the wheel scrolls the conversation, and a drag

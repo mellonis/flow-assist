@@ -52,7 +52,7 @@ const shots = (make: Make) => make('shots', {
   }],
 });
 
-const AI = { baseUrl: 'http://scripted.model', model: 'scripted', toolLoading: 'all', contextWindow: 1000, recall: { everyTurns: 0 } };
+const AI = { baseUrl: 'http://scripted.model', model: 'scripted', toolLoading: 'all', contextWindow: 1000, autoCompact: { enabled: false }, recall: { everyTurns: 0 } };
 const under = { prompt_tokens: 100, completion_tokens: 10 };
 const over = { prompt_tokens: 600, completion_tokens: 10 };
 
