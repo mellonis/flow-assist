@@ -49,3 +49,37 @@ test(':perf writes the report to the log and says its gist', async () => {
   expect(frame).toContain('[perf] wheel: no frames');
   ui.app.unmount();
 });
+
+// The chat's list keeps its rows, its renderer and its callbacks the same objects while
+// the conversation does not change, so a key typed into the field below it re-renders
+// none of the rows in view: a keystroke costs the same with one row on the screen as
+// with a screenful.
+test('typing in the chat field draws no conversation row again', async () => {
+  const meter = createFrameMeter();
+  const model = new ScriptedModel();
+  const ui = await bootApp(model, 100, 30, undefined, {}, { frameMeter: meter });
+  await ui.press('F');
+  const keystroke = async () => {
+    await ui.type('x');
+    const f = meter.frames('typing').at(-1)!;
+    await ui.press('backspace');
+    return f;
+  };
+  model.script([{ text: 'short' }]);
+  await ui.type('first');
+  await ui.press('return');
+  await settle(20);
+  const few = await keystroke();
+  for (let t = 0; t < 3; t++) {
+    model.script([{ text: Array.from({ length: 30 }, (_x, i) => `- line ${i} of answer ${t}`).join('\n') }]);
+    await ui.type(`question ${t}`);
+    await ui.press('return');
+    await settle(20);
+  }
+  expect(ui.backend.lastFrame).toContain('line 14 of answer 2');
+  const many = await keystroke();
+  expect(many.commits).toBe(1);
+  expect(many.applied).toBeLessThanOrEqual(1);
+  expect(many.skipped).toBe(few.skipped);
+  ui.app.unmount();
+});

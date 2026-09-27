@@ -31,7 +31,7 @@ import { CELL_FREE, CELL_FULL, CONTEXT_WARN_AT, GRID_COLS, GRID_ROWS, contextFoo
 import { formatBytes, pickerGroups, pickerSelected, rowStatus, type OwnStatus, type PickerState } from '../assistant/session-picker.js';
 import { runMark, tildePath } from '../assistant/shell.js';
 import { sessionWhen, type SessionRow } from '../assistant/sessions.js';
-import { createElement as h, useEffect, useRef, useState, type ReactNode } from 'react';
+import { createElement as h, memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { wrapText } from '@flowtty/core';
 import { bindingGlyph, keyGlyph } from '../playback/keys.js';
 import {
@@ -1082,6 +1082,29 @@ const MIN_ROWS_TO_PIN = 4;
 export function roomForBlock(height: number): number {
   return height >= MIN_ROWS_TO_PIN ? height - 1 : height;
 }
+// A row of the conversation, drawn again only when the row itself, its place or the
+// renderer changed: a keystroke, a wheel step or a new message leaves every row already
+// in view alone. The rows are the row cache's own objects, the same while their
+// message and the layout are.
+const ChatRowItem = memo(function ChatRowItem({ row, i, draw }: { row: ChatRow; i: number; draw: (row: ChatRow, i: number) => ReactNode }) {
+  return draw(row, i) as ReturnType<typeof h>;
+});
+const chatRowKey = (_row: ChatRow, i: number) => `chat-${i}`;
+// The conversation's list, rendered again only when a prop changed — its own scroll
+// state aside. A keystroke in the field changes none of them (`ChatMessages` keeps the
+// rows, the renderer, the callbacks and the pin the same objects), so typing never
+// touches the list.
+const ChatList = memo(ScrollList<ChatRow>) as unknown as typeof ScrollList<ChatRow>;
+// The same object back while every value in it is the same — for a table rebuilt on
+// every render of its owner with the same functions in it.
+function useShallowStable<T extends object>(value: T): T {
+  const kept = useRef(value);
+  const a = kept.current as Record<string, unknown>;
+  const b = value as Record<string, unknown>;
+  const ka = Object.keys(a);
+  if (a !== b && (ka.length !== Object.keys(b).length || ka.some((k) => a[k] !== b[k]))) kept.current = value;
+  return kept.current;
+}
 function ChatMessages({ messages, rowOpts, palette: m, errorColor, onViewport, scrollTo, keysActive = true, wheel, hidden = false, streaming = false, hover = false }: {
   messages: ChatMsg[];
   // The backend reports hover: a fold line is underlined under the pointer.
@@ -1177,7 +1200,28 @@ function ChatMessages({ messages, rowOpts, palette: m, errorColor, onViewport, s
   const asked = messages.reduce((n, x) => n + (x.role === 'user' || x.role === 'shell' ? 1 : 0), 0);
   useEffect(() => { box.current?.scrollToEnd(); }, [asked]);
 
-  const rows = chatRows(messages, rowOpts);
+  // What the rows are built from, kept the same object across a render that changed
+  // none of it — a keystroke in the field below re-renders this list, and a fresh
+  // `items` or `renderItem` would re-render every row in view (`ChatRow` below is
+  // memoized on them). The clock moves only while something on the list is live — a
+  // round being written, a command still running: nothing else drawn reads it (a
+  // finished view's time is in its data), so a still conversation keeps its rows.
+  const live = streaming || messages.some((x) => Array.isArray(x.views) && (x.views as ViewRecord[]).some((v) => v.phase === 'live'));
+  const clockRef = useRef(rowOpts.now);
+  if (live) clockRef.current = rowOpts.now;
+  const clock = clockRef.current;
+  const paletteKey = Object.values(m).join(',');
+  const rowPaletteKey = Object.values(rowOpts.palette).join(',');
+  const renderers = useShallowStable(rowOpts.renderers);
+  // Read when a view fails to draw, never a reason to build the rows again.
+  const onViewFailRef = useRef(rowOpts.onViewFail);
+  onViewFailRef.current = rowOpts.onViewFail;
+  const rows = useMemo(
+    () => chatRows(messages, { ...rowOpts, renderers, now: clock, onViewFail: (kind, why) => onViewFailRef.current?.(kind, why) }),
+    // The palette by its values: the theme object is updated in place. A renderer's
+    // late answer bumps `viewRevision()` (views.ts) and changes nothing else.
+    [messages, wrap, rowOpts.folds, viewLines, notes, rowOpts.detailsKey, renderers, clock, rowPaletteKey, viewRevision()],
+  );
   let lastUserKey = -1;
   for (let i = 0; i < rows.length; i++) if (rows[i]!.role === 'user' && rows[i]!.first) lastUserKey = i;
   // The first row of the answer to what the person last sent: the round streaming now,
@@ -1213,29 +1257,53 @@ function ChatMessages({ messages, rowOpts, palette: m, errorColor, onViewport, s
   // not on the row under it — what the chat is told, so it leaves that row alone.
   pinnedRef.current = pinned;
 
-  const renderRow = chatRowRenderer({ palette: m, errorColor, wrap, now: rowOpts.now, detailsKey: rowOpts.detailsKey, hover });
+  // One renderer while nothing it draws with changes, so a row in view whose data did
+  // not change is not drawn again (`ChatRowItem`).
+  // Its clock moves whenever a row it draws is live too — the round being written, a
+  // command still running — whatever the flags above say, or a spinner would stand still.
+  const drawClockRef = useRef(rowOpts.now);
+  if (live || rows.some((r) => r.liveMark || r.consoleMark?.state === 'live')) drawClockRef.current = rowOpts.now;
+  const drawClock = drawClockRef.current;
+  const draw = useMemo(
+    () => chatRowRenderer({ palette: m, errorColor, wrap, now: drawClock, detailsKey: rowOpts.detailsKey, hover }),
+    // The palette by its values.
+    [paletteKey, errorColor, wrap, drawClock, rowOpts.detailsKey, hover],
+  );
+  const renderRow = useCallback((row: ChatRow, i: number) => h(ChatRowItem, { row, i, draw }), [draw]);
 
   // An absolute child of a scroll box is an overlay: it stays put while the rows move
   // under it, so pinning does not shift what the person is reading. Needs flowtty
   // ≥ 1.0.0-alpha.9 — before it an overlay vanished under a padded ancestor (this
   // modal has padding).
-  const sticky = pinned
+  const stickyText = pinned ? (lastUserText.length > 60 ? `${lastUserText.slice(0, 60)}…` : lastUserText || '…') : null;
+  const sticky = useMemo(() => stickyText === null ? null
     // Painted over the rows, so a drag would pick it up in place of the row under it.
-    ? h(Box, { key: 'chat-sticky', position: 'absolute', top: 0, left: 0, width: '100%', flexDirection: 'row', backgroundColor: m.userBg ?? m.bg, selectable: false },
+    : h(Box, { key: 'chat-sticky', position: 'absolute', top: 0, left: 0, width: '100%', flexDirection: 'row', backgroundColor: m.userBg ?? m.bg, selectable: false },
         h(Text, { bold: true, dim: true, color: m.accent }, '› '),
-        h(Text, { dim: true, wrap: 'truncate' }, lastUserText.length > 60 ? `${lastUserText.slice(0, 60)}…` : lastUserText || '…'))
-    : null;
-  const scroll = {
-    ref: box, anchor: 'bottom' as const, isActive: keysActive, ...(hidden ? { display: 'none' as const } : {}), flexGrow: 1, flexShrink: 1, flexDirection: 'column' as const,
-    onScroll: (_o: number, x: ScrollMetrics) => see(x), onMetrics: see,
+        h(Text, { dim: true, wrap: 'truncate' }, stickyText)),
+  // The palette by its values.
+  [stickyText, m.userBg ?? m.bg, m.accent]);
+  // The list's callbacks are the same functions for the list's life and call the
+  // latest render's code: with its props unchanged the list is not rendered again at
+  // all (`ChatList`).
+  const latest = useRef({ see, layout: (_r: { top: number; height: number; left: number; width: number }) => {} });
+  latest.current = {
+    see,
     // Where the conversation sits on the terminal, in the coordinates a mouse key is
     // reported in — so a click can be turned into the row under it.
-    onLayout: (r: { top: number; height: number; left: number; width: number }) => {
+    layout: (r) => {
       const had = rect.current;
       if (had && had.top === r.top && had.height === r.height && had.left === r.left && had.width === r.width) return;
       rect.current = { top: r.top, height: r.height, left: r.left, width: r.width };
       tell(view?.top ?? 0, view === null);
     },
+  };
+  const onScroll = useCallback((_o: number, x: ScrollMetrics) => latest.current.see(x), []);
+  const onMetrics = useCallback((x: ScrollMetrics) => latest.current.see(x), []);
+  const onLayout = useCallback((r: { top: number; height: number; left: number; width: number }) => latest.current.layout(r), []);
+  const scroll = {
+    ref: box, anchor: 'bottom' as const, isActive: keysActive, ...(hidden ? { display: 'none' as const } : {}), flexGrow: 1, flexShrink: 1, flexDirection: 'column' as const,
+    onScroll, onMetrics, onLayout,
   };
   // Nothing said yet: the box holds the invitation instead of rows.
   if (!rows.length) {
@@ -1247,12 +1315,12 @@ function ChatMessages({ messages, rowOpts, palette: m, errorColor, onViewport, s
   // as tall as the conversation, so anchoring, the scrollbar and the metrics the pin
   // reads stay exact. Laying out every row of a long conversation on every keystroke
   // was what made typing slower the longer the chat got.
-  return h(ScrollList<ChatRow>, {
+  return h(ChatList, {
     ...scroll,
     items: rows,
     // Rows are rebuilt (and cached) per message; a row's place in the conversation is
     // what identifies it, as it did when every row was a child with a `chat-i` key.
-    keyOf: (_row: ChatRow, i: number) => `chat-${i}`,
+    keyOf: chatRowKey,
     rowHeight: 1,
     renderItem: renderRow,
   }, sticky);

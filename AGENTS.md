@@ -3157,6 +3157,25 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     selection marks — `wrapContinues`, `chrome`, a whole `frame` row — exactly as it
     carried them as a child (alpha.19 dropped them under the list: a wrapped paragraph
     copied as several lines; `copy.e2e.test.ts` catches that).
+  - **A keystroke re-renders no row.** `ScrollList` calls `renderItem` for its whole
+    window on every render, and the chat re-renders `ChatMessages` on every key, so
+    everything the list is handed stays the same object while the conversation does:
+    `items` is a `useMemo` over what the rows depend on (the palette by its values —
+    the theme object is updated in place — and the renderers table through
+    `useShallowStable`, as the chat rebuilds it on every render; `viewRevision()`, a
+    renderer's late answer; `onViewFail` through a ref); the renderer is a `useMemo`, `renderItem` a `useCallback` handing each row to
+    `ChatRowItem` (memoized on the row, its index and the renderer — the row cache's own
+    objects); the list's callbacks are stable and call the latest render's code
+    through a ref; the pinned question is a `useMemo`. The list itself is `ChatList`, a
+    `memo` of `ScrollList`, so with none of that changed it is not rendered at all, and a
+    wheel step re-renders only the rows entering the window. The clock (`RowOpts.now`,
+    the spinner, a running command's pulse) moves only while something is live — a turn
+    streaming, a view still running (the renderer's also while a row it draws is live:
+    a `liveMark` or a running command's mark); nothing else drawn reads it, and a clock
+    moving on every render would change every row. `perf.e2e.test.ts` holds it: a keystroke's
+    frame (the frame meter, `:perf`) touches as many boxes with a screenful of
+    conversation as with one row. Anything new a row is drawn with goes into those
+    dependencies, or the row keeps its old look.
   - The empty conversation is still a `<ScrollBox>`: it holds the invitation, not rows.
   - The **wheel scrolls only while the pointer is over the box**. In a test pass
     coordinates — `backend.wheel('up', 20, 8)`; the default `(0, 0)` is the app title.
