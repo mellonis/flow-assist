@@ -215,11 +215,12 @@ one folded line while it runs (`bun test src/features · 3 s`) and stays folded,
 settled, once it ends (`· ✓ 4.2 s`); the output lands in the conversation and the
 assistant sees it with your next message, without spending a turn on it. Esc stops it.
 Commands start where you started flow-assist, when that lies inside a configured root
-(`config set shell.roots '["~/src/app"]'`); otherwise the first root, with a note saying
-so. The directory is remembered
-between them, as in a terminal (`!cd pkg`; only within the roots; variables are not
-kept; `/clear` and `/new` go back to that same starting directory). A background task
-starts where its parent conversation's directory is, not at that default. The assistant can run commands too — `run_command`, in the same directory and
+(`config set shell.roots '["~/src/app"]'`); otherwise the first root, with a note
+saying so. The directory is remembered between them, as in a terminal (`!cd pkg`;
+only within the roots; variables are not kept; `/clear` and `/new` go back to that
+same starting directory). A background task starts where its parent conversation's
+directory is, not at that default.
+The assistant can run commands too — `run_command`, in the same directory and
 drawn the same live way, and only after you confirm each one (`ai.disabledTools:
 ["shell"]` turns it off); several in a row fold under one head, `Ran N commands`, that
 opens into each command's own block. A folded command that printed more than that
