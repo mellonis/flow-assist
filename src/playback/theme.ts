@@ -140,15 +140,16 @@ export const MODAL_COLOR_DEFAULTS: Record<string, Record<string, string>> = {
   // leaving only the separators and the sticky dump without a background.
   // The chat's own colours, every one overridable via config.plugins.assistant.colors:
   //   accent   — the `›` prompt, shared by the input field and the person's messages
-  //   shell    — the `!`/`!!` prompt of shell/interactive mode and the `$ ` marker on
-  //              a command's result — the same colour for all three, so a shell
-  //              command reads as one thing from the moment it is typed to the
-  //              moment its output appears
+  //   shell    — the `!`/`‼` prompt of shell/interactive mode, and a command's own
+  //              `$ `/`‼ ` marker while it still runs (pulsing) — so a shell command
+  //              reads as one thing from the moment it is typed to the moment it
+  //              starts; once it ends the marker takes `ok` or the error colour
   //   userBg   — the ground under the person's messages
   //   fieldBg  — the ground under the input field
   //   assistantAccent — the `ƒ` mark on the assistant's answers
   //   bgAccent / bgBg — the `◆` marker and ground of a background-task result
-  //   warn     — things waiting on the person (the queue); ok — finished work
+  //   warn     — things waiting on the person (the queue)
+  //   ok       — finished work, and a command's marker on exit 0
   //   idleBorder — the frame of a docked chat while the plugin has the keyboard; with
   //              it, the frame is in `accent`
   chat: { userBg: '#2b2b40', accent: 'cyan', shell: 'magentaBright', assistantAccent: 'green', fieldBg: '#1f1f2e', bgAccent: 'magenta', bgBg: '#2a2438', warn: 'yellow', ok: 'green', idleBorder: 'gray' },

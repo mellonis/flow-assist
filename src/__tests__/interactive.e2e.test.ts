@@ -93,7 +93,7 @@ test('!!command hands the terminal over, shows the cleaned recording as its view
   expect(fs.existsSync(path.dirname(seen.recordings[0]!))).toBe(false);
 
   const frame = ui.backend.lastFrame;
-  expect(frame).toMatch(/\$ \.\/greet\.sh · interactive · ✗ exit 1 · \d+\.\d s/);
+  expect(frame).toMatch(/‼ \.\/greet\.sh · interactive · ✗ exit 1 · \d+\.\d s/);
   // The host's ask is on screen as a message of the person's side — and it is the
   // host's words, drawn dim, not the person's.
   expect(frame).toContain(INTERACTIVE_ASK.slice(0, 40));
@@ -127,10 +127,10 @@ test('!!command hands the terminal over, shows the cleaned recording as its view
   expect(ui.backend.lastFrame).toContain('│ progress 100%');
   expect(ui.backend.lastFrame).toContain('│ Your name? Hello, Ruslan!');
 
-  // ↑ brings back `!!./greet.sh` — not the ask — shown in interactive mode, `!!` and
-  // `./greet.sh` with its bangs stripped.
+  // ↑ brings back `!!./greet.sh` — not the ask — shown in interactive mode, its
+  // bangs stripped and read at the matching level: the `‼ ` prompt over `./greet.sh`.
   await ui.press('up');
-  expect(ui.backend.lastFrame).toContain('!!./greet.sh');
+  expect(ui.backend.lastFrame).toContain('‼ ./greet.sh');
   ui.app.unmount();
 });
 
@@ -161,12 +161,12 @@ test('a second ! on the still-empty shell-mode field steps to interactive mode; 
   const ui = await boot(model, root, (b) => ({ detect: () => 'bsd', spawn: fakeScript(seen, b), signals: new EventEmitter() }));
   await ui.type('!'); // shell mode
   await ui.type('!echo hi'); // the leading ! here steps to interactive mode; the rest types normally
-  expect(ui.backend.lastFrame).toContain('!!echo hi');
+  expect(ui.backend.lastFrame).toContain('‼ echo hi');
   await ui.press('return');
   await settleUntil(() => ui.backend.lastFrame.includes('First.'));
   expect(ui.backend.suspensions).toBe(1);
   await ui.press('up');
-  expect(ui.backend.lastFrame).toContain('!!echo hi');
+  expect(ui.backend.lastFrame).toContain('‼ echo hi');
   await ui.press('return');
   await settleUntil(() => ui.backend.lastFrame.includes('Second.'));
   expect(ui.backend.suspensions).toBe(2);

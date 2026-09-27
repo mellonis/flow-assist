@@ -78,6 +78,34 @@ test('chat marks a background result with its own marker and ground, never as th
   handle.unmount();
 });
 
+// The gutter marker on a command block's first row: dim/pulsing while it runs, then
+// coloured for how it ended — never a code to decode, the way the tail beside it reads.
+test("a command block's gutter marker is dim while it runs, ok on exit 0, the error colour otherwise", async () => {
+  const theme = { modals: { chat: MODAL_COLOR_DEFAULTS.chat }, error: 'red' };
+  const shellMsg = (data: Record<string, unknown>, phase: string) => ({
+    role: 'shell', content: '',
+    views: [{ kind: 'console', data: { command: 'echo hi', cwd: '~', text: '', ...data }, phase, startedAt: 0 }],
+  });
+  const markerFg = async (msg: unknown, now?: number) => {
+    const backend = new TestBackend(80, 24);
+    const handle = await render(h(renderChatModal, { ...baseChat, theme, messages: [msg], ...(now === undefined ? {} : { now }) }), backend);
+    const row = backend.lastFrame.split('\n').find((r) => r.includes('echo hi'))!;
+    const fg = backend.lastBuffer!.get(row.indexOf('echo hi') - 2, backend.lastFrame.split('\n').indexOf(row)).style.fg;
+    handle.unmount();
+    return fg;
+  };
+  // Live: neither the ok nor the error colour — a pulse dims it, but never colours
+  // it for an outcome the run has not reached yet.
+  const live = await markerFg(shellMsg({}, 'live'), 0);
+  expect(live).not.toBe('green');
+  expect(live).not.toBe('red');
+  // Exit 0: ok (green).
+  expect(await markerFg(shellMsg({ exitCode: 0, ms: 10, status: 'exit 0' }, 'done'))).toBe('green');
+  // A non-zero exit, and a run the tool call itself failed on: the error colour.
+  expect(await markerFg(shellMsg({ exitCode: 1, ms: 10, status: 'exit 1' }, 'done'))).toBe('red');
+  expect(await markerFg(shellMsg({}, 'failed'))).toBe('red');
+});
+
 test('a window paints its own ink on its own ground, not the terminal foreground', async () => {
   // On a light terminal theme the default foreground is black: text with no colour of
   // its own drew black on the black window. The window's `text` reaches it now.

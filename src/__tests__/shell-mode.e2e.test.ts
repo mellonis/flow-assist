@@ -58,9 +58,9 @@ test('`!` on an empty field enters shell mode — `! ` in the shell colour, no `
   await settle(6);
   expect(ui.backend.lastFrame).toContain('│ hi');
   expect(model.requests).toHaveLength(0); // no turn spent — same as the legacy `!command`
-  // The result's `$ ` gutter marker (the live block's first row) shares the
-  // shell-mode prompt's colour — a command reads as one thing end to end.
-  expect(styleAt(ui.backend, '$ echo hi').fg).toBe('magentaBright');
+  // The result's `$ ` gutter marker shares the shell-mode prompt's colour only while
+  // it runs; once it exits 0 it turns the `ok` colour.
+  expect(styleAt(ui.backend, '$ echo hi').fg).toBe('green');
 
   // Back to the normal prompt: one command per `!`.
   expect(ui.backend.lastFrame).toContain('› ');
@@ -166,19 +166,19 @@ test('a shell-mode command refused while an answer is running stays refused, not
   ui.app.unmount();
 });
 
-test('`!` again on an empty shell-mode field steps to interactive mode — the prompt reads `!!`, and Backspace steps back down one level at a time', async () => {
+test('`!` again on an empty shell-mode field steps to interactive mode — the prompt reads `‼`, and Backspace steps back down one level at a time', async () => {
   const root = rootDir();
   const ui = await boot(new ScriptedModel(), root);
 
   await ui.type('!');
   expect(ui.backend.lastFrame).toContain('! ');
   await ui.type('!'); // field still empty — the second bang steps up, not typed
-  expect(ui.backend.lastFrame).toContain('!!');
-  expect(styleAt(ui.backend, '!!').fg).toBe('magentaBright');
+  expect(ui.backend.lastFrame).toContain('‼');
+  expect(styleAt(ui.backend, '‼').fg).toBe('magentaBright');
 
   await ui.press('backspace'); // level 2 → 1, nothing to delete
   expect(ui.backend.lastFrame).toContain('! ');
-  expect(ui.backend.lastFrame).not.toContain('!!');
+  expect(ui.backend.lastFrame).not.toContain('‼');
   await ui.press('backspace'); // level 1 → 0
   expect(ui.backend.lastFrame).toContain('› ');
   ui.app.unmount();
@@ -190,11 +190,11 @@ test('Esc on an empty field steps the bang level back down one at a time, the sa
 
   await ui.type('!');
   await ui.type('!'); // level 2
-  expect(ui.backend.lastFrame).toContain('!!');
+  expect(ui.backend.lastFrame).toContain('‼');
 
   await ui.press('escape'); // level 2 → 1, not armed
   expect(ui.backend.lastFrame).toContain('! ');
-  expect(ui.backend.lastFrame).not.toContain('!!');
+  expect(ui.backend.lastFrame).not.toContain('‼');
   expect(ui.backend.lastFrame).not.toContain('Esc again to exit');
 
   await ui.press('escape'); // level 1 → 0, still not armed

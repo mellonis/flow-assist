@@ -9,6 +9,10 @@ What each version of flow-assist brought, newest first. The version is the one i
   is kept whole, up to 16 KiB rather than the old 300 characters: a folded row still
   cuts it (reserving room for the duration and the outcome first), but the opened
   block never does, wrapping it across its own rows instead.
+- **Interactive mode (`!!`) draws as one glyph, and a command's marker says how it
+  ran.** `‼` (U+203C) replaces the two-character `!!` in the prompt and on a running
+  interactive command's own gutter marker. Every command's marker is dim while it
+  runs, then turns green on exit 0 or the error colour otherwise.
 - **Every session keeps a journal of everything that happened in it.** Beside the
   saved session, `sessions/<id>.log.jsonl` records each row you saw; each tool call
   when it starts, the y/n you answered, and when it ends, with its whole arguments and

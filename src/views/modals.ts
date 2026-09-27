@@ -161,6 +161,13 @@ interface ChatRow {
   first?: boolean;
   // A view that is not a command draws no `$`.
   plainGutter?: boolean;
+  // A console block's own state, read off its view record — resolved here, once,
+  // rather than in the renderer, so the gutter marker never has to know a view's
+  // shape: `live` while it runs (dim, pulsing), `ok` for exit 0 (green), `error` for
+  // anything else it ended with (the error colour) — a stopped or timed-out run
+  // included, which keeps its own wording in the tail text beside it. `interactive`
+  // draws `‼ ` in place of `$ `. Absent for a view that is not a console block.
+  consoleMark?: { state: 'live' | 'ok' | 'error'; interactive?: boolean };
   // The quiet line under an answer: how long it took, which tools ran, what it cost.
   meta?: boolean;
   runs?: ToolRun[];
@@ -684,10 +691,22 @@ function buildMessageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): Ch
           width: inner, folded: !open, live: v.phase === 'live', failed: v.phase === 'failed',
           elapsedMs: Math.max(0, o.now - v.startedAt), lines: o.folds.open ? VIEW_CAPS.lines : viewLines, moreKey: detailsKey,
         }, o.palette, o.onViewFail);
+        const isConsole = isConsoleKind(v.kind);
+        // The gutter marker's own state, read straight off the record — a discarded
+        // view (kept only so its message is not silently missing a block) draws the
+        // ordinary `$ `, as it always has.
+        const data = v.data as { exitCode?: number | null; interactive?: boolean } | undefined;
+        const consoleMark: ChatRow['consoleMark'] = isConsole && v.phase !== 'discarded'
+          ? {
+              state: v.phase === 'live' ? 'live' : v.phase === 'failed' ? 'error' : data?.exitCode === 0 ? 'ok' : 'error',
+              interactive: !!data?.interactive,
+            }
+          : undefined;
         framed.forEach((line, li) => rows.push({
           role, spans: line.spans, first: vi === 0 && li === 0, fold: id,
           ...(line.chrome ? { chrome: line.chrome } : {}),
-          ...(isConsoleKind(v.kind) ? {} : { plainGutter: true }),
+          ...(isConsole ? {} : { plainGutter: true }),
+          ...(vi === 0 && li === 0 && consoleMark ? { consoleMark } : {}),
         }));
       });
       if (views.length && !last) rows.push({ gap: true });
@@ -861,13 +880,24 @@ function chatRowRenderer({ palette: m, errorColor, wrap, now, detailsKey }: {
   const gutter = (row: ChatRow) => h(Box, { selectable: false, flexShrink: 0 }, marker(row));
   const marker = (row: ChatRow) => {
     if (row.first && row.role === 'user') return row.quiet ? h(Text, { dim: true, color: m.accent }, '› ') : h(Text, { bold: true, color: m.accent }, '› ');
-    // Same colour as the shell-mode prompt below — a command reads as one thing
-    // from the `! ` it was typed with to the `$ ` its result appears under. A
-    // `view` is a command the MODEL ran and the person confirmed: the same `$ ` in
-    // the same colour, on no ground of its own, so whose command it was is still
-    // told apart at a glance. A view that is not a command (`plainGutter`, e.g. a
-    // plugin's own block) draws no `$` — it falls through to the blank gutter below.
-    if (row.first && (row.role === 'shell' || row.role === 'view') && !row.plainGutter) return h(Text, { bold: true, color: m.shell }, '$ ');
+    // Same colour as the shell-mode prompt below while it runs — a command reads as
+    // one thing from the `! `/`‼ ` it was typed with to the moment its own marker
+    // takes over. A `view` is a command the MODEL ran and the person confirmed: the
+    // same marker, on no ground of its own, so whose command it was is still told
+    // apart at a glance. A view that is not a command (`plainGutter`, e.g. a plugin's
+    // own block) draws no marker — it falls through to the blank gutter below.
+    if (row.first && (row.role === 'shell' || row.role === 'view') && !row.plainGutter) {
+      const cm = row.consoleMark;
+      const glyph = cm?.interactive ? '‼ ' : '$ ';
+      if (cm?.state === 'ok') return h(Text, { bold: true, color: m.ok }, glyph);
+      if (cm?.state === 'error') return h(Text, { bold: true, color: errorColor }, glyph);
+      // Live (or a shape this host does not classify, e.g. a discarded view read
+      // back from an older session): the shell colour, pulsing slowly while it runs
+      // — the same clock the elapsed-seconds tail already redraws by, so no timer of
+      // its own is needed.
+      const pulse = cm?.state === 'live' && Math.floor(now / 600) % 2 === 0;
+      return h(Text, { bold: !pulse, dim: pulse, color: m.shell }, glyph);
+    }
     if (row.first && row.role === 'bg') return h(Text, { bold: true, color: m.bgAccent }, '◆ ');
     // A note is the HOST speaking to the person (what /memory found, what /clear kept).
     // It is not part of the conversation and is never sent to the model.
@@ -1321,10 +1351,10 @@ export function renderChatModal({
   stoppable?: boolean;
   // The field's bang level (assistant.ts owns the state machine): 0 normal, 1 shell
   // mode (prompt `! `, Enter runs the text as a command), 2 interactive mode (prompt
-  // `!!`, Enter hands the terminal over) — both non-zero levels in the shell colour.
+  // `‼ `, Enter hands the terminal over) — both non-zero levels in the shell colour.
   bangLevel?: 0 | 1 | 2;
   // The shell's directory, `~`-shortened, as the hint row starts in shell mode — so
-  // where `!` / `!!` will run is seen while the command is typed, not only in the
+  // where `!` / `‼` will run is seen while the command is typed, not only in the
   // block after it ran. Drawn at a non-zero bang level only.
   shellCwd?: string;
   // How much of a turn runs without a y/n (src/assistant/auto.ts). Drawn beside the
@@ -1598,12 +1628,13 @@ export function renderChatModal({
               visible.map((row, i) => {
                 // The prompt marks the field's first line; it dims while an answer is
                 // coming, when ⏎ queues instead of sending. A non-zero bang level swaps
-                // both the glyph and the colour — `! ` or `!!` in m.shell, the same
+                // both the glyph and the colour — `! ` or `‼ ` in m.shell, the same
                 // colour at both levels — so the field itself says what Enter will do,
                 // the way Claude Code's bash mode does. Every glyph is exactly GUTTER
-                // (2) columns wide (`!!` has no trailing space) so a wrapped command's
-                // continuation rows still line up under the first.
-                const bangGlyph = bangLevel === 2 ? '!!' : bangLevel === 1 ? '! ' : '› ';
+                // (2) columns wide: `‼` (U+203C) is one cell (`stringWidth`), so it
+                // takes a trailing space of its own, same as `! `, to line up a
+                // wrapped command's continuation rows under the first.
+                const bangGlyph = bangLevel === 2 ? '‼ ' : bangLevel === 1 ? '! ' : '› ';
                 const prompt = h(Text, { bold: !streaming, dim: streaming, color: bangLevel ? m.shell : m.accent }, visible[i] === fieldRows[0] ? bangGlyph : ' '.repeat(GUTTER));
                 // A blank line is a real '' — flowtty ≥ 1.0.0-alpha.5 gives an empty Text
                 // its row; a collapsed one instead is how "two newlines" would vanish.

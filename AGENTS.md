@@ -688,8 +688,13 @@ there is no `/fullscreen`.
   **A confirmed call SHOWS what it printed**, as the person's own `!command` does: the
   tool opens a live view (`ctx.liveView`, see "A tool describes what it shows, a
   renderer draws it, the host frames it") and fills it as the command prints, and the
-  chat draws the `$ …` block. A declined call leaves none — nothing ran; a failed one
-  shows its output and its exit code.
+  chat draws the `$ …`/`‼ …` block (the second when it is marked `interactive`; see
+  the bang levels below). Its gutter marker is dim while the command runs — a slow
+  pulse off the same clock the elapsed-seconds tail already redraws by, no timer of
+  its own — then `ok` on exit 0 or the error colour otherwise (`ChatRow.consoleMark`,
+  `src/views/modals.ts`; a stopped or timed-out run keeps its own wording in the tail
+  beside it, only the marker's colour changes). A declined call leaves none — nothing
+  ran; a failed one shows its output and its exit code.
   **The command itself is kept WHOLE**, up to `VIEW_CAPS.command` (16 KiB — it is text
   someone typed, never a display cap): a folded row that has no room for it cuts it
   with `cutStep`, reserving space for the outcome first so the duration and how it
@@ -2240,13 +2245,16 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   **bang LEVEL** — 0 normal, 1 shell mode, 2 interactive mode (`!!command` below) —
   and `!` typed into an EMPTY field steps it UP one level instead of being inserted
   (like Claude Code's bash mode, taken one step further): the prompt glyph reads `! `
-  at level 1 and `!!` at level 2 in place of `› `, both in `theme.modals.chat.shell`
-  (a colour of its own, distinct from `accent` — pick it from
-  `MODAL_COLOR_DEFAULTS.chat` in `src/playback/theme.ts`, checked against flowtty's
-  `NAMED_COLORS` by the theme test; `!!` reuses the same colour rather than getting a
-  second one — one shell identity at two depths). Both glyphs are exactly `GUTTER`
-  (2) columns, `!!` with no trailing space, so a wrapped command's continuation rows
-  still line up under the first. Enter runs the field text as it reads — level 1 as
+  at level 1 and `‼ ` (U+203C, one glyph rather than two `!` characters) at level 2 in
+  place of `› `, both in `theme.modals.chat.shell` (a colour of its own, distinct from
+  `accent` — pick it from `MODAL_COLOR_DEFAULTS.chat` in `src/playback/theme.ts`,
+  checked against flowtty's `NAMED_COLORS` by the theme test; `‼` reuses the same
+  colour rather than getting a second one — one shell identity at two depths, and the
+  same glyph draws a running interactive command's own gutter marker in the chat's
+  rows). Both glyphs are exactly `GUTTER` (2) columns: `‼` is one cell wide
+  (`stringWidth`), so it takes a trailing space of its own, same as `! `, so a wrapped
+  command's continuation rows still line up under the first. Enter runs the field text
+  as it reads — level 1 as
   the plain command, level 2 handed to the terminal (below) — and the level drops
   back to 0 right after, whatever it was: one command per bang, even on an empty
   submit (leaving a level engaged would silently redirect the next thing typed into
