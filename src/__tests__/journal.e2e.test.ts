@@ -233,7 +233,7 @@ test('/export of a session with no journal renders it from its saved state and s
   empty.app.unmount();
 });
 
-test('a !command is in the journal from the moment it starts; its end adds the exit, the time and the output', async () => {
+test('a !command is in the journal from the moment it starts; its output and its end — the exit and the time — follow', async () => {
   const dir = dirOf();
   const ui = await boot(dir, new ScriptedModel());
   await ui.type('!');
@@ -247,7 +247,7 @@ test('a !command is in the journal from the moment it starts; its end adds the e
   await settleUntil(() => journalOf(dir).some((e) => e.t === 'shell-end'), 600);
   const end = journalOf(dir).find((e) => e.t === 'shell-end')!;
   expect(end).toMatchObject({ command: 'sleep 1; echo готово', status: expect.stringContaining('exit 0') });
-  expect(String(end.output)).toContain('готово');
+  expect(journalOf(dir).filter((e) => e.t === 'shell-out').map((e) => e.text).join('')).toContain('готово');
   expect(typeof end.ms).toBe('number');
   ui.app.unmount();
 });
@@ -290,23 +290,47 @@ test('a framed result: the journal and the export keep the data behind the frame
   ui.app.unmount();
 });
 
-test('a !command whose output was longer than the host keeps: the journal says how much was cut, and so does the export', async () => {
+test('a !command\'s whole output streams into the journal as it arrives — more than the host keeps — and the export stitches it back', async () => {
   const dir = dirOf();
   const root = rootOf();
   const ui = await bootApp(new ScriptedModel(), 100, 28, undefined, { sessions: { dir }, shell: { roots: [root], maxChars: 100 } });
   await ui.press('F');
   await ui.type('!');
-  await ui.type('seq 1 300');
+  await ui.type('seq 1 3000');
   await ui.press('return');
   await settleUntil(() => journals(dir).length > 0 && journalOf(dir).some((e) => e.t === 'shell-end'), 400);
-  const end = journalOf(dir).find((e) => e.t === 'shell-end')!;
-  const whole = Array.from({ length: 300 }, (_, i) => `${i + 1}\n`).join('');
-  expect(Number(end.cut)).toBeGreaterThan(0);
-  expect(end.total).toBe(whole.length);
-  expect(String(end.output).length + Number(end.cut)).toBe(whole.length);
+  const events = journalOf(dir);
+  const whole = Array.from({ length: 3000 }, (_, i) => `${i + 1}\n`).join('');
+  const out = events.filter((e) => e.t === 'shell-out');
+  expect(out.length).toBeGreaterThan(0);
+  expect(out.map((e) => e.text).join('')).toBe(whole);
+  const end = events.find((e) => e.t === 'shell-end')!;
+  expect(end).toMatchObject({ command: 'seq 1 3000', status: expect.stringContaining('exit 0') });
+  expect(end.output).toBeUndefined();
+  expect(typeof end.ms).toBe('number');
   await ask(ui, '/export out.md', 6);
   const md = fs.readFileSync(path.join(root, 'out.md'), 'utf8');
-  expect(md).toContain(`${end.cut} characters before this were not kept (shell.maxChars)`);
+  expect(md).toContain(whole.trimEnd());
+  ui.app.unmount();
+});
+
+test('no tool can write to the journal: a plugin tool\'s ctx has none', async () => {
+  const dir = dirOf();
+  const seen: string[][] = [];
+  const spy = (make: Make) => make('spy', {
+    tools: [{
+      id: 'spy',
+      tools: [{ type: 'function', function: { name: 'look', description: 'Looks at its ctx.', parameters: { type: 'object', properties: {} } } }],
+      exec: async (_name: string, _args: unknown, ctx: Record<string, unknown>) => { seen.push(Object.keys(ctx)); return 'ok'; },
+    }],
+  });
+  const model = new ScriptedModel();
+  model.script([{ tool: 'look', args: {} }], [{ text: 'ок' }]);
+  const ui = await bootApp(model, 100, 28, (make) => [spy(make)], { sessions: { dir }, shell: { roots: [rootOf()] } });
+  await ui.press('F');
+  await ask(ui, 'посмотри');
+  expect(seen).toHaveLength(1);
+  expect(seen[0]!.some((k) => /journal/i.test(k))).toBe(false);
   ui.app.unmount();
 });
 

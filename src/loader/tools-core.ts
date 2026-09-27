@@ -28,9 +28,6 @@ import { TOOL_RESULT_MAX_CHARS_CEILING, TOOL_RESULT_MAX_CHARS_DEFAULT } from '..
 import { IMAGE_DEFAULTS, type ImageRef } from '../assistant/images.js';
 import { RECALL_DEFAULTS, findItem, recallLimits, recallResult, type RecallSource } from '../assistant/recall.js';
 import { ANTHROPIC_BASE_URL, DEFAULT_MAX_TOKENS, llmOpts } from '../assistant/llm-endpoint.js';
-import { callEndEvent, callStartEvent, type JournalEvent } from '../assistant/journal.js';
-import type { ToolRun } from '../assistant/agent.js';
-import type { ViewRenderers } from '../assistant/views.js';
 
 // Runtime context handed to core tools by the caller: the resolved memory
 // file (absent → resolved from config), the config.local.json path, and the active
@@ -700,20 +697,6 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
         // Count the task as in-flight from the moment it is ARMED (its delay starts),
         // so the chat's «N in background» indicator reflects a scheduled-but-not-yet-firing
         // task too — and re-render NOW so the count appears during the wait.
-        // Its own calls go into the journal of the session that started it (`ctx.journal`,
-        // the chat's; none for the one-shot prompt), each tagged with the task's label —
-        // started, the y/n it is refused (it declines every write), ended.
-        const journal = (ctx as { journal?: (ev: JournalEvent) => void }).journal;
-        const renderers = ((ctx as { viewRenderers?: ViewRenderers }).viewRenderers ?? {}) as ViewRenderers;
-        const tag = { task: label };
-        const journaled = journal ? {
-          onToolStart: (call: { id?: string; name: string; args: Record<string, unknown>; confirm: boolean }) => journal(callStartEvent(call, tag)),
-          onToolRun: (run: ToolRun) => journal(callEndEvent(run, renderers, tag)),
-        } : {};
-        const decline = (name: string, _args: string, info?: { id?: string }) => {
-          journal?.({ t: 'confirm', ...(info?.id ? { id: info.id } : {}), name, answer: 'no', by: 'background', ...tag });
-          return false;
-        };
         bgActive++;
         (ctx as { notify?: () => void }).notify?.();
         setTimeout(() => {
@@ -724,7 +707,9 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
               // as an image.
               const res = await chatLLM(
                 [{ role: 'system', content: prompt }, { role: 'user', content: task }],
-                { extraTools: extraTools as ToolDef[], toolCtx, maxRounds: 12, confirmWrite: decline, ...journaled,
+                // `taskLabel` names the task to the host, which journals the run's calls
+                // under it; the tool itself writes nothing there.
+                { extraTools: extraTools as ToolDef[], toolCtx, maxRounds: 12, confirmWrite: () => false, taskLabel: label,
                   systemPrompt: instructionsPrompt(bgConfig, bgShell, prompt),
                   ...llmOpts(ai) },
               );

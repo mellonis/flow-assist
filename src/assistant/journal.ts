@@ -24,9 +24,10 @@
 //            A call made by a background task carries `task`, the task's label.
 //   shell    a `!command` the person ran, written when it starts: `command`, `cwd`
 //            (from a state file: with its `output` too)
-//   shell-end  how it ended: `output`, `status` (the exit), `ms`; the host keeps only the
-//            last `shell.maxChars` of a command's output, so `cut` says how many
-//            characters before it were dropped and `total` how many there were
+//   shell-out  its output as it arrives, in chunks (`text`), whole — more than the
+//            screen and the model keep — up to OUTPUT_CAP per command; past it, one
+//            last `shell-out` with `capped` and the `total` bytes the command printed
+//   shell-end  how it ended: `status` (the exit), `ms`
 //   compact  a `/compact`: the `summary` the model was given from then on
 //   end      how a turn ended: its duration, what it cost, stopped or failed, and the
 //            text of a round cut off
@@ -112,6 +113,55 @@ export function viewText(rec: ViewRecord, renderers: ViewRenderers): string {
 // A view as the journal keeps it: the record and what it drew.
 export function viewEntry(rec: ViewRecord, renderers: ViewRenderers): Record<string, unknown> {
   return { kind: rec.kind, phase: rec.phase, data: rec.data, text: viewText(rec, renderers) };
+}
+
+// A command's output as it arrives, into the journal: held until a chunk fills
+// (`chunkBytes`) or a moment has passed (`schedule`, 200 ms), so a command that prints
+// line by line costs a few appends, not one per line — and a crash loses at most that
+// moment. At most `capBytes` of it is written; `end()` flushes what is held and, when
+// the cap was hit, writes the note with the total.
+export const OUTPUT_CAP = 8 * 1024 * 1024;
+export const OUTPUT_CHUNK = 64 * 1024;
+export function outputJournal(
+  write: (ev: JournalEvent) => void,
+  opts: { capBytes?: number; chunkBytes?: number; schedule?: (fn: () => void) => void } = {},
+): { push: (chunk: string) => void; end: () => void } {
+  const cap = opts.capBytes ?? OUTPUT_CAP;
+  const size = opts.chunkBytes ?? OUTPUT_CHUNK;
+  const schedule = opts.schedule ?? ((fn: () => void) => { setTimeout(fn, 200); });
+  let held = '';
+  let heldBytes = 0;
+  let kept = 0;
+  let total = 0;
+  let armed = false;
+  const flush = () => {
+    armed = false;
+    if (!held) return;
+    write({ t: 'shell-out', text: held });
+    held = ''; heldBytes = 0;
+  };
+  return {
+    push: (chunk: string) => {
+      const n = bytes(chunk);
+      total += n;
+      if (kept >= cap) return;
+      let take = chunk;
+      if (kept + n > cap) {
+        // Cut at the cap, never inside a character.
+        let room = cap - kept;
+        take = '';
+        for (const ch of chunk) { const b = bytes(ch); if (b > room) break; take += ch; room -= b; }
+      }
+      const b = bytes(take);
+      kept += b; held += take; heldBytes += b;
+      if (heldBytes >= size || kept >= cap) flush();
+      else if (!armed) { armed = true; schedule(flush); }
+    },
+    end: () => {
+      flush();
+      if (total > kept) write({ t: 'shell-out', capped: true, total });
+    },
+  };
 }
 
 // A call's two events, from what the agent loop reports (./agent.ts `onToolStart`,
@@ -205,6 +255,15 @@ export function exportMarkdown(events: JournalEvent[], opts: { title: string; id
   // start never ended is drawn as not finished. Keyed by call id and name — a provider
   // may reuse an id in a later round, after the first call with it has ended.
   const open = new Map<string, { slot: number; start: JournalEvent; confirm?: JournalEvent }>();
+  // A command's output, stitched back from its chunks; drawn when the command ends (or
+  // the next command begins, for one that never did).
+  let output = '';
+  let outputNote = '';
+  const flushOutput = () => {
+    if (output) out.push(block(output, 'console'), '');
+    if (outputNote) out.push(outputNote, '');
+    output = ''; outputNote = '';
+  };
   const keyOf = (ev: JournalEvent) => `${String(ev.task ?? '')}\u0000${String(ev.id ?? '')}\u0000${String(ev.name ?? '')}`;
   for (const ev of events) {
     const at = when(ev.at);
@@ -232,12 +291,18 @@ export function exportMarkdown(events: JournalEvent[], opts: { title: string; id
         break;
       }
       case 'shell':
+        flushOutput();
         out.push(`**$ ${String(ev.command ?? '')}**${at}`, '');
+        // A command from a state file carries the output that file kept.
         if (typeof ev.output === 'string') out.push(block(ev.output, 'console'), '');
         break;
+      case 'shell-out':
+        if (typeof ev.text === 'string') output += ev.text;
+        if (ev.capped) outputNote = `*the journal keeps the first ${formatBytes(OUTPUT_CAP)} of this output — ${String(ev.total)} bytes in all*`;
+        break;
       case 'shell-end':
-        if (typeof ev.cut === 'number' && ev.cut > 0) out.push(`*${ev.cut} characters before this were not kept (shell.maxChars)${typeof ev.total === 'number' ? ` — ${ev.total} in all` : ''}*`, '');
-        out.push(block(String(ev.output ?? ''), 'console'), '', `*${String(ev.status ?? 'ended')}${typeof ev.ms === 'number' ? ` · ${(ev.ms / 1000).toFixed(1)} s` : ''}*`, '');
+        flushOutput();
+        out.push(`*${String(ev.status ?? 'ended')}${typeof ev.ms === 'number' ? ` · ${(ev.ms / 1000).toFixed(1)} s` : ''}*`, '');
         break;
       case 'compact': out.push('---', '', `**Compacted**${at} — from here on the model was given this summary instead of the conversation above:`, '', quoted(String(ev.summary ?? '')), '', '---', ''); break;
       case 'end': {
@@ -249,6 +314,7 @@ export function exportMarkdown(events: JournalEvent[], opts: { title: string; id
       default: break;
     }
   }
+  flushOutput();
   for (const o of open.values()) out[o.slot] = callBlock(o.start, o.confirm);
   return `${out.join('\n').trimEnd()}\n`;
 }

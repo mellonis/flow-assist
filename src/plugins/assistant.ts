@@ -31,7 +31,7 @@ import {
   makeLockToken, newSessionId, pruneSessions, releaseLock, removeSession, renameSession, saveSession, sessionFingerprint,
   sessionFingerprintsEqual, sessionRows, sessionTitle, sessionWhen, sessionsDir, sweepJournals, type Session, type SessionFingerprint,
 } from '../assistant/sessions.js';
-import { appendJournal, callEndEvent, callStartEvent, exportMarkdown, readJournal, rowOf, type JournalEvent } from '../assistant/journal.js';
+import { appendJournal, callEndEvent, callStartEvent, exportMarkdown, outputJournal, readJournal, rowOf, type JournalEvent } from '../assistant/journal.js';
 import { pickerKey, pickerReload, pickerStart, type PickerAction, type PickerState } from '../assistant/session-picker.js';
 import type { ChatMessage, TokenUsage, ToolRun } from '../assistant/agent.js';
 import type { ChangeView } from '../assistant/diff.js';
@@ -878,6 +878,29 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             journalTo(id, stamped);
             return id;
           };
+          // The host's LLM service as a tool is handed it: the nested run's calls, their
+          // start, their y/n and their end, go into the journal of `from`'s session.
+          const journaledChatLLM = (from: string) => (messages: unknown[], opts: Record<string, any> = {}) => {
+            const chatLLM = (host.services as Record<string, any>).chatLLM as (m: unknown[], o: Record<string, unknown>) => Promise<unknown>;
+            const tag = { task: typeof opts.taskLabel === 'string' && opts.taskLabel ? opts.taskLabel : 'background' };
+            const { taskLabel: _label, ...rest } = opts;
+            return chatLLM(messages, {
+              ...rest,
+              onToolStart: (call: { id?: string; name: string; args: Record<string, unknown>; confirm: boolean }) => {
+                journalTo(from, callStartEvent(call, tag));
+                rest.onToolStart?.(call);
+              },
+              onToolRun: (run: ToolRun) => {
+                journalTo(from, callEndEvent(run, viewRenderers, tag));
+                rest.onToolRun?.(run);
+              },
+              confirmWrite: async (name: string, args: string, info?: { id?: string }) => {
+                const ok = typeof rest.confirmWrite === 'function' ? !!(await rest.confirmWrite(name, args, info)) : false;
+                journalTo(from, { t: 'confirm', ...(info?.id ? { id: info.id } : {}), name, answer: ok ? 'yes' : 'no', by: 'background', ...tag });
+                return ok;
+              },
+            });
+          };
           // A row the host says to the person: drawn and journaled.
           const pushNote = (content: string) => {
             journal({ t: 'row', role: 'note', text: content });
@@ -1409,9 +1432,6 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                     onRecalled: (id: string) => { recallRef.current.recalled.add(id); },
                   } satisfies RecallSource,
                   memoryFile: memoryFilePath(host.config),
-                  // Where a background task this turn starts journals its own calls: the
-                  // session the turn runs in (following a fork).
-                  journal: (ev: JournalEvent) => journalTo(journalId, ev),
                   // The plugin's OWN host-issued token. The CALLER never supplies a
                   // name here — a raw plugin-name string is ignored by the memory
                   // tool (it resolves `plugin` scope only through a token the host
@@ -1431,6 +1451,11 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   // silently handed tools a ctx with no chatLLM, config, showMessage or
                   // pushLog — `background` answered "no LLM service" and nothing ran.
                   ...allServices(host.services),
+                  // A run a tool starts through the host's LLM service — the `background`
+                  // tool's — has its calls journaled by the host, in this turn's session
+                  // (following a fork), tagged with the task's label (`task`). No tool is
+                  // handed a way to write to the journal itself.
+                  chatLLM: journaledChatLLM(journalId),
                 },
                 // The y/n pause on a writing op: agentChat calls confirmWrite for tools
                 // with a write-flag, we set pendingRef + pendingAsk and wait for the
@@ -1821,11 +1846,15 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // In the journal from the moment it starts — a crash mid-command still leaves
             // what ran; its end, when it comes, goes to the same session.
             const journalId = journal({ t: 'shell', command: cmd, cwd: tildePath(cwd), ...(interactive ? { interactive: true } : {}) }, { person: true });
+            // Its output, whole, as it arrives — the screen and the model keep only its
+            // tail; the journal keeps up to OUTPUT_CAP of it.
+            const outJournal = outputJournal((ev) => journalTo(journalId, ev));
             try {
               liveSeen.current.add(callId);
               setMessages((cur) => [...cur, { role: 'shell', content: '', command: cmd, views: [{ ...liveRec(capConsoleData({ command: cmd, cwd: tildePath(cwd), text: '', showCwd: true, interactive })), turn: turnRef.current }] }]);
               let raw = '';
               const onOutput = (chunk: string) => {
+                outJournal.push(chunk);
                 raw += chunk;
                 if (raw.length > maxChars * 2) raw = raw.slice(-maxChars);
                 offerLive(liveRec(capConsoleData({ command: cmd, cwd: tildePath(cwd), text: raw, showCwd: true })), epoch);
@@ -1848,7 +1877,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               if (r.stopped && stopKeyRef.current) r.stoppedBy = stopKeyRef.current;
               // Its end, whatever happened to the conversation meanwhile — it ran there.
               // `output` is what the host holds: the last `shell.maxChars` of it.
-              journalTo(journalId, { t: 'shell-end', command: cmd, output: r.output, status: shellOutcome(r, timeoutMs), ms: r.ms, ...(r.cut ? { cut: r.cut, total: r.cut + r.output.length } : {}) });
+              // An interactive run has no stream: its recording is what there is.
+              if (interactive) outJournal.push(r.output);
+              outJournal.end();
+              journalTo(journalId, { t: 'shell-end', command: cmd, status: shellOutcome(r, timeoutMs), ms: r.ms });
               const move = nextCwd(host.config as Record<string, unknown>, cwd, r.pwd);
               const { display, forModel } = formatShell(cmd, r, cwd, timeoutMs, { after: move.cwd, note: move.note, ...(interactive ? { interactive: { recorded } } : {}) });
               // Everything from here on is display/model-facing state for THIS
@@ -1892,7 +1924,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             } catch (e) {
               stopped = true; // a command that could not run keeps the queue, as a failed turn does
               setError(`!: ${(e as Error).message}`);
-              journalTo(journalId, { t: 'shell-end', command: cmd, output: '', status: `could not run: ${(e as Error).message}`, ms: Date.now() - startedAt });
+              outJournal.end();
+              journalTo(journalId, { t: 'shell-end', command: cmd, status: `could not run: ${(e as Error).message}`, ms: Date.now() - startedAt });
               // The block stops ticking rather than waiting forever for a completion
               // that is never coming — marked failed in place, keeping whatever it had
               // already shown (the way a tool's own thrown view does, agent.ts).

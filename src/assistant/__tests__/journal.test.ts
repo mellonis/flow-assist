@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { JOURNAL_LINE_MAX, appendJournal, exportMarkdown, journalLine, readJournal, rowOf, viewText } from '../journal.ts';
+import { JOURNAL_LINE_MAX, appendJournal, exportMarkdown, outputJournal, journalLine, readJournal, rowOf, viewText } from '../journal.ts';
 import { renderConsole } from '../console-view.ts';
 import {
   JOURNAL_DAYS, KEEP_MESSAGES, SESSION_VERSION, acquireLock, loadSession, deleteSession, journalPath, makeLockToken, newSessionId, pruneSessions, removeSession,
@@ -127,7 +127,8 @@ test('the export is readable markdown: the conversation, each call folded with i
     { t: 'end', ms: 3000, at: '2026-09-27T10:00:04.000Z' },
     { t: 'compact', summary: 'Прочитан a.md.', note: '── compacted ──', at: '2026-09-27T10:05:00.000Z' },
     { t: 'shell', command: 'ls', cwd: '~', at: '2026-09-27T10:06:00.000Z' },
-    { t: 'shell-end', command: 'ls', output: 'a.md\n', status: 'exit 0', ms: 5, at: '2026-09-27T10:06:01.000Z' },
+    { t: 'shell-out', text: 'a.md\n', at: '2026-09-27T10:06:00.500Z' },
+    { t: 'shell-end', command: 'ls', status: 'exit 0', ms: 5, at: '2026-09-27T10:06:01.000Z' },
     { t: 'row', role: 'note', text: 'Project instructions: none', at: '2026-09-27T10:07:00.000Z' },
     { t: 'end', ms: 10, stopped: 'Esc', cut: 'Я начал', at: '2026-09-27T10:08:00.000Z' },
   ], { title: 'Чтение', id: '2026-09-27T10-00-00-abcd' });
@@ -161,7 +162,10 @@ test('the export pairs a call\'s start with its end, says when one never ended, 
     { t: 'confirm', id: 'c2', name: 'run_command', answer: 'yes', by: 'person' },
     { t: 'call-start', id: 'c3', name: 'datetime', args: {}, task: 'часы' },
     { t: 'shell', command: 'seq 1 9' },
-    { t: 'shell-end', command: 'seq 1 9', output: '9\n', status: 'exit 0', cut: 16, total: 18 },
+    { t: 'shell-out', text: '1\n2\n' },
+    { t: 'shell-out', text: '3\n' },
+    { t: 'shell-out', capped: true, total: 18 },
+    { t: 'shell-end', command: 'seq 1 9', status: 'exit 0', ms: 3 },
   ], { title: 't', id: 'x' });
   expect(md.match(/<details>/g)).toHaveLength(3);
   expect(md).toContain('Data:');
@@ -169,5 +173,31 @@ test('the export pairs a call\'s start with its end, says when one never ended, 
   expect(md).toContain('<summary>run_command · did not finish</summary>');
   expect(md).toContain('answered yes by the person');
   expect(md).toContain('background task «часы»');
-  expect(md).toContain('16 characters before this were not kept (shell.maxChars)');
+  expect(md).toContain('```console\n1\n2\n3\n```');
+  expect(md).toContain('the journal keeps the first');
+  expect(md).toContain('18 bytes in all');
+});
+
+test('a command\'s output goes to the journal in chunks as it arrives, capped with a note of the total', () => {
+  const lines: Record<string, unknown>[] = [];
+  const timers: (() => void)[] = [];
+  const j = outputJournal((ev) => lines.push(ev), { chunkBytes: 10, capBytes: 25, schedule: (fn) => { timers.push(fn); } });
+  j.push('abc');
+  expect(lines).toHaveLength(0); // held until the chunk fills or the timer fires
+  timers.shift()!();
+  expect(lines).toEqual([{ t: 'shell-out', text: 'abc' }]);
+  j.push('0123456789xyz'); // fills a chunk: written at once
+  j.push('ÿÿÿÿÿÿÿÿÿÿÿÿ'); // past the cap: cut at it
+  j.push('more');
+  j.end();
+  const text = lines.filter((e) => typeof e.text === 'string').map((e) => e.text).join('');
+  expect(Buffer.byteLength(text)).toBeLessThanOrEqual(25);
+  expect(text.startsWith('abc0123456789xyz')).toBe(true);
+  expect(lines.at(-1)).toEqual({ t: 'shell-out', capped: true, total: 3 + 13 + 24 + 4 });
+  // Under the cap, no note.
+  const quiet: Record<string, unknown>[] = [];
+  const q = outputJournal((ev) => quiet.push(ev), { schedule: () => {} });
+  q.push('ok\n');
+  q.end();
+  expect(quiet).toEqual([{ t: 'shell-out', text: 'ok\n' }]);
 });

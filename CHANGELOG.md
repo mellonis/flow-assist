@@ -12,9 +12,9 @@ What each version of flow-assist brought, newest first. The version is the one i
   as an MCP server's, the data behind the frame); the calls of the background tasks
   it started, under each task's name; each `/compact` with its summary — line by line
   as it happens, so a crash loses nothing, and never trimmed: a long session's
-  beginning is no longer lost. A `!command` is recorded when it starts and again, with
-  its exit and output, when it ends; when it printed more than `shell.maxChars`, the
-  journal says how much was cut. A journal lives exactly as long as its session;
+  beginning is no longer lost. A `!command` is recorded when it starts, its whole output
+  as it arrives (up to 8 MiB per command, more than the screen keeps), and its exit
+  when it ends. A journal lives exactly as long as its session;
   `sessions.journalDays` (0 by default) removes one not written to for that many
   days, and the session says so in a note. `/export [path]` turns it into a markdown
   document to read — each tool call folded with its arguments and result, the

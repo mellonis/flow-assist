@@ -1141,13 +1141,16 @@ there is no `/fullscreen`.
     left in their FINAL phase with the text their renderer draws, so a view is recorded
     once, never per live update. A call refused before it starts (arguments that do not
     parse or fit) has only its `call`.
-  - `shell` — a `!command`'s line and directory, written when it STARTS; `shell-end` —
-    its exit, duration and output, written when it ends, to the same session whatever
-    reset came meanwhile. The host never holds more of a command's output than its last
-    `shell.maxChars` (`runShell` keeps the tail as it reads), so `output` is that tail;
-    when the command printed more, `cut` is how many characters before it were dropped
-    and `total` how many it printed, and the export says so above the output.
-    run_command's `result` is the same capped tail, with its own cut note in the text.
+  - `shell` — a `!command`'s line and directory, written when it STARTS; `shell-out` —
+    its output WHOLE, streamed from `runShell`'s `onOutput` as it arrives
+    (`outputJournal`: held until 64 KiB gather or 200 ms pass, so a crash loses at most
+    that moment), up to `OUTPUT_CAP` (8 MiB) per command, then one last `shell-out` with
+    `capped` and the `total` bytes printed; `shell-end` — its exit and duration. All of
+    it goes to the same session whatever reset came meanwhile. The screen and the model
+    keep what they always did — the last `shell.maxChars`; the journal is the only
+    place the rest lives. An interactive `!!command` has no stream: its recording is
+    written when it ends. run_command's `result` is its own capped tail, with its cut
+    note in the text.
   - `compact` — the summary; `end` — how the turn ended: duration, tokens, stopped or
     failed, and the text of a round cut off, which never reached `onLiveCommit`.
   A turn's events go to the session its question was journaled in (`journalId`, taken
@@ -1155,10 +1158,15 @@ there is no `/fullscreen`.
   different: the conversation goes on in the fork, so `journalTo` follows `forkedTo`
   (parent id → fork id, set where `writeSession` forks) and the rest of a turn in
   flight, a `!command` still running and a background task's calls land in the fork's
-  journal, never in the parent's, which another writer holds now. A background task's
-  own calls (`call-start`, `confirm`, `call`) are journaled through `ctx.journal`, which
-  the chat hands its tools, in the session whose turn started the task, each tagged
-  `task` with the task's label; the one-shot prompt has no journal. A line over
+  journal, never in the parent's, which another writer holds now. **No tool writes to
+  the journal** — it is the host's record, and a tool's ctx (a plugin's, a remote
+  plugin's, a core tool's) carries nothing that writes there; the host writes every line
+  from its own hooks. A background task's own calls (`call-start`, `confirm`, `call`)
+  are journaled that way too: the chat hands its tools its LLM service wrapped
+  (`journaledChatLLM`), which adds its own `onToolStart`/`onToolRun`/`confirmWrite`
+  hooks to the nested run and writes to the session whose turn started the task, each
+  line tagged `task` with the label the `background` tool names it by (`taskLabel`); the
+  one-shot prompt has no journal. A line over
   `JOURNAL_LINE_MAX` (4 MiB) is written with its largest fields replaced by a note of
   their size and named in `omitted` (`journalLine`).
   The journal needs the session's id, which is given when the session first has
