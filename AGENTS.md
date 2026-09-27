@@ -1843,10 +1843,15 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   the LAST one and what it waits for — `reaches the model after this step · ↑ back ·
   ⇥ hold to end`, or `held to the turn's end · ↑ back · ⇥ release` — in a turn
   (`queueWaits`), and `↑ takes it back` outside one (a slash command's wait); ↑ and ⇥
-  act only on an empty field, where they are offered. Only the LEADING run of the queue
-  is delivered: a message that waits (held, or naming an image — its line says `at the
-  end of the turn`) keeps everything queued after it waiting too, so the person's words
-  never overtake each other. A turn that ends on a limit delivers nothing more: what is
+  act only on an empty field, where they are offered. Two rules decide what waits
+  (`queueWait`, shared by the delivery and the line): **⇥ holds only the message it
+  was pressed on** — it goes at the turn's end, and messages queued after it are still
+  delivered at the next boundary (the person held that one on purpose; a correction
+  typed after it is meant to reach the model now). **A message naming an image waits
+  for the turn's end AND keeps every message behind it waiting** — it was not held by
+  choice, and delivering the later text first would reorder what the person wrote. The
+  line says which: `held to the turn's end`, `at the end of the turn (it names an
+  image)`, `at the end of the turn (behind an image)` (no ⇥ offered for either). A turn that ends on a limit delivers nothing more: what is
   queued goes out as the next turn, after the host's stop line. **Esc** while an answer or a `!command` runs **stops it,
   on the first press**, touching neither the field nor the queue (the line under what
   came so far says `stopped (Esc)` — `stopped (^c)` after Ctrl+C: the label names the

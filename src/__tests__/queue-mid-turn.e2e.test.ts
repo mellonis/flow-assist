@@ -2,7 +2,11 @@
 // boundary — after the current tool results — as the person's message; ↑ takes it back
 // until then, and ⇥ on the empty field holds it for the turn's end instead.
 import { afterEach, expect, test } from 'bun:test';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { ScriptedModel, bootApp, settle } from './helpers/scripted';
+import { png } from './helpers/image-fixtures';
 
 const realFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = realFetch; });
@@ -74,15 +78,46 @@ test('⇥ on the empty field holds the queued message for the turn\'s end', asyn
   expect(messages(model, 2).at(-1)).toEqual({ role: 'user', content: 'not there, the other file' });
 });
 
-test('a message queued after a held one waits with it: the person\'s words never overtake each other', async () => {
+test('⇥ holds only the message it was pressed on: a correction typed after it reaches the model mid-turn while the note waits', async () => {
   const { model, ui } = await heldTurn();
-  await ui.press('tab'); // the first is held to the end
-  await ui.type('and a second thought');
+  await ui.press('tab'); // this note, and only it, goes at the turn's end
+  await ui.type('and a correction');
   await ui.press('return');
-  model.script([{ text: 'First handled.' }], [{ text: 'Second handled.' }]);
+  // The line describes the last message: it goes after this step.
+  expect(ui.backend.lastFrame).toMatch(/queued \(2\): … and a correction · reaches the model after this step/);
+  model.script([{ text: 'Now the note.' }]);
   model.release();
-  await settleUntil(() => ui.backend.lastFrame.includes('Second handled.'));
-  expect(JSON.stringify(messages(model, 1))).not.toContain('second thought');
+  await settleUntil(() => ui.backend.lastFrame.includes('Now the note.'));
+  // The correction went in at the boundary, the held note waited for the end.
+  expect(messages(model, 1).at(-1)).toEqual({ role: 'user', content: 'and a correction' });
+  expect(JSON.stringify(messages(model, 1))).not.toContain('not there');
   expect(messages(model, 2).at(-1)).toEqual({ role: 'user', content: 'not there, the other file' });
-  expect(messages(model, 3).at(-1)).toEqual({ role: 'user', content: 'and a second thought' });
+});
+
+test('a message naming an image waits for the turn\'s end, and keeps the ones behind it waiting — the line says so for each', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-queue-img-'));
+  const shot = path.join(dir, 'shot.png');
+  fs.writeFileSync(shot, png(40, 30));
+  const model = new ScriptedModel();
+  model.script([{ tool: 'datetime', args: {} }, { hold: true }], [{ text: 'Adjusted.' }], [{ text: 'Saw the image.' }], [{ text: 'And the rest.' }]);
+  const ui = await bootApp(model, 140, 30, undefined, {}, { clipboardImage: () => ({ ok: true, path: shot }) });
+  await ui.press('F');
+  await ui.type('do the long thing');
+  await ui.press('return');
+  await settle(6);
+  ui.backend.press({ name: 'v', ctrl: true });
+  await settle();
+  await ui.type(' look at this');
+  await ui.press('return');
+  expect(ui.backend.lastFrame).toContain('at the end of the turn (it names an image)');
+  await ui.type('and then this');
+  await ui.press('return');
+  expect(ui.backend.lastFrame).toContain('at the end of the turn (behind an image)');
+  model.release();
+  await settleUntil(() => ui.backend.lastFrame.includes('And the rest.'));
+  // Nothing was delivered mid-turn: the image and the text after it went in order after.
+  expect(JSON.stringify(messages(model, 1))).not.toContain('look at this');
+  expect(JSON.stringify(messages(model, 1))).not.toContain('and then this');
+  expect(JSON.stringify(messages(model, 2))).toContain('look at this');
+  expect(messages(model, 3).at(-1)).toEqual({ role: 'user', content: 'and then this' });
 });

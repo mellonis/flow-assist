@@ -568,12 +568,26 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // Messages sent while an answer was coming. During a turn each reaches the
           // model at the turn's next request boundary — after the current tool results —
           // as the person's message (`beforeRequest` in `send`); one HELD (⇥ on the empty
-          // field) waits for the turn's end instead, and so does one naming an image.
+          // field) waits for the turn's end instead, and one naming an image waits with
+          // everything behind it (`queueWait`).
           // What is left when the turn ends goes out in order then (a stopped or failed
           // turn puts it back into the field instead — `restoreQueue`); ↑ on an empty
           // field takes the last one back until it is delivered. queueRef is what the
           // handlers act on, `queued` mirrors it for the render.
           type Queued = { text: string; hold?: boolean };
+          // When a queued message reaches the model in a running turn — the one rule the
+          // delivery and the queue line share. A message naming an image waits for the
+          // turn's end (it goes as a message of its own, images and all) and keeps every
+          // message behind it waiting too: it was not held by choice, and delivering the
+          // later text first would reorder what the person wrote. A message held with ⇥
+          // waits alone: the person held that one on purpose, and a correction typed
+          // after it is meant to reach the model now.
+          const queueWait = (list: Queued[], at: number): 'step' | 'end' | 'image' | 'behind' => {
+            const img = list.slice(0, at + 1).findIndex((m) => imagesInText(m.text, imagesRef.current).length > 0);
+            if (img === at) return 'image';
+            if (img >= 0) return 'behind';
+            return list[at]!.hold ? 'end' : 'step';
+          };
           const queueRef = ui.useRef<Queued[]>([]);
           const [queued, setQueued] = ui.useState<Queued[]>([]);
           const syncQueue = () => { setQueued(queueRef.current.slice()); host.notify(); };
@@ -1489,16 +1503,15 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 beforeRequest: async ({ round, transcript, measured }: { round: number; transcript: ChatMessage[]; measured?: number }) => {
                   if (epoch !== epochRef.current) return;
                   // First what the person queued since the last request: it reaches the
-                  // model now, after the round's results, as their message — not held
-                  // (⇥), and not naming an image (which goes with a message of its own
-                  // at the turn's end). On screen it stands where it reached the model.
+                  // model now, after the round's results, as their message — each one
+                  // whose wait is the next step (`queueWait`). On screen it stands where
+                  // it reached the model.
                   const delivered: ChatMessage[] = [];
                   if (round > 0) {
-                    // The leading run only: a message that waits (held, or naming an
-                    // image) keeps everything queued after it waiting too, so the person's
-                    // words never reach the model out of order.
-                    const firstWaiting = queueRef.current.findIndex((m) => m.hold || imagesInText(m.text, imagesRef.current).length > 0);
-                    const now = firstWaiting < 0 ? queueRef.current.slice() : queueRef.current.slice(0, firstWaiting);
+                    // Every message whose wait is the next step (`queueWait`): not one
+                    // held with ⇥, nothing from a message naming an image on.
+                    const list = queueRef.current;
+                    const now = list.filter((_, i) => queueWait(list, i) === 'step');
                     if (now.length) {
                       queueRef.current = queueRef.current.filter((m) => !now.includes(m));
                       syncQueue();
@@ -3226,10 +3239,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             queued: queued.map((m) => m.text),
             // What the last queued message waits for: the turn's next step, or its end
             // (held, ⇥) — none outside a turn, where it goes when the command ends.
-            // A message naming an image waits for the end too, and ⇥ cannot change that.
-            queueWaits: queued.length && inTurnRef.current
-              ? (imagesInText(queued.at(-1)!.text, imagesRef.current).length ? 'image' : queued.at(-1)!.hold ? 'end' : 'step')
-              : null,
+            // By the delivery's own rule (`queueWait`).
+            queueWaits: queued.length && inTurnRef.current ? queueWait(queued, queued.length - 1) : null,
             // The title names what is on screen — the items' labels.
             subject: contextTitle(screen),
             elapsed: elapsedMs, emptyNotice, toolCount, completion, continueOffer,
