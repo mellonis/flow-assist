@@ -15,11 +15,12 @@ export function configDir(env: Record<string, string | undefined> = process.env,
 }
 
 // Where the host keeps what it writes FOR ITSELF — the memory, the cache, the tool
-// log, the settings `config set` saves. Normally that is the config directory. Under
+// log, the settings `config set` saves — and where the settings are read from. Normally
+// that is the config directory. Under
 // `bun test` it is a temporary directory of this process instead, the same protection
 // the sessions already have (`sessionsDir` → null): a test that names no file of its
-// own must never add to the person's memory, empty their cache or rewrite their
-// settings. It is made once per process and never reused from a previous run, so
+// own must never add to the person's memory, empty their cache, rewrite their
+// settings or run with them. It is made once per process and never reused from a previous run, so
 // nothing a run writes is read back by the next one.
 //
 // Resolve it on every call. An import-time constant is fixed before a test can point
@@ -31,9 +32,11 @@ export function hostStateDir(env: Record<string, string | undefined> = process.e
   return (TEST_STATE_DIR ??= fs.mkdtempSync(path.join(os.tmpdir(), 'flow-assist-test-state-')));
 }
 
-const CONFIG_DIR = configDir();
-const CONFIG_PATH = path.join(CONFIG_DIR, 'config.json');
-const CONFIG_LOCAL_PATH = path.join(CONFIG_DIR, 'config.local.json');
+// The two settings files, resolved on every call through `hostStateDir`, as every
+// other file the host keeps: a read and a write of the same setting reach the same
+// file, and under `bun test` neither reaches the person's.
+const configPath = (): string => path.join(hostStateDir(), 'config.json');
+const configLocalPath = (): string => path.join(hostStateDir(), 'config.local.json');
 
 type WriteResult = { ok: true; value: unknown } | { ok: false; error: string };
 
@@ -108,8 +111,8 @@ const LAYERS = new WeakMap<object, ConfigLayers>();
 // `session: false` reads the files alone — for a caller that writes the result back to
 // a file, which must never carry a session value into it.
 export function loadConfig(opts?: { localPath?: string; session?: boolean }): Record<string, unknown> {
-  const base = asConfigObject(readConfigFile(CONFIG_PATH)) ?? {};
-  const local = asConfigObject(readConfigFile(opts?.localPath ?? CONFIG_LOCAL_PATH)) ?? {};
+  const base = asConfigObject(readConfigFile(configPath())) ?? {};
+  const local = asConfigObject(readConfigFile(opts?.localPath ?? configLocalPath())) ?? {};
   const merged = deepMerge(structuredClone(base), structuredClone(local));
   if (opts?.session !== false) for (const [key, value] of SESSION) setDeep(merged, key, structuredClone(value));
   LAYERS.set(merged, { base, local });
@@ -456,12 +459,10 @@ export function editConfigArray(
   return written ? { ok: true, value: check.value } : { ok: false, error: 'config: failed to write config.local.json.' };
 }
 
-// Where a SAVED setting goes when the caller names no file. Through `hostStateDir`,
-// so `:config set` and `:cache off` driven from a test write into the run's temporary
-// directory and not over the person's own overrides. Reading is left alone: a test
-// that builds its own config never reads this file anyway, and changing what the CLI
-// reads under test would change what the CLI does.
-const configLocalWritePath = (): string => path.join(hostStateDir(), 'config.local.json');
+// Where a SAVED setting goes when the caller names no file: the file `loadConfig`
+// reads, so `:config set` and `:cache off` driven from a test write into the run's
+// temporary directory and not over the person's own overrides.
+const configLocalWritePath = configLocalPath;
 
 // Saves a whole-object merge into config.local.json, on top of existing
 // overrides. Returns the resulting object (or null on a write error).

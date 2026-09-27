@@ -49,9 +49,9 @@ past incident may motivate a rule; keep the rule, drop the incident.
   which is also what gets reported when nothing is found. Both plugin dirs must exist
   for the first two. Bun reads `.env` from the working directory only, so when the
   root is elsewhere `<root>/.env` is loaded too, never overriding a variable already
-  set (not under `NODE_ENV=test`). `install.ts` is `main.ts`'s FIRST import: the config
-  directory is fixed when `config/load.ts` is evaluated, so a `.env` loaded from
-  `main` would reach only half of the program.
+  set (not under `NODE_ENV=test`). `install.ts` is `main.ts`'s FIRST import: a module that
+  reads the environment when it is evaluated must see the `.env` values, or a `.env`
+  loaded from `main` would reach only half of the program.
 - **The entry is `src/cli.ts`, the CLI is `src/main.ts`, and React runs its
   PRODUCTION build.** React and the reconciler inside `@flowtty/react` pick their
   build by `NODE_ENV` when first loaded, and Bun leaves it unset — so the app ran the
@@ -2949,12 +2949,14 @@ Plugin tests: `cd plugins-available/<name> && bun test`.
 The host suite must pass with `plugins-available/` empty — a host test never loads a real plugin.
 
 **A test never reaches the person's own files.** `hostStateDir()` (`src/config/load.ts`)
-is where the host keeps what it writes for itself: the config directory normally, a
-temporary directory of this process under `bun test`. The memory, the tool log and a
-setting `config set` saves all resolve through it, the cache keeps its store in memory
-and writes no file at all under a test, and the sessions have their own `null`
-(`sessionsDir`). Two rules hold it together, and a new file the host writes by default
-keeps both:
+is where the host keeps what it writes for itself, and where it reads its settings:
+the config directory normally, a temporary directory of this process under `bun test`.
+The memory, the tool log and both settings files — `config.json` and
+`config.local.json`, read by `loadConfig` and written by `config set` — all resolve
+through it, so no test runs with the person's own settings; the cache keeps its
+store in memory and writes no file at all under a test, and the sessions have their own
+`null` (`sessionsDir`). Two rules hold it together, and a new file the host reads or
+writes by default keeps both:
 
 - **Resolve the path on every call, never at import.** A `bun test` run shares its
   module registry across every file, so an import-time constant is decided by whichever

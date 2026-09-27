@@ -4,7 +4,10 @@ import { z } from 'zod';
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { getDeep, setDeep, unsetDeep, parseValue, validateConfigWriteValue, configWarnings, saveConfigSetting, saveConfigUnset, configDir } from '../load';
+import { getDeep, setDeep, unsetDeep, parseValue, validateConfigWriteValue, configWarnings, saveConfigSetting, saveConfigUnset, configDir, hostStateDir, loadConfig } from '../load';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 test('schema has NO tracker-only keys at direct level', () => {
   const shape = (hostConfigSchema as any).shape;
@@ -121,4 +124,33 @@ test('where the chat is — its mode and its panel — is a setting `config set`
   // The key a config written before the modes still has: read as `mode: full`.
   expect(validateConfigWriteValue(hostConfigSchema, 'plugins.assistant.fullscreen', true, plugins)).toEqual({ ok: true, value: true });
   expect(validateConfigWriteValue(hostConfigSchema, 'plugins.assistant.fullscreen', 'yes', plugins).ok).toBe(false);
+});
+
+// "A test never reaches the person's own files": under `bun test` the settings are read
+// from the run's own directory (`hostStateDir`), exactly where `config set` writes them,
+// and never from the config directory — the person's `config.json` and
+// `config.local.json` there never reach a test.
+test('under bun test the config is read from the run\'s own directory, never from the config directory', () => {
+  const xdg = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-xdg-'));
+  const was = process.env.XDG_CONFIG_HOME;
+  const own = hostStateDir();
+  const files = ['config.json', 'config.local.json'].map((n) => path.join(own, n));
+  const kept = files.map((f) => (fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : null));
+  try {
+    // What the person's own directory would hold, where configDir() points.
+    process.env.XDG_CONFIG_HOME = xdg;
+    fs.mkdirSync(configDir(), { recursive: true });
+    fs.writeFileSync(path.join(configDir(), 'config.json'), JSON.stringify({ personBase: 'theirs' }));
+    fs.writeFileSync(path.join(configDir(), 'config.local.json'), JSON.stringify({ personLocal: 'theirs' }));
+    fs.writeFileSync(files[0]!, JSON.stringify({ runBase: 'ours' }));
+    fs.writeFileSync(files[1]!, JSON.stringify({ runLocal: 'ours' }));
+    const read = loadConfig();
+    expect(read.personBase).toBeUndefined();
+    expect(read.personLocal).toBeUndefined();
+    expect(read.runBase).toBe('ours');
+    expect(read.runLocal).toBe('ours');
+  } finally {
+    if (was === undefined) delete process.env.XDG_CONFIG_HOME; else process.env.XDG_CONFIG_HOME = was;
+    files.forEach((f, i) => (kept[i] === null ? fs.rmSync(f, { force: true }) : fs.writeFileSync(f, kept[i]!)));
+  }
 });
