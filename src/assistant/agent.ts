@@ -38,6 +38,7 @@ import {
 } from './tool-loading.js';
 import { TOOL_RESULT_MAX_CHARS_DEFAULT, capToolResult, resolveToolResultCap } from './tool-result-cap.js';
 import { toolArgsError } from './tool-args.js';
+import { planReminder, type Plan } from './plan.js';
 import { RAW_OMITTED, RAW_RESULT, findToolResult, keptRaw, toolReturn, type FoundResult } from './tool-results.js';
 import type { RecallSource } from './recall.js';
 
@@ -783,6 +784,8 @@ export async function agentChat(
   // Counts every call of the turn, declined ones included: another call between two
   // commands is what separates them — a view's `callId` says which call it belongs to.
   let seq = 0;
+  // The plan reminder goes out at most once per turn (below, after a round's calls).
+  let planReminded = false;
   // A view's `callId` is never the provider's own tool-call id, `${tc.id}#${n}`,
   // alone: that id is NOT guaranteed unique across rounds of one turn (a test double
   // restarts at `call_0` every round; some real servers send '' or reuse ids), so two
@@ -1201,6 +1204,23 @@ export async function agentChat(
         if (outcome !== 'error' && whole !== undefined) run.raw = whole;
         toolRuns.push(run);
         opts.onToolRun?.(run);
+      }
+      // The plan says what the turn works on only when the model marks it. A round
+      // that ran work (any call but `todo`) while the plan has items pending and none
+      // in progress gets ONE reminder, once per turn: appended to the round's last
+      // tool result, after the cap so it cannot be cut, and never shown to the person
+      // (`run.detail` is untouched). That result's data is kept beside it first, so a
+      // later call piping it (`resultInput`) reads the data without the reminder.
+      const plan = toolCtx.plan as Plan | undefined;
+      const worked = r.toolCalls.some((tc) => (realName.get(tc.name) ?? tc.name) !== 'todo');
+      const reminder = !planReminded && worked && plan ? planReminder(plan) : null;
+      if (reminder) {
+        const last = current.at(-1);
+        if (last?.role === 'tool' && typeof last.content === 'string') {
+          if (!(RAW_RESULT in last) && !(RAW_OMITTED in last) && last.content.startsWith('OK: ')) last[RAW_RESULT] = last.content.slice(4);
+          last.content = `${last.content}\n\n${reminder}`;
+          planReminded = true;
+        }
       }
     }
   } catch (e) {

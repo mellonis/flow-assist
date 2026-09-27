@@ -11,6 +11,8 @@ import { makeFactory } from '../../loader/plugin';
 import { VIEW_CAPS } from '../views';
 import { TOOL_RESULT_MAX_CHARS_CEILING, TOOL_RESULT_MAX_CHARS_DEFAULT } from '../tool-result-cap';
 import { png } from '../../__tests__/helpers/image-fixtures';
+import { PLAN_REMINDER, createPlan } from '../plan';
+import { findToolResult } from '../tool-results';
 
 test('assistant language fallback: assistantLanguage ?? language ?? en', () => {
   expect(chatLanguage({})).toBe('en');
@@ -974,4 +976,27 @@ test('markup written beside a real tool call is stripped: never the step, never 
   expect(res.process).toBe('Let me look.');
   expect(JSON.stringify(res.transcript)).not.toContain('DSML');
   expect(res.transcript[0]!.content).toBe('Let me look.');
+});
+
+test('the plan reminder rides on the round\'s last result, and piping that result reads the data without it', async () => {
+  const make = makeFactory({});
+  const plugins = [make('t', { aiTools: [
+    { type: 'function', function: { name: 't:read', description: 'read', parameters: { type: 'object', properties: {} } }, run: async () => 'the data' },
+  ] })];
+  assembleToolRegistry({ plugins, config: {}, repo: { list: async () => [] } as any });
+  const plan = createPlan();
+  plan.exec({ action: 'add', items: ['a', 'b'] });
+  let n = 0;
+  const fakeRound = async () => (++n === 1
+    ? { content: '', toolCalls: [{ id: 'c1', name: 't:read', arguments: '{}' }] }
+    : { content: 'done', toolCalls: [] });
+  const res = await agentChat([{ role: 'user', content: 'hi' }], {
+    baseUrl: 'http://x', model: 'm', token: 't', onLiveCommit: () => {}, onLive: () => {},
+    extraTools: plugins[0]!.aiTools as any, toolCtx: { plan }, chatRound: fakeRound as any,
+  });
+  const result = res.transcript.find((m) => m.role === 'tool')!;
+  expect(result.content).toBe(`OK: the data\n\n${PLAN_REMINDER}`);
+  // The person's trail never shows it.
+  expect(res.toolRuns[0]!.detail).toBe('the data');
+  expect(findToolResult(res.transcript, 'c1')).toMatchObject({ ok: true, text: 'the data' });
 });

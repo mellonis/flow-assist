@@ -703,14 +703,14 @@ test.each([[30, 'line'], [60, 'full']] as const)('a bottom panel on a %i-row ter
   if (shape === 'line') {
     const plan = inside.filter((l) => l.includes('plan'));
     expect(plan).toHaveLength(1);
-    expect(plan[0]).toContain('▸ plan 2/3 · write the fix');
+    expect(plan[0]).toContain('▸ plan · ⊟ write the fix');
     expect(ui.backend.lastFrame).not.toContain('☐');
   } else {
     expect(ui.backend.lastFrame).toContain('▾ plan');
-    expect(ui.backend.lastFrame).toContain('◐ 2 · write the fix');
-    expect(ui.backend.lastFrame).toContain('☐ 3 · run the tests');
-    expect(ui.backend.lastFrame).toContain('· 1 done');
-    expect(ui.backend.lastFrame).not.toContain('plan 2/3');
+    expect(ui.backend.lastFrame).toContain('☑ read the code');
+    expect(ui.backend.lastFrame).toContain('⊟ write the fix');
+    expect(ui.backend.lastFrame).toContain('☐ run the tests');
+    expect(ui.backend.lastFrame).not.toContain('▸ plan');
   }
   ui.app.unmount();
 });

@@ -405,13 +405,14 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
       type: 'function',
       function: {
         name: 'todo',
-        description: 'The task plan the chat renders as `▾ plan`. It changes only through this tool, so call it whenever the plan or an item\'s status should change. Target an item by `id` or by `text`. Use `set` with the full list when several items change at once, `start`/`complete` for a single item.',
+        description: 'The task plan the chat renders as `▾ plan`, in its own order with checkboxes and no numbers. It changes only through this tool, so call it whenever the plan or an item\'s status should change: `start` the item you begin working on, `complete` it when it is done. Target an item by its `id` (`t1`, `t2`, … — given when the item is created, never reused within a plan) or by its exact `text`. Use `set` with the full list when several items change at once.',
         parameters: { type: 'object', properties: {
           action: { type: 'string', enum: ['list', 'set', 'add', 'start', 'complete', 'uncomplete', 'update', 'remove', 'clear'], description: 'list — read the plan; set — replace the whole plan with `todos`; add — append pending item(s); start / complete / uncomplete — mark in progress / done / pending; update — new `text` for an item (needs `id`); remove — delete an item; clear — empty the plan.' },
           todos: { type: 'array', items: { type: 'object', properties: { text: { type: 'string' }, status: { type: 'string', enum: ['pending', 'in_progress', 'done'] } }, required: ['text'] }, description: 'For `set`: the full plan, each item { text, status? } (status defaults to pending). An empty array empties the plan.' },
           items: { type: 'array', items: { type: 'string' }, description: 'For `add`: several pending items in one call.' },
-          text: { type: 'string', description: 'For add/update: the item text. For start/complete/uncomplete/remove: the item to target — matched exactly, then case-insensitively, then as a substring.' },
-          id: { type: 'number', description: 'The item id from `list`; an alternative to `text`.' },
+          text: { type: 'string', description: 'For add/update: the item text. For start/complete/uncomplete/remove: the item to target — its whole text, matched exactly, then ignoring case.' },
+          // One type, as every provider reads a schema; `Plan` reads `"5"` as `t5`.
+          id: { type: 'string', description: 'The item\'s id as the plan results show it (`t3`); an alternative to `text`. Never a position in the list.' },
         }, required: ['action'] },
       },
     },

@@ -72,7 +72,8 @@ export interface Session {
   messages: Record<string, unknown>[]; // the screen
   api: Record<string, unknown>[];      // the model's history
   summary: string;
-  plan: { id: number; text: string; status: string }[];
+  // `id` is `t3`, or a number in an older file, which `Plan.load` reads as `t3`.
+  plan: { id: number | string; text: string; status: string }[];
   usage: TokenUsage | null;
   prompts: string[];                   // ↑/↓ history of the field
   draft: string;                       // what was typed and not sent

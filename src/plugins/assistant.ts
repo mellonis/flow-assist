@@ -13,7 +13,7 @@ import path from 'node:path';
 import { addTrigger, chatUser } from '../loader/registry.js';
 import { bgActiveCount } from '../loader/tools-core.js';
 import { autoBadge, autoCommand, autoConfirms, autoSaid, nextAutoMode, type AutoMode } from '../assistant/auto.js';
-import { createPlan, todoGlyph } from '../assistant/plan.js';
+import { createPlan, describePlan } from '../assistant/plan.js';
 import { pickVerb, verbList } from '../assistant/verbs.js';
 import { NOTES_MODES, addCalls, callRun, endRound, startsWithNext, notesCommand, notesMode, notesSaid, type CallRun, type NotesMode, type TurnPart } from '../assistant/step.js';
 import { lineTab, lineView, type TabWalk } from '../config/commandline.js';
@@ -1252,12 +1252,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const planBlock = () => {
             const plan = planRef.current.snapshot();
             if (!plan.length) return '';
-            const order = { in_progress: 0, pending: 1, done: 2 };
-            const lines = [...plan].sort((a, b) => order[a.status] - order[b.status]).map((t) => {
-              const w = t.status === 'done' ? 'done' : t.status === 'in_progress' ? 'in progress' : 'pending';
-              return `${todoGlyph(t.status)} ${t.id} · ${t.text} (${w})`;
-            });
-            return `## Current task plan (the \`todo\` tool)\nYou maintain it through \`todo\`; it changes only when you call the tool.\n${lines.join('\n')}`;
+            // The plan's own order, by id — the same text the `todo` tool returns.
+            return `## Current task plan (the \`todo\` tool)\nYou maintain it through \`todo\`; it changes only when you call the tool. Name an item by its id or its text.\n${describePlan(plan)}`;
           };
           // What the person's screens show now, as the plugins describe it
           // (src/assistant/screen-context.ts). Read fresh for every request — every

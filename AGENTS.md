@@ -492,8 +492,8 @@ there is no `/fullscreen`.
   never shrinks (`flexShrink: 0`, its whole height kept, so a 12-row bottom panel with
   a three-item plan still shows the field and its hint) and the conversation keeps at
   least one row. The `todo` plan is
-  what yields: whole when it fits, else ONE row — `▸ plan 2/3 · <item>`, the item in
-  progress (else the first pending) by its place in the plan, cut to the width — and
+  what yields: whole when it fits, else ONE row — `▸ plan · ⊟ <item>`, the item in
+  progress (else the first pending) with its checkbox, cut to the width — and
   whole again when there is room (`planFit` / `planLine` in `views/modals.ts`, the
   rows counted from the same pieces the blocks draw). Past even that it is not drawn.
 - **Two slots, in every mode, in the same order** — the plugin's side, then the panel;
@@ -992,6 +992,32 @@ there is no `/fullscreen`.
   background run gets a fresh one, so its checkboxes never appear among the chat's;
   an eval trial makes one per trial. Only a caller with no conversation of its own
   (the one-shot CLI, a bare `execChatTool`) falls back to the process-wide plan.
+  - **How the plan is drawn.** flowtty's checkbox glyphs, from `checkboxMarker(…,
+    'none')` through `todoMarker` in `plan.ts` — ☐ pending, ⊟ in progress (the partial
+    box), ☑ done (in flowtty's checked green) — in the plan's OWN order, done items in
+    place, and the item's text with no number beside it: neither its id nor a
+    position. A number on screen is what the person and the model each read as
+    something else. Not the `<Checkbox>` component: it is a focusable field (Tab
+    reaches it, Space toggles it), and the plan is read-only. A plan longer than five
+    items shows five in a row — the one it is at, with one before it — and one line
+    `+N more · D/T done` (`planView` in `views/modals.ts`).
+  - **Ids.** An item's id is `t1`, `t2`, … given at creation, never reused within the
+    plan; a new plan (`reset`, `clear`, an empty plan's first `add`, a `set` that keeps
+    no item of the old one) starts again at `t1`, and a `set` keeps an item's id when
+    its text stays. The model names an item by id or by its whole text (exact, then
+    ignoring case — never a fragment: "33" does not find "item 33"). What the model
+    reads — every `todo` result and the system prompt's plan block, both
+    `describePlan` — lists the items in plan order, `☐ t2 · text (pending)`. A saved
+    plan with numeric ids loads with `5` read as `t5`, and the tool reads an `id` of
+    `"5"` the same way. The schema's `id` is a plain string: a type list
+    (`['string', 'number']`) is a schema not every provider accepts, on a core tool
+    sent with every request.
+  - **The reminder.** When a round ran work (any call but `todo`) and the plan has
+    items pending and none in progress, `agentChat` appends `PLAN_REMINDER` to that
+    round's LAST tool result — once per turn, after the result's cap, never in the
+    trail the person sees. The result's data is kept beside it first (`RAW_RESULT`),
+    so a later call that pipes that result reads the data without the reminder. A
+    round of `todo` alone (laying out the plan) is not work and carries none.
   The shell's directory is the same kind of state: `createShellState` in
   `src/assistant/shell.ts`, held by the chat (`shellRef`), handed to run_command and
   `cd` as `ctx.shell`; a background run gets a fresh one.

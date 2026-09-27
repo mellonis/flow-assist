@@ -82,7 +82,7 @@ test.each([[110, 40, 'window'], [100, 22, 'window'], [100, 22, 'panel']] as cons
   expect(backend.lastFrame).toContain('Merging then.');
   if (mode === 'panel') {
     expect(backend.lastFrame.split('\n')[rows - 12]).toContain('╭─ ƒ Flow Assist');
-    expect(backend.lastFrame).toContain('▸ plan 1/3 · one');
+    expect(backend.lastFrame).toContain('▸ plan · ☐ one');
     expect(backend.lastFrame).toContain('Esc Esc collapse');
   }
   expect(backend.lastFrame).not.toContain('Rebase or merge?');

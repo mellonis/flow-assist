@@ -220,7 +220,7 @@ test('in shell mode the hint row starts with the shell directory, cut from the l
   none.unmount();
 });
 
-test('chat renders a todo plan capped at 5 active + one summary line', async () => {
+test('chat draws the plan as checkboxes in its own order, no numbers, a window of 5 around the work', async () => {
   const backend = new TestBackend(100, 24);
   const handle = await render(
     h(renderChatModal, {
@@ -228,48 +228,51 @@ test('chat renders a todo plan capped at 5 active + one summary line', async () 
       width: 100,
       messages: [],
       todo: [
-        { id: 1, text: 'one', status: 'pending' },
-        { id: 2, text: 'two', status: 'pending' },
-        { id: 3, text: 'three', status: 'in_progress' },
-        { id: 4, text: 'four', status: 'pending' },
-        { id: 5, text: 'five', status: 'pending' },
-        { id: 6, text: 'six', status: 'pending' }, // hides behind +1 pending
-        { id: 7, text: 'seven', status: 'done' },
-        { id: 8, text: 'eight', status: 'done' },
+        { id: 't1', text: 'one', status: 'done' }, // above the window
+        { id: 't2', text: 'two', status: 'done' },
+        { id: 't3', text: 'three', status: 'in_progress' },
+        { id: 't4', text: 'four', status: 'pending' },
+        { id: 't5', text: 'five', status: 'pending' },
+        { id: 't6', text: 'six', status: 'pending' },
+        { id: 't7', text: 'seven', status: 'pending' }, // below the window
+        { id: 't8', text: 'eight', status: 'pending' },
       ],
     }),
     backend,
   );
-  // The in-progress item leads (◐), then pending ☐; hidden active is a summary.
-  expect(backend.lastFrame).toContain('◐ 3 · three');
-  expect(backend.lastFrame).toContain('☐ 1 · one');
-  expect(backend.lastFrame).toContain('☐ 5 · five');
-  expect(backend.lastFrame).not.toContain('☐ 6 · six');
-  // A single summary line: `+N pending · M done` (one line, thin-bullet separated).
-  expect(backend.lastFrame).toContain('+1 pending · 2 done');
-  // The done items are counted, not listed individually.
-  expect(backend.lastFrame).not.toContain('☑ 7 · seven');
+  const rows = backend.lastFrame.split('\n');
+  const plan = rows.filter((r) => /[☐⊟☑] /.test(r)).map((r) => r.replace(/^[│\s]*/, '').replace(/[│\s]+$/, ''));
+  // flowtty's checkbox glyphs, in the plan's order: done ☑, in progress ⊟, pending ☐;
+  // the window keeps one item before the one in progress.
+  expect(plan).toEqual(['☑ two', '⊟ three', '☐ four', '☐ five', '☐ six']);
+  // Neither an id nor a position is drawn.
+  expect(backend.lastFrame).not.toMatch(/\bt\d\b/);
+  expect(backend.lastFrame).not.toMatch(/[☐⊟☑] \d/);
+  // One summary line for what the window leaves out, and how far the plan is.
+  expect(backend.lastFrame).toContain('+3 more · 2/8 done');
+  // The done marker carries flowtty's checked color.
+  const y = rows.findIndex((r) => r.includes('☑ two'));
+  expect(backend.lastBuffer!.get(rows[y]!.indexOf('☑'), y).style.fg).toBe('green');
   handle.unmount();
 });
 
-test('chat omits the summary line when nothing is hidden or done', async () => {
+test('chat draws a short plan whole, done items in place, with no summary line', async () => {
   const backend = new TestBackend(100, 24);
   const handle = await render(
     h(renderChatModal, {
       ...baseChat,
       width: 100,
       messages: [],
-      // Two active items, both fit under the cap, none done — no summary line.
       todo: [
-        { id: 1, text: 'a', status: 'pending' },
-        { id: 2, text: 'b', status: 'pending' },
+        { id: 't1', text: 'a', status: 'done' },
+        { id: 't2', text: 'b', status: 'pending' },
       ],
     }),
     backend,
   );
-  expect(backend.lastFrame).toContain('☐ 1 · a');
-  expect(backend.lastFrame).toContain('☐ 2 · b');
-  expect(backend.lastFrame).not.toContain('pending');
+  expect(backend.lastFrame).toContain('☑ a');
+  expect(backend.lastFrame).toContain('☐ b');
+  expect(backend.lastFrame).not.toContain('more');
   expect(backend.lastFrame).not.toContain('done');
   handle.unmount();
 });

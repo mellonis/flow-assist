@@ -17,6 +17,7 @@
 import { askRows, type AskRow, type AskState } from '../assistant/ask.js';
 import { autoBadge, type AutoMode } from '../assistant/auto.js';
 import { VERBS } from '../assistant/verbs.js';
+import { todoMarker } from '../assistant/plan.js';
 import { cellWidth, cutLeft, cutStep } from '../cells.js';
 import { answerText, readParts, runMarks, runRowText, shownText, trailTone, turnSegments, type NotesMode } from '../assistant/step.js';
 import { isClicked, isOpen, foldId, type FoldState } from '../assistant/folds.js';
@@ -87,17 +88,19 @@ interface ToolRun {
   // · 400×300`) — the mark, never the image (src/assistant/tool-images.ts).
   images?: ImageMark[];
 }
-// The assistant's task plan (the `todo` core tool). Rendered as a fixed checkbox
-// block above the chat: active items (in-progress ◐ first, then pending ☐), up to
-// MAX_VISIBLE, with done items condensed to a "+N pending · M done" count. Purely
-// presentational — the render never mutates it (the plugin hands over a snapshot
-// of its own plan, `planRef.current.snapshot()`).
+// The assistant's task plan (the `todo` core tool). Rendered as a fixed block above
+// the field: flowtty's checkbox glyphs (`todoMarker` — ☐ pending, ⊟ in progress, ☑
+// done) in the plan's own order, the item's text and nothing else — no id, no
+// position, since a number on screen is what the person and the model would each read
+// differently. Up to MAX_VISIBLE_PLAN rows; a longer plan shows a window around the
+// work and one summary line. Purely presentational — the render never mutates it (the
+// plugin hands over a snapshot of its own plan, `planRef.current.snapshot()`).
 interface PlanItem {
-  id: number;
+  id: string;
   text: string;
   status: 'pending' | 'in_progress' | 'done';
 }
-// How many active (non-done) plan rows are drawn before the rest fold into a count.
+// How many plan rows are drawn before the rest fold into the summary line.
 const MAX_VISIBLE_PLAN = 5;
 // A styled span (matches StyledSpan: text + flowtty emphasis props). We widen with
 // `link`/`[k: string]` so InlineSeg (parseInline) objects fit too.
@@ -1238,33 +1241,36 @@ export function pagerTitle(rows: readonly ChatRow[], id: string): string {
 // scroll box that takes the rows the rest of the column leaves; under it sit the
 // error, the status line, the plan, the queue line and the field (or the question /
 // y-n block that replaces it). Palette: theme.modals.chat.
-// What the plan block shows: in progress first, then pending, each in insertion order
-// (the sort is stable): the cap cuts from the END, so the items being worked on are the
-// last to fall off the screen. Needs flowtty ≥ 1.0.0-alpha.5 — before it, re-ordering
-// keyed children aborted Yoga and the plan was pinned to insertion order. Done items are
-// counted, not listed.
+// The item the plan is at: the first in progress, else the first pending, else the
+// last (all done).
+const planFocus = (list: PlanItem[]): number => {
+  const at = list.findIndex((t) => t.status === 'in_progress');
+  if (at >= 0) return at;
+  const next = list.findIndex((t) => t.status === 'pending');
+  return next >= 0 ? next : list.length - 1;
+};
+// What the plan block shows: the plan in its own order, done items in place. A plan
+// longer than MAX_VISIBLE_PLAN shows that many consecutive items — the one it is at,
+// with one before it for context — and a summary line: how many are left out, and how
+// many of all are done.
 function planView(list: PlanItem[]): { shown: PlanItem[]; summary: string } {
-  const active = list
-    .filter((t) => t.status !== 'done')
-    .sort((a, b) => Number(b.status === 'in_progress') - Number(a.status === 'in_progress'));
-  const shown = active.slice(0, MAX_VISIBLE_PLAN);
+  if (list.length <= MAX_VISIBLE_PLAN) return { shown: list, summary: '' };
+  const from = Math.max(0, Math.min(planFocus(list) - 1, list.length - MAX_VISIBLE_PLAN));
+  const shown = list.slice(from, from + MAX_VISIBLE_PLAN);
   const done = list.filter((t) => t.status === 'done').length;
-  const hidden = active.length - shown.length;
-  const summary = [hidden > 0 ? `+${hidden} pending` : '', done > 0 ? `· ${done} done` : ''].filter(Boolean).join(' ');
-  return { shown, summary };
+  return { shown, summary: `+${list.length - shown.length} more · ${done}/${list.length} done` };
 }
 // How many rows the whole plan block takes: its `▾ plan` head, the items shown, the
 // summary line.
 const planBlockRows = (plan: { shown: PlanItem[]; summary: string }) =>
   plan.shown.length || plan.summary ? 1 + plan.shown.length + (plan.summary ? 1 : 0) : 0;
-// The plan on ONE row, for a chat with too few rows for the whole block: `plan 2/3 ·`
-// and the item being worked on — the one in progress, else the first pending — counted
-// by its place in the plan.
-export function planLine(list: PlanItem[]): { head: string; text: string; inProgress: boolean } {
-  let at = list.findIndex((t) => t.status === 'in_progress');
-  if (at < 0) at = list.findIndex((t) => t.status === 'pending');
-  if (at < 0) return { head: `plan ${list.length}/${list.length} · `, text: 'all done', inProgress: false };
-  return { head: `plan ${at + 1}/${list.length} · `, text: list[at]!.text, inProgress: list[at]!.status === 'in_progress' };
+// The plan on ONE row, for a chat with too few rows for the whole block: `plan ·` and
+// the item it is at — the one in progress, else the first pending — with its checkbox.
+export function planLine(list: PlanItem[]): { head: string; marker: { text: string; color?: string }; text: string; inProgress: boolean } {
+  const at = planFocus(list);
+  const t = list[at]!;
+  if (t.status === 'done') return { head: 'plan · ', marker: todoMarker('done'), text: 'all done', inProgress: false };
+  return { head: 'plan · ', marker: todoMarker(t.status), text: t.text, inProgress: t.status === 'in_progress' };
 }
 // How the plan is drawn in a chat column of `rows` rows, `others` of which everything but
 // the conversation and the plan takes (the gaps between those pieces included). The
@@ -1607,21 +1613,22 @@ export function renderChatModal({
       // The task plan sits ABOVE the input (not above the messages) — the newest
       // answer stays pinned just above it, so a growing plan never hides it. In a chat
       // with too few rows for it (a small docked panel) it gives way first: ONE row,
-      // `plan 2/3 · <item>`, cut to the width, and whole again once there is room. The
+      // `plan · ⊟ <item>`, cut to the width, and whole again once there is room. The
       // field never shrinks and the conversation keeps a row (`planFit`).
       pager ? null : oneLine
         ? h(Box, { key: 'plan', flexDirection: 'row', width: '100%', flexShrink: 0, overflow: 'hidden' },
             h(Text, { dim: true, color: 'magenta', wrap: 'truncate' }, `▸ ${oneLine.head}`),
+            h(Text, { color: oneLine.inProgress ? 'yellow' : oneLine.marker.color }, `${oneLine.marker.text} `),
             h(Text, { wrap: 'truncate', color: oneLine.inProgress ? 'yellow' : undefined }, oneLine.text))
         : planShape === 'full'
         ? h(Box, { key: 'plan', flexDirection: 'column', width: '100%', flexShrink: 0 },
             h(Text, { dim: true, color: 'magenta' }, '▾ plan'),
-            planShown.map((t) =>
-              h(Box, { key: `plan-${t.id}`, flexDirection: 'row' },
-                h(Text, { color: t.status === 'in_progress' ? 'yellow' : undefined },
-                  t.status === 'done' ? '☑' : t.status === 'in_progress' ? '◐' : '☐'),
-                h(Text, { dim: true }, ` ${t.id} · `),
-                h(Text, { wrap: 'truncate', color: t.status === 'in_progress' ? 'yellow' : undefined }, t.text))),
+            planShown.map((t) => {
+              const marker = todoMarker(t.status);
+              return h(Box, { key: `plan-${t.id}`, flexDirection: 'row' },
+                h(Text, { color: t.status === 'in_progress' ? 'yellow' : marker.color }, `${marker.text} `),
+                h(Text, { wrap: 'truncate', dim: t.status === 'done', color: t.status === 'in_progress' ? 'yellow' : undefined }, t.text));
+            }),
             planSummary ? h(Text, { dim: true, color: 'yellow' }, planSummary) : null,
           )
         : null,

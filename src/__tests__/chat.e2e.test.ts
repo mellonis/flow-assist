@@ -1,6 +1,7 @@
 // The chat as a person meets it, through the real TUI with a scripted model.
 import { afterEach, expect, test } from 'bun:test';
 import { ScriptedModel, bootApp, settle } from './helpers/scripted';
+import { PLAN_REMINDER } from '../assistant/plan';
 
 const realFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = realFetch; });
@@ -203,8 +204,7 @@ test('a blank line between two thoughts is a row of the field on screen', async 
   ui.app.unmount();
 });
 
-test('the plan lists what is in progress first, and re-orders live without a crash', async () => {
-  // Needs flowtty ≥ 1.0.0-alpha.5: re-ordering keyed children aborts Yoga below that version.
+test('the plan is drawn as checkboxes in its own order, with no numbers, as items change', async () => {
   const model = new ScriptedModel();
   model.script(
     [{ tool: 'todo', args: { action: 'add', items: ['read the diff', 'run the tests', 'write the summary'] } }],
@@ -217,15 +217,70 @@ test('the plan lists what is in progress first, and re-orders live without a cra
   await ui.type('plan it');
   await ui.press('return');
   await settle(20);
-  const order = () => ui.backend.lastFrame.split('\n').filter((r) => /[☐◐☑] \d+ · /.test(r)).map((r) => r.replace(/^.*· /, '').replace(/[│\s]+$/, ''));
-  expect(order()).toEqual(['read the diff', 'run the tests', 'write the summary']);
+  const order = () => ui.backend.lastFrame.split('\n').filter((r) => /^[│\s]*[☐⊟☑] /.test(r)).map((r) => r.replace(/^[│\s]*/, '').replace(/[│\s]+$/, ''));
+  expect(order()).toEqual(['☐ read the diff', '☐ run the tests', '☐ write the summary']);
 
   await ui.type('start the last one');
   await ui.press('return');
   await settle(24);
-  // The item in progress moved to the top; the app is still alive and drew the answer.
-  expect(order()).toEqual(['write the summary', 'read the diff', 'run the tests']);
+  // The item in progress stays in its place, marked; the app drew the answer.
+  expect(order()).toEqual(['☐ read the diff', '☐ run the tests', '⊟ write the summary']);
   expect(ui.backend.lastFrame).toContain('Started the summary.');
+  ui.app.unmount();
+});
+
+// The tool messages of a request that carry the plan reminder.
+const reminded = (req: { messages: { role: string; content?: unknown }[] }) =>
+  req.messages.filter((m) => m.role === 'tool' && String(m.content).includes(PLAN_REMINDER));
+
+test('work run with nothing in progress gets ONE reminder per turn to mark the item', async () => {
+  const model = new ScriptedModel();
+  model.script(
+    [{ tool: 'todo', args: { action: 'add', items: ['read the diff', 'run the tests'] } }],
+    [{ tool: 'datetime', args: {} }],
+    [{ tool: 'datetime', args: {} }],
+    [{ text: 'Worked.' }],
+    [{ tool: 'datetime', args: {} }],
+    [{ text: 'Again.' }],
+  );
+  const ui = await bootApp(model, 100, 30);
+  await ui.press('F');
+  await ui.type('do it');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('Worked.'));
+  // Laying out the plan is not work yet: the round of `todo` alone carries none.
+  expect(reminded(model.requests[1]!)).toHaveLength(0);
+  // The first round of work carries it, on its tool result, and later rounds of the
+  // same turn add no second one.
+  expect(reminded(model.requests[2]!)).toHaveLength(1);
+  expect(reminded(model.requests[3]!)).toHaveLength(1);
+  const at = model.requests[3]!.messages.findIndex((m) => reminded({ messages: [m] }).length);
+  expect((model.requests[3]!.messages[at - 1] as { tool_calls?: { function: { name: string } }[] }).tool_calls?.[0]?.function.name).toBe('datetime');
+  // The next turn is reminded again.
+  await ui.type('more');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('Again.'));
+  const last = model.requests.at(-1)!;
+  const turnStart = last.messages.findLastIndex((m) => m.role === 'user');
+  expect(reminded({ messages: last.messages.slice(turnStart) })).toHaveLength(1);
+  ui.app.unmount();
+});
+
+test('no reminder when an item is in progress', async () => {
+  const model = new ScriptedModel();
+  model.script(
+    [{ tool: 'todo', args: { action: 'add', items: ['read the diff', 'run the tests'] } }],
+    [{ tool: 'todo', args: { action: 'start', id: 't1' } }],
+    [{ tool: 'datetime', args: {} }],
+    [{ text: 'Worked.' }],
+  );
+  const ui = await bootApp(model, 100, 30);
+  await ui.press('F');
+  await ui.type('do it');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('Worked.'));
+  expect(model.requests).toHaveLength(4);
+  expect(reminded(model.requests.at(-1)!)).toHaveLength(0);
   ui.app.unmount();
 });
 
@@ -249,14 +304,14 @@ test('a plan finished in the turn goes when the answer ends; one with work left 
   await settle(30);
   expect(ui.backend.lastFrame).toContain('All done.');
   expect(ui.backend.lastFrame).not.toMatch(/\d+ done/);
-  expect(ui.backend.lastFrame).not.toMatch(/[☐◐☑] \d+ · /);
+  expect(ui.backend.lastFrame).not.toMatch(/[☐⊟☑] /);
 
   await ui.type('next');
   await ui.press('return');
   await settle(30);
   expect(ui.backend.lastFrame).toContain('Half way.');
-  expect(ui.backend.lastFrame).toMatch(/☐ \d+ · send it/);
-  expect(ui.backend.lastFrame).toMatch(/1 done/);
+  expect(ui.backend.lastFrame).toContain('☑ write the summary');
+  expect(ui.backend.lastFrame).toContain('☐ send it');
   ui.app.unmount();
 });
 

@@ -5,6 +5,13 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **The plan is drawn in its own order, with checkboxes and no numbers, and says what
+  is being worked on.** Items used to be listed by state with a number beside each —
+  numbers the assistant and you read differently, and a new plan could start at 6. Now
+  the plan keeps its order, shows flowtty's checkboxes (☐ pending, ⊟ in progress, ☑ done)
+  and no numbers; the assistant names items by an id of their own (`t1`, `t2`, …, new
+  for each plan) or by their text. When it works with nothing marked in progress, it is
+  reminded once in the turn to mark the item it is on.
 - **The session list says what each session is doing.** A word on each row: `this chat ·
   working` while an answer or a command runs in this chat, `in use elsewhere` for one
   another flow-assist process has open, and `done` for a session whose last answer came

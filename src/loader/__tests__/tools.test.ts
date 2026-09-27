@@ -91,8 +91,7 @@ test('todo add creates a pending item, assigns an id and notifies', async () => 
   let notifies = 0;
   const ctx = { notify: () => { notifies++; } } as any;
   const out = await reg.exec('todo', { action: 'add', text: 'write the test' }, ctx);
-  expect(out).toContain('1');
-  expect(out).toContain('write the test');
+  expect(out).toContain('t1 · write the test');
   expect(notifies).toBe(1);
   await reg.exec('todo', { action: 'clear' }, ctx);
 });
@@ -113,13 +112,13 @@ test('todo add accepts a whole batch of items in one call', async () => {
   // One call, one notify (not one per item), and the ids are returned so the model
   // can target them later.
   expect(out).toContain('Added 3');
-  expect(out).toContain('1 · a');
-  expect(out).toContain('2 · b');
-  expect(out).toContain('3 · c');
+  expect(out).toContain('t1 · a');
+  expect(out).toContain('t2 · b');
+  expect(out).toContain('t3 · c');
   expect(notifies).toBe(1);
   const list = await reg.exec('todo', { action: 'list' }, ctx);
-  expect(list).toContain('☐ 1 · a');
-  expect(list).toContain('☐ 3 · c');
+  expect(list).toContain('☐ t1 · a');
+  expect(list).toContain('☐ t3 · c');
   await reg.exec('todo', { action: 'clear' }, ctx);
 });
 
@@ -129,13 +128,13 @@ test('todo set replaces the whole plan (full-replace) and keeps ids by text', as
   const ctx = { notify: () => {} } as any;
   await reg.exec('todo', { action: 'set', todos: [{ text: 'a', status: 'in_progress' }, { text: 'b' }] }, ctx);
   let list = await reg.exec('todo', { action: 'list' }, ctx);
-  expect(list).toContain('◐ 1 · a');
-  expect(list).toContain('☐ 2 · b');
-  // Re-set: 'a' keeps id 1 (now done), 'b' is dropped, new 'c' gets a fresh id.
+  expect(list).toContain('⊟ t1 · a');
+  expect(list).toContain('☐ t2 · b');
+  // Re-set: 'a' keeps t1 (now done), 'b' is dropped, new 'c' gets a fresh id.
   await reg.exec('todo', { action: 'set', todos: [{ text: 'a', status: 'done' }, { text: 'c' }] }, ctx);
   list = await reg.exec('todo', { action: 'list' }, ctx);
-  expect(list).toContain('☑ 1 · a');
-  expect(list).toContain('☐ 3 · c');
+  expect(list).toContain('☑ t1 · a');
+  expect(list).toContain('☐ t3 · c');
   expect(list).not.toContain('b');
   await reg.exec('todo', { action: 'clear' }, ctx);
 });
@@ -145,7 +144,7 @@ test('todo set with an empty array clears the plan (done task leaves no stale pl
   const reg = assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
   const ctx = { notify: () => {} } as any;
   await reg.exec('todo', { action: 'set', todos: [{ text: 'a', status: 'done' }, { text: 'b', status: 'done' }] }, ctx);
-  expect(await reg.exec('todo', { action: 'list' }, ctx)).toContain('☑ 1 · a');
+  expect(await reg.exec('todo', { action: 'list' }, ctx)).toContain('☑ t1 · a');
   // Full-replace semantics allow "no remaining plan": an empty list empties the
   // plan (same as clear), so a finished task doesn't leave a stale ▾ plan.
   const out = await reg.exec('todo', { action: 'set', todos: [] }, ctx);
@@ -153,7 +152,7 @@ test('todo set with an empty array clears the plan (done task leaves no stale pl
   expect(await reg.exec('todo', { action: 'list' }, ctx)).toContain('Plan is empty');
 });
 
-test('todo list reports open items first, then done, with ids', async () => {
+test('todo list reports the items in plan order, with ids', async () => {
   const make = makeFactory({});
   const reg = assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
   const ctx = { notify: () => {} } as any;
@@ -161,12 +160,8 @@ test('todo list reports open items first, then done, with ids', async () => {
   await reg.exec('todo', { action: 'add', text: 'b' }, ctx);
   await reg.exec('todo', { action: 'complete', id: 1 }, ctx);
   const list = await reg.exec('todo', { action: 'list' }, ctx);
-  // Open items first (☐ b), then done (☑ a) — regardless of insertion order.
-  const openIdx = list.indexOf('☐ 2 · b');
-  const doneIdx = list.indexOf('☑ 1 · a');
-  expect(openIdx).toBeGreaterThan(-1);
-  expect(doneIdx).toBeGreaterThan(-1);
-  expect(openIdx).toBeLessThan(doneIdx);
+  // The plan's own order, whatever the states: a done item stays where it was.
+  expect(list).toBe('☑ t1 · a (done)\n☐ t2 · b (pending)');
   await reg.exec('todo', { action: 'clear' }, ctx);
 });
 
@@ -189,13 +184,13 @@ test('todo start marks an item in-progress (several may be in-progress)', async 
   await reg.exec('todo', { action: 'add', text: 'a' }, ctx);
   await reg.exec('todo', { action: 'add', text: 'b' }, ctx);
   const started = await reg.exec('todo', { action: 'start', id: 1 }, ctx);
-  expect(started).toContain('◐');
+  expect(started).toContain('⊟');
   expect(started).toContain('in progress');
   // Several in-progress items may coexist — starting id 2 must not reset id 1.
   await reg.exec('todo', { action: 'start', id: 2 }, ctx);
   const list = await reg.exec('todo', { action: 'list' }, ctx);
-  expect(list).toContain('◐ 1 · a');
-  expect(list).toContain('◐ 2 · b');
+  expect(list).toContain('⊟ t1 · a');
+  expect(list).toContain('⊟ t2 · b');
   await reg.exec('todo', { action: 'clear' }, ctx);
 });
 
@@ -205,14 +200,13 @@ test('todo targets an item by text, not only by id', async () => {
   const ctx = { notify: () => {} } as any;
   await reg.exec('todo', { action: 'add', text: '73' }, ctx);
   await reg.exec('todo', { action: 'add', text: '42' }, ctx);
-  // The model thinks in the number the user names ("73") — start/complete by text.
+  // The model names the item by its text ("73") — start/complete by text.
   const started = await reg.exec('todo', { action: 'start', text: '73' }, ctx);
-  expect(started).toContain('◐ 1 · 73');
+  expect(started).toContain('⊟ t1 · 73');
   const done = await reg.exec('todo', { action: 'complete', text: '73' }, ctx);
-  expect(done).toContain('☑ 1 · 73');
-  // A partial/insensitive match also resolves ("73" vs "№ 73").
-  const sub = await reg.exec('todo', { action: 'start', text: '42' }, ctx);
-  expect(sub).toContain('◐ 2 · 42');
+  expect(done).toContain('☑ t1 · 73');
+  const other = await reg.exec('todo', { action: 'start', text: '42' }, ctx);
+  expect(other).toContain('⊟ t2 · 42');
   // Unknown text → friendly error.
   const missing = await reg.exec('todo', { action: 'complete', text: '999' }, ctx);
   expect(missing).toContain('not found');
