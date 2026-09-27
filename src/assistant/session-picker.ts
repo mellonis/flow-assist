@@ -1,5 +1,6 @@
-// The session picker (`/sessions`, the assistant's `sessions` key): every saved session,
-// newest first, filtered as the person types. A pure state machine, as ./ask.ts is: the
+// The session picker (`/sessions`, the assistant's `sessions` key): the saved sessions of
+// the current project, newest first — Tab shows every session, grouped by project, the
+// current one first — filtered as the person types. A pure state machine, as ./ask.ts is: the
 // chat owns the disk and the pause, this file only what a key does to what is shown and
 // which action the chat must carry out. The two one-line fields — the filter and a new
 // name — are flowtty's `editorReducer`, the chat's own field, so caret motion, the kill
@@ -10,8 +11,12 @@ import type { SessionRow } from './sessions.js';
 
 export type PickerKey = { name?: string; ctrl?: boolean; meta?: boolean; shift?: boolean; text?: string };
 export type PickerMode = 'list' | 'rename' | 'delete';
+// `project` — the current project's sessions; `all` — every session, grouped by project.
+export type PickerScope = 'project' | 'all';
 export interface PickerState {
   rows: SessionRow[];    // as `sessionRows` read them, newest first
+  project: string | null; // the current project (null — none: the sessions at the top level)
+  scope: PickerScope;
   filter: string;
   caret: number;         // in `filter`, a UTF-16 index (flowtty's unit)
   cursor: number;        // an index into `pickerMatches(state)`
@@ -28,8 +33,8 @@ export type PickerAction =
   | { kind: 'delete'; id: string };
 export interface PickerStep { state: PickerState; action?: PickerAction }
 
-export const pickerStart = (rows: SessionRow[]): PickerState =>
-  ({ rows, filter: '', caret: 0, cursor: 0, mode: 'list', name: '', nameCaret: 0, notice: '' });
+export const pickerStart = (rows: SessionRow[], project: string | null = null): PickerState =>
+  ({ rows, project, scope: 'project', filter: '', caret: 0, cursor: 0, mode: 'list', name: '', nameCaret: 0, notice: '' });
 
 // Every word of the filter, case-blind, in the title or the conversation's text.
 export function sessionMatches(row: SessionRow, filter: string): boolean {
@@ -38,7 +43,19 @@ export function sessionMatches(row: SessionRow, filter: string): boolean {
   const hay = `${row.title.toLowerCase()}\n${row.text}`;
   return words.every((w) => hay.includes(w));
 }
-export const pickerMatches = (state: PickerState): SessionRow[] => state.rows.filter((r) => sessionMatches(r, state.filter));
+// What is shown, in the order it is drawn: in the project scope the current project's
+// sessions, newest first; in `all` every session in groups by project — the current
+// project first, then each other by its newest session — newest first inside each.
+export interface PickerGroup { project: string | null; rows: SessionRow[] }
+export function pickerGroups(state: PickerState): PickerGroup[] {
+  const hits = state.rows.filter((r) => sessionMatches(r, state.filter));
+  const own = (r: SessionRow) => (r.project ?? null) === state.project;
+  if (state.scope === 'project') return [{ project: state.project, rows: hits.filter(own) }];
+  const groups = new Map<string | null, SessionRow[]>([[state.project, []]]);
+  for (const r of hits) groups.set(r.project ?? null, [...(groups.get(r.project ?? null) ?? []), r]);
+  return [...groups].map(([project, rows]) => ({ project, rows })).filter((g) => g.rows.length);
+}
+export const pickerMatches = (state: PickerState): SessionRow[] => pickerGroups(state).flatMap((g) => g.rows);
 export const pickerSelected = (state: PickerState): SessionRow | undefined => pickerMatches(state)[state.cursor];
 
 // A list read again (after a rename or a delete) keeps the filter, and the cursor where
@@ -96,6 +113,9 @@ export function pickerKey(state: PickerState, key: PickerKey, width = 60): Picke
     if (row.lock === 'held') return { state: { ...state, notice: held(row, 'opened here') } };
     if (row.lock === 'ours') return { state, action: { kind: 'close' } }; // already this chat's
     return { state, action: { kind: 'open', id: row.id } };
+  }
+  if (name === 'tab' && !key.ctrl && !key.meta && !key.shift) {
+    return { state: { ...state, scope: state.scope === 'project' ? 'all' : 'project', cursor: 0, notice: '' } };
   }
   if (key.ctrl && name === 'n') return { state, action: { kind: 'new' } };
   if (key.ctrl && name === 'r') {

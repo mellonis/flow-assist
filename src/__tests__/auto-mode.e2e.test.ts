@@ -10,6 +10,7 @@ import path from 'node:path';
 import { ScriptedModel, bootApp, settle } from './helpers/scripted';
 import { resetSessionConfig } from '../config/load';
 import type { Make } from '../loader/plugin';
+import { listTree } from './helpers/session-files';
 
 const realFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = realFetch; resetSessionConfig(); });
@@ -204,7 +205,7 @@ test('a restart comes back to ask, and the session file never held the mode', as
   await stepAuto(ui, 2);
   expect(shownMode(ui.backend.lastFrame)).toBe('writes');
   await new Promise((r) => setTimeout(r, 350)); // the debounced save
-  const saved = fs.readdirSync(dir).filter((n) => n.endsWith('.json'));
+  const saved = listTree(dir).filter((n) => n.endsWith('.json'));
   expect(saved).toHaveLength(1);
   expect(fs.readFileSync(path.join(dir, saved[0]!), 'utf8')).not.toContain('auto');
   ui.app.unmount();

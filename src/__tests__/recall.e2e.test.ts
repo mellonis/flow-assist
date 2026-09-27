@@ -9,6 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { ScriptedModel, bootApp, settle } from './helpers/scripted';
 import { png } from './helpers/image-fixtures';
+import { listTree } from './helpers/session-files';
 
 const realFetch = globalThis.fetch;
 const realKey = process.env.ANTHROPIC_API_KEY;
@@ -289,7 +290,7 @@ test('the session keeps the content and the stubbed set: after a restart the stu
   await ask(a, first, 'first', 1);
   await a.press('escape', 'escape'); // closing the chat saves at once
   a.app.unmount();
-  const [name] = fs.readdirSync(dir).filter((n) => n.endsWith('.json'));
+  const [name] = listTree(dir).filter((n) => n.endsWith('.json'));
   const saved = JSON.parse(fs.readFileSync(path.join(dir, name!), 'utf8'));
   expect(saved.recall).toEqual({ stubbed: [id], turns: 0 });
   // The full content is what is kept: the ref on the message, never a stub in its place.

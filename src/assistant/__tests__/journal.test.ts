@@ -117,6 +117,19 @@ test('a journal lives as long as its session by default; journalDays, when set, 
   expect(back.messages.at(-1)).toEqual({ role: 'note', content: 'Journal removed after 30 days without a write (sessions.journalDays) — this session\'s full record is gone.' });
 });
 
+test('the journal sweep reaches a journal under a project directory as well', () => {
+  const root = tmp();
+  const home = path.join(root, 'Users', 'me', 'app');
+  const id = '2026-01-01T00-00-00-0009';
+  const now = Date.now();
+  appendJournal(journalPath(home, id), { t: 'row', role: 'user', text: 'x' });
+  fs.utimesSync(journalPath(home, id), new Date(now - 40 * 86_400_000), new Date(now - 40 * 86_400_000));
+  saveSession(home, session({ id }));
+  expect(sweepJournals(root, 30, now)).toBe(1);
+  expect(fs.existsSync(journalPath(home, id))).toBe(false);
+  expect(loadSession(home, id)!.messages.at(-1)!.role).toBe('note');
+});
+
 test('the export is readable markdown: the conversation, each call folded with its arguments and result, the summaries in place', () => {
   const md = exportMarkdown([
     { t: 'start', id: 'x', at: '2026-09-27T10:00:00.000Z' },

@@ -9,6 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { ScriptedModel, bootApp, settle } from './helpers/scripted';
 import type { ContextItem, Make } from '../loader/plugin';
+import { listTree } from './helpers/session-files';
 
 const realFetch = globalThis.fetch;
 const realKey = process.env.ANTHROPIC_API_KEY;
@@ -122,7 +123,7 @@ test('two items reach the end of each request, framed as data — and neither th
   expect(tailOf(second)).toContain('cursor on ABC-12');
 
   await ui.press('escape', 'escape'); // saves the session
-  const saved = fs.readdirSync(dir).filter((n) => n.endsWith('.json')).map((n) => fs.readFileSync(path.join(dir, n), 'utf8')).join('\n');
+  const saved = listTree(dir).filter((n) => n.endsWith('.json')).map((n) => fs.readFileSync(path.join(dir, n), 'utf8')).join('\n');
   expect(saved).toContain('what am I looking at?');
   expect(saved).not.toContain('cursor on ABC-12');
   expect(saved).not.toContain('What the person sees now');

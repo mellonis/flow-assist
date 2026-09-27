@@ -1,7 +1,16 @@
 // Chat sessions on disk, so a restart (an update, a crash) does not lose the
-// conversation. One file per session, `<config dir>/sessions/<id>.json`; the app
-// continues the latest one on start, `/clear` begins a new one and `/resume` goes
+// conversation. One file per session, `<config dir>/sessions/<project>/<id>.json`; the
+// app continues the latest one on start, `/clear` begins a new one and `/resume` goes
 // back to an older one — as in Claude Code.
+//
+// A session belongs to the project it started in (`projectOf`): its files live under a
+// mirror of that project's path (`projectHome`), a session with no project at the top
+// level. Every `(dir, id)` function below takes a session's OWN directory — where its
+// state file, journal and lock sit side by side; the ones that read every session
+// (`listSessions`, `sessionRows`, `pruneSessions`, `sweepJournals`) take the root and walk
+// the tree. A file written flat by an older host is read where it is, as a session with
+// no project, and never moved: another process may hold its lock beside it, and a
+// move would part the file from that lock.
 //
 // A session is ONE object: what is on screen, what the model sees, the summary a
 // `/compact` left, the plan and the last usage reading. They are three views of one
@@ -38,6 +47,7 @@ import { configDir } from '../config/load.js';
 import { isImageRef, type ImageRef } from './images.js';
 import { createRecallState, saveRecallState } from './recall.js';
 import { readLegacyView, type ViewRecord } from './views.js';
+import { realOf, within } from './shell.js';
 import { addCalls, callRun, readChange, readParts, type CallRun, type TurnPart } from './step.js';
 import type { ChangeView } from './diff.js';
 import type { TokenUsage } from './agent.js';
@@ -73,10 +83,13 @@ export interface Session {
   imageSeq?: number;                   // the last N given out — numbering goes on from it
   recall?: { stubbed: string[]; turns: number }; // the bulky items sent as stubs (by id) and the turns since the last batch (./recall.ts)
   closed?: boolean;                    // left with /clear — listed, never continued on start
+  project?: string | null;             // the project it started in (`projectOf`), decided once; absent — none
   rev?: number;                        // bumped by every saveSession; absent (an older host) reads as 0
 }
 
-export interface SessionInfo { id: string; title: string; updatedAt: string; turns: number; closed: boolean }
+// `dir` — the directory the file was found in (the session's own, for every
+// `(dir, id)` function); `project` — the one it recorded, null for none.
+export interface SessionInfo { id: string; title: string; updatedAt: string; turns: number; closed: boolean; dir: string; project: string | null }
 
 // null — sessions stay in memory. That is the case under `bun test` (NODE_ENV=test)
 // with no dir named: a test that boots the app must never write into, or continue,
@@ -87,6 +100,51 @@ export function sessionsDir(config: Record<string, unknown> | undefined, env: Re
   const expanded = String(raw).replace(/^~(?=\/|$)/, os.homedir());
   return path.isAbsolute(expanded) ? expanded : path.resolve(process.cwd(), expanded);
 }
+
+// ─── Where a session lives ──────────────────────────────────────────────────────
+// The project a directory belongs to: the innermost shell root holding it, else the
+// nearest directory above it with a `.git` (a directory, or a file in a worktree), else
+// none. By real path, as the roots are compared everywhere (./shell.ts, `dirAllowed`).
+export function gitRootOf(dir: string): string | null {
+  for (let d = dir; ; d = path.dirname(d)) {
+    if (fs.existsSync(path.join(d, '.git'))) return d;
+    if (path.dirname(d) === d) return null;
+  }
+}
+export function projectOf(dir: string, roots: string[], gitRoot: (dir: string) => string | null = gitRootOf): string | null {
+  const real = realOf(path.resolve(dir));
+  const root = roots.map(realOf).filter((r) => within(real, r)).sort((a, b) => b.length - a.length)[0];
+  return root ?? gitRoot(real);
+}
+
+// A project's sessions directory: the project's path mirrored under the root, its
+// separators kept as directories (`/Users/me/app` → `<root>/Users/me/app`); no project
+// is the root itself.
+export function projectHome(root: string, project: string | null): string {
+  if (!project) return root;
+  return path.join(root, ...project.split(/[\\/]/).filter((seg) => seg && seg !== '.' && seg !== '..').map((seg) => seg.replace(/:$/, '')));
+}
+const projectRead = (v: unknown): string | null => (typeof v === 'string' && v ? v : null);
+
+// Every directory of the tree, the root first. A link is never followed: the tree is
+// ours, and a link in it leads somewhere that is not.
+const MAX_DEPTH = 64;
+function sessionDirs(root: string): string[] {
+  const out: string[] = [];
+  const walk = (dir: string, depth: number) => {
+    let entries: fs.Dirent[];
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    out.push(dir);
+    if (depth >= MAX_DEPTH) return;
+    for (const e of entries) if (e.isDirectory()) walk(path.join(dir, e.name), depth + 1);
+  };
+  walk(root, 0);
+  return out;
+}
+const namesIn = (dir: string): string[] => {
+  try { return fs.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile()).map((e) => e.name); } catch { return []; }
+};
+const newestFirst = (a: { updatedAt: string }, b: { updatedAt: string }) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0);
 
 // Sortable and unique enough for one person: 2026-09-21T16-05-09-4f2a.
 export function newSessionId(now = new Date()): string {
@@ -312,24 +370,32 @@ export function loadSession(dir: string, id: string): Session | null {
       // items; anything that is not a list of strings reads as nothing stubbed.
       recall: saveRecallState(createRecallState(s.recall)),
       rev: Number.isInteger(s.rev) ? (s.rev as number) : 0,
+      project: projectRead(s.project),
     };
   } catch {
     return null;
   }
 }
 
-// Newest first; a file that does not parse is left out.
-export function listSessions(dir: string): SessionInfo[] {
-  let names: string[] = [];
-  try { names = fs.readdirSync(dir); } catch { return []; }
+// Every session under the root, newest first; a file that does not parse is left out.
+export function listSessions(root: string): SessionInfo[] {
   const out: SessionInfo[] = [];
-  for (const n of names) {
-    const id = n.replace(/\.json$/, '');
-    if (!n.endsWith('.json') || !ID.test(id)) continue;
-    const s = loadSession(dir, id);
-    if (s) out.push({ id, title: s.title || sessionTitle(s.messages), updatedAt: s.updatedAt, turns: s.messages.filter(bySomeone).length, closed: s.closed === true });
+  for (const dir of sessionDirs(root)) {
+    for (const n of namesIn(dir)) {
+      const id = n.replace(/\.json$/, '');
+      if (!n.endsWith('.json') || !ID.test(id)) continue;
+      const s = loadSession(dir, id);
+      if (s) out.push({ id, title: s.title || sessionTitle(s.messages), updatedAt: s.updatedAt, turns: s.messages.filter(bySomeone).length, closed: s.closed === true, dir, project: s.project ?? null });
+    }
   }
-  return out.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0));
+  return out.sort(newestFirst);
+}
+
+// The sessions a list for the current project offers: its own, or — when it has none —
+// every session, so a first start in a new project still finds the last conversation.
+export function projectFirst<T extends { project: string | null }>(list: T[], project: string | null): T[] {
+  const mine = list.filter((s) => s.project === project);
+  return mine.length ? mine : list;
 }
 
 // ─── The picker's rows ──────────────────────────────────────────────────────────
@@ -338,7 +404,7 @@ export function listSessions(dir: string): SessionInfo[] {
 // lower-cased — at most SEARCH_TEXT_MAX characters per session, the NEWEST kept, since
 // the word a person looks for is most often one said lately.
 export const SEARCH_TEXT_MAX = 64 * 1024;
-export interface SessionRow { id: string; title: string; updatedAt: string; turns: number; bytes: number; lock: LockState; text: string }
+export interface SessionRow { id: string; title: string; updatedAt: string; turns: number; bytes: number; lock: LockState; text: string; dir: string; project: string | null }
 
 export function searchText(messages: unknown[]): string {
   let out = '';
@@ -354,15 +420,14 @@ export function searchText(messages: unknown[]): string {
   return out.toLowerCase().slice(-SEARCH_TEXT_MAX); // lower-cased first: a few characters grow
 }
 
-// Newest first. One file is parsed at a time and dropped once its row is made, so the
-// list never holds every conversation at once — only each one's bounded `text`. The
-// picker reads it when it opens and after a rename or a delete, never per keystroke.
-// A file that does not parse is left out, as `listSessions` leaves it.
-export function sessionRows(dir: string, token: string, deps: LockDeps = {}): SessionRow[] {
-  let names: string[] = [];
-  try { names = fs.readdirSync(dir); } catch { return []; }
+// Every session under the root, newest first. One file is parsed at a time and dropped
+// once its row is made, so the list never holds every conversation at once — only each
+// one's bounded `text`. The picker reads it when it opens and after a rename or a
+// delete, never per keystroke. A file that does not parse is left out, as
+// `listSessions` leaves it.
+export function sessionRows(root: string, token: string, deps: LockDeps = {}): SessionRow[] {
   const out: SessionRow[] = [];
-  for (const n of names) {
+  for (const dir of sessionDirs(root)) for (const n of namesIn(dir)) {
     const id = n.replace(/\.json$/, '');
     if (!n.endsWith('.json') || !ID.test(id)) continue;
     try {
@@ -374,10 +439,11 @@ export function sessionRows(dir: string, token: string, deps: LockDeps = {}): Se
       out.push({
         id, title: (typeof s.title === 'string' && s.title) || sessionTitle(messages), updatedAt: String(s.updatedAt ?? ''),
         turns: messages.filter(bySomeone).length, bytes, lock: lockState(dir, id, token, deps), text: searchText(messages),
+        dir, project: projectRead(s.project),
       });
     } catch { /* unreadable — left out */ }
   }
-  return out.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0));
+  return out.sort(newestFirst);
 }
 
 // `/clear`: the conversation stays on the list, but a restart does not bring it back.
@@ -386,11 +452,16 @@ export function closeSession(dir: string, id: string): void {
   if (s) saveSession(dir, { ...s, closed: true });
 }
 
-// What a start continues: the newest session, unless it was cleared.
-export function sessionToContinue(dir: string): Session | null {
-  const last = listSessions(dir)[0];
-  if (!last || last.closed) return null;
-  return loadSession(dir, last.id);
+// What a start continues: the newest session of the current project — the newest of
+// all only when the project has none — unless it was cleared. A project whose newest
+// was cleared continues nothing: another project's conversation is not what it left.
+export function pickToContinue(list: SessionInfo[], project: string | null): SessionInfo | null {
+  const last = projectFirst(list, project)[0];
+  return !last || last.closed ? null : last;
+}
+export function sessionToContinue(root: string, project: string | null = null): Session | null {
+  const last = pickToContinue(listSessions(root), project);
+  return last ? loadSession(last.dir, last.id) : null;
 }
 
 // The state file and the journal go together.
@@ -406,12 +477,10 @@ export function deleteSession(dir: string, id: string): void {
 // gone must not look like one that still has it. A journal whose session a live chat
 // holds is left alone, and so is one whose state file never got written (a crash in
 // the first moments of a session) until it is as old as any other.
-export function sweepJournals(dir: string, days = JOURNAL_DAYS, now = Date.now()): number {
+export function sweepJournals(root: string, days = JOURNAL_DAYS, now = Date.now()): number {
   if (!(days > 0)) return 0;
-  let names: string[] = [];
-  try { names = fs.readdirSync(dir); } catch { return 0; }
   let removed = 0;
-  for (const n of names) {
+  for (const dir of sessionDirs(root)) for (const n of namesIn(dir)) {
     if (!n.endsWith(JOURNAL_EXT)) continue;
     const id = n.slice(0, -JOURNAL_EXT.length);
     if (!ID.test(id)) continue;
@@ -435,22 +504,22 @@ export function sweepJournals(dir: string, days = JOURNAL_DAYS, now = Date.now()
   return removed;
 }
 
-// Keeps the newest `keep`; returns how many session files went. A session whose
+// Keeps the newest `keep` of each project — each directory of the tree, the top level
+// one of them; returns how many session files went. A session whose
 // lock is currently HELD by a live process (this one or another) is left alone —
 // deleting its file out from under a process still writing it would be a second
 // way to lose data. A `.lock` whose session file is already gone (deleted just
 // above, or by hand) is swept too, unless it is itself still held.
-export function pruneSessions(dir: string, keep = KEEP_SESSIONS): number {
-  const old = listSessions(dir).slice(keep);
+export function pruneSessions(root: string, keep = KEEP_SESSIONS): number {
+  const byDir = new Map<string, SessionInfo[]>();
+  for (const s of listSessions(root)) byDir.set(s.dir, [...(byDir.get(s.dir) ?? []), s]);
   let removed = 0;
-  for (const s of old) {
-    if (isLockHeld(dir, s.id)) continue;
-    deleteSession(dir, s.id);
+  for (const s of [...byDir.values()].flatMap((list) => list.slice(keep))) {
+    if (isLockHeld(s.dir, s.id)) continue;
+    deleteSession(s.dir, s.id);
     removed++;
   }
-  let names: string[] = [];
-  try { names = fs.readdirSync(dir); } catch { /* nothing to sweep */ }
-  for (const n of names) {
+  for (const dir of sessionDirs(root)) for (const n of namesIn(dir)) {
     if (!n.endsWith('.lock')) continue;
     const id = n.slice(0, -'.lock'.length);
     if (!ID.test(id) || fs.existsSync(path.join(dir, `${id}.json`))) continue;

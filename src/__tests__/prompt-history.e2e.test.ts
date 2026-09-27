@@ -7,6 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { Make } from '../loader/plugin.ts';
 import { ScriptedModel, bootApp, settle } from './helpers/scripted';
+import { listTree } from './helpers/session-files';
 
 const realFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = realFetch; });
@@ -19,7 +20,7 @@ const settleUntil = async (cond: () => boolean, ms = 3000) => {
   while (Date.now() < end) { await settle(2); if (cond()) return; await wait(20); }
 };
 const promptsIn = (dir: string): string[] => {
-  const name = fs.readdirSync(dir).find((n) => n.endsWith('.json'))!;
+  const name = listTree(dir).find((n) => n.endsWith('.json'))!;
   return JSON.parse(fs.readFileSync(path.join(dir, name), 'utf8')).prompts;
 };
 

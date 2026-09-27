@@ -7,6 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { SESSION_VERSION, newSessionId, saveSession, type Session } from '../assistant/sessions.ts';
 import { ScriptedModel, bootApp, settle } from './helpers/scripted';
+import { listTree } from './helpers/session-files';
 
 const realFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = realFetch; });
@@ -65,7 +66,7 @@ test('closing the chat saves at once; /clear starts anew and a restart does not 
   const dir = dirOf();
   const first = await talk(dir, 'первый вопрос', 'первый ответ');
   await first.ui.press('escape', 'escape'); // closed — written without waiting
-  expect(fs.readdirSync(dir).filter((n) => n.endsWith('.json'))).toHaveLength(1);
+  expect(listTree(dir).filter((n) => n.endsWith('.json'))).toHaveLength(1);
   await first.ui.press('F');
   await first.ui.type('/clear');
   await first.ui.press('return');
@@ -116,7 +117,7 @@ test('a second process avoids a session the first still holds — starts a new o
   const dir = dirOf();
   const first = await talk(dir, 'первый вопрос', 'первый ответ');
   await first.ui.press('escape', 'escape'); // closed — written and locked, at once; the process stays alive
-  const files1 = fs.readdirSync(dir);
+  const files1 = listTree(dir);
   expect(files1.filter((n) => n.endsWith('.json'))).toHaveLength(1);
   expect(files1.filter((n) => n.endsWith('.lock'))).toHaveLength(1);
   const heldFile = files1.find((n) => n.endsWith('.json'))!;
@@ -141,7 +142,7 @@ test('a second process avoids a session the first still holds — starts a new o
   ui2.app.unmount();
   first.ui.app.unmount();
 
-  const jsonFiles = fs.readdirSync(dir).filter((n) => n.endsWith('.json'));
+  const jsonFiles = listTree(dir).filter((n) => n.endsWith('.json'));
   expect(jsonFiles).toHaveLength(2); // the first's original session, plus the second's new one
   const heldAfter = JSON.parse(fs.readFileSync(path.join(dir, heldFile), 'utf8'));
   expect(heldAfter.messages.some((m: { role: string; content: unknown }) => m.role === 'user' && m.content === 'первый вопрос')).toBe(true);
@@ -152,7 +153,7 @@ test('/resume of a session another live instance holds refuses with a note and s
   const dir = dirOf();
   const first = await talk(dir, 'held-vopros', 'held-otvet');
   await first.ui.press('escape', 'escape'); // held: saved and locked, the process stays alive
-  const lockName = fs.readdirSync(dir).find((n) => n.endsWith('.lock'))!;
+  const lockName = listTree(dir).find((n) => n.endsWith('.lock'))!;
 
   const model2 = new ScriptedModel();
   model2.script([{ text: 'own-otvet' }]);
@@ -220,7 +221,7 @@ test('a foreign write between two saves forks into a new session — both a bump
     const dir = dirOf();
     const first = await talk(dir, 'q1', 'a1');
     await first.ui.press('escape', 'escape'); // save #1 — establishes the rev this instance knows
-    const name = fs.readdirSync(dir).find((n) => n.endsWith('.json'))!;
+    const name = listTree(dir).find((n) => n.endsWith('.json'))!;
     const file = path.join(dir, name);
     const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
     fs.writeFileSync(file, JSON.stringify(mutate(raw))); // a foreign write this instance never saw
@@ -235,7 +236,7 @@ test('a foreign write between two saves forks into a new session — both a bump
     const frame = first.ui.backend.lastFrame!;
     expect(flat(frame)).toContain(flat('was changed elsewhere — saved this conversation as a new session.'));
 
-    const files = fs.readdirSync(dir).filter((n) => n.endsWith('.json'));
+    const files = listTree(dir).filter((n) => n.endsWith('.json'));
     expect(files).toHaveLength(2);
     const originalStill = JSON.parse(fs.readFileSync(file, 'utf8'));
     expect(originalStill.messages.some((m: { content: unknown }) => m.content === 'FOREIGN EDIT')).toBe(true);
@@ -254,7 +255,7 @@ test('a hand edit that leaves rev untouched still forks — mtimeMs/size catch w
   const dir = dirOf();
   const first = await talk(dir, 'q1', 'a1');
   await first.ui.press('escape', 'escape'); // save #1 — establishes the fingerprint this instance knows
-  const name = fs.readdirSync(dir).find((n) => n.endsWith('.json'))!;
+  const name = listTree(dir).find((n) => n.endsWith('.json'))!;
   const file = path.join(dir, name);
   const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
   await new Promise((r) => setTimeout(r, 5)); // a distinguishable mtime even on a coarse clock
@@ -271,7 +272,7 @@ test('a hand edit that leaves rev untouched still forks — mtimeMs/size catch w
   const frame = first.ui.backend.lastFrame!;
   expect(flat(frame)).toContain(flat('was changed elsewhere — saved this conversation as a new session.'));
 
-  const files = fs.readdirSync(dir).filter((n) => n.endsWith('.json'));
+  const files = listTree(dir).filter((n) => n.endsWith('.json'));
   expect(files).toHaveLength(2);
   const originalStill = JSON.parse(fs.readFileSync(file, 'utf8'));
   expect(originalStill.rev).toBe(raw.rev); // untouched — the fork never overwrote it, rev included
@@ -313,7 +314,7 @@ test('a legacy session (no rev field) changed elsewhere by another legacy writer
   const frame = ui.backend.lastFrame!;
   expect(flat(frame)).toContain(flat('was changed elsewhere — saved this conversation as a new session.'));
 
-  const files = fs.readdirSync(dir).filter((n) => n.endsWith('.json'));
+  const files = listTree(dir).filter((n) => n.endsWith('.json'));
   expect(files).toHaveLength(2);
   const originalStill = JSON.parse(fs.readFileSync(file, 'utf8'));
   expect(originalStill.rev).toBeUndefined(); // the foreign legacy write, still untouched
@@ -326,19 +327,19 @@ test('the lock is released on unmount and on /clear', async () => {
   const dir = dirOf();
   const first = await talk(dir, 'q', 'a');
   await first.ui.press('escape', 'escape');
-  expect(fs.readdirSync(dir).filter((n) => n.endsWith('.lock'))).toHaveLength(1);
+  expect(listTree(dir).filter((n) => n.endsWith('.lock'))).toHaveLength(1);
   first.ui.app.unmount();
-  expect(fs.readdirSync(dir).filter((n) => n.endsWith('.lock'))).toHaveLength(0);
+  expect(listTree(dir).filter((n) => n.endsWith('.lock'))).toHaveLength(0);
 
   const dir2 = dirOf();
   const second = await talk(dir2, 'q2', 'a2');
   await second.ui.press('escape', 'escape');
-  expect(fs.readdirSync(dir2).filter((n) => n.endsWith('.lock'))).toHaveLength(1);
+  expect(listTree(dir2).filter((n) => n.endsWith('.lock'))).toHaveLength(1);
   await second.ui.press('F');
   await second.ui.type('/clear');
   await second.ui.press('return');
   await settle(4);
-  expect(fs.readdirSync(dir2).filter((n) => n.endsWith('.lock'))).toHaveLength(0);
+  expect(listTree(dir2).filter((n) => n.endsWith('.lock'))).toHaveLength(0);
   second.ui.app.unmount();
 });
 
@@ -352,7 +353,7 @@ test('/title renames the session: the name is in its file and stays through late
   await first.ui.type('/title Тренды за неделю');
   await first.ui.press('return');
   await settle(4);
-  const name = fs.readdirSync(dir).find((n) => n.endsWith('.json'))!;
+  const name = listTree(dir).find((n) => n.endsWith('.json'))!;
   const read = () => JSON.parse(fs.readFileSync(path.join(dir, name), 'utf8'));
   expect(read().title).toBe('Тренды за неделю');
 
@@ -402,7 +403,7 @@ test('an un-renamed session keeps the title of its first save — through later 
   const dir2 = dirOf();
   const first = await talk(dir2, 'первый вопрос', 'ответ');
   await first.ui.press('escape', 'escape'); // the first save — the title is fixed here
-  const name = fs.readdirSync(dir2).find((n) => n.endsWith('.json'))!;
+  const name = listTree(dir2).find((n) => n.endsWith('.json'))!;
   const file = path.join(dir2, name);
   const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
   expect(raw.title).toBe('первый вопрос');
@@ -415,7 +416,7 @@ test('an un-renamed session keeps the title of its first save — through later 
   await first.ui.press('escape', 'escape');
   await first.ui.press('F');
   expect(flat(first.ui.backend.lastFrame!)).toContain(flat('Session "первый вопрос" was changed elsewhere'));
-  const forked = fs.readdirSync(dir2).find((n) => n.endsWith('.json') && n !== name)!;
+  const forked = listTree(dir2).find((n) => n.endsWith('.json') && n !== name)!;
   expect(JSON.parse(fs.readFileSync(path.join(dir2, forked), 'utf8')).title).toBe('первый вопрос');
   first.ui.app.unmount();
 });
@@ -443,7 +444,7 @@ test('/new starts a fresh session: the model is sent nothing of the old one, whi
   await first.ui.press('return');
   await settle(4);
   expect(first.ui.backend.lastFrame).not.toContain('старый ответ');
-  const files = fs.readdirSync(dir).filter((n) => n.endsWith('.json'));
+  const files = listTree(dir).filter((n) => n.endsWith('.json'));
   expect(files).toHaveLength(1);
   const old = JSON.parse(fs.readFileSync(path.join(dir, files[0]!), 'utf8'));
   expect(old.messages.some((m: { content: unknown }) => m.content === 'старый ответ')).toBe(true);
@@ -456,7 +457,7 @@ test('/new starts a fresh session: the model is sent nothing of the old one, whi
   expect(sent.some((m) => m.content === 'старый вопрос')).toBe(false);
   expect(sent.at(-1)).toMatchObject({ role: 'user', content: 'новый вопрос' });
   await first.ui.press('escape', 'escape');
-  expect(fs.readdirSync(dir).filter((n) => n.endsWith('.json'))).toHaveLength(2);
+  expect(listTree(dir).filter((n) => n.endsWith('.json'))).toHaveLength(2);
   first.ui.app.unmount();
 });
 
@@ -499,7 +500,7 @@ test('a history longer than the cap is cut at a whole turn: after a restart the 
     expect(ui.backend.lastFrame).toContain('третий готов');
     await ui.press('escape', 'escape'); // written at once
     ui.app.unmount();
-    const file = fs.readdirSync(dir).find((n) => n.endsWith('.json'))!;
+    const file = listTree(dir).find((n) => n.endsWith('.json'))!;
     const saved = JSON.parse(fs.readFileSync(path.join(dir, file), 'utf8'));
     expect(saved.api[0]).toMatchObject({ role: 'user', content: 'два' });
 

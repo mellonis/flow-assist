@@ -12,6 +12,7 @@ import type { Make } from '../loader/plugin';
 import { sha256 } from '../assistant/images';
 import { ScriptedModel, bootApp, settle } from './helpers/scripted';
 import { png } from './helpers/image-fixtures';
+import { listTree } from './helpers/session-files';
 
 const realFetch = globalThis.fetch;
 const realKey = process.env.ANTHROPIC_API_KEY;
@@ -217,7 +218,7 @@ test('the session keeps a ref into the host\'s store, never the bytes, and a res
   await ask(a, first, 'show me', 2);
   await a.press('escape', 'escape'); // closing the chat saves at once
   a.app.unmount();
-  const [name] = fs.readdirSync(dir).filter((n) => n.endsWith('.json'));
+  const [name] = listTree(dir).filter((n) => n.endsWith('.json'));
   const raw = fs.readFileSync(path.join(dir, name!), 'utf8');
   expect(raw).not.toContain('base64');
   const saved = JSON.parse(raw) as { api: Array<{ role: string; images?: Array<{ n: number; name: string; path: string; sha256: string }> }> };

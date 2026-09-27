@@ -44,9 +44,13 @@ anything the model has read, and only the host's shell tool is covered by the fl
 Only pass it for a prompt whose tools read nothing you do not trust.
 
 The chat is saved as you go and continued on the next start, so a restart or an
-update loses nothing. `/sessions` — or Ctrl+S from any screen (`config set keys.sessions
-<key>` moves it) — lists every saved session, newest first, with its title, when it was
-last used, its size, and whether another flow-assist process has it open. Type to
+update loses nothing. A session belongs to the project it started in — the `shell.roots`
+entry holding the shell's directory at its first message, else that directory's git
+repository — and a start continues that project's newest session (the newest of all
+when the project has none yet). `/sessions` — or Ctrl+S from any screen (`config set
+keys.sessions <key>` moves it) — lists the current project's saved sessions, newest
+first, with its title, when it was last used, its size, and whether another flow-assist
+process has it open; Tab shows every session, grouped under each project's path. Type to
 filter by the title or by any word of the conversation; ⏎ opens one (the session you are
 in is saved first), Ctrl+N starts a new one, Ctrl+R renames, Ctrl+X deletes after a y/n.
 A session open in another process can be neither opened nor renamed nor deleted from
@@ -55,10 +59,11 @@ here. A session is named by the first line you wrote; `/title <text>` renames it
 say anything continues it; while an answer is still coming it says to stop it (Esc)
 first. `/clear` also starts a fresh session, but it stops an answer that is still
 coming and marks the old session done, so a restart starts empty. `/resume` lists the
-saved sessions and `/resume <n>` opens one.
-Sessions live in `sessions/` in the config directory, readable by you only
-(`sessions.resume: false` starts every run empty; `sessions.keep` — how many are kept,
-50 by default). What a restart restores is bounded — the last 400 messages of the
+current project's saved sessions and `/resume <n>` opens one.
+Sessions live in `sessions/` in the config directory, under a mirror of their project's
+path (`sessions/Users/me/app/<id>.json`; a session with no project, and one saved by an
+older version, at the top level), readable by you only (`sessions.resume: false` starts
+every run empty; `sessions.keep` — how many are kept per project, 50 by default). What a restart restores is bounded — the last 400 messages of the
 conversation, fewer of the commands' output blocks — but each session also keeps a
 journal beside it, `<id>.log.jsonl`: everything as it happened — every tool call with
 its whole arguments and result and the y/n you gave it, a background task's calls

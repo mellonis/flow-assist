@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { CELL_FREE, CELL_FULL, CELL_PART, contextBadge, contextGrid, contextHeading, contextLegend, estimateTokens, readContext } from '../assistant/context-meter.js';
 import { ScriptedModel, bootApp, handoff, settle } from './helpers/scripted.js';
+import { listTree } from './helpers/session-files';
 
 const parts = (over: Partial<Parameters<typeof readContext>[0]> = {}) => ({
   system: 'x'.repeat(4000), memory: '', plan: '', summary: '', tools: [], messages: [], ...over,
@@ -242,7 +243,7 @@ test('the cache line: an OpenAI-compatible server\'s prompt_tokens_details.cache
 
   // Closing the panel, then the chat, writes the session at once (no debounce wait).
   await ui.press('escape', 'escape', 'escape');
-  const [file] = fs.readdirSync(dir).filter((n) => n.endsWith('.json'));
+  const [file] = listTree(dir).filter((n) => n.endsWith('.json'));
   const saved = JSON.parse(fs.readFileSync(path.join(dir, file!), 'utf8'));
   expect(saved.usage).toMatchObject({ promptTokens: 3300, completionTokens: 200, cachedTokens: 2840 });
   expect('cacheWriteTokens' in saved.usage).toBe(false);
@@ -275,7 +276,7 @@ test('the cache line: Anthropic\'s cache_read/cache_creation, kept with the sess
     expect(frame).toContain('last request: 4.3k prompt · 2.8k from cache · 1.2k written to cache');
 
     await ui.press('escape', 'escape', 'escape');
-    const [file] = fs.readdirSync(dir).filter((n) => n.endsWith('.json'));
+    const [file] = listTree(dir).filter((n) => n.endsWith('.json'));
     const saved = JSON.parse(fs.readFileSync(path.join(dir, file!), 'utf8'));
     expect(saved.usage).toMatchObject({ promptTokens: 4300, completionTokens: 200, cachedTokens: 2840, cacheWriteTokens: 1200 });
     const answer = saved.messages.find((m: Record<string, unknown>) => m.role === 'assistant' && typeof m.content === 'string' && (m.content as string).includes('hi there'));

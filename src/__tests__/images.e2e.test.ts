@@ -8,6 +8,7 @@ import path from 'node:path';
 import { ScriptedModel, bootApp, settle } from './helpers/scripted';
 import { png } from './helpers/image-fixtures';
 import type { ClipboardImage } from '../assistant/images';
+import { listTree } from './helpers/session-files';
 
 const realFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = realFetch; });
@@ -173,7 +174,7 @@ test('the session keeps a path and a hash, never the bytes; a restart sends the 
   await a.press('escape', 'escape'); // closing the chat saves at once
   a.app.unmount();
 
-  const [file] = fs.readdirSync(dir).filter((n) => n.endsWith('.json'));
+  const [file] = listTree(dir).filter((n) => n.endsWith('.json'));
   const saved = fs.readFileSync(path.join(dir, file!), 'utf8');
   expect(saved).not.toContain('base64');
   expect(saved).not.toContain(b64(one));

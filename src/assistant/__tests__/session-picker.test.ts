@@ -1,8 +1,8 @@
 import { expect, test } from 'bun:test';
-import { formatBytes, pickerKey, pickerMatches, pickerReload, pickerSelected, pickerStart, type PickerAction, type PickerKey, type PickerState } from '../session-picker.ts';
+import { formatBytes, pickerGroups, pickerKey, pickerMatches, pickerReload, pickerSelected, pickerStart, type PickerAction, type PickerKey, type PickerState } from '../session-picker.ts';
 import type { SessionRow } from '../sessions.ts';
 
-const row = (over: Partial<SessionRow>): SessionRow => ({ id: 'x', title: 't', updatedAt: '2026-09-25T10:00:00.000Z', turns: 1, bytes: 10, lock: 'free', text: '', ...over });
+const row = (over: Partial<SessionRow>): SessionRow => ({ id: 'x', title: 't', updatedAt: '2026-09-25T10:00:00.000Z', turns: 1, bytes: 10, lock: 'free', text: '', dir: '/s', project: null, ...over });
 const ROWS = [
   row({ id: 'a', title: 'Current chat', lock: 'ours' }),
   row({ id: 'b', title: 'Held one', lock: 'held', text: 'zebrafish in the pond' }),
@@ -107,4 +107,39 @@ test('formatBytes says a size the way a person reads it', () => {
   expect(formatBytes(812)).toBe('812 B');
   expect(formatBytes(12 * 1024 + 100)).toBe('12 KB');
   expect(formatBytes(3 * 1024 * 1024)).toBe('3.0 MB');
+});
+
+// ─── the current project, and all of them ─────────────────────────────────────
+
+const MIXED = [
+  row({ id: 'o1', title: 'Other newest', project: '/p/other', updatedAt: '2026-09-25T12:00:00.000Z' }),
+  row({ id: 'a1', title: 'App newer', project: '/p/app', updatedAt: '2026-09-25T11:00:00.000Z', text: 'zebra' }),
+  row({ id: 'n1', title: 'Loose one', project: null, updatedAt: '2026-09-25T10:30:00.000Z', text: 'zebra' }),
+  row({ id: 'a2', title: 'App older', project: '/p/app', updatedAt: '2026-09-25T10:00:00.000Z' }),
+  row({ id: 'o2', title: 'Other older', project: '/p/other', updatedAt: '2026-09-25T09:00:00.000Z', text: 'zebra' }),
+];
+
+test('the picker opens on the current project; Tab shows every session grouped by project, the current one first; Tab again goes back', () => {
+  const start = pickerStart(MIXED, '/p/app');
+  expect(start.scope).toBe('project');
+  expect(pickerMatches(start).map((r) => r.id)).toEqual(['a1', 'a2']);
+  const all = press(start, 'down', 'tab').state;
+  expect(all.scope).toBe('all');
+  expect(all.cursor).toBe(0);
+  expect(pickerMatches(all).map((r) => r.id)).toEqual(['a1', 'a2', 'o1', 'o2', 'n1']);
+  expect(pickerGroups(all).map((g) => [g.project, g.rows.map((r) => r.id)])).toEqual([['/p/app', ['a1', 'a2']], ['/p/other', ['o1', 'o2']], [null, ['n1']]]);
+  expect(pickerSelected(press(all, 'down', 'down').state)!.id).toBe('o1');
+  expect(press(all, 'tab').state.scope).toBe('project');
+});
+
+test('the filter works in both scopes', () => {
+  const s = press(pickerStart(MIXED, '/p/app'), 'z', 'e', 'b', 'r', 'a').state;
+  expect(pickerMatches(s).map((r) => r.id)).toEqual(['a1']);
+  const all = press(s, 'tab').state;
+  expect(all.filter).toBe('zebra');
+  expect(pickerMatches(all).map((r) => r.id)).toEqual(['a1', 'n1', 'o2']); // the groups follow their newest match
+});
+
+test('no project is a project of its own: the sessions at the top level', () => {
+  expect(pickerMatches(pickerStart(MIXED, null)).map((r) => r.id)).toEqual(['n1']);
 });

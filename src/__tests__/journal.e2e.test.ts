@@ -7,6 +7,7 @@ import path from 'node:path';
 import { readJournal, type JournalEvent } from '../assistant/journal.ts';
 import { ScriptedModel, bootApp, handoff, settle } from './helpers/scripted';
 import type { Make } from '../loader/plugin.ts';
+import { listTree, sessionIdOf } from './helpers/session-files';
 
 const realFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = realFetch; });
@@ -14,7 +15,7 @@ afterEach(() => { globalThis.fetch = realFetch; });
 const settleUntil = async (ok: () => boolean, n = 200) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
 const dirOf = () => fs.mkdtempSync(path.join(os.tmpdir(), 'fa-journal-e2e-'));
 const rootOf = () => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-journal-root-')));
-const journals = (dir: string) => fs.readdirSync(dir).filter((n) => n.endsWith('.log.jsonl'));
+const journals = (dir: string) => listTree(dir).filter((n) => n.endsWith('.log.jsonl'));
 const journalOf = (dir: string, name = journals(dir)[0]!): JournalEvent[] => readJournal(path.join(dir, name))!;
 
 async function boot(dir: string, model: ScriptedModel, extra: Record<string, unknown> = {}) {
@@ -41,7 +42,7 @@ test('a crash before any save leaves every row and every call — whole, before 
   // The moment the turn has ended — before the save it schedules (250 ms later, and
   // nothing closed the chat): this is what a crash would leave.
   await settleUntil(() => journals(dir).length > 0 && journalOf(dir).some((e) => e.t === 'end'));
-  expect(fs.readdirSync(dir).filter((n) => n.endsWith('.json'))).toHaveLength(0);
+  expect(listTree(dir).filter((n) => n.endsWith('.json'))).toHaveLength(0);
   const events = journalOf(dir);
   expect(events[0]).toMatchObject({ t: 'start' });
   expect(events.find((e) => e.t === 'row' && e.role === 'user')).toMatchObject({ text: 'покажи схему' });
@@ -71,7 +72,7 @@ test('a session longer than the cap: the state file lost its first question, the
     await ui.press('escape', 'escape'); // a save after every turn
     await ui.press('F');
   }
-  const saved = JSON.parse(fs.readFileSync(path.join(dir, fs.readdirSync(dir).find((n) => n.endsWith('.json'))!), 'utf8'));
+  const saved = JSON.parse(fs.readFileSync(path.join(dir, listTree(dir).find((n) => n.endsWith('.json'))!), 'utf8'));
   expect(saved.api.some((m: { content: unknown }) => m.content === 'раз')).toBe(false);
   const events = journalOf(dir);
   expect(events.find((e) => e.t === 'row' && e.role === 'user')).toMatchObject({ text: 'раз' });
@@ -124,15 +125,15 @@ test('a fork starts its own journal with a pointer to the session it came from',
   const ui = await boot(dir, model);
   await ask(ui, 'первый вопрос');
   await ui.press('escape', 'escape'); // the first save
-  const name = fs.readdirSync(dir).find((n) => n.endsWith('.json'))!;
+  const name = listTree(dir).find((n) => n.endsWith('.json'))!;
   const file = path.join(dir, name);
   const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
   fs.writeFileSync(file, JSON.stringify({ ...raw, rev: Number(raw.rev) + 5 })); // a foreign write — the next save forks
   await ui.press('F');
   await ask(ui, 'следующий вопрос');
   await ui.press('escape', 'escape');
-  const parent = name.replace(/\.json$/, '');
-  const forked = journals(dir).find((n) => !n.startsWith(parent))!;
+  const parent = sessionIdOf(name);
+  const forked = journals(dir).find((n) => !path.basename(n).startsWith(parent))!;
   expect(forked).toBeDefined();
   const events = journalOf(dir, forked);
   expect(events[0]).toMatchObject({ t: 'start', parent });
@@ -367,8 +368,8 @@ test('a fork in the middle of a turn: the rest of the turn lands in the fork\'s 
   await ask(ui, 'первый вопрос');
   await ui.press('escape', 'escape'); // the first save
   await ui.press('F');
-  const name = fs.readdirSync(dir).find((n) => n.endsWith('.json'))!;
-  const parent = name.replace(/\.json$/, '');
+  const name = listTree(dir).find((n) => n.endsWith('.json'))!;
+  const parent = sessionIdOf(name);
   const file = path.join(dir, name);
   const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
   fs.writeFileSync(file, JSON.stringify({ ...raw, rev: Number(raw.rev) + 5 })); // a foreign write
@@ -376,11 +377,11 @@ test('a fork in the middle of a turn: the rest of the turn lands in the fork\'s 
   await ui.press('return');
   await new Promise((r) => setTimeout(r, 400)); // the question's own save forks, mid-turn
   await settle(4);
-  const forkedName = journals(dir).find((n) => !n.startsWith(parent))!;
+  const forkedName = journals(dir).find((n) => !path.basename(n).startsWith(parent))!;
   expect(forkedName).toBeDefined();
   model.release();
   await settleUntil(() => journalOf(dir, forkedName).some((e) => e.t === 'end'));
-  const parentJournal = journalOf(dir, `${parent}.log.jsonl`);
+  const parentJournal = journalOf(dir, path.join(path.dirname(name), `${parent}.log.jsonl`));
   expect(parentJournal.some((e) => e.text === 'второй ответ')).toBe(false);
   const forked = journalOf(dir, forkedName);
   expect(forked[0]).toMatchObject({ t: 'start', parent });
@@ -466,8 +467,8 @@ test('after a fork, reopening the session it came from writes to that session\'s
   const ui = await boot(dir, model);
   await ask(ui, 'первый вопрос');
   await ui.press('escape', 'escape');
-  const name = fs.readdirSync(dir).find((n) => n.endsWith('.json'))!;
-  const parent = name.replace(/\.json$/, '');
+  const name = listTree(dir).find((n) => n.endsWith('.json'))!;
+  const parent = sessionIdOf(name);
   const file = path.join(dir, name);
   const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
   fs.writeFileSync(file, JSON.stringify({ ...raw, rev: Number(raw.rev) + 5 })); // a foreign write — the next save forks
@@ -476,12 +477,12 @@ test('after a fork, reopening the session it came from writes to that session\'s
   await ui.press('escape', 'escape'); // the save that forks
   await ui.press('F');
   await ask(ui, 'вопрос в форке');
-  const forkedName = journals(dir).find((n) => !n.startsWith(parent))!;
+  const forkedName = journals(dir).find((n) => !path.basename(n).startsWith(parent))!;
   expect(journalOf(dir, forkedName).some((e) => e.text === 'ответ в форке')).toBe(true);
   // Back to the parent — the older of the two, so the last on /resume's list.
   await ask(ui, '/resume 2', 6);
   await ask(ui, 'снова в родителе');
-  expect(journalOf(dir, `${parent}.log.jsonl`).some((e) => e.t === 'row' && e.text === 'снова в родителе')).toBe(true);
+  expect(journalOf(dir, path.join(path.dirname(name), `${parent}.log.jsonl`)).some((e) => e.t === 'row' && e.text === 'снова в родителе')).toBe(true);
   expect(journalOf(dir, forkedName).some((e) => e.text === 'снова в родителе')).toBe(false);
   ui.app.unmount();
 });

@@ -8,6 +8,7 @@ import path from 'node:path';
 import { ScriptedModel, bootApp, settle } from './helpers/scripted';
 import { SESSION_VERSION, newSessionId } from '../assistant/sessions.ts';
 import type { Make } from '../loader/plugin.ts';
+import { listTree } from './helpers/session-files';
 
 const realFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = realFetch; });
@@ -320,7 +321,7 @@ test('a session keeps what a view IS, not how it was drawn, and a restart draws 
   await new Promise((r) => setTimeout(r, 350)); // the debounced save
   ui.app.unmount();
 
-  const file = fs.readdirSync(dir).find((n) => n.endsWith('.json'));
+  const file = listTree(dir).find((n) => n.endsWith('.json'));
   expect(file).toBeDefined();
   const saved = fs.readFileSync(path.join(dir, file!), 'utf8');
   expect(saved).toContain('"kind":"console"');

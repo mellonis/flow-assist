@@ -27,7 +27,8 @@ import { VIEW_CAPS, frameView, isConsoleKind, viewRevision, type ViewRecord, typ
 import { groupHeadText, groupOpen, viewGroups, type GroupMsg, type ViewGroup } from '../assistant/view-groups.js';
 import { renderConsole } from '../assistant/console-view.js';
 import { CELL_FREE, CELL_FULL, CONTEXT_WARN_AT, GRID_COLS, GRID_ROWS, contextFootnote, contextGrid, contextHeading, contextLegend, tokensBadge, type ContextReading, type GridCell } from '../assistant/context-meter.js';
-import { formatBytes, pickerMatches, pickerSelected, type PickerState } from '../assistant/session-picker.js';
+import { formatBytes, pickerGroups, pickerSelected, type PickerState } from '../assistant/session-picker.js';
+import { tildePath } from '../assistant/shell.js';
 import { sessionWhen, type SessionRow } from '../assistant/sessions.js';
 import { createElement as h, useEffect, useRef, useState, type ReactNode } from 'react';
 import { wrapText } from '@flowtty/core';
@@ -1734,15 +1735,18 @@ export function renderSessionPicker({ width, height, theme, picker, now = Date.n
   const boxW = chatBoxWidth(width, fullscreen);
   const boxH = fullscreen ? height : Math.min(Math.floor(height * 0.82), height - 4);
   const m = (theme?.modals?.chat ?? {}) as Record<string, string | undefined>;
-  const shown = pickerMatches(picker);
-  const total = picker.rows.length;
+  const groups = pickerGroups(picker);
+  const shown = groups.flatMap((g) => g.rows);
+  const all = picker.scope === 'all';
+  // How many the scope holds before the filter: every session, or the project's.
+  const total = all ? picker.rows.length : pickerGroups({ ...picker, filter: '' })[0]!.rows.length;
   const inner = Math.max(1, boxW - 4);
+  const projectName = (p: string | null) => (p ? tildePath(p) : 'no project');
   const message = error ? `⚠ ${error}` : picker.notice;
   // The rows the list gets: the frame's border and padding (4), the field and the hint,
   // and the notice when there is one (as many rows as it wraps to) — each with the gap
   // above it. The list scrolls so the cursor stays in view; the bar says there is more.
   const listRows = Math.max(1, boxH - 4 - 4 - (message ? 1 + textRows(message, inner) : 0));
-  const offset = windowAround(shown, picker.cursor, listRows).start;
   const today = new Date(now);
   const sessionRow = (r: SessionRow, i: number) => {
     const active = i === picker.cursor;
@@ -1758,6 +1762,29 @@ export function renderSessionPicker({ width, height, theme, picker, now = Date.n
         : r.lock === 'ours' ? h(Box, { flexShrink: 1, overflow: 'hidden' }, h(Text, { dim: true, selectable: false, wrap: 'truncate' }, '  this chat')) : null,
       h(Box, { flexShrink: 1000, overflow: 'hidden' }, h(Text, { dim: true, selectable: false, wrap: 'truncate' }, `  ${meta}`)));
   };
+  // Every session: each project's rows under its path, a dim header (its end kept when
+  // it is cut — the end says which project). The offset counts drawn lines, headers
+  // too, so the cursor's row stays in view.
+  const lines: ReactNode[] = [];
+  let cursorLine = 0;
+  let at = 0;
+  for (const g of groups) {
+    if (all) lines.push(h(Text, { key: `project:${g.project ?? ''}`, dim: true, bold: true, selectable: false, wrap: 'truncate' }, cutLeft(projectName(g.project), inner)));
+    for (const r of g.rows) {
+      if (at === picker.cursor) cursorLine = lines.length;
+      lines.push(sessionRow(r, at++));
+    }
+  }
+  const offset = windowAround(lines, cursorLine, listRows).start;
+  const count = shown.length === total ? `${total}` : `${shown.length} of ${total}`;
+  // The project's path gives way first, from its start: its end names the project.
+  const headRoom = Math.max(0, boxW - 4);
+  const headStart = `${ASSISTANT_MARK} Flow Assist · Sessions · ${count} · `;
+  const heading = all ? `${ASSISTANT_MARK} Flow Assist · Sessions · all · ${count}`
+    : `${headStart}${cutLeft(projectName(picker.project), Math.max(8, headRoom - cellWidth(headStart)))}`;
+  const empty = picker.filter && total ? `Nothing matches «${picker.filter}»`
+    : !all && picker.rows.length ? `No sessions in this project yet — ${CAP.tab} shows all ${picker.rows.length}`
+    : 'No saved sessions yet.';
   // The y/n keys are named only here (delete mode has no hint row), so the title is
   // what gets cut, never the keys; a frame too narrow for both on one line puts the keys
   // on a line of their own.
@@ -1777,7 +1804,7 @@ export function renderSessionPicker({ width, height, theme, picker, now = Date.n
     : picker.mode === 'rename' ? `${CAP.enter} save · ${CAP.esc} back`
     // `Esc close` comes before the picker's own keys: the row is cut at the frame's
     // width, and the way out must not be what falls off in a narrow panel.
-    : [`${CAP.upDown} pick`, `${CAP.enter} open`, `${CAP.esc} close`, `${CAP.pickNew} new`, `${CAP.pickRename} rename`, `${CAP.pickDelete} delete`].join(' · ');
+    : [`${CAP.upDown} pick`, `${CAP.enter} open`, `${CAP.esc} close`, `${CAP.tab} ${all ? 'this project' : 'all'}`, `${CAP.pickNew} new`, `${CAP.pickRename} rename`, `${CAP.pickDelete} delete`].join(' · ');
   return h(Box, docked ? { width, height, flexDirection: 'column' } : overlay(width, height),
     h(Box, {
       border: 'round',
@@ -1785,7 +1812,7 @@ export function renderSessionPicker({ width, height, theme, picker, now = Date.n
       color: m.text,
       borderBackgroundColor: m.borderBg,
       borderColor: docked ? (focused ? m.accent : m.idleBorder) : m.border,
-      borderTitle: cutStep(`${ASSISTANT_MARK} Flow Assist · Sessions · ${shown.length === total ? total : `${shown.length} of ${total}`}`, Math.max(0, boxW - 4)),
+      borderTitle: cutStep(heading, headRoom),
       width: boxW,
       height: boxH,
       padding: 1,
@@ -1796,9 +1823,7 @@ export function renderSessionPicker({ width, height, theme, picker, now = Date.n
     },
       // Keys are the picker's (`isActive: false`): the offset follows the cursor.
       h(ScrollBox, { flexGrow: 1, flexShrink: 1, flexDirection: 'column', scrollbar: true, isActive: false, offset },
-        shown.length
-          ? shown.map(sessionRow)
-          : h(Text, { dim: true }, total ? `Nothing matches «${picker.filter}»` : 'No saved sessions yet.')),
+        shown.length ? lines : h(Text, { dim: true }, empty)),
       message ? h(Text, { color: error ? 'red' : m.warn, wrap: 'wrap' }, message) : null,
       h(Box, { flexDirection: 'column', width: '100%', flexShrink: 0, backgroundColor: m.fieldBg }, field),
       hint ? h(Text, { dim: true, wrap: 'truncate', selectable: false }, hint) : null));

@@ -640,9 +640,9 @@ test('a message with no views keeps its cached rows across a view-revision bump:
 // ─── the session picker ──────────────────────────────────────────────────────────
 
 const PICKER_ROWS: SessionRow[] = [
-  { id: '2026-09-25T10-00-00-aaaa', title: 'The current one', updatedAt: '2026-09-25T10:00:00.000Z', turns: 3, bytes: 2048, lock: 'ours', text: '' },
-  { id: '2026-09-24T10-00-00-bbbb', title: 'Held elsewhere', updatedAt: '2026-09-24T10:00:00.000Z', turns: 1, bytes: 500, lock: 'held', text: 'zebrafish' },
-  { id: '2026-09-23T10-00-00-cccc', title: 'An idle one', updatedAt: '2026-09-23T10:00:00.000Z', turns: 2, bytes: 3 * 1024 * 1024, lock: 'free', text: '' },
+  { id: '2026-09-25T10-00-00-aaaa', title: 'The current one', updatedAt: '2026-09-25T10:00:00.000Z', turns: 3, bytes: 2048, lock: 'ours', text: '', dir: '/s', project: null },
+  { id: '2026-09-24T10-00-00-bbbb', title: 'Held elsewhere', updatedAt: '2026-09-24T10:00:00.000Z', turns: 1, bytes: 500, lock: 'held', text: 'zebrafish', dir: '/s', project: null },
+  { id: '2026-09-23T10-00-00-cccc', title: 'An idle one', updatedAt: '2026-09-23T10:00:00.000Z', turns: 2, bytes: 3 * 1024 * 1024, lock: 'free', text: '', dir: '/s', project: null },
 ];
 
 test('the session picker draws one row per session — title, whose it is, size, messages — and its keys', async () => {
@@ -654,7 +654,7 @@ test('the session picker draws one row per session — title, whose it is, size,
   expect(frame).toMatch(/Held elsewhere\s+in use elsewhere\s+.*500 B · 1 msg\b/);
   expect(frame).toContain('3.0 MB · 2 msgs');
   expect(frame).toContain('filter ›');
-  expect(frame).toContain('↑↓ pick · ⏎ open · Esc close · ^n new · ^r rename · ^x delete');
+  expect(frame).toContain('↑↓ pick · ⏎ open · Esc close · ⇥ all · ^n new · ^r rename · ^x delete');
   handle.unmount();
 });
 

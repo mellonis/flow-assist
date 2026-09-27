@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { ScriptedModel, bootApp, settle } from './helpers/scripted';
 import { acquireLock, lockPath } from '../assistant/sessions';
+import { homeIn, listTree, sessionIdOf } from './helpers/session-files';
 
 const realFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = realFetch; });
@@ -15,7 +16,7 @@ const flat = (s: string) => s.replace(/[\s│╭╮╰╯─]+/g, '');
 type Sent = { role: string; content: unknown }[];
 const sentTo = (m: ScriptedModel) => m.requests.at(-1)!.messages as Sent;
 // The session file whose conversation holds `text`.
-const fileWith = (dir: string, text: string) => fs.readdirSync(dir).filter((n) => n.endsWith('.json'))
+const fileWith = (dir: string, text: string) => listTree(dir).filter((n) => n.endsWith('.json'))
   .map((n) => ({ n, s: JSON.parse(fs.readFileSync(path.join(dir, n), 'utf8')) }))
   .find(({ s }) => s.messages.some((m: { content: unknown }) => m.content === text));
 const rowOf = (frame: string, text: string) => frame.split('\n').find((r) => r.includes(text)) ?? '';
@@ -143,7 +144,7 @@ test('delete asks y/n and removes an idle session and nothing else; this chat’
   expect(frame).toContain('Deleted «doomed question»');
   expect(frame).toContain('Sessions · 1');
   expect(fileWith(dir, 'doomed question')).toBeUndefined();
-  expect(fs.readdirSync(dir).filter((n) => n.endsWith('.lock'))).toHaveLength(1); // this chat's own, only
+  expect(listTree(dir).filter((n) => n.endsWith('.lock'))).toHaveLength(1); // this chat's own, only
   expect(fileWith(dir, 'kept question')).toBeDefined();
   t.ui.app.unmount();
 });
@@ -346,8 +347,9 @@ test('a session taken by another process after the list was read: ⏎ is refused
   await t.command('/new');
   await t.ask('mine question');
   await t.chord('s');
-  const taken = fileWith(dir, 'taken question')!.n.replace(/\.json$/, '');
-  expect(acquireLock(dir, taken, 'another-process').status).toBe('acquired'); // this pid, alive: held
+  const taken = sessionIdOf(fileWith(dir, 'taken question')!.n);
+  const home = homeIn(dir, taken);
+  expect(acquireLock(home, taken, 'another-process').status).toBe('acquired'); // this pid, alive: held
   await t.ui.press('down', 'return');
   let frame = t.ui.backend.lastFrame!;
   expect(frame).toContain('Sessions · 2');
@@ -355,11 +357,11 @@ test('a session taken by another process after the list was read: ⏎ is refused
   expect(rowOf(frame, 'taken question')).toContain('in use elsewhere');
   expect(frame).not.toContain('taken answer');
 
-  fs.rmSync(lockPath(dir, taken)); // let go; the picker opened again reads it free
+  fs.rmSync(lockPath(home, taken)); // let go; the picker opened again reads it free
   await t.ui.press('escape');
   await t.chord('s');
   await t.ui.press('down');
-  fs.rmSync(path.join(dir, `${taken}.json`)); // and then its file goes
+  fs.rmSync(path.join(home, `${taken}.json`)); // and then its file goes
   await t.chord('r');
   await t.chord('u');
   await t.ui.type('Too late');

@@ -1186,7 +1186,25 @@ there is no `/fullscreen`.
   `ToolDef` of its own in the registry (it is the loop's own tool), so it is checked
   against `TOOLS_LOAD_PARAMETERS` (`tool-loading.ts`) directly.
 - **Sessions survive a restart** (`src/assistant/sessions.ts`, one JSON per session
-  in `<config dir>/sessions/`, dir 700 / files 600 — they hold tracker and MR text).
+  under `<config dir>/sessions/`, dirs 700 / files 600 — they hold tracker and MR text).
+  **A session belongs to the project it started in** (`projectOf`): the innermost
+  `shell.roots` entry holding the shell's directory, else the nearest directory above it
+  with a `.git` (a file in a worktree), else none — by real path. It is decided once,
+  when the session gets its id (`ensureSessionId`, its first message — the journal and
+  the lock start there too), recorded in the file as `project`, and never changed: a
+  `cd` into another project later leaves the session where it is. Its state file,
+  journal and lock sit together under a mirror of that path (`projectHome`:
+  `sessions/Users/me/app/<id>.json`), a session with no project at the top level. Every
+  `(dir, id)` function in sessions.ts takes a session's OWN directory; the readers of
+  every session — `listSessions`, `sessionRows`, `pruneSessions`, `sweepJournals` — take
+  the root and walk the tree (`sessionDirs`, never following a link), and each row they
+  return carries `dir` and `project`. The chat keeps the directory of every session it
+  has held (`homes`, by id), so a turn, a `!command` or a background task still writing
+  to a session it has left, or a fork, finds its journal. A flat file an older host
+  wrote loads where it is, as a session with no project, and is NEVER moved: another
+  process may hold its lock beside it, and a move would part the file from its lock
+  (and from a journal that process is still appending to). The current project is the
+  chat's session's once it has one, else where the shell is (`currentProject`).
   A session is ONE object: the screen list, `apiRef` (what the model is sent),
   `summaryRef`, the plan, the usage reading, the ↑/↓ prompts, the unsent draft, the
   loaded tools (`tools`) and the
@@ -1197,16 +1215,20 @@ there is no `/fullscreen`.
   chat, `/clear`, `/new`, `/resume`, opening the picker (`/sessions`), and at process
   exit (`flushOnExit`). A
   write is temp file + rename; a file that does not parse is skipped. On start the
-  newest session is continued unless `/clear` closed it (`sessions.resume: false`
-  turns this off); `/clear` starts a new one and keeps the old on
-  `/resume` (`/resume <n>` opens it).
+  newest session of the project the shell starts in is continued — the newest of all
+  only when that project has none (`pickToContinue`) — unless `/clear` closed it, and
+  then nothing is continued, never another project's (`sessions.resume: false` turns
+  this off); `/clear` starts a new one and keeps the old on
+  `/resume` (`/resume` numbers the current project's sessions, all of them when it has
+  none — `projectFirst`, as the start; `/resume <n>` opens one).
   `/new` starts a new one the same way and leaves the old one OPEN (not closed), so a
   restart before anything is said in the new one continues the old. Both reset the
   conversation through one function (`resetConversation` in `src/plugins/assistant.ts`):
   everything this file says `/clear` resets — the plan, the loaded tools, the recall
   state, the images' numbering, the auto mode, the notes mode, the folds, the live views,
   the shell's directory — `/new` resets too. `/new` is refused while an answer or a
-  `!command` runs. 50 sessions are kept. **The state file is bounded** (`trimScreen`,
+  `!command` runs. 50 sessions are kept per project (`sessions.keep`,
+  `pruneSessions` groups by the directory a file is in; the top level is one project). **The state file is bounded** (`trimScreen`,
   `trimHistory`): the screen list keeps its last `KEEP_MESSAGES` (400) CONVERSATION
   rows — every row but a `view` — and among them the newest `KEEP_VIEWS` (100) view
   rows in their places, so a session that runs many commands keeps as much of what was
@@ -1329,7 +1351,14 @@ there is no `/fullscreen`.
   only in short; a journal that began partway (`continued`) says the same, and a fork's
   names its parent. Nothing said yet: nothing to export.
   **The picker** (`/sessions`, and the assistant's `sessions` key — `^s`, `config.keys.sessions`
-  moves it) lists every saved session newest first, one row each: the title, `this chat`
+  moves it) opens on the current project's sessions (`scope: 'project'`; no project is
+  the top level's) and Tab switches to every session (`all`), grouped by project — the
+  current one first, then each other by its newest session — under a dim, bold header
+  row with the project's path (cut from the left, `no project` for the top level);
+  headers are drawn only, never a cursor stop, and the list's offset counts them
+  (`pickerGroups`). The title says the scope: `Sessions · N · <project>` or
+  `Sessions · all · N`. The filter works in both, and a scope with nothing in it says
+  Tab shows all. Newest first, one row each: the title, `this chat`
   or `in use elsewhere` (`lockState`: ours / held), `sessionWhen`, the file's size
   (`formatBytes`), the messages. It is pure state in `src/assistant/session-picker.ts`
   (`pickerKey`, the `ask.ts` pattern) drawn by `renderSessionPicker`
@@ -2928,6 +2957,10 @@ keeps both:
   aborted rejects before it is recorded. End-to-end
   tests drive the app through it; assert on the frame AND on cell styles
   (`backend.lastBuffer`).
+- `src/__tests__/helpers/session-files.ts` — a booted app's sessions land under a
+  mirror of the project the shell starts in (the checkout's git root under `bun test`,
+  none where there is no `.git`): a test finds a session's files with `listTree` /
+  `homeIn`, never by listing the sessions directory flat, so it holds either layout.
 - `bun scripts/ui-frames.ts [--size WxH] [--color|--styles] [scenario…]` — the same
   rig for eyes: frames at named checkpoints, no network. Look at a display change
   before and after with it.

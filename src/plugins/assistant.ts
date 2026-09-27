@@ -30,7 +30,7 @@ import { createShellState, formatShell, nextCwd, realOf, runShell, shellAutoRun,
 import { findInstructions, instructionsBlock, instructionsNote, type ProjectInstructions } from '../assistant/project-instructions.js';
 import {
   JOURNAL_DAYS, KEEP_SESSIONS, SESSION_VERSION, acquireLock, closeSession, cutTitle, flushOnExit, journalPath, listSessions, loadSession, lockPath,
-  makeLockToken, newSessionId, pruneSessions, releaseLock, removeSession, renameSession, saveSession, sessionFingerprint,
+  makeLockToken, newSessionId, pickToContinue, projectFirst, projectHome, projectOf, pruneSessions, releaseLock, removeSession, renameSession, saveSession, sessionFingerprint,
   sessionFingerprintsEqual, sessionRows, sessionTitle, sessionWhen, sessionsDir, sweepJournals, type Session, type SessionFingerprint,
 } from '../assistant/sessions.js';
 import { appendJournal, callEndEvent, callStartEvent, exportMarkdown, outputJournal, readJournal, rowOf, type JournalEvent } from '../assistant/journal.js';
@@ -806,11 +806,27 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // first has something to keep; `/clear` starts a new one and leaves the old
           // for `/resume`.
           const sessDir = sessionsDir(host.config);
+          // A session belongs to the project it started in (sessions.ts, `projectOf`),
+          // decided when it gets its id and kept for its life; its files live in that
+          // project's directory (`projectHome`). `homes` knows the directory of every
+          // session this chat has held — a turn, a `!command` or a background task still
+          // writing to one it has left finds its journal by it.
+          const sessionProjectRef = ui.useRef<string | null>(null);
+          const homes = ui.useRef(new Map<string, string>());
+          const homeOf = (id: string): string | null => homes.current.get(id) ?? null;
+          // Where the shell is now, as a project.
+          const projectHere = (): string | null => projectOf(shellRef.current.cwd(), shellRoots(host.config as Record<string, unknown>));
+          // The project the lists open on: this chat's session's, once it has one; else
+          // where the shell is.
+          const currentProject = (): string | null => (sessionIdRef.current ? sessionProjectRef.current : projectHere());
+          // What `/resume` numbers: the current project's sessions, newest first — every
+          // session when it has none, as a start continues.
+          const resumeList = () => (sessDir ? projectFirst(listSessions(sessDir), currentProject()) : []);
           // The chat's commands with `/resume`'s values filled in: the saved sessions,
           // newest first, numbered as `/resume` lists them, each number labelled with
           // its title. Read when the field is drawn, so the list is the one on disk.
           const chatCommandDefs: ChatCommandDef[] = CHAT_COMMAND_DEFS.map((c) => (c.name === 'resume'
-            ? { ...c, values: () => (sessDir ? listSessions(sessDir).slice(0, 15).map((s, i) => ({ value: String(i + 1), label: s.title || '(untitled)' })) : []) }
+            ? { ...c, values: () => resumeList().slice(0, 15).map((s, i) => ({ value: String(i + 1), label: s.title || '(untitled)' })) }
             : c));
           // What the field completes, from its text alone: in shell mode the word being
           // typed as a path under the shell's directory (nothing outside the roots by
@@ -844,13 +860,24 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // the session it currently holds — what a save compares the disk against
           // before overwriting it (sessions.ts, "sessionFingerprint").
           const fingerprintRef = ui.useRef<SessionFingerprint>(NO_FILE);
-          const releaseCurrentLock = () => { if (sessDir && sessionIdRef.current) releaseLock(sessDir, sessionIdRef.current, lockToken); };
+          const releaseCurrentLock = () => {
+            const home = homeOf(sessionIdRef.current);
+            if (home && sessionIdRef.current) releaseLock(home, sessionIdRef.current, lockToken);
+          };
           // A session gets its id — and its lock — when it first has something to keep:
-          // its first save, or the first thing its journal records.
+          // its first save, or the first thing its journal records. Its project is
+          // decided here too, from where the shell is at that moment, and never again.
           const ensureSessionId = (): string => {
             if (!sessionIdRef.current) {
               sessionIdRef.current = newSessionId(); createdAtRef.current = new Date().toISOString(); fingerprintRef.current = NO_FILE;
-              if (sessDir) acquireLock(sessDir, sessionIdRef.current, lockToken); // a fresh id — nothing else could hold it
+              if (sessDir) {
+                let project: string | null = null;
+                try { project = projectHere(); } catch { /* no project — the top level */ }
+                sessionProjectRef.current = project;
+                const home = projectHome(sessDir, project);
+                homes.current.set(sessionIdRef.current, home);
+                acquireLock(home, sessionIdRef.current, lockToken); // a fresh id — nothing else could hold it
+              }
             }
             return sessionIdRef.current;
           };
@@ -872,6 +899,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               images: [...imagesRef.current.values()], imageSeq: imageSeqRef.current,
               recall: saveRecallState(recallRef.current),
               closed: false, // written means in use — a resumed cleared session is open again
+              project: sessionProjectRef.current,
             };
           };
           // ── The journal (src/assistant/journal.ts) ── one line per event, appended as
@@ -893,7 +921,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             let id = from;
             for (let i = 0; i < 64 && forkedTo.current.has(id); i++) id = forkedTo.current.get(id)!;
             if (!sessDir || !id) return;
-            try { appendJournal(journalPath(sessDir, id), ev); }
+            const home = homeOf(id);
+            if (!home) { (host.services as Record<string, any>).pushLog?.(`[session] journal not written: no directory known for ${id}`); return; }
+            try { appendJournal(journalPath(home, id), ev); }
             catch (e) { (host.services as Record<string, any>).pushLog?.(`[session] journal not written: ${(e as Error).message}`); }
           };
           // `person` — the event is something the person said or ran (or the question a
@@ -904,7 +934,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             if (!sessionIdRef.current && !opts.person) { journalBuf.current.push(stamped); return ''; }
             const id = ensureSessionId();
             let fresh = false;
-            try { fresh = !fs.existsSync(journalPath(sessDir, id)); } catch { /* an id that is not one — journalTo says so */ }
+            try { fresh = !fs.existsSync(journalPath(homeOf(id) ?? sessDir, id)); } catch { /* an id that is not one — journalTo says so */ }
             if (fresh) {
               const imported = journalImport.current ?? [];
               journalTo(id, { t: 'start', id, ...(imported.length ? { continued: true } : {}) });
@@ -962,7 +992,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             if (!sessDir || !msgsRef.current.some((m) => personSpoke(m.role))) return; // nothing said or run yet
             try {
               const snap = snapshotSession();
-              const disk = sessionFingerprint(sessDir, snap.id);
+              const home = homeOf(snap.id) ?? projectHome(sessDir, snap.project ?? null);
+              const disk = sessionFingerprint(home, snap.id);
               if (!sessionFingerprintsEqual(disk, fingerprintRef.current)) {
                 // Someone else changed this file since we last read or wrote it — an
                 // older host with no lock, a hand edit (rev alone would miss a hand
@@ -972,9 +1003,11 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 const forkedId = newSessionId();
                 const now = new Date().toISOString();
                 releaseCurrentLock();
-                acquireLock(sessDir, forkedId, lockToken);
+                // The fork is the same conversation: the same project, the same directory.
+                homes.current.set(forkedId, home);
+                acquireLock(home, forkedId, lockToken);
                 const forked: Session = { ...snap, id: forkedId, createdAt: now, updatedAt: now };
-                const fp = saveSession(sessDir, forked);
+                const fp = saveSession(home, forked);
                 sessionIdRef.current = forkedId; createdAtRef.current = now; fingerprintRef.current = fp;
                 // The fork's journal begins with where it came from; what came before is
                 // in that session's journal.
@@ -987,7 +1020,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 }
                 return;
               }
-              fingerprintRef.current = saveSession(sessDir, snap);
+              fingerprintRef.current = saveSession(home, snap);
             } catch (e) {
               (host.services as Record<string, any>).pushLog?.(`[session] not saved: ${(e as Error).message}`);
             }
@@ -1005,14 +1038,17 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // "seen" even though `s` never saw it, and the next save would silently
           // overwrite it. Taking the fingerprint first means a write in that window
           // is instead caught — the next save finds the disk has moved and forks.
-          const applySession = (s: Session, fingerprint: SessionFingerprint) => {
+          // `dir` — the directory the session's file was found in.
+          const applySession = (s: Session, fingerprint: SessionFingerprint, dir: string) => {
             sessionIdRef.current = s.id; createdAtRef.current = s.createdAt;
+            homes.current.set(s.id, dir);
+            sessionProjectRef.current = s.project ?? null;
             journalBuf.current = []; // held for the conversation being left
             // Opened again, a session writes its own journal: a fork's redirect was for
             // what was in flight when it forked, not for the session for good.
             forkedTo.current.delete(s.id);
             let journaled = true;
-            try { journaled = !sessDir || fs.existsSync(journalPath(sessDir, s.id)); } catch { /* not an id — nothing to journal */ }
+            try { journaled = !sessDir || fs.existsSync(journalPath(dir, s.id)); } catch { /* not an id — nothing to journal */ }
             journalImport.current = journaled ? null : (s.messages as Record<string, unknown>[]).filter((m) => m.role !== 'system');
             titleRef.current = s.title;
             fingerprintRef.current = fingerprint;
@@ -1056,20 +1092,24 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               try { pruneSessions(sessDir, Number.isInteger(sessConf.keep) ? Number(sessConf.keep) : KEEP_SESSIONS); } catch { /* not fatal */ }
               try { sweepJournals(sessDir, typeof sessConf.journalDays === 'number' ? sessConf.journalDays : JOURNAL_DAYS); } catch { /* not fatal */ }
               if (sessConf.resume === false || msgsRef.current.length) return;
-              const last = listSessions(sessDir)[0];
-              if (!last || last.closed) return;
+              // The newest session of the project the shell starts in — of all of them
+              // when that project has none.
+              let here: string | null = null;
+              try { here = projectHere(); } catch { /* no project */ }
+              const last = pickToContinue(listSessions(sessDir), here);
+              if (!last) return;
               // The fingerprint first, stat before the content read just below — see
               // applySession's own comment for why the order matters.
-              const fp = sessionFingerprint(sessDir, last.id);
-              const s = loadSession(sessDir, last.id);
+              const fp = sessionFingerprint(last.dir, last.id);
+              const s = loadSession(last.dir, last.id);
               if (!s) return;
-              const outcome = acquireLock(sessDir, s.id, lockToken);
+              const outcome = acquireLock(last.dir, s.id, lockToken);
               if (outcome.status === 'held') {
-                pushNote(`Session "${s.title || s.id}" is open in another flow-assist process — started a new one. (lock: ${lockPath(sessDir, s.id)})`);
+                pushNote(`Session "${s.title || s.id}" is open in another flow-assist process — started a new one. (lock: ${lockPath(last.dir, s.id)})`);
                 host.notify();
                 return;
               }
-              applySession(s, fp);
+              applySession(s, fp, last.dir);
               (host.services as Record<string, any>).showMessage?.(`Continued «${s.title || 'the last session'}» — /new starts a new one, /sessions lists them all`);
               host.notify();
             }, 0);
@@ -2312,22 +2352,23 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // one being left is written first, so it is on the list to come back to; one
           // another flow-assist process holds is refused with a note naming its lock.
           // true — switched.
-          const openSession = (id: string, title: string): boolean => {
+          // `dir` — the directory its file is in (a list's row says).
+          const openSession = (id: string, title: string, dir: string): boolean => {
             if (!sessDir) return false;
             if (streamRef.current) { setError('an answer is still coming — stop it (Esc) before switching sessions'); return false; }
             writeSession();
             // The fingerprint first, stat before the content read just below — see
             // applySession's own comment for why the order matters.
-            const fp = sessionFingerprint(sessDir, id);
-            const s = loadSession(sessDir, id);
+            const fp = sessionFingerprint(dir, id);
+            const s = loadSession(dir, id);
             if (!s) { setError('that session file cannot be read'); return false; }
             // Held by another live flow-assist process: refuse and stay put. Own lock
             // already, or free/stale, and this acquires it — side-effect free when held,
             // so nothing to undo on the refusal.
             if (id !== sessionIdRef.current) {
-              const outcome = acquireLock(sessDir, id, lockToken);
+              const outcome = acquireLock(dir, id, lockToken);
               if (outcome.status === 'held') {
-                pushNote(`Session "${title || id}" is open in another flow-assist process. (lock: ${lockPath(sessDir, id)})`);
+                pushNote(`Session "${title || id}" is open in another flow-assist process. (lock: ${lockPath(dir, id)})`);
                 // `/resume <n>` in the field is the command, done; from the picker the
                 // field holds the person's draft, which stays.
                 if (/^\s*\//.test(inputRef.current)) setField('');
@@ -2339,7 +2380,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             queueRef.current = []; setQueued([]); bgQueueRef.current = [];
             setError(null); setEmptyNotice(''); setContinueOffer(false); setToolLabel(''); setToolCount(0);
             if (id !== sessionIdRef.current) releaseCurrentLock(); // leaving the old one
-            applySession(s, fp);
+            applySession(s, fp, dir);
             (host.services as Record<string, any>).showMessage?.(`Resumed «${s.title || 'session'}»`);
             host.notify();
             return true;
@@ -2362,18 +2403,19 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // The picker takes the conversation's place, where a pager left open while
             // the plugin had the keys stands: the pager goes.
             setPager(null);
-            setPicker(pickerStart(sessionRows(sessDir, lockToken)));
+            setPicker(pickerStart(sessionRows(sessDir, lockToken), currentProject()));
           };
           // What a picker key asked for (session-picker.ts' `PickerAction`).
           const pickerAction = (a: PickerAction) => {
             const p = pickerRef.current;
             if (!sessDir || !p) return;
             const titleOf = (id: string) => p.rows.find((r) => r.id === id)?.title || id;
+            const dirOf = (id: string) => p.rows.find((r) => r.id === id)?.dir ?? sessDir;
             switch (a.kind) {
               case 'close': setPicker(null); return;
               case 'new': if (startNew()) setPicker(null); return;
               case 'open': {
-                if (openSession(a.id, titleOf(a.id))) { setPicker(null); return; }
+                if (openSession(a.id, titleOf(a.id), dirOf(a.id))) { setPicker(null); return; }
                 // Refused — an answer still coming (the error line says so), or taken by
                 // another process since the list was read: the picker stays, re-read.
                 const rows = sessionRows(sessDir, lockToken);
@@ -2385,7 +2427,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 const title = cutTitle(a.title);
                 let outcome = 'renamed';
                 if (a.id === sessionIdRef.current) { titleRef.current = title; writeSession(); }
-                else outcome = renameSession(sessDir, a.id, title, lockToken);
+                else outcome = renameSession(dirOf(a.id), a.id, title, lockToken);
                 const notice = outcome === 'held' ? `"${titleOf(a.id)}" is open in another flow-assist process — it cannot be renamed here`
                   : outcome === 'missing' ? `"${titleOf(a.id)}" is gone — its file was removed`
                   : `Renamed to «${title}»`;
@@ -2393,7 +2435,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 return;
               }
               case 'delete': {
-                const done = removeSession(sessDir, a.id, lockToken);
+                const done = removeSession(dirOf(a.id), a.id, lockToken);
                 const notice = done === 'deleted' ? `Deleted «${titleOf(a.id)}»`
                   : done === 'held' ? `"${titleOf(a.id)}" is open in another flow-assist process — it cannot be deleted`
                   : `"${titleOf(a.id)}" is the session in this chat — it cannot be deleted from here`;
@@ -2551,7 +2593,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 const id = sessionIdRef.current;
                 const title = titleRef.current || sessionTitle(msgs);
                 let events: JournalEvent[] | null = null;
-                try { events = sessDir && id ? readJournal(journalPath(sessDir, id)) : null; } catch { /* not an id — no journal */ }
+                const home = id ? homeOf(id) : null;
+                try { events = home ? readJournal(journalPath(home, id)) : null; } catch { /* not an id — no journal */ }
                 const md = events
                   ? exportMarkdown(events, { title, id })
                   : exportMarkdown(msgs.map((m) => rowOf(m, viewRenderers)).filter((e): e is JournalEvent => e !== null), { title, id: id || 'unsaved', noJournal: true });
@@ -2591,7 +2634,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // being left is written first, so it is on the list to come back to.
                 if (!sessDir) { setError('sessions are not saved here (no sessions directory)'); return; }
                 writeSession();
-                const list = listSessions(sessDir);
+                const list = resumeList();
                 const n = Number(arg.trim());
                 if (!arg.trim()) {
                   const lines = list.slice(0, 15).map((s, i) => `${i + 1}. ${s.title || '(untitled)'} — ${sessionWhen(s.updatedAt)}, ${s.turns} message${s.turns === 1 ? '' : 's'}${s.id === sessionIdRef.current ? ' · this one' : ''}`);
@@ -2602,7 +2645,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 }
                 const pick = Number.isInteger(n) && n >= 1 ? list[n - 1] : undefined;
                 if (!pick) { setError(`/resume takes a number from the list (1–${list.length})`); return; }
-                openSession(pick.id, pick.title);
+                openSession(pick.id, pick.title, pick.dir);
                 return;
               }
               case 'sessions':
@@ -2613,7 +2656,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // The session is written and left for /resume — closed, so a restart does
                 // not bring back what was just cleared; what follows is a new one.
                 writeSession();
-                if (sessDir && sessionIdRef.current) { try { closeSession(sessDir, sessionIdRef.current); } catch { /* not fatal */ } }
+                if (sessDir && sessionIdRef.current) { try { closeSession(homeOf(sessionIdRef.current) ?? sessDir, sessionIdRef.current); } catch { /* not fatal */ } }
                 releaseCurrentLock();
                 sessionIdRef.current = ''; createdAtRef.current = ''; fingerprintRef.current = NO_FILE;
                 resetConversation();

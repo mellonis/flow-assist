@@ -12,6 +12,7 @@ import path from 'node:path';
 import { ScriptedModel, bootApp, settle, type Turn } from './helpers/scripted';
 import type { Make } from '../loader/plugin';
 import { SESSION_VERSION, newSessionId, type Session } from '../assistant/sessions.ts';
+import { listTree } from './helpers/session-files';
 
 const realFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = realFetch; });
@@ -444,7 +445,7 @@ test('a call keeps what its trail line draws — never a 200 KB argument in the 
   const ui = await ask(model, [[{ text: 'I write it.' }, { tool: 'edit_app', args: { b: 42, content: big } }], [{ text: 'Written.' }]], { sessions: { dir } });
   await ui.press('escape', 'escape'); // closing the chat saves at once
   ui.app.unmount();
-  const file = fs.readdirSync(dir).find((f) => f.endsWith('.json'))!;
+  const file = listTree(dir).find((f) => f.endsWith('.json'))!;
   // The screen's list — the model's own history (`api`) keeps the call as it was
   // made, which it must: the model is sent it next turn.
   const screen = JSON.stringify((JSON.parse(fs.readFileSync(path.join(dir, file), 'utf8')) as Session).messages);
@@ -483,7 +484,7 @@ test('a restart keeps the turn in the order it happened', async () => {
   for (const y of ys) expect(y).toBeGreaterThan(-1);
   expect([...ys].sort((a, b) => a - b)).toEqual(ys);
   // What is saved is the parts, in order — never the category slots.
-  const file = fs.readdirSync(dir).find((f) => f.endsWith('.json'))!;
+  const file = listTree(dir).find((f) => f.endsWith('.json'))!;
   const saved = JSON.parse(fs.readFileSync(path.join(dir, file), 'utf8')) as Session;
   const turn = saved.messages.find((m) => Array.isArray(m.parts)) as { parts: { kind: string }[] } & Record<string, unknown>;
   expect(turn.parts.map((p) => p.kind)).toEqual(['text', 'tools', 'text', 'tools', 'change', 'text', 'tools', 'text', 'tools', 'change']);

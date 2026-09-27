@@ -7,7 +7,7 @@ import {
   KEEP_MESSAGES, KEEP_VIEWS, SEARCH_TEXT_MAX, SESSION_VERSION, TITLE_MAX, acquireLock, closeSession, cutTitle, listSessions, loadSession,
   lockPath, lockState, makeLockToken, newSessionId, normalizeViews, pruneSessions, releaseLock, removeSession, renameSession,
   saveSession, searchText, sessionFingerprint, sessionFingerprintsEqual, sessionRev, sessionRows, sessionTitle,
-  sessionToContinue, sessionsDir, trimHistory, trimScreen, type Session,
+  pickToContinue, projectHome, projectOf, sessionToContinue, sessionsDir, trimHistory, trimScreen, type Session,
 } from '../sessions.ts';
 
 const tmp = () => path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'sess-')), 'sessions');
@@ -495,4 +495,96 @@ test('removeSession deletes an idle session and its lock; a held one and this to
   expect(removeSession(dir, mine.id, 'tok-me', alive)).toBe('ours');
   expect(fs.existsSync(path.join(dir, `${mine.id}.json`))).toBe(true);
   expect(JSON.parse(fs.readFileSync(lockPath(dir, mine.id), 'utf8')).token).toBe('tok-me'); // the open chat stays protected
+});
+
+// ─── sessions per project ─────────────────────────────────────────────────────
+
+test('projectOf: the innermost shell root holding the directory, else its git root, else none — by real path', () => {
+  const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'proj-')));
+  const outer = path.join(base, 'work');
+  const inner = path.join(outer, 'app');
+  fs.mkdirSync(path.join(inner, 'src'), { recursive: true });
+  expect(projectOf(path.join(inner, 'src'), [outer, inner])).toBe(inner);
+  expect(projectOf(path.join(outer), [outer, inner])).toBe(outer);
+  // No root holds it: the git root — `.git` may be a file (a worktree).
+  const repo = path.join(base, 'repo');
+  fs.mkdirSync(path.join(repo, 'deep', 'er'), { recursive: true });
+  fs.writeFileSync(path.join(repo, '.git'), 'gitdir: elsewhere\n');
+  expect(projectOf(path.join(repo, 'deep', 'er'), [inner])).toBe(repo);
+  // A link into a root is its root, by the real path.
+  const link = path.join(base, 'link');
+  fs.symlinkSync(inner, link);
+  expect(projectOf(link, [inner])).toBe(inner);
+  expect(projectOf(path.join(base, 'loose'), [], () => null)).toBeNull();
+});
+
+test('projectHome mirrors the project path under the sessions directory; no project is the top level', () => {
+  expect(projectHome('/s', '/Users/me/Developer/app')).toBe(path.join('/s', 'Users', 'me', 'Developer', 'app'));
+  expect(projectHome('/s', null)).toBe('/s');
+});
+
+test('a session saved under its project is listed from the root with its directory and project; a flat legacy file still loads and stays put', () => {
+  const root = tmp();
+  const home = projectHome(root, '/Users/me/app');
+  const mine = session({ id: '2026-09-21T09-00-00-aaaa', updatedAt: '2026-09-21T09:00:00.000Z', project: '/Users/me/app' });
+  saveSession(home, mine);
+  expect(fs.existsSync(path.join(root, 'Users', 'me', 'app', `${mine.id}.json`))).toBe(true);
+  expect(loadSession(home, mine.id)!.project).toBe('/Users/me/app');
+  const legacy = session({ id: '2026-09-20T09-00-00-bbbb', updatedAt: '2026-09-20T09:00:00.000Z' });
+  saveSession(root, legacy);
+  const list = listSessions(root);
+  expect(list.map((s) => [s.id, s.dir, s.project])).toEqual([[mine.id, home, '/Users/me/app'], [legacy.id, root, null]]);
+  const rows = sessionRows(root, 'tok');
+  expect(rows.map((r) => [r.id, r.dir, r.project])).toEqual([[mine.id, home, '/Users/me/app'], [legacy.id, root, null]]);
+  expect(fs.existsSync(path.join(root, `${legacy.id}.json`))).toBe(true); // read where it is, never moved
+});
+
+test('a start continues the newest session of the current project, and the newest overall only when the project has none', () => {
+  const root = tmp();
+  const a = (id: string, at: string, project: string | null) => {
+    const s = session({ id, updatedAt: at, project });
+    saveSession(projectHome(root, project), s);
+    return s;
+  };
+  const appOld = a('2026-09-20T09-00-00-aaaa', '2026-09-20T09:00:00.000Z', '/p/app');
+  const other = a('2026-09-22T09-00-00-bbbb', '2026-09-22T09:00:00.000Z', '/p/other');
+  expect(sessionToContinue(root, '/p/app')!.id).toBe(appOld.id);
+  expect(sessionToContinue(root, '/p/other')!.id).toBe(other.id);
+  expect(sessionToContinue(root, '/p/none')!.id).toBe(other.id); // nothing of its own: the newest overall
+  expect(pickToContinue(listSessions(root), null)!.id).toBe(other.id);
+  // The project's newest was cleared: nothing is continued — never another project's.
+  closeSession(projectHome(root, '/p/app'), appOld.id);
+  expect(sessionToContinue(root, '/p/app')).toBeNull();
+});
+
+test('KEEP_SESSIONS counts per project; the top level counts as one project', () => {
+  const root = tmp();
+  for (const project of ['/p/app', '/p/other', null]) {
+    for (let d = 1; d <= 4; d++) {
+      saveSession(projectHome(root, project), session({ id: `2026-09-0${d}T09-00-00-${project ? project.length : 0}00${d}`, updatedAt: `2026-09-0${d}T09:00:00.000Z`, project }));
+    }
+  }
+  expect(pruneSessions(root, 2)).toBe(6);
+  const left = listSessions(root);
+  for (const project of ['/p/app', '/p/other', null]) expect(left.filter((s) => s.project === project).map((s) => s.updatedAt)).toEqual(['2026-09-04T09:00:00.000Z', '2026-09-03T09:00:00.000Z']);
+});
+
+test('pruneSessions sweeps an orphan lock under a project directory too', () => {
+  const root = tmp();
+  const home = projectHome(root, '/p/app');
+  fs.mkdirSync(home, { recursive: true });
+  const orphan = newSessionId();
+  const dead = spawnSync('true');
+  fs.writeFileSync(lockPath(home, orphan), JSON.stringify({ pid: dead.pid, host: os.hostname(), token: 't', at: new Date().toISOString() }), { mode: 0o600 });
+  pruneSessions(root, 50);
+  expect(fs.existsSync(lockPath(home, orphan))).toBe(false);
+});
+
+test('the tree walk follows no link out of the sessions directory', () => {
+  const root = tmp();
+  const elsewhere = tmp();
+  saveSession(elsewhere, session({ id: '2026-09-21T09-00-00-eeee' }));
+  fs.mkdirSync(root, { recursive: true });
+  fs.symlinkSync(elsewhere, path.join(root, 'link'));
+  expect(listSessions(root)).toEqual([]);
 });
