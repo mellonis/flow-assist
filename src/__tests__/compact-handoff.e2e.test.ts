@@ -7,6 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { SESSION_VERSION, newSessionId, saveSession } from '../assistant/sessions.ts';
 import { ScriptedModel, bootApp, handoff, settle } from './helpers/scripted';
+import { hereHome, hereProject } from './helpers/session-files';
 
 const realFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = realFetch; });
@@ -132,11 +133,11 @@ test('tool-call markup is stripped from the summary before it is stored', async 
 test('a saved summary with tool-call markup in it is read without the markup', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-sess-handoff-'));
   const now = new Date().toISOString();
-  saveSession(dir, {
+  saveSession(hereHome(dir), {
     version: SESSION_VERSION, id: newSessionId(), title: 'q', createdAt: now, updatedAt: now,
     messages: [], api: [],
     summary: 'OLD-SUMMARY\n<tool_call>{"name":"read_file","arguments":{"path":"a"}}</tool_call>',
-    plan: [], usage: null, prompts: [], draft: '',
+    plan: [], usage: null, prompts: [], draft: '', project: hereProject(),
   });
   const model = new ScriptedModel();
   model.script([{ text: 'ok' }]);

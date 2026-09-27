@@ -144,7 +144,8 @@ test('a session saved before journals existed starts its journal with what its s
   const dir = dirOf();
   const model = new ScriptedModel();
   model.script([{ text: 'ответ' }]);
-  const first = await boot(dir, model);
+  const root = rootOf(); // one project for both starts
+  const first = await boot(dir, model, { shell: { roots: [root] } });
   await ask(first, 'старый вопрос');
   await first.press('escape', 'escape');
   first.app.unmount();
@@ -152,7 +153,7 @@ test('a session saved before journals existed starts its journal with what its s
 
   const next = new ScriptedModel();
   next.script([{ text: 'новый ответ' }]);
-  const ui = await bootApp(next, 100, 28, undefined, { sessions: { dir }, shell: { roots: [rootOf()] } });
+  const ui = await bootApp(next, 100, 28, undefined, { sessions: { dir }, shell: { roots: [root] } });
   await settle(6);
   await ui.press('F');
   await ask(ui, 'новый вопрос');

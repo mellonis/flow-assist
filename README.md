@@ -43,42 +43,45 @@ plugin's own `run_command` are declined: config stays yours, a URL can carry out
 anything the model has read, and only the host's shell tool is covered by the flag.
 Only pass it for a prompt whose tools read nothing you do not trust.
 
-The chat is saved as you go and continued on the next start, so a restart or an
-update loses nothing. A session belongs to the project it started in — the git
-repository holding the shell's directory at its first message, when that repository lies
-inside your `shell.roots` entry (so a root that is a whole workspace keeps each of its
+The chat is saved as you go and continued on the next start, so a restart or an update
+loses nothing. A session belongs to the project it started in — the git repository
+holding the shell's directory at its first message, when that repository lies inside
+your `shell.roots` entry (so a root that is a whole workspace keeps each of its
 repositories a project of its own); the root itself when there is no repository between
-it and the directory; outside every root, the nearest repository — and a start continues that project's newest session (the newest of all
-when the project has none yet). `/sessions` — or Ctrl+S from any screen (`config set
+it and the directory; outside every root, the nearest repository — and a start continues
+that project's newest session; in a project with none yet a new session starts, and a
+note says where the others are. `/sessions` — or Ctrl+S from any screen (`config set
 keys.sessions <key>` moves it) — lists the current project's saved sessions, newest
-first, with its title, when it was last used, its size, and what it is doing — `this
-chat · working` while an answer or a command runs, `in use elsewhere` when another
+first, with their titles, when each was last used, its size, and what it is doing —
+`this chat · working` while an answer or a command runs, `in use elsewhere` when another
 flow-assist process has it open, `done` when its last answer came while you were not
-looking; Tab shows every session, grouped under each project's path. Type to filter
-by the title or by any word of the conversation; ⏎ opens one (the session you are
-in is saved first), Ctrl+N starts a new one, Ctrl+R renames, Ctrl+X deletes after a y/n.
-A session open in another process can be neither opened nor renamed nor deleted from
-here. A session is named by the first line you wrote; `/title <text>` renames it.
-`/new` starts a fresh session and keeps the current one as it is — a restart before you
-say anything continues it; while an answer is still coming it says to stop it (Esc)
-first. `/clear` also starts a fresh session, but it stops an answer that is still
-coming and marks the old session done, so a restart starts empty. `/resume` lists the
-current project's saved sessions and `/resume <n>` opens one.
-Sessions live in `sessions/` in the config directory, under a mirror of their project's
-path (`sessions/Users/me/app/<id>.json`; a session with no project, and one saved by an
-older version, at the top level), readable by you only (`sessions.resume: false` starts
-every run empty; `sessions.keep` — how many are kept per project, 50 by default). What a restart restores is bounded — the last 400 messages of the
+looking; Tab shows every session, grouped under each project's path. Type to filter by
+the title or by any word of the conversation; ⏎ opens one (the session you are in is
+saved first), Ctrl+N starts a new one, Ctrl+R renames, Ctrl+X deletes after a y/n. A
+session open in another process can be neither opened nor renamed nor deleted from here.
+A session is named by the first line you wrote; `/title <text>` renames it. `/new`
+starts a fresh session and keeps the current one as it is — a restart before you say
+anything continues it; while an answer is still coming it says to stop it (Esc) first.
+`/clear` also starts a fresh session, but it stops an answer that is still coming and
+marks the old session closed, so a restart starts empty. `/resume` lists the current
+project's saved sessions (the top level's when there is no project) and `/resume <n>`
+opens one; the others are a Tab away in `/sessions`. Sessions live in `sessions/` in the
+config directory, under a mirror of their project's path
+(`sessions/Users/me/app/<id>.json`; a session with no project, and one saved by an older
+version, at the top level), readable by you only (`sessions.resume: false` starts every
+run empty; `sessions.keep` — how many are kept per project, 50 by default). What a
+restart restores is bounded — the last 400 messages of the
 conversation, fewer of the commands' output blocks — but each session also keeps a
 journal beside it, `<id>.log.jsonl`: everything as it happened — every tool call with
-its whole arguments and result and the y/n you gave it, a background task's calls
-under its name, every `!command` with its whole output (up to 8 MiB), every `/compact` summary — written line by line so a crash loses
-nothing, and never trimmed. It lives exactly as long as its session and
-goes when the session is deleted; `sessions.journalDays` (0 by default) removes one not
-written to for that many days, and the session then says so in a note. `/export [path]`
-turns the journal into a markdown document you can read — the conversation, each tool
-call folded with its arguments and result, the `/compact` summaries where they
-happened — written to the path you give, or to `session-<id>.md` in the shell's
-directory; it never overwrites a file that is there.
+its whole arguments and result and the y/n you gave it, a background task's calls under
+its name, every `!command` with its whole output (up to 8 MiB), every `/compact` summary
+— written line by line so a crash loses nothing, and never trimmed. It lives exactly as
+long as its session and goes when the session is deleted; `sessions.journalDays` (0 by
+default) removes one not written to for that many days, and the session then says so in
+a note. `/export [path]` turns the journal into a markdown document you can read — the
+conversation, each tool call folded with its arguments and result, the `/compact`
+summaries where they happened — written to the path you give, or to `session-<id>.md` in
+the shell's directory; it never overwrites a file that is there.
 
 A message sent while an answer is still coming is queued (`⏎ queued`) and reaches the
 assistant after its current step — between two tool rounds — so a correction lands

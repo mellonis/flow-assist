@@ -401,11 +401,20 @@ export function listSessions(root: string): SessionInfo[] {
   return out.sort(newestFirst);
 }
 
-// The sessions a list for the current project offers: its own, or — when it has none —
-// every session, so a first start in a new project still finds the last conversation.
-export function projectFirst<T extends { project: string | null }>(list: T[], project: string | null): T[] {
-  const mine = list.filter((s) => s.project === project);
-  return mine.length ? mine : list;
+// The current project's sessions, in the list's order — what a start continues and
+// what `/resume` numbers. Another project's conversation is never offered in its
+// place: the picker's `all` reaches those.
+export function projectSessions<T extends { project: string | null }>(list: T[], project: string | null): T[] {
+  return list.filter((s) => s.project === project);
+}
+
+// Removes `dir` and each parent above it that is left empty, up to — never including —
+// `root`: a mirror directory a prune or a delete emptied. A directory with anything in
+// it stays, and so does one outside `root`.
+export function dropEmptyDirs(dir: string, root: string): void {
+  for (let d = path.resolve(dir); d !== path.resolve(root) && within(d, path.resolve(root)); d = path.dirname(d)) {
+    try { fs.rmdirSync(d); } catch { return; } // not empty, or gone
+  }
 }
 
 // ─── The picker's rows ──────────────────────────────────────────────────────────
@@ -488,11 +497,11 @@ export function closeSession(dir: string, id: string): void {
   if (s) saveSession(dir, { ...s, closed: true });
 }
 
-// What a start continues: the newest session of the current project — the newest of
-// all only when the project has none — unless it was cleared. A project whose newest
-// was cleared continues nothing: another project's conversation is not what it left.
+// What a start continues: the newest session of the current project, unless it was
+// cleared. A project with none continues nothing — a new session starts — and no
+// project is a project of its own (the top level's sessions).
 export function pickToContinue(list: SessionInfo[], project: string | null): SessionInfo | null {
-  const last = projectFirst(list, project)[0];
+  const last = projectSessions(list, project)[0];
   return !last || last.closed ? null : last;
 }
 export function sessionToContinue(root: string, project: string | null = null): Session | null {
@@ -555,6 +564,7 @@ export function pruneSessions(root: string, keep = KEEP_SESSIONS): number {
     deleteSession(s.dir, s.id);
     removed++;
   }
+  for (const dir of byDir.keys()) dropEmptyDirs(dir, root);
   for (const dir of sessionDirs(root)) for (const n of namesIn(dir)) {
     if (!n.endsWith('.lock')) continue;
     const id = n.slice(0, -'.lock'.length);

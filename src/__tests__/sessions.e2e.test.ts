@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { SESSION_VERSION, newSessionId, saveSession, type Session } from '../assistant/sessions.ts';
 import { ScriptedModel, bootApp, settle } from './helpers/scripted';
-import { listTree } from './helpers/session-files';
+import { hereHome, hereProject, listTree } from './helpers/session-files';
 
 const realFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = realFetch; });
@@ -192,11 +192,11 @@ test('a stale lock — its process gone — is taken over on start; the app cont
     version: SESSION_VERSION, id, title: '', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
     messages: [{ role: 'user', content: 'stale-owner question' }, { role: 'assistant', content: 'stale-owner answer' }],
     api: [{ role: 'user', content: 'stale-owner question' }, { role: 'assistant', content: 'stale-owner answer' }],
-    summary: '', plan: [], usage: null, prompts: [], draft: '',
+    summary: '', plan: [], usage: null, prompts: [], draft: '', project: hereProject(),
   };
-  saveSession(dir, s);
+  saveSession(hereHome(dir), s);
   const dead = spawnSync('true'); // finished by the time spawnSync returns — a pid that is gone
-  fs.writeFileSync(path.join(dir, `${id}.lock`), JSON.stringify({ pid: dead.pid, host: os.hostname(), token: 'a-gone-process-token', at: new Date().toISOString() }), { mode: 0o600 });
+  fs.writeFileSync(path.join(hereHome(dir), `${id}.lock`), JSON.stringify({ pid: dead.pid, host: os.hostname(), token: 'a-gone-process-token', at: new Date().toISOString() }), { mode: 0o600 });
 
   const model = new ScriptedModel();
   model.script([{ text: 'continued' }]);
@@ -207,7 +207,7 @@ test('a stale lock — its process gone — is taken over on start; the app cont
   expect(frame).toContain('stale-owner question');
   expect(frame).not.toContain('is open in another flow-assist process');
 
-  const lock = JSON.parse(fs.readFileSync(path.join(dir, `${id}.lock`), 'utf8'));
+  const lock = JSON.parse(fs.readFileSync(path.join(hereHome(dir), `${id}.lock`), 'utf8'));
   expect(lock.token).not.toBe('a-gone-process-token');
   expect(lock.pid).toBe(process.pid);
   ui.app.unmount();
@@ -290,9 +290,10 @@ test('a legacy session (no rev field) changed elsewhere by another legacy writer
     api: [{ role: 'user', content: 'legacy q' }, { role: 'assistant', content: 'legacy a' }],
     summary: '', plan: [], usage: null, prompts: [], draft: '',
     // No `rev` at all — an older host wrote this.
+    project: hereProject(),
   };
-  const file = path.join(dir, `${id}.json`);
-  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(hereHome(dir), `${id}.json`);
+  fs.mkdirSync(hereHome(dir), { recursive: true });
   fs.writeFileSync(file, JSON.stringify(legacy));
 
   const model = new ScriptedModel();
@@ -381,11 +382,11 @@ test('an un-renamed session keeps the title of its first save — through later 
   const dir = dirOf();
   const id = newSessionId();
   const now = new Date().toISOString();
-  saveSession(dir, {
+  saveSession(hereHome(dir), {
     version: SESSION_VERSION, id, title: 'самый первый вопрос', createdAt: now, updatedAt: now,
     messages: [{ role: 'user', content: 'поздний вопрос' }, { role: 'assistant', content: 'поздний ответ' }],
     api: [{ role: 'user', content: 'поздний вопрос' }, { role: 'assistant', content: 'поздний ответ' }],
-    summary: '', plan: [], usage: null, prompts: [], draft: '',
+    summary: '', plan: [], usage: null, prompts: [], draft: '', project: hereProject(),
   });
   const model = new ScriptedModel();
   model.script([{ text: 'ещё ответ' }]);
@@ -396,7 +397,9 @@ test('an un-renamed session keeps the title of its first save — through later 
   await ui.press('return');
   await settle(20);
   await ui.press('escape', 'escape'); // closing writes at once
-  expect(JSON.parse(fs.readFileSync(path.join(dir, `${id}.json`), 'utf8')).title).toBe('самый первый вопрос');
+  const back = JSON.parse(fs.readFileSync(path.join(hereHome(dir), `${id}.json`), 'utf8'));
+  expect(back.messages.some((m: { content: unknown }) => m.content === 'ещё вопрос')).toBe(true); // continued, and written
+  expect(back.title).toBe('самый первый вопрос');
   ui.app.unmount();
 
   // A new session's title is fixed at its first save and is what a fork note names.

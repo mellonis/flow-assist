@@ -1219,12 +1219,14 @@ there is no `/fullscreen`.
   chat, `/clear`, `/new`, `/resume`, opening the picker (`/sessions`), and at process
   exit (`flushOnExit`). A
   write is temp file + rename; a file that does not parse is skipped. On start the
-  newest session of the project the shell starts in is continued — the newest of all
-  only when that project has none (`pickToContinue`) — unless `/clear` closed it, and
-  then nothing is continued, never another project's (`sessions.resume: false` turns
-  this off); `/clear` starts a new one and keeps the old on
-  `/resume` (`/resume` numbers the current project's sessions, all of them when it has
-  none — `projectFirst`, as the start; `/resume <n>` opens one).
+  newest session of the project the shell starts in is continued (`pickToContinue`)
+  unless `/clear` closed it; another project's is NEVER continued in its place — a
+  project with none starts a new session, and when other sessions exist a start-up
+  message says where they are (`No session in this project yet — ^s, then ⇥ for all`)
+  (`sessions.resume: false` turns this off); `/clear` starts a new one and keeps the old
+  on `/resume` (`/resume` numbers only the current project's sessions, the top level's
+  when there is no project — `projectSessions`, as the start; `/resume <n>` opens one;
+  the others are reached through the picker's Tab).
   `/new` starts a new one the same way and leaves the old one OPEN (not closed), so a
   restart before anything is said in the new one continues the old. Both reset the
   conversation through one function (`resetConversation` in `src/plugins/assistant.ts`):
@@ -1232,8 +1234,11 @@ there is no `/fullscreen`.
   state, the images' numbering, the auto mode, the notes mode, the folds, the live views,
   the shell's directory — `/new` resets too. `/new` is refused while an answer or a
   `!command` runs. 50 sessions are kept per project (`sessions.keep`,
-  `pruneSessions` groups by the directory a file is in; the top level is one project). **The state file is bounded** (`trimScreen`,
-  `trimHistory`): the screen list keeps its last `KEEP_MESSAGES` (400) CONVERSATION
+  `pruneSessions` groups by the directory a file is in; the top level is one project),
+  and a mirror directory a prune or a picker delete leaves empty is removed, with each
+  empty parent up to — never including — the sessions directory (`dropEmptyDirs`).
+  **The state file is bounded** (`trimScreen`, `trimHistory`): the screen list keeps its
+  last `KEEP_MESSAGES` (400) CONVERSATION
   rows — every row but a `view` — and among them the newest `KEEP_VIEWS` (100) view
   rows in their places, so a session that runs many commands keeps as much of what was
   said as one that runs none. The model's history keeps about its last 400 messages,
@@ -1374,12 +1379,15 @@ there is no `/fullscreen`.
   otherwise, drawn as nothing (this chat's own is `this chat`, being on screen — never
   `done`). `done` rests on two times the session file keeps: `answeredAt`, set when a
   turn ends with a final answer (not stopped, failed, out of rounds or empty), and
-  `seenAt`, set when the chat shows the session's end — that answer arriving while the
-  chat is open (the same instant), the chat opening (`markSeen`), a session opened or
-  continued in an open chat. A docked chat that is collapsed is not open. `sessionRows`
-  computes `held`/`done`/`idle`; the chat hands its own `pickerOwn` to the render, so the
-  word follows a turn that starts or ends while the picker is up. It is pure state in `src/assistant/session-picker.ts`
-  (`pickerKey`, the `ask.ts` pattern) drawn by `renderSessionPicker`
+  `seenAt`, set when the chat shows the session's end — the conversation on screen
+  (`conversationShown`: the chat open, neither the picker nor the pager drawn in its
+  place; a docked chat that is collapsed is not open): that answer arriving then (the
+  same instant), and `markSeen` when it comes back — the chat opening, the picker or the
+  pager closing, a session opened or continued. `sessionRows` computes
+  `held`/`done`/`idle`; the chat hands its own `pickerOwn` to the render, so the word
+  follows a turn that starts or ends while the picker is up. It is pure state in
+  `src/assistant/session-picker.ts` (`pickerKey`, the `ask.ts` pattern) drawn by
+  `renderSessionPicker`
   (`src/views/modals.ts`) in the conversation's place, in the chat's own frame, in every
   mode. `sessionRows` reads the list when the picker opens and after a rename or a
   delete, never per keystroke: one file parsed at a time, and of each only the title and

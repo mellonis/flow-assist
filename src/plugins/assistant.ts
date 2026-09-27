@@ -30,7 +30,7 @@ import { createShellState, formatShell, nextCwd, realOf, runShell, shellAutoRun,
 import { findInstructions, instructionsBlock, instructionsNote, type ProjectInstructions } from '../assistant/project-instructions.js';
 import {
   JOURNAL_DAYS, KEEP_SESSIONS, SESSION_VERSION, acquireLock, closeSession, cutTitle, flushOnExit, journalPath, listSessions, loadSession, lockPath,
-  makeLockToken, newSessionId, pickToContinue, projectFirst, projectHome, projectOf, pruneSessions, releaseLock, removeSession, renameSession, saveSession, sessionFingerprint,
+  makeLockToken, newSessionId, dropEmptyDirs, pickToContinue, projectHome, projectSessions, projectOf, pruneSessions, releaseLock, removeSession, renameSession, saveSession, sessionFingerprint,
   sessionFingerprintsEqual, sessionRows, sessionTitle, sessionWhen, sessionsDir, sweepJournals, type Session, type SessionFingerprint,
 } from '../assistant/sessions.js';
 import { appendJournal, callEndEvent, callStartEvent, exportMarkdown, outputJournal, readJournal, rowOf, type JournalEvent } from '../assistant/journal.js';
@@ -425,7 +425,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // state for the render; null — closed.
           const pickerRef = ui.useRef<PickerState | null>(null);
           const [picker, setPickerState] = ui.useState<PickerState | null>(null);
-          const setPicker = (next: PickerState | null) => { pickerRef.current = next; setPickerState(next); host.notify(); };
+          // Closed, it gives the conversation back: an answer that came behind it is seen
+          // (`markSeen`, through a ref — it is defined further down).
+          const markSeenRef = ui.useRef<() => void>(() => {});
+          const setPicker = (next: PickerState | null) => { pickerRef.current = next; setPickerState(next); if (!next) markSeenRef.current(); host.notify(); };
           const [messages, setMessages] = ui.useState<ChatMsg[]>([]);
           const [input, setInput] = ui.useState('');
           const [streaming, setStreaming] = ui.useState(false);
@@ -480,7 +483,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const [pager, setPagerState] = ui.useState<string | null>(null);
           const pagerRef = ui.useRef<string | null>(null);
           const pagerShownRef = ui.useRef(false);
-          const setPager = (id: string | null) => { pagerRef.current = id; if (!id) pagerShownRef.current = false; setPagerState(id); };
+          const setPager = (id: string | null) => { pagerRef.current = id; if (!id) pagerShownRef.current = false; setPagerState(id); if (!id) markSeenRef.current(); };
           // Process indicator: spinner + the seconds of whatever is running NOW.
           // t0Ref — when the turn started, which is what the finished answer's quiet
           // line says (`· 12.4s`). segRef — when the thing on the status line started:
@@ -819,9 +822,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // The project the lists open on: this chat's session's, once it has one; else
           // where the shell is.
           const currentProject = (): string | null => (sessionIdRef.current ? sessionProjectRef.current : projectHere());
-          // What `/resume` numbers: the current project's sessions, newest first — every
-          // session when it has none, as a start continues.
-          const resumeList = () => (sessDir ? projectFirst(listSessions(sessDir), currentProject()) : []);
+          // What `/resume` numbers: the current project's sessions, newest first — the
+          // top level's when there is no project. The picker's Tab reaches the others.
+          const resumeList = () => (sessDir ? projectSessions(listSessions(sessDir), currentProject()) : []);
           // The chat's commands with `/resume`'s values filled in: the saved sessions,
           // newest first, numbered as `/resume` lists them, each number labelled with
           // its title. Read when the field is drawn, so the list is the one on disk.
@@ -1038,13 +1041,17 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             saveTimer.current = setTimeout(() => { saveTimer.current = null; writeSession(); }, 250);
           };
           const writeRef = ui.useRef(writeSession); writeRef.current = writeSession;
-          // The chat shows the session's end — it is open, on this session: an answer
-          // that came before now is seen, and the file says so at the next save.
+          // Whether the conversation is on screen: the chat open, and neither the picker
+          // nor the pager drawn in its place.
+          const conversationShown = () => openRef.current && !pickerRef.current && !pagerRef.current;
+          // The chat shows the session's end: an answer that came before now is seen,
+          // and the file says so at the next save.
           const markSeen = () => {
-            if (!answeredAtRef.current || seenAtRef.current >= answeredAtRef.current) return;
+            if (!conversationShown() || !answeredAtRef.current || seenAtRef.current >= answeredAtRef.current) return;
             seenAtRef.current = new Date().toISOString();
             persist();
           };
+          markSeenRef.current = markSeen;
           // `fingerprint` is the caller's — taken with a stat BEFORE the content in
           // `s` was read, never re-derived here. Reading it fresh off the disk at
           // this point (after `s` was already loaded) would leave a window: a
@@ -1066,7 +1073,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             journalImport.current = journaled ? null : (s.messages as Record<string, unknown>[]).filter((m) => m.role !== 'system');
             titleRef.current = s.title;
             answeredAtRef.current = s.answeredAt ?? ''; seenAtRef.current = s.seenAt ?? '';
-            if (openRef.current) markSeen(); // opened in an open chat: its end is on screen
+            markSeen(); // opened where the conversation shows: its end is on screen
             fingerprintRef.current = fingerprint;
             apiRef.current = s.api as unknown as ChatMessage[];
             // A summary saved with tool-call markup in it is read without it: it rides in
@@ -1112,8 +1119,18 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // when that project has none.
               let here: string | null = null;
               try { here = projectHere(); } catch { /* no project */ }
-              const last = pickToContinue(listSessions(sessDir), here);
-              if (!last) return;
+              const all = listSessions(sessDir);
+              const last = pickToContinue(all, here);
+              if (!last) {
+                // Nothing here: a new session. Sessions of other projects are one key and
+                // Tab away, and the note says so.
+                if (!projectSessions(all, here).length && all.length) {
+                  const key = firstGlyph(host.keys.sessions ?? []);
+                  (host.services as Record<string, any>).showMessage?.(`No session in this project yet — ${key ? `${key}, then ` : '/sessions, then '}${keyGlyph('tab')} for all`);
+                  host.notify();
+                }
+                return;
+              }
               // The fingerprint first, stat before the content read just below — see
               // applySession's own comment for why the order matters.
               const fp = sessionFingerprint(last.dir, last.id);
@@ -1982,7 +1999,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               if (contentRef.current.trim() && !failed && !aborted && !roundLimit) {
                 const at = new Date().toISOString();
                 answeredAtRef.current = at;
-                if (openRef.current) seenAtRef.current = at;
+                if (conversationShown()) seenAtRef.current = at;
               }
               if (!contentRef.current.trim() && !failed && !aborted && !roundLimit) {
                 const opens = firstGlyph(host.keys.details);
@@ -2460,6 +2477,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               }
               case 'delete': {
                 const done = removeSession(dirOf(a.id), a.id, lockToken);
+                if (done === 'deleted') dropEmptyDirs(dirOf(a.id), sessDir); // a project's last one
                 const notice = done === 'deleted' ? `Deleted «${titleOf(a.id)}»`
                   : done === 'held' ? `"${titleOf(a.id)}" is open in another flow-assist process — it cannot be deleted`
                   : `"${titleOf(a.id)}" is the session in this chat — it cannot be deleted from here`;
@@ -2663,7 +2681,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 const n = Number(arg.trim());
                 if (!arg.trim()) {
                   const lines = list.slice(0, 15).map((s, i) => `${i + 1}. ${s.title || '(untitled)'} — ${sessionWhen(s.updatedAt)}, ${s.turns} message${s.turns === 1 ? '' : 's'}${s.id === sessionIdRef.current ? ' · this one' : ''}`);
-                  pushNote(lines.length ? `Sessions (newest first) — /resume <number> opens one:\n${lines.join('\n')}` : 'No saved sessions yet.');
+                  pushNote(lines.length ? `Sessions (newest first) — /resume <number> opens one:\n${lines.join('\n')}` : `No saved sessions in this project yet — ${firstGlyph(host.keys.sessions ?? []) || '/sessions'}, then ${keyGlyph('tab')} for all`);
                   setField('');
                   host.notify();
                   return;

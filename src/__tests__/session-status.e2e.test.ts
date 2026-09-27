@@ -94,3 +94,25 @@ test('an answer that lands while the chat is open is seen at once', async () => 
   expect(file.seenAt).toBe(file.answeredAt);
   ui.app.unmount();
 });
+
+test('an answer that lands behind the picker is not seen until the picker goes and the conversation shows', async () => {
+  const dir = dirOf();
+  const model = new ScriptedModel();
+  model.script([{ hold: true }, { text: 'hidden by the picker' }]);
+  const ui = await bootApp(model, 100, 28, undefined, { sessions: { dir } });
+  await ui.press('F');
+  await ui.type('a covered question');
+  await ui.press('return');
+  await settle(6);
+  ui.backend.press({ name: 's', ctrl: true });
+  await settle();
+  model.release();
+  await settleUntil(() => saved(dir, 'a covered question')?.answeredAt !== undefined, 400);
+  const covered = saved(dir, 'a covered question');
+  expect(covered.answeredAt > (covered.seenAt ?? '')).toBe(true);
+  await ui.press('escape'); // the picker goes: the answer is on screen
+  await new Promise((r) => setTimeout(r, 350)); // the debounced save
+  const shown = saved(dir, 'a covered question');
+  expect(shown.seenAt >= shown.answeredAt).toBe(true);
+  ui.app.unmount();
+});

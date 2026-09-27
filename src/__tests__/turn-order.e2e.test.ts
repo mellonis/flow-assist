@@ -12,7 +12,7 @@ import path from 'node:path';
 import { ScriptedModel, bootApp, settle, type Turn } from './helpers/scripted';
 import type { Make } from '../loader/plugin';
 import { SESSION_VERSION, newSessionId, type Session } from '../assistant/sessions.ts';
-import { listTree } from './helpers/session-files';
+import { hereHome, hereProject, listTree } from './helpers/session-files';
 
 const realFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = realFetch; });
@@ -515,11 +515,12 @@ test('a session saved before the time order still renders — and a malformed me
       'stray' as never,
     ],
     api: [{ role: 'user', content: 'old question' }, { role: 'assistant', content: 'Old answer.' }],
-    summary: '', plan: [], usage: null, prompts: [], draft: '',
+    summary: '', plan: [], usage: null, prompts: [], draft: '', project: hereProject(),
   };
   // Written as a file on disk, not through saveSession: this is what a hand edit or an
   // older host may have left, and saving is not what is being tested.
-  fs.writeFileSync(path.join(dir, `${id}.json`), JSON.stringify(s), { mode: 0o600 });
+  fs.mkdirSync(hereHome(dir), { recursive: true });
+  fs.writeFileSync(path.join(hereHome(dir), `${id}.json`), JSON.stringify(s), { mode: 0o600 });
   const model = new ScriptedModel();
   const ui = await bootApp(model, 100, 40, undefined, { sessions: { dir } });
   await ui.press('F');

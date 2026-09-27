@@ -52,13 +52,19 @@ test('a session started in a root lands under its mirror directory — the state
   t.ui.app.unmount();
 });
 
-test('a flat file from an older host still loads, is continued where it is, and never moves', async () => {
+test('a flat file from an older host still loads — as a session with no project — goes on where it is, and never moves', async () => {
   const dir = tmp('fa-proj-sessions-');
   const app = tmp('fa-proj-app-');
   const legacy = session('an old flat question', '2026-09-20T09:00:00.000Z');
   saveSession(dir, legacy);
   const t = await boot(dir, [app], 'more');
   await t.ui.press('F');
+  expect(t.ui.backend.lastFrame).not.toContain('an old flat question'); // another project's: not continued
+  await t.chord('s');
+  await t.ui.press('tab');
+  expect(rowOf(t.ui.backend.lastFrame!, 'no project')).toContain('no project');
+  await t.ui.press('return');
+  await settle(4);
   expect(t.ui.backend.lastFrame).toContain('an old flat question');
   await t.ask('and one more');
   await t.ui.press('escape', 'escape');
@@ -70,23 +76,64 @@ test('a flat file from an older host still loads, is continued where it is, and 
   t.ui.app.unmount();
 });
 
-test("a start continues the current project's newest session, not a newer one of another project", async () => {
+test("a start continues the current project's newest session, never another project's; with none of its own it starts a new one and says where the others are", async () => {
   const dir = tmp('fa-proj-sessions-');
   const app = tmp('fa-proj-app-');
   const other = tmp('fa-proj-other-');
   saveSession(projectHome(dir, app), session('the app question', '2026-09-20T09:00:00.000Z', app));
   saveSession(projectHome(dir, other), session('the other question', '2026-09-22T09:00:00.000Z', other));
-  // A project with none of its own continues the newest of all…
-  const fresh = tmp('fa-proj-fresh-');
-  const u = await boot(dir, [fresh]);
-  await u.ui.press('F');
-  expect(u.ui.backend.lastFrame).toContain('the other question');
-  u.ui.app.unmount(); // …which it writes on the way out: newer still
-  // …and one that has its own continues that, though another project's is newer.
   const t = await boot(dir, [app, other]);
   await t.ui.press('F');
   expect(t.ui.backend.lastFrame).toContain('the app question');
   expect(t.ui.backend.lastFrame).not.toContain('the other question');
+  t.ui.app.unmount();
+  const fresh = tmp('fa-proj-fresh-');
+  const u = await boot(dir, [fresh]);
+  expect(u.ui.backend.lastFrame).toContain('No session in this project yet — ^s, then ⇥ for all');
+  await u.ui.press('F');
+  expect(u.ui.backend.lastFrame).not.toContain('the other question');
+  expect(u.ui.backend.lastFrame).not.toContain('the app question');
+  // /resume numbers this project's sessions only: none here.
+  await u.ask('/resume');
+  expect(u.ui.backend.lastFrame).toContain('No saved sessions in this project yet');
+  u.ui.app.unmount();
+});
+
+test('/resume numbers only the current project\'s sessions', async () => {
+  const dir = tmp('fa-proj-sessions-');
+  const app = tmp('fa-proj-app-');
+  const other = tmp('fa-proj-other-');
+  saveSession(projectHome(dir, app), session('app one', '2026-09-20T09:00:00.000Z', app));
+  saveSession(projectHome(dir, other), session('other one', '2026-09-22T09:00:00.000Z', other));
+  const t = await boot(dir, [app, other]);
+  await t.ui.press('F');
+  await t.ask('/resume');
+  const frame = t.ui.backend.lastFrame!;
+  expect(frame).toContain('1. app one');
+  expect(frame).not.toContain('other one');
+  t.ui.app.unmount();
+});
+
+test('the project is decided at the first message: a cd into another root later leaves the session where it began', async () => {
+  const dir = tmp('fa-proj-sessions-');
+  const a = tmp('fa-proj-a-');
+  const b = tmp('fa-proj-b-');
+  const t = await boot(dir, [a, b], 'first answer', 'second answer');
+  await t.ui.press('F');
+  await t.ask('first in A');
+  await t.ask(`!cd ${b}`);
+  await settle(10);
+  await t.ui.press('backspace'); // out of shell mode
+  await t.ask('second in B');
+  await t.ui.press('escape', 'escape');
+  const files = listTree(dir).filter((n) => n.endsWith('.json'));
+  expect(files).toHaveLength(1);
+  expect(path.join(dir, path.dirname(files[0]!))).toBe(projectHome(dir, a));
+  const saved = JSON.parse(fs.readFileSync(path.join(dir, files[0]!), 'utf8'));
+  expect(saved.project).toBe(a);
+  expect(saved.shellCwd).toBe(b); // the shell did move
+  expect(saved.messages.some((m: { content: unknown }) => m.content === 'second in B')).toBe(true);
+  expect(fs.existsSync(projectHome(dir, b))).toBe(false);
   t.ui.app.unmount();
 });
 
@@ -156,5 +203,24 @@ test('a delete from the picker removes the state file and the journal under the 
   expect(fs.existsSync(path.join(home, `${doomed}.json`))).toBe(false);
   expect(fs.existsSync(journalPath(home, doomed))).toBe(false);
   expect(fs.existsSync(path.join(home, `${doomed}.lock`))).toBe(false);
+  t.ui.app.unmount();
+});
+
+test('a delete from the picker removes a mirror directory it leaves empty', async () => {
+  const dir = tmp('fa-proj-sessions-');
+  const app = tmp('fa-proj-app-');
+  const other = tmp('fa-proj-other-');
+  saveSession(projectHome(dir, other), session('the lone other', '2026-09-20T09:00:00.000Z', other));
+  const t = await boot(dir, [app], 'fine');
+  await t.ui.press('F');
+  await t.ask('here');
+  await t.chord('s');
+  await t.ui.press('tab');
+  await t.ui.press('down');
+  await t.chord('x');
+  await t.ui.press('y');
+  expect(t.ui.backend.lastFrame).toContain('Deleted «the lone other»');
+  expect(fs.existsSync(projectHome(dir, other))).toBe(false);
+  expect(fs.existsSync(dir)).toBe(true);
   t.ui.app.unmount();
 });

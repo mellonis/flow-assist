@@ -7,7 +7,7 @@ import {
   KEEP_MESSAGES, KEEP_VIEWS, SEARCH_TEXT_MAX, SESSION_VERSION, TITLE_MAX, acquireLock, closeSession, cutTitle, listSessions, loadSession,
   lockPath, lockState, makeLockToken, newSessionId, normalizeViews, pruneSessions, releaseLock, removeSession, renameSession,
   saveSession, searchText, sessionFingerprint, sessionFingerprintsEqual, sessionRev, sessionRows, sessionTitle,
-  pickToContinue, projectHome, projectOf, sessionToContinue, sessionsDir, trimHistory, trimScreen, unseenAnswer, type Session,
+  dropEmptyDirs, pickToContinue, projectHome, projectOf, sessionToContinue, sessionsDir, trimHistory, trimScreen, unseenAnswer, type Session,
 } from '../sessions.ts';
 
 const tmp = () => path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'sess-')), 'sessions');
@@ -553,7 +553,7 @@ test('a session saved under its project is listed from the root with its directo
   expect(fs.existsSync(path.join(root, `${legacy.id}.json`))).toBe(true); // read where it is, never moved
 });
 
-test('a start continues the newest session of the current project, and the newest overall only when the project has none', () => {
+test('a start continues the newest session of the current project and never another project\'s', () => {
   const root = tmp();
   const a = (id: string, at: string, project: string | null) => {
     const s = session({ id, updatedAt: at, project });
@@ -562,13 +562,32 @@ test('a start continues the newest session of the current project, and the newes
   };
   const appOld = a('2026-09-20T09-00-00-aaaa', '2026-09-20T09:00:00.000Z', '/p/app');
   const other = a('2026-09-22T09-00-00-bbbb', '2026-09-22T09:00:00.000Z', '/p/other');
+  const loose = a('2026-09-23T09-00-00-cccc', '2026-09-23T09:00:00.000Z', null);
   expect(sessionToContinue(root, '/p/app')!.id).toBe(appOld.id);
   expect(sessionToContinue(root, '/p/other')!.id).toBe(other.id);
-  expect(sessionToContinue(root, '/p/none')!.id).toBe(other.id); // nothing of its own: the newest overall
-  expect(pickToContinue(listSessions(root), null)!.id).toBe(other.id);
-  // The project's newest was cleared: nothing is continued — never another project's.
+  expect(sessionToContinue(root, '/p/none')).toBeNull(); // nothing of its own: a new session
+  expect(pickToContinue(listSessions(root), null)!.id).toBe(loose.id); // no project is a project of its own
+  // The project's newest was cleared: nothing is continued.
   closeSession(projectHome(root, '/p/app'), appOld.id);
   expect(sessionToContinue(root, '/p/app')).toBeNull();
+});
+
+test('a prune or a delete removes a mirror directory it leaves empty, never the sessions directory itself', () => {
+  const root = tmp();
+  const home = projectHome(root, '/p/app');
+  saveSession(home, session({ id: '2026-09-01T09-00-00-0001', updatedAt: '2026-09-01T09:00:00.000Z', project: '/p/app' }));
+  saveSession(projectHome(root, '/p/other'), session({ id: '2026-09-01T09-00-00-0002', updatedAt: '2026-09-01T09:00:00.000Z', project: '/p/other' }));
+  expect(pruneSessions(root, 0)).toBe(2);
+  expect(fs.existsSync(path.join(root, 'p'))).toBe(false);
+  expect(fs.existsSync(root)).toBe(true);
+  saveSession(home, session({ id: '2026-09-02T09-00-00-0003', project: '/p/app' }));
+  fs.writeFileSync(path.join(root, 'p', 'keep.txt'), 'not ours to remove');
+  expect(removeSession(home, '2026-09-02T09-00-00-0003', 'tok')).toBe('deleted');
+  dropEmptyDirs(home, root);
+  expect(fs.existsSync(path.join(root, 'p', 'app'))).toBe(false);
+  expect(fs.existsSync(path.join(root, 'p'))).toBe(true); // not empty: kept
+  dropEmptyDirs(root, root);
+  expect(fs.existsSync(root)).toBe(true);
 });
 
 test('KEEP_SESSIONS counts per project; the top level counts as one project', () => {

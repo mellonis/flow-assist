@@ -8,7 +8,7 @@ import path from 'node:path';
 import { ScriptedModel, bootApp, settle } from './helpers/scripted';
 import { SESSION_VERSION, newSessionId } from '../assistant/sessions.ts';
 import type { Make } from '../loader/plugin.ts';
-import { listTree } from './helpers/session-files';
+import { hereHome, hereProject, listTree } from './helpers/session-files';
 
 const realFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = realFetch; });
@@ -352,9 +352,10 @@ test('a view with an unknown kind is drawn as a fallback line, never a "Cannot u
       { role: 'user', content: 'what happened here' },
       { role: 'view', content: '', views: [{ kind: 'gone:card', data: {}, phase: 'done', startedAt: 0 }] },
     ],
-    api: [], summary: '', plan: [], usage: null, prompts: [], draft: '',
+    api: [], summary: '', plan: [], usage: null, prompts: [], draft: '', project: hereProject(),
   };
-  fs.writeFileSync(path.join(dir, `${id}.json`), JSON.stringify(raw));
+  fs.mkdirSync(hereHome(dir), { recursive: true });
+  fs.writeFileSync(path.join(hereHome(dir), `${id}.json`), JSON.stringify(raw));
 
   const errors: unknown[][] = [];
   const errSpy = spyOn(console, 'error').mockImplementation((...args: unknown[]) => { errors.push(args); });

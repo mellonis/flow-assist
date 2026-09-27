@@ -5,22 +5,23 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
-- **The session list says what each session is doing.** A word on each row: `this
-  chat · working` while an answer or a command runs in this chat, `in use elsewhere` for one another flow-assist process
-  has open, and `done` for a session whose last answer came while the chat was closed
-  and has not been seen since — opening the chat on it, or opening it in the chat, marks
-  it seen.
+- **The session list says what each session is doing.** A word on each row: `this chat ·
+  working` while an answer or a command runs in this chat, `in use elsewhere` for one
+  another flow-assist process has open, and `done` for a session whose last answer came
+  while the chat was closed and has not been seen since — opening the chat on it, or
+  opening it in the chat, marks it seen.
 - **Sessions are kept per project.** A session belongs to the project it started in —
   the git repository holding the shell's directory at its first message, when it lies
   inside the `shell.roots` entry holding that directory (a root that is a whole
   workspace keeps each repository a project of its own); that root when no repository
-  lies between it and the directory; outside every root the nearest repository — and its files live under a mirror of that path,
-  `sessions/Users/me/app/<id>.json` with its journal beside it. A start continues the
-  current project's newest session (the newest of all only when the project has none);
-  `/sessions` opens on the current project's sessions and Tab shows every session,
-  grouped under each project's path; `/resume` numbers the current project's.
-  `sessions.keep` (50) counts per project. Sessions saved by an older version load where
-  they are, as sessions with no project, and are never moved.
+  lies between it and the directory; outside every root the nearest repository — and its
+  files live under a mirror of that path, `sessions/Users/me/app/<id>.json` with its
+  journal beside it. A start continues the current project's newest session, and in a
+  project with none yet starts a new one and says where the others are; `/sessions`
+  opens on the current project's sessions and Tab shows every session, grouped under
+  each project's path; `/resume` numbers the current project's only. `sessions.keep`
+  (50) counts per project. Sessions saved by an older version load where they are, as
+  sessions with no project, and are never moved.
 - **A plugin that asks the model something no longer lets it write.** A plugin's
   `chatLLM` — and a remote plugin's `host.chatLLM` — ran every write the model called
   without asking you. Now each write there is declined unless the plugin asks you
