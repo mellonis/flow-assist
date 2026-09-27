@@ -22,7 +22,10 @@ What each version of flow-assist brought, newest first. The version is the one i
   a line per fact, framed as the assistant's own earlier notes rather than your
   instructions; it reads a fact in full when its line matters. A fact written in one
   project never reaches another's prompt. `/memory` lists this project's facts and every
-  project's, and `/memory forget project|global|all` empties either.
+  project's, and `/memory forget project|global|all` empties either. The memory an older
+  version kept in `memory.json` moves into the global workspace on the first start —
+  once; the old file is kept as `memory.json.migrated` — and a note says how many facts
+  moved, so ones that belong to a single project can be moved there.
 - **The plan is drawn in its own order, with checkboxes and no numbers, and says what
   is being worked on.** Items used to be listed by state with a number beside each —
   numbers the assistant and you read differently, and a new plan could start at 6. Now

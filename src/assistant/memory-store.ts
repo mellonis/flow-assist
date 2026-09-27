@@ -155,3 +155,36 @@ export function memoryPromptBlock(project: Fact[], global: Fact[]): string {
     ...part('### Every project (scope "global")', global),
   ].join('\n');
 }
+
+// Two entries say the same thing when their text matches once case, runs of whitespace
+// and trailing punctuation are taken out: "This repo prefers rebase over merge." and
+// "this repo prefers  rebase over merge" are one fact, stored once.
+export function normalizeMemoryText(text: string): string {
+  return text.toLowerCase().replace(/\s+/g, ' ').trim().replace(/[.!?;,:…]+$/u, '').trim();
+}
+
+// The one list an older host kept for every project (`memory.json`) moves into the
+// global workspace, once: each entry becomes a fact file — an entry scoped to a plugin
+// keeps the plugin's name — then the old file is renamed `<file>.migrated`. A fact the
+// workspace already holds is not written twice, so a start interrupted between the
+// writes and the rename moves nothing twice. A file that does not parse is left where
+// it is. `moved` — facts written, `kept` — entries already there.
+export function migrateMemoryJson(file: string, globalWs: string): { moved: number; kept: number } {
+  let list: unknown;
+  try { list = (JSON.parse(fs.readFileSync(file, 'utf8')) as { memories?: unknown })?.memories; } catch { return { moved: 0, kept: 0 }; }
+  const entries = Array.isArray(list) ? list.filter((m): m is { text: string; scope?: unknown; label?: unknown } => !!m && typeof (m as { text?: unknown }).text === 'string' && !!(m as { text: string }).text.trim()) : [];
+  const have = new Set(readFacts(globalWs).map((f) => normalizeMemoryText(f.text)));
+  let moved = 0;
+  let kept = 0;
+  for (const m of entries) {
+    const key = normalizeMemoryText(m.text);
+    if (have.has(key)) { kept++; continue; }
+    const scope = typeof m.scope === 'string' ? m.scope : '';
+    const plugin = scope && scope !== 'host' && scope !== 'global' ? scope : undefined;
+    addFact(globalWs, { text: m.text, ...(typeof m.label === 'string' && m.label.trim() ? { type: m.label } : {}), ...(plugin ? { plugin } : {}) });
+    have.add(key);
+    moved++;
+  }
+  fs.renameSync(file, `${file}.migrated`);
+  return { moved, kept };
+}

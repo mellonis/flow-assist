@@ -92,7 +92,9 @@ presented to the assistant as its own earlier notes rather than your instruction
 reads a fact in full when its line matters. A fact kept in one project never reaches
 another. `/memory` lists them, this project's first; `/memory forget <n>` removes one,
 `/memory forget project`, `global` or `all` a whole list — without asking the model.
-`/clear` says how many it kept.
+`/clear` says how many it kept. What an older version remembered in `memory.json`
+moves into the global workspace on the first start, and a note says how many facts
+moved; the old file stays as `memory.json.migrated`.
 
 **The assistant keeps its own work in its own place.** Each project has an agent
 workspace, `projects/<the project's path>/_workspace/` in the config directory

@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { hostStateDir } from '../../config/load.js';
-import { readFacts, removeFact } from '../../assistant/memory-store.js';
+import { normalizeMemoryText, readFacts, removeFact } from '../../assistant/memory-store.js';
 import { workspaceFor } from '../../assistant/workspace.js';
 
 // The memory list an older host kept, one JSON file for every project. It is read to
@@ -73,12 +73,7 @@ export function saveMemories(list: Memory[], filePath: string = defaultMemoryPat
 export const MEMORY_TEXT_MAX = 300;
 export const MEMORY_MAX_ENTRIES = 100;
 
-// Two entries say the same thing when their text matches once case, runs of
-// whitespace and trailing punctuation are taken out: "This repo prefers rebase over
-// merge." and "this repo prefers  rebase over merge" are one fact, stored once.
-export function normalizeMemoryText(text: string): string {
-  return text.toLowerCase().replace(/\s+/g, ' ').trim().replace(/[.!?;,:…]+$/u, '').trim();
-}
+export { normalizeMemoryText };
 
 // Why a new entry is NOT stored, or null when it may be. `list` is the scope the entry
 // goes to — the cap is counted there — and `others` every other fact the conversation

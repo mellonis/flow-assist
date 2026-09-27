@@ -50,7 +50,8 @@ import { groupOpen, toggleGroup } from '../assistant/view-groups.js';
 import { bindingGlyph, firstGlyph, isKey, isMouseButton, keyGlyph } from '../playback/keys.js';
 import { askKey, askStart, type AskQuestion, type AskState } from '../assistant/ask.js';
 import { keptAfterClear, memoryCommand, type MemoryLists } from '../assistant/memory-command.js';
-import { memoryPromptBlock, readFacts, removeFact } from '../assistant/memory-store.js';
+import { memoryPromptBlock, migrateMemoryJson, readFacts, removeFact } from '../assistant/memory-store.js';
+import { memoryFilePath } from '../runtime/services/memory.js';
 import { workspaceFor } from '../assistant/workspace.js';
 import { CONTEXT_WARN_AT, DEFAULT_CONTEXT_WINDOW, cacheLine, contextBadge, estimateTokens, readContext, short as shortTokens } from '../assistant/context-meter.js';
 import { applyRecall, bulkyItems, createRecallState, decideBatch, recallLimits, recallLine, saveRecallState, type BulkyItem, type RecallSource, type ShellMeta } from '../assistant/recall.js';
@@ -1339,7 +1340,20 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // so a continued session is in place first — the start-up only continues one
           // into an empty list.
           ui.useEffect(() => {
-            const t = setTimeout(() => onShellSetRef.current(), 0);
+            const t = setTimeout(() => {
+              onShellSetRef.current();
+              // The memory an older host kept in one list moves into the global
+              // workspace once (src/assistant/memory-store.ts), and the person is told —
+              // what was one list for every project is every project's now, and some of
+              // it may belong to one project only.
+              try {
+                const { moved } = migrateMemoryJson(memoryFilePath(host.config), workspaceFor(host.config, null, 'global'));
+                if (moved) {
+                  pushNote(`Moved ${moved} ${moved === 1 ? 'memory' : 'memories'} from ${tildePath(memoryFilePath(host.config))} into the global workspace, as files — ${moved === 1 ? 'it is' : 'they are'} every project's now. /memory lists them; ask the assistant to move one that belongs to a single project into it.`);
+                  host.notify();
+                }
+              } catch (e) { (host.services as Record<string, any>).pushLog?.(`[memory] moving memory.json failed: ${(e as Error).message}`); }
+            }, 0);
             return () => clearTimeout(t);
           }, []);
 

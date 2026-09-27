@@ -970,7 +970,15 @@ there is no `/fullscreen`.
     leave nowhere to go (an entry added short and then updated long is still open).
   - **`memory.json`** — `memoryFilePath(config)`: `config.memory.file`, else
     `memory.json` under `hostStateDir()` — is where an older host kept one list for
-    every project. It is resolved on every call and never at import: an import-time
+    every project. At the chat's start (the timer after the session's own, so a
+    continued session is in place first) it moves into the global workspace ONCE
+    (`migrateMemoryJson`): each entry becomes a fact file — one scoped to a plugin keeps
+    the name as `plugin`, a `label` becomes the `type` — then the file is renamed
+    `memory.json.migrated`. A fact the global workspace already holds is not written
+    again, so a start interrupted between the writes and the rename doubles nothing; a
+    file that does not parse is left where it is. A move says so in a start-up note
+    (`pushNote`, journaled once the session has an id) — how many, that they are every
+    project's now, `/memory` to see them. It is resolved on every call and never at import: an import-time
     constant is fixed before a test can move it, which is how every e2e test that
     reached the tool appended to the person's own file, 32 copies of one fact. Uninstalling
     a plugin removes what an older host kept for it (`purgePluginMemories`: the list's

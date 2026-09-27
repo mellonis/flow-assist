@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { addFact, memoryPromptBlock, parseFact, readFacts, removeFact, saveFact } from '../memory-store.js';
+import { addFact, memoryPromptBlock, migrateMemoryJson, parseFact, readFacts, removeFact, saveFact } from '../memory-store.js';
 
 const ws = () => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-memws-')));
 const index = (dir: string) => fs.readFileSync(path.join(dir, 'memory', 'MEMORY.md'), 'utf8');
@@ -70,4 +70,28 @@ test('the prompt carries the index of both scopes, framed as the model\'s own no
   expect(block).toContain('workspace_read');
   expect(block).toContain('(scope "global")');
   expect(memoryPromptBlock([], [])).toBe('');
+});
+
+test('memory.json moves into the global workspace once: as files, the old file renamed, a fact already there not doubled', () => {
+  const g = ws();
+  const legacy = path.join(ws(), 'memory.json');
+  fs.writeFileSync(legacy, JSON.stringify({ memories: [
+    { id: 'm-1', text: 'Prefers rebase over merge.', scope: 'host', ts: 1 },
+    { id: 'm-2', text: 'The keycaps panel stays off.', scope: 'keycaps', label: 'keycaps', ts: 2 },
+    { id: 'm-3', text: 'Answers in Russian.', scope: 'host', ts: 3 },
+  ] }));
+  addFact(g, { text: 'answers in russian' });
+  expect(migrateMemoryJson(legacy, g)).toEqual({ moved: 2, kept: 1 });
+  expect(fs.existsSync(legacy)).toBe(false);
+  expect(fs.existsSync(`${legacy}.migrated`)).toBe(true);
+  const facts = readFacts(g);
+  expect(facts.map((f) => f.text).sort()).toEqual(['Answers in Russian.', 'Prefers rebase over merge.', 'The keycaps panel stays off.'].map((t) => (t === 'Answers in Russian.' ? 'answers in russian' : t)).sort());
+  // A fact an older host kept for a plugin still says whose it is.
+  expect(facts.find((f) => f.text.startsWith('The keycaps'))!.plugin).toBe('keycaps');
+  // Again: nothing to move.
+  expect(migrateMemoryJson(legacy, g)).toEqual({ moved: 0, kept: 0 });
+  // A file that does not parse is left where it is.
+  fs.writeFileSync(legacy, '{ not json');
+  expect(migrateMemoryJson(legacy, g)).toEqual({ moved: 0, kept: 0 });
+  expect(fs.readFileSync(legacy, 'utf8')).toBe('{ not json');
 });

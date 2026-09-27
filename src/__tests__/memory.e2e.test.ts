@@ -1,6 +1,6 @@
 // What /clear clears, and what it does not — as a person meets it.
 import { afterEach, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ScriptedModel, bootApp, settle } from './helpers/scripted';
@@ -184,4 +184,39 @@ test('/clear with an empty memory says nothing extra', async () => {
   expect(ui.backend.lastFrame).not.toContain('kept');
   expect(ui.backend.lastFrame).toContain('Ask anything.');
   ui.app.unmount();
+});
+
+test('the first start moves memory.json into the global workspace and says so; the next start moves nothing and says nothing', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'fa-ws-'));
+  const file = join(mkdtempSync(join(tmpdir(), 'fa-mem-')), 'memory.json');
+  writeFileSync(file, JSON.stringify({ memories: [
+    { id: 'm-1', text: 'Prefers rebase over merge.', scope: 'host', ts: 1 },
+    { id: 'm-2', text: 'Answers in Russian.', scope: 'host', ts: 2 },
+  ] }));
+  const model = new ScriptedModel();
+  model.script([{ text: 'hi' }], [{ text: 'again' }]);
+  const ui = await bootApp(model, 110, 30, undefined, { workspace: { dir }, memory: { file } });
+  await ui.press('F');
+  await settle(10);
+  expect(ui.backend.lastFrame).toContain('Moved 2 memories');
+  expect(ui.backend.lastFrame).toContain('/memory');
+  expect(existsSync(file)).toBe(false);
+  expect(existsSync(`${file}.migrated`)).toBe(true);
+  expect(factsUnder(join(dir, '_global')).sort()).toEqual(['Answers in Russian.', 'Prefers rebase over merge.']);
+  // The note is the person's; the facts reach the model as the global index.
+  await ui.type('hello');
+  await ui.press('return');
+  await settle(20);
+  expect(JSON.stringify(model.requests.at(-1)!.messages)).not.toContain('Moved 2');
+  expect(systemOf(model)).toContain('Prefers rebase over merge');
+  ui.app.unmount();
+
+  const again = new ScriptedModel();
+  again.script([{ text: 'hi' }]);
+  const ui2 = await bootApp(again, 110, 30, undefined, { workspace: { dir }, memory: { file } });
+  await ui2.press('F');
+  await settle(10);
+  expect(ui2.backend.lastFrame).not.toContain('Moved');
+  expect(factsUnder(join(dir, '_global'))).toHaveLength(2);
+  ui2.app.unmount();
 });
