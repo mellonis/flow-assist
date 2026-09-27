@@ -56,7 +56,7 @@ import { ARM_MS, armHint, armKeyOf, armStep, type Arm } from './exit-keys.js';
 import { copyToClipboard } from '../assistant/copy.js';
 import { readClipboardImage, type ClipboardImage } from '../assistant/images.js';
 import { legacyRootsNote } from '../assistant/shell.js';
-import { refreshSecrets } from '../assistant/secrets.js';
+import { redactSecrets, refreshSecrets } from '../assistant/secrets.js';
 import { llmConfigNotes } from '../assistant/llm-endpoint.js';
 import { collectContext } from '../assistant/screen-context.js';
 import { resolveAppTheme } from '../playback/theme.js';
@@ -415,7 +415,7 @@ export function renderApp(
     // `services` object so plugins see the live channels). `showMessage` uses
     // the toast (auto-clears after 4s); `pushLog` appends to the log buffer and
     // refreshes `logs` for the log modal to read.
-    (services as unknown as ReactBoundServices).showMessage = (msg) => toast.showMessage(msg);
+    (services as unknown as ReactBoundServices).showMessage = (msg) => toast.showMessage(redactSecrets(String(msg)));
     (services as unknown as ReactBoundServices).pushLog = (entry) => {
       services.log.append(entry);
       (services as unknown as ReactBoundServices).logs = services.log.read();
@@ -718,7 +718,7 @@ export function renderApp(
             // Where the command runs: here, the `:` line — the chat runs a command marked
             // `chat` with `surface: 'chat'` and its own `say` / `openPanel`.
             surface: 'line',
-            showMessage: (m: string) => toast.showMessage(m),
+            showMessage: (m: string) => toast.showMessage(redactSecrets(String(m))),
             setView: (v: string) => { ui.view = v; notify(); },
             onExit,
             back: () => { ui.view = undefined; notify(); },

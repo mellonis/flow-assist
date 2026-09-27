@@ -133,3 +133,11 @@ test('escape codes painted inside a token do not hide it — grep --color', () =
   const s = secretStream(set);
   expect(s.push(painted.slice(0, at)) + s.push(painted.slice(at)) + s.flush()).toBe('pre ‹secret WB_WIKI_TOKEN› post');
 });
+
+test('an MCP header value with ${VAR} in it is a secret as it is sent, expanded; a plain header is not', () => {
+  const config = { plugins: { mcp: { servers: { wiki: { headers: { 'X-Wiki': 'tok=${WB_WIKI_TOKEN};v=2', Accept: 'application/json' } } } } } };
+  const set = buildSecretSet(config, env);
+  expect(redactSecrets(`sent tok=${TOKEN};v=2`, set)).toBe('sent ‹secret plugins.mcp.servers.wiki.headers.X-Wiki›');
+  expect(redactSecrets(TOKEN, set)).toBe('‹secret WB_WIKI_TOKEN›');
+  expect(redactSecrets('application/json', set)).toBe('application/json');
+});

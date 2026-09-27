@@ -3204,7 +3204,8 @@ commands; docs and hints never present either mechanism as a boundary.
   token is one of these — the plugin API has no other way to call a setting secret),
   and a literal string at a secret-looking key of the config itself (an MCP server's
   `headers.Authorization`, named by its key path; `Bearer x`'s credential on its own
-  too). A system variable (`PATH`, `HOME`, `USER`, `SHELL`, `TMPDIR`, `TERM`, `LANG`,
+  too), and a request header that names a variable, as it is sent — expanded
+  (`tok=${TOKEN};v=2` under an MCP server's `headers`). A system variable (`PATH`, `HOME`, `USER`, `SHELL`, `TMPDIR`, `TERM`, `LANG`,
   `LC_*`, `XDG_*`, …) is never one, whatever names it: a stdio server's `env` passes
   `${PATH}` through. The set is built at start (`refreshSecrets` in `main()` and
   `renderApp`) and again whenever a value is set or unset (`setConfigValue`,
@@ -3236,7 +3237,11 @@ commands; docs and hints never present either mechanism as a boundary.
   - view text — `sanitizeViewText`, which every framed view line and every screen item
     the model is sent passes through;
   - the log — `LogService.append` and `logToolRun`, and `consoleLogLines` (so the lines
-    kept for stderr at exit have none).
+    kept for stderr at exit have none);
+  - what a plugin says — `pluginNote` in the chat (`services.chatNote`, a command's
+    `ctx.say`), a command's error line, a command panel's rows, title and notice
+    before they are drawn (`/mcp`'s list names server URLs), and every toast
+    (`showMessage`, bound in `renderApp`);
   - the system prompt — `withSystemPrompt` in `agentChat`, the per-round prompt and a
     leading system message alike: project instructions and the memory index are text
     anyone may have written a token into (a group's description, an MCP server's
@@ -3260,8 +3265,10 @@ commands; docs and hints never present either mechanism as a boundary.
   (`src/config/load.ts`, the guard). The host keeps, in its own state
   (`config.accepted.json`, 0600), the hash and the content of `config.json` and
   `config.local.json` as it last ACCEPTED them — its own writes (`saveConfigSetting`,
-  `saveConfigUnset`, `saveConfig`: `:config set`, `config_set`, `editConfigArray` and
-  the CLI's `config set`) and a change the person said yes to; a first start with no
+  `saveConfigUnset`, `saveConfig`: `:config set`, `config_set`, `editConfigArray`, a
+  plugin's own `services.setConfig` / `unsetConfig` — a plugin runs in the host's
+  process, so its write is the host's — and the CLI's `config set`) and a change the
+  person said yes to; a first start with no
   record accepts the files as they are. At a start a file whose hash differs is not
   applied: `loadConfig` serves the accepted content; the app asks about it, the CLI
   and the one-shot prompt print why (`configStartupNotes`) and go on without it. Once

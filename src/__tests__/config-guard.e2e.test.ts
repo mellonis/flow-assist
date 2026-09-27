@@ -124,3 +124,24 @@ test('the question shows every leash key however many there are, the others cut 
   expect(frame).toContain('shell.autoRun: (unset) → true');
   expect(frame).toContain('+32 more keys');
 });
+
+test('a plugin\'s own setConfig is the host\'s write: accepted, never asked about, and kept at a restart', async () => {
+  const { z } = await import('zod');
+  const { checkConfigFiles } = await import('../config/load.ts');
+  fs.mkdirSync(hostStateDir(), { recursive: true });
+  fs.rmSync(acceptedConfigPath(), { force: true });
+  fs.writeFileSync(local(), '{}');
+  loadConfig();
+  guardConfigFiles();
+  const state: { host?: { services: Record<string, any> } } = {};
+  const guest = (make: any) => make('srv', {
+    configSchema: z.object({ flag: z.boolean().optional() }).optional(),
+    setup: ({ host }: { host: { services: Record<string, any> } }) => { state.host = host; },
+  });
+  await bootApp(new ScriptedModel(), 120, 34, (make) => [guest(make)]);
+  expect(state.host!.services.setConfig('plugins.srv.flag', true)).toMatchObject({ ok: true });
+  expect(JSON.parse(fs.readFileSync(local(), 'utf8'))).toEqual({ plugins: { srv: { flag: true } } });
+  expect(checkConfigFiles()).toEqual([]);
+  unguardConfigFiles();
+  expect((loadConfig().plugins as { srv?: { flag?: boolean } }).srv?.flag).toBe(true);
+});

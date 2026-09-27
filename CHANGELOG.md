@@ -10,7 +10,9 @@ What each version of flow-assist brought, newest first. The version is the one i
   name says it is a token, key, secret, password or cookie, a credential written into
   the config — is replaced by `‹secret NAME›` in tool results, command output (streamed,
   a token split across chunks included, and base64 or URL-encoded forms too), views, the
-  assistant's answer and the log, before it is sent, drawn, saved or journaled.
+  assistant's answer, what a plugin says in the chat (notes, `/mcp`'s list, toasts) and
+  the log, before it is sent, drawn, saved or journaled. An MCP header that names a
+  variable counts as it is sent.
 - **The assistant's commands start without your tokens.** `run_command` starts with every
   secret variable the app knows taken out of its environment and says which, by name,
   once per conversation; `shell.passEnv` (yours to set, never the assistant's) lists

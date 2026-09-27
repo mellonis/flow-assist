@@ -36,16 +36,20 @@ export interface SecretSet {
   maxLength: number;
 }
 
-// Every `${VAR}` named in a string of the config, and every literal at a secret key.
-function walkConfig(value: unknown, path: string[], refs: Set<string>, literals: { path: string; value: string }[]): void {
+// Every `${VAR}` named in a string of the config, and every literal at a secret key. A
+// request header (an MCP server's `headers`) that names a variable is sent expanded
+// (`Bearer ${TOKEN}`, `tok=${TOKEN};v=2`): that whole value is a secret too.
+const VAR_RE = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g;
+function walkConfig(value: unknown, path: string[], refs: Set<string>, literals: { path: string; value: string }[], env: Record<string, string | undefined>): void {
   if (typeof value === 'string') {
-    for (const m of value.matchAll(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g)) refs.add(m[1]!);
+    for (const m of value.matchAll(VAR_RE)) refs.add(m[1]!);
     const key = path.at(-1) ?? '';
     if (SECRET_KEY_RE.test(key) && !value.includes('${')) literals.push({ path: path.join('.'), value });
+    if (path.at(-2) === 'headers' && value.includes('${')) literals.push({ path: path.join('.'), value: value.replace(VAR_RE, (_, v: string) => env[v] ?? '') });
     return;
   }
-  if (Array.isArray(value)) { value.forEach((v, i) => walkConfig(v, [...path, String(i)], refs, literals)); return; }
-  if (value && typeof value === 'object') for (const [k, v] of Object.entries(value)) walkConfig(v, [...path, k], refs, literals);
+  if (Array.isArray(value)) { value.forEach((v, i) => walkConfig(v, [...path, String(i)], refs, literals, env)); return; }
+  if (value && typeof value === 'object') for (const [k, v] of Object.entries(value)) walkConfig(v, [...path, k], refs, literals, env);
 }
 
 // The forms a value is redacted in: itself, base64 and base64url without padding (so a
@@ -58,7 +62,7 @@ function formsOf(value: string): string[] {
 export function buildSecretSet(config: Record<string, unknown> | undefined, env: Record<string, string | undefined> = process.env): SecretSet {
   const refs = new Set<string>();
   const literals: { path: string; value: string }[] = [];
-  walkConfig(config ?? {}, [], refs, literals);
+  walkConfig(config ?? {}, [], refs, literals, env);
   const named = new Set<string>([...refs, llmOpts(config?.ai, env).tokenEnv]);
   for (const k of Object.keys(env)) if (SECRET_NAME_RE.test(k)) named.add(k);
   const names = [...named].filter((n) => n && !isSystemVariable(n) && typeof env[n] === 'string' && env[n] !== '').sort();

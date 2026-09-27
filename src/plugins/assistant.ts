@@ -20,6 +20,7 @@ import { lineTab, lineView, type TabWalk } from '../config/commandline.js';
 import { completePath, completeSlash, listDirectory, type ChatCommandDef } from '../config/fieldcomplete.js';
 import { configSetLine, type CompleteResult } from '../config/commands.js';
 import { RESTART_NOTE, parseValue, type ConfigChange } from '../config/load.js';
+import { redactDeep, redactSecrets } from '../assistant/secrets.js';
 import { apiHistory, compactConversation, chatLanguage, requestTools, transcriptSoFar } from '../assistant/agent.js';
 import { RESUMED_NOTE, autoCompactLimits, overThreshold } from '../assistant/compaction.js';
 import { stripToolMarkup } from '../assistant/tool-markup.js';
@@ -2709,13 +2710,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // never sent), a failure the chat's error line, and it may open a panel.
           const runPluginCommand = (name: string, cmd: PluginCommand, arg: string) => {
             setField('');
-            const fail = (e: unknown) => { setError(`/${name}: ${(e as Error)?.message ?? String(e)}`); host.notify(); };
+            const fail = (e: unknown) => { setError(redactSecrets(`/${name}: ${(e as Error)?.message ?? String(e)}`)); host.notify(); };
             const ctx = {
               surface: 'chat',
               // The command's plugin speaks: its name in front, held while a turn runs.
               say: (text: string) => pluginNote(`[${cmd.name.includes(':') ? cmd.name.slice(0, cmd.name.indexOf(':')) : name}] ${String(text ?? '')}`),
               showMessage: (text: string) => (host.services as Record<string, any>).showMessage?.(text),
-              error: (text: string) => { setError(String(text ?? '')); host.notify(); },
+              error: (text: string) => { setError(redactSecrets(String(text ?? ''))); host.notify(); },
               openPanel,
               config: host.config,
             };
@@ -2726,7 +2727,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             host.notify();
           };
           // A plugin's news: a note now, or under the turn's answer when one runs.
-          const pluginNote = (text: string) => {
+          // What a plugin says is redacted here (src/assistant/secrets.ts): a server's URL
+          // or a header it names may hold a token.
+          const pluginNote = (raw: string) => {
+            const text = redactSecrets(raw);
             if (!text) return;
             if (inTurnRef.current) { laterNotesRef.current.push(text); return; }
             pushNote(text);
@@ -3544,11 +3548,12 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             panel: panel ? (() => {
               const { rows, error: rowsError } = panelRows(panel);
               const top = panelTop(panel);
-              return {
-                title: top.title, rows, cursor: Math.min(panel.cursor, Math.max(0, rows.length - 1)),
+              // Everything the plugin put in it is redacted before it is drawn.
+              return redactDeep({
+                title: top.title, rows: rows.map((r) => ({ ...r })), cursor: Math.min(panel.cursor, Math.max(0, rows.length - 1)),
                 notice: rowsError ? `⚠ ${rowsError}` : panel.notice, empty: top.empty ?? '',
                 keys: panelKeys(panel).map((k) => ({ cap: keyGlyph(k.key), label: k.label })), nested: panel.stack.length > 1,
-              };
+              });
             })() : null,
             // What this chat is doing, for its own row: a y/n or a question waits, or a
             // turn or a `!command` runs.

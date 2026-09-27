@@ -112,3 +112,36 @@ test('the model\'s run_command runs without the token and is told so once; the p
   await settleUntil(() => ui.backend.lastFrame.includes('Again.'));
   expect(tools(model.requests.length - 1)[0]).toContain('withheld from commands: LLM_TOKEN, WB_WIKI_TOKEN');
 });
+
+test('what a plugin says in the chat — a note, a command\'s line, a panel, a toast — never shows a known token', async () => {
+  process.env.WB_WIKI_TOKEN = TOKEN;
+  const guest = (make: Make) => make('srv', {
+    setup: ({ host }: { host: { services: Record<string, any> } }) => { setTimeout(() => host.services.chatNote(`note ${TOKEN}`), 0); },
+    commands: [{
+      name: 'leak', description: 'Leaks', chat: true,
+      run: (ctx: any, arg = '') => {
+        if (arg === 'toast' || ctx.surface !== 'chat') { ctx.showMessage(`toast ${TOKEN}`); return; }
+        ctx.say(`said ${TOKEN}`);
+        ctx.openPanel({ title: `panel ${TOKEN.slice(0, 30)}${TOKEN.slice(30)}`, rows: () => [{ id: 'a', text: `row ${TOKEN}`, detail: `detail ${TOKEN}` }] });
+      },
+    }],
+  } as never);
+  const ui = await bootApp(new ScriptedModel(), 160, 34, (make) => [guest(make)]);
+  await ui.press('F');
+  await settleUntil(() => ui.backend.lastFrame.includes('note ‹secret'));
+  await ui.type('/leak');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('row ‹secret'));
+  const frame = ui.backend.lastFrame;
+  expect(frame).not.toContain(TOKEN.slice(0, 20));
+  expect(frame).toContain('panel ‹secret WB_WIKI_TOKEN›');
+  expect(frame).toContain('detail ‹secret');
+  await ui.press('escape');
+  await settleUntil(() => ui.backend.lastFrame.includes('said ‹secret'));
+  expect(ui.backend.lastFrame).not.toContain(TOKEN.slice(0, 20));
+  await ui.press('escape', 'escape');
+  await ui.type(':leak toast');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('toast ‹secret'));
+  expect(ui.backend.lastFrame).not.toContain(TOKEN.slice(0, 20));
+});
