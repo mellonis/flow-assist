@@ -10,6 +10,7 @@ import { ScriptedModel, bootApp, settle } from './helpers/scripted';
 const realFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 
+const settleUntil = async (ok: () => boolean, n = 200) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
 const dirOf = () => fs.mkdtempSync(path.join(os.tmpdir(), 'fa-journal-e2e-'));
 const rootOf = () => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-journal-root-')));
 const journals = (dir: string) => fs.readdirSync(dir).filter((n) => n.endsWith('.log.jsonl'));
@@ -34,10 +35,11 @@ test('a crash before any save leaves every row and every call — whole, before 
     [{ text: 'Схема на месте.' }],
   );
   const ui = await boot(dir, model, { ai: { baseUrl: 'http://scripted.model', model: 'scripted', toolLoading: 'all', toolResultMaxChars: 200 } });
-  await ask(ui, 'покажи схему');
-  expect(ui.backend.lastFrame).toContain('Схема на месте.');
-  // No save has happened yet (the debounce is 250 ms, and nothing closed the chat):
-  // this is what a crash would leave.
+  await ui.type('покажи схему');
+  await ui.press('return');
+  // The moment the turn has ended — before the save it schedules (250 ms later, and
+  // nothing closed the chat): this is what a crash would leave.
+  await settleUntil(() => journals(dir).length > 0 && journalOf(dir).some((e) => e.t === 'end'));
   expect(fs.readdirSync(dir).filter((n) => n.endsWith('.json'))).toHaveLength(0);
   const events = journalOf(dir);
   expect(events[0]).toMatchObject({ t: 'start' });
@@ -52,6 +54,8 @@ test('a crash before any save leaves every row and every call — whole, before 
   expect(events.at(-1)).toMatchObject({ t: 'end' });
   // The order is the order it happened in.
   expect(events.map((e) => e.t)).toEqual(['start', 'row', 'step', 'call', 'answer', 'end']);
+  await settle(10);
+  expect(ui.backend.lastFrame).toContain('Схема на месте.');
   ui.app.unmount();
 });
 
