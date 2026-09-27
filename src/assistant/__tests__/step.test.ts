@@ -17,6 +17,7 @@ import {
   runRowText,
   shownText,
   stepSummary,
+  trailTone,
   turnSegments,
   type TurnPart,
 } from '../step.ts';
@@ -192,4 +193,21 @@ test('a folded run is marked when a call failed, or a write showed no diff', () 
   expect(runMarks([c(0, { name: 'w', outcome: 'applied', write: true })], true).wrote).toBe(false);
   expect(runMarks([c(0, { name: 'w', outcome: 'applied', write: true })], false).wrote).toBe(true);
   expect(runMarks([c(0, { name: 'w', outcome: 'applied', write: true }), c(1, { name: 'a', outcome: 'ok' })], true).wrote).toBe(true);
+});
+
+test('the trail\'s tone is red for a failure nobody recovered from, yellow for one that was, and ok otherwise', () => {
+  const r = (name: string, outcome: string) => ({ name, outcome });
+  // Nothing failed.
+  expect(trailTone([r('a', 'ok')])).toBe('ok');
+  // The failing tool called again, successfully: recovered.
+  expect(trailTone([r('a', 'error'), r('a', 'ok')])).toBe('warn');
+  // The trail's last call failed — nothing came after it to recover.
+  expect(trailTone([r('a', 'error')])).toBe('error');
+  // A different tool's later success does not recover tool a's failure.
+  expect(trailTone([r('a', 'error'), r('b', 'ok')])).toBe('error');
+  // A later call of the same tool that is not itself a success does not recover it —
+  // recovery needs a positive success, not merely "a different outcome".
+  expect(trailTone([r('a', 'error'), r('a', 'declined')])).toBe('error');
+  // Writes alone are not failures.
+  expect(trailTone([r('w', 'applied')])).toBe('ok');
 });

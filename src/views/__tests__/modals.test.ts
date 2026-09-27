@@ -111,6 +111,31 @@ test("a command block's gutter marker is dim while it runs, ok on exit 0, the er
   expect(await markerFg(shellMsg({}, 'failed'))).toBe('red');
 });
 
+// The trail's header (`▾ N tools:`) takes red only for a failure nobody recovered
+// from, yellow for one a later call of the same tool recovered, and the normal
+// colour otherwise — a write never turns it yellow, it only adds its own ✎.
+test('the tool trail header is yellow on a recovered failure, red on one that stands, and normal for writes alone', async () => {
+  const theme = { modals: { chat: MODAL_COLOR_DEFAULTS.chat }, error: 'red' };
+  const trailRow = async (runs: { name: string; outcome: string }[]) => {
+    const backend = new TestBackend(80, 24);
+    const handle = await render(h(renderChatModal, { ...baseChat, theme, messages: [{ role: 'assistant', content: 'done', parts: [{ kind: 'tools', runs }] }] }), backend);
+    const rows = backend.lastFrame.split('\n');
+    const y = rows.findIndex((r) => /tool/.test(r));
+    const x = rows[y]!.search(/[▸▾]/);
+    const style = backend.lastBuffer!.get(x, y).style;
+    handle.unmount();
+    return { fg: style.fg, line: rows[y]! };
+  };
+  // Recovered: tool a failed, then succeeded — yellow, not red.
+  expect((await trailRow([{ name: 'a', outcome: 'error' }, { name: 'a', outcome: 'ok' }])).fg).toBe('yellow');
+  // Unrecovered: the failing tool never ran again — red.
+  expect((await trailRow([{ name: 'a', outcome: 'error' }, { name: 'b', outcome: 'ok' }])).fg).toBe('red');
+  // A write with nothing failed: the normal colour, with ✎ beside it, never yellow.
+  const wrote = await trailRow([{ name: 'w', outcome: 'applied' }]);
+  expect(wrote.fg).toBe('green');
+  expect(wrote.line).toContain('✎');
+});
+
 test('a window paints its own ink on its own ground, not the terminal foreground', async () => {
   // On a light terminal theme the default foreground is black: text with no colour of
   // its own drew black on the black window. The window's `text` reaches it now.
@@ -697,6 +722,20 @@ test('a folded run with a failed call keeps its marks and a ZWJ step uncut', () 
   const rows = chatRows([msg] as never, { wrap, folds: { open: false, except: new Set() }, viewLines: 20, notes: 'step', detailsKey: '^o', renderers: {}, now: 0, palette: {} }).map(rowText);
   const row = rows.find((r) => r.startsWith('▸'));
   expect(row).toBe(`${text} ✗`);
+});
+
+test("a folded run's ✗ carries the trail's tone: warn when the same tool recovered, error when it did not", () => {
+  const o: RowOpts = { wrap: 60, folds: { open: false, except: new Set() }, viewLines: 20, notes: 'step', detailsKey: '^o', renderers: {}, now: 0, palette: {} };
+  const markOf = (runs: { name: string; outcome: string }[]) => {
+    const msg = { role: 'assistant', content: 'Done.', parts: [{ kind: 'text', text: 'looked' }, { kind: 'tools', runs }] };
+    const rows = chatRows([msg] as never, o);
+    const row = rows.find((r) => (r.spans ?? []).some((sp) => sp.text === ' ✗'));
+    return (row?.spans ?? []).find((sp) => sp.text === ' ✗')?.mark;
+  };
+  // Tool a failed, then succeeded: recovered — the ✗ is the warn tone, not error.
+  expect(markOf([{ name: 'a', outcome: 'error' }, { name: 'a', outcome: 'ok' }])).toBe('warn');
+  // Tool a failed and never ran again — the error tone stands.
+  expect(markOf([{ name: 'a', outcome: 'error' }, { name: 'b', outcome: 'ok' }])).toBe('error');
 });
 
 test('the chat title that fits by clusters is not cut', async () => {

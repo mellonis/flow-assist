@@ -18,7 +18,7 @@ import { askRows, type AskRow, type AskState } from '../assistant/ask.js';
 import { autoBadge, type AutoMode } from '../assistant/auto.js';
 import { VERBS } from '../assistant/verbs.js';
 import { cellWidth, cutLeft, cutStep } from '../cells.js';
-import { answerText, readParts, runMarks, runRowText, shownText, turnSegments, type NotesMode } from '../assistant/step.js';
+import { answerText, readParts, runMarks, runRowText, shownText, trailTone, turnSegments, type NotesMode } from '../assistant/step.js';
 import { isClicked, isOpen, foldId, type FoldState } from '../assistant/folds.js';
 import { imageTokenRanges, splitTokens } from '../assistant/images.js';
 import { markText, type ImageMark } from '../assistant/tool-images.js';
@@ -789,11 +789,14 @@ function buildMessageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): Ch
           // The run folded: ONE dim row where it began, saying the newest step and
           // how many there are. Chrome — the host's account of what was said. Its
           // marks say what happened inside without a click: `✗` a call failed or was
-          // declined, `✎` a write ran that showed no diff.
-          const marks = runMarks(seg.calls, segs[si + 1]?.kind === 'change');
+          // declined, `✎` a write ran that showed no diff — both in the run's tone
+          // (`trailTone`, the same rule the trail's own header uses).
+          const runs = seg.calls.flatMap((c) => c?.runs ?? []);
+          const tone = trailTone(runs);
+          const wrote = runMarks(seg.calls, segs[si + 1]?.kind === 'change').wrote;
           const markSpans: Span[] = [
-            ...(marks.failed ? [{ text: ' ✗', mark: 'failed' }] : []),
-            ...(marks.wrote ? [{ text: ' ✎', mark: 'wrote' }] : []),
+            ...(tone !== 'ok' ? [{ text: ' ✗', mark: tone }] : []),
+            ...(wrote ? [{ text: ' ✎', mark: tone }] : []),
           ];
           const markWidth = markSpans.reduce((w, sp) => w + cellWidth(sp.text), 0);
           rows.push({ role, step: true, fold: id, spans: [{ text: runRowText(seg.steps, Math.max(4, inner - markWidth)) }, ...markSpans] });
@@ -960,7 +963,7 @@ function chatRowRenderer({ palette: m, errorColor, wrap, now, detailsKey }: {
         h(Box, { flexDirection: 'row', flexShrink: 1, overflow: 'hidden' },
           (row.spans || []).map((s, j) => h(Text, {
             key: j, wrap: 'truncate',
-            ...(s.mark === 'failed' ? { color: errorColor } : s.mark === 'wrote' ? { color: m.warn } : { dim: true }),
+            ...(s.mark === 'error' ? { color: errorColor } : s.mark === 'warn' ? { color: m.warn } : s.mark === 'ok' ? { dim: true, color: m.ok } : { dim: true }),
           }, String(s.text ?? '')))));
       if (row.reason) return h(Box, { key, flexDirection: 'row', flexShrink: 0, ...frameRow(row) },
         gutter(row),
@@ -977,13 +980,13 @@ function chatRowRenderer({ palette: m, errorColor, wrap, now, detailsKey }: {
       if (row.meta) {
         const runs = row.runs ?? [];
         const wrote = runs.some((r) => r.outcome === 'applied');
-        const failed = runs.some((r) => r.outcome === 'error' || r.outcome === 'declined');
+        const tone = trailTone(runs);
         // How long it took and which tools ran — about the answer, not part of it.
         return h(Box, { key, flexDirection: 'row', flexShrink: 0, selectable: false },
           h(Text, null, ' '.repeat(GUTTER)),
           row.duration ? h(Text, { dim: true }, `${fmtSec(row.duration)}${runs.length || row.stopped ? ' · ' : ''}`) : null,
           row.stopped ? h(Text, { color: m.warn }, `stopped (${row.stoppedBy ?? CAP.esc})${runs.length ? ' · ' : ''}`) : null,
-          runs.length ? h(Text, { dim: !failed, color: failed ? errorColor : wrote ? m.warn : m.ok }, `${row.open ? '▾' : '▸'} ${runs.length} tool${runs.length === 1 ? '' : 's'}${wrote ? ' ✎' : ''}: `) : null,
+          runs.length ? h(Text, { dim: tone === 'ok', color: tone === 'error' ? errorColor : tone === 'warn' ? m.warn : m.ok }, `${row.open ? '▾' : '▸'} ${runs.length} tool${runs.length === 1 ? '' : 's'}${wrote ? ' ✎' : ''}: `) : null,
           // The summary is a row like any other: cut it to what is left of the width,
           // or a turn of fifty tools takes a second line and the list's arithmetic
           // (one terminal line per row) is wrong.

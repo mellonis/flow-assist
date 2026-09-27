@@ -298,3 +298,27 @@ export function runMarks(calls: readonly (StepCalls | null)[], diffAfter: boolea
   const wrote = calls.some((c, i) => (c?.runs ?? []).some((r) => r.write && r.outcome === 'applied') && !(i === calls.length - 1 && diffAfter));
   return { failed, wrote };
 }
+
+// The trail's colour, and a step's folded summary by the same rule (`src/views/
+// modals.ts` draws both): red when a call failed and the SAME tool was never called
+// successfully after it — a failure nobody recovered from, the trail's last call
+// failing included, since nothing came after it to recover; yellow when every failure
+// was followed by a later success of the same tool; the normal colour when nothing
+// failed. A write never moves the tone — it only adds its own `✎`, in whichever
+// colour this returns.
+const isFailure = (outcome: string) => outcome === 'error' || outcome === 'declined';
+// Recovery needs a POSITIVE success (`ok`/`applied`), not merely a different outcome —
+// an outcome this closed set does not know yet must not read as a recovery, or an
+// unrecovered failure would quietly turn yellow the day one is added.
+const isSuccess = (outcome: string) => outcome === 'ok' || outcome === 'applied';
+export type TrailTone = 'ok' | 'warn' | 'error';
+export function trailTone(runs: readonly { name: string; outcome: string }[]): TrailTone {
+  let recoveredOnly = false;
+  for (let i = 0; i < runs.length; i++) {
+    if (!isFailure(runs[i]!.outcome)) continue;
+    const recovered = runs.slice(i + 1).some((r) => r.name === runs[i]!.name && isSuccess(r.outcome));
+    if (!recovered) return 'error';
+    recoveredOnly = true;
+  }
+  return recoveredOnly ? 'warn' : 'ok';
+}

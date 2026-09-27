@@ -5,6 +5,11 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **A recovered tool trail is yellow, not red.** The trail's header and a folded run's
+  `✗` mark now take red only when a failed call was never followed by a later,
+  successful call of the same tool; a failure the model went on to retry
+  successfully draws yellow instead. A write shows as `✎` in whichever of these
+  colours applies — it no longer turns the trail yellow on its own.
 - **`ctx N%` climbs with a long turn instead of jumping once at the end.** Each round
   of a turn already reported its usage; now the reading is drawn from it right away,
   so you see the context fill up round by round rather than only when the answer

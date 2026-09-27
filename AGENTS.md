@@ -2187,10 +2187,17 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     changes as the turn grows because parts are only appended. A click opens that run
     alone: every step in full, dim, where it happened (a click on any of its rows
     folds it again); `^o` opens and closes every run with everything else. A folded
-    run carries marks after its text so what happened inside is seen without a click
-    (`runMarks`): `✗` in the error colour when one of its calls failed or was
-    declined, `✎` in the warn colour when a write ran and showed no diff; the summary
-    is cut to leave them room. Every cut in the chat's chrome counts cells per
+    run carries marks after its text so what happened inside is seen without a click:
+    `✗` when one of its calls failed or was declined, `✎` when a write ran and showed
+    no diff — both in the run's TONE (`trailTone`, pure, `src/assistant/step.ts`): red
+    when a failed call was never followed by a later, successful call (`ok`/`applied`)
+    of the SAME tool — a failure nobody recovered from — yellow when it was, the normal
+    colour when nothing failed. A write never moves the tone, only adds its own `✎`, in
+    whichever colour that is — it no longer turns the row yellow on its own. An open
+    trail's own header (`▾ N tools:`) takes its colour the same way, over every call it
+    holds; the rows' cache key changes through the message's own identity (below), the
+    tone is never baked into it. The summary is cut to leave the marks room. Every cut
+    in the chat's chrome counts cells per
     grapheme cluster, as the grid draws them — `cutStep` / `cellWidth` in
     `src/cells.ts`, on @flowtty/core's `stringWidth` / `fitClusters`, never a
     per-code-point or `.length` count — so a wide character, a flag or a ZWJ sequence
