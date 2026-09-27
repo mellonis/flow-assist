@@ -789,9 +789,12 @@ there is no `/fullscreen`.
   confirmation at all is to a host outside `web.allowlist`, which is exactly what its
   write flag tests) and `config_set` (config is the person's: even a key the model may
   change changes only with their yes); the last two never are. `shell.autoRun: true` is
-  the person's second consent: with it AND the mode at `all`, the host's own bare
-  `run_command` is answered like any other write (a plugin's tool of that name is not
-  lifted); either alone changes nothing. It sits under `shell`, on the leash, so the
+  the person's second consent: with it AND the mode at `all`, the host's own
+  `run_command` is answered like any other write; either alone changes nothing. "The
+  host's own" is the def object the shell group made (`isHostShellTool`,
+  `src/loader/tools-shell.ts`, passed to `confirmWrite` as `info.hostShell`), never the
+  name: a plugin's tool called `run_command` — qualified, or holding the bare name while
+  the host's shell is off — still asks. It sits under `shell`, on the leash, so the
   model can never set it. The chat reads it at each confirmation (`shellAutoRun`,
   `src/assistant/shell.ts`) and passes it into `autoConfirms` — live, not restart-only,
   since it only loosens a pause the person already chose with `/auto all`, so a
@@ -2024,8 +2027,8 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   while it is open, rather than letting it fall into the plain Tab's completion, which
   is not what anyone asks for by holding Shift. `/auto [reads|all|off]` does the same in words, and
   a bare `/auto` takes the next rung. The mode is stated on the hint line in the warn
-  colour (`auto: writes`; `auto: everything — commands run without asking` while
-  `shell.autoRun` is on too) as a SIBLING of the hint, not inside it: the left cell becomes
+  colour (`auto: writes`; `auto: writes + commands` while `shell.autoRun` is on
+  too) as a SIBLING of the hint, not inside it: the left cell becomes
   the running turn's status while an answer comes in, and a mode that disappeared
   exactly while writes were running unasked would be the wrong half of the screen to
   lose.

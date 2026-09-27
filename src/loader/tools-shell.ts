@@ -119,7 +119,23 @@ export function runCommandDescription(config: Record<string, unknown>, found: st
   ].filter(Boolean).join(' ');
 }
 
-export const shellTools = (config: Record<string, unknown>): ToolGroup => ({
+// The host's own shell tools, by identity, not by name: a plugin may name a tool
+// `run_command` too, and when the host's shell group is off (`ai.disabledTools:
+// ["shell"]`) that tool holds the bare name. What only the host's shell may do — be
+// answered by the auto mode under `shell.autoRun` (src/assistant/auto.ts) — is keyed
+// on the def object this group made, which no plugin can hand in.
+const hostShellDefs = new WeakSet<object>();
+export function isHostShellTool(def: unknown): boolean {
+  return typeof def === 'object' && def !== null && hostShellDefs.has(def);
+}
+
+export const shellTools = (config: Record<string, unknown>): ToolGroup => {
+  const group = shellGroup(config);
+  for (const t of group.tools) hostShellDefs.add(t);
+  return group;
+};
+
+const shellGroup = (config: Record<string, unknown>): ToolGroup => ({
   id: 'shell',
   alwaysOn: false,
   tools: [

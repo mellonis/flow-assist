@@ -1350,18 +1350,19 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // The y/n pause on a writing op: agentChat calls confirmWrite for tools
                 // with a write-flag, we set pendingRef + pendingAsk and wait for the
                 // input-handler to resolve the promise ('y'/Enter — yes, 'n'/Esc — no).
-                confirmWrite: (name: string, argsStr: unknown, info?: { input?: string; inputId?: string }) => new Promise<boolean>((resolve) => {
+                confirmWrite: (name: string, argsStr: unknown, info?: { input?: string; inputId?: string; hostShell?: boolean }) => new Promise<boolean>((resolve) => {
                   // The one place a confirmation may be answered without the person:
                   // the auto mode (src/assistant/auto.ts), which only `all` ever lets
                   // say yes, never for an unlisted web_fetch or config_set, and for
-                  // run_command only while the person's `shell.autoRun` is on — read
+                  // run_command only while the person's `shell.autoRun` is on and the
+                  // call is the host's own shell tool (`info.hostShell`) — the key read
                   // here, at the call, so a value set mid-session holds at once. It
                   // answers BEFORE anything on screen moves — a call that does not
                   // pause must not close the `/context` panel the person is reading.
                   // Nothing here relaxes what agentChat asks about: a tool with no
                   // write flag never reaches this function, and the trail and the ✎
                   // diff block still show what ran.
-                  if (autoConfirms(autoModeRef.current, name, shellAutoRun(host.config as { shell?: unknown }))) { resolve(true); return; }
+                  if (autoConfirms(autoModeRef.current, name, { autoRun: shellAutoRun(host.config as { shell?: unknown }), hostShell: info?.hostShell === true })) { resolve(true); return; }
                   const args = typeof argsStr === 'string' ? argsStr : JSON.stringify(argsStr ?? '');
                   const command = shellCommandOf(name, args);
                   const line = configLineOf(name, args);

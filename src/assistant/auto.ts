@@ -23,8 +23,11 @@
 //     on purpose with `shell.autoRun: true` (read by the chat and passed in here, as
 //     `autoRun`): then `all` answers it like any other write. Both consents are
 //     needed — the key alone changes nothing under `ask` or `reads`, and `all` alone
-//     still asks. Only the host's own bare `run_command` is lifted: a plugin's tool of
-//     the same name is not the host's shell;
+//     still asks. Only the host's own shell tool is lifted, known by the def the
+//     host's shell group made (`hostShell`, from `isHostShellTool` in
+//     src/loader/tools-shell.ts), never by the name: a plugin's tool called
+//     `run_command` — qualified, or holding the bare name while the host's shell is
+//     off — is not the host's shell;
 //   - `web_fetch` — a fetch that reaches the confirmation at all is one to a host
 //     outside `web.allowlist` (that is exactly what its `write` flag tests), and a URL
 //     can carry out anything the model has seen. Should that flag ever become a plain
@@ -60,10 +63,12 @@ export function autoCommand(arg: string): AutoMode | 'cycle' | null {
 // What the hint line shows — '' while the mode is `ask`, since there is nothing
 // unusual to say then. `all` is called "writes" on screen: what it changes is that
 // writes stop asking, and that is the word the person is looking for. With
-// `shell.autoRun` as well, commands stop asking too, and the line says so plainly.
+// `shell.autoRun` as well, commands stop asking too, and the line says so — short
+// enough to stay whole on a narrow row, and no wider than the truth: an unlisted
+// web_fetch and config_set still ask.
 export function autoBadge(mode: AutoMode, autoRun: boolean): string {
   if (mode === 'reads') return 'auto: reads';
-  if (mode === 'all') return autoRun ? 'auto: everything — commands run without asking' : 'auto: writes';
+  if (mode === 'all') return autoRun ? 'auto: writes + commands' : 'auto: writes';
   return '';
 }
 
@@ -72,7 +77,7 @@ export function autoSaid(mode: AutoMode, autoRun: boolean): string {
   if (mode === 'reads') return 'auto: reads — reads run, every write still asks';
   if (mode === 'all') {
     return autoRun
-      ? 'auto: everything — writes and commands run without asking (shell.autoRun); an unlisted web_fetch and config_set still ask'
+      ? 'auto: writes + commands — writes and commands run without asking (shell.autoRun); an unlisted web_fetch and config_set still ask'
       : 'auto: writes — writes run without asking; run_command, an unlisted web_fetch and config_set still ask';
   }
   return 'auto off — every write asks again';
@@ -80,17 +85,19 @@ export function autoSaid(mode: AutoMode, autoRun: boolean): string {
 
 // A tool the mode may never answer for. The name is the host's own (`plugin:tool`),
 // the one `agentChat` resolves before it asks — a plugin that declared a tool of the
-// same name gets the qualified spelling, and it is covered too. `autoRun` lifts only
-// the host's bare `run_command`.
+// same name gets the qualified spelling, and it is covered too. `autoRun` (the
+// person's `shell.autoRun`) lifts `run_command` only when `hostShell` says the call is
+// the host's own shell tool.
 const NEVER_AUTO = ['run_command', 'web_fetch', 'config_set'];
-export function neverAutomatic(name: string, autoRun: boolean): boolean {
-  if (autoRun && name === 'run_command') return false;
+export type AutoRun = { autoRun: boolean; hostShell: boolean };
+export function neverAutomatic(name: string, { autoRun, hostShell }: AutoRun): boolean {
+  if (autoRun && hostShell && name === 'run_command') return false;
   return NEVER_AUTO.some((n) => name === n || name.endsWith(`:${n}`));
 }
 
 // Does the mode answer this confirmation for the person? Only a write ever reaches
 // here (the host asks about nothing else), so only `all` can say yes — and not for the
 // calls above.
-export function autoConfirms(mode: AutoMode, name: string, autoRun: boolean): boolean {
-  return mode === 'all' && !neverAutomatic(name, autoRun);
+export function autoConfirms(mode: AutoMode, name: string, run: AutoRun): boolean {
+  return mode === 'all' && !neverAutomatic(name, run);
 }

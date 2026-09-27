@@ -16,6 +16,7 @@
 import crypto from 'node:crypto';
 import type { ToolDef, ToolCtx } from '../loader/tools.js';
 import { chatTools, execChatTool, chatToolDefs, chatToolGroupOf, chatGroupDescriptions } from '../loader/tools.js';
+import { isHostShellTool } from '../loader/tools-shell.js';
 import type { ToolRunEntry } from '../runtime/services/log.js';
 import { changeView, type Change, type ChangeView } from './diff.js';
 import { acceptData, isConsoleKind, readLegacyView, type ViewRecord } from './views.js';
@@ -151,8 +152,10 @@ export interface AgentOpts {
   onReasoning?: (chunk: string) => void;
   // `info.input` names the tool whose earlier result the call takes as its input (a
   // def's `resultInput`, run_command's `stdinFrom`), `info.inputId` that call's id — the
-  // y/n says where it comes from.
-  confirmWrite?: (name: string, args: string, info?: { input?: string; inputId?: string }) => boolean | Promise<boolean>;
+  // y/n says where it comes from. `info.hostShell` is true when the call is the host's
+  // own shell tool (by the def's identity, `isHostShellTool`), never a plugin's tool of
+  // the same name — what the auto mode's `shell.autoRun` may answer.
+  confirmWrite?: (name: string, args: string, info?: { input?: string; inputId?: string; hostShell?: boolean }) => boolean | Promise<boolean>;
   // Fired as each tool call ends (declined ones too), so the chat can show what a
   // write changed while the turn goes on.
   onToolRun?: (run: ToolRun) => void;
@@ -928,7 +931,7 @@ export async function agentChat(
         let whole: string | null | undefined;
         let confirmedByPerson = false;
         if (needsConfirm && confirm) {
-          const ok = await confirm(tc.name, tc.arguments, input ? { input: input.tool, inputId: input.id } : undefined);
+          const ok = await confirm(tc.name, tc.arguments, { ...(input ? { input: input.tool, inputId: input.id } : {}), ...(isHostShellTool(def) ? { hostShell: true } : {}) });
           if (!ok) {
             outcome = 'declined';
             detail = 'This write operation was declined — the user must explicitly confirm before it runs.';

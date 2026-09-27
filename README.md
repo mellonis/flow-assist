@@ -204,7 +204,7 @@ whatever you set — reading a page from a host that is not on `web.allowlist`, 
 assistant's `config_set`. A command the assistant runs (`run_command`) asks too, unless
 you also said so yourself: `config set shell.autoRun true` (or `:config set --session
 shell.autoRun true` for this run) together with `auto: writes` lets commands run without
-the y/n, and the hint line then says `auto: everything — commands run without asking`.
+the y/n, and the hint line then says `auto: writes + commands`.
 Either alone changes nothing, and the assistant can never set `shell.autoRun` itself.
 What ran is still shown: the ✎ diff, the command's block and the tool trail are the same
 either way.
