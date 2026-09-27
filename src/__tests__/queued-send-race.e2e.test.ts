@@ -35,7 +35,9 @@ test('a message queued during a !command goes out after it, and the command keep
   model.script([{ text: 'Answered.' }]);
   const ui = await bootApp(model, 110, 32, undefined, { shell: { roots: [root] } });
   await ui.press('F');
-  await ui.type('!sleep 0.4; echo done');
+  // The command runs on the real clock: long enough that a loaded machine is still
+  // inside it when the message is queued and the queue line is checked.
+  await ui.type('!sleep 2; echo done');
   await ui.press('return');
   await settle(4);
   await ui.type('what happened?');
@@ -47,7 +49,7 @@ test('a message queued during a !command goes out after it, and the command keep
   globalThis.setTimeout = realSetTimeout;
   await settle(6);
   expect(model.requests).toHaveLength(1);
-  expect(ui.backend.lastFrame).toMatch(/sleep 0\.4; echo done · ✓/);
+  expect(ui.backend.lastFrame).toMatch(/sleep 2; echo done · ✓/);
   ui.app.unmount();
 });
 
