@@ -282,10 +282,19 @@ secret, password or cookie, and a credential written into the config itself — 
 replaced by `‹secret NAME›` wherever it turns up: a tool's result, a command's output
 (yours too), what a view shows, the assistant's answer and the log. The assistant, the
 screen, the saved session and its journal only ever see the mark. A command the
-assistant runs starts without those variables at all — so `auto: writes + commands`
-runs commands without asking, but never with your tokens — and the assistant is told
-their names once; `config set shell.passEnv '["GH_TOKEN"]'` lets its commands see the
-ones you list. Your own `!command` keeps the whole environment.
+assistant runs starts without those variables, and the assistant is told their names
+once; `config set shell.passEnv '["GH_TOKEN"]'` lets its commands see the ones you
+list. Your own `!command` keeps the whole environment.
+
+This stops accidents — a debugging `env | grep`, a config file printed whole — not an
+assistant that sets out to get a token. A command runs as you, so it can read the
+environment of the app itself (`ps eww` of its parent process), start an interactive
+shell that loads your profile again, ask the Keychain helper your profile uses, or have
+a plugin's own `git` (which runs with the whole environment) run something for it; and a
+token it prints transformed — reversed with `rev`, split over lines, re-encoded — is
+not recognised. Letting commands run unasked (`auto: writes` together with
+`shell.autoRun`) is your decision to trust what the assistant writes; with it off,
+read each command before you say yes.
 
 The app applies only settings it accepted: when `config.local.json` or `config.json`
 holds something it did not write or you did not approve — a command changed it, another

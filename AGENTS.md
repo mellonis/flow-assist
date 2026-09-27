@@ -3185,6 +3185,18 @@ A command the model runs can print anything the process can see, so "secrets sta
 the environment" holds only with the rules below; each is enforced in ONE place, and
 a new path for text keeps to it.
 
+**What they stop is an accident, not a model that tries.** Redaction and the clean
+environment keep a token out of what the model, the screen and the records see when it
+turns up by mistake — `env | grep` while debugging, a config file printed whole. They do
+not contain a command written to get one: it runs as the person, so it can read the
+app's own start-time environment (`ps eww` of its parent), start an interactive shell
+that sources the profile again, call the Keychain helper the profile uses, or have a
+plugin's process with the full environment run something (`repo`'s `git` runs a
+`core.fsmonitor` a command wrote into `.git/config`); and a token printed transformed —
+`rev`, split over lines, a substring, hex or another encoding — is not recognised.
+`/auto all` together with `shell.autoRun` is the person's decision to trust the model's
+commands; docs and hints never present either mechanism as a boundary.
+
 - **The host knows the secret values** (`src/assistant/secrets.ts`, `SecretSet`): every
   environment variable the config names — `${VAR}` in any string value, `ai.tokenEnv`
   (or its default) — every variable whose NAME matches `SECRET_NAME_RE`
