@@ -65,6 +65,8 @@ interface ChatMsg {
   roundLimit?: number;
   // The last step of a turn that stopped at the cap — where it stopped.
   roundLimitAt?: string;
+  // Set when it was the token budget (`ai.maxTurnTokens`) that stopped it: the tokens spent.
+  roundLimitTokens?: number;
   duration?: number;
   stopped?: boolean;
   // The cap of the key that stopped the turn when it was not Esc (`^c`). A session
@@ -469,6 +471,9 @@ export const ASSISTANT_MARK = 'ƒ';
 // keys drawn elsewhere as ⏎ ␣.
 // These keys are the chat's own and are not remappable; an action that IS bound
 // through `config.keys` must be drawn with `host.keyCap(action)` instead.
+// A token count for a line of text: 1220 → 1.2k, 2000000 → 2.0M.
+const tokenCount = (n: number): string => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
+
 const CAP = {
   enter: keyGlyph('return'),
   esc: keyGlyph('escape'),
@@ -820,8 +825,11 @@ function buildMessageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): Ch
       // under the field would instead be hidden by a wall of grey tool lines.
       const answer = answerText(String(m.content ?? ''));
       if (Number(m.roundLimit) > 0 && !answer) {
-        const at = typeof m.roundLimitAt === 'string' && m.roundLimitAt ? ` at ${m.roundLimitAt}` : '';
-        rows.push({ role, limit: true, first: true, spans: [{ text: cutStep(`stopped after ${Number(m.roundLimit)} rounds (ai.maxRounds)${at} — ${CAP.enter} continue`, inner) }] });
+        // The key comes before the last step, so a narrow row cuts the step, never the key.
+        const last = typeof m.roundLimitAt === 'string' && m.roundLimitAt ? ` · last: ${m.roundLimitAt}` : '';
+        const spent = Number(m.roundLimitTokens);
+        const limit = Number.isFinite(spent) && m.roundLimitTokens !== undefined ? `${tokenCount(spent)} tokens (ai.maxTurnTokens)` : `${Number(m.roundLimit)} rounds (ai.maxRounds)`;
+        rows.push({ role, limit: true, first: true, spans: [{ text: cutStep(`stopped after ${limit} — ${CAP.enter} continue${last}`, inner) }] });
       }
       // The answer, exactly as written — the rows the round was drawn with while it
       // streamed (a `Next:` it held reflows by a word), now in the normal colour

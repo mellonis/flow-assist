@@ -95,9 +95,12 @@ export const hostConfigSchema = z.object({
     // the context passes `threshold` (0.5 of `ai.contextWindow`) or every `everyTurns`
     // turns (10; 0 — the threshold alone). `enabled: false` sends everything in full.
     recall: z.object({ enabled: z.boolean(), threshold: z.number().positive().max(1), minChars: z.number().int().positive(), everyTurns: z.number().int().min(0) }).partial().optional(),
-    // How many rounds one turn may take before the host stops it (default 150,
-    // src/assistant/agent.ts `maxRoundsOf`); the chat then offers ⏎ continue.
-    maxRounds: z.number().int().positive().optional(),
+    // What bounds one turn (src/assistant/rounds.ts): at most `maxRounds` requests
+    // (150; 0 — no cap) and `maxTurnTokens` tokens spent across them (2000000, the
+    // cached part of each prompt not counted; 0 — no budget). Whichever is reached first
+    // ends the turn, and the chat offers ⏎ continue.
+    maxRounds: z.number().int().min(0).optional(),
+    maxTurnTokens: z.number().int().min(0).optional(),
     // Before a request that would pass `threshold` (0.8) of `contextWindow`, the chat
     // compacts the conversation into a handoff first — the /compact path, its row marked
     // `auto` — at a request boundary, never between a call and its result

@@ -2557,17 +2557,28 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   over `… N earlier calls`, which only a click opens (see the fold model above). The
   folded summary (`toolSummary`) carries the counts too and is cut to the width —
   every `ChatRow` is one terminal line, and fifty tool names would take two.
-- **A turn that ran out of rounds says where it stopped, and one key carries it on.**
-  The cap is `ai.maxRounds` (`maxRoundsOf`, default `MAX_ROUNDS_DEFAULT` = 150 — a guard
-  against a loop that never ends, high enough for long ordinary work; `services.chatLLM`
-  applies it, and a caller naming its own keeps it: a background task runs 12). It
-  counts per turn. `agentChat` reports `roundLimit` when the loop ends with no round
-  that was an answer, with `lastStep` — the last round's calls, `name {args}`, cut to
-  80. The chat draws `stopped after N rounds (ai.maxRounds) at <lastStep> — ⏎ continue`
-  in the warn colour, in the conversation (not as a dim line under the field, which the
-  wall of grey above it would hide), and closes the turn in the model's history with
-  the host's line in the model's voice (`roundCapTurn`: where it stopped, not finished,
-  picked up on "continue"). Then Enter on the EMPTY field sends `continue`
+- **Two limits bound a turn; the one reached first ends it, says where, and one key
+  carries it on** (`src/assistant/rounds.ts`; `services.chatLLM` applies both, and a
+  caller naming its own keeps it: a background task runs 12 rounds). `ai.maxRounds`
+  (`maxRoundsOf`, `MAX_ROUNDS_DEFAULT` = 150) — requests per turn, a guard against a
+  loop that never ends, high enough for long ordinary work; 0 is no round cap.
+  `ai.maxTurnTokens` (`maxTurnTokensOf`, `MAX_TURN_TOKENS_DEFAULT` = 2000000) — tokens
+  the turn's requests spend together, from the usage each reports: the prompt LESS its
+  cached part (a long loop re-reads its prefix from the cache every round, which is not
+  new work) plus the answer; checked before each request after the first, so the turn
+  closes before the request that would go past it; 0 is no budget, and a provider that
+  reports no usage is bounded by the rounds alone. With `maxRounds: 0` the budget is what
+  ends a long turn; with both 0 only Esc does. Both are the person's (under `ai`, never
+  the model's to set). `agentChat` reports `roundLimit` (rounds taken) when the loop ends
+  with no round that was an answer, with `lastStep` — the last round's calls,
+  `name {args}`, cut to 80 — and, when the budget ended it, `limitBy: 'tokens'` and
+  `turnTokens`. The chat draws `stopped after N rounds (ai.maxRounds) — ⏎ continue ·
+  last: <lastStep>` (or `stopped after 2.0M tokens (ai.maxTurnTokens) — …`; the key
+  before the step, so a narrow row cuts the step) in the warn colour, in the
+  conversation (not as a dim line under the field, which the wall of grey above it
+  would hide), and closes the turn in the model's history with the host's line in the
+  model's voice (`roundCapTurn`: which limit, where it stopped, not finished, picked up
+  on "continue"). Then Enter on the EMPTY field sends `continue`
   (`CONTINUE_WORD`) and the field's hint reads `⏎ continue`; the offer
   (`continueOfferRef`) goes with the next message and wherever the empty-answer notice
   is reset.

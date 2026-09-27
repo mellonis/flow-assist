@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
 import { chatLanguage } from '../agent';
-import { MAX_ROUNDS_DEFAULT, agentChat, apiHistory, maxRoundsOf, openAiMessages, transcriptSoFar } from '../agent';
+import { MAX_ROUNDS_DEFAULT, MAX_TURN_TOKENS_DEFAULT, agentChat, apiHistory, maxRoundsOf, maxTurnTokensOf, openAiMessages, transcriptSoFar } from '../agent';
 import { toAnthropicMessages } from '../anthropic';
 import { sha256, type ImageRef } from '../images';
 import { hostStateDir } from '../../config/load';
@@ -803,11 +803,46 @@ test('the round cap is 150 by default, and a capped turn says its last step', as
   expect(res.lastStep).toBe('no_such_tool {"n":1}');
 });
 
-test('ai.maxRounds: a positive whole number, else the default', () => {
+test('ai.maxRounds and ai.maxTurnTokens: whole numbers, 0 for none, else the default', () => {
   expect(maxRoundsOf(undefined)).toBe(150);
   expect(maxRoundsOf({ maxRounds: 40 })).toBe(40);
-  expect(maxRoundsOf({ maxRounds: 0 })).toBe(150);
+  expect(maxRoundsOf({ maxRounds: 0 })).toBe(0);
+  expect(maxRoundsOf({ maxRounds: -1 })).toBe(150);
   expect(maxRoundsOf({ maxRounds: 2.5 })).toBe(150);
+  expect(MAX_TURN_TOKENS_DEFAULT).toBe(2_000_000);
+  expect(maxTurnTokensOf(undefined)).toBe(2_000_000);
+  expect(maxTurnTokensOf({ maxTurnTokens: 0 })).toBe(0);
+  expect(maxTurnTokensOf({ maxTurnTokens: 5000 })).toBe(5000);
+  expect(maxTurnTokensOf({ maxTurnTokens: 'x' })).toBe(2_000_000);
+});
+
+test('maxRounds 0 is no round cap: a turn runs past 150 rounds', async () => {
+  let n = 0;
+  const chatRound = async (_m: any[], opts: any) => {
+    n++;
+    if (n > 160) opts.onDelta?.('finally');
+    return n <= 160
+      ? { content: '', finishReason: 'tool_calls', toolCalls: [{ id: `c${n}`, name: 'no_such_tool', arguments: '{}' }] }
+      : { content: 'finally', finishReason: 'stop', toolCalls: [] };
+  };
+  const res = await agentChat([{ role: 'user', content: 'loop' }], { baseUrl: 'http://x', model: 'm', token: 't', onLive: () => {}, onLiveCommit: () => {}, chatRound, maxRounds: 0, maxTurnTokens: 0 });
+  expect(n).toBe(161);
+  expect(res.content).toBe('finally');
+  expect(res.roundLimit).toBeUndefined();
+});
+
+test('maxTurnTokens closes the turn before the request that would go past it; cached prompt tokens do not count', async () => {
+  let n = 0;
+  const chatRound = async () => {
+    n++;
+    // 400 fresh + 100 answer = 500 a round; the cached 300 are not counted.
+    return { content: '', finishReason: 'tool_calls', toolCalls: [{ id: `c${n}`, name: 'no_such_tool', arguments: '{}' }], usage: { promptTokens: 700, cachedTokens: 300, completionTokens: 100 } };
+  };
+  const res = await agentChat([{ role: 'user', content: 'loop' }], { baseUrl: 'http://x', model: 'm', token: 't', onLive: () => {}, onLiveCommit: () => {}, chatRound, maxTurnTokens: 1200 });
+  expect(n).toBe(3); // 500, 1000, 1500 — past 1200 after the third
+  expect(res.roundLimit).toBe(3);
+  expect(res.limitBy).toBe('tokens');
+  expect(res.turnTokens).toBe(1500);
 });
 
 test('beforeRequest may append messages after a round\'s results; they join the transcript', async () => {

@@ -12,9 +12,12 @@ What each version of flow-assist brought, newest first. The version is the one i
   model after this step`, ↑ still takes it back until then, and ⇥ on the empty field
   holds it for the end of the turn instead.
 - **Long work is no longer cut off at 64 rounds, and carrying on is one key.** A turn
-  may take 150 rounds (`ai.maxRounds` changes it). When one reaches the cap, the chat
-  says where it stopped — `stopped after 150 rounds (ai.maxRounds) at <the last call> —
-  ⏎ continue` — and Enter on the empty field sends "continue", so you no longer type it.
+  may take 150 rounds (`ai.maxRounds`; 0 is no cap) and spend 2,000,000 tokens across its
+  requests (`ai.maxTurnTokens`, counting each prompt without the part read from the
+  provider's cache, plus the answer; 0 is no budget) — whichever comes first ends it.
+  The chat then says where it stopped — `stopped after 150 rounds (ai.maxRounds) —
+  ⏎ continue · last: <the last call>` — and Enter on the empty field sends "continue", so
+  you no longer type it.
 - **A tool call the model writes as text is asked for again instead of ending the
   turn.** Some models now and then write their call as text in the answer — DSML,
   `<tool_call>`, `<function_calls>` — so nothing runs and the turn stops on raw markup.

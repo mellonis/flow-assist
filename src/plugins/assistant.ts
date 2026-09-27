@@ -106,10 +106,12 @@ export function logShareMessage(lines: readonly string[], arg = ''): string | nu
 // What ⏎ on the empty field sends after a turn stopped at `ai.maxRounds`.
 export const CONTINUE_WORD = 'continue';
 export const STOPPED_TURN = '(Stopped by the person before I finished. I am not resuming this request unless they ask me to.)';
-// What the model's history says of a turn the host stopped at `ai.maxRounds`: in the
-// model's voice, where it stopped — so a "continue" after it reads as picking up there.
-export function roundCapTurn(rounds: number, lastStep?: string): string {
-  return `(The host stopped this turn after ${rounds} rounds, its limit for one turn (ai.maxRounds)${lastStep ? `; my last step was ${lastStep}` : ''}. The work is not finished: on "continue" I pick up from there.)`;
+// What the model's history says of a turn the host stopped at its limit — `ai.maxRounds`
+// or, with `tokens`, `ai.maxTurnTokens`: in the model's voice, where it stopped — so a
+// "continue" after it reads as picking up there.
+export function roundCapTurn(rounds: number, lastStep?: string, tokens?: number): string {
+  const limit = tokens !== undefined ? `${tokens} tokens, its budget for one turn (ai.maxTurnTokens)` : `${rounds} rounds, its limit for one turn (ai.maxRounds)`;
+  return `(The host stopped this turn after ${limit}${lastStep ? `; my last step was ${lastStep}` : ''}. The work is not finished: on "continue" I pick up from there.)`;
 }
 export function failedTurn(message: unknown): string {
   const why = String(message ?? '').replace(/\s+/g, ' ').trim().slice(0, 200);
@@ -1449,6 +1451,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // field that a wall of grey tool lines would otherwise hide.
             let roundLimit = 0;
             let lastStep = '';
+            let limitTokens: number | undefined; // set when the token budget ended the turn
             inTurnRef.current = true; // a project note from here on waits for the turn's end (the `finally`)
             try {
               const chatResult = await (host.services as Record<string, any>).chatLLM(wire, {
@@ -1780,6 +1783,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               (host.services as Record<string, any>).pushLog?.(`[chat] ${q.slice(0, 40)}… → ${q.length} chars${images.length ? ` + ${images.length} image${images.length === 1 ? '' : 's'}` : ''}`);
               roundLimit = Number((chatResult as { roundLimit?: number } | undefined)?.roundLimit ?? 0);
               lastStep = String((chatResult as { lastStep?: string } | undefined)?.lastStep ?? '');
+              const limited = chatResult as { limitBy?: string; turnTokens?: number } | undefined;
+              limitTokens = limited?.limitBy === 'tokens' ? Number(limited.turnTokens ?? 0) : undefined;
               const turn = (chatResult as { transcript?: ChatMessage[]; content?: string } | undefined);
               const reported = (chatResult as { usage?: TokenUsage } | undefined)?.usage;
               if (reported) usageRef.current = reported;
@@ -1788,7 +1793,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 ...(turn?.transcript?.length ? turn.transcript : [{ role: 'assistant', content: turn?.content ?? '' }]),
                 // Stopped at the cap: the turn is closed in the model's history by the
                 // host's line saying where, and the person is offered ⏎ continue.
-                ...(roundLimit ? [{ role: 'assistant', content: roundCapTurn(roundLimit, lastStep || undefined) } as ChatMessage] : []),
+                ...(roundLimit ? [{ role: 'assistant', content: roundCapTurn(roundLimit, lastStep || undefined, limitTokens) } as ChatMessage] : []),
               ];
               if (roundLimit) setContinueOffer(true);
               // The calls are already in the turn, where they were made (`onToolRun`).
@@ -1865,7 +1870,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                     : { ...rest, content: `${rest.content ?? ''}${live}` };
                 });
                 const at = answerAt(next);
-                if (at >= 0) next[at] = { ...next[at]!, duration: finalMs, ...(spent ? { tokens: spent } : {}), ...(cachedSpent ? { cached: cachedSpent } : {}), ...(aborted ? { stopped: true, ...(stopKeyRef.current ? { stoppedBy: stopKeyRef.current } : {}) } : {}), ...(roundLimit ? { roundLimit, ...(lastStep ? { roundLimitAt: lastStep } : {}) } : {}) };
+                if (at >= 0) next[at] = { ...next[at]!, duration: finalMs, ...(spent ? { tokens: spent } : {}), ...(cachedSpent ? { cached: cachedSpent } : {}), ...(aborted ? { stopped: true, ...(stopKeyRef.current ? { stoppedBy: stopKeyRef.current } : {}) } : {}), ...(roundLimit ? { roundLimit, ...(lastStep ? { roundLimitAt: lastStep } : {}), ...(limitTokens !== undefined ? { roundLimitTokens: limitTokens } : {}) } : {}) };
                 return next;
               });
               // Empty answer: the model gave only reasoning but no final text — say so

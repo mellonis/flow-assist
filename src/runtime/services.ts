@@ -9,7 +9,7 @@ import { spawn } from 'node:child_process';
 import { createCacheService } from './services/cache.js';
 import { createLogService } from './services/log.js';
 import { loadMemories, saveMemories, memoryFilePath } from './services/memory.js';
-import { agentChat, maxRoundsOf } from '../assistant/agent.js';
+import { agentChat, maxRoundsOf, maxTurnTokensOf } from '../assistant/agent.js';
 import { copyToClipboard as platformCopy } from '../assistant/copy.js';
 import { toolLoadingMode } from '../assistant/tool-loading.js';
 import { toolResultCapFromConfig } from '../assistant/tool-result-cap.js';
@@ -187,8 +187,10 @@ export function createServices({ config, tools, repo, onExit }: CreateServicesOp
       toolResultMaxChars: toolResultCapFromConfig(config.ai),
       // `ai.images` holds a tool's returned images to the same limits as an attachment.
       imageLimits: imageLimits(config.ai),
-      // `ai.maxRounds` caps a turn; a caller that names its own cap keeps it.
+      // `ai.maxRounds` and `ai.maxTurnTokens` bound a turn; a caller that names its own
+      // keeps it.
       maxRounds: maxRoundsOf(config.ai),
+      maxTurnTokens: maxTurnTokensOf(config.ai),
       ...llmOpts(config.ai),
       ...opts,
       logToolRun: (opts?.logToolRun as ToolLogger | undefined) ?? log.logToolRun,

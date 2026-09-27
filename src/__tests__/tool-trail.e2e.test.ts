@@ -132,7 +132,7 @@ test('a turn that runs out of rounds says so where the answer would be, in the w
   await settleUntil(() => ui.backend.lastFrame.includes('stopped after'), 900);
   await settle(8);
   const frame = ui.backend.lastFrame;
-  expect(frame).toContain('stopped after 5 rounds (ai.maxRounds) at datetime {} — ⏎ continue');
+  expect(frame).toContain('stopped after 5 rounds (ai.maxRounds) — ⏎ continue · last: datetime {}');
   // In the conversation, not on the dim hint line a wall of grey would otherwise hide.
   expect(frame).not.toContain('ran out of steps');
   const y = frame.split('\n').findIndex((r) => r.includes('stopped after 5 rounds'));

@@ -7,6 +7,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { assembleToolRegistry } from '../tools';
+import { hostConfigSchema } from '../../config/schema.js';
 import { bgActiveCount } from '../tools-core.js';
 import { makeFactory } from '../plugin';
 import { loadMemories } from '../../runtime/services/memory.js';
@@ -800,4 +801,16 @@ test('config_schema prints the marks beside a key, with the reason', async () =>
   expect(row('plugins.notes.file')).not.toMatch(/model may/);
   expect(row('ai.model')).not.toMatch(/model may/);
   expect(row('keys')).toMatch(/takes effect on restart/);
+});
+
+test('ai.maxRounds and ai.maxTurnTokens take 0 for none, and the notes say which limit ends a turn', async () => {
+  expect(hostConfigSchema.safeParse({ ai: { maxRounds: 0, maxTurnTokens: 0 } }).success).toBe(true);
+  expect(hostConfigSchema.safeParse({ ai: { maxRounds: -1 } }).success).toBe(false);
+  const dir = mkdtempSync(join(tmpdir(), 'fa-cfgschema-rounds-'));
+  const local = join(dir, 'config.local.json');
+  writeFileSync(local, '{}');
+  const reg = assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
+  const out = String(await reg.exec('config_schema', { key: 'ai' }, { configLocalPath: local }));
+  expect(out).toMatch(/- ai\.maxRounds: .*default: 150 — .*0 is no round cap, and then ai\.maxTurnTokens is what ends a long turn/);
+  expect(out).toMatch(/- ai\.maxTurnTokens: .*default: 2000000 — .*cache.*0 is no budget/);
 });

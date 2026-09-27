@@ -27,9 +27,9 @@ import { llmErrorMessage } from './llm-error.js';
 import { ANTHROPIC_CONTENT, REQUEST_TAIL, anthropicChatRound, anthropicCompact, summaryHistory } from './anthropic.js';
 import { compactionInstruction, retryNote, summaryProblem } from './compaction.js';
 import { hasToolMarkup, markupToolNames, stripToolMarkup } from './tool-markup.js';
-import { MAX_ROUNDS_DEFAULT } from './rounds.js';
+import { MAX_ROUNDS_DEFAULT, MAX_TURN_TOKENS_DEFAULT } from './rounds.js';
 
-export { MAX_ROUNDS_DEFAULT, maxRoundsOf } from './rounds.js';
+export { MAX_ROUNDS_DEFAULT, MAX_TURN_TOKENS_DEFAULT, maxRoundsOf, maxTurnTokensOf } from './rounds.js';
 import { estimateTokens } from './context-meter.js';
 import type { ThinkingConfig } from './llm-endpoint.js';
 import {
@@ -131,8 +131,12 @@ export interface AgentResult {
   // otherwise only visible as a wall of grey tool lines with no answer under it.
   roundLimit?: number;
   // With `roundLimit`: the last step taken — the last round's calls, `name {args}`,
-  // cut — so the chat can say where the turn stopped.
+  // cut — so the chat can say where the turn stopped; `limitBy: 'tokens'` when it was
+  // the token budget (`maxTurnTokens`) that ended it rather than the rounds, and
+  // `turnTokens`, what the turn spent as that budget counts it.
   lastStep?: string;
+  limitBy?: 'tokens';
+  turnTokens?: number;
   // What the provider reported for the LAST round, when it reports usage at all.
   usage?: TokenUsage;
 }
@@ -153,7 +157,10 @@ export type ToolLogger = (entry: ToolRunEntry) => void;
 export interface AgentOpts {
   onTool?: (name: string, args: string) => void;
   toolCtx?: ToolCtx;
+  // What bounds the turn (./rounds.ts): at most `maxRounds` requests (0 — no cap) and
+  // `maxTurnTokens` tokens spent across them (0 — no budget).
   maxRounds?: number;
+  maxTurnTokens?: number;
   onProcess?: (chunk: string) => void;
   extraTools?: ToolDef[];
   logTools?: boolean;
@@ -706,6 +713,7 @@ export async function agentChat(
     onTool = () => {},
     toolCtx = {},
     maxRounds = MAX_ROUNDS_DEFAULT,
+    maxTurnTokens = MAX_TURN_TOKENS_DEFAULT,
     onProcess = () => {},
     extraTools = [],
     logTools = false,
@@ -798,6 +806,10 @@ export async function agentChat(
   let askedAgain = false;
   // The last round's calls, for a turn that runs out of rounds to say where it stopped.
   let lastStep = '';
+  // What the turn has spent as `maxTurnTokens` counts it (./rounds.ts): each reported
+  // request's prompt less its cached part, plus its answer.
+  let spent = 0;
+  let limitBy: 'tokens' | undefined;
   // Set once a round came back `thinkingDropped`: the rest of the turn asks for none.
   let noThinking = false;
   // The images tools of this turn returned or attached to their results, by hash →
@@ -822,7 +834,8 @@ export async function agentChat(
   const recallItems = () => { try { return (toolCtx as { recall?: RecallSource }).recall?.items() ?? []; } catch { return []; } };
   const say = (line: string) => { const f = (toolCtx as { pushLog?: unknown }).pushLog; if (typeof f === 'function') { try { (f as (l: string) => void)(line); } catch { /* the log's trouble */ } } };
   try {
-    for (let i = 0; i < maxRounds; i++) {
+    for (let i = 0; maxRounds <= 0 || i < maxRounds; i++) {
+      if (i > 0 && maxTurnTokens > 0 && spent >= maxTurnTokens) { limitBy = 'tokens'; break; }
       rounds = i + 1;
       if (opts.beforeRequest) {
         const measured = usage ? usage.promptTokens + usage.completionTokens + estimateTokens(JSON.stringify(current.slice(usageAt))) : undefined;
@@ -849,7 +862,10 @@ export async function agentChat(
           (opts.onLive as AgentOpts['onLive'])?.(d);
         },
       } as Record<string, unknown>);
-      if (r.usage) usage = r.usage;
+      if (r.usage) {
+        usage = r.usage;
+        spent += Math.max(0, r.usage.promptTokens - (r.usage.cachedTokens ?? 0)) + r.usage.completionTokens;
+      }
       if (r.thinkingDropped) {
         noThinking = true;
         current = current.map((m) => {
@@ -1171,7 +1187,7 @@ export async function agentChat(
   }
   return {
     content, process, toolRuns, transcript: current.slice(turnStart),
-    ...(answered ? {} : { roundLimit: rounds, ...(lastStep ? { lastStep } : {}) }),
+    ...(answered ? {} : { roundLimit: rounds, ...(lastStep ? { lastStep } : {}), ...(limitBy ? { limitBy, turnTokens: spent } : {}) }),
     ...(usage ? { usage } : {}),
   };
 }
