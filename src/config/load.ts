@@ -15,13 +15,13 @@ export function configDir(env: Record<string, string | undefined> = process.env,
 }
 
 // Where the host keeps what it writes FOR ITSELF — the memory, the cache, the tool
-// log, the settings `config set` saves — and where the settings are read from. Normally
-// that is the config directory. Under
-// `bun test` it is a temporary directory of this process instead, the same protection
-// the sessions already have (`sessionsDir` → null): a test that names no file of its
-// own must never add to the person's memory, empty their cache, rewrite their
-// settings or run with them. It is made once per process and never reused from a previous run, so
-// nothing a run writes is read back by the next one.
+// log, the settings `config set` saves — and where the settings are read from.
+// Normally that is the config directory. Under `bun test` it is a temporary
+// directory of this process instead, the same protection the sessions already have
+// (`sessionsDir` → null): a test that names no file of its own must never add to the
+// person's memory, empty their cache, rewrite their settings or run with them. It is
+// made once per process and never reused from a previous run, so nothing a run
+// writes is read back by the next one.
 //
 // Resolve it on every call. An import-time constant is fixed before a test can point
 // the directory anywhere, which is how every test that reached the `memory` tool wrote
