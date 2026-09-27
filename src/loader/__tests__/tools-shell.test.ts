@@ -270,6 +270,40 @@ test('run_command runs without the secret variables, names them once per convers
   }
 });
 
+// A background task's own `ShellState` (tools-core.ts's `background` case:
+// `createShellState(() => bgConfig, parentCwd)`, starting where the parent
+// conversation's shell was, not at the app's default) runs `run_command` no
+// differently from the chat's own — the clean environment and the once-per-Set
+// `told` note are keyed off `config`/`shell.told`, never off how or where the
+// `ShellState` was created.
+test('a background task\'s own ShellState — started at its parent\'s directory — still runs run_command without the secret variables', async () => {
+  const { buildSecretSet, setActiveSecrets } = await import('../../assistant/secrets.ts');
+  const { createShellState } = await import('../../assistant/shell.ts');
+  const token = 'withheld-token-value-0003';
+  process.env.WB_WIKI_TOKEN = token;
+  setActiveSecrets(buildSecretSet({}, { WB_WIKI_TOKEN: token }));
+  try {
+    const root = tmp();
+    const sub = path.join(root, 'sub');
+    fs.mkdirSync(sub);
+    const bgConfig = { shell: { roots: [root] } };
+    // The parent's own shell is at `sub`; the background task's own state starts there
+    // too, exactly as `tools-core.ts` builds it — never at `root`, the app's default.
+    const bgShell = createShellState(() => bgConfig, sub);
+    expect(bgShell.cwd()).toBe(sub);
+    expect(bgShell.told.size).toBe(0); // its own, not the parent's
+    const g = shellTools(bgConfig);
+    const out = await g.exec('run_command', { command: 'printf "wiki=%s\\n" "${WB_WIKI_TOKEN-unset}"' }, { shell: bgShell } as never) as string;
+    expect(out).toContain('wiki=unset');
+    expect(out).toContain('withheld from commands: WB_WIKI_TOKEN');
+    expect(out).not.toContain(token);
+    expect(out).toContain(`Ran in ${sub}`);
+  } finally {
+    delete process.env.WB_WIKI_TOKEN;
+    setActiveSecrets(null);
+  }
+});
+
 test('a config set the model runs through run_command writes the file but is not accepted — the next start asks; the person\'s own runner is not marked', async () => {
   const { spawnSync } = await import('node:child_process');
   const { runShell } = await import('../../assistant/shell.ts');

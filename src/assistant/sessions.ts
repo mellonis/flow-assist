@@ -811,11 +811,15 @@ export function moveSessionToProject(dir: string, id: string, root: string, proj
     try { raw = JSON.parse(fs.readFileSync(file, 'utf8')) as Record<string, unknown>; } catch { return 'missing'; }
     const destFile = fileOf(dest, id);
     if (fs.existsSync(destFile)) return 'exists';
-    // 1. Patch `project` in place, at the source.
+    // 1. Patch `project` in place, at the source. `redactDeep` is the same backstop
+    //    `saveSession` writes through (./secrets.ts) — the content here came from an
+    //    earlier `saveSession` and should already be clean, but a move is still a
+    //    write, and the one place it patches (`project`, a directory path) can never
+    //    itself be a secret, so this never loses anything real.
     const body: Record<string, unknown> = { ...raw };
     if (project) body.project = project; else delete body.project;
     const tmp = `${file}.${process.pid}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(body), { mode: 0o600 });
+    fs.writeFileSync(tmp, JSON.stringify(redactDeep(body)), { mode: 0o600 });
     fs.renameSync(tmp, file);
     fs.mkdirSync(dest, { recursive: true, mode: 0o700 });
     // 2. The journal and `.sub`, before the state file — resumable: each moves only

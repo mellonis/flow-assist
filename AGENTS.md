@@ -3313,7 +3313,12 @@ commands; docs and hints never present either mechanism as a boundary.
   - the backstop — `appendJournal` and `saveSession` write `redactDeep` of what they
     are given, so a tool call's arguments and a tool round's text (kept in the model's
     history as they came) never reach the disk with a token. At write time only: what
-    a call runs is what the model wrote.
+    a call runs is what the model wrote. `moveSessionToProject`'s own patch write (the
+    picker's `^p`, sessions.ts) goes through the same `redactDeep` — the content came
+    from an earlier `saveSession` and should already be clean, and the one field it
+    patches (`project`, a directory path) can never itself be a secret, but a move is
+    still a write, and the backstop does not make exceptions for one that only touches
+    one field.
   The person's own words — a message, a `!command` line — are shown and sent as they
   are; on disk the backstop takes a pasted token out of them too.
 - **The model's commands run without the secrets.** `run_command` starts from the
