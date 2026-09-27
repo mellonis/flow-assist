@@ -11,9 +11,10 @@
 import { hostConfigSchema } from '../config/schema.js';
 import { loadConfig, getDeep, getSchemaAtPath, describeSchema, unwrapNode, configSchemaAt, configMarks, parseValue, setConfigValue, validateConfigWriteValue, RESTART_NOTE } from '../config/load.js';
 import { configSetLine } from '../config/commands.js';
-import { loadMemories, saveMemories, memoryFilePath, refuseMemory } from '../runtime/services/memory.js';
+import { refuseMemory } from '../runtime/services/memory.js';
+import { addFact, readFacts, removeFact, saveFact, type Fact } from '../assistant/memory-store.js';
+import { callProject, ensureWorkspace, readScope, workspaceFor, type WorkspaceScope } from '../assistant/workspace.js';
 import { openInBrowser } from '../runtime/services.js';
-import { resolveIdentityToken } from '../runtime/plugin-identity.js';
 import { DEFAULT_THEME } from '../playback/theme.js';
 import { writtenKey } from '../playback/keys.js';
 import { createPlan, type Plan } from '../assistant/plan.js';
@@ -31,12 +32,11 @@ import { MAX_ROUNDS_DEFAULT, MAX_TURN_TOKENS_DEFAULT } from '../assistant/rounds
 import { RECALL_DEFAULTS, findItem, recallLimits, recallResult, type RecallSource } from '../assistant/recall.js';
 import { ANTHROPIC_BASE_URL, DEFAULT_MAX_TOKENS, llmOpts } from '../assistant/llm-endpoint.js';
 
-// Runtime context handed to core tools by the caller: the resolved memory
-// file (absent → resolved from config), the config.local.json path, and the active
-// plugin's identity token (a `plugin` memory scope resolves to the plugin it was
-// issued to — the host maps the token to the name; a caller cannot forge one).
+// Runtime context handed to core tools by the caller: the conversation's project (the
+// workspace the memory and the workspace tools work in — absent, where the call's shell
+// is), the config.local.json path, and the active plugin's identity token.
 export interface CoreCtx {
-  memoryFile?: string;
+  workspaceProject?: () => string | null;
   configLocalPath?: string;
   pluginToken?: symbol;
   // Supplied by an interactive chat: shows the questions and resolves once the
@@ -63,13 +63,6 @@ export interface CoreCtx {
   // Set by `agentChat` for each call: true only when this call was put to the y/n and
   // answered yes. A caller's own `toolCtx` cannot set it.
   confirmedByPerson?: boolean;
-}
-
-// Resolves the memory `plugin` scope to the owning plugin name from the host-issued
-// identity token. Only a Symbol the host actually issued maps to a name — a
-// caller-injected raw string or a foreign token resolves to undefined.
-function pluginScopeName(ctx: CoreCtx): string | undefined {
-  return ctx.pluginToken !== undefined ? resolveIdentityToken(ctx.pluginToken) : undefined;
 }
 
 // Renders a resolved hotkey map ({ action: [keys] }) compactly for tool output:
@@ -114,7 +107,7 @@ const KEY_DEFAULTS: Record<string, string> = {
   // Said in full because it answers a question people really ask the assistant:
   // "why can't I select text with the mouse?"
   ui: 'mouse: true — the wheel scrolls the chat, and dragging with the mouse selects text and copies it to the clipboard when the button is released ("Copied N chars"); a drag stays inside the pane it started in (the conversation, a window, a board column), so borders, markers and the next panel are left out, and a wrapped paragraph copies as one line. The terminal\'s own selection still works with its bypass held (Option in iTerm2, Shift in most Linux terminals, fn in Apple Terminal). config set ui.mouse false gives the mouse back to the terminal (takes effect on restart). In the chat, /copy copies the last answer\'s code block (/copy answer — the whole answer) without the mouse. verbs: a list of words the chat\'s status line picks one from per model request while the model works (default: a built-in list of gerunds); config set ui.verbs \'["Thinking"]\' pins one',
-  memory: 'file: memory.json in the config directory; empty to start',
+  memory: 'each fact the memory tool stores is a file in the agent workspace — memory/<id>.md with a name, a description and a type, and memory/MEMORY.md, the index — of the conversation\'s project (the default) or the global one (every project); only the index is sent with every request, the model reads a fact in full with workspace_read. In the chat, /memory lists this project\'s facts and every project\'s, numbered, and /memory forget <number>, /memory forget project, /memory forget global or /memory forget all removes them without asking the model; /clear says how many it kept. file: where an older version kept one list for every project (memory.json in the config directory), moved into the global workspace on the first start',
   sessions: 'dir: sessions/ in the config directory; resume: true — the chat continues the current project\'s latest session on start (a restart or an update loses nothing; a project with none starts a new session, never another project\'s); a session belongs to the project it started in — the git repository holding the shell\'s directory at its first message when it lies inside the shell.roots entry holding that directory (each repository of a workspace root is its own project), that root when no repository lies between them, outside every root the nearest repository — and lives under a mirror of that path (sessions/Users/me/app/<id>.json; no project, or saved by an older version: the top level); keep: 50 sessions per project; journalDays: 0 — every session also has a journal beside it (<id>.log.jsonl) that records everything as it happens, every tool call whole, never trimmed, removed with its session; journalDays set removes one not written to for that many days and adds a note to the session saying so. In the chat, /sessions (or Ctrl+S, from any screen; config set keys.sessions <key> moves it) lists the current project\'s saved sessions newest first with its title (Tab shows every session, grouped by project) and a word for what each is doing — this chat · working, in use elsewhere, done (its last answer not seen yet) — and typing filters by the title and the conversation\'s words — Enter opens one, Ctrl+N starts a new one, Ctrl+R renames, Ctrl+X deletes after a y/n (a session open in another flow-assist process is refused); /resume lists the current project\'s by number (the top level\'s with no project; the others through the picker\'s Tab) and /resume <n> opens one; /new starts a new session and keeps the current one open, so a restart before anything is said continues it; /clear starts a new session and marks the old one closed (never continued on start); /title <text> renames the current session (it is named by the first line the person wrote); /export [path] writes the current session from its journal as a markdown document — every tool call with its arguments and result, the /compact summaries in place — to the path given (in the shell\'s directory) or to session-<id>.md there, never over an existing file',
   fs: 'legacy — roots is read as shell.roots (and by the repo plugin after plugins.repo.roots / shell.roots) for one release; set shell.roots instead',
   web: `allowlist: [] — every web_fetch asks the person first (a background task cannot fetch at all); a host on the list is fetched without asking, even a local one. maxBytes: ${WEB_DEFAULTS.maxBytes}, timeoutMs: ${WEB_DEFAULTS.timeoutMs}. The web_fetch tool is its own group: config set ai.disabledTools ["web"] turns it off`,
@@ -140,25 +133,16 @@ function schemaAt(key: string, pluginConfigs?: Record<string, unknown>): any {
   return configSchemaAt(hostConfigSchema, key, pluginConfigs);
 }
 
-// Normalizes a memory scope to the host scope-model. Only two literals are accepted:
-// 'host' (host-wide) and 'plugin' (the current plugin's memory — the host resolves it
-// to the plugin name via the host-issued identity token; without a valid token it
-// errors rather than silently writing an unattributed entry). 'global' is a legacy
-// alias for 'host'. Empty → 'host' (the default). Anything else is rejected, so the
-// memory tool stops accepting ad-hoc values (e.g. an obsolete "issue:TRK-1") that
-// orphan entries.
-function normalizeScope(raw: string | undefined, ctx: CoreCtx): { scope: string; error?: string } {
-  const s = String(raw ?? 'host').trim();
-  const scope = s === 'global' ? 'host' : s;
-  if (!scope) return { scope: 'host' };
-  if (scope === 'plugin') {
-    const name = pluginScopeName(ctx);
-    if (name) return { scope: name };
-    return { scope, error: "scope 'plugin' needs a plugin context (no valid plugin identity token attached) — use 'host' for host-wide memory" };
-  }
-  if (scope !== 'host') return { scope, error: `invalid scope '${scope}' — expected 'host' or 'plugin'` };
-  return { scope: 'host' };
+// The facts the memory tool works on: the conversation's project and the global
+// workspace (./../assistant/workspace.ts), each read from its files on every call.
+function memoryScopes(config: Record<string, unknown>, ctx: CoreCtx) {
+  const project = callProject(config, ctx as Parameters<typeof callProject>[1]);
+  // With no project there is one workspace, the global one: the project's scope is it.
+  const dir = (scope: WorkspaceScope) => workspaceFor(config, project, project ? scope : 'global');
+  const facts = (scope: WorkspaceScope) => (scope === 'project' && !project ? [] : readFacts(dir(scope)));
+  return { project, dir, facts };
 }
+const asMemory = (f: Fact) => ({ id: f.id, text: f.text, ts: f.mtimeMs });
 
 // Renders the current date/time in a given IANA zone (default: the host local
 // zone), plus epoch seconds and the UTC ISO timestamp. Lets the LLM answer
@@ -323,21 +307,23 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
       type: 'function',
       function: {
         name: 'memory',
-        description: 'Persistent cross-session memory. Facts the user asks you to remember are stored here and injected into the system prompt (re-read on every message, so edits take effect immediately). action: "list" — show stored memories (optional scope and/or label filter); "add" — store a new one (text, optional label to classify it, scope: "host" for host-wide memory or "plugin" for the current plugin\'s memory, default "host"); "update" — edit an existing one (id + text and/or scope and/or label); "forget" — delete by id. This writes only a local JSON file on this machine, not the tracker. Every entry is sent with every later request, forever: store ONE durable fact per entry — a preference, a convention, a name — as a short sentence that stands without the conversation it came from. Never task state, a number that will change, or anything the session already holds; never a secret or a token. Before adding, list and UPDATE the entry that already says it rather than adding a near-copy. The host refuses a duplicate, an entry over 300 characters and more than 100 entries; the person sees and prunes the list with /memory.',
+        description: 'Persistent cross-session memory. One fact per file in your workspace. The system prompt carries only the INDEX of this project\'s memory and of the global one (a line per fact: name, file, description); read a fact in full with workspace_read({"path": "memory/<file>", "scope": …}) when its line is relevant. action: "list" — show the stored facts with their text (optional scope); "add" — store a new one (text; optional name, a short title; description, one line for the index; type — preference, convention, fact, reference; scope: "project" — this project only, the default — or "global" — every project, for the person\'s own preferences); "update" — edit one (id + text, name, description, type, and/or scope to move it); "forget" — delete by id. It writes only files on this machine, beside the host\'s own state. Every entry\'s line is sent with every later request in its scope, forever: store ONE durable fact per entry — a preference, a convention, a name — as a short sentence that stands without the conversation it came from. Never task state, a number that will change, or anything the session already holds; never a secret or a token. Before adding, list and UPDATE the entry that already says it rather than adding a near-copy. The host refuses a duplicate, an entry over 300 characters and more than 100 entries per scope; the person sees and prunes the list with /memory.',
         parameters: {
           type: 'object',
           properties: {
-            action: { type: 'string', enum: ['list', 'add', 'update', 'forget'], description: 'list — read stored memories; add — store a new one; update — edit an existing one; forget — delete by id.' },
-            text: { type: 'string', description: 'Memory text (for add/update).' },
-            scope: { type: 'string', description: 'Optional scope: "host" (host-wide, default) or "plugin" (the current plugin\'s memory — the host resolves the plugin).' },
-            label: { type: 'string', description: 'Optional label to classify a memory, e.g. the name of the tool a fact relates to (config, host:plugins_list, memory …). Use it to filter memories by topic: prefix the label with the tool name, then list with the same label to recall only that tool\'s facts.' },
-            id: { type: 'string', description: 'Memory id (for update/forget; from action=list).' },
+            action: { type: 'string', enum: ['list', 'add', 'update', 'forget'], description: 'list — read stored facts; add — store a new one; update — edit an existing one; forget — delete by id.' },
+            text: { type: 'string', description: 'The fact (for add/update): one short sentence that stands on its own.' },
+            name: { type: 'string', description: 'A short title for the index (add/update); by default the first words of the text. The file is named after it.' },
+            description: { type: 'string', description: 'One line for the index saying when the fact matters (add/update); by default the text itself.' },
+            type: { type: 'string', description: 'What kind of fact: preference, convention, fact or reference (default fact).' },
+            scope: { type: 'string', enum: ['project', 'global'], description: '"project" (default) — this project only; "global" — every project. For update: the scope to move the fact to. For list: only that scope.' },
+            id: { type: 'string', description: 'The fact\'s id — its file name without .md (for update/forget; from action=list).' },
           },
           required: ['action'],
         },
       },
       // Memory is intentionally NOT write-confirmed: it is a low-stakes, local,
-      // reversible scratchpad (a JSON file on this machine). A confirm on every
+      // reversible scratchpad (files in the host's own workspace on this machine). A confirm on every
       // add/update/forget would break the transparent persistence the tool exists
       // for — the assistant should record/update/drop facts quietly. (config
       // set/unset/… stays confirmed — it changes hotkeys/model/cache, real behavior.)
@@ -489,71 +475,72 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
         return `Opened ${url} in the browser`;
       }
       case 'memory': {
-        // The assistant's memory lives in a local JSON file (ctx.memoryFile from
-        // the caller, or resolved from config.memory.file, or the default).
-        // `list` reads, `add` appends, `update` edits an existing entry by id
-        // (text and/or scope), `forget` deletes by id. The contents are injected
-        // into the system prompt (re-read on every message — edits take effect
-        // immediately). Writes only a file on this machine, not the tracker.
+        // The facts are files in the workspace (src/assistant/memory-store.ts): the
+        // conversation's project's, or the global one. `list` reads, `add` writes a new
+        // file, `update` rewrites one by id (and moves it to the scope named), `forget`
+        // deletes it; each write keeps MEMORY.md current. The prompt's index is read
+        // again for every message, so a change lands in the next one.
         const action = String(args.action ?? '').trim();
-        const memFile = ctx.memoryFile ?? memoryFilePath(config);
-        const list = loadMemories(memFile);
+        const { project, dir, facts } = memoryScopes(config, ctx);
+        const hasScope = args.scope != null && String(args.scope).trim() !== '';
+        const asked = readScope(args.scope);
+        if ('error' in asked) return asked.error;
+        const read = { scope: project ? asked.scope : 'global' as WorkspaceScope };
         if (action === 'list') {
-          const raw = String(args.scope ?? '').trim();
-          // Empty filter → all memories; a given scope is normalized (global→host,
-          // plugin→resolved name) and filtered exactly, so legacy entries still match.
-          const filter = raw ? (raw === 'global' ? 'host' : raw === 'plugin' ? (pluginScopeName(ctx) ?? raw) : raw) : '';
-          const label = String(args.label ?? '').trim();
-          const filtered = list.filter(m => (!filter || m.scope === filter) && (!label || m.label === label));
-          if (!filtered.length) return 'No memories stored yet.';
-          return filtered.map(m => `[${m.id}] (${m.scope})${m.label ? ` [${m.label}]` : ''} ${m.text}`).join('\n');
+          const scopes: WorkspaceScope[] = hasScope ? [read.scope] : ['project', 'global'];
+          const rows = scopes.flatMap((sc) => facts(sc).map((f) => `[${f.id}] (${sc}, memory/${f.id}.md${f.type && f.type !== 'fact' ? `, ${f.type}` : ''}) ${f.text}`));
+          return rows.length ? rows.join('\n') : 'No memories stored yet.';
         }
+        const find = (id: string): { scope: WorkspaceScope; fact: Fact } | null => {
+          for (const sc of ['project', 'global'] as WorkspaceScope[]) {
+            const fact = facts(sc).find((f) => f.id === id);
+            if (fact) return { scope: sc, fact };
+          }
+          return null;
+        };
+        const opt = (k: string) => (args[k] != null && String(args[k]).trim() !== '' ? String(args[k]).trim() : undefined);
         if (action === 'add') {
           const text = String(args.text ?? '').trim();
           if (!text) return 'text is required — the memory text to store.';
           // What the description asks for, the host holds it to: the model reads other
-          // people's text, so a rule it may ignore is not a rule. A near-copy of a
-          // fact already stored, a paragraph, or one entry past the cap is refused —
-          // and the refusal says what to do instead.
-          const refusal = refuseMemory(list, text);
+          // people's text, so a rule it may ignore is not a rule. A near-copy of a fact
+          // it already has in either scope, a paragraph, or one entry past the scope's
+          // cap is refused — and the refusal says what to do instead.
+          const other: WorkspaceScope = read.scope === 'project' ? 'global' : 'project';
+          const refusal = refuseMemory(facts(read.scope).map(asMemory), text, facts(other).map(asMemory));
           if (refusal) return refusal;
-          const { scope, error } = normalizeScope(args.scope as string | undefined, ctx);
-          if (error) return error;
-          const label = String(args.label ?? '').trim() || undefined;
-          const id = `m-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
-          list.push({ id, text, scope, label, ts: Date.now() });
-          saveMemories(list, memFile);
-          return `Memory stored (${id}, scope ${scope}). It will be injected into subsequent messages.`;
+          ensureWorkspace(dir(read.scope));
+          const f = addFact(dir(read.scope), { text, name: opt('name'), description: opt('description'), type: opt('type') });
+          return `Memory stored (${f.id}, scope ${read.scope}, memory/${f.id}.md). Its line joins the index in the system prompt of later messages.`;
         }
-        if (action === 'update') {
+        if (action === 'update' || action === 'forget') {
           const id = String(args.id ?? '').trim();
           if (!id) return 'id is required — memory id (from memory action=list).';
-          const idx = list.findIndex(m => m.id === id);
-          if (idx === -1) return `Memory ${id} not found.`;
-          const hasText = args.text != null && String(args.text).trim() !== '';
-          const hasScope = args.scope != null && String(args.scope).trim() !== '';
-          // Present-but-empty label clears it (|| undefined), so update can drop a label.
-          const hasLabel = args.label != null;
-          if (!hasText && !hasScope && !hasLabel) return 'text, scope and/or label is required — the memory fields to update (id must exist).';
-          const next = { ...list[idx], ts: Date.now() };
-          if (hasText) next.text = String(args.text).trim();
-          if (hasLabel) next.label = String(args.label).trim() || undefined;
-          if (hasScope) {
-            const { scope, error } = normalizeScope(args.scope as string | undefined, ctx);
-            if (error) return error;
-            next.scope = scope;
+          const found = find(id);
+          if (!found) return `Memory ${id} not found.`;
+          if (action === 'forget') {
+            removeFact(dir(found.scope), id);
+            return `Memory ${id} deleted.`;
           }
-          list[idx] = next;
-          saveMemories(list, memFile);
-          return `Memory ${id} updated. It will be injected into subsequent messages.`;
-        }
-        if (action === 'forget') {
-          const id = String(args.id ?? '').trim();
-          if (!id) return 'id is required — memory id (from memory action=list).';
-          const kept = list.filter(m => m.id !== id);
-          if (kept.length === list.length) return `Memory ${id} not found.`;
-          saveMemories(kept, memFile);
-          return `Memory ${id} deleted.`;
+          const edits = ['text', 'name', 'description', 'type'].filter((k) => opt(k) !== undefined);
+          if (!edits.length && !hasScope) return 'text, name, description, type and/or scope is required — the fields to update (id must exist).';
+          const next: Fact = { ...found.fact, mtimeMs: Date.now() };
+          if (opt('text')) {
+            next.text = opt('text')!;
+            // A description that was the old text follows the new one.
+            if (!opt('description') && found.fact.description === found.fact.text) next.description = next.text;
+          }
+          if (opt('name')) next.name = opt('name')!;
+          if (opt('description')) next.description = opt('description')!;
+          if (opt('type')) next.type = opt('type')!;
+          if (hasScope && read.scope !== found.scope) {
+            ensureWorkspace(dir(read.scope));
+            const moved = addFact(dir(read.scope), { text: next.text, name: next.name, description: next.description, type: next.type, plugin: next.plugin });
+            removeFact(dir(found.scope), id);
+            return `Memory ${id} updated and moved to scope ${read.scope} (now ${moved.id}).`;
+          }
+          saveFact(dir(found.scope), next);
+          return `Memory ${id} updated. Its line in the index changes with the next message.`;
         }
         return 'action is required — list|add|update|forget.';
       }

@@ -10,8 +10,9 @@ import { assembleToolRegistry } from '../tools';
 import { hostConfigSchema } from '../../config/schema.js';
 import { bgActiveCount } from '../tools-core.js';
 import { makeFactory } from '../plugin';
-import { loadMemories } from '../../runtime/services/memory.js';
 import { identityToken } from '../../runtime/plugin-identity.js';
+import { addFact, readFacts } from '../../assistant/memory-store.js';
+import { workspaceDir } from '../../assistant/workspace.js';
 
 test('assembles built-in core + host + plugin groups, deduped by name', () => {
   const make = makeFactory({});
@@ -575,78 +576,67 @@ test('ai-tool run fuses the OWNING plugin services + preserves caller ctx + host
   expect(seen.ctx.pluginToken).toBe(identityToken('tracker'));
 });
 
-test('memory plugin scope resolves ONLY from a host-issued token, not a caller-supplied name', async () => {
-  const make = makeFactory({});
-  const plugins = [make('keycaps', { keys: {} })];
-  const memFile = join(tmpdir(), `fa-mem-token-${Date.now()}.json`);
-  const config = { memory: { file: memFile } };
-  const reg = assembleToolRegistry({ plugins, config, repo: { list: async () => [] } as any });
-  // A mixed ctx: a raw `pluginName` string AND the real host token. The string is
-  // the fake identity; only the token counts.
-  const ctx = { memoryFile: memFile, pluginName: 'tracker' as string, pluginToken: identityToken('keycaps') };
-  await reg.exec('memory', { action: 'add', text: 'keycap note', scope: 'plugin' }, ctx);
-  // The note is attributed to the TOKEN's owner (keycaps), not the spoofed 'tracker'.
-  const mems = await reg.exec('memory', { action: 'list', scope: 'plugin' }, ctx);
-  expect(mems).toContain('keycap note');
-  expect(loadMemories(memFile).some(m => m.scope === 'keycaps')).toBe(true);
-  expect(loadMemories(memFile).some(m => m.scope === 'tracker')).toBe(false);
+// A workspace root of the test's own, and a conversation in a project of its own.
+const memSetup = () => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-mem-ws-')));
+  const config = { workspace: { dir: root } };
+  const reg = assembleToolRegistry({ plugins: [], config, repo: { list: async () => [], remove: async () => ({ ok: true }) } as any });
+  const inProject = (project: string | null) => ({ workspaceProject: () => project });
+  return { root, config, reg, inProject };
+};
+
+test('the memory tool keeps each fact as a file in the project\'s workspace, or the global one; a fact of project A is never listed in project B', async () => {
+  const { root, reg, inProject } = memSetup();
+  const a = inProject('/p/a');
+  const b = inProject('/p/b');
+  const stored = String(await reg.exec('memory', { action: 'add', text: 'The build needs ZANZIBAR set.', name: 'Build variable', type: 'convention' }, a));
+  expect(stored).toContain('build-variable');
+  expect(readFacts(workspaceDir(root, '/p/a')).map((f) => f.text)).toEqual(['The build needs ZANZIBAR set.']);
+  expect(String(await reg.exec('memory', { action: 'list' }, a))).toContain('ZANZIBAR');
+  expect(String(await reg.exec('memory', { action: 'list' }, b))).not.toContain('ZANZIBAR');
+
+  // Global: every project sees it. `host` — the older word — reads as global.
+  await reg.exec('memory', { action: 'add', text: 'Answers in Russian.', scope: 'global' }, a);
+  await reg.exec('memory', { action: 'add', text: 'Prefers short answers.', scope: 'host' }, a);
+  expect(readFacts(workspaceDir(root, null)).map((f) => f.text).sort()).toEqual(['Answers in Russian.', 'Prefers short answers.']);
+  const inB = String(await reg.exec('memory', { action: 'list' }, b));
+  expect(inB).toContain('Answers in Russian.');
+  expect(inB).toContain('(global');
+  expect(String(await reg.exec('memory', { action: 'list', scope: 'project' }, b))).toBe('No memories stored yet.');
+
+  // Any other scope is refused, naming the two there are.
+  expect(String(await reg.exec('memory', { action: 'add', text: 'x', scope: 'plugin' }, a))).toContain('"project" or "global"');
+
+  // update edits in place, and moves a fact to the scope it names; forget removes it.
+  const id = readFacts(workspaceDir(root, '/p/a'))[0]!.id;
+  expect(String(await reg.exec('memory', { action: 'update', id, text: 'The build needs ZANZIBAR=1 set.' }, a))).toContain('updated');
+  expect(readFacts(workspaceDir(root, '/p/a'))[0]!.text).toBe('The build needs ZANZIBAR=1 set.');
+  await reg.exec('memory', { action: 'update', id, scope: 'global' }, a);
+  expect(readFacts(workspaceDir(root, '/p/a'))).toEqual([]);
+  expect(readFacts(workspaceDir(root, null)).some((f) => f.id === id)).toBe(true);
+  expect(String(await reg.exec('memory', { action: 'forget', id }, b))).toContain('deleted');
+  expect(readFacts(workspaceDir(root, null)).some((f) => f.id === id)).toBe(false);
+  // The index follows every write.
+  expect(fs.readFileSync(path.join(workspaceDir(root, null), 'memory', 'MEMORY.md'), 'utf8')).not.toContain(id);
 });
 
-test('memory tool enforces host|plugin scope, resolves plugin, and supports a label', async () => {
-  const make = makeFactory({});
-  const plugins = [make('keycaps', { keys: {} })];
-  const memFile = join(tmpdir(), `fa-mem-scope-${Date.now()}.json`);
-  const config = { memory: { file: memFile } };
-  const reg = assembleToolRegistry({ plugins, config, repo: { list: async () => [] } as any });
-  const ctx = { memoryFile: memFile };
-
-  // Default scope is host (assistant's own memory).
-  await reg.exec('memory', { action: 'add', text: 'cache is ON by default', label: 'config' }, ctx);
-  // 'plugin' scope resolves to the current plugin name (the host knows it).
-  await reg.exec('memory', { action: 'add', text: 'keycaps panel flag', scope: 'plugin', label: 'keycaps' }, { ...ctx, pluginToken: identityToken('keycaps') });
-
-  // An invalid scope is rejected instead of being stored verbatim.
-  const bad = await reg.exec('memory', { action: 'add', text: 'x', scope: 'issue:42' }, ctx);
-  expect(bad).toContain('invalid scope');
-
-  // Label filter narrows recall by topic; scope filter narrows by owner.
-  const configMems = await reg.exec('memory', { action: 'list', label: 'config' }, ctx);
-  expect(configMems).toContain('cache is ON by default');
-  expect(configMems).not.toContain('keycaps panel');
-  const pluginMems = await reg.exec('memory', { action: 'list', scope: 'plugin', label: 'keycaps' }, { ...ctx, pluginToken: identityToken('keycaps') });
-  expect(pluginMems).toContain('keycaps panel');
-
-  // list renders the label so the assistant can see it (`(scope) [label] text`).
-  const all = await reg.exec('memory', { action: 'list', label: 'config' }, ctx);
-  expect(all).toMatch(/\(host\) \[config\] cache is ON by default/);
-
-  // update can change the label.
-  const listed = await reg.exec('memory', { action: 'list', label: 'config' }, ctx);
-  const id = (listed.match(/\[(m-[^\]]+)\]/)?.[1]) ?? '';
-  expect(id).toBeTruthy();
-  await reg.exec('memory', { action: 'update', id, label: 'host:misc' }, ctx);
-  const relabeled = await reg.exec('memory', { action: 'list', label: 'host:misc' }, ctx);
-  expect(relabeled).toContain('cache is ON by default');
+test('without a chat the project is where the call\'s shell is', async () => {
+  const { root, reg } = memSetup();
+  const repo = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-mem-repo-')));
+  fs.mkdirSync(path.join(repo, '.git'));
+  await reg.exec('memory', { action: 'add', text: 'A fact of this repo.' }, { shell: { cwd: () => repo } });
+  expect(readFacts(workspaceDir(root, repo)).map((f) => f.text)).toEqual(['A fact of this repo.']);
 });
 
-test('host:plugins_remove purges the removed plugin\'s scoped memories', async () => {
-  const make = makeFactory({});
-  const plugins = [make('keycaps', { keys: {} })];
-  const memFile = join(tmpdir(), `fa-mem-purge-${Date.now()}.json`);
-  const config = { memory: { file: memFile } };
-  const repo = { list: async () => [], remove: async () => ({ ok: true }) } as any;
-  const reg = assembleToolRegistry({ plugins, config, repo });
-  // One host-scoped fact, one keycaps-scoped fact (scope 'plugin' → 'keycaps').
-  await reg.exec('memory', { action: 'add', text: 'host note' }, { memoryFile: memFile });
-  await reg.exec('memory', { action: 'add', text: 'keycap note', scope: 'plugin', label: 'keycaps' }, { memoryFile: memFile, pluginToken: identityToken('keycaps') });
-  expect(loadMemories(memFile).some(m => m.scope === 'keycaps')).toBe(true);
-
-  // Uninstalling keycaps drops its facts; the host-scoped one survives.
+test('host:plugins_remove purges the facts an older host kept for the removed plugin', async () => {
+  const { root, reg } = memSetup();
+  const g = workspaceDir(root, null);
+  addFact(g, { text: 'keycap note', plugin: 'keycaps' });
+  addFact(g, { text: 'host note' });
   await reg.exec('host:plugins_remove', { name: 'keycaps' }, {});
-  const mems = loadMemories(memFile);
-  expect(mems.some(m => m.scope === 'keycaps')).toBe(false);
-  expect(mems.some(m => m.scope === 'host')).toBe(true);
+  expect(readFacts(g).map((f) => f.text)).toEqual(['host note']);
 });
+
 test('ask_user hands validated questions to the chat and reads the answer back', async () => {
   const reg = assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
   expect(reg.tools.map((t) => t.function.name)).toContain('ask_user');
@@ -721,35 +711,43 @@ test('a tool name is claimed once: the first plugin keeps the bare word, the sec
   }
 });
 
-test('the memory tool says how an entry is written, and refuses a near-copy of one', async () => {
-  const reg = assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
+test('the memory tool says how an entry is written, and refuses a near-copy — in either scope — a paragraph, and a full list', async () => {
+  const { root, reg, inProject } = memSetup();
   // The rules ride in the description of every request; a drift out of the prompt is
   // what this holds. The first sentence is the tools-on-demand index and stays put.
   const description = reg.tools.find((t) => t.function.name === 'memory')!.function.description!;
   expect(description.startsWith('Persistent cross-session memory.')).toBe(true);
-  for (const rule of ['ONE durable fact per entry', 'stands without the conversation', 'never a secret or a token', 'UPDATE the entry that already says it', '300 characters', '100 entries', '/memory']) {
+  for (const rule of ['ONE durable fact per entry', 'stands without the conversation', 'never a secret or a token', 'UPDATE the entry that already says it', '300 characters', '100 entries', '/memory', 'workspace_read']) {
     expect(description).toContain(rule);
   }
 
-  const memFile = join(mkdtempSync(join(tmpdir(), 'fa-mem-dup-')), 'memory.json');
-  const ctx = { memoryFile: memFile };
+  const ctx = inProject('/p/a');
+  const facts = () => readFacts(workspaceDir(root, '/p/a'));
   const first = String(await reg.exec('memory', { action: 'add', text: 'This repo prefers rebase over merge.' }, ctx));
   expect(first).toContain('Memory stored');
-  const id = loadMemories(memFile)[0]!.id;
+  const id = facts()[0]!.id;
   // The same fact in other spacing and case does not become a second entry — which is
-  // how one file came to hold 32 copies of this very sentence.
-  const again = String(await reg.exec('memory', { action: 'add', text: 'this repo prefers  rebase over merge' }, ctx));
-  expect(again).toContain(id);
-  expect(again).toContain('update');
-  expect(loadMemories(memFile)).toHaveLength(1);
+  // how one file came to hold 32 copies of this very sentence — nor does it in the
+  // other scope.
+  for (const scope of ['project', 'global']) {
+    const again = String(await reg.exec('memory', { action: 'add', text: 'this repo prefers  rebase over merge', scope }, ctx));
+    expect(again).toContain(id);
+    expect(again).toContain('update');
+  }
+  expect(facts()).toHaveLength(1);
+  expect(readFacts(workspaceDir(root, null))).toHaveLength(0);
   // A paragraph is refused with its length, and nothing is stored.
   const long = String(await reg.exec('memory', { action: 'add', text: 'y'.repeat(400) }, ctx));
   expect(long).toContain('400');
-  expect(loadMemories(memFile)).toHaveLength(1);
+  expect(facts()).toHaveLength(1);
   // Updating the entry that already says it is the way through, and still works.
   const updated = String(await reg.exec('memory', { action: 'update', id, text: 'This repo rebases; it never merges.' }, ctx));
   expect(updated).toContain('updated');
-  expect(loadMemories(memFile)[0]!.text).toBe('This repo rebases; it never merges.');
+  expect(facts()[0]!.text).toBe('This repo rebases; it never merges.');
+  // The cap is per scope: a full project list refuses, the global one still takes.
+  for (let i = facts().length; i < 100; i++) addFact(workspaceDir(root, '/p/a'), { text: `fact number ${i}` });
+  expect(String(await reg.exec('memory', { action: 'add', text: 'one too many' }, ctx))).toContain('the memory is full');
+  expect(String(await reg.exec('memory', { action: 'add', text: 'one too many', scope: 'global' }, ctx))).toContain('Memory stored');
 });
 
 test('a background run carries the project\'s instructions for its own shell directory, and cd there answers from its own reading', async () => {

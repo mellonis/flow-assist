@@ -83,6 +83,17 @@ conversation, each tool call folded with its arguments and result, the `/compact
 summaries where they happened — written to the path you give, or to `session-<id>.md` in
 the shell's directory; it never overwrites a file that is there.
 
+**What the assistant remembers is yours to see.** When you ask it to remember
+something, it keeps the fact as a file of its own in the project's agent workspace —
+`memory/<id>.md`, with a name, a one-line description and a type, indexed in
+`memory/MEMORY.md` — or in the global workspace, for what holds in every project. Each
+request carries the index of this project's facts and the global ones, not their text,
+presented to the assistant as its own earlier notes rather than your instructions; it
+reads a fact in full when its line matters. A fact kept in one project never reaches
+another. `/memory` lists them, this project's first; `/memory forget <n>` removes one,
+`/memory forget project`, `global` or `all` a whole list — without asking the model.
+`/clear` says how many it kept.
+
 A message sent while an answer is still coming is queued (`⏎ queued`) and reaches the
 assistant after its current step — between two tool rounds — so a correction lands
 while the work it means to steer is still going; ↑ on an empty field takes the last one

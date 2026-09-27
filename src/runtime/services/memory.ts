@@ -2,7 +2,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { hostStateDir } from '../../config/load.js';
+import { readFacts, removeFact } from '../../assistant/memory-store.js';
+import { workspaceFor } from '../../assistant/workspace.js';
 
+// The memory list an older host kept, one JSON file for every project. It is read to
+// be moved into the global workspace once (src/assistant/memory-store.ts,
+// `migrateMemoryJson`); the facts themselves live as files in the workspaces now.
+//
 // The assistant's memory lives outside the repo, beside the rest of what the host
 // keeps for itself, so personal notes never end up in git. `hostStateDir()` is the one
 // place that decides where that is — the config directory normally, a temporary
@@ -74,17 +80,19 @@ export function normalizeMemoryText(text: string): string {
   return text.toLowerCase().replace(/\s+/g, ' ').trim().replace(/[.!?;,:…]+$/u, '').trim();
 }
 
-// Why a new entry is NOT stored, or null when it may be. Each refusal says what to do
-// instead — update the entry that already says it, say it shorter, prune the list —
-// and points at `/memory` and `/memory forget <n|all>`, which stay the person's own
-// way in and out. Only adding is refused: `update` is the remedy the duplicate
-// refusal names, and refusing that too would leave nowhere to go.
-export function refuseMemory(list: Memory[], text: string): string | null {
+// Why a new entry is NOT stored, or null when it may be. `list` is the scope the entry
+// goes to — the cap is counted there — and `others` every other fact the conversation
+// can see (the other scope): a fact the model already has in either is a duplicate.
+// Each refusal says what to do instead — update the entry that already says it, say it
+// shorter, prune the list — and points at `/memory` and `/memory forget`, which stay
+// the person's own way in and out. Only adding is refused: `update` is the remedy the
+// duplicate refusal names, and refusing that too would leave nowhere to go.
+export function refuseMemory(list: Pick<Memory, 'id' | 'text' | 'ts'>[], text: string, others: Pick<Memory, 'id' | 'text' | 'ts'>[] = []): string | null {
   const one = text.trim();
   if (one.length > MEMORY_TEXT_MAX) {
     return `Not stored: ${one.length} characters, and an entry may hold at most ${MEMORY_TEXT_MAX} — one short fact per entry, in a sentence that stands on its own.`;
   }
-  const same = list.find((m) => normalizeMemoryText(m.text) === normalizeMemoryText(one));
+  const same = [...list, ...others].find((m) => normalizeMemoryText(m.text) === normalizeMemoryText(one));
   if (same) {
     return `Not stored: already remembered as ${same.id} — "${clipMemory(same.text)}". Update that entry (memory action=update) if it should say something else; the person sees the list with /memory.`;
   }
@@ -94,7 +102,7 @@ export function refuseMemory(list: Memory[], text: string): string | null {
       .slice(0, 3)
       .map((m) => `${m.id} "${clipMemory(m.text)}"`)
       .join(', ');
-    return `Not stored: the memory is full (${list.length} entries, the cap is ${MEMORY_MAX_ENTRIES}). The oldest are ${oldest}. Forget what is no longer true, or ask the person to prune it with /memory forget <n|all>.`;
+    return `Not stored: the memory is full (${list.length} entries, the cap is ${MEMORY_MAX_ENTRIES}). The oldest are ${oldest}. Forget what is no longer true, or ask the person to prune it with /memory forget <number>.`;
   }
   return null;
 }
@@ -106,16 +114,17 @@ const clipMemory = (text: string, max = 60): string => {
   return one.length > max ? `${one.slice(0, max - 1)}…` : one;
 };
 
-// Removes every memory whose scope is a plugin name (scope === pluginName) from the
-// resolved memory file, so a plugin's facts don't linger after it is uninstalled.
-// Returns the number of memories removed (0 if none / unreadable). The plugin's
-// own memory file (if it opted into a per-plugin path) is not touched — the host
-// only clears its own, scope-based memory store.
+// Removes what an older host kept for a plugin (an entry whose scope was the plugin's
+// name), so a plugin's facts don't linger after it is uninstalled: the facts moved into
+// the global workspace carry the name as `plugin`, and a list not moved yet is cleaned
+// where it is. Returns how many were removed.
 export function purgePluginMemories(config: Record<string, unknown> | undefined, pluginName: string, filePath?: string): number {
   const memFile = filePath ?? memoryFilePath(config);
   const list = loadMemories(memFile);
   const kept = list.filter((m) => m.scope !== pluginName);
-  const removed = list.length - kept.length;
+  let removed = list.length - kept.length;
   if (removed) saveMemories(kept, memFile);
+  const global = workspaceFor(config, null, 'global');
+  for (const f of readFacts(global)) if (f.plugin === pluginName && removeFact(global, f.id)) removed++;
   return removed;
 }

@@ -1,6 +1,6 @@
 // What /clear clears, and what it does not — as a person meets it.
 import { afterEach, expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ScriptedModel, bootApp, settle } from './helpers/scripted';
@@ -8,8 +8,23 @@ import { ScriptedModel, bootApp, settle } from './helpers/scripted';
 const realFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 
+// Every fact file under a workspace root, by its text.
+const factsUnder = (root: string): string[] => {
+  const out: string[] = [];
+  const walk = (d: string) => {
+    for (const e of readdirSync(d, { withFileTypes: true })) {
+      const p = join(d, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (e.name.endsWith('.md') && e.name !== 'MEMORY.md' && d.endsWith('memory')) out.push(readFileSync(p, 'utf8').split('---\n')[2]!.trim());
+    }
+  };
+  walk(root);
+  return out;
+};
+const systemOf = (model: ScriptedModel) => JSON.stringify(model.requests.at(-1)!.messages.filter((m) => m.role === 'system'));
+
 test('after /clear the assistant still has its memory — and the chat says so, and /memory removes it', async () => {
-  const file = join(mkdtempSync(join(tmpdir(), 'fa-mem-')), 'memory.json');
+  const dir = mkdtempSync(join(tmpdir(), 'fa-ws-'));
   const model = new ScriptedModel();
   model.script(
     // The model decides to remember the prompt — nobody sees more than "1 tool: memory".
@@ -18,11 +33,12 @@ test('after /clear the assistant still has its memory — and the chat says so, 
     [{ text: 'second' }],
     [{ text: 'third' }],
   );
-  const ui = await bootApp(model, 110, 30, undefined, { memory: { file } });
+  const ui = await bootApp(model, 110, 30, undefined, { workspace: { dir } });
   await ui.press('F');
   await ui.type('think of 7 numbers');
   await ui.press('return');
   await settle(24);
+  expect(factsUnder(dir)).toEqual(['Prompt "focus": think of 7 random numbers and plan them']);
 
   await ui.type('/clear');
   await ui.press('return');
@@ -33,13 +49,15 @@ test('after /clear the assistant still has its memory — and the chat says so, 
   expect(ui.backend.lastFrame).toContain('1 memory is kept');
   expect(ui.backend.lastFrame).toContain('/memory');
 
-  // The next request: no trace of the old turn in the MESSAGES, the fact in the system prompt.
+  // The next request: no trace of the old turn in the MESSAGES, the fact's line in the
+  // system prompt's index.
   await ui.type('hello again');
   await ui.press('return');
   await settle(20);
   const sent = model.requests.at(-1)!.messages;
   expect(sent.filter((m) => m.role !== 'system')).toEqual([{ role: 'user', content: 'hello again' }]);
-  expect(JSON.stringify(sent.filter((m) => m.role === 'system'))).toContain('7 random numbers');
+  expect(systemOf(model)).toContain('7 random numbers');
+  expect(systemOf(model)).toContain('](memory/');
   // The note itself is for the person only.
   expect(JSON.stringify(sent)).not.toContain('is kept');
 
@@ -48,14 +66,15 @@ test('after /clear the assistant still has its memory — and the chat says so, 
   await ui.type('/memory');
   await ui.press('return');
   await settle();
-  expect(ui.backend.lastFrame).toContain('1 memory — sent with every request');
+  expect(ui.backend.lastFrame).toContain('1 memory — each one');
+  expect(ui.backend.lastFrame).toContain('This project');
   expect(ui.backend.lastFrame).toContain('7 random numbers');
   // …and removes it.
   await ui.type('/memory forget 1');
   await ui.press('return');
   await settle();
   expect(ui.backend.lastFrame).toContain('Forgot:');
-  expect(JSON.parse(readFileSync(file, 'utf8')).memories).toEqual([]);
+  expect(factsUnder(dir)).toEqual([]);
   expect(model.requests.length).toBe(before);
 
   // From now on the model does not know it either.
@@ -64,6 +83,54 @@ test('after /clear the assistant still has its memory — and the chat says so, 
   await settle(20);
   expect(JSON.stringify(model.requests.at(-1)!.messages)).not.toContain('7 random numbers');
   ui.app.unmount();
+});
+
+test('a fact of project A never reaches project B\'s prompt; a global one reaches both — as an index line, never the fact\'s text', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'fa-ws-'));
+  const repo = () => {
+    const r = realpathSync(mkdtempSync(join(tmpdir(), 'fa-proj-')));
+    mkdirSync(join(r, '.git'));
+    return r;
+  };
+  const a = repo();
+  const b = repo();
+
+  const modelA = new ScriptedModel();
+  modelA.script(
+    [
+      { tool: 'memory', args: { action: 'add', text: 'The build of this repo needs QUAGGA set.', name: 'Build variable', description: 'what the build needs' } },
+      { tool: 'memory', args: { action: 'add', text: 'The person wants answers without TAPIR words.', name: 'Answer style', description: 'how to answer', scope: 'global' } },
+    ],
+    [{ text: 'Noted.' }],
+    [{ text: 'ok' }],
+  );
+  const uiA = await bootApp(modelA, 110, 30, undefined, { workspace: { dir }, shell: { roots: [a] } });
+  await uiA.press('F');
+  await uiA.type('remember two things');
+  await uiA.press('return');
+  await settle(24);
+  await uiA.type('and?');
+  await uiA.press('return');
+  await settle(20);
+  // In A: both lines of the index — and neither fact's own text, which is read with
+  // workspace_read when a line is relevant.
+  expect(systemOf(modelA)).toContain('[Build variable](memory/build-variable.md) — what the build needs');
+  expect(systemOf(modelA)).toContain('[Answer style](memory/answer-style.md) — how to answer');
+  expect(systemOf(modelA)).not.toContain('QUAGGA');
+  expect(systemOf(modelA)).not.toContain('TAPIR');
+  expect(systemOf(modelA)).toContain('your own notes');
+  uiA.app.unmount();
+
+  const modelB = new ScriptedModel();
+  modelB.script([{ text: 'hi' }]);
+  const uiB = await bootApp(modelB, 110, 30, undefined, { workspace: { dir }, shell: { roots: [b] } });
+  await uiB.press('F');
+  await uiB.type('hello');
+  await uiB.press('return');
+  await settle(20);
+  expect(systemOf(modelB)).not.toContain('Build variable');
+  expect(systemOf(modelB)).toContain('[Answer style](memory/answer-style.md)');
+  uiB.app.unmount();
 });
 
 test('a test that stores a memory leaves the config directory alone', async () => {

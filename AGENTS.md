@@ -871,14 +871,44 @@ there is no `/fullscreen`.
   goes in at the caret with its line breaks collapsed to spaces. Esc leaves the field
   for the list; Esc on the list dismisses the question.
 - **The memory is the person's too.** The `memory` tool is the model's: a stored fact
-  goes into the system prompt of EVERY later request — across `/clear`, across
-  restarts. That is its purpose, but left unsaid it reads as a bug: the assistant
-  still knowing an earlier prompt after `/clear` looks like `/clear` failing, when in
-  fact the conversation is gone and only the memory remains. So `/clear` reports what it kept
-  (`keptAfterClear`), and `/memory` lists and `/memory forget <n|all>` removes — without
-  going through the model (`src/assistant/memory-command.ts`). What the host tells the
-  person this way is a display-only message of role `note`; `apiHistory` drops it, and
-  the model's history (`apiRef`) never holds it.
+  is a file in the agent workspace (`src/assistant/memory-store.ts`, "The agent
+  workspace" below) — the conversation's project's, or the global one — and its LINE in
+  the index goes into the system prompt of every later request in that scope, across
+  `/clear` and restarts. That is its purpose, but left unsaid it reads as a bug: the
+  assistant still knowing an earlier prompt after `/clear` looks like `/clear` failing,
+  when in fact the conversation is gone and only the memory remains. So `/clear` reports
+  what it kept (`keptAfterClear`, both scopes counted), and `/memory [project|global]`
+  lists — this project's facts, then every project's, numbered through both — and
+  `/memory forget <n|project|global|all>` removes, without going through the model
+  (`src/assistant/memory-command.ts`, pure: the lists in, a note and what to remove out).
+  What the host tells the person this way is a display-only message of role `note`;
+  `apiHistory` drops it, and the model's history (`apiRef`) never holds it.
+  - **A fact is a file, the prompt carries the index.** `memory/<id>.md` holds one fact
+    under a front matter — `name`, `description`, `type` (preference, convention, fact,
+    reference), and `plugin` on a fact an older host kept for a plugin — and
+    `memory/MEMORY.md` one line per file, `- [name](file) — description`. The id is the
+    file's name, a slug of the name (`[a-z0-9-]`, Cyrillic transliterated, never
+    `memory` — on a case-blind disk that is the index — numbered when taken). Every
+    value is flattened to one line before it is written (`oneLine`): a description
+    holding `\n---\n` would otherwise end the front matter and write a line of its own
+    into the index. Files 0600 through temp file + rename, directories 0700. The
+    system prompt's `## Your memory` block (`memoryPromptBlock`) lists this project's
+    index and the global one — never a fact's text; the default description is the
+    text's first 100 characters, and the model reads a fact in full with
+    `workspace_read({ path: "memory/<id>.md", scope })` when its line is relevant. The
+    index is built from the files' own front matter every time, for the prompt and
+    for MEMORY.md alike, so a hand-edited index never decides what the model is told.
+    A fact is text the model wrote while it was reading other people's, so it may carry
+    an instruction injected there into later sessions: the block frames the lines as
+    the model's own earlier notes — data to weigh, never the person's instruction.
+  - **The scope.** `scope: "project"` (the default) is the conversation's project —
+    decided at its first message, as a session's is, and handed to the tools as
+    `ctx.workspaceProject` (the chat's `currentProject`); a caller without one (a
+    background run, the one-shot prompt) takes the project of the call's shell
+    directory (`callProject`). `"global"` is every project — the person's own
+    preferences; `"host"`, an older word, reads as global. With no project there is one
+    workspace, the global one. A fact of project A never reaches project B's prompt.
+    `update` finds a fact by id in either scope and moves it when given another.
   - **A fact that rides on every request forever is worth writing well**, so the
     tool's description asks for one durable fact per entry — a preference, a
     convention, a name — as a short sentence that stands without the conversation it
@@ -886,19 +916,23 @@ there is no `/fullscreen`.
     adding, list and UPDATE the entry that already says it. The model reads other
     people's text, so a rule that lives only in a description is a rule it may ignore:
     the host enforces the three that can be enforced (`refuseMemory` in
-    `runtime/services/memory.ts`, applied by the tool's `add`). A near-copy is refused
-    naming the entry it duplicates — text matched with case, runs of whitespace and
-    trailing punctuation taken out; an entry over `MEMORY_TEXT_MAX` (300) characters is
-    refused with its length; past `MEMORY_MAX_ENTRIES` (100) the tool refuses and names
-    the oldest. Every refusal says what to do instead and points at `/memory`. Only
-    `add` is guarded: `update` is the remedy the duplicate refusal names, so refusing
-    that too would leave nowhere to go (an entry added short and then updated long is
-    still open).
-  - **Where it is kept is the host's state, not the repo's**: `memoryFilePath(config)`
-    → `config.memory.file`, else `memory.json` under `hostStateDir()`. It is resolved
-    on every call and never at import — an import-time constant is fixed before a test
-    can move it, which is how every e2e test that reached the tool appended to the
-    person's own file, 32 copies of one fact.
+    `runtime/services/memory.ts`, applied by the tool's `add`). A near-copy of a fact in
+    EITHER scope is refused naming the entry it duplicates — text matched with case,
+    runs of whitespace and trailing punctuation taken out; an entry over
+    `MEMORY_TEXT_MAX` (300) characters is refused with its length; past
+    `MEMORY_MAX_ENTRIES` (100) in its scope the tool refuses and names the oldest. Every
+    refusal says what to do instead and points at `/memory`. Only `add` is guarded:
+    `update` is the remedy the duplicate refusal names, so refusing that too would
+    leave nowhere to go (an entry added short and then updated long is still open).
+  - **`memory.json`** — `memoryFilePath(config)`: `config.memory.file`, else
+    `memory.json` under `hostStateDir()` — is where an older host kept one list for
+    every project. It is resolved on every call and never at import: an import-time
+    constant is fixed before a test can move it, which is how every e2e test that
+    reached the tool appended to the person's own file, 32 copies of one fact. Uninstalling
+    a plugin removes what an older host kept for it (`purgePluginMemories`: the list's
+    entries scoped to its name, and the global facts whose `plugin` names it).
+    `services.memory` (load/save of that list) is still on the host's services and
+    nothing reads it.
 - **How full the context is, is shown — and says where the number came from.** The
   chat's hint line ends in `ctx N%` (yellow from 80%), and `/context` opens a PANEL in
   the field's place, like a write confirmation — a look at the conversation, not a

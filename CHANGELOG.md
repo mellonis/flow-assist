@@ -5,6 +5,15 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **The memory is kept per project, as files, and only its index is sent.** Each fact
+  the assistant remembers is a file of its own — `memory/<id>.md` with a name, a
+  description and a type — in the agent workspace of the conversation's project, or in
+  the global one for what holds everywhere (`scope: "project" | "global"`, project by
+  default), with `memory/MEMORY.md` indexing them. The system prompt carries that index,
+  a line per fact, framed as the assistant's own earlier notes rather than your
+  instructions; it reads a fact in full when its line matters. A fact written in one
+  project never reaches another's prompt. `/memory` lists this project's facts and every
+  project's, and `/memory forget project|global|all` empties either.
 - **The plan is drawn in its own order, with checkboxes and no numbers, and says what
   is being worked on.** Items used to be listed by state with a number beside each —
   numbers the assistant and you read differently, and a new plan could start at 6. Now

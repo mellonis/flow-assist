@@ -19,8 +19,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { hostStateDir } from '../config/load.js';
-import { projectHome } from './sessions.js';
-import { realOf, within } from './shell.js';
+import { projectHome, projectOf } from './sessions.js';
+import { realOf, shellRoots, within } from './shell.js';
 
 export const WORKSPACE_LEAF = '_workspace';
 export const GLOBAL_PROJECT = '_global';
@@ -63,4 +63,23 @@ export function resolveInWorkspace(ws: string, rel: string): { abs: string } | {
   const abs = s ? path.join(ws, s) : ws;
   if (!within(realOf(abs), realOf(ws))) return { error: `«${s}» resolves through a link to ${realOf(abs)}, outside the workspace — ${where}` };
   return { abs };
+}
+
+// The project a tool call works in: the conversation's, when its owner says
+// (`workspaceProject` — the chat's, decided at its first message as a session's is);
+// else where the call's shell is, else the process's directory, by the sessions' rule.
+export function callProject(config: Record<string, unknown> | undefined, ctx: { workspaceProject?: () => string | null; shell?: unknown } | undefined): string | null {
+  if (typeof ctx?.workspaceProject === 'function') return ctx.workspaceProject();
+  const shell = ctx?.shell as { cwd?: () => string } | undefined;
+  const cwd = typeof shell?.cwd === 'function' ? shell.cwd() : process.cwd();
+  try { return projectOf(cwd, shellRoots((config ?? {}) as Parameters<typeof shellRoots>[0])); } catch { return null; }
+}
+
+// A scope as the model wrote it: `project` (the default) or `global`; `host`, the word
+// an older host used for "everywhere", reads as global.
+export function readScope(raw: unknown): { scope: WorkspaceScope } | { error: string } {
+  const s = String(raw ?? '').trim().toLowerCase();
+  if (!s || s === 'project') return { scope: 'project' };
+  if (s === 'global' || s === 'host') return { scope: 'global' };
+  return { error: `invalid scope '${s}' — expected "project" or "global"` };
 }

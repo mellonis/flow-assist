@@ -49,8 +49,9 @@ import { allFolded, flipFolds, isClicked, isOpen, openInFull, pageable, toggleFo
 import { groupOpen, toggleGroup } from '../assistant/view-groups.js';
 import { bindingGlyph, firstGlyph, isKey, isMouseButton, keyGlyph } from '../playback/keys.js';
 import { askKey, askStart, type AskQuestion, type AskState } from '../assistant/ask.js';
-import { loadMemories, memoryFilePath, saveMemories } from '../runtime/services/memory.js';
-import { keptAfterClear, memoryCommand } from '../assistant/memory-command.js';
+import { keptAfterClear, memoryCommand, type MemoryLists } from '../assistant/memory-command.js';
+import { memoryPromptBlock, readFacts, removeFact } from '../assistant/memory-store.js';
+import { workspaceFor } from '../assistant/workspace.js';
 import { CONTEXT_WARN_AT, DEFAULT_CONTEXT_WINDOW, cacheLine, contextBadge, estimateTokens, readContext, short as shortTokens } from '../assistant/context-meter.js';
 import { applyRecall, bulkyItems, createRecallState, decideBatch, recallLimits, recallLine, saveRecallState, type BulkyItem, type RecallSource, type ShellMeta } from '../assistant/recall.js';
 import { contextTitle, screenBlock, type ContextItem } from '../assistant/screen-context.js';
@@ -878,10 +879,12 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const ensureSessionId = (): string => {
             if (!sessionIdRef.current) {
               sessionIdRef.current = newSessionId(); createdAtRef.current = new Date().toISOString(); fingerprintRef.current = NO_FILE;
+              // The project is the conversation's — its workspace and memory too — with
+              // or without a sessions directory to keep it in.
+              let project: string | null = null;
+              try { project = projectHere(); } catch { /* no project — the top level */ }
+              sessionProjectRef.current = project;
               if (sessDir) {
-                let project: string | null = null;
-                try { project = projectHere(); } catch { /* no project — the top level */ }
-                sessionProjectRef.current = project;
                 const home = projectHome(sessDir, project);
                 homes.current.set(sessionIdRef.current, home);
                 acquireLock(home, sessionIdRef.current, lockToken); // a fresh id — nothing else could hold it
@@ -1234,14 +1237,22 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             return [directive, identity, writeLangDirective].filter(Boolean).join('\n\n');
           };
 
-          // The fresh memory block: every message re-reads the file, so a note added or
-          // edited mid-session lands in the next answer immediately. Empty → '' (block
-          // not added).
+          // The memory as the conversation sees it: its project's facts and the global
+          // ones (src/assistant/memory-store.ts), read from the files each time.
+          const memoryLists = (): MemoryLists => {
+            const project = currentProject();
+            return {
+              project: project ? readFacts(workspaceFor(host.config, project, 'project')) : [],
+              global: readFacts(workspaceFor(host.config, project, 'global')),
+              projectLabel: project ? tildePath(project) : '',
+            };
+          };
+          // The memory's INDEX for the system prompt — never every fact's text: every
+          // message reads it again, so a fact added or edited mid-session is in the next
+          // one. Nothing stored → '' (no block).
           const memoryBlock = () => {
-            const mems = loadMemories(memoryFilePath(host.config));
-            return mems.length
-              ? `## Persistent memory\nFacts remembered across sessions (the \`memory\` tool adds/updates/removes them). Consider them when answering.\n${mems.map(m => `- ${m.scope}: ${m.text}`).join('\n')}`
-              : '';
+            const l = memoryLists();
+            return memoryPromptBlock(l.project, l.global);
           };
           // The CURRENT task plan (the `todo` tool), re-read every message so the model
           // sees the live checkboxes it created and must keep in sync. The rendered
@@ -1658,11 +1669,11 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                     resolveImage: (ref: ImageRef) => resolveImage(ref, []),
                     onRecalled: (id: string) => { recallRef.current.recalled.add(id); },
                   } satisfies RecallSource,
-                  memoryFile: memoryFilePath(host.config),
-                  // The plugin's OWN host-issued token. The CALLER never supplies a
-                  // name here — a raw plugin-name string is ignored by the memory
-                  // tool (it resolves `plugin` scope only through a token the host
-                  // issued), so a plugin can present itself but not impersonate one.
+                  // The conversation's project — the workspace its memory and its files
+                  // are in (src/assistant/workspace.ts), decided at its first message.
+                  workspaceProject: currentProject,
+                  // The plugin's OWN host-issued token: a plugin can present itself but
+                  // not impersonate one.
                   pluginToken: host.pluginToken,
                   askUser: (questions: AskQuestion[]) => new Promise<AskState>((resolve) => {
                     const state = askStart(questions);
@@ -2513,7 +2524,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             {
               // What the journal held back belonged to the conversation being left.
               journalBuf.current = []; journalImport.current = null;
-              const kept = keptAfterClear(loadMemories(memoryFilePath(host.config)));
+              const l = memoryLists();
+              const kept = keptAfterClear(l.project.length + l.global.length);
               if (kept) journal({ t: 'row', role: 'note', text: kept });
               setMessages(kept ? [{ role: 'note', content: kept }] : []);
             }
@@ -2610,9 +2622,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // The person's own view of the model's memory; nothing here reaches the
                 // model. A `note` is a display-only message: `apiRef` — the model's
                 // history — is not touched.
-                const file = memoryFilePath(host.config);
-                const res = memoryCommand(arg, loadMemories(file));
-                if (res.next) saveMemories(res.next, file);
+                const res = memoryCommand(arg, memoryLists());
+                for (const f of res.forget ?? []) removeFact(workspaceFor(host.config, currentProject(), f.scope), f.id);
                 pushNote(res.note);
                 setField('');
                 host.notify();
