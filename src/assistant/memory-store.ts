@@ -15,6 +15,7 @@
 // matter early and write a line of its own into the index.
 import fs from 'node:fs';
 import path from 'node:path';
+import { defaultPidAlive } from './sessions.js';
 import { writePrivate } from './workspace.js';
 
 export const MEMORY_DIR = 'memory';
@@ -179,13 +180,36 @@ export function normalizeMemoryText(text: string): string {
 
 // The one list an older host kept for every project (`memory.json`) moves into the
 // global workspace, once: each entry becomes a fact file — an entry scoped to a plugin
-// keeps the plugin's name — then the old file is renamed `<file>.migrated`. A fact the
-// workspace already holds is not written twice, so a start interrupted between the
-// writes and the rename moves nothing twice. A file that does not parse is left where
-// it is. `moved` — facts written, `kept` — entries already there.
-export function migrateMemoryJson(file: string, globalWs: string): { moved: number; kept: number } {
+// keeps the plugin's name — and the file ends as `<file>.migrated` (`.migrated-2`, … when
+// that name is taken: a backup is never overwritten). A fact the workspace already holds
+// is not written twice, and a file that does not parse is left where it is. `moved` —
+// facts written, `kept` — entries already there.
+//
+// Two processes starting at once must not both move it, so the file is CLAIMED first by
+// an atomic rename to `<file>.migrating-<pid>`: the process that gets ENOENT has nothing
+// to move, unless a claim is left by a process that is gone — then it takes that claim
+// over (a claim of a live process is left to it), and the dedupe makes the retake
+// write nothing twice.
+export function migrateMemoryJson(file: string, globalWs: string, deps: { pid?: number; pidAlive?: (pid: number) => boolean } = {}): { moved: number; kept: number } {
+  const none = { moved: 0, kept: 0 };
+  const pid = deps.pid ?? process.pid;
+  const alive = deps.pidAlive ?? defaultPidAlive;
+  const claimed = `${file}.migrating-${pid}`;
+  const claim = (from: string): boolean => {
+    try { fs.renameSync(from, claimed); return true; } catch { return false; }
+  };
+  if (!claim(file)) {
+    const prefix = `${path.basename(file)}.migrating-`;
+    let names: string[] = [];
+    try { names = fs.readdirSync(path.dirname(file)); } catch { return none; }
+    const stale = names.find((n) => n.startsWith(prefix) && /^\d+$/.test(n.slice(prefix.length)) && !alive(Number(n.slice(prefix.length))));
+    if (!stale || !claim(path.join(path.dirname(file), stale))) return none;
+  }
   let list: unknown;
-  try { list = (JSON.parse(fs.readFileSync(file, 'utf8')) as { memories?: unknown })?.memories; } catch { return { moved: 0, kept: 0 }; }
+  try { list = (JSON.parse(fs.readFileSync(claimed, 'utf8')) as { memories?: unknown })?.memories; } catch {
+    try { fs.renameSync(claimed, file); } catch { /* left as the claim */ }
+    return none;
+  }
   const entries = Array.isArray(list) ? list.filter((m): m is { text: string; scope?: unknown; label?: unknown } => !!m && typeof (m as { text?: unknown }).text === 'string' && !!(m as { text: string }).text.trim()) : [];
   const have = new Set(readFacts(globalWs).map((f) => normalizeMemoryText(f.text)));
   let moved = 0;
@@ -199,6 +223,8 @@ export function migrateMemoryJson(file: string, globalWs: string): { moved: numb
     have.add(key);
     moved++;
   }
-  fs.renameSync(file, `${file}.migrated`);
+  let done = `${file}.migrated`;
+  for (let n = 2; fs.existsSync(done); n++) done = `${file}.migrated-${n}`;
+  fs.renameSync(claimed, done);
   return { moved, kept };
 }

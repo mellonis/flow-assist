@@ -642,7 +642,9 @@ function statMtimeOrNull(file: string): number | null {
 
 // `process.kill(pid, 0)` sends no signal; it throws ESRCH when the pid is gone and
 // EPERM when it exists but belongs to someone else — EPERM still means alive.
-function defaultPidAlive(pid: number): boolean {
+// Whether a process of this host is alive (a pid that exists but is not ours to signal
+// counts as alive).
+export function defaultPidAlive(pid: number): boolean {
   try { process.kill(pid, 0); return true; }
   catch (e) { return (e as NodeJS.ErrnoException).code === 'EPERM'; }
 }

@@ -984,9 +984,13 @@ there is no `/fullscreen`.
     continued session is in place first) it moves into the global workspace ONCE
     (`migrateMemoryJson`): each entry becomes a fact file — one scoped to a plugin keeps
     the name as `plugin`, a `label` becomes the `type` — then the file is renamed
-    `memory.json.migrated`. A fact the global workspace already holds is not written
-    again, so a start interrupted between the writes and the rename doubles nothing; a
-    file that does not parse is left where it is. A move says so in a start-up note
+    `memory.json.migrated` (`.migrated-2`, … — a backup is never overwritten). Two
+    processes starting at once are kept apart by an atomic rename that CLAIMS the file
+    first, `memory.json.migrating-<pid>`: the one that gets ENOENT has nothing to move,
+    unless a claim is left by a pid that is gone (`defaultPidAlive`, the sessions'
+    rule), which it takes over. A fact the global workspace already holds is not
+    written again, so a retaken claim doubles nothing; a file that does not parse is
+    put back where it was. A move says so in a start-up note
     (`pushNote`, journaled once the session has an id) — how many, that they are every
     project's now, `/memory` to see them. It is resolved on every call and never at import: an import-time
     constant is fixed before a test can move it, which is how every e2e test that

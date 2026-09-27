@@ -103,3 +103,28 @@ test('the prompt shows at most MEMORY_PROMPT_LINES lines per scope, and says how
   expect(block.split('\n').filter((l) => l.startsWith('- ['))).toHaveLength(MEMORY_PROMPT_LINES);
   expect(block).toContain('+5 more — workspace_read memory/MEMORY.md (scope "project")');
 });
+
+test('the migration claims memory.json by an atomic rename: a live claim is left to its process, a dead one is taken over, and a backup is never overwritten', () => {
+  const g = ws();
+  const dir = ws();
+  const legacy = path.join(dir, 'memory.json');
+  const body = JSON.stringify({ memories: [{ id: 'm-1', text: 'Prefers rebase.', scope: 'host', ts: 1 }] });
+  // Another process, alive, is migrating: this one backs off and writes nothing.
+  fs.writeFileSync(`${legacy}.migrating-4242`, body);
+  expect(migrateMemoryJson(legacy, g, { pid: 1, pidAlive: (p) => p === 4242 })).toEqual({ moved: 0, kept: 0 });
+  expect(readFacts(g)).toEqual([]);
+  expect(fs.existsSync(`${legacy}.migrating-4242`)).toBe(true);
+  // That process died mid-way: the next start takes the claim over, and an earlier
+  // backup stays as it was.
+  fs.writeFileSync(`${legacy}.migrated`, 'the first backup');
+  expect(migrateMemoryJson(legacy, g, { pid: 1, pidAlive: () => false })).toEqual({ moved: 1, kept: 0 });
+  expect(fs.existsSync(`${legacy}.migrating-4242`)).toBe(false);
+  expect(fs.readFileSync(`${legacy}.migrated`, 'utf8')).toBe('the first backup');
+  expect(fs.readFileSync(`${legacy}.migrated-2`, 'utf8')).toBe(body);
+  // Two starts at once: whoever renames first migrates; the other finds nothing.
+  fs.writeFileSync(legacy, JSON.stringify({ memories: [{ id: 'm-2', text: 'Answers briefly.', scope: 'host', ts: 2 }] }));
+  const first = migrateMemoryJson(legacy, g, { pid: 7, pidAlive: (p) => p === 7 });
+  const second = migrateMemoryJson(legacy, g, { pid: 8, pidAlive: (p) => p === 7 || p === 8 });
+  expect([first.moved, second.moved]).toEqual([1, 0]);
+  expect(readFacts(g).map((f) => f.text).sort()).toEqual(['Answers briefly.', 'Prefers rebase.']);
+});
