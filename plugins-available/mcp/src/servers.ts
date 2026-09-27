@@ -3,8 +3,8 @@
 // A server is `connecting`, `connected`, `failed` or `disabled`. One that fails to
 // connect — at start or later — or drops once connected (a call finds the line refused
 // or reset or a gateway's 502/503/504, a stdio process exits; a call that timed out or
-// got another 5xx drops it only when a `ping` after it gets no answer either) is tried
-// again in the background,
+// got another 5xx or a 404 drops it only when a `ping` after it gets no answer either)
+// is tried again in the background,
 // after 5 s, 15 s and 60 s, then every 5 minutes, until it answers. A 401 or 403 is not
 // tried again: that is the token, not the network, and the reason says so; `restart`
 // tries it again once the person has fixed it. A server that connects after the start
@@ -20,7 +20,7 @@
 
 import { McpError, createMcpClient as createHttp, type Fetcher, type McpClient, type McpTool } from './client.ts';
 import { createStdioClient } from './stdio.ts';
-import { specProblem, toolGroup, unknownReadOnly, type ServerSpec } from './index.ts';
+import { inSeconds, specProblem, toolGroup, unknownReadOnly, type ServerSpec } from './index.ts';
 
 export type ServerState = 'connecting' | 'connected' | 'failed' | 'disabled';
 
@@ -68,6 +68,8 @@ export type ServerView = {
 
 type Entry = ServerView & {
   spec: ServerSpec;
+  // The question in flight whether the server is there — one at a time.
+  checking?: Promise<Verdict>;
   gen: number;
   attempt: number;
   timer?: unknown;
@@ -103,10 +105,13 @@ const isAuth = (e: unknown) => e instanceof McpError && (e.status === 401 || e.s
 const TRANSPORT_STATUS = new Set([502, 503, 504]);
 const isLost = (e: unknown) => e instanceof McpError && (e.lost === true || (e.status !== undefined && TRANSPORT_STATUS.has(e.status)));
 // A call that failed in a way that may be the call's or the server's: no answer in time
-// (a slow search), a server error. The call's error goes to the model either way; the
-// server is asked whether it is there (`ping`) and dropped only when that fails too.
-// Anything else — a 404, a 401 — is that call's error alone.
-const isDoubt = (e: unknown) => e instanceof McpError && (e.timeout === true || (e.status !== undefined && e.status >= 500));
+// (a slow search), a server error, a 404 (the tool's own "not found", or a session the
+// server forgot). The server is asked whether it is there (`ping`): an answer keeps it
+// and the call's error goes to the model; a 404 to the ping too is the session, and a
+// new one is started and the call made again, once; no answer drops it. Anything else —
+// a 401, a 400 — is that call's error alone.
+const isDoubt = (e: unknown) => e instanceof McpError && (e.timeout === true || (e.status !== undefined && (e.status >= 500 || e.status === 404)));
+type Verdict = 'kept' | 'retry' | 'dropped';
 
 export function createServerManager(servers: Array<{ name: string; spec: ServerSpec }>, deps: ManagerDeps = {}) {
   const env = deps.env ?? process.env;
@@ -192,14 +197,35 @@ export function createServerManager(servers: Array<{ name: string; spec: ServerS
     fail(e, err, true);
   };
 
-  // Is the server there? One question at a time per server; a server that does not
-  // answer is dropped with the ping's own reason.
-  const checking = new Set<Entry>();
-  const check = async (e: Entry, gen: number, client: McpClient) => {
-    if (checking.has(e)) return;
-    checking.add(e);
-    try { await client.ping(); } catch (err) { lost(e, gen, err); } finally { checking.delete(e); }
+  // Is the server there? One question at a time per server. A 404 to the ping is a
+  // session the server forgot: a new one is started (the client drops its session id),
+  // and the call is made again. A server that does not answer is dropped with the
+  // ping's own reason.
+  const check = (e: Entry, gen: number, client: McpClient & { forgetSession?: () => void }): Promise<Verdict> => {
+    e.checking ??= (async (): Promise<Verdict> => {
+      try {
+        await client.ping();
+        return 'kept';
+      } catch (err) {
+        if (err instanceof McpError && err.status === 404 && client.forgetSession) {
+          try {
+            client.forgetSession();
+            await client.initialize();
+            return gen === e.gen ? 'retry' : 'dropped';
+          } catch (again) { lost(e, gen, again); return 'dropped'; }
+        }
+        lost(e, gen, err);
+        return 'dropped';
+      }
+    })().finally(() => { e.checking = undefined; });
+    return e.checking;
   };
+  // What a call to a group that no longer answers is told.
+  const notConnected = (e: Entry): string =>
+    e.state === 'disabled' ? `${e.name} is disabled`
+    : e.state === 'connected' ? `${e.name} was connected again since — call the tool again`
+    : e.nextAt !== undefined ? `${e.name} is not connected — retrying in ${inSeconds(e.nextAt, timers.now())}`
+    : `${e.name} is not connected — ${e.reason ?? 'no answer'}`;
 
   // One attempt. `later` — not the start: its success is news for the chat.
   async function connect(e: Entry, later: boolean): Promise<void> {
@@ -218,9 +244,12 @@ export function createServerManager(servers: Array<{ name: string; spec: ServerS
       const info = await client.initialize();
       const tools = await client.listTools();
       if (gen !== e.gen) { try { client.close(); } catch { /* gone */ } return; }
-      const group = toolGroup(e.name, e.spec, client, tools, info.instructions, (err) => {
-        if (isLost(err)) lost(e, gen, err);
-        else if (isDoubt(err)) void check(e, gen, client);
+      const group = toolGroup(e.name, e.spec, client, tools, info.instructions, {
+        onFail: (err) => {
+          if (isLost(err)) { lost(e, gen, err); return 'dropped'; }
+          return isDoubt(err) ? check(e, gen, client) : 'kept';
+        },
+        status: () => (gen === e.gen && e.state === 'connected' ? null : notConnected(e)),
       });
       e.state = 'connected';
       e.attempt = 0;
@@ -254,7 +283,7 @@ export function createServerManager(servers: Array<{ name: string; spec: ServerS
       return [...entries.values()].flatMap((e) => (e.state === 'connected' && e.group ? [e.group] : []));
     },
     list(): ServerView[] {
-      return [...entries.values()].map(({ spec: _s, gen: _g, attempt: _a, timer: _t, client: _c, group: _gr, ...view }) => ({ ...view }));
+      return [...entries.values()].map(({ spec: _s, gen: _g, attempt: _a, timer: _t, client: _c, group: _gr, checking: _ch, ...view }) => ({ ...view }));
     },
     has: (name: string) => entries.has(name),
     // Off at once: its group goes, a stdio process is stopped, no retry is left.

@@ -65,7 +65,7 @@ export function serverRow(v: ServerView, now: number) {
 
 // The list as one line, for the `:` line's toast.
 export const listLine = (views: ServerView[], now: number) =>
-  views.length ? `mcp: ${views.map((v) => `${v.name} (${v.transport}) ${stateText(v, now)}`).join(' · ')}` : 'mcp: no servers — /mcp add <name> <url | command…>';
+  views.length ? `${views.map((v) => `${v.name} (${v.transport}) ${stateText(v, now)}`).join(' · ')}` : 'no servers — /mcp add <name> <url | command…>';
 
 export function mcpCommand(manager: ServerManager, deps: { services: () => Services | undefined; now?: () => number }) {
   const now = deps.now ?? (() => Date.now());
@@ -84,11 +84,11 @@ export function mcpCommand(manager: ServerManager, deps: { services: () => Servi
 
   const toggle = (name: string, on: boolean, session: boolean): string => {
     const svc = deps.services();
-    if (!svc?.setConfig) throw new Error('mcp: this needs the app — config set plugins.mcp.servers.' + name + '.enabled ' + on);
+    if (!svc?.setConfig) throw new Error('this needs the app — config set plugins.mcp.servers.' + name + '.enabled ' + on);
     const res = svc.setConfig(`plugins.mcp.servers.${name}.enabled`, on, { session });
-    if (!res.ok) throw new Error(res.error ?? 'mcp: could not save it');
+    if (!res.ok) throw new Error(res.error ?? 'could not save it');
     if (on) void manager.enable(name); else manager.disable(name);
-    return `mcp: ${name} ${on ? 'enabled — connecting' : 'disabled'}${session ? ' for this run' : ' (saved)'}`;
+    return `${name} ${on ? 'enabled — connecting' : 'disabled'}${session ? ' for this run' : ' (saved)'}`;
   };
 
   const panel = () => ({
@@ -101,7 +101,7 @@ export function mcpCommand(manager: ServerManager, deps: { services: () => Servi
         const v = manager.list().find((x) => x.name === id);
         return toggle(id, v?.state === 'disabled', false);
       } },
-      { key: 'r', label: 'restart', run: (id: string | null) => (id ? (manager.restart(id) ? `mcp: restarting ${id}` : `mcp: ${id} is disabled — d enables it`) : '') },
+      { key: 'r', label: 'restart', run: (id: string | null) => (id ? (manager.restart(id) ? `restarting ${id}` : `${id} is disabled — d enables it`) : '') },
       { key: 't', label: 'tools', run: (id: string | null) => (id ? toolsPanel(id) : '') },
     ],
   });
@@ -110,18 +110,19 @@ export function mcpCommand(manager: ServerManager, deps: { services: () => Servi
   const run = (ctx: Ctx = {}, arg = ''): void => {
     try { act(ctx, arg); } catch (e) {
       const message = (e as Error).message;
-      if (ctx.surface === 'chat' && ctx.error) ctx.error(message); else ctx.showMessage?.(message);
+      if (ctx.surface === 'chat' && ctx.error) ctx.error(`/mcp: ${message}`); else ctx.showMessage?.(`mcp: ${message}`);
     }
   };
   const act = (ctx: Ctx, arg: string): void => {
     const chat = ctx.surface === 'chat';
-    // The `:` line's toast is one row: a text of several lines (the help) is said in the
-    // chat, opened for it, as a note.
+    // In the chat the host puts the plugin's name in front of a note; the `:` line's
+    // toast says it here. The toast is one row: a text of several lines (the help) is
+    // said in the chat, opened for it, as a note.
     const say = (text: string) => {
       if (chat) { ctx.say?.(text); return; }
       const note = deps.services()?.chatNote;
       if (text.includes('\n') && note) { ctx.openChat?.(); note(text); return; }
-      ctx.showMessage?.(text.split('\n')[0]!);
+      ctx.showMessage?.(`mcp: ${text.split('\n')[0]!}`);
     };
     const words = arg.trim().split(/\s+/).filter(Boolean);
     const session = words.includes('--session');
@@ -134,50 +135,52 @@ export function mcpCommand(manager: ServerManager, deps: { services: () => Servi
       return;
     }
     const verb = sub.toLowerCase();
-    if (verb === 'help' || !(SUBCOMMANDS as readonly string[]).includes(verb)) { say(verb === 'help' ? MCP_HELP : `mcp: no such action "${sub}"\n${MCP_HELP}`); return; }
-    if (!name) throw new Error(`mcp: ${verb} takes a server's name — /mcp help`);
-    if (NAMED.has(verb) && !manager.has(name)) throw new Error(`mcp: no server "${name}"${names().length ? ` — there are ${names().join(', ')}` : ''}`);
+    if (verb === 'help' || !(SUBCOMMANDS as readonly string[]).includes(verb)) { say(verb === 'help' ? MCP_HELP : `no such action "${sub}"\n${MCP_HELP}`); return; }
+    if (!name) throw new Error(`${verb} takes a server's name — /mcp help`);
+    if (NAMED.has(verb) && !manager.has(name)) throw new Error(`no server "${name}"${names().length ? ` — there are ${names().join(', ')}` : ''}`);
     switch (verb) {
       case 'disable': say(toggle(name, false, session)); return;
       case 'enable': say(toggle(name, true, session)); return;
       case 'restart':
-        if (!manager.restart(name)) throw new Error(`mcp: ${name} is disabled — /mcp enable ${name}`);
-        say(`mcp: restarting ${name}`);
+        if (!manager.restart(name)) throw new Error(`${name} is disabled — /mcp enable ${name}`);
+        say(`restarting ${name}`);
         return;
       case 'tools': {
         if (chat && ctx.openPanel) { ctx.openPanel(toolsPanel(name)); return; }
         const v = manager.list().find((x) => x.name === name)!;
         const ro = readOnlyNames(manager, name);
-        say(v.tools.length ? `mcp: ${name} — ${v.tools.map((t) => `${t.name}${ro.has(t.name) ? ' (read-only)' : ''}`).join(', ')}` : `mcp: ${name} has no tools — ${stateText(v, now())}`);
+        say(v.tools.length ? `${name} — ${v.tools.map((t) => `${t.name}${ro.has(t.name) ? ' (read-only)' : ''}`).join(', ')}` : `${name} has no tools — ${stateText(v, now())}`);
         return;
       }
       case 'add': {
-        if (!NAME.test(name)) throw new Error(`mcp: a server's name is letters, digits, - and _ — "${name}" is not`);
-        if (manager.has(name)) throw new Error(`mcp: "${name}" is there already — /mcp remove ${name} first`);
-        if (!rest.length) throw new Error(`mcp: add ${name} <url | command args…>`);
+        if (!NAME.test(name)) throw new Error(`a server's name is letters, digits, - and _ — "${name}" is not`);
+        if (manager.has(name)) throw new Error(`"${name}" is there already — /mcp remove ${name} first`);
+        if (!rest.length) throw new Error(`add ${name} <url | command args…>`);
         const spec: ServerSpec = /^https?:\/\//i.test(rest[0]!) && rest.length === 1 ? { url: rest[0]! } : { command: rest[0]!, ...(rest.length > 1 ? { args: rest.slice(1) } : {}) };
         const svc = deps.services();
-        if (!svc?.setConfig) throw new Error('mcp: this needs the app — config set plugins.mcp.servers.<name>.url …');
+        if (!svc?.setConfig) throw new Error('this needs the app — config set plugins.mcp.servers.<name>.url …');
         const res = svc.setConfig(`plugins.mcp.servers.${name}`, spec, { session });
-        if (!res.ok) throw new Error(res.error ?? 'mcp: could not save it');
+        if (!res.ok) throw new Error(res.error ?? 'could not save it');
         void manager.add(name, spec);
-        say(`mcp: added ${name}${session ? ' for this run' : ' (saved)'} — connecting; headers and env are set with config set`);
+        say(`added ${name}${session ? ' for this run' : ' (saved)'} — connecting; headers and env are set with config set`);
         return;
       }
       case 'remove': {
+        // A remove is of the saved entry: for this run only, a server is turned off.
+        if (session) throw new Error(`remove takes no --session — /mcp disable ${name} --session turns it off for this run`);
         const svc = deps.services();
-        if (!svc?.unsetConfig) throw new Error(`mcp: this needs the app — config unset plugins.mcp.servers.${name}`);
+        if (!svc?.unsetConfig) throw new Error(`this needs the app — config unset plugins.mcp.servers.${name}`);
         const wasOff = manager.list().find((v) => v.name === name)?.state === 'disabled';
         const res = svc.unsetConfig(`plugins.mcp.servers.${name}`, { session });
-        if (!res.ok) throw new Error(res.error ?? 'mcp: could not remove it');
+        if (!res.ok) throw new Error(res.error ?? 'could not remove it');
         // What is left is config.json's, which this command does not write. The unset took
         // the server's own overrides with it — a disable among them, which is put back.
         if (res.value !== undefined) {
           if (wasOff) svc.setConfig?.(`plugins.mcp.servers.${name}.enabled`, false, { session });
-          throw new Error(`mcp: ${name} is set in config.json — remove it there, or /mcp disable ${name}`);
+          throw new Error(`${name} is set in config.json — remove it there, or /mcp disable ${name}`);
         }
         manager.remove(name);
-        say(`mcp: removed ${name}`);
+        say(`removed ${name}`);
         return;
       }
     }

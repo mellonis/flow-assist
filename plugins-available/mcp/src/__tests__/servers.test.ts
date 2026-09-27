@@ -195,6 +195,75 @@ describe('what counts as the server dropping', () => {
   });
 });
 
+describe('an answer the server gives to a ping, and a session it forgot', () => {
+  // A server that has never heard of `ping` answers it with a JSON-RPC error — it is
+  // there, and keeps its tools.
+  test('a ping answered with a JSON-RPC error counts as an answer', async () => {
+    const s = flaky('ok');
+    let calls = 0;
+    const fetch: Fetcher = async (u, init) => {
+      const body = JSON.parse(String(init.body));
+      if (body.method === 'ping') return Response.json({ jsonrpc: '2.0', id: body.id, error: { code: -32601, message: 'Method not found' } });
+      if (body.method === 'tools/call') { calls++; return new Response('boom', { status: 500 }); }
+      return s.fetch(u, init);
+    };
+    const t = fakeTimers();
+    const m = createServerManager([{ name: 'ide', spec: { url: 'http://x' } }], { fetch, schedule, timers: t.timers });
+    await m.start();
+    await m.groups()[0]!.exec('ide:find', {});
+    await Bun.sleep(20);
+    expect(calls).toBe(1);
+    expect(m.list()[0]!.state).toBe('connected');
+    expect(t.count()).toBe(0);
+  });
+
+  // Streamable HTTP answers 404 to a session id it no longer knows: the call and the
+  // ping both get it, a new session is started, and the call is made again — once.
+  test('a session the server forgot: a new one is started and the call made again, once', async () => {
+    let session = 'S1';
+    let forgotten = false;
+    const seen: Array<[string, string | null]> = [];
+    const fetch: Fetcher = async (_u, init) => {
+      const body = JSON.parse(String(init.body));
+      const sid = (init.headers as Record<string, string>)['mcp-session-id'] ?? null;
+      seen.push([body.method, sid]);
+      if (body.method !== 'initialize' && forgotten && sid === 'S1') return new Response('unknown session', { status: 404 });
+      if (body.id === undefined) return new Response(null, { status: 202 });
+      if (body.method === 'initialize') {
+        if (forgotten) session = 'S2';
+        return Response.json({ jsonrpc: '2.0', id: body.id, result: { protocolVersion: PROTOCOL_VERSION, serverInfo: { name: 'Wiki' }, capabilities: {} } }, { headers: { 'mcp-session-id': session } });
+      }
+      if (body.method === 'tools/list') return Response.json({ jsonrpc: '2.0', id: body.id, result: { tools: [{ name: 'search' }] } });
+      return Response.json({ jsonrpc: '2.0', id: body.id, result: { content: [{ type: 'text', text: `found in ${sid}` }] } });
+    };
+    const t = fakeTimers();
+    const m = createServerManager([{ name: 'wiki', spec: { url: 'http://x' } }], { fetch, schedule, timers: t.timers });
+    await m.start();
+    forgotten = true;
+    const out = await m.groups()[0]!.exec('wiki:search', {});
+    expect(out.text).toContain('found in S2');
+    expect(m.list()[0]!.state).toBe('connected');
+    expect(seen.filter(([method]) => method === 'tools/call').map(([, sid]) => sid)).toEqual(['S1', 'S2']);
+    expect(t.count()).toBe(0);
+  });
+
+  // A turn's tool list is fixed at its start: a call to a server that dropped since
+  // reaches its group's last dispatch and says where the server stands.
+  test('a call to a server that dropped says it is not connected and when it is tried next', async () => {
+    const s = flaky('ok');
+    const t = fakeTimers();
+    const m = createServerManager([{ name: 'tracker', spec: { url: 'http://x' } }], { fetch: s.fetch, schedule, timers: t.timers });
+    await m.start();
+    const group = m.groups()[0]!;
+    s.box.mode = 502;
+    await group.exec('tracker:find', {});
+    expect(m.groups()).toEqual([]);
+    await expect(group.exec('tracker:find', {})).rejects.toThrow('tracker is not connected — retrying in 5 s');
+    m.disable('tracker');
+    await expect(group.exec('tracker:find', {})).rejects.toThrow('tracker is disabled');
+  });
+});
+
 describe('the person\'s levers', () => {
   test('a server disabled at start is never connected; enable connects it, disable takes it off and clears its retry', async () => {
     const s = flaky('ok');

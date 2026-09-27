@@ -69,7 +69,7 @@ describe('what /mcp says', () => {
     mode.status = 'ok';
     due.shift()!();
     await Bun.sleep(20);
-    expect(notes).toEqual(['mcp: ide connected — 1 tool']);
+    expect(notes).toEqual(['ide connected — 1 tool']);
     expect(plugin.description).toBe('MCP — 1 of 1 servers connected');
   });
 
@@ -130,15 +130,15 @@ describe('/mcp', () => {
       b.cmd.run(b.chat, 'disable ide');
       expect(b.set).toEqual([['plugins.mcp.servers.ide.enabled', false, false]]);
       expect(b.plugin.tools).toEqual([]);
-      expect(b.said.at(-1)).toBe('mcp: ide disabled (saved)');
+      expect(b.said.at(-1)).toBe('ide disabled (saved)');
       b.cmd.run(b.chat, 'enable ide --session');
       expect(b.set.at(-1)).toEqual(['plugins.mcp.servers.ide.enabled', true, true]);
       await Bun.sleep(20);
       expect(b.plugin.tools.map((g: { id: string }) => g.id)).toEqual(['mcp:ide']);
-      expect(b.notes).toEqual(['mcp: ide connected — 2 tools']);
+      expect(b.notes).toEqual(['ide connected — 2 tools']);
       // The panel's key does the same.
       b.cmd.run(b.chat, '');
-      expect(b.panel().keys[0].run('ide')).toBe('mcp: ide disabled (saved)');
+      expect(b.panel().keys[0].run('ide')).toBe('ide disabled (saved)');
       expect(b.plugin.tools).toEqual([]);
     } finally { globalThis.fetch = realFetch; }
   });
@@ -153,6 +153,8 @@ describe('/mcp', () => {
     expect(b.errors.at(-1)).toContain('"tracker" is there already');
     b.cmd.run(b.chat, 'add bad.name https://x');
     expect(b.errors.at(-1)).toContain('letters, digits');
+    b.cmd.run(b.chat, 'remove tracker --session');
+    expect(b.errors.at(-1)).toContain('remove takes no --session');
     b.cmd.run(b.chat, 'remove tracker');
     expect(b.unset).toEqual([['plugins.mcp.servers.tracker', false]]);
     b.cmd.run(b.chat, 'help');

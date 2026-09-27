@@ -113,10 +113,14 @@ export function frame(server: string, tool: string, text: string, isError: boole
   ].join('\n');
 }
 
-// `onFail` hears every call that failed with an error of the line or the server (not a
-// tool's own `isError` answer): the server's manager reads from it whether the
-// connection is gone (servers.ts).
-export function toolGroup(name: string, spec: ServerSpec, client: McpClient, tools: McpTool[], instructions?: string, onFail?: (e: unknown) => void) {
+// The server's manager (servers.ts) watches the group through two hooks: `onFail` hears
+// every call that failed with an error of the line or the server (not a tool's own
+// `isError` answer) and answers `retry` when it started the server's session anew, so
+// the call is made again — once; `status` says why the group no longer answers (its
+// server dropped or was turned off since the turn's tool list was fixed), and a call
+// gets that instead of reaching a client that is gone.
+export type GroupHooks = { onFail?: (e: unknown) => Promise<unknown> | unknown; status?: () => string | null };
+export function toolGroup(name: string, spec: ServerSpec, client: McpClient, tools: McpTool[], instructions?: string, hooks: GroupHooks = {}) {
   const byWire = new Map<string, string>();
   const personSays = claimedReadOnly(spec);
   const defs = tools.map((t) => {
@@ -147,16 +151,22 @@ export function toolGroup(name: string, spec: ServerSpec, client: McpClient, too
     exec: async (wire: string, args: Record<string, unknown>) => {
       const tool = byWire.get(wire) ?? byWire.get(wire.replace(/__/, ':'));
       if (!tool) throw new Error(`Unknown tool: ${wire}`);
+      const gone = hooks.status?.();
+      if (gone) throw new Error(gone);
       // `text` is what the model reads, framed; `raw` the server's own text, whole — what
       // a later command may read as its stdin (docs/plugins.md). A failed call has none.
-      try {
+      const call = async () => {
         const r = await client.callTool(tool, args ?? {});
         const text = resultText(r);
         const failed = r.isError === true;
         return { text: frame(name, tool, text, failed), raw: failed ? null : text };
+      };
+      const failed = (e: unknown) => ({ text: frame(name, tool, (e as Error).message, true), raw: null });
+      try {
+        return await call();
       } catch (e) {
-        onFail?.(e);
-        return { text: frame(name, tool, (e as Error).message, true), raw: null };
+        if ((await hooks.onFail?.(e)) !== 'retry') return failed(e);
+        try { return await call(); } catch (again) { return failed(again); }
       }
     },
   };
@@ -292,7 +302,7 @@ export async function buildMcpPlugin({ make, config, z, toolsChanged, retry, tim
       if (event?.kind === 'connected') {
         const line = `${event.name} connected — ${event.tools} ${event.tools === 1 ? 'tool' : 'tools'}`;
         log(line);
-        services?.chatNote?.(`mcp: ${line}`);
+        services?.chatNote?.(line); // the host puts `[mcp]` in front
       } else if (event?.kind === 'dropped') {
         log(`${event.name}: lost — ${event.reason}`);
       } else if (event?.kind === 'failed') {

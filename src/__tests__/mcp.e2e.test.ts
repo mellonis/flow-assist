@@ -154,8 +154,8 @@ test('a server that failed at start connects later: its group is in the next req
     const index = (i: number) => JSON.stringify((model.requests[i] as { tools?: unknown[] }).tools ?? []);
     expect(index(0)).not.toContain('find_issue');
     up = true;
-    for (let i = 0; i < 50 && !app.backend.lastFrame.includes('mcp: tracker connected — 1 tool'); i++) { await new Promise((r) => setTimeout(r, 20)); await app.press('end'); }
-    expect(app.backend.lastFrame).toContain('mcp: tracker connected — 1 tool');
+    for (let i = 0; i < 50 && !app.backend.lastFrame.includes('[mcp] tracker connected — 1 tool'); i++) { await new Promise((r) => setTimeout(r, 20)); await app.press('end'); }
+    expect(app.backend.lastFrame).toContain('[mcp] tracker connected — 1 tool');
     await app.type('two');
     await app.press('return');
     await new Promise((r) => setTimeout(r, 30));

@@ -22,12 +22,14 @@ A server that does not answer at start — a gateway that said 502 at that momen
 not open yet — is tried again in the background: after 5 s, 15 s and 60 s, then every
 5 minutes, until it answers. So is one that drops later: a call whose connection is
 refused or reset, a gateway's 502, 503 or 504, a process that exits. Its tools are not offered while it is gone, and when it
-answers they join at your next message — no restart — and the chat says so: `mcp:
-tracker connected — 12 tools`. A 404 answering one call is that tool's error: the
-assistant reads it as the call's answer, and the server keeps its tools. A call with no
-answer within `timeoutMs`, or another 5xx, is that call's error too — a slow search
-takes no other tool away — unless the server, asked at once whether it is there (MCP's
-`ping`), does not answer either: then it has dropped.
+answers they join at your next message — no restart — and the chat says so: `[mcp]
+tracker connected — 12 tools`. A call with no answer within `timeoutMs`, another 5xx or
+a 404 is that call's error — a slow search takes no other tool away — unless the
+server, asked at once whether it is there (MCP's `ping`), does not answer either: then
+it has dropped. A 404 to the ping too is a session the server has forgotten (sessions
+expire): a new one is started and the call is made again, once. A call the assistant
+makes to a server that dropped meanwhile is answered `<name> is not connected —
+retrying in N s`.
 
 A 401 or a 403 is not tried again: that is the token, not the network, and trying again
 would only be refused again. The reason says so; fix the token, then `/mcp restart

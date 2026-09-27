@@ -133,9 +133,11 @@ export function createProtocol(transport: McpTransport, opts: ProtocolOptions, o
       }
       return tools;
     },
-    // Whether the server is there: MCP's `ping`, within `connectTimeoutMs`. Any answer
-    // counts — a JSON-RPC error too (a server without `ping` still answered); what
-    // rejects is the line: nothing in time, no connection, a process gone.
+    // Whether the server is there: MCP's `ping`, within `connectTimeoutMs`. An answer is
+    // a JSON-RPC result or a JSON-RPC error (a server without `ping` still answered).
+    // No answer — what rejects — is: nothing within `connectTimeoutMs`, a connection
+    // refused or reset, a stdio process gone, and over HTTP any status that is not 2xx
+    // (a 404 there says the session id is no longer known — servers.ts starts a new one).
     async ping(): Promise<void> {
       try {
         await request('ping', undefined, connectTimeoutMs);
@@ -193,6 +195,8 @@ export function createMcpClient(opts: McpClientOptions) {
   return {
     ...protocolClient,
     get session() { return session; },
+    // A session the server no longer knows: the next `initialize` starts a new one.
+    forgetSession() { session = undefined; },
   };
 }
 
