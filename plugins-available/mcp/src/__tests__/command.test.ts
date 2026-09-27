@@ -48,6 +48,23 @@ async function boot(servers: Record<string, unknown>, mode = { status: 'ok' as n
   return { plugin, cmd, set, unset, notes, said, errors, chat, line, panel: () => panel, changed: () => changed };
 }
 
+describe('/mcp remove', () => {
+  test('a server config.json sets is refused, and a disable its overrides held is put back', async () => {
+    const b = await boot({ ide: { url: 'http://x', enabled: false } });
+    // The host's unset answers with what is left: config.json's entry.
+    b.plugin.setup({ ui: {}, host: { services: {
+      pushLog: () => {}, notify: () => {},
+      setConfig: (key: string, value: unknown, o?: { session?: boolean }) => { b.set.push([key, value, !!o?.session]); return { ok: true, value }; },
+      unsetConfig: (key: string, o?: { session?: boolean }) => { b.unset.push([key, !!o?.session]); return { ok: true, value: { url: 'http://x' } }; },
+    } } });
+    b.cmd.run(b.chat, 'remove ide');
+    expect(b.errors.at(-1)).toContain('set in config.json');
+    expect(b.set).toEqual([['plugins.mcp.servers.ide.enabled', false, false]]);
+    b.cmd.run(b.chat, '');
+    expect(b.panel().rows().map((r: { id: string }) => r.id)).toEqual(['ide']);
+  });
+});
+
 describe('/mcp', () => {
   test('bare: a panel in the chat — name, transport, state, read-only count — and one line on the command line', async () => {
     const b = await boot({ ide: { url: 'http://x', trusted: true }, off: { url: 'http://y', enabled: false } });

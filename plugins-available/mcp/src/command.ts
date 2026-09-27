@@ -157,10 +157,15 @@ export function mcpCommand(manager: ServerManager, deps: { services: () => Servi
       case 'remove': {
         const svc = deps.services();
         if (!svc?.unsetConfig) throw new Error(`mcp: this needs the app — config unset plugins.mcp.servers.${name}`);
+        const wasOff = manager.list().find((v) => v.name === name)?.state === 'disabled';
         const res = svc.unsetConfig(`plugins.mcp.servers.${name}`, { session });
         if (!res.ok) throw new Error(res.error ?? 'mcp: could not remove it');
-        // What is left is config.json's, which this command does not write.
-        if (res.value !== undefined) throw new Error(`mcp: ${name} is set in config.json — remove it there, or /mcp disable ${name}`);
+        // What is left is config.json's, which this command does not write. The unset took
+        // the server's own overrides with it — a disable among them, which is put back.
+        if (res.value !== undefined) {
+          if (wasOff) svc.setConfig?.(`plugins.mcp.servers.${name}.enabled`, false, { session });
+          throw new Error(`mcp: ${name} is set in config.json — remove it there, or /mcp disable ${name}`);
+        }
         manager.remove(name);
         say(`mcp: removed ${name}`);
         return;

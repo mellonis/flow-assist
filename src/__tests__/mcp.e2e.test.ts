@@ -219,4 +219,7 @@ test('/mcp lists the servers in a panel; d disables one at once, saved, and its 
   await new Promise((r) => setTimeout(r, 50));
   expect(JSON.stringify(model.requests.at(-1))).not.toContain('webstorm__get_file_text');
   app.app.unmount();
+  // The settings file is the process's under `bun test`: what this test saved goes.
+  const { unsetConfigValue } = await import('../config/load');
+  unsetConfigValue({}, 'plugins.mcp.servers.webstorm', { scope: 'saved' });
 });
