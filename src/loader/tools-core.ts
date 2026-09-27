@@ -411,8 +411,9 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
           todos: { type: 'array', items: { type: 'object', properties: { text: { type: 'string' }, status: { type: 'string', enum: ['pending', 'in_progress', 'done'] } }, required: ['text'] }, description: 'For `set`: the full plan, each item { text, status? } (status defaults to pending). An empty array empties the plan.' },
           items: { type: 'array', items: { type: 'string' }, description: 'For `add`: several pending items in one call.' },
           text: { type: 'string', description: 'For add/update: the item text. For start/complete/uncomplete/remove: the item to target — its whole text, matched exactly, then ignoring case.' },
-          // One type, as every provider reads a schema; `Plan` reads `"5"` as `t5`.
-          id: { type: 'string', description: 'The item\'s id as the plan results show it (`t3`); an alternative to `text`. Never a position in the list.' },
+          // A string (`t3`) or an integer: a model used to numbered plans sends `5`, and
+          // refusing it would cost a round each time; `Plan` reads `5` and `"5"` as `t5`.
+          id: { anyOf: [{ type: 'string' }, { type: 'integer' }], description: 'The item\'s id as the plan results show it (`t3`); an alternative to `text`. Never a position in the list.' },
         }, required: ['action'] },
       },
     },

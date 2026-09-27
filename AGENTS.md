@@ -1009,9 +1009,9 @@ there is no `/fullscreen`.
     reads — every `todo` result and the system prompt's plan block, both
     `describePlan` — lists the items in plan order, `☐ t2 · text (pending)`. A saved
     plan with numeric ids loads with `5` read as `t5`, and the tool reads an `id` of
-    `"5"` the same way. The schema's `id` is a plain string: a type list
-    (`['string', 'number']`) is a schema not every provider accepts, on a core tool
-    sent with every request.
+    `5` or `"5"` the same way. The schema's `id` is `anyOf` a string or an integer (as
+    `tools_load`'s `names` is), so a model used to numbered plans is not refused a
+    round for sending one.
   - **The reminder.** When a round ran work (any call but `todo`) and the plan has
     items pending and none in progress, `agentChat` appends `PLAN_REMINDER` to that
     round's LAST tool result — once per turn, after the result's cap, never in the

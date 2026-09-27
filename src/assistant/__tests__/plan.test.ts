@@ -115,12 +115,12 @@ test('the reminder is due while work is pending and nothing is in progress', () 
   expect(planReminder(plan)).toBeNull();
 });
 
-test('the todo schema takes an id as a string, a bare number in it too', () => {
+test('the todo schema takes an id as a string or an integer, and a number n names t<n>', () => {
   assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as never });
   const def = chatToolDefs().find((t) => t.function.name === 'todo')!;
   expect(toolArgsError('todo', def.function.parameters, { action: 'start', id: 't3' })).toBeNull();
-  expect(toolArgsError('todo', def.function.parameters, { action: 'start', id: '3' })).toBeNull();
+  expect(toolArgsError('todo', def.function.parameters, { action: 'complete', id: 5 })).toBeNull();
   const plan = createPlan();
-  plan.load([{ id: 3, text: 'old three', status: 'pending' }]);
-  expect(plan.exec({ action: 'start', id: '3' })).toContain('t3 · old three (in progress)');
+  plan.exec({ action: 'add', items: ['a', 'b', 'c', 'd', 'e'] });
+  expect(plan.exec({ action: 'complete', id: 5 })).toContain('☑ t5 · e (done)');
 });
