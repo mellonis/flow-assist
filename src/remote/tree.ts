@@ -107,7 +107,10 @@ export function renderTree(tree: Tree | null, ctx: RenderCtx): ReactElement | nu
     }
     // A JSON `null` is a plugin's "nothing" in many languages, read as the prop unset.
     if (type === 'Checkbox' && props.checked == null) props.checked = false;
-    if (type === 'Checkbox' && !props.onChange) props.onChange = () => {};
+    // flowtty calls a picker's `onChange` unconditionally — a checkbox's toggle, a list's
+    // row picked by a click or moved to with the arrows — so a node with no `id`, whose
+    // value nobody holds, still gets one that does nothing.
+    if ((type === 'Checkbox' || type === 'ListSelect' || type === 'ListMultiSelect' || type === 'Select') && !props.onChange) props.onChange = () => {};
     // flowtty's ListMultiSelect calls `value.includes(...)` unconditionally on every
     // render, so an unset value (no id, or an id the field state hasn't populated yet)
     // must default to an array rather than reach the component as undefined or null.

@@ -5,6 +5,17 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **flowtty 1.0.0-alpha.33.** A box can take a click itself (`onClick`), and
+  flowtty's pickers do: a click on a plugin's list row moves the highlight there, on a
+  multi-select row or a checkbox toggles it, on a dropdown opens it. Such a press is
+  taken before any key handler, so the host tells the chat where it landed itself — a
+  click on a plugin's list in the docked layout still moves the keyboard to the plugin.
+  A remote plugin's list or dropdown sent without an `id` no longer throws when clicked
+  or moved through: nothing holds its value, so the change goes nowhere. Two new key
+  names, the pointer moving and leaving the window, get short caps.
+  **For plugin authors:** declare `"flowtty": ">=1.0.0-alpha.33 <1.0.0-alpha.34"` — a
+  manifest still declaring the alpha.31 range is refused as incompatible. The host
+  API number is unchanged.
 - **The assistant reacts when background work comes back.** A background task's result
   waits until the answer being written ends — it never cuts into a turn — then lands in
   the chat, and the assistant takes it up: in one turn for everything that came back

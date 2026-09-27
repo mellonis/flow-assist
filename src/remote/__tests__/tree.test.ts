@@ -92,6 +92,16 @@ test('a ListMultiSelect with no held value renders value: [] rather than undefin
   expect(nullValue.props.value).toEqual([]);
 });
 
+test('a picker with no id still gets an onChange: a click on its row calls it, with or without the keyboard', () => {
+  // flowtty's lists and dropdown call `onChange` unconditionally — a click on a row, a
+  // move with the arrows — so one the host did not wire would throw inside the dispatch.
+  for (const type of ['ListSelect', 'ListMultiSelect', 'Select']) {
+    const el: any = renderTree([type, { items: [{ label: 'a', value: 'a' }] }], ctx());
+    expect(typeof el.props.onChange).toBe('function');
+    expect(() => el.props.onChange('a')).not.toThrow();
+  }
+});
+
 test('a Checkbox whose checked arrives as JSON null is unchecked', () => {
   const el: any = renderTree(['Checkbox', { label: 'agree', checked: null }], ctx());
   expect(el.props.checked).toBe(false);

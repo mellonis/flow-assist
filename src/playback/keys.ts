@@ -126,6 +126,10 @@ const KEY_GLYPHS: Record<string, string> = {
   mousedown: 'btn↓',
   mousedrag: 'drag',
   mouseup: 'btn↑',
+  // The pointer moving with no button held, and leaving the window (flowtty ≥
+  // 1.0.0-alpha.32, reported only with hover on).
+  mousemove: 'move',
+  mouseleave: 'leave',
 };
 // A mouse button key — press, drag or release. These belong to flowtty's
 // drag-selection: nothing in the host or a plugin treats one as text, a dismissal or

@@ -34,7 +34,7 @@ const command = async (ui: UI, text: string) => {
 // A guest with a screen: it says how big the room it was given is, and its runtime is
 // kept for what the test reads through it (the chat's messages, the theme). `take`
 // lists the keys it consumes; `all` consumes every key, at the priority given.
-function guest(opts: { take?: string[]; all?: boolean; priority?: number } = {}) {
+function guest(opts: { take?: string[]; all?: boolean; priority?: number; list?: boolean } = {}) {
   const seen: string[] = [];
   const size = { width: 0, height: 0 };
   // How many times the surface was drawn.
@@ -57,6 +57,12 @@ function guest(opts: { take?: string[]; all?: boolean; priority?: number } = {})
         const s = api.host.useSurfaceSize();
         size.width = s.width; size.height = s.height;
         drawn.count += 1;
+        // `list`: a flowtty picker under the title, which takes a click on its own box.
+        if (opts.list) {
+          return api.ui.h(api.ui.Box, { flexDirection: 'column' },
+            api.ui.h(api.ui.Text, null, 'BOARD-SURFACE'),
+            api.ui.h(api.ui.ListSelect, { items: [{ label: 'Alpha', value: 'a' }, { label: 'Bravo', value: 'b' }], onChange: () => {}, isFocused: false }));
+        }
         return api.ui.h(api.ui.Text, null, 'BOARD-SURFACE');
       },
     },
@@ -330,6 +336,26 @@ test('a click on a fold in the right panel opens it, whichever side has the keyb
   // A press on the board's side gives it back.
   ui.backend.mouse('down', 10, 10);
   ui.backend.mouse('up', 10, 10);
+  await settle();
+  expect(g.host().store.chat.focus).toBe('plugin');
+  ui.app.unmount();
+});
+
+test('a press on a plugin\'s picker, which takes the click itself, still moves the keyboard to the plugin', async () => {
+  // flowtty's lists take a click through `onClick` on their own box, and such a press
+  // never reaches an input handler — the host's chords included. Where it landed is
+  // still the chat's to know.
+  const g = guest({ list: true });
+  const ui = await bootApp(new ScriptedModel(), 160, 40, g.make as never, {}, { chatMode: 'panel' });
+  await ui.press('F');
+  expect(g.host().store.chat.focus).toBe('chat');
+  const r = rows(ui);
+  const y = r.findIndex((l) => l.includes('Bravo'));
+  expect(y).toBeGreaterThan(0);
+  const x = r[y]!.indexOf('Bravo');
+  expect(x).toBeLessThan(104);
+  ui.backend.mouse('down', x, y);
+  ui.backend.mouse('up', x, y);
   await settle();
   expect(g.host().store.chat.focus).toBe('plugin');
   ui.app.unmount();

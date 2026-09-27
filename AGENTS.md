@@ -595,9 +595,15 @@ there is no `/fullscreen`.
 - **The mouse goes by the pointer.** A press anywhere tells the chat which pane it
   landed in (`store.chat.pointer`) and the keyboard follows it; the button then goes on
   its usual path — the chat's `mouse: true` handler folds by the conversation's own rect, so
-  a click on a fold in the panel works whichever side has the keys. The wheel scrolls
-  whatever list is under it (flowtty's lists check the pointer; the chat's own, when not
-  focused, through its handler). Plugins get no mouse buttons.
+  a click on a fold in the panel works whichever side has the keys. A press on a box with
+  `onClick` — flowtty's pickers, checkboxes and fields declare one on their own box — is
+  taken by flowtty's mouse controller before any input handler, `HostChords` included,
+  and never reaches step 1: `hostKeyed` tells the chat where it landed all the same
+  (`HostKeyPath.pressed`), so a click on a plugin's list moves the keyboard to the plugin.
+  The wheel scrolls whatever list is under it (flowtty's lists check the pointer; the
+  chat's own, when not focused, through its handler). Plugins get no mouse buttons
+  through `useInputHandler`; flowtty's own components in `ui` take their clicks
+  themselves.
 - `bootApp` opens the chat as a WINDOW unless a test says otherwise (`opts.chatMode`,
   `null` for a fresh config): most e2e tests are about what the chat draws.
   `chat-modes.e2e.test.ts` holds the modes, the keys, the layout and a row check at a

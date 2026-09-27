@@ -243,6 +243,9 @@ interface HostKeyPath {
   // `muted`: the App's subtree is muted (a popup is open) — the exit keys only.
   first: (key: InputKey, muted: boolean) => unknown;
   last: (key: InputKey) => unknown;
+  // A press that flowtty's mouse controller took for a box's `onClick` before any
+  // handler heard it: the chat is told where it landed, as step 1 tells it of any other.
+  pressed: (key: InputKey) => void;
   pass: 1 | 2;
   // Whether `HostChords` heard the key in pass 1 — whether the App's subtree was live.
   heard: boolean;
@@ -256,7 +259,12 @@ function hostKeyed(root: Backend, path: HostKeyPath): Backend {
         return (listener: (key: never) => unknown) => target.onKey!(((key: InputKey) => {
           path.pass = 1;
           path.heard = false;
-          if (listener(key as never) === true) return true;
+          if (listener(key as never) === true) {
+            // A press a box's `onClick` took (a plugin's list, a checkbox) is withheld from
+            // every input handler, `HostChords` included; where it landed is still told.
+            if (!path.heard && key.name === 'mousedown') path.pressed(key);
+            return true;
+          }
           if (!path.heard) return false;
           if (isMouseButton(key.name)) {
             path.last(key);
@@ -389,7 +397,7 @@ export function renderApp(
   const ui: UiState = { cmdOpen: false, modalActive: false };
   const cmdline = { current: { open: false, input: '', history: [], historyIdx: -1, walk: null } as CommandLineState };
   // The host's place in key delivery (see `HostKeyPath`); the App fills in its steps.
-  const keyPath: HostKeyPath = { first: () => undefined, last: () => undefined, pass: 1, heard: false };
+  const keyPath: HostKeyPath = { first: () => undefined, last: () => undefined, pressed: () => undefined, pass: 1, heard: false };
 
   function App() {
     const inputRegistryRef = useRef<LazyInputEntry[]>([]);
@@ -897,6 +905,9 @@ export function renderApp(
       // drag still selects.
       if (k.name === 'mousedown' && typeof k.x === 'number' && typeof k.y === 'number') chat?.pointer?.(k.x, k.y);
       return undefined;
+    };
+    keyPath.pressed = (k) => {
+      if (typeof k.x === 'number' && typeof k.y === 'number') chatStore()?.pointer?.(k.x, k.y);
     };
     // Step 3: the host's key path, for a key no component took. A handled key is
     // followed by a redraw: a plugin keeps its state in one component and draws it in a

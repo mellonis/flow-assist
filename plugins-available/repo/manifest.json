@@ -2,7 +2,7 @@
   "name": "repo",
   "version": "0.1.0",
   "hostApi": 2,
-  "flowtty": ">=1.0.0-alpha.31 <1.0.0-alpha.32",
+  "flowtty": ">=1.0.0-alpha.33 <1.0.0-alpha.34",
   "description": "Local clones + git context",
   "tools": ["repo"]
 }

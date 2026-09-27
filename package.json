@@ -16,9 +16,9 @@
   },
   "dependencies": {
     "@flow-assist/remote": "workspace:*",
-    "@flowtty/core": "^1.0.0-alpha.31",
-    "@flowtty/react": "^1.0.0-alpha.31",
-    "@flowtty/tty-backend": "^1.0.0-alpha.31",
+    "@flowtty/core": "^1.0.0-alpha.33",
+    "@flowtty/react": "^1.0.0-alpha.33",
+    "@flowtty/tty-backend": "^1.0.0-alpha.33",
     "react": "^19.2.8",
     "zod": "^4.6.5"
   },
