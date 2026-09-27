@@ -783,11 +783,19 @@ there is no `/fullscreen`.
   runs", and it is what the hint line then says. `all` answers a write's y/n for the
   person. The mode belongs to the CONVERSATION and is never saved: a restart, `/clear`
   and `/resume` all come back to `ask`, and the session file does not
-  hold it. Three calls are never automatic in ANY mode — `run_command` (the y/n is its
-  only guard, and the command may have been written from a page the model just read),
-  `web_fetch` (one that reaches the confirmation at all is to a host outside
-  `web.allowlist`, which is exactly what its write flag tests) and `config_set` (config
-  is the person's: even a key the model may change changes only with their yes). A
+  hold it. Three calls are not automatic in any mode on their own — `run_command` unless
+  the person set `shell.autoRun` (the y/n is its only guard, and the command may have
+  been written from a page the model just read), `web_fetch` (one that reaches the
+  confirmation at all is to a host outside `web.allowlist`, which is exactly what its
+  write flag tests) and `config_set` (config is the person's: even a key the model may
+  change changes only with their yes); the last two never are. `shell.autoRun: true` is
+  the person's second consent: with it AND the mode at `all`, the host's own bare
+  `run_command` is answered like any other write (a plugin's tool of that name is not
+  lifted); either alone changes nothing. It sits under `shell`, on the leash, so the
+  model can never set it. The chat reads it at each confirmation (`shellAutoRun`,
+  `src/assistant/shell.ts`) and passes it into `autoConfirms` — live, not restart-only,
+  since it only loosens a pause the person already chose with `/auto all`, so a
+  `:config set --session shell.autoRun true` holds for the next command. A
   background task is
   untouched: it is handed a confirmation that always answers no, and the chat's mode
   never reaches it; the person's own `!command` is untouched too. The decision lives in
@@ -2016,7 +2024,8 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   while it is open, rather than letting it fall into the plain Tab's completion, which
   is not what anyone asks for by holding Shift. `/auto [reads|all|off]` does the same in words, and
   a bare `/auto` takes the next rung. The mode is stated on the hint line in the warn
-  colour (`auto: writes`) as a SIBLING of the hint, not inside it: the left cell becomes
+  colour (`auto: writes`; `auto: everything — commands run without asking` while
+  `shell.autoRun` is on too) as a SIBLING of the hint, not inside it: the left cell becomes
   the running turn's status while an answer comes in, and a mode that disappeared
   exactly while writes were running unasked would be the wrong half of the screen to
   lose.

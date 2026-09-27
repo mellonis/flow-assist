@@ -135,6 +135,19 @@ test('the auto mode never answers it', async () => {
   ui.app.unmount();
 });
 
+test('shell.autoRun is the person\'s: the model\'s config_set of it is refused before the y/n', async () => {
+  const model = new ScriptedModel();
+  const ui = await ask(model, [{ key: 'shell.autoRun', value: true, scope: 'session' }]);
+  await settleUntil(() => model.requests.length === 2);
+  expect(ui.backend.lastFrame).not.toContain('Confirm write');
+  const sent = resultSent(model);
+  expect(sent).toContain('shell.autoRun');
+  expect(sent).toContain('it is the person\'s');
+  expect(sent).toContain('shell.autoRun true');
+  expect(getDeep(loadConfig(), 'shell.autoRun')).toBeUndefined();
+  ui.app.unmount();
+});
+
 test('a plugin\'s marked key is the model\'s to set; its unmarked key is refused', async () => {
   const model = new ScriptedModel();
   // The guest has no section in the config at start: it is handed the config's own

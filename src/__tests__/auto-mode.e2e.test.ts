@@ -1,16 +1,18 @@
 // The auto mode: how much of a turn runs without the person's y/n, per conversation.
 // What matters is that it is never a hidden state (the hint line says it, mid-answer
-// too), that it never covers run_command or a web_fetch the allowlist does not cover,
-// and that it is gone after /clear, /resume and a restart.
+// too), that it never covers a web_fetch the allowlist does not cover, that it covers
+// run_command only when the person also set `shell.autoRun`, and that it is gone after
+// /clear, /resume and a restart.
 import { afterEach, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { ScriptedModel, bootApp, settle } from './helpers/scripted';
+import { resetSessionConfig } from '../config/load';
 import type { Make } from '../loader/plugin';
 
 const realFetch = globalThis.fetch;
-afterEach(() => { globalThis.fetch = realFetch; });
+afterEach(() => { globalThis.fetch = realFetch; resetSessionConfig(); });
 
 const settleUntil = async (ok: () => boolean, n = 100) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
 // A fenced block is drawn as rows behind a dim `│ `; strip the bar to read the lines.
@@ -19,7 +21,7 @@ const screen = (frame: string) => frame.split('\n').map((r) => r.replace(/│ /g
 // announces a change (that one is outside the frame and fades).
 function shownMode(frame: string): string | null {
   const inWindow = frame.split('\n').filter((r) => r.trimStart().startsWith('│')).join('\n');
-  return /auto: (reads|writes)/.exec(inWindow)?.[1] ?? null;
+  return /auto: (reads|writes|everything)/.exec(inWindow)?.[1] ?? null;
 }
 
 // A guest with one read and one write — the write reports what it changed, so the ✎
@@ -214,4 +216,123 @@ test('a restart comes back to ask, and the session file never held the mode', as
   expect(back.backend.lastFrame).toContain('first question'); // the conversation did come back
   expect(shownMode(back.backend.lastFrame)).toBeNull(); // the mode did not
   back.app.unmount();
+});
+
+// ─── shell.autoRun: the person's second consent for run_command ──────────────
+
+const rootDir = () => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-autorun-')));
+// A real process finishes on its own clock, not the test backend's.
+const settleReal = async (ok: () => boolean, ms = 3000) => {
+  const end = Date.now() + ms;
+  while (Date.now() < end && !ok()) { await settle(2); await new Promise((r) => setTimeout(r, 20)); }
+};
+const styleAt = (ui: Awaited<ReturnType<typeof boot>>, text: string) => {
+  const rows = ui.backend.lastFrame.split('\n');
+  const y = rows.findIndex((r) => r.includes(text));
+  return ui.backend.lastBuffer!.get(rows[y]!.indexOf(text), y).style as { fg?: string; bold?: boolean };
+};
+
+test('all without shell.autoRun still asks for run_command, and the hint keeps its text', async () => {
+  const root = rootDir();
+  const model = new ScriptedModel();
+  model.script([{ tool: 'run_command', args: { command: 'touch made.txt' } }], [{ text: 'Not run.' }]);
+  const ui = await boot(model, { shell: { roots: [root] } });
+  await ui.press('F');
+  await stepAuto(ui, 2);
+  expect(shownMode(ui.backend.lastFrame)).toBe('writes');
+  await ui.type('make it');
+  await ui.press('return');
+  await settle(10);
+  expect(ui.backend.lastFrame).toContain('Confirm write: run_command');
+  await ui.press('n');
+  await settleUntil(() => model.requests.length === 2);
+  expect(fs.existsSync(path.join(root, 'made.txt'))).toBe(false);
+  ui.app.unmount();
+});
+
+test('all with shell.autoRun runs the command unasked, still shows it, and says so in the warn colour', async () => {
+  const root = rootDir();
+  const model = new ScriptedModel();
+  model.script([{ tool: 'run_command', args: { command: 'echo made > made.txt; echo autorun-42' } }], [{ text: 'Ran it.' }]);
+  const ui = await boot(model, { shell: { roots: [root], autoRun: true } });
+  await ui.press('F');
+  await stepAuto(ui); // reads: the key alone is not a consent
+  expect(shownMode(ui.backend.lastFrame)).toBe('reads');
+  await stepAuto(ui);
+  expect(ui.backend.lastFrame).toContain('auto: everything — commands run without asking');
+  const badge = styleAt(ui, 'auto: everything');
+  expect(badge.bold).toBe(true);
+  expect(badge.fg).toBeTruthy();
+
+  await ui.type('make it');
+  await ui.press('return');
+  await settleReal(() => model.requests.length === 2);
+  await settle(10);
+  expect(ui.backend.lastFrame).not.toContain('Confirm write');
+  expect(fs.existsSync(path.join(root, 'made.txt'))).toBe(true);
+  expect(ui.backend.lastFrame).toContain('echo made > made.txt; echo autorun-42'); // what ran is shown
+  expect(JSON.stringify(model.requests[1]!.messages)).toContain('autorun-42');
+  ui.app.unmount();
+});
+
+test('the badge is drawn in the colour writes is drawn in', async () => {
+  const writes = await boot(new ScriptedModel());
+  await writes.press('F');
+  await stepAuto(writes, 2);
+  const w = styleAt(writes, 'auto: writes');
+  writes.app.unmount();
+  const all = await boot(new ScriptedModel(), { shell: { autoRun: true } });
+  await all.press('F');
+  await stepAuto(all, 2);
+  expect(styleAt(all, 'auto: everything')).toEqual(w);
+  all.app.unmount();
+});
+
+test('with shell.autoRun web_fetch and config_set still ask', async () => {
+  const model = new ScriptedModel();
+  model.script(
+    [{ tool: 'web_fetch', args: { url: 'https://example.com/page' } }],
+    [{ text: 'Not fetched.' }],
+    [{ tool: 'config_set', args: { key: 'ui.verbs', value: ['Auto'], scope: 'session' } }],
+    [{ text: 'Not set.' }],
+  );
+  const ui = await boot(model, { shell: { autoRun: true } });
+  await ui.press('F');
+  await stepAuto(ui, 2);
+  expect(shownMode(ui.backend.lastFrame)).toBe('everything');
+  await ui.type('read example.com');
+  await ui.press('return');
+  await settle(10);
+  expect(ui.backend.lastFrame).toContain('Confirm write: web_fetch');
+  await ui.press('n');
+  await settleUntil(() => model.requests.length === 2);
+  await ui.type('change the words');
+  await ui.press('return');
+  await settle(10);
+  expect(ui.backend.lastFrame).toContain('Confirm write: config_set');
+  await ui.press('n');
+  await settleUntil(() => model.requests.length === 4);
+  ui.app.unmount();
+});
+
+test('shell.autoRun is read live: set for the session after start, the next command runs unasked', async () => {
+  const root = rootDir();
+  const model = new ScriptedModel();
+  model.script([{ tool: 'run_command', args: { command: 'touch made.txt' } }], [{ text: 'Ran it.' }]);
+  const ui = await boot(model, { shell: { roots: [root] } });
+  await ui.press(':');
+  await ui.type('config set --session shell.autoRun true');
+  await ui.press('return');
+  await settle();
+  expect(ui.backend.lastFrame).not.toContain('takes effect on restart');
+  await ui.press('F');
+  await ui.type('/auto all');
+  await ui.press('return');
+  expect(shownMode(ui.backend.lastFrame)).toBe('everything');
+  await ui.type('make it');
+  await ui.press('return');
+  await settleReal(() => model.requests.length === 2);
+  expect(ui.backend.lastFrame).not.toContain('Confirm write');
+  expect(fs.existsSync(path.join(root, 'made.txt'))).toBe(true);
+  ui.app.unmount();
 });

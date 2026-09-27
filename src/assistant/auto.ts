@@ -17,15 +17,21 @@
 //   - `all`    — a write runs without asking too, except for what can never be
 //     automatic (below).
 //
-// Three calls are never automatic, in any mode:
+// Three calls are not automatic in any mode on their own:
 //   - `run_command` — the y/n is its only guard, and the command may have been written
-//     from a page or a ticket the model read a minute ago;
+//     from a page or a ticket the model read a minute ago. The person may lift that
+//     on purpose with `shell.autoRun: true` (read by the chat and passed in here, as
+//     `autoRun`): then `all` answers it like any other write. Both consents are
+//     needed — the key alone changes nothing under `ask` or `reads`, and `all` alone
+//     still asks. Only the host's own bare `run_command` is lifted: a plugin's tool of
+//     the same name is not the host's shell;
 //   - `web_fetch` — a fetch that reaches the confirmation at all is one to a host
 //     outside `web.allowlist` (that is exactly what its `write` flag tests), and a URL
 //     can carry out anything the model has seen. Should that flag ever become a plain
 //     `true`, this degrades to "never automatic", which is the safe direction;
 //   - `config_set` — config is the person's, and even a key the model may change
 //     changes only with their yes.
+// `web_fetch` and `config_set` are never automatic, whatever is set.
 // A background task is not covered here at all: it declines writes by construction —
 // it is given a confirmation that always answers no, and the chat's mode never reaches
 // it. Nor is the person's own `!command`: they typed it.
@@ -53,29 +59,38 @@ export function autoCommand(arg: string): AutoMode | 'cycle' | null {
 
 // What the hint line shows — '' while the mode is `ask`, since there is nothing
 // unusual to say then. `all` is called "writes" on screen: what it changes is that
-// writes stop asking, and that is the word the person is looking for.
-export function autoBadge(mode: AutoMode): string {
-  return mode === 'reads' ? 'auto: reads' : mode === 'all' ? 'auto: writes' : '';
+// writes stop asking, and that is the word the person is looking for. With
+// `shell.autoRun` as well, commands stop asking too, and the line says so plainly.
+export function autoBadge(mode: AutoMode, autoRun: boolean): string {
+  if (mode === 'reads') return 'auto: reads';
+  if (mode === 'all') return autoRun ? 'auto: everything — commands run without asking' : 'auto: writes';
+  return '';
 }
 
 // The sentence said when the mode changes.
-export function autoSaid(mode: AutoMode): string {
+export function autoSaid(mode: AutoMode, autoRun: boolean): string {
   if (mode === 'reads') return 'auto: reads — reads run, every write still asks';
-  if (mode === 'all') return 'auto: writes — writes run without asking; run_command, an unlisted web_fetch and config_set still ask';
+  if (mode === 'all') {
+    return autoRun
+      ? 'auto: everything — writes and commands run without asking (shell.autoRun); an unlisted web_fetch and config_set still ask'
+      : 'auto: writes — writes run without asking; run_command, an unlisted web_fetch and config_set still ask';
+  }
   return 'auto off — every write asks again';
 }
 
 // A tool the mode may never answer for. The name is the host's own (`plugin:tool`),
 // the one `agentChat` resolves before it asks — a plugin that declared a tool of the
-// same name gets the qualified spelling, and it is covered too.
+// same name gets the qualified spelling, and it is covered too. `autoRun` lifts only
+// the host's bare `run_command`.
 const NEVER_AUTO = ['run_command', 'web_fetch', 'config_set'];
-export function neverAutomatic(name: string): boolean {
+export function neverAutomatic(name: string, autoRun: boolean): boolean {
+  if (autoRun && name === 'run_command') return false;
   return NEVER_AUTO.some((n) => name === n || name.endsWith(`:${n}`));
 }
 
 // Does the mode answer this confirmation for the person? Only a write ever reaches
 // here (the host asks about nothing else), so only `all` can say yes — and not for the
-// three calls above.
-export function autoConfirms(mode: AutoMode, name: string): boolean {
-  return mode === 'all' && !neverAutomatic(name);
+// calls above.
+export function autoConfirms(mode: AutoMode, name: string, autoRun: boolean): boolean {
+  return mode === 'all' && !neverAutomatic(name, autoRun);
 }

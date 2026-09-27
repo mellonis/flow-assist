@@ -5,6 +5,12 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **Commands can run without asking, when you say so twice.** `config set shell.autoRun
+  true` together with `/auto all` (or ⇧⇥ to `all`) lets the assistant's `run_command` run
+  without the y/n; the hint line then says `auto: everything — commands run without
+  asking`. Either alone changes nothing, `web_fetch` and `config_set` still ask, and the
+  assistant can never set the key itself. It is read as each command is asked about, so
+  `:config set --session shell.autoRun true` holds at once. What ran is still shown.
 - **A setting can be changed for one run, and the assistant may change a few itself.**
   `:config set --session <key> <value>` changes a setting for the running app only:
   nothing is written, and the next start has the saved value again. `config set` still

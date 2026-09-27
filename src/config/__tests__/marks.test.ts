@@ -49,7 +49,7 @@ test('the host schema carries no mark under the model\'s leash, and may-save is 
 });
 
 test('the leash: ai, shell, web, the legacy fs roots, a plugin\'s roots — and every key holding one', () => {
-  for (const key of ['ai', 'ai.disabledTools', 'ai.baseUrl', 'ai.tokenEnv', 'shell.roots', 'shell', 'web.allowlist', 'fs.roots', 'plugins.repo.roots', 'plugins.repo.roots.0', 'plugins.repo', 'plugins']) {
+  for (const key of ['ai', 'ai.disabledTools', 'ai.baseUrl', 'ai.tokenEnv', 'shell.roots', 'shell.autoRun', 'shell', 'web.allowlist', 'fs.roots', 'plugins.repo.roots', 'plugins.repo.roots.0', 'plugins.repo', 'plugins']) {
     expect({ key, leash: isLeashKey(key) }).toEqual({ key, leash: true });
   }
   for (const key of ['ui.verbs', 'ui.mouse', 'sessions.resume', 'plugins.assistant.mode', 'plugins.repo.rootsNote']) {

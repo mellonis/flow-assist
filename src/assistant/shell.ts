@@ -150,6 +150,13 @@ export function nextCwd(config: RootsConfig, ran: string, pwd: string | undefine
   return { cwd: ran, note: `cd led outside the roots — staying in ${ran}` };
 }
 
+// `shell.autoRun`: whether the person lets the auto mode's `all` answer run_command
+// (src/assistant/auto.ts). Only a real `true` counts. Read when the chat asks, so a
+// value set while the app runs holds for the next call.
+export function shellAutoRun(config: { shell?: unknown } | undefined): boolean {
+  return (config?.shell as { autoRun?: unknown } | undefined)?.autoRun === true;
+}
+
 // `shell.timeoutMs` / `shell.maxChars`, a bad value falling back to the default.
 export function shellLimits(config: { shell?: unknown } | undefined): { timeoutMs: number; maxChars: number } {
   const s = (config?.shell ?? {}) as { timeoutMs?: unknown; maxChars?: unknown };

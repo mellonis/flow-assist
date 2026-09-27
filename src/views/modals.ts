@@ -1255,6 +1255,7 @@ export function renderChatModal({
   bangLevel = 0,
   shellCwd = '',
   autoMode = 'ask',
+  autoRun = false,
   pendingConfirm = null,
   pendingQuestion = null,
   queued = [],
@@ -1330,6 +1331,9 @@ export function renderChatModal({
   // context badge, in the warn colour, in every state the hint row can be in: the
   // person must be able to see it while the answer they did not confirm is arriving.
   autoMode?: AutoMode;
+  // The person's `shell.autoRun`: with `all`, commands run unasked too, and the badge
+  // says so.
+  autoRun?: boolean;
   // `command`: a run_command call — shown whole and wrapped, since the person is
   // deciding on exactly that line.
   pendingConfirm?: { name: string; args?: string | unknown; command?: string; line?: string; input?: string } | null;
@@ -1541,7 +1545,7 @@ export function renderChatModal({
                   imagesOn && `${CAP.image} image`, `${CAP.auto} auto`, bgCount > 0 && `${bgCount} in background`].filter(Boolean).join(' · ')))),
       // A sibling of the hint, not part of it: the left cell is the hint OR the status
       // of a running turn, and the mode has to stay on screen through both.
-      autoBadge(autoMode) ? h(Text, { color: m.warn, bold: true }, `  ${autoBadge(autoMode)}`) : null,
+      autoBadge(autoMode, autoRun) ? h(Text, { color: m.warn, bold: true }, `  ${autoBadge(autoMode, autoRun)}`) : null,
       contextBadge ? h(Text, contextWarn ? { color: 'yellow' } : { dim: true }, `  ${contextBadge}`) : null),
       // The task plan sits ABOVE the input (not above the messages) — the newest
       // answer stays pinned just above it, so a growing plan never hides it. In a chat

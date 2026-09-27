@@ -128,7 +128,10 @@ export const hostConfigSchema = z.object({
   web: z.object({ allowlist: z.array(z.string()).optional(), maxBytes: z.number().int().positive().optional(), timeoutMs: z.number().int().positive().optional() }).optional(),
   // Shell commands — `!command` in the chat and the model's run_command
   // (src/assistant/shell.ts): the time limit, how much of the output is kept, and
-  // `roots` — the directories commands start in (the first) and may `cd` within.
-  shell: z.object({ timeoutMs: z.number().int().positive(), maxChars: z.number().int().positive(), roots: z.array(z.string()) }).partial().optional(),
+  // `roots` — the directories commands start in (the first) and may `cd` within — and
+  // `autoRun`, the person's second consent that lets the auto mode's `all` answer
+  // run_command (src/assistant/auto.ts). On the leash with the rest of `shell`, so the
+  // model can never set it; read live, since it only loosens a pause the person chose.
+  shell: z.object({ timeoutMs: z.number().int().positive(), maxChars: z.number().int().positive(), roots: z.array(z.string()), autoRun: z.boolean() }).partial().optional(),
   plugins: z.record(z.string(), z.unknown()).optional(),
 }).passthrough();

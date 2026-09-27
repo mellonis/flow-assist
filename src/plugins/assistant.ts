@@ -21,7 +21,7 @@ import { apiHistory, compactConversation, chatLanguage, requestTools, transcript
 import { createToolSet, toolLoadingMode } from '../assistant/tool-loading.js';
 import { llmOpts } from '../assistant/llm-endpoint.js';
 import { copyTarget, copyToClipboard } from '../assistant/copy.js';
-import { createShellState, formatShell, nextCwd, realOf, runShell, shellLimits, shellOutcome, shellRoots, tildePath, type ShellResult } from '../assistant/shell.js';
+import { createShellState, formatShell, nextCwd, realOf, runShell, shellAutoRun, shellLimits, shellOutcome, shellRoots, tildePath, type ShellResult } from '../assistant/shell.js';
 import { findInstructions, instructionsBlock, instructionsNote, type ProjectInstructions } from '../assistant/project-instructions.js';
 import {
   KEEP_SESSIONS, SESSION_VERSION, acquireLock, closeSession, cutTitle, flushOnExit, listSessions, loadSession, lockPath,
@@ -1353,13 +1353,15 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 confirmWrite: (name: string, argsStr: unknown, info?: { input?: string; inputId?: string }) => new Promise<boolean>((resolve) => {
                   // The one place a confirmation may be answered without the person:
                   // the auto mode (src/assistant/auto.ts), which only `all` ever lets
-                  // say yes and never for run_command, an unlisted web_fetch or config_set. It
+                  // say yes, never for an unlisted web_fetch or config_set, and for
+                  // run_command only while the person's `shell.autoRun` is on — read
+                  // here, at the call, so a value set mid-session holds at once. It
                   // answers BEFORE anything on screen moves — a call that does not
                   // pause must not close the `/context` panel the person is reading.
                   // Nothing here relaxes what agentChat asks about: a tool with no
                   // write flag never reaches this function, and the trail and the ✎
                   // diff block still show what ran.
-                  if (autoConfirms(autoModeRef.current, name)) { resolve(true); return; }
+                  if (autoConfirms(autoModeRef.current, name, shellAutoRun(host.config as { shell?: unknown }))) { resolve(true); return; }
                   const args = typeof argsStr === 'string' ? argsStr : JSON.stringify(argsStr ?? '');
                   const command = shellCommandOf(name, args);
                   const line = configLineOf(name, args);
@@ -2148,7 +2150,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 const next = want === 'cycle' ? nextAutoMode(autoModeRef.current) : want;
                 setAutoMode(next);
                 setField('');
-                (host.services as Record<string, any>).showMessage?.(autoSaid(next));
+                (host.services as Record<string, any>).showMessage?.(autoSaid(next, shellAutoRun(host.config as { shell?: unknown })));
                 host.notify();
                 return;
               }
@@ -2673,7 +2675,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               if (key.name === 'tab' && key.shift && !key.meta && !key.ctrl) {
                 const next = nextAutoMode(autoModeRef.current);
                 setAutoMode(next);
-                (host.services as Record<string, any>).showMessage?.(autoSaid(next));
+                (host.services as Record<string, any>).showMessage?.(autoSaid(next, shellAutoRun(host.config as { shell?: unknown })));
                 host.notify();
                 return true;
               }
@@ -2861,7 +2863,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             shellCwd: bangLevel ? tildePath(shellRef.current.cwd()) : '',
             // How much runs without a y/n — said on the hint line, so the mode is never
             // a hidden state, while an answer is coming as much as between turns.
+            // `autoRun` (the person's `shell.autoRun`, read per draw) changes what `all`
+            // is called: commands run unasked too.
             autoMode,
+            autoRun: shellAutoRun(host.config as { shell?: unknown }),
             // The numbers the conversation's images carry — their tokens are drawn as
             // attachments — and whether attaching is on (the hint names Ctrl+V then).
             imageNumbers: [...imagesRef.current.keys()],
