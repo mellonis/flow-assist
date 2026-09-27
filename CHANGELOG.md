@@ -9,9 +9,10 @@ What each version of flow-assist brought, newest first. The version is the one i
   saved session, `sessions/<id>.log.jsonl` records each row you saw, each tool call
   with its whole arguments and result (not the cut the model was given), each
   `/compact` with its summary — line by line as it happens, so a crash loses nothing,
-  and never trimmed: a long session's beginning is no longer lost. A journal goes with
-  its session, or after `sessions.journalDays` days without a write (30; 0 keeps it
-  forever). `/export [path]` turns it into a markdown document to read — each tool call
+  and never trimmed: a long session's beginning is no longer lost. A `!command` is
+  recorded when it starts and again, with its exit and output, when it ends. A journal
+  lives exactly as long as its session; `sessions.journalDays` (0 by default) removes
+  one not written to for that many days, and the session says so in a note. `/export [path]` turns it into a markdown document to read — each tool call
   folded with its arguments and result, the summaries in place — in the shell's
   directory unless you name a path, never over a file that is there. The saved session itself counts its limit of 400 in messages of the
   conversation: the blocks of the commands the assistant ran have a smaller limit of

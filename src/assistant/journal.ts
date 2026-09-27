@@ -15,7 +15,9 @@
 //   answer   the final text of a turn
 //   call     one tool call: `name`, `args`, `outcome`, `result`, what it `changes`d,
 //            the `views` it left in their final state with their text
-//   shell    a `!command` the person ran: `command`, `output`, `status`
+//   shell    a `!command` the person ran, written when it starts: `command`, `cwd`
+//            (from a state file: with its `output` too)
+//   shell-end  how it ended: `output`, `status` (the exit), `ms`
 //   compact  a `/compact`: the `summary` the model was given from then on
 //   end      how a turn ended: its duration, what it cost, stopped or failed, and the
 //            text of a round cut off
@@ -185,7 +187,11 @@ export function exportMarkdown(events: JournalEvent[], opts: { title: string; id
       case 'step': out.push(`*Step${at}:* ${text}`, ''); break;
       case 'answer': out.push(`**Assistant**${at}`, '', text, ''); break;
       case 'call': out.push(callBlock(ev), ''); break;
-      case 'shell': out.push(`**$ ${String(ev.command ?? '')}**${at}${ev.status ? ` · ${String(ev.status)}` : ''}`, '', block(String(ev.output ?? ''), 'console'), ''); break;
+      case 'shell':
+        out.push(`**$ ${String(ev.command ?? '')}**${at}`, '');
+        if (typeof ev.output === 'string') out.push(block(ev.output, 'console'), '');
+        break;
+      case 'shell-end': out.push(block(String(ev.output ?? ''), 'console'), '', `*${String(ev.status ?? 'ended')}${typeof ev.ms === 'number' ? ` · ${(ev.ms / 1000).toFixed(1)} s` : ''}*`, ''); break;
       case 'compact': out.push('---', '', `**Compacted**${at} — from here on the model was given this summary instead of the conversation above:`, '', quoted(String(ev.summary ?? '')), '', '---', ''); break;
       case 'end': {
         if (typeof ev.cut === 'string' && ev.cut) out.push(`**Assistant**${at} (cut off)`, '', ev.cut, '');

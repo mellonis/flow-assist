@@ -1800,6 +1800,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // Set once an interactive run's recording has joined the model's history: the
             // turn that looks at it starts when this command is done (the `finally`).
             let ask = false;
+            // In the journal from the moment it starts — a crash mid-command still leaves
+            // what ran; its end, when it comes, goes to the same session.
+            const journalId = journal({ t: 'shell', command: cmd, cwd: tildePath(cwd), ...(interactive ? { interactive: true } : {}) }, { person: true });
             try {
               liveSeen.current.add(callId);
               setMessages((cur) => [...cur, { role: 'shell', content: '', command: cmd, views: [{ ...liveRec(capConsoleData({ command: cmd, cwd: tildePath(cwd), text: '', showCwd: true, interactive })), turn: turnRef.current }] }]);
@@ -1825,6 +1828,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               }
               stopped = r.stopped;
               if (r.stopped && stopKeyRef.current) r.stoppedBy = stopKeyRef.current;
+              // Its end, whatever happened to the conversation meanwhile — it ran there.
+              journalTo(journalId, { t: 'shell-end', command: cmd, output: r.output, status: shellOutcome(r, timeoutMs), ms: r.ms });
               const move = nextCwd(host.config as Record<string, unknown>, cwd, r.pwd);
               const { display, forModel } = formatShell(cmd, r, cwd, timeoutMs, { after: move.cwd, note: move.note, ...(interactive ? { interactive: { recorded } } : {}) });
               // Everything from here on is display/model-facing state for THIS
@@ -1855,7 +1860,6 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // recall.ts): the command, how it ended, how long, how many lines.
                 const printed = r.output.replace(/\n+$/, '');
                 const meta: ShellMeta = { command: cmd, outcome: shellOutcome(r, timeoutMs), ms: r.ms, lines: printed ? printed.split('\n').length : 0 };
-                journal({ t: 'shell', command: cmd, cwd: tildePath(cwd), output: r.output, status: meta.outcome, ms: r.ms, ...(interactive ? { interactive: true } : {}) }, { person: true });
                 if (seen) apiRef.current = [...apiRef.current, { role: 'shell', content: forModel, shell: meta }];
                 if (interactive && !r.error && !seen) {
                   const why = recorded
@@ -1869,7 +1873,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             } catch (e) {
               stopped = true; // a command that could not run keeps the queue, as a failed turn does
               setError(`!: ${(e as Error).message}`);
-              if (epoch === epochRef.current) journal({ t: 'shell', command: cmd, cwd: tildePath(cwd), output: '', status: `could not run: ${(e as Error).message}` }, { person: true });
+              journalTo(journalId, { t: 'shell-end', command: cmd, output: '', status: `could not run: ${(e as Error).message}`, ms: Date.now() - startedAt });
               // The block stops ticking rather than waiting forever for a completion
               // that is never coming — marked failed in place, keeping whatever it had
               // already shown (the way a tool's own thrown view does, agent.ts).

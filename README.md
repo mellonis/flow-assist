@@ -52,8 +52,9 @@ Sessions live in `sessions/` in the config directory, readable by you only
 conversation, fewer of the commands' output blocks — but each session also keeps a
 journal beside it, `<id>.log.jsonl`: everything as it happened, every tool call with
 its whole arguments and result, every `/compact` summary, written line by line so a
-crash loses nothing and never trimmed. It goes with its session, or after
-`sessions.journalDays` days without a write (30; 0 keeps it forever). `/export [path]`
+crash loses nothing and never trimmed. It lives exactly as long as its session and
+goes when the session is deleted; `sessions.journalDays` (0 by default) removes one not
+written to for that many days, and the session then says so in a note. `/export [path]`
 turns the journal into a markdown document you can read — the conversation, each tool
 call folded with its arguments and result, the `/compact` summaries where they
 happened — written to the path you give, or to `session-<id>.md` in the shell's

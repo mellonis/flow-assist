@@ -231,3 +231,22 @@ test('/export of a session with no journal renders it from its saved state and s
   expect(empty.backend.lastFrame).toContain('nothing to export');
   empty.app.unmount();
 });
+
+test('a !command is in the journal from the moment it starts; its end adds the exit, the time and the output', async () => {
+  const dir = dirOf();
+  const ui = await boot(dir, new ScriptedModel());
+  await ui.type('!');
+  await ui.type('sleep 1; echo готово');
+  await ui.press('return');
+  await settleUntil(() => journals(dir).length > 0);
+  // Still running — what a crash now would leave: the command that ran.
+  const started = journalOf(dir);
+  expect(started.find((e) => e.t === 'shell')).toMatchObject({ command: 'sleep 1; echo готово' });
+  expect(started.some((e) => e.t === 'shell-end')).toBe(false);
+  await settleUntil(() => journalOf(dir).some((e) => e.t === 'shell-end'), 600);
+  const end = journalOf(dir).find((e) => e.t === 'shell-end')!;
+  expect(end).toMatchObject({ command: 'sleep 1; echo готово', status: expect.stringContaining('exit 0') });
+  expect(String(end.output)).toContain('готово');
+  expect(typeof end.ms).toBe('number');
+  ui.app.unmount();
+});

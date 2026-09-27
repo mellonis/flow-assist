@@ -5,7 +5,7 @@ import path from 'node:path';
 import { JOURNAL_LINE_MAX, appendJournal, exportMarkdown, journalLine, readJournal, rowOf, viewText } from '../journal.ts';
 import { renderConsole } from '../console-view.ts';
 import {
-  KEEP_MESSAGES, SESSION_VERSION, acquireLock, deleteSession, journalPath, makeLockToken, newSessionId, pruneSessions, removeSession,
+  JOURNAL_DAYS, KEEP_MESSAGES, SESSION_VERSION, acquireLock, loadSession, deleteSession, journalPath, makeLockToken, newSessionId, pruneSessions, removeSession,
   saveSession, sweepJournals, type Session,
 } from '../sessions.ts';
 
@@ -94,7 +94,7 @@ test('deleting a session removes its journal — from the picker, by pruning, or
   expect(fs.existsSync(journalPath(dir, c.id))).toBe(true);
 });
 
-test('retention sweeps a journal older than journalDays, keeps a younger one, one held open, and all of them with 0', () => {
+test('a journal lives as long as its session by default; journalDays, when set, removes an old one and says so in the session', () => {
   const dir = tmp();
   const day = 24 * 60 * 60 * 1000;
   const now = Date.now();
@@ -104,14 +104,17 @@ test('retention sweeps a journal older than journalDays, keeps a younger one, on
   for (const id of [old, held, orphan]) fs.utimesSync(journalPath(dir, id!), new Date(now - 31 * day), new Date(now - 31 * day));
   saveSession(dir, session({ id: old! }));
   acquireLock(dir, held!, makeLockToken()); // a live chat has it open
-  expect(sweepJournals(dir, 0, now)).toBe(0); // 0 keeps them forever
+  expect(JOURNAL_DAYS).toBe(0);
+  expect(sweepJournals(dir, JOURNAL_DAYS, now)).toBe(0); // the default: kept while the session exists
+  for (const id of ids) expect(fs.existsSync(journalPath(dir, id!))).toBe(true);
   expect(sweepJournals(dir, 30, now)).toBe(2);
   expect(fs.existsSync(journalPath(dir, young!))).toBe(true);
   expect(fs.existsSync(journalPath(dir, held!))).toBe(true);
   expect(fs.existsSync(journalPath(dir, old!))).toBe(false);
   expect(fs.existsSync(journalPath(dir, orphan!))).toBe(false);
-  // The session itself stays: only its journal is past its time.
-  expect(fs.existsSync(path.join(dir, `${old}.json`))).toBe(true);
+  // The session stays, and says its evidence is gone.
+  const back = loadSession(dir, old!)!;
+  expect(back.messages.at(-1)).toEqual({ role: 'note', content: 'Journal removed after 30 days without a write (sessions.journalDays) — this session\'s full record is gone.' });
 });
 
 test('the export is readable markdown: the conversation, each call folded with its arguments and result, the summaries in place', () => {
@@ -123,7 +126,8 @@ test('the export is readable markdown: the conversation, each call folded with i
     { t: 'answer', text: 'В файле **x**.', at: '2026-09-27T10:00:04.000Z' },
     { t: 'end', ms: 3000, at: '2026-09-27T10:00:04.000Z' },
     { t: 'compact', summary: 'Прочитан a.md.', note: '── compacted ──', at: '2026-09-27T10:05:00.000Z' },
-    { t: 'shell', command: 'ls', output: 'a.md\n', status: 'exit 0', at: '2026-09-27T10:06:00.000Z' },
+    { t: 'shell', command: 'ls', cwd: '~', at: '2026-09-27T10:06:00.000Z' },
+    { t: 'shell-end', command: 'ls', output: 'a.md\n', status: 'exit 0', ms: 5, at: '2026-09-27T10:06:01.000Z' },
     { t: 'row', role: 'note', text: 'Project instructions: none', at: '2026-09-27T10:07:00.000Z' },
     { t: 'end', ms: 10, stopped: 'Esc', cut: 'Я начал', at: '2026-09-27T10:08:00.000Z' },
   ], { title: 'Чтение', id: '2026-09-27T10-00-00-abcd' });
@@ -138,6 +142,8 @@ test('the export is readable markdown: the conversation, each call folded with i
   expect(md).toContain('Прочитан a.md.');
   expect(md.indexOf('Прочитан a.md.')).toBeGreaterThan(md.indexOf('В файле'));
   expect(md).toContain('$ ls');
+  expect(md).toContain('a.md\n```');
+  expect(md).toContain('exit 0');
   expect(md).toContain('stopped (Esc)');
   expect(md).toContain('Я начал');
   expect(md).not.toContain('beginning may be missing');

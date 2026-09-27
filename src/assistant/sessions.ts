@@ -100,13 +100,13 @@ const fileOf = (dir: string, id: string) => {
 };
 
 // The session's journal (./journal.ts): beside its state file, never trimmed, removed
-// with the session or once it is older than `sessions.journalDays`.
+// with the session — and before it only when `sessions.journalDays` says so.
 const JOURNAL_EXT = '.log.jsonl';
 export function journalPath(dir: string, id: string): string {
   if (!ID.test(id)) throw new Error(`not a session id: ${id}`);
   return path.join(dir, `${id}${JOURNAL_EXT}`);
 }
-export const JOURNAL_DAYS = 30;
+export const JOURNAL_DAYS = 0;
 
 // The screen list as the state file keeps it: the latest `keep` conversation rows —
 // every row but a `view` — and, among them, the latest `keepViews` view rows in their
@@ -399,11 +399,13 @@ export function deleteSession(dir: string, id: string): void {
   try { fs.unlinkSync(journalPath(dir, id)); } catch { /* none, or already gone */ }
 }
 
-// Retention, swept at start: a journal not written to for more than `days` days goes —
-// its session's state file stays, and a journal starts again from it if the session is
-// opened. 0 (or less) keeps every journal. A journal whose session a live chat holds
-// is left alone, and so is one whose state file never got written (a crash in the
-// first moments of a session): it goes by its age like any other, never sooner.
+// Retention, swept at start, and only when the person asks for it: by default (0) a
+// journal lives exactly as long as its session — a session that can still be opened
+// keeps its evidence. With `days` set, a journal not written to for longer goes, and
+// its session, which stays, gets a note row saying so: a state file whose record is
+// gone must not look like one that still has it. A journal whose session a live chat
+// holds is left alone, and so is one whose state file never got written (a crash in
+// the first moments of a session) until it is as old as any other.
 export function sweepJournals(dir: string, days = JOURNAL_DAYS, now = Date.now()): number {
   if (!(days > 0)) return 0;
   let names: string[] = [];
@@ -417,7 +419,9 @@ export function sweepJournals(dir: string, days = JOURNAL_DAYS, now = Date.now()
     let mtimeMs: number;
     try { mtimeMs = fs.statSync(file).mtimeMs; } catch { continue; }
     if (now - mtimeMs <= days * 24 * 60 * 60 * 1000 || isLockHeld(dir, id)) continue;
-    try { fs.unlinkSync(file); removed++; } catch { /* already gone */ }
+    try { fs.unlinkSync(file); removed++; } catch { continue; }
+    const s = loadSession(dir, id);
+    if (s) saveSession(dir, { ...s, messages: [...s.messages, { role: 'note', content: `Journal removed after ${days} days without a write (sessions.journalDays) — this session's full record is gone.` }] });
   }
   return removed;
 }

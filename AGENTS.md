@@ -1127,7 +1127,9 @@ there is no `/fullscreen`.
   the arguments as parsed, the result as the tool returned it — `ToolRun.detail`, before
   `capToolResult` and any recall stub — what it changed, and the views it left in their
   FINAL phase with the text their renderer draws, so a view is recorded once, never per
-  live update), `shell` (a `!command` with its whole output, once it has ended),
+  live update), `shell` (a `!command`'s line and directory, written when it STARTS, so a crash
+  mid-command still records what ran) and `shell-end` (its exit, duration and whole
+  output, written when it ends, to the same session whatever reset came meanwhile),
   `compact` (the summary) and `end` (how the turn ended: duration, tokens, stopped or
   failed, and the text of a round cut off, which never reached `onLiveCommit`). A turn's
   events go to the session its question was journaled in (`journalId`, taken in
@@ -1145,12 +1147,17 @@ there is no `/fullscreen`.
   line `continued`). A fork's journal starts with `parent` naming the session it left;
   what came before is in that one's journal. `/new` and `/clear` start a new session and
   so a new journal. A delete (the picker, `pruneSessions`) takes the state file and the
-  journal together (`deleteSession`). Retention is `sessions.journalDays` (30; 0 keeps
-  every journal forever): at start, beside `pruneSessions`, `sweepJournals` removes a
-  journal not written to for longer than that, unless a live chat holds its session —
-  the state file stays, and a journal starts again from it if the session is opened. A
+  journal together (`deleteSession`) — so does `KEEP_SESSIONS` pruning. **A journal
+  lives as long as its session**: a session the person can still open keeps its
+  evidence, so nothing removes a journal by age unless the person asks —
+  `sessions.journalDays` defaults to 0. Set, `sweepJournals` (at start, beside
+  `pruneSessions`) removes a journal not written to for longer than that, unless a live
+  chat holds its session, and appends a note row to that session's state file, `Journal
+  removed after N days without a write (sessions.journalDays) — this session's full
+  record is gone.`, so a state file whose record is gone never passes for one that
+  still has it; a journal starts again from the state file if the session is opened. A
   journal whose state file was never written (a crash in the session's first 250 ms)
-  is swept by its age like any other, never sooner. `debug.logTools`' `tools.log` is a
+  goes only by that same age. `debug.logTools`' `tools.log` is a
   debugging aid beside it (arguments and results clipped to 300 characters, only when
   switched on), not a record.
   **`/export [path]`** writes the current session as a markdown document

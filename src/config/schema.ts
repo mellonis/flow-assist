@@ -113,7 +113,7 @@ export const hostConfigSchema = z.object({
   memory: z.object({ file: z.string() }).optional(),
   // Chat sessions on disk (src/assistant/sessions.ts): where, whether the app
   // continues the latest one on start, how many are kept, and for how many days a
-  // session's journal is kept (0 — forever).
+  // session's journal may outlast its last write (0 — as long as the session).
   // Read when the chat starts.
   sessions: z.object({
     dir: z.string(),
