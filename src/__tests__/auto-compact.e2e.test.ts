@@ -137,3 +137,28 @@ test('autoCompact.enabled false never compacts by itself', async () => {
   expect(body(model, 2)).toContain('BIG-ANSWER');
   expect(ui.backend.lastFrame).not.toContain('compacted');
 });
+
+test('a message queued in the crossing turn is delivered first, then the compaction runs, and the message goes after the question', async () => {
+  const model = new ScriptedModel();
+  model.script([{ text: 'short' }]);
+  const ui = await boot(model, 'openai');
+  await ask(ui, 'first');
+  const base = Math.ceil(body(model, 0).length / 4);
+  model.script([{ text: `BIG-ANSWER ${'b'.repeat(Math.ceil((WINDOW * 0.65 - base) * 4))}` }]);
+  await ask(ui, 'tell me everything');
+  const narration = `Checking the clock. ${'n'.repeat(Math.ceil(WINDOW * 0.2 * 4))}`;
+  model.script([{ text: narration, tool: 'datetime', args: {} }, { hold: true }], [{ text: long('QUEUE-HANDOFF') }], [{ text: 'It is noon.' }]);
+  await ui.type('what time is it?');
+  await ui.press('return');
+  await settle(6);
+  await ui.type('in UTC please');
+  await ui.press('return');
+  model.release();
+  await settleUntil(() => ui.backend.lastFrame.includes('It is noon.'));
+  expect(model.requests).toHaveLength(5);
+  expect(streamed(model, 3)).toBe(false);
+  const after = (model.requests[4] as { messages: { role: string; content: unknown }[] }).messages;
+  expect(after.map((m) => m.role)).toEqual(['system', 'user', 'user']);
+  expect(String(after[1]!.content)).toContain('what time is it?');
+  expect(after[2]).toEqual({ role: 'user', content: 'in UTC please' });
+});

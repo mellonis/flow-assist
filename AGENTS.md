@@ -1816,9 +1816,22 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   line break. Only role `user`: a background result (`bg`) is the model's writing and
   a `!command`'s block (`shell`) is the host's own ```console fence — both stay
   markdown. The pinned question folds a multi-line message onto its one row.
-- **⏎** sends; while an answer is coming it **queues** instead (sent in order when
-  the turn ends; the line over the field shows the LAST one, and `↑ takes it back`
-  while the field is empty). **Esc** while an answer or a `!command` runs **stops it,
+- **⏎** sends; while an answer is coming it **queues** instead, and a queued message
+  reaches the model at the turn's NEXT REQUEST BOUNDARY — after the current round's
+  tool results, as the person's message, the turn going on with it in view (the
+  `beforeRequest` hook in `send`: the message is taken off the queue, put into ↑'s
+  history, drawn as the person's message where it reached the model, and appended to
+  what `agentChat` sends, so it joins the turn's transcript; delivered first, then the
+  automatic compaction's size check, with the message counted — a compaction keeps it
+  after the question). **⇥ on the empty field holds** the last queued message for the
+  turn's end instead, and ⇥ again lets it go at the next step; a message naming an
+  image waits for the turn's end too (it goes as a message of its own, images and
+  all). What is left when the turn ends goes out in order then — a turn with no
+  further round (an answer) delivers nothing mid-turn. The line over the field shows
+  the LAST one and what it waits for — `reaches the model after this step · ↑ back ·
+  ⇥ hold to end`, or `held to the turn's end · ↑ back · ⇥ release` — in a turn
+  (`queueWaits`), and `↑ takes it back` outside one (a slash command's wait); ↑ and ⇥
+  act only on an empty field, where they are offered. **Esc** while an answer or a `!command` runs **stops it,
   on the first press**, touching neither the field nor the queue (the line under what
   came so far says `stopped (Esc)` — `stopped (^c)` after Ctrl+C: the label names the
   key that stopped it, from `keyGlyph`, and so does a `!command`'s outcome; the message

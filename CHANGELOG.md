@@ -5,6 +5,12 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **A message you send while the assistant works reaches it after the current step.**
+  It used to wait for the whole turn to end, so a correction arrived after the work it
+  meant to steer. Now it goes in between two rounds of tool calls, as your message, and
+  the assistant carries on with it in view; the line over the field says `reaches the
+  model after this step`, ↑ still takes it back until then, and ⇥ on the empty field
+  holds it for the end of the turn instead.
 - **Long work is no longer cut off at 64 rounds, and carrying on is one key.** A turn
   may take 150 rounds (`ai.maxRounds` changes it). When one reaches the cap, the chat
   says where it stopped — `stopped after 150 rounds (ai.maxRounds) at <the last call> —

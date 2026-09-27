@@ -1292,6 +1292,7 @@ export function renderChatModal({
   pendingConfirm = null,
   pendingQuestion = null,
   queued = [],
+  queueWaits = null,
   elapsed = 0,
   emptyNotice = '',
   continueOffer = false,
@@ -1376,6 +1377,9 @@ export function renderChatModal({
   // (a stopped or failed turn puts them back into the field). ↑ on an empty field takes
   // the LAST one back, so the last one is what the line shows.
   queued?: string[];
+  // What the last queued message waits for in a running turn: its next step (it then
+  // reaches the model) or its end (held with ⇥); null outside a turn.
+  queueWaits?: 'step' | 'end' | null;
   // The seconds of what is running NOW — a tool while one runs, the model's round
   // otherwise. The turn's own total is on the finished answer's quiet line.
   elapsed?: number;
@@ -1605,12 +1609,21 @@ export function renderChatModal({
           )
         : null,
       !pager && queued.length
-        ? h(Box, { flexDirection: 'row', width: '100%', flexShrink: 0 },
-            h(Text, { bold: true, color: m.warn }, `${CAP.enter} queued${queued.length > 1 ? ` (${queued.length})` : ''}: `),
-            h(Text, { wrap: 'truncate', color: m.warn }, `${queued.length > 1 ? '… ' : ''}${queued.at(-1)!.replace(/\s+/g, ' ').slice(0, Math.max(10, wrap - 40))}`),
-            // ↑ takes it back only from an empty field (in a draft it moves the caret),
-            // so it is offered only there.
-            input ? null : h(Text, { dim: true }, ` · ${keyGlyph('up')} takes it back`))
+        ? (() => {
+            // In a turn the line says when the message reaches the model — after the
+            // current step, or held to the turn's end — and ⇥ switches between the two.
+            // ↑ and ⇥ act only on an empty field (in a draft they move the caret and
+            // complete), so they are offered only there.
+            const waits = queueWaits === 'end' ? ' · held to the turn\'s end' : queueWaits === 'step' ? ' · reaches the model after this step' : '';
+            const keys = input ? '' : queueWaits
+              ? ` · ${keyGlyph('up')} back · ${CAP.tab} ${queueWaits === 'step' ? 'hold to end' : 'release'}`
+              : ` · ${keyGlyph('up')} takes it back`;
+            const tail = `${waits}${keys}`;
+            return h(Box, { flexDirection: 'row', width: '100%', flexShrink: 0 },
+              h(Text, { bold: true, color: m.warn }, `${CAP.enter} queued${queued.length > 1 ? ` (${queued.length})` : ''}: `),
+              h(Text, { wrap: 'truncate', color: m.warn }, `${queued.length > 1 ? '… ' : ''}${queued.at(-1)!.replace(/\s+/g, ' ').slice(0, Math.max(20, wrap - 16 - tail.length))}`),
+              tail ? h(Text, { dim: true, wrap: 'truncate' }, tail) : null);
+          })()
         : null,
       // The input field group (the y/n confirm block or the multiline input box). It
       // never shrinks: in a small panel the plan gives way (`planFit`), the field and

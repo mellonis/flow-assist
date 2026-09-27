@@ -61,8 +61,10 @@ call folded with its arguments and result, the `/compact` summaries where they
 happened — written to the path you give, or to `session-<id>.md` in the shell's
 directory; it never overwrites a file that is there.
 
-A message sent while an answer is still coming waits its turn (`⏎ queued`) and goes
-out when the answer ends; ↑ on an empty field takes the last one back to edit. Esc or
+A message sent while an answer is still coming is queued (`⏎ queued`) and reaches the
+assistant after its current step — between two tool rounds — so a correction lands
+while the work it means to steer is still going; ↑ on an empty field takes the last one
+back to edit until then, and ⇥ holds it for the end of the answer instead. Esc or
 Ctrl+C stops the answer on the first press — then the waiting messages come back into
 the field instead of being sent, and so they do when a request fails. ↑/↓ walk
 everything you typed, `/commands` and `!commands` included, and the history is saved

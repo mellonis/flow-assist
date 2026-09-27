@@ -809,3 +809,21 @@ test('ai.maxRounds: a positive whole number, else the default', () => {
   expect(maxRoundsOf({ maxRounds: 0 })).toBe(150);
   expect(maxRoundsOf({ maxRounds: 2.5 })).toBe(150);
 });
+
+test('beforeRequest may append messages after a round\'s results; they join the transcript', async () => {
+  assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
+  const sent: any[][] = [];
+  const chatRound = async (messages: any[]) => {
+    sent.push(messages);
+    return sent.length === 1
+      ? { content: '', finishReason: 'tool_calls', toolCalls: [{ id: '1', name: 'memory', arguments: '{"action":"list"}' }] }
+      : { content: 'ok', finishReason: 'stop', toolCalls: [] };
+  };
+  const res = await agentChat([{ role: 'user', content: 'Q' }], {
+    baseUrl: 'http://x', model: 'm', token: 't', onLive: () => {}, onLiveCommit: () => {}, chatRound,
+    beforeRequest: async ({ round }) => (round === 1 ? { append: [{ role: 'user', content: 'also this' }] } : undefined),
+  });
+  expect(sent[1]!.map((m: any) => m.role)).toEqual(['user', 'assistant', 'tool', 'user']);
+  expect(sent[1]!.at(-1).content).toBe('also this');
+  expect(res.transcript.map((m) => m.role)).toEqual(['assistant', 'tool', 'user', 'assistant']);
+});

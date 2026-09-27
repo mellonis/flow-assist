@@ -200,6 +200,9 @@ export interface AgentOpts {
   // arrives, so a caller drawing the round's text as it streams learns what that text
   // is while it is still being written rather than after the round has ended.
   onRoundKind?: (kind: 'tools') => void;
+  // A line for the person about the turn itself, drawn dim in the conversation — a
+  // tool call the model wrote as text, said when it is asked again.
+  onNote?: (text: string) => void;
   // Called before EVERY request of the turn — the first, and each after a round's tool
   // results are all in, so a call is never parted from its result. `transcript` is the
   // turn so far (the question is the last of the messages handed in, not in it);
@@ -207,11 +210,10 @@ export interface AgentOpts {
   // round's usage (its prompt and answer, plus what joined after it, as an estimate),
   // and undefined before the first round. Returning `messages` replaces everything
   // sent from here on — what the chat's automatic compaction does — and the turn's
-  // transcript then starts after them.
-  // A line for the person about the turn itself, drawn dim in the conversation — a
-  // tool call the model wrote as text, said when it is asked again.
-  onNote?: (text: string) => void;
-  beforeRequest?: (info: { round: number; transcript: ChatMessage[]; measured?: number }) => Promise<{ messages: ChatMessage[] } | void>;
+  // transcript then starts after them. `append` adds messages after the round's
+  // results — the person's words queued while the turn ran — and they join the
+  // transcript like the rest of the turn.
+  beforeRequest?: (info: { round: number; transcript: ChatMessage[]; measured?: number }) => Promise<{ messages?: ChatMessage[]; append?: ChatMessage[] } | void>;
   // Tools on demand (src/assistant/tool-loading.ts). 'all' — every tool in full on
   // every request, the default here, so a caller that does not say keeps what it had;
   // the chat, a background task and the one-shot CLI pass `ai.toolLoading`.
@@ -831,6 +833,7 @@ export async function agentChat(
           // The figure was of the history just replaced.
           usage = undefined;
         }
+        if (replaced?.append?.length) current.push(...replaced.append);
       }
       let roundContent = '';
       const r = await chatRoundFn(withRequestTail(withSystemPrompt(withAttachedImages(current, attachedUrls), systemPrompt), requestTail), {

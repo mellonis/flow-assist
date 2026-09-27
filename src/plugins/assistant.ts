@@ -562,12 +562,17 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // handler reads a fresh value.
           const [cursor, setCursor] = ui.useState(0);
           const cursorRef = ui.useRef(cursor); cursorRef.current = cursor;
-          // Messages sent while an answer was coming. They go out in order when the
-          // turn ends (a stopped or failed turn puts them back into the field instead —
-          // `restoreQueue`); ↑ on an empty field takes the last one back. queueRef is what
-          // the handlers act on, `queued` mirrors it for the render.
-          const queueRef = ui.useRef<string[]>([]);
-          const [queued, setQueued] = ui.useState<string[]>([]);
+          // Messages sent while an answer was coming. During a turn each reaches the
+          // model at the turn's next request boundary — after the current tool results —
+          // as the person's message (`beforeRequest` in `send`); one HELD (⇥ on the empty
+          // field) waits for the turn's end instead, and so does one naming an image.
+          // What is left when the turn ends goes out in order then (a stopped or failed
+          // turn puts it back into the field instead — `restoreQueue`); ↑ on an empty
+          // field takes the last one back until it is delivered. queueRef is what the
+          // handlers act on, `queued` mirrors it for the render.
+          type Queued = { text: string; hold?: boolean };
+          const queueRef = ui.useRef<Queued[]>([]);
+          const [queued, setQueued] = ui.useState<Queued[]>([]);
           const syncQueue = () => { setQueued(queueRef.current.slice()); host.notify(); };
           // Prompt history for ↑/↓. `histAt` is the entry on screen (null = the draft),
           // `histShown` is its text — an arrow only replaces the field while it still
@@ -597,7 +602,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const restoreQueue = () => {
             if (!queueRef.current.length) return;
             const draft = bangLevelRef.current && inputRef.current ? encodeBangLine(bangLevelRef.current as 1 | 2, inputRef.current) : inputRef.current;
-            const text = [...queueRef.current, draft].filter((t) => t.trim()).join('\n\n');
+            const text = [...queueRef.current.map((m) => m.text), draft].filter((t) => t.trim()).join('\n\n');
             queueRef.current = [];
             setBangLevel(0);
             histAt.current = null;
@@ -1476,14 +1481,33 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // goes on from the handoff, so it is not begun again. A compaction that
                 // fails is logged and the request goes as it is; Esc stops it with the turn.
                 beforeRequest: async ({ round, transcript, measured }: { round: number; transcript: ChatMessage[]; measured?: number }) => {
+                  if (epoch !== epochRef.current) return;
+                  // First what the person queued since the last request: it reaches the
+                  // model now, after the round's results, as their message — not held
+                  // (⇥), and not naming an image (which goes with a message of its own
+                  // at the turn's end). On screen it stands where it reached the model.
+                  const delivered: ChatMessage[] = [];
+                  if (round > 0) {
+                    const now = queueRef.current.filter((m) => !m.hold && !imagesInText(m.text, imagesRef.current).length);
+                    if (now.length) {
+                      queueRef.current = queueRef.current.filter((m) => !now.includes(m));
+                      syncQueue();
+                      for (const m of now) pushHistory(historyRef.current, m.text);
+                      delivered.push(...now.map((m): ChatMessage => ({ role: 'user', content: m.text })));
+                      setMessages((cur) => [...cur, ...now.map((m): ChatMsg => ({ role: 'user', content: m.text }))]);
+                      host.notify();
+                    }
+                  }
+                  const append = delivered.length ? { append: delivered } : undefined;
+                  // Then the size check, with those messages in.
                   const limits = autoCompactLimits(host.config.ai);
-                  if (!limits.enabled || epoch !== epochRef.current) return;
-                  if (round === 0 && apiRef.current.length < 2) return; // nothing but the question to fold
+                  if (!limits.enabled) return append;
+                  if (round === 0 && apiRef.current.length < 2) return append; // nothing but the question to fold
                   let next: number;
-                  if (typeof measured === 'number') next = measured;
+                  if (typeof measured === 'number') next = measured + estimateTokens(JSON.stringify(delivered));
                   else if (round === 0) { const r = contextReading(); next = r.measured ? r.used + estimateTokens(q) : r.used; }
-                  else next = contextReading(undefined, transcript, false).used;
-                  if (!overThreshold(next, contextWindowOf(), limits)) return;
+                  else next = contextReading(undefined, [...transcript, ...delivered], false).used;
+                  if (!overThreshold(next, contextWindowOf(), limits)) return append;
                   setToolLabel('⚙ compact…');
                   let result: Awaited<ReturnType<typeof foldIntoHandoff>>;
                   try {
@@ -1491,12 +1515,14 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   } catch (e) {
                     if (abort.signal.aborted || (e as Error)?.name === 'AbortError') throw e;
                     (host.services as Record<string, any>).pushLog?.(`[compact] the automatic compaction failed, the request goes as it is: ${(e as Error)?.message}`);
-                    return;
+                    return append;
                   } finally {
                     setToolLabel('');
                   }
                   if (abort.signal.aborted) throw new DOMException('The operation was aborted.', 'AbortError');
-                  if (epoch !== epochRef.current) return;
+                  if (epoch !== epochRef.current) return append;
+                  // The person's message stays, the rest is the handoff; what they
+                  // queued since goes after it, as it would have without the compaction.
                   const resumed: ChatMessage = round === 0 ? asked : { ...asked, content: `${q}\n\n${RESUMED_NOTE}` };
                   summaryRef.current = result.summary;
                   usageRef.current = null; // the measured size was of the history just replaced
@@ -1504,7 +1530,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   markCompacted(next, result.summary, result.incomplete, true);
                   persist();
                   const sysNow = joinSystem({ ...sysParts, summary: summaryBlock() }, projectBlock());
-                  return { messages: wireMessages([...(sysNow ? [{ role: 'system', content: sysNow } as ChatMessage] : []), resumed], (ref) => resolveImage(ref, [])) };
+                  return { messages: wireMessages([...(sysNow ? [{ role: 'system', content: sysNow } as ChatMessage] : []), resumed], (ref) => resolveImage(ref, [])), ...append };
                 },
                 // What this conversation has loaded; `tools_load` adds to it mid-turn.
                 // The mode (`ai.toolLoading`) is applied by the `chatLLM` service.
@@ -1892,7 +1918,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // turn puts them back into the field instead (`restoreQueue`) rather than
               // firing them into a conversation just stopped.
               if (!aborted && !failed && queueRef.current.length) {
-                const nextQueued = queueRef.current.shift() as string;
+                const nextQueued = queueRef.current.shift()!.text;
                 syncQueue();
                 setTimeout(() => { void send(nextQueued); }, 0);
               } else {
@@ -2078,7 +2104,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // What the person queued meanwhile goes out now — unless they stopped the
               // command: then it comes back into the field, as after a stopped answer.
               else if (!stopped && queueRef.current.length) {
-                const nextQueued = queueRef.current.shift() as string;
+                const nextQueued = queueRef.current.shift()!.text;
                 syncQueue();
                 setTimeout(() => { void send(nextQueued); }, 0);
               } else {
@@ -2135,7 +2161,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // What was queued meanwhile goes out now, as after an answer — unless the
                 // command was stopped or failed: then it comes back into the field.
                 if (ok && queueRef.current.length) {
-                  const nextQueued = queueRef.current.shift() as string;
+                  const nextQueued = queueRef.current.shift()!.text;
                   syncQueue();
                   setTimeout(() => { void send(nextQueued); }, 0);
                 } else restoreQueue();
@@ -2970,6 +2996,14 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 host.notify();
                 return true;
               }
+              // ── Tab on the EMPTY field with a message queued in a turn: the last one is
+              // held for the turn's end, or let go at the next step again.
+              if (key.name === 'tab' && !key.shift && !key.meta && !key.ctrl && inputRef.current === '' && inTurnRef.current && queueRef.current.length) {
+                const last = queueRef.current.at(-1)!;
+                queueRef.current = [...queueRef.current.slice(0, -1), { ...last, hold: !last.hold }];
+                syncQueue();
+                return true;
+              }
               // ── Tab: completion — a `/command`, its argument, a path in shell mode
               // (`chatComplete`). It takes the offer drawn after the caret and then walks
               // the other candidates, the `:` line's way; only with the caret at the end
@@ -3001,7 +3035,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   histAt.current = null;
                   histShown.current = '';
                   setBangLevel(0);
-                  setField(queueRef.current.pop() as string);
+                  setField(queueRef.current.pop()!.text);
                   syncQueue();
                   return true;
                 }
@@ -3083,7 +3117,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 }
                 else if (streamRef.current) {
                   // An answer is coming: queue instead of dropping the keypress.
-                  if (cmd) { queueRef.current.push(cmd); setField(''); syncQueue(); }
+                  if (cmd) { queueRef.current.push({ text: cmd }); setField(''); syncQueue(); }
                 } else if (!cmd && continueOfferRef.current) void send(CONTINUE_WORD);
                 else send();
                 return true;
@@ -3173,7 +3207,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             pendingConfirm: pendingAsk,
             pendingQuestion,
             picker,
-            queued,
+            queued: queued.map((m) => m.text),
+            // What the last queued message waits for: the turn's next step, or its end
+            // (held, ⇥) — none outside a turn, where it goes when the command ends.
+            queueWaits: queued.length && inTurnRef.current ? (queued.at(-1)!.hold ? 'end' : 'step') : null,
             // The title names what is on screen — the items' labels.
             subject: contextTitle(screen),
             elapsed: elapsedMs, emptyNotice, toolCount, completion, continueOffer,
