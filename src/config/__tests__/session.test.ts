@@ -165,3 +165,21 @@ test('an array edit writes the files\' value back, never a session value', async
   expect(res.ok).toBe(true);
   expect(JSON.stringify(JSON.parse(readFileSync(file, 'utf8')))).not.toContain('Session');
 });
+
+test('a value that names another variable brings its value into the secrets at once', async () => {
+  const { activeSecrets, redactSecrets, setActiveSecrets, setSecretsEnv } = await import('../../assistant/secrets.ts');
+  const { resetSessionConfig, setConfigValue, unsetConfigValue } = await import('../load');
+  setSecretsEnv(() => ({ WIKI_ACCESS: 'wiki-access-value-001' }));
+  try {
+    const config: Record<string, unknown> = {};
+    setConfigValue(config, 'ai.tokenEnv', 'WIKI_ACCESS', { scope: 'session' });
+    expect(activeSecrets()?.names).toContain('WIKI_ACCESS');
+    expect(redactSecrets('wiki-access-value-001')).toBe('‹secret WIKI_ACCESS›');
+    unsetConfigValue(config, 'ai.tokenEnv', { scope: 'session' });
+    expect(activeSecrets()?.names).not.toContain('WIKI_ACCESS');
+  } finally {
+    setSecretsEnv(null);
+    setActiveSecrets(null);
+    resetSessionConfig();
+  }
+});

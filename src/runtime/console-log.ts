@@ -10,14 +10,18 @@
 // rendering" again, printed by the very thing that is logging it. So every line is
 // delivered on a microtask. Lines printed before the App is up are held until it is.
 
+import { redactSecrets } from '../assistant/secrets.js';
+
 export type ConsoleLevel = 'log' | 'info' | 'debug' | 'warn' | 'error';
 
 // `[console] …` for a plain line, `[console.warn] …` / `[console.error] …` otherwise —
 // the log colours a line that says `error` as a failure. A line of several (a stack) is
-// one entry per line, each with the prefix, so every one of them reads on its own.
+// one entry per line, each with the prefix, so every one of them reads on its own. A
+// known secret is taken out here, so neither the log nor the lines kept for stderr at
+// exit ever hold one.
 export function consoleLogLines({ level, line }: { level: ConsoleLevel; line: string }): string[] {
   const prefix = level === 'log' ? '[console]' : `[console.${level}]`;
-  return line.split('\n').filter((l) => l.trim() !== '').map((l) => `${prefix} ${l}`);
+  return redactSecrets(line).split('\n').filter((l) => l.trim() !== '').map((l) => `${prefix} ${l}`);
 }
 
 export interface ConsoleBridge {

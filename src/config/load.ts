@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { appliesOnRestart, hostConfigSchema, isLeashKey, modelMaySave, modelMaySet } from './schema.js';
 import { llmOpts } from '../assistant/llm-endpoint.js';
+import { refreshSecrets } from '../assistant/secrets.js';
 
 // Config files live outside the repo, under the user's home config dir (or the
 // XDG override). config.json is the committed/default base; config.local.json
@@ -141,6 +142,17 @@ function layersOf(config: Record<string, unknown>): ConfigLayers {
   return layers;
 }
 
+// The config as the files and the session have it now, whatever of it waits for a
+// restart — what names the secrets: a key read at start (`ai.tokenEnv`) already names
+// the variable it will read.
+function configValueView(config: Record<string, unknown>): Record<string, unknown> {
+  const layers = LAYERS.get(config);
+  if (!layers) return config;
+  const root = deepMerge(deepMerge(structuredClone(config), structuredClone(layers.base)), structuredClone(layers.local));
+  for (const [k, v] of SESSION) setDeep(root, k, structuredClone(v));
+  return root;
+}
+
 // The value `key` has now, as `config get` answers it: the files' layers with the
 // session laid over them. It differs from the running app's config only for a key read
 // at start, which is never laid on it — the answer is then the value the next start
@@ -200,6 +212,8 @@ export function setConfigValue(
   }
   const restart = configMarks(opts.rootSchema ?? hostConfigSchema, key, opts.pluginConfigs).restart;
   if (!restart) setDeep(config, key, structuredClone(check.value));
+  // A value may name another variable (`${VAR}`, `ai.tokenEnv`): the secrets follow.
+  refreshSecrets(configValueView(config));
   return { ok: true, value: check.value, restart };
 }
 
@@ -226,6 +240,7 @@ export function unsetConfigValue(
     if (value === undefined) unsetDeep(config, key);
     else setDeep(config, key, structuredClone(value));
   }
+  refreshSecrets(configValueView(config));
   return { ok: true, value, restart };
 }
 

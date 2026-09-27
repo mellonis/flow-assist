@@ -19,6 +19,7 @@ import { chatTools, execChatTool, chatToolDefs, chatToolGroupOf, chatGroupDescri
 import { isHostShellTool } from '../loader/tools-shell.js';
 import type { ToolRunEntry } from '../runtime/services/log.js';
 import { changeView, type Change, type ChangeView } from './diff.js';
+import { redactDeep, redactSecrets, secretStream } from './secrets.js';
 import { acceptData, isConsoleKind, readLegacyView, type ViewRecord } from './views.js';
 import { capConsoleData } from './console-view.js';
 import { IMAGE_DEFAULTS, contentText, type ContentPart, type ImageLimits, type ImageRef } from './images.js';
@@ -859,6 +860,14 @@ export async function agentChat(
         if (replaced?.append?.length) current.push(...replaced.append);
       }
       let roundContent = '';
+      // What the model writes is shown, kept and saved without a known secret in it
+      // (./secrets.ts): its text and its reasoning each pass a redacting stream, which
+      // holds back a tail a chunk boundary may have split; the tails go out when the
+      // round ends. A round cut off loses its held tail, never a redaction.
+      const answerStream = secretStream();
+      const thinkStream = secretStream();
+      const onLive = (d: string) => { if (d) { roundContent += d; (opts.onLive as AgentOpts['onLive'])?.(d); } };
+      const onThink = (d: string) => { if (d) opts.onReasoning?.(d); };
       const r = await chatRoundFn(withRequestTail(withSystemPrompt(withAttachedImages(current, attachedUrls), systemPrompt), requestTail), {
         ...opts,
         tools: roundTools(),
@@ -867,11 +876,11 @@ export async function agentChat(
         // Round content streams LIVE via onLive while accumulating into roundContent.
         // Which shelf it belongs to (answer vs. narration fold) is decided at the end
         // of the round, when tool_calls arrive (or not).
-        onDelta: (d: string) => {
-          roundContent += d;
-          (opts.onLive as AgentOpts['onLive'])?.(d);
-        },
+        onDelta: (d: string) => onLive(answerStream.push(d)),
+        onReasoning: (d: string) => onThink(thinkStream.push(d)),
       } as Record<string, unknown>);
+      onThink(thinkStream.flush());
+      onLive(answerStream.flush());
       if (r.usage) {
         usage = r.usage;
         // New tokens: the prompt less its cached part — or, with no cache figure reported,
@@ -1095,7 +1104,12 @@ export async function agentChat(
         // run_command's already was, src/assistant/console-view.ts), so a session file
         // stays bounded whichever path handed the data over — a live view's first
         // state, an update, or the legacy one-argument reportView below.
-        const capIfConsole = (kind: string, data: unknown): unknown => (isConsoleKind(kind) ? capConsoleData(data) : data);
+        // Every string in a view's data is redacted first (./secrets.ts): the view is
+        // drawn, saved with the session and journaled from this record.
+        const capIfConsole = (kind: string, data: unknown): unknown => {
+          const clean = redactDeep(data);
+          return isConsoleKind(kind) ? capConsoleData(clean) : clean;
+        };
         const open = (kind: string, data: unknown): LiveView => {
           const capped = capIfConsole(kind, data);
           const slot = { rec: { kind: String(kind), data: acceptData(capped) ? capped : null, phase: 'live', startedAt: now(), callId: `${turnKey}.${callSeq}#${opened.length}`, seq: callSeq } as ViewRecord, discarded: false };
@@ -1126,7 +1140,10 @@ export async function agentChat(
             // tool that must never run on the model's word alone (`config_set`) reads it.
             confirmedByPerson,
             reportChange: (c: Change) => {
-              try { const v = changeView(c); if (v) changes.push(v); } catch { /* a bad report never fails the write */ }
+              try {
+                const v = changeView({ ...c, before: redactSecrets(c.before), after: redactSecrets(c.after) });
+                if (v) changes.push(v);
+              } catch { /* a bad report never fails the write */ }
             },
             // An image to send beside this result in the rounds that follow — the
             // `recall` tool's way of showing an attached image again. The ref is what
@@ -1187,7 +1204,11 @@ export async function agentChat(
         }
         // A tool that threw keeps what it showed, marked failed: the person was reading it.
         const views = opened.filter((s) => !s.discarded).map((s) => s.rec);
-        const detailStr = typeof detail === 'string' ? detail : JSON.stringify(detail);
+        // The one place a tool's result is taken out of known secrets (./secrets.ts):
+        // everything below — what the model is sent, the kept data a later call pipes,
+        // the trail, the log, the session and the journal — reads these two.
+        const detailStr = redactSecrets(typeof detail === 'string' ? detail : JSON.stringify(detail));
+        if (typeof whole === 'string') whole = redactSecrets(whole);
         // Only what joins the model's history is capped — the trail line, the log and
         // the session below all keep `detailStr` whole; `def?.maxResultChars` (the
         // plugin tool type) overrides the conversation's cap for this one tool.

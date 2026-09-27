@@ -34,6 +34,7 @@ import type { PluginRepo as RepoShape } from './loader/host-group.js';
 import { loadPlugins } from './loader/build.js';
 import { assembleToolRegistry, pluginConfigs } from './loader/tools.js';
 import { renderApp } from './runtime/app.js';
+import { refreshSecrets } from './assistant/secrets.js';
 import { consoleBridge } from './runtime/console-log.js';
 import { agentChat } from './assistant/agent.js';
 import { neverAutomatic } from './assistant/auto.js';
@@ -113,6 +114,9 @@ export function parseCli(argv: string[]): ParseResult {
 export async function main(argv: string[]): Promise<void> {
   const parsed = parseCli(argv);
   const config = loadConfig();
+  // The secrets this config and the environment name, taken out of every text the
+  // model, the screen and the records see (src/assistant/secrets.ts).
+  refreshSecrets(config);
   const repo = createPluginRepo({ availableDir, enabledDir, projectRoot, fetchPlugin });
 
   switch (parsed.cmd) {

@@ -1032,3 +1032,49 @@ test('the plan reminder goes only to a result of work that ran, never to a faile
   expect(byId('c3')).toContain(PLAN_REMINDER);
   expect(byId('c4')).not.toContain(PLAN_REMINDER);
 });
+
+test('a known secret leaves a turn nowhere: not the result sent, the run, its raw data, a view, a change, the streamed answer or its reasoning', async () => {
+  const { buildSecretSet, setActiveSecrets } = await import('../secrets');
+  const token = 'agent-secret-value-1234567890';
+  setActiveSecrets(buildSecretSet({}, { WB_WIKI_TOKEN: token }));
+  try {
+    const seen: unknown[] = [];
+    const run = async (_a: unknown, ctx: any) => {
+      const v = ctx.liveView('console', { command: 'env', cwd: '~', text: '' });
+      v.update({ command: 'env', cwd: '~', text: `WB_WIKI_TOKEN=${token}` });
+      ctx.reportChange({ title: '.env', before: '', after: `WB_WIKI_TOKEN=${token}\n` });
+      return { text: `framed: ${token}`, raw: token };
+    };
+    assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
+    const extraTools = [{ type: 'function', function: { name: 'demo:show', description: 'd', parameters: { type: 'object', properties: {} } }, run }] as any;
+    let round = 0;
+    const chatRound = async (messages: any[], opts: any) => {
+      round++;
+      if (round === 1) return { content: '', finishReason: 'tool_calls', toolCalls: [{ id: 'c1', name: 'demo__show', arguments: '{}' }] };
+      seen.push(messages);
+      const answer = `The token is ${token}.`;
+      opts.onReasoning?.(answer.slice(0, 20));
+      opts.onReasoning?.(answer.slice(20));
+      for (let i = 0; i < answer.length; i += 5) opts.onDelta?.(answer.slice(i, i + 5));
+      return { content: answer, finishReason: 'stop', toolCalls: [] };
+    };
+    let live = '';
+    let reasoning = '';
+    const res = await agentChat([{ role: 'user', content: 'go' }], {
+      baseUrl: 'http://x', model: 'm', token: 't', extraTools, chatRound,
+      onLive: (d: string) => { live += d; },
+      onLiveCommit: (c: string) => seen.push(c),
+      onReasoning: (d: string) => { reasoning += d; },
+      onToolLive: (rec: unknown) => seen.push(rec),
+      onToolRun: (r: unknown) => seen.push(r),
+    } as any);
+    seen.push(res, live, reasoning);
+    const all = JSON.stringify(seen);
+    expect(all).not.toContain(token);
+    expect(live).toBe('The token is ‹secret WB_WIKI_TOKEN›.');
+    expect(reasoning).toBe('The token is ‹secret WB_WIKI_TOKEN›.');
+    expect(res.toolRuns[0]!.raw).toBe('‹secret WB_WIKI_TOKEN›');
+  } finally {
+    setActiveSecrets(null);
+  }
+});

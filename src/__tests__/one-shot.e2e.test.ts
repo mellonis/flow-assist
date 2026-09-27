@@ -32,7 +32,7 @@ export default function ({ make }) {
 }
 
 async function oneShot(model: ScriptedModel, allowWrites: boolean, withPlugin = false) {
-  process.env.LLM_TOKEN = 'scripted';
+  process.env.LLM_TOKEN = '^scripted-llm-token';
   model.install();
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-oneshot-')));
   const enabledDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-oneshot-enabled-'));

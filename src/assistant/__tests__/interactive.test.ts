@@ -301,3 +301,20 @@ test('a session is never named by the host\'s ask after a !!command', () => {
   expect(sessionTitle([{ role: 'shell', command: 'git add -p', content: '' }, ask])).toBe('$ git add -p');
   expect(sessionTitle([{ role: 'shell', command: 'top', content: '' }, ask, { role: 'user', content: 'why so slow?' }])).toBe('why so slow?');
 });
+
+test('a known secret in the recording is redacted before anything reads it', async () => {
+  const { buildSecretSet, setActiveSecrets } = await import('../secrets.ts');
+  const token = 'recorded-secret-value-123456';
+  setActiveSecrets(buildSecretSet({}, { MY_API_KEY: token }));
+  try {
+    const spawn: InteractiveSpawn = async (_f, args) => {
+      fs.writeFileSync(args[1]!, `login ok\n${token}\n`);
+      return { code: 0, signal: null };
+    };
+    const run = await runInteractive('login', { cwd: os.tmpdir(), suspend: async (fn) => fn(), maxChars: 1000 }, { detect: () => 'bsd', spawn, signals: new EventEmitter() });
+    expect(JSON.stringify(run)).not.toContain(token);
+    expect(run.result.output).toContain('‹secret MY_API_KEY›');
+  } finally {
+    setActiveSecrets(null);
+  }
+});

@@ -20,6 +20,7 @@ import { spawn as nodeSpawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { redactSecrets } from './secrets.js';
 import type { ShellResult } from './shell.js';
 import { sanitizeViewText } from './views.js';
 import { withPwdTrailer } from './shell.js';
@@ -293,7 +294,9 @@ export async function runInteractive(cmd: string, opts: InteractiveOptions, deps
     let raw = '';
     let skipped = 0;
     if (flavor) { try { ({ text: raw, skipped } = readTail(recording)); } catch { /* nothing was recorded */ } }
-    const text = cleanRecording(raw);
+    // Every known secret out before anything reads the recording — the model, the
+    // view, the session and the journal all take it from here (./secrets.ts).
+    const text = redactSecrets(cleanRecording(raw));
     const over = Math.max(0, text.length - opts.maxChars);
     // Bytes left unread count as characters cut: near enough to say that the start of
     // the recording is missing, and how much of it.

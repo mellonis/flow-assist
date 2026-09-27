@@ -53,6 +53,7 @@ import { ARM_MS, armHint, armKeyOf, armStep, type Arm } from './exit-keys.js';
 import { copyToClipboard } from '../assistant/copy.js';
 import { readClipboardImage, type ClipboardImage } from '../assistant/images.js';
 import { legacyRootsNote } from '../assistant/shell.js';
+import { refreshSecrets } from '../assistant/secrets.js';
 import { llmConfigNotes } from '../assistant/llm-endpoint.js';
 import { collectContext } from '../assistant/screen-context.js';
 import { resolveAppTheme } from '../playback/theme.js';
@@ -333,6 +334,9 @@ export function renderApp(
   // An app starts on an empty session: a value `config set --session` laid over the
   // files belongs to the run that set it (src/config/load.ts).
   resetSessionConfig();
+  // The secrets the host knows, from this config and the environment: every choke
+  // point that takes them out of text reads this set (src/assistant/secrets.ts).
+  refreshSecrets(config);
   const userTheme = config.theme as Theme | undefined;
   let themeScheme: ColorScheme = root.colorScheme?.().scheme ?? 'unknown';
   config.theme = resolveAppTheme(userTheme, plugins, config, themeScheme);

@@ -117,3 +117,14 @@ test('the log keeps its last lines only', async () => {
   expect(log.read()).toHaveLength(LOG_MAX_LINES);
   expect(log.read()[0]).toEndWith(' line 5');
 });
+
+test('a known secret printed to the console reaches neither the log nor stderr at exit', async () => {
+  const { buildSecretSet, setActiveSecrets } = await import('../../assistant/secrets.ts');
+  const token = 'console-secret-value-01';
+  setActiveSecrets(buildSecretSet({}, { MY_TOKEN: token }));
+  try {
+    expect(consoleLogLines({ level: 'log', line: `got ${token}` })).toEqual(['[console] got ‹secret MY_TOKEN›']);
+  } finally {
+    setActiveSecrets(null);
+  }
+});

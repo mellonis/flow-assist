@@ -30,6 +30,7 @@
 // Pure: no fs, no clock, no colours.
 
 import { cellWidth, cutStep } from '../cells.js';
+import { redactSecrets } from './secrets.js';
 
 export const VIEW_CAPS = {
   // What a view KEEPS — and so what a session file holds and what ^r unfolds.
@@ -77,13 +78,15 @@ const TAB_WIDTH = 4;
 // Text as it may be drawn: no escape sequences, no control characters, and `\r`
 // treated as a line break of its own — a progress bar that rewrites one line with
 // carriage returns becomes one line per state, so the cap below keeps its LAST state
-// rather than gluing the whole bar into a single unreadable row.
+// rather than gluing the whole bar into a single unreadable row. A known secret is
+// taken out too (./secrets.ts): every view line drawn and every screen item the model
+// is sent passes through here.
 export function sanitizeViewText(raw: unknown): string {
-  return String(raw ?? '')
+  return redactSecrets(String(raw ?? '')
     .replace(ESCAPES, '')
     .replace(/\r\n?/g, '\n')
     .replace(/\t/g, ' '.repeat(TAB_WIDTH))
-    .replace(CONTROLS, '');
+    .replace(CONTROLS, ''));
 }
 
 // ─── Renderers ────────────────────────────────────────────────────────────────

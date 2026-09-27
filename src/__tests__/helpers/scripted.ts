@@ -28,6 +28,7 @@ import type { ClipboardImage } from '../../assistant/images.ts';
 import type { InteractiveDeps } from '../../assistant/interactive.ts';
 import type { RestartingTransport } from '../../remote/transport.ts';
 import { renderChatModal, renderHelp, renderLogModal, renderReminder } from '../../views/modals.ts';
+import { setSecretsEnv } from '../../assistant/secrets.ts';
 
 export type Step =
   | { text: string } | { tool: string; args: unknown } | { text: string; tool: string; args: unknown } | { hold: true }
@@ -293,8 +294,17 @@ export const settle = async (n = 10) => { for (let i = 0; i < n; i++) { await fl
 // the assistant is left alone too. `opts.remote` enables one remote plugin through the
 // loader's real path: its manifest is written into a temp `plugins-enabled/<name>/`
 // and the loader is handed `transport` for it instead of starting a process.
+// The environment as it was when the rig was loaded: the machine's own. The secrets an
+// app knows (src/assistant/secrets.ts) are built from what a test set or changed
+// since, never from the tokens of whoever runs the suite — a secret of theirs would
+// otherwise hold back streamed text in the frames the tests read.
+const MACHINE_ENV = { ...process.env };
+const testEnv = (): Record<string, string | undefined> =>
+  Object.fromEntries(Object.entries(process.env).filter(([k, v]) => MACHINE_ENV[k] !== v));
+setSecretsEnv(testEnv);
+
 export async function bootApp(model: ScriptedModel, cols = 100, rows = 28, guests?: (make: Make) => Plugin[], extra: Record<string, unknown> = {}, opts: { toastMs?: number; scheme?: 'light' | 'dark' | 'unknown'; clipboardImage?: () => ClipboardImage; pluginsNote?: string; interactive?: InteractiveDeps; chatMode?: 'panel' | 'window' | 'full' | null; backend?: TestBackend; remote?: { manifest: Record<string, unknown>; transport: RestartingTransport } } = {}) {
-  process.env.LLM_TOKEN = 'scripted';
+  process.env.LLM_TOKEN = '^scripted-llm-token';
   model.install();
   // Sessions go to a fresh temp dir unless a test names one: a test must never write
   // into, or continue, the person's own saved chats.

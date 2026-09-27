@@ -3177,6 +3177,52 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   (`[config] fs.roots is read as shell.roots / plugins.repo.roots — move it: …`). The
   one-shot prompt has no log and says nothing.
 
+## Secrets
+
+A command the model runs can print anything the process can see, so "secrets stay in
+the environment" holds only with the rules below; each is enforced in ONE place, and
+a new path for text keeps to it.
+
+- **The host knows the secret values** (`src/assistant/secrets.ts`, `SecretSet`): every
+  environment variable the config names — `${VAR}` in any string value, `ai.tokenEnv`
+  (or its default) — every variable whose NAME matches `SECRET_NAME_RE`
+  (`TOKEN|SECRET|PASSWORD|PASSWD|COOKIE|API_?KEY|_KEY$`; a plugin's `requiredSettings`
+  token is one of these — the plugin API has no other way to call a setting secret),
+  and a literal string at a secret-looking key of the config itself (an MCP server's
+  `headers.Authorization`, named by its key path; `Bearer x`'s credential on its own
+  too). A system variable (`PATH`, `HOME`, `USER`, `SHELL`, `TMPDIR`, `TERM`, `LANG`,
+  `LC_*`, `XDG_*`, …) is never one, whatever names it: a stdio server's `env` passes
+  `${PATH}` through. The set is built at start (`refreshSecrets` in `main()` and
+  `renderApp`) and again whenever a value is set or unset (`setConfigValue`,
+  `unsetConfigValue`); a value is never logged or journaled.
+- **`redactSecrets(text)` replaces each occurrence with `‹secret NAME›`** — the value,
+  and its base64 (unpadded), base64url and URL-encoded forms, the longest match first; a
+  value under `SECRET_MIN_LENGTH` (8) is never redacted (it would match words). A
+  stream (`secretStream`) holds back the shortest tail that could still grow into a
+  secret, so a chunk boundary never lets a split one through; streamed text therefore
+  shows a few characters late when its end could begin one. The choke points, one per
+  channel:
+  - a tool's result — `agentChat`, where `detailStr` and the data behind a framed result
+    (`raw`) are made: what the model is sent, the kept data a later call pipes, the
+    trail, the tool log, the session and the journal all read them;
+  - a view's data (`open`/`update` in `agentChat`, before `acceptData`) and a change's
+    `before`/`after` (`reportChange`) — drawn, saved and journaled from there;
+  - command output — inside `runShell`, before a chunk reaches `onOutput` or the kept
+    tail, so `!command`, `run_command`, the live view, the journal's `shell-out` /
+    `call-out` and the model all get it redacted, and a tail cut never starts inside a
+    secret; the `!!` recording right after `cleanRecording`;
+  - the model's answer and its reasoning — a stream per round in `agentChat`, so what
+    is drawn live, committed, saved and journaled has none;
+  - view text — `sanitizeViewText`, which every framed view line and every screen item
+    the model is sent passes through;
+  - the log — `LogService.append` and `logToolRun`, and `consoleLogLines` (so the lines
+    kept for stderr at exit have none).
+  The person's own words — a message, a `!command` line — are theirs and are not
+  touched.
+- The test rig builds the set from what a test set itself (`setSecretsEnv` in
+  `src/__tests__/helpers/scripted.ts`), never from the machine's own tokens, and its
+  `LLM_TOKEN` starts with `^`, a character no streamed test text ends in.
+
 ## Testing
 
 From the host root: `bun run typecheck && bun test ./src ./scripts ./packages` (the

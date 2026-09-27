@@ -5,6 +5,12 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **Known secrets never reach the assistant or the records.** Every token the app
+  knows — the variables the config names (`${VAR}`, `ai.tokenEnv`), any variable whose
+  name says it is a token, key, secret, password or cookie, a credential written into
+  the config — is replaced by `‹secret NAME›` in tool results, command output (streamed,
+  a token split across chunks included, and base64 or URL-encoded forms too), views, the
+  assistant's answer and the log, before it is sent, drawn, saved or journaled.
 - **An MCP server that is not there at start is tried again, not dropped for the run.**
   A server that fails to connect — a gateway that answered 502 just then, an IDE not open
   yet — or drops later (refused, reset, a gateway's 502/503/504, a process that exits;

@@ -24,6 +24,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { secretStream } from './secrets.js';
 import { fence } from './views.js';
 
 export const SHELL_DEFAULTS = { timeoutMs: 120_000, maxChars: 20_000 };
@@ -188,11 +189,18 @@ export function runShell(cmd: string, opts: ShellOptions): Promise<ShellResult> 
     let out = '';
     let dropped = 0;
     let timedOut = false, stopped = false, done = false;
-    const take = (chunk: string) => {
-      if (!done) { try { opts.onOutput?.(chunk); } catch { /* a listener never breaks the command */ } }
-      out += chunk;
+    // Every known secret is taken out HERE, before a chunk reaches a listener or the
+    // buffer (./secrets.ts): whatever shows, journals or hands over the output only ever
+    // has the redacted text, and a tail cut can never start inside a secret. The stream
+    // holds back a tail that could still grow into one; `finish` flushes it.
+    const secrets = secretStream();
+    const emit = (text: string) => {
+      if (!text) return;
+      if (!done) { try { opts.onOutput?.(text); } catch { /* a listener never breaks the command */ } }
+      out += text;
       if (out.length > maxChars * 2) { dropped += out.length - maxChars; out = out.slice(-maxChars); }
     };
+    const take = (chunk: string) => emit(secrets.push(chunk));
     // Where the shell ends up is written to a private temp file, so it never mixes
     // with the output. (A 4th stdio pipe was tried: under Bun it now and then closed
     // early — "pwd: write error: Broken pipe" — and the report was lost.) The newline
@@ -217,6 +225,7 @@ export function runShell(cmd: string, opts: ShellOptions): Promise<ShellResult> 
     let grace: ReturnType<typeof setTimeout> | null = null;
     const finish = (code: number | null, error?: string) => {
       if (done) return;
+      emit(secrets.flush());
       done = true;
       clearTimeout(timer);
       if (grace) clearTimeout(grace);

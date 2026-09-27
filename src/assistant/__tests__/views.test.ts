@@ -137,3 +137,14 @@ test('a line is cut by the cells it takes, per grapheme cluster', () => {
   const [cut] = texts(frameView(rec('k'), { k: () => [[{ text: '✅'.repeat(15) }, { text: 'abcdefgh' }]] }, rctx, palette));
   expect(cut).toBe(`${'✅'.repeat(9)}…`);
 });
+
+test('a known secret never reaches a view\'s text — what is drawn and what the screen context sends', async () => {
+  const { buildSecretSet, setActiveSecrets } = await import('../secrets.ts');
+  const token = 'view-secret-value-0001';
+  setActiveSecrets(buildSecretSet({}, { MY_TOKEN: token }));
+  try {
+    expect(sanitizeViewText(`a ${token} b`)).toBe('a ‹secret MY_TOKEN› b');
+  } finally {
+    setActiveSecrets(null);
+  }
+});

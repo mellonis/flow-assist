@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import { hostStateDir } from '../../config/load.js';
 import path from 'node:path';
+import { redactSecrets } from '../../assistant/secrets.js';
 
 // Debug log for tool runs lives with the rest of the host state (`hostStateDir`,
 // honouring the XDG override — a temporary directory under `bun test`, so a test that
@@ -66,7 +67,8 @@ export function createLogService(config: Record<string, unknown> | undefined): L
       // When it happened is half of what a log line says; the buffer had none.
       const t = new Date();
       const stamp = [t.getHours(), t.getMinutes(), t.getSeconds()].map((n) => String(n).padStart(2, '0')).join(':');
-      buffer.push(`${stamp} ${entry}`);
+      // Every line the log keeps, whoever appends it, has no known secret in it.
+      buffer.push(`${stamp} ${redactSecrets(String(entry))}`);
       if (buffer.length > LOG_MAX_LINES) buffer.splice(0, buffer.length - LOG_MAX_LINES);
     },
 
@@ -89,7 +91,7 @@ export function createLogService(config: Record<string, unknown> | undefined): L
         // Rotation is best-effort; a failed rename must not abort the loop.
       }
       try {
-        const line = formatToolRun({ ts: new Date().toISOString(), ...entry }) + '\n';
+        const line = redactSecrets(formatToolRun({ ts: new Date().toISOString(), ...entry })) + '\n';
         fs.appendFileSync(file, line, 'utf8');
       } catch {
         // Logging is optional; a failed write is silently ignored.

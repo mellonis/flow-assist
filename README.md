@@ -276,6 +276,13 @@ Either alone changes nothing, and the assistant can never set `shell.autoRun` it
 What ran is still shown: the ✎ diff, the command's block and the tool trail are the same
 either way.
 
+Tokens stay out of the conversation. Every secret the app knows — the variables your
+config names (`${VAR}`, `ai.tokenEnv`), any variable whose name says it is a token, key,
+secret, password or cookie, and a credential written into the config itself — is
+replaced by `‹secret NAME›` wherever it turns up: a tool's result, a command's output
+(yours too), what a view shows, the assistant's answer and the log. The assistant, the
+screen, the saved session and its journal only ever see the mark.
+
 ## Plugins
 
 Source lives in `plugins-available/<name>/`. Enable a plugin with
