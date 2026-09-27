@@ -128,10 +128,54 @@ export function scopeViews(ctx: ToolCtx, owner: string): ToolCtx {
 
 // Module-level singleton registry so the agent loop can dispatch tools without
 // threading a registry through every call (source-faithful `chatTools` /
-// `execChatTool`). Refreshed on every `assembleToolRegistry` call.
+// `execChatTool`). Set by every `assembleToolRegistry` call and brought up to date in
+// place by `refreshToolRegistry`.
 let currentRegistry: ToolRegistry | null = null;
+let refreshCurrent: (() => void) | null = null;
 
-export function assembleToolRegistry({ plugins, config, repo }: AssembledToolRegistryInput): ToolRegistry {
+type Assembled = { groups: ToolGroup[]; tools: ToolDef[]; nameToGroup: Map<string, ToolGroup>; ownName: Map<string, string> };
+
+export function assembleToolRegistry(input: AssembledToolRegistryInput): ToolRegistry {
+  // A name clash is said once per registry, not again at every refresh.
+  const said = new Set<string>();
+  const warn = (line: string) => {
+    if (said.has(line)) return;
+    said.add(line);
+    console.warn(line);
+  };
+  let state = assemble(input, warn);
+  const registry: ToolRegistry = {
+    groups: state.groups,
+    tools: state.tools,
+    exec: async (name, args, ctx) => {
+      const group = state.nameToGroup.get(name);
+      if (!group) throw new Error(`Unknown tool: ${name}`);
+      return group.exec(state.ownName.get(name) ?? name, args ?? {}, ctx);
+    },
+  };
+  // A refresh swaps what this object holds, never the object: the app, its services and
+  // the context meter keep the one they were handed.
+  refreshCurrent = () => {
+    state = assemble(input, warn);
+    registry.groups = state.groups;
+    registry.tools = state.tools;
+  };
+  currentRegistry = registry;
+  return registry;
+}
+
+// Reads every plugin's `tools` again into the registry already handed out — for a
+// plugin whose groups change while the app runs (an MCP server that connects after the
+// start, or is turned off): the plugin sets `tools` on its plugin object and calls this,
+// handed to its builder as `toolsChanged`. `ai.disabledTools` is read again with it.
+// What a request carries is read from the registry when its turn starts (`agentChat`),
+// so a change reaches the next message, never the middle of a turn. A no-op before any
+// registry is assembled.
+export function refreshToolRegistry(): void {
+  refreshCurrent?.();
+}
+
+function assemble({ plugins, config, repo }: AssembledToolRegistryInput, warn: (line: string) => void): Assembled {
   const disabled = (config?.ai as { disabledTools?: string[] } | undefined)?.disabledTools ?? [];
   // The resolved hotkey map (host defaults + plugin keys + config.keys overrides).
   // Handed to the config tool so `config get/explain keys` reports the EFFECTIVE
@@ -187,10 +231,10 @@ export function assembleToolRegistry({ plugins, config, repo }: AssembledToolReg
       }
       const qualified = `${owner}:${name}`;
       if (nameToGroup.has(qualified)) {
-        console.warn(`[tools] "${name}" is declared by both ${holder.id} and ${group.id}, and "${qualified}" is taken too — ${group.id}'s is not offered.`);
+        warn(`[tools] "${name}" is declared by both ${holder.id} and ${group.id}, and "${qualified}" is taken too — ${group.id}'s is not offered.`);
         return [];
       }
-      console.warn(`[tools] "${name}" is declared by both ${holder.id} and ${group.id} — ${holder.id} keeps the name, ${group.id}'s is offered as "${qualified}".`);
+      warn(`[tools] "${name}" is declared by both ${holder.id} and ${group.id} — ${holder.id} keeps the name, ${group.id}'s is offered as "${qualified}".`);
       nameToGroup.set(qualified, group);
       ownName.set(qualified, name);
       return [{ ...t, function: { ...t.function, name: qualified } }];
@@ -272,17 +316,7 @@ export function assembleToolRegistry({ plugins, config, repo }: AssembledToolReg
   const tools: ToolDef[] = [];
   for (const g of groups) for (const t of g.tools) tools.push(stripTool(t));
 
-  const registry: ToolRegistry = {
-    groups,
-    tools,
-    exec: async (name, args, ctx) => {
-      const group = nameToGroup.get(name);
-      if (!group) throw new Error(`Unknown tool: ${name}`);
-      return group.exec(ownName.get(name) ?? name, args ?? {}, ctx);
-    },
-  };
-  currentRegistry = registry;
-  return registry;
+  return { groups, tools, nameToGroup, ownName };
 }
 
 // The LLM-facing (tree-shaken, disabledTools-filtered) tools of the last

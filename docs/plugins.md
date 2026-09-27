@@ -40,7 +40,7 @@ see [Compatibility](#compatibility).
 ## The builder
 
 The entry default-exports a function that gets `{ renders, config, make, z,
-modelMaySet, modelMaySave, appliesOnRestart }` and returns `make(name, shape)`:
+modelMaySet, modelMaySave, appliesOnRestart, toolsChanged }` and returns `make(name, shape)`:
 
 ```ts
 export default function buildNotesPlugin({ config, make, z, modelMaySet, modelMaySave, appliesOnRestart }) {
@@ -88,6 +88,20 @@ export default function buildNotesPlugin({ config, make, z, modelMaySet, modelMa
 - `make` fills in what the host owns — the name, the config slice, the keys.
 - The builder may be `async` (the `mcp` plugin asks its servers for their tools
   first); bound the wait yourself, the app starts after it.
+- **Tools that change while the app runs** — a server that connects after the start,
+  one turned off — are set on the plugin object `make` returned, followed by a call to
+  `toolsChanged()`: the host reads every plugin's `tools` again, `ai.disabledTools`
+  with them. What a message carries is read when its turn starts, so a group that
+  arrives mid-turn is offered from the next message on, in the `tools_load` index like
+  any other.
+
+  ```ts
+  const plugin = make('late', { tools: [] });
+  onConnected((group) => { plugin.tools = [group]; toolsChanged?.(); });
+  return plugin;
+  ```
+
+  A host older than this has no `toolsChanged`: check that it is there.
 
 ## Tools for the model
 

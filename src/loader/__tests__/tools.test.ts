@@ -908,3 +908,29 @@ test('scope "plugin" keeps a fact for the calling plugin — named by its host-i
   await reg.exec('host:plugins_remove', { name: 'keycaps' }, {});
   expect(readFacts(g)).toEqual([]);
 });
+
+// A plugin whose groups change while the app runs (an MCP server that connects late)
+// sets its plugin's `tools` and calls `refreshToolRegistry()`: the SAME registry object —
+// the one the app and its services hold — and the chat's catalog carry the new group, and
+// a group taken away is gone again.
+test('refreshToolRegistry re-reads every plugin\'s tools into the registry already handed out', async () => {
+  const { refreshToolRegistry, chatTools, chatToolGroupOf, chatGroupDescriptions } = await import('../tools');
+  const make = makeFactory({});
+  const plugin = make('late', { tools: [] });
+  const reg = assembleToolRegistry({ plugins: [plugin], config: {}, repo: { list: async () => [] } as any });
+  expect(reg.tools.map((t) => t.function.name)).not.toContain('late_ping');
+  plugin.tools = [{ id: 'mcp:late', description: 'Pings.', tools: [{ type: 'function', function: { name: 'late_ping', description: 'Ping.', parameters: { type: 'object', properties: {} } } }], exec: async () => 'pong' }];
+  refreshToolRegistry();
+  expect(reg.tools.map((t) => t.function.name)).toContain('late_ping');
+  expect(reg.groups.map((g) => g.id)).toContain('mcp:late');
+  expect(chatTools().map((t) => t.function.name)).toContain('late_ping');
+  expect(chatToolGroupOf().get('late_ping')).toBe('mcp:late');
+  expect(chatGroupDescriptions().get('mcp:late')).toBe('Pings.');
+  expect(await reg.exec('late_ping', {}, {})).toBe('pong');
+  // host:tools_list sees it too.
+  expect(String(await reg.exec('host:tools_list', {}, {}))).toContain('late_ping');
+  plugin.tools = [];
+  refreshToolRegistry();
+  expect(reg.tools.map((t) => t.function.name)).not.toContain('late_ping');
+  await expect(reg.exec('late_ping', {}, {})).rejects.toThrow(/Unknown tool/);
+});

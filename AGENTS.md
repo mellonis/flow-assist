@@ -147,7 +147,7 @@ failure). A manifest.json that does not parse says `manifest.json is not valid J
 from `host.hostApi`.
 
 A plugin module default-exports `build<Name>Plugin({ renders, config, make, z,
-modelMaySet, modelMaySave, appliesOnRestart })`.
+modelMaySet, modelMaySave, appliesOnRestart, toolsChanged })`.
 The builder may be **async** — the loader awaits it — for a plugin whose tools are known
 only after it has asked someone (the `mcp` plugin connects to its servers first, over
 Streamable HTTP or, for a server that is a command, its stdin and stdout); it is
@@ -159,6 +159,14 @@ is the person's" below): a plugin registers a key of its own schema in them, and
 is found by its node in the host's registry, so it must be these. They are an addition:
 `HOST_API` stays as it is, and a plugin that must also run on an older host checks that
 they are there.
+`toolsChanged` is for a plugin whose tool groups change while the app runs (the `mcp`
+plugin's servers connect late, drop, are turned off): it sets `tools` on the plugin
+object `make` returned and calls it, and `refreshToolRegistry` (`src/loader/tools.ts`)
+assembles every group again INTO the registry object already handed out — the App, its
+services and the context meter hold that object, so it is never replaced — with
+`ai.disabledTools` read again and a name clash said once per registry. `agentChat` reads
+the catalog when a turn starts, so a group that arrives mid-turn is sent (and indexed)
+from the next message on: the index stays stable within a turn.
 `make(name, shape)` injects `config.plugins.<name>` and qualified keys. The
 returned `shape` has optional: `commands`, `keys`, `keyActions`, `views`,
 `surface`, `modals`, `colors`, `modalColors`, `configSchema`, `components`, `tools`,

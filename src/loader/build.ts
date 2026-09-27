@@ -32,9 +32,10 @@ import { z } from 'zod';
 import { appliesOnRestart, modelMaySave, modelMaySet } from '../config/schema.js';
 import { THIS_HOST, pluginCompat, readPluginManifest } from './compat.js';
 import { isRemoteManifest, remotePlugin, transportFor } from '../remote/index.js';
+import { refreshToolRegistry } from './tools.js';
 
 // A plugin builder: `build<X>Plugin({ renders, config, make, z, modelMaySet, modelMaySave,
-// appliesOnRestart })` → Plugin (or a promise of one).
+// appliesOnRestart, toolsChanged })` → Plugin (or a promise of one).
 // `z` is the host's zod, handed to every builder: a plugin with no bundler (and so no
 // runtime dependencies — the compiled binary cannot import a package from disk) still
 // declares its `configSchema`, and it is the same zod the host validates with. The
@@ -43,7 +44,13 @@ import { isRemoteManifest, remotePlugin, transportFor } from '../remote/index.js
 // what is read only at start. A mark is found by its node in the host's registry, so
 // it must be these, never a registry of the plugin's own.
 const MARKS = { modelMaySet, modelMaySave, appliesOnRestart };
-type BuilderCtx = { renders: Record<string, unknown>; config: Record<string, unknown>; make: Make; z: typeof z } & typeof MARKS;
+// `toolsChanged` is for a plugin whose tool groups change while the app runs (the `mcp`
+// plugin, as its servers connect, drop and are turned off): it sets `tools` on the plugin
+// object `make` returned and calls this, and the registry reads every plugin's groups
+// again (`refreshToolRegistry`). An addition like the marks: a plugin that must also run
+// on an older host checks that it is there.
+const EXTRAS = { ...MARKS, toolsChanged: refreshToolRegistry };
+type BuilderCtx = { renders: Record<string, unknown>; config: Record<string, unknown>; make: Make; z: typeof z } & typeof EXTRAS;
 type BuiltinBuilder = (ctx: BuilderCtx) => Plugin;
 
 const BUILTINS: BuiltinBuilder[] = [buildCorePlugin, buildAssistantPlugin, buildKeycapsPlugin, buildLogPlugin];
@@ -127,7 +134,7 @@ export async function loadPlugins({
   // symlink set).
   for (const build of BUILTINS) {
     try {
-      plugins.push(build({ renders, config, make, z, ...MARKS }));
+      plugins.push(build({ renders, config, make, z, ...EXTRAS }));
     } catch (e) {
       console.warn(`[plugins] builtin skipped: ${(e as Error).message}`);
     }
@@ -174,7 +181,7 @@ export async function loadPlugins({
         // A builder may be async: a plugin whose tools are known only after it has asked
         // someone (an MCP server lists its tools once connected) returns a promise. It is
         // the plugin's job to bound that wait — the app starts only after it.
-        const plugin = await (build as (ctx: BuilderCtx) => Plugin | Promise<Plugin>)({ renders, config, make, z, ...MARKS });
+        const plugin = await (build as (ctx: BuilderCtx) => Plugin | Promise<Plugin>)({ renders, config, make, z, ...EXTRAS });
         // What the plugin IS, in its author's words, for the start screen — from its
         // manifest, unless the shape says it itself.
         plugin.description ??= manifestDescription(join(enabledDir, name));

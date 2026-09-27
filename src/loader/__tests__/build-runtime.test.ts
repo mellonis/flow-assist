@@ -85,3 +85,34 @@ test('a builder gets the host\'s mark registries beside z, and a key it marks is
   expect(configMarks(hostConfigSchema, 'plugins.marked.compact', schemas).maySet).toEqual({ reason: 'a display flag' });
   expect(configMarks(hostConfigSchema, 'plugins.marked.token', schemas).maySet).toBeNull();
 });
+
+// A plugin whose tools are known only later sets them on its plugin object and calls
+// `toolsChanged`, handed to its builder: the registry assembled at start reads them.
+test('a builder gets toolsChanged: the groups it sets later reach the registry assembled at start', async () => {
+  const { assembleToolRegistry } = await import('../tools');
+  const root = mkdtempSync(join(tmpdir(), 'fa-later-'));
+  const avail = join(root, 'plugins-available');
+  const enabled = join(root, 'plugins-enabled');
+  const dir = join(avail, 'later');
+  mkdirSync(join(dir, 'src'), { recursive: true });
+  mkdirSync(enabled, { recursive: true });
+  writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'later', main: './src/index.ts' }));
+  writeFileSync(join(dir, 'manifest.json'), JSON.stringify({ name: 'later', version: '1.0.0', hostApi: HOST_API }));
+  writeFileSync(join(dir, 'src', 'index.ts'), `
+    export default function build({ make, toolsChanged }) {
+      const plugin = make('later', { tools: [] });
+      globalThis.__later = () => {
+        plugin.tools = [{ id: 'later', tools: [{ type: 'function', function: { name: 'later_ping', description: 'Ping.', parameters: { type: 'object', properties: {} } } }], exec: async () => 'pong' }];
+        toolsChanged();
+      };
+      return plugin;
+    }`);
+  symlinkSync(dir, join(enabled, 'later'));
+  const repo = createPluginRepo({ availableDir: avail, enabledDir: enabled, projectRoot: root });
+  const config = {};
+  const plugins = await loadPlugins({ config, repo, enabledDir: enabled });
+  const reg = assembleToolRegistry({ plugins, config, repo });
+  expect(reg.tools.map((t) => t.function.name)).not.toContain('later_ping');
+  ((globalThis as Record<string, unknown>).__later as () => void)();
+  expect(reg.tools.map((t) => t.function.name)).toContain('later_ping');
+});
