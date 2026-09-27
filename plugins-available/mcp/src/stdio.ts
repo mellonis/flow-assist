@@ -241,7 +241,7 @@ export function createStdioClient(opts: StdioClientOptions) {
           pending.delete(id);
           // A server that has said nothing at all yet is most likely stuck starting up —
           // its stderr is the only thing that can say why.
-          reject(new McpError(heardFromServer ? `no answer in ${timeoutMs} ms` : withStderr(`no answer in ${timeoutMs} ms`)));
+          reject(new McpError(heardFromServer ? `no answer in ${timeoutMs} ms` : withStderr(`no answer in ${timeoutMs} ms`), { timeout: true }));
         }, timeoutMs);
         pending.set(id, { resolve, reject, timer });
         write(message);

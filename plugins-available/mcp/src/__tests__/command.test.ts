@@ -48,6 +48,41 @@ async function boot(servers: Record<string, unknown>, mode = { status: 'ok' as n
   return { plugin, cmd, set, unset, notes, said, errors, chat, line, panel: () => panel, changed: () => changed };
 }
 
+describe('what /mcp says', () => {
+  test('the note counts in words: 1 tool, N tools; the start screen\'s count follows a late connect', async () => {
+    const mode = { status: 502 as number | 'ok' };
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async (u: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body));
+      if (mode.status !== 'ok') return new Response('nope', { status: mode.status });
+      if (body.id === undefined) return new Response(null, { status: 202 });
+      const result = body.method === 'initialize' ? { protocolVersion: PROTOCOL_VERSION, serverInfo: { name: 'IDE', version: '1' }, capabilities: { tools: {} } } : { tools: [{ name: 'only' }] };
+      return Response.json({ jsonrpc: '2.0', id: body.id, result });
+    }) as unknown as typeof fetch;
+    const due: Array<() => void> = [];
+    const later: Timers = { now: () => 0, set: (fn) => { due.push(fn); return due.length; }, clear: () => {} };
+    const plugin = await buildMcpPlugin({ make: (_n, s) => s, config: { plugins: { mcp: { servers: { ide: { url: 'http://x' } } } } }, timers: later }) as Record<string, any>;
+    globalThis.fetch = realFetch;
+    const notes: string[] = [];
+    plugin.setup({ ui: {}, host: { services: { pushLog: () => {}, notify: () => {}, chatNote: (t: string) => notes.push(t) } } });
+    expect(plugin.description).toBe('MCP — 0 of 1 servers connected');
+    mode.status = 'ok';
+    due.shift()!();
+    await Bun.sleep(20);
+    expect(notes).toEqual(['mcp: ide connected — 1 tool']);
+    expect(plugin.description).toBe('MCP — 1 of 1 servers connected');
+  });
+
+  test(':mcp help says every line — in the chat, as a note', async () => {
+    const b = await boot({});
+    const opened: string[] = [];
+    b.cmd.run({ ...b.line, openChat: () => opened.push('open') }, 'help');
+    expect(opened).toEqual(['open']);
+    expect(b.notes.at(-1)).toContain('/mcp tools <name>');
+    expect(b.notes.at(-1)).toContain('headers and env are never taken here');
+  });
+});
+
 describe('/mcp remove', () => {
   test('a server config.json sets is refused, and a disable its overrides held is put back', async () => {
     const b = await boot({ ide: { url: 'http://x', enabled: false } });

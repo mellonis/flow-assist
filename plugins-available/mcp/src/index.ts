@@ -288,8 +288,9 @@ export async function buildMcpPlugin({ make, config, z, toolsChanged, retry, tim
       if (!plugin) return;
       plugin.tools = manager.groups();
       toolsChanged?.();
+      (plugin as { description?: string }).description = describe();
       if (event?.kind === 'connected') {
-        const line = `${event.name} connected — ${event.tools} tools`;
+        const line = `${event.name} connected — ${event.tools} ${event.tools === 1 ? 'tool' : 'tools'}`;
         log(line);
         services?.chatNote?.(`mcp: ${line}`);
       } else if (event?.kind === 'dropped') {
@@ -300,6 +301,11 @@ export async function buildMcpPlugin({ make, config, z, toolsChanged, retry, tim
       services?.notify?.();
     },
   });
+  // What the start screen says of the plugin — kept up to date as servers connect and drop.
+  const describe = () => {
+    const on = manager.list().filter((v) => v.state !== 'disabled');
+    return servers.length || on.length ? `MCP — ${on.filter((v) => v.state === 'connected').length} of ${on.length} servers connected` : 'MCP servers — none configured (plugins.mcp.servers)';
+  };
   managers.add(manager);
   if (!exitHooked) { exitHooked = true; process.once('exit', stopManagers); }
   await manager.start();
@@ -312,7 +318,6 @@ export async function buildMcpPlugin({ make, config, z, toolsChanged, retry, tim
     statusLine(v, now),
     ...(v.unknownReadOnly?.length ? [`${v.name}: readOnly names ${v.unknownReadOnly.length === 1 ? 'a tool' : 'tools'} this server does not offer — ${v.unknownReadOnly.join(', ')}`] : []),
   ]);
-  const enabled = views.filter((v) => v.state !== 'disabled');
   plugin = make('mcp', {
     name: 'mcp',
     tools: manager.groups(),
@@ -320,7 +325,7 @@ export async function buildMcpPlugin({ make, config, z, toolsChanged, retry, tim
     configSchema: configSchema(z),
     // `/mcp` in the chat, `:mcp` on the command line — the person's, never the model's.
     commands: [mcpCommand(manager, { services: () => services, now: () => clock.now() })],
-    description: servers.length ? `MCP — ${enabled.filter((v) => v.state === 'connected').length} of ${enabled.length} servers connected` : 'MCP servers — none configured (plugins.mcp.servers)',
+    description: describe(),
     // What happened to each server, in the log (L): the start screen only has room for
     // the count.
     setup: ({ host }: { host: { services?: Record<string, any> } }) => {

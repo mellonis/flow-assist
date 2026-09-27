@@ -43,15 +43,18 @@ export interface McpClientOptions {
 }
 
 // `status` — the HTTP status a server answered with; `lost` — the connection itself
-// failed (a network error, a server process gone), as against one call that failed or
-// timed out. What the plugin retries, and what it takes for the token, is read from these.
+// failed (a network error, a server process gone); `timeout` — no answer in time. What
+// the plugin takes for a drop, and what it takes for the token, is read from these.
+// A timeout is a drop (servers.ts); a status is one only for 502/503/504.
 export class McpError extends Error {
   status?: number;
   lost?: boolean;
-  constructor(message: string, info: { status?: number; lost?: boolean } = {}) {
+  timeout?: boolean;
+  constructor(message: string, info: { status?: number; lost?: boolean; timeout?: boolean } = {}) {
     super(message);
     if (info.status !== undefined) this.status = info.status;
     if (info.lost) this.lost = true;
+    if (info.timeout) this.timeout = true;
   }
 }
 
@@ -164,7 +167,7 @@ export function createMcpClient(opts: McpClientOptions) {
       const type = res.headers.get('content-type') ?? '';
       return type.includes('text/event-stream') ? await fromSse(res, id) : await res.json();
     } catch (e) {
-      if (ctl.signal.aborted) throw new McpError(`no answer in ${timeoutMs} ms`);
+      if (ctl.signal.aborted) throw new McpError(`no answer in ${timeoutMs} ms`, { timeout: true });
       // What fetch itself throws is the line down: nothing reached the server.
       throw e instanceof McpError ? e : new McpError((e as Error).message, { lost: true });
     } finally {

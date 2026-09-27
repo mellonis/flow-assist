@@ -301,16 +301,19 @@ long-lived follows:
 
 `plugins-available/mcp/src/servers.ts` holds each MCP server's life: `connecting`,
 `connected`, `failed`, `disabled`. A server that fails to connect — at start or later —
-or DROPS (a call's error is the line's: `McpError.lost` from a fetch that threw or a
-stdio process gone through `onDead`, a 5xx, a 404 for a session no longer known) loses
-its group and is tried again on `RETRY`: 5 s, 15 s, 60 s, then every 5 minutes. A
+or DROPS (a call's error is the transport's: `McpError.lost` from a fetch that threw or
+a stdio process gone through `onDead`, `McpError.timeout`, a 502/503/504 — a 500 or 404
+answering one `tools/call`, or a 401, is that call's error and the server keeps its
+tools) loses its group and is tried again on `RETRY`: 5 s, 15 s, 60 s, then every 5 minutes. A
 401/403 is the token and is never tried again (`authReason` says so and names `/mcp
 restart`). Every attempt carries the server's generation; `disable`, `restart`,
 `remove` and a drop start a new one, so an attempt that finishes under an older one lets
 go of its client and brings back nothing. A connect after the start calls `onChange`:
 the plugin sets `plugin.tools` and calls the host's `toolsChanged` (the group is in the
-next message's index), logs it and says `mcp: <name> connected — N tools` through
-`services.chatNote`. Timers are unref'd and cleared at exit (`process.once('exit')`
+next message's index), keeps the start screen's `N of M servers connected` current,
+logs it and says `mcp: <name> connected — 1 tool` / `N tools` through
+`services.chatNote`. `:mcp help`, too long for the one-row toast, opens the chat and is
+said there as a note. Timers are unref'd and cleared at exit (`process.once('exit')`
 stops every manager). The clock and the schedule are injected (`timers`, `retry` —
 builder options the loader never passes), so the tests run the schedule without waiting
 it; `src/__tests__/mcp.e2e.test.ts` holds the late group reaching the index of the next

@@ -1,8 +1,9 @@
 // The servers over the run: each one's state, and getting it back when it is not there.
 //
 // A server is `connecting`, `connected`, `failed` or `disabled`. One that fails to
-// connect — at start or later — or drops once connected (a call finds the line down, a
-// 5xx, the session gone, a stdio process that exits) is tried again in the background,
+// connect — at start or later — or drops once connected (a call finds the line refused
+// or reset, gets no answer in time or a gateway's 502/503/504, a stdio process exits)
+// is tried again in the background,
 // after 5 s, 15 s and 60 s, then every 5 minutes, until it answers. A 401 or 403 is not
 // tried again: that is the token, not the network, and the reason says so; `restart`
 // tries it again once the person has fixed it. A server that connects after the start
@@ -97,9 +98,11 @@ export const authReason = (status: number) => `HTTP ${status} — the server ref
 
 const isAuth = (e: unknown) => e instanceof McpError && (e.status === 401 || e.status === 403);
 // A call that says the connection is gone, rather than that the call failed: the line
-// down, a server error, the session no longer known, a process gone — or the token
-// refused.
-const isLost = (e: unknown) => e instanceof McpError && (e.lost === true || (e.status !== undefined && (e.status >= 500 || e.status === 404)) || isAuth(e));
+// refused or reset, no answer in time, a gateway's 502/503/504, a stdio process gone.
+// Anything else — a 500 or a 404 answering one `tools/call`, a 401 — is that call's
+// error: the model reads it, and the server keeps its tools.
+const TRANSPORT_STATUS = new Set([502, 503, 504]);
+const isLost = (e: unknown) => e instanceof McpError && (e.lost === true || e.timeout === true || (e.status !== undefined && TRANSPORT_STATUS.has(e.status)));
 
 export function createServerManager(servers: Array<{ name: string; spec: ServerSpec }>, deps: ManagerDeps = {}) {
   const env = deps.env ?? process.env;

@@ -19,9 +19,12 @@ type Services = {
   setConfig?: (key: string, value: unknown, opts?: { session?: boolean }) => { ok: boolean; error?: string; value?: unknown };
   unsetConfig?: (key: string, opts?: { session?: boolean }) => { ok: boolean; error?: string; value?: unknown };
   pushLog?: (line: string) => void;
+  chatNote?: (text: string) => void;
 };
 type Ctx = {
   surface?: 'chat' | 'line';
+  // The `:` line's: opens the chat, where a text of several lines is said as a note.
+  openChat?: () => void;
   say?: (text: string) => void;
   showMessage?: (text: string) => void;
   error?: (text: string) => void;
@@ -112,7 +115,14 @@ export function mcpCommand(manager: ServerManager, deps: { services: () => Servi
   };
   const act = (ctx: Ctx, arg: string): void => {
     const chat = ctx.surface === 'chat';
-    const say = (text: string) => (chat ? ctx.say?.(text) : ctx.showMessage?.(text.split('\n')[0]!));
+    // The `:` line's toast is one row: a text of several lines (the help) is said in the
+    // chat, opened for it, as a note.
+    const say = (text: string) => {
+      if (chat) { ctx.say?.(text); return; }
+      const note = deps.services()?.chatNote;
+      if (text.includes('\n') && note) { ctx.openChat?.(); note(text); return; }
+      ctx.showMessage?.(text.split('\n')[0]!);
+    };
     const words = arg.trim().split(/\s+/).filter(Boolean);
     const session = words.includes('--session');
     const [sub, name, ...rest] = words.filter((w) => w !== '--session');

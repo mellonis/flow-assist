@@ -115,6 +115,47 @@ describe('a server that is not there', () => {
   });
 });
 
+describe('what counts as the server dropping', () => {
+  // A server answering one tools/call with its own 500 or 404 has a broken tool, not a
+  // broken line: the model reads the call's error, and the server keeps its tools.
+  test('a 500 or a 404 answering one call is that tool\'s error; the server keeps its tools', async () => {
+    for (const status of [500, 404]) {
+      const s = flaky('ok');
+      const t = fakeTimers();
+      const m = createServerManager([{ name: 'tracker', spec: { url: 'http://x' } }], { fetch: s.fetch, schedule, timers: t.timers });
+      await m.start();
+      s.box.mode = status;
+      const out = await m.groups()[0]!.exec('tracker:find', {});
+      expect(out.text).toContain(`ERROR from tracker:find`);
+      expect(out.text).toContain(`HTTP ${status}`);
+      expect(m.groups().map((g) => g.id)).toEqual(['mcp:tracker']);
+      expect(m.list()[0]!.state).toBe('connected');
+      expect(t.count()).toBe(0);
+    }
+  });
+
+  test('a transport failure is a drop: 502/503/504, a refused connection, a timeout', async () => {
+    const cases: Array<[string, Fetcher]> = [
+      ['503', async () => new Response('down', { status: 503 })],
+      ['504', async () => new Response('slow', { status: 504 })],
+      ['refused', async () => { throw new Error('connect ECONNREFUSED 127.0.0.1:1'); }],
+      ['timeout', (_u, init) => new Promise((_, reject) => init.signal?.addEventListener('abort', () => reject(new Error('aborted'))))],
+    ];
+    for (const [label, broken] of cases) {
+      const s = flaky('ok');
+      let bad = false;
+      const fetch: Fetcher = (u, i) => (bad ? broken(u, i) : s.fetch(u, i));
+      const t = fakeTimers();
+      const m = createServerManager([{ name: 'tracker', spec: { url: 'http://x', timeoutMs: 30 } }], { fetch, schedule, timers: t.timers });
+      await m.start();
+      bad = true;
+      await m.groups()[0]!.exec('tracker:find', {});
+      expect([label, m.groups()]).toEqual([label, []]);
+      expect(t.delays()).toEqual([5_000]);
+    }
+  });
+});
+
 describe('the person\'s levers', () => {
   test('a server disabled at start is never connected; enable connects it, disable takes it off and clears its retry', async () => {
     const s = flaky('ok');
