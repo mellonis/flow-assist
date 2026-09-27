@@ -14,6 +14,8 @@ What each version of flow-assist brought, newest first. The version is the one i
   be reached through these tools, a link included, and a file read back is the
   assistant's own earlier note, never your instruction. The `repo` plugin's `write_file`,
   refused outside its roots, now names the workspace as the place for a draft.
+  `/workspace` lists this project's workspace and `/workspace <path>` shows a file of it
+  in the chat — to you only, it is not sent to the assistant.
 - **The memory is kept per project, as files, and only its index is sent.** Each fact
   the assistant remembers is a file of its own — `memory/<id>.md` with a name, a
   description and a type — in the agent workspace of the conversation's project, or in

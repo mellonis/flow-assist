@@ -103,6 +103,8 @@ the drafts, notes, plans and findings you asked it to keep. It writes there with
 y/n — nothing of yours is touched — and each write shows in the chat as a change with its
 path, and in the session's journal. The tools reach nothing outside the workspace, and
 what the assistant reads back from it is its own earlier note, not your instruction.
+`/workspace` lists this project's workspace; `/workspace <path>` shows one of its files
+in the chat, to you only — it is not sent to the assistant.
 
 A message sent while an answer is still coming is queued (`⏎ queued`) and reaches the
 assistant after its current step — between two tool rounds — so a correction lands

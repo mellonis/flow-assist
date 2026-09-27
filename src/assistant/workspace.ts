@@ -161,3 +161,18 @@ export function listWorkspace(ws: string, rel = ''): string {
   if (!out.length) return `The workspace${rel ? ` at ${rel}` : ''} is empty (${ws}). Write working files under ${ARTIFACTS_DIR}/ with workspace_write.`;
   return [`${ws}${rel ? `/${rel}` : ''}:`, ...out, ...(more ? [`… ${more} more`] : [])].join('\n');
 }
+
+// `/workspace [path]` — the person's own look into the project's workspace: no path
+// lists it, a path shows that file. What it says is a note in the chat, for the person
+// only — never sent to the model (a file the model wrote is not the person's message).
+export function workspaceNote(arg: string, ws: string, fenceOf: (text: string) => string): string {
+  const rel = arg.trim();
+  try {
+    if (!rel) return `${listWorkspace(ws, '')}\n/workspace <path> shows a file here — to you, not to the assistant.`;
+    const text = readWorkspaceFile(ws, rel);
+    const f = fenceOf(text);
+    return `${rel} — in the workspace, shown to you only:\n${f}\n${text.replace(/\n$/, '')}\n${f}`;
+  } catch (e) {
+    return (e as Error).message.replace(/^workspace_(read|list): /, '/workspace: ');
+  }
+}

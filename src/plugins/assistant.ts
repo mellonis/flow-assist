@@ -37,7 +37,7 @@ import { appendJournal, callEndEvent, callStartEvent, exportMarkdown, outputJour
 import { pickerKey, pickerReload, pickerStart, type PickerAction, type PickerState } from '../assistant/session-picker.js';
 import type { ChatMessage, TokenUsage, ToolRun } from '../assistant/agent.js';
 import type { ChangeView } from '../assistant/diff.js';
-import { VIEW_CAPS, type ViewRecord, type ViewRenderers } from '../assistant/views.js';
+import { VIEW_CAPS, fence, type ViewRecord, type ViewRenderers } from '../assistant/views.js';
 import { capConsoleData, consoleData, renderConsole } from '../assistant/console-view.js';
 import { INTERACTIVE_ASK, runInteractive, type InteractiveDeps } from '../assistant/interactive.js';
 import { editorReducer } from '@flowtty/core';
@@ -52,7 +52,7 @@ import { askKey, askStart, type AskQuestion, type AskState } from '../assistant/
 import { keptAfterClear, memoryCommand, type MemoryLists } from '../assistant/memory-command.js';
 import { memoryPromptBlock, migrateMemoryJson, readFacts, removeFact } from '../assistant/memory-store.js';
 import { memoryFilePath } from '../runtime/services/memory.js';
-import { workspaceFor } from '../assistant/workspace.js';
+import { ensureWorkspace, workspaceFor, workspaceNote } from '../assistant/workspace.js';
 import { CONTEXT_WARN_AT, DEFAULT_CONTEXT_WINDOW, cacheLine, contextBadge, estimateTokens, readContext, short as shortTokens } from '../assistant/context-meter.js';
 import { applyRecall, bulkyItems, createRecallState, decideBatch, recallLimits, recallLine, saveRecallState, type BulkyItem, type RecallSource, type ShellMeta } from '../assistant/recall.js';
 import { contextTitle, screenBlock, type ContextItem } from '../assistant/screen-context.js';
@@ -76,7 +76,7 @@ import type { PluginApi } from '../runtime/plugin-api.js';
 // sessions directory is known (`chatCommandDefs` in the chat).
 type ChatCommand = HistoryCommand & ChatCommandDef;
 const CHAT_COMMAND_DEFS: ChatCommand[] = [
-  { name: 'compact' }, { name: 'context' }, { name: 'copy' }, { name: 'image' }, { name: 'resume' }, { name: 'sessions' }, { name: 'new' }, { name: 'title' }, { name: 'export' }, { name: 'clear' }, { name: 'memory' },
+  { name: 'compact' }, { name: 'context' }, { name: 'copy' }, { name: 'image' }, { name: 'resume' }, { name: 'sessions' }, { name: 'new' }, { name: 'title' }, { name: 'export' }, { name: 'clear' }, { name: 'memory', values: ['project', 'global', 'forget'] }, { name: 'workspace' },
   { name: 'auto', values: ['reads', 'all', 'off'] }, { name: 'notes', values: NOTES_MODES }, { name: 'mode', values: CHAT_MODES }, { name: 'log' }, { name: 'exit' },
 ];
 const CHAT_COMMANDS = CHAT_COMMAND_DEFS.map((c) => c.name);
@@ -2630,6 +2630,16 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 const svc = host.services as Record<string, any>;
                 const shared = logShareMessage((svc.log?.read?.() ?? svc.logs ?? []) as string[], arg);
                 if (shared) void send(shared); else setError('the log is empty — nothing to share');
+                return;
+              }
+              case 'workspace': {
+                // The person's own look into the project's workspace — a note, never a
+                // message: what the model wrote there is not the person's to send back.
+                const ws = workspaceFor(host.config, currentProject(), 'project');
+                ensureWorkspace(ws);
+                pushNote(workspaceNote(arg, ws, fence));
+                setField('');
+                host.notify();
                 return;
               }
               case 'memory': {

@@ -86,3 +86,39 @@ test('a write out of the workspace is refused with the path to use; a file read 
   expect(String(read.content)).toContain('Deploy on Fridays only.');
   ui.app.unmount();
 });
+
+test('/workspace lists the project\'s workspace and opens a file of it as a note — never sent to the model', async () => {
+  const model = new ScriptedModel();
+  model.script(
+    [{ tool: 'workspace_write', args: { path: 'artifacts/plan.md', content: 'PLAN: migrate the NARWHAL table\n' } }],
+    [{ text: 'Planned.' }],
+    [{ text: 'fine' }],
+  );
+  const { ui } = await boot(model);
+  await ui.type('plan it');
+  await ui.press('return');
+  await settle(30);
+  const asked = model.requests.length;
+
+  await ui.type('/workspace');
+  await ui.press('return');
+  await settle();
+  expect(ui.backend.lastFrame).toContain('artifacts/plan.md');
+  await ui.type('/workspace artifacts/plan.md');
+  await ui.press('return');
+  await settle();
+  expect(ui.backend.lastFrame).toContain('NARWHAL');
+  await ui.type('/workspace ../../etc/hosts');
+  await ui.press('return');
+  await settle();
+  expect(ui.backend.lastFrame).toContain('leads out of the workspace');
+  expect(model.requests.length).toBe(asked);
+
+  await ui.type('and now');
+  await ui.press('return');
+  await settle(20);
+  const sent = model.requests.at(-1)!.messages.filter((m) => m.role !== 'system' && m.role !== 'tool');
+  expect(JSON.stringify(sent.slice(-1))).not.toContain('NARWHAL');
+  expect(JSON.stringify(model.requests.at(-1)!.messages.filter((m) => m.role === 'user'))).not.toContain('NARWHAL');
+  ui.app.unmount();
+});

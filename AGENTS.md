@@ -911,6 +911,10 @@ there is no `/fullscreen`.
     `currentProject` to its tools as `ctx.workspaceProject`); a caller without one — a
     background run, the one-shot prompt — takes the project of the call's shell
     directory (`callProject`). With no project the project's scope IS the global one.
+  - **`/workspace [path]` is the person's look into it** (`workspaceNote`): no path lists
+    the project's workspace, a path shows that file fenced (`fence`) — a `note`, display
+    only, never sent to the model: what the model wrote there is not the person's
+    message. A path out of the workspace answers with the tools' own refusal.
   - The `repo` plugin's `write_file` refused outside its roots adds one sentence naming
     the workspace as the place for a draft (`DRAFT_HINT`): a write aimed at `/tmp` is
     most often the model's own note, and the refusal used to end the turn.
@@ -2736,7 +2740,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   walking the rest. What is offered is `chatComplete`'s (`src/config/fieldcomplete.ts`,
   pure): a `/command`'s name in the declared order (a bare `/` lists them all), then
   its argument from `CHAT_COMMAND_DEFS`' `values` — `/auto reads|all|off`, `/notes
-  step|open`, `/mode panel|window|full`, and `/resume` the saved sessions by number,
+  step|open`, `/mode panel|window|full`, `/memory project|global|forget`, and `/resume` the saved sessions by number,
   newest first, each labelled with its title (`chatCommandDefs`, bound where `sessDir`
   is known and read when the field is drawn) — the picker (`/sessions`) is the way to
   find one by what was said — or, at a non-zero bang level, the last
