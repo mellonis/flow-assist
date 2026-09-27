@@ -218,6 +218,7 @@ function shownValue(key: string, v: unknown): string {
   const s = redactSecrets(JSON.stringify(v) ?? String(v));
   return s.length > 80 ? `${s.slice(0, 79)}…` : s;
 }
+const OTHER_LINES = 8;
 const isPlain = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 // The leaf keys whose values differ between two objects, sorted.
 function changedKeys(a: unknown, b: unknown, prefix = ''): string[] {
@@ -253,7 +254,14 @@ function checkFile(p: string): ConfigChange | null {
   if (declined?.hash === hash) { DECLINED.set(p, { ...st, hash }); return null; }
   const content = parseObject(raw);
   const keys = changedKeys(seen.content ?? {}, content ?? {});
-  const lines = keys.map((k) => `${k}: ${shownValue(k, getDeep(seen.content ?? {}, k))} → ${shownValue(k, getDeep(content ?? {}, k))}`);
+  // The keys on the model's leash (`isLeashKey`: `ai`, `shell`, `web`, a plugin's roots)
+  // first, and all of them — a key that widens what the model may do is never cut from
+  // the question; the rest up to `OTHER_LINES`, then how many more.
+  const line = (k: string) => `${k}: ${shownValue(k, getDeep(seen.content ?? {}, k))} → ${shownValue(k, getDeep(content ?? {}, k))}`;
+  const leash = keys.filter((k) => isLeashKey(k));
+  const other = keys.filter((k) => !isLeashKey(k));
+  const lines = [...leash.map(line), ...other.slice(0, OTHER_LINES).map(line)];
+  if (other.length > OTHER_LINES) lines.push(`+${other.length - OTHER_LINES} more keys`);
   if (raw !== null && content === null) lines.push('the file does not hold a JSON object — applied, it reads as empty');
   if (!keys.length && !lines.length) { SEEN.set(p, { ...st, hash, content }); PENDING.delete(p); return null; }
   const change: ConfigChange = { file: path.basename(p) as ConfigChange['file'], path: p, keys, lines, hash, ...st, content, raw };

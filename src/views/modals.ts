@@ -2057,8 +2057,9 @@ function askView(state: AskState, wrap: number) {
 }
 
 // What a y/n block is given: a write the model asked for, or — with `title` and `hint`
-// of its own — a question the host asks (a settings file changed outside it).
-export interface ConfirmAsk { name: string; args?: string | unknown; command?: string; line?: string; input?: string; title?: string; hint?: string }
+// of its own — a question the host asks (a settings file changed outside it); `whole`
+// keeps its `line` uncut (the host's question bounds its own lines).
+export interface ConfirmAsk { name: string; args?: string | unknown; command?: string; line?: string; input?: string; title?: string; hint?: string; whole?: boolean }
 
 // The y/n block's pieces, the same way.
 // `command` is a shell command, drawn behind `$ `; `line` is a line drawn as it is (the
@@ -2067,7 +2068,7 @@ function confirmView(c: ConfirmAsk) {
   const cut = (t: string) => (t.length > 1000 ? `${t.slice(0, 1000)}…` : t);
   return {
     title: c.title ?? `⚠ Confirm write: ${c.name}`,
-    command: c.command != null ? `$ ${cut(c.command)}` : c.line != null ? cut(c.line) : null,
+    command: c.command != null ? `$ ${cut(c.command)}` : c.line != null ? (c.whole ? c.line : cut(c.line)) : null,
     // Where the call's input comes from — a command's stdin, piped from an earlier
     // call's result (src/assistant/tool-results.ts); drawn under the command line.
     input: c.input ? `${c.command != null ? 'stdin' : 'input'}: result of ${c.input}` : null,

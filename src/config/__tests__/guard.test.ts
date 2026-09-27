@@ -153,3 +153,15 @@ test('config.json is watched too, and a value at a secret-looking key is masked'
     'plugins.mcp.servers.wiki.headers.Authorization: (unset) → ‹masked›',
   ]);
 });
+
+test('the keys on the model\'s leash come first and are never cut; the rest are cut with a count', () => {
+  external(local(), {});
+  arm();
+  const padding = Object.fromEntries(Array.from({ length: 40 }, (_, i) => [`k${String(i).padStart(2, '0')}`, 'x'.repeat(20)]));
+  external(local(), { plugins: { a: padding }, shell: { autoRun: true, passEnv: ['GH_TOKEN'] }, ai: { disabledTools: [] } });
+  const [change] = checkConfigFiles();
+  expect(change!.keys).toHaveLength(43);
+  expect(change!.lines.slice(0, 3)).toEqual(['ai.disabledTools: (unset) → []', 'shell.autoRun: (unset) → true', 'shell.passEnv: (unset) → ["GH_TOKEN"]']);
+  expect(change!.lines.slice(3, -1)).toHaveLength(8);
+  expect(change!.lines.at(-1)).toBe('+32 more keys');
+});

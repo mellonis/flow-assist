@@ -3257,7 +3257,10 @@ a new path for text keeps to it.
   host last read or wrote (`SEEN`); `checkConfigFiles` is a stat per file, the file
   read only when the stat moved (a touch with the same text is no change), and reports
   a change with its key paths, a value at a secret-looking key (`TOKEN`, `KEY`,
-  `authorization`, `headers`, `env`, …) masked. The chat asks — `config.local.json
+  `authorization`, `headers`, `env`, …) masked: every key on the model's leash
+  (`isLeashKey` — `ai.*` with `ai.disabledTools`, `shell.*`, `web.*`,
+  `plugins.<name>.roots`) first and never cut (`ConfirmAsk.whole`), the rest up to
+  eight and then `+N more keys`. The chat asks — `config.local.json
   changed outside flow-assist — apply? (y/n)` in the confirmation's place
   (`ConfirmAsk.title` / `hint`), through the `configChanges` host service `renderApp`
   binds — as it starts, before the next request of a turn (`beforeRequest` awaits it),

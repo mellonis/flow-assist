@@ -1213,7 +1213,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // block renders. pendingRef holds { name, args, resolve } — read by the
           // input-handler (a ref, always current); pendingAsk is only for render.
           const pendingRef = ui.useRef<{ name: string; args: string; input?: string; resolve: (ok: boolean, by?: 'person' | 'stop' | 'reset') => void } | null>(null);
-          const [pendingAsk, setPendingAsk] = ui.useState<{ name: string; args: string; command?: string; line?: string; input?: string; title?: string; hint?: string } | null>(null);
+          const [pendingAsk, setPendingAsk] = ui.useState<{ name: string; args: string; command?: string; line?: string; input?: string; title?: string; hint?: string; whole?: boolean } | null>(null);
           // `ask_user`: the same kind of pause, but the person picks among options.
           // askRef is what the input handler steps key by key (a ref, always current);
           // pendingQuestion mirrors it for the render.
@@ -1266,7 +1266,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               for (const change of changes) {
                 const answer = await new Promise<boolean | null>((resolve) => {
                   pendingRef.current = { name: 'config', args: '', resolve: (ok, by = 'person') => resolve(by === 'person' ? ok : null) };
-                  setPendingAsk({ name: 'config', args: '', title: `⚠ ${change.file} changed outside flow-assist — apply? (y/n)`, line: change.lines.join('\n'), hint: `y applies it now · n keeps the running config until restart` });
+                  setPendingAsk({ name: 'config', args: '', title: `⚠ ${change.file} changed outside flow-assist — apply? (y/n)`, line: change.lines.join('\n'), whole: true, hint: `y applies it now · n keeps the running config until restart` });
                   host.notify();
                 });
                 if (answer === null) break;

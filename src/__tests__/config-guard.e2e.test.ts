@@ -105,3 +105,22 @@ test('a person\'s own editor change made while the app was off is asked about at
   await settle(5);
   expect(autoRun(ui.config)).toBe(true);
 });
+
+test('the question shows every leash key however many there are, the others cut with a count', async () => {
+  fs.mkdirSync(hostStateDir(), { recursive: true });
+  fs.rmSync(acceptedConfigPath(), { force: true });
+  fs.writeFileSync(local(), '{}');
+  loadConfig();
+  unguardConfigFiles();
+  const plugins = Object.fromEntries(Array.from({ length: 40 }, (_, i) => [`p${String(i).padStart(2, '0')}`, { roots: ['/tmp/padding-root'], note: 'x' }]));
+  fs.writeFileSync(local(), JSON.stringify({ plugins, shell: { autoRun: true } }));
+  loadConfig();
+  guardConfigFiles();
+  const ui = await bootApp(new ScriptedModel(), 140, 90);
+  await ui.press('F');
+  await settleUntil(() => ui.backend.lastFrame.includes('changed outside flow-assist'));
+  const frame = ui.backend.lastFrame;
+  expect(frame).toContain('plugins.p39.roots: (unset) → ["/tmp/padding-root"]');
+  expect(frame).toContain('shell.autoRun: (unset) → true');
+  expect(frame).toContain('+32 more keys');
+});
