@@ -36,6 +36,8 @@ import { assembleToolRegistry, pluginConfigs } from './loader/tools.js';
 import { renderApp } from './runtime/app.js';
 import { consoleBridge } from './runtime/console-log.js';
 import { agentChat } from './assistant/agent.js';
+import { neverAutomatic } from './assistant/auto.js';
+import { shellCommandOf } from './plugins/assistant.js';
 import { createShellState } from './assistant/shell.js';
 import { instructionsPrompt } from './assistant/project-instructions.js';
 import { toolLoadingMode } from './assistant/tool-loading.js';
@@ -85,13 +87,14 @@ export type ParseResult =
   | { cmd: 'interactive'; args: string[] }
   | { cmd: 'config'; args: string[] }
   | { cmd: 'plugins'; args: string[] }
-  | { cmd: 'prompt'; args: string[] }
+  | { cmd: 'prompt'; args: string[]; allowWrites?: true }
   | { cmd: 'help'; args: string[] }
   | { cmd: 'version'; args: string[] };
 
 // Maps argv to a subcommand. Pure: no I/O, no config reads — easy to unit-test.
 // A prompt is ANY argv that does not start with `config`/`plugins`/`--help`/
-// `--version`; an empty argv starts the interactive TUI.
+// `--version`; an empty argv starts the interactive TUI. `--allow-writes` counts only
+// before the prompt: once the prompt has begun, it is a word of it.
 export function parseCli(argv: string[]): ParseResult {
   const args = argv ?? [];
   const first = (args[0] ?? '').toLowerCase();
@@ -101,6 +104,7 @@ export function parseCli(argv: string[]): ParseResult {
   if (first === 'config') return { cmd: 'config', args: args.slice(1) };
   if (first === 'plugins') return { cmd: 'plugins', args: args.slice(1) };
   if (args.length === 0) return { cmd: 'interactive', args: [] };
+  if (args[0] === '--allow-writes') return { cmd: 'prompt', args: args.slice(1), allowWrites: true };
   return { cmd: 'prompt', args };
 }
 
@@ -124,8 +128,13 @@ export async function main(argv: string[]): Promise<void> {
       await runPlugins(parsed.args, config, repo);
       return;
     case 'prompt':
+      if (!parsed.args.length) {
+        console.error('flow-assist: --allow-writes needs a prompt after it:  flow-assist --allow-writes "your request"');
+        process.exitCode = 1;
+        return;
+      }
       gateLlmConfig(config);
-      await runPrompt(parsed.args, config, repo);
+      await runPrompt(parsed.args, config, repo, parsed.allowWrites ? { allowWrites: true } : {});
       return;
     case 'interactive':
       gateLlmConfig(config);
@@ -264,15 +273,28 @@ function gateLlmConfig(config: Record<string, unknown>): void {
 }
 
 // ─── one-shot prompt ──────────────────────────────────────────────────────────
-async function runPrompt(args: string[], config: Record<string, unknown>, repo: PluginRepo): Promise<void> {
+// What a one-shot run is handed besides its prompt: `allowWrites` from the command
+// line, and where it reads its plugins and writes its answer — the install's own and
+// the process's streams unless a test gives its own.
+export type PromptDeps = {
+  allowWrites?: boolean;
+  enabledDir?: string;
+  out?: (text: string) => void;
+  err?: (text: string) => void;
+};
+
+export async function runPrompt(args: string[], config: Record<string, unknown>, repo: PluginRepo, deps: PromptDeps = {}): Promise<void> {
   const prompt = args.join(' ');
   const ai = (config.ai ?? {}) as Record<string, unknown>;
-  const plugins = await loadPlugins({ config, repo, renders, enabledDir });
+  const dir = deps.enabledDir ?? enabledDir;
+  const out = deps.out ?? ((text: string) => { process.stdout.write(text); });
+  const err = deps.err ?? ((text: string) => { process.stderr.write(text); });
+  const plugins = await loadPlugins({ config, repo, renders, enabledDir: dir });
   const registry = assembleToolRegistry({ plugins, config, repo: repo as unknown as RepoShape });
   const log = createLogService(config);
   // On stderr, so an answer piped elsewhere stays clean.
-  const note = await missingPluginsNote(repo);
-  if (note) console.error(`[plugins] ${note}`);
+  const note = noPluginsNote(dir, (await repo.enabledPlugins()).length, existsSync);
+  if (note) err(`[plugins] ${note}\n`);
 
   // Plugin ai-tools live in the assembled registry as synthetic groups whose id
   // ends with `:aiTools` — collect their tools for the agent's extraTools.
@@ -297,9 +319,25 @@ async function runPrompt(args: string[], config: Record<string, unknown>, repo: 
     imageLimits: imageLimits(ai),
     toolCtx: { ...services, shell } as never,
     logToolRun: log.logToolRun,
-    onLive: (delta: string) => process.stdout.write(delta),
+    // Nobody is there to answer a y/n, so with no `confirmWrite` the loop declines every
+    // write. `--allow-writes` is the person's yes given in advance — to what the chat's
+    // auto mode may answer with `shell.autoRun` on, never to `config_set` or an unlisted
+    // `web_fetch` — and each write it lets through is said on stderr as it runs.
+    ...(deps.allowWrites ? { confirmWrite: (name: string, argsText: string, info?: { hostShell?: boolean }) => {
+      if (neverAutomatic(name, { autoRun: true, hostShell: !!info?.hostShell })) return false;
+      err(`[write] ${writeLine(name, argsText)}\n`);
+      return true;
+    } } : {}),
+    onLive: (delta: string) => out(delta),
   });
-  process.stdout.write('\n' + result.content + '\n');
+  out('\n' + result.content + '\n');
+}
+
+// A write as the one-shot run says it on stderr: the command line of a `run_command`,
+// else the tool and its arguments.
+function writeLine(name: string, argsText: string): string {
+  const command = shellCommandOf(name, argsText);
+  return command !== null ? `$ ${command}` : `${name} ${argsText}`;
 }
 
 // ─── interactive TUI ──────────────────────────────────────────────────────────
@@ -373,7 +411,12 @@ function printUsage(): void {
       '  flow-assist                       Start the interactive TUI',
       '  flow-assist config <cmd> ...      get|set|unset|help on host config',
       '  flow-assist plugins <cmd> ...     ls|install|remove|update plugins',
-      '  flow-assist <prompt>              One-shot chat with the loaded tool registry',
+      '  flow-assist <prompt>              One-shot chat with the loaded tool registry;',
+      '                                    it declines every write, as it cannot ask',
+      '  flow-assist --allow-writes <prompt>',
+      '                                    One-shot chat whose writes run unasked, each said',
+      '                                    on stderr (config_set, an unlisted web_fetch and',
+      '                                    a plugin\'s run_command are still declined)',
       '  flow-assist --help                Show this help',
       '  flow-assist --version             Show the host version',
     ].join('\n'),

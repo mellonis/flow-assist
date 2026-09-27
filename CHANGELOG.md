@@ -5,6 +5,13 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **A one-shot prompt no longer runs writes without asking.** `flow-assist "<prompt>"`
+  has nobody to answer a y/n, yet it ran every write the model called — a command, a
+  file edit, a tracker change — so one instruction planted in a page or a ticket it read
+  was a command run on your machine. It now declines each write and the model is told
+  you can do it in the chat; reads run as before. `flow-assist --allow-writes "<prompt>"`
+  lets writes run, each said on stderr as it runs; `config_set` and a `web_fetch`
+  outside `web.allowlist` are still declined.
 - **`tools_load`'s `group` accepts a tool's own name.** A `group` that names no group
   is read the way `names` already reads one: a tool's own name, qualified
   (`<group>:<name>`) or bare, loads that tool instead of erroring, and the answer says

@@ -31,7 +31,17 @@ bun run src/cli.ts                            # interactive TUI
 bun run src/cli.ts config get                 # host config
 bun run src/cli.ts plugins ls                 # enabled plugins
 bun run src/cli.ts "summarize ABC-123"        # one-shot prompt
+bun run src/cli.ts --allow-writes "fix the typo in README.md"   # one-shot, writes allowed
 ```
+
+A one-shot prompt has nobody to answer a y/n, so it declines every write — a command,
+a file edit, a tracker change — and the model is told to leave it to you in the chat;
+reads run as usual. `--allow-writes`, given before the prompt, lets writes run without
+asking and says each one on stderr as it runs (`[write] $ <command>`, or the tool and
+its arguments). Even then `config_set`, a `web_fetch` outside `web.allowlist` and a
+plugin's own `run_command` are declined: config stays yours, a URL can carry out
+anything the model has read, and only the host's shell tool is covered by the flag.
+Only pass it for a prompt whose tools read nothing you do not trust.
 
 The chat is saved as you go and continued on the next start, so a restart or an
 update loses nothing. `/sessions` — or Ctrl+S from any screen (`config set keys.sessions

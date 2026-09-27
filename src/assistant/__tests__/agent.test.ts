@@ -677,7 +677,7 @@ test('systemPrompt is read before every round and replaces the leading system me
 
 // `confirmedByPerson` is the loop's fact about ONE call: true only after its own y/n
 // answered yes. A caller's toolCtx cannot forge it, and a run with no confirmation
-// (the one-shot prompt) never sets it.
+// never sets it — it declines the write outright.
 test('agentChat tells a tool whether the person said yes to this very call', async () => {
   const seen: unknown[] = [];
   const make = makeFactory({});
@@ -702,10 +702,64 @@ test('agentChat tells a tool whether the person said yes to this very call', asy
   await run(() => true);
   expect(seen).toEqual([true, false]);
   seen.length = 0;
-  // No confirmation at all: the write runs (the loop's rule), but not as confirmed —
+  // No confirmation at all: the write is declined and never runs; the read runs, and
   // the forged `true` in the caller's toolCtx is overwritten.
   await run();
-  expect(seen).toEqual([false, false]);
+  expect(seen).toEqual([false]);
+});
+
+// A caller that cannot ask the person passes no `confirmWrite`, and the loop declines
+// every write for it: the tool never runs, the model is told why, and the decline is
+// logged and reported like the person's own no. A read runs as ever.
+test('agentChat with no confirmWrite declines every write and runs the reads', async () => {
+  const ran: string[] = [];
+  const make = makeFactory({});
+  const plugins = [make('t', { aiTools: [
+    { type: 'function', function: { name: 't:save', description: 'save', parameters: { type: 'object', properties: {} } }, write: true, run: async () => { ran.push('save'); return 'saved'; } },
+    { type: 'function', function: { name: 't:pick', description: 'pick', parameters: { type: 'object', properties: { mode: { type: 'string' } } } }, write: (a: Record<string, unknown>) => a.mode === 'set', run: async (a: Record<string, unknown>) => { ran.push(`pick ${a.mode}`); return 'picked'; } },
+    { type: 'function', function: { name: 't:read', description: 'read', parameters: { type: 'object', properties: {} } }, run: async () => { ran.push('read'); return 'read it'; } },
+  ] })];
+  assembleToolRegistry({ plugins, config: {}, repo: { list: async () => [] } as any });
+  const sent: string[] = [];
+  let n = 0;
+  const chatRound = async (messages: any[], opts: any) => {
+    for (const m of messages) if (m.role === 'tool') sent.push(m.content);
+    if (n++ === 0) {
+      opts.onDelta?.('a');
+      return { content: 'a', finishReason: 'tool_calls', toolCalls: [
+        { id: '1', name: 't:save', arguments: '{}' },
+        { id: '2', name: 't:pick', arguments: '{"mode":"set"}' },
+        { id: '3', name: 't:pick', arguments: '{"mode":"get"}' },
+        { id: '4', name: 't:read', arguments: '{}' },
+      ] };
+    }
+    opts.onDelta?.('done');
+    return { content: 'done', finishReason: 'stop', toolCalls: [] };
+  };
+  const started: string[] = [];
+  const ended: { name: string; outcome: string }[] = [];
+  const logged: { name: string; outcome: string }[] = [];
+  const res = await agentChat([{ role: 'user', content: 'hi' }], {
+    baseUrl: 'http://x', model: 'm', token: 't', onLiveCommit: () => {}, onLive: () => {}, chatRound,
+    onToolStart: (c) => started.push(c.name),
+    onToolRun: (r) => ended.push({ name: r.name, outcome: r.outcome }),
+    logToolRun: (e: any) => logged.push({ name: e.name, outcome: e.outcome }),
+  });
+  expect(ran).toEqual(['pick get', 'read']);
+  const declined = sent.filter((c) => c.startsWith('DECLINED:'));
+  expect(declined).toHaveLength(2);
+  for (const d of declined) {
+    expect(d).toContain('cannot ask the person');
+    expect(d).toContain('in the chat');
+  }
+  expect(ended).toEqual([
+    { name: 't:save', outcome: 'declined' }, { name: 't:pick', outcome: 'declined' },
+    { name: 't:pick', outcome: 'ok' }, { name: 't:read', outcome: 'ok' },
+  ]);
+  expect(logged.filter((l) => l.outcome === 'declined').map((l) => l.name)).toEqual(['t:save', 't:pick']);
+  // A declined call never began: only the calls that ran are started.
+  expect(started).toEqual(['t:pick', 't:read']);
+  expect(res.toolRuns.map((r) => r.outcome)).toEqual(['declined', 'declined', 'ok', 'ok']);
 });
 
 test('beforeRequest runs at every request boundary, after a round\'s results, and may replace what is sent', async () => {

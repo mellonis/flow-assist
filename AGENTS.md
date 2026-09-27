@@ -582,9 +582,9 @@ there is no `/fullscreen`.
   refusal, naming the key and the command the person can run instead. It runs only on
   the loop's own word that the person said yes to THIS call: `agentChat` sets
   `ctx.confirmedByPerson` for every call, after the caller's `toolCtx` so a caller cannot
-  forge it, true only when the call went to `confirmWrite` and the answer was yes. With
-  no confirmation — the one-shot prompt, which passes none and so would run any write
-  unasked — the call is refused the same way. The y/n
+  forge it, true only when the call went to `confirmWrite` and the answer was yes. A
+  run with no confirmation never reaches it: the loop declines the write first (below,
+  "a path to the model that cannot ask the person declines writes"). The y/n
   block shows the command line the call stands for — `config set --session ui.verbs
   '["Thinking"]'`, `config set ui.verbs …` — drawn as it is (`configLineOf` beside
   `shellCommandOf`, the block's `line` beside `command`), so what the person confirms
@@ -782,6 +782,31 @@ there is no `/fullscreen`.
   `applySession` and `/clear` drop a waiting note and set the directory AFTER replacing
   the list, or the note would be replaced with it. The context meter counts the
   section under `system`.
+- **A path to the model that cannot ask the person declines writes.** The rule lives
+  in one place, `agentChat` (`src/assistant/agent.ts`): a write (the tool's `write`
+  flag, a predicate evaluated on the call's arguments) goes to `confirmWrite` when the
+  caller passed one, and with none it is declined before it begins — no `onToolStart`,
+  the tool never runs, the model gets a `DECLINED` result saying this run cannot ask
+  the person and they can do it in the chat, the tool log and `onToolRun` carry the
+  `declined` outcome, and a journal that hears `onToolRun` records it as declined by
+  the host. A read runs as ever. So passing a `confirmWrite` is a deliberate act, and
+  leaving it out is safe. Where each path stands:
+  - the chat's turn — asks: its y/n closure, which the auto mode may answer;
+  - a background task — declines: it passes a confirmation that always says no, which
+    `journaledChatLLM` journals as a `confirm` line `by: 'background'`;
+  - the one-shot prompt (`runPrompt`, `src/main.ts`) — declines. `--allow-writes`,
+    given before the prompt, is the person's yes in advance: its `confirmWrite` answers
+    what the auto mode may answer with `shell.autoRun` on (`neverAutomatic` with both
+    consents — so never `config_set`, an unlisted `web_fetch` or a plugin's
+    `run_command`) and says each write it
+    lets through on stderr as it runs (`[write] $ <command>`, else the tool and its
+    arguments);
+  - a plugin's `services.chatLLM` — declines unless the plugin passes a `confirmWrite`
+    of its own (one that can ask the person);
+  - a remote plugin's `host.chatLLM` (`src/remote/adapter.ts`) — always declines: a
+    function cannot cross the wire;
+  - `/compact` and the automatic compaction run no tools (`compactConversation`); the
+    evals in `scripts/` call `agentChat` bare and so decline.
 - **Whose claim excuses a y/n, and whose does not.** A tool pauses because its `write`
   flag says so, and the flag is set by whoever is entitled to say it. The `mcp` plugin
   keeps the two apart per server: `trusted` is "I believe THIS SERVER's own
@@ -2790,7 +2815,10 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   an archive (the `.flow-assist-source` marker says `archive`). The model's
   `host:plugins_install` stays name-only: a URL in a tool argument may come from any
   page the model has read.
-- any other arg — a one-shot `<prompt>` chat with the loaded tool registry.
+- any other arg — a one-shot `<prompt>` chat with the loaded tool registry. It
+  declines every write; `--allow-writes` before the prompt lets them run, each said on
+  stderr ("a path to the model that cannot ask the person declines writes", above). A
+  bare `--allow-writes` with no prompt is an error, exit code 1.
 
 ## Config & environment
 

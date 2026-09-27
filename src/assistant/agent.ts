@@ -177,11 +177,13 @@ export interface AgentOpts {
   // y/n says where it comes from. `info.hostShell` is true when the call is the host's
   // own shell tool (by the def's identity, `isHostShellTool`), never a plugin's tool of
   // the same name — what the auto mode's `shell.autoRun` may answer. `info.id` is the
-  // call's own id, as `onToolStart` and `onToolRun` carry it.
+  // call's own id, as `onToolStart` and `onToolRun` carry it. A caller that cannot ask
+  // the person leaves it out, and then every write is declined unasked.
   confirmWrite?: (name: string, args: string, info?: { input?: string; inputId?: string; hostShell?: boolean; id?: string }) => boolean | Promise<boolean>;
   // Fired as a call that will run (or wait on a y/n) begins — after its arguments are
   // checked, before the y/n: `confirm` says whether it waits on one. A call refused
-  // before that (arguments that do not parse or do not fit) has only its `onToolRun`.
+  // before that (arguments that do not parse or do not fit, a write with no
+  // `confirmWrite` to ask) has only its `onToolRun`.
   onToolStart?: (call: { id?: string; name: string; args: Record<string, unknown>; confirm: boolean }) => void;
   // What the host's own run_command printed, as it arrives and whole — the result the
   // model gets is its capped tail. Only that tool is handed `ctx.reportOutput`, and a
@@ -740,7 +742,8 @@ export async function agentChat(
   // came before.
   let turnStart = current.length;
   // Writing tools (write flag: true or a predicate (args) => boolean) ask for
-  // confirmation via opts.confirmWrite (a y/n pause in chat) before running. In the
+  // confirmation via opts.confirmWrite (a y/n pause in chat) before running, and are
+  // declined when there is none. In the
   // API we send tools WITHOUT the service fields write/run (a strict server may
   // reject them), but keep the full defs in toolByName for the confirmation check.
   // Plugin ai-tools (aiTools) sit on top of group tools: override by name and carry
@@ -1034,12 +1037,21 @@ export async function agentChat(
           opts.onToolRun?.(run);
           continue;
         }
-        const confirm = opts.confirmWrite;
-        const needsConfirm =
-          !notLoaded &&
-          typeof confirm === 'function' &&
-          !!def?.write &&
-          (def.write === true ? true : (def.write as (a: Record<string, unknown>) => boolean)(parsed));
+        // A write is seen by the person before it runs, and only a caller that can ask
+        // them passes `confirmWrite`. Without one — a run apart from the chat: the
+        // one-shot prompt, a plugin's `chatLLM`, a remote plugin's — the write is
+        // declined here, before it begins, and the model is told why.
+        const confirm = typeof opts.confirmWrite === 'function' ? opts.confirmWrite : null;
+        const needsConfirm = !notLoaded && write;
+        if (needsConfirm && !confirm) {
+          const detail = `This run cannot ask the person to confirm a write, so ${tc.name} did not run and nothing was changed. Tell them what you would do; they can do it in the chat.`;
+          current.push({ role: 'tool', tool_call_id: tc.id, content: modelToolResult('declined', detail) });
+          logRun({ name: tc.name, write, outcome: 'declined', detail, args: parsed });
+          const run: ToolRun = { id: tc.id, name: tc.name, args: parsed, write, outcome: 'declined', detail };
+          toolRuns.push(run);
+          opts.onToolRun?.(run);
+          continue;
+        }
         // outcome: applied — write really happened; declined — the user rejected it
         // (y/n); error — the tool threw (incl. Unknown tool if the name is not in the
         // registry); ok — a non-writing tool ran. detail — the result string to the model.
@@ -1049,7 +1061,7 @@ export async function agentChat(
         // `toolReturn`): a string, `null` for none, `undefined` — the result is the data.
         let whole: string | null | undefined;
         let confirmedByPerson = false;
-        try { opts.onToolStart?.({ id: tc.id, name: tc.name, args: parsed, confirm: !!(needsConfirm && confirm) }); } catch { /* the caller's trouble, not the call's */ }
+        try { opts.onToolStart?.({ id: tc.id, name: tc.name, args: parsed, confirm: needsConfirm }); } catch { /* the caller's trouble, not the call's */ }
         if (needsConfirm && confirm) {
           const ok = await confirm(tc.name, tc.arguments, { ...(input ? { input: input.tool, inputId: input.id } : {}), ...(isHostShellTool(def) ? { hostShell: true } : {}), id: tc.id });
           if (!ok) {
