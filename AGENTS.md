@@ -2120,7 +2120,26 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
 - **Nothing is silent.** An unknown command answers `Unknown command: x — try :help`.
   A command that is listed does something: `view` and `back` set a state nothing in
   the host reads and were removed. The host's commands are `clear`, `quit`, `config`,
-  `cache`, `help`; everything else is a plugin's.
+  `cache`, `perf`, `help`; everything else is a plugin's.
+- **`:perf` is how fast the app answers** (`src/runtime/frame-stats.ts`). The runtime,
+  not any plugin, owns it: `renderApp` passes flowtty's `onFrame` (docs/app.md in
+  `@flowtty/react`, "frame stats") to a `FrameMeter`, and wraps the root backend in
+  `metered` UNDER `hostKeyed` — `hostKeyed` hands a key nothing took to flowtty a
+  second time, so wrapped outside it the meter would count such a key twice. A frame is
+  tagged by the input that came before it — `typing` (a printable key, Backspace,
+  Delete, a paste), `wheel`, `other` (any other key or mouse event) — or is a `redraw`
+  when none did (an answer streaming, a timer). An input frame is timed from the first
+  input since the previous frame to the frame's end, the React render included; a
+  redraw by its own layout + paint + draw. A stamp no frame took by the next macrotask
+  is dropped (the paint is a microtask after the commit), so a key that changed
+  nothing never lends its time to a later frame. The last `FRAME_WINDOW` (200) frames
+  of each kind are kept; `:perf` writes p50/p95/max of the wait, the frame's own time,
+  `commits`, `applied` and `skipped` per kind into the log and says the p95s in the
+  toast. A frame slower than `SLOW_FRAME_MS` (50 ms) appends one `[perf] slow frame`
+  line with its counters — `services.log.append`, no redraw, so logging a slow frame
+  never costs another frame. `onFrame` must never throw (with no `onError` flowtty
+  would end the app), so the meter swallows its own errors. A test passes its own meter
+  (`bootApp`'s `opts.frameMeter`) to read the frames.
 - **The typed command is text; everything drawn around it is chrome.** A drag over
   the line copies what was typed and nothing else — not the `: ` prompt, not the
   inline offer after the caret, not the `⇥ a · b` candidates — so a long

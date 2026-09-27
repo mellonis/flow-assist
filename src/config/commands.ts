@@ -52,6 +52,7 @@ export const BASE_COMMANDS: Command[] = [
   // Not remembered: a value set may be a secret — an MCP server's `headers` or `env`.
   { name: 'config', aliases: [], usage: 'config [get <key>|set [--session] <key> <value>|unset [--session] <key>|help]', minArgs: 0, maxArgs: -1, description: 'Show the whole config; get a key and where its value comes from; set a key (config.local.json, or with --session for this run only); unset a key (with --session, only the value for this run); help — what the keys are', history: false },
   { name: 'cache', aliases: [], usage: 'cache [on|off]', minArgs: 0, maxArgs: 1, description: 'Turn the cache on or off (config.cache.enabled)' },
+  { name: 'perf', aliases: [], usage: 'perf', minArgs: 0, maxArgs: 0, description: 'How long the last frames took, per kind of input — the report goes to the log' },
   { name: 'help', aliases: ['?'], usage: 'help', minArgs: 0, maxArgs: 0, description: 'List the commands' },
 ];
 

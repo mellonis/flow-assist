@@ -4,7 +4,7 @@ import { BASE_COMMANDS, completeCommand, parseCommand, validateCommand, argCount
 
 test('BASE_COMMANDS has only generic host commands', () => {
   const names = BASE_COMMANDS.map(c => c.name);
-  expect(names.sort()).toEqual(['cache', 'clear', 'config', 'help', 'quit']);
+  expect(names.sort()).toEqual(['cache', 'clear', 'config', 'help', 'perf', 'quit']);
   // `view` and `back` set a state nothing in the host reads: listed, and silent.
   expect(names).not.toContain('view');
   expect(names).not.toContain('back');

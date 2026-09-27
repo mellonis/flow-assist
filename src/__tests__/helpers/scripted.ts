@@ -20,6 +20,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { TestBackend, flush } from '@flowtty/core/testing';
+import type { FrameMeter } from '../../runtime/frame-stats';
 import { loadPlugins } from '../../loader/build.ts';
 import { makeFactory, type Make, type Plugin } from '../../loader/plugin.ts';
 import { assembleToolRegistry } from '../../loader/tools.ts';
@@ -287,6 +288,7 @@ export const settle = async (n = 10) => { for (let i = 0; i < n; i++) { await fl
 // file a test then reads. `opts.toastMs` shortens the toast, for a test that waits
 // for one to go. `opts.clipboardImage` stands in for the system clipboard's image; a
 // test that does not give one has an empty clipboard — never the platform's real tools.
+// `opts.frameMeter` is a meter of the test's own, to read the frames the app painted.
 // `opts.backend` is a backend of the test's own (one it can resize); `cols` and `rows`
 // are then its business. `opts.chatMode` is where the chat opens: a WINDOW over the screen unless a test says
 // otherwise — most tests are about what the chat draws, and their frames were written
@@ -304,7 +306,7 @@ const testEnv = (): Record<string, string | undefined> =>
   Object.fromEntries(Object.entries(process.env).filter(([k, v]) => MACHINE_ENV[k] !== v));
 setSecretsEnv(testEnv);
 
-export async function bootApp(model: ScriptedModel, cols = 100, rows = 28, guests?: (make: Make) => Plugin[], extra: Record<string, unknown> = {}, opts: { toastMs?: number; scheme?: 'light' | 'dark' | 'unknown'; clipboardImage?: () => ClipboardImage; pluginsNote?: string; interactive?: InteractiveDeps; chatMode?: 'panel' | 'window' | 'full' | null; backend?: TestBackend; remote?: { manifest: Record<string, unknown>; transport: RestartingTransport }; startDir?: string } = {}) {
+export async function bootApp(model: ScriptedModel, cols = 100, rows = 28, guests?: (make: Make) => Plugin[], extra: Record<string, unknown> = {}, opts: { toastMs?: number; scheme?: 'light' | 'dark' | 'unknown'; clipboardImage?: () => ClipboardImage; pluginsNote?: string; interactive?: InteractiveDeps; chatMode?: 'panel' | 'window' | 'full' | null; backend?: TestBackend; remote?: { manifest: Record<string, unknown>; transport: RestartingTransport }; startDir?: string; frameMeter?: FrameMeter } = {}) {
   process.env.LLM_TOKEN = '^scripted-llm-token';
   model.install();
   // Sessions go to a fresh temp dir unless a test names one: a test must never write
@@ -369,7 +371,7 @@ export async function bootApp(model: ScriptedModel, cols = 100, rows = 28, guest
   setStartDirForTests(opts.startDir ?? (firstRoot && fs.existsSync(firstRoot) ? firstRoot : null));
   let app: Awaited<ReturnType<typeof renderApp>>;
   try {
-    app = await renderApp(backend, { plugins, config, tools, onExit: () => { exits++; }, toastMs: opts.toastMs, pluginsNote: opts.pluginsNote, clipboardImage: opts.clipboardImage ?? (() => ({ ok: false, none: true, error: 'no image on the clipboard' })),
+    app = await renderApp(backend, { plugins, config, tools, onExit: () => { exits++; }, toastMs: opts.toastMs, pluginsNote: opts.pluginsNote, frameMeter: opts.frameMeter, clipboardImage: opts.clipboardImage ?? (() => ({ ok: false, none: true, error: 'no image on the clipboard' })),
       // `!!command` never reaches the machine's own `script` or signals from a test: with
       // no `interactive` given, there is no `script`, the program "runs" at once and
       // exits 0, and the signal hold works on an emitter of its own.

@@ -322,3 +322,13 @@ Like `!`, it is refused while an answer is coming.
 transport, state and how many of its tools run without asking — and from there a
 server is disabled, enabled, restarted or its tools listed. The plugin's own page,
 `plugins-available/mcp/README.md`, has the whole command set and its settings.
+
+## When the app feels slow: `:perf`
+
+`:perf` on the `:` command line says how long the app took to answer your input, over
+the last 200 frames of each kind: typing, the mouse wheel, any other key or click, and
+the redraws nobody typed for (an answer streaming in). The toast gives the p95 of each;
+the log (`L`) gets the whole report — the median, the p95 and the slowest wait from the
+key to the screen, the time the frame itself took, and how much of the screen was laid
+out again. A frame slower than 50 ms leaves a `[perf] slow frame` line in the log as it
+happens, so a lag you felt a minute ago can still be found there.

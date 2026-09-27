@@ -53,6 +53,7 @@ import {
 } from '../config/load.js';
 import { bindingGlyph, isKey, isMouseKey, keyGlyph } from '../playback/keys.js';
 import { ARM_MS, armHint, armKeyOf, armStep, type Arm } from './exit-keys.js';
+import { createFrameMeter, metered, type FrameMeter } from './frame-stats.js';
 import { copyToClipboard } from '../assistant/copy.js';
 import { readClipboardImage, type ClipboardImage } from '../assistant/images.js';
 import { legacyRootsNote } from '../assistant/shell.js';
@@ -158,6 +159,9 @@ export interface RenderAppInput {
   // What the TTY backend took off the console while it holds the screen (its
   // `onConsole`, src/runtime/console-log.ts): each line goes to the log.
   consoleLog?: import('./console-log.js').ConsoleBridge;
+  // What the frames cost, per kind of input (src/runtime/frame-stats.ts). A test passes
+  // its own to read the frames; the app makes one, whose slow frames go to the log.
+  frameMeter?: FrameMeter;
 }
 
 // Command-line state lives in a single stable `{ current }` object created in
@@ -333,7 +337,7 @@ const CONSOLE_REDRAW_MS = 200;
 
 export function renderApp(
   root: Backend,
-  { plugins, config, onExit, renders: _renders = {}, tools, toastMs, clipboardImage, pluginsNote, loadNotes = [], interactive, consoleLog }: RenderAppInput,
+  { plugins, config, onExit, renders: _renders = {}, tools, toastMs, clipboardImage, pluginsNote, loadNotes = [], interactive, consoleLog, frameMeter }: RenderAppInput,
 ) {
   // Resolve config.theme into the full per-modal palette BEFORE anything reads it
   // (createServices, the plugins' `host` and every renderer read `config.theme`): the base of the
@@ -387,6 +391,10 @@ export function renderApp(
     }, CONSOLE_REDRAW_MS);
     consoleRedraw.unref?.();
   });
+  // Every painted frame is counted here; a slow one leaves a line in the log without
+  // asking for a redraw (the log shows it the next time it is drawn) — a redraw per
+  // slow frame could be one more slow frame.
+  const meter = frameMeter ?? createFrameMeter({ onSlow: (line) => services.log.append(line) });
   const viewRegistry = buildViewRegistry(plugins);
   const commandRegistry = buildCommandRegistry(plugins);
   const keys = buildKeys(plugins, config, undefined, (line) => services.log.append(line));
@@ -643,6 +651,14 @@ export function renderApp(
         toast.showMessage(`cache ${cur ? 'on' : 'off'}`);
       }
     };
+    // What the frames have cost: the whole report into the log, its gist in the toast.
+    const runPerfCmd = (): void => {
+      // The last line through `pushLog`, which refreshes an open log once for them all.
+      const lines = meter.report();
+      for (const line of lines.slice(0, -1)) services.log.append(line);
+      (services as unknown as ReactBoundServices).pushLog(lines.at(-1)!);
+      toast.showMessage(`${meter.headline()} — the report is in the log`);
+    };
     // Base host commands (the BASE_COMMANDS metadata has no `run`). Dispatches
     // the unprefixed names to the ctx closures; plugin commands carry their own
     // `run` and are dispatched separately. `:quit`/`:clear` stay works — they
@@ -656,6 +672,7 @@ export function renderApp(
         case 'cache': runCacheCmd(arg); break;
         case 'help': case '?': setHelpModalOpen(true); break;
         case 'keycaps': toggleKeycaps(arg); break;
+        case 'perf': runPerfCmd(); break;
         // A typo is answered, not swallowed: silence after Enter reads as a hang.
         default: if (name) toast.showMessage(`Unknown command: ${name} — try :help`);
       }
@@ -1075,7 +1092,10 @@ export function renderApp(
   // floating dialog anchored under the field, in frame cells — which is why it sits at
   // the frame's origin). While a popup is open every key is the popup's but the exit
   // keys (`HostKeyPath`).
-  return render(h(Fragment, null, h(DialogHost, null, h(App)), h(HostExit, { path: keyPath })), hostKeyed(root, keyPath), {
+  // The meter hears each key where the terminal reports it, under the host's key path
+  // (which hands a key nothing took to flowtty twice), and every frame flowtty paints.
+  return render(h(Fragment, null, h(DialogHost, null, h(App)), h(HostExit, { path: keyPath })), hostKeyed(metered(root, meter), keyPath), {
+    onFrame: (stats) => meter.frame(stats),
     onCopy: (event) => onCopySelection(event, {
       say: (msg) => (services as unknown as ReactBoundServices).showMessage(msg),
       fallback: (text) => copyToClipboard(text),
