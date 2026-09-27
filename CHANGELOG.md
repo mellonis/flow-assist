@@ -11,8 +11,10 @@ What each version of flow-assist brought, newest first. The version is the one i
   and has not been seen since — opening the chat on it, or opening it in the chat, marks
   it seen.
 - **Sessions are kept per project.** A session belongs to the project it started in —
-  the `shell.roots` entry holding the shell's directory at its first message, else that
-  directory's git repository — and its files live under a mirror of that path,
+  the git repository holding the shell's directory at its first message, when it lies
+  inside the `shell.roots` entry holding that directory (a root that is a whole
+  workspace keeps each repository a project of its own); that root when no repository
+  lies between it and the directory; outside every root the nearest repository — and its files live under a mirror of that path,
   `sessions/Users/me/app/<id>.json` with its journal beside it. A start continues the
   current project's newest session (the newest of all only when the project has none);
   `/sessions` opens on the current project's sessions and Tab shows every session,

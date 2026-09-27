@@ -499,23 +499,37 @@ test('removeSession deletes an idle session and its lock; a held one and this to
 
 // ─── sessions per project ─────────────────────────────────────────────────────
 
-test('projectOf: the innermost shell root holding the directory, else its git root, else none — by real path', () => {
+test('projectOf: the nearest git root inside the innermost root, else that root; outside every root the nearest git root; else none — by real path', () => {
   const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'proj-')));
-  const outer = path.join(base, 'work');
-  const inner = path.join(outer, 'app');
-  fs.mkdirSync(path.join(inner, 'src'), { recursive: true });
-  expect(projectOf(path.join(inner, 'src'), [outer, inner])).toBe(inner);
-  expect(projectOf(path.join(outer), [outer, inner])).toBe(outer);
-  // No root holds it: the git root — `.git` may be a file (a worktree).
-  const repo = path.join(base, 'repo');
-  fs.mkdirSync(path.join(repo, 'deep', 'er'), { recursive: true });
-  fs.writeFileSync(path.join(repo, '.git'), 'gitdir: elsewhere\n');
-  expect(projectOf(path.join(repo, 'deep', 'er'), [inner])).toBe(repo);
-  // A link into a root is its root, by the real path.
+  // A workspace root holding several repositories: each is a project of its own.
+  const workspace = path.join(base, 'work');
+  const repoA = path.join(workspace, 'a');
+  const repoB = path.join(workspace, 'b');
+  const notes = path.join(workspace, 'notes');
+  for (const d of [path.join(repoA, 'src', 'deep'), repoB, notes]) fs.mkdirSync(d, { recursive: true });
+  fs.mkdirSync(path.join(repoA, '.git'));
+  fs.writeFileSync(path.join(repoB, '.git'), 'gitdir: elsewhere\n'); // a worktree: `.git` is a file
+  expect(projectOf(path.join(repoA, 'src', 'deep'), [workspace])).toBe(repoA);
+  expect(projectOf(repoB, [workspace])).toBe(repoB);
+  // No repository between the root and the directory: the root.
+  expect(projectOf(notes, [workspace])).toBe(workspace);
+  expect(projectOf(workspace, [workspace])).toBe(workspace);
+  // A repository ABOVE the root is not inside it: the root wins.
+  const outerRepo = path.join(base, 'outer');
+  const innerRoot = path.join(outerRepo, 'sub');
+  fs.mkdirSync(path.join(innerRoot, 'x'), { recursive: true });
+  fs.mkdirSync(path.join(outerRepo, '.git'));
+  expect(projectOf(path.join(innerRoot, 'x'), [innerRoot])).toBe(innerRoot);
+  // The innermost root counts: a root inside a repository inside a root.
+  expect(projectOf(path.join(repoA, 'src'), [workspace, path.join(repoA, 'src')])).toBe(path.join(repoA, 'src'));
+  // Outside every root: the nearest git root.
+  expect(projectOf(path.join(repoA, 'src'), [notes])).toBe(repoA);
+  // A link into a root is read by its real path.
   const link = path.join(base, 'link');
-  fs.symlinkSync(inner, link);
-  expect(projectOf(link, [inner])).toBe(inner);
+  fs.symlinkSync(repoB, link);
+  expect(projectOf(link, [workspace])).toBe(repoB);
   expect(projectOf(path.join(base, 'loose'), [], () => null)).toBeNull();
+  expect(projectOf(notes, [workspace], () => null)).toBe(workspace);
 });
 
 test('projectHome mirrors the project path under the sessions directory; no project is the top level', () => {

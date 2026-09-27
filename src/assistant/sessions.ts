@@ -104,9 +104,13 @@ export function sessionsDir(config: Record<string, unknown> | undefined, env: Re
 }
 
 // ─── Where a session lives ──────────────────────────────────────────────────────
-// The project a directory belongs to: the innermost shell root holding it, else the
-// nearest directory above it with a `.git` (a directory, or a file in a worktree), else
-// none. By real path, as the roots are compared everywhere (./shell.ts, `dirAllowed`).
+// The project a directory belongs to: the nearest directory at or above it with a
+// `.git` (a directory, or a file in a worktree) — so a `shell.roots` entry that is a
+// whole workspace of repositories keeps each repository a project of its own — as long
+// as that repository lies inside the innermost root holding the directory; the root
+// itself when no repository lies between it and the directory; outside every root the
+// nearest repository; else none. By real path, as the roots are compared everywhere
+// (./shell.ts, `dirAllowed`).
 export function gitRootOf(dir: string): string | null {
   for (let d = dir; ; d = path.dirname(d)) {
     if (fs.existsSync(path.join(d, '.git'))) return d;
@@ -116,7 +120,9 @@ export function gitRootOf(dir: string): string | null {
 export function projectOf(dir: string, roots: string[], gitRoot: (dir: string) => string | null = gitRootOf): string | null {
   const real = realOf(path.resolve(dir));
   const root = roots.map(realOf).filter((r) => within(real, r)).sort((a, b) => b.length - a.length)[0];
-  return root ?? gitRoot(real);
+  const repo = gitRoot(real);
+  if (!root) return repo;
+  return repo && within(repo, root) ? repo : root;
 }
 
 // A project's sessions directory: the project's path mirrored under the root, its

@@ -1187,9 +1187,13 @@ there is no `/fullscreen`.
   against `TOOLS_LOAD_PARAMETERS` (`tool-loading.ts`) directly.
 - **Sessions survive a restart** (`src/assistant/sessions.ts`, one JSON per session
   under `<config dir>/sessions/`, dirs 700 / files 600 — they hold tracker and MR text).
-  **A session belongs to the project it started in** (`projectOf`): the innermost
-  `shell.roots` entry holding the shell's directory, else the nearest directory above it
-  with a `.git` (a file in a worktree), else none — by real path. It is decided once,
+  **A session belongs to the project it started in** (`projectOf`): the nearest
+  directory at or above the shell's directory with a `.git` (a file in a worktree) when
+  it lies inside the innermost `shell.roots` entry holding that directory — a root that
+  is a whole workspace keeps each repository in it a project of its own; that root
+  itself when no repository lies between it and the directory (a repository ABOVE the
+  root does not count); outside every root the nearest repository; else none — by real
+  path. It is decided once,
   when the session gets its id (`ensureSessionId`, its first message — the journal and
   the lock start there too), recorded in the file as `project`, and never changed: a
   `cd` into another project later leaves the session where it is. Its state file,

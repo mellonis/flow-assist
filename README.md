@@ -44,9 +44,11 @@ anything the model has read, and only the host's shell tool is covered by the fl
 Only pass it for a prompt whose tools read nothing you do not trust.
 
 The chat is saved as you go and continued on the next start, so a restart or an
-update loses nothing. A session belongs to the project it started in — the `shell.roots`
-entry holding the shell's directory at its first message, else that directory's git
-repository — and a start continues that project's newest session (the newest of all
+update loses nothing. A session belongs to the project it started in — the git
+repository holding the shell's directory at its first message, when that repository lies
+inside your `shell.roots` entry (so a root that is a whole workspace keeps each of its
+repositories a project of its own); the root itself when there is no repository between
+it and the directory; outside every root, the nearest repository — and a start continues that project's newest session (the newest of all
 when the project has none yet). `/sessions` — or Ctrl+S from any screen (`config set
 keys.sessions <key>` moves it) — lists the current project's saved sessions, newest
 first, with its title, when it was last used, its size, and what it is doing — `this
