@@ -39,6 +39,7 @@
 // different foreign writes both read as rev 0), would still read as unchanged —
 // `mtimeMs`/`size` catch what the counter cannot. A mismatch on any of the three
 // forks the conversation into a new session instead of overwriting what changed.
+import { redactDeep } from './secrets.js';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -289,7 +290,10 @@ export function saveSession(dir: string, s: Session): SessionFingerprint {
     api: trimHistory(s.api),
   };
   const tmp = `${file}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(body), { mode: 0o600 });
+  // Nothing is written with a known secret in it (./secrets.ts) — the backstop behind
+  // the choke points: the model's own history holds its tool calls' arguments and its
+  // rounds' text as they came.
+  fs.writeFileSync(tmp, JSON.stringify(redactDeep(body)), { mode: 0o600 });
   fs.renameSync(tmp, file);
   const stat = fs.statSync(file);
   return { rev, mtimeMs: stat.mtimeMs, size: stat.size };

@@ -649,3 +649,22 @@ test('unseenAnswer: an answer is unseen while it is the last message and came af
   expect(unseenAnswer(msgs, '', '')).toBe(false);
   expect(unseenAnswer([...msgs, { role: 'shell', command: 'ls', content: '' }], '2026-09-21T10:00:05.000Z', '')).toBe(false);
 });
+
+test('nothing a session file holds keeps a known secret — a tool call\'s arguments, a tool round\'s text', async () => {
+  const { buildSecretSet, setActiveSecrets } = await import('../secrets.ts');
+  const token = 'session-secret-value-000123';
+  setActiveSecrets(buildSecretSet({}, { WB_WIKI_TOKEN: token }));
+  try {
+    const dir = tmp();
+    const s = session({ api: [
+      { role: 'user', content: 'call it' },
+      { role: 'assistant', content: `Next: curl with ${token}`, tool_calls: [{ id: 'c1', type: 'function', function: { name: 'run_command', arguments: JSON.stringify({ command: `curl -H "Authorization: Bearer ${token}" x` }) } }] },
+    ] as never });
+    saveSession(dir, s);
+    const text = fs.readFileSync(path.join(dir, `${s.id}.json`), 'utf8');
+    expect(text).not.toContain(token);
+    expect(text).toContain('‹secret WB_WIKI_TOKEN›');
+  } finally {
+    setActiveSecrets(null);
+  }
+});

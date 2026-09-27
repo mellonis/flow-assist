@@ -675,12 +675,19 @@ function withRequestTail(messages: ChatMessage[], tail: (() => string) | undefin
 
 // The round's messages with the system prompt as it is now (`AgentOpts.systemPrompt`).
 // A copy — the history never holds it.
+// The system prompt goes out without a known secret (./secrets.ts): project
+// instructions and the memory index are text anyone may have written a token into. A
+// prompt with none is sent as the same message, so the cached prefix holds.
 function withSystemPrompt(messages: ChatMessage[], system: (() => string | null) | undefined): ChatMessage[] {
-  if (!system) return messages;
   let text = '';
-  try { text = String(system() ?? ''); } catch { text = ''; }
-  if (!text) return messages;
+  if (system) { try { text = String(system() ?? ''); } catch { text = ''; } }
   const first = messages[0];
+  if (!text) {
+    if (first?.role !== 'system' || typeof first.content !== 'string') return messages;
+    const clean = redactSecrets(first.content);
+    return clean === first.content ? messages : [{ ...first, content: clean }, ...messages.slice(1)];
+  }
+  text = redactSecrets(text);
   if (first?.role === 'system') return first.content === text ? messages : [{ ...first, content: text }, ...messages.slice(1)];
   return [{ role: 'system', content: text }, ...messages];
 }

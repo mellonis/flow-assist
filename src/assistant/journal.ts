@@ -37,6 +37,7 @@
 // `/export` renders a journal as markdown (`exportMarkdown`).
 //
 // Pure but for the two file functions; the chat decides when an event happens.
+import { redactDeep } from './secrets.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { formatBytes } from './session-picker.js';
@@ -77,9 +78,12 @@ export function journalLine(ev: JournalEvent): string {
 // Appends one event, stamped with the time it happened unless it carries one already
 // (an event held until the session had an id). The directory is the sessions', 700;
 // the file is created 600 — it holds whatever the conversation held.
+// Every line is written without a known secret (./secrets.ts) — the backstop behind
+// the choke points: a tool call's arguments, a round's text, anything an event carries.
+// At write time only: what ran, ran as the model wrote it.
 export function appendJournal(file: string, ev: JournalEvent): void {
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
-  fs.appendFileSync(file, journalLine({ ...ev, at: ev.at ?? new Date().toISOString() }), { mode: 0o600 });
+  fs.appendFileSync(file, journalLine(redactDeep({ ...ev, at: ev.at ?? new Date().toISOString() })), { mode: 0o600 });
 }
 
 // Every event in order; a line that does not parse (a write cut by a crash, a hand

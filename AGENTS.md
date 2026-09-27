@@ -3225,8 +3225,16 @@ a new path for text keeps to it.
     the model is sent passes through;
   - the log — `LogService.append` and `logToolRun`, and `consoleLogLines` (so the lines
     kept for stderr at exit have none).
-  The person's own words — a message, a `!command` line — are theirs and are not
-  touched.
+  - the system prompt — `withSystemPrompt` in `agentChat`, the per-round prompt and a
+    leading system message alike: project instructions and the memory index are text
+    anyone may have written a token into (a group's description, an MCP server's
+    `instructions`, passes `sanitizeViewText`);
+  - the backstop — `appendJournal` and `saveSession` write `redactDeep` of what they
+    are given, so a tool call's arguments and a tool round's text (kept in the model's
+    history as they came) never reach the disk with a token. At write time only: what
+    a call runs is what the model wrote.
+  The person's own words — a message, a `!command` line — are shown and sent as they
+  are; on disk the backstop takes a pasted token out of them too.
 - **The model's commands run without the secrets.** `run_command` starts from the
   process's environment less every name of the set (`withheldEnv`), except those the
   person lists in `shell.passEnv` (under `shell`, so on the leash — the model can never

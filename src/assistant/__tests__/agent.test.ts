@@ -1104,3 +1104,19 @@ test('a held tail is flushed at a round\'s end, a stop and an error — whole, a
     setActiveSecrets(null);
   }
 });
+
+test('the system prompt is sent without a known secret — the chat\'s per-round one and a leading system message alike', async () => {
+  const { buildSecretSet, setActiveSecrets } = await import('../secrets');
+  const token = 'system-secret-value-0001';
+  setActiveSecrets(buildSecretSet({}, { WB_WIKI_TOKEN: token }));
+  try {
+    assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
+    const sent: string[] = [];
+    const chatRound = async (messages: any[]) => { sent.push(JSON.stringify(messages)); return { content: 'ok', finishReason: 'stop', toolCalls: [] }; };
+    await agentChat([{ role: 'system', content: `AGENTS.md says the token is ${token}` }, { role: 'user', content: 'go' }], { baseUrl: 'http://x', model: 'm', token: 't', onLive: () => {}, onLiveCommit: () => {}, chatRound } as any);
+    await agentChat([{ role: 'user', content: 'go' }], { baseUrl: 'http://x', model: 'm', token: 't', onLive: () => {}, onLiveCommit: () => {}, chatRound, systemPrompt: () => `memory: ${token}` } as any);
+    for (const s of sent) { expect(s).not.toContain(token); expect(s).toContain('‹secret WB_WIKI_TOKEN›'); }
+  } finally {
+    setActiveSecrets(null);
+  }
+});
