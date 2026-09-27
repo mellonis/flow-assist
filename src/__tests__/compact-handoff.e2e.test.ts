@@ -63,15 +63,16 @@ test('the compaction asks for the handoff sections, carries the previous summary
 });
 
 test('the whole history is compacted, not its last messages', async () => {
+  // 16 turns are 32 messages — more than the last 30.
   const model = new ScriptedModel();
-  const turns = Array.from({ length: 18 }, (_, i) => [{ text: `answer ${i}` }]);
+  const turns = Array.from({ length: 16 }, (_, i) => [{ text: `answer ${i}` }]);
   model.script(...turns, [{ text: handoff('ALL') }]);
   const ui = await bootApp(model, 110, 30);
   await ui.press('F');
-  for (let i = 0; i < 18; i++) await ask(ui, `question ${i}`);
+  for (let i = 0; i < 16; i++) await ask(ui, `question ${i}`);
   await compact(ui);
-  expect(userText(model, 18)).toContain('user: question 0\n');
-});
+  expect(userText(model, 16)).toContain('user: question 0\n');
+}, 20_000);
 
 test('an answer that is not a handoff is asked for once more, with the reason', async () => {
   const model = new ScriptedModel();

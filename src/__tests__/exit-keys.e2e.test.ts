@@ -219,12 +219,12 @@ test('↑ on an empty field takes the last queued message back; with the queue e
   await ui.type('queued b');
   await ui.press('return');
   expect(ui.backend.lastFrame).toMatch(/queued \(2\)/);
-  expect(ui.backend.lastFrame).toContain('↑ takes it back');
+  expect(ui.backend.lastFrame).toContain('↑ back'); // in a turn, beside when it reaches the model
 
   await ui.press('up');
   expect(ui.backend.lastFrame).toContain('› queued b');
   expect(ui.backend.lastFrame).toMatch(/queued: .*queued a/);
-  expect(ui.backend.lastFrame).not.toContain('↑ takes it back'); // not from a draft
+  expect(ui.backend.lastFrame).not.toContain('↑ back'); // not from a draft
   await ui.press('escape'); // the turn is still running: Esc stops it, the field stays
   await settle(10);
   expect(ui.backend.lastFrame).toContain('stopped (Esc)');
