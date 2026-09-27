@@ -316,6 +316,18 @@ builder options the loader never passes), so the tests run the schedule without 
 it; `src/__tests__/mcp.e2e.test.ts` holds the late group reaching the index of the next
 request and a 401 asked once.
 
+**`/mcp` is the person's lever over them** (`plugins-available/mcp/src/command.ts`, a
+plugin command with `chat: true` and `complete`): bare, a panel in the chat (name,
+transport, state, read-only count; `d` disable/enable, `r` restart, `t` tools) and one
+line on the `:` line; `disable|enable <name> [--session]` act at once and save
+`plugins.mcp.servers.<name>.enabled` through `services.setConfig`; `restart` resets the
+backoff; `add <name> <url | command args…>` writes the whole entry (so the schema's
+one-transport check holds; a command is split on spaces, never a shell line) and
+`remove` unsets it, refusing — with `/mcp disable` as the way — when config.json still
+sets it. `headers` and `env` are never taken from the chat (a secret in the chat's
+history and session); the help says `config set`. A server `enabled: false` at start is
+listed and never connected. There is no tool for the model: config is the person's.
+
 ### A handled key is followed by a redraw
 
 A plugin usually keeps its state in ONE component (a workspace that publishes it on

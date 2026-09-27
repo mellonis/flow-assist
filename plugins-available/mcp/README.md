@@ -29,6 +29,32 @@ A 401 or a 403 is not tried again: that is the token, not the network, and tryin
 would only be refused again. The reason says so; fix the token, then `/mcp restart
 <name>`.
 
+## `/mcp` — the servers, from the chat
+
+`/mcp` in the chat lists the servers in the conversation's place — each one's name,
+transport (`http` or `stdio`), state (`connected · 23 tools`, `failed — HTTP 502 ·
+retrying in 12 s`, `disabled`) and how many of its tools run without asking — with keys:
+`d` disables or enables the one under the cursor, `r` restarts it, `t` lists its tools,
+Esc closes. `:mcp` on the command line says the same in one line (each server in the
+log too).
+
+    /mcp disable <name> [--session]   off at once — its tools gone, a command's process stopped
+    /mcp enable <name> [--session]    on again, connected now
+    /mcp restart <name>               try now; the backoff starts over
+    /mcp add <name> <url>             a new HTTP server
+    /mcp add <name> <command> [args…] a new server started as a command (split on spaces, no shell)
+    /mcp remove <name>                out of config.local.json and this run
+    /mcp tools <name>                 its tools, the read-only ones marked
+
+`disable`, `enable`, `add` and `remove` write `config.local.json` as `config set`
+does (`plugins.mcp.servers.<name>.enabled`, the server's whole entry); `--session`
+keeps the change for this run only. A server set in `config.json` is removed there, by
+hand — `/mcp disable` turns it off meanwhile. `headers` and `env` are never taken
+from the chat: they hold tokens, and what is typed in the chat is kept in its history
+and its session. Set them with `config set plugins.mcp.servers.<name>.headers '{…}'`.
+The names complete with Tab. The model has no tool for any of this: which servers run
+is yours to say.
+
 ## Settings — `plugins.mcp.servers.<name>`
 
 A server is reached one of two ways, and exactly one: `url` or `command`.
@@ -42,7 +68,7 @@ A server is reached one of two ways, and exactly one: `url` or `command`.
 | `env` | environment for the server's process, on top of the assistant's own; `${VAR}` is taken from the environment here too |
 | `trusted` | `true` — you believe THIS SERVER's own read-only claims: a tool with `readOnlyHint: true` runs without asking |
 | `readOnly` | YOUR OWN list of this server's tools you have checked and call read-only, by the name the server gives them — each runs without asking. It needs no `trusted`, and it is the only thing that helps a server which makes no claims at all |
-| `enabled` | `false` — keep the entry, do not connect |
+| `enabled` | `false` — keep the entry, do not connect (`/mcp disable <name>` sets it) |
 | `connectTimeoutMs` | the handshake and the tool list, default 1500 — the assistant waits for them at start, so a server that is down (or a command that never answers) costs at most this much |
 | `timeoutMs` | a tool call, default 60000 |
 

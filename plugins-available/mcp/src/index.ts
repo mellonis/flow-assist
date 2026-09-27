@@ -35,6 +35,7 @@
 
 import { createMcpClient, resultText, type Fetcher, type McpClient, type McpTool } from './client.ts';
 import { createStdioClient } from './stdio.ts';
+import { mcpCommand } from './command.ts';
 import { createServerManager, realTimers, type RetrySchedule, type ServerManager, type ServerView, type Timers } from './servers.ts';
 
 export type ServerSpec = {
@@ -317,6 +318,8 @@ export async function buildMcpPlugin({ make, config, z, toolsChanged, retry, tim
     tools: manager.groups(),
     surface: undefined,
     configSchema: configSchema(z),
+    // `/mcp` in the chat, `:mcp` on the command line — the person's, never the model's.
+    commands: [mcpCommand(manager, { services: () => services, now: () => clock.now() })],
     description: servers.length ? `MCP — ${enabled.filter((v) => v.state === 'connected').length} of ${enabled.length} servers connected` : 'MCP servers — none configured (plugins.mcp.servers)',
     // What happened to each server, in the log (L): the start screen only has room for
     // the count.

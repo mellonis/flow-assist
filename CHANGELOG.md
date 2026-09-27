@@ -12,6 +12,18 @@ What each version of flow-assist brought, newest first. The version is the one i
   and the chat says `mcp: <name> connected — N tools`. A 401 or 403 is not tried again:
   the reason says it is the token. A server started as a command that exits is started
   again the same way.
+- **`/mcp` shows the MCP servers and changes them from the chat.** A list in the
+  conversation's place — each server's transport, state (`connected · 23 tools`,
+  `failed — HTTP 502 · retrying in 12 s`, `disabled`) and read-only count — with keys to
+  disable or enable one at once, restart it or see its tools; `:mcp` says it in a line.
+  `/mcp disable|enable <name>` is saved (`--session` for this run only), `/mcp restart`
+  tries now, `/mcp add <name> <url | command…>` and `/mcp remove <name>` edit
+  `config.local.json`, `/mcp tools <name>` lists a server's tools. Headers and env are
+  never taken from the chat — they hold secrets; `config set` sets them.
+- **For plugin authors:** a command with `chat: true` is also the chat's `/name`; it may
+  say a note (`ctx.say`), open a panel with keys of its own (`ctx.openPanel`) and
+  complete every word of its argument (`complete(words)`). `host.services.chatNote`,
+  `setConfig` and `unsetConfig` are new services.
 - **For plugin authors:** a plugin whose tool groups change while the app runs sets
   `tools` on its plugin object and calls `toolsChanged()`, handed to its builder.
 - **The assistant has a workspace of its own per project.** Drafts, notes, plans and

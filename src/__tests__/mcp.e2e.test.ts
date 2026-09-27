@@ -184,3 +184,39 @@ test('a server that answers 401 is not tried again: the reason names the token',
     locked.stop(true);
   }
 });
+
+// `/mcp` through the real chat: the panel lists the server, `d` turns it off — saved in
+// config.local.json, its tools gone from the next request — and `:mcp` says the same in a
+// line.
+test('/mcp lists the servers in a panel; d disables one at once, saved, and its tools leave the next request', async () => {
+  const { default: buildMcpPlugin } = await import('../../plugins-available/mcp/src/index.ts');
+  const { refreshToolRegistry } = await import('../loader/tools');
+  const { hostStateDir } = await import('../config/load');
+  const { readFileSync } = await import('node:fs');
+  const config = mcpConfig();
+  const { z } = await import('zod');
+  // Built with the host's zod, as the loader builds it: the settings are what `d` writes.
+  const shape = await buildMcpPlugin({ make: makeFactory(config as never) as never, config, z, toolsChanged: refreshToolRegistry } as never);
+  const model = new ScriptedModel();
+  model.script([{ text: 'ok' }]);
+  const app = await bootApp(model, 110, 30, () => [shape as never], config);
+  await app.type(':mcp');
+  await app.press('return');
+  expect(app.backend.lastFrame).toContain('mcp: webstorm (http) connected · 2 tools');
+  await app.press('F');
+  await app.type('/mcp');
+  await app.press('return');
+  expect(app.backend.lastFrame).toContain('MCP servers · 1');
+  expect(app.backend.lastFrame).toContain('http · connected · 2 tools');
+  await app.type('d');
+  expect(app.backend.lastFrame).toContain('webstorm disabled (saved)');
+  expect(app.backend.lastFrame).toContain('http · disabled');
+  const local = JSON.parse(readFileSync(`${hostStateDir()}/config.local.json`, 'utf8'));
+  expect(local.plugins.mcp.servers.webstorm.enabled).toBe(false);
+  await app.press('escape');
+  await app.type('hi');
+  await app.press('return');
+  await new Promise((r) => setTimeout(r, 50));
+  expect(JSON.stringify(model.requests.at(-1))).not.toContain('webstorm__get_file_text');
+  app.app.unmount();
+});
