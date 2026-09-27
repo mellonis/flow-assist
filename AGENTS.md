@@ -1096,7 +1096,11 @@ there is no `/fullscreen`.
   is actually in — a name already in the list, bare or genuinely qualified by a
   clash, is tried first and never rewritten) avoids the round `ERROR: Not in the
   list` would otherwise cost. An unknown name still errors, listing
-  the groups. A group may carry its own description too — guidance beyond any one
+  the groups. `group` takes the same forgiveness the other way round: a value that
+  names no group is read as a tool's own name instead, qualified or bare, through the
+  same resolution (`runToolsLoad`) — a model that passes a TOOL where the parameter
+  reads "group" loads that tool rather than a round-costing error, and the answer says
+  so like any other load. A group may carry its own description too — guidance beyond any one
   tool's, an MCP server's `initialize` `instructions`, say (`ToolGroup.description`,
   `src/loader/tools.ts`) — shown as one line under the group's heading in the index
   and, once the group's tools are loaded (or sent in full under `'all'`), in full on the

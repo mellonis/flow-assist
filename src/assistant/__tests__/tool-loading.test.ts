@@ -174,6 +174,25 @@ test('tools_load accepts a name qualified with its group, as well as the bare na
   expect(runToolsLoad({ names: ['acme:get_issue'] }, catalog, set)).toBe('Already loaded: get_issue.');
 });
 
+test('a `group` that names no group is read as a tool name instead, the same way `names` reads one', () => {
+  const set = createToolSet();
+  // "acme:get_issue" names no group — the index shows the group as "acme", not
+  // "acme:get_issue" — but resolves to the tool through the same `unqualify` fallback
+  // `names` uses.
+  expect(runToolsLoad({ group: 'acme:get_issue' }, catalog, set)).toBe('Loaded: get_issue — call them now.');
+  expect(set.names()).toEqual(['get_issue']);
+  // Bare, unqualified: the tool's own name.
+  const bareSet = createToolSet();
+  expect(runToolsLoad({ group: 'read_file' }, catalog, bareSet)).toBe('Loaded: read_file — call them now.');
+  // A real group still wins over this fallback — nothing here shadows `inGroup`.
+  expect(runToolsLoad({ group: 'repo' }, catalog, createToolSet())).toBe('Loaded: read_file, list_dir — call them now.');
+  // The WRONG group prefix still does not resolve, and still errors as a group.
+  expect(() => runToolsLoad({ group: 'repo:get_issue' }, catalog, createToolSet()))
+    .toThrow('Not in the list: group "repo:get_issue". Groups: repo, acme.');
+  // Already loaded, asked again as `group`: reads as already loaded.
+  expect(runToolsLoad({ group: 'acme:get_issue' }, catalog, set)).toBe('Already loaded: get_issue.');
+});
+
 // ─── A group's own description (an MCP server's `instructions`, e.g.) ─────────────────
 test('a group\'s description is the index line under its heading, cut to the index\'s own width', () => {
   const groupDescriptions = new Map([['repo', 'Statuses are numeric ids: 1 open, 2 done. Look them up before filtering.'.repeat(4)]]);

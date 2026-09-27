@@ -5,6 +5,10 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **`tools_load`'s `group` accepts a tool's own name.** A `group` that names no group
+  is read the way `names` already reads one: a tool's own name, qualified
+  (`<group>:<name>`) or bare, loads that tool instead of erroring, and the answer says
+  it loaded the tool.
 - **A recovered tool trail is yellow, not red.** The trail's header and a folded run's
   `✗` mark now take red only when a failed call was never followed by a later,
   successful call of the same tool; a failure the model went on to retry

@@ -297,7 +297,15 @@ export function runToolsLoad(args: Record<string, unknown>, catalog: CatalogEntr
       groupRefusal = `"${group}" has ${es.length} tools — ${costPhrase(es)}:\n${groupLines(es)}`;
     } else if (tools.length) wanted.push(...tools);
     else if (group === ALWAYS_LOADED_GROUP) always.push(`group "${group}"`);
-    else unknown.push(`group "${group}"`);
+    else {
+      // `group` names no group — read it the way `names` reads one: a tool's own
+      // name, qualified (`<group>:<name>`) or bare, loads that tool instead. A real
+      // group always wins (checked above), so this never shadows `inGroup`.
+      const asTool = deferred.has(group) ? group : unqualify(group, deferred);
+      if (deferred.has(asTool)) wanted.push(asTool);
+      else if (asTool === TOOLS_LOAD || catalog.some((e) => e.name === asTool)) always.push(asTool);
+      else unknown.push(`group "${group}"`);
+    }
   }
   if (!wanted.length && !always.length && !groupRefusal) throw new Error(`${notInList(unknown)} Groups: ${groups.join(', ')}.`);
   const fresh = set.add(wanted);
