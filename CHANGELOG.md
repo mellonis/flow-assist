@@ -7,8 +7,9 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 - **An MCP server that is not there at start is tried again, not dropped for the run.**
   A server that fails to connect — a gateway that answered 502 just then, an IDE not open
-  yet — or drops later (refused, reset, timed out, a gateway's 502/503/504, a process
-  that exits; a 500 or 404 answering one call stays that tool's error) is tried again in
+  yet — or drops later (refused, reset, a gateway's 502/503/504, a process that exits;
+  a call that times out or gets another 5xx stays that call's error while the server
+  answers a ping, and a 404 stays the tool's error) is tried again in
   the background after 5 s, 15 s and 60 s, then
   every 5 minutes. When it answers, its tools join at your next message with no restart,
   and the chat says `mcp: <name> connected — N tools`. A 401 or 403 is not tried again:

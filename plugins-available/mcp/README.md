@@ -21,11 +21,13 @@ says what each one answered — `webstorm: WebStorm 2026.2, 23 tools`,
 A server that does not answer at start — a gateway that said 502 at that moment, an IDE
 not open yet — is tried again in the background: after 5 s, 15 s and 60 s, then every
 5 minutes, until it answers. So is one that drops later: a call whose connection is
-refused or reset, that gets no answer within `timeoutMs`, or a gateway's 502, 503 or
-504, and a process that exits. Its tools are not offered while it is gone, and when it
+refused or reset, a gateway's 502, 503 or 504, a process that exits. Its tools are not offered while it is gone, and when it
 answers they join at your next message — no restart — and the chat says so: `mcp:
-tracker connected — 12 tools`. A 500 or a 404 answering one call is that tool's error:
-the assistant reads it as the call's answer, and the server keeps its tools.
+tracker connected — 12 tools`. A 404 answering one call is that tool's error: the
+assistant reads it as the call's answer, and the server keeps its tools. A call with no
+answer within `timeoutMs`, or another 5xx, is that call's error too — a slow search
+takes no other tool away — unless the server, asked at once whether it is there (MCP's
+`ping`), does not answer either: then it has dropped.
 
 A 401 or a 403 is not tried again: that is the token, not the network, and trying again
 would only be refused again. The reason says so; fix the token, then `/mcp restart
@@ -88,8 +90,8 @@ later, like an HTTP server that is down.
 
 A server that dies fails the calls that were waiting, saying which server it was and
 what it last wrote to stderr, and is started again in the background as a new process
-(above). A call that runs past `timeoutMs` fails, and the server is taken for gone and
-tried again (above) — give a slow tool a larger `timeoutMs`.
+(above). A call that runs past `timeoutMs` fails alone, and the server keeps its tools
+as long as it answers a `ping`.
 
 stdout is the protocol, one JSON-RPC message per line; any other line the server prints
 there is skipped. stderr is its log — kept for the error messages above, never read as

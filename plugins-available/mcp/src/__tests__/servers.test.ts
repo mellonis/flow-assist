@@ -116,41 +116,80 @@ describe('a server that is not there', () => {
 });
 
 describe('what counts as the server dropping', () => {
-  // A server answering one tools/call with its own 500 or 404 has a broken tool, not a
-  // broken line: the model reads the call's error, and the server keeps its tools.
+  // A server whose `tools/call` is answered by `onCall` (a Response, or a promise that
+  // never settles), everything else as a healthy MCP server — `ping` included — until
+  // `dead` is set, when nothing answers at all.
+  function server(onCall: (init: RequestInit) => Promise<Response> | Response) {
+    const s = flaky('ok');
+    const box = { dead: false, pings: 0 };
+    const hang = (init: RequestInit) => new Promise<Response>((_, reject) => init.signal?.addEventListener('abort', () => reject(new Error('aborted'))));
+    const fetch: Fetcher = async (u, init) => {
+      if (box.dead) return hang(init);
+      const body = JSON.parse(String(init.body));
+      if (body.method === 'tools/call') return onCall(init);
+      if (body.method === 'ping') { box.pings++; return Response.json({ jsonrpc: '2.0', id: body.id, result: {} }); }
+      return s.fetch(u, init);
+    };
+    return { box, fetch, hang };
+  }
+  const spec = { url: 'http://x', timeoutMs: 30, connectTimeoutMs: 30 };
+
+  // A broken tool, not a broken line: the model reads the call's error, the server — asked
+  // whether it is there, and answering — keeps its tools.
   test('a 500 or a 404 answering one call is that tool\'s error; the server keeps its tools', async () => {
     for (const status of [500, 404]) {
-      const s = flaky('ok');
+      const srv = server(() => new Response('boom', { status }));
       const t = fakeTimers();
-      const m = createServerManager([{ name: 'tracker', spec: { url: 'http://x' } }], { fetch: s.fetch, schedule, timers: t.timers });
+      const m = createServerManager([{ name: 'tracker', spec }], { fetch: srv.fetch, schedule, timers: t.timers });
       await m.start();
-      s.box.mode = status;
       const out = await m.groups()[0]!.exec('tracker:find', {});
-      expect(out.text).toContain(`ERROR from tracker:find`);
       expect(out.text).toContain(`HTTP ${status}`);
+      await Bun.sleep(20);
       expect(m.groups().map((g) => g.id)).toEqual(['mcp:tracker']);
-      expect(m.list()[0]!.state).toBe('connected');
       expect(t.count()).toBe(0);
     }
   });
 
-  test('a transport failure is a drop: 502/503/504, a refused connection, a timeout', async () => {
-    const cases: Array<[string, Fetcher]> = [
+  test('a slow call that times out is that call\'s error: the server answers a ping and keeps its tools', async () => {
+    const srv = server((init) => srv.hang(init));
+    const t = fakeTimers();
+    const m = createServerManager([{ name: 'wiki', spec }], { fetch: srv.fetch, schedule, timers: t.timers });
+    await m.start();
+    const out = await m.groups()[0]!.exec('wiki:find', {});
+    expect(out.text).toContain('no answer in 30 ms');
+    await Bun.sleep(20);
+    expect(srv.box.pings).toBe(1);
+    expect(m.list()[0]!.state).toBe('connected');
+    expect(m.groups().map((g) => g.id)).toEqual(['mcp:wiki']);
+    expect(t.count()).toBe(0);
+  });
+
+  test('a call that times out on a server that is gone drops it: the ping gets no answer either', async () => {
+    const srv = server((init) => { srv.box.dead = true; return srv.hang(init); });
+    const t = fakeTimers();
+    const m = createServerManager([{ name: 'wiki', spec }], { fetch: srv.fetch, schedule, timers: t.timers });
+    await m.start();
+    await m.groups()[0]!.exec('wiki:find', {});
+    for (let i = 0; i < 20 && m.groups().length; i++) await Bun.sleep(10);
+    expect(m.groups()).toEqual([]);
+    expect(m.list()[0]!.state).toBe('failed');
+    expect(t.delays()).toEqual([5_000]);
+  });
+
+  test('a transport failure is a drop at once: 502/503/504, a refused connection', async () => {
+    const cases: Array<[string, () => Promise<Response>]> = [
       ['503', async () => new Response('down', { status: 503 })],
       ['504', async () => new Response('slow', { status: 504 })],
       ['refused', async () => { throw new Error('connect ECONNREFUSED 127.0.0.1:1'); }],
-      ['timeout', (_u, init) => new Promise((_, reject) => init.signal?.addEventListener('abort', () => reject(new Error('aborted'))))],
     ];
     for (const [label, broken] of cases) {
-      const s = flaky('ok');
-      let bad = false;
-      const fetch: Fetcher = (u, i) => (bad ? broken(u, i) : s.fetch(u, i));
+      const srv = server(broken);
       const t = fakeTimers();
-      const m = createServerManager([{ name: 'tracker', spec: { url: 'http://x', timeoutMs: 30 } }], { fetch, schedule, timers: t.timers });
+      const m = createServerManager([{ name: 'tracker', spec }], { fetch: srv.fetch, schedule, timers: t.timers });
       await m.start();
-      bad = true;
       await m.groups()[0]!.exec('tracker:find', {});
       expect([label, m.groups()]).toEqual([label, []]);
+      expect(srv.box.pings).toBe(0);
       expect(t.delays()).toEqual([5_000]);
     }
   });

@@ -2,8 +2,9 @@
 //
 // A server is `connecting`, `connected`, `failed` or `disabled`. One that fails to
 // connect — at start or later — or drops once connected (a call finds the line refused
-// or reset, gets no answer in time or a gateway's 502/503/504, a stdio process exits)
-// is tried again in the background,
+// or reset or a gateway's 502/503/504, a stdio process exits; a call that timed out or
+// got another 5xx drops it only when a `ping` after it gets no answer either) is tried
+// again in the background,
 // after 5 s, 15 s and 60 s, then every 5 minutes, until it answers. A 401 or 403 is not
 // tried again: that is the token, not the network, and the reason says so; `restart`
 // tries it again once the person has fixed it. A server that connects after the start
@@ -98,11 +99,14 @@ export const authReason = (status: number) => `HTTP ${status} — the server ref
 
 const isAuth = (e: unknown) => e instanceof McpError && (e.status === 401 || e.status === 403);
 // A call that says the connection is gone, rather than that the call failed: the line
-// refused or reset, no answer in time, a gateway's 502/503/504, a stdio process gone.
-// Anything else — a 500 or a 404 answering one `tools/call`, a 401 — is that call's
-// error: the model reads it, and the server keeps its tools.
+// refused or reset, a gateway's 502/503/504, a stdio process gone.
 const TRANSPORT_STATUS = new Set([502, 503, 504]);
-const isLost = (e: unknown) => e instanceof McpError && (e.lost === true || e.timeout === true || (e.status !== undefined && TRANSPORT_STATUS.has(e.status)));
+const isLost = (e: unknown) => e instanceof McpError && (e.lost === true || (e.status !== undefined && TRANSPORT_STATUS.has(e.status)));
+// A call that failed in a way that may be the call's or the server's: no answer in time
+// (a slow search), a server error. The call's error goes to the model either way; the
+// server is asked whether it is there (`ping`) and dropped only when that fails too.
+// Anything else — a 404, a 401 — is that call's error alone.
+const isDoubt = (e: unknown) => e instanceof McpError && (e.timeout === true || (e.status !== undefined && e.status >= 500));
 
 export function createServerManager(servers: Array<{ name: string; spec: ServerSpec }>, deps: ManagerDeps = {}) {
   const env = deps.env ?? process.env;
@@ -188,6 +192,15 @@ export function createServerManager(servers: Array<{ name: string; spec: ServerS
     fail(e, err, true);
   };
 
+  // Is the server there? One question at a time per server; a server that does not
+  // answer is dropped with the ping's own reason.
+  const checking = new Set<Entry>();
+  const check = async (e: Entry, gen: number, client: McpClient) => {
+    if (checking.has(e)) return;
+    checking.add(e);
+    try { await client.ping(); } catch (err) { lost(e, gen, err); } finally { checking.delete(e); }
+  };
+
   // One attempt. `later` — not the start: its success is news for the chat.
   async function connect(e: Entry, later: boolean): Promise<void> {
     const problem = specProblem(e.spec);
@@ -205,7 +218,10 @@ export function createServerManager(servers: Array<{ name: string; spec: ServerS
       const info = await client.initialize();
       const tools = await client.listTools();
       if (gen !== e.gen) { try { client.close(); } catch { /* gone */ } return; }
-      const group = toolGroup(e.name, e.spec, client, tools, info.instructions, (err) => { if (isLost(err)) lost(e, gen, err); });
+      const group = toolGroup(e.name, e.spec, client, tools, info.instructions, (err) => {
+        if (isLost(err)) lost(e, gen, err);
+        else if (isDoubt(err)) void check(e, gen, client);
+      });
       e.state = 'connected';
       e.attempt = 0;
       e.group = group;

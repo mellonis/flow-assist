@@ -43,18 +43,21 @@ export interface McpClientOptions {
 }
 
 // `status` — the HTTP status a server answered with; `lost` — the connection itself
-// failed (a network error, a server process gone); `timeout` — no answer in time. What
-// the plugin takes for a drop, and what it takes for the token, is read from these.
-// A timeout is a drop (servers.ts); a status is one only for 502/503/504.
+// failed (a network error, a server process gone); `timeout` — no answer in time; `rpc`
+// — the server answered, with a JSON-RPC error. What the plugin takes for a drop, what
+// sends it to ask the server whether it is there, and what it takes for the token, is
+// read from these (servers.ts).
 export class McpError extends Error {
   status?: number;
   lost?: boolean;
   timeout?: boolean;
-  constructor(message: string, info: { status?: number; lost?: boolean; timeout?: boolean } = {}) {
+  rpc?: boolean;
+  constructor(message: string, info: { status?: number; lost?: boolean; timeout?: boolean; rpc?: boolean } = {}) {
     super(message);
     if (info.status !== undefined) this.status = info.status;
     if (info.lost) this.lost = true;
     if (info.timeout) this.timeout = true;
+    if (info.rpc) this.rpc = true;
   }
 }
 
@@ -101,7 +104,7 @@ export function createProtocol(transport: McpTransport, opts: ProtocolOptions, o
 
   async function request(method: string, params: unknown, timeoutMs: number): Promise<unknown> {
     const message = (await transport.send({ jsonrpc: '2.0', id: nextId++, method, ...(params === undefined ? {} : { params }) }, true, timeoutMs)) as { result?: unknown; error?: { code?: number; message?: string } } | undefined;
-    if (message?.error) throw new McpError(`${message.error.message ?? 'error'}${message.error.code !== undefined ? ` (${message.error.code})` : ''}`);
+    if (message?.error) throw new McpError(`${message.error.message ?? 'error'}${message.error.code !== undefined ? ` (${message.error.code})` : ''}`, { rpc: true });
     return message?.result;
   }
   const notify = (method: string) => transport.send({ jsonrpc: '2.0', method }, false, connectTimeoutMs);
@@ -129,6 +132,17 @@ export function createProtocol(transport: McpTransport, opts: ProtocolOptions, o
         if (!cursor) break;
       }
       return tools;
+    },
+    // Whether the server is there: MCP's `ping`, within `connectTimeoutMs`. Any answer
+    // counts — a JSON-RPC error too (a server without `ping` still answered); what
+    // rejects is the line: nothing in time, no connection, a process gone.
+    async ping(): Promise<void> {
+      try {
+        await request('ping', undefined, connectTimeoutMs);
+      } catch (e) {
+        if (e instanceof McpError && e.rpc) return;
+        throw e;
+      }
     },
     async callTool(name: string, args: Record<string, unknown>): Promise<McpCallResult> {
       return ((await request('tools/call', { name, arguments: args }, callTimeoutMs)) ?? {}) as McpCallResult;
