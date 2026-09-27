@@ -124,3 +124,15 @@ test('the todo schema takes an id as a string or an integer, and a number n name
   plan.exec({ action: 'add', items: ['a', 'b', 'c', 'd', 'e'] });
   expect(plan.exec({ action: 'complete', id: 5 })).toContain('☑ t5 · e (done)');
 });
+
+test('a set that only re-cases an item keeps its id', () => {
+  const plan = createPlan();
+  plan.exec({ action: 'add', items: ['plan it', 'read the diff', 'run the tests'] });
+  // The first item dropped, the others re-cased: they are the same items, so this is
+  // not a new plan and their ids stay.
+  plan.exec({ action: 'set', todos: [{ text: 'Read the diff', status: 'done' }, { text: 'Run the tests' }] });
+  expect(plan.snapshot()).toEqual([
+    { id: 't2', text: 'Read the diff', status: 'done' },
+    { id: 't3', text: 'Run the tests', status: 'pending' },
+  ]);
+});

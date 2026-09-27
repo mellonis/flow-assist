@@ -1000,3 +1000,35 @@ test('the plan reminder rides on the round\'s last result, and piping that resul
   expect(res.toolRuns[0]!.detail).toBe('the data');
   expect(findToolResult(res.transcript, 'c1')).toMatchObject({ ok: true, text: 'the data' });
 });
+
+test('the plan reminder goes only to a result of work that ran, never to a failed or declined one', async () => {
+  const make = makeFactory({});
+  const plugins = [make('t', { aiTools: [
+    { type: 'function', function: { name: 't:read', description: 'read', parameters: { type: 'object', properties: {} } }, run: async () => 'the data' },
+    { type: 'function', function: { name: 't:fail', description: 'fail', parameters: { type: 'object', properties: {} } }, run: async () => { throw new Error('boom'); } },
+    { type: 'function', function: { name: 't:save', description: 'save', parameters: { type: 'object', properties: {} } }, write: true, run: async () => 'saved' },
+  ] })];
+  assembleToolRegistry({ plugins, config: {}, repo: { list: async () => [] } as any });
+  const plan = createPlan();
+  plan.exec({ action: 'add', items: ['a', 'b'] });
+  let n = 0;
+  const fakeRound = async () => {
+    n++;
+    // Round 1: nothing runs (a failure, a declined write) — no reminder yet.
+    if (n === 1) return { content: '', toolCalls: [{ id: 'c1', name: 't:fail', arguments: '{}' }, { id: 'c2', name: 't:save', arguments: '{}' }] };
+    // Round 2: a read runs, then a failure — the reminder rides on the read.
+    if (n === 2) return { content: '', toolCalls: [{ id: 'c3', name: 't:read', arguments: '{}' }, { id: 'c4', name: 't:fail', arguments: '{}' }] };
+    return { content: 'done', toolCalls: [] };
+  };
+  const res = await agentChat([{ role: 'user', content: 'hi' }], {
+    baseUrl: 'http://x', model: 'm', token: 't', onLiveCommit: () => {}, onLive: () => {},
+    extraTools: plugins[0]!.aiTools as any, toolCtx: { plan }, chatRound: fakeRound as any,
+    confirmWrite: () => false,
+  });
+  const byId = (id: string) => String(res.transcript.find((m) => m.role === 'tool' && m.tool_call_id === id)!.content);
+  expect(byId('c1')).not.toContain(PLAN_REMINDER);
+  expect(byId('c2')).toMatch(/^DECLINED/);
+  expect(byId('c2')).not.toContain(PLAN_REMINDER);
+  expect(byId('c3')).toContain(PLAN_REMINDER);
+  expect(byId('c4')).not.toContain(PLAN_REMINDER);
+});

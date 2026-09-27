@@ -1004,7 +1004,8 @@ there is no `/fullscreen`.
   - **Ids.** An item's id is `t1`, `t2`, … given at creation, never reused within the
     plan; a new plan (`reset`, `clear`, an empty plan's first `add`, a `set` that keeps
     no item of the old one) starts again at `t1`, and a `set` keeps an item's id when
-    its text stays. The model names an item by id or by its whole text (exact, then
+    its text stays (matched as a target is: exactly, then ignoring case, so re-casing
+    an item keeps it). The model names an item by id or by its whole text (exact, then
     ignoring case — never a fragment: "33" does not find "item 33"). What the model
     reads — every `todo` result and the system prompt's plan block, both
     `describePlan` — lists the items in plan order, `☐ t2 · text (pending)`. A saved
@@ -1012,9 +1013,10 @@ there is no `/fullscreen`.
     `5` or `"5"` the same way. The schema's `id` is `anyOf` a string or an integer (as
     `tools_load`'s `names` is), so a model used to numbered plans is not refused a
     round for sending one.
-  - **The reminder.** When a round ran work (any call but `todo`) and the plan has
-    items pending and none in progress, `agentChat` appends `PLAN_REMINDER` to that
-    round's LAST tool result — once per turn, after the result's cap, never in the
+  - **The reminder.** When work ran in a round (a call of any tool but `todo` that
+    came back ok or applied) and the plan has items pending and none in progress,
+    `agentChat` appends `PLAN_REMINDER` to the round's last such result — never to a
+    declined or failed one — once per turn, after the result's cap, never in the
     trail the person sees. The result's data is kept beside it first (`RAW_RESULT`),
     so a later call that pipes that result reads the data without the reminder. A
     round of `todo` alone (laying out the plan) is not work and carries none.

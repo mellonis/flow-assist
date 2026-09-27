@@ -977,6 +977,9 @@ export async function agentChat(
         ...(r.blocks?.length && !noThinking ? { [ANTHROPIC_CONTENT]: r.blocks } : {}),
       });
       if (r.usage) usageAt = current.length;
+      // The round's last result of work that ran (ok or applied, any tool but `todo`):
+      // where the plan reminder goes, if it is due.
+      let workAt = -1;
       for (let idx = 0; idx < r.toolCalls.length; idx++) {
         const called = r.toolCalls[idx]!;
         const callParse = callParses[idx]!;
@@ -1196,6 +1199,7 @@ export async function agentChat(
         const sent = capToolResult(modelToolResult(outcome, detailStr), resultCap);
         const kept = outcome === 'ok' || outcome === 'applied' ? keptRaw(sent, whole === undefined ? detailStr : whole) : {};
         current.push({ role: 'tool', tool_call_id: tc.id, content: sent, ...(outcome !== 'error' && attached.length ? { images: attached } : {}), ...kept });
+        if ((outcome === 'ok' || outcome === 'applied') && tc.name !== 'todo') workAt = current.length - 1;
         logRun({ name: tc.name, write, outcome, detail: detailStr, args: parsed });
         const run: ToolRun = { id: tc.id, name: tc.name, args: parsed, write, outcome, detail: detailStr };
         if (outcome !== 'error' && changes.length) run.changes = changes;
@@ -1205,17 +1209,17 @@ export async function agentChat(
         toolRuns.push(run);
         opts.onToolRun?.(run);
       }
-      // The plan says what the turn works on only when the model marks it. A round
-      // that ran work (any call but `todo`) while the plan has items pending and none
-      // in progress gets ONE reminder, once per turn: appended to the round's last
-      // tool result, after the cap so it cannot be cut, and never shown to the person
-      // (`run.detail` is untouched). That result's data is kept beside it first, so a
-      // later call piping it (`resultInput`) reads the data without the reminder.
+      // The plan says what the turn works on only when the model marks it. A round in
+      // which work ran (a call that came back ok or applied, any tool but `todo`) while
+      // the plan has items pending and none in progress gets ONE reminder, once per
+      // turn: appended to the last such result — never to a declined or failed one —
+      // after the cap so it cannot be cut, and never shown to the person (`run.detail`
+      // is untouched). That result's data is kept beside it first, so a later call
+      // piping it (`resultInput`) reads the data without the reminder.
       const plan = toolCtx.plan as Plan | undefined;
-      const worked = r.toolCalls.some((tc) => (realName.get(tc.name) ?? tc.name) !== 'todo');
-      const reminder = !planReminded && worked && plan ? planReminder(plan) : null;
+      const reminder = !planReminded && workAt >= 0 && plan ? planReminder(plan) : null;
       if (reminder) {
-        const last = current.at(-1);
+        const last = current[workAt];
         if (last?.role === 'tool' && typeof last.content === 'string') {
           if (!(RAW_RESULT in last) && !(RAW_OMITTED in last) && last.content.startsWith('OK: ')) last[RAW_RESULT] = last.content.slice(4);
           last.content = `${last.content}\n\n${reminder}`;

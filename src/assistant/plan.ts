@@ -123,20 +123,26 @@ export function createPlan(): Plan {
       if (action === 'set') {
         // Full-replace (like TodoWrite): the model passes the ENTIRE desired list and
         // the plan is rewritten wholesale. An item whose text is already in the plan
-        // keeps its id; a new text gets the next id. A list that keeps no item is a NEW
-        // plan and its ids start from t1. An EMPTY list is a valid plan — "nothing
+        // (ignoring case) keeps its id; a new text gets the next id. A list that keeps
+        // no item is a NEW plan and its ids start from t1. An EMPTY list is a valid plan — "nothing
         // left": the same as `clear`, so a finished task leaves no stale `▾ plan`.
         const arr = Array.isArray(args.todos) ? (args.todos as Array<Record<string, unknown>>) : [];
         const wanted = arr
           .map((raw) => ({ text: String(raw?.text ?? '').trim(), status: normalizeTodoStatus(raw?.status) }))
           .filter((t) => t.text);
-        const prev = new Map(items.map((t) => [t.text, t.id]));
-        if (!wanted.some((t) => prev.has(t.text))) nextId = 1;
+        // Matched as `resolve` matches text: exactly first, then ignoring case — a
+        // re-cased item is the same item.
+        const left = [...items];
+        const keep = (text: string): string | undefined => {
+          let at = left.findIndex((t) => t.text === text);
+          if (at === -1) at = left.findIndex((t) => t.text.toLowerCase() === text.toLowerCase());
+          return at === -1 ? undefined : left.splice(at, 1)[0]!.id;
+        };
+        const kept = wanted.map((t) => keep(t.text));
+        if (kept.every((id) => id === undefined)) nextId = 1;
         const next: TodoItem[] = [];
-        for (const t of wanted) {
-          const kept = prev.get(t.text);
-          prev.delete(t.text);
-          next.push({ id: kept ?? newId(), text: t.text, status: t.status });
+        for (const [i, t] of wanted.entries()) {
+          next.push({ id: kept[i] ?? newId(), text: t.text, status: t.status });
         }
         items = next;
         if (!next.length) nextId = 1;
