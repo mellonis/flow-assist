@@ -1433,14 +1433,19 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // into an empty list.
           ui.useEffect(() => {
             const t = setTimeout(() => {
-              // Said once, before the project note that follows from `onShellSetRef`:
-              // only when nothing already set the directory (a continued session's own
-              // `shellCwd` decides where it goes instead, ./sessions.ts `applySession`,
-              // whose start-up timer runs first) and the app's start directory was
-              // outside every configured root, so the first one took over instead.
+              // Said once per launch, before the project note that follows from
+              // `onShellSetRef`: only when nothing already set the directory (a
+              // continued session's own `shellCwd` decides where it goes instead,
+              // ./sessions.ts `applySession`, whose start-up timer runs first) and the
+              // app's start directory was outside every configured root, so the first
+              // one took over instead. A TOAST (`showMessage`), not `pushNote`: a
+              // continued session that starts outside the roots every time it is
+              // opened — restarted daily, say — would otherwise gain one more
+              // permanent row and journal line per launch, forever; the toast is seen
+              // and gone, never part of what a save or the journal keeps.
               if (!shellRef.current.saved()) {
                 const note = startNote(host.config as Record<string, unknown>, shellRef.current.start());
-                if (note) pushNote(note);
+                if (note) (host.services as Record<string, any>).showMessage?.(note);
               }
               onShellSetRef.current();
               // The memory an older host kept in one list moves into the global

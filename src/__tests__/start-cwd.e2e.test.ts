@@ -78,6 +78,50 @@ test('started outside every root: the first one takes over, and the chat says so
   ui.app.unmount();
 });
 
+test('the start-up note repeats on every restart from outside the roots, but is never saved into a continued session\'s history', async () => {
+  const root = tmp('fa-start-root-');
+  const outside = tmp('fa-start-outside-');
+  const sessDir = tmp('fa-start-sessions-');
+  const config = { shell: { roots: [root] }, sessions: { dir: sessDir } };
+  const noteText = (m: { role: string; content: unknown }) => m.role === 'note' && String(m.content).includes('outside shell.roots');
+
+  const model1 = new ScriptedModel();
+  model1.script([{ text: 'answer one' }]);
+  const ui1 = await bootApp(model1, 140, 32, undefined, config, { startDir: outside });
+  await ui1.press('F');
+  await settle(6);
+  expect(ui1.backend.lastFrame).toContain('outside shell.roots'); // a toast — seen, not a chat row
+  await ui1.type('question one');
+  await ui1.press('return');
+  await settle(20);
+  await ui1.press('escape', 'escape'); // written; not /clear — the session stays open
+  ui1.app.unmount();
+
+  const home = projectHome(sessDir, root);
+  const files = listTree(sessDir).filter((n) => n.endsWith('.json'));
+  expect(files.length).toBe(1);
+  const id = path.basename(files[0]!).replace(/\.json$/, '');
+  const firstSaved = JSON.parse(fs.readFileSync(path.join(sessDir, files[0]!), 'utf8'));
+  expect((firstSaved.messages as { role: string; content: unknown }[]).some(noteText)).toBe(false);
+
+  // Restart from outside the roots again — the SAME session continues.
+  const model2 = new ScriptedModel();
+  const ui2 = await bootApp(model2, 140, 32, undefined, config, { startDir: outside });
+  await ui2.press('F');
+  await settle(10);
+  expect(ui2.backend.lastFrame).toContain('outside shell.roots'); // said again — every launch
+  expect(ui2.backend.lastFrame).toContain('question one'); // the continued conversation
+  await ui2.press('escape', 'escape');
+  ui2.app.unmount();
+
+  // Two restarts from outside the roots, and still not one note in the saved history
+  // or the journal — a busy session restarted daily must not accumulate one per day.
+  const secondSaved = JSON.parse(fs.readFileSync(path.join(home, `${id}.json`), 'utf8'));
+  expect((secondSaved.messages as { role: string; content: unknown }[]).some(noteText)).toBe(false);
+  const journalLines = fs.readFileSync(journalPath(home, id), 'utf8').split('\n').filter(Boolean);
+  expect(journalLines.some((l) => l.includes('outside shell.roots'))).toBe(false);
+});
+
 test('a background task starts where its parent conversation\'s shell currently is, not at the default', async () => {
   const root = tmp('fa-start-root-');
   const sub = path.join(root, 'sub');

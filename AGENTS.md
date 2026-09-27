@@ -2744,8 +2744,10 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   the app was started (`startDir`, captured once — nothing here calls
   `process.chdir`) when that lies inside a configured root, real path, by
   `shellCwd`/`dirAllowed`'s rule — else the first configured root that is a directory
-  (`startNote` says so, once, at start-up, only then); with no roots at all, always
-  the start directory. A `cd` moves it only within the
+  (`startNote` says so, as a TOAST — `showMessage`, not `pushNote` — every launch it
+  applies, since a permanent row and journal line would otherwise pile up, one per
+  restart, in a session continued outside the roots day after day); with no roots at
+  all, always the start directory. A `cd` moves it only within the
   roots by real path (the shell writes `pwd -P` to a private temp file after the
   command — a 4th stdio pipe under Bun lost the report now and then), `exit N` or a
   kill keeps it, run_command's `cwd` argument is a `cd` that stays, `/clear` and `/new`
