@@ -53,7 +53,11 @@ conversation, fewer of the commands' output blocks — but each session also kee
 journal beside it, `<id>.log.jsonl`: everything as it happened, every tool call with
 its whole arguments and result, every `/compact` summary, written line by line so a
 crash loses nothing and never trimmed. It goes with its session, or after
-`sessions.journalDays` days without a write (30; 0 keeps it forever).
+`sessions.journalDays` days without a write (30; 0 keeps it forever). `/export [path]`
+turns the journal into a markdown document you can read — the conversation, each tool
+call folded with its arguments and result, the `/compact` summaries where they
+happened — written to the path you give, or to `session-<id>.md` in the shell's
+directory; it never overwrites a file that is there.
 
 A message sent while an answer is still coming waits its turn (`⏎ queued`) and goes
 out when the answer ends; ↑ on an empty field takes the last one back to edit. Esc or

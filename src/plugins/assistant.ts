@@ -8,6 +8,8 @@
 //   - the chat's language is `ai.assistantLanguage` (chatLanguage).
 
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { addTrigger, chatUser } from '../loader/registry.js';
 import { bgActiveCount } from '../loader/tools-core.js';
 import { autoBadge, autoCommand, autoConfirms, autoSaid, nextAutoMode, type AutoMode } from '../assistant/auto.js';
@@ -29,7 +31,7 @@ import {
   makeLockToken, newSessionId, pruneSessions, releaseLock, removeSession, renameSession, saveSession, sessionFingerprint,
   sessionFingerprintsEqual, sessionRows, sessionTitle, sessionWhen, sessionsDir, sweepJournals, type Session, type SessionFingerprint,
 } from '../assistant/sessions.js';
-import { appendJournal, rowOf, viewEntry, type JournalEvent } from '../assistant/journal.js';
+import { appendJournal, exportMarkdown, readJournal, rowOf, viewEntry, type JournalEvent } from '../assistant/journal.js';
 import { pickerKey, pickerReload, pickerStart, type PickerAction, type PickerState } from '../assistant/session-picker.js';
 import type { ChatMessage, TokenUsage, ToolRun } from '../assistant/agent.js';
 import type { ChangeView } from '../assistant/diff.js';
@@ -70,7 +72,7 @@ import type { PluginApi } from '../runtime/plugin-api.js';
 // sessions directory is known (`chatCommandDefs` in the chat).
 type ChatCommand = HistoryCommand & ChatCommandDef;
 const CHAT_COMMAND_DEFS: ChatCommand[] = [
-  { name: 'compact' }, { name: 'context' }, { name: 'copy' }, { name: 'image' }, { name: 'resume' }, { name: 'sessions' }, { name: 'new' }, { name: 'title' }, { name: 'clear' }, { name: 'memory' },
+  { name: 'compact' }, { name: 'context' }, { name: 'copy' }, { name: 'image' }, { name: 'resume' }, { name: 'sessions' }, { name: 'new' }, { name: 'title' }, { name: 'export' }, { name: 'clear' }, { name: 'memory' },
   { name: 'auto', values: ['reads', 'all', 'off'] }, { name: 'notes', values: NOTES_MODES }, { name: 'mode', values: CHAT_MODES }, { name: 'log' }, { name: 'exit' },
 ];
 const CHAT_COMMANDS = CHAT_COMMAND_DEFS.map((c) => c.name);
@@ -2299,6 +2301,35 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 if (res.next) saveMemories(res.next, file);
                 pushNote(res.note);
                 setField('');
+                host.notify();
+                return;
+              }
+              case 'export': {
+                // `/export [path]`: this session as a markdown document, rendered from its
+                // journal (src/assistant/journal.ts, `exportMarkdown`) — or, for a session
+                // that has none, from what its state holds, saying the beginning may be
+                // missing. The path is the shell's directory's (`~` the home), a file named
+                // after the session when none is given. The person typed it, so there is no
+                // y/n — that pause is for what the MODEL writes; what is there already is
+                // never overwritten, and the file is the person's alone, as the session is.
+                setField('');
+                const msgs = (msgsRef.current as Record<string, unknown>[]).filter((m) => m.role !== 'system');
+                if (!msgs.some((m) => personSpoke(String(m.role)))) { setError('/export: nothing to export yet — nothing has been said in this session'); return; }
+                const id = sessionIdRef.current;
+                const title = titleRef.current || sessionTitle(msgs);
+                let events: JournalEvent[] | null = null;
+                try { events = sessDir && id ? readJournal(journalPath(sessDir, id)) : null; } catch { /* not an id — no journal */ }
+                const md = events
+                  ? exportMarkdown(events, { title, id })
+                  : exportMarkdown(msgs.map((m) => rowOf(m, viewRenderers)).filter((e): e is JournalEvent => e !== null), { title, id: id || 'unsaved', noJournal: true });
+                const target = path.resolve(shellRef.current.cwd(), arg.trim() ? arg.trim().replace(/^~(?=\/|$)/, os.homedir()) : `session-${id || 'unsaved'}.md`);
+                try {
+                  fs.writeFileSync(target, md, { mode: 0o600, flag: 'wx' });
+                } catch (e) {
+                  setError((e as NodeJS.ErrnoException).code === 'EEXIST' ? `/export: already exists, not overwritten — ${tildePath(target)}` : `/export: ${(e as Error).message}`);
+                  return;
+                }
+                pushNote(`Exported this session to ${tildePath(target)}`);
                 host.notify();
                 return;
               }

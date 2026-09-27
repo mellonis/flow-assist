@@ -1153,6 +1153,19 @@ there is no `/fullscreen`.
   is swept by its age like any other, never sooner. `debug.logTools`' `tools.log` is a
   debugging aid beside it (arguments and results clipped to 300 characters, only when
   switched on), not a record.
+  **`/export [path]`** writes the current session as a markdown document
+  (`exportMarkdown`): the conversation in order, each tool call a `<details>` block with
+  its arguments and result, each change's diff and each view's text, the `/compact`
+  summaries where they happened, how a stopped or failed turn ended — everything quoted
+  in a fence longer than any backtick run it holds (`fence`). The path is resolved in
+  the shell's directory (`~` the home); with none, `session-<id>.md` there. It is the
+  PERSON's command, typed by them, so it takes no y/n (that pause guards what the MODEL
+  writes); it never overwrites — an existing file is refused (`flag: 'wx'`), and the
+  file is written 600, like the session. A session with no journal (opened from a state
+  file that has none, nothing journaled since) is rendered from its screen list through
+  `rowOf`, and the document says its beginning may be missing and its calls are kept
+  only in short; a journal that began partway (`continued`) says the same, and a fork's
+  names its parent. Nothing said yet: nothing to export.
   **The picker** (`/sessions`, and the assistant's `sessions` key — `^s`, `config.keys.sessions`
   moves it) lists every saved session newest first, one row each: the title, `this chat`
   or `in use elsewhere` (`lockState`: ours / held), `sessionWhen`, the file's size

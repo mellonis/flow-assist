@@ -11,7 +11,9 @@ What each version of flow-assist brought, newest first. The version is the one i
   `/compact` with its summary — line by line as it happens, so a crash loses nothing,
   and never trimmed: a long session's beginning is no longer lost. A journal goes with
   its session, or after `sessions.journalDays` days without a write (30; 0 keeps it
-  forever). The saved session itself counts its limit of 400 in messages of the
+  forever). `/export [path]` turns it into a markdown document to read — each tool call
+  folded with its arguments and result, the summaries in place — in the shell's
+  directory unless you name a path, never over a file that is there. The saved session itself counts its limit of 400 in messages of the
   conversation: the blocks of the commands the assistant ran have a smaller limit of
   their own (100), so a session that runs many commands no longer loses what was said
   twice as fast. The model's side of it is cut where a turn begins, never between a

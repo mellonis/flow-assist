@@ -156,3 +156,74 @@ test('a session saved before journals existed starts its journal with what its s
   expect(events.some((e) => e.t === 'row' && e.text === 'новый вопрос' && !e.imported)).toBe(true);
   ui.app.unmount();
 });
+
+test('/export renders the journal to markdown in the shell\'s directory — every call of the session, the summaries in place', async () => {
+  const dir = dirOf();
+  const root = rootOf();
+  const model = new ScriptedModel();
+  model.script(
+    [{ tool: 'datetime', args: {} }, { tool: 'config_schema', args: {} }], [{ text: 'Первый ответ.' }],
+    [{ text: 'Итог беседы.' }],
+    [{ tool: 'todo', args: { action: 'add', text: 'проверить' } }], [{ text: 'Второй ответ.' }],
+  );
+  const ui = await bootApp(model, 100, 28, undefined, { sessions: { dir }, shell: { roots: [root] } });
+  await ui.press('F');
+  await ask(ui, 'первый вопрос');
+  await ask(ui, '/compact');
+  await ask(ui, 'второй вопрос');
+  await ask(ui, '/export notes/out.md', 6);
+  expect(fs.existsSync(path.join(root, 'notes'))).toBe(false); // a directory that is not there is not made
+  expect(ui.backend.lastFrame).toContain('/export');
+  await ask(ui, '/export out.md', 6);
+  const file = path.join(root, 'out.md');
+  const md = fs.readFileSync(file, 'utf8');
+  expect(fs.statSync(file).mode & 0o777).toBe(0o600);
+  expect(md.match(/<details>/g)).toHaveLength(3);
+  for (const name of ['datetime', 'config_schema', 'todo']) expect(md).toContain(`<summary>${name} · `);
+  expect(md).toContain('"text": "проверить"');
+  expect(md).toContain('первый вопрос');
+  expect(md).toContain('Второй ответ.');
+  expect(md.indexOf('Итог беседы.')).toBeGreaterThan(md.indexOf('Первый ответ.'));
+  expect(md.indexOf('Итог беседы.')).toBeLessThan(md.indexOf('второй вопрос'));
+  expect(ui.backend.lastFrame).toContain('Exported');
+  // A file that is there already is never overwritten.
+  await ask(ui, '/export out.md', 6);
+  expect(fs.readFileSync(file, 'utf8')).toBe(md);
+  expect(ui.backend.lastFrame).toContain('already exists');
+  // With no path: a file named after the session, in the shell's directory.
+  await ask(ui, '/export', 6);
+  const named = fs.readdirSync(root).filter((n) => /^session-.*\.md$/.test(n));
+  expect(named).toHaveLength(1);
+  ui.app.unmount();
+});
+
+test('/export of a session with no journal renders it from its saved state and says the beginning may be missing', async () => {
+  const dir = dirOf();
+  const root = rootOf();
+  const model = new ScriptedModel();
+  model.script([{ text: 'старый ответ' }]);
+  const first = await bootApp(model, 100, 28, undefined, { sessions: { dir }, shell: { roots: [root] } });
+  await first.press('F');
+  await ask(first, 'старый вопрос');
+  await first.press('escape', 'escape');
+  first.app.unmount();
+  for (const n of journals(dir)) fs.unlinkSync(path.join(dir, n)); // as an older host left it
+
+  const ui = await bootApp(new ScriptedModel(), 100, 28, undefined, { sessions: { dir }, shell: { roots: [root] } });
+  await settle(6);
+  await ui.press('F');
+  await ask(ui, '/export old.md', 6);
+  const md = fs.readFileSync(path.join(root, 'old.md'), 'utf8');
+  expect(md).toContain('beginning may be missing');
+  expect(md).toContain('старый вопрос');
+  expect(md).toContain('старый ответ');
+  ui.app.unmount();
+
+  // A chat where nothing was said has nothing to export.
+  const empty = await bootApp(new ScriptedModel(), 100, 28, undefined, { sessions: { dir: dirOf() }, shell: { roots: [root] } });
+  await empty.press('F');
+  await ask(empty, '/export none.md', 6);
+  expect(fs.existsSync(path.join(root, 'none.md'))).toBe(false);
+  expect(empty.backend.lastFrame).toContain('nothing to export');
+  empty.app.unmount();
+});

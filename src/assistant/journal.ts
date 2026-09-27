@@ -20,11 +20,13 @@
 //   end      how a turn ended: its duration, what it cost, stopped or failed, and the
 //            text of a round cut off
 //
+// `/export` renders a journal as markdown (`exportMarkdown`).
+//
 // Pure but for the two file functions; the chat decides when an event happens.
 import fs from 'node:fs';
 import path from 'node:path';
 import { formatBytes } from './session-picker.js';
-import { VIEW_CAPS, resolveRenderer, type ViewRecord, type ViewRenderers } from './views.js';
+import { VIEW_CAPS, fence, resolveRenderer, type ViewRecord, type ViewRenderers } from './views.js';
 import { readParts } from './step.js';
 
 export type JournalEvent = Record<string, unknown> & { t: string; at?: string };
@@ -127,4 +129,72 @@ export function rowOf(m: Record<string, unknown>, renderers: ViewRenderers): Jou
     }
     default: return null;
   }
+}
+
+// ─── /export ────────────────────────────────────────────────────────────────────
+// A journal as a markdown document to read: the conversation in order, each tool call
+// folded as a `<details>` block with its arguments and its result, each `/compact`'s
+// summary where it happened. Everything the conversation quoted goes in a fence longer
+// than any backtick run it holds (`fence`), so nothing it carries can close the fence
+// and write markdown of its own. `noJournal` — the events were made from a state file
+// (`rowOf`), for a session that has no journal.
+
+const block = (text: string, lang = '') => { const f = fence(text); return `${f}${lang}\n${text.replace(/\n+$/, '')}\n${f}`; };
+const quoted = (text: string) => text.split('\n').map((l) => (l ? `> ${l}` : '>')).join('\n');
+const when = (at: unknown) => {
+  const d = new Date(String(at ?? ''));
+  if (Number.isNaN(d.getTime())) return '';
+  const p = (n: number) => String(n).padStart(2, '0');
+  return ` · ${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+};
+const asText = (v: unknown) => (typeof v === 'string' ? v : JSON.stringify(v, null, 2) ?? '');
+
+function callBlock(ev: Record<string, unknown>): string {
+  const head = `${String(ev.name ?? 'call')} · ${String(ev.outcome ?? '')}${ev.write ? ' · write' : ''}`;
+  const out = ['<details>', `<summary>${head.replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' })[c]!)}</summary>`, ''];
+  out.push('Arguments:', '', block(asText(ev.args ?? {}), 'json'), '');
+  if (ev.result !== undefined) out.push('Result:', '', block(asText(ev.result)), '');
+  for (const c of Array.isArray(ev.changes) ? ev.changes as { title?: unknown; diff?: unknown }[] : []) out.push(`Changed ${String(c.title ?? '')}:`, '', block(String(c.diff ?? ''), 'diff'), '');
+  for (const v of Array.isArray(ev.views) ? ev.views as { kind?: unknown; text?: unknown }[] : []) if (v.text) out.push(`Shown (${String(v.kind ?? 'view')}):`, '', block(String(v.text)), '');
+  out.push('</details>');
+  return out.join('\n');
+}
+
+export function exportMarkdown(events: JournalEvent[], opts: { title: string; id: string; noJournal?: boolean }): string {
+  const out: string[] = [`# ${opts.title.replace(/\s+/g, ' ').trim() || opts.id}`, '', `Session \`${opts.id}\``, ''];
+  const start = events.find((e) => e.t === 'start');
+  if (opts.noJournal) out.push('> This session has no journal (it was saved before journals were kept, or its journal was removed after `sessions.journalDays`): it is rendered from its saved state, whose beginning may be missing and whose tool calls are kept only in short.', '');
+  else if (start?.continued) out.push('> The journal began partway through this session: the part before it comes from its saved state, whose beginning may be missing and whose tool calls are kept only in short.', '');
+  if (typeof start?.parent === 'string') out.push(`> This session was forked from \`${start.parent}\` — what came before is in that session's journal and its export.`, '');
+  for (const ev of events) {
+    const at = when(ev.at);
+    const text = typeof ev.text === 'string' ? ev.text : '';
+    switch (ev.t) {
+      case 'row':
+        if (ev.role === 'user') out.push(`**${ev.hostAsk ? 'The host asked' : 'You'}**${at}`, '', text, '');
+        else if (ev.role === 'bg') out.push(`**Background result**${at}`, '', text, '');
+        else if (ev.role === 'note') out.push(`*Note${at}:* ${text.split('\n')[0]}`, ...(text.includes('\n') ? ['', block(text.split('\n').slice(1).join('\n'))] : []), '');
+        else if (ev.role === 'view') for (const v of Array.isArray(ev.views) ? ev.views as { text?: unknown }[] : []) out.push(block(String(v.text ?? '')), '');
+        else if (ev.role === 'assistant') {
+          for (const st of Array.isArray(ev.steps) ? ev.steps as string[] : []) out.push(`*Step:* ${st}`, '');
+          const calls = Array.isArray(ev.calls) ? ev.calls as { name?: unknown; outcome?: unknown; args?: unknown }[] : [];
+          if (calls.length) out.push(...calls.map((c) => `- \`${String(c.name)}\` · ${String(c.outcome)}${c.args ? ` · ${JSON.stringify(c.args)}` : ''}`), '');
+          if (text) out.push(`**Assistant**${at}`, '', text, '');
+        }
+        break;
+      case 'step': out.push(`*Step${at}:* ${text}`, ''); break;
+      case 'answer': out.push(`**Assistant**${at}`, '', text, ''); break;
+      case 'call': out.push(callBlock(ev), ''); break;
+      case 'shell': out.push(`**$ ${String(ev.command ?? '')}**${at}${ev.status ? ` · ${String(ev.status)}` : ''}`, '', block(String(ev.output ?? ''), 'console'), ''); break;
+      case 'compact': out.push('---', '', `**Compacted**${at} — from here on the model was given this summary instead of the conversation above:`, '', quoted(String(ev.summary ?? '')), '', '---', ''); break;
+      case 'end': {
+        if (typeof ev.cut === 'string' && ev.cut) out.push(`**Assistant**${at} (cut off)`, '', ev.cut, '');
+        const how = [ev.stopped ? `stopped (${String(ev.stopped)})` : '', ev.failed ? `failed: ${String(ev.failed)}` : '', ev.roundLimit ? `stopped after ${String(ev.roundLimit)} rounds — no answer` : ''].filter(Boolean);
+        if (how.length) out.push(`*${how.join(' · ')}*`, '');
+        break;
+      }
+      default: break;
+    }
+  }
+  return `${out.join('\n').trimEnd()}\n`;
 }

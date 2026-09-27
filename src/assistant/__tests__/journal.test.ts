@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { JOURNAL_LINE_MAX, appendJournal, journalLine, readJournal, rowOf, viewText } from '../journal.ts';
+import { JOURNAL_LINE_MAX, appendJournal, exportMarkdown, journalLine, readJournal, rowOf, viewText } from '../journal.ts';
 import { renderConsole } from '../console-view.ts';
 import {
   KEEP_MESSAGES, SESSION_VERSION, acquireLock, deleteSession, journalPath, makeLockToken, newSessionId, pruneSessions, removeSession,
@@ -112,4 +112,36 @@ test('retention sweeps a journal older than journalDays, keeps a younger one, on
   expect(fs.existsSync(journalPath(dir, orphan!))).toBe(false);
   // The session itself stays: only its journal is past its time.
   expect(fs.existsSync(path.join(dir, `${old}.json`))).toBe(true);
+});
+
+test('the export is readable markdown: the conversation, each call folded with its arguments and result, the summaries in place', () => {
+  const md = exportMarkdown([
+    { t: 'start', id: 'x', at: '2026-09-27T10:00:00.000Z' },
+    { t: 'row', role: 'user', text: 'прочитай файл', at: '2026-09-27T10:00:01.000Z' },
+    { t: 'step', text: 'Next: читаю', at: '2026-09-27T10:00:02.000Z' },
+    { t: 'call', name: 'read_file', args: { path: 'a.md' }, outcome: 'ok', result: 'x\n```\ny', at: '2026-09-27T10:00:03.000Z' },
+    { t: 'answer', text: 'В файле **x**.', at: '2026-09-27T10:00:04.000Z' },
+    { t: 'end', ms: 3000, at: '2026-09-27T10:00:04.000Z' },
+    { t: 'compact', summary: 'Прочитан a.md.', note: '── compacted ──', at: '2026-09-27T10:05:00.000Z' },
+    { t: 'shell', command: 'ls', output: 'a.md\n', status: 'exit 0', at: '2026-09-27T10:06:00.000Z' },
+    { t: 'row', role: 'note', text: 'Project instructions: none', at: '2026-09-27T10:07:00.000Z' },
+    { t: 'end', ms: 10, stopped: 'Esc', cut: 'Я начал', at: '2026-09-27T10:08:00.000Z' },
+  ], { title: 'Чтение', id: '2026-09-27T10-00-00-abcd' });
+  expect(md.startsWith('# Чтение\n')).toBe(true);
+  expect(md).toContain('прочитай файл');
+  expect(md).toContain('<details>');
+  expect(md).toContain('<summary>read_file · ok</summary>');
+  expect(md).toContain('"path": "a.md"');
+  // A result holding a fence is put in a longer one, so it cannot close it.
+  expect(md).toContain('````\nx\n```\ny\n````');
+  expect(md).toContain('В файле **x**.');
+  expect(md).toContain('Прочитан a.md.');
+  expect(md.indexOf('Прочитан a.md.')).toBeGreaterThan(md.indexOf('В файле'));
+  expect(md).toContain('$ ls');
+  expect(md).toContain('stopped (Esc)');
+  expect(md).toContain('Я начал');
+  expect(md).not.toContain('beginning may be missing');
+  expect(exportMarkdown([{ t: 'start', id: 'x', continued: true }], { title: '', id: 'x' })).toContain('beginning may be missing');
+  expect(exportMarkdown([], { title: '', id: 'x', noJournal: true })).toContain('beginning may be missing');
+  expect(exportMarkdown([{ t: 'start', id: 'x', parent: '2026-09-27T09-00-00-aaaa' }], { title: '', id: 'x' })).toContain('2026-09-27T09-00-00-aaaa');
 });
