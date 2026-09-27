@@ -916,11 +916,17 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             return id;
           };
           // The host's LLM service as a tool is handed it: the nested run's calls, their
-          // start, their y/n and their end, go into the journal of `from`'s session.
+          // start, their y/n and their end, go into the journal of `from`'s session. A
+          // caller that names a `taskLabel` (the `background` tool) is a background task
+          // and its lines carry the label; any other is a plugin tool asking the model.
+          // Only a caller that passed a confirmation gets a y/n, journaled as its answer;
+          // with none, agentChat declines each write itself and the journal hears it as a
+          // declined call.
           const journaledChatLLM = (from: string) => (messages: unknown[], opts: Record<string, any> = {}) => {
             const chatLLM = (host.services as Record<string, any>).chatLLM as (m: unknown[], o: Record<string, unknown>) => Promise<unknown>;
-            const tag = { task: typeof opts.taskLabel === 'string' && opts.taskLabel ? opts.taskLabel : 'background' };
-            const { taskLabel: _label, ...rest } = opts;
+            const label = typeof opts.taskLabel === 'string' && opts.taskLabel ? opts.taskLabel : null;
+            const tag = label ? { task: label } : {};
+            const { taskLabel: _label, confirmWrite: answer, ...rest } = opts;
             return chatLLM(messages, {
               ...rest,
               onToolStart: (call: { id?: string; name: string; args: Record<string, unknown>; confirm: boolean }) => {
@@ -931,11 +937,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 journalTo(from, callEndEvent(run, viewRenderers, tag));
                 rest.onToolRun?.(run);
               },
-              confirmWrite: async (name: string, args: string, info?: { id?: string }) => {
-                const ok = typeof rest.confirmWrite === 'function' ? !!(await rest.confirmWrite(name, args, info)) : false;
-                journalTo(from, { t: 'confirm', ...(info?.id ? { id: info.id } : {}), name, answer: ok ? 'yes' : 'no', by: 'background', ...tag });
-                return ok;
-              },
+              ...(typeof answer === 'function' ? {
+                confirmWrite: async (name: string, args: string, info?: { id?: string }) => {
+                  const ok = !!(await answer(name, args, info));
+                  journalTo(from, { t: 'confirm', ...(info?.id ? { id: info.id } : {}), name, answer: ok ? 'yes' : 'no', by: label ? 'background' : 'plugin', ...tag });
+                  return ok;
+                },
+              } : {}),
             });
           };
           // A row the host says to the person: drawn and journaled.

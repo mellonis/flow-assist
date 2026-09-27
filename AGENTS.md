@@ -794,6 +794,9 @@ there is no `/fullscreen`.
   - the chat's turn — asks: its y/n closure, which the auto mode may answer;
   - a background task — declines: it passes a confirmation that always says no, which
     `journaledChatLLM` journals as a `confirm` line `by: 'background'`;
+  - a tool's `ctx.chatLLM` in the chat (`journaledChatLLM` with no `taskLabel`) —
+    declines unless the tool passes its own `confirmWrite`, whose answer is journaled
+    `by: 'plugin'`; with none, the journal holds the declined call and no `confirm`;
   - the one-shot prompt (`runPrompt`, `src/main.ts`) — declines. `--allow-writes`,
     given before the prompt, is the person's yes in advance: its `confirmWrite` answers
     what the auto mode may answer with `shell.autoRun` on (`neverAutomatic` with both
@@ -1271,10 +1274,13 @@ there is no `/fullscreen`.
   plugin's, a core tool's) carries nothing that writes there; the host writes every line
   from its own hooks. A background task's own calls (`call-start`, `confirm`, `call`)
   are journaled that way too: the chat hands its tools its LLM service wrapped
-  (`journaledChatLLM`), which adds its own `onToolStart`/`onToolRun`/`confirmWrite`
-  hooks to the nested run and writes to the session whose turn started the task, each
-  line tagged `task` with the label the `background` tool names it by (`taskLabel`); the
-  one-shot prompt has no journal. A line over
+  (`journaledChatLLM`), which adds its own `onToolStart`/`onToolRun` hooks to the nested
+  run — and a `confirmWrite` hook only when the caller passed a confirmation — and writes
+  to the session whose turn started it. A run with a `taskLabel` (the `background`
+  tool's) is a background task: each line is tagged `task` with that label and its y/n
+  answers are `by: 'background'`. Any other caller is a plugin tool asking the model:
+  no `task` tag, and its own answers are `by: 'plugin'`. The one-shot prompt has no
+  journal. A line over
   `JOURNAL_LINE_MAX` (4 MiB) is written with its largest fields replaced by a note of
   their size and named in `omitted` (`journalLine`).
   The journal needs the session's id, which is given when the session first has

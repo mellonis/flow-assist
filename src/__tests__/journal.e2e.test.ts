@@ -407,6 +407,58 @@ test('a background task\'s own calls are journaled in the session that started i
   ui.app.unmount();
 });
 
+// A plugin tool that asks the model through its own `ctx.chatLLM`: it is no background
+// task, and the journal says so. With no confirmation of its own, a write the model
+// calls there is declined by the host — no y/n, the "cannot ask" wording — and a
+// confirmation it does pass is journaled as the plugin's answer.
+async function pluginAsks(confirm: boolean) {
+  const dir = dirOf();
+  const root = rootOf();
+  const asker = (make: Make) => make('asker', {
+    tools: [{
+      id: 'asker',
+      tools: [{ type: 'function', function: { name: 'ask_model', description: 'Asks the model.', parameters: { type: 'object', properties: {} } } }],
+      exec: async (_name: string, _args: unknown, ctx: Record<string, any>) => {
+        const res = await ctx.chatLLM([{ role: 'user', content: 'make the file' }], confirm ? { confirmWrite: () => true } : {});
+        return String(res?.content ?? '');
+      },
+    }],
+  });
+  const model = new ScriptedModel();
+  model.script(
+    [{ tool: 'ask_model', args: {} }],
+    [{ tool: 'run_command', args: { command: 'echo made > made.txt' } }],
+    [{ text: 'nested done' }],
+    [{ text: 'ok' }],
+  );
+  const ui = await bootApp(model, 100, 28, (make) => [asker(make)], { sessions: { dir }, shell: { roots: [root] } });
+  await ui.press('F');
+  await ask(ui, 'ask it');
+  await settleUntil(() => journalOf(dir).some((e) => e.t === 'end'));
+  ui.app.unmount();
+  return { root, events: journalOf(dir) };
+}
+
+test('a plugin tool\'s own chatLLM with no confirmation: the write is declined by the host, no y/n, no background task', async () => {
+  const { root, events } = await pluginAsks(false);
+  expect(fs.existsSync(path.join(root, 'made.txt'))).toBe(false);
+  const call = events.find((e) => e.t === 'call' && e.name === 'run_command')!;
+  expect(call).toMatchObject({ outcome: 'declined' });
+  expect(String(call.result)).toContain('cannot ask the person');
+  expect(call.task).toBeUndefined();
+  expect(events.some((e) => e.t === 'confirm')).toBe(false);
+  expect(events.some((e) => e.t === 'call-start' && e.name === 'run_command')).toBe(false);
+});
+
+test('a plugin tool\'s own confirmation is journaled as the plugin\'s answer, not a background task\'s', async () => {
+  const { root, events } = await pluginAsks(true);
+  expect(fs.readFileSync(path.join(root, 'made.txt'), 'utf8')).toBe('made\n');
+  const confirm = events.find((e) => e.t === 'confirm')!;
+  expect(confirm).toMatchObject({ name: 'run_command', answer: 'yes', by: 'plugin' });
+  expect(confirm.task).toBeUndefined();
+  expect(events.find((e) => e.t === 'call' && e.name === 'run_command')).toMatchObject({ outcome: 'applied' });
+});
+
 test('after a fork, reopening the session it came from writes to that session\'s own journal again', async () => {
   const dir = dirOf();
   const model = new ScriptedModel();

@@ -231,7 +231,7 @@ const asText = (v: unknown) => (typeof v === 'string' ? v : JSON.stringify(v, nu
 
 // Who settled a y/n, in words.
 const CONFIRMED_BY: Record<string, string> = {
-  person: 'the person', auto: 'the auto mode', background: 'the background task',
+  person: 'the person', auto: 'the auto mode', background: 'the background task', plugin: 'the plugin that ran it',
   stop: 'a stop (the turn was stopped)', reset: 'a reset of the conversation',
 };
 
