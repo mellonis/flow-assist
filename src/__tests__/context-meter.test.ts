@@ -137,8 +137,8 @@ test('a multi-round turn shows the reading rising after each round, before the a
   expect(pct()).toBe('ctx 70%');
 });
 
-// A provider that never reports usage (AGENTS.md, "a provider that reports no usage
-// leaves the estimate up"): the reading never gets stuck mid-turn either — it just
+// A provider that never reports usage (AGENTS.md, "How full the context is, is shown"):
+// the reading never gets stuck mid-turn either — it just
 // stays the character estimate, round after round.
 test('a provider without usage keeps the estimate through a multi-round turn', async () => {
   const model = new ScriptedModel();
