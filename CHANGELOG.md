@@ -5,6 +5,15 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **What a click acts on shows it under the pointer.** A fold line in the chat — a
+  turn's `▸ N tools`, a folded run of steps, the thinking header, a command's line and
+  its `… N lines cut` — is underlined while the pointer is over it, the look flowtty
+  gives its own pickers; the answer, your message and an open block's text never
+  change. The session picker's rows and a command panel's (`/mcp`) are underlined the
+  same way, and a click on one puts the cursor there (⏎ still opens). A plugin's
+  flowtty pickers underline their rows too. Moving the pointer redraws only the row it
+  enters and the one it leaves. On with the mouse; `config set ui.hover false` keeps
+  the mouse without the motion reports (takes effect on restart).
 - **flowtty 1.0.0-alpha.33.** A box can take a click itself (`onClick`), and
   flowtty's pickers do: a click on a plugin's list row moves the highlight there, on a
   multi-select row or a checkbox toggles it, on a dropdown opens it. Such a press is

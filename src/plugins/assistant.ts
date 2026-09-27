@@ -48,7 +48,8 @@ import { anchorRow, askFieldWidth, blockRows, roomForBlock, chatFieldWidth, chat
 import { CHAT_MODES, chatModeOf, inRect, type ChatMode, type PanelLayout } from '../runtime/panel-layout.js';
 import { allFolded, flipFolds, isClicked, isOpen, openInFull, pageable, toggleFold, type FoldState } from '../assistant/folds.js';
 import { groupOpen, toggleGroup } from '../assistant/view-groups.js';
-import { bindingGlyph, firstGlyph, isKey, isMouseButton, keyGlyph } from '../playback/keys.js';
+import { bindingGlyph, firstGlyph, isKey, isMouseButton, isMouseKey, keyGlyph } from '../playback/keys.js';
+import { hoverEnabled } from '../config/mouse.js';
 import { askKey, askStart, type AskQuestion, type AskState } from '../assistant/ask.js';
 import { keptAfterClear, memoryCommand, type MemoryLists } from '../assistant/memory-command.js';
 import { memoryPromptBlock, migrateMemoryJson, readFacts, removeFact } from '../assistant/memory-store.js';
@@ -3284,13 +3285,15 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // not reach the list it hides. A pending y/n or question is drawn with the
               // conversation instead (the render's own condition), and a click reaches it.
               const pickerDrawn = (!!pickerRef.current || !!panelRef.current) && !pendingRef.current && !askRef.current;
-              if (pickerDrawn && isMouseButton(key.name)) return false;
+              if (pickerDrawn && isMouseKey(key.name)) return false;
               if (pickerDrawn && (key.name === 'wheelup' || key.name === 'wheeldown')) return true;
               // A press, a drag or a release. It is consumed only when it actually
               // folded something: a drag that reported "handled" per dragged cell
               // would cost a re-render a cell, and every other click must be free.
-              // A click in the panel folds whichever side has the keyboard.
-              if (isMouseButton(key.name)) return mouse(key);
+              // A click in the panel folds whichever side has the keyboard. A move or
+              // the pointer leaving is flowtty's hover, already drawn: nothing here, and
+              // a press waiting for its release keeps waiting.
+              if (isMouseKey(key.name)) return isMouseButton(key.name) && mouse(key);
               // The pager is a reader: Esc brings the conversation back, and every other
               // key stops here — nothing reaches the field, the folds or the model.
               // PgUp/PgDn and the wheel are its own list's, which hears them first.
@@ -3658,6 +3661,17 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 keys: panelKeys(panel).map((k) => ({ cap: keyGlyph(k.key), label: k.label })), nested: panel.stack.length > 1,
               });
             })() : null,
+            // What a click acts on is underlined under the pointer when the backend
+            // reports hover (`ui.mouse` and `ui.hover`, read at start like the backend).
+            hover: hoverEnabled(host.config as Record<string, unknown>),
+            // A click on a row of the picker or a panel puts the cursor there, as ↑/↓
+            // would; ⏎ still opens.
+            onPickRow: (index: number) => {
+              const p = pickerRef.current;
+              if (p) { if (p.mode === 'list' && index !== p.cursor) setPicker({ ...p, cursor: index, notice: '' }); return; }
+              const q = panelRef.current;
+              if (q && index !== q.cursor) setPanel({ ...q, cursor: index });
+            },
             // What this chat is doing, for its own row: a y/n or a question waits, or a
             // turn or a `!command` runs.
             pickerOwn: pendingAsk || pendingQuestion ? 'waiting' : streaming ? 'working' : 'idle',

@@ -137,6 +137,14 @@ const KEY_GLYPHS: Record<string, string> = {
 export function isMouseButton(name: string | undefined): boolean {
   return name === 'mousedown' || name === 'mousedrag' || name === 'mouseup';
 }
+// Any key the mouse sends but the wheel: a button, or — with hover on — the pointer
+// moving with none held and leaving the window. None of them is a key a person pressed:
+// the host stops them before its own dispatch, as it does a button, and a move, which
+// comes at every cell the pointer crosses, must cost nothing there (flowtty's own hover
+// has already acted on it).
+export function isMouseKey(name: string | undefined): boolean {
+  return isMouseButton(name) || name === 'mousemove' || name === 'mouseleave';
+}
 // Whether a key types a character: @flowtty/core's own rule, the one `PluginUi.isPrintable`
 // hands plugins — never a chord, never a control character.
 export const isPrintableKey = (key: { name: string; ctrl?: boolean; meta?: boolean }): boolean => isPrintable(key as never);

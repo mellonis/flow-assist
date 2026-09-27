@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { appliesOnRestart, modelMaySave, modelMaySet } from '../config/schema.js';
 import type { Make } from '../loader/plugin.js';
 import type { Plugin } from '../loader/plugin.js';
-import { isMouseButton, keyGlyph } from '../playback/keys.js';
+import { isMouseKey, keyGlyph } from '../playback/keys.js';
 import type { PluginApi } from '../runtime/plugin-api.js';
 
 // The app-glue dispatched to by the :keycaps command.
@@ -63,7 +63,7 @@ export function buildKeycapsPlugin({ renders, config, make }: BuildKeycapsParams
             // The wheel is not a key: one flick is a dozen events and would flush the panel.
             // Nor is a drag, one event per cell crossed (the host stops mouse buttons
             // before dispatch; this says so where the panel is).
-            handler: (key) => { if (enabled && !key.name.startsWith('wheel') && !isMouseButton(key.name)) setRecent(r => [...r, keyGlyph(key)].slice(-6)); },
+            handler: (key) => { if (enabled && !key.name.startsWith('wheel') && !isMouseKey(key.name)) setRecent(r => [...r, keyGlyph(key)].slice(-6)); },
           });
           // API for the :keycaps command — toggles/enables/disables the panel. Reads
           // `enabled` from the latest render (the toggle is recreated each render).

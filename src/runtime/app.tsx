@@ -51,7 +51,7 @@ import {
   setConfigValue,
   unsetConfigValue,
 } from '../config/load.js';
-import { bindingGlyph, isKey, isMouseButton, keyGlyph } from '../playback/keys.js';
+import { bindingGlyph, isKey, isMouseKey, keyGlyph } from '../playback/keys.js';
 import { ARM_MS, armHint, armKeyOf, armStep, type Arm } from './exit-keys.js';
 import { copyToClipboard } from '../assistant/copy.js';
 import { readClipboardImage, type ClipboardImage } from '../assistant/images.js';
@@ -102,7 +102,7 @@ export function twoPhaseDispatch(
   // re-render. So a button reaches ONLY a handler that asked for it (`mouse: true`),
   // and never the host fallback: a handler that opts in knows what is under the
   // pointer, which is the whole of what a button means.
-  if (isMouseButton(key.name)) {
+  if (isMouseKey(key.name)) {
     const { consumers } = partitionInput(registry, ui);
     return runConsumers(consumers.filter((c) => c.mouse === true), key, ui);
   }
@@ -266,7 +266,7 @@ function hostKeyed(root: Backend, path: HostKeyPath): Backend {
             return true;
           }
           if (!path.heard) return false;
-          if (isMouseButton(key.name)) {
+          if (isMouseKey(key.name)) {
             path.last(key);
             return false;
           }
@@ -886,7 +886,7 @@ export function renderApp(
         setArm(null);
         if (twoPhaseDispatch(inputRegistryRef.current, ui, k, () => hostFallback(k))) notify();
         return true;
-      } else if (armRef.current && !isMouseButton(k.name)) {
+      } else if (armRef.current && !isMouseKey(k.name)) {
         setArm(null);
         notify();
       }

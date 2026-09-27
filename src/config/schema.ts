@@ -37,6 +37,7 @@ export function isLeashKey(key: string): boolean {
 
 // Why the model may change a host key, said beside it (`config_schema`).
 const MOUSE = { reason: 'whether the app takes the mouse or leaves it to the terminal — undone with one command' };
+const HOVER = { reason: 'whether what a click acts on is underlined under the pointer — a look, undone with one command' };
 const VERBS = { reason: 'the words on the status line while the model works — a look, undone with one command' };
 const RESUME = { reason: 'whether the chat continues the latest conversation on start — nothing is lost either way' };
 
@@ -114,11 +115,16 @@ export const hostConfigSchema = z.object({
   // default. `config set ui.mouse false` gives the mouse back to the terminal, whose own
   // selection takes whole screen rows, borders included; `/copy` in the chat copies an
   // answer with no mouse at all.
+  // `hover` (with the mouse on; on by default) reports the pointer's moves too, so what a
+  // click acts on — a fold line in the chat, a row of the session picker or a command's
+  // panel — is underlined under it (src/config/mouse.ts). `config set ui.hover false`
+  // keeps the mouse and drops the motion reports, for a terminal or a link that feels them.
   // `verbs` — the words the chat's status line picks from while the model works (one
   // per request, src/assistant/verbs.ts); an empty list keeps the built-in ones.
   ui: z.object({
     // The backend is opened with the mouse or without it when the app starts.
     mouse: z.boolean().register(modelMaySet, MOUSE).register(modelMaySave, MOUSE).register(appliesOnRestart, {}).optional(),
+    hover: z.boolean().register(modelMaySet, HOVER).register(modelMaySave, HOVER).register(appliesOnRestart, {}).optional(),
     verbs: z.array(z.string()).register(modelMaySet, VERBS).register(modelMaySave, VERBS).optional(),
   }).optional(),
   // `file` — the memory list an older host kept; it is moved into the global workspace

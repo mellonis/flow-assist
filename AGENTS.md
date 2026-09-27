@@ -668,10 +668,10 @@ hold this set together:
   schema and the built-ins' and asserts no mark under the leash and every save mark
   beside a set mark, and walks each bundled `plugins-available/*` schema (whatever is
   there — the suite still passes with it empty) and asserts it marks nothing: a key
-  holding a path, a command, a URL or a token stays the person's. The host marks `ui.verbs`, `ui.mouse`, `sessions.resume`, the
+  holding a path, a command, a URL or a token stays the person's. The host marks `ui.verbs`, `ui.mouse`, `ui.hover`, `sessions.resume`, the
   chat's `plugins.assistant.mode` and `panel.side`, and `plugins.keycaps.enabled`. A
   third registry, `appliesOnRestart`, marks a node whose consumer reads it only at start
-  (`ui.mouse`, `keys`, `theme`, `sessions`, the chat's `mode`, `keycaps.enabled`, and on
+  (`ui.mouse`, `ui.hover`, `keys`, `theme`, `sessions`, the chat's `mode`, `keycaps.enabled`, and on
   the leash `ai.provider`, `ai.baseUrl`, `ai.tokenEnv` and `ai.disabledTools`), covering
   every key under it; every `config set` of such a key says `takes effect on restart`,
   and its value is never laid on the running app (below).
@@ -2673,9 +2673,14 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     flowtty calls it on the key path. Copies the app makes go through
     `services.copy(text)` (`useApp().copy`, then the tool), and `onCopy` leaves those
     (source `'api'`) to their caller, so `/copy` says what it copied once.
-  - **Mouse buttons are not keys.** `mousedown` / `mousedrag` / `mouseup` reach every
-    `useInput` subscriber; `twoPhaseDispatch` drops them before any handler or the
-    host fallback (`isMouseButton` in `src/playback/keys.ts`). Handlers were written
+  - **Mouse buttons are not keys.** `mousedown` / `mousedrag` / `mouseup` — and, with
+    hover on, `mousemove` / `mouseleave` — reach every `useInput` subscriber;
+    `twoPhaseDispatch` drops them before any handler or the host fallback (`isMouseKey`
+    in `src/playback/keys.ts`; `isMouseButton` is the three buttons alone). A move comes
+    at every cell the pointer crosses, so it must cost nothing on the host's path: it
+    disarms no Esc, answers no y/n, reaches no remote plugin and redraws nothing — the
+    chat's `mouse: true` handler hears it and returns `false` without touching the press
+    it may be waiting to see released. Handlers were written
     for keys: the y/n pause and an open question swallow every key, Esc Esc is
     disarmed by "any key", the command line's catch-all consumes, keycaps would draw a
     cap per dragged cell, and every consumed key costs a re-render. A new handler
@@ -2685,7 +2690,38 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     button reaches such a handler and nothing else — not another consumer, not the
     host fallback — and that handler returns `false` unless it actually acted, so a
     drag still costs no re-render a cell.
-  - Tests: `backend.mouse('down' | 'drag' | 'up', x, y)`, then read
+  - **Hover** (`src/config/mouse.ts`): with `ui.mouse` on and `ui.hover` not false the
+    backend is opened with `mouse: { hover: true }` (any-event tracking; the TTY
+    backend coalesces the moves to one per cell), and what a click acts on is underlined while
+    the pointer is over it — flowtty's own hover look for its components, so a
+    plugin's `ListSelect` and the host's rows read the same. Underline, not brightness:
+    the rows it marks are the chat's dim chrome, and brightening them would read as the
+    answer's text, while an underline is a look nothing else in the chat uses on its
+    own. Which rows: a chat row with `foldLine` (set where the rows are built — a folded
+    block's one row, the `▸ N tools` trail head, a folded run of steps and a group's
+    head, the thinking header, a command block's first row and its `… N lines cut`
+    row, `… N earlier calls`, the `/compact` summary's row); the body of an open block
+    closes it on a click but never changes under the pointer. A fold line with hover on
+    is drawn by `FoldLine` (`views/modals.ts`), its own component with flowtty's
+    `useHover`, the hover props on the row's own outer box (a wrapper would change what
+    a drag copies): entering or leaving it re-renders that row alone, and the row cache
+    (`messageRows`) never hears of the pointer. The pager draws the same rows with hover
+    off — a click there folds nothing. The session picker's and a command panel's rows
+    (`ListRow`) take a click through `onClick` on their own box that puts the cursor
+    there, as ↑/↓ would (never ⏎'s open; the picker only in its list mode), and are
+    underlined under the pointer too. `ui.hover: false`, or the mouse off, draws no
+    hover props at all — the test backend delivers moves whatever the mode, so the
+    rows, not the backend, are what holds it; a `mouseleave` clears it (flowtty).
+  - **flowtty's `onClick` beside the chat's own click.** The chat maps a click to a fold
+    by hand (`mouse()` and `foldAt` in the chat: press, release in the same cell within
+    `CLICK_MS`, the row under it by the viewport's arithmetic). flowtty's `ScrollList`
+    `onRowClick(index)` does the same hit-testing from the committed frame and would
+    replace `foldAt` and the press bookkeeping; its press is withheld from every input
+    handler, which is fine once nothing else reads it (the pointer is told through
+    `HostKeyPath.pressed`). Not done: the working click code stays as it is until it is
+    rewritten on its own.
+  - Tests: `backend.mouse('down' | 'drag' | 'up', x, y)` (and `'move'` / `'leave'` for
+    hover, `src/__tests__/hover.e2e.test.ts`), then read
     `backend.clipboard`; `backend.clipboardAvailable = false` stands for Apple
     Terminal (`src/__tests__/copy.e2e.test.ts`).
 - **`!command` runs a shell command** — the person's own, typed into the field

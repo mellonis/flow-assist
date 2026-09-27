@@ -52,6 +52,7 @@ import { createServices } from './runtime/services.js';
 import { hostVersion } from './version.js';
 import { renderChatModal, renderHelp, renderLogModal, renderReminder } from './views/modals.js';
 import { purgePluginMemories } from './runtime/services/memory.js';
+import { mouseOption } from './config/mouse.js';
 
 // The built-in modal renderers. The host knows no domain: these
 // are the surfaces for the built-in chat/help/log modals, handed to plugins as
@@ -361,13 +362,8 @@ function writeLine(name: string, argsText: string): string {
 }
 
 // ─── interactive TUI ──────────────────────────────────────────────────────────
-// Whether the terminal reports the mouse to the app — the wheel, and the drag that
-// selects and copies (flowtty's copy-on-select, wired in runtime/app.tsx). On unless
-// `ui.mouse` is explicitly false: some people will rather have the terminal's own
-// selection back.
-export function mouseEnabled(config: Record<string, unknown>): boolean {
-  return (config.ui as { mouse?: unknown } | undefined)?.mouse !== false;
-}
+// The mouse and its hover, from `ui.mouse` and `ui.hover` (src/config/mouse.ts).
+export { mouseEnabled, mouseOption } from './config/mouse.js';
 
 // The TUI needs a terminal on BOTH ends: it draws on stdout and reads keys from
 // stdin. Started in a pipe, in CI or with its input redirected, flowtty ≥
@@ -399,7 +395,7 @@ async function runInteractive(config: Record<string, unknown>, repo: PluginRepo)
   // The backend holds the console while it owns the screen; with `onConsole` set every
   // line goes to the log (`L`) at once and nothing is printed again at exit.
   const consoleLog = consoleBridge();
-  const backend = new TtyBackend(process.stdout, process.stdin, { mouse: mouseEnabled(config), onConsole: consoleLog.onConsole });
+  const backend = new TtyBackend(process.stdout, process.stdin, { mouse: mouseOption(config), onConsole: consoleLog.onConsole });
 
   let handle: { unmount(): void } | undefined;
   // Guards against a second call landing while the first is still waiting on remote

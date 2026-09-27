@@ -7,7 +7,7 @@
 // once per frame. The event the plugin gets carries all three names: the terminal's,
 // the canonical id bindings are compared by, and the action from `hello.keys` the key
 // resolves to under the person's `config.keys`.
-import { canonicalBinding, isMouseButton, isPrintableKey, keyId } from '../playback/keys.js';
+import { canonicalBinding, isMouseKey, isPrintableKey, keyId } from '../playback/keys.js';
 import type { ConsumeSpec, KeyEvent } from '@flow-assist/remote';
 
 export interface InputKey { name: string; ctrl?: boolean; meta?: boolean; shift?: boolean }
@@ -30,7 +30,7 @@ export function canonicalConsume(spec: ConsumeSpec, actions: Record<string, stri
 // The mouse — buttons and the wheel — is never a plugin's to take: it drives the
 // host's drag-selection and scrolling, whatever `consume` says.
 export function consumes(c: Consume, key: InputKey): boolean {
-  if (isMouseButton(key.name) || key.name.startsWith('wheel')) return false;
+  if (isMouseKey(key.name) || key.name.startsWith('wheel')) return false;
   if (c.all) return true;
   if (c.ids.has(keyId(key))) return true;
   return c.printable && isPrintableKey(key);

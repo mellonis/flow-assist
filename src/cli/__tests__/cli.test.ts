@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { interactiveRefusal, mouseEnabled, parseCli } from '../../main';
+import { interactiveRefusal, mouseEnabled, mouseOption, parseCli } from '../../main';
 import { hostConfigSchema } from '../../config/schema';
 import { validateConfigWriteValue } from '../../config/load';
 
@@ -11,6 +11,18 @@ test('the wheel is reported unless ui.mouse is explicitly false, and the key can
   expect(mouseEnabled({ ui: { mouse: false } })).toBe(false);
   expect(validateConfigWriteValue(hostConfigSchema, 'ui.mouse', false).ok).toBe(true);
   expect(validateConfigWriteValue(hostConfigSchema, 'ui.mouse', 'sometimes').ok).toBe(false);
+});
+
+test('the backend is asked for hover unless ui.hover or ui.mouse is false', () => {
+  expect(mouseOption({})).toEqual({ hover: true });
+  expect(mouseOption({ ui: { hover: true } })).toEqual({ hover: true });
+  // A terminal that reports motion badly: the mouse without hover.
+  expect(mouseOption({ ui: { hover: false } })).toBe(true);
+  // No mouse, no hover, whatever ui.hover says.
+  expect(mouseOption({ ui: { mouse: false } })).toBe(false);
+  expect(mouseOption({ ui: { mouse: false, hover: true } })).toBe(false);
+  expect(validateConfigWriteValue(hostConfigSchema, 'ui.hover', false).ok).toBe(true);
+  expect(validateConfigWriteValue(hostConfigSchema, 'ui.hover', 'sometimes').ok).toBe(false);
 });
 
 test('parseCli maps argv to a subcommand', () => {

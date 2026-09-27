@@ -40,6 +40,7 @@ import {
   ScrollList,
   Shimmer,
   Text,
+  useHover,
   layoutMarkdown,
   layoutMarkdownDetailed,
   caretPosition,
@@ -149,6 +150,11 @@ interface ChatRow {
   // closes it. A row without one is not clickable — a plain answer, the person's own
   // message, the chrome.
   fold?: string;
+  // The row is a fold LINE — the one line a click on it is about: a folded block's
+  // only row, the head of a trail or a command's block, the `… N earlier calls` /
+  // `… N lines cut` rows. With hover on it is underlined under the pointer; the rows
+  // of an open block's body close it too, and still never change.
+  foldLine?: boolean;
   // The turn ended because the loop ran out of rounds. It stands where the answer
   // would be, in the warn colour: a wall of grey tool lines with nothing under it
   // said nothing about why.
@@ -606,7 +612,7 @@ function rowsPerDrawn(messages: ChatMsg[], o: RowOpts): ChatRow[][] {
     const out: ChatRow[] = [];
     if (inGroup.g.head === at) {
       const recs = inGroup.g.members.map((i) => (drawn[i]!.views as ViewRecord[])[0]!);
-      out.push({ role: 'assistant', first: true, step: true, groupHead: true, fold: foldId(at, 'group'),
+      out.push({ role: 'assistant', first: true, step: true, groupHead: true, fold: foldId(at, 'group'), foldLine: true,
         spans: groupHeadText(recs, o.now).map((s) => ({ text: s.text, ...(s.color ? { color: o.palette[s.color] } : { dim: true }) })) });
     }
     if (inGroup.open && inGroup.g.members.includes(at)) out.push(...messageRows(m, at, last, o));
@@ -716,6 +722,7 @@ function buildMessageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): Ch
           : undefined;
         framed.forEach((line, li) => rows.push({
           role, spans: line.spans, first: vi === 0 && li === 0, fold: id,
+          ...(li === 0 || line.spans.some((sp) => sp.dim && String(sp.text ?? '').startsWith('… ')) ? { foldLine: true } : {}),
           ...(line.chrome ? { chrome: line.chrome } : {}),
           ...(isConsole ? {} : { plainGutter: true }),
           ...(vi === 0 && li === 0 && consoleMark ? { consoleMark } : {}),
@@ -743,7 +750,7 @@ function buildMessageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): Ch
         const id = foldId(at, 'thinking');
         const foldable = notes !== 'open';
         const opened = !foldable || isOpen(folds, id);
-        rows.push({ role, reasonHeader: true, open: opened, label: 'thinking', ...(foldable ? { fold: id } : {}) });
+        rows.push({ role, reasonHeader: true, open: opened, label: 'thinking', ...(foldable ? { fold: id, foldLine: true } : {}) });
         if (opened) for (const line of mdLines(reasoning, inner)) rows.push(row(line, { reason: true, ...(foldable ? { fold: id } : {}) }));
         rows.push({ gap: true });
       }
@@ -758,7 +765,7 @@ function buildMessageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): Ch
       const trail = (n: number, runs: ToolRun[]) => {
         const toolsId = foldId(at, 'tools', n);
         const opened = isOpen(folds, toolsId);
-        rows.push({ role, meta: true, runs, open: opened, fold: toolsId });
+        rows.push({ role, meta: true, runs, open: opened, fold: toolsId, foldLine: true });
         if (!opened) return;
         const condensed = condenseRuns(runs);
         // The open trail is capped: the LAST calls are the ones a person is looking
@@ -767,7 +774,7 @@ function buildMessageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): Ch
         // state is: only a click on that line lifts it.
         const callsId = foldId(at, 'calls', n);
         const earlier = isClicked(folds, callsId) ? 0 : Math.max(0, condensed.length - TRAIL_ROWS);
-        if (earlier) rows.push({ role, toolRun: true, fold: callsId, spans: [{ text: `… ${earlier} earlier call${earlier === 1 ? '' : 's'}`, dim: true }] });
+        if (earlier) rows.push({ role, toolRun: true, fold: callsId, foldLine: true, spans: [{ text: `… ${earlier} earlier call${earlier === 1 ? '' : 's'}`, dim: true }] });
         for (const { run, n: times } of condensed.slice(earlier)) {
           rows.push({ role, toolRun: true, fold: toolsId, spans: [toolRunText(run, inner, times)] });
           for (const mark of imageMarkRows(run, inner)) rows.push({ role, toolRun: true, fold: toolsId, spans: [mark] });
@@ -804,7 +811,7 @@ function buildMessageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): Ch
             ...(wrote ? [{ text: ' ✎', mark: tone }] : []),
           ];
           const markWidth = markSpans.reduce((w, sp) => w + cellWidth(sp.text), 0);
-          rows.push({ role, step: true, fold: id, spans: [{ text: runRowText(seg.steps, Math.max(4, inner - markWidth)) }, ...markSpans] });
+          rows.push({ role, step: true, fold: id, foldLine: true, spans: [{ text: runRowText(seg.steps, Math.max(4, inner - markWidth)) }, ...markSpans] });
         } else {
           // Every step in full, where it happened: dim in `step` (a click on any of
           // its rows folds the run again), the normal colour in `open`. Under each,
@@ -849,7 +856,7 @@ function buildMessageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): Ch
       // summary in its text and is drawn as it always was, below.
       const id = foldId(at, 'summary');
       const opened = isOpen(folds, id);
-      rows.push({ role, first: true, fold: id, spans: [{ text: cutStep(String(m.content ?? ''), Math.max(1, inner - 10)) }, { text: ` ${opened ? '▾' : '▸'} summary`, dim: true }] });
+      rows.push({ role, first: true, fold: id, foldLine: true, spans: [{ text: cutStep(String(m.content ?? ''), Math.max(1, inner - 10)) }, { text: ` ${opened ? '▾' : '▸'} summary`, dim: true }] });
       if (opened) for (const line of mdLines(m.summary, inner)) rows.push({ role, spans: line.spans, continues: line.continues, chrome: line.chrome, frame: line.frame, fold: id });
     } else {
       const text = String(m.content ?? '');
@@ -883,12 +890,15 @@ function buildMessageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): Ch
 // One row of the conversation as the screen draws it — shared by the conversation
 // and the pager, so a block read in the pager keeps every mark a drag reads: the gutter
 // and a code block's bar are chrome, a wrapped paragraph copies as one line.
-function chatRowRenderer({ palette: m, errorColor, wrap, now, detailsKey }: {
+function chatRowRenderer({ palette: m, errorColor, wrap, now, detailsKey, hover = false }: {
   palette: Record<string, string | undefined>;
   errorColor?: string;
   wrap: number;
   now: number;
   detailsKey: string;
+  // Whether a fold line is underlined under the pointer: the backend reports hover, and
+  // these rows are the conversation's — never the pager's, where a click folds nothing.
+  hover?: boolean;
 }): (row: ChatRow, i: number) => ReactNode {
   // Who is speaking is said by a marker in the gutter and by the ground under the
   // message — not by a label. The person's marker is the input field's own prompt.
@@ -943,39 +953,49 @@ function chatRowRenderer({ palette: m, errorColor, wrap, now, detailsKey }: {
   const frameRow = (row: ChatRow) => (row.frame === true ? { selectable: false } : {});
 
   // One row of the conversation. `<ScrollList>` calls it only for the rows near the
-  // screen, so a long conversation costs what a short one costs.
-  const renderRow = (row: ChatRow, i: number) => {
-      const key = `chat-${i}`;
+  // screen, so a long conversation costs what a short one costs. A fold line, with
+  // hover on, is drawn by `FoldLine`, which asks flowtty whether the pointer is over
+  // it: entering or leaving it redraws that row alone — nothing above it, and not the
+  // row cache, which never hears of the pointer.
+  const renderRow = (row: ChatRow, i: number): ReactNode => {
+    const key = `chat-${i}`;
+    if (hover && row.foldLine && row.fold) return h(FoldLine, { key, draw: (lit: boolean, hp: HoverProps) => drawRow(row, key, lit, hp) });
+    return drawRow(row, key, false, NO_HOVER);
+  };
+  // `lit`: the pointer is over this fold line, and its text is underlined — flowtty's
+  // own hover look for its components, the gutter left as it is. `hp` goes on the row's
+  // own outer box, never a wrapper, so a drag's marks on it mean what they did.
+  const drawRow = (row: ChatRow, key: string, lit: boolean, hp: HoverProps): ReactNode => {
       if (row.gap) return h(Box, { key, height: 1, flexShrink: 0 });
-      if (row.reasonHeader) return h(Text, { key, dim: true, color: 'magenta', selectable: false }, `${' '.repeat(GUTTER)}${row.open ? '▾' : '▸'} ${row.label}`);
+      if (row.reasonHeader) return h(Text, { key, ...hp, dim: true, underline: lit, color: 'magenta', selectable: false }, `${' '.repeat(GUTTER)}${row.open ? '▾' : '▸'} ${row.label}`);
       // A group's head is a one-row line like a folded run — chrome, cut to one row —
       // but it carries several spans (`Ran 3 commands · ✗ 1 failed · 34.0 s`) and the
       // `ƒ ` mark a run's row never draws: a span's own colour (the failed count's warn) wins
       // over the line's forced dim, or a red count would read as grey.
-      if (row.step && row.groupHead) return h(Box, { key, flexDirection: 'row', flexShrink: 0, selectable: false },
+      if (row.step && row.groupHead) return h(Box, { key, ...hp, flexDirection: 'row', flexShrink: 0, selectable: false },
         gutter(row),
         h(Box, { flexDirection: 'row', flexShrink: 1, overflow: 'hidden' },
           (row.spans || []).map((s, j) => h(Text, {
-            key: j, dim: s.dim, color: s.color, wrap: 'truncate',
+            key: j, dim: s.dim, underline: lit, color: s.color, wrap: 'truncate',
           }, String(s.text ?? '')))));
       // A folded run of steps. Chrome, like the `N tools` line and the gutter: a drag
       // across the answer returns what the model SAID, never the host's one-line
       // account of it. It is cut to the width above, and truncated here as well so
       // that it can never take a second row — the whole conversation is laid out one
       // terminal line per row.
-      if (row.step) return h(Box, { key, flexDirection: 'row', flexShrink: 0, selectable: false },
+      if (row.step) return h(Box, { key, ...hp, flexDirection: 'row', flexShrink: 0, selectable: false },
         h(Text, null, ' '.repeat(GUTTER)),
         h(Box, { flexDirection: 'row', flexShrink: 1, overflow: 'hidden' },
           (row.spans || []).map((s, j) => h(Text, {
-            key: j, wrap: 'truncate',
+            key: j, wrap: 'truncate', underline: lit,
             ...(s.mark === 'error' ? { color: errorColor } : s.mark === 'warn' ? { color: m.warn } : s.mark === 'ok' ? { dim: true, color: m.ok } : { dim: true }),
           }, String(s.text ?? '')))));
       if (row.reason) return h(Box, { key, flexDirection: 'row', flexShrink: 0, ...frameRow(row) },
         gutter(row),
         content(row, (s, j) => h(Text, { key: j, dim: true, bold: s.bold, underline: s.underline, color: s.color, selectable: j < (row.chrome ?? 0) ? false : undefined }, String(s.text ?? ''))));
-      if (row.toolRun) return h(Box, { key, flexDirection: 'row', flexShrink: 0 },
+      if (row.toolRun) return h(Box, { key, ...hp, flexDirection: 'row', flexShrink: 0 },
         h(Text, null, ' '.repeat(GUTTER)),
-        (row.spans || []).map((s, j) => h(Text, { key: j, dim: true, wrap: 'truncate' }, String(s.text ?? ''))));
+        (row.spans || []).map((s, j) => h(Text, { key: j, dim: true, underline: lit, wrap: 'truncate' }, String(s.text ?? ''))));
       // The turn ran out of rounds: said in the warn colour, where the answer it never
       // wrote would have been. Chrome — it is the host's account of the turn, not
       // something the model said.
@@ -987,29 +1007,30 @@ function chatRowRenderer({ palette: m, errorColor, wrap, now, detailsKey }: {
         const wrote = runs.some((r) => r.outcome === 'applied');
         const tone = trailTone(runs);
         // How long it took and which tools ran — about the answer, not part of it.
-        return h(Box, { key, flexDirection: 'row', flexShrink: 0, selectable: false },
+        return h(Box, { key, ...hp, flexDirection: 'row', flexShrink: 0, selectable: false },
           h(Text, null, ' '.repeat(GUTTER)),
           row.duration ? h(Text, { dim: true }, `${fmtSec(row.duration)}${runs.length || row.stopped ? ' · ' : ''}`) : null,
           row.stopped ? h(Text, { color: m.warn }, `stopped (${row.stoppedBy ?? CAP.esc})${runs.length ? ' · ' : ''}`) : null,
-          runs.length ? h(Text, { dim: tone === 'ok', color: tone === 'error' ? errorColor : tone === 'warn' ? m.warn : m.ok }, `${row.open ? '▾' : '▸'} ${runs.length} tool${runs.length === 1 ? '' : 's'}${wrote ? ' ✎' : ''}: `) : null,
+          runs.length ? h(Text, { dim: tone === 'ok', underline: lit, color: tone === 'error' ? errorColor : tone === 'warn' ? m.warn : m.ok }, `${row.open ? '▾' : '▸'} ${runs.length} tool${runs.length === 1 ? '' : 's'}${wrote ? ' ✎' : ''}: `) : null,
           // The summary is a row like any other: cut it to what is left of the width,
           // or a turn of fifty tools takes a second line and the list's arithmetic
           // (one terminal line per row) is wrong.
-          runs.length ? h(Text, { dim: true, wrap: 'truncate' }, `${toolSummary(runs, Math.max(10, wrap - 30))}${row.open || !detailsKey ? '' : ` · ${detailsKey}`}`) : null,
+          runs.length ? h(Text, { dim: true, underline: lit, wrap: 'truncate' }, `${toolSummary(runs, Math.max(10, wrap - 30))}${row.open || !detailsKey ? '' : ` · ${detailsKey}`}`) : null,
           // What the turn cost the provider — the turn's, not the conversation's.
           row.tokens ? h(Text, { dim: true }, `${row.duration || runs.length || row.stopped ? ' · ' : ''}${tokensBadge(row.tokens)}`) : null);
       }
       const ground = groundOf(row.role);
       const groundStyle = ground ? { width: '100%', backgroundColor: ground } : {};
       if (row.spans && row.spans.length) {
-        return h(Box, { key, flexDirection: 'row', flexShrink: 0, ...groundStyle, ...frameRow(row) }, gutter(row),
+        return h(Box, { key, ...hp, flexDirection: 'row', flexShrink: 0, ...groundStyle, ...frameRow(row) }, gutter(row),
           content(row, (s, j) => h(Text, {
             key: j,
             bold: s.bold,
             // A note is the host's; what the model wrote on the way stays where it
             // was drawn but steps back, so the answer under it is what the eye lands on.
             dim: s.dim || row.role === 'note' || row.quiet === true,
-            underline: s.underline,
+            // Lit, the text is underlined and a code block's bar (chrome) is not.
+            underline: s.underline || (lit && j >= (row.chrome ?? 0)),
             color: s.token || s.accent ? m.accent : s.color,
             selectable: j < (row.chrome ?? 0) ? false : undefined,
           }, String(s.text ?? ''))));
@@ -1018,6 +1039,31 @@ function chatRowRenderer({ palette: m, errorColor, wrap, now, detailsKey }: {
       return h(Box, { key, height: 1, flexShrink: 0, ...groundStyle });
   };
   return renderRow;
+}
+
+// A row of the session picker or a command panel: one terminal line that a click puts
+// the cursor on (`onClick` on its own box — flowtty's mouse controller takes the press
+// before any key handler). With hover on, what it is picked by is underlined while the
+// pointer is over it, as flowtty's own lists do; it asks for hover only then, so with
+// hover off it holds no subscription for it. `onClick` is always a present key, its
+// value toggled, so the row is never remounted for it.
+function ListRow({ hover, onClick, draw }: { hover: boolean; onClick: (() => void) | undefined; draw: (lit: boolean) => ReactNode[] }) {
+  const box = { flexDirection: 'row' as const, width: '100%', flexShrink: 0, onClick };
+  return hover ? h(HoveredListRow, { box, draw }) : h(Box, box, ...draw(false));
+}
+function HoveredListRow({ box, draw }: { box: Record<string, unknown>; draw: (lit: boolean) => ReactNode[] }) {
+  const [lit, hp] = useHover();
+  return h(Box, { ...box, ...hp }, ...draw(lit));
+}
+
+// What `useHover` hands a row to spread on its own outer box.
+type HoverProps = ReturnType<typeof useHover>[1];
+const NO_HOVER = {} as HoverProps;
+// A fold line that knows whether the pointer is over it. Its own component, so a
+// move onto it or off it re-renders this row and nothing else.
+function FoldLine({ draw }: { draw: (lit: boolean, hp: HoverProps) => ReactNode }) {
+  const [lit, hp] = useHover();
+  return draw(lit, hp) as ReturnType<typeof h>;
 }
 
 // ─── The conversation: a scroll box, anchored to its bottom ───────────────────
@@ -1036,8 +1082,10 @@ const MIN_ROWS_TO_PIN = 4;
 export function roomForBlock(height: number): number {
   return height >= MIN_ROWS_TO_PIN ? height - 1 : height;
 }
-function ChatMessages({ messages, rowOpts, palette: m, errorColor, onViewport, scrollTo, keysActive = true, wheel, hidden = false, streaming = false }: {
+function ChatMessages({ messages, rowOpts, palette: m, errorColor, onViewport, scrollTo, keysActive = true, wheel, hidden = false, streaming = false, hover = false }: {
   messages: ChatMsg[];
+  // The backend reports hover: a fold line is underlined under the pointer.
+  hover?: boolean;
   // Not drawn, and still mounted: the pager stands in its place, and the list keeps
   // its scroll for when the pager closes.
   hidden?: boolean;
@@ -1165,7 +1213,7 @@ function ChatMessages({ messages, rowOpts, palette: m, errorColor, onViewport, s
   // not on the row under it — what the chat is told, so it leaves that row alone.
   pinnedRef.current = pinned;
 
-  const renderRow = chatRowRenderer({ palette: m, errorColor, wrap, now: rowOpts.now, detailsKey: rowOpts.detailsKey });
+  const renderRow = chatRowRenderer({ palette: m, errorColor, wrap, now: rowOpts.now, detailsKey: rowOpts.detailsKey, hover });
 
   // An absolute child of a scroll box is an overlay: it stays put while the rows move
   // under it, so pinning does not shift what the person is reading. Needs flowtty
@@ -1341,7 +1389,14 @@ export function renderChatModal({
   picker = null,
   pickerOwn = 'idle',
   panel = null,
+  hover = false,
+  onPickRow,
 }: {
+  // The backend reports hover: what a click acts on is underlined under the pointer.
+  hover?: boolean;
+  // A click on a row of the session picker or a command panel: the cursor goes there,
+  // as ↑/↓ would take it — the index among the rows the list shows.
+  onPickRow?: (index: number) => void;
   // The block open in the pager, drawn in the conversation's place (null — none).
   pager?: PagerView | null;
   width: number;
@@ -1469,8 +1524,8 @@ export function renderChatModal({
 }) {
   // A y/n or a question that arrives while the picker is up wins: the chat is drawn with
   // it, and the picker comes back once it is answered. So for a plugin's panel.
-  if (picker && !pendingQuestion && !pendingConfirm) return renderSessionPicker({ width, height, theme, picker, own: pickerOwn, now, error, fullscreen, docked, focused });
-  if (panel && !pendingQuestion && !pendingConfirm) return renderCommandPanel({ width, height, theme, panel, error, fullscreen, docked, focused });
+  if (picker && !pendingQuestion && !pendingConfirm) return renderSessionPicker({ width, height, theme, picker, own: pickerOwn, now, error, fullscreen, docked, focused, hover, onPickRow });
+  if (panel && !pendingQuestion && !pendingConfirm) return renderCommandPanel({ width, height, theme, panel, error, fullscreen, docked, focused, hover, onPickRow });
   const boxW = chatBoxWidth(width, fullscreen);
   const boxH = fullscreen ? height : Math.min(Math.floor(height * 0.82), height - 4);
   const wrap = chatWrapWidth(width, fullscreen);
@@ -1549,7 +1604,7 @@ export function renderChatModal({
       },
       // Under the pager the conversation is not drawn and hears no key: PgUp/PgDn and
       // the wheel are the pager's, and the conversation stays where it was left.
-      h(ChatMessages, { messages, rowOpts: { wrap, folds, viewLines, notes, detailsKey, renderers: viewRenderers, now, palette: m, onViewFail }, palette: m, errorColor: theme?.error, onViewport, scrollTo, keysActive: focused && !pager, wheel, hidden: !!pager, streaming }),
+      h(ChatMessages, { messages, rowOpts: { wrap, folds, viewLines, notes, detailsKey, renderers: viewRenderers, now, palette: m, onViewFail }, palette: m, errorColor: theme?.error, onViewport, scrollTo, keysActive: focused && !pager, wheel, hidden: !!pager, streaming, hover }),
       // The pager, in the conversation's place: the block's rows at the conversation's
       // width, with a scroll of their own.
       pager
@@ -1736,7 +1791,7 @@ const pickerField = (prompt: string, value: string, caret: number, m: Record<str
     h(Text, { wrap: 'truncate' }, value.slice(caret + at.length)));
 };
 
-export function renderSessionPicker({ width, height, theme, picker, own = 'idle', now = Date.now(), error = null, fullscreen = false, docked = false, focused = true }: {
+export function renderSessionPicker({ width, height, theme, picker, own = 'idle', now = Date.now(), error = null, fullscreen = false, docked = false, focused = true, hover = false, onPickRow }: {
   width: number;
   height: number;
   theme: Theme | undefined;
@@ -1747,11 +1802,17 @@ export function renderSessionPicker({ width, height, theme, picker, own = 'idle'
   fullscreen?: boolean;
   docked?: boolean;
   focused?: boolean;
+  hover?: boolean;
+  // A click on a row (list mode only): the cursor goes there.
+  onPickRow?: (index: number) => void;
 }) {
   const boxW = chatBoxWidth(width, fullscreen);
   const boxH = fullscreen ? height : Math.min(Math.floor(height * 0.82), height - 4);
   const m = (theme?.modals?.chat ?? {}) as Record<string, string | undefined>;
   const groups = pickerGroups(picker);
+  // A row takes a click only while the list is what the keys move — not while a
+  // rename or a delete asks about the row the cursor is on.
+  const pick = picker.mode === 'list' ? onPickRow : undefined;
   const shown = groups.flatMap((g) => g.rows);
   const all = picker.scope === 'all';
   // How many the scope holds before the filter: every session, or the project's.
@@ -1777,12 +1838,12 @@ export function renderSessionPicker({ width, height, theme, picker, own = 'idle'
       : null;
     // The title is what a person picks by, so it keeps up to half the row; the meta gives
     // way first (it shrinks far faster), then whose it is — each cut, never pushed off.
-    return h(Box, { key: r.id, flexDirection: 'row', width: '100%', flexShrink: 0 },
-      h(Text, { bold: true, color: m.accent, selectable: false }, active ? '› ' : '  '),
-      h(Box, { flexGrow: 1, flexShrink: 1, overflow: 'hidden', minWidth: Math.min(cellWidth(title), Math.floor((inner - 2) / 2)) },
-        h(Text, { wrap: 'truncate', bold: active, color: active ? m.accent : undefined }, title)),
-      mark ? h(Box, { flexShrink: 1, overflow: 'hidden' }, h(Text, { ...mark.style, selectable: false, wrap: 'truncate' }, `  ${mark.text}`)) : null,
-      h(Box, { flexShrink: 1000, overflow: 'hidden' }, h(Text, { dim: true, selectable: false, wrap: 'truncate' }, `  ${meta}`)));
+    return h(ListRow, { key: r.id, hover: hover && !!pick, onClick: pick ? () => pick(i) : undefined, draw: (lit: boolean) => [
+      h(Text, { key: 'mark', bold: true, color: m.accent, selectable: false }, active ? '› ' : '  '),
+      h(Box, { key: 'title', flexGrow: 1, flexShrink: 1, overflow: 'hidden', minWidth: Math.min(cellWidth(title), Math.floor((inner - 2) / 2)) },
+        h(Text, { wrap: 'truncate', bold: active, underline: lit, color: active ? m.accent : undefined }, title)),
+      mark ? h(Box, { key: 'whose', flexShrink: 1, overflow: 'hidden' }, h(Text, { ...mark.style, selectable: false, wrap: 'truncate' }, `  ${mark.text}`)) : null,
+      h(Box, { key: 'meta', flexShrink: 1000, overflow: 'hidden' }, h(Text, { dim: true, selectable: false, wrap: 'truncate' }, `  ${meta}`))] });
   };
   // Every session: each project's rows under its path, a dim header (its end kept when
   // it is cut — the end says which project). The offset counts drawn lines, headers
@@ -1868,7 +1929,7 @@ export type CommandPanelView = {
   nested?: boolean;
 };
 
-export function renderCommandPanel({ width, height, theme, panel, error = null, fullscreen = false, docked = false, focused = true }: {
+export function renderCommandPanel({ width, height, theme, panel, error = null, fullscreen = false, docked = false, focused = true, hover = false, onPickRow }: {
   width: number;
   height: number;
   theme: Theme | undefined;
@@ -1877,6 +1938,9 @@ export function renderCommandPanel({ width, height, theme, panel, error = null, 
   fullscreen?: boolean;
   docked?: boolean;
   focused?: boolean;
+  hover?: boolean;
+  // A click on a row: the cursor goes there.
+  onPickRow?: (index: number) => void;
 }) {
   const boxW = chatBoxWidth(width, fullscreen);
   const boxH = fullscreen ? height : Math.min(Math.floor(height * 0.82), height - 4);
@@ -1891,11 +1955,11 @@ export function renderCommandPanel({ width, height, theme, panel, error = null, 
   const lines = panel.rows.map((r, i) => {
     const active = i === panel.cursor;
     const color = toneColor(r.tone);
-    return h(Box, { key: r.id, flexDirection: 'row', width: '100%', flexShrink: 0 },
-      h(Text, { bold: true, color: m.accent, selectable: false }, active ? '› ' : '  '),
-      h(Box, { flexShrink: 0, overflow: 'hidden', width: textCol },
-        h(Text, { wrap: 'truncate', bold: active, color: active ? m.accent : undefined }, r.text)),
-      r.detail ? h(Box, { flexShrink: 1000, overflow: 'hidden' }, h(Text, { ...(color ? { color } : { dim: true }), wrap: 'truncate' }, `  ${r.detail}`)) : null);
+    return h(ListRow, { key: r.id, hover: hover && !!onPickRow, onClick: onPickRow ? () => onPickRow(i) : undefined, draw: (lit: boolean) => [
+      h(Text, { key: 'mark', bold: true, color: m.accent, selectable: false }, active ? '› ' : '  '),
+      h(Box, { key: 'text', flexShrink: 0, overflow: 'hidden', width: textCol },
+        h(Text, { wrap: 'truncate', bold: active, underline: lit, color: active ? m.accent : undefined }, r.text)),
+      r.detail ? h(Box, { key: 'detail', flexShrink: 1000, overflow: 'hidden' }, h(Text, { ...(color ? { color } : { dim: true }), wrap: 'truncate' }, `  ${r.detail}`)) : null] });
   });
   const offset = windowAround(lines, panel.cursor, listRows).start;
   const headRoom = Math.max(0, boxW - 4);

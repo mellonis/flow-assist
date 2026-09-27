@@ -461,7 +461,8 @@ setup: ({ host }) => { /* once, before any component mounts: seed a store */ },
   highlight there (`onChange`, never `onSubmit`), on a `ListMultiSelect` row toggles
   it, on a `Checkbox` toggles it, on a `Select` opens it; the click also moves the
   keyboard to the plugin's side, so the picker a person clicked is the one that hears
-  the keys next.
+  the keys next. With hover on (`ui.hover`, on with the mouse by default) the row under
+  the pointer is underlined — flowtty's own look, which the host's rows share.
   `ui.Checkbox`, `ui.TextInput` (a one-line field; it takes the width of a column
   around it, so give it a box with a width) and `ui.ScrollBox` hear flowtty's input
   the same way — a scroll box
