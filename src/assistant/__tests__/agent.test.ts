@@ -831,7 +831,7 @@ test('maxRounds 0 is no round cap: a turn runs past 150 rounds', async () => {
   expect(res.roundLimit).toBeUndefined();
 });
 
-test('maxTurnTokens closes the turn before the request that would go past it; cached prompt tokens do not count', async () => {
+test('maxTurnTokens ends the turn once reached — the request that crosses it is the last; cached prompt tokens do not count', async () => {
   let n = 0;
   const chatRound = async () => {
     n++;
@@ -889,4 +889,35 @@ test('after a corrective round the next boundary measures from that round\'s usa
   });
   expect(seen[1]).toBeGreaterThan(10_100);
   expect(seen[1]).toBeLessThan(10_300); // the reported figure and the corrective line — not the system prompt again
+});
+
+test('a provider that reports no cache figure is counted by the growth of its prompt, so the budget does not end a long turn early', async () => {
+  let n = 0;
+  const chatRound = async (_m: any[], opts: any) => {
+    n++;
+    if (n > 30) { opts.onDelta?.('done'); return { content: 'done', toolCalls: [], finishReason: 'stop', usage: { promptTokens: 101_000, completionTokens: 10 } }; }
+    // A 100k prompt that grows by 30 tokens a round, and no cachedTokens at all.
+    return { content: '', finishReason: 'tool_calls', toolCalls: [{ id: `c${n}`, name: 'no_such_tool', arguments: '{}' }], usage: { promptTokens: 100_000 + n * 30, completionTokens: 10 } };
+  };
+  const res = await agentChat([{ role: 'user', content: 'loop' }], { baseUrl: 'http://x', model: 'm', token: 't', onLive: () => {}, onLiveCommit: () => {}, chatRound, maxTurnTokens: 200_000 });
+  // Counted in full, 30 rounds of 100k would pass 200k at the second; by growth they do not.
+  expect(n).toBe(31);
+  expect(res.content).toBe('done');
+  expect(res.roundLimit).toBeUndefined();
+});
+
+test('markup written beside a real tool call is stripped: never the step, never the history', async () => {
+  assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
+  let n = 0;
+  const chatRound = async (_m: any[], opts: any) => {
+    n++;
+    if (n === 1) { const c = DSML('memory'); opts.onDelta?.(c); return { content: c, finishReason: 'tool_calls', toolCalls: [{ id: '1', name: 'memory', arguments: '{"action":"list"}' }] }; }
+    opts.onDelta?.('ok'); return { content: 'ok', toolCalls: [], finishReason: 'stop' };
+  };
+  const commits: string[] = [];
+  const res = await agentChat([{ role: 'user', content: 'q' }], { baseUrl: 'http://x', model: 'm', token: 't', onLive: () => {}, onLiveCommit: (t) => { commits.push(t); }, chatRound });
+  expect(commits[0]).toBe('Let me look.');
+  expect(res.process).toBe('Let me look.');
+  expect(JSON.stringify(res.transcript)).not.toContain('DSML');
+  expect(res.transcript[0]!.content).toBe('Let me look.');
 });

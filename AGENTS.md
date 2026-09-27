@@ -895,7 +895,9 @@ there is no `/fullscreen`.
   its place. So the instruction asks for fixed sections, written for the model that
   continues and never for the person (no question, no pleasantries): `## Goal`,
   `## Done` (commits, paths, commands that worked), `## In progress` (and its exact next
-  step), `## Open decisions`, `## Facts learned` (pitfalls, conventions of the project).
+  step), `## Open decisions`, `## Facts learned` (pitfalls, conventions of the project),
+  at least about N words, N in proportion to what is compacted (`handoffWords`: 2% of
+  its tokens, 150 to 3000).
   The WHOLE history the model saw is sent — never its last N messages: what the old
   summary did not hold would be lost for good. The previous summary goes in the same
   request, to carry forward what still holds, and the answer takes its place in
@@ -1629,7 +1631,10 @@ the screen, not `current`, not the transcript — and a user line tells the mode
 was written as text and nothing ran, naming the tools it has when the markup named one
 that does not exist; then one more round. At most once in a row (`askedAgain`, cleared
 by a round with a real call): a second such round ends the turn on the text around the
-markup. `AgentOpts.onNote` carries a line about it (`tool call written as text — asked
+markup. Markup written BESIDE a real call is stripped the same way — from the step shown
+and from the round's assistant message, so from the history and the session. Markup
+inside a code fence is never seen (the price of never taking code for a call): a model
+that fences its broken call gets no correction. `AgentOpts.onNote` carries a line about it (`tool call written as text — asked
 again`, `… again — the turn ends`), drawn as a dim note where it happened.
 
 **A turn that did not finish is closed in the model's history too.** The question
@@ -1833,7 +1838,11 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   the LAST one and what it waits for — `reaches the model after this step · ↑ back ·
   ⇥ hold to end`, or `held to the turn's end · ↑ back · ⇥ release` — in a turn
   (`queueWaits`), and `↑ takes it back` outside one (a slash command's wait); ↑ and ⇥
-  act only on an empty field, where they are offered. **Esc** while an answer or a `!command` runs **stops it,
+  act only on an empty field, where they are offered. Only the LEADING run of the queue
+  is delivered: a message that waits (held, or naming an image — its line says `at the
+  end of the turn`) keeps everything queued after it waiting too, so the person's words
+  never overtake each other. A turn that ends on a limit delivers nothing more: what is
+  queued goes out as the next turn, after the host's stop line. **Esc** while an answer or a `!command` runs **stops it,
   on the first press**, touching neither the field nor the queue (the line under what
   came so far says `stopped (Esc)` — `stopped (^c)` after Ctrl+C: the label names the
   key that stopped it, from `keyGlyph`, and so does a `!command`'s outcome; the message
@@ -2565,9 +2574,13 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   `ai.maxTurnTokens` (`maxTurnTokensOf`, `MAX_TURN_TOKENS_DEFAULT` = 2000000) — tokens
   the turn's requests spend together, from the usage each reports: the prompt LESS its
   cached part (a long loop re-reads its prefix from the cache every round, which is not
-  new work) plus the answer; checked before each request after the first, so the turn
-  closes before the request that would go past it; 0 is no budget, and a provider that
-  reports no usage is bounded by the rounds alone. With `maxRounds: 0` the budget is what
+  new work) plus the answer — and for a request whose usage carries no cache figure, the
+  prompt's growth since the turn's previous request (never below 0) plus the answer, so
+  a missing field cannot spend the budget in a dozen rounds. It bounds the NEW tokens a
+  turn adds, not what it costs: cache reads of a long prefix are not counted, nor are a
+  compaction's own requests. It is checked before each request after the first, so the
+  turn ends once the budget is reached — the request that crosses it is the last; 0 is
+  no budget, and a provider that reports no usage is bounded by the rounds alone. With `maxRounds: 0` the budget is what
   ends a long turn; with both 0 only Esc does. Both are the person's (under `ai`, never
   the model's to set). `agentChat` reports `roundLimit` (rounds taken) when the loop ends
   with no round that was an answer, with `lastStep` — the last round's calls,

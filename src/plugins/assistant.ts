@@ -100,11 +100,12 @@ export function logShareMessage(lines: readonly string[], arg = ''): string | nu
   return `Host log, last ${tail.length} line${tail.length === 1 ? '' : 's'}:\n\`\`\`\n${tail.join('\n')}\n\`\`\``;
 }
 
+// What ⏎ on the empty field sends after a turn stopped at a turn limit
+// (`ai.maxRounds`, `ai.maxTurnTokens`).
+export const CONTINUE_WORD = 'continue';
 // How a turn that did not finish ends in the MODEL's history — an assistant message,
 // read as the model's own previous turn. A question left there unanswered was answered
 // with the next one: the model went back to what the person had stopped.
-// What ⏎ on the empty field sends after a turn stopped at `ai.maxRounds`.
-export const CONTINUE_WORD = 'continue';
 export const STOPPED_TURN = '(Stopped by the person before I finished. I am not resuming this request unless they ask me to.)';
 // What the model's history says of a turn the host stopped at its limit — `ai.maxRounds`
 // or, with `tokens`, `ai.maxTurnTokens`: in the model's voice, where it stopped — so a
@@ -515,7 +516,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // decide «empty?» and show an amber status message.
           const contentRef = ui.useRef('');
           const [emptyNotice, setEmptyNotice] = ui.useState('');
-          // The last turn stopped at `ai.maxRounds`: Enter on the empty field sends
+          // The last turn stopped at a turn limit: Enter on the empty field sends
           // "continue", and the field's hint says so. Gone with the next message, and
           // wherever the notice above is reset.
           const continueOfferRef = ui.useRef(false);
@@ -1491,7 +1492,11 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   // at the turn's end). On screen it stands where it reached the model.
                   const delivered: ChatMessage[] = [];
                   if (round > 0) {
-                    const now = queueRef.current.filter((m) => !m.hold && !imagesInText(m.text, imagesRef.current).length);
+                    // The leading run only: a message that waits (held, or naming an
+                    // image) keeps everything queued after it waiting too, so the person's
+                    // words never reach the model out of order.
+                    const firstWaiting = queueRef.current.findIndex((m) => m.hold || imagesInText(m.text, imagesRef.current).length > 0);
+                    const now = firstWaiting < 0 ? queueRef.current.slice() : queueRef.current.slice(0, firstWaiting);
                     if (now.length) {
                       queueRef.current = queueRef.current.filter((m) => !now.includes(m));
                       syncQueue();
@@ -3215,7 +3220,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             queued: queued.map((m) => m.text),
             // What the last queued message waits for: the turn's next step, or its end
             // (held, ⇥) — none outside a turn, where it goes when the command ends.
-            queueWaits: queued.length && inTurnRef.current ? (queued.at(-1)!.hold ? 'end' : 'step') : null,
+            // A message naming an image waits for the end too, and ⇥ cannot change that.
+            queueWaits: queued.length && inTurnRef.current
+              ? (imagesInText(queued.at(-1)!.text, imagesRef.current).length ? 'image' : queued.at(-1)!.hold ? 'end' : 'step')
+              : null,
             // The title names what is on screen — the items' labels.
             subject: contextTitle(screen),
             elapsed: elapsedMs, emptyNotice, toolCount, completion, continueOffer,

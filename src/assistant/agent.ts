@@ -809,6 +809,9 @@ export async function agentChat(
   // What the turn has spent as `maxTurnTokens` counts it (./rounds.ts): each reported
   // request's prompt less its cached part, plus its answer.
   let spent = 0;
+  // The last reported prompt of this turn: for a provider that reports no cache figure,
+  // a request's new tokens are its prompt's growth over this one.
+  let lastPrompt = 0;
   let limitBy: 'tokens' | undefined;
   // Set once a round came back `thinkingDropped`: the rest of the turn asks for none.
   let noThinking = false;
@@ -864,7 +867,13 @@ export async function agentChat(
       } as Record<string, unknown>);
       if (r.usage) {
         usage = r.usage;
-        spent += Math.max(0, r.usage.promptTokens - (r.usage.cachedTokens ?? 0)) + r.usage.completionTokens;
+        // New tokens: the prompt less its cached part — or, with no cache figure reported,
+        // what the prompt grew by since the turn's previous request (never below 0: a
+        // compaction shrinks it) — plus the answer. Counted in full without a cache
+        // figure, a long prompt would spend the budget in a dozen rounds.
+        const fresh = typeof r.usage.cachedTokens === 'number' ? r.usage.promptTokens - r.usage.cachedTokens : r.usage.promptTokens - lastPrompt;
+        spent += Math.max(0, fresh) + r.usage.completionTokens;
+        lastPrompt = r.usage.promptTokens;
       }
       if (r.thinkingDropped) {
         noThinking = true;
@@ -932,6 +941,9 @@ export async function agentChat(
       }
       // Round with tool_calls: its content is the narration of moves. Already shown
       // live (onLive), now pin it in `process` (the folded plaque), not the answer.
+      // Markup written beside a real call is not the step either: stripped from what is
+      // shown and from what is kept (./tool-markup.ts).
+      if (hasToolMarkup(roundContent)) roundContent = stripToolMarkup(roundContent);
       process += roundContent;
       if (opts.onLiveCommit) opts.onLiveCommit(roundContent, false);
       else if (roundContent) onProcess?.(roundContent);
@@ -946,7 +958,7 @@ export async function agentChat(
       const callParses = r.toolCalls.map((tc) => parseCallArgs(tc.arguments));
       current.push({
         role: 'assistant',
-        content: (r as ChatRoundResult).content || null,
+        content: (hasToolMarkup(r.content) ? stripToolMarkup(r.content) : r.content) || null,
         tool_calls: r.toolCalls.map((tc, idx) => ({
           id: tc.id,
           type: 'function',
@@ -1217,10 +1229,10 @@ export async function compactConversation(
   { baseUrl, model, token, tokenEnv, provider, maxTokens, thinking, signal, previous = '' }: { baseUrl?: string; model?: string; token?: string; tokenEnv?: string; provider?: string; maxTokens?: number; thinking?: ThinkingConfig; signal?: AbortSignal; previous?: string },
 ): Promise<CompactResult> {
   requireAiOpts({ baseUrl, model, token, tokenEnv });
-  const instruction: ChatMessage = { role: 'system', content: compactionInstruction() };
   const history = messages.filter((m) => m.role !== 'system').map(compactable);
   const before = stripToolMarkup(previous);
   const compacted = estimateTokens(history.map((m) => contentText(m.content) + JSON.stringify(m.tool_calls ?? '')).join('\n'));
+  const instruction: ChatMessage = { role: 'system', content: compactionInstruction(compacted) };
   const ask = async (note?: string): Promise<string> => {
     const sent = summaryHistory([instruction, ...history], { ...(before ? { previous: before } : {}), ...(note ? { note } : {}) });
     if (provider === 'anthropic') return anthropicCompact(sent, { baseUrl, model, token, maxTokens, thinking, signal });

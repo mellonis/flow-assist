@@ -73,3 +73,16 @@ test('⇥ on the empty field holds the queued message for the turn\'s end', asyn
   expect(model.requests).toHaveLength(3);
   expect(messages(model, 2).at(-1)).toEqual({ role: 'user', content: 'not there, the other file' });
 });
+
+test('a message queued after a held one waits with it: the person\'s words never overtake each other', async () => {
+  const { model, ui } = await heldTurn();
+  await ui.press('tab'); // the first is held to the end
+  await ui.type('and a second thought');
+  await ui.press('return');
+  model.script([{ text: 'First handled.' }], [{ text: 'Second handled.' }]);
+  model.release();
+  await settleUntil(() => ui.backend.lastFrame.includes('Second handled.'));
+  expect(JSON.stringify(messages(model, 1))).not.toContain('second thought');
+  expect(messages(model, 2).at(-1)).toEqual({ role: 'user', content: 'not there, the other file' });
+  expect(messages(model, 3).at(-1)).toEqual({ role: 'user', content: 'and a second thought' });
+});

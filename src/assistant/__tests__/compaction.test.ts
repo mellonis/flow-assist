@@ -109,3 +109,10 @@ test('tags shown as code are not markup: an answer or a handoff about them stays
   // Real markup beside code still goes; the code stays.
   expect(stripToolMarkup('see `<tool_call>`\n<tool_call>{"name":"x"}</tool_call>')).toBe('see `<tool_call>`');
 });
+
+test('the instruction asks for a length in proportion to what is compacted', () => {
+  expect(compactionInstruction(200_000)).toMatch(/at least about [\d,]+ words/);
+  const words = (t: number) => Number(/at least about ([\d,]+) words/.exec(compactionInstruction(t))![1]!.replace(/,/g, ''));
+  expect(words(200_000)).toBeGreaterThan(words(20_000));
+  expect(words(1_000)).toBeGreaterThanOrEqual(150); // a floor for a small conversation
+});

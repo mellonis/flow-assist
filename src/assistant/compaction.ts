@@ -27,7 +27,13 @@ const HEADING: Record<(typeof HANDOFF_SECTIONS)[number], RegExp> = {
 export const SHORT_SHARE = 0.01;
 export const SHORT_CHARS = 1500;
 
-export function compactionInstruction(): string {
+// How long a handoff is asked to be: about 2% of the compacted tokens, in words (a
+// token is about three quarters of a word), between 150 and 3000.
+export function handoffWords(compactedTokens: number): number {
+  return Math.min(3000, Math.max(150, Math.round(compactedTokens * 0.02 * 0.75 / 10) * 10));
+}
+
+export function compactionInstruction(compactedTokens = 0): string {
   return [
     'You are writing a HANDOFF. The conversation below is being compacted: everything in it is replaced by what you write, and a model that has not seen it continues the work from your text alone. Write for that model, not for the person — no question to the person, no greeting, no offer, no closing line.',
     '',
@@ -38,7 +44,7 @@ export function compactionInstruction(): string {
     '## Open decisions — questions waiting for the person and choices not yet made; "none" when there are none.',
     '## Facts learned — pitfalls hit, conventions of this repository or project, commands and flags that work or fail, names and values that matter.',
     '',
-    'When a previous handoff is given, yours REPLACES it: carry forward everything in it that still holds, and drop what was settled or went stale. Keep the specifics — names, paths, numbers, error texts — the next model cannot recover them. Plain text under the headings; never write a tool call. Scale the length to the work: a long session needs a long handoff.',
+    `When a previous handoff is given, yours REPLACES it: carry forward everything in it that still holds, and drop what was settled or went stale. Keep the specifics — names, paths, numbers, error texts — the next model cannot recover them. Plain text under the headings; never write a tool call. Scale the length to the work: a long session needs a long handoff — this one is about ${Math.round(compactedTokens / 100) / 10}k tokens, so write at least about ${handoffWords(compactedTokens).toLocaleString('en-US')} words.`,
   ].join('\n');
 }
 

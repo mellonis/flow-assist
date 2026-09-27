@@ -1386,13 +1386,14 @@ export function renderChatModal({
   // the LAST one back, so the last one is what the line shows.
   queued?: string[];
   // What the last queued message waits for in a running turn: its next step (it then
-  // reaches the model) or its end (held with ⇥); null outside a turn.
-  queueWaits?: 'step' | 'end' | null;
+  // reaches the model) or its end — held with ⇥, or naming an image (`image`, which ⇥
+  // does not change); null outside a turn.
+  queueWaits?: 'step' | 'end' | 'image' | null;
   // The seconds of what is running NOW — a tool while one runs, the model's round
   // otherwise. The turn's own total is on the finished answer's quiet line.
   elapsed?: number;
   emptyNotice?: string;
-  // The last turn stopped at the round cap: Enter on the empty field sends "continue".
+  // The last turn stopped at a turn limit: Enter on the empty field sends "continue".
   continueOffer?: boolean;
   toolCount?: number;
   // What the provider has reported this TURN costing (0 — nothing reported, and no
@@ -1622,8 +1623,10 @@ export function renderChatModal({
             // current step, or held to the turn's end — and ⇥ switches between the two.
             // ↑ and ⇥ act only on an empty field (in a draft they move the caret and
             // complete), so they are offered only there.
-            const waits = queueWaits === 'end' ? ' · held to the turn\'s end' : queueWaits === 'step' ? ' · reaches the model after this step' : '';
-            const keys = input ? '' : queueWaits
+            const waits = queueWaits === 'end' ? ' · held to the turn\'s end' : queueWaits === 'image' ? ' · at the end of the turn (it names an image)' : queueWaits === 'step' ? ' · reaches the model after this step' : '';
+            const keys = input ? '' : queueWaits === 'image'
+              ? ` · ${keyGlyph('up')} back`
+              : queueWaits
               ? ` · ${keyGlyph('up')} back · ${CAP.tab} ${queueWaits === 'step' ? 'hold to end' : 'release'}`
               : ` · ${keyGlyph('up')} takes it back`;
             const tail = `${waits}${keys}`;

@@ -38,7 +38,8 @@ test('a turn stopped at ai.maxRounds says its last step, and ⏎ on the empty fi
 
 test('a turn past ai.maxTurnTokens closes the same way, and ⏎ continue carries it on', async () => {
   const model = new ScriptedModel();
-  model.usage = { prompt_tokens: 600, completion_tokens: 10 };
+  // A cache figure of 0: every prompt token is new.
+  model.usage = { prompt_tokens: 600, completion_tokens: 10, prompt_tokens_details: { cached_tokens: 0 } };
   model.script(...Array.from({ length: 4 }, () => [{ tool: 'datetime', args: {} }]), [{ text: 'Done now.' }]);
   const ui = await bootApp(model, 110, 30, undefined, { ai: { baseUrl: 'http://scripted.model', model: 'scripted', toolLoading: 'all', maxTurnTokens: 1000 } });
   await ui.press('F');
