@@ -773,15 +773,35 @@ export function removeSession(dir: string, id: string, token: string, deps: Lock
 // (`projectHome`) — that no chat holds: the lock is taken FIRST, so a process with the
 // session open (this token's own included — 'ours' means this very chat, refused the
 // same way rename/remove refuse it) never has its files moved from under it, and
-// released after, at the SOURCE (the file is gone from there by then). Moves the state
-// file, the journal, and a `.sub` directory beside it if it has one — nothing here
-// writes one yet, but a session already carries this shape for whatever might — and
-// rewrites the `project` field in place, every other field untouched (a plain parse,
-// patch, temp file, rename — not `saveSession`, which would also re-trim the screen and
-// bump `rev`; a move is not a content edit). Never overwrites anything already at the
-// destination — `exists` refuses rather than picking a side.
+// released after, at the SOURCE (the file is gone from there by then). "Already here"
+// is judged by the directory (`dir` against `projectHome(root, project)`), not the
+// file's own `project` field — the field is patched before the file itself moves (see
+// below), so a retry after a crash must not read that patched value as "done".
+//
+// The state file is what makes a session findable — `listSessions`/`sessionRows` walk
+// the tree by `.json` name — so it is the ONE thing whose location changes, and it
+// changes in ONE `renameSync` call, last, after everything else that belongs beside it
+// is already at the destination (or was, from an earlier attempt this one resumes):
+//   1. `project` is patched into the file IN PLACE, at the SOURCE (tmp + rename, same
+//      directory — already atomic on its own, and idempotent: written again with the
+//      same value, a retry costs nothing extra), every other field untouched (a plain
+//      parse-patch-write, not `saveSession`, which would also re-trim the screen and
+//      bump `rev` — a move is not a content edit).
+//   2. The journal, and a `.sub` directory beside it if it has one (nothing writes one
+//      yet, but a session already carries this shape for whatever might), move to the
+//      destination — each skipped if already there, so a resumed move never re-links
+//      or re-renames what an earlier, interrupted attempt already placed.
+//   3. The state file itself moves, `renameSync(file, destFile)` — the one moment its
+//      name changes at all, so exactly one `<id>.json` for this id exists at every
+//      instant: a crash before this line leaves it, patched, still at the source,
+//      journal and `.sub` already at the destination waiting for it; a crash after
+//      leaves it at the destination, whole. Never two, never none, never a state file
+//      without its journal. `exists` (destFile already there) refuses rather than
+//      picking a side — it is checked before step 1 ever touches anything.
 export type MoveOutcome = 'moved' | 'held' | 'ours' | 'missing' | 'here' | 'exists';
 export function moveSessionToProject(dir: string, id: string, root: string, project: string | null, token: string, deps: LockDeps = {}): MoveOutcome {
+  const dest = projectHome(root, project);
+  if (path.resolve(dir) === path.resolve(dest)) return 'here';
   const lock = acquireLock(dir, id, token, deps);
   if (lock.status === 'held') return 'held';
   if (lock.status === 'ours') return 'ours';
@@ -789,23 +809,28 @@ export function moveSessionToProject(dir: string, id: string, root: string, proj
     const file = fileOf(dir, id);
     let raw: Record<string, unknown>;
     try { raw = JSON.parse(fs.readFileSync(file, 'utf8')) as Record<string, unknown>; } catch { return 'missing'; }
-    if (projectRead(raw.project) === (project ?? null)) return 'here';
-    const dest = projectHome(root, project);
     const destFile = fileOf(dest, id);
-    const jrnl = journalPath(dir, id);
-    const destJrnl = journalPath(dest, id);
-    const sub = path.join(dir, `${id}.sub`);
-    const destSub = path.join(dest, `${id}.sub`);
-    if (fs.existsSync(destFile) || fs.existsSync(destJrnl) || fs.existsSync(destSub)) return 'exists';
-    fs.mkdirSync(dest, { recursive: true, mode: 0o700 });
+    if (fs.existsSync(destFile)) return 'exists';
+    // 1. Patch `project` in place, at the source.
     const body: Record<string, unknown> = { ...raw };
     if (project) body.project = project; else delete body.project;
-    const tmp = `${destFile}.${process.pid}.tmp`;
+    const tmp = `${file}.${process.pid}.tmp`;
     fs.writeFileSync(tmp, JSON.stringify(body), { mode: 0o600 });
-    fs.renameSync(tmp, destFile);
-    fs.unlinkSync(file);
-    if (fs.existsSync(jrnl)) { fs.linkSync(jrnl, destJrnl); fs.unlinkSync(jrnl); }
-    if (fs.existsSync(sub)) fs.renameSync(sub, destSub);
+    fs.renameSync(tmp, file);
+    fs.mkdirSync(dest, { recursive: true, mode: 0o700 });
+    // 2. The journal and `.sub`, before the state file — resumable: each moves only
+    //    if the destination does not already have it.
+    const jrnl = journalPath(dir, id);
+    const destJrnl = journalPath(dest, id);
+    if (fs.existsSync(jrnl)) {
+      if (!fs.existsSync(destJrnl)) fs.linkSync(jrnl, destJrnl);
+      fs.unlinkSync(jrnl);
+    }
+    const sub = path.join(dir, `${id}.sub`);
+    const destSub = path.join(dest, `${id}.sub`);
+    if (fs.existsSync(sub) && !fs.existsSync(destSub)) fs.renameSync(sub, destSub);
+    // 3. The state file, last — the only step that makes the move visible.
+    fs.renameSync(file, destFile);
     return 'moved';
   } finally {
     releaseLock(dir, id, token);

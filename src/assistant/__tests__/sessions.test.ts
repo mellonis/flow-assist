@@ -558,6 +558,51 @@ test('moveSessionToProject refuses when already in that project, and when the de
   expect(fs.existsSync(path.join(fromHome, `${s.id}.json`))).toBe(true); // the source is untouched too
 });
 
+// A crash between step 2 (journal/.sub already at the destination) and step 3 (the
+// state file's own rename) is simulated directly on disk — not by killing a real
+// process — since that is exactly the window the fix closes: at every instant there
+// is exactly one `.json` for this id, findable, and a retry completes the move rather
+// than refusing it or leaving it stuck.
+test('moveSessionToProject resumes a move a crash left half-finished, between the journal/.sub step and the state file\'s own rename', () => {
+  const root = tmp();
+  const fromHome = projectHome(root, '/Users/me/from');
+  const toHome = projectHome(root, '/Users/me/to');
+  const s = session({ id: '2026-09-21T09-00-00-eeee', project: '/Users/me/from', title: 'crash test' });
+  saveSession(fromHome, s);
+  fs.writeFileSync(journalPath(fromHome, s.id), '{"t":"start"}\n');
+  fs.mkdirSync(path.join(fromHome, `${s.id}.sub`));
+  fs.writeFileSync(path.join(fromHome, `${s.id}.sub`, 'a.bin'), 'x');
+
+  // Simulate exactly what the function's own steps 1 and 2 leave behind, without ever
+  // calling it — the crash this stands in for happened between them and step 3.
+  const raw = JSON.parse(fs.readFileSync(path.join(fromHome, `${s.id}.json`), 'utf8'));
+  fs.writeFileSync(path.join(fromHome, `${s.id}.tmp`), JSON.stringify({ ...raw, project: '/Users/me/to' }));
+  fs.renameSync(path.join(fromHome, `${s.id}.tmp`), path.join(fromHome, `${s.id}.json`)); // step 1, in place
+  fs.mkdirSync(toHome, { recursive: true });
+  fs.linkSync(journalPath(fromHome, s.id), journalPath(toHome, s.id));
+  fs.unlinkSync(journalPath(fromHome, s.id));
+  fs.renameSync(path.join(fromHome, `${s.id}.sub`), path.join(toHome, `${s.id}.sub`)); // step 2
+
+  // The invariant at the simulated crash point: exactly one `.json` for this id, whole
+  // (parseable, already carrying the new project), at the source — never two, never
+  // none. No lock either: nothing here ever called the function.
+  expect(fs.existsSync(path.join(fromHome, `${s.id}.json`))).toBe(true);
+  expect(fs.existsSync(path.join(toHome, `${s.id}.json`))).toBe(false);
+  expect(JSON.parse(fs.readFileSync(path.join(fromHome, `${s.id}.json`), 'utf8')).project).toBe('/Users/me/to');
+  expect(fs.existsSync(lockPath(fromHome, s.id))).toBe(false);
+
+  // The retry: a fresh call, same arguments, resumes rather than re-copying the
+  // journal/.sub (already there) or refusing the move as `exists`/`here`.
+  expect(moveSessionToProject(fromHome, s.id, root, '/Users/me/to', 'tok-me', alive)).toBe('moved');
+  expect(fs.existsSync(path.join(fromHome, `${s.id}.json`))).toBe(false);
+  expect(fs.existsSync(lockPath(fromHome, s.id))).toBe(false);
+  const after = loadSession(toHome, s.id)!;
+  expect(after.title).toBe('crash test');
+  expect(after.project).toBe('/Users/me/to');
+  expect(fs.readFileSync(journalPath(toHome, s.id), 'utf8')).toBe('{"t":"start"}\n');
+  expect(fs.readFileSync(path.join(toHome, `${s.id}.sub`, 'a.bin'), 'utf8')).toBe('x');
+});
+
 test('projectOf: the nearest git root inside the innermost root, else that root; outside every root the nearest git root; else none — by real path', () => {
   const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'proj-')));
   // A workspace root holding several repositories: each is a project of its own.

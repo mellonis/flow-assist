@@ -1617,16 +1617,27 @@ hold this set together:
   the same way `^r`/`^x` refuse: a HELD one (`it cannot be moved`), this chat's own
   (`switch away first` — its OWN files are not to be moved from under the very
   conversation writing them), and one already in the current project. The actual move
-  (`moveSessionToProject`, sessions.ts) re-checks all three with the lock — a row can
-  be stale by the time the key lands — then moves the state file, the journal, and a
-  `.sub` directory beside it if it has one (nothing writes one yet), rewrites the
-  file's own `project` field in place (a parse, a patch, a temp file, a rename — every
-  other field untouched, not `saveSession`, which would also re-trim the screen and
-  bump `rev`), and never overwrites anything already at the destination. The lock is
-  taken before any of this and released after, AT THE SOURCE, so a process with the
-  session open never has its files moved from under it. On success the picker's own
-  mirror-directory cleanup runs too (`dropEmptyDirs`, the same one delete uses), and
-  `homes` (above) is updated if this chat still holds the id.
+  (`moveSessionToProject`, sessions.ts) re-checks the first two with the lock — a row
+  can be stale by the time the key lands — and re-checks "already here" itself, first,
+  before ever taking the lock: by DIRECTORY (`dir` against `projectHome(root,
+  project)`), never by the file's own `project` field, which the move patches before
+  the file itself moves (next). Three steps, in this order, make the move safe to kill
+  at any point and retry: (1) `project` is patched into the file IN PLACE, at the
+  SOURCE (a parse, a patch, a temp file, a rename — same directory, already atomic,
+  and idempotent on a retry — every other field untouched, not `saveSession`, which
+  would also re-trim the screen and bump `rev`); (2) the journal, and a `.sub`
+  directory beside it if it has one (nothing writes one yet), move to the destination,
+  each skipped if a resumed attempt already put it there; (3) the state file itself
+  moves LAST, one `renameSync`, the one moment its name changes — so exactly one
+  `<id>.json` for this id exists at every instant a crash could land on: never two
+  (a crash after step 3 cannot have left one at the source too), never a state file
+  without its journal (steps 1–2 always finish, and are always resumable, before step
+  3 can). `exists` (something already at the destination) refuses before step 1 ever
+  touches anything, rather than picking a side. The lock is taken before any of this
+  and released after, AT THE SOURCE, so a process with the session open never has its
+  files moved from under it. On success the picker's own mirror-directory cleanup
+  runs too (`dropEmptyDirs`, the same one delete uses), and `homes` (above) is updated
+  if this chat still holds the id.
   `^x` deletes after a y/n line of the picker's own — a bare `y` deletes, `n` or Esc
   keeps, ⏎ and a chord are no answer — through `removeSession`, refused for a HELD
   session and for this chat's own. A pending y/n or
