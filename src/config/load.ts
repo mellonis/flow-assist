@@ -132,6 +132,14 @@ const PENDING = new Map<string, ConfigChange>();
 const DECLINED = new Map<string, { mtimeMs: number; size: number; hash: string }>();
 let GUARDED = false;
 
+// Set in the environment of every command the MODEL runs (`run_command`, a background
+// task's): a host process started there — `flow-assist config set` — writes what it is
+// told but never accepts it, so the running app and the next start ask the person. The
+// person's own `!command` does not set it. It stops the accident, not a process that
+// unsets it or writes the record itself.
+export const MODEL_SHELL_ENV = 'FLOW_ASSIST_MODEL_SHELL';
+export const inModelShell = (env: Record<string, string | undefined> = process.env): boolean => env[MODEL_SHELL_ENV] === '1';
+
 // The accepted record: per file name, the hash of its text and the object it held.
 type Accepted = { hash: string; content: Record<string, unknown> | null };
 export const acceptedConfigPath = (): string => path.join(hostStateDir(), 'config.accepted.json');
@@ -142,6 +150,7 @@ function readAccepted(): Record<string, Accepted> {
   } catch { return {}; }
 }
 function recordAccepted(p: string, a: Accepted): void {
+  if (inModelShell()) return;
   try {
     const all = readAccepted();
     all[path.basename(p)] = a;

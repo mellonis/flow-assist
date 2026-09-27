@@ -25,6 +25,7 @@ import path from 'node:path';
 import { capConsoleText, consoleData } from '../assistant/console-view.js';
 import { findInstructions, type ProjectInstructions } from '../assistant/project-instructions.js';
 import { activeSecrets, buildSecretSet, withheldEnv } from '../assistant/secrets.js';
+import { MODEL_SHELL_ENV } from '../config/load.js';
 import { createShellState, dirAllowed, formatShell, nextCwd, realOf, runShell, shellCwd, shellLimits, shellPassEnv, shellRoots, tildePath, within, type ShellState } from '../assistant/shell.js';
 import type { ToolGroup } from './tools.js';
 
@@ -216,8 +217,10 @@ const shellGroup = (config: Record<string, unknown>): ToolGroup => ({
     // every variable of the set but those `shell.passEnv` lets through; the person's own
     // `!command` keeps the whole environment. The model is told which, by name, once
     // per conversation (`shell.told`), at the head of the result so no cut drops it.
+    // `MODEL_SHELL_ENV` marks it as the model's: a `flow-assist config set` run from it
+    // writes the file but is not accepted (src/config/load.ts, the guard).
     const { env, withheld } = withheldEnv(process.env, activeSecrets() ?? buildSecretSet(config), shellPassEnv(config));
-    const r = await runShell(cmd, { cwd, timeoutMs, maxChars, signal, env, ...(onOutput ? { onOutput } : {}), ...(stdin != null ? { stdin } : {}) });
+    const r = await runShell(cmd, { cwd, timeoutMs, maxChars, signal, env: { ...env, [MODEL_SHELL_ENV]: '1' }, ...(onOutput ? { onOutput } : {}), ...(stdin != null ? { stdin } : {}) });
     if (r.error) throw new Error(`run_command: could not start /bin/sh: ${r.error}`);
     live?.update(consoleData(cmd, r, cwd, timeoutMs));
     const move = nextCwd(config, cwd, r.pwd);

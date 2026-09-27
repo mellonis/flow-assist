@@ -304,7 +304,8 @@ with the keys that changed (values of token-like keys masked). `y` applies it; `
 the accepted settings back into the file and keeps the change beside it as
 `config.local.json.rejected-<time>`, so neither a restart nor a crash brings it in. A
 one-shot prompt or a `config` command on a changed file does not use it and says why.
-`config set`, `:config set` and the assistant's `config_set` are the app's own writes.
+`config set`, `:config set` and the assistant's `config_set` are the app's own writes;
+a `flow-assist config set` the assistant runs as a command is not — it waits for your yes.
 
 ## Plugins
 

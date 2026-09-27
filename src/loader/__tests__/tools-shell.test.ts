@@ -256,3 +256,26 @@ test('run_command runs without the secret variables, names them once per convers
     setActiveSecrets(null);
   }
 });
+
+test('a config set the model runs through run_command writes the file but is not accepted — the next start asks; the person\'s own runner is not marked', async () => {
+  const { spawnSync } = await import('node:child_process');
+  const { runShell } = await import('../../assistant/shell.ts');
+  const xdg = tmp();
+  const dir = path.join(xdg, 'flow-assist');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'config.local.json'), '{}');
+  const cli = path.join(import.meta.dir, '..', '..', 'cli.ts');
+  const env = { ...process.env, XDG_CONFIG_HOME: xdg, NODE_ENV: 'production' };
+  // The person's CLI first: it keeps the record.
+  expect(spawnSync('bun', [cli, 'config', 'get', 'shell.autoRun'], { env, encoding: 'utf8' }).status).toBe(0);
+  const root = tmp();
+  const out = await shellTools({ shell: { roots: [root] } }).exec('run_command', { command: `XDG_CONFIG_HOME='${xdg}' NODE_ENV=production bun '${cli}' config set shell.autoRun true` }, { shell: createShellState(() => ({ shell: { roots: [root] } })) } as never) as string;
+  expect(out).toContain('saved to config.local.json, but it waits for the person\'s yes in flow-assist');
+  expect(JSON.parse(fs.readFileSync(path.join(dir, 'config.local.json'), 'utf8'))).toEqual({ shell: { autoRun: true } });
+  const next = spawnSync('bun', [cli, 'config', 'get', 'shell.autoRun'], { env, encoding: 'utf8' });
+  expect(next.stderr).toContain('config.local.json changed outside flow-assist since it was last accepted (shell.autoRun) — not used');
+  expect(next.stdout).not.toContain('true');
+  // `!command` runs through runShell with no environment of its own: not marked.
+  const own = await runShell('printf "%s" "${FLOW_ASSIST_MODEL_SHELL-unset}"', { cwd: root });
+  expect(own.output).toBe('unset');
+});

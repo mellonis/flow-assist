@@ -3285,8 +3285,14 @@ commands; docs and hints never present either mechanism as a boundary.
   kept beside it the same way first. The auto mode never answers the question (it is
   not `confirmWrite`); a stop or a reset that closes it answers nothing, so the next
   check asks again. A `flow-assist config set` from another terminal is accepted by
-  that process and still asked about by a running app, which cannot tell it from the
-  model running the same command.
+  that process and still asked about by a running app. The model's commands
+  (`run_command`, a background task's) run with `FLOW_ASSIST_MODEL_SHELL=1`
+  (`MODEL_SHELL_ENV`); a host process that sees it — the CLI's `config set`/`unset` —
+  writes the file but never updates the accepted record, and says the change waits for
+  the person's yes, so the running app and the next start ask. The person's `!command`
+  does not set it. Like the rest of this section it stops the accident, not intent: a
+  same-user process that unsets the variable, or writes `config.accepted.json` itself,
+  can still forge the record.
 - The test rig builds the set from what a test set itself (`setSecretsEnv` in
   `src/__tests__/helpers/scripted.ts`), never from the machine's own tokens, and its
   `LLM_TOKEN` starts with `^`, a character no streamed test text ends in.

@@ -24,7 +24,8 @@ What each version of flow-assist brought, newest first. The version is the one i
   flow-assist — apply? (y/n)` with the keys that changed. Yes applies it; no puts the
   accepted settings back and keeps the change beside the file as `.rejected-<time>`,
   so a restart or a crash never brings it in. A one-shot prompt or a `config` command
-  refuses a changed file and says why.
+  refuses a changed file and says why. A `flow-assist config set` the assistant runs as
+  a command writes the file but still waits for your yes.
 - **An MCP server that is not there at start is tried again, not dropped for the run.**
   A server that fails to connect — a gateway that answered 502 just then, an IDE not open
   yet — or drops later (refused, reset, a gateway's 502/503/504, a process that exits;

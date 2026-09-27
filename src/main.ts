@@ -14,7 +14,8 @@
 import { projectRoot, availableDir, enabledDir } from './install.js';
 import { existsSync } from 'node:fs';
 import { TtyBackend, isInteractive } from '@flowtty/tty-backend';
-import { configStartupNotes, guardConfigFiles, loadConfig } from './config/load.js';
+import { configStartupNotes, guardConfigFiles, inModelShell, loadConfig } from './config/load.js';
+
 import {
   configSource,
   configValue,
@@ -155,6 +156,9 @@ export async function main(argv: string[]): Promise<void> {
 
 // ─── config subcommand ────────────────────────────────────────────────────────
 // `io` is where the lines go — the console, or a test's own lists.
+// What `config set`/`unset` says when the model's command ran it (src/config/load.ts).
+const MODEL_SHELL_NOTE = 'config: saved to config.local.json, but it waits for the person\'s yes in flow-assist — a command the assistant runs cannot accept a setting';
+
 type ConfigIo = { out: (line: string) => void; err: (line: string) => void };
 const consoleIo: ConfigIo = { out: (l) => console.log(l), err: (l) => console.error(l) };
 
@@ -192,6 +196,7 @@ export async function runConfig(args: string[], config: Record<string, unknown>,
       return;
     }
     io.out(JSON.stringify(res.value));
+    if (inModelShell()) io.err(MODEL_SHELL_NOTE);
     return;
   }
 
@@ -203,6 +208,7 @@ export async function runConfig(args: string[], config: Record<string, unknown>,
       return;
     }
     io.out(`config: unset ${key}`);
+    if (inModelShell()) io.err(MODEL_SHELL_NOTE);
     return;
   }
 
