@@ -27,7 +27,7 @@ import { VIEW_CAPS, frameView, isConsoleKind, viewRevision, type ViewRecord, typ
 import { groupHeadText, groupOpen, viewGroups, type GroupMsg, type ViewGroup } from '../assistant/view-groups.js';
 import { renderConsole } from '../assistant/console-view.js';
 import { CELL_FREE, CELL_FULL, CONTEXT_WARN_AT, GRID_COLS, GRID_ROWS, contextFootnote, contextGrid, contextHeading, contextLegend, tokensBadge, type ContextReading, type GridCell } from '../assistant/context-meter.js';
-import { formatBytes, pickerGroups, pickerSelected, type PickerState } from '../assistant/session-picker.js';
+import { formatBytes, pickerGroups, pickerSelected, rowStatus, type OwnStatus, type PickerState } from '../assistant/session-picker.js';
 import { tildePath } from '../assistant/shell.js';
 import { sessionWhen, type SessionRow } from '../assistant/sessions.js';
 import { createElement as h, useEffect, useRef, useState, type ReactNode } from 'react';
@@ -1332,6 +1332,7 @@ export function renderChatModal({
   imagesOn = false,
   pager = null,
   picker = null,
+  pickerOwn = 'idle',
 }: {
   // The block open in the pager, drawn in the conversation's place (null — none).
   pager?: PagerView | null;
@@ -1453,10 +1454,12 @@ export function renderChatModal({
   imagesOn?: boolean;
   // `/sessions`: the picker, drawn in the conversation's place (null — closed).
   picker?: PickerState | null;
+  // What this chat is doing, for its own row in the picker.
+  pickerOwn?: OwnStatus;
 }) {
   // A y/n or a question that arrives while the picker is up wins: the chat is drawn with
   // it, and the picker comes back once it is answered.
-  if (picker && !pendingQuestion && !pendingConfirm) return renderSessionPicker({ width, height, theme, picker, now, error, fullscreen, docked, focused });
+  if (picker && !pendingQuestion && !pendingConfirm) return renderSessionPicker({ width, height, theme, picker, own: pickerOwn, now, error, fullscreen, docked, focused });
   const boxW = chatBoxWidth(width, fullscreen);
   const boxH = fullscreen ? height : Math.min(Math.floor(height * 0.82), height - 4);
   const wrap = chatWrapWidth(width, fullscreen);
@@ -1721,11 +1724,12 @@ const pickerField = (prompt: string, value: string, caret: number, m: Record<str
     h(Text, { wrap: 'truncate' }, value.slice(caret + at.length)));
 };
 
-export function renderSessionPicker({ width, height, theme, picker, now = Date.now(), error = null, fullscreen = false, docked = false, focused = true }: {
+export function renderSessionPicker({ width, height, theme, picker, own = 'idle', now = Date.now(), error = null, fullscreen = false, docked = false, focused = true }: {
   width: number;
   height: number;
   theme: Theme | undefined;
   picker: PickerState;
+  own?: OwnStatus;
   now?: number;
   error?: string | null;
   fullscreen?: boolean;
@@ -1752,14 +1756,20 @@ export function renderSessionPicker({ width, height, theme, picker, now = Date.n
     const active = i === picker.cursor;
     const meta = `${sessionWhen(r.updatedAt, today)} · ${formatBytes(r.bytes)} · ${r.turns} msg${r.turns === 1 ? '' : 's'}`;
     const title = r.title || '(untitled)';
+    // Whose it is and what it is doing, in a word: this chat's own (and what it is
+    // doing), another process's, an answer not seen yet; nothing when it is idle.
+    const status = rowStatus(r, own);
+    const mark = status === 'held' ? { text: 'in use elsewhere', style: { color: m.warn } }
+      : r.lock === 'ours' ? { text: status === 'idle' ? 'this chat' : `this chat · ${status}`, style: status === 'waiting' ? { color: m.warn } : { dim: true } }
+      : status === 'done' ? { text: 'done', style: { color: m.assistantAccent ?? 'green' } }
+      : null;
     // The title is what a person picks by, so it keeps up to half the row; the meta gives
     // way first (it shrinks far faster), then whose it is — each cut, never pushed off.
     return h(Box, { key: r.id, flexDirection: 'row', width: '100%', flexShrink: 0 },
       h(Text, { bold: true, color: m.accent, selectable: false }, active ? '› ' : '  '),
       h(Box, { flexGrow: 1, flexShrink: 1, overflow: 'hidden', minWidth: Math.min(cellWidth(title), Math.floor((inner - 2) / 2)) },
         h(Text, { wrap: 'truncate', bold: active, color: active ? m.accent : undefined }, title)),
-      r.lock === 'held' ? h(Box, { flexShrink: 1, overflow: 'hidden' }, h(Text, { color: m.warn, selectable: false, wrap: 'truncate' }, '  in use elsewhere'))
-        : r.lock === 'ours' ? h(Box, { flexShrink: 1, overflow: 'hidden' }, h(Text, { dim: true, selectable: false, wrap: 'truncate' }, '  this chat')) : null,
+      mark ? h(Box, { flexShrink: 1, overflow: 'hidden' }, h(Text, { ...mark.style, selectable: false, wrap: 'truncate' }, `  ${mark.text}`)) : null,
       h(Box, { flexShrink: 1000, overflow: 'hidden' }, h(Text, { dim: true, selectable: false, wrap: 'truncate' }, `  ${meta}`)));
   };
   // Every session: each project's rows under its path, a dim header (its end kept when

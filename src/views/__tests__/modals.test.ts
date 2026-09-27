@@ -640,9 +640,9 @@ test('a message with no views keeps its cached rows across a view-revision bump:
 // ─── the session picker ──────────────────────────────────────────────────────────
 
 const PICKER_ROWS: SessionRow[] = [
-  { id: '2026-09-25T10-00-00-aaaa', title: 'The current one', updatedAt: '2026-09-25T10:00:00.000Z', turns: 3, bytes: 2048, lock: 'ours', text: '', dir: '/s', project: null },
-  { id: '2026-09-24T10-00-00-bbbb', title: 'Held elsewhere', updatedAt: '2026-09-24T10:00:00.000Z', turns: 1, bytes: 500, lock: 'held', text: 'zebrafish', dir: '/s', project: null },
-  { id: '2026-09-23T10-00-00-cccc', title: 'An idle one', updatedAt: '2026-09-23T10:00:00.000Z', turns: 2, bytes: 3 * 1024 * 1024, lock: 'free', text: '', dir: '/s', project: null },
+  { id: '2026-09-25T10-00-00-aaaa', title: 'The current one', updatedAt: '2026-09-25T10:00:00.000Z', turns: 3, bytes: 2048, lock: 'ours', status: 'idle', text: '', dir: '/s', project: null },
+  { id: '2026-09-24T10-00-00-bbbb', title: 'Held elsewhere', updatedAt: '2026-09-24T10:00:00.000Z', turns: 1, bytes: 500, lock: 'held', status: 'held', text: 'zebrafish', dir: '/s', project: null },
+  { id: '2026-09-23T10-00-00-cccc', title: 'An idle one', updatedAt: '2026-09-23T10:00:00.000Z', turns: 2, bytes: 3 * 1024 * 1024, lock: 'free', status: 'done', text: '', dir: '/s', project: null },
 ];
 
 test('the session picker draws one row per session — title, whose it is, size, messages — and its keys', async () => {
@@ -656,6 +656,28 @@ test('the session picker draws one row per session — title, whose it is, size,
   expect(frame).toContain('filter ›');
   expect(frame).toContain('↑↓ pick · ⏎ open · Esc close · ⇥ all · ^n new · ^r rename · ^x delete');
   handle.unmount();
+});
+
+test("each row says its status in a word: this chat's while it works or waits, done for an answer not seen, nothing when idle", async () => {
+  for (const own of ['working', 'waiting'] as const) {
+    const backend = new TestBackend(100, 24);
+    const handle = await render(h(renderChatModal, { ...baseChat, width: 100, picker: pickerStart(PICKER_ROWS), pickerOwn: own }), backend);
+    expect(backend.lastFrame).toMatch(new RegExp(`› The current one\\s+this chat · ${own}\\s`));
+    expect(backend.lastFrame).toMatch(/An idle one\s+done\s/);
+    handle.unmount();
+  }
+  const backend = new TestBackend(100, 24);
+  const quiet = PICKER_ROWS.map((r) => ({ ...r, status: r.lock === 'held' ? 'held' as const : 'idle' as const }));
+  const handle = await render(h(renderChatModal, { ...baseChat, width: 100, picker: pickerStart(quiet) }), backend);
+  expect(backend.lastFrame).toMatch(/› The current one\s+this chat\s+2026/);
+  expect(backend.lastFrame).not.toContain('done');
+  handle.unmount();
+  // Narrow, the title keeps its half and the word is cut, never the row pushed off.
+  const narrow = new TestBackend(42, 24);
+  const h2 = await render(h(renderChatModal, { ...baseChat, width: 42, docked: true, fullscreen: true, picker: pickerStart(PICKER_ROWS), pickerOwn: 'working' }), narrow);
+  for (const line of narrow.lastFrame!.split('\n')) expect(stringWidth(line)).toBeLessThanOrEqual(42);
+  expect(narrow.lastFrame).toMatch(/› The current/);
+  h2.unmount();
 });
 
 test('the picker counts what the filter shows, says when nothing matches, and asks y/n before a delete', async () => {

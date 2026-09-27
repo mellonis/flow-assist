@@ -49,9 +49,11 @@ entry holding the shell's directory at its first message, else that directory's 
 repository — and a start continues that project's newest session (the newest of all
 when the project has none yet). `/sessions` — or Ctrl+S from any screen (`config set
 keys.sessions <key>` moves it) — lists the current project's saved sessions, newest
-first, with its title, when it was last used, its size, and whether another flow-assist
-process has it open; Tab shows every session, grouped under each project's path. Type to
-filter by the title or by any word of the conversation; ⏎ opens one (the session you are
+first, with its title, when it was last used, its size, and what it is doing — `this
+chat · working` while an answer or a command runs, `in use elsewhere` when another
+flow-assist process has it open, `done` when its last answer came while you were not
+looking; Tab shows every session, grouped under each project's path. Type to filter
+by the title or by any word of the conversation; ⏎ opens one (the session you are
 in is saved first), Ctrl+N starts a new one, Ctrl+R renames, Ctrl+X deletes after a y/n.
 A session open in another process can be neither opened nor renamed nor deleted from
 here. A session is named by the first line you wrote; `/title <text>` renames it.

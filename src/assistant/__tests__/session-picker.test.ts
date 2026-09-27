@@ -1,8 +1,8 @@
 import { expect, test } from 'bun:test';
-import { formatBytes, pickerGroups, pickerKey, pickerMatches, pickerReload, pickerSelected, pickerStart, type PickerAction, type PickerKey, type PickerState } from '../session-picker.ts';
+import { formatBytes, pickerGroups, pickerKey, rowStatus, pickerMatches, pickerReload, pickerSelected, pickerStart, type PickerAction, type PickerKey, type PickerState } from '../session-picker.ts';
 import type { SessionRow } from '../sessions.ts';
 
-const row = (over: Partial<SessionRow>): SessionRow => ({ id: 'x', title: 't', updatedAt: '2026-09-25T10:00:00.000Z', turns: 1, bytes: 10, lock: 'free', text: '', dir: '/s', project: null, ...over });
+const row = (over: Partial<SessionRow>): SessionRow => ({ id: 'x', title: 't', updatedAt: '2026-09-25T10:00:00.000Z', turns: 1, bytes: 10, lock: 'free', status: 'idle', text: '', dir: '/s', project: null, ...over });
 const ROWS = [
   row({ id: 'a', title: 'Current chat', lock: 'ours' }),
   row({ id: 'b', title: 'Held one', lock: 'held', text: 'zebrafish in the pond' }),
@@ -142,4 +142,15 @@ test('the filter works in both scopes', () => {
 
 test('no project is a project of its own: the sessions at the top level', () => {
   expect(pickerMatches(pickerStart(MIXED, null)).map((r) => r.id)).toEqual(['n1']);
+});
+
+// ─── a status per row ─────────────────────────────────────────────────────────
+
+test("a row's status: this chat's is what the chat is doing; any other's is what its file and lock say", () => {
+  expect(rowStatus(row({ lock: 'ours', status: 'done' }), 'working')).toBe('working');
+  expect(rowStatus(row({ lock: 'ours' }), 'waiting')).toBe('waiting');
+  expect(rowStatus(row({ lock: 'ours', status: 'done' }), 'idle')).toBe('idle'); // on screen: seen
+  expect(rowStatus(row({ lock: 'held', status: 'held' }), 'working')).toBe('held');
+  expect(rowStatus(row({ status: 'done' }), 'working')).toBe('done');
+  expect(rowStatus(row({}), 'idle')).toBe('idle');
 });

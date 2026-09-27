@@ -7,7 +7,7 @@
 // bindings and paste behave as they do there.
 import { editorReducer } from '@flowtty/core';
 import { keyGlyph } from '../playback/keys.js';
-import type { SessionRow } from './sessions.js';
+import type { SessionRow, SessionStatus } from './sessions.js';
 
 export type PickerKey = { name?: string; ctrl?: boolean; meta?: boolean; shift?: boolean; text?: string };
 export type PickerMode = 'list' | 'rename' | 'delete';
@@ -64,6 +64,12 @@ export function pickerReload(state: PickerState, rows: SessionRow[], notice = ''
   const next: PickerState = { ...state, rows, mode: 'list', notice };
   return { ...next, cursor: Math.min(state.cursor, Math.max(0, pickerMatches(next).length - 1)) };
 }
+
+// A row's status as drawn: this chat's own session is what the chat is doing — it is
+// on screen, so never `done`; any other's is what `sessionRows` read from its file and
+// lock (sessions.ts, `SessionStatus`).
+export type OwnStatus = 'working' | 'waiting' | 'idle';
+export const rowStatus = (row: SessionRow, own: OwnStatus): SessionStatus => (row.lock === 'ours' ? own : row.status ?? 'idle');
 
 export function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;

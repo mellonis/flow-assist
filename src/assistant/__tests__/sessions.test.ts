@@ -7,7 +7,7 @@ import {
   KEEP_MESSAGES, KEEP_VIEWS, SEARCH_TEXT_MAX, SESSION_VERSION, TITLE_MAX, acquireLock, closeSession, cutTitle, listSessions, loadSession,
   lockPath, lockState, makeLockToken, newSessionId, normalizeViews, pruneSessions, releaseLock, removeSession, renameSession,
   saveSession, searchText, sessionFingerprint, sessionFingerprintsEqual, sessionRev, sessionRows, sessionTitle,
-  pickToContinue, projectHome, projectOf, sessionToContinue, sessionsDir, trimHistory, trimScreen, type Session,
+  pickToContinue, projectHome, projectOf, sessionToContinue, sessionsDir, trimHistory, trimScreen, unseenAnswer, type Session,
 } from '../sessions.ts';
 
 const tmp = () => path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'sess-')), 'sessions');
@@ -587,4 +587,32 @@ test('the tree walk follows no link out of the sessions directory', () => {
   fs.mkdirSync(root, { recursive: true });
   fs.symlinkSync(elsewhere, path.join(root, 'link'));
   expect(listSessions(root)).toEqual([]);
+});
+
+// ─── a status per session ─────────────────────────────────────────────────────
+
+test('sessionRows says whose a session is and whether its answer was seen: held, done, idle', () => {
+  const root = tmp();
+  const answered = { answeredAt: '2026-09-21T10:00:05.000Z' };
+  const unseen = session({ id: '2026-09-21T09-00-00-aaaa', ...answered, seenAt: '2026-09-21T10:00:00.000Z' });
+  const neverSeen = session({ id: '2026-09-21T09-00-00-bbbb', ...answered });
+  const seen = session({ id: '2026-09-21T09-00-00-cccc', ...answered, seenAt: '2026-09-21T10:00:05.000Z' });
+  // Asked again since: the last message is the person's, not an answer.
+  const askedSince = session({ id: '2026-09-21T09-00-00-dddd', ...answered, messages: [...session().messages, { role: 'user', content: 'и ещё?' }] });
+  const held = session({ id: '2026-09-21T09-00-00-eeee', ...answered });
+  const old = session({ id: '2026-09-21T09-00-00-ffff' }); // saved before statuses: no times at all
+  for (const s of [unseen, neverSeen, seen, askedSince, held, old]) saveSession(root, s);
+  acquireLock(root, held.id, 'tok-other', alive);
+  const status = Object.fromEntries(sessionRows(root, 'tok-me', alive).map((r) => [r.id, r.status]));
+  expect(status).toEqual({ [unseen.id]: 'done', [neverSeen.id]: 'done', [seen.id]: 'idle', [askedSince.id]: 'idle', [held.id]: 'held', [old.id]: 'idle' });
+  expect(loadSession(root, unseen.id)).toMatchObject({ answeredAt: answered.answeredAt, seenAt: '2026-09-21T10:00:00.000Z' });
+});
+
+test('unseenAnswer: an answer is unseen while it is the last message and came after the last look', () => {
+  const msgs = [{ role: 'user', content: 'q' }, { role: 'assistant', content: 'a' }, { role: 'note', content: 'n' }, { role: 'view', views: [] }];
+  expect(unseenAnswer(msgs, '2026-09-21T10:00:05.000Z', '')).toBe(true);
+  expect(unseenAnswer(msgs, '2026-09-21T10:00:05.000Z', '2026-09-21T10:00:04.000Z')).toBe(true);
+  expect(unseenAnswer(msgs, '2026-09-21T10:00:05.000Z', '2026-09-21T10:00:05.000Z')).toBe(false);
+  expect(unseenAnswer(msgs, '', '')).toBe(false);
+  expect(unseenAnswer([...msgs, { role: 'shell', command: 'ls', content: '' }], '2026-09-21T10:00:05.000Z', '')).toBe(false);
 });

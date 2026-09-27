@@ -84,6 +84,8 @@ export interface Session {
   recall?: { stubbed: string[]; turns: number }; // the bulky items sent as stubs (by id) and the turns since the last batch (./recall.ts)
   closed?: boolean;                    // left with /clear — listed, never continued on start
   project?: string | null;             // the project it started in (`projectOf`), decided once; absent — none
+  answeredAt?: string;                 // when its last turn ended with an answer; absent — none yet
+  seenAt?: string;                     // when a chat last showed its end (`unseenAnswer`)
   rev?: number;                        // bumped by every saveSession; absent (an older host) reads as 0
 }
 
@@ -371,6 +373,8 @@ export function loadSession(dir: string, id: string): Session | null {
       recall: saveRecallState(createRecallState(s.recall)),
       rev: Number.isInteger(s.rev) ? (s.rev as number) : 0,
       project: projectRead(s.project),
+      answeredAt: typeof s.answeredAt === 'string' ? s.answeredAt : '',
+      seenAt: typeof s.seenAt === 'string' ? s.seenAt : '',
     };
   } catch {
     return null;
@@ -404,7 +408,31 @@ export function projectFirst<T extends { project: string | null }>(list: T[], pr
 // lower-cased — at most SEARCH_TEXT_MAX characters per session, the NEWEST kept, since
 // the word a person looks for is most often one said lately.
 export const SEARCH_TEXT_MAX = 64 * 1024;
-export interface SessionRow { id: string; title: string; updatedAt: string; turns: number; bytes: number; lock: LockState; text: string; dir: string; project: string | null }
+export interface SessionRow { id: string; title: string; updatedAt: string; turns: number; bytes: number; lock: LockState; status: SessionStatus; text: string; dir: string; project: string | null }
+
+// What a session is doing, for the picker to say — from what is on disk and in this
+// process, nothing running in the background: `working` and `waiting` are this chat's
+// own session while a turn or a `!command` runs, or while a y/n or a question waits
+// (the chat says, session-picker.ts `rowStatus`); `held` — another live process has
+// its lock; `done` — its last message is an answer no chat has shown since it came
+// (`unseenAnswer`); `idle` otherwise.
+export type SessionStatus = 'working' | 'waiting' | 'held' | 'done' | 'idle';
+
+// Whether a session ends in an answer nobody has seen: the last thing said in it — by
+// the person, the model, a command or a background result; notes and views are not
+// said — is the model's answer, and it came after the last time a chat showed the end.
+// The times are ISO strings, compared as such; an answer seen at the moment it came
+// is seen.
+export function unseenAnswer(messages: unknown[], answeredAt: string, seenAt: string): boolean {
+  if (!answeredAt || (seenAt && seenAt >= answeredAt)) return false;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i] as Record<string, unknown> | null;
+    if (!m || typeof m !== 'object') continue;
+    if (m.role === 'assistant') return true;
+    if (m.role === 'user' || m.role === 'shell' || m.role === 'bg') return false;
+  }
+  return false;
+}
 
 export function searchText(messages: unknown[]): string {
   let out = '';
@@ -436,9 +464,11 @@ export function sessionRows(root: string, token: string, deps: LockDeps = {}): S
       const s = JSON.parse(fs.readFileSync(file, 'utf8')) as Partial<Session> | null;
       if (!s || s.version !== SESSION_VERSION || !Array.isArray(s.messages) || !Array.isArray(s.api)) continue;
       const messages = (s.messages as unknown[]).filter((m): m is Record<string, unknown> => !!m && typeof m === 'object');
+      const lock = lockState(dir, id, token, deps);
       out.push({
         id, title: (typeof s.title === 'string' && s.title) || sessionTitle(messages), updatedAt: String(s.updatedAt ?? ''),
-        turns: messages.filter(bySomeone).length, bytes, lock: lockState(dir, id, token, deps), text: searchText(messages),
+        turns: messages.filter(bySomeone).length, bytes, lock, text: searchText(messages),
+        status: lock === 'held' ? 'held' : unseenAnswer(messages, typeof s.answeredAt === 'string' ? s.answeredAt : '', typeof s.seenAt === 'string' ? s.seenAt : '') ? 'done' : 'idle',
         dir, project: projectRead(s.project),
       });
     } catch { /* unreadable — left out */ }

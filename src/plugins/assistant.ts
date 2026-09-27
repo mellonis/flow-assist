@@ -843,6 +843,11 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // wrote (`sessionTitle`), so it never drifts as the oldest messages are
           // trimmed; `/title` sets it. '' — not decided yet.
           const titleRef = ui.useRef('');
+          // When the session's last turn ended with an answer, and when the chat last
+          // showed the session's end — the picker's `done` is an answer after that
+          // (sessions.ts, `unseenAnswer`). '' — never.
+          const answeredAtRef = ui.useRef('');
+          const seenAtRef = ui.useRef('');
           const saveTimer = ui.useRef<ReturnType<typeof setTimeout> | null>(null);
           // One token for this chat instance's whole life (not per process — see
           // sessions.ts, "Ownership lock"): what makes a lock this instance's own.
@@ -900,6 +905,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               recall: saveRecallState(recallRef.current),
               closed: false, // written means in use — a resumed cleared session is open again
               project: sessionProjectRef.current,
+              ...(answeredAtRef.current ? { answeredAt: answeredAtRef.current } : {}),
+              ...(seenAtRef.current ? { seenAt: seenAtRef.current } : {}),
             };
           };
           // ── The journal (src/assistant/journal.ts) ── one line per event, appended as
@@ -1031,6 +1038,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             saveTimer.current = setTimeout(() => { saveTimer.current = null; writeSession(); }, 250);
           };
           const writeRef = ui.useRef(writeSession); writeRef.current = writeSession;
+          // The chat shows the session's end — it is open, on this session: an answer
+          // that came before now is seen, and the file says so at the next save.
+          const markSeen = () => {
+            if (!answeredAtRef.current || seenAtRef.current >= answeredAtRef.current) return;
+            seenAtRef.current = new Date().toISOString();
+            persist();
+          };
           // `fingerprint` is the caller's — taken with a stat BEFORE the content in
           // `s` was read, never re-derived here. Reading it fresh off the disk at
           // this point (after `s` was already loaded) would leave a window: a
@@ -1051,6 +1065,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             try { journaled = !sessDir || fs.existsSync(journalPath(dir, s.id)); } catch { /* not an id — nothing to journal */ }
             journalImport.current = journaled ? null : (s.messages as Record<string, unknown>[]).filter((m) => m.role !== 'system');
             titleRef.current = s.title;
+            answeredAtRef.current = s.answeredAt ?? ''; seenAtRef.current = s.seenAt ?? '';
+            if (openRef.current) markSeen(); // opened in an open chat: its end is on screen
             fingerprintRef.current = fingerprint;
             apiRef.current = s.api as unknown as ChatMessage[];
             // A summary saved with tool-call markup in it is read without it: it rides in
@@ -1960,6 +1976,14 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // already have their own indication (⚠ error / quiet log); neither is a
               // turn that ran out of rounds, which now says so in the conversation
               // itself, where the answer would have been.
+              // A turn that ended with an answer: when, and — the chat open — seen then.
+              // A stopped or failed turn, or one with no final text, is not an answer
+              // waiting to be read.
+              if (contentRef.current.trim() && !failed && !aborted && !roundLimit) {
+                const at = new Date().toISOString();
+                answeredAtRef.current = at;
+                if (openRef.current) seenAtRef.current = at;
+              }
               if (!contentRef.current.trim() && !failed && !aborted && !roundLimit) {
                 const opens = firstGlyph(host.keys.details);
                 setEmptyNotice(`The turn ended without a final answer — only reasoning came back${opens ? ` (${opens} shows it)` : ''}. Narrow the question, or say "continue".`);
@@ -2454,6 +2478,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             dismissAsk();
             contentRef.current = '';
             titleRef.current = ''; // the next session is named by its own first line
+            answeredAtRef.current = ''; seenAtRef.current = '';
             // A fresh conversation must not have an earlier background result surface in
             // it: drop any queued-but-unsent delivery and stop the flush interval. (A task
             // still RUNNING delivers afterwards — that is a new, legitimate result; only
@@ -2758,6 +2783,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               inputRef.current = initialText;
               setCursor(Array.from(initialText).length);
             }
+            markSeen(); // the session's end is on screen now
             disarmEsc();
             host.notify();
             if (initialText?.trim()) send(initialText);
@@ -3297,6 +3323,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             pendingConfirm: pendingAsk,
             pendingQuestion,
             picker,
+            // What this chat is doing, for its own row: a y/n or a question waits, or a
+            // turn or a `!command` runs.
+            pickerOwn: pendingAsk || pendingQuestion ? 'waiting' : streaming ? 'working' : 'idle',
             queued: queued.map((m) => m.text),
             // What the last queued message waits for: the turn's next step, or its end
             // (held, ⇥) — none outside a turn, where it goes when the command ends.
