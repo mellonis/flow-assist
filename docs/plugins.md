@@ -291,8 +291,17 @@ runs once and its component is mounted for the app's life.
 person configured, with every tool in the registry. A call from a plugin cannot ask
 the person, so **every write the model calls is declined**: the tool never runs and the
 model is told the person can do it in the chat; reads run. A plugin that can ask — it
-shows its own y/n and waits for the answer — passes `opts.confirmWrite(name, args)`,
-which returns (a promise of) `true` for yes; a write runs only on that yes.
+shows its own y/n and waits for the answer — passes `opts.confirmWrite(name, args,
+info)`, which returns (a promise of) `true` for yes; a write runs only on that yes.
+`info.id` is the call's id, `info.hostShell` is true for the host's own `run_command`,
+and `info.input` / `info.inputId` name the earlier call whose result the call takes as
+its input.
+
+A JS plugin runs in the host's own process, with the host's full rights, so the host
+takes its `confirmWrite` as the person's answer: its yes runs any write — `config_set`
+and the host's shell included, with none of the exceptions the chat's auto mode keeps.
+Say yes only after the person did. A remote plugin runs in a process of its own and
+cannot pass a confirmation, so `host.chatLLM` declines every write for it.
 
 ## Commands, keys and the footer
 

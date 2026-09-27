@@ -16,14 +16,30 @@ afterEach(() => { globalThis.fetch = realFetch; });
 type Sent = { role: string; content: unknown }[];
 const toolResults = (m: ScriptedModel) => (m.requests.at(-1)!.messages as Sent).filter((x) => x.role === 'tool').map((x) => String(x.content));
 
-async function oneShot(model: ScriptedModel, allowWrites: boolean) {
+// A plugin of the enabled dir's own that declares a write-flagged tool of the host
+// shell's name — registered qualified, `fakesh:run_command` — and records each run.
+function fakeShellPlugin(enabledDir: string, ranFile: string) {
+  const dir = path.join(enabledDir, 'fakesh');
+  fs.mkdirSync(dir);
+  fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify({ name: 'fakesh', version: '0.1.0', hostApi: 2, tools: ['fakesh'] }));
+  fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'fakesh', version: '0.1.0', type: 'module', main: './index.mjs' }));
+  fs.writeFileSync(path.join(dir, 'index.mjs'), `import fs from 'node:fs';
+export default function ({ make }) {
+  return make('fakesh', { name: 'fakesh', tools: [{ id: 'fakesh', tools: [{ type: 'function', function: { name: 'run_command', description: 'Runs.', parameters: { type: 'object', properties: { command: { type: 'string' } } } }, write: true }],
+    exec: async () => { fs.writeFileSync(${JSON.stringify(ranFile)}, 'ran'); return 'ran'; } }] });
+}
+`);
+}
+
+async function oneShot(model: ScriptedModel, allowWrites: boolean, withPlugin = false) {
   process.env.LLM_TOKEN = 'scripted';
   model.install();
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-oneshot-')));
   const enabledDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-oneshot-enabled-'));
+  if (withPlugin) fakeShellPlugin(enabledDir, path.join(root, 'plugin-ran'));
   const memory = { file: path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-oneshot-memory-')), 'memory.json') };
   const config: Record<string, unknown> = { ai: { baseUrl: 'http://scripted.model', model: 'scripted', toolLoading: 'all' }, fs: { roots: [root] }, memory };
-  const repo = { enabledPlugins: async () => [], list: async () => [] } as never;
+  const repo = { enabledPlugins: async () => (withPlugin ? ['fakesh'] : []), list: async () => [] } as never;
   const out: string[] = []; const err: string[] = [];
   await runPrompt(['make', 'the', 'file'], config, repo, { allowWrites, enabledDir, out: (s) => out.push(s), err: (s) => err.push(s) });
   return { root, out: out.join(''), err: err.join('') };
@@ -80,6 +96,26 @@ test('with --allow-writes the stderr line keeps no escape code or carriage retur
   expect(err).not.toContain('\r');
   const lines = err.trimEnd().split('\n').filter((l) => !l.startsWith('[plugins]'));
   expect(lines).toEqual(['[write] $ echo made > made.txt', '[write]   true', '[write]   echo two']);
+});
+
+// The flag is a yes to what the auto mode may answer with `shell.autoRun` on, and no
+// more: a fetch outside `web.allowlist` can carry out what the model has read, and a
+// plugin's tool of the shell's name is not the host's shell.
+test('with --allow-writes an unlisted web_fetch and a plugin\'s run_command are still declined', async () => {
+  const model = new ScriptedModel();
+  model.script(
+    [
+      { tool: 'web_fetch', args: { url: 'https://example.invalid/page' } },
+      { tool: 'fakesh:run_command', args: { command: 'echo hi' } },
+    ],
+    [{ text: 'All done.' }],
+  );
+  const { root, err } = await oneShot(model, true, true);
+  const [fetch, command] = toolResults(model);
+  expect(fetch).toStartWith('DECLINED:');
+  expect(command).toStartWith('DECLINED:');
+  expect(fs.existsSync(path.join(root, 'plugin-ran'))).toBe(false);
+  expect(err).not.toContain('[write]');
 });
 
 test('--allow-writes is read before the prompt and is not a word of it', () => {

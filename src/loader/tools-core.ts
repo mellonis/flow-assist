@@ -608,9 +608,10 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
         if (refusal) throw new Error(refusal);
         const a = configSetArgs(args) as ConfigSetArgs;
         // Only after the person's own yes to this call (`confirmedByPerson`, set by
-        // agentChat when its y/n was answered yes): a call that did not pass the y/n — a
-        // bare `execChatTool`, a run whose confirmation is not the person's — never
-        // changes the config on the model's word.
+        // agentChat when its confirmation answered yes): a call that never got a yes — a
+        // bare `execChatTool`, a run with no confirmation, one that said no — never
+        // changes the config on the model's word. Any yes counts, a JS plugin's own
+        // `confirmWrite` included: a plugin runs in the host's process with its rights.
         if (ctx.confirmedByPerson !== true) throw new Error(`config_set: there is nobody here to confirm it — give the person the command: ${configSetLine(a.key, a.value, a.scope)}. Nothing was changed.`);
         // The same path as the person's `config set` (src/config/load.ts), laid on the
         // config the running app reads.
