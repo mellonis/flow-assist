@@ -596,6 +596,11 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
           if (opt('description')) next.description = opt('description')!;
           if (opt('type')) next.type = opt('type')!;
           if (hasScope && read.scope !== found.scope) {
+            // A move adds to the target scope, so it is held to what an add is: the
+            // target's cap and the duplicate check — the fact being moved left out of it,
+            // or it would be refused as a copy of itself.
+            const refusal = refuseMemory(facts(read.scope).map(asMemory), next.text, facts(found.scope).filter((f) => f.id !== id).map(asMemory));
+            if (refusal) return refusal;
             ensureWorkspace(dir(read.scope));
             const moved = addFact(dir(read.scope), { text: next.text, name: next.name, description: next.description, type: next.type, plugin: next.plugin });
             removeFact(dir(found.scope), id);

@@ -942,7 +942,10 @@ there is no `/fullscreen`.
     holding `\n---\n` would otherwise end the front matter and write a line of its own
     into the index. Files 0600 through temp file + rename, directories 0700. The
     system prompt's `## Your memory` block (`memoryPromptBlock`) lists this project's
-    index and the global one — never a fact's text; the default description is the
+    index and the global one — never a fact's text, and at most `MEMORY_PROMPT_LINES`
+    (40) lines of each, then `+N more — workspace_read memory/MEMORY.md (scope "…")`:
+    the store's cap bounds what the tool writes, this bounds a directory filled by hand
+    or by a large migrated list; the default description is the
     text's first 100 characters, and the model reads a fact in full with
     `workspace_read({ path: "memory/<id>.md", scope })` when its line is relevant. The
     index is built from the files' own front matter every time, for the prompt and
@@ -970,7 +973,9 @@ there is no `/fullscreen`.
     runs of whitespace and trailing punctuation taken out; an entry over
     `MEMORY_TEXT_MAX` (300) characters is refused with its length; past
     `MEMORY_MAX_ENTRIES` (100) in its scope the tool refuses and names the oldest. Every
-    refusal says what to do instead and points at `/memory`. Only `add` is guarded:
+    refusal says what to do instead and points at `/memory`. A move (`update` naming
+    another scope) adds to the target, so it is held to the same cap and duplicate
+    check there, the fact being moved left out of the latter. Otherwise only `add` is guarded:
     `update` is the remedy the duplicate refusal names, so refusing that too would
     leave nowhere to go (an entry added short and then updated long is still open).
   - **`memory.json`** — `memoryFilePath(config)`: `config.memory.file`, else

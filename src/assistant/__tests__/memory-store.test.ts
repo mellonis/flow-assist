@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { addFact, memoryPromptBlock, migrateMemoryJson, parseFact, readFacts, removeFact, saveFact } from '../memory-store.js';
+import { addFact, MEMORY_PROMPT_LINES, memoryPromptBlock, migrateMemoryJson, parseFact, readFacts, removeFact, saveFact } from '../memory-store.js';
 
 const ws = () => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-memws-')));
 const index = (dir: string) => fs.readFileSync(path.join(dir, 'memory', 'MEMORY.md'), 'utf8');
@@ -94,4 +94,12 @@ test('memory.json moves into the global workspace once: as files, the old file r
   fs.writeFileSync(legacy, '{ not json');
   expect(migrateMemoryJson(legacy, g)).toEqual({ moved: 0, kept: 0 });
   expect(fs.readFileSync(legacy, 'utf8')).toBe('{ not json');
+});
+
+test('the prompt shows at most MEMORY_PROMPT_LINES lines per scope, and says how many more there are and where', () => {
+  const p = ws();
+  for (let i = 0; i < MEMORY_PROMPT_LINES + 5; i++) addFact(p, { text: `fact ${String(i).padStart(3, '0')}` });
+  const block = memoryPromptBlock(readFacts(p), []);
+  expect(block.split('\n').filter((l) => l.startsWith('- ['))).toHaveLength(MEMORY_PROMPT_LINES);
+  expect(block).toContain('+5 more — workspace_read memory/MEMORY.md (scope "project")');
 });

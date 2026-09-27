@@ -859,3 +859,24 @@ test('a fact under a hand-made file name is forgotten too, and a name that leads
   expect(fs.existsSync(path.join(ws, 'memory', 'My_Note.md'))).toBe(false);
   expect(String(await reg.exec('memory', { action: 'forget', id: '../../x' }, inProject('/p/a')))).toContain('not found');
 });
+
+test('moving a fact to another scope is held to that scope\'s cap and to the duplicate check — the fact itself left out of it', async () => {
+  const { root, reg, inProject } = memSetup();
+  const ctx = inProject('/p/a');
+  const a = workspaceDir(root, '/p/a');
+  const g = workspaceDir(root, null);
+  const mine = addFact(a, { text: 'Moves on its own.' });
+  // Not a duplicate of itself: the move goes through.
+  expect(String(await reg.exec('memory', { action: 'update', id: mine.id, scope: 'global' }, ctx))).toContain('moved');
+  expect(readFacts(g).map((f) => f.text)).toEqual(['Moves on its own.']);
+  // A duplicate of a fact already in the target is refused, and nothing moves.
+  const twin = addFact(a, { text: 'moves on its own' });
+  expect(String(await reg.exec('memory', { action: 'update', id: twin.id, scope: 'global' }, ctx))).toContain('already remembered');
+  expect(readFacts(a).some((f) => f.id === twin.id)).toBe(true);
+  // A full target refuses a move too.
+  for (let i = readFacts(g).length; i < 100; i++) addFact(g, { text: `global fact ${i}` });
+  const one = addFact(a, { text: 'One more for global.' });
+  expect(String(await reg.exec('memory', { action: 'update', id: one.id, scope: 'global' }, ctx))).toContain('the memory is full');
+  expect(readFacts(g)).toHaveLength(100);
+  expect(readFacts(a).some((f) => f.id === one.id)).toBe(true);
+});
