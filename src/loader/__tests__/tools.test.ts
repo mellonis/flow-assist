@@ -937,3 +937,14 @@ test('refreshToolRegistry re-reads every plugin\'s tools into the registry alrea
   expect(await reg.exec('late_ping', {}, {})).toBe('pong');
   await expect(reg.exec('never_there', {}, {})).rejects.toThrow(/Unknown tool/);
 });
+
+test('config_schema says what shell.passEnv does, and the model may not set it', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'fa-cfgschema-pe-'));
+  const local = join(dir, 'config.local.json');
+  writeFileSync(local, '{}');
+  const reg = assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
+  const out = String(await reg.exec('config_schema', { key: 'shell.passEnv' }, { configLocalPath: local }));
+  expect(out).toMatch(/- shell\.passEnv: array — unset \(default: \[\] — run_command starts without every secret variable/);
+  expect(out).not.toContain('· model may set');
+  await expect(reg.exec('config_set', { key: 'shell.passEnv', value: ['GH_TOKEN'], scope: 'session' }, { configLocalPath: local })).rejects.toThrow();
+});

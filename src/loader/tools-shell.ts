@@ -24,7 +24,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { capConsoleText, consoleData } from '../assistant/console-view.js';
 import { findInstructions, type ProjectInstructions } from '../assistant/project-instructions.js';
-import { createShellState, dirAllowed, formatShell, nextCwd, realOf, runShell, shellCwd, shellLimits, shellRoots, tildePath, within, type ShellState } from '../assistant/shell.js';
+import { activeSecrets, buildSecretSet, withheldEnv } from '../assistant/secrets.js';
+import { createShellState, dirAllowed, formatShell, nextCwd, realOf, runShell, shellCwd, shellLimits, shellPassEnv, shellRoots, tildePath, within, type ShellState } from '../assistant/shell.js';
 import type { ToolGroup } from './tools.js';
 
 // Where a call runs. No `cwd` — the conversation's directory (`base`). A `cwd` is a
@@ -119,6 +120,10 @@ export function runCommandDescription(config: Record<string, unknown>, found: st
   ].filter(Boolean).join(' ');
 }
 
+// What the model is told about the environment its commands run in.
+export const withheldNote = (names: string[]): string =>
+  `withheld from commands: ${names.join(', ')} — shell.passEnv lets a command see one`;
+
 // The host's own shell tools, by identity, not by name: a plugin may name a tool
 // `run_command` too, and when the host's shell group is off (`ai.disabledTools:
 // ["shell"]`) that tool holds the bare name. What only the host's shell may do — be
@@ -207,11 +212,20 @@ const shellGroup = (config: Record<string, unknown>): ToolGroup => ({
         raw += chunk; if (raw.length > maxChars * 2) raw = raw.slice(-maxChars); live.update({ command: cmd, cwd: tildePath(cwd), text: capConsoleText(raw) });
       }
       : undefined;
-    const r = await runShell(cmd, { cwd, timeoutMs, maxChars, signal, ...(onOutput ? { onOutput } : {}), ...(stdin != null ? { stdin } : {}) });
+    // The model's command starts without the secrets the host knows (./secrets.ts) —
+    // every variable of the set but those `shell.passEnv` lets through; the person's own
+    // `!command` keeps the whole environment. The model is told which, by name, once
+    // per conversation (`shell.told`), at the head of the result so no cut drops it.
+    const { env, withheld } = withheldEnv(process.env, activeSecrets() ?? buildSecretSet(config), shellPassEnv(config));
+    const r = await runShell(cmd, { cwd, timeoutMs, maxChars, signal, env, ...(onOutput ? { onOutput } : {}), ...(stdin != null ? { stdin } : {}) });
     if (r.error) throw new Error(`run_command: could not start /bin/sh: ${r.error}`);
     live?.update(consoleData(cmd, r, cwd, timeoutMs));
     const move = nextCwd(config, cwd, r.pwd);
     if (move.cwd !== cwd) shell.setCwd(move.cwd);
-    return formatShell(cmd, r, cwd, timeoutMs, { after: move.cwd, note: move.note }).forTool;
+    const result = formatShell(cmd, r, cwd, timeoutMs, { after: move.cwd, note: move.note }).forTool;
+    const said = `withheld:${withheld.join(',')}`;
+    if (!withheld.length || shell.told.has(said)) return result;
+    shell.told.add(said);
+    return `${withheldNote(withheld)}\n${result}`;
   },
 });

@@ -281,7 +281,11 @@ config names (`${VAR}`, `ai.tokenEnv`), any variable whose name says it is a tok
 secret, password or cookie, and a credential written into the config itself — is
 replaced by `‹secret NAME›` wherever it turns up: a tool's result, a command's output
 (yours too), what a view shows, the assistant's answer and the log. The assistant, the
-screen, the saved session and its journal only ever see the mark.
+screen, the saved session and its journal only ever see the mark. A command the
+assistant runs starts without those variables at all — so `auto: writes + commands`
+runs commands without asking, but never with your tokens — and the assistant is told
+their names once; `config set shell.passEnv '["GH_TOKEN"]'` lets its commands see the
+ones you list. Your own `!command` keeps the whole environment.
 
 ## Plugins
 

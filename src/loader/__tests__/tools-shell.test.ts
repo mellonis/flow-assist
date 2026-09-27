@@ -226,3 +226,33 @@ test('cd answers with the instructions its caller already read, when the ctx car
   const out = await shellTools(config).exec('cd', { path: 'p' }, { shell, projectInstructions: () => read } as never);
   expect(out).toContain('- /already/read/AGENTS.md');
 });
+
+test('run_command runs without the secret variables, names them once per conversation, and shell.passEnv lets one through', async () => {
+  const { buildSecretSet, setActiveSecrets } = await import('../../assistant/secrets.ts');
+  const { createShellState } = await import('../../assistant/shell.ts');
+  const token = 'withheld-token-value-0001';
+  const gh = 'passed-gh-token-value-0002';
+  process.env.WB_WIKI_TOKEN = token;
+  process.env.GH_TOKEN = gh;
+  setActiveSecrets(buildSecretSet({}, { WB_WIKI_TOKEN: token, GH_TOKEN: gh }));
+  try {
+    const root = tmp();
+    const config = { shell: { roots: [root], passEnv: ['GH_TOKEN'] } };
+    const shell = createShellState(() => config);
+    const g = shellTools(config);
+    const first = await g.exec('run_command', { command: 'printf "wiki=%s gh=%s\\n" "${WB_WIKI_TOKEN-unset}" "${GH_TOKEN-unset}"' }, { shell } as never) as string;
+    expect(first).toContain('wiki=unset gh=‹secret GH_TOKEN›');
+    expect(first).toContain('withheld from commands: WB_WIKI_TOKEN — shell.passEnv lets a command see one');
+    expect(first).not.toContain(token);
+    const second = await g.exec('run_command', { command: 'true' }, { shell } as never) as string;
+    expect(second).not.toContain('withheld from commands');
+    // A conversation told anew (/clear, another session) is told again.
+    shell.told.clear();
+    const third = await g.exec('run_command', { command: 'true' }, { shell } as never) as string;
+    expect(third).toContain('withheld from commands: WB_WIKI_TOKEN');
+  } finally {
+    delete process.env.WB_WIKI_TOKEN;
+    delete process.env.GH_TOKEN;
+    setActiveSecrets(null);
+  }
+});

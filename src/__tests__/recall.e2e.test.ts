@@ -195,7 +195,8 @@ test('a !command output and a large run_command result are stubbed the same way,
   expect(back[0]).toMatch(new RegExp(`^OK: \\[recalled ${outId} — \\d+ lines\\]\\nThe person ran a shell command`));
   expect(back[0]!.split('\n')).toContain('30');
   // A result comes back as the history holds it — its own `OK:` tag included.
-  expect(back[1]).toMatch(new RegExp(`^OK: \\[recalled ${resId} — \\d+ lines\\]\\nOK: Ran in `));
+  // (run_command's first result of a conversation opens with what it withheld.)
+  expect(back[1]).toMatch(new RegExp(`^OK: \\[recalled ${resId} — \\d+ lines\\]\\nOK: (?:withheld from commands: [^\\n]*\\n)?Ran in `));
   expect(back[1]!.split('\n')).toContain('200');
   expect(back[2]).toContain('OK: recall: nothing in the conversation matches "img:0000"');
   // The stubs in the history stay stubs: the item is beside the recall, not put back in place.

@@ -248,3 +248,10 @@ test('a known secret never leaves the runner: not in a chunk, not in the output,
     setActiveSecrets(null);
   }
 });
+
+test('a caller may give the command an environment of its own', async () => {
+  const r = await runShell('printf "%s" "${FA_ONLY_HERE-unset}"', { cwd: tmp(), env: { PATH: process.env.PATH, FA_ONLY_HERE: 'yes' } });
+  expect(r.output).toBe('yes');
+  const plain = await runShell('printf "%s" "${FA_ONLY_HERE-unset}"', { cwd: tmp() });
+  expect(plain.output).toBe('unset');
+});

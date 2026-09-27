@@ -11,6 +11,10 @@ What each version of flow-assist brought, newest first. The version is the one i
   the config — is replaced by `‹secret NAME›` in tool results, command output (streamed,
   a token split across chunks included, and base64 or URL-encoded forms too), views, the
   assistant's answer and the log, before it is sent, drawn, saved or journaled.
+- **The assistant's commands run without your tokens.** `run_command` starts with every
+  secret variable the app knows taken out of its environment and says which, by name,
+  once per conversation; `shell.passEnv` (yours to set, never the assistant's) lists
+  the ones a command may see. Your own `!command` keeps the whole environment.
 - **An MCP server that is not there at start is tried again, not dropped for the run.**
   A server that fails to connect — a gateway that answered 502 just then, an IDE not open
   yet — or drops later (refused, reset, a gateway's 502/503/504, a process that exits;

@@ -148,8 +148,9 @@ export const hostConfigSchema = z.object({
   // (src/assistant/shell.ts): the time limit, how much of the output is kept, and
   // `roots` — the directories commands start in (the first) and may `cd` within — and
   // `autoRun`, the person's second consent that lets the auto mode's `all` answer
-  // run_command (src/assistant/auto.ts). On the leash with the rest of `shell`, so the
-  // model can never set it; read live, since it only loosens a pause the person chose.
-  shell: z.object({ timeoutMs: z.number().int().positive(), maxChars: z.number().int().positive(), roots: z.array(z.string()), autoRun: z.boolean() }).partial().optional(),
+  // run_command (src/assistant/auto.ts) — and `passEnv`, the secret variables the
+  // person lets the model's commands see (src/assistant/secrets.ts). On the leash with
+  // the rest of `shell`, so the model can never set either; read live, per command.
+  shell: z.object({ timeoutMs: z.number().int().positive(), maxChars: z.number().int().positive(), roots: z.array(z.string()), autoRun: z.boolean(), passEnv: z.array(z.string()) }).partial().optional(),
   plugins: z.record(z.string(), z.unknown()).optional(),
 }).passthrough();

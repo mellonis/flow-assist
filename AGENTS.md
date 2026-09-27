@@ -3219,6 +3219,15 @@ a new path for text keeps to it.
     kept for stderr at exit have none).
   The person's own words — a message, a `!command` line — are theirs and are not
   touched.
+- **The model's commands run without the secrets.** `run_command` starts from the
+  process's environment less every name of the set (`withheldEnv`), except those the
+  person lists in `shell.passEnv` (under `shell`, so on the leash — the model can never
+  set it; read per command). Its result names what was withheld at its head, once per
+  conversation — `withheld from commands: WB_WIKI_TOKEN, … — shell.passEnv lets a
+  command see one` — kept in `ShellState.told`, which the chat empties on `/clear`,
+  `/new` and opening another session. A background task has a shell state of its own
+  and is told again. The person's own `!command` and `!!command` keep the whole
+  environment; their output is still redacted.
 - The test rig builds the set from what a test set itself (`setSecretsEnv` in
   `src/__tests__/helpers/scripted.ts`), never from the machine's own tokens, and its
   `LLM_TOKEN` starts with `^`, a character no streamed test text ends in.

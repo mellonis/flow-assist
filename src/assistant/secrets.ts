@@ -99,6 +99,21 @@ export function refreshSecrets(config: Record<string, unknown> | undefined): Sec
   return set;
 }
 
+// The environment a command the MODEL runs is started with: `env` without every
+// variable of the set (`set.names`), except those the person lets through
+// (`shell.passEnv`). `withheld` names what was taken out and was there to take, sorted
+// — what the model is told, by name only.
+export function withheldEnv(env: Record<string, string | undefined>, set: SecretSet | null, pass: readonly string[] = []): { env: Record<string, string | undefined>; withheld: string[] } {
+  const out = { ...env };
+  const withheld: string[] = [];
+  for (const name of set?.names ?? []) {
+    if (pass.includes(name) || out[name] === undefined) continue;
+    delete out[name];
+    withheld.push(name);
+  }
+  return { env: out, withheld: withheld.sort() };
+}
+
 // One alternation, longest form first: at any position the longest secret matches.
 const PATTERNS = new WeakMap<SecretSet, { re: RegExp; nameOf: Map<string, string> }>();
 function patternOf(set: SecretSet): { re: RegExp; nameOf: Map<string, string> } | null {

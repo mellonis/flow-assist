@@ -1146,6 +1146,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             projectNoteRef.current = null;
             projectRef.current = { dir: '', root: null, files: [] };
             shellRef.current.setCwd(s.shellCwd ?? null);
+            // Another conversation: what its commands told the model is told again.
+            shellRef.current.told.clear();
             setBangLevel(0); // the level is never saved — a restored draft is plain text
             setField(s.draft);
           };
@@ -2594,6 +2596,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             projectNoteRef.current = null;
             projectRef.current = { dir: '', root: null, files: [] };
             shellRef.current.setCwd(null);
+            shellRef.current.told.clear();
             setInput(''); inputRef.current = '';
             setCursor(0);
             setBangLevel(0); // a fresh conversation opens on a plain prompt

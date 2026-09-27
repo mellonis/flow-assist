@@ -62,6 +62,10 @@ export interface ShellOptions {
   onOutput?: (chunk: string) => void;
   // What the command reads on stdin, written as UTF-8 and closed; absent — no stdin.
   stdin?: string;
+  // The environment the command starts from; absent — the process's whole one (the
+  // person's `!command`). The model's run_command passes it without the secrets
+  // (`withheldEnv`, ./secrets.ts).
+  env?: Record<string, string | undefined>;
 }
 
 type RootsConfig = { shell?: { roots?: unknown }; fs?: { roots?: unknown } } | Record<string, unknown> | undefined;
@@ -129,10 +133,14 @@ export function shellCwd(config: RootsConfig, cwd = process.cwd()): string {
 // the `cd` tool, /clear, a restored session all set it here, so this is the one place
 // the chat learns the directory was set (it reads the project's instructions again,
 // ./project-instructions.ts).
+// `told` is what the conversation's commands have already told the model once (the
+// variables withheld from them): its owner empties it where a conversation starts
+// anew — /clear, /new, another session.
 export interface ShellState {
   cwd(): string;
   setCwd(dir: string | null): void;
   saved(): string | null; // what a session keeps
+  told: Set<string>;
 }
 export function createShellState(config: () => RootsConfig, initial: string | null = null, onSet?: (dir: string | null) => void): ShellState {
   let dir = initial;
@@ -140,6 +148,7 @@ export function createShellState(config: () => RootsConfig, initial: string | nu
     cwd: () => (dir && dirAllowed(config(), dir) ? dir : shellCwd(config())),
     setCwd: (d) => { dir = d; onSet?.(d); },
     saved: () => dir,
+    told: new Set(),
   };
 }
 
@@ -156,6 +165,12 @@ export function nextCwd(config: RootsConfig, ran: string, pwd: string | undefine
 // value set while the app runs holds for the next call.
 export function shellAutoRun(config: { shell?: unknown } | undefined): boolean {
   return (config?.shell as { autoRun?: unknown } | undefined)?.autoRun === true;
+}
+
+// `shell.passEnv`: the secret variables the person lets the model's commands see.
+export function shellPassEnv(config: { shell?: unknown } | undefined): string[] {
+  const v = (config?.shell as { passEnv?: unknown } | undefined)?.passEnv;
+  return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && !!x) : [];
 }
 
 // `shell.timeoutMs` / `shell.maxChars`, a bad value falling back to the default.
@@ -213,7 +228,7 @@ export function runShell(cmd: string, opts: ShellOptions): Promise<ShellResult> 
       cwd: opts.cwd,
       detached: true, // its own process group: `kill(-pid)` reaches everything it started
       stdio: [opts.stdin != null ? 'pipe' : 'ignore', 'pipe', 'pipe'],
-      env: { ...process.env, PAGER: 'cat', GIT_PAGER: 'cat', GIT_TERMINAL_PROMPT: '0' },
+      env: { ...(opts.env ?? process.env), PAGER: 'cat', GIT_PAGER: 'cat', GIT_TERMINAL_PROMPT: '0' },
     });
     const killGroup = () => {
       if (child.pid == null) return;

@@ -104,3 +104,13 @@ test('a stream holds back only what could still become a secret', () => {
   expect(s.push('nope!')).toBe('eyJhbnope!');
   expect(s.flush()).toBe('');
 });
+
+test('the environment for a model\'s command loses every secret variable but the passed ones', async () => {
+  const { withheldEnv } = await import('../secrets.ts');
+  const set = buildSecretSet({}, env);
+  const { env: clean, withheld } = withheldEnv(env, set, ['SHORT_TOKEN']);
+  expect(clean.WB_WIKI_TOKEN).toBeUndefined();
+  expect(clean.SHORT_TOKEN).toBe('abc');
+  expect(clean.PATH).toBe('/usr/bin:/bin');
+  expect(withheld).toEqual(['WB_WIKI_TOKEN']);
+});

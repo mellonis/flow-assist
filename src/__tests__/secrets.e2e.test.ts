@@ -76,3 +76,39 @@ test('the person\'s own !command keeps the whole environment, and its output is 
   expect(journal).not.toContain(TOKEN);
   expect(journal).toContain('seen:‹secret WB_WIKI_TOKEN›');
 });
+
+test('the model\'s run_command runs without the token and is told so once; the person\'s /clear starts the telling again', async () => {
+  process.env.WB_WIKI_TOKEN = TOKEN;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-secrets-e2e-'));
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-secrets-root-')));
+  const model = new ScriptedModel();
+  const probe = { command: 'printf "wiki=%s\\n" "${WB_WIKI_TOKEN-unset}"' };
+  model.script(
+    [{ tool: 'run_command', args: probe }],
+    [{ tool: 'run_command', args: probe }],
+    [{ text: 'Checked.' }],
+    [{ tool: 'run_command', args: probe }],
+    [{ text: 'Again.' }],
+  );
+  const ui = await bootApp(model, 120, 30, undefined, { sessions: { dir }, shell: { roots: [root] } });
+  await ui.press('F');
+  await ui.type('check the wiki token');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('Confirm write'));
+  await ui.press('y');
+  await settleUntil(() => model.requests.length >= 2 && ui.backend.lastFrame.includes('Confirm write'));
+  await ui.press('y');
+  await settleUntil(() => ui.backend.lastFrame.includes('Checked.'));
+  const tools = (n: number) => (model.requests[n]!.messages as { role: string; content: string }[]).filter((m) => m.role === 'tool').map((m) => m.content);
+  expect(tools(1)[0]).toContain('withheld from commands: LLM_TOKEN, WB_WIKI_TOKEN — shell.passEnv lets a command see one');
+  expect(tools(1)[0]).toContain('wiki=unset');
+  expect(tools(2)[1]).not.toContain('withheld from commands');
+  await ui.type('/clear');
+  await ui.press('return');
+  await ui.type('once more');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('Confirm write'));
+  await ui.press('y');
+  await settleUntil(() => ui.backend.lastFrame.includes('Again.'));
+  expect(tools(model.requests.length - 1)[0]).toContain('withheld from commands: LLM_TOKEN, WB_WIKI_TOKEN');
+});
