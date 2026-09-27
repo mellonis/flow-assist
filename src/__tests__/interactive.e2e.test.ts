@@ -128,9 +128,15 @@ test('!!command hands the terminal over, shows the cleaned recording as its view
   expect(ui.backend.lastFrame).toContain('│ Your name? Hello, Ruslan!');
 
   // ↑ brings back `!!./greet.sh` — not the ask — shown in interactive mode, its
-  // bangs stripped and read at the matching level: the `‼ ` prompt over `./greet.sh`.
+  // bangs stripped and read at the matching level: the `‼ ` prompt over `./greet.sh`
+  // in the FIELD. The finished block's own row now reads `‼ ./greet.sh` too (its
+  // gutter is `interactive`'s glyph as well), so the check must be the bare field
+  // row — nothing after the command on it — not just the glyph's presence anywhere.
   await ui.press('up');
-  expect(ui.backend.lastFrame).toContain('‼ ./greet.sh');
+  // Nothing but padding and the panel's own border follows the command on the
+  // field's row; the finished block's row has ` · interactive · …` right after it.
+  const fieldRow = ui.backend.lastFrame.split('\n').find((r) => /‼ \.\/greet\.sh[\s│]*$/.test(r));
+  expect(fieldRow).toBeDefined();
   ui.app.unmount();
 });
 

@@ -696,10 +696,19 @@ there is no `/fullscreen`.
   beside it, only the marker's colour changes). A declined call leaves none — nothing
   ran; a failed one shows its output and its exit code.
   **The command itself is kept WHOLE**, up to `VIEW_CAPS.command` (16 KiB — it is text
-  someone typed, never a display cap): a folded row that has no room for it cuts it
-  with `cutStep`, reserving space for the outcome first so the duration and how it
-  ended stay on screen; the opened block never cuts it, wrapping it across its own
-  rows instead (`wrapCells`, `src/cells.ts`).
+  someone typed, never a display cap, and it keeps its own line breaks — a heredoc or
+  a paste — where every other field of the view is flattened to one line): a folded
+  row that has no room for it cuts it with `cutStep`, reserving space for the outcome
+  first so the duration and how it ended stay on screen (and flattens a multi-line
+  command to draw it, `frameView` would anyway); the opened block never cuts it,
+  wrapping each of its lines across its own rows instead (`wrapCells`, `src/cells.ts`)
+  — up to `VIEW_CAPS.commandRows` (40) of them, past which a dim `… N more lines of
+  the command` row stands in for the rest: the command's own rows share the block's
+  `VIEW_CAPS.rows` budget with its output and its outcome row, so at 16 KiB they must
+  stay bounded well short of it or a long enough command, wrapped narrow, could push
+  the tail of the output and the outcome row out of the block entirely. The record,
+  the journal and `/export` still keep the command whole regardless — only this
+  display is capped.
   Folded, the block is ONE line saying how it ended — `cmd · ✓ 4.2 s`, `✗ exit 1 · 4.2
   s`, `stopped`, `timed out` — and, when it printed more than a click shows, how much it
   holds: `· 40 lines`, or `· last 200 of 300 lines` when the view kept only the tail of

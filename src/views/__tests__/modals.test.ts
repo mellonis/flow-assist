@@ -86,19 +86,24 @@ test("a command block's gutter marker is dim while it runs, ok on exit 0, the er
     role: 'shell', content: '',
     views: [{ kind: 'console', data: { command: 'echo hi', cwd: '~', text: '', ...data }, phase, startedAt: 0 }],
   });
-  const markerFg = async (msg: unknown, now?: number) => {
+  const markerStyle = async (msg: unknown, now?: number) => {
     const backend = new TestBackend(80, 24);
     const handle = await render(h(renderChatModal, { ...baseChat, theme, messages: [msg], ...(now === undefined ? {} : { now }) }), backend);
     const row = backend.lastFrame.split('\n').find((r) => r.includes('echo hi'))!;
-    const fg = backend.lastBuffer!.get(row.indexOf('echo hi') - 2, backend.lastFrame.split('\n').indexOf(row)).style.fg;
+    const style = backend.lastBuffer!.get(row.indexOf('echo hi') - 2, backend.lastFrame.split('\n').indexOf(row)).style;
     handle.unmount();
-    return fg;
+    return style;
   };
-  // Live: neither the ok nor the error colour — a pulse dims it, but never colours
-  // it for an outcome the run has not reached yet.
-  const live = await markerFg(shellMsg({}, 'live'), 0);
-  expect(live).not.toBe('green');
-  expect(live).not.toBe('red');
+  const markerFg = async (msg: unknown, now?: number) => (await markerStyle(msg, now)).fg;
+  // Live: the shell colour (same as the `!`/`‼` prompt it was typed with), pinned —
+  // never the ok or the error colour, an outcome the run has not reached yet.
+  const liveAt0 = await markerStyle(shellMsg({}, 'live'), 0);
+  expect(liveAt0.fg).toBe('magentaBright');
+  // The pulse alternates dim on and off over the same clock the elapsed-seconds tail
+  // reads, off a `now` sample half a period apart — no timer of its own.
+  const liveAt600 = await markerStyle(shellMsg({}, 'live'), 600);
+  expect(liveAt600.fg).toBe('magentaBright');
+  expect(liveAt0.dim).not.toBe(liveAt600.dim);
   // Exit 0: ok (green).
   expect(await markerFg(shellMsg({ exitCode: 0, ms: 10, status: 'exit 0' }, 'done'))).toBe('green');
   // A non-zero exit, and a run the tool call itself failed on: the error colour.

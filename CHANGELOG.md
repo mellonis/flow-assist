@@ -6,9 +6,11 @@ What each version of flow-assist brought, newest first. The version is the one i
 ## Unreleased
 
 - **A command block keeps the whole command.** The command a person or the model ran
-  is kept whole, up to 16 KiB rather than the old 300 characters: a folded row still
-  cuts it (reserving room for the duration and the outcome first), but the opened
-  block never does, wrapping it across its own rows instead.
+  is kept whole, up to 16 KiB rather than the old 300 characters, its own line breaks
+  included: a folded row still cuts it (reserving room for the duration and the
+  outcome first), but the opened block never does, wrapping each of its lines across
+  its own rows instead — up to 40 of them, past which a dim note stands in for the
+  rest, so a long command can never push the output or the outcome out of the block.
 - **Interactive mode (`!!`) draws as one glyph, and a command's marker says how it
   ran.** `‼` (U+203C) replaces the two-character `!!` in the prompt and on a running
   interactive command's own gutter marker. Every command's marker is dim while it

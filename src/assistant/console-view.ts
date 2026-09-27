@@ -11,7 +11,10 @@
 // typed. A folded row that has no room for it is cut with `cutStep`, reserving space
 // for the outcome first, so the duration and how it ended stay on screen even when
 // the command does not fit; the open block never cuts it, wrapping it across its own
-// rows instead (`wrapCells`). Open, it is the (possibly wrapped) command, the last
+// rows instead (`wrapCells`) — up to `VIEW_CAPS.commandRows`, past which the DISPLAY
+// (never the record, the journal or `/export`) shows a dim `… N more lines of the
+// command` row, so the command's own rows can never grow past the output's tail and
+// the outcome row. Open, it is the (possibly wrapped, possibly cut) command, the last
 // `ctx.lines` lines of output under a bar a drag never copies, and the same tail. The
 // tail says how it ended in words a person reads without decoding: ✓, ✗ with the code
 // (1 and 127 mean different things), stopped, timed out, or ✗ failed — the tool
@@ -73,6 +76,17 @@ const oneLine = (s: string, max: number) => {
   return t.length > max ? `${t.slice(0, max)}…` : t;
 };
 
+// The command keeps its own line breaks — a heredoc or a multi-line paste is text
+// someone typed too — where every other field here (`cwd`, `status`, `note`, …) is
+// flattened to read on one line. `renderConsole`'s folded row still shows it as one
+// line: `frameView` flattens a line break inside any span to a space when it draws a
+// row, so nothing here has to; the open block draws each line of the command on its
+// own row (`renderConsole`, split before wrapping).
+const capCommand = (s: string, max: number) => {
+  const t = sanitizeViewText(s).trim();
+  return t.length > max ? `${t.slice(0, max)}…` : t;
+};
+
 // What a tool reports is capped where it is COLLECTED, so a message, a session file
 // and the screen are bounded alike — the same rule `consoleData` already applies to a
 // confirmed `run_command`, held here so every path that hands over console data (a
@@ -83,7 +97,7 @@ export function capConsoleData(raw: unknown): ConsoleData {
   const v = (raw ?? {}) as Partial<ConsoleData>;
   const ms = Number(v.ms);
   return {
-    command: oneLine(String(v.command ?? ''), VIEW_CAPS.command),
+    command: capCommand(String(v.command ?? ''), VIEW_CAPS.command),
     cwd: oneLine(String(v.cwd ?? ''), VIEW_CAPS.path),
     text: capConsoleText(String(v.text ?? '')),
     ...(v.exitCode === undefined ? {} : { exitCode: typeof v.exitCode === 'number' ? v.exitCode : null }),
@@ -102,7 +116,7 @@ export function capConsoleData(raw: unknown): ConsoleData {
 // call sites pass neither and stay exactly as they were).
 export function consoleData(cmd: string, r: ShellResult, cwd: string, timeoutMs: number, showCwd = false, opts: { movedTo?: string; note?: string; interactive?: boolean } = {}): ConsoleData {
   return {
-    command: oneLine(cmd, VIEW_CAPS.command),
+    command: capCommand(cmd, VIEW_CAPS.command),
     cwd: tildePath(cwd),
     text: capConsoleText(r.output),
     exitCode: r.code,
@@ -147,11 +161,15 @@ export const renderConsole: ViewRenderer = (raw, ctx) => {
   const marker: ViewSpan[] = d.interactive ? [{ text: INTERACTIVE_LABEL, dim: true }] : [];
   const all = d.text ? String(d.text).split('\n') : [];
   if (ctx.folded) {
+    // A folded row is ONE line: a multi-line command (its own line breaks kept in
+    // the open block below) reads here as `frameView` would flatten it anyway, but
+    // flattened here first so the width this reserves for it matches what is drawn.
+    const foldedCommand = command.replace(/\n+/g, ' ');
     const total = typeof d.lines === 'number' && d.lines > all.length ? d.lines : 0;
     const size: ViewSpan[] = total
       ? [{ text: ` · last ${all.length} of ${total} lines`, dim: true }]
       : all.length > Math.max(1, ctx.lines) ? [{ text: ` · ${all.length} lines`, dim: true }] : [];
-    // A folded row is ONE line: what does not fit is cut, but the duration and the
+    // What does not fit is cut, but the duration and the
     // outcome are news every time, so they are reserved first and the COMMAND gives
     // up its room, not them. Only the OUTCOME itself (its icon/word and, unless the
     // tail ended there already, its duration) is reserved — a person's own
@@ -161,20 +179,31 @@ export const renderConsole: ViewRenderer = (raw, ctx) => {
     const outcome = tail.slice(0, ctx.failed || ctx.live ? 1 : 2);
     const rest = [...marker, { text: ' · ' }, ...outcome];
     const restWidth = rest.reduce((w, s) => w + cellWidth(String(s.text ?? '')), 0);
-    const cmd = cutStep(command, ctx.width - restWidth);
+    const cmd = cutStep(foldedCommand, ctx.width - restWidth);
     return [[{ text: cmd }, ...marker, { text: ' · ', dim: true }, ...tail, ...size]];
   }
   const max = Math.max(1, ctx.lines);
   const cutN = all.length > max ? all.length - max : 0;
   const bar: ViewSpan = { text: '│ ', chrome: true, dim: true };
-  // The command is kept WHOLE: wrapped across as many rows as it needs, never cut
-  // with an ellipsis. The interactive label rides the last row when there is room
-  // for it there, or gets a row of its own otherwise.
-  const cmdRows = wrapCells(command, ctx.width);
-  const lastRow = cmdRows[cmdRows.length - 1]!;
-  const markerFits = marker.length > 0 && cellWidth(INTERACTIVE_LABEL) <= ctx.width - cellWidth(lastRow);
-  const head: ViewLine[] = cmdRows.map((line, i): ViewLine =>
-    i === cmdRows.length - 1 && markerFits ? [{ text: line }, ...marker] : [{ text: line }]);
+  // The command is kept WHOLE in the RECORD, never cut with an ellipsis: it is
+  // wrapped across its own rows. But those rows are DISPLAY only and share the
+  // block's `VIEW_CAPS.rows` budget with the output and the outcome — so a 16 KiB
+  // command wrapped at a narrow width is itself capped at `VIEW_CAPS.commandRows`,
+  // past which it shows a dim `… N more lines of the command` row instead of
+  // growing further; the journal and `/export` still write the command whole. The
+  // interactive label rides the command's own last drawn row when there is room for
+  // it there and nothing was cut, or gets a row of its own otherwise. A multi-line
+  // command (a heredoc, a paste) keeps its own line breaks: each of its lines is
+  // wrapped on its own, as `typedLines` wraps the person's own field text, rather
+  // than joined into one span a line break inside would flatten to a space.
+  const cmdRows = command.split('\n').flatMap((line) => wrapCells(line, ctx.width));
+  const cmdCutN = cmdRows.length > VIEW_CAPS.commandRows ? cmdRows.length - VIEW_CAPS.commandRows : 0;
+  const shownCmdRows = cmdCutN ? cmdRows.slice(0, VIEW_CAPS.commandRows) : cmdRows;
+  const lastRow = shownCmdRows[shownCmdRows.length - 1]!;
+  const markerFits = marker.length > 0 && !cmdCutN && cellWidth(INTERACTIVE_LABEL) <= ctx.width - cellWidth(lastRow);
+  const head: ViewLine[] = shownCmdRows.map((line, i): ViewLine =>
+    i === shownCmdRows.length - 1 && markerFits ? [{ text: line }, ...marker] : [{ text: line }]);
+  if (cmdCutN) head.push([{ text: `… ${cmdCutN} more line${cmdCutN === 1 ? '' : 's'} of the command`, dim: true }]);
   if (marker.length > 0 && !markerFits) head.push([{ text: INTERACTIVE_LABEL.trimStart(), dim: true }]);
   const body: ViewLine[] = [
     ...(cutN ? [[bar, { text: `… ${cutN} line${cutN === 1 ? '' : 's'} cut${ctx.moreKey ? ` · ${ctx.moreKey} for all` : ''}`, dim: true }]] : []),

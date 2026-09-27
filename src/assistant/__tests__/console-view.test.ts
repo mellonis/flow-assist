@@ -62,6 +62,37 @@ test('the opened block never cuts the command, however long — it wraps across 
   expect(rows.some((r) => r.includes('…'))).toBe(false);
 });
 
+test('a command long enough to wrap past VIEW_CAPS.commandRows cuts to a dim note instead of pushing the output or the outcome out of the block', () => {
+  const command = 'x'.repeat(10 * 1024);
+  const output = Array.from({ length: 200 }, (_, i) => `line ${i + 1}`).join('\n');
+  const rec: ViewRecord = { kind: 'console', data: d({ command, text: output }), phase: 'done', startedAt: 0 };
+  const ctx: ViewRenderCtx = { width: 40, folded: false, live: false, failed: false, elapsedMs: 0, lines: VIEW_CAPS.lines, moreKey: '^o' };
+  const framed = frameView(rec, { console: renderConsole }, ctx, {});
+  const rows = framed.map((l) => l.spans.map((s) => s.text).join(''));
+  // The command wraps to far more than VIEW_CAPS.commandRows rows at this width — it
+  // is cut to a dim note rather than eating the row budget the output and the
+  // outcome need.
+  expect(rows.filter((r) => /^x+$/.test(r)).length).toBe(VIEW_CAPS.commandRows);
+  expect(rows.some((r) => /… \d+ more lines? of the command/.test(r))).toBe(true);
+  // The last line the run printed, and the outcome, both survive — as the block's
+  // very last row.
+  expect(rows).toContain('│ line 200');
+  expect(rows.at(-1)).toBe('✓ 4.2 s');
+});
+
+test('the same command survives the pager\'s own layout (blockRows), not just frameView directly', async () => {
+  const { blockRows } = await import('../../views/modals.js');
+  const command = 'x'.repeat(10 * 1024);
+  const output = Array.from({ length: 200 }, (_, i) => `line ${i + 1}`).join('\n');
+  const msg = { role: 'shell', content: '', views: [{ kind: 'console', data: d({ command, text: output }), phase: 'done', startedAt: 0 }] };
+  const rows = blockRows([msg] as never, {
+    wrap: 40, folds: { open: true, except: new Set() }, viewLines: VIEW_CAPS.lines, notes: 'step', detailsKey: '^o',
+    renderers: { console: renderConsole }, now: 0, palette: {},
+  }, '0:view:0').map((r) => (r.spans ?? []).map((s) => s.text).join(''));
+  expect(rows).toContain('│ line 200');
+  expect(rows.at(-1)).toBe('✓ 4.2 s');
+});
+
 test('a person\'s own command also says where it ran', () => {
   expect(renderConsole(d({ showCwd: true }), base).map(plain)).toEqual(['bun test · ✓ 4.2 s · ~/app']);
 });
@@ -110,6 +141,22 @@ test('capConsoleData caps a console view like a confirmed run_command does', () 
   expect(capped.command).toHaveLength(VIEW_CAPS.command + 1);
   expect(capped.text.split('\n')).toHaveLength(VIEW_CAPS.lines);
   expect((capped as Record<string, unknown>).weird).toBeUndefined();
+});
+
+test('capConsoleData keeps a multi-line command\'s own line breaks — every other field is flattened to one line', () => {
+  const capped = capConsoleData({ command: 'cat <<EOF > file.txt\nline one\nline two\nEOF', cwd: '~', status: 'exit 0\nwith extra' } as unknown);
+  expect(capped.command).toBe('cat <<EOF > file.txt\nline one\nline two\nEOF');
+  expect(capped.status).toBe('exit 0 with extra');
+});
+
+test('a multi-line command reads as one flattened line folded, and as its own lines opened', () => {
+  const command = 'cat <<EOF > file.txt\nline one\nline two\nEOF';
+  const rec: ViewRecord = { kind: 'console', data: d({ command }), phase: 'done', startedAt: 0 };
+  const folded = frameView(rec, { console: renderConsole }, { ...base, width: 60 }, {}).map((l) => l.spans.map((s) => s.text).join(''));
+  expect(folded).toEqual(['cat <<EOF > file.txt line one line two EOF · ✓ 4.2 s']);
+  const open = frameView(rec, { console: renderConsole }, { ...base, width: 60, folded: false }, {}).map((l) => l.spans.map((s) => s.text).join(''));
+  expect(open.slice(0, 4)).toEqual(['cat <<EOF > file.txt', 'line one', 'line two', 'EOF']);
+  expect(open.at(-1)).toBe('✓ 4.2 s');
 });
 
 test('capConsoleData caps movedTo and note the way it caps every other field', () => {

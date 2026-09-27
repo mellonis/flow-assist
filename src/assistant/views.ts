@@ -47,6 +47,13 @@ export const VIEW_CAPS = {
   // A path (a command's cwd, or where a `cd` inside it left the directory) — short
   // by nature, so it keeps the old, tighter cap.
   path: 300,
+  // How many WRAPPED rows an open block draws the command in before it cuts to a
+  // dim `… N more lines of the command` row — a display limit only (the record, the
+  // journal and `/export` keep the whole command): the command's own rows must
+  // never be able to grow past `rows` and push the output's tail or the outcome row
+  // out of the block, which a 16 KiB command wrapped at a narrow width otherwise
+  // could.
+  commandRows: 40,
   // How many lines an open console block shows.
   folded: 20,
   // How many rows any block may take, whatever its renderer returns.
