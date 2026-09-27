@@ -255,3 +255,26 @@ test('a caller may give the command an environment of its own', async () => {
   const plain = await runShell('printf "%s" "${FA_ONLY_HERE-unset}"', { cwd: tmp() });
   expect(plain.output).toBe('unset');
 });
+
+test('output cut inside a token, stderr landing inside one, and a coloured one are all still redacted', async () => {
+  const { buildSecretSet, setActiveSecrets } = await import('../secrets.ts');
+  const token = 'eyJhbGciOiJIUzI1NiJ9.payload-of-a-token.sig';
+  process.env.FA_TEST_TOKEN = token;
+  setActiveSecrets(buildSecretSet({}, { FA_TEST_TOKEN: token }));
+  try {
+    // All but the last character, and nothing after it: a held tail at the end.
+    const less = await runShell('printf "%s" "${FA_TEST_TOKEN%?}"', { cwd: tmp() });
+    expect(less.output).toBe('‹secret FA_TEST_TOKEN›');
+    // A stderr write between two halves of a stdout token.
+    const split = await runShell(`printf '%s' '${token.slice(0, 20)}'; sleep 0.05; printf X >&2; sleep 0.05; printf '%s\\n' '${token.slice(20)}'`, { cwd: tmp() });
+    expect(split.output).not.toContain(token.slice(0, 12));
+    expect(split.output).toContain('‹secret FA_TEST_TOKEN›');
+    expect(split.output).toContain('X');
+    // grep --color paints the match inside the token.
+    const painted = await runShell('printf "%s\\n" "$FA_TEST_TOKEN" | grep --color=always payload', { cwd: tmp() });
+    expect(painted.output.replace(/\u001b\[[0-9;]*[A-Za-z]/g, '')).toBe('‹secret FA_TEST_TOKEN›\n');
+  } finally {
+    delete process.env.FA_TEST_TOKEN;
+    setActiveSecrets(null);
+  }
+});

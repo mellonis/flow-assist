@@ -3199,11 +3199,17 @@ a new path for text keeps to it.
   `unsetConfigValue`); a value is never logged or journaled.
 - **`redactSecrets(text)` replaces each occurrence with `‹secret NAME›`** — the value,
   and its base64 (unpadded), base64url and URL-encoded forms, the longest match first; a
-  value under `SECRET_MIN_LENGTH` (8) is never redacted (it would match words). A
-  stream (`secretStream`) holds back the shortest tail that could still grow into a
-  secret, so a chunk boundary never lets a split one through; streamed text therefore
-  shows a few characters late when its end could begin one. The choke points, one per
-  channel:
+  value under `SECRET_MIN_LENGTH` (8) is never redacted (it would match words). A match
+  is looked for with terminal escape sequences taken out, so `grep --color` painting
+  part of a token does not hide it (the sequences inside a match go with it). A stream
+  (`secretStream`) holds back the shortest tail that could still grow into a secret — or
+  an escape sequence cut off — so a chunk boundary never lets a split one through, and
+  a held tail is never emitted in clear: at `flush`, a tail of 8 or more characters
+  that begins a secret (output cut off inside a token, `${TOKEN%?}`) goes out as its
+  mark. One stream per source: `runShell` keeps one for stdout and one for stderr, and
+  `agentChat` flushes its answer and reasoning streams in a `finally`, so a stop or an
+  error loses no text. Streamed text shows a few characters late when its end could
+  begin a secret. The choke points, one per channel:
   - a tool's result — `agentChat`, where `detailStr` and the data behind a framed result
     (`raw`) are made: what the model is sent, the kept data a later call pipes, the
     trail, the tool log, the session and the journal all read them;

@@ -206,16 +206,18 @@ export function runShell(cmd: string, opts: ShellOptions): Promise<ShellResult> 
     let timedOut = false, stopped = false, done = false;
     // Every known secret is taken out HERE, before a chunk reaches a listener or the
     // buffer (./secrets.ts): whatever shows, journals or hands over the output only ever
-    // has the redacted text, and a tail cut can never start inside a secret. The stream
-    // holds back a tail that could still grow into one; `finish` flushes it.
-    const secrets = secretStream();
+    // has the redacted text, and a tail cut can never start inside a secret. Each pipe
+    // has a stream of its own (a stderr line landing inside a stdout token would split
+    // it), holding back a tail that could still grow into one; `finish` flushes both.
+    const outSecrets = secretStream();
+    const errSecrets = secretStream();
     const emit = (text: string) => {
       if (!text) return;
       if (!done) { try { opts.onOutput?.(text); } catch { /* a listener never breaks the command */ } }
       out += text;
       if (out.length > maxChars * 2) { dropped += out.length - maxChars; out = out.slice(-maxChars); }
     };
-    const take = (chunk: string) => emit(secrets.push(chunk));
+
     // Where the shell ends up is written to a private temp file, so it never mixes
     // with the output. (A 4th stdio pipe was tried: under Bun it now and then closed
     // early — "pwd: write error: Broken pipe" — and the report was lost.) The newline
@@ -240,7 +242,8 @@ export function runShell(cmd: string, opts: ShellOptions): Promise<ShellResult> 
     let grace: ReturnType<typeof setTimeout> | null = null;
     const finish = (code: number | null, error?: string) => {
       if (done) return;
-      emit(secrets.flush());
+      emit(outSecrets.flush());
+      emit(errSecrets.flush());
       done = true;
       clearTimeout(timer);
       if (grace) clearTimeout(grace);
@@ -258,8 +261,8 @@ export function runShell(cmd: string, opts: ShellOptions): Promise<ShellResult> 
       child.stdin.on('error', () => {});
       child.stdin.end(Buffer.from(opts.stdin, 'utf8'));
     }
-    child.stdout!.setEncoding('utf8').on('data', take);
-    child.stderr!.setEncoding('utf8').on('data', take);
+    child.stdout!.setEncoding('utf8').on('data', (chunk: string) => emit(outSecrets.push(chunk)));
+    child.stderr!.setEncoding('utf8').on('data', (chunk: string) => emit(errSecrets.push(chunk)));
     child.on('error', (e) => finish(null, e.message));
     let exitCode: number | null = null;
     child.on('exit', (code) => {

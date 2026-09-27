@@ -863,24 +863,30 @@ export async function agentChat(
       // What the model writes is shown, kept and saved without a known secret in it
       // (./secrets.ts): its text and its reasoning each pass a redacting stream, which
       // holds back a tail a chunk boundary may have split; the tails go out when the
-      // round ends. A round cut off loses its held tail, never a redaction.
+      // round ends, however it ends.
       const answerStream = secretStream();
       const thinkStream = secretStream();
       const onLive = (d: string) => { if (d) { roundContent += d; (opts.onLive as AgentOpts['onLive'])?.(d); } };
       const onThink = (d: string) => { if (d) opts.onReasoning?.(d); };
-      const r = await chatRoundFn(withRequestTail(withSystemPrompt(withAttachedImages(current, attachedUrls), systemPrompt), requestTail), {
-        ...opts,
-        tools: roundTools(),
-        ...(noThinking ? { thinking: undefined } : {}),
-        onToolCalls: () => opts.onRoundKind?.('tools'),
-        // Round content streams LIVE via onLive while accumulating into roundContent.
-        // Which shelf it belongs to (answer vs. narration fold) is decided at the end
-        // of the round, when tool_calls arrive (or not).
-        onDelta: (d: string) => onLive(answerStream.push(d)),
-        onReasoning: (d: string) => onThink(thinkStream.push(d)),
-      } as Record<string, unknown>);
-      onThink(thinkStream.flush());
-      onLive(answerStream.flush());
+      let r: ChatRoundResult;
+      try {
+        r = await chatRoundFn(withRequestTail(withSystemPrompt(withAttachedImages(current, attachedUrls), systemPrompt), requestTail), {
+          ...opts,
+          tools: roundTools(),
+          ...(noThinking ? { thinking: undefined } : {}),
+          onToolCalls: () => opts.onRoundKind?.('tools'),
+          // Round content streams LIVE via onLive while accumulating into roundContent.
+          // Which shelf it belongs to (answer vs. narration fold) is decided at the end
+          // of the round, when tool_calls arrive (or not).
+          onDelta: (d: string) => onLive(answerStream.push(d)),
+          onReasoning: (d: string) => onThink(thinkStream.push(d)),
+        } as Record<string, unknown>);
+      } finally {
+        // Whatever the round ends in — its end, a stop, an error — the held tails go
+        // out, a begun secret as its mark.
+        onThink(thinkStream.flush());
+        onLive(answerStream.flush());
+      }
       if (r.usage) {
         usage = r.usage;
         // New tokens: the prompt less its cached part — or, with no cache figure reported,

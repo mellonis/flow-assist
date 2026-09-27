@@ -129,11 +129,50 @@ function patternOf(set: SecretSet): { re: RegExp; nameOf: Map<string, string> } 
 
 export const secretMark = (name: string): string => `‹secret ${name}›`;
 
+// The escape sequences a terminal consumes — CSI, OSC (to BEL or ST), the two-character
+// ones — and one cut off at the end of a chunk. A match is looked for in the text with
+// them taken out, so `grep --color` painting part of a token does not hide it; the
+// sequences inside a match go with it.
+const ANSI = /\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_]/g;
+const ANSI_CUT = /\x1b(?:\[[0-?]*[ -/]*|\][^\x07\x1b]*)?$/;
+// The text without escape sequences, and where each of its characters stood (`at`,
+// one entry more: the original's length).
+function visible(text: string): { text: string; at: number[] } {
+  if (!text.includes('\x1b')) return { text, at: [] };
+  let out = '';
+  const at: number[] = [];
+  let last = 0;
+  ANSI.lastIndex = 0;
+  for (const m of text.matchAll(ANSI)) {
+    for (let i = last; i < m.index!; i++) { out += text[i]; at.push(i); }
+    last = m.index! + m[0].length;
+  }
+  for (let i = last; i < text.length; i++) { out += text[i]; at.push(i); }
+  at.push(text.length);
+  return { text: out, at };
+}
+const origin = (v: { at: number[] }, i: number): number => (v.at.length ? v.at[i]! : i);
+
+// Every match in `text`, as spans of the text as it is.
+function matchSpans(text: string, p: { re: RegExp; nameOf: Map<string, string> }): { start: number; end: number; name: string }[] {
+  const v = visible(text);
+  const out: { start: number; end: number; name: string }[] = [];
+  p.re.lastIndex = 0;
+  for (const m of v.text.matchAll(p.re)) {
+    out.push({ start: origin(v, m.index!), end: origin(v, m.index! + m[0].length - 1) + 1, name: p.nameOf.get(m[0]) ?? 'value' });
+  }
+  return out;
+}
+
 export function redactSecrets(text: string, set: SecretSet | null = ACTIVE): string {
   if (!set || typeof text !== 'string' || !text) return text;
   const p = patternOf(set);
   if (!p) return text;
-  return text.replace(p.re, (m) => secretMark(p.nameOf.get(m) ?? 'value'));
+  if (!text.includes('\x1b')) return text.replace(p.re, (m) => secretMark(p.nameOf.get(m) ?? 'value'));
+  let out = '';
+  let last = 0;
+  for (const m of matchSpans(text, p)) { out += text.slice(last, m.start) + secretMark(m.name); last = m.end; }
+  return out + text.slice(last);
 }
 
 // Every string of a JSON-like value redacted; everything else as it is.
@@ -152,8 +191,12 @@ export function redactDeep<T>(value: T, set: SecretSet | null = ACTIVE): T {
 
 // Redaction over a stream of chunks: `push` returns what may go out now, redacted, and
 // holds back the shortest tail that could still grow into a secret (a chunk boundary
-// may split one); `flush` gives the rest. Nothing emitted ever holds a piece of a
-// secret that the next chunk completes.
+// may split one, or an escape sequence be cut off); `flush` gives the rest. Nothing
+// emitted ever holds a piece of a secret that the next chunk completes, and a held tail
+// is never emitted in clear: at `flush` a tail of `SECRET_MIN_LENGTH` or more that
+// begins a secret — output cut off inside a token, a token less its last character —
+// goes out as that secret's mark. One stream per source: two sources interleaved
+// (stdout and stderr) would split each other's tokens.
 export interface SecretStream {
   push(chunk: string): string;
   flush(): string;
@@ -162,13 +205,17 @@ export function secretStream(set: SecretSet | null = ACTIVE): SecretStream {
   let buf = '';
   const p = set ? patternOf(set) : null;
   if (!set || !p) return { push: (c) => c, flush: () => '' };
-  // The first position whose tail is a proper prefix of some form.
+  // Where the held tail starts, in the text as it is: an escape sequence cut off at the
+  // end, else the first visible position whose tail is a proper prefix of some form.
   const holdFrom = (s: string): number => {
-    for (let i = Math.max(0, s.length - set.maxLength + 1); i < s.length; i++) {
-      const tail = s.slice(i);
-      if (set.forms.some((f) => f.text.length > tail.length && f.text.startsWith(tail))) return i;
+    const cut = ANSI_CUT.exec(s);
+    const limit = cut ? cut.index : s.length;
+    const v = visible(s.slice(0, limit));
+    for (let i = Math.max(0, v.text.length - set.maxLength + 1); i < v.text.length; i++) {
+      const tail = v.text.slice(i);
+      if (set.forms.some((f) => f.text.length > tail.length && f.text.startsWith(tail))) return origin(v, i);
     }
-    return s.length;
+    return limit;
   };
   return {
     push(chunk: string): string {
@@ -176,16 +223,20 @@ export function secretStream(set: SecretSet | null = ACTIVE): SecretStream {
       buf += chunk;
       let h = holdFrom(buf);
       // A whole match that the hold would cut is held with it.
-      p.re.lastIndex = 0;
-      for (const m of buf.matchAll(p.re)) {
-        if (m.index! < h && m.index! + m[0].length > h) { h = m.index!; break; }
+      for (const m of matchSpans(buf, p)) {
+        if (m.start < h && m.end > h) { h = m.start; break; }
       }
       const out = buf.slice(0, h);
       buf = buf.slice(h);
       return redactSecrets(out, set);
     },
     flush(): string {
-      const out = redactSecrets(buf, set);
+      const h = holdFrom(buf);
+      const tail = visible(buf.slice(h)).text;
+      const begun = h < buf.length && tail.length >= SECRET_MIN_LENGTH
+        ? set.forms.find((f) => f.text.length > tail.length && f.text.startsWith(tail))
+        : undefined;
+      const out = begun ? redactSecrets(buf.slice(0, h), set) + secretMark(begun.name) : redactSecrets(buf, set);
       buf = '';
       return out;
     },

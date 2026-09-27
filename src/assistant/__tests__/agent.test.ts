@@ -1078,3 +1078,29 @@ test('a known secret leaves a turn nowhere: not the result sent, the run, its ra
     setActiveSecrets(null);
   }
 });
+
+test('a held tail is flushed at a round\'s end, a stop and an error — whole, and a begun secret as its mark', async () => {
+  const { buildSecretSet, setActiveSecrets } = await import('../secrets');
+  const token = 'agent-secret-value-1234567890';
+  setActiveSecrets(buildSecretSet({}, { WB_WIKI_TOKEN: token }));
+  try {
+    assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
+    // An answer that ends in all but the last character of the token.
+    let live = '';
+    const cut = await agentChat([{ role: 'user', content: 'go' }], {
+      baseUrl: 'http://x', model: 'm', token: 't', onLive: (d: string) => { live += d; }, onLiveCommit: () => {},
+      chatRound: async (_m: any[], opts: any) => { opts.onDelta?.(`It is ${token.slice(0, -1)}`); return { content: '', finishReason: 'stop', toolCalls: [] }; },
+    } as any);
+    expect(live).toBe('It is ‹secret WB_WIKI_TOKEN›');
+    expect(cut.content).toBe('It is ‹secret WB_WIKI_TOKEN›');
+    // Stopped mid-round: what was held (an `a` that could begin the token) is not lost.
+    let stopped = '';
+    await expect(agentChat([{ role: 'user', content: 'go' }], {
+      baseUrl: 'http://x', model: 'm', token: 't', onLive: (d: string) => { stopped += d; }, onLiveCommit: () => {},
+      chatRound: async (_m: any[], opts: any) => { opts.onDelta?.('Stopped here a'); const e = new Error('aborted'); e.name = 'AbortError'; throw e; },
+    } as any)).rejects.toThrow();
+    expect(stopped).toBe('Stopped here a');
+  } finally {
+    setActiveSecrets(null);
+  }
+});

@@ -114,3 +114,22 @@ test('the environment for a model\'s command loses every secret variable but the
   expect(clean.PATH).toBe('/usr/bin:/bin');
   expect(withheld).toEqual(['WB_WIKI_TOKEN']);
 });
+
+test('a held tail that begins a secret is never flushed in clear — 8 or more characters go out as its mark', () => {
+  const set = buildSecretSet({}, env);
+  const cut = secretStream(set);
+  expect(cut.push(`x ${TOKEN.slice(0, -1)}`) + cut.flush()).toBe('x ‹secret WB_WIKI_TOKEN›');
+  const short = secretStream(set);
+  expect(short.push('x eyJhb') + short.flush()).toBe('x eyJhb');
+});
+
+test('escape codes painted inside a token do not hide it — grep --color', () => {
+  const set = buildSecretSet({}, env);
+  const painted = `pre ${TOKEN.slice(0, 21)}\u001b[01;31m\u001b[K${TOKEN.slice(21, 28)}\u001b[m\u001b[K${TOKEN.slice(28)} post`;
+  expect(redactSecrets(painted, set)).toBe('pre ‹secret WB_WIKI_TOKEN› post');
+  expect(redactSecrets('\u001b[31mred\u001b[0m', set)).toBe('\u001b[31mred\u001b[0m');
+  // Split across chunks, the cut falling inside an escape sequence.
+  const at = painted.indexOf('\u001b[01') + 4;
+  const s = secretStream(set);
+  expect(s.push(painted.slice(0, at)) + s.push(painted.slice(at)) + s.flush()).toBe('pre ‹secret WB_WIKI_TOKEN› post');
+});
