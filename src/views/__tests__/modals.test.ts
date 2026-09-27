@@ -111,6 +111,45 @@ test("a command block's gutter marker is dim while it runs, ok on exit 0, the er
   expect(await markerFg(shellMsg({}, 'failed'))).toBe('red');
 });
 
+// The gutter marker draws the mark of HOW the run happened — `! ` ordinary, `‼ `
+// interactive — the same two characters the field's own prompt uses, whether the
+// block is folded to one line or opened to its output. `folded`/`opened` are told
+// apart by the output: folded holds it back (one line, no `│ ` body), opened shows it.
+const shellMsg = (interactive: boolean) => ({
+  role: 'shell', content: '',
+  views: [{
+    kind: 'console',
+    data: { command: 'echo hi', cwd: '~', text: 'out', exitCode: 0, ms: 10, status: 'exit 0', ...(interactive ? { interactive: true } : {}) },
+    phase: 'done', startedAt: 0,
+  }],
+});
+const consoleFrame = async (interactive: boolean, open: boolean) => {
+  const theme = { modals: { chat: MODAL_COLOR_DEFAULTS.chat }, error: 'red' };
+  const backend = new TestBackend(80, 24);
+  const handle = await render(h(renderChatModal, { ...baseChat, theme, messages: [shellMsg(interactive)], folds: { open, except: new Set<string>() } }), backend);
+  const frame = backend.lastFrame;
+  handle.unmount();
+  return frame;
+};
+
+test('the gutter marker draws the ordinary run mark, folded and opened', async () => {
+  const folded = await consoleFrame(false, false);
+  expect(folded).toContain('! echo hi');
+  expect(folded).not.toContain('│ out'); // folded: one line, the output stays back
+  const opened = await consoleFrame(false, true);
+  expect(opened).toContain('! echo hi');
+  expect(opened).toContain('│ out'); // opened: the output is shown
+});
+
+test('the gutter marker draws the interactive run mark, folded and opened', async () => {
+  const folded = await consoleFrame(true, false);
+  expect(folded).toContain('‼ echo hi');
+  expect(folded).not.toContain('│ out');
+  const opened = await consoleFrame(true, true);
+  expect(opened).toContain('‼ echo hi');
+  expect(opened).toContain('│ out');
+});
+
 // The trail's header (`▾ N tools:`) takes red only for a failure nobody recovered
 // from, yellow for one a later call of the same tool recovered, and the normal
 // colour otherwise — a write never turns it yellow, it only adds its own ✎.

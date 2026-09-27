@@ -27,7 +27,7 @@ import { stripToolMarkup } from '../assistant/tool-markup.js';
 import { createToolSet, toolLoadingMode } from '../assistant/tool-loading.js';
 import { llmOpts } from '../assistant/llm-endpoint.js';
 import { copyTarget, copyToClipboard } from '../assistant/copy.js';
-import { cdChatTarget, createShellState, formatShell, nextCwd, realOf, runShell, shellAutoRun, shellLimits, shellOutcome, shellRoots, startNote, tildePath, type ShellResult } from '../assistant/shell.js';
+import { cdChatTarget, createShellState, formatShell, nextCwd, realOf, runMark, runShell, shellAutoRun, shellLimits, shellOutcome, shellRoots, startNote, tildePath, type ShellResult } from '../assistant/shell.js';
 import { findInstructions, instructionsBlock, instructionsNote, type ProjectInstructions } from '../assistant/project-instructions.js';
 import {
   JOURNAL_DAYS, KEEP_SESSIONS, SESSION_VERSION, acquireLock, closeSession, cutTitle, flushOnExit, journalPath, listSessions, loadSession, lockPath,
@@ -2219,7 +2219,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             setEmptyNotice(''); setContinueOffer(false);
             setToolCount(0);
             setStreaming(true);
-            setToolLabel(`$ ${cmd.length > 60 ? `${cmd.slice(0, 60)}…` : cmd}`);
+            setToolLabel(`${runMark(interactive)} ${cmd.length > 60 ? `${cmd.slice(0, 60)}…` : cmd}`);
             t0Ref.current = Date.now();
             // The command is the only thing running, so the segment is the whole of it.
             beginSegment();
@@ -2313,7 +2313,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // Beside the text, what its stub says once a batch stubs it (src/assistant/
                 // recall.ts): the command, how it ended, how long, how many lines.
                 const printed = r.output.replace(/\n+$/, '');
-                const meta: ShellMeta = { command: cmd, outcome: shellOutcome(r, timeoutMs), ms: r.ms, lines: printed ? printed.split('\n').length : 0 };
+                const meta: ShellMeta = { command: cmd, outcome: shellOutcome(r, timeoutMs), ms: r.ms, lines: printed ? printed.split('\n').length : 0, ...(interactive ? { interactive: true } : {}) };
                 if (seen) apiRef.current = [...apiRef.current, { role: 'shell', content: forModel, shell: meta }];
                 if (interactive && !r.error && !seen) {
                   const why = recorded

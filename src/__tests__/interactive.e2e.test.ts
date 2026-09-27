@@ -105,7 +105,7 @@ test('!!command hands the terminal over, shows the cleaned recording as its view
   expect(shell).toBeDefined();
   const body = String(shell!.content);
   expect(body).toContain(`in ${root}`);
-  expect(body).toContain('$ ./greet.sh');
+  expect(body).toContain('‼ ./greet.sh');
   expect(body).toContain('(exit 1 ·');
   expect(body.split('\n')).toContain('Your name? Hello, Ruslan!');
   expect(body.split('\n')).toContain('progress 100%');

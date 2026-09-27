@@ -21,7 +21,7 @@ test('while it runs the tail is its clock in whole seconds', () => {
   expect(plain(consoleTail(d({ exitCode: undefined, ms: undefined, status: undefined }), { ...base, live: true, elapsedMs: 12_900 }))).toBe('12 s');
 });
 
-test('folded, a command is one line; the $ is the gutter\'s, not the renderer\'s', () => {
+test('folded, a command is one line; the run mark is the gutter\'s, not the renderer\'s', () => {
   expect(renderConsole(d({ text: 'a\nb\nc' }), base).map(plain)).toEqual(['bun test · ✓ 4.2 s']);
 });
 

@@ -3,7 +3,7 @@
 // no drawing path of its own. `run_command` and the person's `!command` both use it,
 // and so does an interactive `!!command` (./interactive.ts), marked `interactive`.
 //
-// Folded, a command is ONE line: `bun test · ✓ 4.2 s` (the `$ ` is the gutter's), and
+// Folded, a command is ONE line: `bun test · ✓ 4.2 s` (the `! `/`‼ ` mark is the gutter's), and
 // `· 40 lines` after it when the output is longer than a click shows — how much there
 // is to read is news only then, and a block that size may open in the chat's pager —
 // or `· last 200 of 300 lines` when the view kept only the tail of what was printed.

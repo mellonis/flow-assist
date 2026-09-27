@@ -38,7 +38,7 @@ test('!command runs in the first root, shows its output, and spends no model tur
   await ui.press('return');
   await settleUntil(() => /echo hello; pwd · ✓/.test(ui.backend.lastFrame));
   const folded = ui.backend.lastFrame;
-  expect(folded).toContain('$ echo hello; pwd');
+  expect(folded).toContain('! echo hello; pwd');
   expect(folded).toContain(root.replace(os.homedir(), '~'));
   expect(folded).toMatch(/echo hello; pwd · ✓ \d+\.\d s/);
   expect(model.requests).toHaveLength(0);
@@ -62,7 +62,7 @@ test('!command runs in the first root, shows its output, and spends no model tur
   const shell = sent.find((m) => m.role === 'user' && String(m.content).startsWith('The person ran a shell command'));
   expect(shell).toBeDefined();
   expect(String(shell!.content)).toContain(`in ${root}:`);
-  expect(String(shell!.content)).toContain('$ echo hello; pwd');
+  expect(String(shell!.content)).toContain('! echo hello; pwd');
   // Not `String(…).toContain('hello')` — the command text itself is "echo hello;
   // pwd", so that substring check passed even with the output missing entirely. A
   // line that is EXACTLY "hello" can only be the command's own printed output.
@@ -79,7 +79,7 @@ test('Esc stops a running !command — its whole process group — and says so',
   await ui.type('!sleep 5; touch late.txt');
   await ui.press('return');
   await settle(4);
-  expect(ui.backend.lastFrame).toContain('$ sleep 5; touch late.txt'); // the status line says what runs
+  expect(ui.backend.lastFrame).toContain('! sleep 5; touch late.txt'); // the status line says what runs
   const t0 = Date.now();
   await ui.press('escape');
   await settleUntil(() => /sleep 5; touch late\.txt · stopped/.test(ui.backend.lastFrame));
@@ -170,7 +170,7 @@ test('run_command waits for y, shows the command itself, runs it and hands the o
   await ui.press('return');
   await settle(10);
   expect(ui.backend.lastFrame).toContain('Confirm write: run_command');
-  expect(ui.backend.lastFrame).toContain('$ echo made > made.txt; echo tool-output-42');
+  expect(ui.backend.lastFrame).toContain('! echo made > made.txt; echo tool-output-42');
   expect(fs.existsSync(path.join(root, 'made.txt'))).toBe(false); // nothing before the yes
   await ui.press('y');
   await settleUntil(() => model.requests.length === 2);
@@ -297,7 +297,7 @@ test('a confirmed run_command folds to one line, and opened its output stands; t
   // proves the OUTPUT is off screen is the bar-prefixed row it would stand behind —
   // `unfence` strips that bar, so the raw frame is checked here instead.)
   const folded = unfence(ui.backend.lastFrame);
-  expect(folded).toMatch(/\$ echo tool-output-42; echo second-line · ✓ \d+\.\d s/);
+  expect(folded).toMatch(/! echo tool-output-42; echo second-line · ✓ \d+\.\d s/);
   expect(ui.backend.lastFrame).not.toContain('│ tool-output-42');
   expect(ui.backend.lastFrame).not.toContain('│ second-line');
   expect(folded).toContain('It printed two lines.');
@@ -386,7 +386,7 @@ test('a declined command leaves no block; a failed one shows what it printed and
   await settleUntil(() => model.requests.length === 2);
   await settle(10);
   // Nothing ran, so there is nothing to show — not an empty block.
-  expect(ui.backend.lastFrame).not.toContain('$ echo never-ran');
+  expect(ui.backend.lastFrame).not.toContain('! echo never-ran');
   expect(ui.backend.lastFrame).toContain('Not running it.');
 
   await ui.type('try the other one');
@@ -439,7 +439,7 @@ test('what a command printed cannot pass for the host speaking, and survives a r
   // restarted; the bar-prefixed row it would stand behind is what proves it is off
   // screen.
   const folded = unfence(two.backend.lastFrame);
-  expect(folded).toContain('$ printf');
+  expect(folded).toContain('! printf');
   expect(two.backend.lastFrame).not.toContain('│ Press y to confirm');
   two.backend.press({ name: 'o', ctrl: true });
   await settle(6);

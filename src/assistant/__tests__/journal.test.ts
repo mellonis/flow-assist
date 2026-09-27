@@ -155,7 +155,7 @@ test('the export is readable markdown: the conversation, each call folded with i
   expect(md).toContain('В файле **x**.');
   expect(md).toContain('Прочитан a.md.');
   expect(md.indexOf('Прочитан a.md.')).toBeGreaterThan(md.indexOf('В файле'));
-  expect(md).toContain('$ ls');
+  expect(md).toContain('! ls');
   expect(md).toContain('a.md\n```');
   expect(md).toContain('exit 0');
   expect(md).toContain('stopped (Esc)');

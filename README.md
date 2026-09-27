@@ -37,7 +37,7 @@ bun run src/cli.ts --allow-writes "fix the typo in README.md"   # one-shot, writ
 A one-shot prompt has nobody to answer a y/n, so it declines every write — a command,
 a file edit, a tracker change — and the model is told to leave it to you in the chat;
 reads run as usual. `--allow-writes`, given before the prompt, lets writes run without
-asking and says each one on stderr as it runs (`[write] $ <command>`, or the tool and
+asking and says each one on stderr as it runs (`[write] ! <command>`, or the tool and
 its arguments). Even then `config_set`, a `web_fetch` outside `web.allowlist` and a
 plugin's own `run_command` are declined: config stays yours, a URL can carry out
 anything the model has read, and only the host's shell tool is covered by the flag.
@@ -205,7 +205,7 @@ URL as an image. A model that cannot take images: `config set ai.images.enabled 
 
 Bulky things — an image, a `!command`'s output, a large tool result — are sent to the
 model in full in the turn they arrive in, and later as a one-line stub naming an id
-(`[$ brew update — exit 0 · 24.7 s · 120 lines — recall("out:7d41e0aa")]`) that the
+(`[! brew update — exit 0 · 24.7 s · 120 lines — recall("out:7d41e0aa")]`) that the
 assistant reads again with its `recall` tool when it needs the content; the screen and
 the session keep everything. Stubbing happens in batches, once the context passes half
 the window (`ai.recall.threshold`) or every ten turns (`ai.recall.everyTurns`), so the

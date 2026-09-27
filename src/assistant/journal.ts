@@ -43,6 +43,7 @@ import path from 'node:path';
 import { formatBytes } from './session-picker.js';
 import { VIEW_CAPS, fence, resolveRenderer, type ViewRecord, type ViewRenderers } from './views.js';
 import { readParts } from './step.js';
+import { runMark } from './shell.js';
 
 export type JournalEvent = Record<string, unknown> & { t: string; at?: string };
 
@@ -195,7 +196,11 @@ export function rowOf(m: Record<string, unknown>, renderers: ViewRenderers): Jou
   switch (m.role) {
     case 'user': case 'bg': return { t: 'row', role: m.role, text, ...(m.hostAsk ? { hostAsk: true } : {}) };
     case 'note': return typeof m.summary === 'string' ? { t: 'compact', summary: m.summary, note: text } : { t: 'row', role: 'note', text };
-    case 'shell': return { t: 'shell', command: String(m.command ?? ''), output: text };
+    case 'shell': {
+      const v0 = Array.isArray(m.views) ? (m.views[0] as ViewRecord | undefined) : undefined;
+      const interactive = (v0?.data as { interactive?: boolean } | undefined)?.interactive === true;
+      return { t: 'shell', command: String(m.command ?? ''), output: text, ...(interactive ? { interactive: true } : {}) };
+    }
     case 'view': {
       const views = Array.isArray(m.views) ? (m.views as ViewRecord[]).map((v) => viewEntry(v, renderers)) : [];
       return views.length ? { t: 'row', role: 'view', views } : null;
@@ -326,7 +331,7 @@ export function exportMarkdown(events: JournalEvent[], opts: { title: string; id
       }
       case 'shell':
         shellOpen = true;
-        out.push(`**$ ${String(ev.command ?? '')}**${at}`, '');
+        out.push(`**${runMark(ev.interactive === true)} ${String(ev.command ?? '')}**${at}`, '');
         // A command from a state file carries the output that file kept.
         if (typeof ev.output === 'string') out.push(block(ev.output, 'console'), '');
         break;

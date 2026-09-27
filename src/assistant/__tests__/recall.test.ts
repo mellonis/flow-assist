@@ -31,7 +31,7 @@ test('an id is the kind and the first 8 hex of the content\'s sha256', () => {
 
 test('bulky items: each image, each !command output, each tool result over the size — identical content once', () => {
   const ref = image();
-  const out = 'The person ran a shell command in /w:\n$ brew update\n(exit 0 · 24.7 s)\n```\n' + big(1200) + '\n```';
+  const out = 'The person ran a shell command in /w:\n! brew update\n(exit 0 · 24.7 s)\n```\n' + big(1200) + '\n```';
   const res = `OK: ${big(5000)}`;
   const api: ChatMessage[] = [
     { role: 'user', content: 'look [Image #1]', images: [ref] },
@@ -54,7 +54,7 @@ test('bulky items: each image, each !command output, each tool result over the s
   expect(img!.stub).toBe(`[image shot.png · 3384×2078 — recall("img:aaaaaaaa")]`);
   expect(img!.ref).toBe(ref);
   expect(sh!.id).toBe(itemId('out', hashOf(out)));
-  expect(sh!.stub).toBe(`[$ brew update — exit 0 · 24.7 s · 120 lines — recall("${sh!.id}")]`);
+  expect(sh!.stub).toBe(`[! brew update — exit 0 · 24.7 s · 120 lines — recall("${sh!.id}")]`);
   expect(sh!.content).toBe(out);
   expect(tool!.id).toBe(itemId('res', hashOf(res)));
   expect(tool!.stub).toBe(`[read_file src/app.ts — 500 lines — recall("${tool!.id}")]`);
@@ -66,12 +66,14 @@ test('bulky items: each image, each !command output, each tool result over the s
 test('a stub is deterministic where the meta is missing, and an image without a size says its name alone', () => {
   const api: ChatMessage[] = [
     { role: 'user', content: 'x', images: [image({ width: undefined, height: undefined })] },
+    // `$ ls` — the content a session saved by an older build still holds; the
+    // fallback reads the command off it and normalizes the mark.
     { role: 'shell', content: 'The person ran a shell command in /w:\n$ ls\n(exit 0 · 0.1 s)\n```\na\nb\n```' },
     { role: 'tool', tool_call_id: 'orphan', content: `OK: ${big(5000)}` }, // its call is not in the history
   ];
   const [img, sh, res] = bulkyItems(api, 4096);
   expect(img!.stub).toBe('[image shot.png — recall("img:aaaaaaaa")]');
-  expect(sh!.stub).toBe(`[$ ls — 7 lines — recall("${sh!.id}")]`);
+  expect(sh!.stub).toBe(`[! ls — 7 lines — recall("${sh!.id}")]`);
   expect(res!.stub).toBe(`[tool result — 500 lines — recall("${res!.id}")]`);
 });
 
@@ -121,7 +123,7 @@ test('the state saves as plain lists and loads back; anything odd in a saved fil
 
 test('applyRecall: a stubbed image leaves its message as text, a stubbed output and result become their stubs, the rest is untouched', () => {
   const ref = image();
-  const out = 'The person ran a shell command in /w:\n$ brew update\n(exit 0 · 24.7 s)\n```\n' + big(1200) + '\n```';
+  const out = 'The person ran a shell command in /w:\n! brew update\n(exit 0 · 24.7 s)\n```\n' + big(1200) + '\n```';
   const res = `OK: ${big(5000)}`;
   const api: ChatMessage[] = [
     { role: 'user', content: 'look [Image #1]', images: [ref] },
@@ -162,8 +164,8 @@ test('applyRecall: a message with two images keeps the one that is not stubbed a
 
 test('findItem: the id, any unique prefix, the hash alone; an ambiguous prefix names the candidates', () => {
   const items = [
-    { id: 'out:7d41e0aa', hash: '7d41e0aa', kind: 'out' as const, stub: '[$ a]', chars: 1, lines: 1 },
-    { id: 'out:7d99ffff', hash: '7d99ffff', kind: 'out' as const, stub: '[$ b]', chars: 1, lines: 1 },
+    { id: 'out:7d41e0aa', hash: '7d41e0aa', kind: 'out' as const, stub: '[! a]', chars: 1, lines: 1 },
+    { id: 'out:7d99ffff', hash: '7d99ffff', kind: 'out' as const, stub: '[! b]', chars: 1, lines: 1 },
     { id: 'res:c02b9f15', hash: 'c02b9f15', kind: 'res' as const, stub: '[r]', chars: 1, lines: 1 },
   ];
   expect(findItem(items, 'out:7d41e0aa')).toEqual({ ok: true, item: items[0] });
@@ -172,7 +174,7 @@ test('findItem: the id, any unique prefix, the hash alone; an ambiguous prefix n
   expect(findItem(items, 'res')).toEqual({ ok: true, item: items[2] });
   const amb = findItem(items, 'out:7d');
   expect(amb.ok).toBe(false);
-  if (!amb.ok) expect(amb.error).toBe('"out:7d" matches more than one item: out:7d41e0aa [$ a]; out:7d99ffff [$ b] — give more of the id');
+  if (!amb.ok) expect(amb.error).toBe('"out:7d" matches more than one item: out:7d41e0aa [! a]; out:7d99ffff [! b] — give more of the id');
   const none = findItem(items, 'img:1');
   expect(none.ok).toBe(false);
   if (!none.ok) expect(none.error).toContain('nothing in the conversation matches "img:1"');
@@ -180,7 +182,7 @@ test('findItem: the id, any unique prefix, the hash alone; an ambiguous prefix n
 });
 
 test('recallResult: text comes back whole under a header; an image comes back as an image, or says why not', () => {
-  const out = 'The person ran a shell command in /w:\n$ ls\n(exit 0 · 0.1 s)\n```\na\nb\n```';
+  const out = 'The person ran a shell command in /w:\n! ls\n(exit 0 · 0.1 s)\n```\na\nb\n```';
   const [sh] = bulkyItems([{ role: 'shell', content: out, shell: { command: 'ls', outcome: 'exit 0', ms: 100, lines: 2 } }], 10);
   expect(recallResult(sh!, {})).toEqual({ ok: true, text: `[recalled ${sh!.id} — 7 lines]\n${out}` });
   const ref = image();

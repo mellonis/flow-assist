@@ -133,7 +133,7 @@ test('run_command and an unlisted web_fetch ask in every mode', async () => {
   await ui.press('return');
   await settle(10);
   expect(ui.backend.lastFrame).toContain('Confirm write: run_command');
-  expect(ui.backend.lastFrame).toContain('$ rm -rf /tmp/whatever'); // the line itself, not its JSON
+  expect(ui.backend.lastFrame).toContain('! rm -rf /tmp/whatever'); // the line itself, not its JSON
   await ui.press('n');
   await settleUntil(() => model.requests.length === 2);
 

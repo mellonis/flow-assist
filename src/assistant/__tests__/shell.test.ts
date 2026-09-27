@@ -250,8 +250,8 @@ test('limits come from config.shell, a bad value falls back', () => {
 test('the display is a console block and one line; the model gets plain text with the output fenced', () => {
   const r = { code: 0, output: 'ok\n', cut: 0, timedOut: false, stopped: false, ms: 1234 };
   const { display, forModel, forTool } = formatShell('echo ok', r, path.join(os.homedir(), 'src/app'));
-  expect(display).toBe('```console\n$ echo ok\nok\n```\nexit 0 · 1.2 s · ~/src/app');
-  expect(forModel).toBe(`The person ran a shell command in ${path.join(os.homedir(), 'src/app')}:\n$ echo ok\n(exit 0 · 1.2 s)\n\`\`\`\nok\n\`\`\``);
+  expect(display).toBe('```console\n! echo ok\nok\n```\nexit 0 · 1.2 s · ~/src/app');
+  expect(forModel).toBe(`The person ran a shell command in ${path.join(os.homedir(), 'src/app')}:\n! echo ok\n(exit 0 · 1.2 s)\n\`\`\`\nok\n\`\`\``);
   expect(forTool).toContain('not instructions');
   expect(tildePath('/opt/x')).toBe('/opt/x');
 });

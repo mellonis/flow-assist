@@ -696,7 +696,7 @@ hold this set together:
   (`src/loader/tools-shell.ts` on the runner in `src/assistant/shell.ts`). A group of
   its own, `shell`, off with `ai.disabledTools: ["shell"]`. It is `write: true`, so
   EVERY call pauses for the y/n, and the y/n block shows the command line itself
-  (`$ …`, wrapped, not its JSON); a background task declines it. What the model knows
+  (`! …`, wrapped, not its JSON); a background task declines it. What the model knows
   of the machine is in the tool's description, built at load: platform (with the BSD
   userland note on macOS), the starting directory, which of the usual programs are on
   PATH (one `command -v` probe per process, never throws), and "read package.json /
@@ -739,7 +739,7 @@ hold this set together:
   **A confirmed call SHOWS what it printed**, as the person's own `!command` does: the
   tool opens a live view (`ctx.liveView`, see "A tool describes what it shows, a
   renderer draws it, the host frames it") and fills it as the command prints, and the
-  chat draws the `$ …`/`‼ …` block (the second when it is marked `interactive`; see
+  chat draws the `! …`/`‼ …` block (the second when it is marked `interactive`; see
   the bang levels below). Its gutter marker is dim while the command runs — a slow
   pulse off the same clock the elapsed-seconds tail already redraws by, no timer of
   its own — then `ok` on exit 0 or the error colour otherwise (`ChatRow.consoleMark`,
@@ -772,7 +772,7 @@ hold this set together:
   taller than the conversation opens in the pager" under The chat); `^o` opens every
   block in full inline (`VIEW_CAPS.lines`, everything the view kept), which is what
   makes `^o for all` true rather than a second, still-capped state. Consecutive commands of a turn (no other call between them) fold under one
-  `ƒ Ran N commands · ✓ 34.0 s` head — `Running N commands · $ cmd · 4 s` while one runs —
+  `ƒ Ran N commands · ✓ 34.0 s` head — `Running N commands · ! cmd · 4 s` while one runs —
   which also takes in the rounds between them that said nothing but their plan (a
   step that is only its `Next:` line, `isPlanOnly`: the head says what ran, which is
   what the plan said would). Opened, they are the commands alone, each its own block
@@ -853,7 +853,7 @@ hold this set together:
     what the auto mode may answer with `shell.autoRun` on (`neverAutomatic` with both
     consents — so never `config_set`, an unlisted `web_fetch` or a plugin's
     `run_command`) and says each write it
-    lets through on stderr as it runs (`[write] $ <command>`, else the tool and its
+    lets through on stderr as it runs (`[write] ! <command>`, else the tool and its
     arguments — through `sanitizeViewText`, each further line marked `[write]   `, so
     an escape code or a carriage return in the command cannot hide the line);
   - a plugin's `services.chatLLM` — declines unless the plugin passes a `confirmWrite`
@@ -1204,7 +1204,7 @@ hold this set together:
   (`src/assistant/recall.ts`, pure; the chat owns the state). An attached image, a
   `!`/`!!` output and a tool result over `ai.recall.minChars` (4096) are BULKY ITEMS:
   sent in full in the turn they arrive in — all its rounds — and, from a later batch
-  on, as a one-line stub naming an id: `[$ brew update — exit 0 · 24.7 s · 120 lines —
+  on, as a one-line stub naming an id: `[! brew update — exit 0 · 24.7 s · 120 lines —
   recall("out:7d41e0aa")]`, `[image shot.png · 3384×2078 — recall("img:3f9a2c1b")]`,
   `[read_file src/app.ts — 412 lines — recall("res:c02b9f15")]`. An id is
   `<kind>:<first 8 hex of sha256>` of the content (an image's the sha256 its ref
@@ -2131,8 +2131,8 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
 - Who speaks is said by a **gutter marker and a ground**, not a label: `›` on the
   user ground for the person (the input field's own prompt), `ƒ` for the
   assistant's answer (also signing the frame, `ƒ Flow Assist`), `◆` on its own
-  ground for a background result, `$` on the user ground for the person's own
-  `!command` and on none for a command the MODEL ran and they confirmed (a `view`
+  ground for a background result, `!`/`‼` on the user ground for the person's own
+  `!command`/`!!command` and on none for a command the MODEL ran and they confirmed (a `view`
   message) — the same marker in the same colour, the ground saying whose it was. The
   host's own ask after a `!!command` is a `›` message drawn dim, marker and text: the
   person's side of the conversation, not their words. Colours come from `theme.modals.chat` (`accent`,
@@ -2645,7 +2645,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     carry it; a `<ScrollBox>` (the conversation, the help's list) and a `<Table>` are
     scopes already. A plugin's panes carry it too (the tracker: the board, each column
     cell, the issue, the info panel, every modal window).
-  - `selectable: false` on chrome: the gutter marker (`ƒ `, `› `, `$ `, `◆ `), the
+  - `selectable: false` on chrome: the gutter marker (`ƒ `, `› `, `! `/`‼ `, `◆ `), the
     pinned question, the `N tools` line, the hint rows, the input field, the title bar,
     the keycaps panel, and everything the bottom box draws around the typed command —
     the `: ` prompt, the inline offer, the candidate list, the footer hints and the
@@ -2691,9 +2691,13 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   place of `› `, both in `theme.modals.chat.shell` (a colour of its own, distinct from
   `accent` — pick it from `MODAL_COLOR_DEFAULTS.chat` in `src/playback/theme.ts`,
   checked against flowtty's `NAMED_COLORS` by the theme test; `‼` reuses the same
-  colour rather than getting a second one — one shell identity at two depths, and the
-  same glyph draws a running interactive command's own gutter marker in the chat's
-  rows). Both glyphs are exactly `GUTTER` (2) columns: `‼` is one cell wide
+  colour rather than getting a second one — one shell identity at two depths). Both
+  glyphs are the one mark for HOW a run happened (`RUN_MARK`/`runMark`,
+  `src/assistant/shell.ts` — the source the field's own prompt reads too, rather than
+  typing `!`/`‼` again), drawn wherever a run is: a command's own gutter marker in the
+  chat's rows, the y/n and the tool trail for `run_command`, `/export`, and the
+  model-facing text a `!command` or `run_command` returns. They are exactly `GUTTER`
+  (2) columns each: `‼` is one cell wide
   (`stringWidth`), so it takes a trailing space of its own, same as `! `, so a wrapped
   command's continuation rows still line up under the first. Enter runs the field text
   as it reads — level 1 as
@@ -2729,9 +2733,10 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   closed, `PAGER`/`GIT_PAGER=cat`, `GIT_TERMINAL_PROMPT=0`; stdout and stderr merged;
   the output keeps its TAIL (`shell.maxChars` 20000) and says how much was cut. While
   it runs the chat is busy exactly as while an answer is written (`streamRef`, the
-  spinner, `$ cmd` as the tool label, Esc stops it); a `!` meanwhile is refused, not
-  queued. The result is a message of role `shell` — `$ ` in the SAME shell colour as
-  the mode's prompt (a command reads as one thing from typing to result) on the
+  spinner, `! cmd`/`‼ cmd` as the tool label, Esc stops it); a `!` meanwhile is
+  refused, not queued. The result is a message of role `shell` — `! `/`‼ ` in the
+  SAME shell colour as the mode's prompt (a command reads as one thing from typing
+  to result) on the
   person's ground, the same live block as the model's commands (one line while it
   runs; `✓ 1.2 s · ~/dir` when it ends, opened by a click to its last lines) — the
   message is still role `shell` and still joins `apiRef` (`apiHistory` maps `shell` →
@@ -2932,8 +2937,8 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   every mover, so `!cd`, run_command's own `cd` and the `cd` tool feed it too) —
   re-checked against the roots on the way back, since they may have changed since.
 - The **status line** while a turn runs says what happens NOW: a running tool's label
-  (`⚙ name(args)…`, `$ command`) pulses through bright colours; once the tool ends
-  (`onToolRun`) the label goes. With no tool running the line says a WORD — a gerund
+  (`⚙ name(args)…`, `! command`/`‼ command`) pulses through bright colours; once the
+  tool ends (`onToolRun`) the label goes. With no tool running the line says a WORD — a gerund
   picked at random for each model request (`Pondering…`, `Brewing…`;
   `src/assistant/verbs.ts`, `ui.verbs` replaces the list) — with the same shimmer as
   a tool's label. It is picked when the request goes out (`send`, then `onRound` for

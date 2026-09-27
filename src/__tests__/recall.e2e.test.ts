@@ -178,8 +178,8 @@ test('a !command output and a large run_command result are stubbed the same way,
   // The turn's end batched both: the next request carries two stubs and none of the lines.
   await ask(ui, model, 'what did they print?', 3);
   const stubbed = req(model, 2);
-  const shellStub = textOf(stubbed.messages[stubbed.messages.indexOf(stubbed.messages.find((m) => m.role === 'user' && /^\[\$ seq 1 30/.test(textOf(m.content)))!)]!.content);
-  expect(shellStub).toMatch(/^\[\$ seq 1 30 — exit 0 · \d+\.\d s · 30 lines — recall\("out:[0-9a-f]{8}"\)\]$/);
+  const shellStub = textOf(stubbed.messages[stubbed.messages.indexOf(stubbed.messages.find((m) => m.role === 'user' && /^\[! seq 1 30/.test(textOf(m.content)))!)]!.content);
+  expect(shellStub).toMatch(/^\[! seq 1 30 — exit 0 · \d+\.\d s · 30 lines — recall\("out:[0-9a-f]{8}"\)\]$/);
   const resultStub = textOf(stubbed.messages.find((m) => m.role === 'tool')!.content);
   expect(resultStub).toMatch(/^\[run_command seq 1 200 — \d+ lines — recall\("res:[0-9a-f]{8}"\)\]$/);
   expect(JSON.stringify(stubbed.messages).split('\n').length).toBeLessThan(20);

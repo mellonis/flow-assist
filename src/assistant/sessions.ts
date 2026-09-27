@@ -50,7 +50,7 @@ import { configDir } from '../config/load.js';
 import { isImageRef, type ImageRef } from './images.js';
 import { createRecallState, saveRecallState } from './recall.js';
 import { readLegacyView, type ViewRecord } from './views.js';
-import { realOf, within } from './shell.js';
+import { realOf, runMark, within } from './shell.js';
 import { addCalls, callRun, readChange, readParts, type CallRun, type TurnPart } from './step.js';
 import type { ChangeView } from './diff.js';
 import type { TokenUsage } from './agent.js';
@@ -226,7 +226,8 @@ export function sessionTitle(messages: Record<string, unknown>[]): string {
   // The host's own ask after a `!!command` is not something the person asked.
   const first = messages.find((m) => m.role === 'user' && m.hostAsk !== true && String(m.content ?? '').trim());
   const ran = first ? undefined : messages.find((m) => m.role === 'shell' && typeof m.command === 'string');
-  return cutTitle(first ? String(first.content ?? '') : ran ? `$ ${String(ran.command)}` : '');
+  const interactive = ran && Array.isArray(ran.views) ? ((ran.views[0] as ViewRecord | undefined)?.data as { interactive?: boolean } | undefined)?.interactive === true : false;
+  return cutTitle(first ? String(first.content ?? '') : ran ? `${runMark(interactive)} ${String(ran.command)}` : '');
 }
 
 // A session worth keeping has something the person said or ran in it.

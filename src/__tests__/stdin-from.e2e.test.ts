@@ -74,7 +74,7 @@ test('a previous result reaches the command whole, before the cut, and the y/n n
   await settleUntil(() => ui.backend.lastFrame.includes('Confirm write: run_command'));
   const frame = ui.backend.lastFrame;
   expect(frame).toContain('Confirm write: run_command');
-  expect(frame).toContain(`$ ${COUNT_NBSP}`);
+  expect(frame).toContain(`! ${COUNT_NBSP}`);
   expect(frame).toContain('stdin: result of get_poem');
   // The model itself was sent the cut result: what it has is not what the command gets.
   // The whole text kept beside it is the host's alone — never in a request, not even in

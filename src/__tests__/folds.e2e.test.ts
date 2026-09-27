@@ -195,7 +195,7 @@ async function longOutput(runOutputLines = 3, lines = 8) {
 test('a finished command, folded, is one line saying how it ended', async () => {
   // longOutput() already ends scrolled to the very top, where the folded line stands.
   const { ui } = await longOutput(3, 60);
-  expect(ui.backend.lastFrame).toMatch(/\$ seq 1 60 · ✓ \d+\.\d s · 60 lines/);
+  expect(ui.backend.lastFrame).toMatch(/! seq 1 60 · ✓ \d+\.\d s · 60 lines/);
   expect(ui.backend.lastFrame).not.toContain('│ 60');
   ui.app.unmount();
 });

@@ -5,7 +5,7 @@
 // it stays in the model's history and rides every later request. So a BULKY ITEM (an
 // image, a `!`/`!!` output, a tool result over `ai.recall.minChars`) is sent in full in
 // the turn it arrives in, all its rounds, and from a later batch on as a short stub
-// naming an id: `[$ brew update — exit 0 · 24.7 s · 120 lines — recall("out:7d41e0aa")]`.
+// naming an id: `[! brew update — exit 0 · 24.7 s · 120 lines — recall("out:7d41e0aa")]`.
 // The `recall` core tool brings the item back for one turn — an image as an image.
 //
 // An id is a CONTENT HASH, `<kind>:<first 8 hex of sha256>` — `img:` an image (the
@@ -26,6 +26,7 @@
 import crypto from 'node:crypto';
 import type { ChatMessage } from './agent.js';
 import { contentText, type ImageRef, type ResolvedImage } from './images.js';
+import { RUN_MARK, runMark } from './shell.js';
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 // `ai.recall`: on by default. `threshold` is the share of `ai.contextWindow` past which
@@ -63,7 +64,8 @@ export interface BulkyItem {
 
 // What a `!command`'s message carries beside its text (`ShellMeta` on the `shell`
 // message in the model's history), so its stub can name the command and how it ended.
-export interface ShellMeta { command: string; outcome: string; ms: number; lines: number }
+// `interactive` is the person's `!!command`, so its stub's mark matches the screen's.
+export interface ShellMeta { command: string; outcome: string; ms: number; lines: number; interactive?: boolean }
 
 export const hashOf = (text: string): string => crypto.createHash('sha256').update(text).digest('hex');
 export const itemId = (kind: BulkyKind, hash: string): string => `${kind}:${hash.slice(0, 8)}`;
@@ -80,12 +82,14 @@ export function imageStub(ref: ImageRef): string {
   return `[image ${ref.name}${size} — ${RECALL_CALL(itemId('img', ref.sha256))}]`;
 }
 
-// Without the meta (a session saved before it was kept) the command is read off the
-// text's own `$ ` line, and the count is the message's.
+// Without the meta (a session saved before it was kept) the command and its mark are
+// read off the text's own first line — `$ ` in a session saved by an older build,
+// else `!`/`‼` — and the count is the message's.
 function shellStub(id: string, meta: ShellMeta | null, content: string): string {
-  if (meta) return `[$ ${meta.command} — ${meta.outcome} · ${fmtSecs(meta.ms)} · ${meta.lines} lines — ${RECALL_CALL(id)}]`;
-  const cmd = /^\$ (.+)$/m.exec(content)?.[1] ?? '…';
-  return `[$ ${cmd} — ${countLines(content)} lines — ${RECALL_CALL(id)}]`;
+  if (meta) return `[${runMark(meta.interactive)} ${meta.command} — ${meta.outcome} · ${fmtSecs(meta.ms)} · ${meta.lines} lines — ${RECALL_CALL(id)}]`;
+  const line = /^([$!‼]) (.+)$/m.exec(content);
+  const mark = runMark(line?.[1] === RUN_MARK.interactive);
+  return `[${mark} ${line?.[2] ?? '…'} — ${countLines(content)} lines — ${RECALL_CALL(id)}]`;
 }
 
 // The first string argument of the call, on one line and short — what names a
@@ -113,7 +117,7 @@ function resultStub(id: string, content: string, call: { name: string; args: unk
 function shellMetaOf(v: unknown): ShellMeta | null {
   const m = v as Partial<ShellMeta> | null;
   if (!m || typeof m !== 'object' || typeof m.command !== 'string') return null;
-  return { command: m.command, outcome: typeof m.outcome === 'string' ? m.outcome : '?', ms: Number(m.ms) || 0, lines: Number.isInteger(m.lines) ? (m.lines as number) : 0 };
+  return { command: m.command, outcome: typeof m.outcome === 'string' ? m.outcome : '?', ms: Number(m.ms) || 0, lines: Number.isInteger(m.lines) ? (m.lines as number) : 0, ...(m.interactive === true ? { interactive: true } : {}) };
 }
 
 // Every bulky item the model's history (`apiRef`, the host's own shape — a `!command`

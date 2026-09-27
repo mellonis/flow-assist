@@ -100,9 +100,9 @@ test('a running tool is drawn bright, not dim — it moves', async () => {
   await ui.press('return');
   await settle(6);
   const rows = ui.backend.lastFrame.split('\n');
-  const y = rows.findIndex((r) => r.includes('$ sleep 1') && r.includes('Esc stops'));
+  const y = rows.findIndex((r) => r.includes('! sleep 1') && r.includes('Esc stops'));
   expect(y).toBeGreaterThanOrEqual(0);
-  const style = ui.backend.lastBuffer.get(rows[y]!.indexOf('$ sleep 1'), y).style as { fg?: string; dim?: boolean };
+  const style = ui.backend.lastBuffer.get(rows[y]!.indexOf('! sleep 1'), y).style as { fg?: string; dim?: boolean };
   expect(style.dim).toBeFalsy();
   expect(style.fg).toBeTruthy();
   await ui.press('escape');

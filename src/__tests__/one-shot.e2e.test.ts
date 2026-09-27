@@ -78,7 +78,7 @@ test('with --allow-writes a write runs and is said on stderr; config_set still d
   expect(read).toStartWith('OK:');
   // Config is the person's: the flag is no yes to it, as the auto mode never is.
   expect(config).toStartWith('DECLINED:');
-  expect(err).toContain('$ echo made > made.txt');
+  expect(err).toContain('! echo made > made.txt');
   expect(err).not.toContain('config set');
 });
 
@@ -95,7 +95,7 @@ test('with --allow-writes the stderr line keeps no escape code or carriage retur
   expect(err).not.toContain('\u001b');
   expect(err).not.toContain('\r');
   const lines = err.trimEnd().split('\n').filter((l) => !l.startsWith('[plugins]'));
-  expect(lines).toEqual(['[write] $ echo made > made.txt', '[write]   true', '[write]   echo two']);
+  expect(lines).toEqual(['[write] ! echo made > made.txt', '[write]   true', '[write]   echo two']);
 });
 
 // The flag is a yes to what the auto mode may answer with `shell.autoRun` on, and no

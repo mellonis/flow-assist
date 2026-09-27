@@ -141,7 +141,7 @@ export const MODAL_COLOR_DEFAULTS: Record<string, Record<string, string>> = {
   // The chat's own colours, every one overridable via config.plugins.assistant.colors:
   //   accent   — the `›` prompt, shared by the input field and the person's messages
   //   shell    — the `!`/`‼` prompt of shell/interactive mode, and a command's own
-  //              `$ `/`‼ ` marker while it still runs (pulsing) — so a shell command
+  //              `! `/`‼ ` marker while it still runs (pulsing) — so a shell command
   //              reads as one thing from the moment it is typed to the moment it
   //              starts; once it ends the marker takes `ok` or the error colour
   //   userBg   — the ground under the person's messages

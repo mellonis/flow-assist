@@ -298,7 +298,8 @@ test('the console view keeps the interactive mark through the cap (a live update
 
 test('a session is never named by the host\'s ask after a !!command', () => {
   const ask = { role: 'user', content: 'Look at what the interactive command above printed…', hostAsk: true };
-  expect(sessionTitle([{ role: 'shell', command: 'git add -p', content: '' }, ask])).toBe('$ git add -p');
+  const ran = { role: 'shell', command: 'git add -p', content: '', views: [{ kind: 'console', data: { interactive: true }, phase: 'done', startedAt: 0 }] };
+  expect(sessionTitle([ran, ask])).toBe('‼ git add -p');
   expect(sessionTitle([{ role: 'shell', command: 'top', content: '' }, ask, { role: 'user', content: 'why so slow?' }])).toBe('why so slow?');
 });
 

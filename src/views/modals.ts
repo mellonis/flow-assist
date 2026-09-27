@@ -29,7 +29,7 @@ import { groupHeadText, groupOpen, viewGroups, type GroupMsg, type ViewGroup } f
 import { renderConsole } from '../assistant/console-view.js';
 import { CELL_FREE, CELL_FULL, CONTEXT_WARN_AT, GRID_COLS, GRID_ROWS, contextFootnote, contextGrid, contextHeading, contextLegend, tokensBadge, type ContextReading, type GridCell } from '../assistant/context-meter.js';
 import { formatBytes, pickerGroups, pickerSelected, rowStatus, type OwnStatus, type PickerState } from '../assistant/session-picker.js';
-import { tildePath } from '../assistant/shell.js';
+import { runMark, tildePath } from '../assistant/shell.js';
 import { sessionWhen, type SessionRow } from '../assistant/sessions.js';
 import { createElement as h, useEffect, useRef, useState, type ReactNode } from 'react';
 import { wrapText } from '@flowtty/core';
@@ -167,14 +167,14 @@ interface ChatRow {
   label?: boolean | string;
   // The first content row of a message: it carries the speaker's marker.
   first?: boolean;
-  // A view that is not a command draws no `$`.
+  // A view that is not a command draws no run mark.
   plainGutter?: boolean;
   // A console block's own state, read off its view record — resolved here, once,
   // rather than in the renderer, so the gutter marker never has to know a view's
   // shape: `live` while it runs (dim, pulsing), `ok` for exit 0 (green), `error` for
   // anything else it ended with (the error colour) — a stopped or timed-out run
   // included, which keeps its own wording in the tail text beside it. `interactive`
-  // draws `‼ ` in place of `$ `. Absent for a view that is not a console block.
+  // draws `‼ ` in place of `! `. Absent for a view that is not a console block.
   consoleMark?: { state: 'live' | 'ok' | 'error'; interactive?: boolean };
   // The quiet line under an answer: how long it took, which tools ran, what it cost.
   meta?: boolean;
@@ -278,7 +278,7 @@ export function mdLines(text: string | null | undefined, wrap: number): Line[] {
 // ─── A block the HOST built: the fence is ours, so its label row is noise ──────
 // flowtty draws a dim language label over every fenced block. Over a block the host
 // wrote itself that row says nothing: `diff` sits under a line that already says this
-// is a change to a file, `console` under the `$ command` line that says it better. The
+// is a change to a file, `console` under the `! command` line that says it better. The
 // language stays ON the fence — it is what colours a diff green and red — and the row
 // it produces is left out here, where the host's own markdown is laid out.
 //
@@ -706,7 +706,7 @@ function buildMessageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): Ch
         const isConsole = isConsoleKind(v.kind);
         // The gutter marker's own state, read straight off the record — a discarded
         // view (kept only so its message is not silently missing a block) draws the
-        // ordinary `$ `, as it always has.
+        // ordinary `! `.
         const data = v.data as { exitCode?: number | null; interactive?: boolean } | undefined;
         const consoleMark: ChatRow['consoleMark'] = isConsole && v.phase !== 'discarded'
           ? {
@@ -895,7 +895,7 @@ function chatRowRenderer({ palette: m, errorColor, wrap, now, detailsKey }: {
   // A `!command` is the person's own action, so it sits on the person's ground.
   const groundOf = (role?: string) => (role === 'user' || role === 'shell' ? m.userBg : role === 'bg' ? m.bgBg : undefined);
   // The gutter is frame, never copied: a drag across an answer returns its text
-  // without the `ƒ ` (or `› `, `$ `, `◆ `) in front of it.
+  // without the `ƒ ` (or `› `, `! `/`‼ `, `◆ `) in front of it.
   const gutter = (row: ChatRow) => h(Box, { selectable: false, flexShrink: 0 }, marker(row));
   const marker = (row: ChatRow) => {
     if (row.first && row.role === 'user') return row.quiet ? h(Text, { dim: true, color: m.accent }, '› ') : h(Text, { bold: true, color: m.accent }, '› ');
@@ -907,7 +907,7 @@ function chatRowRenderer({ palette: m, errorColor, wrap, now, detailsKey }: {
     // own block) draws no marker — it falls through to the blank gutter below.
     if (row.first && (row.role === 'shell' || row.role === 'view') && !row.plainGutter) {
       const cm = row.consoleMark;
-      const glyph = cm?.interactive ? '‼ ' : '$ ';
+      const glyph = `${runMark(cm?.interactive)} `;
       if (cm?.state === 'ok') return h(Text, { bold: true, color: m.ok }, glyph);
       if (cm?.state === 'error') return h(Text, { bold: true, color: errorColor }, glyph);
       // Live (or a shape this host does not classify, e.g. a discarded view read
@@ -1684,7 +1684,7 @@ export function renderChatModal({
                 // (2) columns wide: `‼` (U+203C) is one cell (`stringWidth`), so it
                 // takes a trailing space of its own, same as `! `, to line up a
                 // wrapped command's continuation rows under the first.
-                const bangGlyph = bangLevel === 2 ? '‼ ' : bangLevel === 1 ? '! ' : '› ';
+                const bangGlyph = bangLevel ? `${runMark(bangLevel === 2)} ` : '› ';
                 const prompt = h(Text, { bold: !streaming, dim: streaming, color: bangLevel ? m.shell : m.accent }, visible[i] === fieldRows[0] ? bangGlyph : ' '.repeat(GUTTER));
                 // A blank line is a real '' — flowtty ≥ 1.0.0-alpha.5 gives an empty Text
                 // its row; a collapsed one instead is how "two newlines" would vanish.
@@ -2063,13 +2063,15 @@ function askView(state: AskState, wrap: number) {
 export interface ConfirmAsk { name: string; args?: string | unknown; command?: string; line?: string; input?: string; title?: string; hint?: string; whole?: boolean }
 
 // The y/n block's pieces, the same way.
-// `command` is a shell command, drawn behind `$ `; `line` is a line drawn as it is (the
-// `config set` a `config_set` call stands for). Either takes the arguments' place.
+// `command` is a shell command, drawn behind the ordinary run mark — only
+// `run_command` reaches this block, and the model's own run is never interactive;
+// `line` is a line drawn as it is (the `config set` a `config_set` call stands for).
+// Either takes the arguments' place.
 function confirmView(c: ConfirmAsk) {
   const cut = (t: string) => (t.length > 1000 ? `${t.slice(0, 1000)}…` : t);
   return {
     title: c.title ?? `⚠ Confirm write: ${c.name}`,
-    command: c.command != null ? `$ ${cut(c.command)}` : c.line != null ? (c.whole ? c.line : cut(c.line)) : null,
+    command: c.command != null ? `${runMark()} ${cut(c.command)}` : c.line != null ? (c.whole ? c.line : cut(c.line)) : null,
     // Where the call's input comes from — a command's stdin, piped from an earlier
     // call's result (src/assistant/tool-results.ts); drawn under the command line.
     input: c.input ? `${c.command != null ? 'stdin' : 'input'}: result of ${c.input}` : null,

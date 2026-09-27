@@ -391,7 +391,7 @@ test('a title is the first line the person wrote, whitespace collapsed, cut at T
   expect(cutTitle(long).endsWith('…')).toBe(true);
   expect(cutTitle('   ')).toBe('');
   expect(sessionTitle([{ role: 'note', content: 'kept' }, { role: 'user', content: 'first line\nsecond line' }])).toBe('first line');
-  expect(sessionTitle([{ role: 'shell', command: 'git status\n', content: '' }])).toBe('$ git status');
+  expect(sessionTitle([{ role: 'shell', command: 'git status\n', content: '' }])).toBe('! git status');
 });
 
 // ─── the picker's rows, and writes that respect the lock ─────────────────────────

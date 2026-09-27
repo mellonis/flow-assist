@@ -13,6 +13,7 @@
 import { clickedOpen, foldId, isOpen, type FoldState } from './folds.js';
 import { isPlanOnly, shownText, type NotesMode, type TurnPart } from './step.js';
 import { isConsoleKind, sanitizeViewText, type ViewRecord } from './views.js';
+import { runMark } from './shell.js';
 
 export interface ViewGroup { head: number; members: number[]; hidden: number[] }
 export type GroupMsg = { role: string; content?: unknown; parts?: unknown; reasoning?: unknown; views?: unknown; roundLimit?: unknown; stopped?: unknown };
@@ -81,8 +82,9 @@ export function groupHeadText(recs: ViewRecord[], now: number): { text: string; 
   const running = recs.find((r) => r.phase === 'live');
   const sanitize = (parts: { text: string; color?: 'warn' | 'ok' }[]) => parts.map((p) => ({ ...p, text: sanitizeViewText(p.text) }));
   if (running) {
-    const cmd = String((running.data as { command?: unknown })?.command ?? '');
-    return sanitize([{ text: `Running ${n} commands · $ ${cmd} · ${Math.floor(Math.max(0, now - running.startedAt) / 1000)} s` }]);
+    const data = running.data as { command?: unknown; interactive?: boolean } | undefined;
+    const cmd = String(data?.command ?? '');
+    return sanitize([{ text: `Running ${n} commands · ${runMark(data?.interactive)} ${cmd} · ${Math.floor(Math.max(0, now - running.startedAt) / 1000)} s` }]);
   }
   const total = recs.reduce((t, r) => t + Number((r.data as { ms?: unknown })?.ms ?? 0), 0);
   const failed = recs.filter((r) => r.phase === 'failed' || (r.data as { exitCode?: unknown })?.exitCode !== 0).length;

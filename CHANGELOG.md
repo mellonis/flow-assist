@@ -37,6 +37,11 @@ What each version of flow-assist brought, newest first. The version is the one i
   so a restart or a crash never brings it in. A one-shot prompt or a `config` command
   refuses a changed file and says why. A `flow-assist config set` the assistant runs as
   a command writes the file but still waits for your yes.
+- **A shell run is marked by how it ran, not by `$`.** The console block, the y/n and
+  the tool trail for `run_command`, the pager and `/export` now draw `!` for an
+  ordinary run and `‼` for an interactive `!!` one — the same two characters the
+  field's own prompt already used at bang level 1/2 — so the screen and what the model
+  is told (the recall stub, the `--allow-writes` stderr line) always agree.
 - **An MCP server that is not there at start is tried again, not dropped for the run.**
   A server that fails to connect — a gateway that answered 502 just then, an IDE not open
   yet — or drops later (refused, reset, a gateway's 502/503/504, a process that exits;

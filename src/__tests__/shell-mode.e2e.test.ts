@@ -48,7 +48,7 @@ test('`!` on an empty field enters shell mode — `! ` in the shell colour, no `
   await ui.press('return');
   await settleUntil(() => ui.backend.lastFrame.includes('✓'));
   const frame = ui.backend.lastFrame;
-  expect(frame).toContain('$ echo hi');
+  expect(frame).toContain('! echo hi');
   expect(frame).toContain('✓');
   // The command's own text already contains "hi" — a click opens the block to
   // check the OUTPUT actually printed, not just the command naming it.
@@ -58,13 +58,17 @@ test('`!` on an empty field enters shell mode — `! ` in the shell colour, no `
   await settle(6);
   expect(ui.backend.lastFrame).toContain('│ hi');
   expect(model.requests).toHaveLength(0); // no turn spent — same as the legacy `!command`
-  // The result's `$ ` gutter marker shares the shell-mode prompt's colour only while
+  // The result's `! ` gutter marker shares the shell-mode prompt's colour only while
   // it runs; once it exits 0 it turns the `ok` colour.
-  expect(styleAt(ui.backend, '$ echo hi').fg).toBe('green');
+  expect(styleAt(ui.backend, '! echo hi').fg).toBe('green');
 
-  // Back to the normal prompt: one command per `!`.
+  // Back to the normal prompt: one command per `!`. The command's own block keeps
+  // its `! ` mark for good — the only one left is that one, not a stray second copy
+  // of the mode's own prompt.
   expect(ui.backend.lastFrame).toContain('› ');
-  expect(ui.backend.lastFrame).not.toContain('! ');
+  const bangRows = ui.backend.lastFrame.split('\n').filter((r) => r.includes('! '));
+  expect(bangRows).toHaveLength(1);
+  expect(bangRows[0]).toContain('! echo hi');
   ui.app.unmount();
 });
 

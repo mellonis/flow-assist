@@ -72,7 +72,7 @@ test('the notes plugin draws a block of its own with its own renderer', async ()
   await settleUntil(() => ui.backend.lastFrame.includes('Noted.'));
   const row = ui.backend.lastFrame.split('\n').find((r) => r.includes('note: buy milk'));
   expect(row).toBeDefined();
-  expect(row).not.toContain('$ '); // not a command: no shell gutter
+  expect(row).not.toContain('! '); // not a command: no shell gutter
   expect(JSON.stringify(model.requests.at(-1)!.messages)).not.toContain('note: buy milk'); // display only
   ui.app.unmount();
 });
