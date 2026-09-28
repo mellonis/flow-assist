@@ -1,6 +1,7 @@
 // A minimal flow-assist plugin: a notebook the assistant can read and add to.
-// It has no screen of its own — only tools for the model and one `:` command —
-// which is the smallest useful plugin (docs/plugins.md walks through it).
+// It has no screen of its own — only tools for the model and one command, on the `:`
+// line and in the chat — which is the smallest useful plugin (docs/plugins.md walks
+// through it).
 //
 // Enable it with a link: `ln -s ../examples/notes plugins-enabled/notes`.
 // The notebook is `notes.md` in the directory the app starts in, or the file
@@ -19,7 +20,8 @@ export default function buildNotesPlugin({ config, make, z }: any) {
 
   return make('notes', {
     name: 'notes',
-    // Validated by the host for `config set plugins.notes.<key>`.
+    // Validated by the host for `config set plugins.notes.<key>`. `file` is a path, so
+    // it carries no mark (`modelMaySet`): the model reads the key and never changes it.
     configSchema: z.object({ file: z.string().optional() }).optional(),
 
     // A tool group: what the model may call. A tool marked `write` makes the chat
@@ -66,19 +68,27 @@ export default function buildNotesPlugin({ config, make, z }: any) {
     }],
 
     // How this plugin's blocks are drawn: data in, lines of spans out. Colours are the
-    // chat palette's tokens; the host cuts each line to the width.
+    // chat palette's tokens; the host cuts each line to the width. The marker is
+    // `chrome`: painted, never copied, so a drag over the row takes the note alone.
     viewRenderers: {
-      note: (data: { text?: string }) => [[{ text: '✎ ', color: 'accent' }, { text: `note: ${String(data?.text ?? '')}` }]],
+      note: (data: { text?: string }) => [[{ text: '✎ ', color: 'accent', chrome: true }, { text: `note: ${String(data?.text ?? '')}` }]],
     },
 
-    // `:notes` — how many notes there are, in the host's message line.
+    // `:notebook` on the command line, and `/notebook` in the chat (`chat: true`) — how
+    // many notes there are. The chat's own commands keep their names, `/notes` among
+    // them, so this one has a name of its own. On the line the answer is the one-row
+    // message; in the chat it is a note in the conversation, shown to the person and
+    // never sent to the model.
     commands: [{
-      name: 'notes',
-      usage: 'notes',
+      name: 'notebook',
+      usage: 'notebook',
       description: 'Count the notes in the notebook',
-      run: (ctx: { showMessage?: (message: string) => void }) => {
+      chat: true,
+      run: (ctx: { surface?: 'line' | 'chat'; say?: (text: string) => void; showMessage?: (message: string) => void }) => {
         const count = read().split('\n').filter((line) => line.startsWith('- ')).length;
-        ctx?.showMessage?.(`${count} note${count === 1 ? '' : 's'} in ${path.basename(file())}`);
+        const text = `${count} note${count === 1 ? '' : 's'} in ${path.basename(file())}`;
+        if (ctx?.surface === 'chat') ctx.say?.(text);
+        else ctx?.showMessage?.(text);
       },
     }],
   });

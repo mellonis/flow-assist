@@ -13,10 +13,13 @@ const until = async (ok: () => boolean, label: string, n = 300) => {
   if (!ok()) throw new Error(`timed out waiting for ${label}`);
 };
 
-test('the login example runs as a real process: its form draws, typing reaches it, and it signs in', async () => {
+test('the login example runs as a real process: its form draws, typing reaches it, it signs in and says who in the store', async () => {
   const dir = path.resolve(import.meta.dir, '../../examples/remote-login');
   const transport = transportFor(manifest, dir, { log: () => {} });
-  const ui = await bootApp(new ScriptedModel(), 100, 30, undefined, {}, { chatMode: null, remote: { manifest, transport } });
+  // A plugin in the host's process beside it, reading what the example writes to the store.
+  let store: Record<string, any> = {};
+  const reader = (make: any) => [make('reader', { name: 'reader', setup: ({ host }: any) => { store = host.store; } })];
+  const ui = await bootApp(new ScriptedModel(), 100, 30, reader as never, {}, { chatMode: null, remote: { manifest, transport } });
   try {
     await until(() => ui.backend.lastFrame.includes('remote-login'), 'the plugin on the start screen');
     await ui.press('S');
@@ -33,6 +36,7 @@ test('the login example runs as a real process: its form draws, typing reaches i
     await until(() => ui.backend.lastFrame.includes('signed in as ann'), 'the signed-in note');
     expect(ui.backend.lastFrame).toContain('Signed in'); // the toast
     expect(ui.backend.lastFrame).not.toContain('secret'); // masked
+    expect(store['remote-login']).toEqual({ user: 'ann' });
   } finally {
     ui.app.unmount();
     await transport.close(500);

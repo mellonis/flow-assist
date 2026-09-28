@@ -146,7 +146,7 @@ moved into place, a registry fetch before it replaces the installed version (whi
 set aside and restored unless the new one is compatible; a batch update names each
 failure). A manifest.json that does not parse says `manifest.json is not valid JSON`
 (`readPluginManifest` → null). A missing `flowtty` is loaded with a note; the bundled plugins and
-`examples/notes` declare both fields (a test). A plugin reads the number it runs under
+both examples declare both fields (a test). A plugin reads the number it runs under
 from `host.hostApi`.
 
 A plugin module default-exports `build<Name>Plugin({ renders, config, make, z,

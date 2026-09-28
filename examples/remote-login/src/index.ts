@@ -20,6 +20,9 @@ await runPlugin<Model, HostEvent>({
         if (e.key.action === 'login' && m.focus === 'login') {
           if (!m.name || !m.pass) return { ...m, note: 'both fields are required' };
           await host.showMessage('Signed in');
+          // Who signed in, for the app's other plugins: a remote one hears it as a `store`
+          // event, one in the host's process reads `host.store['remote-login']`.
+          await host.store.set('user', m.name);
           return { ...m, note: `signed in as ${m.name}` };
         }
         return m;

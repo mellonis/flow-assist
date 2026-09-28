@@ -53,13 +53,15 @@ test('every bundled plugin shares the host version', () => {
   }
 });
 
-// A bundled plugin and the example ship with this host, so they say what they are built
-// for — the host API and the flowtty range, both — and this host loads them. The loader
-// itself takes a manifest with no `flowtty` (a plugin with no screens), with a note.
-test('every bundled plugin and the example declare the host API and flowtty they are built for', () => {
+// A bundled plugin and the examples ship with this host, so they say what they are
+// built for — the host API and the flowtty range, both — and this host loads them. The
+// loader itself takes a manifest with no `flowtty` (a plugin with no screens), with a
+// note.
+test('every bundled plugin and both examples declare the host API and flowtty they are built for', () => {
   const manifests = [
     ...bundledPluginNames().map((name) => join('plugins-available', name, 'manifest.json')),
     join('examples', 'notes', 'manifest.json'),
+    join('examples', 'remote-login', 'manifest.json'),
   ].filter((p) => existsSync(p));
   for (const path of manifests) {
     const manifest = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;

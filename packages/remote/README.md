@@ -7,7 +7,8 @@ The protocol's number is the host API's (`PROTOCOL_HOST_API`); the package ships
 ## A sign-in form
 
 This is the whole of `examples/remote-login/src/index.ts` — a form the person opens
-with `S`, fills in, and submits with Enter:
+with `S`, fills in, and submits with Enter; it then writes who signed in to the
+plugin's own `store` slice:
 
 ```ts
 import { runPlugin, type HostEvent } from '@flow-assist/remote';
@@ -29,6 +30,9 @@ await runPlugin<Model, HostEvent>({
         if (e.key.action === 'login' && m.focus === 'login') {
           if (!m.name || !m.pass) return { ...m, note: 'both fields are required' };
           await host.showMessage('Signed in');
+          // Who signed in, for the app's other plugins: a remote one hears it as a `store`
+          // event, one in the host's process reads `host.store['remote-login']`.
+          await host.store.set('user', m.name);
           return { ...m, note: `signed in as ${m.name}` };
         }
         return m;
@@ -136,7 +140,7 @@ A remote plugin's `manifest.json` names the process instead of an entry module �
 or `connect` for a shared server (below) — and is enabled the same way any plugin is:
 
 ```json
-{ "name": "remote-login", "version": "0.1.0", "hostApi": 2, "flowtty": ">=1.0.0-alpha.28",
+{ "name": "remote-login", "version": "0.1.0", "hostApi": 2, "flowtty": ">=1.0.0-alpha.36 <1.0.0-alpha.37",
   "run": ["bun", "src/index.ts"] }
 ```
 

@@ -5,6 +5,15 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **The examples show what a plugin can do now.** `examples/notes`' command is
+  `notebook`, marked `chat: true`, so it answers `/notebook` in the chat with a note as
+  well as `:notebook` on the command line (the chat's own `/notes` keeps its name); its
+  block's `✎` marker is `chrome`, so a drag copies the note alone; and its `file` key
+  says why it carries no mark for the model. `examples/remote-login` writes who signed
+  in to `host.store`, which the app's other plugins read. docs/plugins.md, its wire
+  transcript and `@flow-assist/remote`'s README match them, and a test holds both
+  examples' manifests to this host. **For plugin authors:** nothing changes in the
+  contract; copy from the examples again if you started from them.
 - **flowtty 1.0.0-alpha.36: Shift+Enter starts a new line.** The TTY backend asks the
   terminal for the kitty keyboard protocol, so in kitty, Ghostty, WezTerm, foot,
   Alacritty and iTerm2 3.5+ Shift+Enter is its own key and breaks the line; the hints

@@ -1,6 +1,7 @@
 // The example plugin that docs/plugins.md walks through (examples/notes) works as the
 // page says: its tools reach the model, its write pauses for the y/n and leaves its
-// diff in the chat, and its `:` command runs. If this test fails, the page is wrong.
+// diff in the chat, and its command runs on the `:` line and in the chat. If this test
+// fails, the page is wrong.
 import { afterEach, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -70,19 +71,46 @@ test('the notes plugin draws a block of its own with its own renderer', async ()
   await settleUntil(() => ui.backend.lastFrame.includes('Confirm write: notes_add'));
   await ui.press('y');
   await settleUntil(() => ui.backend.lastFrame.includes('Noted.'));
-  const row = ui.backend.lastFrame.split('\n').find((r) => r.includes('note: buy milk'));
-  expect(row).toBeDefined();
+  const lines = ui.backend.lastFrame.split('\n');
+  const y = lines.findIndex((r) => r.includes('note: buy milk'));
+  expect(y).toBeGreaterThanOrEqual(0);
+  const row = lines[y]!;
   expect(row).not.toContain('! '); // not a command: no shell gutter
   expect(JSON.stringify(model.requests.at(-1)!.messages)).not.toContain('note: buy milk'); // display only
+  // The marker is chrome: a drag over the whole row copies the note, never the ✎.
+  const cells = (text: string) => Array.from(text).length;
+  const from = cells(row.slice(0, row.indexOf('✎')));
+  const to = cells(row.slice(0, row.indexOf('note: buy milk'))) + cells('note: buy milk') - 1;
+  ui.backend.mouse('down', from, y);
+  ui.backend.mouse('drag', to, y);
+  ui.backend.mouse('up', to, y);
+  await settle(4);
+  expect(ui.backend.clipboard.at(-1)).toBe('note: buy milk');
   ui.app.unmount();
 });
 
-test(':notes counts the notes', async () => {
+test(':notebook counts the notes on the command line', async () => {
   const { ui } = await boot(new ScriptedModel());
   await ui.press(':');
-  await ui.type('notes');
+  await ui.type('notebook');
   await ui.press('return');
   await settle(10);
   expect(ui.backend.lastFrame).toContain('1 note in notes.md');
+  ui.app.unmount();
+});
+
+test('/notebook counts them in the chat, as a note the model is never sent', async () => {
+  const model = new ScriptedModel();
+  model.script([{ text: 'Hi.' }]);
+  const { ui } = await boot(model);
+  await ui.press('F');
+  await ui.type('/notebook');
+  await ui.press('return');
+  await settle(10);
+  expect(ui.backend.lastFrame).toContain('[notes] 1 note in notes.md');
+  await ui.type('hello');
+  await ui.press('return');
+  await settleUntil(() => model.requests.length === 1);
+  expect(JSON.stringify(model.requests[0]!.messages)).not.toContain('1 note in notes.md');
   ui.app.unmount();
 });

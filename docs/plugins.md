@@ -187,7 +187,7 @@ What the host does with it, and what it expects back:
     data (the chat redraws a few times a second); `v.discard()` removes the block once
     the call ends. `ctx.reportView?.('card', data)` is a block that never changes.
   - Draw it with a renderer in the shape — data in, lines out:
-    `viewRenderers: { card: (data, ctx) => [[{ text: '✎ ', color: 'accent' }, { text: data.title }]] }`.
+    `viewRenderers: { card: (data, ctx) => [[{ text: '✎ ', color: 'accent', chrome: true }, { text: data.title }]] }`.
     `ctx` says `folded`, `live`, `failed`, `width`, `elapsedMs`, `lines`, `moreKey`;
     draw both the folded and the open state. The host qualifies the kind by your
     plugin's name (`notes:card`), so your tool names it bare. An open block taller
@@ -353,8 +353,9 @@ cannot pass a confirmation, so `host.chatLLM` declines every write for it.
 
 ```ts
 commands: [{
-  name: 'notes', usage: 'notes', description: 'Count the notes in the notebook',
-  run: (ctx) => ctx?.showMessage?.(`${count()} notes`),
+  name: 'notebook', usage: 'notebook', description: 'Count the notes in the notebook',
+  chat: true,                         // `/notebook` in the chat too (below)
+  run: (ctx) => (ctx.surface === 'chat' ? ctx.say?.(`${count()} notes`) : ctx.showMessage?.(`${count()} notes`)),
 }],
 keys: { notes: 'N' },                 // an action and its default binding
 keycaps: ({ host }) => {              // the footer's hints for the current context
@@ -378,7 +379,8 @@ entry: ['notes'],                     // the key that leads in, on the start scr
   completes `restart <server>` in both places. Optional: a command without either
   completes its name and nothing more.
 - **A command can be the chat's too.** `chat: true` makes it `/name` in the chat as well
-  as `:name` on the command line (the chat's own commands keep their names). `run(ctx,
+  as `:name` on the command line. The chat's own commands keep their names — `/notes`
+  is the chat's, which is why the example's command is `notebook`. `run(ctx,
   arg)` tells the two apart by `ctx.surface` — `'line'` or `'chat'`. On the `:` line
   `ctx.showMessage(text)` is the one-line toast; in the chat `ctx.say(text)` puts a note
   in the conversation — shown to the person, never sent to the model —
@@ -558,7 +560,8 @@ is "Running it", below.
 This is the whole of `examples/remote-login/src/index.ts` — a sign-in form the person
 opens with `S`. Every key it acts on is one of its own actions, consumed and matched by
 action and drawn in the footer as `{ action, label }`, so a person who binds `open` to
-another key in `config.keys` opens it with that key and sees it in the caps:
+another key in `config.keys` opens it with that key and sees it in the caps. Signed in,
+it writes who to `host.store`, the channel between plugins:
 
 ```ts
 import { runPlugin, type HostEvent } from '@flow-assist/remote';
@@ -580,6 +583,9 @@ await runPlugin<Model, HostEvent>({
         if (e.key.action === 'login' && m.focus === 'login') {
           if (!m.name || !m.pass) return { ...m, note: 'both fields are required' };
           await host.showMessage('Signed in');
+          // Who signed in, for the app's other plugins: a remote one hears it as a `store`
+          // event, one in the host's process reads `host.store['remote-login']`.
+          await host.store.set('user', m.name);
           return { ...m, note: `signed in as ${m.name}` };
         }
         return m;
@@ -818,6 +824,8 @@ language that reads stdin and writes stdout, exchanges lines exactly like these:
 → {"jsonrpc":"2.0","method":"key","params":{"name":"return","id":"return","action":"login"}}
 ← {"jsonrpc":"2.0","id":1,"method":"host.showMessage","params":{"text":"Signed in"}}
 → {"jsonrpc":"2.0","id":1,"result":null}
+← {"jsonrpc":"2.0","id":2,"method":"host.store.set","params":{"key":"user","value":"ann"}}
+→ {"jsonrpc":"2.0","id":2,"result":null}
 ← {"jsonrpc":"2.0","method":"frame","params":{"surface":["Box",{"flexDirection":"column","padding":1},["Text",{"bold":true},"Sign in"],["Text",{"dim":true},"Name"],["TextInput",{"id":"name","value":"ann","isFocused":false}],["Text",{"dim":true},"Password"],["TextInput",{"id":"pass","value":"secret","mask":true,"isFocused":false}],["Text",{"inverse":true},"[ Log in ]"],["Text",{"dim":true},"signed in as ann"]],"keycaps":[{"action":"open","label":"form"},{"action":"next","label":"next"},{"action":"login","label":"log in"},{"action":"close","label":"close"}],"context":[{"label":"Sign in","text":"name: ann · focus: login"}],"keys":{"consume":["open","next","login","close"]}}}
 → {"jsonrpc":"2.0","id":2,"method":"shutdown","params":{}}
 ← {"jsonrpc":"2.0","id":2,"result":{}}
@@ -831,9 +839,12 @@ event with a frame, changed or not. Every key the example acts on arrives with i
 `changed` PER LETTER, not one for the whole word, and the plugin's frames echo each
 `value` in turn — `a`, `an`, `ann` — after the host's own field already reads `ann`:
 this is what the echo rule above guards against, and none of the three lag it back
-down. The host's answer to the
-plugin's own request is `null` (a JSON-RPC result with nothing in it), never `{}` —
-only the plugin answers `shutdown` that way, since it has something to send back.
+down. The host's answer to each of the
+plugin's own requests — the toast, then who signed in, written to the store — is `null`
+(a JSON-RPC result with nothing in it), never `{}`; only the plugin answers `shutdown`
+that way, since it has something to send back. The two sides number their requests
+independently, which is why the plugin's `host.store.set` and the host's `shutdown`
+are both `id` 2.
 
 ### The TypeScript runtime
 
