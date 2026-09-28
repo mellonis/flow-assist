@@ -2570,6 +2570,12 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   subscribers at once; while a turn runs, at most once per macrotask, two
   `setImmediate` steps later — behind any render React's scheduler queued meanwhile, so
   a stream draws once per network read, as often as the chat's own state did. The
+  second step is what keeps it there: with one, the telling lands before a render the
+  scheduler queued in the same loop turn (the ticker's, the App's `notify`), and the two
+  commit apart. A telling at once disarms the deferred one waiting. `stream-cadence.e2e.test.ts`
+  guards this in React commits: an answer read at once draws a couple of times, and one
+  read delta by delta (200 reads) draws at most once per read, +3.5 % — the racing
+  variants draw 6–9 % more. The
   model's saves and notes read the list as the chat last drew it (`drawnRows`, set by
   every render), so a save and the journal see what the person saw.
 - **Ctrl+C, Ctrl+D and Ctrl+Z take a second press** (`src/runtime/exit-keys.ts`, pure;

@@ -212,6 +212,8 @@ export class Conversation {
   private snap: ConversationSnapshot | null = null;
   private listeners = new Set<() => void>();
   private tellSoon = false;
+  // Which deferred telling is the armed one: a telling at once disarms the one waiting.
+  private tellGen = 0;
 
   // For `useSyncExternalStore`. Fields, not methods: the chat hands React the same two
   // functions on every render, so React does not subscribe again.
@@ -224,6 +226,7 @@ export class Conversation {
       this.snap = {
         version: this.version, key: this.key, kind: this.kind,
         messages: this.messages,
+        // The kind is read live, not drawn: a chat that draws it must write it through `draw`.
         busy: this.busyDrawn ? this.busyKind : null,
         activity: { label: this.toolLabel, phase: this.phase, verb: this.verb, toolCount: this.toolCount, turnTokens: this.turnTokens },
         pendingConfirm: this.confirmDrawn, pendingQuestion: this.questionDrawn,
@@ -253,7 +256,8 @@ export class Conversation {
     if (now || !this.inTurn) { this.tell(); return; }
     if (this.tellSoon) return;
     this.tellSoon = true;
-    setImmediate(() => setImmediate(() => { if (this.tellSoon) this.tell(); }));
+    const g = ++this.tellGen;
+    setImmediate(() => setImmediate(() => { if (this.tellSoon && g === this.tellGen) this.tell(); }));
   }
   private tell(): void {
     this.tellSoon = false;
@@ -535,7 +539,7 @@ export class Conversation {
   }
   syncQueue(): void { this.queuedDrawn = this.queue.slice(); this.changed(true); this.deps.notify(); }
   // The queue emptied by a reset or a switch — drawn empty, as a fresh empty list always
-  // draws (no notify: the key handler that resets redraws).
+  // draws (no `deps.notify`: the key handler that resets redraws).
   clearQueue(): void { this.queue = []; this.draw('queuedDrawn', [], true); }
   // ⏎ while an answer is coming: queued instead of dropped.
   enqueue(text: string): void { this.queue.push({ text }); this.syncQueue(); }

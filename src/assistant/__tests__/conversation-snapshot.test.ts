@@ -63,3 +63,19 @@ test('while a turn runs, its changes are told once per macrotask, and a change t
   c.setPhase('thinking');
   expect(heard).toBe(3);
 });
+
+test('a telling at once disarms the deferred one waiting, so a later change is not told early', async () => {
+  const c = new Conversation(fakeDeps());
+  let heard = 0;
+  c.subscribe(() => { heard++; });
+  c.inTurn = true;
+  c.setRows((cur) => [...cur, { role: 'assistant', content: 'a' }]);
+  await macrotasks(1);                   // its telling is one step from firing
+  c.setBusyDrawn(true);                  // told at once, 'a' with it
+  expect(heard).toBe(1);
+  c.setRows((cur) => [...cur, { role: 'assistant', content: 'b' }]);
+  await macrotasks(1);                   // the first telling's second step: disarmed
+  expect(heard).toBe(1);
+  await macrotasks(2);
+  expect(heard).toBe(2);
+});
