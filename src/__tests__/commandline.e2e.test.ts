@@ -1,9 +1,10 @@
 // The `:` command line, as a person uses it.
 import { afterEach, expect, test } from 'bun:test';
 import { ScriptedModel, bootApp, settle } from './helpers/scripted';
+import { getDeep, loadConfig, resetSessionConfig } from '../config/load';
 
 const realFetch = globalThis.fetch;
-afterEach(() => { globalThis.fetch = realFetch; });
+afterEach(() => { globalThis.fetch = realFetch; resetSessionConfig(); });
 
 const lastRow = (ui: { backend: { lastFrame: string } }) => ui.backend.lastFrame.split('\n').filter((r) => r.trim()).at(-1) ?? '';
 
@@ -68,5 +69,50 @@ test('completion is inline and the screen does not jump while typing', async () 
   await ui.press('return');
   await settle();
   expect(ui.backend.lastFrame).toMatch(/help|commands/i);
+  ui.app.unmount();
+});
+
+// A value with a colon in it — a URL, a time, `host:port`, `repo:git_status` — reaches
+// the command whole, typed or pasted; only the key that opens the line is special, and
+// only while it is closed or empty.
+const echoCommand = (got: string[]) => (make: any) => [make('boards', {
+  name: 'boards',
+  commands: [{ name: 'open', run: (_ctx: unknown, arg: string) => { got.push(arg); }, usage: 'open <key>', minArgs: 1, maxArgs: -1, description: 'Open a card' }],
+})];
+
+test('a colon typed into the open line is a character', async () => {
+  const ui = await bootApp(new ScriptedModel(), 100, 24);
+  await ui.press(':');
+  await ui.type(`config set --session ui.verbs '["a:b"]'`);
+  await ui.press('return');
+  await settle();
+  expect(getDeep(loadConfig(), 'ui.verbs')).toEqual(['a:b']);
+  ui.app.unmount();
+});
+
+test('a pasted value keeps its colons, and a pasted line break does not run the line', async () => {
+  const got: string[] = [];
+  const ui = await bootApp(new ScriptedModel(), 100, 24, echoCommand(got));
+  await ui.press(':');
+  await ui.type('open ');
+  ui.backend.paste('https://api.example.com/v1\n10:30');
+  await settle();
+  expect(got).toEqual([]);
+  expect(lastRow(ui)).toContain('open https://api.example.com/v1 10:30');
+  await ui.press('return');
+  expect(got).toEqual(['https://api.example.com/v1 10:30']);
+  ui.app.unmount();
+});
+
+test('`:` opens a closed line, and does nothing on an empty open one', async () => {
+  const got: string[] = [];
+  const ui = await bootApp(new ScriptedModel(), 100, 24, echoCommand(got));
+  await ui.press(':');
+  expect(lastRow(ui)).toMatch(/^\s*:$/);
+  await ui.press(':');
+  expect(lastRow(ui)).toMatch(/^\s*:$/);
+  await ui.type('open repo:git_status');
+  await ui.press('return');
+  expect(got).toEqual(['repo:git_status']);
   ui.app.unmount();
 });

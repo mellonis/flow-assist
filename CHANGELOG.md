@@ -5,6 +5,11 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **A colon typed or pasted into the `:` line stays.** `:config set ai.baseUrl
+  https://…` kept `https//…`: every `:` typed while the line was open was dropped, and
+  a paste did not reach the line at all. Now `:` opens the line when it is closed and
+  is a character once something is typed (on an empty line it still does nothing); a
+  paste goes in whole, its line breaks as spaces.
 - **Typing and scrolling in a long conversation are lighter.** A key typed into the
   field no longer draws the conversation above it again — the rows in view are left
   as they are, while an answer is being written too — and a wheel step draws only the

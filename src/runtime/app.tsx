@@ -686,12 +686,9 @@ export function renderApp(
     const completeLine = (text: string) => completeCommand(text, commandRegistry as never, config, hostConfigSchema);
     const hostFallback = (key: InputKey): boolean => {
       const name = key.name ?? '';
-      // `:` OPENS the command line (when it is closed). It must NOT toggle it
-      // closed again — with the box open, `:` should be treated as a regular key
-      // (so a command containing a colon, or a stray `:`, edits the buffer rather
-      // than discarding what was typed); closing the box is ESC's job. The old
-      // toggle behaviour made `:help` close the line you had just typed — a real
-      // runtime defect.
+      // `:` OPENS the command line (when it is closed). It never toggles it closed
+      // again: with the line open, `:` edits the buffer (below), and closing the line
+      // is Esc's job.
       if (isKey(keys.commandLine, name) && !cmdline.current.open) {
         cmdline.current.open = true;
         ui.cmdOpen = true;
@@ -712,11 +709,11 @@ export function renderApp(
           notify();
           return true;
         }
-        // With the line open, `:` is a NO-OP: it is the OPEN key, the line is
-        // already open, so it must neither toggle it closed nor print itself into
-        // the buffer (a command token stays clean — `:help` remains `help`, not
-        // `help:`). Closing the line is ESC's job.
-        if (isKey(keys.commandLine, name)) return true;
+        // With the line open, the open key never closes it (Esc does). On an EMPTY line
+        // it does nothing, so a doubled `:` still opens a clean line; anywhere else it is
+        // a character like any other — a URL, a time, `host:port` or `repo:git_status`
+        // keeps its colons.
+        if (isKey(keys.commandLine, name) && cmdline.current.input === '') return true;
         // Enter/Return runs a command. This is a HOST concern — it must not depend on
         // the plugin-namespaced `open` action: tracker defines `open:'enter'`
         // (open an issue), which overrides the host's `open:['enter','return']`
@@ -823,6 +820,14 @@ export function renderApp(
         }
         if (name === 'backspace') {
           cmdline.current.input = cmdline.current.input.slice(0, -1);
+          notify();
+          return true;
+        }
+        // A paste goes in whole, colons and all, a line break or other control character
+        // as a space: the line is one row, and a pasted newline must not run the command.
+        if (name === 'paste') {
+          const text = String((key as { text?: unknown }).text ?? '');
+          cmdline.current.input += text.replace(/\r\n|[\u0000-\u001f\u007f]/g, ' ');
           notify();
           return true;
         }

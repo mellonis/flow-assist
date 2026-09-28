@@ -2097,6 +2097,11 @@ row of candidates would make the whole screen jump with every keystroke. Tab
 replaces the WORD being completed (`stem + candidate`), a command name or a
 `config get|set|unset` argument alike.
 
+- **`:` opens the line; once it is open, `:` is a character** (`hostFallback` in
+  `src/runtime/app.tsx`) — a URL, a time, `host:port`, `repo:git_status` keep their
+  colons. On an EMPTY open line it does nothing (a doubled `:` still opens a clean
+  line); Esc is what closes it. A paste goes in whole at the end of the line, a line
+  break or other control character as a space, so a pasted newline never runs it.
 - **A command is its first word**; the rest of the line is its argument. Looking up
   the whole line instead would silently break every plugin command given one —
   `:ask hi`, a tracker's `:open ABC-1` — since such a command still runs fine with no
