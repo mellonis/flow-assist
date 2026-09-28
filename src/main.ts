@@ -339,8 +339,10 @@ export async function runPlugins(args: string[], config: Record<string, unknown>
     // On a successful uninstall, purge the plugin's memory (its `plugin`-scope facts)
     // so they don't linger after the plugin is gone.
     if (res.ok) purgePluginMemories(config, name);
-    // The person's removal: the trust and its tombstone both go.
-    if (res.ok) untrustPlugin(deps.enabledDir, name, { clear: true });
+    // The person's removal: the trust and its tombstone both go. From a command the
+    // assistant runs, the tombstone stays, so a link put back elsewhere still shows
+    // where it led before and its trust still asks.
+    if (res.ok) untrustPlugin(deps.enabledDir, name, { clear: !inModelShell() });
     io.out(res.ok ? `plugin '${name}' removed — restart the assistant for the change to take effect` : res.error ?? '');
     if (!res.ok) process.exitCode = 1;
     return;

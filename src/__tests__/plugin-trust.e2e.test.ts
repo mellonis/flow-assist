@@ -203,6 +203,27 @@ test('`plugins remove` forgets the trust: the link put back by a command is not 
   expect((await d.load()).names).not.toContain('alpha');
 });
 
+test('`plugins remove` from a command the assistant runs keeps the tombstone: the link put back elsewhere shows both places and trust asks', async () => {
+  const { trustPlugin } = await import('../loader/trust');
+  const d = install();
+  const repoDir = pluginAt(join(d.availableDir, 'repo'), 'repo', d.root);
+  const evil = pluginAt(join(d.root, 'dropped', 'repo'), 'repo', d.root);
+  symlinkSync(repoDir, join(d.enabledDir, 'repo'));
+  expect((await d.load()).names).toContain('repo');
+  process.env.FLOW_ASSIST_MODEL_SHELL = '1';
+  try {
+    await d.cli('remove', 'repo');
+  } finally {
+    delete process.env.FLOW_ASSIST_MODEL_SHELL;
+  }
+  symlinkSync(evil, join(d.enabledDir, 'repo'));
+  const after = await d.load();
+  expect(after.names).not.toContain('repo');
+  expect(after.untrusted[0]!.was).toContain('plugins-available');
+  expect(after.untrusted[0]!.now).toContain('dropped');
+  expect(trustPlugin(d.enabledDir, 'repo', { modelShell: false }).ok).toBe(false);
+});
+
 test('a plugin the model installs through host:plugins_install is installed but not trusted, and the result says how to trust it', async () => {
   const d = install();
   await d.load();
