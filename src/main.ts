@@ -35,7 +35,7 @@ import { createInterface } from 'node:readline/promises';
 import { memoryRecordNotes } from './assistant/memory-trust.js';
 import type { PluginRepo } from './loader/repo.js';
 import type { PluginRepo as RepoShape } from './loader/host-group.js';
-import { loadPlugins } from './loader/build.js';
+import { loadEnabledPlugin, loadPlugins } from './loader/build.js';
 import { createLatePlugins } from './loader/late.js';
 import { assembleToolRegistry, pluginConfigs } from './loader/tools.js';
 import { renderApp } from './runtime/app.js';
@@ -272,7 +272,7 @@ export async function runPlugins(args: string[], config: Record<string, unknown>
         io.out(`${shownName(e.name)}  [${untrustedText({ name: e.name, refused: true })}]`);
         continue;
       }
-      const state = e.active ? (u ? `active, ${untrustedText(u)}` : 'active') : 'inactive';
+      const state = e.disabled ? 'disabled' : e.active ? (u ? `active, ${untrustedText(u)}` : 'active') : 'inactive';
       const source = e.source && e.source !== 'git' ? ` (${e.source})` : '';
       const missing = e.missingDeps.length ? `  missing: ${e.missingDeps.join(',')}` : '';
       const settingMiss = e.missingSettings?.length ? `  missing settings: ${e.missingSettings.join(',')}` : '';
@@ -483,7 +483,12 @@ async function runInteractive(config: Record<string, unknown>, repo: PluginRepo)
   // An enabled plugin the person has not trusted is not loaded; the start screen names it.
   const untrusted: Untrusted[] = [];
   const trustNotes: string[] = [];
-  const plugins = await loadPlugins({ config, repo, renders, enabledDir, notes: loadNotes, late, untrusted, trustNotes });
+  // Why each plugin was skipped — the `:plugins` panel says it on the plugin's row.
+  const skipped = new Map<string, string>();
+  const plugins = await loadPlugins({ config, repo, renders, enabledDir, notes: loadNotes, late, untrusted, trustNotes, skipped });
+  // What the `:plugins` panel needs to enable, restart and trust a plugin while the app
+  // runs (src/runtime/plugins-panel.ts): the same dirs, and the loader's own way to load one.
+  const site = { repo, enabledDir, skipped, untrusted, load: (name: string) => loadEnabledPlugin(name, { config, enabledDir, renders, log: (line) => late.note(line) }) };
   const registry = assembleToolRegistry({ plugins, config, repo: repo as unknown as RepoShape });
   // The backend holds the console while it owns the screen; with `onConsole` set every
   // line goes to the log (`L`) at once and nothing is printed again at exit.
@@ -510,7 +515,7 @@ async function runInteractive(config: Record<string, unknown>, repo: PluginRepo)
     void stopRemotePlugins().then(() => process.exit(0));
   };
   const pluginsNote = await missingPluginsNote(repo);
-  handle = await renderApp(backend, { plugins, config, renders: {}, tools: registry, onExit, pluginsNote: pluginsNote ?? undefined, loadNotes, consoleLog, late, untrusted, trustNotes: [...trustNotes, ...memoryRecordNotes()] });
+  handle = await renderApp(backend, { plugins, config, renders: {}, tools: registry, onExit, pluginsNote: pluginsNote ?? undefined, loadNotes, consoleLog, late, untrusted, trustNotes: [...trustNotes, ...memoryRecordNotes()], site });
 }
 
 // ─── help text ────────────────────────────────────────────────────────────────

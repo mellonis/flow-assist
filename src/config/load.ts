@@ -221,7 +221,7 @@ export function unguardConfigFiles(): void {
 // A value as the change's line shows it: masked at a secret-looking key, a known
 // secret redacted, cut short.
 const MASK_KEY = /TOKEN|SECRET|PASSWORD|PASSWD|COOKIE|API_?KEY|_KEY$|^authorization$|^headers$|^env$/i;
-function shownValue(key: string, v: unknown): string {
+export function shownValue(key: string, v: unknown): string {
   if (v === undefined) return '(unset)';
   if (key.split('.').some((seg) => MASK_KEY.test(seg))) return '‹masked›';
   const s = redactSecrets(JSON.stringify(v) ?? String(v));

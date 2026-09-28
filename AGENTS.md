@@ -353,7 +353,11 @@ remote's `holdHello`): the frame drawn with `starting: fake…`, the plugin join
 its entry key and caps, a refused handshake as one skip line, and a turn begun before
 the join sending its tools from the next round with the draft still in the field.
 `bootApp`'s `opts.late` loads that way (a guest's `ready` included); without it the rig
-waits for every plugin, as the one-shot prompt does.
+waits for every plugin, as the one-shot prompt does. `opts.dirs` gives a boot a
+plugins-available/ and plugins-enabled/ of its own through the real repository (and
+`opts.trustFile` its trust record), which is what the `:plugins` tests lay plugins out in.
+The `:plugins` panel's enable and restart join through the same hub
+(`loadEnabledPlugin`, `src/loader/build.ts` — the loader's own one-plugin load).
 
 ### A plugin that starts a process owns its life
 
@@ -2268,7 +2272,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
 - **Nothing is silent.** An unknown command answers `Unknown command: x — try :help`.
   A command that is listed does something: `view` and `back` set a state nothing in
   the host reads and were removed. The host's commands are `clear`, `quit`, `config`,
-  `cache`, `perf`, `help`; everything else is a plugin's.
+  `cache`, `perf`, `plugins`, `help`; everything else is a plugin's.
 - **`:perf` is how fast the app answers** (`src/runtime/frame-stats.ts`). The runtime,
   not any plugin, owns it: `renderApp` passes flowtty's `onFrame` (docs/app.md in
   `@flowtty/react`, "frame stats") to a `FrameMeter`, and wraps the root backend in
@@ -2290,6 +2294,57 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   line`), so a lagging app does not flood the log it is read in. `onFrame` must never throw (with no `onError` flowtty
   would end the app), so the meter swallows its own errors. A test passes its own meter
   (`bootApp`'s `opts.frameMeter`) to read the frames.
+- **`:plugins` is the person's lever over the plugins** (`src/runtime/plugins-panel.ts`,
+  `createPluginsPanel`; drawn by the command panel's `renderCommandPanel` over the
+  plugin's side). The runtime owns it, like `:perf`: it works with the chat closed and
+  with no assistant plugin at all. `plugins` is a host command WITH a `run`
+  (`hostCommands` in `renderApp`, the base both registry builds use — a late join
+  rebuilds the registry), marked `chat: true`, so `/plugins` in the chat opens the same
+  spec through the chat's `openPanel`; the chat implements nothing of it. On the `:` line
+  it opens the runtime's own panel (`hostPanel`): in step 1 of the key path, after the
+  exit keys AND the chat's chords — it never keeps the person from the chat: Ctrl+] or
+  the collapse key acting closes it — it holds every other key while up (`ui.hostPanel`,
+  and `pluginHasKeyboard` is false). While the chat waits for an answer (`needRows` of
+  `store.chat` non-zero: a y/n or a question, open or not) none of its own keys acts —
+  ↑/↓ and Esc only, and a notice names the chat's key — so a `y` meant for the chat never
+  trusts a plugin. A 1 s tick redraws it, and its rows are redacted before they are drawn. One row per
+  plugin — the list's own in order, then every other enabled, disabled, starting,
+  untrusted or skipped name — with its version and its state: `disabled (restart to
+  unload)`, `disabled`, `not trusted` (with `was`/`now`), `starting…`
+  (`late.starting()`), `skipped: <why>` (`site.skipped`, from the loader's `skipped` map
+  and each late `skipped` event's `why`), `missing settings: …`, `active` with its
+  groups, tools and keys. `rows()` reads no disk: what the repository says is read when
+  the panel opens and after each action. Keys: ⏎ details (manifest description, ranges,
+  the skip reason, `plugins.<name>` flattened with `shownValue`'s mask, each
+  `requiredSettings` variable set or `required — unset`), `r` restart (a REMOTE plugin
+  only: out of the list, `stopRemotePlugin` — `shutdown`, then its transport's close —
+  and loaded again through `site.load` and `late.expect`, so it rejoins as a late plugin
+  does; the order is read again first, `late.order`), `d` disable/enable (below), `t`
+  tools, `y` trust (below). What the loader knew reaches it as `renderApp`'s `site`
+  (`PluginSite`: the repository, `enabledDir`, the trust options, `skipped`, the
+  `untrusted` array the start screen reads, `load` = `loadEnabledPlugin`); the App always
+  has a late hub (its own when the loader passed none), which is how enable and restart
+  join.
+  **Disable** moves the link to `plugins-enabled/.disabled/<name>` (`repo.disable`, the
+  link re-made absolute so a relative one still leads where it did), puts the name in
+  `disabledNow` and withholds its tools (`registry.withhold` + `rebuildFromPlugins`, which
+  also splices `pluginAiTools`): out from the next round, a call from the turn in flight
+  answered `<tool> is gone — <plugin> was disabled`. Its screens, keys and commands stay
+  until a restart. A plugin disabled while starting joins withheld. **Enable** moves the
+  link back; a plugin disabled in this run gets its tools back, any other is checked
+  against the trust record (`readOnly`) and joins through `late` only when trusted — else
+  it is added to `untrusted` and the row says so. `enabledPlugins` lists only the links at
+  the top level, so a disabled one is never loaded; `trust.ts`'s `present` counts
+  `.disabled/` too, so a start while it is off forgets nothing. `plugins ls` says
+  `disabled`, `install` of a disabled plugin moves it back, `remove` takes a disabled one.
+  **Trust from the panel** is `trustPlugin` with the loader's trust options, on the
+  person's `y` in the panel — the only way it is reached: the model's tools do not
+  include it, a remote plugin's requests do not, and a chat line (`/plugins y`, typed or
+  queued) opens the panel and nothing more. A retargeted link answers `confirm`; the
+  panel opens a spec over itself showing `was` and `now`, and only its own `y` calls
+  again with `yes`. A trusted plugin leaves `untrusted` (the start screen follows) and,
+  when enabled and not loaded, joins. `src/__tests__/plugins-panel.e2e.test.ts` holds
+  it.
 - **The typed command is text; everything drawn around it is chrome.** A drag over
   the line copies what was typed and nothing else — not the `: ` prompt, not the
   inline offer after the caret, not the `⇥ a · b` candidates — so a long
@@ -3491,7 +3546,8 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
 
 - (default) `interactive` — the TUI.
 - `config get|set|unset|help` — host config.
-- `plugins ls|install|trust|remove|update` — manage enabled plugins. `install` takes a name
+- `plugins ls|install|trust|remove|update` — manage enabled plugins (`ls` marks one the
+  person disabled in the app `[disabled]`; `install` of a disabled one enables it). `install` takes a name
   (linked from `plugins-available/`, else fetched from the registry) or an archive —
   a `.tar.gz` path or an https URL (`loader/archive-install.ts`). An archive's member
   list is checked before extraction (no links, no `..`, one top-level `<name>/`), it
@@ -3740,6 +3796,10 @@ commands; docs and hints never present either mechanism as a boundary.
       the next `plugins trust` moves it aside (`.unreadable-<time>`) and starts a new
       one with the flag set. `plugins ls` reads with `readOnly` — it never runs the
       first start or prunes.
+    - **Disabled.** A link the person disabled waits in `plugins-enabled/.disabled/`:
+      never loaded, and still present for the check — its trust is kept, so enabling it
+      loads it while it leads where it did. A command moving that link back enables it
+      at the next start; a link leading anywhere else is untrusted as ever.
     - **Stale entries.** A check forgets every recorded name whose entry is gone from
       the directory — from the model's shell too; `repo.remove` forgets
       (`untrustPlugin`), and the model's `host:plugins_install` calls `repo.untrust`
@@ -3757,7 +3817,8 @@ commands; docs and hints never present either mechanism as a boundary.
       in a pipe) or takes `--yes`.
     - **What records**: `plugins install` (name or archive, trusting the target it
       installed, `installed and trusted`) and `plugins trust <name>` from the CLI
-      (`runPlugins`, `src/main.ts`). Under the model's shell neither records: the install
+      (`runPlugins`, `src/main.ts`), and the person's `y` in the `:plugins` panel (The
+      command line, `:plugins`), with the same confirm for a retarget. Under the model's shell neither records: the install
       still happens, forgets any trust under the name (`untrustPlugin`) and says
       `installed, not trusted`. The model's `host:plugins_install` leaves the plugin untrusted and its
       result names the command: the auto mode may answer its y/n (`confirmedByPerson`

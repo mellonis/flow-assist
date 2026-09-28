@@ -12,6 +12,8 @@ export interface FakeRemote {
   crash(): void;
   restart(): void;
   hello: HelloResult;
+  // How many times the host said `hello` — once per start, again after a restart.
+  hellos(): number;
   // Holds the next `hello` unanswered until `answerHello()` — or `refuseHello(why)`,
   // which answers it with an error — so a test can act while the handshake is pending.
   holdHello(): void;
@@ -26,7 +28,9 @@ export function fakeRemote(hello: Partial<HelloResult> = {}, manifest: Partial<R
     send: (l) => queueMicrotask(() => toPlugin.forEach((f) => f(l))),
     onLine: (f) => { toHost.push(f); },
     onClose: (f) => { closes.push(f); },
-    close: async () => {},
+    // Closed for good: the host that closed it hears nothing more — a transport reached
+    // again (a restart from the `:plugins` panel) is heard by the one that reached it.
+    close: async () => { toHost.length = 0; closes.length = 0; restarts.length = 0; },
     start: async () => {},
     onRestart: (f) => { restarts.push(f); },
   };
@@ -34,7 +38,9 @@ export function fakeRemote(hello: Partial<HelloResult> = {}, manifest: Partial<R
   const full: HelloResult = { hostApi: 2, ...hello };
   let held: { answer: () => void; refuse: (e: Error) => void } | null = null;
   let holding = false;
+  let hellos = 0;
   peer.onRequest('hello', () => {
+    hellos++;
     if (!holding) return full;
     holding = false;
     return new Promise<HelloResult>((resolve, reject) => { held = { answer: () => resolve(full), refuse: reject }; });
@@ -42,7 +48,7 @@ export function fakeRemote(hello: Partial<HelloResult> = {}, manifest: Partial<R
   const events: Array<[string, unknown]> = [];
   for (const m of ['key', 'changed', 'submitted', 'cancelled', 'toggled', 'resize', 'focus', 'blur', 'visible', 'store', 'cache.flushed', 'afterWrite']) peer.onNotify(m, (p) => events.push([m, p]));
   return {
-    transport, peer, events, hello: full,
+    transport, peer, events, hello: full, hellos: () => hellos,
     manifest: { name: 'fake', hostApi: 2, run: ['fake'], ...manifest },
     frame: (f) => peer.notify('frame', f),
     crash: () => closes.forEach((f) => f({ code: 1 })),

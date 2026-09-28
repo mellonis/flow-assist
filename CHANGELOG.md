@@ -5,6 +5,20 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **`:plugins`: the plugins, their states and what you can do to them.** `:plugins` on
+  the `:` command line lists every plugin with its version, its state — `active`,
+  `starting…`, `skipped: <why>`, `missing settings: …`, `not trusted`, `disabled` — and
+  what it brings (tool groups, tools, keys). It works with the chat closed, which makes
+  it the place to look when a plugin is broken; `/plugins` in the chat opens the same
+  list in the chat's frame. ⏎ shows a plugin's details (its ranges, why it was skipped,
+  its settings with the missing ones marked), `t` its tools, `r` restarts a plugin in
+  another language, `d` disables or enables one — disabled, its tools leave the
+  assistant at once and its screens and keys go at the next restart; its link waits in
+  `plugins-enabled/.disabled/`, still installed and trusted, and `plugins ls` says
+  `disabled` — and `y` trusts one, showing both places first when its link moved.
+  Installing, removing and updating stay `flow-assist plugins …`.
+  **For plugin authors:** nothing to change; the person can now disable your plugin
+  while the app runs (docs/plugins.md, "Where a plugin lives").
 - **A tool a plugin takes away is gone for the rest of the run.** A plugin that dropped
   a tool while the app ran (a server turned off or gone) left it callable by its name: a
   model that had seen it could still run it. Now such a call never runs, and the model is

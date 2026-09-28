@@ -134,6 +134,56 @@ export interface LoadPluginsOptions {
   trustNotes?: string[];
   // The trust record's file and whether this runs in the model's shell — a test's own.
   trust?: TrustOptions;
+  // Why each plugin was skipped, by name — the `:plugins` panel's `skipped: <why>`.
+  skipped?: Map<string, string>;
+}
+
+// What loading one enabled plugin needs — at start, and again while the app runs (the
+// `:plugins` panel's enable and restart).
+export interface LoadOneOptions {
+  config: Record<string, unknown>;
+  enabledDir: string;
+  renders?: Record<string, unknown>;
+  make?: Make;
+  remoteTransport?: typeof transportFor;
+  // Where the adapter and the transport of a remote plugin say what they say.
+  log?: (line: string) => void;
+  // A line for the loader's notes (a missing `flowtty` range).
+  note?: (line: string) => void;
+}
+
+// Loads one enabled plugin: its manifest checked before any of its code runs, then a
+// remote plugin's transport and handshake, or a JS plugin's module imported and built.
+// Rejects with why it cannot load — the loader's skip. The plugin's own `ready` is not
+// awaited here.
+export async function loadEnabledPlugin(name: string, { config, enabledDir, renders = {}, make = makeFactory(config as MakeFactoryConfig), remoteTransport, log, note }: LoadOneOptions): Promise<Plugin> {
+  // Whether it can run here is read from its manifest before any of its code runs.
+  const manifest = readPluginManifest(join(enabledDir, name));
+  const compat = pluginCompat(manifest, THIS_HOST);
+  if (!compat.ok) throw new Error(compat.reason);
+  if (compat.note) note?.(`[plugins] ${name} ${compat.note}`);
+  if (isRemoteManifest(manifest)) {
+    // A plugin in another language: a process the host talks to, built into a Plugin by
+    // the adapter — the rest of the loader never knows (docs/plugins.md, "A plugin in
+    // another language").
+    const say = log ?? ((line: string) => console.warn(line));
+    const transport = (remoteTransport ?? transportFor)(manifest, join(enabledDir, name), { log: say });
+    return remotePlugin({ manifest, transport, config, make, log: say });
+  }
+  // Import the entry FILE (not the symlinked directory), so the compiled binary and the
+  // runtime resolve plugins the same way — see resolvePluginEntry.
+  const entry = resolvePluginEntry(join(enabledDir, name));
+  const mod = (await import(pathToFileURL(entry).href)) as { default?: unknown; build?: unknown };
+  const build = (mod.default ?? mod.build) as unknown;
+  if (typeof build !== 'function') throw new Error('default export is not a builder function');
+  // A builder may be async. One whose plugin waits on someone (an MCP server lists its
+  // tools once connected) returns at once and says so with `ready`; it is the plugin's
+  // job to bound that wait.
+  const plugin = await (build as (ctx: BuilderCtx) => Plugin | Promise<Plugin>)({ renders, config, make, z, ...EXTRAS });
+  // What the plugin IS, in its author's words, for the start screen — from its manifest,
+  // unless the shape says it itself.
+  plugin.description ??= manifestDescription(join(enabledDir, name));
+  return plugin;
 }
 
 export async function loadPlugins({
@@ -148,11 +198,13 @@ export async function loadPlugins({
   untrusted = [],
   trustNotes = [],
   trust,
+  skipped,
 }: LoadPluginsOptions): Promise<Plugin[]> {
   const skip = (name: string, why: string) => {
     const line = skipLine(name, why);
     console.warn(line);
     notes.push(line);
+    skipped?.set(name, why);
   };
   const plugins: Plugin[] = [];
 
@@ -190,7 +242,12 @@ export async function loadPlugins({
       console.warn(`[plugins] skip ${name}: no enabledDir provided`);
       return null;
     }
-    // Whether it can run here is read from its manifest before any of its code runs.
+    // What the adapter and the transport of a remote plugin say — the process's stderr, a
+    // restart. Waiting, it goes to stderr and the notes the app's log starts with; late,
+    // to the app's log itself, whenever it is said (the console is the screen's then).
+    const log = late ? (line: string) => late.note(line) : (line: string) => { console.warn(line); notes.push(line); };
+    // Whether it can run here is read from its manifest before any of its code runs; one
+    // that cannot is skipped at once, never said to be starting.
     const manifest = readPluginManifest(join(enabledDir, name));
     const compat = pluginCompat(manifest, THIS_HOST);
     if (!compat.ok) {
@@ -198,49 +255,14 @@ export async function loadPlugins({
       return null;
     }
     if (compat.note) notes.push(`[plugins] ${name} ${compat.note}`);
-    if (isRemoteManifest(manifest)) {
-      // A plugin in another language: a process the host talks to, built into a
-      // Plugin by the adapter — the rest of the loader never knows (docs/plugins.md,
-      // "A plugin in another language").
-      // What the adapter and the transport say — the process's stderr, a restart. Waiting,
-      // it goes to stderr and the notes the app's log starts with; late, to the app's log
-      // itself, whenever it is said (the console is the screen's then).
-      const log = late ? (line: string) => late.note(line) : (line: string) => { console.warn(line); notes.push(line); };
-      const remote = (async () => {
-        const transport = (remoteTransport ?? transportFor)(manifest, join(enabledDir, name), { log });
-        return remotePlugin({ manifest, transport, config, make, log });
-      })();
-      if (late) {
-        late.expect(name, remote);
-        return null;
-      }
-      try {
-        return await remote;
-      } catch (e) {
-        skip(name, (e as Error).message);
-        return null;
-      }
+    const loading = loadEnabledPlugin(name, { config, enabledDir, renders, make, remoteTransport, log });
+    // A remote plugin is not waited for in the app: it joins when its handshake is done.
+    if (late && isRemoteManifest(manifest)) {
+      late.expect(name, loading);
+      return null;
     }
     try {
-      // Import the entry FILE (not the symlinked directory), so the compiled binary
-      // and the runtime resolve plugins the same way — see resolvePluginEntry.
-      const entry = resolvePluginEntry(join(enabledDir, name));
-      const mod = (await import(pathToFileURL(entry).href)) as {
-        default?: unknown;
-        build?: unknown;
-      };
-      const build = (mod.default ?? mod.build) as unknown;
-      if (typeof build !== 'function') {
-        skip(name, 'default export is not a builder function');
-        return null;
-      }
-      // A builder may be async. One whose plugin waits on someone (an MCP server lists
-      // its tools once connected) returns at once and says so with `ready`; it is the
-      // plugin's job to bound that wait.
-      const plugin = await (build as (ctx: BuilderCtx) => Plugin | Promise<Plugin>)({ renders, config, make, z, ...EXTRAS });
-      // What the plugin IS, in its author's words, for the start screen — from its
-      // manifest, unless the shape says it itself.
-      plugin.description ??= manifestDescription(join(enabledDir, name));
+      const plugin = await loading;
       if (plugin.ready) {
         if (late) late.wait(plugin.name, plugin.ready);
         else await plugin.ready.catch(() => undefined);

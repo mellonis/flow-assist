@@ -21,15 +21,16 @@ import {
   readFileSync,
   realpathSync,
   renameSync,
+  readlinkSync,
   rmSync,
   symlinkSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { THIS_HOST, pluginCompat, readPluginManifest } from './compat.js';
 import { isRemoteManifest } from '../remote/transport.js';
-import { isPluginName, untrustPlugin } from './trust.js';
+import { DISABLED_DIR, isPluginName, untrustPlugin } from './trust.js';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -58,6 +59,8 @@ export interface RepoEntry {
   broken?: boolean;
   // A name that is not a plugin name (./trust.ts, `PLUGIN_NAME`): never loaded.
   refused?: boolean;
+  // Installed and turned off by the person: its link waits in `plugins-enabled/.disabled/`.
+  disabled?: boolean;
   source?: PluginSource;
   surfaces?: string[];
   tools?: string[];
@@ -86,6 +89,13 @@ export interface PluginRepo {
   enabledPlugins(): Promise<string[]>;
   // Forgets that a plugin was trusted (./trust.ts).
   untrust(name: string): Promise<void>;
+  // Turns an installed plugin off and on again, keeping it installed and its trust: its
+  // link moves to `plugins-enabled/.disabled/` and back. The person's, from the app's
+  // `:plugins` panel. Absent on a repository made by hand.
+  disable?(name: string): Promise<InstallResult>;
+  enable?(name: string): Promise<InstallResult>;
+  // The names waiting in `plugins-enabled/.disabled/`.
+  disabledPlugins?(): Promise<string[]>;
 }
 
 // A parsed `manifest.json` (subsets we consume; unknown fields preserved).
@@ -212,6 +222,21 @@ function missingSettingsFor(pluginDir: string): string[] {
   return missing;
 }
 
+// Whether there is an entry at `p`, a link to nothing included.
+const entryAt = (p: string): boolean => {
+  try { lstatSync(p); return true; } catch { return false; }
+};
+
+// Moves a link from `from` to `to`, keeping where it leads: a relative link (an
+// installer's `../plugins-available/<name>`) would lead elsewhere from another directory,
+// so the new link names the target as the old one resolved it.
+function moveLink(from: string, to: string): void {
+  const target = resolve(dirname(from), readlinkSync(from));
+  mkdirSync(dirname(to), { recursive: true });
+  symlinkSync(target, to);
+  unlinkSync(from);
+}
+
 // ─── Standalone dependency resolver ───────────────────────────────────────────
 // Checks a plugin's manifest `deps` and reports the ones that cannot be resolved
 // (e.g. `@acme/client` → `file:../client` when the target is absent). Options are supplied so the function can also be used standalone;
@@ -293,6 +318,11 @@ export function createPluginRepo({ availableDir, enabledDir, projectRoot, fetchP
       if (existsSync(enabledLink)) {
         return { ok: false, error: `plugin '${n}' is already installed` };
       }
+      // Installed and turned off: installing it is turning it on again.
+      const off = join(enabledDir, DISABLED_DIR, n);
+      if (entryAt(off) && !entryAt(enabledLink)) {
+        try { moveLink(off, enabledLink); return { ok: true }; } catch (e) { return { ok: false, error: (e as Error).message }; }
+      }
       if (existsSync(join(pluginDir, 'manifest.json'))) {
         const compat = pluginCompat(readPluginManifest(pluginDir), THIS_HOST);
         if (!compat.ok) return { ok: false, error: `plugin '${n}': ${compat.reason}` };
@@ -317,8 +347,9 @@ export function createPluginRepo({ availableDir, enabledDir, projectRoot, fetchP
     async remove(name: string): Promise<InstallResult> {
       const n = validPluginName(name);
       if (!n) return { ok: false, error: `plugin '${name}' — invalid name (letters, digits, . _ - only, starting with a letter or digit)` };
-      const enabledLink = join(enabledDir, n);
-      if (!existsSync(enabledLink)) {
+      const off = join(enabledDir, DISABLED_DIR, n);
+      const enabledLink = entryAt(join(enabledDir, n)) ? join(enabledDir, n) : entryAt(off) ? off : null;
+      if (!enabledLink) {
         return { ok: false, error: `plugin '${n}' is not installed` };
       }
       try {
@@ -386,6 +417,7 @@ export function createPluginRepo({ availableDir, enabledDir, projectRoot, fetchP
           version: manifest.version ?? '',
           description: manifest.description ?? '',
           active: existsSync(join(enabledDir, dirEntry.name)),
+          ...(entryAt(join(enabledDir, DISABLED_DIR, dirEntry.name)) ? { disabled: true } : {}),
           missingDeps: missingDepsFor(pluginDir),
           missingSettings: missingSettingsFor(pluginDir),
           source: isRemoteManifest(manifest) ? 'remote' : sourceFor(pluginDir),
@@ -399,12 +431,16 @@ export function createPluginRepo({ availableDir, enabledDir, projectRoot, fetchP
       // A plugin enabled by a link to somewhere else — kept in a repository of its own —
       // is listed too, with whether this host can load it.
       const inAvailable = (() => { try { return realpathSync(availableDir); } catch { return resolve(availableDir); } })();
-      if (existsSync(enabledDir)) {
-        for (const name of readdirSync(enabledDir)) {
-          const link = join(enabledDir, name);
+      // The disabled ones are listed the same way, from where they wait.
+      const places: Array<[string, boolean]> = [[enabledDir, false], [join(enabledDir, DISABLED_DIR), true]];
+      for (const [dir, disabled] of places) {
+        if (!existsSync(dir)) continue;
+        for (const name of readdirSync(dir)) {
+          const link = join(dir, name);
           if (!lstatSync(link).isSymbolicLink() || entries.some((e) => e.name === name)) continue;
+          const off = disabled ? { active: false, disabled: true } : { active: true };
           if (!isPluginName(name)) {
-            entries.push({ name, version: '', description: '', active: true, missingDeps: [], source: 'linked', refused: true });
+            entries.push({ name, version: '', description: '', ...off, missingDeps: [], source: 'linked', refused: true });
             continue;
           }
           let target: string;
@@ -412,7 +448,7 @@ export function createPluginRepo({ availableDir, enabledDir, projectRoot, fetchP
             target = realpathSync(link);
           } catch {
             // A link to something that is gone is said, not left out.
-            entries.push({ name, version: '', description: '', active: true, missingDeps: [], source: 'linked', broken: true });
+            entries.push({ name, version: '', description: '', ...off, missingDeps: [], source: 'linked', broken: true });
             continue;
           }
           if (target === inAvailable || target.startsWith(`${inAvailable}/`)) continue;
@@ -422,7 +458,7 @@ export function createPluginRepo({ availableDir, enabledDir, projectRoot, fetchP
             name,
             version: typeof manifest.version === 'string' ? manifest.version : '',
             description: typeof manifest.description === 'string' ? manifest.description : '',
-            active: true,
+            ...off,
             missingDeps: [],
             missingSettings: missingSettingsFor(target),
             source: isRemoteManifest(parsed) ? 'remote' : 'linked',
@@ -433,6 +469,33 @@ export function createPluginRepo({ availableDir, enabledDir, projectRoot, fetchP
         }
       }
       return entries;
+    },
+
+    async disable(name: string): Promise<InstallResult> {
+      const n = validPluginName(name);
+      if (!n) return { ok: false, error: `plugin '${name}' — invalid name (letters, digits, . _ - only, starting with a letter or digit)` };
+      const link = join(enabledDir, n);
+      const off = join(enabledDir, DISABLED_DIR, n);
+      if (!entryAt(link)) return { ok: false, error: entryAt(off) ? `plugin '${n}' is disabled already` : `plugin '${n}' is not installed` };
+      if (!lstatSync(link).isSymbolicLink()) return { ok: false, error: `plugin '${n}' is not a link in ${enabledDir}` };
+      if (entryAt(off)) return { ok: false, error: `${off} is there already — remove it first` };
+      try { moveLink(link, off); return { ok: true }; } catch (e) { return { ok: false, error: (e as Error).message }; }
+    },
+
+    async enable(name: string): Promise<InstallResult> {
+      const n = validPluginName(name);
+      if (!n) return { ok: false, error: `plugin '${name}' — invalid name (letters, digits, . _ - only, starting with a letter or digit)` };
+      const link = join(enabledDir, n);
+      const off = join(enabledDir, DISABLED_DIR, n);
+      if (entryAt(link)) return { ok: false, error: `plugin '${n}' is enabled already` };
+      if (!entryAt(off)) return { ok: false, error: `plugin '${n}' is not installed` };
+      try { moveLink(off, link); return { ok: true }; } catch (e) { return { ok: false, error: (e as Error).message }; }
+    },
+
+    async disabledPlugins(): Promise<string[]> {
+      const dir = join(enabledDir, DISABLED_DIR);
+      if (!existsSync(dir)) return [];
+      return readdirSync(dir).filter((n) => lstatSync(join(dir, n)).isSymbolicLink());
     },
 
     async untrust(name: string): Promise<void> {

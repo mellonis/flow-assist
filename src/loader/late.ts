@@ -12,8 +12,9 @@ import type { Plugin } from './plugin.js';
 export type LateEvent =
   // A plugin that was on its way joins the list.
   | { kind: 'joined'; plugin: Plugin }
-  // It did not make it: the loader's own skip line, `[plugins] skip <name>: <why>`.
-  | { kind: 'skipped'; name: string; line: string }
+  // It did not make it: the loader's own skip line, `[plugins] skip <name>: <why>`, and
+  // the why alone.
+  | { kind: 'skipped'; name: string; line: string; why: string }
   // A plugin already in the list is done with what it was waiting on.
   | { kind: 'ready'; name: string }
   // A line for the app's log from a plugin still on its way — its process's stderr, a
@@ -71,7 +72,7 @@ export function createLatePlugins(): LatePlugins {
           // A plugin that joined late may still be waiting on someone of its own.
           if (p.ready) this.wait(p.name, p.ready);
         },
-        (e: unknown) => settle(name, { kind: 'skipped', name, line: skipLine(name, (e as Error)?.message ?? String(e)) }),
+        (e: unknown) => { const why = (e as Error)?.message ?? String(e); settle(name, { kind: 'skipped', name, line: skipLine(name, why), why }); },
       );
     },
     wait(name, ready) {

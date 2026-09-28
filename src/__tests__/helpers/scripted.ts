@@ -21,7 +21,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { TestBackend, flush } from '@flowtty/core/testing';
 import type { FrameMeter } from '../../runtime/frame-stats';
-import { loadPlugins } from '../../loader/build.ts';
+import { loadEnabledPlugin, loadPlugins } from '../../loader/build.ts';
+import { createPluginRepo } from '../../loader/repo.ts';
+import type { Untrusted } from '../../loader/trust.ts';
 import { createLatePlugins } from '../../loader/late.ts';
 import { makeFactory, type Make, type Plugin } from '../../loader/plugin.ts';
 import { assembleToolRegistry } from '../../loader/tools.ts';
@@ -307,7 +309,7 @@ const testEnv = (): Record<string, string | undefined> =>
   Object.fromEntries(Object.entries(process.env).filter(([k, v]) => MACHINE_ENV[k] !== v));
 setSecretsEnv(testEnv);
 
-export async function bootApp(model: ScriptedModel, cols = 100, rows = 28, guests?: (make: Make) => Plugin[], extra: Record<string, unknown> = {}, opts: { toastMs?: number; scheme?: 'light' | 'dark' | 'unknown'; clipboardImage?: () => ClipboardImage; pluginsNote?: string; interactive?: InteractiveDeps; chatMode?: 'panel' | 'window' | 'full' | null; backend?: TestBackend; remote?: { manifest: Record<string, unknown>; transport: RestartingTransport }; startDir?: string; frameMeter?: FrameMeter; late?: boolean; untrusted?: import('../../loader/trust.ts').Untrusted[]; trustNotes?: string[] } = {}) {
+export async function bootApp(model: ScriptedModel, cols = 100, rows = 28, guests?: (make: Make) => Plugin[], extra: Record<string, unknown> = {}, opts: { toastMs?: number; scheme?: 'light' | 'dark' | 'unknown'; clipboardImage?: () => ClipboardImage; pluginsNote?: string; interactive?: InteractiveDeps; chatMode?: 'panel' | 'window' | 'full' | null; backend?: TestBackend; remote?: { manifest: Record<string, unknown>; transport: RestartingTransport }; startDir?: string; frameMeter?: FrameMeter; late?: boolean; untrusted?: import('../../loader/trust.ts').Untrusted[]; trustNotes?: string[]; dirs?: { available: string; enabled: string }; trustFile?: string } = {}) {
   process.env.LLM_TOKEN = '^scripted-llm-token';
   model.install();
   // Sessions go to a fresh temp dir unless a test names one: a test must never write
@@ -334,22 +336,33 @@ export async function bootApp(model: ScriptedModel, cols = 100, rows = 28, guest
   const renders = { chat: renderChatModal, help: renderHelp, log: renderLogModal, reminder: renderReminder };
   let enabled: string[] = [];
   let enabledDir: string | undefined;
-  if (opts.remote) {
+  // With `opts.dirs` the test lays its plugins out itself, a remote one included.
+  if (opts.remote && !opts.dirs) {
     const name = String(opts.remote.manifest.name);
     enabledDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-enabled-'));
     fs.mkdirSync(path.join(enabledDir, name));
     fs.writeFileSync(path.join(enabledDir, name, 'manifest.json'), JSON.stringify(opts.remote.manifest));
     enabled = [name];
   }
-  const repo = { enabledPlugins: async () => enabled, list: async () => [] } as never;
+  // `opts.dirs` — a plugins-available/ and a plugins-enabled/ of the test's own, reached
+  // through the real repository: the `:plugins` panel disables, enables and loads from
+  // them as the app does.
+  if (opts.dirs) enabledDir = opts.dirs.enabled;
+  const repo = (opts.dirs
+    ? createPluginRepo({ availableDir: opts.dirs.available, enabledDir: opts.dirs.enabled, projectRoot: path.dirname(opts.dirs.available) })
+    : { enabledPlugins: async () => enabled, list: async () => [] }) as never;
   const remoteTransport = opts.remote ? () => opts.remote!.transport : undefined;
   // `opts.late` loads as the interactive app does: a remote plugin joins once its
   // handshake completes, and a plugin's `ready` (a guest's too) is only noted.
   const late = opts.late ? createLatePlugins() : undefined;
   // Each boot's plugins directory is new, so each boot is a machine of its own with a
   // trust record of its own (src/loader/trust.ts): its first start trusts its plugin.
-  const trust = enabledDir ? { file: path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-trust-')), 'plugins.trusted.json'), modelShell: false } : undefined;
-  const plugins = await loadPlugins({ config, repo, renders: renders as never, enabledDir, remoteTransport, late, trust });
+  const trust = enabledDir ? { file: opts.trustFile ?? path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-trust-')), 'plugins.trusted.json'), modelShell: false } : undefined;
+  const untrusted: Untrusted[] = opts.untrusted ?? [];
+  const skipped = new Map<string, string>();
+  const plugins = await loadPlugins({ config, repo, renders: renders as never, enabledDir, remoteTransport, late, trust, untrusted, skipped });
+  // What the `:plugins` panel needs, as `runInteractive` hands it over.
+  const site = { repo, enabledDir, trust, skipped, untrusted, ...(enabledDir ? { load: (name: string) => loadEnabledPlugin(name, { config, enabledDir: enabledDir!, renders: renders as never, remoteTransport, log: (line: string) => late?.note(line) }) } : {}) };
   if (guests) {
     const added = guests(makeFactory(config as never));
     plugins.push(...added);
@@ -385,7 +398,7 @@ export async function bootApp(model: ScriptedModel, cols = 100, rows = 28, guest
   setStartDirForTests(opts.startDir ?? (firstRoot && fs.existsSync(firstRoot) ? firstRoot : null));
   let app: Awaited<ReturnType<typeof renderApp>>;
   try {
-    app = await renderApp(backend, { plugins, config, tools, late, untrusted: opts.untrusted, trustNotes: opts.trustNotes, onExit: () => { exits++; }, toastMs: opts.toastMs, pluginsNote: opts.pluginsNote, frameMeter: opts.frameMeter, clipboardImage: opts.clipboardImage ?? (() => ({ ok: false, none: true, error: 'no image on the clipboard' })),
+    app = await renderApp(backend, { plugins, config, tools, late, untrusted, site, trustNotes: opts.trustNotes, onExit: () => { exits++; }, toastMs: opts.toastMs, pluginsNote: opts.pluginsNote, frameMeter: opts.frameMeter, clipboardImage: opts.clipboardImage ?? (() => ({ ok: false, none: true, error: 'no image on the clipboard' })),
       // `!!command` never reaches the machine's own `script` or signals from a test: with
       // no `interactive` given, there is no `script`, the program "runs" at once and
       // exits 0, and the signal hold works on an emitter of its own.
@@ -396,7 +409,7 @@ export async function bootApp(model: ScriptedModel, cols = 100, rows = 28, guest
   await settle();
   const press = async (...names: string[]) => { for (const name of names) backend.press({ name }); await settle(); };
   const type = async (text: string) => { backend.type(text); await settle(); };
-  return { backend, app, press, type, exits: () => exits, config, tools, plugins };
+  return { backend, app, press, type, exits: () => exits, config, tools, plugins, site, trust };
 }
 
 // A summary in the shape a compaction accepts (src/assistant/compaction.ts): every

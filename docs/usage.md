@@ -355,6 +355,38 @@ while its process starts — and each one's tools join as it answers: a message 
 on its way gets them from its next step. The line goes once everything has joined or
 failed; what failed is in the log (`L`).
 
+## Plugins: `:plugins`
+
+`:plugins` on the `:` command line lists the plugins — each one's version, its state and
+what it brings (its tool groups, its tools, its keys). The state is `active`,
+`starting…` (a plugin in another language while its process starts, `mcp` while it
+connects), `skipped: <why>`, `missing settings: <VAR>`, `not trusted` (with where its
+link led and where it leads now, when that changed) or `disabled`. It works with the chat
+closed, and without the chat at all — the place to look when a plugin is broken.
+`/plugins` in the chat opens the same list in the chat's frame. The keys:
+
+- **⏎** — its details: what it is, the host API and flowtty range it declares, why it
+  was skipped (whole), and its settings under `plugins.<name>`, a secret-looking one
+  masked and each environment variable it needs marked set or `required — unset`.
+- **r** — restart a plugin in another language: its process is stopped and started
+  again, and it rejoins as it does at a start. A plugin that runs inside the app is
+  reloaded by restarting the app.
+- **d** — disable or enable. Disabled, its tools are out of the assistant's next step (a
+  step already running is told the tool is gone), and its screens and keys stay until
+  you restart the app — the row says `disabled (restart to unload)`. Enabled, it loads
+  at once. Its link waits in `plugins-enabled/.disabled/` meanwhile: it stays installed
+  and trusted, and `plugins ls` says `disabled`.
+- **t** — its tools, the ones that ask before they run marked.
+- **y** — trust it, as `flow-assist plugins trust <name>` would, and it loads. A plugin
+  whose link now leads elsewhere shows both places first and waits for a second `y`.
+  Enabling a plugin you have not trusted leaves it unloaded until you do.
+
+While the chat waits for your answer to a question or a y/n, the list's own keys do
+nothing — a `y` meant for the chat never trusts a plugin; `^]` takes you to the chat and
+closes the list. Installing, removing and updating stay `flow-assist plugins
+install|remove|update` (and the assistant's tools); the list shows what they did the
+next time you open it.
+
 ## When the app feels slow: `:perf`
 
 `:perf` on the `:` command line says how long the app took to answer your input, over

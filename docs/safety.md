@@ -126,6 +126,15 @@ for the global one. So the app keeps a record of what it put there itself.
   put back somewhere else still shows both places and `plugins trust` still asks.
   `plugins install` from your terminal trusts what it installed and says `installed and
   trusted`; run by the assistant's command it says `installed, not trusted`, and is.
+  The app's `:plugins` list (`/plugins` in the chat) trusts a plugin too, when you press
+  `y` on its row — and for a link that leads elsewhere than it did, only after it has
+  shown both places and you press `y` again. That key is yours alone: the assistant has
+  no tool for it, a plugin in another language no request, and a line typed or queued in
+  the chat only opens the list. A plugin you disable there keeps its trust (its link
+  waits in `plugins-enabled/.disabled/`), so enabling it loads it again while it leads
+  where it did. The same holds for a command: one that moves a disabled plugin's link
+  back enables it at the next start, as one that edits a trusted plugin's code changes
+  what runs — a link that leads anywhere else is still not trusted.
 - **A memory the app did not write is not sent.** The app keeps the hash of each fact
   file as it wrote it (through the assistant's `memory` tool, or a plugin's use of the
   memory) or as you accepted it. A fact file that was changed or added some other way is

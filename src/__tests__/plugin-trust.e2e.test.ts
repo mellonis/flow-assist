@@ -399,3 +399,23 @@ test('`plugins install` says what it did: the person\'s install trusts, one from
   expect(d.out.at(-1)).toContain("plugin 'alpha' installed and trusted");
   expect((await d.load()).names).toContain('alpha');
 });
+
+// A plugin the person disabled in the app (`:plugins`) is still installed and still
+// trusted: `plugins ls` says so, and a start while it is off neither loads nor forgets it.
+test('a disabled plugin is listed as disabled, is not loaded, and loads again once enabled', async () => {
+  const d = install();
+  symlinkSync(pluginAt(join(d.availableDir, 'alpha'), 'alpha', d.root), join(d.enabledDir, 'alpha'));
+  expect((await d.load()).names).toContain('alpha');
+  expect((await d.repo.disable!('alpha')).ok).toBe(true);
+  await d.cli('ls');
+  expect(d.out.join('\n')).toContain('alpha  v1.0.0  [disabled]');
+  rmSync(join(d.root, 'alpha.ran'));
+  const off = await d.load();
+  expect(off.names).not.toContain('alpha');
+  expect(off.untrusted).toEqual([]);
+  expect(d.ran('alpha')).toBe(false);
+  expect((await d.repo.enable!('alpha')).ok).toBe(true);
+  const on = await d.load();
+  expect(on.names).toContain('alpha');
+  expect(on.untrusted).toEqual([]);
+});

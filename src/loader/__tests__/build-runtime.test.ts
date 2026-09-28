@@ -206,7 +206,7 @@ test('with late, a remote plugin is not waited for: it joins after its handshake
     expect(late.starting()).toEqual([]);
     expect(events[0]).toEqual({ kind: 'note', line: '[fake] warming up' });
     if (outcome === 'answer') expect(events.slice(1).map((e) => [e.kind, e.plugin?.name])).toEqual([['joined', 'fake']]);
-    else expect(events.slice(1)).toEqual([{ kind: 'skipped', name: 'fake', line: '[plugins] skip fake: hello: nope' } as never]);
+    else expect(events.slice(1)).toEqual([{ kind: 'skipped', name: 'fake', line: '[plugins] skip fake: hello: nope', why: 'hello: nope' } as never]);
   }
 });
 

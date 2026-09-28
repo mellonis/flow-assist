@@ -132,3 +132,43 @@ test('a built plugin carries its dependencies inside: none of them is reported m
   writeFileSync(join(built, 'dist', 'index.mjs'), 'export default 1;');
   expect((await repo.list()).find((e) => e.name === 'built')?.missingDeps).toEqual([]);
 });
+
+// The person turns a plugin off from the app's `:plugins` panel: its link waits in
+// plugins-enabled/.disabled/ — not loaded, still installed — and its trust is kept, so a
+// start between disable and enable forgets nothing and the plugin loads again once
+// enabled. A relative link keeps leading where it did from its new place.
+test('disable moves the link aside and enable brings it back; the trust is kept across a start', async () => {
+  const { checkPluginTrust, trustPlugin } = await import('../trust');
+  const { repo, enabled, root } = fakeRepo();
+  const trust = { file: join(root, 'plugins.trusted.json'), modelShell: false };
+  // An installer's relative link.
+  symlinkSync('../plugins-available/tracker', join(enabled, 'tracker'));
+  expect(trustPlugin(enabled, 'tracker', trust).ok).toBe(true);
+  checkPluginTrust(enabled, ['tracker'], trust); // the first start, done
+  expect(await repo.disable!('tracker')).toEqual({ ok: true });
+  expect(await repo.enabledPlugins()).toEqual([]);
+  expect(await repo.disabledPlugins!()).toEqual(['tracker']);
+  expect((await repo.list()).find((e) => e.name === 'tracker')).toMatchObject({ active: false, disabled: true });
+  expect(await repo.disable!('tracker')).toEqual({ ok: false, error: "plugin 'tracker' is disabled already" });
+  // A start while it is off: not loaded, not forgotten.
+  expect(checkPluginTrust(enabled, await repo.enabledPlugins(), trust).untrusted).toEqual([]);
+  expect(await repo.enable!('tracker')).toEqual({ ok: true });
+  expect(await repo.enabledPlugins()).toEqual(['tracker']);
+  expect(readdirSync(join(enabled, '.disabled'))).toEqual([]);
+  expect(checkPluginTrust(enabled, ['tracker'], trust)).toMatchObject({ trusted: ['tracker'], untrusted: [] });
+  expect(existsSync(join(enabled, 'tracker', 'manifest.json'))).toBe(true);
+});
+
+test('install turns a disabled plugin on again; remove takes a disabled one out too', async () => {
+  const { repo, enabled } = fakeRepo();
+  expect((await repo.install('tracker')).ok).toBe(true);
+  expect((await repo.disable!('tracker')).ok).toBe(true);
+  expect(await repo.install('tracker')).toEqual({ ok: true });
+  expect(await repo.enabledPlugins()).toEqual(['tracker']);
+  expect(await repo.disabledPlugins!()).toEqual([]);
+  expect((await repo.disable!('tracker')).ok).toBe(true);
+  expect(await repo.remove('tracker')).toEqual({ ok: true });
+  expect(existsSync(join(enabled, '.disabled', 'tracker'))).toBe(false);
+  expect((await repo.list()).find((e) => e.name === 'tracker')).toMatchObject({ active: false });
+  expect(await repo.enable!('tracker')).toEqual({ ok: false, error: "plugin 'tracker' is not installed" });
+});

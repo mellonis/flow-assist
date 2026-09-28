@@ -23,6 +23,9 @@
 // (`PLUGIN_NAME`): an entry named otherwise is refused, never loaded, and never put into
 // a command line shown to the person.
 //
+// A plugin the person disabled (its link moved to `plugins-enabled/.disabled/`) keeps its
+// trust: enabling it again loads it while its link leads where it did.
+//
 // The first start — the record MISSING, or written by the host before any start — trusts
 // every plugin enabled then, once, and says which (`bootstrapped`); the record then says
 // the first start is done, and a `plugins-enabled/` directory seen for the first time
@@ -69,13 +72,22 @@ function dirKey(enabledDir: string): string {
   try { return fs.realpathSync(enabledDir); } catch { return path.resolve(enabledDir); }
 }
 
+// Where the person's disabled plugins wait (`plugins-enabled/.disabled/<name>`, a link
+// like the enabled ones): not loaded, and not gone — its trust is kept, so enabling it
+// again needs no new word while the link leads where it did. A name starting with `.` is
+// never a plugin name, so nothing here is ever taken for a plugin.
+export const DISABLED_DIR = '.disabled';
+
 // Where an entry of `plugins-enabled/` really leads; null for one that leads nowhere.
 export function pluginTarget(enabledDir: string, name: string): string | null {
   try { return fs.realpathSync(path.join(enabledDir, name)); } catch { return null; }
 }
-const present = (enabledDir: string, name: string): boolean => {
-  try { fs.lstatSync(path.join(enabledDir, name)); return true; } catch { return false; }
+const exists = (p: string): boolean => {
+  try { fs.lstatSync(p); return true; } catch { return false; }
 };
+// Enabled, or disabled by the person — either way the name is still theirs.
+const present = (enabledDir: string, name: string): boolean =>
+  exists(path.join(enabledDir, name)) || exists(path.join(enabledDir, DISABLED_DIR, name));
 
 const isMap = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 // Only ENOENT is a first start; anything that does not parse to the record's shape is
@@ -210,7 +222,7 @@ export function trustPlugin(enabledDir: string, name: string, opts?: TrustOption
   const n = String(name ?? '').trim();
   if (modelShellOf(opts)) return { ok: false, error: `plugins trust: a command the assistant runs cannot trust a plugin — run \`${trustCommand(n)}\` yourself` };
   if (!isPluginName(n)) return { ok: false, error: `plugins trust: ${shownName(n)} is not a plugin name — letters, digits, . _ - only, starting with a letter or digit` };
-  if (!present(enabledDir, n)) return { ok: false, error: `plugin '${n}' is not in ${enabledDir}` };
+  if (!exists(path.join(enabledDir, n))) return { ok: false, error: `plugin '${n}' is not in ${enabledDir}` };
   const target = pluginTarget(enabledDir, n);
   if (!target) return { ok: false, error: `plugin '${n}' is a link to something that is gone` };
   const file = fileOf(opts);

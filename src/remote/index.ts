@@ -30,5 +30,6 @@ export const storeBus: StoreBus = {
 
 export const remotePlugin = (opts: RemotePluginOpts) => buildRemotePlugin({ storeBus, ...opts });
 export { transportFor } from './transports.js';
+export { stopRemotePlugin, isRemotePlugin } from './adapter.js';
 export { isRemoteManifest } from './transport.js';
 export type { Transport, RestartingTransport, RemoteManifest } from './transport.js';

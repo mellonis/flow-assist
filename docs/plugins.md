@@ -43,7 +43,15 @@ notes/
 
 A manifest may also list `requiredSettings` — the environment variables the plugin
 cannot work without (a token): the host says a plugin is missing settings instead of
-loading it half-working. `hostApi` and `flowtty` say what the plugin is built for —
+loading it half-working.
+
+The person sees your plugin in the app's `:plugins` list: its version, its state, what
+it brings, and — on ⏎ — your manifest's description and ranges, why it was skipped (a
+builder that throws says its message there), and its settings. From there they may
+disable it: your tools leave the assistant at once, and a call to one is told it is gone;
+your screens, keys and commands stay until the app restarts, so nothing of yours needs
+to handle being disabled. A plugin in another language may be restarted there: the host
+says `shutdown`, closes its transport and starts it again, and a new `hello` follows. `hostApi` and `flowtty` say what the plugin is built for —
 see [Compatibility](#compatibility).
 
 ## The builder

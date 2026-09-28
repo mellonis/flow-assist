@@ -34,7 +34,7 @@ import {
   partitionInput,
   runConsumers,
 } from '../loader/registry.js';
-import { completeCommand, describeConfigValue, flattenConfigPaths, parseConfigArgs, unquoteValue } from '../config/commands.js';
+import { BASE_COMMANDS, completeCommand, describeConfigValue, flattenConfigPaths, parseConfigArgs, unquoteValue } from '../config/commands.js';
 import { lineTab, lineView, type TabWalk } from '../config/commandline.js';
 import { hostConfigSchema } from '../config/schema.js';
 import {
@@ -65,7 +65,12 @@ import type { ColorScheme, Theme } from '../playback/theme.js';
 import type { Command } from '../loader/plugin.js';
 import type { Plugin, PluginShape } from '../loader/plugin.js';
 import { renderHome } from '../views/home.js';
-import { joinIndex, type LatePlugins } from '../loader/late.js';
+import { createLatePlugins, joinIndex, type LatePlugins } from '../loader/late.js';
+import { createPluginsPanel, type PluginSite } from './plugins-panel.js';
+import { panelKey as commandPanelKey, panelAnswer, panelKeys, panelRows, panelStart, panelTop, type PanelSpec, type PanelState } from '../assistant/command-panel.js';
+import { renderCommandPanel } from '../views/modals.js';
+import { redactDeep } from '../assistant/secrets.js';
+import { stopRemotePlugin } from '../remote/index.js';
 import { FOOTER_ROWS, TITLE_ROWS, chatModeOf, panelLayout, type ChatMode, type PanelLayout } from './panel-layout.js';
 
 // The host's own plugins: they ARE the host, so the start screen does not list them
@@ -84,6 +89,8 @@ const TOP_LAYER: Record<string, 'topLeft' | 'bottomRight'> = { 'core:reminder': 
 // wrappers or resolved entries; `partitionInput` unwraps lazily either way.
 type UiState = {
   cmdOpen?: boolean;
+  // The runtime's own panel (`:plugins`) is up and holds the keys.
+  hostPanel?: boolean;
   modalActive?: boolean;
   view?: string;
   overlay?: string;
@@ -173,6 +180,10 @@ export interface RenderAppInput {
   // What the start screen says of the trust records, once: the plugins the first start
   // trusted, a record that cannot be read.
   trustNotes?: string[];
+  // What the loader knew, for the `:plugins` panel (src/runtime/plugins-panel.ts): the
+  // plugin repository, how to load one plugin again, why each was skipped. Absent: the
+  // panel lists the plugins in the app and cannot change them.
+  site?: PluginSite;
 }
 
 // Command-line state lives in a single stable `{ current }` object created in
@@ -335,8 +346,8 @@ function HostExit({ path }: { path: HostKeyPath }) {
 // open, the log or the help is up, or the chat has the keys (open, and not docked with
 // the focus on the plugin). While a dropdown's popup is open flowtty mutes everything
 // under it, whatever this says.
-export function pluginHasKeyboard(store: Record<string, unknown>, ui: { cmdOpen?: boolean }): boolean {
-  if (ui.cmdOpen) return false;
+export function pluginHasKeyboard(store: Record<string, unknown>, ui: { cmdOpen?: boolean; hostPanel?: boolean }): boolean {
+  if (ui.cmdOpen || ui.hostPanel) return false;
   const s = store as { log?: { open?: boolean }; help?: { helpModal?: boolean }; chat?: { open?: boolean; focus?: string } };
   if (s.log?.open || s.help?.helpModal) return false;
   return !(s.chat?.open && s.chat.focus !== 'plugin');
@@ -348,8 +359,14 @@ const CONSOLE_REDRAW_MS = 200;
 
 export function renderApp(
   root: Backend,
-  { plugins, config, onExit, renders: _renders = {}, tools, toastMs, clipboardImage, pluginsNote, loadNotes = [], interactive, consoleLog, frameMeter, late, untrusted = [], trustNotes = [] }: RenderAppInput,
+  { plugins, config, onExit, renders: _renders = {}, tools, toastMs, clipboardImage, pluginsNote, loadNotes = [], interactive, consoleLog, frameMeter, late: lateIn, untrusted: untrustedIn = [], trustNotes = [], site: siteIn }: RenderAppInput,
 ) {
+  // Plugins join the running app through one hub: the loader's, or one of the App's own
+  // for a plugin the `:plugins` panel enables or restarts.
+  const late: LatePlugins = lateIn ?? createLatePlugins();
+  const site: PluginSite = siteIn ?? { skipped: new Map(), untrusted: untrustedIn };
+  // The start screen's untrusted list is the panel's: a plugin trusted there leaves it.
+  const untrusted = site.untrusted;
   // Resolve config.theme into the full per-modal palette BEFORE anything reads it
   // (createServices, the plugins' `host` and every renderer read `config.theme`): the base of the
   // terminal's scheme + user config.theme on top, then resolveModalPalettes lays the
@@ -407,11 +424,53 @@ export function renderApp(
   // slow frame could be one more slow frame.
   const meter = frameMeter ?? createFrameMeter({ onSlow: (line) => services.log.append(line) });
   const viewRegistry = buildViewRegistry(plugins);
-  const commandRegistry = buildCommandRegistry(plugins);
+  // The runtime's own panel (`:plugins`), drawn over the plugin's side; null — none.
+  const hostPanel: { current: PanelState | null } = { current: null };
+  let openHostPanel: (spec: PanelSpec) => void = () => undefined;
+  // Disabled while the app runs and still loaded (src/runtime/plugins-panel.ts).
+  const disabledNow = new Set<string>();
+  const logLine = (line: string) => {
+    services.log.append(line);
+    (services as unknown as ReactBoundServices).logs = services.log.read();
+  };
+  const redraw = () => (services as unknown as ReactBoundServices).notify();
+  // The host's own commands. `plugins` carries its `run`: on the `:` line it opens the
+  // runtime's panel, in the chat (`chat: true`) the same panel in the chat's frame.
+  const hostCommands: Command[] = BASE_COMMANDS.map((c) => (c.name === 'plugins'
+    ? { ...c, chat: true, run: (ctx?: unknown) => {
+      const c2 = ctx as { surface?: string; openPanel?: (spec: PanelSpec) => void } | undefined;
+      if (c2?.surface === 'chat' && typeof c2.openPanel === 'function') c2.openPanel(pluginsPanel.spec());
+      else openHostPanel(pluginsPanel.spec());
+    } }
+    : c));
+  const commandRegistry = buildCommandRegistry(plugins, hostCommands);
   // A key refused for an action is said once, however often the keys are built again.
   const keyNotes = new Set<string>();
   const keyNote = (line: string) => { if (!keyNotes.has(line)) { keyNotes.add(line); services.log.append(line); } };
   const keys = buildKeys(plugins, config, undefined, keyNote);
+  const pluginsPanel = createPluginsPanel({
+    plugins, builtins: BUILTIN_PLUGINS, config, keys, site, disabledNow,
+    starting: () => late.starting(),
+    withhold: (name, on) => { tools?.withhold?.(name, on); rebuildFromPlugins(); redraw(); },
+    unload: (plugin) => {
+      const at = plugins.indexOf(plugin);
+      if (at >= 0) plugins.splice(at, 1);
+      rebuildFromPlugins();
+      redraw();
+    },
+    join: async (name) => {
+      if (!site.load) return;
+      // Its place in the enabled order as it is now — a plugin disabled at the start has
+      // none in the order the loader set.
+      if (site.repo) { try { late.order(await site.repo.enabledPlugins()); } catch { /* the order the loader set */ } }
+      late.expect(name, site.load(name));
+      redraw();
+    },
+    stop: (plugin) => stopRemotePlugin(plugin) ?? Promise.resolve(),
+    notify: redraw,
+    log: logLine,
+  });
+
   // A plugin that joins after the first frame goes into the SAME list, and what was
   // built from the list is built again INTO the objects already handed out — the keys
   // (every plugin's `host.keys`), the view and command registries, the palette, the tool
@@ -422,7 +481,7 @@ export function renderApp(
     for (const action of Object.keys(keys)) delete keys[action];
     Object.assign(keys, nextKeys);
     Object.assign(viewRegistry, buildViewRegistry(plugins));
-    commandRegistry.splice(0, commandRegistry.length, ...buildCommandRegistry(plugins));
+    commandRegistry.splice(0, commandRegistry.length, ...buildCommandRegistry(plugins, hostCommands));
     const theme = config.theme as Theme;
     const nextTheme = resolveAppTheme(userTheme, plugins, config, themeScheme);
     for (const key of Object.keys(theme)) delete theme[key];
@@ -605,18 +664,61 @@ export function renderApp(
     const overlayComps = plugins.flatMap((p) => compsOf.get(p) ?? []);
     // The plugins still starting join here as they come (src/loader/late.ts); what waited
     // for the App to listen is handed over at once.
-    useEffect(() => late?.listen((event) => {
+    useEffect(() => late.listen((event) => {
       if (event.kind === 'joined') {
         // Its place in the enabled order, whenever it arrived: the keys, the palette, the
         // screen context and the start screen follow the config, not the timing.
         plugins.splice(joinIndex(plugins, event.plugin.name, late.rank), 0, event.plugin);
+        site.skipped.delete(event.plugin.name);
+        // Disabled from the panel while it was still starting: it joins without its tools.
+        if (disabledNow.has(event.plugin.name)) tools?.withhold?.(event.plugin.name, true);
         rebuildFromPlugins();
       } else if (event.kind === 'skipped' || event.kind === 'note') {
+        if (event.kind === 'skipped') site.skipped.set(event.name, event.why);
         services.log.append(event.line);
         (services as unknown as ReactBoundServices).logs = services.log.read();
       }
       notify();
     }), []);
+    // The runtime's panel (`:plugins`): drawn over the plugin's side, it holds the keys
+    // while it is up (step 1 of the key path, below), and a tick redraws it every second
+    // so what it says of a plugin starting moves.
+    openHostPanel = (spec) => {
+      hostPanel.current = panelStart(spec);
+      ui.hostPanel = true;
+      notify();
+    };
+    const setHostPanel = (next: PanelState | null) => {
+      hostPanel.current = next;
+      ui.hostPanel = !!next;
+      notify();
+    };
+    const hostPanelUp = !!hostPanel.current;
+    useEffect(() => {
+      if (!hostPanelUp) return;
+      const t = setInterval(notify, 1000);
+      (t as { unref?: () => void }).unref?.();
+      return () => clearInterval(t);
+    }, [hostPanelUp]);
+    // A key's answer: a line for the notice, or a panel over it — laid on the panel it ran
+    // in, and dropped when that one has gone meanwhile.
+    const hostPanelKey = (k: InputKey) => {
+      const step = commandPanelKey(hostPanel.current!, k as never);
+      setHostPanel(step.state);
+      if (!step.run || !step.state) return;
+      const at = panelTop(step.state);
+      const apply = (answer: unknown) => {
+        const cur = hostPanel.current;
+        if (!cur || panelTop(cur) !== at) return;
+        setHostPanel(panelAnswer(cur, answer));
+      };
+      const fail = (e: unknown) => apply(`⚠ ${(e as Error)?.message ?? String(e)}`);
+      try {
+        const r = step.run.def.run(step.run.id);
+        if (r && typeof (r as Promise<unknown>).then === 'function') (r as Promise<unknown>).then(apply, fail);
+        else apply(r);
+      } catch (e) { fail(e); }
+    };
 
     // Every view renderer, the host's and each plugin's: the chat draws a tool's block
     // with the renderer its kind names (src/loader/registry.ts).
@@ -722,6 +824,7 @@ export function renderApp(
         case 'help': case '?': setHelpModalOpen(true); break;
         case 'keycaps': toggleKeycaps(arg); break;
         case 'perf': runPerfCmd(); break;
+        case 'plugins': openHostPanel(pluginsPanel.spec()); break;
         // A typo is answered, not swallowed: silence after Enter reads as a hang.
         default: if (name) toast.showMessage(`Unknown command: ${name} — try :help`);
       }
@@ -970,7 +1073,23 @@ export function renderApp(
       // chat opened over it would leave what is typed going into a line nobody sees.
       const chat = chatStore();
       const panelKey = ui.cmdOpen ? null : isKey(keys.chatFocus ?? [], k) ? 'focus' : isKey(keys.chatCollapse ?? [], k) ? 'collapse' : null;
-      if (panelKey && chat?.panelKey?.(panelKey)) { notify(); return true; }
+      // The runtime's panel never keeps the person from the chat: the chat taking the
+      // keyboard closes it.
+      if (panelKey && chat?.panelKey?.(panelKey)) { if (hostPanel.current) setHostPanel(null); notify(); return true; }
+      // The runtime's panel holds every other key while it is up — ↑/↓, Esc and its own
+      // keys — as the `:` line does; a mouse button goes on its way (a drag still
+      // selects). While the chat waits for an answer (a y/n, a question) none of its own
+      // keys acts: a `y` meant for the chat must never trust a plugin here.
+      if (hostPanel.current && !ui.cmdOpen && !isMouseKey(k.name)) {
+        const waits = (chat?.needRows?.(80) ?? 0) > 0; // any width: only whether it is 0
+        if (waits && !['up', 'down', 'escape'].includes(String(k.name))) {
+          const cap = bindingGlyph(keys.chatFocus);
+          setHostPanel({ ...hostPanel.current, notice: `⚠ the chat waits for your answer${cap ? ` — ${cap} to answer it` : ''}; nothing here acts until then` });
+          return true;
+        }
+        hostPanelKey(k);
+        return true;
+      }
       // A press anywhere tells the chat which pane it landed in (the keyboard follows
       // it). The button goes on its usual path: a click in the panel may open a fold, and a
       // drag still selects.
@@ -1051,6 +1170,18 @@ export function renderApp(
     // candidates appearing and vanishing under the line with every keystroke would
     // jump the whole screen by a row each time.
     const line = cmdline.current.open ? lineView(cmdline.current.input, cmdline.current.walk, completeLine) : null;
+    // The runtime's panel as it is drawn: its rows as they are now, redacted — a
+    // plugin's settings and its links' places may hold what should not be on screen.
+    const hostView = hostPanel.current ? (() => {
+      const state = hostPanel.current!;
+      const { rows, error } = panelRows(state);
+      const top = panelTop(state);
+      return redactDeep({
+        title: top.title, rows: rows.map((r) => ({ ...r })), cursor: Math.min(state.cursor, Math.max(0, rows.length - 1)),
+        notice: error ? `⚠ ${error}` : state.notice, empty: top.empty ?? '',
+        keys: panelKeys(state).map((k) => ({ cap: keyGlyph(k.key), label: k.label })), nested: state.stack.length > 1,
+      });
+    })() : null;
 
     const isChat = (c: { key: string }) => c.key === 'assistant:chat';
     const chatComp = overlayComps.find(isChat);
@@ -1135,6 +1266,9 @@ export function renderApp(
       ))),
       h(AreaContext.Provider, { value: panelArea },
         h(Box, panelBox, chatComp ? h(chatComp.Comp as any, { key: chatComp.key }) : null)),
+      // The runtime's panel, over the plugin's side — above the chat's window, which the
+      // `:` line it was opened from could not have been typed into.
+      hostView ? renderCommandPanel({ width: region.width, height: region.height, theme: config.theme as Theme, panel: hostView }) : null,
       h(AreaContext.Provider, { value: { width: termWidth, height: termHeight } }, layer('topLeft'), layer('bottomRight')),
     );
   }

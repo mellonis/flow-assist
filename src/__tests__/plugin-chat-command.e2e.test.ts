@@ -63,7 +63,7 @@ test('/name runs a plugin command marked for the chat; its later words complete;
   await wide.press('F');
   await wide.type('/nope');
   await wide.press('return');
-  expect(frame(wide)).toMatch(/unknown command \/nope — available: .*\/exit, \/srv/);
+  expect(frame(wide)).toMatch(/unknown command \/nope — available: .*\/exit, \/plugins, \/srv/);
   wide.app.unmount();
 });
 

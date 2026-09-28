@@ -75,6 +75,17 @@ const EMPTY: Frame & { keys: { consume: ConsumeSpec } } = { surface: null, modal
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
+// Each remote plugin's own stop, by its plugin object: the `:plugins` panel's restart
+// stops the process before the loader starts it again (`stopRemotePlugin`).
+const ownStops = new WeakMap<Plugin, () => Promise<void>>();
+
+// Stops a remote plugin for good — `shutdown`, then its transport's close — the same stop
+// the host's exit runs. Null for a plugin that is not remote.
+export function stopRemotePlugin(plugin: Plugin): Promise<void> | null {
+  return ownStops.get(plugin)?.() ?? null;
+}
+export const isRemotePlugin = (plugin: Plugin): boolean => ownStops.has(plugin);
+
 export async function remotePlugin(opts: RemotePluginOpts): Promise<Plugin> {
   const { manifest, transport, make } = opts;
   const name = manifest.name;
@@ -227,14 +238,19 @@ export async function remotePlugin(opts: RemotePluginOpts): Promise<Plugin> {
   // answers, needs no more than the transport's own close. Unregistered once run, and
   // also once a restart's handshake fails below: past that point the supervisor is
   // closed for good and there is nothing left to stop.
-  const unregisterStop = registerRemoteStop(async () => {
+  // Stopped for good by the host (its exit, or the panel's restart): nothing more is sent.
+  let ended = false;
+  const hostStop = async () => {
     unregisterStop();
+    if (ended) return;
     if (!stopped) { try { await peer.request('shutdown', {}, SHUTDOWN_REQUEST_TIMEOUT_MS); } catch { /* a dead plugin needs no asking */ } }
+    ended = true;
     await transport.close(STOP_GRACE_MS);
-  });
+  };
+  const unregisterStop = registerRemoteStop(hostStop);
 
   // ── the events the host sends ───────────────────────────────────────────────
-  const send = (method: string, params?: unknown) => { if (!stopped) peer.notify(method, params); };
+  const send = (method: string, params?: unknown) => { if (!stopped && !ended) peer.notify(method, params); };
   let focused: boolean | null = null; // the last `focus`/`blur` said, told again after a restart
   // Whether the plugin's side is on screen: not while the chat is `full` and open over
   // it (the surface stays mounted under the chat, so this is read from the chat's own
@@ -432,7 +448,7 @@ export async function remotePlugin(opts: RemotePluginOpts): Promise<Plugin> {
   };
 
   const keys = Object.fromEntries(Object.entries(registration.keys ?? {}).map(([a, b]) => [a, Array.isArray(b) ? b : [b]]));
-  return make(name, {
+  const plugin = make(name, {
     name,
     keys,
     entry: registration.entry,
@@ -457,4 +473,6 @@ export async function remotePlugin(opts: RemotePluginOpts): Promise<Plugin> {
     chatContext: () => frame.context ?? [],
     afterWrite: () => { send('afterWrite'); },
   });
+  ownStops.set(plugin, hostStop);
+  return plugin;
 }
