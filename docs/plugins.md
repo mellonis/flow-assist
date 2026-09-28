@@ -608,8 +608,10 @@ make('tutor', {
   on your own screen is yours to guard. A turn the person stopped, or one that failed,
   opens nothing it held back. Nothing opens from background work (the `background`
   tool's run, a tool of yours it calls included): `Not opened: screens are not opened
-  from background work.` Only a loaded plugin's
-  screens open, and only while the person trusts it and has not disabled it; the host's
+  from background work.` The mark follows what that run starts — its awaits, its
+  timers, a process's output — but not a callback you registered before it and that
+  fires later; a plugin that opens its own screen from such a callback opens it as if
+  the person were there. Only a loaded plugin's screens open, and only while the person trusts it and has not disabled it; the host's
   own panels — `:plugins`, `/mcp`, the session picker, the settings, the help, the log —
   never do. A screen that opens while the chat covers the plugin's side (a window, the
   whole terminal) is said to be behind the chat.

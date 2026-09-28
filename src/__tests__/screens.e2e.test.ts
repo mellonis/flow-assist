@@ -382,3 +382,19 @@ test('a remote plugin whose screen is up is not sent its entry key again; one wh
   expect(keys()).toBe(0);
   ui.app.unmount();
 });
+
+test('a remote plugin with a modal of its own up is not sent its entry key: the key would answer the modal', async () => {
+  const model = new ScriptedModel();
+  model.script([{ tool: 'ui_open', args: { screen: 'fake' } }], [{ text: 'ok' }]);
+  const fake = fakeRemote({ keys: { open: 'S' }, entry: ['open'] }, { description: 'finder' });
+  const ui = await bootApp(model, 120, 30, undefined, {}, { chatMode: 'panel', remote: { manifest: fake.manifest, transport: fake.transport } });
+  const keys = () => fake.events.filter(([m, p]) => m === 'key' && (p as { action?: string }).action === 'open').length;
+  fake.frame({ surface: null as never, modals: { confirm: ['Text', {}, 'Delete all? S = sure'] }, keycaps: [], keys: { consume: ['open'] } });
+  await ui.press('F');
+  await ui.type('open');
+  await ui.press('return');
+  await until(ui, () => model.requests.length >= 2, 'ui_open answered');
+  expect(lastResult(model, 1)).toContain('fake:open is already open.');
+  expect(keys()).toBe(0);
+  ui.app.unmount();
+});

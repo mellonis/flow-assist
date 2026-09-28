@@ -468,14 +468,15 @@ export async function remotePlugin(opts: RemotePluginOpts): Promise<Plugin> {
     [entryAction]: {
       entry: true,
       title: typeof manifest.description === 'string' && manifest.description.trim() ? manifest.description.trim() : name,
-      // The entry key is pressed only while the plugin's screen is closed — once it is up
-      // the key may mean something else there (close it, run what is on it) — and only
-      // through the checks a keypress takes: the plugin stopped, or its frame not taking
-      // the key now, sends nothing. Not the keyboard's side: the model asks from the chat,
-      // which has the keys then.
+      // The entry key is pressed only while the plugin's screen and its modals are all
+      // closed — once one is up the key may mean something else there (close it, answer
+      // the modal, run what is on it) — and only through the checks a keypress takes: the
+      // plugin stopped, or its frame not taking the key now, sends nothing. Not the
+      // keyboard's side: the model asks from the chat, which has the keys then.
       open: (a) => {
         if (stopped) throw new Error(stopped);
-        if (frame.keycaps?.length) return ALREADY_OPEN;
+        // A modal of its own up counts as open too: the key would answer the modal.
+        if (frame.keycaps?.length || openModals().length) return ALREADY_OPEN;
         const host = (a as PluginApi).host;
         const id = ownBindings(host)[entryAction]?.[0];
         if (!id) throw new Error(`its key ${entryAction} is not bound`);
