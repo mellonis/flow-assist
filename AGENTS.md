@@ -2091,7 +2091,8 @@ hardest. Rules the `repo` and `gitlab` plugins hold, each with a test that tries
     conversation's `epoch`** (`Conversation.resetLiveViews` in
     `src/assistant/conversation.ts`); the conversation's `turn` is NOT reset there, it
     belongs to the conversation's whole history, not one turn.
-    A turn (`runTurn`) and the `!command` runner each capture `epoch` when they
+    A turn (`runTurn`) and a `!command` (`runShell`, `src/assistant/conversation-shell.ts`)
+    each capture `epoch` when they
     START; every one of their callbacks that could still fire after a LATER reset —
     a tool's own view (`offerLive`), its `changes` (`onToolRun`), the turn's own
     final `flushLive()`, `!command`'s own completion — compares its captured value
@@ -2502,7 +2503,8 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
 - **⏎** sends; while an answer is coming it **queues** instead, and a queued message
   reaches the model at the turn's NEXT REQUEST BOUNDARY — after the current round's
   tool results, as the person's message, the turn going on with it in view (the
-  `beforeRequest` hook in `send`: the message is taken off the queue, put into ↑'s
+  `beforeRequest` hook in `runTurn`, `src/assistant/conversation-turn.ts`: the message
+  is taken off the queue, put into ↑'s
   history, drawn as the person's message where it reached the model, and appended to
   what `agentChat` sends, so it joins the turn's transcript; delivered first, then the
   automatic compaction's size check, with the message counted — a compaction keeps it
@@ -2536,9 +2538,10 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   panel). Stopping always comes first, before clearing the field or taking the queue back: with
   a message queued, doing either first would throw the queued message away on the
   second Esc and only stop the tool on the third.
-  **A queued message never undoes what just ended**: `send` lays its message onto the
-  list with an UPDATER over the list as React has it, never onto `msgsRef` (what was
-  last DRAWN). The queue goes out from a zero-delay timer after a turn, a `!command`
+  **A queued message never undoes what just ended**: `runTurn` lays its message onto
+  the list with an UPDATER through the chat's `mirror.setMessages`, over the list as
+  React has it, never onto `msgsRef` (what was last DRAWN, which
+  `Conversation.rows()` reads). The queue goes out from a zero-delay timer after a turn, a `!command`
   or a slash command (and `!!`'s ask likewise), and that timer can run before the
   render carrying the end: a list built from `msgsRef` would throw the end away — a
   finished command's block would come back live and tick forever, an answer would
@@ -2873,7 +2876,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     `stopped (Esc)`, what it cost. **That line is the turn's LAST row.** A turn
     stopped, failed or cut at a limit while a call's block (a command's, a view's) was
     its newest message, or right after a queued message reached the model, has no
-    message of its own under it — so `send`'s `finally` puts the line on a fresh one
+    message of its own under it — so `runTurn`'s `finally` puts the line on a fresh one
     rather than on the message above. A call still running at Esc finishes before the
     turn ends (`agentChat` awaits it), so its trail line, its ✎ mark or its diff lands
     above the label.
@@ -3140,8 +3143,8 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   group (a timeout, `shell.timeoutMs` 120 s, or Esc kills the whole group), stdin
   closed, `PAGER`/`GIT_PAGER=cat`, `GIT_TERMINAL_PROMPT=0`; stdout and stderr merged;
   the output keeps its TAIL (`shell.maxChars` 20000) and says how much was cut. While
-  it runs the chat is busy exactly as while an answer is written (`streamRef`, the
-  spinner, `! cmd`/`‼ cmd` as the tool label, Esc stops it); a `!` meanwhile is
+  it runs (`Conversation.runShell`, `src/assistant/conversation-shell.ts`) the chat is
+  busy exactly as while an answer is written (`Conversation.busy`, the spinner, `! cmd`/`‼ cmd` as the tool label, Esc stops it); a `!` meanwhile is
   refused, not queued. The result is a message of role `shell` — `! `/`‼ ` in the
   SAME shell colour as the mode's prompt (a command reads as one thing from typing
   to result) on the
@@ -3180,7 +3183,8 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   and was refused. `run_command`'s own view never sets `showCwd` and so never draws
   either.
 - **`!!command` runs an INTERACTIVE program and hands its recording to the model**
-  (`src/assistant/interactive.ts`; the chat's side is `runShellCommand(cmd, true)`) — a
+  (`src/assistant/interactive.ts`; the chat's side is `Conversation.runShell(cmd, true)`
+  (`src/assistant/conversation-shell.ts`)) — a
   TUI, a prompt, `git add -p`, a login flow, which `!` cannot run (its output goes
   through pipes). Typed as `!!cmd` — the second `!`, on the still-empty field, steps
   from level 1 to level 2, the same as pressing `!` again once already in shell mode

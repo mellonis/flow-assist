@@ -28,6 +28,7 @@ import {
   releaseLockOf, writeSession, NO_FILE,
 } from './conversation-session.js';
 import { askConfigChanges, compact, runTurn } from './conversation-turn.js';
+import { runShell } from './conversation-shell.js';
 
 export { NO_FILE };
 // Live views, coalesced: the latest record per view waits at most
@@ -295,6 +296,9 @@ export class Conversation {
   send(text: string, opts?: SendOptions): Promise<boolean> { return runTurn(this, text, opts); }
   // `/compact`.
   compact(): void { compact(this); }
+  // The person's `!command`, or `!!command` with `interactive` (src/assistant/conversation-shell.ts);
+  // the caller has refused a busy conversation and an empty command.
+  runShell(cmd: string, interactive = false): Promise<void> { return runShell(this, cmd, interactive); }
 
   // ── the y/n and the question
   // Resolves the y/n pause: ok=true confirms the writing op (tool runs),

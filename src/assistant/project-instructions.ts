@@ -134,7 +134,9 @@ export function instructionsBlock(p: ProjectInstructions): string {
 // A system prompt for a caller that has no chat to read the instructions when the
 // directory is set (a background run, the one-shot prompt): `base` and the section for
 // the shell's directory — read once per directory, kept until it moves, the same rule
-// the chat's own reading follows (`onShellSetRef` in src/plugins/assistant.ts). The
+// a conversation's own reading follows (`Conversation.onShellSet`, src/assistant/
+// conversation.ts, which a `cd` in the person's `!command` reaches too: src/assistant/
+// conversation-shell.ts). The
 // caller wires `refresh` to the shell's own `onSet` (`createShellState`), so a `cd`
 // mid-task is read once, right when it happens — never again from `systemPrompt`
 // itself, which only ever hands back what `refresh` last found. A directory that has

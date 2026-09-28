@@ -20,18 +20,17 @@ import type { CompleteResult } from '../config/commands.js';
 import { redactDeep, redactSecrets } from '../assistant/secrets.js';
 import { compactConversation } from '../assistant/agent.js';
 import { copyTarget, copyToClipboard } from '../assistant/copy.js';
-import { cdChatTarget, formatShell, nextCwd, realOf, runMark, runShell, shellAutoRun, shellLimits, shellOutcome, shellRoots, startNote, tildePath, type ShellResult } from '../assistant/shell.js';
+import { cdChatTarget, realOf, shellAutoRun, shellRoots, startNote, tildePath } from '../assistant/shell.js';
 import {
   JOURNAL_DAYS, KEEP_SESSIONS, acquireLock, closeSession, cutTitle, flushOnExit, journalPath, listSessions, loadSession, lockPath,
   makeLockToken, dropEmptyDirs, moveSessionToProject, pickToContinue, projectHome, projectSessions, pruneSessions, removeSession, renameSession, sessionFingerprint,
   sessionRows, sessionTitle, sessionWhen, sessionsDir, sweepJournals, type Session,
 } from '../assistant/sessions.js';
-import { exportMarkdown, outputJournal, readJournal, rowOf, type JournalEvent } from '../assistant/journal.js';
+import { exportMarkdown, readJournal, rowOf, type JournalEvent } from '../assistant/journal.js';
 import { pickerKey, pickerReload, pickerStart, type PickerAction, type PickerState } from '../assistant/session-picker.js';
 import type { ChangeView } from '../assistant/diff.js';
-import { VIEW_CAPS, fence, type ViewRecord, type ViewRenderers } from '../assistant/views.js';
-import { capConsoleData, consoleData, renderConsole } from '../assistant/console-view.js';
-import { INTERACTIVE_ASK, runInteractive, type InteractiveDeps } from '../assistant/interactive.js';
+import { VIEW_CAPS, fence, type ViewRenderers } from '../assistant/views.js';
+import { renderConsole } from '../assistant/console-view.js';
 import { editorReducer } from '@flowtty/core';
 import { z } from 'zod';
 import { appliesOnRestart, modelMaySave, modelMaySet } from '../config/schema.js';
@@ -48,7 +47,7 @@ import { acceptFact, firstStart, firstStartPending } from '../assistant/memory-t
 import { memoryFilePath } from '../runtime/services/memory.js';
 import { ensureWorkspace, workspaceFor, workspaceNote, workspaceRoot } from '../assistant/workspace.js';
 import { CONTEXT_WARN_AT, cacheLine, contextBadge } from '../assistant/context-meter.js';
-import { createRecallState, recallLine, type ShellMeta } from '../assistant/recall.js';
+import { createRecallState, recallLine } from '../assistant/recall.js';
 import { contextTitle, type ContextItem } from '../assistant/screen-context.js';
 import {
   IMAGES_OFF, imageLimits, imagesInText, insertToken, loadImageFile, pastedPaths, readClipboardImage, removeTokenAt,
@@ -60,7 +59,7 @@ import type { Plugin } from '../loader/plugin.js';
 import type { PluginApi } from '../runtime/plugin-api.js';
 import { isPanelSpec, panelAnswer, panelKey as commandPanelKey, panelKeys, panelRows, panelStart, panelTop, type PanelSpec, type PanelState } from '../assistant/command-panel.js';
 import type { Command as PluginCommand } from '../loader/plugin.js';
-import { callOf, type ChatMsg, type ConversationDeps, type ConversationEvent, type Queued, type SendOptions, type ViewPort } from '../assistant/conversation-types.js';
+import type { ChatMsg, ConversationDeps, ConversationEvent, Queued, SendOptions, ViewPort } from '../assistant/conversation-types.js';
 import { Conversation } from '../assistant/conversation.js';
 import { NO_FILE, personSpoke, projectHere } from '../assistant/conversation-session.js';
 import { configLineOf, shellCommandOf } from '../assistant/conversation-turn.js';
@@ -911,186 +910,12 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             },
           };
 
-          // ── `!command` — the person runs a shell command (src/assistant/shell.ts) ──
-          // The chat is busy exactly as while an answer is written — the same spinner,
-          // and Esc stops it — but no model turn is spent: the result joins the model's
-          // history and is read with the person's next message.
-          // `interactive` is `!!command` (src/assistant/interactive.ts): the program gets
-          // the terminal, what it printed is recorded, and once it is back the recording
-          // lands the same way — and a turn starts at once with the host's ask to look at
-          // it. Refused while anything runs, exactly as `!` is: a program taking the
-          // terminal under a running turn would put its recording in the middle of that
-          // turn's history, and hide a y/n the turn may be waiting on.
-          const runShellCommand = async (cmd: string, interactive = false) => {
+          // `!command` / `!!command`: refused while anything runs, and said how to use when empty
+          // (the chat's own words); the conversation runs it (src/assistant/conversation-shell.ts).
+          const runShellCommand = (cmd: string, interactive = false): void => {
             if (conv.busy) { setError('an answer or a command is still running — wait, or stop it with Esc'); return; }
             if (!cmd) { setError(interactive ? '!! runs an interactive program with the terminal — e.g. !!git add -p' : '! runs a shell command — e.g. !git status'); return; }
-            conv.busy = true; // closed synchronously, as in send()
-            const line = encodeBangLine(interactive ? 2 : 1, cmd);
-            pushHistory(conv.prompts, line);
-            histAt.current = null;
-            histShown.current = '';
-            // The field is emptied now: the command is in its block from here on.
-            setInput(''); inputRef.current = ''; setCursor(0);
-            setError(null);
-            conv.setEmptyAnswer(false); conv.setContinueOffer(false);
-            conv.setToolCount(0);
-            setStreaming(true);
-            conv.setToolLabel(`${runMark(interactive)} ${cmd.length > 60 ? `${cmd.slice(0, 60)}…` : cmd}`);
-            conv.turnStartedAt = Date.now();
-            // The command is the only thing running, so the segment is the whole of it.
-            conv.beginSegment();
-            if (tickRef.current) clearInterval(tickRef.current);
-            tickRef.current = setInterval(() => setElapsedMs(Date.now() - conv.segmentStartedAt), 120);
-            disarmEsc();
-            const abort = new AbortController();
-            conv.abort = abort;
-            conv.stopKey = '';
-            const cwd = conv.shell.cwd();
-            const { timeoutMs, maxChars } = shellLimits(host.config as { shell?: unknown });
-            let stopped = false;
-            // The person's command gets the same live block as the model's. The message
-            // is still role `shell`: it joins conv.api and ↑/↓ as it always did. Declared
-            // OUTSIDE the try so the catch below can still find the message by `callId`
-            // if something throws after it was pushed; `epoch` is this command's own
-            // conversation identity, captured now — a completion that arrives after a
-            // LATER /clear (or /resume) must not touch the fresh
-            // conversation's messages, session-facing history or shell directory.
-            const startedAt = Date.now();
-            const callId = `shell#${startedAt}`;
-            const liveRec = (data: unknown, phase: ViewRecord['phase'] = 'live'): ViewRecord => ({ kind: 'console', data, phase, startedAt, callId });
-            const epoch = conv.epoch;
-            // Set once an interactive run's recording has joined the model's history: the
-            // turn that looks at it starts when this command is done (the `finally`).
-            let ask = false;
-            // In the journal from the moment it starts — a crash mid-command still leaves
-            // what ran; its end, when it comes, goes to the same session.
-            const journalId = conv.journal({ t: 'shell', command: cmd, cwd: tildePath(cwd), ...(interactive ? { interactive: true } : {}) }, { person: true });
-            // Its output, whole, as it arrives — the screen and the model keep only its
-            // tail; the journal keeps up to OUTPUT_CAP of it.
-            const outJournal = outputJournal((ev) => conv.journalTo(journalId, ev));
-            try {
-              conv.liveSeen.add(callId);
-              setMessages((cur) => [...cur, { role: 'shell', content: '', command: cmd, views: [{ ...liveRec(capConsoleData({ command: cmd, cwd: tildePath(cwd), text: '', showCwd: true, interactive })), turn: conv.turn }] }]);
-              let raw = '';
-              const onOutput = (chunk: string) => {
-                outJournal.push(chunk);
-                raw += chunk;
-                if (raw.length > maxChars * 2) raw = raw.slice(-maxChars);
-                conv.offerLive(liveRec(capConsoleData({ command: cmd, cwd: tildePath(cwd), text: raw, showCwd: true })), epoch);
-              };
-              // The interactive run holds no AbortController of its own: while it runs the
-              // terminal is the program's, and no key reaches the chat (flowtty's TTY
-              // backend stops reading its input for the hand-over) — Esc and Ctrl+C are
-              // the program's keys.
-              let recorded = true;
-              let r: ShellResult;
-              if (interactive) {
-                const svc = host.services as { suspend?: <T>(fn: () => T | Promise<T>) => Promise<T>; interactive?: InteractiveDeps };
-                const run = await runInteractive(cmd, { cwd, maxChars, suspend: svc.suspend ?? (async (fn) => fn()) }, svc.interactive ?? {});
-                r = run.result;
-                recorded = run.recorded;
-              } else {
-                r = await runShell(cmd, { cwd, timeoutMs, maxChars, signal: abort.signal, onOutput });
-              }
-              stopped = r.stopped;
-              if (r.stopped && conv.stopKey) r.stoppedBy = conv.stopKey;
-              // Its end, whatever happened to the conversation meanwhile — it ran there.
-              // `output` is what the host holds: the last `shell.maxChars` of it.
-              // An interactive run has no stream: its recording is what there is.
-              if (interactive) outJournal.push(r.output);
-              outJournal.end();
-              conv.journalTo(journalId, { t: 'shell-end', command: cmd, status: shellOutcome(r, timeoutMs), ms: r.ms });
-              const move = nextCwd(host.config as Record<string, unknown>, cwd, r.pwd);
-              const { display, forModel } = formatShell(cmd, r, cwd, timeoutMs, { after: move.cwd, note: move.note, ...(interactive ? { interactive: { recorded } } : {}) });
-              // Everything from here on is display/model-facing state for THIS
-              // conversation — skipped whole for a stale epoch (a /clear mid-command:
-              // the command still finishes, and without this its block would land in
-              // the fresh, cleared chat).
-              if (epoch === conv.epoch) {
-                // `cd` sticks, as in a terminal — within the roots.
-                if (move.cwd !== cwd) conv.shell.setCwd(move.cwd);
-                conv.flushLive();
-                // The block says where a `cd` inside the command left the directory — or
-                // that one tried to leave the roots and stayed — the same facts the old
-                // markdown line carried, now on the live view instead.
-                const data = consoleData(cmd, r, cwd, timeoutMs, true, { movedTo: tildePath(move.cwd), note: move.note, interactive });
-                setMessages((cur) => {
-                  const next = cur.slice();
-                  const at = next.findLastIndex((m) => callOf(m) === callId);
-                  const done = { role: 'shell', content: display, command: cmd, views: [{ ...liveRec(data, 'done'), turn: conv.turn }] };
-                  if (at >= 0) next[at] = done; else next.push(done);
-                  return next;
-                });
-                // An interactive run reaches the model only with something to look at: no
-                // `script` to record with, or nothing left once the full-screen program's
-                // own screen is dropped (vim, less, top), and it is only a block on screen —
-                // a turn spent on "(no output)" would cost a request for nothing.
-                const seen = !interactive || (recorded && !!r.output.trim());
-                // Beside the text, what its stub says once a batch stubs it (src/assistant/
-                // recall.ts): the command, how it ended, how long, how many lines.
-                const printed = r.output.replace(/\n+$/, '');
-                const meta: ShellMeta = { command: cmd, outcome: shellOutcome(r, timeoutMs), ms: r.ms, lines: printed ? printed.split('\n').length : 0, ...(interactive ? { interactive: true } : {}) };
-                if (seen) conv.api = [...conv.api, { role: 'shell', content: forModel, shell: meta }];
-                if (interactive && !r.error && !seen) {
-                  const why = recorded
-                    ? 'Nothing was printed outside the full-screen program — the assistant was not asked.'
-                    : 'No usable `script` on PATH — the program ran with the terminal, but nothing was recorded, so the assistant was not asked.';
-                  conv.pushNote(why);
-                }
-                ask = interactive && seen;
-              }
-              (host.services as Record<string, any>).pushLog?.(`[shell] ${interactive ? '!! ' : ''}${cmd.slice(0, 60)} → ${r.error ? `error: ${r.error}` : r.stopped ? 'stopped' : r.timedOut ? 'timed out' : r.signal ? `killed by ${r.signal}` : `exit ${r.code}`}`);
-            } catch (e) {
-              stopped = true; // a command that could not run keeps the queue, as a failed turn does
-              setError(`!: ${(e as Error).message}`);
-              outJournal.end();
-              conv.journalTo(journalId, { t: 'shell-end', command: cmd, status: `could not run: ${(e as Error).message}`, ms: Date.now() - startedAt });
-              // The block stops ticking rather than waiting forever for a completion
-              // that is never coming — marked failed in place, keeping whatever it had
-              // already shown (the way a tool's own thrown view does, agent.ts).
-              if (epoch === conv.epoch) {
-                setMessages((cur) => {
-                  const next = cur.slice();
-                  const at = next.findLastIndex((m) => callOf(m) === callId);
-                  if (at < 0) return cur;
-                  const target = next[at]!;
-                  const views = (target.views as ViewRecord[] | undefined) ?? [];
-                  if (!views.length) return cur;
-                  next[at] = { ...target, views: [{ ...views[0]!, phase: 'failed', turn: conv.turn }] };
-                  return next;
-                });
-              }
-            } finally {
-              if (tickRef.current) { clearInterval(tickRef.current); tickRef.current = null; }
-              setElapsedMs(Date.now() - conv.turnStartedAt);
-              // An interactive run that was recorded goes on into the turn that looks at
-              // it. The chat stays BUSY until that turn has started (the `send` waits one
-              // tick, for the render that carries the command's block): a message typed
-              // in between queues behind the ask, as behind any turn — never ahead of it.
-              const askNow = ask && epoch === conv.epoch;
-              conv.busy = askNow;
-              if (epoch === conv.epoch) conv.flushLive();
-              conv.persist();
-              if (!askNow) setStreaming(false);
-              // A command of the person's may have changed a settings file (the guard).
-              void conv.askConfigChanges();
-              conv.setToolLabel('');
-              conv.abort = null;
-              if (askNow) {
-                setTimeout(() => {
-                  conv.busy = false;
-                  if (epoch !== conv.epoch) { setStreaming(false); return; }
-                  void send(INTERACTIVE_ASK, { hostAsk: true });
-                }, 0);
-              }
-              // What the person queued meanwhile goes out now — unless they stopped the
-              // command: then it comes back into the field, as after a stopped answer.
-              else {
-                if (stopped) restoreQueue();
-                conv.afterTurn(!stopped);
-              }
-              host.notify();
-            }
+            void conv.runShell(cmd, interactive);
           };
 
           // ── in-chat commands ── `/context` says how full the model's context is,
@@ -2032,9 +1857,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // ── ↑/↓ — prompt history, but only while the field is empty or still shows
               // the history entry untouched; in a draft they move the caret between its
               // rows (the editor below), so a draft is never replaced. A `!cmd`/`!!cmd`
-              // entry (how a shell command is stored, see runShellCommand) is shown the
-              // way it was typed: the matching bang level, the field holding `cmd` with
-              // its bang(s) stripped.
+              // entry (how a shell command is stored, see `runShell`, src/assistant/
+              // conversation-shell.ts) is shown the way it was typed: the matching bang
+              // level, the field holding `cmd` with its bang(s) stripped.
               if (key.name === 'up' || key.name === 'down') {
                 // ↑ on an EMPTY field takes the last queued message back for editing,
                 // before history — which it reaches once the queue is empty. The bang
