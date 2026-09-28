@@ -45,8 +45,12 @@ export const shellWord = (s: string): string => (/^[A-Za-z0-9._\/-]+$/.test(s) ?
 export const shownName = (s: string): string => (isPluginName(s) ? s : JSON.stringify(s));
 
 // `firstStartDone`: whether the first start's pass ran. Per directory (real path):
-// name → the real path its link led to.
-type TrustRecord = { firstStartDone: boolean; dirs: Record<string, Record<string, string>> };
+// name → the real path its link led to. `forgotten`, per directory: name → the target
+// it was trusted at before it was forgotten (a link gone, a removal, the model's
+// install) — a tombstone that never grants trust, only says where the name led, so a
+// link put back somewhere else shows both places and `plugins trust` asks. Only the
+// person clears it: `plugins trust` (with its yes) or `plugins remove` in the CLI.
+type TrustRecord = { firstStartDone: boolean; dirs: Record<string, Record<string, string>>; forgotten: Record<string, Record<string, string>> };
 type ReadState = { state: 'missing' | 'ok'; rec: TrustRecord } | { state: 'unreadable'; rec: TrustRecord };
 
 export interface TrustOptions {
@@ -77,18 +81,19 @@ const isMap = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 
 // Only ENOENT is a first start; anything that does not parse to the record's shape is
 // unreadable.
 function readRecord(file: string): ReadState {
-  const empty = (): TrustRecord => ({ firstStartDone: false, dirs: {} });
+  const empty = (): TrustRecord => ({ firstStartDone: false, dirs: {}, forgotten: {} });
   let raw: string;
   try { raw = fs.readFileSync(file, 'utf8'); } catch (e) {
     return (e as NodeJS.ErrnoException).code === 'ENOENT' ? { state: 'missing', rec: empty() } : { state: 'unreadable', rec: empty() };
   }
   try {
     const v = JSON.parse(raw) as unknown;
-    if (!isMap(v) || typeof v.firstStartDone !== 'boolean' || !isMap(v.dirs)) return { state: 'unreadable', rec: empty() };
-    for (const d of Object.values(v.dirs)) {
+    const forgotten = v && isMap(v) && v.forgotten !== undefined ? v.forgotten : {};
+    if (!isMap(v) || typeof v.firstStartDone !== 'boolean' || !isMap(v.dirs) || !isMap(forgotten)) return { state: 'unreadable', rec: empty() };
+    for (const d of [...Object.values(v.dirs), ...Object.values(forgotten)]) {
       if (!isMap(d) || Object.values(d).some((t) => typeof t !== 'string')) return { state: 'unreadable', rec: empty() };
     }
-    const rec = { firstStartDone: v.firstStartDone, dirs: v.dirs as TrustRecord['dirs'] };
+    const rec = { firstStartDone: v.firstStartDone, dirs: v.dirs as TrustRecord['dirs'], forgotten: forgotten as TrustRecord['forgotten'] };
     return { state: rec.firstStartDone ? 'ok' : 'missing', rec };
   } catch { return { state: 'unreadable', rec: empty() }; }
 }
@@ -102,6 +107,15 @@ function writeRecord(file: string, rec: TrustRecord, replacingUnreadable = false
   const tmp = `${file}.${process.pid}.tmp`;
   fs.writeFileSync(tmp, JSON.stringify(rec, null, 2), { mode: 0o600 });
   fs.renameSync(tmp, file);
+}
+
+// Moves a trusted name to the tombstones of its directory.
+function forget(rec: TrustRecord, key: string, name: string): boolean {
+  const known = rec.dirs[key];
+  if (!known || !(name in known)) return false;
+  rec.forgotten[key] = { ...(rec.forgotten[key] ?? {}), [name]: known[name]! };
+  delete known[name];
+  return true;
 }
 
 // The command that trusts a plugin, as the person would type it.
@@ -163,20 +177,24 @@ export function checkPluginTrust(enabledDir: string, names: string[], opts?: Tru
     return { trusted, untrusted: [...refused, ...valid.filter((n) => !(n in plugins)).map((name) => ({ name }))], bootstrapped: opts?.readOnly ? null : trusted, unreadable: null };
   }
   const known = rec.dirs[key] ?? {};
-  // Forget what is no longer there — a link removed by hand, by an installer, by git.
+  // Forget what is no longer there — a link removed by hand, by an installer, by git —
+  // keeping where it led as a tombstone.
   const gone = Object.keys(known).filter((n) => !present(enabledDir, n));
   if (gone.length && !opts?.readOnly) {
-    for (const n of gone) delete known[n];
     rec.dirs[key] = known;
+    for (const n of gone) forget(rec, key, n);
     try { writeRecord(file, rec); } catch { /* a stale entry trusts only the same target */ }
   }
+  const tomb = rec.forgotten[key] ?? {};
+  const own = (m: Record<string, string>, n: string) => (Object.prototype.hasOwnProperty.call(m, n) ? m[n] : undefined);
   const trusted: string[] = [];
   const untrusted: Untrusted[] = [...refused];
   for (const name of valid) {
     const target = pluginTarget(enabledDir, name);
-    const was = Object.prototype.hasOwnProperty.call(known, name) ? known[name] : undefined;
-    if (target && was === target) trusted.push(name);
-    else untrusted.push(was && target ? { name, was, now: target } : { name });
+    const trustedAt = own(known, name);
+    if (target && trustedAt === target) { trusted.push(name); continue; }
+    const was = trustedAt ?? own(tomb, name);
+    untrusted.push(was && target && was !== target ? { name, was, now: target } : { name });
   }
   return { trusted, untrusted, bootstrapped: null, unreadable: null };
 }
@@ -198,7 +216,7 @@ export function trustPlugin(enabledDir: string, name: string, opts?: TrustOption
   const file = fileOf(opts);
   const { state, rec } = readRecord(file);
   const key = dirKey(enabledDir);
-  const was = rec.dirs[key]?.[n];
+  const was = rec.dirs[key]?.[n] ?? rec.forgotten[key]?.[n];
   if (was && was !== target && !opts?.yes) {
     return { ok: false, error: `plugin '${n}' was trusted at ${was}; its link now leads to ${target}`, confirm: { was, now: target } };
   }
@@ -206,18 +224,21 @@ export function trustPlugin(enabledDir: string, name: string, opts?: TrustOption
   // one, and the first start is not run again.
   if (state === 'unreadable') rec.firstStartDone = true;
   rec.dirs[key] = { ...(rec.dirs[key] ?? {}), [n]: target };
+  if (rec.forgotten[key]) delete rec.forgotten[key][n];
   try { writeRecord(file, rec, state === 'unreadable'); } catch (e) { return { ok: false, error: `plugins trust: the record could not be written (${(e as Error).message})` }; }
   return { ok: true, target, ...(was && was !== target ? { was } : {}) };
 }
 
-// Forgets a plugin: a link put back later is not trusted by the old word. From a command
-// the model runs too — the safe direction.
-export function untrustPlugin(enabledDir: string, name: string, opts?: TrustOptions): void {
+// Forgets a plugin: a link put back later is not trusted by the old word, and its old
+// target stays as a tombstone (above). From a command the model runs too — the safe
+// direction. `clear` — the person's own `plugins remove` — drops the tombstone as well.
+export function untrustPlugin(enabledDir: string, name: string, opts?: TrustOptions & { clear?: boolean }): void {
   const file = fileOf(opts);
   const { state, rec } = readRecord(file);
   if (state === 'unreadable') return;
-  const known = rec.dirs[dirKey(enabledDir)];
-  if (!known || !(name in known)) return;
-  delete known[name];
+  const key = dirKey(enabledDir);
+  let changed = forget(rec, key, name);
+  if (opts?.clear && rec.forgotten[key] && name in rec.forgotten[key]) { delete rec.forgotten[key][name]; changed = true; }
+  if (!changed) return;
   try { writeRecord(file, rec); } catch { /* a stale entry trusts only the same target */ }
 }

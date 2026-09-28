@@ -32,8 +32,9 @@ export interface Forget { scope: WorkspaceScope; id: string }
 // A fact to accept: its text as the person was shown it, by its hash.
 export interface Accept { scope: WorkspaceScope; id: string; hash: string }
 // A listing as the person saw it, by its numbers: which fact each was, the hash of its
-// file then, and whether it was changed outside flow-assist.
-export interface Shown extends Accept { outside: boolean }
+// file then, whether it was changed outside flow-assist, and whether the listing showed
+// it at all (`/memory project` numbers the global facts too, and shows none of them).
+export interface Shown extends Accept { outside: boolean; listed: boolean }
 
 export interface MemoryCommandResult {
   // What to show the person (a note in the chat — never sent to the model).
@@ -90,15 +91,15 @@ export function memoryNote(l: MemoryLists, only?: WorkspaceScope): string {
 }
 
 // What each number of a listing stands for.
-export function shownOf(l: MemoryLists): Shown[] {
-  return numbered(l).map((e) => ({ scope: e.scope, id: e.fact.id, hash: e.fact.hash ?? '', outside: !!e.fact.outside }));
+export function shownOf(l: MemoryLists, only?: WorkspaceScope): Shown[] {
+  return numbered(l).map((e) => ({ scope: e.scope, id: e.fact.id, hash: e.fact.hash ?? '', outside: !!e.fact.outside, listed: !only || e.scope === only }));
 }
 
 // `shown` — the last listing the person saw (null before the first).
 export function memoryCommand(arg: string, l: MemoryLists, shown: Shown[] | null = null): MemoryCommandResult {
   const [verb = '', target = ''] = arg.trim().split(/\s+/);
   if (!verb || verb === 'list') return { note: memoryNote(l), shown: shownOf(l) };
-  if (verb === 'project' || verb === 'global') return { note: memoryNote(l, verb), shown: shownOf(l) };
+  if (verb === 'project' || verb === 'global') return { note: memoryNote(l, verb), shown: shownOf(l, verb) };
   if (verb === 'accept') return acceptCommand(target, l, shown);
   if (verb !== 'forget') return { note: `Unknown: /memory ${verb}. Use /memory [project|global], /memory forget <number>, /memory forget project|global, /memory forget all or /memory accept <number|all>.` };
   const all = numbered(l);
@@ -127,13 +128,15 @@ function acceptCommand(target: string, l: MemoryLists, shown: Shown[] | null): M
   if (!shown) return again('/memory accept takes a number from a list you have seen — here it is:');
   const current = numbered(l);
   const still = (s: Shown) => current.some((e) => e.scope === s.scope && e.fact.id === s.id && e.fact.hash === s.hash && e.fact.outside);
-  const picked = target === 'all' ? shown.filter((s) => s.outside) : (() => {
+  // Only what the listing showed: `all` is exactly its facts changed outside.
+  const acceptable = (s: Shown | undefined) => !!s && s.listed && s.outside;
+  const picked = target === 'all' ? shown.filter(acceptable) : (() => {
     const n = Number(target);
     const s = Number.isInteger(n) ? shown[n - 1] : undefined;
-    return s?.outside ? [s] : null;
+    return acceptable(s) ? [s!] : null;
   })();
   if (!picked) {
-    const which = shown.flatMap((s, i) => (s.outside ? [String(i + 1)] : [])).join(', ');
+    const which = shown.flatMap((s, i) => (acceptable(s) ? [String(i + 1)] : [])).join(', ');
     return { note: which ? `/memory accept needs the number of a memory ${OUTSIDE_MARK} (${which}) or "all".` : `Nothing to accept — no memory listed was ${OUTSIDE_MARK}.` };
   }
   if (!picked.length) return { note: `Nothing to accept — no memory listed was ${OUTSIDE_MARK}.` };

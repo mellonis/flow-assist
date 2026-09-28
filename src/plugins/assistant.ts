@@ -53,7 +53,7 @@ import { hoverEnabled } from '../config/mouse.js';
 import { askKey, askStart, type AskQuestion, type AskState } from '../assistant/ask.js';
 import { keptAfterClear, memoryCommand, type MemoryLists, type Shown } from '../assistant/memory-command.js';
 import { memoryPromptBlock, migrateMemoryJson, readFacts, removeFact, writeIndex, type Fact } from '../assistant/memory-store.js';
-import { acceptFact, firstStart, firstStartPending, markFacts } from '../assistant/memory-trust.js';
+import { acceptFact, firstStart, firstStartPending, markFacts, memoryRecordNotes } from '../assistant/memory-trust.js';
 import { memoryFilePath } from '../runtime/services/memory.js';
 import { ensureWorkspace, workspaceFor, workspaceNote, workspaceRoot } from '../assistant/workspace.js';
 import { CONTEXT_WARN_AT, DEFAULT_CONTEXT_WINDOW, cacheLine, contextBadge, estimateTokens, readContext, short as shortTokens } from '../assistant/context-meter.js';
@@ -409,6 +409,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const toolSetRef = ui.useRef(createToolSet());
           // The last `/memory` listing the person saw: what `/memory accept <n>` may accept.
           const memoryShownRef = ui.useRef<Shown[] | null>(null);
+          // Whether the chat said the memory record went missing (said once while it is).
+          const memoryMissingSaidRef = ui.useRef(false);
           // What the provider reported for the last turn: its prompt plus the answer it
           // produced is, to a close approximation, the size of the NEXT request.
           const usageRef = ui.useRef<TokenUsage | null>(null);
@@ -1355,8 +1357,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // marked when the host did not write it (src/assistant/memory-trust.ts).
           const memoryLists = (): MemoryLists => {
             const project = currentProject();
-            const root = workspaceRoot(host.config);
-            const read = (ws: string) => markFacts(root, ws, readFacts(ws));
+            const read = (ws: string) => markFacts(ws, readFacts(ws));
             return {
               project: project ? read(workspaceFor(host.config, project, 'project')) : [],
               global: read(workspaceFor(host.config, project, 'global')),
@@ -1368,6 +1369,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // one. A fact changed outside flow-assist is left out until the person accepts
           // it (`/memory accept`). Nothing stored → '' (no block).
           const memoryBlock = () => {
+            // A record gone missing while the app runs sends nothing, and says so once.
+            const missing = memoryRecordNotes('later');
+            if (missing.length && !memoryMissingSaidRef.current) { memoryMissingSaidRef.current = true; for (const n of missing) pluginNote(n); }
+            if (!missing.length) memoryMissingSaidRef.current = false;
             const l = memoryLists();
             const kept = (facts: Fact[]) => facts.filter((f) => !f.outside);
             return memoryPromptBlock(kept(l.project), kept(l.global));

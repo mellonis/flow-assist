@@ -131,11 +131,11 @@ export const hostGroupTools = (
       }
       case 'host:plugins_install': {
         if (typeof repo.install !== 'function') return 'host:plugins_install — plugin repository not configured.';
-        // Whatever the person trusted under this name before is forgotten first: a stale
-        // word must not load what the model installs now.
-        await repo.untrust?.(argName(args));
         const res = (await repo.install(argName(args))) as { ok?: boolean };
         if (!res?.ok) return withRestartHint(res);
+        // Whatever the person trusted under this name before is forgotten (its target
+        // kept as a tombstone): a stale word must not load what the model installed.
+        await repo.untrust?.(argName(args));
         return `${JSON.stringify(res)} — installed but not trusted: it loads once the person runs \`${trustCommand(argName(args))}\` in a terminal and restarts the assistant`;
       }
       case 'host:plugins_remove': {

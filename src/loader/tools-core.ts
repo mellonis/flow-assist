@@ -146,7 +146,7 @@ function memoryScopes(config: Record<string, unknown>, ctx: CoreCtx) {
   const project = callProject(config, ctx as Parameters<typeof callProject>[1]);
   // With no project there is one workspace, the global one: the project's scope is it.
   const dir = (scope: WorkspaceScope) => workspaceFor(config, project, project ? scope : 'global');
-  const facts = (scope: WorkspaceScope) => (scope === 'project' && !project ? [] : markFacts(workspaceRoot(config), dir(scope), readFacts(dir(scope))).filter((f) => !f.outside));
+  const facts = (scope: WorkspaceScope) => (scope === 'project' && !project ? [] : markFacts(dir(scope), readFacts(dir(scope))).filter((f) => !f.outside));
   return { project, dir, facts };
 }
 const asMemory = (f: Fact) => ({ id: f.id, text: f.text, ts: f.mtimeMs });

@@ -314,3 +314,67 @@ test('a link removed by hand is forgotten, so the model\'s install under that na
   expect(res).toContain('installed but not trusted');
   expect((await d.load()).names).not.toContain('gamma');
 });
+
+test('a link that vanished keeps its old target as a tombstone: put back elsewhere, it shows both places and trust asks — however it was forgotten', async () => {
+  const { checkPluginTrust, trustPlugin } = await import('../loader/trust');
+  const d = install();
+  const repoDir = pluginAt(join(d.availableDir, 'repo'), 'repo', d.root);
+  const evil = pluginAt(join(d.root, 'dropped', 'repo'), 'repo', d.root);
+  symlinkSync(repoDir, join(d.enabledDir, 'repo'));
+  expect((await d.load()).names).toContain('repo');
+  unlinkSync(join(d.enabledDir, 'repo'));
+  // A check from a command the model runs (a one-shot prompt) forgets the gone link…
+  checkPluginTrust(d.enabledDir, [], { modelShell: true });
+  symlinkSync(evil, join(d.enabledDir, 'repo'));
+  // …but not where it led.
+  const after = await d.load();
+  expect(after.names).not.toContain('repo');
+  expect(after.untrusted[0]).toMatchObject({ name: 'repo' });
+  expect(after.untrusted[0]!.was).toContain('plugins-available');
+  expect(after.untrusted[0]!.now).toContain('dropped');
+  const t = trustPlugin(d.enabledDir, 'repo', { modelShell: false });
+  expect(t.ok).toBe(false);
+  expect(t.ok ? null : t.confirm?.was).toContain('plugins-available');
+  // The person's yes clears it.
+  expect(trustPlugin(d.enabledDir, 'repo', { modelShell: false, yes: true }).ok).toBe(true);
+  expect((await d.load()).names).toContain('repo');
+});
+
+test('the model\'s install on a name already installed fails and forgets nothing; one that installs keeps the old target as a tombstone', async () => {
+  const d = install();
+  const repoDir = pluginAt(join(d.availableDir, 'repo'), 'repo', d.root);
+  symlinkSync(repoDir, join(d.enabledDir, 'repo'));
+  expect((await d.load()).names).toContain('repo');
+  const group = hostGroupTools(d.repo);
+  const failed = String(await group.exec('host:plugins_install', { name: 'repo' }, {} as never));
+  expect(failed).toContain('already installed');
+  expect((await d.load()).names).toContain('repo');
+  // Removed by hand, installed again by the model: not trusted, and a later retarget
+  // still shows where it led.
+  unlinkSync(join(d.enabledDir, 'repo'));
+  expect(String(await group.exec('host:plugins_install', { name: 'repo' }, {} as never))).toContain('installed but not trusted');
+  expect((await d.load()).names).not.toContain('repo');
+  unlinkSync(join(d.enabledDir, 'repo'));
+  symlinkSync(pluginAt(join(d.root, 'dropped', 'repo'), 'repo', d.root), join(d.enabledDir, 'repo'));
+  const r = await d.load();
+  expect(r.untrusted[0]!.was).toContain('plugins-available');
+});
+
+test('`plugins install` says what it did: the person\'s install trusts, one from the model\'s command does not — even over a stale entry', async () => {
+  const d = install();
+  const dir = pluginAt(join(d.availableDir, 'alpha'), 'alpha', d.root);
+  symlinkSync(dir, join(d.enabledDir, 'alpha'));
+  expect((await d.load()).names).toContain('alpha');
+  unlinkSync(join(d.enabledDir, 'alpha'));
+  process.env[MODEL_SHELL_ENV] = '1';
+  await d.cli('install', 'alpha');
+  delete process.env[MODEL_SHELL_ENV];
+  expect(d.out.at(-1)).toContain("plugin 'alpha' installed, not trusted");
+  expect(d.err.at(-1)).toContain("plugin 'alpha' is not trusted");
+  expect((await d.load()).names).not.toContain('alpha');
+  // The person's own install (after their remove) trusts it, and says so.
+  await d.cli('remove', 'alpha');
+  await d.cli('install', 'alpha');
+  expect(d.out.at(-1)).toContain("plugin 'alpha' installed and trusted");
+  expect((await d.load()).names).toContain('alpha');
+});

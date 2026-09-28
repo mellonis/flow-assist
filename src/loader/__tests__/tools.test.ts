@@ -892,6 +892,8 @@ test('a fact under a hand-made file name is forgotten too, and a name that leads
   addFact(ws, { text: 'kept by the tool' });
   // A file the person made by hand, under a name that is not a slug.
   fs.writeFileSync(path.join(ws, 'memory', 'My_Note.md'), '---\nname: mine\ndescription: d\ntype: fact\n---\nA hand-made note.\n');
+  // Made before the first start, which accepts it (src/assistant/memory-trust.ts).
+  (await import('../../assistant/memory-trust')).firstStart(root);
   const listed = String(await reg.exec('memory', { action: 'list' }, inProject('/p/a')));
   expect(listed).toContain('A hand-made note.');
   expect(String(await reg.exec('memory', { action: 'forget', id: 'My_Note' }, inProject('/p/a')))).toContain('deleted');

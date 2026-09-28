@@ -12,9 +12,9 @@
 // the facts' own files each time — so only the facts are checked. The check is a hash of
 // text the index build reads anyway, and one read of the record.
 //
-// The first start — the record MISSING, or written by the host before its first look —
-// accepts every fact file already under the workspace root, once, and the record then
-// says so: a workspace root seen for the first time after that (a new `workspace.dir`)
+// The first start — the record MISSING, or written by the host before its first look,
+// found by the chat's start-up pass (`firstStart`, never an index build) — accepts every
+// fact file already under the workspace root, once, and the record then says so: a workspace root seen for the first time after that (a new `workspace.dir`)
 // starts with nothing accepted. A record that cannot be read accepts nothing, and the
 // start screen says so. An older host's `memory.json` is moved into files without
 // recording them: its facts are accepted only when the move is part of the first start —
@@ -34,7 +34,8 @@ export const memoryTrustPath = (): string => path.join(hostStateDir(), 'memory.a
 // `firstStartDone`: whether the first start's pass ran; `files`: a fact file's real path
 // → the hash of the text the host wrote or the person accepted.
 type MemoryRecord = { firstStartDone: boolean; files: Record<string, string> };
-type RecordState = 'missing' | 'ok' | 'unreadable';
+// `pending`: written by the host (its own fact writes) before the start's first pass.
+type RecordState = 'missing' | 'pending' | 'ok' | 'unreadable';
 
 const INDEX = 'memory.md';
 const WORKSPACE_LEAF = '_workspace';
@@ -60,7 +61,7 @@ function readRecord(): { state: RecordState; rec: MemoryRecord } {
     const v = JSON.parse(raw) as unknown;
     if (!isMap(v) || typeof v.firstStartDone !== 'boolean' || !isMap(v.files) || Object.values(v.files).some((h) => typeof h !== 'string')) return { state: 'unreadable', rec: empty() };
     const rec = { firstStartDone: v.firstStartDone, files: v.files as Record<string, string> };
-    return { state: rec.firstStartDone ? 'ok' : 'missing', rec };
+    return { state: rec.firstStartDone ? 'ok' : 'pending', rec };
   } catch { return { state: 'unreadable', rec: empty() }; }
 }
 
@@ -128,7 +129,8 @@ function factFilesUnder(root: string): Array<{ key: string; text: string }> {
 
 // Whether the first start's pass is still to run (the record missing).
 export function firstStartPending(): boolean {
-  return readRecord().state === 'missing';
+  const { state } = readRecord();
+  return state === 'missing' || state === 'pending';
 }
 
 // The first start: every fact under the root is accepted, once — not from a command the
@@ -138,33 +140,42 @@ export function firstStart(root: string): void {
   runFirstStart(root, state, rec);
 }
 function runFirstStart(root: string, state: RecordState, rec: MemoryRecord): void {
-  if (state !== 'missing' || inModelShell()) return;
+  if ((state !== 'missing' && state !== 'pending') || inModelShell()) return;
   for (const f of factFilesUnder(root)) rec.files[f.key] = factHash(f.text);
   rec.firstStartDone = true;
   writeRecord(rec, state);
 }
 
-// What the start screen says when the record cannot be read.
-export function memoryRecordNotes(): string[] {
-  return readRecord().state === 'unreadable'
-    ? [`${memoryTrustPath()} cannot be read — no memory fact is sent; /memory lists them and /memory accept sends one again (the file is then replaced, its old text kept beside it)`]
-    : [];
+// What is said of the record: at `start` (the start screen) a missing one — this start
+// is the first, and accepts what is stored — or one that cannot be read; `later` (the
+// chat, after the start's pass) a missing one, which accepts nothing until the next start.
+export function memoryRecordNotes(when: 'start' | 'later' = 'start'): string[] {
+  const { state } = readRecord();
+  if (state === 'unreadable') return [`${memoryTrustPath()} cannot be read — no memory fact is sent; /memory lists them and /memory accept sends one again (the file is then replaced, its old text kept beside it)`];
+  if (inModelShell()) return [];
+  // A record the host started before any first pass says the same at a start: this
+  // start is the first, whoever deleted the one before.
+  if (when === 'start' && state === 'pending') return [`${memoryTrustPath()} has had no first start yet — this start accepts every memory fact stored now, as a first start does`];
+  if (state !== 'missing') return [];
+  return when === 'start'
+    ? [`${memoryTrustPath()} is missing — this start accepts every memory fact stored now, as a first start does`]
+    : [`${memoryTrustPath()} is missing — no memory fact is sent until the next start, which accepts every fact stored then; /memory lists them`];
 }
 
 // The facts of a workspace, each marked `outside` when its text is not what the host
-// wrote or the person accepted. `root` is the workspace root it lies under: the first
-// start runs here, even when this workspace holds nothing yet.
-export function markFacts<F extends { id: string; hash?: string; outside?: boolean }>(root: string, ws: string, facts: F[]): F[] {
+// wrote or the person accepted. The first start never runs here — only in the start's
+// own pass (`firstStart`) — so a record that goes missing while the app runs accepts
+// nothing: its facts wait for the next start, which the start screen names.
+export function markFacts<F extends { id: string; hash?: string; outside?: boolean }>(ws: string, facts: F[]): F[] {
   const { state, rec } = readRecord();
-  runFirstStart(root, state, rec);
-  return compare(ws, facts, state === 'unreadable' ? null : rec);
+  return compare(ws, facts, state === 'ok' || state === 'pending' ? rec : null);
 }
 
 // The same marks with no first start run — for MEMORY.md, written after the host's own
 // writes.
 export function acceptedOnly<F extends { id: string; hash?: string; outside?: boolean }>(ws: string, facts: F[]): F[] {
   const { state, rec } = readRecord();
-  return compare(ws, facts, state === 'unreadable' ? null : rec).filter((f) => !f.outside);
+  return compare(ws, facts, state === 'ok' || state === 'pending' ? rec : null).filter((f) => !f.outside);
 }
 
 function compare<F extends { id: string; hash?: string; outside?: boolean }>(ws: string, facts: F[], rec: MemoryRecord | null): F[] {

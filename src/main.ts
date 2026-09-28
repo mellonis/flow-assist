@@ -30,7 +30,7 @@ import { stopRemotePlugins } from './remote/lifecycle.js';
 import { noPluginsNote } from './loader/install-root.js';
 import { fetchPluginFromRegistry } from './loader/registry-download.js';
 import { installPluginArchive, isArchiveSource } from './loader/archive-install.js';
-import { checkPluginTrust, isPluginName, shownName, trustCommand, trustPlugin, unreadableTrustText, untrustedText, type Untrusted } from './loader/trust.js';
+import { checkPluginTrust, isPluginName, shownName, trustCommand, trustPlugin, unreadableTrustText, untrustPlugin, untrustedText, type Untrusted } from './loader/trust.js';
 import { createInterface } from 'node:readline/promises';
 import { memoryRecordNotes } from './assistant/memory-trust.js';
 import type { PluginRepo } from './loader/repo.js';
@@ -247,9 +247,17 @@ export async function runPlugins(args: string[], config: Record<string, unknown>
   const yes = args.includes('--yes');
   const name = args.slice(1).find((a) => a !== '--yes');
   // The person's own install is their word that the plugin, as installed now, may load.
-  const trustInstalled = (installed: string) => {
+  // From a command the model runs it is not: whatever was trusted under the name is
+  // forgotten, so what it installed never loads on an old word. Says which it was.
+  const trustInstalled = (installed: string): string => {
+    if (inModelShell()) {
+      untrustPlugin(deps.enabledDir, installed);
+      io.err(notTrustedYet(installed));
+      return 'installed, not trusted';
+    }
     const t = trustPlugin(deps.enabledDir, installed, { yes: true });
-    if (!t.ok) io.err(inModelShell() ? notTrustedYet(installed) : t.error);
+    if (!t.ok) { io.err(t.error); return 'installed, not trusted'; }
+    return 'installed and trusted';
   };
 
   if (sub === 'ls' || sub === 'list') {
@@ -280,19 +288,18 @@ export async function runPlugins(args: string[], config: Record<string, unknown>
   // and enabled; a name is linked from there or fetched from the registry.
   if (sub === 'install' && name && isArchiveSource(name)) {
     const res = await installPluginArchive(name, { availableDir: deps.availableDir, enabledDir: deps.enabledDir });
-    const replacedNote = res.replaced ? (res.previousVersion ? `replaced (was v${res.previousVersion})` : 'replaced') : 'installed';
-    io.out(res.ok
-      ? `plugin '${res.name}'${res.version ? ` v${res.version}` : ''} ${replacedNote} — restart the assistant for the change to take effect`
-      : `plugins install: ${res.error}`);
-    if (res.ok && res.name) trustInstalled(res.name);
+    if (res.ok && res.name) {
+      const trusted = trustInstalled(res.name);
+      const how = res.replaced ? `${res.previousVersion ? `replaced (was v${res.previousVersion})` : 'replaced'}, ${trusted.replace('installed, ', '').replace('installed and ', '')}` : trusted;
+      io.out(`plugin '${res.name}'${res.version ? ` v${res.version}` : ''} ${how} — restart the assistant for the change to take effect`);
+    } else io.out(`plugins install: ${res.error}`);
     if (!res.ok) process.exitCode = 1;
     return;
   }
 
   if (sub === 'install' && name) {
     const res = await repo.install(name);
-    io.out(res.ok ? `plugin '${name}' installed — restart the assistant for the change to take effect` : res.error ?? '');
-    if (res.ok) trustInstalled(name);
+    io.out(res.ok ? `plugin '${name}' ${trustInstalled(name)} — restart the assistant for the change to take effect` : res.error ?? '');
     if (!res.ok) process.exitCode = 1;
     return;
   }
@@ -332,6 +339,8 @@ export async function runPlugins(args: string[], config: Record<string, unknown>
     // On a successful uninstall, purge the plugin's memory (its `plugin`-scope facts)
     // so they don't linger after the plugin is gone.
     if (res.ok) purgePluginMemories(config, name);
+    // The person's removal: the trust and its tombstone both go.
+    if (res.ok) untrustPlugin(deps.enabledDir, name, { clear: true });
     io.out(res.ok ? `plugin '${name}' removed — restart the assistant for the change to take effect` : res.error ?? '');
     if (!res.ok) process.exitCode = 1;
     return;

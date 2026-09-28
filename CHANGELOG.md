@@ -47,17 +47,21 @@ What each version of flow-assist brought, newest first. The version is the one i
   (`--yes` answers for you). A plugin's name is letters, digits, `.`, `_` and `-`; any
   other entry is refused. A plugin the assistant installs is not trusted until you run
   `plugins trust`, whatever was trusted under that name before; a link that is gone is
-  forgotten at the next start.
+  forgotten at the next start, though where it led is kept, so a link put back
+  elsewhere still shows both places and asks. `plugins install` from your terminal
+  says `installed and trusted`.
   A memory fact changed or added outside the app is left out of every request, of a
   plugin's list and of `MEMORY.md`, and shown in `/memory` as `changed outside
   flow-assist` together with the line a request would carry for it; `/memory accept <n>`
-  (or `all`) sends it again as that listing showed it, and refuses if the file changed
-  since. A `memory.json` that turns up after the first start is moved into files as
+  (or `all`, which is only what that listing showed) sends it again as the listing
+  showed it, and refuses if the file changed since. A memory record deleted while the
+  app runs sends no fact until the next start, and the chat says so. A `memory.json` that turns up after the first start is moved into files as
   before, but its facts wait for `/memory accept` too.
   The first start after upgrading — with no record yet — trusts the plugins already
   enabled and accepts the facts already stored, once, and the start screen names the
   plugins; a plugins or memory directory first met after that starts with nothing
-  trusted. A record that cannot be read trusts nothing, and the start screen says how
+  trusted; a deleted record makes the next start a first start again, and its screen
+  says so. A record that cannot be read trusts nothing, and the start screen says how
   to go on. From a command the assistant runs, `plugins trust` is refused and nothing
   is recorded. Like the settings guard, this stops accidents, not a command set on
   getting round it — docs/safety.md says where it stops.

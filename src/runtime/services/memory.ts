@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { hostStateDir } from '../../config/load.js';
 import { addFact, MEMORY_DIR, normalizeMemoryText, readFacts, removeFact, saveFact, type Fact } from '../../assistant/memory-store.js';
-import { workspaceFor, workspaceRoot } from '../../assistant/workspace.js';
+import { workspaceFor } from '../../assistant/workspace.js';
 import { markFacts } from '../../assistant/memory-trust.js';
 
 // The memory list an older host kept, one JSON file for every project. It is read to
@@ -138,7 +138,7 @@ const asEntry = (f: Fact): Memory => ({ id: f.id, text: f.text, scope: f.plugin 
 const pluginOf = (scope: unknown) => (typeof scope === 'string' && scope && scope !== 'global' && scope !== 'host' ? scope : undefined);
 export function globalMemoryService(config: Record<string, unknown> | undefined) {
   const dir = () => workspaceFor(config, null, 'global');
-  const marked = (ws: string) => markFacts(workspaceRoot(config), ws, readFacts(ws));
+  const marked = (ws: string) => markFacts(ws, readFacts(ws));
   return {
     load: (): Memory[] => marked(dir()).filter((f) => !f.outside).map(asEntry),
     save: (list: Memory[]): void => {

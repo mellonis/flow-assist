@@ -1164,8 +1164,10 @@ hold this set together:
     the index line `indexLine` would send (the name and description are what the model
     reads, and a planted description may say something the text does not). `/memory
     accept <n|all>` accepts only what the LAST listing showed: every listing hands the
-    chat its `Shown` (number → scope, id, hash, outside; `memoryShownRef`), and the
-    accept checks the fact still has that hash — else nothing is accepted and the list
+    chat its `Shown` (number → scope, id, hash, outside, and `listed` — `/memory
+    project` numbers the global facts and shows none of them, `shownOf(l, only)`), `all`
+    is exactly the listed facts changed outside, and the accept checks the fact still
+    has that hash — else nothing is accepted and the list
     is shown again; with no listing yet it lists. `acceptFact` records the shown hash
     and the chat rewrites `MEMORY.md`. A slash command, so never the model's. The
     prompt's index is built from the facts' files, never from `MEMORY.md`, and the
@@ -3726,18 +3728,25 @@ commands; docs and hints never present either mechanism as a boundary.
       one with the flag set. `plugins ls` reads with `readOnly` — it never runs the
       first start or prunes.
     - **Stale entries.** A check forgets every recorded name whose entry is gone from
-      the directory; `repo.remove` forgets too (`untrustPlugin`), and the model's
-      `host:plugins_install` calls `repo.untrust` BEFORE it links, so a name the person
-      trusted earlier never lends that word to what the model installs.
+      the directory — from the model's shell too; `repo.remove` forgets
+      (`untrustPlugin`), and the model's `host:plugins_install` calls `repo.untrust`
+      once its install SUCCEEDED (a refused install forgets nothing), so a name the
+      person trusted earlier never lends that word to what the model installed. A
+      forgotten name keeps its target in `forgotten` (a tombstone): it never grants
+      trust, but a link put back elsewhere is untrusted WITH `was`/`now` and
+      `trustPlugin` asks for `yes`. Only the person clears a tombstone: `plugins trust`
+      (recording the new target) or the CLI's `plugins remove`
+      (`untrustPlugin(…, { clear: true })`); the model's `host:plugins_remove` keeps it.
     - **Retargets.** A name recorded with another target is untrusted with `was` and
       `now`, shown on the start screen and in the log; `trustPlugin` refuses to record
       the new target without `yes` and returns both (`confirm`), and `runPlugins trust`
       prints both and asks on a terminal (`deps.confirm`, a readline y/n on a TTY; none
       in a pipe) or takes `--yes`.
     - **What records**: `plugins install` (name or archive, trusting the target it
-      installed) and `plugins trust <name>` from the CLI (`runPlugins`, `src/main.ts`),
-      each refused a record under the model's shell (the install still happens, and
-      says so). The model's `host:plugins_install` leaves the plugin untrusted and its
+      installed, `installed and trusted`) and `plugins trust <name>` from the CLI
+      (`runPlugins`, `src/main.ts`). Under the model's shell neither records: the install
+      still happens, forgets any trust under the name (`untrustPlugin`) and says
+      `installed, not trusted`. The model's `host:plugins_install` leaves the plugin untrusted and its
       result names the command: the auto mode may answer its y/n (`confirmedByPerson`
       does not tell it from the person's key), and the y/n shows a name, not what a
       command may have put in that directory. `plugins ls` marks an untrusted plugin
@@ -3745,10 +3754,17 @@ commands; docs and hints never present either mechanism as a boundary.
   - **Memory** — `memory.accepted.json`: `firstStartDone`, and `files`, a fact file's
     real path → the hash of the text the host wrote (`addFact` / `saveFact` →
     `writeFactFile` → `recordFactFile`; `removeFact` forgets) or the person accepted.
-    The first start is ONE per record, as for plugins: the first `markFacts` with the
-    record missing walks the workspace root it is given (no link followed), accepts
-    every fact file there and sets the flag — even when the workspace being read holds
-    nothing; a root first met after that (another `workspace.dir`) accepts nothing. An
+    The first start is ONE per record, as for plugins, and runs ONLY in the chat's
+    start-up pass (the timer that also moves `memory.json`: `firstStartPending` →
+    migrate → `firstStart(workspaceRoot(config))`), never in `markFacts`: it walks the
+    root (no link followed), accepts every fact file there and sets the flag; a root
+    first met after that (another `workspace.dir`) accepts nothing. A record MISSING
+    after that (deleted while the app runs) accepts nothing — `markFacts` compares
+    against nothing — and the chat says so once (`memoryRecordNotes('later')` from
+    `memoryBlock`); at a start, a missing record, or one the host wrote before any
+    first pass (`firstStartDone: false`, "pending" — its own fact writes, which it does
+    compare against), is a line on the start screen (`memoryRecordNotes('start')`, in
+    `runInteractive`'s `trustNotes`). An
     unreadable record accepts nothing, `memoryRecordNotes()` says so on the start
     screen, and the host's next write or the person's accept moves it aside and starts
     a new one. Checked at index build only: a hash of text `readFacts` reads anyway and

@@ -122,6 +122,10 @@ for the global one. So the app keeps a record of what it put there itself.
   no command is shown for it. A plugin the assistant installs (`host:plugins_install`)
   is not trusted until you run `plugins trust` yourself, even under a name you trusted
   before; `plugins remove`, or a link that is simply gone at a start, forgets the trust.
+  A name forgotten any way but your own `plugins remove` keeps where it led, so a link
+  put back somewhere else still shows both places and `plugins trust` still asks.
+  `plugins install` from your terminal trusts what it installed and says `installed and
+  trusted`; run by the assistant's command it says `installed, not trusted`, and is.
 - **A memory the app did not write is not sent.** The app keeps the hash of each fact
   file as it wrote it (through the assistant's `memory` tool, or a plugin's use of the
   memory) or as you accepted it. A fact file that was changed or added some other way is
@@ -129,16 +133,20 @@ for the global one. So the app keeps a record of what it put there itself.
   the index file `memory/MEMORY.md`, and `/memory` shows it as `changed outside
   flow-assist` — its text, and the line a request would carry for it (its name and
   description, which is what the assistant reads). `/memory accept <n>` (or `all`) sends
-  it again exactly as that listing showed it: if the file changed since, nothing is
-  accepted and the list is shown again. What an older version kept in `memory.json` is
+  it again exactly as that listing showed it — `all` is the facts changed outside that
+  that listing showed, so after `/memory project` it never takes a global one: if a file
+  changed since, nothing is accepted and the list is shown again. What an older version kept in `memory.json` is
   accepted with the first start; a `memory.json` that turns up after that is moved into
   files as usual, but its facts wait for `/memory accept`. The assistant's working files
   (`artifacts/`) are never sent; it reads them only when it asks for one.
 - **The first start, and a record that cannot be read.** Both records are files in the
   app's own directory, `plugins.trusted.json` and `memory.accepted.json`. The first start
   after upgrading — with no record at all — trusts the plugins already enabled and
-  accepts the facts already stored, once; the start screen names the plugins it
-  trusted. After that, a `plugins-enabled/` directory or a memory directory the app
+  accepts the facts already stored, once, and the start screen says so: it names the
+  plugins it trusted, and says the memory record is missing. So deleting either record
+  shows on the next start's screen. A memory record deleted while the app runs sends no
+  fact at all from then on, and the chat says so; only the next start's pass accepts
+  facts again. After that, a `plugins-enabled/` directory or a memory directory the app
   meets for the first time (starting from another install, another `workspace.dir`)
   starts with nothing trusted. A record that is there but cannot be read — emptied,
   cut short, not the app's shape — trusts and accepts nothing, and the start screen
@@ -184,7 +192,8 @@ The plugin and memory records are the same, with the same limits: a command can 
 them, or take the marker off. A record that is damaged fails closed — nothing is trusted
 until you say so — but one that is deleted makes the next start a first start, which
 trusts or accepts whatever is there then, a plugin or fact the command put there
-included; so does a record rewritten to look like one from before the first start. Beyond that, trust in a plugin is
+included — the start screen says it happened, and nothing stops it; so does a record
+rewritten to look like one from before the first start (`{"firstStartDone": false}`). Beyond that, trust in a plugin is
 where it lives, not what its code says: a command that edits the code inside a trusted
 plugin's directory is not caught, nor one that writes into a trusted plugin's
 repository. A fact file the assistant reads by its path with `workspace_read` reaches
