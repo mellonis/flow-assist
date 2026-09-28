@@ -3168,13 +3168,16 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     objects); the list's callbacks are stable and call the latest render's code
     through a ref; the pinned question is a `useMemo`. The list itself is `ChatList`, a
     `memo` of `ScrollList`, so with none of that changed it is not rendered at all, and a
-    wheel step re-renders only the rows entering the window. The clock (`RowOpts.now`,
-    the spinner, a running command's pulse) moves only while something is live — a turn
-    streaming, a view still running (the renderer's also while a row it draws is live:
-    a `liveMark` or a running command's mark); nothing else drawn reads it, and a clock
-    moving on every render would change every row. `perf.e2e.test.ts` holds it: a keystroke's
-    frame (the frame meter, `:perf`) touches as many boxes with a screenful of
-    conversation as with one row. Anything new a row is drawn with goes into those
+    wheel step re-renders only the rows entering the window. The clock, which moves on
+    every render while a turn runs, is kept out of all of it: the rows read it only for
+    the whole seconds of a view still running (`items` depends on those seconds, not on
+    `RowOpts.now`), and the renderer not at all — the round's spinner and a running
+    command's pulse are `LiveMark` / `PulseMark`, which read `ChatClock`, a context
+    `ChatMessages` (and the pager) provide with the render's `now`; a context change
+    re-renders its readers through the memos and nothing around them.
+    `perf.e2e.test.ts` holds it: a keystroke's frame (the frame meter, `:perf`) touches
+    as many boxes with a screenful of conversation as with one row, and during a
+    running turn only the turn's status line more, while the spinner still turns. Anything new a row is drawn with goes into those
     dependencies, or the row keeps its old look.
   - The empty conversation is still a `<ScrollBox>`: it holds the invitation, not rows.
   - The **wheel scrolls only while the pointer is over the box**. In a test pass

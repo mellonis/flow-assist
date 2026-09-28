@@ -83,3 +83,43 @@ test('typing in the chat field draws no conversation row again', async () => {
   expect(many.skipped).toBe(few.skipped);
   ui.app.unmount();
 });
+
+// While a turn runs the chat redraws on every tick of its spinner, and the clock it
+// draws by moves on every render. Only the live marks read it (`ChatClock`), so a
+// keystroke during a turn still leaves the rows in view alone: it touches what an idle
+// keystroke touches, plus the turn's own status line under the list — a few boxes,
+// where the screenful of rows above would be hundreds.
+test('typing while a turn runs draws no conversation row again either', async () => {
+  const meter = createFrameMeter();
+  const model = new ScriptedModel();
+  const ui = await bootApp(model, 100, 30, undefined, {}, { frameMeter: meter });
+  await ui.press('F');
+  for (let t = 0; t < 2; t++) {
+    model.script([{ text: Array.from({ length: 30 }, (_x, i) => `- line ${i} of answer ${t}`).join('\n') }]);
+    await ui.type(`question ${t}`);
+    await ui.press('return');
+    await settle(20);
+  }
+  await ui.type('x');
+  const idle = meter.frames('typing').at(-1)!;
+  await ui.press('backspace');
+  model.script([{ text: 'working on it' }, { hold: true }, { text: ' done' }]);
+  await ui.type('q');
+  await ui.press('return');
+  await settle(20);
+  expect(ui.backend.lastFrame).toContain('working on it');
+  expect(ui.backend.lastFrame).toContain('line 29 of answer 1');
+  await ui.type('y');
+  const busy = meter.frames('typing').at(-1)!;
+  expect(busy.commits).toBe(1);
+  expect(busy.applied).toBeLessThanOrEqual(idle.applied + 2);
+  expect(busy.skipped).toBeLessThanOrEqual(idle.skipped + 8);
+  // The round's own mark still turns: the clock reaches it.
+  const mark = () => ui.backend.lastFrame.split('\n').find((r) => r.includes('working on it'))!.trim().slice(2, 3);
+  const seen = new Set<string>();
+  for (let i = 0; i < 8; i++) { seen.add(mark()); await new Promise((r) => setTimeout(r, 70)); }
+  expect(seen.size).toBeGreaterThan(1);
+  model.release();
+  await settle(20);
+  ui.app.unmount();
+});

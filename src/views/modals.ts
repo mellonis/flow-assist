@@ -31,7 +31,7 @@ import { CELL_FREE, CELL_FULL, CONTEXT_WARN_AT, GRID_COLS, GRID_ROWS, contextFoo
 import { formatBytes, pickerGroups, pickerSelected, rowStatus, type OwnStatus, type PickerState } from '../assistant/session-picker.js';
 import { runMark, tildePath } from '../assistant/shell.js';
 import { sessionWhen, type SessionRow } from '../assistant/sessions.js';
-import { createElement as h, memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createContext, createElement as h, memo, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { wrapText } from '@flowtty/core';
 import { bindingGlyph, keyGlyph } from '../playback/keys.js';
 import {
@@ -890,11 +890,25 @@ function buildMessageRows(m: ChatMsg, at: number, last: boolean, o: RowOpts): Ch
 // One row of the conversation as the screen draws it — shared by the conversation
 // and the pager, so a block read in the pager keeps every mark a drag reads: the gutter
 // and a code block's bar are chrome, a wrapped paragraph copies as one line.
-function chatRowRenderer({ palette: m, errorColor, wrap, now, detailsKey, hover = false }: {
+// The clock the live marks of the conversation are drawn by — the spinner of the round
+// being written, the pulse of a command still running. A context, not a prop of the
+// renderer: only those marks read it, so a moving clock re-renders them and no row
+// around them (`ChatRowItem` is memoized on the renderer).
+const ChatClock = createContext(0);
+function LiveMark({ color }: { color?: string }) {
+  const now = useContext(ChatClock);
+  return h(Text, { dim: true, color }, `${spin(now) ?? '·'} `);
+}
+// Pulsing slowly while the command runs — the same clock the elapsed-seconds tail
+// already redraws by, so no timer of its own is needed.
+function PulseMark({ color, glyph }: { color?: string; glyph: string }) {
+  const pulse = Math.floor(useContext(ChatClock) / 600) % 2 === 0;
+  return h(Text, { bold: !pulse, dim: pulse, color }, glyph);
+}
+function chatRowRenderer({ palette: m, errorColor, wrap, detailsKey, hover = false }: {
   palette: Record<string, string | undefined>;
   errorColor?: string;
   wrap: number;
-  now: number;
   detailsKey: string;
   // Whether a fold line is underlined under the pointer: the backend reports hover, and
   // these rows are the conversation's — never the pager's, where a click folds nothing.
@@ -921,11 +935,9 @@ function chatRowRenderer({ palette: m, errorColor, wrap, now, detailsKey, hover 
       if (cm?.state === 'ok') return h(Text, { bold: true, color: m.ok }, glyph);
       if (cm?.state === 'error') return h(Text, { bold: true, color: errorColor }, glyph);
       // Live (or a shape this host does not classify, e.g. a discarded view read
-      // back from an older session): the shell colour, pulsing slowly while it runs
-      // — the same clock the elapsed-seconds tail already redraws by, so no timer of
-      // its own is needed.
-      const pulse = cm?.state === 'live' && Math.floor(now / 600) % 2 === 0;
-      return h(Text, { bold: !pulse, dim: pulse, color: m.shell }, glyph);
+      // back from an older session): the shell colour, pulsing while it runs.
+      if (cm?.state === 'live') return h(PulseMark, { color: m.shell, glyph });
+      return h(Text, { bold: true, color: m.shell }, glyph);
     }
     if (row.first && row.role === 'bg') return h(Text, { bold: true, color: m.bgAccent }, '◆ ');
     // A note is the HOST speaking to the person (what /memory found, what /clear kept).
@@ -937,7 +949,7 @@ function chatRowRenderer({ palette: m, errorColor, wrap, now, detailsKey, hover 
     if (row.first && row.role === 'assistant') return h(Text, { bold: true, color: m.assistantAccent }, `${ASSISTANT_MARK} `);
     // The round being written: nobody knows yet whether it is the answer, so it gets
     // a live mark instead of the answer's `ƒ`.
-    if (row.liveMark) return h(Text, { dim: true, color: m.assistantAccent }, `${spin(now) ?? '·'} `);
+    if (row.liveMark) return h(LiveMark, { color: m.assistantAccent });
     return h(Text, null, ' '.repeat(GUTTER));
   };
 
@@ -1202,14 +1214,13 @@ function ChatMessages({ messages, rowOpts, palette: m, errorColor, onViewport, s
 
   // What the rows are built from, kept the same object across a render that changed
   // none of it — a keystroke in the field below re-renders this list, and a fresh
-  // `items` or `renderItem` would re-render every row in view (`ChatRow` below is
-  // memoized on them). The clock moves only while something on the list is live — a
-  // round being written, a command still running: nothing else drawn reads it (a
-  // finished view's time is in its data), so a still conversation keeps its rows.
-  const live = streaming || messages.some((x) => Array.isArray(x.views) && (x.views as ViewRecord[]).some((v) => v.phase === 'live'));
-  const clockRef = useRef(rowOpts.now);
-  if (live) clockRef.current = rowOpts.now;
-  const clock = clockRef.current;
+  // `items` or `renderItem` would re-render every row in view (`ChatRowItem` above is
+  // memoized on them). The rows read the clock only for the whole seconds of a view
+  // still running (a finished view's time is in its data; the live marks read
+  // `ChatClock`), so they are built again when one of those seconds turns, not on
+  // every render while something is live.
+  const liveSeconds = messages.flatMap((x) => (Array.isArray(x.views) ? (x.views as ViewRecord[]) : []))
+    .filter((v) => v.phase === 'live').map((v) => Math.floor((rowOpts.now - v.startedAt) / 1000)).join(',');
   const paletteKey = Object.values(m).join(',');
   const rowPaletteKey = Object.values(rowOpts.palette).join(',');
   const renderers = useShallowStable(rowOpts.renderers);
@@ -1217,10 +1228,10 @@ function ChatMessages({ messages, rowOpts, palette: m, errorColor, onViewport, s
   const onViewFailRef = useRef(rowOpts.onViewFail);
   onViewFailRef.current = rowOpts.onViewFail;
   const rows = useMemo(
-    () => chatRows(messages, { ...rowOpts, renderers, now: clock, onViewFail: (kind, why) => onViewFailRef.current?.(kind, why) }),
+    () => chatRows(messages, { ...rowOpts, renderers, onViewFail: (kind, why) => onViewFailRef.current?.(kind, why) }),
     // The palette by its values: the theme object is updated in place. A renderer's
     // late answer bumps `viewRevision()` (views.ts) and changes nothing else.
-    [messages, wrap, rowOpts.folds, viewLines, notes, rowOpts.detailsKey, renderers, clock, rowPaletteKey, viewRevision()],
+    [messages, wrap, rowOpts.folds, viewLines, notes, rowOpts.detailsKey, renderers, liveSeconds, rowPaletteKey, viewRevision()],
   );
   let lastUserKey = -1;
   for (let i = 0; i < rows.length; i++) if (rows[i]!.role === 'user' && rows[i]!.first) lastUserKey = i;
@@ -1259,15 +1270,10 @@ function ChatMessages({ messages, rowOpts, palette: m, errorColor, onViewport, s
 
   // One renderer while nothing it draws with changes, so a row in view whose data did
   // not change is not drawn again (`ChatRowItem`).
-  // Its clock moves whenever a row it draws is live too — the round being written, a
-  // command still running — whatever the flags above say, or a spinner would stand still.
-  const drawClockRef = useRef(rowOpts.now);
-  if (live || rows.some((r) => r.liveMark || r.consoleMark?.state === 'live')) drawClockRef.current = rowOpts.now;
-  const drawClock = drawClockRef.current;
   const draw = useMemo(
-    () => chatRowRenderer({ palette: m, errorColor, wrap, now: drawClock, detailsKey: rowOpts.detailsKey, hover }),
+    () => chatRowRenderer({ palette: m, errorColor, wrap, detailsKey: rowOpts.detailsKey, hover }),
     // The palette by its values.
-    [paletteKey, errorColor, wrap, drawClock, rowOpts.detailsKey, hover],
+    [paletteKey, errorColor, wrap, rowOpts.detailsKey, hover],
   );
   const renderRow = useCallback((row: ChatRow, i: number) => h(ChatRowItem, { row, i, draw }), [draw]);
 
@@ -1315,7 +1321,8 @@ function ChatMessages({ messages, rowOpts, palette: m, errorColor, onViewport, s
   // as tall as the conversation, so anchoring, the scrollbar and the metrics the pin
   // reads stay exact. Laying out every row of a long conversation on every keystroke
   // was what made typing slower the longer the chat got.
-  return h(ChatList, {
+  // The clock of this render reaches the live marks alone (`ChatClock`).
+  return h(ChatClock.Provider, { value: rowOpts.now }, h(ChatList, {
     ...scroll,
     items: rows,
     // Rows are rebuilt (and cached) per message; a row's place in the conversation is
@@ -1323,7 +1330,7 @@ function ChatMessages({ messages, rowOpts, palette: m, errorColor, onViewport, s
     keyOf: chatRowKey,
     rowHeight: 1,
     renderItem: renderRow,
-  }, sticky);
+  }, sticky));
 }
 
 // ─── The pager ────────────────────────────────────────────────────────────────
@@ -1676,13 +1683,13 @@ export function renderChatModal({
       // The pager, in the conversation's place: the block's rows at the conversation's
       // width, with a scroll of their own.
       pager
-        ? h(ScrollList<ChatRow>, {
+        ? h(ChatClock.Provider, { value: now }, h(ScrollList<ChatRow>, {
             // Its keys and the wheel only while the chat has the keyboard.
             isActive: focused,
             items: pager.rows, rowHeight: 1, scrollbar: true, flexGrow: 1, flexShrink: 1, flexDirection: 'column',
             keyOf: (_row: ChatRow, i: number) => `pager-${i}`,
-            renderItem: chatRowRenderer({ palette: m, errorColor: theme?.error, wrap, now, detailsKey }),
-          })
+            renderItem: chatRowRenderer({ palette: m, errorColor: theme?.error, wrap, detailsKey }),
+          }))
         : null,
       error ? h(Text, { color: 'red' }, `⚠ ${error}`) : null,
       // The hint on the left, how full the model's context is on the right — it stays

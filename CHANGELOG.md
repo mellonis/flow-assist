@@ -7,7 +7,8 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 - **Typing and scrolling in a long conversation are lighter.** A key typed into the
   field no longer draws the conversation above it again — the rows in view are left
-  as they are — and a wheel step draws only the rows that come into view.
+  as they are, while an answer is being written too — and a wheel step draws only the
+  rows that come into view.
 - **`:perf` says how fast the app answers.** Every frame is counted by the input that
   led to it — typing, the wheel, another key or click, or none (a redraw) — and `:perf`
   reports the median, p95 and slowest wait from the input to the screen for each, over
