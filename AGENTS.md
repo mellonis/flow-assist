@@ -539,10 +539,24 @@ another's):
   '' with nothing to list.
 - **A remote plugin's entry** is declared by the adapter (`src/remote/adapter.ts`): one
   screen named after its first bound `hello.entry` action, titled by its manifest's
-  description, whose `open` sends the `key` event that key would (`name`, `id` — the
-  person's binding — and `action`), so the plugin answers it as it answers the key and
-  its next frame's `keycaps` bring the surface up. A stopped plugin refuses. No screen
-  with params crosses the wire, and a remote plugin has no `host.open`.
+  description, whose `open` presses that key only while the surface is closed (the last
+  frame's `keycaps` empty — else it returns `ALREADY_OPEN`, answered `<key> is already
+  open.`, and sends nothing: once up, the key may close or run something) and only
+  through `deliverKey`, the person's own path less the keyboard-side check (the model
+  asks from the chat, which has the keys): not stopped, and the frame's `keys.consume`
+  takes it — else `it does not take its entry key S now`. The plugin answers it as it
+  answers the key, and its next frame's `keycaps` bring the surface up. No screen with
+  params crosses the wire, and a remote plugin has no `host.open`.
+- **Background work opens nothing**: the `background` tool runs its nested `chatLLM`
+  under `asBackgroundWork` (`src/runtime/background-work.ts`, an `AsyncLocalStorage`), so
+  every await of it — a plugin's tool calling `host.open` included, which has no ctx of
+  the chat's — reads `inBackgroundWork()`; `screens.open` and `ui_open` refuse there.
+- A stopped or failed turn's `afterTurn(false)` drops what it deferred BEFORE looking at
+  `asking()` — a settings y/n (`askConfigChanges`) may be up as the turn ends.
+- The list caps a line's screens and tools at `LINE_ITEMS_MAX` (8, then `+N more`) and
+  the block at `PROMPT_BLOCK_MAX` (4000 characters, then `+N more plugins`).
+- The host sees only the chat's draft and the `:` line: a field on a plugin's own screen
+  is not guarded, and docs/safety.md says so.
 - A DEFERRED open is resolved and its params checked again when it runs (`flush`): a
   plugin disabled, untrusted or gone meanwhile is not opened — a log line and a toast.
 - **`ui_open` is offered only when it can work**: `assembleToolRegistry`'s `screens`

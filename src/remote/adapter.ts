@@ -24,7 +24,9 @@ import { FLOWTTY_VERSION, HOST_API } from '../version.js';
 import { validateFrame } from './frame.js';
 import { drawFrame, focusedCount, type RenderCtx } from './tree.js';
 import { createFieldState } from './fieldState.js';
-import { canonicalConsume, consumes, keyEventFor, type Consume } from './keys.js';
+import { canonicalConsume, consumes, keyEventFor, type Consume, type InputKey } from './keys.js';
+import { ALREADY_OPEN } from '../runtime/screens.js';
+import { bindingGlyph } from '../playback/keys.js';
 import { localeFromEnv } from './locale.js';
 import type { RemoteManifest, RestartingTransport, TransportClose } from './transport.js';
 import { registerRemoteStop } from './lifecycle.js';
@@ -386,6 +388,13 @@ export async function remotePlugin(opts: RemotePluginOpts): Promise<Plugin> {
     if (consume?.of !== frame) consume = { of: frame, keys: canonicalConsume(frame.keys.consume, ownBindings(host)) };
     return consume.keys;
   };
+  // A key to the plugin, when it is running and its frame takes the key — the person's
+  // press (with their side at the keys) and the model's `ui_open` of its entry alike.
+  const deliverKey = (host: PluginApi['host'], key: InputKey): boolean => {
+    if (stopped || !consumes(consumeOf(host), key)) return false;
+    send('key', keyEventFor(key, ownBindings(host)));
+    return true;
+  };
 
   // ── the components ──────────────────────────────────────────────────────────
   const treeCtx = (ui: PluginApi['ui'], hasKeyboard: boolean): RenderCtx => ({ ui, hasKeyboard, state: fields, onEvent: (m, ev) => send(m, ev), redraw: notify, warn: (l) => once(`prop:${l}`, l) });
@@ -431,11 +440,7 @@ export async function remotePlugin(opts: RemotePluginOpts): Promise<Plugin> {
         host.useInputHandler({
           mode: 'consume',
           priority: (u) => (u.cmdOpen ? 0 : openModals().length ? MODAL_PRIORITY : frame.keycaps?.length ? SURFACE_PRIORITY : ENTRY_PRIORITY),
-          handler: (key) => {
-            if (stopped || !host.hasKeyboard() || !consumes(consumeOf(host), key)) return false;
-            send('key', keyEventFor(key, ownBindings(host)));
-            return true;
-          },
+          handler: (key) => (host.hasKeyboard() ? deliverKey(host, key) : false),
         });
         const open = openModals();
         if (!open.length) return null;
@@ -453,17 +458,28 @@ export async function remotePlugin(opts: RemotePluginOpts): Promise<Plugin> {
   // and the person's binding for it — under the host's rules. No screen with params
   // crosses the wire.
   const entryAction = (registration.entry ?? []).find((a) => Object.hasOwn(keys, a));
+  // The key as the terminal would report the binding `id` (`ctrl+r`, `S`, `return`).
+  const keyOfId = (id: string): InputKey => {
+    const parts = id.split('+');
+    const name = id.endsWith('++') ? '+' : parts.at(-1)!;
+    return { name, ...(parts.includes('ctrl') ? { ctrl: true } : {}), ...(parts.includes('alt') ? { meta: true } : {}), ...(parts.includes('shift') ? { shift: true } : {}) };
+  };
   const screens: Plugin['screens'] = entryAction ? {
     [entryAction]: {
       entry: true,
       title: typeof manifest.description === 'string' && manifest.description.trim() ? manifest.description.trim() : name,
+      // The entry key is pressed only while the plugin's screen is closed — once it is up
+      // the key may mean something else there (close it, run what is on it) — and only
+      // through the checks a keypress takes: the plugin stopped, or its frame not taking
+      // the key now, sends nothing. Not the keyboard's side: the model asks from the chat,
+      // which has the keys then.
       open: (a) => {
         if (stopped) throw new Error(stopped);
-        const id = ownBindings((a as PluginApi).host)[entryAction]?.[0];
+        if (frame.keycaps?.length) return ALREADY_OPEN;
+        const host = (a as PluginApi).host;
+        const id = ownBindings(host)[entryAction]?.[0];
         if (!id) throw new Error(`its key ${entryAction} is not bound`);
-        const parts = id.split('+');
-        const keyName = id.endsWith('++') ? '+' : parts.at(-1)!;
-        send('key', { name: keyName, id, action: entryAction, ...(parts.includes('ctrl') ? { ctrl: true } : {}), ...(parts.includes('alt') ? { meta: true } : {}), ...(parts.includes('shift') ? { shift: true } : {}) });
+        if (!deliverKey(host, keyOfId(id))) throw new Error(`it does not take its entry key ${bindingGlyph([id])} now`);
         return undefined;
       },
     },

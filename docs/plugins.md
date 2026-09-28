@@ -600,12 +600,15 @@ make('tutor', {
   `Not opened: …` and why. The params are checked against the screen's `params` (JSON
   Schema, a tool's `parameters` shape) before your `open` runs; a screen without
   `params` takes none. `host.close(screen)` asks your `close`.
-- **The rules, the same for your tools and the model.** A screen never opens over the
-  person's typing — a draft in the chat's field, the `:` line open — or over a y/n or a
-  question waiting for them: it waits, and opens when the turn ends (outside a turn,
-  once the chat is free); the answer says so at once — `tutor:lessons is not open yet:
-  the person is typing in the chat. It opens when this turn ends.` A turn the person
-  stopped, or one that failed, opens nothing it held back. Only a loaded plugin's
+- **The rules, the same for your tools and the model.** While the person types — a
+  draft in the chat's field, the `:` line open — or a y/n or a question waits for them,
+  a screen waits, and opens when the turn ends (outside a turn, once the chat is free);
+  the answer says so at once — `tutor:lessons is not open yet: the person is typing in
+  the chat. It opens when this turn ends.` The host sees only those two fields: a field
+  on your own screen is yours to guard. A turn the person stopped, or one that failed,
+  opens nothing it held back. Nothing opens from background work (the `background`
+  tool's run, a tool of yours it calls included): `Not opened: screens are not opened
+  from background work.` Only a loaded plugin's
   screens open, and only while the person trusts it and has not disabled it; the host's
   own panels — `:plugins`, `/mcp`, the session picker, the settings, the help, the log —
   never do. A screen that opens while the chat covers the plugin's side (a window, the
@@ -1036,9 +1039,14 @@ give up that host's own attempts until some other host's restart revives the ser
 
 - **Declare screens with params, or open one itself.** `screens` and `host.open` are a
   JS plugin's. A remote plugin's entry screen is what its entry key opens: the model's
-  `ui_open("<name>")` sends it the same `key` event that key would (the entry action,
-  the person's binding for it), under the same rules, and its line on the model's list
-  says `open with ui_open("<name>")`.
+  `ui_open("<name>")` presses that key — the same `key` event (the entry action, the
+  person's binding for it), through the same check that your frame's `keys.consume`
+  takes it — **only while your screen is closed** (your last frame has no `keycaps`); with
+  it up the answer is `already open` and nothing is sent. So a remote plugin's entry key
+  must mean "open": a key that toggles the screen, or runs something once it is up, is
+  never pressed a second time by the model. Its line on the model's list says `open with
+  ui_open("<name>")`. A plugin whose entry key must mean more has no way to opt out yet;
+  a `hello` field saying so is the way it would be added.
 
 - **Mark a config key for the model.** Its `configSchema` is JSON Schema, read into the
   host's zod, and carries no mark: every key of a remote plugin is the person's to set.

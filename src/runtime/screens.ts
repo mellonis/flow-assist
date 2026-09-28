@@ -30,6 +30,7 @@ import { bindingGlyph } from '../playback/keys.js';
 import { toolArgsError } from '../assistant/tool-args.js';
 import { sanitizeGroupDescription } from '../assistant/tool-loading.js';
 import { cutStep } from '../cells.js';
+import { inBackgroundWork } from './background-work.js';
 
 // One screen as a plugin declares it.
 export interface ScreenDecl {
@@ -43,11 +44,15 @@ export interface ScreenDecl {
   // `ui_open`'s place.
   tools?: string[];
   // Puts the screen up: the plugin sets its own state. May return what was opened, in a
-  // few words (`board FRONT`); a throw is the reason it was not.
+  // few words (`board FRONT`), or `ALREADY_OPEN` when it was up and nothing was done; a
+  // throw is the reason it was not.
   open: (api: unknown, params: Record<string, unknown>) => unknown;
   // Takes it down; without it the host cannot close the screen (Esc still does).
   close?: (api: unknown) => unknown;
 }
+
+// What a screen's `open` returns when the screen is up already and it did nothing.
+export const ALREADY_OPEN = Symbol.for('flow-assist.screen.already-open');
 
 // What `open` and `close` answer. `text` is a sentence for the model or the person, in
 // every case; `deferred` — accepted, and opened when the chat is free.
@@ -117,6 +122,12 @@ export interface Screens {
   promptBlock: () => string;
 }
 
+// What one plugin's line lists at most of its screens and of its tools, and how long the
+// whole block may be.
+const LINE_ITEMS_MAX = 8;
+const PROMPT_BLOCK_MAX = 4000;
+const capped = (items: string[]): string => (items.length > LINE_ITEMS_MAX ? `${items.slice(0, LINE_ITEMS_MAX).join(', ')}, +${items.length - LINE_ITEMS_MAX} more` : items.join(', '));
+
 type Resolved = { plugin: Plugin; name: string; decl: ScreenDecl; key: string };
 
 export function createScreens(d: ScreensDeps): Screens {
@@ -161,6 +172,7 @@ export function createScreens(d: ScreensDeps): Screens {
     let label = '';
     try {
       const out = await r.decl.open(d.apiOf(r.plugin.name), params);
+      if (out === ALREADY_OPEN) return { ok: true, screen: r.key, opened: r.key, text: `${r.key} is already open.` };
       if (typeof out === 'string') label = said(out);
     } catch (e) {
       return { ok: false, screen: r.key, text: `${r.key} was not opened: ${said(e instanceof Error ? e.message : e, 200)}` };
@@ -171,6 +183,8 @@ export function createScreens(d: ScreensDeps): Screens {
   };
 
   const open = async (from: string | null, screen: string, paramsIn?: unknown): Promise<ScreenResult> => {
+    // A background task runs apart from the screen: whatever it calls opens nothing.
+    if (inBackgroundWork()) return { ok: false, text: 'Not opened: screens are not opened from background work.' };
     const r = resolve(from, screen);
     if (typeof r === 'string') return { ok: false, text: `Not opened: ${r}.` };
     if (paramsIn != null && (typeof paramsIn !== 'object' || Array.isArray(paramsIn))) return { ok: false, screen: r.key, text: `Not opened: ${r.key}'s params are an object.` };
@@ -248,8 +262,11 @@ export function createScreens(d: ScreensDeps): Screens {
       return open(null, `${pluginName}:${entry[0]}`, {});
     },
     afterTurn: (ok) => {
+      // A stopped or failed turn drops what it deferred first, whatever still waits for
+      // the person (a settings y/n asked as the turn ends).
+      if (!ok) { flush(false); return; }
       if (d.asking()) return;
-      flush(ok);
+      flush(true);
     },
     settle: () => {
       if (!deferred.length || d.busy() || d.blocker()) return;
@@ -264,18 +281,23 @@ export function createScreens(d: ScreensDeps): Screens {
         const entry = entryScreen(p);
         const keys = (p.entry ?? []).map((a) => bindingGlyph(d.keys[a])).filter(Boolean);
         if (!all.length && !keys.length) continue;
-        const what = all.length ? all.map(([n, s]) => said(s.title ?? n, 40)).join(', ') : said(p.description ?? '', 80);
+        const what = all.length ? capped(all.map(([n, s]) => said(s.title ?? n, 40))) : said(p.description ?? '', 80);
         const tools = [...new Set(all.flatMap(([, s]) => s.tools ?? []))].map((t) => said(t, 60));
         const entryOwn = !!entry?.[1].tools?.length;
         const how = [...(entry && !entryOwn ? [`ui_open("${p.name}")`] : []), ...tools];
-        const parts = [what, keys.length ? `key ${keys.join(' / ')}` : '', how.length ? `open with ${how.join(', ')}` : 'the person opens it with its key'].filter(Boolean);
+        const parts = [what, keys.length ? `key ${keys.join(' / ')}` : '', how.length ? `open with ${capped(how)}` : 'the person opens it with its key'].filter(Boolean);
         lines.push(`- ${p.name} — ${parts.join(' · ')}`);
       }
       if (!lines.length) return '';
+      // The block rides on every request: past its size the rest of the plugins are
+      // counted, not listed.
+      let size = 0;
+      const kept = lines.filter((l) => (size += l.length + 1) <= PROMPT_BLOCK_MAX);
+      if (kept.length < lines.length) kept.push(`- +${lines.length - kept.length} more plugins`);
       return [
         '## Screens',
         'The plugins\' screens the person can see, one line each: what they show, the key the person presses, and how you open one. Open a screen when the person asks to see it. The host\'s own panels (:plugins, /mcp, the sessions, settings) are the person\'s to open, never yours.',
-        ...lines,
+        ...kept,
       ].join('\n');
     },
   };

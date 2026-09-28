@@ -18,10 +18,13 @@ read-only and you set `trusted` for that server, or when you list it yourself in
 `plugins.mcp.servers.<name>.readOnly`; `plugins-available/mcp/README.md` has the
 details. The assistant installs a plugin only by its name, never from a URL: a URL in
 its request may come from any page it has read. Opening a plugin's screen is not a
-write and asks nothing, but it never opens over your typing or a pending y/n, never a
-plugin you have not trusted or have disabled, and never the app's own panels —
-`:plugins`, where trust is given, `/mcp`, the sessions, the settings: those only you
-open.
+write and asks nothing. While you type in the chat or on the `:` line, or a y/n waits
+for you, it waits for the turn's end, and then opens with your draft kept in the field.
+It never opens a plugin you have not trusted or have disabled, never from background
+work, and never the app's own panels — `:plugins`, where trust is given, `/mcp`, the
+sessions, the settings: those only you open. The app sees only the chat's draft and the
+`:` line: typing into a field on a plugin's own screen is not seen, and a screen may
+open over it.
 
 ## Asking less: the auto mode and `shell.autoRun`
 

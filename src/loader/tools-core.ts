@@ -17,6 +17,7 @@ import { callProject, ensureWorkspace, listWorkspace, readScope, readWorkspaceFi
 import { markFacts } from '../assistant/memory-trust.js';
 import { tildePath } from '../assistant/shell.js';
 import { openInBrowser } from '../runtime/services.js';
+import { asBackgroundWork, inBackgroundWork } from '../runtime/background-work.js';
 import { resolveIdentityToken } from '../runtime/plugin-identity.js';
 import { DEFAULT_THEME } from '../playback/theme.js';
 import { writtenKey } from '../playback/keys.js';
@@ -566,7 +567,7 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
       case 'ui_open': {
         // The screens are the running app's (src/runtime/screens.ts); a background task
         // runs apart from the screen, and a run with no app has none.
-        if (Number((ctx as { _bgDepth?: number })._bgDepth ?? 0) > 0) throw new Error('ui_open: a background task does not open screens — ask in the chat.');
+        if (inBackgroundWork() || Number((ctx as { _bgDepth?: number })._bgDepth ?? 0) > 0) throw new Error('ui_open: screens are not opened from background work — ask in the chat.');
         const screens = (ctx as { screens?: { uiOpen: (name: string) => Promise<{ ok: boolean; text: string }> } }).screens;
         if (!screens) throw new Error('ui_open: there is no screen here — the app is not running.');
         // A refusal is the call's error, so the model reads it as one; opened, or waiting
@@ -823,14 +824,16 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
               // Text only: a background task never gets images. It has no person to have
               // attached one, and the model's own words cannot make the host read a file
               // as an image.
-              const res = await chatLLM(
+              // Marked as background work through every await: a plugin's tool it calls
+              // is told so too (src/runtime/background-work.ts).
+              const res = await asBackgroundWork(() => chatLLM(
                 [{ role: 'system', content: prompt }, { role: 'user', content: task }],
                 // `taskLabel` names the task to the host, which journals the run's calls
                 // under it; the tool itself writes nothing there.
                 { extraTools: extraTools as ToolDef[], toolCtx, maxRounds: 12, confirmWrite: () => false, taskLabel: label,
                   systemPrompt: bgInstructions.systemPrompt,
                   ...llmOpts(ai) },
-              );
+              ));
               const result = String(res?.content ?? '').trim() || '(no output)';
               (ctx as { showMessage?: (m: string) => void }).showMessage?.(`⏳ ${label} done`);
               (ctx as { pushLog?: (e: string) => void }).pushLog?.(`[bg] ${label}: ${result}`);

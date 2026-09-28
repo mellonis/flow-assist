@@ -360,9 +360,10 @@ failed; what failed is in the log (`L`).
 "Open the tutor", "show me board FRONT": the assistant knows each plugin's screens and
 the key that opens them, and opens one for you — the entry screen with `ui_open`, a
 board or an issue with the plugin's own tools when it has them. Opening a screen asks no
-y/n; it never opens over what you are typing or over a question waiting for your
-answer — it waits and opens when the assistant's turn ends (a turn you stop opens
-nothing), and the answer says it waits. In the panel the screen is beside the chat; in a
+y/n. While you type in the chat or on the `:` line, or a question waits for your answer,
+it waits for the end of the assistant's turn and then opens, your draft kept in the field
+(a turn you stop opens nothing); the answer says it waits. A plugin's own field is not
+watched: a screen may open while you type there. In the panel the screen is beside the chat; in a
 window, or with the chat over the whole terminal, it is behind the chat until you close
 it. Esc closes it as ever. The assistant never opens `:plugins`, `/mcp`, the sessions or
 the settings for you — those stay yours — and never a plugin you have not trusted or

@@ -322,6 +322,9 @@ test('ui_open opens a remote plugin\'s entry as its key does: the plugin is sent
   model.script([{ tool: 'ui_open', args: { screen: 'fake' } }], [{ text: 'Open.' }]);
   const fake = fakeRemote({ keys: { open: 'S' }, entry: ['open'] }, { description: 'a word finder' });
   const ui = await bootApp(model, 120, 30, undefined, {}, { chatMode: 'panel', remote: { manifest: fake.manifest, transport: fake.transport } });
+  // Closed, its frame takes its entry key — the key the person would press.
+  fake.frame({ surface: null, keycaps: [], keys: { consume: ['open'] } });
+  await settle();
   await ui.press('F');
   await ui.type('open the word finder');
   await ui.press('return');
@@ -353,5 +356,29 @@ test('a plugin that joins mid-turn is in the next round\'s list, with ui_open', 
   await until(ui, () => model.requests.length >= 2, 'the next round');
   expect(systemOf(model, 1)).toContain('- fake — a word finder · key S · open with ui_open("fake")');
   expect(toolNames(model, 1)).toContain('ui_open');
+  ui.app.unmount();
+});
+
+test('a remote plugin whose screen is up is not sent its entry key again; one whose frame does not take the key is not sent it at all', async () => {
+  const model = new ScriptedModel();
+  model.script([{ tool: 'ui_open', args: { screen: 'fake' } }], [{ text: 'ok' }], [{ tool: 'ui_open', args: { screen: 'fake' } }], [{ text: 'ok2' }]);
+  const fake = fakeRemote({ keys: { open: 'S' }, entry: ['open'] }, { description: 'finder' });
+  const ui = await bootApp(model, 120, 30, undefined, {}, { chatMode: 'panel', remote: { manifest: fake.manifest, transport: fake.transport } });
+  const keys = () => fake.events.filter(([m, p]) => m === 'key' && (p as { action?: string }).action === 'open').length;
+  await ui.press('F');
+  // No frame yet takes the key: nothing is sent, and the model is told.
+  await ui.type('open');
+  await ui.press('return');
+  await until(ui, () => model.requests.length >= 2, 'the first ui_open answered');
+  expect(lastResult(model, 1)).toContain('fake:open was not opened: it does not take its entry key S now');
+  expect(keys()).toBe(0);
+  // The screen is up: a second ui_open says so and sends nothing.
+  fake.frame({ surface: ['Text', {}, 'finder open'], keycaps: [{ action: 'open', label: 'find' }], keys: { consume: ['open'] } });
+  await until(ui, () => ui.backend.lastFrame.includes('finder open'), 'the surface');
+  await ui.type('again');
+  await ui.press('return');
+  await until(ui, () => model.requests.length >= 4, 'the second ui_open answered');
+  expect(lastResult(model, 3)).toContain('fake:open is already open.');
+  expect(keys()).toBe(0);
   ui.app.unmount();
 });
