@@ -133,12 +133,12 @@ test('the details mark a required setting that is unset and mask a secret-lookin
   ui.app.unmount();
 });
 
-test('disable takes the plugin\'s tools out of the next round — a call already made is told it is gone — and the row says a restart unloads the rest; enable brings them back', async () => {
+test('disable takes the plugin\'s tools out of the next round — a call already made is told it is gone — and the row says a restart unloads the rest; enable and y bring them back', async () => {
   const d = pluginDirs();
   jsPlugin(d, 'good');
   const model = new ScriptedModel();
   model.script([{ hold: true }, { tool: 'good_ping', args: {} }], [{ text: 'first done' }], [{ text: 'second done' }]);
-  const ui = await bootApp(model, 160, 36, undefined, {}, { dirs: d, chatMode: 'panel' });
+  const ui = await bootApp(model, 160, 36, undefined, {}, { dirs: d, trustFile: d.trustFile, chatMode: 'panel' });
   await ui.press('F');
   await ui.type('ping it');
   await ui.press('return');
@@ -161,10 +161,13 @@ test('disable takes the plugin\'s tools out of the next round — a call already
   const results = (model.requests[1]!.messages as Array<{ role: string; content?: unknown }>).filter((m) => m.role === 'tool').map((m) => String(m.content));
   expect(results.join('\n')).toContain('good_ping is gone — good was disabled');
   expect(results.join('\n')).not.toContain('pong from good');
-  // Enabled again: in the next request.
+  // Enabled again: the disable forgot its trust, so its tools wait for `y` — given at once,
+  // as its link leads where it did.
   await ui.press('d');
-  await until(ui, () => rowOf(ui, 'good').includes('active'), 'the row active again');
+  await until(ui, () => rowOf(ui, 'good').includes('not trusted'), 'the row waiting for trust');
   expect(fs.existsSync(path.join(d.enabled, 'good'))).toBe(true);
+  await ui.press('y');
+  await until(ui, () => rowOf(ui, 'good').includes('active'), 'the row active again');
   await ui.press('escape');
   await ui.press('F');
   await ui.type('again');
@@ -174,7 +177,7 @@ test('disable takes the plugin\'s tools out of the next round — a call already
   ui.app.unmount();
 });
 
-test('enable of a plugin disabled at the start loads it through the late path, and its tools are in the next round', async () => {
+test('enable of a plugin disabled at the start asks for y, then loads it through the late path, and its tools are in the next round', async () => {
   const d = pluginDirs();
   const extra = jsPlugin(d, 'extra', { where: 'disabled' });
   trustRecord(d, { extra });
@@ -185,6 +188,10 @@ test('enable of a plugin disabled at the start loads it through the late path, a
   await until(ui, () => rowOf(ui, 'extra').includes('disabled'), 'the disabled row');
   await cursorTo(ui, 'extra');
   await ui.press('d');
+  // The start forgot the trust of a plugin that was off (its tombstone keeps where it
+  // led): enabled, it waits for `y`, which trusts it at once since it leads there still.
+  await until(ui, () => rowOf(ui, 'extra').includes('not trusted — its link leads to /'), 'the row waiting for trust');
+  await ui.press('y');
   await until(ui, () => rowOf(ui, 'extra').includes('active'), 'the plugin joined');
   expect(rowOf(ui, 'extra')).toContain('1 tool');
   await ui.press('escape');
@@ -196,7 +203,7 @@ test('enable of a plugin disabled at the start loads it through the late path, a
   ui.app.unmount();
 });
 
-test('enabling a plugin not trusted leaves it unloaded and says so; y trusts it and it loads', async () => {
+test('enabling a plugin not trusted leaves it unloaded and says so; y shows where it leads, a second y trusts it and it loads', async () => {
   const d = pluginDirs();
   jsPlugin(d, 'other', { where: 'disabled' });
   const good = jsPlugin(d, 'good');
@@ -205,10 +212,16 @@ test('enabling a plugin not trusted leaves it unloaded and says so; y trusts it 
   await openPanel(ui);
   await cursorTo(ui, 'other');
   await ui.press('d');
-  await until(ui, () => rowOf(ui, 'other').includes('not trusted — not loaded until you trust it (y)'), 'the untrusted row');
-  expect(flat(ui.backend.lastFrame)).toContain('other enabled — not loaded until you trust it (y)');
+  await until(ui, () => rowOf(ui, 'other').includes('not trusted — its link leads to /'), 'the untrusted row');
+  expect(flat(ui.backend.lastFrame)).toContain('other enabled — not trusted: y trusts it, then it loads');
+  expect(readTrust(d).dirs[fs.realpathSync(d.enabled)]!.other).toBeUndefined();
+  // A first trust shows where the link leads and waits for its own `y`.
+  await ui.press('y');
+  await until(ui, () => ui.backend.lastFrame.includes('Trust other?'), 'the confirmation');
+  expect(flat(ui.backend.lastFrame)).toContain(`its link leads to ${fs.realpathSync(path.join(d.available, 'other'))}`);
   expect(readTrust(d).dirs[fs.realpathSync(d.enabled)]!.other).toBeUndefined();
   await ui.press('y');
+  await ui.press('escape');
   await until(ui, () => rowOf(ui, 'other').includes('active'), 'the plugin trusted and joined');
   expect(readTrust(d).dirs[fs.realpathSync(d.enabled)]!.other).toBe(fs.realpathSync(path.join(d.available, 'other')));
   ui.app.unmount();
@@ -345,9 +358,13 @@ test('nothing the model or a remote plugin can reach trusts a plugin', async () 
   await until(ui, () => ui.backend.lastFrame.includes('Flow Assist · Plugins'), 'the panel in the chat');
   await until(ui, () => rowOf(ui, 'other').includes('not trusted'), 'the untrusted row');
   expect(fs.readFileSync(d.trustFile, 'utf8')).toBe(before);
-  // The person's key does.
+  // The person's keys do: `y`, and `y` again once the place is shown.
   await cursorTo(ui, 'other');
   await ui.press('y');
+  await until(ui, () => ui.backend.lastFrame.includes('Trust other?'), 'the confirmation');
+  expect(fs.readFileSync(d.trustFile, 'utf8')).toBe(before);
+  await ui.press('y');
+  await ui.press('escape');
   await until(ui, () => rowOf(ui, 'other').includes('active'), 'trusted and loaded');
   expect(readTrust(d).dirs[fs.realpathSync(d.enabled)]!.other).toBe(fs.realpathSync(path.join(d.available, 'other')));
   ui.app.unmount();
@@ -387,5 +404,59 @@ test('with the chat waiting for a y/n, y in the panel does nothing; ^] reaches t
   await ui.press('y');
   await until(ui, () => wrote === 1, 'the write answered');
   expect(fs.readFileSync(d.trustFile, 'utf8')).toBe(before);
+  ui.app.unmount();
+});
+
+// Every load the panel starts goes through one guarded path: a link a command moved
+// between the start and a restart loads nothing — the process at the new place is never
+// started — and the row says where it led and where it leads.
+test('restart of a remote plugin whose link a command moved loads nothing and says so', async () => {
+  const d = pluginDirs();
+  const fake = fakeRemote({ tools: [] }, { description: 'a remote one' });
+  const orig = path.join(d.available, 'fake');
+  fs.mkdirSync(orig);
+  fs.writeFileSync(path.join(orig, 'manifest.json'), JSON.stringify({ ...fake.manifest, flowtty: FLOWTTY_VERSION }));
+  fs.symlinkSync(orig, path.join(d.enabled, 'fake'));
+  trustRecord(d, { fake: orig });
+  const ui = await bootApp(new ScriptedModel(), 300, 36, undefined, {}, { dirs: d, trustFile: d.trustFile, late: true, remote: { manifest: fake.manifest, transport: fake.transport } });
+  await openPanel(ui);
+  await until(ui, () => rowOf(ui, 'fake').includes('active'), 'active');
+  // A command the model runs points the link elsewhere.
+  const evil = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-evil-'));
+  fs.writeFileSync(path.join(evil, 'manifest.json'), JSON.stringify({ ...fake.manifest, flowtty: FLOWTTY_VERSION }));
+  fs.unlinkSync(path.join(d.enabled, 'fake'));
+  fs.symlinkSync(evil, path.join(d.enabled, 'fake'));
+  await cursorTo(ui, 'fake');
+  await ui.press('r');
+  await until(ui, () => rowOf(ui, 'fake').includes('not trusted — its link led to'), 'the row not trusted');
+  expect(rowOf(ui, 'fake')).toContain(`now to ${fs.realpathSync(evil)}`);
+  await settle(20);
+  expect(fake.hellos()).toBe(1);
+  expect(ui.plugins.some((p) => p.name === 'fake')).toBe(false);
+  ui.app.unmount();
+});
+
+// A remote plugin disabled while its handshake is pending is not mounted when the
+// handshake lands: its process is stopped, and it is simply disabled.
+test('a remote plugin disabled while it starts is stopped when it would join, not mounted', async () => {
+  const d = pluginDirs();
+  const fake = fakeRemote({ tools: [{ id: 'fake', tools: [{ type: 'function', function: { name: 'fake_lookup', description: 'Look.', parameters: { type: 'object', properties: {} } } }] }] });
+  fake.holdHello();
+  let shutdowns = 0;
+  fake.peer.onRequest('shutdown', () => { shutdowns++; return null; });
+  fs.mkdirSync(path.join(d.available, 'fake'));
+  fs.writeFileSync(path.join(d.available, 'fake', 'manifest.json'), JSON.stringify({ ...fake.manifest, flowtty: FLOWTTY_VERSION }));
+  fs.symlinkSync(path.join(d.available, 'fake'), path.join(d.enabled, 'fake'));
+  const ui = await bootApp(new ScriptedModel(), 160, 36, undefined, {}, { dirs: d, late: true, remote: { manifest: fake.manifest, transport: fake.transport } });
+  await openPanel(ui);
+  await until(ui, () => rowOf(ui, 'fake').includes('starting…'), 'starting');
+  await cursorTo(ui, 'fake');
+  await ui.press('d');
+  await until(ui, () => fs.existsSync(path.join(d.enabled, '.disabled', 'fake')), 'the link moved');
+  fake.answerHello();
+  await until(ui, () => shutdowns === 1, 'the process stopped');
+  await until(ui, () => rowOf(ui, 'fake').includes('disabled') && !rowOf(ui, 'fake').includes('restart to unload'), 'the row disabled');
+  expect(ui.plugins.some((p) => p.name === 'fake')).toBe(false);
+  expect(ui.tools.tools.map((t) => t.function.name)).not.toContain('fake_lookup');
   ui.app.unmount();
 });

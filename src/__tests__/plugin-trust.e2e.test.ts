@@ -400,9 +400,10 @@ test('`plugins install` says what it did: the person\'s install trusts, one from
   expect((await d.load()).names).toContain('alpha');
 });
 
-// A plugin the person disabled in the app (`:plugins`) is still installed and still
-// trusted: `plugins ls` says so, and a start while it is off neither loads nor forgets it.
-test('a disabled plugin is listed as disabled, is not loaded, and loads again once enabled', async () => {
+// A plugin the person disabled in the app (`:plugins`) is still installed and no longer
+// trusted: `plugins ls` says so, a start while it is off loads nothing, and enabled again
+// it waits for `plugins trust`.
+test('a disabled plugin is listed as disabled, is not loaded, and loads again only once trusted', async () => {
   const d = install();
   symlinkSync(pluginAt(join(d.availableDir, 'alpha'), 'alpha', d.root), join(d.enabledDir, 'alpha'));
   expect((await d.load()).names).toContain('alpha');
@@ -412,10 +413,11 @@ test('a disabled plugin is listed as disabled, is not loaded, and loads again on
   rmSync(join(d.root, 'alpha.ran'));
   const off = await d.load();
   expect(off.names).not.toContain('alpha');
-  expect(off.untrusted).toEqual([]);
   expect(d.ran('alpha')).toBe(false);
   expect((await d.repo.enable!('alpha')).ok).toBe(true);
   const on = await d.load();
-  expect(on.names).toContain('alpha');
-  expect(on.untrusted).toEqual([]);
+  expect(on.names).not.toContain('alpha');
+  expect(on.untrusted.map((u) => u.name)).toEqual(['alpha']);
+  await d.cli('trust', 'alpha');
+  expect((await d.load()).names).toContain('alpha');
 });

@@ -83,8 +83,9 @@ needs one `plugins trust`. A link that now leads somewhere else shows both place
 start after upgrading trusts everything already enabled, once, and the start screen
 lists it. `plugins ls` marks an untrusted plugin, and `plugins remove` forgets the
 trust. In the app, `:plugins` lists them, disables and enables one (its link waits in
-`plugins-enabled/.disabled/`, still installed and trusted; `plugins install` enables it
-again too), restarts one in another language and trusts one (docs/usage.md, "Plugins:
+`plugins-enabled/.disabled/`, still installed; a disable forgets the trust, so an enabled
+plugin waits for `y` or `plugins trust`; `plugins install` enables it again too),
+restarts one in another language and trusts one (docs/usage.md, "Plugins:
 `:plugins`"). See
 [safety.md](safety.md), "Plugins and memory changed behind the app's back".
 

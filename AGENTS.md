@@ -396,8 +396,9 @@ other non-2xx — drops it — while a 401 or 400 is that call's error alone) lo
 restart`). Every attempt carries the server's generation; `disable`, `restart`,
 `remove` and a drop start a new one, so an attempt that finishes under an older one lets
 go of its client and brings back nothing. A call from a turn that saw a server's tools
-before it left is told where the server stands (`notConnected`, which is also the group's
-`gone`): disabled, not connected and when it is tried next, or — after `/mcp remove` —
+before it left is told where the server stands (`notConnected`; the group's `gone` is the
+same, but null while the server is connected — back without that tool, the host's own
+`is gone` answers, never a "call again" that would loop): disabled, not connected and when it is tried next, or — after `/mcp remove` —
 `<name> was removed by the person`; `connected again since — call the tool again` only
 when it did come back. The first attempts are `start()`, which the
 builder does not await: it is the plugin's `ready`. Every connect and every failure calls
@@ -2325,26 +2326,40 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   `untrusted` array the start screen reads, `load` = `loadEnabledPlugin`); the App always
   has a late hub (its own when the loader passed none), which is how enable and restart
   join.
+  **Every load the panel starts** — enable, restart, trust — is `site.load` =
+  `loadTrustedPlugin` (`src/loader/build.ts`): a read-only `pluginTrustOf` for that name,
+  the link's real target equal to the recorded one, and the plugin loaded from that
+  recorded place (`loadEnabledPlugin`'s `dir`), never through the link — a link moved
+  in between loads nothing. Not trusted: it rejects with `UntrustedPluginError`, the
+  App's `join` puts its `Untrusted` (with `was`/`now`) into `untrusted`, and the row says
+  so. During a restart a call to one of its tools is told `<tool> is gone — <plugin> is
+  restarting` (`registry.leaving`).
   **Disable** moves the link to `plugins-enabled/.disabled/<name>` (`repo.disable`, the
-  link re-made absolute so a relative one still leads where it did), puts the name in
-  `disabledNow` and withholds its tools (`registry.withhold` + `rebuildFromPlugins`, which
-  also splices `pluginAiTools`): out from the next round, a call from the turn in flight
-  answered `<tool> is gone — <plugin> was disabled`. Its screens, keys and commands stay
-  until a restart. A plugin disabled while starting joins withheld. **Enable** moves the
-  link back; a plugin disabled in this run gets its tools back, any other is checked
-  against the trust record (`readOnly`) and joins through `late` only when trusted — else
-  it is added to `untrusted` and the row says so. `enabledPlugins` lists only the links at
-  the top level, so a disabled one is never loaded; `trust.ts`'s `present` counts
-  `.disabled/` too, so a start while it is off forgets nothing. `plugins ls` says
-  `disabled`, `install` of a disabled plugin moves it back, `remove` takes a disabled one.
+  link re-made absolute so a relative one still leads where it did) and FORGETS the trust
+  (`untrustPlugin`, keeping the tombstone; the repository takes the trust options,
+  `PluginRepoOptions.trust`). A loaded plugin goes into `disabledNow` and its tools are
+  withheld (`registry.withhold` + `rebuildFromPlugins`, which also splices
+  `pluginAiTools`): out from the next round, a call from the turn in flight answered
+  `<tool> is gone — <plugin> was disabled`. Its screens, keys and commands stay until a
+  restart. A plugin disabled while starting is not mounted when it would join, and a
+  remote one is stopped (`stopRemotePlugin`). `.disabled` must be a real directory: as a
+  link it is never listed and nothing is moved through it; a non-plugin name in it is
+  not listed. **Enable** moves the link back and never trusts: the plugin is added to
+  `untrusted` (a loaded one keeps its tools withheld) and the row says `not trusted` with
+  where its link leads. `enabledPlugins` lists only the links at the top level, so a
+  disabled one is never loaded, and a command moving it back loads nothing at the next
+  start (its trust is gone). `plugins ls` says `disabled`, `install` of a disabled plugin
+  moves it back, `remove` takes a disabled one.
   **Trust from the panel** is `trustPlugin` with the loader's trust options, on the
   person's `y` in the panel — the only way it is reached: the model's tools do not
   include it, a remote plugin's requests do not, and a chat line (`/plugins y`, typed or
-  queued) opens the panel and nothing more. A retargeted link answers `confirm`; the
-  panel opens a spec over itself showing `was` and `now`, and only its own `y` calls
-  again with `yes`. A trusted plugin leaves `untrusted` (the start screen follows) and,
-  when enabled and not loaded, joins. `src/__tests__/plugins-panel.e2e.test.ts` holds
-  it.
+  queued) opens the panel and nothing more. A plugin whose tombstone (or record) is its
+  target now is trusted at once; otherwise the panel opens a spec over itself — `its
+  link leads to <now>` for a first trust, `was` and `now` for a retarget — and only that
+  spec's own `y`, for the place it showed, records it. A trusted plugin leaves
+  `untrusted` (the start screen follows); a loaded one gets its tools back, an enabled
+  one joins. Every name in a notice or a title goes through `shownName`.
+  `src/__tests__/plugins-panel.e2e.test.ts` holds it.
 - **The typed command is text; everything drawn around it is chrome.** A drag over
   the line copies what was typed and nothing else — not the `: ` prompt, not the
   inline offer after the caret, not the `⇥ a · b` candidates — so a long
@@ -3797,9 +3812,9 @@ commands; docs and hints never present either mechanism as a boundary.
       one with the flag set. `plugins ls` reads with `readOnly` — it never runs the
       first start or prunes.
     - **Disabled.** A link the person disabled waits in `plugins-enabled/.disabled/`:
-      never loaded, and still present for the check — its trust is kept, so enabling it
-      loads it while it leads where it did. A command moving that link back enables it
-      at the next start; a link leading anywhere else is untrusted as ever.
+      never loaded, and its trust forgotten as a removal forgets it (the tombstone kept):
+      enabling it never trusts it, a command moving the link back loads nothing, and the
+      person's `y` in `:plugins` trusts it again at once while it leads where it did.
     - **Stale entries.** A check forgets every recorded name whose entry is gone from
       the directory — from the model's shell too; `repo.remove` forgets
       (`untrustPlugin`), and the model's `host:plugins_install` calls `repo.untrust`
@@ -3818,7 +3833,8 @@ commands; docs and hints never present either mechanism as a boundary.
     - **What records**: `plugins install` (name or archive, trusting the target it
       installed, `installed and trusted`) and `plugins trust <name>` from the CLI
       (`runPlugins`, `src/main.ts`), and the person's `y` in the `:plugins` panel (The
-      command line, `:plugins`), with the same confirm for a retarget. Under the model's shell neither records: the install
+      command line, `:plugins`) — a first trust and a retarget each confirmed with a
+      second `y` over the place shown. Under the model's shell neither records: the install
       still happens, forgets any trust under the name (`untrustPlugin`) and says
       `installed, not trusted`. The model's `host:plugins_install` leaves the plugin untrusted and its
       result names the command: the auto mode may answer its y/n (`confirmedByPerson`

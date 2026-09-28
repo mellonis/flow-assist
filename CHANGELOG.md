@@ -14,8 +14,11 @@ What each version of flow-assist brought, newest first. The version is the one i
   its settings with the missing ones marked), `t` its tools, `r` restarts a plugin in
   another language, `d` disables or enables one — disabled, its tools leave the
   assistant at once and its screens and keys go at the next restart; its link waits in
-  `plugins-enabled/.disabled/`, still installed and trusted, and `plugins ls` says
-  `disabled` — and `y` trusts one, showing both places first when its link moved.
+  `plugins-enabled/.disabled/`, still installed, `plugins ls` says `disabled`, and its
+  trust is forgotten, so enabled again it waits for `y` — and `y` trusts one, showing
+  where its link leads (both places when it moved) and waiting for a second `y`. Every
+  plugin the list loads is checked for trust again and loaded from where it was trusted:
+  a link a command moved meanwhile loads nothing.
   Installing, removing and updating stay `flow-assist plugins …`.
   **For plugin authors:** nothing to change; the person can now disable your plugin
   while the app runs (docs/plugins.md, "Where a plugin lives").
@@ -26,7 +29,8 @@ What each version of flow-assist brought, newest first. The version is the one i
   server was removed by you, not that it came back and should be called again.
   **For plugin authors:** a tool group may say for itself why its tools went, with
   `gone: () => string | null` (docs/plugins.md); your `exec` is no longer called for a
-  tool you took away. The host API number is unchanged.
+  tool you took away — an older host with the same API number still calls it, so keep
+  answering there. The host API number is unchanged.
 - **The examples show what a plugin can do now.** `examples/notes`' command is
   `notebook`, marked `chat: true`, so it answers `/notebook` in the chat with a note as
   well as `:notebook` on the command line (the chat's own `/notes` keeps its name); its

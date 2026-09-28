@@ -70,7 +70,8 @@ import { createPluginsPanel, type PluginSite } from './plugins-panel.js';
 import { panelKey as commandPanelKey, panelAnswer, panelKeys, panelRows, panelStart, panelTop, type PanelSpec, type PanelState } from '../assistant/command-panel.js';
 import { renderCommandPanel } from '../views/modals.js';
 import { redactDeep } from '../assistant/secrets.js';
-import { stopRemotePlugin } from '../remote/index.js';
+import { isRemotePlugin, stopRemotePlugin } from '../remote/index.js';
+import { UntrustedPluginError } from '../loader/build.js';
 import { FOOTER_ROWS, TITLE_ROWS, chatModeOf, panelLayout, type ChatMode, type PanelLayout } from './panel-layout.js';
 
 // The host's own plugins: they ARE the host, so the start screen does not list them
@@ -452,7 +453,8 @@ export function renderApp(
     plugins, builtins: BUILTIN_PLUGINS, config, keys, site, disabledNow,
     starting: () => late.starting(),
     withhold: (name, on) => { tools?.withhold?.(name, on); rebuildFromPlugins(); redraw(); },
-    unload: (plugin) => {
+    unload: (plugin, why) => {
+      tools?.leaving?.(plugin.name, why ?? null);
       const at = plugins.indexOf(plugin);
       if (at >= 0) plugins.splice(at, 1);
       rebuildFromPlugins();
@@ -463,7 +465,15 @@ export function renderApp(
       // Its place in the enabled order as it is now — a plugin disabled at the start has
       // none in the order the loader set.
       if (site.repo) { try { late.order(await site.repo.enabledPlugins()); } catch { /* the order the loader set */ } }
-      late.expect(name, site.load(name));
+      const loading = site.load(name);
+      // Not trusted now (its link moved, its trust forgotten): not loaded, and its row
+      // says so with where it led and where it leads.
+      loading.catch((e: unknown) => {
+        if (!(e instanceof UntrustedPluginError)) return;
+        const at = site.untrusted.findIndex((u) => u.name === name);
+        if (at >= 0) site.untrusted.splice(at, 1, e.untrusted); else site.untrusted.push(e.untrusted);
+      });
+      late.expect(name, loading);
       redraw();
     },
     stop: (plugin) => stopRemotePlugin(plugin) ?? Promise.resolve(),
@@ -666,15 +676,26 @@ export function renderApp(
     // for the App to listen is handed over at once.
     useEffect(() => late.listen((event) => {
       if (event.kind === 'joined') {
+        const name = event.plugin.name;
+        tools?.leaving?.(name, null);
+        // Disabled from the panel while it was still starting: it is not mounted, and a
+        // plugin in another language is stopped.
+        if (disabledNow.has(name)) {
+          disabledNow.delete(name);
+          tools?.withhold?.(name, false);
+          if (isRemotePlugin(event.plugin)) void stopRemotePlugin(event.plugin);
+          services.log.append(`[plugins] ${name} was disabled while it started — not loaded`);
+          (services as unknown as ReactBoundServices).logs = services.log.read();
+          notify();
+          return;
+        }
         // Its place in the enabled order, whenever it arrived: the keys, the palette, the
         // screen context and the start screen follow the config, not the timing.
-        plugins.splice(joinIndex(plugins, event.plugin.name, late.rank), 0, event.plugin);
-        site.skipped.delete(event.plugin.name);
-        // Disabled from the panel while it was still starting: it joins without its tools.
-        if (disabledNow.has(event.plugin.name)) tools?.withhold?.(event.plugin.name, true);
+        plugins.splice(joinIndex(plugins, name, late.rank), 0, event.plugin);
+        site.skipped.delete(name);
         rebuildFromPlugins();
       } else if (event.kind === 'skipped' || event.kind === 'note') {
-        if (event.kind === 'skipped') site.skipped.set(event.name, event.why);
+        if (event.kind === 'skipped') { site.skipped.set(event.name, event.why); tools?.leaving?.(event.name, null); }
         services.log.append(event.line);
         (services as unknown as ReactBoundServices).logs = services.log.read();
       }

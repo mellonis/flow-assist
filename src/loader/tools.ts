@@ -105,6 +105,9 @@ export interface ToolRegistry {
   // Takes a plugin's tools out of the registry (`on`), or lets them back in — a plugin
   // the person disabled while the app runs. Refreshes. Absent on a registry made by hand.
   withhold?(plugin: string, on: boolean): void;
+  // Why a plugin out of the list is out, for a call to one of its tools meanwhile —
+  // `is restarting`; null forgets it (it is `not loaded` then).
+  leaving?(plugin: string, why: string | null): void;
 }
 
 export interface AssembledToolRegistryInput {
@@ -172,6 +175,8 @@ export function assembleToolRegistry(input: AssembledToolRegistryInput): ToolReg
   };
   // The plugins whose tools the person took out while the app runs.
   const withheld = new Set<string>();
+  // Why a plugin is out of the list for now (`registry.leaving`).
+  const leavingWhy = new Map<string, string>();
   let state = assemble(input, warn, new Map(), withheld);
   // The tools a refresh took away, each with the group that last held it and its plugin:
   // a turn fixes the list it sends when it starts, and a model that saw a name may call
@@ -187,7 +192,7 @@ export function assembleToolRegistry(input: AssembledToolRegistryInput): ToolReg
     if (own) return own;
     const who = plugin ?? group.id;
     if (plugin && withheld.has(plugin)) return `${name} is gone — ${plugin} was disabled`;
-    if (plugin && !input.plugins.some((p) => p.name === plugin)) return `${name} is gone — ${plugin} is not loaded`;
+    if (plugin && !input.plugins.some((p) => p.name === plugin)) return `${name} is gone — ${plugin} ${leavingWhy.get(plugin) ?? 'is not loaded'}`;
     return `${name} is gone — ${who} removed it`;
   };
   const registry: ToolRegistry = {
@@ -218,6 +223,9 @@ export function assembleToolRegistry(input: AssembledToolRegistryInput): ToolReg
   // `refresh` touches this registry alone: an App that has gone (a test's) never
   // reassembles the one assembled after it.
   registry.refresh = refresh;
+  registry.leaving = (plugin, why) => {
+    if (why) leavingWhy.set(plugin, why); else leavingWhy.delete(plugin);
+  };
   registry.withhold = (plugin, on) => {
     if (on) withheld.add(plugin); else withheld.delete(plugin);
     refresh();

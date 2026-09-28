@@ -1023,9 +1023,13 @@ test('a tool a refresh took away never runs again; the answer names why', async 
   reg.withhold!('pinger', false);
   expect(await reg.exec('echo_it', {}, {})).toBe('echo');
 
-  // Out of the list altogether (a remote plugin stopped for its restart).
+  // Out of the list for its restart: a call meanwhile is told so; once it is only out,
+  // that it is not loaded.
   plugins.splice(0, 1);
+  reg.leaving!('pinger', 'is restarting');
   reg.refresh!();
+  await expect(reg.exec('ping_it', {}, {})).rejects.toThrow('ping_it is gone — pinger is restarting');
+  reg.leaving!('pinger', null);
   await expect(reg.exec('ping_it', {}, {})).rejects.toThrow('ping_it is gone — pinger is not loaded');
 });
 

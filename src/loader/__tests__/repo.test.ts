@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { createPluginRepo } from '../repo';
-import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, existsSync, readdirSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, existsSync, readdirSync, renameSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { HOST_API } from '../../version';
@@ -134,29 +134,65 @@ test('a built plugin carries its dependencies inside: none of them is reported m
 });
 
 // The person turns a plugin off from the app's `:plugins` panel: its link waits in
-// plugins-enabled/.disabled/ — not loaded, still installed — and its trust is kept, so a
-// start between disable and enable forgets nothing and the plugin loads again once
-// enabled. A relative link keeps leading where it did from its new place.
-test('disable moves the link aside and enable brings it back; the trust is kept across a start', async () => {
-  const { checkPluginTrust, trustPlugin } = await import('../trust');
-  const { repo, enabled, root } = fakeRepo();
+// plugins-enabled/.disabled/ — not loaded, still installed — and its trust is forgotten
+// as a removal forgets it, keeping where it led: enabling it again never trusts it, and a
+// command moving the link back loads nothing at the next start. A relative link keeps
+// leading where it did from its new place.
+test('disable moves the link aside and forgets the trust; enable brings the link back untrusted', async () => {
+  const { checkPluginTrust, pluginTrustOf, trustPlugin } = await import('../trust');
+  const root = mkdtempSync(join(tmpdir(), 'fa-repo-'));
+  const avail = join(root, 'plugins-available');
+  const enabled = join(root, 'plugins-enabled');
+  mkdirSync(join(avail, 'tracker'), { recursive: true }); mkdirSync(enabled);
+  writeFileSync(join(avail, 'tracker', 'manifest.json'), JSON.stringify({ name: 'tracker', hostApi: HOST_API, version: '1.0.0' }));
   const trust = { file: join(root, 'plugins.trusted.json'), modelShell: false };
+  const repo = createPluginRepo({ availableDir: avail, enabledDir: enabled, projectRoot: root, trust });
   // An installer's relative link.
   symlinkSync('../plugins-available/tracker', join(enabled, 'tracker'));
-  expect(trustPlugin(enabled, 'tracker', trust).ok).toBe(true);
-  checkPluginTrust(enabled, ['tracker'], trust); // the first start, done
+  checkPluginTrust(enabled, ['tracker'], trust); // the first start trusts it
+  expect(checkPluginTrust(enabled, ['tracker'], trust).trusted).toEqual(['tracker']);
   expect(await repo.disable!('tracker')).toEqual({ ok: true });
   expect(await repo.enabledPlugins()).toEqual([]);
   expect(await repo.disabledPlugins!()).toEqual(['tracker']);
   expect((await repo.list()).find((e) => e.name === 'tracker')).toMatchObject({ active: false, disabled: true });
   expect(await repo.disable!('tracker')).toEqual({ ok: false, error: "plugin 'tracker' is disabled already" });
-  // A start while it is off: not loaded, not forgotten.
-  expect(checkPluginTrust(enabled, await repo.enabledPlugins(), trust).untrusted).toEqual([]);
+  // The model's command moves it back: the next start does not load it.
+  renameSync(join(enabled, '.disabled', 'tracker'), join(enabled, 'tracker'));
+  expect(checkPluginTrust(enabled, ['tracker'], trust)).toMatchObject({ trusted: [], untrusted: [{ name: 'tracker' }] });
+  renameSync(join(enabled, 'tracker'), join(enabled, '.disabled', 'tracker'));
+  // Enabled by the person: untrusted too, the tombstone saying where it led.
   expect(await repo.enable!('tracker')).toEqual({ ok: true });
   expect(await repo.enabledPlugins()).toEqual(['tracker']);
   expect(readdirSync(join(enabled, '.disabled'))).toEqual([]);
-  expect(checkPluginTrust(enabled, ['tracker'], trust)).toMatchObject({ trusted: ['tracker'], untrusted: [] });
-  expect(existsSync(join(enabled, 'tracker', 'manifest.json'))).toBe(true);
+  const state = pluginTrustOf(enabled, 'tracker', trust);
+  expect(state.recorded).toBeUndefined();
+  expect(state.forgotten).toBe(state.target!);
+  expect(checkPluginTrust(enabled, ['tracker'], trust).trusted).toEqual([]);
+  // The person's word brings it back, at once: it leads where it did.
+  expect(trustPlugin(enabled, 'tracker', trust)).toMatchObject({ ok: true });
+  expect(checkPluginTrust(enabled, ['tracker'], trust).trusted).toEqual(['tracker']);
+});
+
+// plugins-enabled/.disabled/ is a directory of the host's own: made a link, it is never
+// read as the disabled plugins, and nothing is moved through it. A name that is not a
+// plugin name there is not listed.
+test('a .disabled that is a link is refused; a non-plugin name there is not listed', async () => {
+  const { repo, avail, enabled } = fakeRepo();
+  symlinkSync(join(avail, 'tracker'), join(enabled, 'tracker'));
+  mkdirSync(join(enabled, '.disabled'));
+  symlinkSync(join(avail, 'tracker'), join(enabled, '.disabled', '-bad name'));
+  expect(await repo.disabledPlugins!()).toEqual([]);
+  rmSync(join(enabled, '.disabled'), { recursive: true });
+  const elsewhere = mkdtempSync(join(tmpdir(), 'fa-repo-elsewhere-'));
+  symlinkSync(join(avail, 'tracker'), join(elsewhere, 'other'));
+  symlinkSync(elsewhere, join(enabled, '.disabled'));
+  expect(await repo.disabledPlugins!()).toEqual([]);
+  expect((await repo.list()).some((e) => e.name === 'other')).toBe(false);
+  const res = await repo.disable!('tracker');
+  expect(res.ok).toBe(false);
+  expect(res.error).toContain('is a link, not a directory');
+  expect(existsSync(join(enabled, 'tracker'))).toBe(true);
+  expect((await repo.enable!('other')).ok).toBe(false);
 });
 
 test('install turns a disabled plugin on again; remove takes a disabled one out too', async () => {

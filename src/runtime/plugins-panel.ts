@@ -6,27 +6,31 @@
 //
 // One row per plugin — enabled, disabled, starting, skipped, not trusted — with its
 // version, its state and what it brings (tool groups, tools, keys). The keys:
-//   ⏎  details — what it is, the ranges it declares, why it was skipped, its settings
+//   ⏎  details — what it is, the ranges it declares, why it was skipped, where its link
+//      leads, its settings
 //   r  restart — a remote plugin's process stopped and started again, through the same
 //      path a plugin that joins after the first frame takes
-//   d  disable / enable — its link moved to `plugins-enabled/.disabled/` and back
+//   d  disable / enable — its link moved to `plugins-enabled/.disabled/` and back; a
+//      disable forgets the trust, and enabling never gives it back
 //   t  tools — its tools, the ones that ask first marked
-//   y  trust — the person's word, as `flow-assist plugins trust` gives it: a link that
-//      leads elsewhere than it did shows both places and asks for a second `y`
+//   y  trust — the person's word, as `flow-assist plugins trust` gives it: a first trust
+//      shows where the link leads and a link that moved shows both places, each asking
+//      for a second `y`; a plugin a disable forgot, leading where it did, at once
 // Installing, removing and updating stay the CLI's and the model's tools; the panel shows
 // what they did once it is opened again.
 //
 // Trust is the person's alone: the `y` here is a key pressed in this panel. Nothing the
 // model can call reaches it — no tool, no line typed into the chat's queue, no request a
-// remote plugin can make.
+// remote plugin can make. Every plugin the panel loads (enable, restart, trust) goes
+// through `site.load`, which checks the trust again and loads from where it was trusted.
 //
 // `rows()` is read at every draw and every second, so it reads no disk: what the
-// repository says (versions, missing settings, what is disabled) is read when the panel
-// opens and after each action; what changes on its own (starting, joined, skipped) is
-// read live from the App.
+// repository and the trust record say (versions, missing settings, what is disabled,
+// where each link leads) is read when the panel opens and after each action; what
+// changes on its own (starting, joined, skipped) is read live from the App.
 import type { Plugin } from '../loader/plugin.js';
 import type { PluginRepo, RepoEntry } from '../loader/repo.js';
-import { DISABLED_DIR, checkPluginTrust, shownName, trustPlugin, untrustedText, type TrustOptions, type Untrusted } from '../loader/trust.js';
+import { DISABLED_DIR, isTrustedNow, pluginTrustOf, shownName, trustPlugin, untrustedOf as untrustedFrom, untrustedText, type PluginTrustState, type TrustOptions, type Untrusted } from '../loader/trust.js';
 import { readPluginManifest } from '../loader/compat.js';
 import { isRemotePlugin } from '../remote/index.js';
 import { flattenConfigPaths } from '../config/commands.js';
@@ -46,8 +50,9 @@ export interface PluginSite {
   skipped: Map<string, string>;
   // The enabled plugins not trusted — the start screen's list, the same array.
   untrusted: Untrusted[];
-  // Loads one enabled plugin (its manifest checked, its module built or its process
-  // started); rejects with why it cannot.
+  // Loads one enabled plugin — its trust checked first and loaded from where it was
+  // trusted (`loadTrustedPlugin`), its module built or its process started; rejects with
+  // why it cannot (`UntrustedPluginError` when it is not trusted now).
   load?: (name: string) => Promise<Plugin>;
 }
 
@@ -66,8 +71,9 @@ export interface PluginsHost {
   // Takes a plugin's tools out of the registry, or lets them back in, and builds what
   // was built from the list again.
   withhold: (name: string, on: boolean) => void;
-  // Takes a plugin out of the list (a remote plugin being restarted).
-  unload: (plugin: Plugin) => void;
+  // Takes a plugin out of the list (a remote plugin being restarted); `why` is what a
+  // call to one of its tools meanwhile is told (`is restarting`).
+  unload: (plugin: Plugin, why?: string) => void;
   // Starts loading an enabled plugin; it joins the list when it is ready, through the
   // same path as a plugin that joins after the first frame.
   join: (name: string) => Promise<void>;
@@ -77,20 +83,24 @@ export interface PluginsHost {
   log: (line: string) => void;
 }
 
-type Snapshot = { entries: Map<string, RepoEntry>; enabled: string[]; disabled: string[] };
+// `trust` — where each enabled or disabled plugin's link leads and what the trust record
+// says of it, read with the rest.
+type Snapshot = { entries: Map<string, RepoEntry>; enabled: string[]; disabled: string[]; trust: Map<string, PluginTrustState> };
 
 const tone = (t: PanelRow['tone']) => (t ? { tone: t } : {});
 
 export function createPluginsPanel(host: PluginsHost) {
   const { plugins, site } = host;
-  let snap: Snapshot = { entries: new Map(), enabled: [], disabled: [] };
+  let snap: Snapshot = { entries: new Map(), enabled: [], disabled: [], trust: new Map() };
   // What the repository says now; read on open and after every action, never per draw.
   const refresh = async (): Promise<void> => {
     const repo = site.repo;
     if (!repo) return;
     try {
       const [entries, enabled, disabled] = await Promise.all([repo.list(), repo.enabledPlugins(), repo.disabledPlugins?.() ?? Promise.resolve([])]);
-      snap = { entries: new Map(entries.map((e) => [e.name, e])), enabled, disabled };
+      const dir = site.enabledDir;
+      const trust = new Map(dir ? [...enabled, ...disabled].map((n) => [n, pluginTrustOf(dir, n, site.trust)] as const) : []);
+      snap = { entries: new Map(entries.map((e) => [e.name, e])), enabled, disabled, trust };
     } catch (e) {
       host.log(`[plugins] the plugin list cannot be read: ${(e as Error).message}`);
     }
@@ -129,7 +139,12 @@ export function createPluginsPanel(host: PluginsHost) {
     if (p && host.disabledNow.has(name)) return { text: 'disabled (restart to unload)', tone: 'warn' };
     const u = untrustedOf(name);
     if (!p && snap.disabled.includes(name)) return { text: 'disabled' };
-    if (u) return { text: u.refused ? untrustedText(u) : u.was && u.now ? `not trusted — its link led to ${u.was}, now to ${u.now}` : 'not trusted — not loaded until you trust it (y)', tone: 'warn' };
+    if (u) {
+      if (u.refused) return { text: untrustedText(u), tone: 'warn' };
+      if (u.was && u.now) return { text: `not trusted — its link led to ${u.was}, now to ${u.now} (y)`, tone: 'warn' };
+      const now = snap.trust.get(name)?.target;
+      return { text: now ? `not trusted — its link leads to ${now} (y)` : 'not trusted (y)', tone: 'warn' };
+    }
     if (host.starting().includes(name)) return { text: 'starting…' };
     if (!p && site.skipped.has(name)) return { text: `skipped: ${site.skipped.get(name)}`, tone: 'error' };
     const missing = snap.entries.get(name)?.missingSettings ?? [];
@@ -148,94 +163,108 @@ export function createPluginsPanel(host: PluginsHost) {
 
   // ── the actions ─────────────────────────────────────────────────────────────
   const disable = async (name: string): Promise<string> => {
+    const nm = shownName(name);
     const repo = site.repo;
     if (!repo?.disable) return '⚠ the plugins directory is not known here';
+    // The repository forgets its trust with it (./trust.ts): enabling it again waits for `y`.
     const res = await repo.disable(name);
-    if (!res.ok) return `⚠ ${res.error ?? 'could not disable it'}`;
-    // Not trusted and never loaded: nothing to take out, and nothing to trust.
+    if (!res.ok) return `⚠ ${res.error ?? `${nm} could not be disabled`}`;
     const at = site.untrusted.findIndex((u) => u.name === name);
     if (at >= 0) site.untrusted.splice(at, 1);
     if (loaded(name) || host.starting().includes(name)) {
       host.disabledNow.add(name);
       host.withhold(name, true);
       await refresh();
-      return `${name} disabled — its tools are out from the next step; its screens and keys go at a restart`;
+      return `${nm} disabled — its tools are out from the next step; its screens and keys go at a restart`;
     }
     await refresh();
-    return `${name} disabled`;
+    return `${nm} disabled`;
   };
 
+  // Enabling never trusts: a disable forgot the trust, and a plugin not trusted before
+  // it was disabled is not trusted now. The row asks for `y`.
   const enable = async (name: string): Promise<string> => {
+    const nm = shownName(name);
     const repo = site.repo;
     if (!repo?.enable || !site.enabledDir) return '⚠ the plugins directory is not known here';
     const res = await repo.enable(name);
-    if (!res.ok) return `⚠ ${res.error ?? 'could not enable it'}`;
-    // Disabled in this run and still loaded: its tools come back.
-    if (host.disabledNow.has(name)) {
-      host.disabledNow.delete(name);
-      host.withhold(name, false);
+    if (!res.ok) return `⚠ ${res.error ?? `${nm} could not be enabled`}`;
+    // Disabled in this run and still loaded: its tools stay out until it is trusted.
+    host.disabledNow.delete(name);
+    const state = pluginTrustOf(site.enabledDir, name, site.trust);
+    if (isTrustedNow(state)) {
+      if (loaded(name)) host.withhold(name, false);
+      else { site.skipped.delete(name); await host.join(name); }
       await refresh();
-      return `${name} enabled`;
+      return `${nm} enabled`;
     }
-    // Loaded only when trusted, as at a start — never trusted by enabling it.
-    const check = checkPluginTrust(site.enabledDir, [name], { ...site.trust, readOnly: true });
-    const u = check.untrusted.find((x) => x.name === name);
-    if (u) {
-      if (!untrustedOf(name)) site.untrusted.push(u);
-      await refresh();
-      return `${name} enabled — not loaded until you trust it (y)`;
-    }
-    site.skipped.delete(name);
-    await host.join(name);
+    const u = untrustedFrom(state);
+    const at = site.untrusted.findIndex((x) => x.name === name);
+    if (at >= 0) site.untrusted.splice(at, 1, u); else site.untrusted.push(u);
     await refresh();
-    return `${name} enabled — starting`;
+    return `${nm} enabled — not trusted: y trusts it, then it ${loaded(name) ? 'gets its tools back' : 'loads'}`;
   };
 
   const restart = async (name: string): Promise<string> => {
+    const nm = shownName(name);
     const p = loaded(name);
-    if (!p) return `⚠ ${name} is not running`;
-    if (!isRemotePlugin(p)) return `⚠ ${name} runs inside the app — restart the app to load it again`;
+    if (!p) return `⚠ ${nm} is not running`;
+    if (!isRemotePlugin(p)) return `⚠ ${nm} runs inside the app — restart the app to load it again`;
     if (!site.load) return '⚠ the plugins directory is not known here';
-    if (host.disabledNow.has(name)) return `⚠ ${name} is disabled — d enables it`;
-    host.unload(p);
+    if (host.disabledNow.has(name)) return `⚠ ${nm} is disabled — d enables it`;
+    // Loaded again through the one guarded path (`site.load`): a link that no longer leads
+    // where it was trusted loads nothing, and the row says where it led and leads.
+    host.unload(p, 'is restarting');
     await host.stop(p);
     site.skipped.delete(name);
     await host.join(name);
-    return `restarting ${name}`;
+    return `restarting ${nm}`;
   };
 
-  const trust = (name: string, yes = false): string | PanelSpec => {
+  // The person's word, as `flow-assist plugins trust` gives it — never on one keypress
+  // for a place they have not seen: a first trust shows where the link leads, a link that
+  // leads elsewhere than it did shows both, and each waits for its own `y`. A plugin whose
+  // trust a disable forgot, leading where it did, is trusted again at once.
+  const trust = (name: string, shown?: string): string | PanelSpec => {
+    const nm = shownName(name);
     if (!site.enabledDir) return '⚠ the plugins directory is not known here';
-    const u = untrustedOf(name);
-    if (!u) return loaded(name) ? `${name} is trusted` : `⚠ ${name} is not waiting for trust`;
-    const res = trustPlugin(site.enabledDir, name, { ...site.trust, yes });
-    if (!res.ok && res.confirm) {
-      const { was, now } = res.confirm;
+    if (!untrustedOf(name)) return loaded(name) ? `${nm} is trusted` : `⚠ ${nm} is not waiting for trust`;
+    const state = pluginTrustOf(site.enabledDir, name, site.trust);
+    if (!state.target) return `⚠ ${nm} is not enabled, or its link leads nowhere — d enables it`;
+    const was = state.recorded ?? state.forgotten;
+    // Asked when the person has not seen this place yet — or it moved since they did.
+    if (was !== state.target && shown !== state.target) {
+      const now = state.target;
       return {
-        title: `Trust ${name}?`,
-        rows: () => [
-          { id: 'was', text: 'its link led to', detail: was },
-          { id: 'now', text: 'now it leads to', detail: now, tone: 'warn' as const },
-        ],
-        keys: [{ key: 'y', label: `trust ${name} at its new place`, run: () => trust(name, true) }],
+        title: `Trust ${nm}?`,
+        rows: () => (was
+          ? [{ id: 'was', text: 'its link led to', detail: was }, { id: 'now', text: 'now it leads to', detail: now, tone: 'warn' as const }]
+          : [{ id: 'now', text: 'its link leads to', detail: now, tone: 'warn' as const }, { id: 'rights', text: 'it runs with', detail: "the app's rights" }]),
+        keys: [{ key: 'y', label: was ? `trust ${nm} at its new place` : `trust ${nm}`, run: () => trust(name, now) }],
       };
     }
+    const res = trustPlugin(site.enabledDir, name, { ...site.trust, yes: true });
     if (!res.ok) return `⚠ ${res.error}`;
     const at = site.untrusted.findIndex((x) => x.name === name);
     if (at >= 0) site.untrusted.splice(at, 1);
-    host.log(`[plugins] ${name} trusted from the :plugins panel: ${res.target}${res.was ? ` (was ${res.was})` : ''}`);
-    if (!loaded(name) && snap.enabled.includes(name) && !host.starting().includes(name)) {
+    host.log(`[plugins] ${nm} trusted from the :plugins panel: ${res.target}${res.was ? ` (was ${res.was})` : ''}`);
+    if (loaded(name)) {
+      host.withhold(name, false);
+      void refresh();
+      return `${nm} trusted — its tools are back`;
+    }
+    if (!host.starting().includes(name)) {
       site.skipped.delete(name);
       void host.join(name).then(refresh);
-      return `${name} trusted — starting`;
+      return `${nm} trusted — starting`;
     }
     void refresh();
-    return `${name} trusted`;
+    return `${nm} trusted`;
   };
 
   // ── the panels ──────────────────────────────────────────────────────────────
   const toolsPanel = (name: string): PanelSpec => ({
-    title: `Plugins · ${name} · tools`,
+    title: `Plugins · ${shownName(name)} · tools`,
     empty: 'No tools — it is not running, or brings none.',
     rows: () => {
       const p = loaded(name);
@@ -273,6 +302,7 @@ export function createPluginsPanel(host: PluginsHost) {
     if (why && !p) add('skipped', why, 'error');
     const u = untrustedOf(name);
     if (u?.was && u.now) { add('trusted at', u.was); add('now leads to', u.now, 'warn'); }
+    else { const target = snap.trust.get(name)?.target; if (target) add('its link leads to', target, u ? 'warn' : undefined); }
     if (p) { const b = brings(p); if (b) add('brings', b); }
     // Its settings, a secret-looking key masked, and the environment it needs.
     const own = (host.config.plugins as Record<string, unknown> | undefined)?.[name];
@@ -281,7 +311,7 @@ export function createPluginsPanel(host: PluginsHost) {
     if (!settings.length) add(`plugins.${name}`, 'nothing set');
     const required = Array.isArray(manifest?.requiredSettings) ? (manifest!.requiredSettings as unknown[]).filter((k): k is string => typeof k === 'string') : [];
     for (const k of required) add(k, process.env[k] ? 'set' : 'required — unset', process.env[k] ? 'ok' : 'error');
-    return { title: `Plugins · ${name}`, rows: () => lines };
+    return { title: `Plugins · ${shownName(name)}`, rows: () => lines };
   };
 
   const spec = (): PanelSpec => {

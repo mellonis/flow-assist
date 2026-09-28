@@ -43,7 +43,7 @@ import { THIS_HOST, pluginCompat, readPluginManifest } from './compat.js';
 import { isRemoteManifest, remotePlugin, transportFor } from '../remote/index.js';
 import { refreshToolRegistry } from './tools.js';
 import { skipLine, type LatePlugins } from './late.js';
-import { checkPluginTrust, shownName, unreadableTrustText, untrustedText, type TrustOptions, type Untrusted } from './trust.js';
+import { checkPluginTrust, isTrustedNow, pluginTrustOf, shownName, unreadableTrustText, untrustedOf, untrustedText, type TrustOptions, type Untrusted } from './trust.js';
 
 // A plugin builder: `build<X>Plugin({ renders, config, make, z, modelMaySet, modelMaySave,
 // appliesOnRestart, toolsChanged })` → Plugin (or a promise of one).
@@ -150,15 +150,35 @@ export interface LoadOneOptions {
   log?: (line: string) => void;
   // A line for the loader's notes (a missing `flowtty` range).
   note?: (line: string) => void;
+  // Where to load it from, when not through its link: the target its trust was checked
+  // at (`loadTrustedPlugin`).
+  dir?: string;
+}
+
+// A plugin the person does not trust now: not loaded (./trust.ts).
+export class UntrustedPluginError extends Error {
+  constructor(readonly untrusted: Untrusted) { super(untrustedText(untrusted)); }
+}
+
+// Loads one enabled plugin while the app runs — the `:plugins` panel's enable, restart and
+// trust all come here. Its trust is checked first, read only: the link must lead where
+// the person trusted it, and the plugin is loaded from that place, not through the link,
+// so a link a command moved in between loads nothing. Not trusted: rejects with an
+// `UntrustedPluginError` carrying where it led and where it leads.
+export async function loadTrustedPlugin(name: string, opts: LoadOneOptions & { trust?: TrustOptions }): Promise<Plugin> {
+  const state = pluginTrustOf(opts.enabledDir, name, opts.trust);
+  if (!isTrustedNow(state)) throw new UntrustedPluginError(untrustedOf(state));
+  return loadEnabledPlugin(name, { ...opts, dir: state.recorded });
 }
 
 // Loads one enabled plugin: its manifest checked before any of its code runs, then a
 // remote plugin's transport and handshake, or a JS plugin's module imported and built.
 // Rejects with why it cannot load — the loader's skip. The plugin's own `ready` is not
 // awaited here.
-export async function loadEnabledPlugin(name: string, { config, enabledDir, renders = {}, make = makeFactory(config as MakeFactoryConfig), remoteTransport, log, note }: LoadOneOptions): Promise<Plugin> {
+export async function loadEnabledPlugin(name: string, { config, enabledDir, renders = {}, make = makeFactory(config as MakeFactoryConfig), remoteTransport, log, note, dir }: LoadOneOptions): Promise<Plugin> {
+  const at = dir ?? join(enabledDir, name);
   // Whether it can run here is read from its manifest before any of its code runs.
-  const manifest = readPluginManifest(join(enabledDir, name));
+  const manifest = readPluginManifest(at);
   const compat = pluginCompat(manifest, THIS_HOST);
   if (!compat.ok) throw new Error(compat.reason);
   if (compat.note) note?.(`[plugins] ${name} ${compat.note}`);
@@ -167,12 +187,12 @@ export async function loadEnabledPlugin(name: string, { config, enabledDir, rend
     // the adapter — the rest of the loader never knows (docs/plugins.md, "A plugin in
     // another language").
     const say = log ?? ((line: string) => console.warn(line));
-    const transport = (remoteTransport ?? transportFor)(manifest, join(enabledDir, name), { log: say });
+    const transport = (remoteTransport ?? transportFor)(manifest, at, { log: say });
     return remotePlugin({ manifest, transport, config, make, log: say });
   }
   // Import the entry FILE (not the symlinked directory), so the compiled binary and the
   // runtime resolve plugins the same way — see resolvePluginEntry.
-  const entry = resolvePluginEntry(join(enabledDir, name));
+  const entry = resolvePluginEntry(at);
   const mod = (await import(pathToFileURL(entry).href)) as { default?: unknown; build?: unknown };
   const build = (mod.default ?? mod.build) as unknown;
   if (typeof build !== 'function') throw new Error('default export is not a builder function');
@@ -182,7 +202,7 @@ export async function loadEnabledPlugin(name: string, { config, enabledDir, rend
   const plugin = await (build as (ctx: BuilderCtx) => Plugin | Promise<Plugin>)({ renders, config, make, z, ...EXTRAS });
   // What the plugin IS, in its author's words, for the start screen — from its manifest,
   // unless the shape says it itself.
-  plugin.description ??= manifestDescription(join(enabledDir, name));
+  plugin.description ??= manifestDescription(at);
   return plugin;
 }
 

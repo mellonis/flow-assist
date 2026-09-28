@@ -35,7 +35,7 @@ import { createInterface } from 'node:readline/promises';
 import { memoryRecordNotes } from './assistant/memory-trust.js';
 import type { PluginRepo } from './loader/repo.js';
 import type { PluginRepo as RepoShape } from './loader/host-group.js';
-import { loadEnabledPlugin, loadPlugins } from './loader/build.js';
+import { loadPlugins, loadTrustedPlugin } from './loader/build.js';
 import { createLatePlugins } from './loader/late.js';
 import { assembleToolRegistry, pluginConfigs } from './loader/tools.js';
 import { renderApp } from './runtime/app.js';
@@ -487,8 +487,9 @@ async function runInteractive(config: Record<string, unknown>, repo: PluginRepo)
   const skipped = new Map<string, string>();
   const plugins = await loadPlugins({ config, repo, renders, enabledDir, notes: loadNotes, late, untrusted, trustNotes, skipped });
   // What the `:plugins` panel needs to enable, restart and trust a plugin while the app
-  // runs (src/runtime/plugins-panel.ts): the same dirs, and the loader's own way to load one.
-  const site = { repo, enabledDir, skipped, untrusted, load: (name: string) => loadEnabledPlugin(name, { config, enabledDir, renders, log: (line) => late.note(line) }) };
+  // runs (src/runtime/plugins-panel.ts): the same dirs, and the loader's own way to load
+  // one — its trust checked first, and loaded from where it was trusted.
+  const site = { repo, enabledDir, skipped, untrusted, load: (name: string) => loadTrustedPlugin(name, { config, enabledDir, renders, log: (line) => late.note(line) }) };
   const registry = assembleToolRegistry({ plugins, config, repo: repo as unknown as RepoShape });
   // The backend holds the console while it owns the screen; with `onConsole` set every
   // line goes to the log (`L`) at once and nothing is printed again at exit.

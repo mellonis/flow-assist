@@ -128,8 +128,11 @@ export default function buildNotesPlugin({ config, make, z, modelMaySet, modelMa
   earlier) still asks the person first when the tool is a write, then never runs — the
   model is told `<tool> is gone — <plugin> removed it`. A group that knows better says
   it itself with `gone`, a function on the group returning a line (or `null` for the
-  host's words); the `mcp` plugin's says where its server stands, `retrying in 15 s`.
-  Your `exec` is never called for a tool you took away.
+  host's words); the `mcp` plugin's says where its server stands, `retrying in 15 s`,
+  and `null` while the server is connected — a server back without the tool has nothing
+  to add. Your `exec` is never called for a tool you took away — on this host: an older
+  one with the same host API number still calls `exec` for such a name, so keep
+  answering it there as well.
 
   ```ts
   const plugin = make('late', { tools: [] });

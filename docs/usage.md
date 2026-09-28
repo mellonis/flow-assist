@@ -373,13 +373,17 @@ closed, and without the chat at all — the place to look when a plugin is broke
   reloaded by restarting the app.
 - **d** — disable or enable. Disabled, its tools are out of the assistant's next step (a
   step already running is told the tool is gone), and its screens and keys stay until
-  you restart the app — the row says `disabled (restart to unload)`. Enabled, it loads
-  at once. Its link waits in `plugins-enabled/.disabled/` meanwhile: it stays installed
-  and trusted, and `plugins ls` says `disabled`.
+  you restart the app — the row says `disabled (restart to unload)`. Its link waits in
+  `plugins-enabled/.disabled/`: it stays installed, `plugins ls` says `disabled`, and its
+  trust is forgotten. Enabled again, it is `not trusted` until you press `y`, which
+  trusts it at once while its link leads where it did; then it loads (or, still loaded,
+  gets its tools back).
 - **t** — its tools, the ones that ask before they run marked.
 - **y** — trust it, as `flow-assist plugins trust <name>` would, and it loads. A plugin
-  whose link now leads elsewhere shows both places first and waits for a second `y`.
-  Enabling a plugin you have not trusted leaves it unloaded until you do.
+  trusted for the first time shows where its link leads, one whose link now leads
+  elsewhere shows both places, and each waits for a second `y`. Enabling a plugin never
+  trusts it. A plugin restarted or enabled whose link a command moved meanwhile is not
+  loaded, and its row says where it led and where it leads.
 
 While the chat waits for your answer to a question or a y/n, the list's own keys do
 nothing — a `y` meant for the chat never trusts a plugin; `^]` takes you to the chat and

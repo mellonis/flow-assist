@@ -21,7 +21,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { TestBackend, flush } from '@flowtty/core/testing';
 import type { FrameMeter } from '../../runtime/frame-stats';
-import { loadEnabledPlugin, loadPlugins } from '../../loader/build.ts';
+import { loadPlugins, loadTrustedPlugin } from '../../loader/build.ts';
 import { createPluginRepo } from '../../loader/repo.ts';
 import type { Untrusted } from '../../loader/trust.ts';
 import { createLatePlugins } from '../../loader/late.ts';
@@ -348,8 +348,9 @@ export async function bootApp(model: ScriptedModel, cols = 100, rows = 28, guest
   // through the real repository: the `:plugins` panel disables, enables and loads from
   // them as the app does.
   if (opts.dirs) enabledDir = opts.dirs.enabled;
+  const trustDirs = opts.dirs ? { file: opts.trustFile ?? path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-trust-')), 'plugins.trusted.json'), modelShell: false } : undefined;
   const repo = (opts.dirs
-    ? createPluginRepo({ availableDir: opts.dirs.available, enabledDir: opts.dirs.enabled, projectRoot: path.dirname(opts.dirs.available) })
+    ? createPluginRepo({ availableDir: opts.dirs.available, enabledDir: opts.dirs.enabled, projectRoot: path.dirname(opts.dirs.available), trust: trustDirs })
     : { enabledPlugins: async () => enabled, list: async () => [] }) as never;
   const remoteTransport = opts.remote ? () => opts.remote!.transport : undefined;
   // `opts.late` loads as the interactive app does: a remote plugin joins once its
@@ -357,12 +358,12 @@ export async function bootApp(model: ScriptedModel, cols = 100, rows = 28, guest
   const late = opts.late ? createLatePlugins() : undefined;
   // Each boot's plugins directory is new, so each boot is a machine of its own with a
   // trust record of its own (src/loader/trust.ts): its first start trusts its plugin.
-  const trust = enabledDir ? { file: opts.trustFile ?? path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-trust-')), 'plugins.trusted.json'), modelShell: false } : undefined;
+  const trust = trustDirs ?? (enabledDir ? { file: opts.trustFile ?? path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-trust-')), 'plugins.trusted.json'), modelShell: false } : undefined);
   const untrusted: Untrusted[] = opts.untrusted ?? [];
   const skipped = new Map<string, string>();
   const plugins = await loadPlugins({ config, repo, renders: renders as never, enabledDir, remoteTransport, late, trust, untrusted, skipped });
   // What the `:plugins` panel needs, as `runInteractive` hands it over.
-  const site = { repo, enabledDir, trust, skipped, untrusted, ...(enabledDir ? { load: (name: string) => loadEnabledPlugin(name, { config, enabledDir: enabledDir!, renders: renders as never, remoteTransport, log: (line: string) => late?.note(line) }) } : {}) };
+  const site = { repo, enabledDir, trust, skipped, untrusted, ...(enabledDir ? { load: (name: string) => loadTrustedPlugin(name, { config, enabledDir: enabledDir!, renders: renders as never, remoteTransport, log: (line: string) => late?.note(line), trust }) } : {}) };
   if (guests) {
     const added = guests(makeFactory(config as never));
     plugins.push(...added);

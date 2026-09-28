@@ -233,12 +233,12 @@ export async function remotePlugin(opts: RemotePluginOpts): Promise<Plugin> {
   }
 
   // ── the host's own stop, for when the App exits (./lifecycle.ts) ────────────
-  // `shutdown` first, so the plugin gets the chance to say it — its answer is not
-  // read, only waited for, briefly; a plugin already stopped, or one that never
-  // answers, needs no more than the transport's own close. Unregistered once run, and
-  // also once a restart's handshake fails below: past that point the supervisor is
-  // closed for good and there is nothing left to stop.
-  // Stopped for good by the host (its exit, or the panel's restart): nothing more is sent.
+  // Also the `:plugins` panel's restart (`stopRemotePlugin`). `shutdown` first, so the
+  // plugin gets the chance to say it — its answer is not read, only waited for, briefly;
+  // a plugin already stopped, or one that never answers, needs no more than the
+  // transport's own close. Unregistered once run, and also once a restart's handshake
+  // fails below: past that point the supervisor is closed for good and there is nothing
+  // left to stop. Once it has run (`ended`) nothing more is sent.
   let ended = false;
   const hostStop = async () => {
     unregisterStop();

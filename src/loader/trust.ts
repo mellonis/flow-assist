@@ -23,8 +23,9 @@
 // (`PLUGIN_NAME`): an entry named otherwise is refused, never loaded, and never put into
 // a command line shown to the person.
 //
-// A plugin the person disabled (its link moved to `plugins-enabled/.disabled/`) keeps its
-// trust: enabling it again loads it while its link leads where it did.
+// A plugin the person disables (its link moved to `plugins-enabled/.disabled/`) is
+// forgotten as a removal is, keeping where it led: enabling it again never trusts it —
+// the person's `y` in the `:plugins` panel does, silently while it leads where it did.
 //
 // The first start — the record MISSING, or written by the host before any start — trusts
 // every plugin enabled then, once, and says which (`bootstrapped`); the record then says
@@ -73,9 +74,9 @@ function dirKey(enabledDir: string): string {
 }
 
 // Where the person's disabled plugins wait (`plugins-enabled/.disabled/<name>`, a link
-// like the enabled ones): not loaded, and not gone — its trust is kept, so enabling it
-// again needs no new word while the link leads where it did. A name starting with `.` is
-// never a plugin name, so nothing here is ever taken for a plugin.
+// like the enabled ones): not loaded, and not trusted — a disable forgets the trust. A
+// name starting with `.` is never a plugin name, so nothing here is ever taken for a
+// plugin.
 export const DISABLED_DIR = '.disabled';
 
 // Where an entry of `plugins-enabled/` really leads; null for one that leads nowhere.
@@ -85,9 +86,7 @@ export function pluginTarget(enabledDir: string, name: string): string | null {
 const exists = (p: string): boolean => {
   try { fs.lstatSync(p); return true; } catch { return false; }
 };
-// Enabled, or disabled by the person — either way the name is still theirs.
-const present = (enabledDir: string, name: string): boolean =>
-  exists(path.join(enabledDir, name)) || exists(path.join(enabledDir, DISABLED_DIR, name));
+const present = (enabledDir: string, name: string): boolean => exists(path.join(enabledDir, name));
 
 const isMap = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 // Only ENOENT is a first start; anything that does not parse to the record's shape is
@@ -211,6 +210,28 @@ export function checkPluginTrust(enabledDir: string, names: string[], opts?: Tru
   return { trusted, untrusted, bootstrapped: null, unreadable: null };
 }
 
+// Where a plugin's link leads now and what the record says of it, read only: `recorded`
+// — the target it is trusted at; `forgotten` — its tombstone. It is trusted when
+// `target` equals `recorded`. A record that cannot be read, or none, trusts nothing: a
+// load while the app runs never runs the first start.
+export interface PluginTrustState { name: string; target: string | null; recorded?: string; forgotten?: string }
+export function pluginTrustOf(enabledDir: string, name: string, opts?: TrustOptions): PluginTrustState {
+  const target = isPluginName(name) ? pluginTarget(enabledDir, name) : null;
+  const { state, rec } = readRecord(fileOf(opts));
+  if (state !== 'ok') return { name, target };
+  const key = dirKey(enabledDir);
+  const own = (m: Record<string, string> | undefined) => (m && Object.prototype.hasOwnProperty.call(m, name) ? m[name] : undefined);
+  const recorded = own(rec.dirs[key]);
+  const forgotten = own(rec.forgotten[key]);
+  return { name, target, ...(recorded ? { recorded } : {}), ...(forgotten ? { forgotten } : {}) };
+}
+export const isTrustedNow = (s: PluginTrustState): boolean => !!s.target && s.recorded === s.target;
+// The start screen's word for a plugin that is not trusted now.
+export function untrustedOf(s: PluginTrustState): Untrusted {
+  const was = s.recorded ?? s.forgotten;
+  return was && s.target && was !== s.target ? { name: s.name, was, now: s.target } : { name: s.name };
+}
+
 export type TrustResult =
   | { ok: true; target: string; was?: string }
   | { ok: false; error: string; confirm?: { was: string; now: string } };
@@ -222,7 +243,7 @@ export function trustPlugin(enabledDir: string, name: string, opts?: TrustOption
   const n = String(name ?? '').trim();
   if (modelShellOf(opts)) return { ok: false, error: `plugins trust: a command the assistant runs cannot trust a plugin — run \`${trustCommand(n)}\` yourself` };
   if (!isPluginName(n)) return { ok: false, error: `plugins trust: ${shownName(n)} is not a plugin name — letters, digits, . _ - only, starting with a letter or digit` };
-  if (!exists(path.join(enabledDir, n))) return { ok: false, error: `plugin '${n}' is not in ${enabledDir}` };
+  if (!present(enabledDir, n)) return { ok: false, error: `plugin '${n}' is not in ${enabledDir}` };
   const target = pluginTarget(enabledDir, n);
   if (!target) return { ok: false, error: `plugin '${n}' is a link to something that is gone` };
   const file = fileOf(opts);
