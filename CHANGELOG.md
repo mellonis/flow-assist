@@ -5,6 +5,12 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **A block scrolled to its top starts under the pinned question, not behind it.** A
+  run of steps, a command's output, a trail of calls or the reasoning, opened to its
+  first row, landed that row on the very top of the conversation — where the pinned
+  question is painted over it once the list is tall enough to pin. The rule is the
+  same for every kind of block; closing one still leaves the eye on the exact screen
+  row it was on.
 - **The screen is drawn at once.** The app waited for every plugin before its first
   frame — a plugin in another language until its process had started and answered, the
   `mcp` plugin until every server had — which cost one and a half to three seconds at

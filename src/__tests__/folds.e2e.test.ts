@@ -158,9 +158,10 @@ test('with everything open a new turn arrives open, and /clear goes back to fold
 
 // The conversation's own top row: the frame's title, then its padding.
 const contentTop = (ui: Ui) => rowOf(ui, 'ƒ Flow Assist') + 2;
-// The block's own first row is the conversation's top row, where the pinned question
-// is painted over it whenever the block is taller than the window — so what a reader
-// sees first is the row under the pin.
+// A block scrolled to its top lands its own first row here — one below the
+// conversation's top row, which the pinned question covers whenever the block is
+// taller than the window — so what a reader sees first is the block's own first row,
+// not one hidden behind the pin.
 const underPin = (ui: Ui) => contentTop(ui) + 1;
 
 // A command with plenty of conversation under it — so the list can be scrolled to the
@@ -223,9 +224,10 @@ test('opening a block starts at its FIRST row, not its last', async () => {
   // Reading starts at the beginning of the block, and the wheel takes it from there.
   // Landing on the block's LAST line instead would show the end of the very thing the
   // person opened it to read. The last question is out of view, so it is pinned over
-  // the top row — the block's own first row (the command line) sits behind the pin,
-  // and its first line of output is the first row a reader actually sees.
-  expect(rowOf(ui, '│ 1')).toBe(underPin(ui));
+  // the top row — the block's own first row (the command line) lands one row under the
+  // pin, not behind it, so it is what a reader sees first.
+  expect(rowOf(ui, 'seq 1 8')).toBe(underPin(ui));
+  expect(rowOf(ui, '│ 1')).toBe(underPin(ui) + 1);
   ui.app.unmount();
 });
 

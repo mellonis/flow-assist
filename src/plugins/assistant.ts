@@ -501,7 +501,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const viewportRef = ui.useRef<Viewport | null>(null);
           // A row the list should be put at the top of once the rows have changed, and
           // the nonce that makes a repeat of the same row ask again.
-          const [scrollTo, setScrollTo] = ui.useState<{ row: number; n: number } | null>(null);
+          const [scrollTo, setScrollTo] = ui.useState<{ row: number; n: number; pin?: boolean } | null>(null);
           const scrollSeq = ui.useRef(0);
           // The mouse press a click may still come out of: the cell it landed on and
           // when. A drag clears it — a drag is a selection and never a fold.
@@ -732,8 +732,11 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             palette: ((host.config.theme as { modals?: { chat?: Record<string, string | undefined> } } | undefined)?.modals?.chat ?? {}),
             onViewFail,
           });
-          // Put a row at the top of the conversation, once the rows have changed.
-          const askScroll = (row: number) => setScrollTo({ row: Math.max(0, row), n: ++scrollSeq.current });
+          // Put a row at the top of the conversation, once the rows have changed —
+          // under the pin (`pin: true`) so an opened block's own first row is never
+          // the one it covers, or at the literal row otherwise (a fold closing keeps
+          // the screen position the eye was already at, pin or no pin).
+          const askScroll = (row: number, pin = false) => setScrollTo({ row: Math.max(0, row), n: ++scrollSeq.current, pin });
           // A fold changed. Opening a block puts its FIRST row at the top of the
           // screen — landing on its last line instead would show the end of what the
           // person opened it to read. Anything else keeps
@@ -746,7 +749,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             setFolds(next);
             if (opened) {
               const at = firstFoldRow(rows, opened);
-              if (at >= 0) askScroll(at);
+              if (at >= 0) askScroll(at, true);
             } else if (v && v.atEnd) {
               // Resting at the end of the conversation: the rows a fold adds or takes
               // away are all above the reader, and the list follows the bottom by

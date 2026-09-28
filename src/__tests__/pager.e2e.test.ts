@@ -434,8 +434,10 @@ test('a run of steps taller than the conversation opens inline on a click, never
   expect(ui.backend.lastFrame).not.toContain('Step detail 1.');
   await click(ui, rowOf(ui, '▸ '));
   expect(pagerUp(ui)).toBe(false);
-  // Opened in the conversation at its first row, which the pinned question covers (as
-  // for any block opened there): what is read first is the row under the pin.
+  // Opened in the conversation at its first row, one below the row the pinned question
+  // covers (as for any block opened there): what is read first is the step's own lead
+  // sentence (the `Next:` token stripped), not a line further down.
+  expect(ui.backend.lastFrame).toContain('look at the whole tree first.');
   expect(ui.backend.lastFrame).toContain('Step detail 1.');
   expect(ui.backend.lastFrame).toContain('› look around');
   expect(ui.backend.lastFrame).not.toContain('All looked at.');

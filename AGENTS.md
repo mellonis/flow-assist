@@ -2529,14 +2529,19 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   (`onMetrics`) through `onViewport`, and the chat asks `chatRows(...)` — cached per
   message — which row carries which `fold` id. The pinned question is painted over
   the top row, so a click there is the pin's and not the row beneath it.
-  - **Where the eye is left.** Opening a block scrolls so its FIRST row is the top row
-    — landing on its LAST line instead would show the end of the thing the person
-    opened it to read, past where they meant to start; closing keeps the clicked block's first row
-    where it was; the key, which has no one block to anchor on, keeps the message the
-    top row belongs to where it was. With the list resting at the END nothing scrolls
-    at all: the rows are added above the reader and the bottom is already their place.
-    The ask travels as `scrollTo: { row, n }` and is carried out inside the metrics
-    callback, where the box has just measured the rows the fold added or took away.
+  - **Where the eye is left.** Opening a block scrolls so its FIRST row lands right
+    under the pinned question (never behind it — landing on its LAST line instead
+    would show the end of the thing the person opened it to read, past where they
+    meant to start); closing keeps the clicked block's first row exactly where it was
+    on screen, pin or no pin — a screen position, not a thing to read, so it is never
+    pushed down for the pin; the key, which has no one block to anchor on, keeps the
+    message the top row belongs to where it was. With the list resting at the END
+    nothing scrolls at all: the rows are added above the reader and the bottom is
+    already their place. The ask travels as `scrollTo: { row, n, pin? }` and is
+    carried out inside the metrics callback, where the box has just measured the rows
+    the fold added or took away — `pin: true` (opening) subtracts the pin's height
+    (`lead`, shared with the answer-anchor below) from `row` before it becomes the new
+    scrollTop; without it (closing) `row` is used as it stands.
   - Following the bottom belongs to a message ARRIVING (`scrollToEnd` on the count of
     questions asked), never to rows appearing above the viewport.
   - **A long answer stops at its first row.** While the answer fits, the list follows

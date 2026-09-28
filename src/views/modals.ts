@@ -1160,16 +1160,19 @@ function ChatMessages({ messages, rowOpts, palette: m, errorColor, onViewport, s
   // the render: the view reports its geometry, the chat does the arithmetic.
   onViewport?: (v: Viewport) => void;
   // A row the list should be scrolled to once the rows have changed — how a block
-  // that opens puts its first row at the top of the screen, and how one that closes
-  // leaves the eye on the line it was on. The nonce is what makes a repeat ask again.
-  scrollTo?: { row: number; n: number } | null;
+  // that opens puts its first row under the pinned question (`pin`, so a reader
+  // never starts on a row the pin covers), and how one that closes leaves the eye on
+  // the line it was on (no `pin`: that row IS the literal scrollTop wanted, whether
+  // or not the pin covers it — anchoring to a screen position, not to what is read).
+  // The nonce is what makes a repeat ask again.
+  scrollTo?: { row: number; n: number; pin?: boolean } | null;
 }) {
   const { wrap, viewLines, notes } = rowOpts;
   const box = useRef<ScrollBoxHandle>(null);
   const [view, setView] = useState<{ top: number; height: number; atEnd: boolean } | null>(null);
   // The ask that has not been carried out yet, and the last one that was: a ref, so
   // asking again costs no render and a repaint never repeats an old ask.
-  const wanted = useRef<{ row: number; n: number } | null>(null);
+  const wanted = useRef<{ row: number; n: number; pin?: boolean } | null>(null);
   const done = useRef(-1);
   if (scrollTo && scrollTo.n !== done.current) wanted.current = scrollTo;
   const rect = useRef<{ top: number; height: number; left: number; width: number } | null>(null);
@@ -1205,11 +1208,17 @@ function ChatMessages({ messages, rowOpts, palette: m, errorColor, onViewport, s
     // The metrics are fresh HERE — the box has just measured the rows a fold added or
     // took away — so this is where an ask can be turned into an offset the box
     // understands (it counts from the bottom) without guessing at the new height.
+    // The row the pinned question would cover once the list is tall enough to pin —
+    // shared with the answer-anchor below.
+    const lead = x.viewportHeight >= MIN_ROWS_TO_PIN ? 1 : 0;
     const want = wanted.current;
     if (want) {
       wanted.current = null;
       done.current = want.n;
-      box.current?.scrollTo(Math.max(0, x.maxScrollTop - want.row));
+      // A block opened to its top (`want.pin`) must land its own first row under the
+      // pin, not behind it. Restoring a screen position (a fold closing) wants the
+      // literal row instead — that row IS where the eye already was, pin or no pin.
+      box.current?.scrollTo(Math.max(0, x.maxScrollTop - (want.row - (want.pin ? lead : 0))));
       return;
     }
     // A long answer is read from its first line: the list follows it only while that
@@ -1220,7 +1229,6 @@ function ChatMessages({ messages, rowOpts, palette: m, errorColor, onViewport, s
     // who comes back to the end past that line is followed from there, and a list
     // mounted anew only looks first.
     const atEnd = x.scrollTop >= x.maxScrollTop;
-    const lead = x.viewportHeight >= MIN_ROWS_TO_PIN ? 1 : 0;
     const answer = answerRow.current;
     if (following.current && atEnd && answer >= 0 && answer < x.scrollTop + lead) {
       following.current = false;
@@ -1540,8 +1548,9 @@ export function renderChatModal({
   // The conversation's place on the terminal and how far it is scrolled — what turns
   // a click's cell into a row.
   onViewport?: (v: Viewport) => void;
-  // Put this row at the top of the conversation once the rows have changed.
-  scrollTo?: { row: number; n: number } | null;
+  // Put this row at the top of the conversation once the rows have changed — under
+  // the pin (`pin: true`, opening a block) or at the literal row (closing one).
+  scrollTo?: { row: number; n: number; pin?: boolean } | null;
   cursor?: number;
   escArmed?: boolean;
   // An armed Ctrl+C / Ctrl+D / Ctrl+Z says so (`^c again to exit`) where Esc's arm is
