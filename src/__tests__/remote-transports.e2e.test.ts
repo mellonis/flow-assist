@@ -239,4 +239,4 @@ test('a host that exits during a pending handshake leaves no plugin process behi
   const pid = Number(fs.readFileSync(pidfile, 'utf8'));
   expect(pid).toBeGreaterThan(0);
   await until(() => !isAlive(pid), 'the plugin process to end', 300);
-});
+}, 30_000);

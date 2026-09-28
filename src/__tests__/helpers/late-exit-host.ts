@@ -21,7 +21,10 @@ fs.writeFileSync(path.join(enabled, 'fake', 'manifest.json'), JSON.stringify({ n
 const late = createLatePlugins();
 const repo = { enabledPlugins: async () => ['fake'], list: async () => [] } as never;
 await loadPlugins({ config: {}, repo, enabledDir: enabled, late });
-for (let i = 0; i < 200 && !fs.existsSync(pidfile); i++) await new Promise((r) => setTimeout(r, 10));
+// A loaded machine can take seconds to start the plugin's `bun`: wait up to 15 s, and
+// say so if it never came up rather than exiting as if the test had run.
+for (let i = 0; i < 1500 && !fs.existsSync(pidfile); i++) await new Promise((r) => setTimeout(r, 10));
+if (!fs.existsSync(pidfile)) { console.error('the plugin process never started'); process.exit(3); }
 if (late.starting().join() !== 'fake') { console.error(`expected fake to be starting, got ${late.starting().join()}`); process.exit(2); }
 await stopRemotePlugins();
 process.exit(0);
