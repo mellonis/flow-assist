@@ -604,7 +604,10 @@ there is no `/fullscreen`.
   and never reaches step 1: `hostKeyed` tells the chat where it landed all the same
   (`HostKeyPath.pressed`), so a click on a plugin's list moves the keyboard to the plugin.
   The wheel scrolls whatever list is under it (flowtty's lists check the pointer; the
-  chat's own, when not focused, through its handler). Plugins get no mouse buttons
+  chat's own, when not focused, through its handler). A flick over one stdin read
+  arrives as ONE `wheelup` / `wheeldown` key with `count`, the run's length (absent
+  for a lone notch, flowtty ≥ 1.0.0-alpha.35); flowtty's lists scale their own step by
+  it, and the chat's handler reads `key.count ?? 1` for its own. Plugins get no mouse buttons
   through `useInputHandler`; flowtty's own components in `ui` take their clicks
   themselves.
 - `bootApp` opens the chat as a WINDOW unless a test says otherwise (`opts.chatMode`,
@@ -3216,6 +3219,9 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   - The empty conversation is still a `<ScrollBox>`: it holds the invitation, not rows.
   - The **wheel scrolls only while the pointer is over the box**. In a test pass
     coordinates — `backend.wheel('up', 20, 8)`; the default `(0, 0)` is the app title.
+    A fourth argument is the run length a flick stands for — `backend.wheel('up', 20,
+    8, 5)` scrolls as far as five single notches, `wheelStep × count` (flowtty ≥
+    1.0.0-alpha.35; default 1).
   - Every `ChatRow` is exactly one terminal line; the pinned-question check reads a
     row's index as its line. A row that wraps would break it. Long lines of fenced
     code are hard-wrapped by `layoutMarkdown` (needs flowtty ≥ 1.0.0-alpha.11, or

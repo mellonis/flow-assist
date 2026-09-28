@@ -5,6 +5,14 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **flowtty 1.0.0-alpha.35.** A wheel flick over a run of identical reports in one
+  read is now one `wheelup` / `wheeldown` key with a `count` — the run's length,
+  absent for a lone notch — instead of one key per notch. `ScrollBox` and
+  `ScrollList` scroll `wheelStep × count` on their own; the chat's own wheel path,
+  taken while a docked chat is not focused, honors `count` too.
+  **For plugin authors:** declare `"flowtty": ">=1.0.0-alpha.35 <1.0.0-alpha.36"` — a
+  manifest still declaring the alpha.34 range is refused as incompatible. The host
+  API number is unchanged.
 - **What the assistant said between its tool calls opens in the conversation, however
   long.** A click on a folded run of steps taller than the conversation put it in the
   pager, in the conversation's place, until Esc; now it opens where it is, read beside

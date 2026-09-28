@@ -341,6 +341,40 @@ test('a click on a fold in the right panel opens it, whichever side has the keyb
   ui.app.unmount();
 });
 
+test('with the plugin focused, a wheel key with a count scrolls the docked conversation as far as that many single notches', async () => {
+  const script = () => Array.from({ length: 40 }, (_, i) => `line ${i + 1}`).join('\n\n');
+  const setup = async () => {
+    const g = guest();
+    const model = new ScriptedModel();
+    model.script([{ text: script() }]);
+    const ui = await bootApp(model, 160, 40, g.make as never, {}, { chatMode: 'panel' });
+    await ui.press('F');
+    await ui.type('print forty lines');
+    await ui.press('return');
+    await settle(20);
+    expect(ui.backend.lastFrame).toContain('line 1 ');
+    // Ctrl+] gives the plugin the keyboard; the panel stays open and visible, unfocused.
+    await press(ui, CTRL_RIGHT_BRACKET);
+    expect(g.host().store.chat.focus).toBe('plugin');
+    return ui;
+  };
+  const bySingleNotches = await setup();
+  const f = chatFrame(bySingleNotches);
+  const x = f.left + 10;
+  const y = f.top + 10;
+  for (let i = 0; i < 30; i++) bySingleNotches.backend.wheel('down', x, y);
+  await settle();
+
+  const byOneKey = await setup();
+  byOneKey.backend.wheel('down', x, y, 30);
+  await settle();
+
+  expect(byOneKey.backend.lastFrame).toBe(bySingleNotches.backend.lastFrame);
+  expect(byOneKey.backend.lastFrame).toContain('line 40');
+  bySingleNotches.app.unmount();
+  byOneKey.app.unmount();
+});
+
 test('a press on a plugin\'s picker, which takes the click itself, still moves the keyboard to the plugin', async () => {
   // flowtty's lists take a click through `onClick` on their own box, and such a press
   // never reaches an input handler — the host's chords included. Where it landed is

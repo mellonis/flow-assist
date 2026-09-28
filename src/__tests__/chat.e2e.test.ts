@@ -405,6 +405,36 @@ test('the wheel scrolls the conversation', async () => {
   ui.app.unmount();
 });
 
+test('a wheel key with a count scrolls as far as that many single notches', async () => {
+  const script = () => Array.from({ length: 40 }, (_, i) => `line ${i + 1}`).join('\n\n');
+  const printAndFocus = async (ui: Awaited<ReturnType<typeof bootApp>>) => {
+    await ui.press('F');
+    await ui.type('print forty lines');
+    await ui.press('return');
+    await settle(20);
+    expect(ui.backend.lastFrame).toContain('line 1 ');
+  };
+
+  const notches = new ScriptedModel();
+  notches.script([{ text: script() }]);
+  const bySingleNotches = await bootApp(notches, 100, 22);
+  await printAndFocus(bySingleNotches);
+  for (let i = 0; i < 30; i++) bySingleNotches.backend.wheel('down', 20, 8);
+  await settle();
+
+  const collapsed = new ScriptedModel();
+  collapsed.script([{ text: script() }]);
+  const byOneKey = await bootApp(collapsed, 100, 22);
+  await printAndFocus(byOneKey);
+  byOneKey.backend.wheel('down', 20, 8, 30);
+  await settle();
+
+  expect(byOneKey.backend.lastFrame).toBe(bySingleNotches.backend.lastFrame);
+  expect(byOneKey.backend.lastFrame).toContain('line 40');
+  bySingleNotches.app.unmount();
+  byOneKey.app.unmount();
+});
+
 // A turn that hands work to the background: the model calls `background`, says so,
 // and the nested run answers with RESULT. Three requests in all — with
 // `ai.backgroundFollowUp: false`, a fourth would be the chat spending a turn on the

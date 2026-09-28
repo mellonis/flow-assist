@@ -1147,7 +1147,8 @@ function ChatMessages({ messages, rowOpts, palette: m, errorColor, onViewport, s
   keysActive?: boolean;
   // Filled with a function that scrolls the list by a wheel step, for the chat's own
   // handler to call with the wheel over the list while the list does not hear it.
-  wheel?: { current: ((up: boolean) => void) | null };
+  // `count` is the number of notches the step stands for (default 1).
+  wheel?: { current: ((up: boolean, count?: number) => void) | null };
   // Filled with a function that brings the list to the conversation's end — the chat's
   // `toEnd` key; the `↓` control over the list does the same on a click.
   toEnd?: { current: (() => void) | null };
@@ -1187,11 +1188,13 @@ function ChatMessages({ messages, rowOpts, palette: m, errorColor, onViewport, s
   const jumpToEnd = useCallback(() => { box.current?.scrollToEnd(); }, []);
   if (toEnd) toEnd.current = jumpToEnd;
   if (wheel) {
-    wheel.current = (up: boolean) => {
+    wheel.current = (up: boolean, count = 1) => {
       const x = metrics.current;
       if (!x) return;
-      // The box counts its offset from the bottom (it is anchored there).
-      const top = Math.max(0, Math.min(x.maxScrollTop, x.scrollTop + (up ? -3 : 3)));
+      // The box counts its offset from the bottom (it is anchored there). A flick's
+      // key carries the run length as `count` — the same wheel step ScrollBox takes
+      // on its own, one notch scrolling 3 rows.
+      const top = Math.max(0, Math.min(x.maxScrollTop, x.scrollTop + (up ? -3 : 3) * count));
       box.current?.scrollTo(x.maxScrollTop - top);
     };
   }
@@ -1623,7 +1626,7 @@ export function renderChatModal({
   // keyboard (the accent colour) or the plugin has.
   docked?: boolean;
   focused?: boolean;
-  wheel?: { current: ((up: boolean) => void) | null };
+  wheel?: { current: ((up: boolean, count?: number) => void) | null };
   // Filled with what brings the conversation to its end (the `toEnd` key).
   toEnd?: { current: (() => void) | null };
   // What a second Esc does to the chat: `close` the window, or `collapse` the panel.

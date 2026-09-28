@@ -16,7 +16,10 @@
 import type { LazyInputEntry } from './hooks.js';
 import type { ReactElement } from 'react';
 
-type InputKey = { name: string; ctrl?: boolean; meta?: boolean; shift?: boolean; [k: string]: unknown };
+// `count` is how many notches a 'wheelup' / 'wheeldown' stands for — the TTY backend
+// collapses a run of identical wheel reports in one read into one key with the run's
+// length (undefined for every other key, and for a lone notch).
+type InputKey = { name: string; ctrl?: boolean; meta?: boolean; shift?: boolean; count?: number; [k: string]: unknown };
 type UiState = { cmdOpen?: boolean; modalActive?: boolean };
 
 export interface PluginUi {

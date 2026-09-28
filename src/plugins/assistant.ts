@@ -340,8 +340,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const fullscreen = layout !== 'window';
           const fullscreenRef = ui.useRef(fullscreen); fullscreenRef.current = fullscreen;
           // The wheel over the conversation while the plugin has the keys (the list does
-          // not hear its own keys then) — ChatMessages fills it.
-          const wheelRef = ui.useRef<((up: boolean) => void) | null>(null);
+          // not hear its own keys then) — ChatMessages fills it. `count` is the run
+          // length a flick over one read carries (TtyBackend collapses it into one key).
+          const wheelRef = ui.useRef<((up: boolean, count?: number) => void) | null>(null);
           // What brings the conversation's list to its end (`toEnd`), filled by the view.
           const toEndRef = ui.useRef<(() => void) | null>(null);
           // `openRef` is what the detached background flush reads (a timer's closure
@@ -3321,7 +3322,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 const v = viewportRef.current;
                 if ((key.name === 'wheelup' || key.name === 'wheeldown') && v && typeof key.x === 'number' && typeof key.y === 'number'
                   && key.x >= v.left && key.x < v.left + v.width && key.y >= v.top && key.y < v.top + v.height) {
-                  if (!pagerShownRef.current) wheelRef.current?.(key.name === 'wheelup');
+                  if (!pagerShownRef.current) wheelRef.current?.(key.name === 'wheelup', key.count ?? 1);
                   return true;
                 }
                 return false;
