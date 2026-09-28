@@ -154,6 +154,13 @@ line at the top, under your question, and the rest comes in below. PgDn or the w
 reads on, and at the end the conversation follows again. Scrolled somewhere else, you
 stay where you are; the next message you send brings you to the end.
 
+**Back to the end in one step.** While the conversation is not at its end, a `↓` sits
+in its bottom-right corner — `↓ new` once something has arrived since you left the end.
+A click on it, or End, brings you back, and it goes. End is also the field's own key
+(the end of the line): while your draft has text after the caret — on a later line
+too — End moves the caret; at the very end of the draft, or with nothing typed, it
+jumps. `config set keys.toEnd <key>` moves it.
+
 ## Where the chat sits: the panel, the window, the whole terminal
 
 **The chat sits beside what you are looking at.** By default it is a panel docked to

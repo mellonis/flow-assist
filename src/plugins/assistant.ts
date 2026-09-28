@@ -238,7 +238,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
     // `sessions` (Ctrl+S) opens the session picker from anywhere — a chord, since the
     // chat's field would type a letter; the terminal's raw mode leaves Ctrl+S to the app,
     // not to flow control.
-    keys: { chat: 'F', sessions: 'ctrl+s', details: ['ctrl+o', 'ctrl+r'], chatFocus: 'ctrl+]', chatCollapse: 'ctrl+\\' },
+    // `toEnd` (End) brings the conversation back to its end from wherever it was
+    // scrolled to — when End has nothing to do in the field (see the chat's handler).
+    keys: { chat: 'F', sessions: 'ctrl+s', details: ['ctrl+o', 'ctrl+r'], toEnd: 'end', chatFocus: 'ctrl+]', chatCollapse: 'ctrl+\\' },
     // config.plugins.assistant: `mode` — where the chat is (src/runtime/panel-layout.ts):
     // `panel` beside the plugin's screen (the default), `window` over it, `full` the
     // whole terminal; `/mode` switches it for the session, and an old `fullscreen: true`
@@ -340,6 +342,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // The wheel over the conversation while the plugin has the keys (the list does
           // not hear its own keys then) — ChatMessages fills it.
           const wheelRef = ui.useRef<((up: boolean) => void) | null>(null);
+          // What brings the conversation's list to its end (`toEnd`), filled by the view.
+          const toEndRef = ui.useRef<(() => void) | null>(null);
           // `openRef` is what the detached background flush reads (a timer's closure
           // would see a stale `open`); `unread` counts results that landed while the
           // chat was closed — the footer shows it, opening the chat clears it.
@@ -3510,6 +3514,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // action, so `config.keys.details` moves it; it answers to ^o and still
               // to ^r, which every hint written before it named.
               if (isKey(host.keys.details ?? [], key)) { flipAllFolds(); return true; }
+              // `toEnd` — back to the conversation's end, what the `↓` control over it
+              // does on a click. End is the field's own key too (the end of the line), so
+              // the field keeps it while there is text after the caret — a later line of
+              // a draft included: only an End on an empty field, or with the caret at the
+              // very end of the draft, jumps, and only while the list is away from the end.
+              if (isKey(host.keys.toEnd ?? [], key) && viewportRef.current && !viewportRef.current.atEnd
+                && cursorRef.current >= inputRef.current.length) { toEndRef.current?.(); return true; }
               // PgUp/PgDn and the wheel belong to the conversation's own scroll box (the
               // view's <ScrollBox> hears them itself).
               // ── Everything else is EDITING, and that is flowtty's editor reducer: caret
@@ -3653,6 +3664,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             docked: layout === 'panel',
             focused,
             wheel: wheelRef,
+            toEnd: toEndRef,
             escWord: layout === 'panel' ? 'collapse' : 'close',
             pendingConfirm: pendingAsk,
             pendingQuestion,

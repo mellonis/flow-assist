@@ -5,6 +5,11 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **Back to the end of the conversation in one step.** Scrolled up — or with a long
+  answer resting at its first line — a `↓` sits in the conversation's bottom-right
+  corner, `↓ new` once something has arrived since. A click on it or End brings the
+  conversation to its end (with text after the caret in a draft, End still moves the caret);
+  `config set keys.toEnd <key>` moves the key.
 - **`stopped (Esc)` is the last line of its turn.** A turn stopped while a command's
   block (or another tool's view) was the newest thing in it drew the label above that
   block. The label now stands under everything the turn did — a call that was still

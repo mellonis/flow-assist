@@ -2378,6 +2378,21 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   line's `config` does (an MCP server's `headers` / `env`), and a plugin's command may
   say it too (docs/plugins.md). A `/…` or `!…` field is still never saved as the draft.
   The **wheel** and **PgUp/PgDn** scroll.
+- **`↓` / `↓ new` goes back to the end** (`JumpControl` in `src/views/modals.ts`). While
+  the conversation's list is away from its end — scrolled up, or a long answer resting
+  at its first line — a control is painted over its bottom-right corner, `↓`, and
+  `↓ new` once the messages changed since the list left the end (one more, or the last
+  one replaced: a round still being written). It is an overlay of the list, like the
+  pinned question, and both go to the list as ONE memoized child, so a keystroke leaves
+  the list's props as they were; its state is `ChatMessages`' own (`view.atEnd`, set
+  from the metrics). A click takes it through flowtty's `onClick` on its own box, so the
+  press never reaches the chat's fold click; with hover on it is underlined under the
+  pointer. Not drawn while the pager hides the list — where the list left the end is
+  kept meanwhile, so what arrived under the pager reads `↓ new` after Esc. The key is the assistant's `toEnd`
+  (End, `config.keys.toEnd`), acted on in the chat's handler only when the list is away
+  from the end AND the field is empty or its caret stands at the very end of the draft
+  (`cursor === value.length`) — End is the editor's too, so with any text after the
+  caret, a later line of a draft included, End goes to the editor.
 - **What is open and what is folded** (`src/assistant/folds.ts`, pure; the chat owns
   the state, the view resolves it per block). A single global flag would open the
   reasoning, the narration, every tool call of every turn and every capped command
@@ -3181,7 +3196,9 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     renderer's late answer; `onViewFail` through a ref); the renderer is a `useMemo`, `renderItem` a `useCallback` handing each row to
     `ChatRowItem` (memoized on the row, its index and the renderer — the row cache's own
     objects); the list's callbacks are stable and call the latest render's code
-    through a ref; the pinned question is a `useMemo`. The list itself is `ChatList`, a
+    through a ref; the pinned question and the `↓` control are `useMemo`s, handed to the list
+    as ONE memoized `Fragment` child (two positional children would be a new array every
+    render). The list itself is `ChatList`, a
     `memo` of `ScrollList`, so with none of that changed it is not rendered at all, and a
     wheel step re-renders only the rows entering the window. The clock, which moves on
     every render while a turn runs, is kept out of all of it: the rows read it only for

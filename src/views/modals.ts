@@ -31,7 +31,7 @@ import { CELL_FREE, CELL_FULL, CONTEXT_WARN_AT, GRID_COLS, GRID_ROWS, contextFoo
 import { formatBytes, pickerGroups, pickerSelected, rowStatus, type OwnStatus, type PickerState } from '../assistant/session-picker.js';
 import { runMark, tildePath } from '../assistant/shell.js';
 import { sessionWhen, type SessionRow } from '../assistant/sessions.js';
-import { createContext, createElement as h, memo, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Fragment, createContext, createElement as h, memo, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { nextGrapheme, rowIndexAt, wrapText } from '@flowtty/core';
 import { bindingGlyph, keyGlyph } from '../playback/keys.js';
 import {
@@ -1080,6 +1080,18 @@ function FoldLine({ draw }: { draw: (lit: boolean, hp: HoverProps) => ReactNode 
   const [lit, hp] = useHover();
   return draw(lit, hp) as ReturnType<typeof h>;
 }
+// The conversation's `↓` / `↓ new`: painted over the list's bottom-right corner, a
+// click on it (flowtty's `onClick` on its own box, taken before any key handler, so
+// the row under it never hears the press) brings the list to its end. Chrome: a drag
+// never copies it. Underlined under the pointer as a fold line is, with hover on.
+function JumpControl({ label, hover, onClick, ground, color }: { label: string; hover: boolean; onClick: () => void; ground?: string; color?: string }) {
+  const box = { position: 'absolute' as const, bottom: 0, right: 0, flexDirection: 'row' as const, backgroundColor: ground, selectable: false, onClick };
+  return hover ? h(HoveredJump, { box, label, color }) : h(Box, box, h(Text, { bold: true, color }, ` ${label} `));
+}
+function HoveredJump({ box, label, color }: { box: Record<string, unknown>; label: string; color?: string }) {
+  const [lit, hp] = useHover();
+  return h(Box, { ...box, ...hp }, h(Text, { bold: true, color }, ' '), h(Text, { bold: true, color, underline: lit }, label), h(Text, null, ' '));
+}
 
 // ─── The conversation: a scroll box, anchored to its bottom ───────────────────
 // flowtty's <ScrollBox> takes whatever height the column leaves and follows new
@@ -1120,7 +1132,7 @@ function useShallowStable<T extends object>(value: T): T {
   if (a !== b && (ka.length !== Object.keys(b).length || ka.some((k) => a[k] !== b[k]))) kept.current = value;
   return kept.current;
 }
-function ChatMessages({ messages, rowOpts, palette: m, errorColor, onViewport, scrollTo, keysActive = true, wheel, hidden = false, streaming = false, hover = false }: {
+function ChatMessages({ messages, rowOpts, palette: m, errorColor, onViewport, scrollTo, keysActive = true, wheel, toEnd, hidden = false, streaming = false, hover = false }: {
   messages: ChatMsg[];
   // The backend reports hover: a fold line is underlined under the pointer.
   hover?: boolean;
@@ -1136,6 +1148,9 @@ function ChatMessages({ messages, rowOpts, palette: m, errorColor, onViewport, s
   // Filled with a function that scrolls the list by a wheel step, for the chat's own
   // handler to call with the wheel over the list while the list does not hear it.
   wheel?: { current: ((up: boolean) => void) | null };
+  // Filled with a function that brings the list to the conversation's end — the chat's
+  // `toEnd` key; the `↓` control over the list does the same on a click.
+  toEnd?: { current: (() => void) | null };
   rowOpts: RowOpts;
   palette: Record<string, string | undefined>;
   errorColor?: string;
@@ -1150,7 +1165,7 @@ function ChatMessages({ messages, rowOpts, palette: m, errorColor, onViewport, s
 }) {
   const { wrap, viewLines, notes } = rowOpts;
   const box = useRef<ScrollBoxHandle>(null);
-  const [view, setView] = useState<{ top: number; height: number } | null>(null);
+  const [view, setView] = useState<{ top: number; height: number; atEnd: boolean } | null>(null);
   // The ask that has not been carried out yet, and the last one that was: a ref, so
   // asking again costs no render and a repaint never repeats an old ask.
   const wanted = useRef<{ row: number; n: number } | null>(null);
@@ -1169,6 +1184,8 @@ function ChatMessages({ messages, rowOpts, palette: m, errorColor, onViewport, s
   const answerRow = useRef(-1);
   // The message whose turn this list saw being written.
   const turn = useRef<ChatMsg | null>(null);
+  const jumpToEnd = useCallback(() => { box.current?.scrollToEnd(); }, []);
+  if (toEnd) toEnd.current = jumpToEnd;
   if (wheel) {
     wheel.current = (up: boolean) => {
       const x = metrics.current;
@@ -1180,7 +1197,8 @@ function ChatMessages({ messages, rowOpts, palette: m, errorColor, onViewport, s
   }
   const see = (x: ScrollMetrics) => {
     metrics.current = x;
-    setView((v) => (v && v.top === x.scrollTop && v.height === x.viewportHeight ? v : { top: x.scrollTop, height: x.viewportHeight }));
+    const end = x.scrollTop >= x.maxScrollTop;
+    setView((v) => (v && v.top === x.scrollTop && v.height === x.viewportHeight && v.atEnd === end ? v : { top: x.scrollTop, height: x.viewportHeight, atEnd: end }));
     // The metrics are fresh HERE — the box has just measured the rows a fold added or
     // took away — so this is where an ask can be turned into an offset the box
     // understands (it counts from the bottom) without guessing at the new height.
@@ -1293,6 +1311,25 @@ function ChatMessages({ messages, rowOpts, palette: m, errorColor, onViewport, s
         h(Text, { dim: true, wrap: 'truncate' }, stickyText)),
   // The palette by its values.
   [stickyText, m.userBg ?? m.bg, m.accent]);
+  // Away from the end — scrolled up, or a long answer resting at its first line — a
+  // control at the bottom-right corner brings the list back there: `↓`, or `↓ new`
+  // once something arrived since the list left the end (a message, or more of the one
+  // being written). A click on it or the `toEnd` key jumps; at the end it is gone.
+  // Where the list left the end is kept while the pager hides it, so what arrived under
+  // the pager is `new` once Esc brings the list back.
+  const away = !!view && !view.atEnd;
+  const leftAt = useRef<{ n: number; last: ChatMsg | undefined } | null>(null);
+  if (!away) leftAt.current = null;
+  else if (!leftAt.current) leftAt.current = { n: messages.length, last: messages.at(-1) };
+  const fresh = away && (messages.length !== leftAt.current!.n || messages.at(-1) !== leftAt.current!.last);
+  const shown = away && !hidden;
+  const jump = useMemo(() => !shown ? null
+    : h(JumpControl, { key: 'chat-jump', label: fresh ? '↓ new' : '↓', hover, onClick: jumpToEnd, ground: m.userBg ?? m.bg, color: fresh ? m.accent : undefined }),
+  // The palette by its values.
+  [shown, fresh, hover, jumpToEnd, m.userBg ?? m.bg, m.accent]);
+  // The list's overlays as ONE child that stays the same object while neither changes,
+  // so a keystroke still leaves the list's props as they were.
+  const overlays = useMemo(() => (sticky || jump ? h(Fragment, null, sticky, jump) : null), [sticky, jump]);
   // The list's callbacks are the same functions for the list's life and call the
   // latest render's code: with its props unchanged the list is not rendered again at
   // all (`ChatList`).
@@ -1334,7 +1371,7 @@ function ChatMessages({ messages, rowOpts, palette: m, errorColor, onViewport, s
     keyOf: chatRowKey,
     rowHeight: 1,
     renderItem: renderRow,
-  }, sticky));
+  }, overlays));
 }
 
 // ─── The pager ────────────────────────────────────────────────────────────────
@@ -1461,6 +1498,7 @@ export function renderChatModal({
   docked = false,
   focused = true,
   wheel,
+  toEnd,
   escWord = 'close',
   imageNumbers = [],
   imagesOn = false,
@@ -1586,6 +1624,8 @@ export function renderChatModal({
   docked?: boolean;
   focused?: boolean;
   wheel?: { current: ((up: boolean) => void) | null };
+  // Filled with what brings the conversation to its end (the `toEnd` key).
+  toEnd?: { current: (() => void) | null };
   // What a second Esc does to the chat: `close` the window, or `collapse` the panel.
   escWord?: 'close' | 'collapse';
   // The numbers of the conversation's images: an `[Image #N]` in the field with one of
@@ -1683,7 +1723,7 @@ export function renderChatModal({
       },
       // Under the pager the conversation is not drawn and hears no key: PgUp/PgDn and
       // the wheel are the pager's, and the conversation stays where it was left.
-      h(ChatMessages, { messages, rowOpts: { wrap, folds, viewLines, notes, detailsKey, renderers: viewRenderers, now, palette: m, onViewFail }, palette: m, errorColor: theme?.error, onViewport, scrollTo, keysActive: focused && !pager, wheel, hidden: !!pager, streaming, hover }),
+      h(ChatMessages, { messages, rowOpts: { wrap, folds, viewLines, notes, detailsKey, renderers: viewRenderers, now, palette: m, onViewFail }, palette: m, errorColor: theme?.error, onViewport, scrollTo, keysActive: focused && !pager, wheel, toEnd, hidden: !!pager, streaming, hover }),
       // The pager, in the conversation's place: the block's rows at the conversation's
       // width, with a scroll of their own.
       pager
@@ -2396,6 +2436,7 @@ export function helpEntries(commands: HelpCommand[]): { usage: string; descripti
 const ACTION_LABELS: Record<string, string> = {
   commandLine: 'command line', quit: 'quit', back: 'back / close', prev: 'previous', next: 'next',
   open: 'open', openBrowser: 'open in the browser', clearCache: 'flush the cache', chat: 'talk to the assistant', sessions: 'saved sessions', log: 'the log',
+  toEnd: 'to the end of the conversation',
 };
 // Keys the HOST acts on from anywhere — the assistant's `chat` and `sessions` included,
 // whose keys work on every screen. Everything else in the key map belongs to a

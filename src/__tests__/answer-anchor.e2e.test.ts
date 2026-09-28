@@ -21,7 +21,9 @@ function conversation(frame: string): string[] {
   const lines = frame.split('\n');
   const top = lines.findIndex((l) => l.includes('╭'));
   const bottom = lines.findIndex((l) => l.includes('╰'));
-  const rows = lines.slice(top + 2, bottom - 5).map((l) => l.replace(/^\s*│/, '').replace(/│\s*$/, '').trimEnd());
+  // The `↓` / `↓ new` control over the bottom-right corner is not a row: it says the
+  // list is away from its end, and whether something arrived since (jump-to-end tests).
+  const rows = lines.slice(top + 2, bottom - 5).map((l) => l.replace(/^\s*│/, '').replace(/│\s*$/, '').replace(/\s*↓( new)?\s*$/, '').trimEnd());
   expect(rows).toHaveLength(CONVERSATION_ROWS);
   return rows;
 }

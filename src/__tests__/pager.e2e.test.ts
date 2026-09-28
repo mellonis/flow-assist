@@ -410,6 +410,8 @@ test('an answer arriving while the pager is up over a list scrolled up: Esc give
   expect(rowOf(ui, 'seq 1 300 ·')).toBe(y);
   expect(ui.backend.lastFrame.split('\n').slice(top, y + 1)).toEqual(shown);
   expect(ui.backend.lastFrame).not.toContain('Late line 8.');
+  // What arrived under the pager is new to the reader: the control says so.
+  expect(ui.backend.lastFrame).toContain('↓ new');
   // The answer is there, under the rows in view.
   for (let i = 0; i < 20 && !ui.backend.lastFrame.includes('Late line 8.'); i++) await ui.press('pagedown');
   expect(ui.backend.lastFrame).toContain('Late line 8.');

@@ -84,6 +84,41 @@ test('typing in the chat field draws no conversation row again', async () => {
   ui.app.unmount();
 });
 
+// Away from the end the `↓` control sits over the list, and the pin with it; both reach
+// the list as one memoized child, so a keystroke still leaves every row in view alone.
+test('typing with the conversation scrolled away from its end draws no conversation row again', async () => {
+  const meter = createFrameMeter();
+  const model = new ScriptedModel();
+  const ui = await bootApp(model, 100, 30, undefined, {}, { frameMeter: meter });
+  await ui.press('F');
+  const keystroke = async () => {
+    await ui.type('x');
+    const f = meter.frames('typing').at(-1)!;
+    await ui.press('backspace');
+    return f;
+  };
+  model.script([{ text: 'short' }]);
+  await ui.type('first');
+  await ui.press('return');
+  await settle(20);
+  const few = await keystroke();
+  for (let t = 0; t < 3; t++) {
+    model.script([{ text: Array.from({ length: 30 }, (_x, i) => `- line ${i} of answer ${t}`).join('\n') }]);
+    await ui.type(`question ${t}`);
+    await ui.press('return');
+    await settle(20);
+  }
+  for (let i = 0; i < 6; i++) ui.backend.wheel('up', 20, 8);
+  await settle(6);
+  expect(ui.backend.lastFrame).toMatch(/↓ +│/);
+  const away = await keystroke();
+  expect(ui.backend.lastFrame).toMatch(/↓ +│/);
+  expect(away.commits).toBe(1);
+  expect(away.applied).toBeLessThanOrEqual(1);
+  expect(away.skipped).toBe(few.skipped);
+  ui.app.unmount();
+});
+
 // While a turn runs the chat redraws on every tick of its spinner, and the clock it
 // draws by moves on every render. Only the live marks read it (`ChatClock`), so a
 // keystroke during a turn still leaves the rows in view alone: it touches what an idle
