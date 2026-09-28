@@ -63,8 +63,9 @@ test('the state a click makes is a new object — the chat never mutates what it
   expect(isOpen(s, a)).toBe(false);
 });
 
-test('a block a click opens may go to the pager — a group head and a trail\'s earlier calls may not', () => {
-  for (const kind of ['view', 'tools', 'steps', 'thinking', 'summary'] as const) expect(pageable(foldId(3, kind, 1))).toBe(true);
+test('a block a click opens may go to the pager — a run of steps, a group head and a trail\'s earlier calls may not', () => {
+  for (const kind of ['view', 'tools', 'thinking', 'summary'] as const) expect(pageable(foldId(3, kind, 1))).toBe(true);
+  expect(pageable(foldId(3, 'steps', 1))).toBe(false);
   expect(pageable(foldId(3, 'group'))).toBe(false);
   expect(pageable(foldId(3, 'calls', 1))).toBe(false);
   for (const id of ['x', '3', '', '3:']) expect(pageable(id)).toBe(false);

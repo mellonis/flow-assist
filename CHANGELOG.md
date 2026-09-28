@@ -5,6 +5,11 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **What the assistant said between its tool calls opens in the conversation, however
+  long.** A click on a folded run of steps taller than the conversation put it in the
+  pager, in the conversation's place, until Esc; now it opens where it is, read beside
+  the rest. The pager stays for a command's output, a trail of calls, the reasoning and
+  a `/compact` summary.
 - **Back to the end of the conversation in one step.** Scrolled up — or with a long
   answer resting at its first line — a `↓` sits in the conversation's bottom-right
   corner, `↓ new` once something has arrived since. A click on it or End brings the

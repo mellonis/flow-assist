@@ -417,3 +417,31 @@ test('an answer arriving while the pager is up over a list scrolled up: Esc give
   expect(ui.backend.lastFrame).toContain('Late line 8.');
   ui.app.unmount();
 });
+
+// Steps are the conversation's own flow — read beside what came before and after them —
+// so a run of them opens where it is, however tall; the pager stays for a command's
+// output, a trail, the reasoning and a summary.
+test('a run of steps taller than the conversation opens inline on a click, never in the pager', async () => {
+  const STEP = ['Next: look at the whole tree first.', ...Array.from({ length: 30 }, (_, i) => `Step detail ${i + 1}.`)].join('\n\n');
+  const model = new ScriptedModel();
+  model.script([{ text: STEP }, { tool: 'datetime', args: {} }], [{ text: 'All looked at.' }]);
+  const ui = await bootApp(model, 100, 24);
+  await ui.press('F');
+  await ui.type('look around');
+  await ui.press('return');
+  await settleUntil(() => ui.backend.lastFrame.includes('All looked at.'));
+  await settle(8);
+  expect(ui.backend.lastFrame).not.toContain('Step detail 1.');
+  await click(ui, rowOf(ui, '▸ '));
+  expect(pagerUp(ui)).toBe(false);
+  // Opened in the conversation at its first row, which the pinned question covers (as
+  // for any block opened there): what is read first is the row under the pin.
+  expect(ui.backend.lastFrame).toContain('Step detail 1.');
+  expect(ui.backend.lastFrame).toContain('› look around');
+  expect(ui.backend.lastFrame).not.toContain('All looked at.');
+  // A click on it folds it again, in the conversation.
+  await click(ui, rowOf(ui, 'Step detail 2.'));
+  expect(pagerUp(ui)).toBe(false);
+  expect(ui.backend.lastFrame).not.toContain('Step detail 2.');
+  ui.app.unmount();
+});

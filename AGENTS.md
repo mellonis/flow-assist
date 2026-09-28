@@ -2477,8 +2477,8 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     session is no answer arriving) and only while that turn's message is the LAST
     one, so a background result landing under an answer never trips it.
   - **A block taller than the conversation opens in the pager**, not into the
-    conversation. When a click would OPEN a `view`, `tools`, `steps`, `thinking` or
-    `summary` block (`pageable` in `folds.ts`), the chat measures the block WHOLE — as
+    conversation. When a click would OPEN a `view`, `tools`, `thinking` or `summary`
+    block (`pageable` in `folds.ts`), the chat measures the block WHOLE — as
     the pager shows it: laid out with `openInFull` (open, a trail's earlier-calls cap
     lifted) and a view at `VIEW_CAPS.lines`, only the block's own message laid out
     (`blockRows`), at the conversation's own width, since the question is whether it
@@ -2486,7 +2486,9 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     `onViewport` at that moment, less the top row the pinned question covers once the
     list is tall enough to pin (`roomForBlock`). More rows than that → the pager; as
     many or fewer → inline, a view capped to its tail. So a view whose whole kept text
-    does not fit opens in the pager even when its 20-line tail would have. A group's
+    does not fit opens in the pager even when its 20-line tail would have. A run of
+    `steps` always opens inline, however tall: it is the conversation's own flow, read
+    beside what came before and after it. A group's
     head and a trail's `… N earlier calls` line always open inline (the first opens
     into one-line blocks, the second belongs to a trail that fitted). A ✎ diff never
     folds, so it never reaches the pager. **Only a click opens one**: `^o` opens

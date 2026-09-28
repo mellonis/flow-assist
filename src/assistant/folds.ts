@@ -69,10 +69,12 @@ export function clickedOpen(state: FoldState, id: string): boolean {
 }
 
 // The blocks a click may open in the chat's pager rather than into the conversation,
-// when the block is taller than the rows the conversation has for it. A group's head
-// opens into one-line blocks of its own, and the earlier calls of a trail belong to a
-// trail that already fitted, so both always open where they are.
-const PAGEABLE: ReadonlySet<string> = new Set(['view', 'tools', 'steps', 'thinking', 'summary']);
+// when the block is taller than the rows the conversation has for it. A run of steps is
+// part of the conversation's flow, read beside what came before and after it, so it
+// always opens where it is, however tall. A group's head opens into one-line blocks of
+// its own, and the earlier calls of a trail belong to a trail that already fitted, so
+// both always open where they are too.
+const PAGEABLE: ReadonlySet<string> = new Set(['view', 'tools', 'thinking', 'summary']);
 export function pageable(id: string): boolean {
   return PAGEABLE.has(id.split(':')[1] ?? '');
 }
