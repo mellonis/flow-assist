@@ -5,6 +5,13 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **A background run and the one-shot prompt read the project's instructions once per
+  directory.** Both built the `## Project instructions` section through a closure that
+  walked the directory and reread every `AGENTS.md` again before every round, even when
+  the shell had not moved — up to twelve reads for a twelve-round task, and a file
+  edited mid-task could change the prompt under a running round. They now read it once
+  when their shell's directory is set and keep it until `cd` moves it, the same rule
+  the chat's own reading follows.
 - **A block scrolled to its top starts under the pinned question, not behind it.** A
   run of steps, a command's output, a trail of calls or the reasoning, opened to its
   first row, landed that row on the very top of the conversation — where the pinned

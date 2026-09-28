@@ -771,10 +771,13 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
         // and loads what it needs, and nothing it loads reaches the chat's set.
         const bgConfig = ((ctx as { config?: Record<string, unknown> }).config ?? {}) as Record<string, unknown>;
         const parentCwd = (ctx as { shell?: ShellState }).shell?.cwd() ?? null;
-        // It reads the project's instructions for that directory itself, before every
-        // round (`instructionsPrompt`) — never the chat's reading, which describes the
-        // chat's directory.
-        const bgShell = createShellState(() => bgConfig, parentCwd);
+        // It reads the project's instructions for that directory itself — never the
+        // chat's reading, which describes the chat's directory — once per directory,
+        // again only when its own `cd` moves it (`instructionsPrompt`).
+        let refreshBgInstructions = () => {};
+        const bgShell = createShellState(() => bgConfig, parentCwd, () => refreshBgInstructions());
+        const bgInstructions = instructionsPrompt(bgConfig, bgShell, prompt);
+        refreshBgInstructions = bgInstructions.refresh;
         const toolCtx = { ...(ctx as Record<string, unknown>), _bgDepth: depth + 1, askUser: undefined, plan: createPlan(), shell: bgShell, projectInstructions: undefined };
         // The nested run needs its OWN LLM credentials — the same way the chat's
         // send() derives them (`llmOpts(ai)`: the provider, base URL, model, token).
@@ -798,7 +801,7 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
                 // `taskLabel` names the task to the host, which journals the run's calls
                 // under it; the tool itself writes nothing there.
                 { extraTools: extraTools as ToolDef[], toolCtx, maxRounds: 12, confirmWrite: () => false, taskLabel: label,
-                  systemPrompt: instructionsPrompt(bgConfig, bgShell, prompt),
+                  systemPrompt: bgInstructions.systemPrompt,
                   ...llmOpts(ai) },
               );
               const result = String(res?.content ?? '').trim() || '(no output)';

@@ -325,12 +325,15 @@ export async function runPrompt(args: string[], config: Record<string, unknown>,
   const services = createServices({ config, tools: registry, repo, onExit: () => {} });
 
   // The one-shot prompt's own shell directory, so `cd` holds from one call to the next,
-  // and the project's instructions for it, read before every round
-  // (src/assistant/project-instructions.ts).
-  const shell = createShellState(() => config);
+  // and the project's instructions for it, read once per directory and again only when
+  // `cd` moves it (src/assistant/project-instructions.ts).
+  let refreshInstructions = () => {};
+  const shell = createShellState(() => config, null, () => refreshInstructions());
+  const instructions = instructionsPrompt(config, shell);
+  refreshInstructions = instructions.refresh;
   const result = await agentChat([{ role: 'user', content: prompt }], {
     ...llmOpts(ai),
-    systemPrompt: instructionsPrompt(config, shell),
+    systemPrompt: instructions.systemPrompt,
     extraTools: aiTools,
     toolLoading: toolLoadingMode(ai),
     toolResultMaxChars: toolResultCapFromConfig(ai),

@@ -906,10 +906,13 @@ hold this set together:
   turn, and a round whose text did not change sends the message it had — re-reading
   the plan per round would miss the cache after every `todo`. It is never a message in
   the history, so it is never stubbed, compacted or duplicated. A background run and
-  the one-shot prompt have no chat to read it on `setCwd`: each has a shell state of
-  its own (`ctx.shell`, so `cd` holds between calls) and passes `instructionsPrompt`,
-  which reads the section for that state's directory before every round, under the
-  caller's own base prompt; a background run is never handed the chat's reading. The
+  the one-shot prompt have no chat to read it on `setCwd`, so each wires the same rule
+  itself: a shell state of its own (`ctx.shell`, so `cd` holds between calls), built
+  with an `onSet` that calls `instructionsPrompt`'s own `refresh` — read once for the
+  starting directory, again only when `setCwd` moves it, never from the `systemPrompt`
+  function `instructionsPrompt` also returns, which every round calls for what
+  `refresh` last found, under the caller's own base prompt; a background run is never
+  handed the chat's reading. The
   chat says which files were picked up in a `note` row (`Project instructions: ~/p/
   AGENTS.md`) only when the list changes; during a turn the note waits for the turn's
   end (a note between rounds would split the turn's message), and a list that already

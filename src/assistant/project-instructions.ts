@@ -133,9 +133,20 @@ export function instructionsBlock(p: ProjectInstructions): string {
 
 // A system prompt for a caller that has no chat to read the instructions when the
 // directory is set (a background run, the one-shot prompt): `base` and the section for
-// the shell's directory, read again each time it is asked — before every round.
-export function instructionsPrompt(config: Parameters<typeof shellRoots>[0], shell: { cwd(): string }, base = ''): () => string {
-  return () => [base, instructionsBlock(findInstructions(config, shell.cwd()))].filter(Boolean).join('\n\n');
+// the shell's directory — read once per directory, kept until it moves, the same rule
+// the chat's own reading follows (`onShellSetRef` in src/plugins/assistant.ts). The
+// caller wires `refresh` to the shell's own `onSet` (`createShellState`), so a `cd`
+// mid-task is read once, right when it happens — never again from `systemPrompt`
+// itself, which only ever hands back what `refresh` last found. A directory that has
+// not moved costs neither a directory walk nor the file reads again, and a file
+// edited mid-task, with the shell's directory unmoved, does not change the prompt
+// under a running round.
+export function instructionsPrompt(config: Parameters<typeof shellRoots>[0], shell: { cwd(): string }, base = ''): { systemPrompt: () => string; refresh: () => void } {
+  let found: ProjectInstructions = findInstructions(config, shell.cwd());
+  return {
+    systemPrompt: () => [base, instructionsBlock(found)].filter(Boolean).join('\n\n'),
+    refresh: () => { found = findInstructions(config, shell.cwd()); },
+  };
 }
 
 // The files as the person reads them: `~`-shortened, a cut one marked.

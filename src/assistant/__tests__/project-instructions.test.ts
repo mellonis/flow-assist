@@ -202,14 +202,38 @@ test('a cut file: the note is the host\'s, outside the fence', () => {
   expect(block).toMatch(/r\n```\n… \(cut at 32 KiB — 73 more lines\)$/);
 });
 
-test('instructionsPrompt: a base prompt and the section for the shell\'s directory, read when asked', () => {
+test('instructionsPrompt: a base prompt and the section for the shell\'s directory, updated on refresh', () => {
   const root = tmp();
   write(path.join(root, 'proj', 'AGENTS.md'), 'proj rules');
   const cfg = { shell: { roots: [root] } };
   const shell = createShellState(() => cfg);
-  const prompt = instructionsPrompt(cfg, shell, 'BASE');
-  expect(prompt()).toBe('BASE');
+  const { systemPrompt, refresh } = instructionsPrompt(cfg, shell, 'BASE');
+  expect(systemPrompt()).toBe('BASE');
   shell.setCwd(path.join(root, 'proj'));
-  expect(prompt()).toBe(`BASE\n\n${instructionsBlock(findInstructions(cfg, path.join(root, 'proj')))}`);
-  expect(instructionsPrompt(cfg, shell)()).toContain('proj rules');
+  refresh();
+  expect(systemPrompt()).toBe(`BASE\n\n${instructionsBlock(findInstructions(cfg, path.join(root, 'proj')))}`);
+  expect(instructionsPrompt(cfg, shell).systemPrompt()).toContain('proj rules');
+});
+
+test('instructionsPrompt: read once per directory, kept until the shell moves', () => {
+  const root = tmp();
+  write(path.join(root, 'proj', 'AGENTS.md'), 'v1');
+  const cfg = { shell: { roots: [root] } };
+  // Wired the way a background run and the one-shot prompt wire it: the shell's own
+  // `onSet` calls `refresh` right when `cd` moves it — never `systemPrompt` itself.
+  let refresh = () => {};
+  const shell = createShellState(() => cfg, null, () => refresh());
+  const instructions = instructionsPrompt(cfg, shell);
+  refresh = instructions.refresh;
+  shell.setCwd(path.join(root, 'proj'));
+  expect(instructions.systemPrompt()).toContain('v1');
+  // The file changes on disk, but the shell has not moved: the cached read stands —
+  // a directory that has not moved costs no file read.
+  write(path.join(root, 'proj', 'AGENTS.md'), 'v2');
+  expect(instructions.systemPrompt()).toContain('v1');
+  // The shell moves away and back: each `cd` is read right when it happens, so the
+  // return trip picks up what changed while it was away.
+  shell.setCwd(root);
+  shell.setCwd(path.join(root, 'proj'));
+  expect(instructions.systemPrompt()).toContain('v2');
 });
