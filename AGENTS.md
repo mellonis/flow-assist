@@ -182,7 +182,7 @@ when the tool is a write. A call runs against the registry as it is; **a tool a 
 took away never runs again**, for the turn in flight and for a model that remembers the
 name later in the run. The registry keeps the group that last held it (`left` in
 `assembleToolRegistry`) and THROWS why it is gone, never reaching that group's `exec`:
-the group's own word when it has one (`ToolGroup.gone()` — the `mcp` plugin's server
+the group's own word when it has one (`ToolGroup.gone(name)` — the `mcp` plugin's server
 state: `<name> is not connected — retrying in N s`, `<name> was removed by the person`),
 else the host's — `<tool> is gone — <plugin> removed it`, `… — <plugin> was disabled`
 (the person took the plugin's tools out, `registry.withhold`), `… — <plugin> is not
@@ -196,7 +196,7 @@ plugin joins); the process-wide `refreshToolRegistry` refreshes the last one ass
 `make(name, shape)` injects `config.plugins.<name>` and qualified keys. The
 returned `shape` has optional: `commands`, `keys`, `keyActions`, `views`,
 `surface`, `modals`, `colors`, `modalColors`, `configSchema`, `components`, `tools`,
-`services`, `aiTools`, `keycaps`, `entry`, `setup`, `chatContext`,
+`services`, `aiTools`, `keycaps`, `entry`, `screens`, `setup`, `chatContext`,
 `chatSubject` (deprecated), `afterWrite`, `ready`; every hook, and each
 `components[slot] = ({ ui, host }) => Component`, receives the plugin's pair (below).
 `services` expose host services through `host.services` — the host wins on every
@@ -217,7 +217,8 @@ the blacklist.
   `store`, `config`, `keys`, `keyCap`, `useInputHandler`, `useSurfaceSize`,
   `useTerminalSize` (the plugin's side, not flowtty's whole terminal), `notify`,
   `viewRegistry`, `commandRegistry`, `helpFor`, `copyToClipboard`, `pluginToken`,
-  `hostApi` — one per plugin. `host.services` stays the live per-plugin view (host
+  `hostApi`, `open`, `close` (the plugin's screens, below — bound to the plugin where
+  its pair is built) — one per plugin. `host.services` stays the live per-plugin view (host
   services on its prototype, rebound every render): never flatten it into `host` or
   spread it. Each pair is built once per App, where `apiMap` is filled, so a component
   factory makes one component type for the App's life. A change to either part a
@@ -487,6 +488,66 @@ board.
   (`trustNotes`: the plugins the first start trusted, a record that cannot be read —
   the loader's and `memoryRecordNotes()`).
 
+### Screens the model can open
+
+The host has no notion of which screen is up — a plugin's own state decides, and its
+`keycaps` tell the host to mount the surface. So a screen the host can open is one the
+plugin DECLARES (`shape.screens`, `src/runtime/screens.ts`): its name → `{ entry?, title?,
+params? (JSON Schema), tools?, open(api, params), close?(api) }`. `open` lives in the shape,
+not a component, and sets the plugin's own state, which is how it opens a screen whose
+surface was never mounted. Two ways in, one set of rules (`createScreens`, made once in
+`renderApp`, bound as `services.screens`, each plugin's `host.open` / `host.close` bound
+to its name where its pair is built — a bare name is its own, `<plugin>:<screen>`
+another's):
+
+- `host.open(screen, params)` — a plugin's navigation tools (the migration path for a
+  plugin whose tools called stubs its mounted screen replaced); `ui_open(plugin)` — the
+  model's core tool, the entry screen (`entry: true`, else the only one), no params.
+- Refused, as a readable `Not opened: …`: a built-in plugin or a `HOST_PANELS` name
+  (`:plugins`, `/mcp`, the picker, settings, help, log — never a way for the model to lead
+  the person to a trust key), a plugin in `disabledNow`, one in `site.untrusted` (the text
+  names no trust command), one not loaded or still starting (its pair not built), an
+  undeclared screen (the plugin's screens named), params that fail `toolArgsError`
+  against the screen's `params`, or any params for a screen that declares none. A throw
+  from the plugin's `open` is its reason.
+- **Never over the person**: with the chat's draft non-empty while the chat has the keys
+  (`store.chat.typing`), the
+  `:` line open (`ui.cmdOpen`) or a y/n or question waiting (`store.chat.asking`), the
+  open is DEFERRED and answers at once — a tool that awaited the turn it runs in would
+  never end: `<plugin>:<screen> is not open yet: <why>. It opens when this turn ends.`
+  (outside a turn — `store.chat.busy` false — `once the chat is free`). The chat's
+  `afterTurn` calls `screens.afterTurn(ok)`: a turn that ended opens what it held (the
+  draft stays in the field — opening never moves the keyboard), unless a question still
+  waits; a stopped or failed turn drops it with a log line, as it restores rather than
+  sends the queue. Outside a turn, an App effect (`screens.settle`, after every render)
+  opens it once nothing holds it back. A deferred open's own answer goes to the log, a
+  failure to a toast too.
+- Opened while an open chat covers the plugin's side (a window, `full`), the answer says
+  it is behind the chat. Esc closes a screen as the plugin's own key does; `close` asks
+  the plugin's `close` and says Esc when there is none.
+- **The model's list**: `promptBlock()` — `## Screens`, one line per non-built-in plugin
+  the person trusts and has not disabled, with screens or an `entry` key: the screens'
+  titles (else the description), `key <glyph>` of each `entry` action's binding, and
+  `open with` `ui_open("<plugin>")` (an entry screen with no `tools` of its own) and
+  every screen's `tools` — else `the person opens it with its key` (a remote plugin: no
+  `screens` over the wire). Plugin text is one line, `sanitizeGroupDescription`ed and cut.
+  It is part of every message's system prompt, after the base (`systemParts.screens`,
+  counted under `system` by the meter), read from the live list each message — so a late
+  join (the `joined` handler's splice) and a `:plugins` disable or enable are in the next
+  message; '' with nothing to list.
+- A DEFERRED open is resolved and its params checked again when it runs (`flush`): a
+  plugin disabled, untrusted or gone meanwhile is not opened — a log line and a toast.
+- **`ui_open` is offered only when it can work**: `assembleToolRegistry`'s `screens`
+  (the app's registry — `runInteractive`, `bootApp`; never the one-shot prompt's) and a
+  non-withheld plugin with an entry screen; a refresh recomputes it, and a call from an
+  older list answers the core group's `gone` (`no plugin in the app has a screen it can
+  open now`). A refusal throws (the model reads an error), a background run
+  (`_bgDepth`) and a run with no `services.screens` refuse too.
+
+`src/__tests__/screens.e2e.test.ts` holds it. `HOST_API` stays: `screens` is an optional
+field an older host ignores, and `host.open` / `close` are optional members a plugin
+checks for before it calls them (docs/plugins.md, "Compatibility").
+
 ### Remote plugins
 
 A plugin can be a separate process, in any language, speaking JSON-RPC 2.0 over its
@@ -724,7 +785,8 @@ there is no `/fullscreen`.
 ## What the model can do (the `core` tool group)
 
 `memory`, `workspace_read`, `config_schema`, `config_set`, `datetime`, `remind`,
-`background`, `todo`, `ask_user`, `open_url`, `recall`, plus `host:plugins_list`;
+`background`, `todo`, `ask_user`, `open_url`, `recall`, `ui_open` (a plugin's entry screen —
+"Screens the model can open" above; offered while one can be opened), plus `host:plugins_list`;
 `workspace_write` and `workspace_list` are the on-demand `workspace` group. Three rules
 hold this set together:
 

@@ -365,9 +365,13 @@ export const workspaceTools = (config: Record<string, unknown>): ToolGroup => ({
   exec: async (name, args, ctx: CoreCtx) => workspaceExec(config, name, args, ctx),
 });
 
-export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record<string, string[]>, pluginConfigs?: Record<string, unknown>): ToolGroup => ({
+// `uiOpen` — a running app with a plugin whose entry screen `ui_open` can open; without
+// one the tool could never work, and is not offered.
+export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record<string, string[]>, pluginConfigs?: Record<string, unknown>, opts: { uiOpen?: boolean } = {}): ToolGroup => ({
   id: 'core',
   alwaysOn: true,
+  // `ui_open` leaves the list with the last plugin whose screen it could open.
+  gone: (name) => (name === 'ui_open' ? 'ui_open is gone — no plugin in the app has a screen it can open now' : null),
   tools: ([
     {
       type: 'function',
@@ -509,6 +513,14 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
     {
       type: 'function',
       function: {
+        name: 'ui_open',
+        description: 'Open a plugin\'s screen for the person — its entry screen, by the plugin\'s name as the "## Screens" list in the system prompt names it. Use it when the person asks to see or open a plugin whose line says `open with ui_open`; a plugin that names tools of its own there opens with those. It does not open the host\'s own panels. Over the person\'s typing or an open question the screen waits and opens when this turn ends; the answer says which happened.',
+        parameters: { type: 'object', properties: { screen: { type: 'string', description: 'The plugin\'s name from the Screens list, e.g. "tutor".' } }, required: ['screen'] },
+      },
+    },
+    {
+      type: 'function',
+      function: {
         name: 'recall',
         description: 'Read again a bulky item the conversation shows as a stub — an image the person attached (sent to you again as an image), the output of a command the person ran (`! …`), or a large tool result. A stub names the item\'s id, e.g. [! brew update — exit 0 · 24.7 s · 120 lines — recall("out:7d41e0aa")]; pass that id (a unique prefix is enough). The item comes back whole for THIS turn only — call again in a later turn if it is needed again. Nothing else is recalled: content that was never stubbed is already in the conversation.',
         parameters: { type: 'object', properties: { id: { type: 'string', description: 'The id from the stub — "img:…", "out:…" or "res:…" — or a unique prefix of it.' } }, required: ['id'] },
@@ -516,7 +528,7 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
     },
   // With `ai.recall.enabled` false nothing is ever stubbed, so `recall` could only ever
   // answer "already in the conversation" — a tool that can never work is not offered.
-  ] as ToolDef[]).filter((t) => t.function.name !== 'recall' || recallLimits((config as { ai?: unknown }).ai).enabled),
+  ] as ToolDef[]).filter((t) => (t.function.name !== 'recall' || recallLimits((config as { ai?: unknown }).ai).enabled) && (t.function.name !== 'ui_open' || !!opts.uiOpen)),
   exec: async (name, args, ctx: CoreCtx) => {
     switch (name) {
       case 'recall': {
@@ -550,6 +562,18 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
         if (!url) return 'No URL provided';
         openInBrowser(url);
         return `Opened ${url} in the browser`;
+      }
+      case 'ui_open': {
+        // The screens are the running app's (src/runtime/screens.ts); a background task
+        // runs apart from the screen, and a run with no app has none.
+        if (Number((ctx as { _bgDepth?: number })._bgDepth ?? 0) > 0) throw new Error('ui_open: a background task does not open screens — ask in the chat.');
+        const screens = (ctx as { screens?: { uiOpen: (name: string) => Promise<{ ok: boolean; text: string }> } }).screens;
+        if (!screens) throw new Error('ui_open: there is no screen here — the app is not running.');
+        // A refusal is the call's error, so the model reads it as one; opened, or waiting
+        // for the person, is the answer.
+        const res = await screens.uiOpen(String(args.screen ?? ''));
+        if (!res.ok) throw new Error(res.text);
+        return res.text;
       }
       case 'workspace_read':
         return workspaceExec(config, name, args, ctx);

@@ -24,6 +24,7 @@ import type { PluginRepo } from './host-group.js';
 import { buildKeys } from './registry.js';
 import { purgePluginMemories } from '../runtime/services/memory.js';
 import { identityToken } from '../runtime/plugin-identity.js';
+import { entryScreen } from '../runtime/screens.js';
 import { qualifyKind } from '../assistant/views.js';
 import { toolImageResult, type ToolImageResult } from '../assistant/tool-images.js';
 
@@ -89,8 +90,8 @@ export interface ToolGroup {
   // registry — an MCP server's `not connected — retrying in 15 s`. A call the model
   // makes to such a tool (it saw the name earlier) is answered with this instead of the
   // host's own `<tool> is gone — <plugin> removed it`; the group's `exec` is never
-  // reached for it. Absent, or null: the host's own words.
-  gone?: () => string | null;
+  // reached for it. Absent, or null: the host's own words. It is handed the tool's name.
+  gone?: (name?: string) => string | null;
 }
 
 export interface ToolRegistry {
@@ -114,6 +115,9 @@ export interface AssembledToolRegistryInput {
   plugins: Plugin[];
   config: Record<string, unknown>;
   repo: PluginRepo;
+  // The registry of a running app, which opens the plugins' screens: `ui_open` is
+  // offered while a plugin in the list has an entry screen (src/runtime/screens.ts).
+  screens?: boolean;
 }
 
 // ─── Assembly ─────────────────────────────────────────────────────────────────
@@ -188,7 +192,7 @@ export function assembleToolRegistry(input: AssembledToolRegistryInput): ToolReg
   const left = new Map<string, { group: ToolGroup; plugin?: string }>();
   const goneText = (name: string, { group, plugin }: { group: ToolGroup; plugin?: string }): string => {
     let own: string | null = null;
-    try { own = group.gone?.() ?? null; } catch { own = null; }
+    try { own = group.gone?.(name) ?? null; } catch { own = null; }
     if (own) return own;
     const who = plugin ?? group.id;
     if (plugin && withheld.has(plugin)) return `${name} is gone — ${plugin} was disabled`;
@@ -256,7 +260,8 @@ export function toolRegistryRevision(): number {
 
 // `held` — the bare names the last assembly handed out, each with the group that holds it.
 // `withheld` — plugins whose tools are left out.
-function assemble({ plugins, config, repo }: AssembledToolRegistryInput, warn: (line: string) => void, held: Map<string, string>, withheld: ReadonlySet<string> = new Set()): Assembled {
+function assemble(input: AssembledToolRegistryInput, warn: (line: string) => void, held: Map<string, string>, withheld: ReadonlySet<string> = new Set()): Assembled {
+  const { plugins, config, repo } = input;
   const disabled = (config?.ai as { disabledTools?: string[] } | undefined)?.disabledTools ?? [];
   // The resolved hotkey map (host defaults + plugin keys + config.keys overrides).
   // Handed to the config tool so `config get/explain keys` reports the EFFECTIVE
@@ -267,7 +272,8 @@ function assemble({ plugins, config, repo }: AssembledToolRegistryInput, warn: (
   // `config get/explain set plugins.<name>.<flag>` for flags a plugin declares
   // (e.g. config.plugins.keycaps.enabled) — the host schema sees plugins as an
   // opaque record, so without this the tool rejects them as "unknown key".
-  const core = coreTools(config, buildKeys(plugins, config), pluginConfigs(plugins));
+  const uiOpen = !!input.screens && plugins.some((p) => !withheld.has(p.name) && !!entryScreen(p));
+  const core = coreTools(config, buildKeys(plugins, config), pluginConfigs(plugins), { uiOpen });
 
   // Clearing a plugin's memory on uninstall: purge the host memory file's entries
   // scoped to that plugin (the host knows the name). Wired so `host:plugins_remove`

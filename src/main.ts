@@ -490,7 +490,8 @@ async function runInteractive(config: Record<string, unknown>, repo: PluginRepo)
   // runs (src/runtime/plugins-panel.ts): the same dirs, and the loader's own way to load
   // one — its trust checked first, and loaded from where it was trusted.
   const site = { repo, enabledDir, skipped, untrusted, load: (name: string) => loadTrustedPlugin(name, { config, enabledDir, renders, log: (line) => late.note(line) }) };
-  const registry = assembleToolRegistry({ plugins, config, repo: repo as unknown as RepoShape });
+  // The app opens the plugins' screens (`ui_open`); the one-shot prompt has none.
+  const registry = assembleToolRegistry({ plugins, config, repo: repo as unknown as RepoShape, screens: true });
   // The backend holds the console while it owns the screen; with `onConsole` set every
   // line goes to the log (`L`) at once and nothing is printed again at exit.
   const consoleLog = consoleBridge();

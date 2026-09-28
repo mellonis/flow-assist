@@ -355,6 +355,20 @@ while its process starts — and each one's tools join as it answers: a message 
 on its way gets them from its next step. The line goes once everything has joined or
 failed; what failed is in the log (`L`).
 
+## Asking for a plugin's screen
+
+"Open the tutor", "show me board FRONT": the assistant knows each plugin's screens and
+the key that opens them, and opens one for you — the entry screen with `ui_open`, a
+board or an issue with the plugin's own tools when it has them. Opening a screen asks no
+y/n; it never opens over what you are typing or over a question waiting for your
+answer — it waits and opens when the assistant's turn ends (a turn you stop opens
+nothing), and the answer says it waits. In the panel the screen is beside the chat; in a
+window, or with the chat over the whole terminal, it is behind the chat until you close
+it. Esc closes it as ever. The assistant never opens `:plugins`, `/mcp`, the sessions or
+the settings for you — those stay yours — and never a plugin you have not trusted or
+have disabled. A plugin in another language is opened by its key alone; the assistant
+tells you which.
+
 ## Plugins: `:plugins`
 
 `:plugins` on the `:` command line lists the plugins — each one's version, its state and

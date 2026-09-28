@@ -17,7 +17,11 @@ tool of an MCP server runs without asking only when the server itself marks it
 read-only and you set `trusted` for that server, or when you list it yourself in
 `plugins.mcp.servers.<name>.readOnly`; `plugins-available/mcp/README.md` has the
 details. The assistant installs a plugin only by its name, never from a URL: a URL in
-its request may come from any page it has read.
+its request may come from any page it has read. Opening a plugin's screen is not a
+write and asks nothing, but it never opens over your typing or a pending y/n, never a
+plugin you have not trusted or have disabled, and never the app's own panels —
+`:plugins`, where trust is given, `/mcp`, the sessions, the settings: those only you
+open.
 
 ## Asking less: the auto mode and `shell.autoRun`
 

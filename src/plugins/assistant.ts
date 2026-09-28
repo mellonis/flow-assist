@@ -1409,14 +1409,14 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // The tools the next request will CARRY — with tools on demand, the core ones,
               // what was loaded and the index; not every tool there is.
               // The history as it goes out: a stubbed item counts as its stub, not its content.
-              { system: [baseStatic(), projectBlock()].filter(Boolean).join('\n\n'), memory: memoryBlock(), plan: planBlock(), summary: summaryBlock(), screen: screenBlock(screen), tools: requestTools((host.services as Record<string, any>).pluginAiTools ?? [], toolLoadingMode(host.config.ai), toolSetRef.current), messages: [...sentHistory(), ...extra] },
+              { system: [baseStatic(), screensBlock(), projectBlock()].filter(Boolean).join('\n\n'), memory: memoryBlock(), plan: planBlock(), summary: summaryBlock(), screen: screenBlock(screen), tools: requestTools((host.services as Record<string, any>).pluginAiTools ?? [], toolLoadingMode(host.config.ai), toolSetRef.current), messages: [...sentHistory(), ...extra] },
               contextWindowOf(),
               u ? u.promptTokens + u.completionTokens : undefined,
             );
           };
 
-          // The system prompt of a message = the «cheap» base (directive+identity) + fresh
-          // memory + the project's instructions + the current plan + the summary. No
+          // The system prompt of a message = the «cheap» base (directive+identity) + the
+          // screens the model can open + fresh memory + the project's instructions + the current plan + the summary. No
           // network: the base is synchronous, memory a local file, the instructions read
           // when the shell's directory was last set, the plan the tool's module state. It
           // is also what the display list keeps as its system message (and so the
@@ -1427,12 +1427,17 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // (`AgentOpts.systemPrompt`), so a `cd` mid-turn reaches the next round — a
           // plan read per round would change the cached prefix after every `todo` call.
           const projectBlock = () => instructionsBlock(projectRef.current);
+          // The plugins' screens the model can open, and the keys the person presses
+          // (src/runtime/screens.ts): read from the plugins as they are at each message,
+          // so a plugin that joined late, or one disabled or enabled in `:plugins`, is
+          // in the next message's list as it now stands. '' with nothing to list.
+          const screensBlock = () => (host.services as { screens?: { promptBlock: () => string } }).screens?.promptBlock() ?? '';
           const systemParts = () => ({
-            base: baseStatic(), memory: memoryBlock(), plan: planBlock(),
+            base: baseStatic(), screens: screensBlock(), memory: memoryBlock(), plan: planBlock(),
             summary: summaryBlock(),
           });
           const joinSystem = (p: ReturnType<typeof systemParts>, project: string) => {
-            const parts = [p.base, p.memory, project, p.plan, p.summary].filter(Boolean);
+            const parts = [p.base, p.screens, p.memory, project, p.plan, p.summary].filter(Boolean);
             return parts.length ? parts.join('\n\n') : null;
           };
           // A note is said once: not again when the list already ends in the same one
@@ -3226,7 +3231,12 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             : [];
           const pagerShown = !!pager && pagerRows.length > 0;
           pagerShownRef.current = pagerShown;
-          (host.store as Record<string, any>).chat = { open, unread, mode, focus, openChat, closeChat, send, messages, streaming, toolLabel, cursor, escArmed, pendingConfirm: pendingAsk, ctrlKey, panelKey, pointer, note: pluginNote, statusRow: statusRow ? liveChatStatus(() => statusRef.current as never, collapsedBusy) : null, footerStatus, layout, needRows };
+          (host.store as Record<string, any>).chat = { open, unread, mode, focus, openChat, closeChat, send, messages, streaming, toolLabel, cursor, escArmed, pendingConfirm: pendingAsk, ctrlKey, panelKey, pointer, note: pluginNote, statusRow: statusRow ? liveChatStatus(() => statusRef.current as never, collapsedBusy) : null, footerStatus, layout, needRows,
+            // What holds back a screen a plugin or the model opens (src/runtime/screens.ts),
+            // read from the refs at the moment it is asked.
+            // The draft counts while the chat has the keys: folded away, or with the keys on
+            // the plugin's side, nobody is typing into it.
+            busy: () => streamRef.current, typing: () => focusedRef.current && inputRef.current.trim() !== '', asking: () => !!pendingRef.current || !!askRef.current };
           // ── Two queues meet at a turn's end: the person's (`queueRef`, delivered at
           // the next round boundary) and the inbox (`inboxRef`, never inside a turn).
           // Every item waiting in the inbox lands at once, each as its own row — on
@@ -3283,6 +3293,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // nothing queued lands the inbox as rows only too: a follow-up turn would take
           // the place of its `⏎ continue`, and the continued turn reads the rows.
           const afterTurn = (ok: boolean, atLimit = false) => {
+            // A screen that waited for this turn opens now — or, the turn stopped or
+            // failed, never (src/runtime/screens.ts).
+            (host.services as { screens?: { afterTurn: (ok: boolean) => void } }).screens?.afterTurn(ok);
             if (ok && queueRef.current.length) {
               setTimeout(() => {
                 const next = queueRef.current.shift();

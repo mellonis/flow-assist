@@ -5,6 +5,20 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **The assistant opens a plugin's screen when you ask.** "Open the tutor" used to get
+  "I cannot open anything" — the assistant knew a plugin's tools, not its screens or the
+  key that opens them. Now every message tells it each plugin's screens, the key you
+  press and how it opens one, and `ui_open` opens a plugin's entry screen; a board or an
+  issue opens through the plugin's own tools. Opening asks no y/n, never happens over
+  your typing or a question waiting for you — it waits for the end of the turn and says
+  so — and never reaches `:plugins`, `/mcp`, the sessions or the settings, or a plugin
+  you have not trusted or have disabled.
+  **For plugin authors:** declare your screens in `screens` — the entry screen and any
+  other with the params it takes, each with an `open` that sets your state — and open
+  them from your tools with `host.open(screen, params)`, whose answer is a sentence to
+  return as the tool's result; name those tools in the screen's `tools` so the model
+  uses them (docs/plugins.md, "Screens the model can open"). Optional, so the host API
+  number stays; check `host.open` is there before calling it.
 - **`:plugins`: the plugins, their states and what you can do to them.** `:plugins` on
   the `:` command line lists every plugin with its version, its state — `active`,
   `starting…`, `skipped: <why>`, `missing settings: …`, `not trusted`, `disabled` — and

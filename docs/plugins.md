@@ -127,8 +127,8 @@ export default function buildNotesPlugin({ config, make, z, modelMaySet, modelMa
   gone for the rest of the run: a call the model makes to it (from a list it saw
   earlier) still asks the person first when the tool is a write, then never runs — the
   model is told `<tool> is gone — <plugin> removed it`. A group that knows better says
-  it itself with `gone`, a function on the group returning a line (or `null` for the
-  host's words); the `mcp` plugin's says where its server stands, `retrying in 15 s`,
+  it itself with `gone(name)`, a function on the group given the name of the tool asked
+  about and returning a line (or `null` for the host's words); the `mcp` plugin's says where its server stands, `retrying in 15 s`,
   and `null` while the server is connected — a server back without the tool has nothing
   to add. Your `exec` is never called for a tool you took away — on this host: an older
   one with the same host API number still calls `exec` for such a name, so keep
@@ -322,7 +322,8 @@ for a plugin that has no group.
 ## What a plugin is given: `{ ui, host }`
 
 Every hook of the shape — each `components[slot]` factory, `setup`, `keycaps`,
-`chatContext`, `chatSubject`, `afterWrite` — receives one object with two parts:
+`chatContext`, `chatSubject`, `afterWrite`, a screen's `open` and `close` — receives one
+object with two parts:
 
 - **`ui`** — what React and flowtty ship, passed through unchanged, the same for every
   plugin. Take them from here and import only their types: one React for the host and
@@ -341,6 +342,7 @@ Every hook of the shape — each `components[slot]` factory, `setup`, `keycaps`,
 | | `notify()`, `viewRegistry`, `commandRegistry`, `helpFor`, `copyToClipboard` |
 | | `hasKeyboard()` — whether the plugin's side has the keyboard now |
 | | `pluginToken` — the plugin's identity; `hostApi` — the host API it runs under |
+| | `open(screen, params)`, `close(screen)` — open or close one of your declared screens ([Screens the model can open](#screens-the-model-can-open)) |
 | | Not on `host` but handed to the builder beside `z`: `modelMaySet`, `modelMaySave`, `appliesOnRestart` — the marks on a key of `configSchema` ([The builder](#the-builder)) |
 
 The services stay on `host.services` and are read when they are called
@@ -545,6 +547,86 @@ setup: ({ host }) => { /* once, before any component mounts: seed a store */ },
   `accentBg` (a stronger highlight), `highlightText` (the ink on either), and the
   modal base under `theme.modals` (`bg`, `text`, `border`, `fieldBg`, …). Where the
   terminal has not said which it is, they are `'default'`: the terminal's own.
+
+## Screens the model can open
+
+The person asks the assistant to "open the tutor", or "show me board FRONT". For the
+assistant to do it, a plugin names its screens in `screens` — its entry screen, and any
+other with the params it takes — and the host opens them under one set of rules:
+
+```ts
+let host;                                           // kept from setup, for the tools
+make('tutor', {
+  keys: { lessons: 'H' }, entry: ['lessons'],
+  keycaps: () => (state.lesson ? [/* … */] : []),   // the surface mounts while this is non-empty
+  setup: (api) => { host = api.host; },
+  screens: {
+    lessons: {
+      entry: true,                                   // the one `ui_open` opens
+      title: 'lessons',                              // what it shows, for the model's list
+      open: ({ host }) => { state.lesson = 1; return 'lesson 1'; },
+      close: () => { state.lesson = 0; },
+    },
+    lesson: {
+      title: 'one lesson',
+      params: { type: 'object', properties: { n: { type: 'number' } }, required: ['n'] },
+      tools: ['open_lesson'],                        // your own tools that open it
+      open: (_api, { n }) => {
+        if (!lessons[n]) throw new Error(`there is no lesson ${n}`);
+        state.lesson = n;
+        return `lesson ${n}`;
+      },
+    },
+  },
+  aiTools: [{
+    type: 'function',
+    function: { name: 'open_lesson', description: 'Open a lesson by its number.', parameters: { /* n */ } },
+    run: async ({ n }) => (host?.open ? (await host.open('lesson', { n })).text : 'No screen here.'),
+  }],
+});
+```
+
+- **`open` puts the screen up by setting your own state** — the state your `keycaps`
+  and your surface read. It lives in the shape, not in a component, so it works whether
+  or not your surface was ever mounted: once `keycaps` is non-empty the host mounts the
+  surface, and the surface reads the state as it mounts. It gets your `{ ui, host }` and
+  the params; it may return what it opened in a few words (`board FRONT`), and a throw is
+  the reason it did not. `close` takes the screen down; without it the host cannot close
+  the screen, and Esc — your own key — still does.
+- **`host.open(screen, params)`** opens one from your code — a navigation tool of yours,
+  as `open_lesson` above; a bare name is your own screen, `<plugin>:<screen>` another
+  loaded plugin's. It resolves at once with `{ ok, text, deferred?, opened? }`: `text` is
+  a sentence to hand back as your tool's result — `Opened tutor:lesson — lesson 3.`,
+  `Not opened: …` and why. The params are checked against the screen's `params` (JSON
+  Schema, a tool's `parameters` shape) before your `open` runs; a screen without
+  `params` takes none. `host.close(screen)` asks your `close`.
+- **The rules, the same for your tools and the model.** A screen never opens over the
+  person's typing — a draft in the chat's field, the `:` line open — or over a y/n or a
+  question waiting for them: it waits, and opens when the turn ends (outside a turn,
+  once the chat is free); the answer says so at once — `tutor:lessons is not open yet:
+  the person is typing in the chat. It opens when this turn ends.` A turn the person
+  stopped, or one that failed, opens nothing it held back. Only a loaded plugin's
+  screens open, and only while the person trusts it and has not disabled it; the host's
+  own panels — `:plugins`, `/mcp`, the session picker, the settings, the help, the log —
+  never do. A screen that opens while the chat covers the plugin's side (a window, the
+  whole terminal) is said to be behind the chat.
+- **`ui_open(plugin)` is the model's.** A core tool — a read, no y/n — that opens a
+  plugin's entry screen, with no params: the one marked `entry: true`, or the only one
+  declared. It is offered while some plugin in the app has one. A screen that takes
+  params opens through your own tool.
+- **The model's list.** Every message's system prompt carries a `## Screens` block, one
+  line per plugin with a screen or an entry key: what the screens show (each `title`, or
+  the screen's name), the key the person presses (your `entry` action's binding), and
+  what the model opens it with — `ui_open("tutor")` for an entry screen, and each name in
+  a screen's `tools`; with neither, that the person opens it with its key:
+  `- tutor — lessons, one lesson · key H · open with ui_open("tutor"), open_lesson`.
+  Name your navigation tools there, or the model will reach for `ui_open` alone. The
+  list is read from the plugins as they are at each message: a plugin that joins late,
+  or one disabled or enabled in `:plugins`, is in the next one as it now stands.
+- **In the one-shot prompt** there is no screen and no `setup`: your tool has no `host`
+  to call, and should say so.
+- An older host ignores `screens` and has no `host.open`: check that it is there. It is
+  an addition — the host API number stays what it is (see [Compatibility](#compatibility)).
 
 ## A plugin in another language
 
@@ -950,6 +1032,10 @@ give up that host's own attempts until some other host's restart revives the ser
   `chatNote`, `setConfig` / `unsetConfig`, `toolsChanged` and `ready` are a JS
   plugin's; a remote plugin's tools are the ones its `hello` gave.
 
+- **Declare screens the model can open.** `screens` and `host.open` are a JS plugin's:
+  a remote plugin's entry key is on the model's list (`## Screens`), said as the key the
+  person presses, and its screens open by that key alone.
+
 - **Mark a config key for the model.** Its `configSchema` is JSON Schema, read into the
   host's zod, and carries no mark: every key of a remote plugin is the person's to set.
 
@@ -1042,6 +1128,12 @@ one:
   prerelease is matched only by a range that names one: `^1.0.0`, and even `*`, do not
   take `1.0.0-alpha.37`. A plugin with no field is loaded unchecked, and the log says
   so — a plugin with no screens has nothing to check; the bundled ones declare it.
+
+An addition that a plugin built for the previous host can ignore, and that a host
+without it ignores in a plugin, keeps the number: an optional field of the shape, a
+member of `host` or `ui` a plugin checks for before it uses it (`screens` and
+`host.open`, `ui.stringWidth`, `toolsChanged`, a tool group's `gone`). A plugin that
+must run on an older host too checks for each.
 
 A plugin that cannot run here is skipped — the rest load — and said so: `plugins ls`
 shows `incompatible: built for host API 1, host provides 2` (or `incompatible: needs

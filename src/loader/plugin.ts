@@ -6,8 +6,9 @@
 // the plugins themselves can both import it without a cycle.
 import type { ContextItem } from '../assistant/screen-context.js';
 import type { ArgComplete, ArgValues } from '../config/commands.js';
+import type { ScreenDecl } from '../runtime/screens.js';
 
-export type { ContextItem };
+export type { ContextItem, ScreenDecl };
 
 // Input shape — the plugin author supplies this; `make` fills in the host-owned
 // fields (`name`, `config`, `keys`). `keyActions` is a legacy alias for `keys`;
@@ -46,6 +47,11 @@ export type PluginShape = {
   // `['boardPicker']`). The start screen names these beside the plugin; without
   // `entry` it lists every key the plugin binds.
   entry?: string[];
+  // The screens the host may open for the plugin — its entry screen and any other, each
+  // with the params it takes and the function that puts it up (src/runtime/screens.ts;
+  // docs/plugins.md, "Screens the model can open"). A plugin's own tools open one with
+  // `host.open(screen, params)`, the model an entry screen with `ui_open`.
+  screens?: Record<string, ScreenDecl>;
   // One line saying what the plugin is — shown on the start screen. Taken from the
   // plugin's manifest.json when the shape does not set it.
   description?: string;
@@ -127,6 +133,7 @@ export interface Plugin {
   aiTools?: unknown[];
   keycaps?: (api: unknown) => string[];
   entry?: string[];
+  screens?: Record<string, ScreenDecl>;
   description?: string;
   usesCache?: boolean;
   setup?: (api: unknown) => unknown;

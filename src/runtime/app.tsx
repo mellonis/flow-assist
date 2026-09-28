@@ -72,6 +72,7 @@ import { renderCommandPanel } from '../views/modals.js';
 import { redactDeep } from '../assistant/secrets.js';
 import { isRemotePlugin, stopRemotePlugin } from '../remote/index.js';
 import { UntrustedPluginError } from '../loader/build.js';
+import { createScreens } from './screens.js';
 import { FOOTER_ROWS, TITLE_ROWS, chatModeOf, panelLayout, type ChatMode, type PanelLayout } from './panel-layout.js';
 
 // The host's own plugins: they ARE the host, so the start screen does not list them
@@ -245,6 +246,13 @@ type ChatStore = {
   // The running turn's status, drawn on the plugin's bottom row while the panel is
   // collapsed on the right; null when nothing runs.
   statusRow?: unknown;
+  // How the chat is drawn now: `panel` docked, else over the plugin's side.
+  layout?: ChatMode;
+  // Read at call time, for the screens (./screens.ts): a turn, a `!command` or a slash
+  // command runs; the field holds a draft; a y/n or a question waits for the person.
+  busy?: () => boolean;
+  typing?: () => boolean;
+  asking?: () => boolean;
 };
 
 // Where the host hears a key, in a fixed order whatever was mounted when:
@@ -502,6 +510,28 @@ export function renderApp(
   };
   const helpFor = (reg: unknown) => helpForRegistry(reg as Command[]);
 
+  // The screens a plugin declares, opened by its own tools (`host.open`) and by the
+  // model's `ui_open`, under one set of rules (./screens.ts). What they read of the App —
+  // each plugin's pair, the chat's state — the App hands over as it renders.
+  const live: { apis: Record<string, PluginApi>; store: Record<string, unknown> } = { apis: {}, store: {} };
+  const liveChat = () => (live.store as { chat?: ChatStore }).chat;
+  const screens = createScreens({
+    plugins, builtins: BUILTIN_PLUGINS, disabled: disabledNow, keys,
+    untrusted: () => site.untrusted,
+    starting: () => late.starting(),
+    apiOf: (name) => live.apis[name],
+    busy: () => !!liveChat()?.busy?.(),
+    blocker: () => (ui.cmdOpen ? 'the person is typing on the : line'
+      : liveChat()?.asking?.() ? 'a question waits for the person\'s answer'
+      : liveChat()?.typing?.() ? 'the person is typing in the chat' : null),
+    asking: () => !!liveChat()?.asking?.(),
+    covered: () => { const c = liveChat(); return !!c?.open && !!c.layout && c.layout !== 'panel'; },
+    notify: redraw,
+    log: logLine,
+    say: (line) => (services as unknown as ReactBoundServices).showMessage(line),
+  });
+  (services as unknown as HostServices).screens = screens;
+
   // Shared per-app mutable state (created ONCE; read by the App and the
   // fallback handler so a re-render never resets them).
   const ui: UiState = { cmdOpen: false, modalActive: false };
@@ -615,6 +645,8 @@ export function renderApp(
     // render after that. The pairs are stable, and the services/store they point at
     // are mutated live, so re-reading them each render stays fresh.
     const apiMap = useRef<Record<string, PluginApi>>({}).current;
+    live.apis = apiMap;
+    live.store = hostBase.store;
     // The plugins whose `chatContext` threw and was logged — once each, for the run.
     const contextFailed = useRef(new Set<string>()).current;
     // Built per plugin, once: a plugin that joins after the first frame gets its own on
@@ -659,7 +691,8 @@ export function renderApp(
       };
       // `setup` seeds the plugin's cross-component store BEFORE any component
       // mounts, so hooks reading the store during render don't throw.
-      const api: PluginApi = { ui: pluginUi, host: { ...hostBase, services: pServices, pluginToken: identityToken(p.name) } };
+      // `open` / `close` act for this plugin: a bare screen name is its own (./screens.ts).
+      const api: PluginApi = { ui: pluginUi, host: { ...hostBase, services: pServices, pluginToken: identityToken(p.name), open: (screen, params) => screens.open(name, screen, params), close: (screen) => screens.close(name, screen) } };
       apiMap[p.name] = api;
       p.setup?.(api);
       for (const [slot, factory] of Object.entries(p.components ?? {})) {
@@ -672,6 +705,10 @@ export function renderApp(
       }
     }
     const overlayComps = plugins.flatMap((p) => compsOf.get(p) ?? []);
+    // A screen that waited for the person (their draft, the `:` line, a y/n) opens once
+    // nothing holds it back and no turn runs; a turn's own end opens it too (the chat
+    // calls `screens.afterTurn`).
+    useEffect(() => { screens.settle(); });
     // The plugins still starting join here as they come (src/loader/late.ts); what waited
     // for the App to listen is handed over at once.
     useEffect(() => late.listen((event) => {

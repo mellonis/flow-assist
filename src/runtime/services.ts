@@ -64,6 +64,9 @@ export interface HostServices {
     decline: (change: import('../config/load.js').ConfigChange) => string | null;
   };
   showMessage: (msg: string) => void;
+  // The screens plugins declare, and the rules they open by (./screens.ts) — the model's
+  // `ui_open` and the chat's turn end reach them here. Bound by `renderApp`.
+  screens?: import('./screens.js').Screens;
   onExit: () => void;
   clearCache: () => void;
   // Counts cache flushes. A flush empties the cache but changes nothing on screen — the

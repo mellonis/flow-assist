@@ -372,7 +372,7 @@ export async function bootApp(model: ScriptedModel, cols = 100, rows = 28, guest
     // takes its place before them.
     late?.order([...enabled, ...added.map((g) => g.name)]);
   }
-  const tools = assembleToolRegistry({ plugins, config, repo });
+  const tools = assembleToolRegistry({ plugins, config, repo, screens: true });
   const backend = opts.backend ?? new TestBackend(cols, rows);
   // A dark terminal unless a test says otherwise: the look every frame here was written
   // against. `unknown` is the terminal that has not answered (TestBackend's own start).

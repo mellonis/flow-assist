@@ -1,6 +1,6 @@
 // What a plugin is given: `{ ui, host }` — every hook of the plugin shape receives the
 // pair (`components[slot]`, `setup`, `keycaps`, `chatContext`, `chatSubject`,
-// `afterWrite`). The rule for which name is where:
+// `afterWrite`, a screen's `open` and `close`). The rule for which name is where:
 //
 // - `ui` is what React and flowtty ship, passed through unchanged — the same object
 //   for every plugin. A plugin takes them from here, never from its own copy of React
@@ -15,6 +15,7 @@
 
 import type { LazyInputEntry } from './hooks.js';
 import type { ReactElement } from 'react';
+import type { ScreenResult } from './screens.js';
 
 // `count` is how many notches a 'wheelup' / 'wheeldown' stands for — the TTY backend
 // collapses a run of identical wheel reports in one read into one key with the run's
@@ -102,6 +103,13 @@ export interface PluginHost {
   // plugin passes as `isFocused` / `isActive` to the flowtty components that hear keys
   // themselves. Read it while drawing: the host redraws when it changes.
   hasKeyboard: () => boolean;
+  // Opens one of the plugin's declared screens (`screens` in its shape) with its params —
+  // a bare name is the plugin's own, `<plugin>:<screen>` another loaded plugin's — and
+  // closes one that declared how. Resolves with what was opened, or why not, as `text`;
+  // over the person's typing or an open y/n the open waits for the turn's end and says
+  // so (src/runtime/screens.ts). An older host has neither: check that it is there.
+  open?: (screen: string, params?: Record<string, unknown>) => Promise<ScreenResult>;
+  close?: (screen: string) => Promise<ScreenResult>;
 }
 
 export interface PluginApi {
