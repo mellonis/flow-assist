@@ -1176,7 +1176,8 @@ hold this set together:
     `stdinFrom` pipes. The memory index in the prompt is framed the same way.
   - The project is the conversation's, decided at its first message as a session's is
     (`ensureSessionId` records it with or without a sessions directory; the chat hands
-    `currentProject` to its tools as `ctx.workspaceProject`, and a background task's
+    `Conversation.currentProject` (`src/assistant/conversation-session.ts`) to its
+    tools as `ctx.workspaceProject`, and a background task's
     nested run keeps it, its ctx being the chat's spread); a caller with no conversation
     — the one-shot prompt, a plugin's own `chatLLM` — takes the project of the call's
     shell directory (`callProject`). With no project the project's scope IS the global one.
@@ -1225,7 +1226,7 @@ hold this set together:
     the model's own earlier notes — data to weigh, never the person's instruction.
   - **The scope.** `scope: "project"` (the default) is the conversation's project —
     decided at its first message, as a session's is, and handed to the tools as
-    `ctx.workspaceProject` (the chat's `currentProject`, kept by a background task's
+    `ctx.workspaceProject` (`Conversation.currentProject`, kept by a background task's
     nested run); a caller with no conversation (the one-shot prompt) takes the project
     of the call's shell directory (`callProject`). `"global"` is every project — the person's own
     preferences; `"host"` is read as global. `"plugin"` keeps a GLOBAL fact for the
@@ -1256,7 +1257,8 @@ hold this set together:
     record is under "Secrets"). `readFacts` gives each fact the `hash` of its file's
     text; `markFacts(root, ws, facts)` marks `outside` every fact whose hash is not the
     one recorded for its file — by the file's real directory and name — and is what the
-    chat's `memoryLists`, the tool's `memoryScopes` and `services.memory` read through.
+    conversation's `memoryLists`, the tool's `memoryScopes` and `services.memory` read
+    through.
     An `outside` fact is left out of `memoryPromptBlock`, out of the tool's `list` and
     its `update` / `forget` lookups (`Memory <id> not found`), out of `/clear`'s kept
     count, out of `MEMORY.md` (`writeIndex` writes `acceptedOnly`) and out of a
@@ -1444,7 +1446,7 @@ hold this set together:
   shares one id and one stored item, and `recall` takes any unique prefix or the hash
   alone (an ambiguous one answers with the candidates). **What the host keeps never
   changes shape**: the conversation's `api` and the session hold the full content; the stubs are
-  applied on the way OUT — `sentHistory()` in the chat, `applyRecall` over
+  applied on the way OUT — the conversation's `sentHistory()`, `applyRecall` over
   `apiHistory`'s output, matched by content hash — for the request, the context meter
   (a stubbed item counts as its stub) and `/compact` alike. Which items are stubbed is
   conversation state, the conversation's `recall` (`RecallState`: the ids, this turn's recalls, turns
@@ -1825,8 +1827,9 @@ hold this set together:
   `seenAt`, set when the chat shows the session's end — the conversation on screen
   (the chat's `ViewPort.showsEnd`: the chat open, neither the picker, the pager nor a
   plugin's panel drawn in its place; a docked chat that is collapsed is not open): that
-  answer arriving then (the same instant), and `Conversation.markSeen` when it comes back — the chat opening, the picker or the
-  pager closing, a session opened or continued. `sessionRows` computes
+  answer arriving then (the same instant), and `Conversation.markSeen` when it comes
+  back — the chat opening, the picker or the pager closing, a session opened or
+  continued. `sessionRows` computes
   `held`/`done`/`idle`; the chat hands its own `pickerOwn` to the render, so the word
   follows a turn that starts or ends while the picker is up. It is pure state in
   `src/assistant/session-picker.ts` (`pickerKey`, the `ask.ts` pattern) drawn by
@@ -1939,7 +1942,8 @@ hold this set together:
   wrote (set at every load — start-up continue, `/resume` — and every write,
   fork included). At a load, the fingerprint is taken with a stat BEFORE the
   content is read, never re-derived after (`applySession`, in
-  `src/assistant/conversation-session.ts`, takes it as a caller-supplied argument, not something it looks up itself): a write landing in
+  `src/assistant/conversation-session.ts`, takes it as a caller-supplied argument,
+  not something it looks up itself): a write landing in
   that gap is then a fingerprint this instance never actually saw, so the next
   save finds the disk has moved and forks. Taking it AFTER the content read
   instead would record exactly what a same-moment write left, indistinguishable
@@ -2062,7 +2066,7 @@ hardest. Rules the `repo` and `gitlab` plugins hold, each with a test that tries
     role `view`, which `apiHistory` drops) and never on the tool's result — the model
     already read the result, and a copy of it in the conversation costs the context
     twice.
-  - **The chat's half of `onToolLive`** (`src/plugins/assistant.ts`): the message a
+  - **The chat's half of `onToolLive`** (`src/assistant/conversation.ts`): the message a
     view rides on is pushed on the view's FIRST change, so it has its place — and its
     fold id — from the start, and a block opened (by a click) while it ran is still
     open when it ends. Every later change replaces that same message (`views`, a new
@@ -2083,14 +2087,15 @@ hardest. Rules the `repo` and `gitlab` plugins hold, each with a test that tries
     servers send `''` or reuse ids); using it alone would let two commands whose ids
     collided overwrite one another's block.
   - **A reset — `/clear` and `/resume`, the same places the conversation's `plan`
-    resets — clears `liveBuf`, `liveSeen` and any pending `liveTimer`, and bumps an
-    `epochRef`** (`resetLiveViews` in `src/plugins/assistant.ts`); the conversation's `turn` is NOT
-    reset there, it belongs to the conversation's whole history, not one turn.
-    `send()` and the `!command` runner each capture `epochRef.current` when they
+    resets — clears `liveBuf`, `liveSeen` and any pending `liveTimer`, and bumps the
+    conversation's `epoch`** (`Conversation.resetLiveViews` in
+    `src/assistant/conversation.ts`); the conversation's `turn` is NOT reset there, it
+    belongs to the conversation's whole history, not one turn.
+    `send()` and the `!command` runner each capture `epoch` when they
     START; every one of their callbacks that could still fire after a LATER reset —
     a tool's own view (`offerLive`), its `changes` (`onToolRun`), the turn's own
     final `flushLive()`, `!command`'s own completion — compares its captured value
-    against the ref's CURRENT one and drops the update if they differ, rather than
+    against the CURRENT one and drops the update if they differ, rather than
     finding no message for the old `callId` (the buffer forgot it) and pushing a NEW
     one into the fresh conversation: without this, a command still running when
     `/clear` fires would reappear, with its final phase, in the cleared chat.
@@ -2538,8 +2543,9 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   render carrying the end: a list built from `msgsRef` would throw the end away — a
   finished command's block would come back live and tick forever, an answer would
   lose its last words. This shows up under load; `queued-send-race.e2e.test.ts` makes it deterministic by running
-  zero-delay timers as microtasks. **A stopped or failed turn does not send the queue** (`restoreQueue` in
-  `src/plugins/assistant.ts`): the queued messages come back into the field in order,
+  zero-delay timers as microtasks. **A stopped or failed turn does not send the queue**
+  (`Conversation.restoreQueue`, and the chat's `restoreQueue`, which puts the texts
+  back into the field): the queued messages come back into the field in order,
   joined by blank lines, AHEAD of whatever was typed meanwhile — the order they would
   have gone out in; a `!`/`!!`-mode draft keeps its bang(s) and the level drops to 0. A failed
   request would most likely fail again. **↑ on an EMPTY field takes the last queued
@@ -3791,7 +3797,7 @@ commands; docs and hints never present either mechanism as a boundary.
     the model is sent passes through;
   - the log — `LogService.append` and `logToolRun`, and `consoleLogLines` (so the lines
     kept for stderr at exit have none);
-  - what a plugin says — `pluginNote` in the chat (`services.chatNote`, a command's
+  - what a plugin says — `Conversation.pluginNote` (`services.chatNote`, a command's
     `ctx.say`), a command's error line, a command panel's rows, title and notice
     before they are drawn (`/mcp`'s list names server URLs), and every toast
     (`showMessage`, bound in `renderApp`);
@@ -3940,7 +3946,7 @@ commands; docs and hints never present either mechanism as a boundary.
     first met after that (another `workspace.dir`) accepts nothing. A record MISSING
     after that (deleted while the app runs) accepts nothing — `markFacts` compares
     against nothing — and the chat says so once (`memoryRecordNotes('later')` from
-    `memoryBlock`); at a start, a missing record, or one the host wrote before any
+    `Conversation.memoryBlock`); at a start, a missing record, or one the host wrote before any
     first pass (`firstStartDone: false`, "pending" — its own fact writes, which it does
     compare against), is a line on the start screen (`memoryRecordNotes('start')`, in
     `runInteractive`'s `trustNotes`). An

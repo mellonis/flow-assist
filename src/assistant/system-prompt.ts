@@ -1,6 +1,7 @@
 // What the model is told besides the conversation: the system prompt built for each
 // message and for each round, and the lines that close, in the model's history, a turn
-// that did not finish. Pure but for the memory file, read fresh for every message.
+// that did not finish. Pure: the memory's facts are read by the conversation
+// (src/assistant/conversation.ts, `memoryLists`) and handed in.
 import { chatUser } from '../loader/registry.js';
 import { chatLanguage } from './agent.js';
 import { memoryPromptBlock, type Fact } from './memory-store.js';
@@ -50,10 +51,9 @@ export function baseStatic(config: Record<string, unknown>): string {
 
 // The memory's INDEX for the system prompt — never every fact's text: every
 // message reads it again, so a fact added or edited mid-session is in the next
-// one. A fact changed outside flow-assist is left out until the person accepts
-// it (`/memory accept`). Nothing stored → '' (no block).
-// The facts are the conversation's project's and the global ones, as read and marked
-// (`markFacts`); one changed outside flow-assist waits for `/memory accept`.
+// one. The facts are the conversation's project's and the global ones, as read and
+// marked (`markFacts`); one changed outside flow-assist is left out until the person
+// accepts it (`/memory accept`). Nothing stored → '' (no block).
 export function memoryBlock(project: readonly Fact[], global: readonly Fact[]): string {
   const kept = (facts: readonly Fact[]) => facts.filter((f) => !f.outside);
   return memoryPromptBlock(kept(project), kept(global));
