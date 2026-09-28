@@ -10,10 +10,10 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { addTrigger, chatUser } from '../loader/registry.js';
+import { addTrigger } from '../loader/registry.js';
 import { bgActiveCount } from '../loader/tools-core.js';
 import { autoBadge, autoCommand, autoConfirms, autoSaid, nextAutoMode, type AutoMode } from '../assistant/auto.js';
-import { createPlan, describePlan } from '../assistant/plan.js';
+import { createPlan } from '../assistant/plan.js';
 import { pickVerb, verbList } from '../assistant/verbs.js';
 import { NOTES_MODES, addCalls, callRun, endRound, startsWithNext, notesCommand, notesMode, notesSaid, type CallRun, type NotesMode, type TurnPart } from '../assistant/step.js';
 import { lineTab, lineView, type TabWalk } from '../config/commandline.js';
@@ -21,14 +21,14 @@ import { completePath, completeSlash, listDirectory, type ChatCommandDef } from 
 import { configSetLine, type CompleteResult } from '../config/commands.js';
 import { RESTART_NOTE, parseValue, type ConfigChange } from '../config/load.js';
 import { redactDeep, redactSecrets } from '../assistant/secrets.js';
-import { apiHistory, compactConversation, chatLanguage, requestTools, transcriptSoFar } from '../assistant/agent.js';
+import { apiHistory, compactConversation, requestTools, transcriptSoFar } from '../assistant/agent.js';
 import { RESUMED_NOTE, autoCompactLimits, overThreshold } from '../assistant/compaction.js';
 import { stripToolMarkup } from '../assistant/tool-markup.js';
 import { createToolSet, toolLoadingMode } from '../assistant/tool-loading.js';
 import { llmOpts } from '../assistant/llm-endpoint.js';
 import { copyTarget, copyToClipboard } from '../assistant/copy.js';
 import { cdChatTarget, createShellState, formatShell, nextCwd, realOf, runMark, runShell, shellAutoRun, shellLimits, shellOutcome, shellRoots, startNote, tildePath, type ShellResult } from '../assistant/shell.js';
-import { findInstructions, instructionsBlock, instructionsNote, type ProjectInstructions } from '../assistant/project-instructions.js';
+import { findInstructions, instructionsNote, type ProjectInstructions } from '../assistant/project-instructions.js';
 import {
   JOURNAL_DAYS, KEEP_SESSIONS, SESSION_VERSION, acquireLock, closeSession, cutTitle, flushOnExit, journalPath, listSessions, loadSession, lockPath,
   makeLockToken, newSessionId, dropEmptyDirs, moveSessionToProject, pickToContinue, projectHome, projectSessions, projectOf, pruneSessions, releaseLock, removeSession, renameSession, saveSession, sessionFingerprint,
@@ -52,7 +52,7 @@ import { bindingGlyph, firstGlyph, isKey, isMouseButton, isMouseKey, keyGlyph } 
 import { hoverEnabled } from '../config/mouse.js';
 import { askKey, askStart, type AskQuestion, type AskState } from '../assistant/ask.js';
 import { keptAfterClear, memoryCommand, type MemoryLists, type Shown } from '../assistant/memory-command.js';
-import { memoryPromptBlock, migrateMemoryJson, readFacts, removeFact, writeIndex, type Fact } from '../assistant/memory-store.js';
+import { migrateMemoryJson, readFacts, removeFact, writeIndex } from '../assistant/memory-store.js';
 import { acceptFact, firstStart, firstStartPending, markFacts, memoryRecordNotes } from '../assistant/memory-trust.js';
 import { memoryFilePath } from '../runtime/services/memory.js';
 import { ensureWorkspace, workspaceFor, workspaceNote, workspaceRoot } from '../assistant/workspace.js';
@@ -69,6 +69,8 @@ import type { Plugin } from '../loader/plugin.js';
 import type { PluginApi } from '../runtime/plugin-api.js';
 import { isPanelSpec, panelAnswer, panelKey as commandPanelKey, panelKeys, panelRows, panelStart, panelTop, type PanelSpec, type PanelState } from '../assistant/command-panel.js';
 import type { Command as PluginCommand } from '../loader/plugin.js';
+import { STOPPED_TURN, baseStatic as baseStaticFor, failedTurn, joinSystem, memoryBlock as memoryBlockFor, planBlock as planBlockFor, projectBlock as projectBlockFor, roundCapTurn, summaryBlock as summaryBlockFor, systemParts as systemPartsFor } from '../assistant/system-prompt.js';
+import { answerAt, callOf, type ChatMsg, type Queued, type QueueWait } from '../assistant/conversation-types.js';
 
 // Slash-commands of the chat — a single source for runChatCommand and Tab-completion.
 // `/analyze` is a tracker slash command and is removed.
@@ -113,21 +115,7 @@ export function logShareMessage(lines: readonly string[], arg = ''): string | nu
 // What ⏎ on the empty field sends after a turn stopped at a turn limit
 // (`ai.maxRounds`, `ai.maxTurnTokens`).
 export const CONTINUE_WORD = 'continue';
-// How a turn that did not finish ends in the MODEL's history — an assistant message,
-// read as the model's own previous turn. A question left there unanswered was answered
-// with the next one: the model went back to what the person had stopped.
-export const STOPPED_TURN = '(Stopped by the person before I finished. I am not resuming this request unless they ask me to.)';
-// What the model's history says of a turn the host stopped at its limit — `ai.maxRounds`
-// or, with `tokens`, `ai.maxTurnTokens`: in the model's voice, where it stopped — so a
-// "continue" after it reads as picking up there.
-export function roundCapTurn(rounds: number, lastStep?: string, tokens?: number): string {
-  const limit = tokens !== undefined ? `${tokens} tokens, its budget for one turn (ai.maxTurnTokens)` : `${rounds} rounds, its limit for one turn (ai.maxRounds)`;
-  return `(The host stopped this turn after ${limit}${lastStep ? `; my last step was ${lastStep}` : ''}. The work is not finished: on "continue" I pick up from there.)`;
-}
-export function failedTurn(message: unknown): string {
-  const why = String(message ?? '').replace(/\s+/g, ' ').trim().slice(0, 200);
-  return `(This turn failed before I could finish${why ? `: ${why}` : ''}.)`;
-}
+export { STOPPED_TURN, failedTurn, roundCapTurn } from '../assistant/system-prompt.js';
 
 // Something the person said or did: a message, or a `!command` they ran. A session
 // with neither is not worth saving.
@@ -161,44 +149,6 @@ export function configLineOf(name: string, args: string): string | null {
     return null;
   }
 }
-
-// A chat message. `role` is the OpenAI role; `content` may be null when a message
-// carries tool_calls. Extra fields ride along (live/reasoning/parts/duration/…).
-interface ChatMsg {
-  role: string;
-  content?: string | null;
-  // The round being written now, and whether it is known to carry a tool call — then
-  // it is a step, not the answer (src/assistant/step.ts).
-  live?: string;
-  liveQuiet?: boolean;
-  reasoning?: string;
-  // The turn so far in the order it happened: the steps (the text of each round that
-  // went on to call a tool) and the changes its writes reported. Display only.
-  parts?: TurnPart[];
-  duration?: number;
-  stopped?: boolean;
-  // A block a tool asked the host to draw (role 'view') — a command's output so far.
-  views?: ViewRecord[];
-  // The call a DISCARDED view belonged to — kept on the message so a later final for
-  // the same call still finds it (ids are places among drawn messages; removing the
-  // message would move every fold id after it).
-  discardedCallId?: string;
-  [k: string]: unknown;
-}
-
-// The message this turn's answer is being written into: the last assistant message
-// the turn has not yet stamped with its duration. It is looked up rather than assumed
-// to be the last one, because a tool's view (a command's output) is a message of its
-// own and may well sit after it — and the turn's seconds and what it cost belong on
-// the answer whatever landed below it. −1 when the turn has no answer message yet.
-function answerAt(list: ChatMsg[]): number {
-  for (let i = list.length - 1; i >= 0; i--) {
-    const m = list[i]!;
-    if (m.role === 'assistant' && m.duration == null) return i;
-  }
-  return -1;
-}
-
 
 // The app-glue dispatched to by the :ask command.
 interface AssistantCtx {
@@ -617,7 +567,6 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // turn puts it back into the field instead — `restoreQueue`); ↑ on an empty
           // field takes the last one back until it is delivered. queueRef is what the
           // handlers act on, `queued` mirrors it for the render.
-          type Queued = { text: string; hold?: boolean };
           // When a queued message reaches the model in a running turn — the one rule the
           // delivery and the queue line share. A message naming an image waits for the
           // turn's end (it goes as a message of its own, images and all) and keeps every
@@ -625,7 +574,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // later text first would reorder what the person wrote. A message held with ⇥
           // waits alone: the person held that one on purpose, and a correction typed
           // after it is meant to reach the model now.
-          const queueWait = (list: Queued[], at: number): 'step' | 'end' | 'image' | 'behind' => {
+          const queueWait = (list: Queued[], at: number): QueueWait => {
             const img = list.slice(0, at + 1).findIndex((m) => imagesInText(m.text, imagesRef.current).length > 0);
             if (img === at) return 'image';
             if (img >= 0) return 'behind';
@@ -1327,30 +1276,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             setTimeout(() => takeInboxRef.current(), 0);
           };
 
-          // The «cheap» synchronous base: a directive about the reply (language/
-          // brevity), who it is answering, a write-language directive. No network — it
-          // is assembled instantly on every message, so it is not cached.
-          const baseStatic = () => {
-            // Who speaks — the LLM does not know itself: mix in `config.user` (when the
-            // person set one) so it addresses a human.
-            const who = chatUser(host.config as { user?: { name?: unknown; login?: unknown } });
-            const identity = who
-              ? `You are talking to ${who.name}${who.login && who.login !== who.name ? ` (login ${who.login})` : ''}. Address the answer to them, not to an anonymous service account.`
-              : '';
-            // Between tool calls the model writes prose, because it has nothing else to
-            // write there. Asking it not to narrate did not work — it narrated anyway,
-            // at whatever length. So it is asked for a SHAPE instead: one short `Next:`
-            // line before a call and nothing else — the chat never draws that line
-            // (src/assistant/step.ts), so a model that keeps to it leaves nothing but
-            // what it did on screen. The final answer is not a step, so the line is
-            // asked for before a call only.
-            const chatLang = chatLanguage((host.config as Record<string, unknown>).ai as Record<string, unknown>);
-            const directive = `Always respond in ${chatLang}. Answer concisely and to the point: only the outcome, and no retelling of your own moves in the final answer. Before you call a tool, write ONE short line that starts with "Next:" and says what you are about to do — nothing else between calls, no plans, no commentary, no repetition of what you already said. Do not begin the final answer with "Next:". Never claim you changed, created or deleted something unless a write tool actually returned success for it; if a write was declined or errored, say so instead. If the user asks why you did not run a tool, or says they do not see its result, do NOT just restate that the tool was already called («it’s already done», «it was scheduled»): actually re-run it now, or ask the user to confirm the repeat («run it again?»). Never claim a result you have not seen returned.`;
-            // Write-language directive. The tracker named tracker tools here; the host is
-            // tracker-agnostic, so it is generalized to any write/persist tool.
-            const writeLangDirective = `When you write or persist content (a write tool: memory, config set/unset, fs, or any tool that writes), write in ${chatLang}.`;
-            return [directive, identity, writeLangDirective].filter(Boolean).join('\n\n');
-          };
+          const baseStatic = () => baseStaticFor(host.config);
 
           // The memory as the conversation sees it: its project's facts and the global
           // ones (src/assistant/memory-store.ts), read from the files each time, each
@@ -1364,41 +1290,22 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               projectLabel: project ? tildePath(project) : '',
             };
           };
-          // The memory's INDEX for the system prompt — never every fact's text: every
-          // message reads it again, so a fact added or edited mid-session is in the next
-          // one. A fact changed outside flow-assist is left out until the person accepts
-          // it (`/memory accept`). Nothing stored → '' (no block).
           const memoryBlock = () => {
             // A record gone missing while the app runs sends nothing, and says so once.
             const missing = memoryRecordNotes('later');
             if (missing.length && !memoryMissingSaidRef.current) { memoryMissingSaidRef.current = true; for (const n of missing) pluginNote(n); }
             if (!missing.length) memoryMissingSaidRef.current = false;
             const l = memoryLists();
-            const kept = (facts: Fact[]) => facts.filter((f) => !f.outside);
-            return memoryPromptBlock(kept(l.project), kept(l.global));
+            return memoryBlockFor(l.project, l.global);
           };
-          // The CURRENT task plan (the `todo` tool), re-read every message so the model
-          // sees the live checkboxes it created and must keep in sync. The rendered
-          // `▾ plan` block only reflects `todo` calls — so this block instructs it to
-          // route every state change through the tool, never to describe the status in
-          // prose (the bug it hits: it narrates "42 → done" in chat but the block never
-          // moves because `todo complete` was never called). Empty → '' (no block).
-          const planBlock = () => {
-            const plan = planRef.current.snapshot();
-            if (!plan.length) return '';
-            // The plan's own order, by id — the same text the `todo` tool returns.
-            return `## Current task plan (the \`todo\` tool)\nYou maintain it through \`todo\`; it changes only when you call the tool. Name an item by its id or its text.\n${describePlan(plan)}`;
-          };
+          const planBlock = () => planBlockFor(planRef.current.snapshot());
           // What the person's screens show now, as the plugins describe it
           // (src/assistant/screen-context.ts). Read fresh for every request — every
           // round of a turn — and never kept: not in `apiRef`, not in the session.
           const screenNow = (): ContextItem[] => {
             try { return (host.services as { chatContext?: () => ContextItem[] }).chatContext?.() ?? []; } catch { return []; }
           };
-          // The compacted part of the conversation, as the system context carries it —
-          // read fresh wherever it is used: an automatic compaction mid-turn changes it
-          // between two rounds of one message.
-          const summaryBlock = () => (summaryRef.current ? `Summary of the conversation so far (older turns were compacted):\n${summaryRef.current}` : '');
+          const summaryBlock = () => summaryBlockFor(summaryRef.current);
           const contextWindowOf = () => Number((host.config.ai as { contextWindow?: unknown } | undefined)?.contextWindow) || DEFAULT_CONTEXT_WINDOW;
           // How full the model's context is (assistant/context-meter.ts). `extra` is what
           // the history will hold beyond `apiRef` (a turn's transcript so far), and
@@ -1415,31 +1322,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             );
           };
 
-          // The system prompt of a message = the «cheap» base (directive+identity) + the
-          // screens the model can open + fresh memory + the project's instructions + the current plan + the summary. No
-          // network: the base is synchronous, memory a local file, the instructions read
-          // when the shell's directory was last set, the plan the tool's module state. It
-          // is also what the display list keeps as its system message (and so the
-          // session), which is one reason what the screens show is not in it; the other
-          // is the cache — it goes at the end of each request instead (`requestTail`,
-          // `screenNow`). Everything but the instructions and the screens is taken once per
-          // message (`systemParts`); those two are read again for every round
-          // (`AgentOpts.systemPrompt`), so a `cd` mid-turn reaches the next round — a
-          // plan read per round would change the cached prefix after every `todo` call.
-          const projectBlock = () => instructionsBlock(projectRef.current);
+          const projectBlock = () => projectBlockFor(projectRef.current);
           // The plugins' screens the model can open, and the keys the person presses
           // (src/runtime/screens.ts): read from the plugins as they are before each round,
           // so a plugin that joined late, or one disabled or enabled in `:plugins`, is
           // in the next round's list as it now stands. '' with nothing to list.
           const screensBlock = () => (host.services as { screens?: { promptBlock: () => string } }).screens?.promptBlock() ?? '';
-          const systemParts = () => ({
-            base: baseStatic(), screens: screensBlock(), memory: memoryBlock(), plan: planBlock(),
-            summary: summaryBlock(),
-          });
-          const joinSystem = (p: ReturnType<typeof systemParts>, project: string) => {
-            const parts = [p.base, p.screens, p.memory, project, p.plan, p.summary].filter(Boolean);
-            return parts.length ? parts.join('\n\n') : null;
-          };
+          const systemParts = () => systemPartsFor(host.config, screensBlock(), memoryBlock(), planRef.current.snapshot(), summaryRef.current);
           // A note is said once: not again when the list already ends in the same one
           // (a continued session that said it before the restart).
           const pushProjectNote = (note: string) => {
@@ -1528,7 +1417,6 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
 
           // ── Live views (src/assistant/views.ts) ── placing what `turnRef`/`liveBuf`/
           // `liveSeen` (declared with the other refs above) collect.
-          const callOf = (m: ChatMsg) => (m.views as ViewRecord[] | undefined)?.[0]?.callId ?? m.discardedCallId;
           const placeViews = (recs: ViewRecord[]) => setMessages((cur) => {
             const next = cur.slice();
             for (const rec of recs) {
