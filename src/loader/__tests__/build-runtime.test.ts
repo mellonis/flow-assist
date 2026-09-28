@@ -220,3 +220,30 @@ test('a plugin that joins goes before the first plugin that comes after it in th
   expect(joinIndex(list('core', 'a', 'b'), 'c', rank)).toBe(3);
   expect(joinIndex(list('core', 'a'), 'guest', rank)).toBe(2);
 });
+
+// The start-up loader loads a trusted plugin from where its trust was checked — the
+// recorded real path — never through the link again, as `loadTrustedPlugin` does while
+// the app runs.
+test('a trusted plugin is loaded from the place its trust records, not through its link', async () => {
+  const { fakeRemote } = await import('../../__tests__/helpers/remote-fake');
+  const { realpathSync } = await import('node:fs');
+  const fake = fakeRemote();
+  const root = mkdtempSync(join(tmpdir(), 'fa-trusted-at-'));
+  const real = join(root, 'elsewhere', 'fake');
+  mkdirSync(real, { recursive: true });
+  writeFileSync(join(real, 'manifest.json'), JSON.stringify(fake.manifest));
+  const enabled = join(root, 'plugins-enabled');
+  mkdirSync(enabled);
+  symlinkSync(real, join(enabled, 'fake'));
+  const repo = { enabledPlugins: async () => ['fake'], list: async () => [] } as never;
+  const trust = { file: join(root, 'plugins.trusted.json'), modelShell: false };
+  const dirs: string[] = [];
+  const realWarn = console.warn;
+  console.warn = () => {};
+  const loading = loadPlugins({ config: {}, repo, enabledDir: enabled, trust, remoteTransport: (_m, d) => { dirs.push(d); return fake.transport; } }).finally(() => { console.warn = realWarn; });
+  for (let i = 0; i < 50 && !dirs.length; i++) await Bun.sleep(2);
+  fake.answerHello();
+  const plugins = await loading;
+  expect(plugins.some((p) => p.name === 'fake')).toBe(true);
+  expect(dirs).toEqual([realpathSync(real)]);
+});

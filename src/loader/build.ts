@@ -245,6 +245,9 @@ export async function loadPlugins({
   // imported or its process started (./trust.ts). The first check of a directory trusts
   // what is there and says so once.
   let enabled = listed;
+  // Where each trusted plugin is loaded from: the place its trust was checked at, never
+  // through the link again — the rule `loadTrustedPlugin` holds while the app runs.
+  let trustedAt: Record<string, string> = {};
   if (enabledDir) {
     const check = checkPluginTrust(enabledDir, listed, trust);
     const said = (line: string) => { notes.push(`[plugins] ${line}`); trustNotes.push(line); if (!late) console.warn(`[plugins] ${line}`); };
@@ -255,6 +258,7 @@ export async function loadPlugins({
       skip(shownName(u.name), untrustedText(u));
     }
     enabled = listed.filter((n) => check.trusted.includes(n));
+    trustedAt = check.at;
   }
   late?.order(enabled);
   const loads = enabled.map(async (name): Promise<Plugin | null> => {
@@ -268,14 +272,17 @@ export async function loadPlugins({
     const log = late ? (line: string) => late.note(line) : (line: string) => { console.warn(line); notes.push(line); };
     // Whether it can run here is read from its manifest before any of its code runs; one
     // that cannot is skipped at once, never said to be starting.
-    const manifest = readPluginManifest(join(enabledDir, name));
+    // A trusted name whose link leads nowhere now has no place: loaded through the link,
+    // it fails as a link to nothing does.
+    const dir = trustedAt[name] ?? join(enabledDir, name);
+    const manifest = readPluginManifest(dir);
     const compat = pluginCompat(manifest, THIS_HOST);
     if (!compat.ok) {
       skip(name, compat.reason);
       return null;
     }
     if (compat.note) notes.push(`[plugins] ${name} ${compat.note}`);
-    const loading = loadEnabledPlugin(name, { config, enabledDir, renders, make, remoteTransport, log });
+    const loading = loadEnabledPlugin(name, { config, enabledDir, renders, make, remoteTransport, log, dir });
     // A remote plugin is not waited for in the app: it joins when its handshake is done.
     if (late && isRemoteManifest(manifest)) {
       late.expect(name, loading);

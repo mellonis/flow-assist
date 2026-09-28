@@ -151,6 +151,9 @@ export interface Untrusted {
 
 export interface TrustCheck {
   trusted: string[];
+  // Where each trusted plugin is trusted at: the real path its link led to when the check
+  // read it. A plugin is loaded from there, never through the link again.
+  at: Record<string, string>;
   untrusted: Untrusted[];
   // The names trusted by this check, as the first start; null otherwise.
   bootstrapped: string[] | null;
@@ -170,14 +173,17 @@ export function checkPluginTrust(enabledDir: string, names: string[], opts?: Tru
   const valid = names.filter(isPluginName);
   const refused: Untrusted[] = names.filter((n) => !isPluginName(n)).map((name) => ({ name, refused: true }));
   if (state === 'unreadable') {
-    return { trusted: [], untrusted: [...refused, ...valid.map((name) => ({ name }))], bootstrapped: null, unreadable: file };
+    return { trusted: [], at: {}, untrusted: [...refused, ...valid.map((name) => ({ name }))], bootstrapped: null, unreadable: file };
   }
   if (state === 'missing') {
-    if (modelShellOf(opts)) return { trusted: [], untrusted: [...refused, ...valid.map((name) => ({ name }))], bootstrapped: null, unreadable: null };
+    if (modelShellOf(opts)) return { trusted: [], at: {}, untrusted: [...refused, ...valid.map((name) => ({ name }))], bootstrapped: null, unreadable: null };
     const plugins: Record<string, string> = { ...(rec.dirs[key] ?? {}) };
+    // Only a link that leads somewhere now has a place to load from: a recorded name whose
+    // link leads nowhere keeps its entry and loads nothing.
+    const at: Record<string, string> = {};
     for (const name of valid) {
       const target = pluginTarget(enabledDir, name);
-      if (target) plugins[name] = target;
+      if (target) { plugins[name] = target; at[name] = target; }
     }
     const trusted = valid.filter((n) => n in plugins);
     if (!opts?.readOnly) {
@@ -185,7 +191,7 @@ export function checkPluginTrust(enabledDir: string, names: string[], opts?: Tru
       rec.firstStartDone = true;
       try { writeRecord(file, rec); } catch { /* unrecorded, the next start is the first again */ }
     }
-    return { trusted, untrusted: [...refused, ...valid.filter((n) => !(n in plugins)).map((name) => ({ name }))], bootstrapped: opts?.readOnly ? null : trusted, unreadable: null };
+    return { trusted, at, untrusted: [...refused, ...valid.filter((n) => !(n in plugins)).map((name) => ({ name }))], bootstrapped: opts?.readOnly ? null : trusted, unreadable: null };
   }
   const known = rec.dirs[key] ?? {};
   // Forget what is no longer there — a link removed by hand, by an installer, by git —
@@ -199,15 +205,16 @@ export function checkPluginTrust(enabledDir: string, names: string[], opts?: Tru
   const tomb = rec.forgotten[key] ?? {};
   const own = (m: Record<string, string>, n: string) => (Object.prototype.hasOwnProperty.call(m, n) ? m[n] : undefined);
   const trusted: string[] = [];
+  const at: Record<string, string> = {};
   const untrusted: Untrusted[] = [...refused];
   for (const name of valid) {
     const target = pluginTarget(enabledDir, name);
     const trustedAt = own(known, name);
-    if (target && trustedAt === target) { trusted.push(name); continue; }
+    if (target && trustedAt === target) { trusted.push(name); at[name] = trustedAt; continue; }
     const was = trustedAt ?? own(tomb, name);
     untrusted.push(was && target && was !== target ? { name, was, now: target } : { name });
   }
-  return { trusted, untrusted, bootstrapped: null, unreadable: null };
+  return { trusted, at, untrusted, bootstrapped: null, unreadable: null };
 }
 
 // Where a plugin's link leads now and what the record says of it, read only: `recorded`

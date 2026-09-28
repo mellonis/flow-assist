@@ -3791,7 +3791,10 @@ commands; docs and hints never present either mechanism as a boundary.
     `config set plugins.…`) checks it BEFORE a manifest is read, so an untrusted plugin
     is neither imported nor spawned, never `late.expect`ed or `wait`ed; it is a skip line
     (`[plugins] skip <name>: ` + `untrustedText`) and an entry in the caller's
-    `untrusted` (`{ name, was?, now?, refused? }`). The name and the target, not a
+    `untrusted` (`{ name, was?, now?, refused? }`). A trusted plugin is read and loaded
+    from the target its trust was checked at (`TrustCheck.at`, `loadEnabledPlugin`'s
+    `dir`), never through the link again — the same rule `loadTrustedPlugin` holds for
+    the `:plugins` panel's loads. The name and the target, not a
     content hash: a `git pull`, or an installer that unpacks each version into the same
     `plugins-available/<name>` and makes the relative link `../plugins-available/<name>`
     again without the binary, keeps it; a plugin new to such an installer needs one

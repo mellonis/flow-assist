@@ -18,7 +18,8 @@ What each version of flow-assist brought, newest first. The version is the one i
   trust is forgotten, so enabled again it waits for `y` — and `y` trusts one, showing
   where its link leads (both places when it moved) and waiting for a second `y`. Every
   plugin the list loads is checked for trust again and loaded from where it was trusted:
-  a link a command moved meanwhile loads nothing.
+  a link a command moved meanwhile loads nothing. A start loads each trusted plugin from
+  that place too, never through its link again.
   Installing, removing and updating stay `flow-assist plugins …`.
   **For plugin authors:** nothing to change; the person can now disable your plugin
   while the app runs (docs/plugins.md, "Where a plugin lives").

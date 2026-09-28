@@ -134,9 +134,10 @@ for the global one. So the app keeps a record of what it put there itself.
   list. A plugin you disable there is forgotten as a removal is (its link waits in
   `plugins-enabled/.disabled/`): enabling it again does not load it until you press `y`,
   which trusts it at once while it leads where it did — and a command that moves the
-  link back loads nothing at the next start. Every plugin the list loads — enabled,
-  restarted, trusted — is checked again first and loaded from the place you trusted, so
-  a link moved in the meantime loads nothing and its row says where it leads now.
+  link back loads nothing at the next start. Every plugin the app loads — at a start, or
+  from the list: enabled, restarted, trusted — is loaded from the place you trusted, never
+  through its link again; the list checks it again first, so a link moved in the meantime
+  loads nothing and its row says where it leads now.
 - **A memory the app did not write is not sent.** The app keeps the hash of each fact
   file as it wrote it (through the assistant's `memory` tool, or a plugin's use of the
   memory) or as you accepted it. A fact file that was changed or added some other way is
@@ -204,7 +205,9 @@ them, or take the marker off. A record that is damaged fails closed — nothing 
 until you say so — but one that is deleted makes the next start a first start, which
 trusts or accepts whatever is there then, a plugin or fact the command put there
 included — the start screen says it happened, and nothing stops it; so does a record
-rewritten to look like one from before the first start (`{"firstStartDone": false}`). Beyond that, trust in a plugin is
+rewritten to look like one from before the first start (`{"firstStartDone": false}`).
+An entry added to the plugin record by hand — which a command can write — is trusted at
+the next start without a word, the same as deleting or resetting the record. Beyond that, trust in a plugin is
 where it lives, not what its code says: a command that edits the code inside a trusted
 plugin's directory is not caught, nor one that writes into a trusted plugin's
 repository. A fact file the assistant reads by its path with `workspace_read` reaches
