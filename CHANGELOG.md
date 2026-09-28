@@ -32,6 +32,27 @@ What each version of flow-assist brought, newest first. The version is the one i
   **For plugin authors:** declare `"flowtty": ">=1.0.0-alpha.37 <1.0.0-alpha.38"` — a
   manifest still declaring the alpha.36 range is refused as incompatible. The host
   API number is unchanged.
+
+- **A plugin loads only when you trust it, and a memory the app did not write is not
+  sent.** A command could leave something the app trusts at its next start — a link in
+  `plugins-enabled/`, which runs with the app's rights, or a file in the assistant's
+  `memory/`, which rides in every later request. Now the app records what it put there
+  itself. A plugin in `plugins-enabled/` that you did not install or trust is not
+  loaded; the start screen and the log say `not trusted — flow-assist plugins trust
+  <name>`. `plugins install` trusts what it installs, the new `plugins trust <name>`
+  trusts a plugin linked by hand or by an installer script, `plugins remove` forgets
+  it, and `plugins ls` marks an untrusted one. Trust is the plugin's name and where its
+  link leads, so updating it in place keeps it; a link moved elsewhere needs trusting
+  again. A plugin the assistant installs is not trusted until you run `plugins trust`.
+  A memory fact changed or added outside the app is left out of every request and shown
+  in `/memory` as `changed outside flow-assist`; `/memory accept <n>` (or `all`) sends it
+  again. The first start after upgrading trusts the plugins already enabled and accepts
+  the facts already stored, once. From a command the assistant runs, `plugins trust` is
+  refused and nothing is recorded. Like the settings guard, this stops accidents, not a
+  command set on getting round it — docs/safety.md says where it stops.
+  **For kit installers:** a script that unpacks and links plugins without the binary
+  (as the kit's `install.sh` does) keeps an updated plugin trusted, but a plugin new to
+  that install needs `flow-assist plugins trust <name>` once.
 - **A background run and the one-shot prompt read the project's instructions once per
   directory.** Both built the `## Project instructions` section through a closure that
   walked the directory and reread every `AGENTS.md` again before every round, even when

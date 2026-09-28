@@ -5,7 +5,8 @@
 // builder, call it with `{ renders, config, make, z }` and the host's mark registries,
 // and await it — a builder may be async. They join the list in the order they are
 // enabled, whichever finished first. A broken plugin is skipped with a line in the
-// loader's notes.
+// loader's notes, and so is one the person has not trusted (./trust.ts) — before its
+// manifest is read, so none of its code runs and no process of its starts.
 //
 // Two ways to wait. By default everything is awaited — every remote plugin's handshake
 // and every plugin's `ready` — which is what the one-shot prompt and the CLI need: they
@@ -42,6 +43,7 @@ import { THIS_HOST, pluginCompat, readPluginManifest } from './compat.js';
 import { isRemoteManifest, remotePlugin, transportFor } from '../remote/index.js';
 import { refreshToolRegistry } from './tools.js';
 import { skipLine, type LatePlugins } from './late.js';
+import { checkPluginTrust, untrustedText, type TrustOptions, type Untrusted } from './trust.js';
 
 // A plugin builder: `build<X>Plugin({ renders, config, make, z, modelMaySet, modelMaySave,
 // appliesOnRestart, toolsChanged })` → Plugin (or a promise of one).
@@ -124,6 +126,11 @@ export interface LoadPluginsOptions {
   // The running app's: what is not awaited goes here and joins it later (./late.ts).
   // Absent — everything is awaited.
   late?: LatePlugins;
+  // Where the enabled plugins the person has not trusted are listed (./trust.ts): none of
+  // their code runs; the start screen names them.
+  untrusted?: Untrusted[];
+  // The trust record's file and whether this runs in the model's shell — a test's own.
+  trust?: TrustOptions;
 }
 
 export async function loadPlugins({
@@ -135,6 +142,8 @@ export async function loadPlugins({
   notes = [],
   remoteTransport,
   late,
+  untrusted = [],
+  trust,
 }: LoadPluginsOptions): Promise<Plugin[]> {
   const skip = (name: string, why: string) => {
     const line = skipLine(name, why);
@@ -155,7 +164,20 @@ export async function loadPlugins({
 
   // Enabled plugins, all at once: one that waits on a process or a server does not hold
   // up the next. Each resolves to its plugin, or to null once its skip is said.
-  const enabled = await repo.enabledPlugins();
+  const listed = await repo.enabledPlugins();
+  // Only a plugin the person trusts is looked at further — its manifest read, its code
+  // imported or its process started (./trust.ts). The first check of a directory trusts
+  // what is there and says so once.
+  let enabled = listed;
+  if (enabledDir) {
+    const check = checkPluginTrust(enabledDir, listed, trust);
+    if (check.bootstrapped?.length) notes.push(`[plugins] trusted at first start: ${check.bootstrapped.join(', ')}`);
+    for (const u of check.untrusted) {
+      untrusted.push(u);
+      skip(u.name, u.movedTo ? `${untrustedText(u.name)} (its link leads to ${u.movedTo} now)` : untrustedText(u.name));
+    }
+    enabled = listed.filter((n) => check.trusted.includes(n));
+  }
   late?.order(enabled);
   const loads = enabled.map(async (name): Promise<Plugin | null> => {
     if (!enabledDir) {

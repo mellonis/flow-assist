@@ -4,6 +4,9 @@
 // rather than scanning the filesystem. Always on (built-in, not gated by
 // config.ai.disabledTools). plugin_list and tools_list are read-only; the three
 // mutating tools are write-flagged so the chat pauses with a y/n confirmation.
+// A plugin the model installs is not trusted (./trust.ts): the auto mode may have
+// answered that y/n, and it names only a plugin, not what is in its directory. It loads
+// once the person runs `flow-assist plugins trust <name>`, which the result says.
 
 import type { ToolGroup } from './tools.js';
 
@@ -58,7 +61,7 @@ export const hostGroupTools = (
       type: 'function',
       function: {
         name: 'host:plugins_install',
-        description: 'WRITE: install a plugin into the assistant (added to the enabled set and pulled from the package registry). Write-flagged: the chat pauses with a y/n confirmation.',
+        description: 'WRITE: install a plugin into the assistant (added to the enabled set and pulled from the package registry). Write-flagged: the chat pauses with a y/n confirmation. It loads only after the person trusts it with `flow-assist plugins trust <name>` in a terminal and restarts the assistant.',
         parameters: {
           type: 'object',
           properties: {
@@ -124,9 +127,12 @@ export const hostGroupTools = (
           .map(n => ({ name: n, version: '', description: 'built-in plugin (always loaded)', active: true, builtin: true }));
         return JSON.stringify([...builtins, ...registry]);
       }
-      case 'host:plugins_install':
+      case 'host:plugins_install': {
         if (typeof repo.install !== 'function') return 'host:plugins_install — plugin repository not configured.';
-        return withRestartHint(await repo.install(argName(args)));
+        const res = (await repo.install(argName(args))) as { ok?: boolean };
+        if (!res?.ok) return withRestartHint(res);
+        return `${JSON.stringify(res)} — installed but not trusted: it loads once the person runs \`flow-assist plugins trust ${argName(args)}\` in a terminal and restarts the assistant`;
+      }
       case 'host:plugins_remove': {
         if (typeof repo.remove !== 'function') return 'host:plugins_remove — plugin repository not configured.';
         const res = (await repo.remove(argName(args))) as { ok?: boolean; error?: string };

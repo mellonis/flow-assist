@@ -1,6 +1,6 @@
 // The CLI. Classifies argv into a subcommand (`parseCli`), then `main`
 // dispatches: no args → interactive TUI (`renderApp`), `config …` → the config
-// subcommand (get/set/unset/help on the host schema), `plugins ls|install|remove|update`
+// subcommand (get/set/unset/help on the host schema), `plugins ls|install|trust|remove|update`
 // → the plugin repo, any other argv → a one-shot `<prompt>` chat via `agentChat`,
 // and `--help`/`--version`.
 //
@@ -30,6 +30,7 @@ import { stopRemotePlugins } from './remote/lifecycle.js';
 import { noPluginsNote } from './loader/install-root.js';
 import { fetchPluginFromRegistry } from './loader/registry-download.js';
 import { installPluginArchive, isArchiveSource } from './loader/archive-install.js';
+import { checkPluginTrust, trustPlugin, untrustedText, type Untrusted } from './loader/trust.js';
 import type { PluginRepo } from './loader/repo.js';
 import type { PluginRepo as RepoShape } from './loader/host-group.js';
 import { loadPlugins } from './loader/build.js';
@@ -218,41 +219,72 @@ export async function runConfig(args: string[], config: Record<string, unknown>,
 }
 
 // ─── plugins subcommand ───────────────────────────────────────────────────────
-async function runPlugins(args: string[], config: Record<string, unknown>, repo: PluginRepo): Promise<void> {
+// Where the plugins are and where the lines go: the install's own and the console,
+// unless a test gives its own. A plugin the person installs here is trusted — its name
+// and where its link leads (src/loader/trust.ts) — and so is one they name to
+// `plugins trust`; a host process started from a command the model runs records
+// neither, and says so.
+export type PluginsDeps = { availableDir: string; enabledDir: string; io?: ConfigIo };
+
+// What an install says when the model's command ran it: installed, not trusted.
+const notTrustedYet = (name: string) => `plugin '${name}' is not trusted: a command the assistant runs cannot trust a plugin — run \`flow-assist plugins trust ${name}\` yourself`;
+
+export async function runPlugins(args: string[], config: Record<string, unknown>, repo: PluginRepo, deps: PluginsDeps = { availableDir, enabledDir }): Promise<void> {
+  const io = deps.io ?? consoleIo;
   const sub = (args[0] ?? '').toLowerCase();
   const name = args[1];
+  // The person's own install is their word that the plugin may load.
+  const trustInstalled = (installed: string) => {
+    const t = trustPlugin(deps.enabledDir, installed);
+    if (!t.ok) io.err(inModelShell() ? notTrustedYet(installed) : t.error);
+  };
 
   if (sub === 'ls' || sub === 'list') {
     const entries = await repo.list();
+    const untrusted = new Set(checkPluginTrust(deps.enabledDir, await repo.enabledPlugins()).untrusted.map((u) => u.name));
     for (const e of entries) {
-      const state = e.active ? 'active' : 'inactive';
+      const state = e.active ? (untrusted.has(e.name) ? `active, ${untrustedText(e.name)}` : 'active') : 'inactive';
       const source = e.source && e.source !== 'git' ? ` (${e.source})` : '';
       const missing = e.missingDeps.length ? `  missing: ${e.missingDeps.join(',')}` : '';
       const settingMiss = e.missingSettings?.length ? `  missing settings: ${e.missingSettings.join(',')}` : '';
       const incompatible = e.broken ? '  broken link' : e.incompatible ? `  ${e.incompatible}` : '';
-      console.log(`${e.name}  v${e.version || '-'}  [${state}]${source}${incompatible}${missing}${settingMiss}`);
+      io.out(`${e.name}  v${e.version || '-'}  [${state}]${source}${incompatible}${missing}${settingMiss}`);
     }
-    const note = await missingPluginsNote(repo);
-    if (note) console.log(note);
+    const note = noPluginsNote(deps.enabledDir, (await repo.enabledPlugins()).length, existsSync);
+    if (note) io.out(note);
     return;
   }
 
   // An archive (a .tar.gz path or an https URL) is unpacked into plugins-available/
   // and enabled; a name is linked from there or fetched from the registry.
   if (sub === 'install' && name && isArchiveSource(name)) {
-    const res = await installPluginArchive(name, { availableDir, enabledDir });
+    const res = await installPluginArchive(name, { availableDir: deps.availableDir, enabledDir: deps.enabledDir });
     const replacedNote = res.replaced ? (res.previousVersion ? `replaced (was v${res.previousVersion})` : 'replaced') : 'installed';
-    console.log(res.ok
+    io.out(res.ok
       ? `plugin '${res.name}'${res.version ? ` v${res.version}` : ''} ${replacedNote} — restart the assistant for the change to take effect`
       : `plugins install: ${res.error}`);
+    if (res.ok && res.name) trustInstalled(res.name);
     if (!res.ok) process.exitCode = 1;
     return;
   }
 
   if (sub === 'install' && name) {
     const res = await repo.install(name);
-    console.log(res.ok ? `plugin '${name}' installed — restart the assistant for the change to take effect` : res.error);
+    io.out(res.ok ? `plugin '${name}' installed — restart the assistant for the change to take effect` : res.error ?? '');
+    if (res.ok) trustInstalled(name);
     if (!res.ok) process.exitCode = 1;
+    return;
+  }
+
+  // A plugin linked or unpacked into plugins-enabled/ some other way — by hand, by a
+  // kit's installer, or one whose link now leads elsewhere — loads once trusted here.
+  if (sub === 'trust' && name) {
+    const res = trustPlugin(deps.enabledDir, name);
+    if (res.ok) io.out(`plugin '${name}' trusted (${res.target}) — restart the assistant for the change to take effect`);
+    else {
+      io.err(res.error);
+      process.exitCode = 1;
+    }
     return;
   }
 
@@ -261,19 +293,19 @@ async function runPlugins(args: string[], config: Record<string, unknown>, repo:
     // On a successful uninstall, purge the plugin's memory (its `plugin`-scope facts)
     // so they don't linger after the plugin is gone.
     if (res.ok) purgePluginMemories(config, name);
-    console.log(res.ok ? `plugin '${name}' removed — restart the assistant for the change to take effect` : res.error);
+    io.out(res.ok ? `plugin '${name}' removed — restart the assistant for the change to take effect` : res.error ?? '');
     if (!res.ok) process.exitCode = 1;
     return;
   }
 
   if (sub === 'update') {
     const res = await repo.update(name);
-    console.log(res.ok ? (name ? `plugin '${name}' updated — restart the assistant for the change to take effect` : 'plugins updated — restart the assistant for the change to take effect') : res.error);
+    io.out(res.ok ? (name ? `plugin '${name}' updated — restart the assistant for the change to take effect` : 'plugins updated — restart the assistant for the change to take effect') : res.error ?? '');
     if (!res.ok) process.exitCode = 1;
     return;
   }
 
-  printPluginsHelp();
+  printPluginsHelp(io);
 }
 
 // ─── LLM config gate ──────────────────────────────────────────────────────────
@@ -398,7 +430,9 @@ async function runInteractive(config: Record<string, unknown>, repo: PluginRepo)
   // its servers join the app when they are ready (src/loader/late.ts). The one-shot
   // prompt and the CLI wait for everything instead — they read the tools once.
   const late = createLatePlugins();
-  const plugins = await loadPlugins({ config, repo, renders, enabledDir, notes: loadNotes, late });
+  // An enabled plugin the person has not trusted is not loaded; the start screen names it.
+  const untrusted: Untrusted[] = [];
+  const plugins = await loadPlugins({ config, repo, renders, enabledDir, notes: loadNotes, late, untrusted });
   const registry = assembleToolRegistry({ plugins, config, repo: repo as unknown as RepoShape });
   // The backend holds the console while it owns the screen; with `onConsole` set every
   // line goes to the log (`L`) at once and nothing is printed again at exit.
@@ -425,7 +459,7 @@ async function runInteractive(config: Record<string, unknown>, repo: PluginRepo)
     void stopRemotePlugins().then(() => process.exit(0));
   };
   const pluginsNote = await missingPluginsNote(repo);
-  handle = await renderApp(backend, { plugins, config, renders: {}, tools: registry, onExit, pluginsNote: pluginsNote ?? undefined, loadNotes, consoleLog, late });
+  handle = await renderApp(backend, { plugins, config, renders: {}, tools: registry, onExit, pluginsNote: pluginsNote ?? undefined, loadNotes, consoleLog, late, untrusted: untrusted.map((u) => u.name) });
 }
 
 // ─── help text ────────────────────────────────────────────────────────────────
@@ -437,7 +471,7 @@ function printUsage(): void {
       'Usage:',
       '  flow-assist                       Start the interactive TUI',
       '  flow-assist config <cmd> ...      get|set|unset|help on host config',
-      '  flow-assist plugins <cmd> ...     ls|install|remove|update plugins',
+      '  flow-assist plugins <cmd> ...     ls|install|trust|remove|update plugins',
       '  flow-assist <prompt>              One-shot chat with the loaded tool registry;',
       '                                    it declines every write, as it cannot ask',
       '  flow-assist --allow-writes <prompt>',
@@ -466,13 +500,14 @@ function printConfigHelp(): void {
   );
 }
 
-function printPluginsHelp(): void {
-  console.log(
+function printPluginsHelp(io: ConfigIo = consoleIo): void {
+  io.out(
     [
       'plugins subcommands:',
       '  plugins ls                List available plugins',
-      '  plugins install <name>    Install a plugin (symlink from plugins-available)',
-      '  plugins install <file>    Install a plugin archive (.tar.gz, a path or an https URL)',
+      '  plugins install <name>    Install and trust a plugin (symlink from plugins-available)',
+      '  plugins install <file>    Install and trust a plugin archive (.tar.gz, a path or an https URL)',
+      '  plugins trust <name>      Trust a plugin in plugins-enabled that was put there another way',
       '  plugins remove <name>     Remove a plugin (unlink from plugins-enabled)',
       '  plugins update [name]     Re-fetch registry-managed plugins (an archive: install the newer one)',
     ].join('\n'),

@@ -82,7 +82,8 @@ past incident may motivate a rule; keep the rule, drop the incident.
   names what ships, beside the manifest and `package.json` — for a plugin whose
   directory also holds what it is built from (a client package of a workspace).
 - **A plugin kept in a repository of its own** is linked into `plugins-enabled/` from
-  wherever it lives, and it takes React, flowtty and the host's sources for its tests
+  wherever it lives — and trusted with `plugins trust <name>` ("Secrets", the plugin and
+  memory records) — and it takes React, flowtty and the host's sources for its tests
   through links to this checkout's packages (one React, never two). `bunfig.toml`
   keeps `bun test` here out of `plugins-enabled/`: such a plugin's tests run in its
   own repository.
@@ -458,6 +459,11 @@ board.
   under the list, `starting: tutor, mcp…` (`startingLine`, `src/views/home.ts`,
   from `late.starting()`), gone once each has joined or failed. A plugin joins the list
   — and its entry key the start screen, its caps the footer — only once it has.
+- An enabled plugin the person has not trusted ("Secrets") never starts, so it is never
+  on that line: it has a dim row of its own at the end of the list, `<name>  not trusted
+  — flow-assist plugins trust <name>` (`renderHome`'s `untrusted`, handed over by
+  `runInteractive` from `loadPlugins`' `untrusted`), shown under the `plugins` heading
+  even when no plugin loaded.
 
 ### Remote plugins
 
@@ -1085,7 +1091,8 @@ hold this set together:
   when in fact the conversation is gone and only the memory remains. So `/clear` reports
   what it kept (`keptAfterClear`, both scopes counted), and `/memory [project|global]`
   lists — this project's facts, then every project's, numbered through both — and
-  `/memory forget <n|project|global|all>` removes, without going through the model
+  `/memory forget <n|project|global|all>` removes and `/memory accept <n|all>` accepts
+  a fact changed outside flow-assist (below), without going through the model
   (`src/assistant/memory-command.ts`, pure: the lists in, a note and what to remove out).
   What the host tells the person this way is a display-only message of role `note`;
   `apiHistory` drops it, and the model's history (`apiRef`) never holds it.
@@ -1139,6 +1146,19 @@ hold this set together:
     check there, the fact being moved left out of the latter. Otherwise only `add` is guarded:
     `update` is the remedy the duplicate refusal names, so refusing that too would
     leave nowhere to go (an entry added short and then updated long is still open).
+  - **A fact the host did not write is not sent** (`src/assistant/memory-trust.ts`; the
+    record is under "Secrets"). `readFacts` gives each fact the `hash` of its file's
+    text; `markFacts(root, ws, facts)` marks `outside` every fact whose hash is not the
+    one recorded for its file — by the file's real directory and name — and is what the
+    chat's `memoryLists` and the tool's `memoryScopes` read through. An `outside` fact
+    is left out of `memoryPromptBlock`, out of the tool's `list` and its `update` /
+    `forget` lookups (`Memory <id> not found`), and out of `/clear`'s kept count; `/memory`
+    lists it as `[changed outside flow-assist]` and `/memory accept <n|all>` records the
+    hash the person was shown (`acceptFact`) — a slash command, so never the model's.
+    `MEMORY.md` is not checked: the prompt's index is built from the facts' files, never
+    from it. The artifacts are never in the prompt, and a `workspace_write` never
+    reaches `memory/`, so neither needs a record. `services.memory` (a plugin's) sees
+    every fact, marked or not: its `save` removes what its list leaves out.
   - **`memory.json`** — `memoryFilePath(config)`: `config.memory.file`, else
     `memory.json` under `hostStateDir()` — is where an older host kept one list for
     every project. At the chat's start (the timer after the session's own, so a
@@ -3097,7 +3117,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   walking the rest. What is offered is `chatComplete`'s (`src/config/fieldcomplete.ts`,
   pure): a `/command`'s name in the declared order (a bare `/` lists them all), then
   its argument from `CHAT_COMMAND_DEFS`' `values` — `/auto reads|all|off`, `/notes
-  step|open`, `/mode panel|window|full`, `/memory project|global|forget`, and `/resume` the saved sessions by number,
+  step|open`, `/mode panel|window|full`, `/memory project|global|forget|accept`, and `/resume` the saved sessions by number,
   newest first, each labelled with its title (`chatCommandDefs`, bound where `sessDir`
   is known and read when the field is drawn) — the picker (`/sessions`) is the way to
   find one by what was said — or, at a non-zero bang level, the last
@@ -3441,14 +3461,18 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
 
 - (default) `interactive` — the TUI.
 - `config get|set|unset|help` — host config.
-- `plugins ls|install|remove|update` — manage enabled plugins. `install` takes a name
+- `plugins ls|install|trust|remove|update` — manage enabled plugins. `install` takes a name
   (linked from `plugins-available/`, else fetched from the registry) or an archive —
   a `.tar.gz` path or an https URL (`loader/archive-install.ts`). An archive's member
   list is checked before extraction (no links, no `..`, one top-level `<name>/`), it
   is unpacked in a temporary directory, and it replaces only a plugin that came from
-  an archive (the `.flow-assist-source` marker says `archive`). The model's
-  `host:plugins_install` stays name-only: a URL in a tool argument may come from any
-  page the model has read.
+  an archive (the `.flow-assist-source` marker says `archive`). What `install` installs
+  is trusted, and `trust <name>` trusts a plugin put into `plugins-enabled/` another
+  way ("Secrets"); there is no separate `enable` — `install` is it. The model's
+  `host:plugins_install` stays name-only — a URL in a tool argument may come from any
+  page the model has read — and leaves what it installs untrusted.
+  `runPlugins(args, config, repo, deps)` takes the dirs and the output lines (`io`) as
+  `runConfig` does, so a test runs it on a root of its own.
 - any other arg — a one-shot `<prompt>` chat with the loaded tool registry. It
   declines every write; `--allow-writes` before the prompt lets them run, each said on
   stderr ("a path to the model that cannot ask the person declines writes", above). A
@@ -3650,6 +3674,46 @@ commands; docs and hints never present either mechanism as a boundary.
   same-user process that unsets the variable (`env -u FLOW_ASSIST_MODEL_SHELL`), writes
   `config.accepted.json` itself, or deletes it — the next start is then a first start,
   which accepts the files as they are — can still forge the record.
+- **A plugin or a memory fact the host did not record does not reach the next start**
+  (`src/loader/trust.ts`, `src/assistant/memory-trust.ts`). With commands running
+  unasked, or one approved and not read closely, the model's shell could otherwise make
+  itself persistent: a link in `plugins-enabled/` runs in the host's process (or as a
+  child with its environment) at the next start, and a file in `memory/` is a line of
+  every later request of its scope. Both records are the config guard's shape — the
+  host's own state, 0600, written by the host's own acts and the person's, never from a
+  process with `FLOW_ASSIST_MODEL_SHELL=1`, and the same limit: they stop the accident,
+  not intent (a same-user process can rewrite or delete them; a deleted one makes the
+  next start a first start).
+  - **Plugins** — `plugins.trusted.json`: per `plugins-enabled/` directory, by its real
+    path, each trusted plugin's name → the real path its link led to. `loadPlugins`
+    (every path: the app, the one-shot prompt, `config set plugins.…`) checks it
+    BEFORE a manifest is read, so an untrusted plugin is neither imported nor spawned,
+    never `late.expect`ed or `wait`ed; it is a skip line (`[plugins] skip <name>: not
+    trusted — flow-assist plugins trust <name>`, `(its link leads to <path> now)` for a
+    retargeted link) and an entry in the caller's `untrusted`. The name and the target,
+    not a content hash: a `git pull` or a kit's installer (which unpacks over the same
+    directory and makes the relative link again, never calling the binary) keeps it; a
+    command editing a trusted plugin's code is out of scope. A directory with no record
+    is recorded at its first check with everything in it trusted — one log line,
+    `[plugins] trusted at first start: a, b` — except from the model's shell, where
+    nothing is recorded and nothing trusted. What records: `plugins install` (name or
+    archive) and `plugins trust <name>` from the CLI (`runPlugins`, `src/main.ts`), each
+    refused a record under the model's shell (the install still happens, and says so).
+    `repo.remove` forgets (`untrustPlugin`), the model's `host:plugins_remove` included.
+    The model's `host:plugins_install` leaves the plugin untrusted and its result names
+    `flow-assist plugins trust <name>`: the auto mode may answer its y/n
+    (`confirmedByPerson` does not tell it from the person's key), and the y/n shows a
+    name, not what a command may have put in that directory. `plugins ls` marks an
+    untrusted plugin `[active, not trusted — …]`.
+  - **Memory** — `memory.accepted.json`: `roots`, the workspace roots (real paths)
+    whose facts were accepted once, and `files`, a fact file's real path → the hash of
+    the text the host wrote (`addFact` / `saveFact` → `writeFactFile` →
+    `recordFactFile`; `removeFact` forgets) or the person accepted. The first
+    `markFacts` under a root walks it (no link followed) and accepts every fact file
+    there, then records the root — even when the workspace being read holds nothing, so
+    a file planted later in any project's workspace under it is checked, not taken in.
+    Checked at index build only: a hash of text `readFacts` reads anyway and one read
+    of the record.
 - The test rig builds the set from what a test set itself (`setSecretsEnv` in
   `src/__tests__/helpers/scripted.ts`), never from the machine's own tokens, and its
   `LLM_TOKEN` starts with `^`, a character no streamed test text ends in.

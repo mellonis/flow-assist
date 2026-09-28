@@ -9,6 +9,7 @@ import { createElement as h } from 'react';
 import { Box, Text } from '@flowtty/react';
 import { cellWidth } from '../cells.js';
 import { bindingGlyph } from '../playback/keys.js';
+import { untrustedText } from '../loader/trust.js';
 
 // ƒ — the assistant's mark — drawn large with box-drawing characters: the hook, the
 // crossbar, the tail. Every glyph here is a single narrow-width code point, so the
@@ -23,7 +24,7 @@ export const LOGO = [
 
 interface HomePlugin { name: string; description?: string; entry?: string[]; tools?: unknown[]; aiTools?: unknown[] }
 
-export function renderHome({ title, plugins, keys, builtins, width = 80, accent = 'green', pluginsNote, starting = [] }: {
+export function renderHome({ title, plugins, keys, builtins, width = 80, accent = 'green', pluginsNote, starting = [], untrusted = [] }: {
   title: string;
   plugins: HomePlugin[];
   // The resolved key map — so what is shown is what is bound NOW.
@@ -39,6 +40,10 @@ export function renderHome({ title, plugins, keys, builtins, width = 80, accent 
   // The plugins still starting — a remote plugin's handshake, a plugin waiting on its
   // servers. Named on one quiet line under the list until each has joined or failed.
   starting?: string[];
+  // Enabled plugins the person has not trusted (src/loader/trust.ts): never loaded, so
+  // never starting; each on a quiet line of its own under the list, with the command
+  // that trusts it.
+  untrusted?: string[];
 }) {
   const cap = (action: string) => bindingGlyph(keys[action]);
   // What a person can do from here, each only if its key is bound.
@@ -68,6 +73,10 @@ export function renderHome({ title, plugins, keys, builtins, width = 80, accent 
   // measure that still reads as a list (not a paragraph across the terminal).
   const longest = Math.max(0, ...guests.map((g) => cellWidth(g.description ?? 'tools for the assistant')));
   const descW = Math.max(16, Math.min(longest, 56, width - nameW - keyW - 12));
+  // A line wider than the screen wraps rather than running off it.
+  const quiet = (key: string, text: string) => h(Box, { key, width: Math.min(cellWidth(text), Math.max(16, width - 6)), flexShrink: 0 },
+    h(Text, { dim: true, wrap: 'wrap' }, text));
+  const untrustedRows = untrusted.map((name) => quiet(`untrusted:${name}`, `  ${name}  ${untrustedText(name)}`));
 
   // Centred on the screen as ONE block; inside it the rows keep a common left edge,
   // so the column of keys reads as a column.
@@ -82,7 +91,7 @@ export function renderHome({ title, plugins, keys, builtins, width = 80, accent 
       doors.map(([key, label]) => h(Box, { key: label, flexDirection: 'row' },
         h(Text, { bold: true, color: accent }, key + ' '.repeat(Math.max(0, pad + 2 - cellWidth(key)))),
         h(Text, null, label)))),
-    guests.length
+    guests.length || untrusted.length
       ? h(Box, { flexDirection: 'column' },
           h(Text, { dim: true }, 'plugins'),
           guests.map((g) => h(Box, { key: g.name, flexDirection: 'row' },
@@ -93,7 +102,8 @@ export function renderHome({ title, plugins, keys, builtins, width = 80, accent 
             // A long description WRAPS inside its column, so its next line starts under
             // its first — it neither runs off the screen nor stretches the block.
             h(Box, { width: descW, marginLeft: 2, flexShrink: 0 },
-              h(Text, { dim: true, wrap: 'wrap' }, g.description ?? (g.tools ? 'tools for the assistant' : ''))))))
+              h(Text, { dim: true, wrap: 'wrap' }, g.description ?? (g.tools ? 'tools for the assistant' : ''))))),
+          untrustedRows)
       : pluginsNote
         ? h(Box, { flexDirection: 'column' },
             h(Text, { dim: true }, 'plugins'),
@@ -101,10 +111,7 @@ export function renderHome({ title, plugins, keys, builtins, width = 80, accent 
             h(Box, { width: Math.min(cellWidth(pluginsNote), Math.max(16, width - 6)), marginLeft: 2, flexShrink: 0 },
               h(Text, { dim: true, wrap: 'wrap' }, pluginsNote)))
         : null,
-    starting.length
-      ? h(Box, { width: Math.min(cellWidth(startingLine(starting)), Math.max(16, width - 6)), flexShrink: 0 },
-          h(Text, { dim: true, wrap: 'wrap' }, startingLine(starting)))
-      : null));
+    starting.length ? quiet('starting', startingLine(starting)) : null));
 }
 
 // `starting: tutor, mcp…` — what has not joined yet.

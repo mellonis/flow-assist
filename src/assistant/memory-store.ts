@@ -17,6 +17,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { defaultPidAlive } from './sessions.js';
 import { writePrivate } from './workspace.js';
+import { factHash, forgetFactFile, recordFactFile } from './memory-trust.js';
 
 export const MEMORY_DIR = 'memory';
 export const MEMORY_INDEX = 'MEMORY.md';
@@ -30,6 +31,12 @@ export interface Fact {
   text: string;
   plugin?: string;
   mtimeMs: number;
+  // The hash of the file's text, as read (./memory-trust.ts compares it with what the
+  // host wrote).
+  hash?: string;
+  // Set by `markFacts`: the file is not what the host wrote or the person accepted —
+  // left out of the prompt and of the tool's list, shown in `/memory`.
+  outside?: boolean;
 }
 
 const CYRILLIC: Record<string, string> = {
@@ -103,8 +110,9 @@ export function readFacts(ws: string): Fact[] {
     try {
       const st = fs.lstatSync(file);
       if (!st.isFile()) continue;
-      const f = parseFact(e.name.slice(0, -3), fs.readFileSync(file, 'utf8'), st.mtimeMs);
-      if (f) out.push(f);
+      const text = fs.readFileSync(file, 'utf8');
+      const f = parseFact(e.name.slice(0, -3), text, st.mtimeMs);
+      if (f) out.push({ ...f, hash: factHash(text) });
     } catch { /* unreadable — not a fact */ }
   }
   return out.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
@@ -129,14 +137,23 @@ export function addFact(ws: string, input: NewFact): Fact {
   try { for (const n of fs.readdirSync(memDir(ws))) taken.add(n.replace(/\.md$/i, '').toLowerCase()); } catch { /* none yet */ }
   const id = slugOf(input.name || name, taken);
   const fact: Fact = { id, name, description: oneLine(input.description || text, 100), type: oneLine(input.type || DEFAULT_TYPE, 40) || DEFAULT_TYPE, text, ...(input.plugin ? { plugin: input.plugin } : {}), mtimeMs: Date.now() };
-  writePrivate(factPath(ws, id), renderFact(fact));
+  fact.hash = writeFactFile(ws, fact);
   writeIndex(ws);
   return fact;
 }
 
 export function saveFact(ws: string, fact: Fact): void {
-  writePrivate(factPath(ws, fact.id), renderFact(fact));
+  writeFactFile(ws, fact);
   writeIndex(ws);
+}
+
+// Every fact file the host writes goes through here, and its hash is recorded as the
+// host's own (./memory-trust.ts). Returns that hash.
+function writeFactFile(ws: string, fact: Fact): string {
+  const content = renderFact(fact);
+  writePrivate(factPath(ws, fact.id), content);
+  recordFactFile(factPath(ws, fact.id), content);
+  return factHash(content);
 }
 
 // Removes a fact by its file's name — any name `readFacts` reads, a hand-made one
@@ -148,6 +165,7 @@ export function removeFact(ws: string, id: string): boolean {
     if (!fs.lstatSync(factPath(ws, id)).isFile()) return false;
     fs.unlinkSync(factPath(ws, id));
   } catch { return false; }
+  forgetFactFile(factPath(ws, id));
   writeIndex(ws);
   return true;
 }

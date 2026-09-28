@@ -29,6 +29,7 @@ import {
 import { join, resolve } from 'node:path';
 import { THIS_HOST, pluginCompat, readPluginManifest } from './compat.js';
 import { isRemoteManifest } from '../remote/transport.js';
+import { untrustPlugin } from './trust.js';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -307,8 +308,10 @@ export function createPluginRepo({ availableDir, enabledDir, projectRoot, fetchP
       return fetchAndLink(n);
     },
 
-    // Removes a plugin: unlinks it from `enabled`. The available dir (and any
-    // `.flow-assist-source` marker) is left in place so re-install is instant.
+    // Removes a plugin: unlinks it from `enabled` and forgets that it was trusted
+    // (./trust.ts), so a link put back later is not trusted by the old word. The
+    // available dir (and any `.flow-assist-source` marker) is left in place so
+    // re-install is instant.
     async remove(name: string): Promise<InstallResult> {
       const n = validPluginName(name);
       if (!n) return { ok: false, error: `plugin '${name}' — invalid name (must be a single path segment)` };
@@ -318,6 +321,7 @@ export function createPluginRepo({ availableDir, enabledDir, projectRoot, fetchP
       }
       try {
         unlinkSync(enabledLink);
+        untrustPlugin(enabledDir, n);
         return { ok: true };
       } catch (e) {
         return { ok: false, error: (e as Error).message };

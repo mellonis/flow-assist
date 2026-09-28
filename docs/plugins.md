@@ -14,11 +14,19 @@ the plugins linked into its `plugins-enabled/`:
 
 ```sh
 ln -s ../examples/notes plugins-enabled/notes     # a plugin kept anywhere
+bun run src/cli.ts plugins trust notes            # …which loads once you trust it
 bun run src/cli.ts plugins install <name>         # or one from the plugin registry
 ```
 
 `plugins-available/` holds the bundled ones (`repo`, `gitlab`, `mcp`); a plugin of
-your own can live in a repository of its own and be linked from there.
+your own can live in a repository of its own and be linked from there. A plugin runs
+with the host's rights, so the host loads only one the person trusts: `plugins install`
+trusts what it installs, and a link made any other way — by hand, by an installer
+script — waits for `plugins trust <name>`; until then the start screen says
+`not trusted — flow-assist plugins trust <name>`. Trust is the plugin's name and where
+its link leads, so pulling a newer version into the same directory keeps it, and a link
+moved elsewhere needs trusting again ([safety.md](safety.md), "Plugins and memory
+changed behind the app's back").
 
 ```
 notes/

@@ -13,7 +13,8 @@ import { loadConfig, getDeep, getSchemaAtPath, describeSchema, unwrapNode, confi
 import { configSetLine } from '../config/commands.js';
 import { refuseMemory } from '../runtime/services/memory.js';
 import { addFact, readFacts, removeFact, saveFact, type Fact } from '../assistant/memory-store.js';
-import { callProject, ensureWorkspace, listWorkspace, readScope, readWorkspaceFile, workspaceFor, writeArtifact, type WorkspaceScope } from '../assistant/workspace.js';
+import { callProject, ensureWorkspace, listWorkspace, readScope, readWorkspaceFile, workspaceFor, workspaceRoot, writeArtifact, type WorkspaceScope } from '../assistant/workspace.js';
+import { markFacts } from '../assistant/memory-trust.js';
 import { tildePath } from '../assistant/shell.js';
 import { openInBrowser } from '../runtime/services.js';
 import { resolveIdentityToken } from '../runtime/plugin-identity.js';
@@ -138,12 +139,14 @@ function schemaAt(key: string, pluginConfigs?: Record<string, unknown>): any {
 }
 
 // The facts the memory tool works on: the conversation's project and the global
-// workspace (./../assistant/workspace.ts), each read from its files on every call.
+// workspace (./../assistant/workspace.ts), each read from its files on every call. A
+// fact changed outside flow-assist (../assistant/memory-trust.ts) is not among them — not
+// listed, not found by id — until the person accepts it with /memory.
 function memoryScopes(config: Record<string, unknown>, ctx: CoreCtx) {
   const project = callProject(config, ctx as Parameters<typeof callProject>[1]);
   // With no project there is one workspace, the global one: the project's scope is it.
   const dir = (scope: WorkspaceScope) => workspaceFor(config, project, project ? scope : 'global');
-  const facts = (scope: WorkspaceScope) => (scope === 'project' && !project ? [] : readFacts(dir(scope)));
+  const facts = (scope: WorkspaceScope) => (scope === 'project' && !project ? [] : markFacts(workspaceRoot(config), dir(scope), readFacts(dir(scope))).filter((f) => !f.outside));
   return { project, dir, facts };
 }
 const asMemory = (f: Fact) => ({ id: f.id, text: f.text, ts: f.mtimeMs });

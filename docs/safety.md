@@ -1,8 +1,8 @@
 # Safety: what the assistant may do
 
 Everything about trust in one place: what the assistant asks you about, how to ask
-less, the paths where nobody can answer, how your tokens and settings are kept from
-it, and what these measures do not do. For maintainers, the rules behind this page
+less, the paths where nobody can answer, how your tokens, settings, plugins and memory
+are kept from it, and what these measures do not do. For maintainers, the rules behind this page
 are in [AGENTS.md](../AGENTS.md), "What the model can do" and "Secrets".
 
 ## The y/n: what is a write
@@ -100,6 +100,37 @@ one-shot prompt or a `config` command on a changed file does not use it and says
 `config set`, `:config set` and the assistant's `config_set` are the app's own writes;
 a `flow-assist config set` the assistant runs as a command is not — it waits for your yes.
 
+## Plugins and memory changed behind the app's back
+
+A command can leave something the app trusts at its next start: a link in
+`plugins-enabled/` is a plugin that runs with the app's rights, and a file in the
+assistant's `memory/` is a line in every later request of its project — every project,
+for the global one. So the app keeps a record of what it put there itself.
+
+- **A plugin loads only when you trust it.** `flow-assist plugins install` (a name or an
+  archive) trusts what it installs, and `flow-assist plugins trust <name>` trusts a plugin
+  put into `plugins-enabled/` another way — by hand, or by an installer script that
+  unpacks and links. Any other plugin there is not loaded — none of its code runs — and
+  the start screen and the log say `not trusted — flow-assist plugins trust <name>`.
+  Trust is the plugin's name and the place its link leads, so a newer version pulled or
+  unpacked into the same directory stays trusted, and a link that now leads elsewhere
+  is not. A plugin the assistant installs (`host:plugins_install`) is not trusted until
+  you run `plugins trust` yourself; `plugins remove` forgets the trust. The first start
+  after upgrading trusts everything already enabled, once, and the log lists it.
+- **A memory the app did not write is not sent.** The app keeps the hash of each fact
+  file as it wrote it (through the assistant's `memory` tool) or as you accepted it. A
+  fact file that was changed or added some other way is left out of every request and
+  out of the `memory` tool's own list, and `/memory` shows it as `changed outside
+  flow-assist`; `/memory accept <n>` (or `all`) sends it again as it reads now. The
+  index `memory/MEMORY.md` is never sent — the index in a request is built from the
+  facts' own files — so it needs no check. The first start after upgrading accepts the
+  facts already there, once. The assistant's working files (`artifacts/`) are never
+  sent either; it reads them only when it asks for one.
+
+A command the assistant runs carries the same marker as for the settings: from there,
+`flow-assist plugins trust` is refused, `plugins install` installs without trusting, and
+nothing the app does in that process updates either record.
+
 ## What the assistant may set or save
 
 The assistant may change nothing that decides what it can reach — its model, token, tools, the shell's and the web's reach, a plugin's roots. A few
@@ -130,3 +161,11 @@ yes. Like the token rules above, this stops accidents, not a command that sets o
 get round it: one running as you can also rewrite or delete the app's own record of
 what you accepted, or take the marker off — and a record that is deleted makes the
 next start a first start, which accepts the files as they are.
+
+The plugin and memory records are the same, with the same limits: a command can rewrite
+or delete them (a deleted record makes the next start a first start, which trusts or
+accepts what is there), and take the marker off. Beyond that, trust in a plugin is
+where it lives, not what its code says: a command that edits the code inside a trusted
+plugin's directory is not caught, nor one that writes into a trusted plugin's
+repository. A fact file the assistant reads by its path with `workspace_read` reaches
+it as data, whether or not you accepted it.

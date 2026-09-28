@@ -72,6 +72,18 @@ link, a `..` or anything outside that directory is refused before a byte is writ
 A newer archive replaces one installed from an archive; a plugin you checked out is
 never overwritten.
 
+A plugin loads only when you trust it. `plugins install` trusts what it installs; a
+plugin put into `plugins-enabled/` another way — a link you made by hand, an installer
+script that unpacks and links — is named on the start screen as `not trusted —
+flow-assist plugins trust <name>` until you run that. The first start after upgrading
+trusts everything already enabled, once, and the log (`L`) lists it. `plugins ls` marks
+an untrusted plugin, and `plugins remove` forgets the trust. See
+[safety.md](safety.md), "Plugins and memory changed behind the app's back".
+
+```sh
+bun run src/cli.ts plugins trust <name>       # trust a plugin in plugins-enabled/
+```
+
 Each plugin ships a `manifest.json` and a `shape` (commands/keys/views/surfaces/
 aiTools/services/tools/configSchema). Tool groups are delivered by plugins; there
 is no separate tools repo.

@@ -52,9 +52,10 @@ import { bindingGlyph, firstGlyph, isKey, isMouseButton, isMouseKey, keyGlyph } 
 import { hoverEnabled } from '../config/mouse.js';
 import { askKey, askStart, type AskQuestion, type AskState } from '../assistant/ask.js';
 import { keptAfterClear, memoryCommand, type MemoryLists } from '../assistant/memory-command.js';
-import { memoryPromptBlock, migrateMemoryJson, readFacts, removeFact } from '../assistant/memory-store.js';
+import { memoryPromptBlock, migrateMemoryJson, readFacts, removeFact, type Fact } from '../assistant/memory-store.js';
+import { acceptFact, markFacts } from '../assistant/memory-trust.js';
 import { memoryFilePath } from '../runtime/services/memory.js';
-import { ensureWorkspace, workspaceFor, workspaceNote } from '../assistant/workspace.js';
+import { ensureWorkspace, workspaceFor, workspaceNote, workspaceRoot } from '../assistant/workspace.js';
 import { CONTEXT_WARN_AT, DEFAULT_CONTEXT_WINDOW, cacheLine, contextBadge, estimateTokens, readContext, short as shortTokens } from '../assistant/context-meter.js';
 import { applyRecall, bulkyItems, createRecallState, decideBatch, recallLimits, recallLine, saveRecallState, type BulkyItem, type RecallSource, type ShellMeta } from '../assistant/recall.js';
 import { contextTitle, screenBlock, type ContextItem } from '../assistant/screen-context.js';
@@ -80,7 +81,7 @@ import type { Command as PluginCommand } from '../loader/plugin.js';
 // sessions directory is known (`chatCommandDefs` in the chat).
 type ChatCommand = HistoryCommand & ChatCommandDef;
 const CHAT_COMMAND_DEFS: ChatCommand[] = [
-  { name: 'compact' }, { name: 'context' }, { name: 'copy' }, { name: 'image' }, { name: 'resume' }, { name: 'sessions' }, { name: 'new' }, { name: 'title' }, { name: 'export' }, { name: 'clear' }, { name: 'memory', values: ['project', 'global', 'forget'] }, { name: 'workspace' },
+  { name: 'compact' }, { name: 'context' }, { name: 'copy' }, { name: 'image' }, { name: 'resume' }, { name: 'sessions' }, { name: 'new' }, { name: 'title' }, { name: 'export' }, { name: 'clear' }, { name: 'memory', values: ['project', 'global', 'forget', 'accept'] }, { name: 'workspace' },
   // `cd`'s own argument is a path, not a fixed set of values — its completion is
   // special-cased in `chatComplete`, the way shell mode's own path completion is.
   { name: 'cd' },
@@ -1348,21 +1349,26 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           };
 
           // The memory as the conversation sees it: its project's facts and the global
-          // ones (src/assistant/memory-store.ts), read from the files each time.
+          // ones (src/assistant/memory-store.ts), read from the files each time, each
+          // marked when the host did not write it (src/assistant/memory-trust.ts).
           const memoryLists = (): MemoryLists => {
             const project = currentProject();
+            const root = workspaceRoot(host.config);
+            const read = (ws: string) => markFacts(root, ws, readFacts(ws));
             return {
-              project: project ? readFacts(workspaceFor(host.config, project, 'project')) : [],
-              global: readFacts(workspaceFor(host.config, project, 'global')),
+              project: project ? read(workspaceFor(host.config, project, 'project')) : [],
+              global: read(workspaceFor(host.config, project, 'global')),
               projectLabel: project ? tildePath(project) : '',
             };
           };
           // The memory's INDEX for the system prompt — never every fact's text: every
           // message reads it again, so a fact added or edited mid-session is in the next
-          // one. Nothing stored → '' (no block).
+          // one. A fact changed outside flow-assist is left out until the person accepts
+          // it (`/memory accept`). Nothing stored → '' (no block).
           const memoryBlock = () => {
             const l = memoryLists();
-            return memoryPromptBlock(l.project, l.global);
+            const kept = (facts: Fact[]) => facts.filter((f) => !f.outside);
+            return memoryPromptBlock(kept(l.project), kept(l.global));
           };
           // The CURRENT task plan (the `todo` tool), re-read every message so the model
           // sees the live checkboxes it created and must keep in sync. The rendered
@@ -2686,7 +2692,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // What the journal held back belonged to the conversation being left.
               journalBuf.current = []; journalImport.current = null;
               const l = memoryLists();
-              const kept = keptAfterClear(l.project.length + l.global.length);
+              const kept = keptAfterClear([...l.project, ...l.global].filter((f) => !f.outside).length);
               if (kept) journal({ t: 'row', role: 'note', text: kept });
               setMessages(kept ? [{ role: 'note', content: kept }] : []);
             }
@@ -2892,6 +2898,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 const res = memoryCommand(arg, memoryLists());
                 // Said as it happened: a fact whose file could not be removed is named.
                 const failed = (res.forget ?? []).filter((f) => !removeFact(workspaceFor(host.config, currentProject(), f.scope), f.id));
+                // An accept is the person's word on the text they were shown (its hash).
+                for (const a of res.accept ?? []) acceptFact(workspaceFor(host.config, currentProject(), a.scope), a.id, a.hash);
                 pushNote(failed.length ? `${res.note}\nNot removed (the file could not be deleted): ${failed.map((f) => `memory/${f.id}.md`).join(', ')}.` : res.note);
                 setField('');
                 host.notify();
