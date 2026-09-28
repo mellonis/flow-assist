@@ -9,7 +9,8 @@
 // the first input since the previous frame to the end of this one — the React render
 // included, which the frame's own times leave out. A redraw has no input to count from,
 // so its time is the frame's own (layout + paint + draw). `:perf` reports both, per
-// kind; a frame slower than SLOW_FRAME_MS writes one line to the host log.
+// kind; a frame slower than SLOW_FRAME_MS writes one line to the host log, at most one
+// every SLOW_LOG_EVERY_MS.
 //
 // This is the app's concern, not any plugin's: the meter lives in the runtime, hears the
 // keys where the backend reports them and is read by the host's `:perf`.
@@ -26,6 +27,10 @@ export const FRAME_KINDS: readonly FrameKind[] = ['typing', 'wheel', 'other', 'r
 export const FRAME_WINDOW = 200;
 // A frame this slow (input to paint, or a redraw's own time) is logged.
 export const SLOW_FRAME_MS = 50;
+// At most one slow-frame line this often: a lagging app is slow frame after frame, and
+// a line each would flood the log it is read in. The frames in between are counted
+// into the next line.
+export const SLOW_LOG_EVERY_MS = 1000;
 
 export interface FrameRecord extends FrameStats {
   kind: FrameKind;
@@ -72,6 +77,7 @@ export interface FrameMeterOptions {
   slowMs?: number;
   // Where a slow frame's line goes (the host log).
   onSlow?: (line: string) => void;
+  slowEveryMs?: number;
   // Runs `fn` once the input's own synchronous work and its paint are over; a stamp no
   // frame took by then is dropped, so a key that changed nothing never lends its time
   // to an unrelated frame later. The paint is a microtask after the commit, so a
@@ -93,16 +99,21 @@ function spread(values: readonly number[], fmt: (n: number) => string): string {
   return `p50 ${fmt(percentile(values, 50))} p95 ${fmt(percentile(values, 95))} max ${fmt(Math.max(...values))}`;
 }
 
-// The one log line of a slow frame: what it answered and every counter it carried.
-export function slowFrameLine(r: FrameRecord): string {
+// The one log line of a slow frame: what it answered and every counter it carried, and
+// how many slow frames since the previous line were folded into this one.
+export function slowFrameLine(r: FrameRecord, folded = 0): string {
+  const more = folded ? ` · +${folded} slow frame${folded === 1 ? '' : 's'} since the last line` : '';
   const waited = r.latencyMs === undefined ? '' : ` · input→frame ${ms(r.latencyMs)} ms (${r.inputs} input${r.inputs === 1 ? '' : 's'})`;
-  return `[perf] slow frame · ${r.kind}${waited} · layout ${ms(r.layoutMs)} paint ${ms(r.paintMs)} draw ${ms(r.drawMs)} ms · ${r.commits} commit${r.commits === 1 ? '' : 's'} · ${r.applied} applied / ${r.skipped} skipped`;
+  return `[perf] slow frame · ${r.kind}${waited} · layout ${ms(r.layoutMs)} paint ${ms(r.paintMs)} draw ${ms(r.drawMs)} ms · ${r.commits} commit${r.commits === 1 ? '' : 's'} · ${r.applied} applied / ${r.skipped} skipped${more}`;
 }
 
 export function createFrameMeter(opts: FrameMeterOptions = {}): FrameMeter {
   const now = opts.now ?? (() => performance.now());
   const size = Math.max(1, opts.window ?? FRAME_WINDOW);
   const slowMs = opts.slowMs ?? SLOW_FRAME_MS;
+  const slowEvery = opts.slowEveryMs ?? SLOW_LOG_EVERY_MS;
+  let lastSlowLine = -Infinity;
+  let folded = 0;
   const later = opts.later ?? ((fn: () => void) => { setTimeout(fn, 0); });
   const kept = new Map<FrameKind, FrameRecord[]>(FRAME_KINDS.map((k) => [k, []]));
   let pending: { kind: InputKind; at: number; inputs: number } | null = null;
@@ -142,13 +153,19 @@ export function createFrameMeter(opts: FrameMeterOptions = {}): FrameMeter {
       frames += 1;
       if ((record.latencyMs ?? record.workMs) >= slowMs) {
         slow += 1;
-        opts.onSlow?.(slowFrameLine(record));
+        if (at - lastSlowLine < slowEvery) folded += 1;
+        else {
+          lastSlowLine = at;
+          const line = slowFrameLine(record, folded);
+          folded = 0;
+          opts.onSlow?.(line);
+        }
       }
     } catch { /* flowtty ends the app on a throw from onFrame */ }
   };
 
   const report = (): string[] => {
-    const lines = [`[perf] the last ${size} frames of each kind · ${frames} frames since start, ${slow} slower than ${slowMs} ms (each logged)`];
+    const lines = [`[perf] the last ${size} frames of each kind · ${frames} frames since start, ${slow} slower than ${slowMs} ms`];
     for (const kind of FRAME_KINDS) {
       const list = kept.get(kind)!;
       if (!list.length) { lines.push(`[perf] ${kind}: no frames`); continue; }

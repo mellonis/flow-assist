@@ -2137,7 +2137,9 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   `commits`, `applied` and `skipped` per kind into the log and says the p95s in the
   toast. A frame slower than `SLOW_FRAME_MS` (50 ms) appends one `[perf] slow frame`
   line with its counters — `services.log.append`, no redraw, so logging a slow frame
-  never costs another frame. `onFrame` must never throw (with no `onError` flowtty
+  never costs another frame — and at most one line per `SLOW_LOG_EVERY_MS` (1 s): the
+  slow frames in between are counted into the next line (`+N slow frames since the last
+  line`), so a lagging app does not flood the log it is read in. `onFrame` must never throw (with no `onError` flowtty
   would end the app), so the meter swallows its own errors. A test passes its own meter
   (`bootApp`'s `opts.frameMeter`) to read the frames.
 - **The typed command is text; everything drawn around it is chrome.** A drag over

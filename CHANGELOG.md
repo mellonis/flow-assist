@@ -13,7 +13,8 @@ What each version of flow-assist brought, newest first. The version is the one i
   led to it — typing, the wheel, another key or click, or none (a redraw) — and `:perf`
   reports the median, p95 and slowest wait from the input to the screen for each, over
   the last 200 frames, into the log, with the p95s in the toast. A frame slower than
-  50 ms leaves one line in the log with what it cost.
+  50 ms leaves one line in the log with what it cost, at most one a second (the slow
+  frames in between are counted into the next line).
 - **flowtty 1.0.0-alpha.34.** Scrolling and typing in a long conversation are
   lighter: a re-render no longer re-applies the layout of every box it touched, only
   of the boxes whose layout changed, so a wheel flick or a keystroke no longer lays

@@ -331,4 +331,5 @@ the redraws nobody typed for (an answer streaming in). The toast gives the p95 o
 the log (`L`) gets the whole report — the median, the p95 and the slowest wait from the
 key to the screen, the time the frame itself took, and how much of the screen was laid
 out again. A frame slower than 50 ms leaves a `[perf] slow frame` line in the log as it
-happens, so a lag you felt a minute ago can still be found there.
+happens — at most one a second, counting the slow frames in between — so a lag you felt
+a minute ago can still be found there.

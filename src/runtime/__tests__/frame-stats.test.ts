@@ -80,6 +80,7 @@ test('a slow frame is logged once, with its counters', () => {
   expect(r.slow).toEqual(['[perf] slow frame · typing · input→frame 80 ms (1 input) · layout 30 paint 10 draw 5.0 ms · 2 commits · 7 applied / 90 skipped']);
   expect(r.meter.totals()).toEqual({ frames: 2, slow: 1 });
   // A redraw is slow by its own work.
+  r.at(2000);
   r.meter.frame(stats({ layoutMs: 60 }));
   expect(r.slow.at(-1)).toStartWith('[perf] slow frame · redraw · layout 60');
 });
@@ -88,7 +89,7 @@ test('the report says p50/p95/max of each kind, and the headline the p95s', () =
   const r = rig();
   for (const lat of [2, 4, 6, 8, 20]) { r.at(0); r.meter.input({ name: 'a' }); r.at(lat); r.meter.frame(stats()); }
   const lines = r.meter.report();
-  expect(lines[0]).toBe('[perf] the last 5 frames of each kind · 5 frames since start, 0 slower than 50 ms (each logged)');
+  expect(lines[0]).toBe('[perf] the last 5 frames of each kind · 5 frames since start, 0 slower than 50 ms');
   expect(lines).toContain('[perf] typing: 5 frames · input→frame p50 6.0 p95 20 max 20 ms · layout+paint+draw p50 3.0 p95 3.0 max 3.0 ms · commits p50 1 p95 1 max 1 · applied p50 0 p95 0 max 0 · skipped p50 0 p95 0 max 0');
   expect(lines).toContain('[perf] wheel: no frames');
   expect(r.meter.headline()).toBe('perf: typing p95 20 ms');
@@ -109,4 +110,16 @@ test('the metered backend reports each key before its listener hears it', () => 
   metered(backend, spy).onKey!((k) => { heard.push(`app:${k.name}`); return undefined; });
   backend.press({ name: 'down' });
   expect(heard).toEqual(['meter:down', 'app:down']);
+});
+
+test('slow frames are logged at most once a second, the ones between counted into the next line', () => {
+  const r = rig(50);
+  for (let i = 0; i < 5; i++) { r.at(i * 100); r.meter.frame(stats({ layoutMs: 60 })); }
+  expect(r.slow).toHaveLength(1);
+  r.at(1000);
+  r.meter.frame(stats({ layoutMs: 70 }));
+  expect(r.slow).toHaveLength(2);
+  expect(r.slow[1]).toEndWith('· +4 slow frames since the last line');
+  expect(r.slow[0]).not.toContain('since the last line');
+  expect(r.meter.totals()).toEqual({ frames: 6, slow: 6 });
 });
