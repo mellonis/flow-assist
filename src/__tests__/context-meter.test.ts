@@ -114,13 +114,14 @@ test('a multi-round turn shows the reading rising after each round, before the a
   const ui = await bootApp(model, 110, 30, undefined, { ai: { baseUrl: 'http://scripted.model', model: 'scripted', toolLoading: 'all', contextWindow: 20_000 } });
   await ui.press('F');
   const pct = () => /ctx ~?\d+%/.exec(ui.backend.lastFrame)?.[0];
-  const before = pct();
 
   model.usage = { prompt_tokens: 4_000, completion_tokens: 0 };
   await ui.type('work for a while');
   await ui.press('return');
   await settle(20); // round 1 is held after its tool call, before it reports usage
-  expect(pct()).toBe(before); // nothing reported yet — still the estimate
+  // Nothing reported yet — still the estimate (`~`). Its number may have moved: the
+  // estimate now counts the message just sent.
+  expect(pct()).toMatch(/^ctx ~\d+%$/);
 
   model.release(); // round 1 ends: its usage lands, and the reading redraws at once
   await settle(20);
