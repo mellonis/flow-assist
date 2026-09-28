@@ -448,10 +448,31 @@ export async function remotePlugin(opts: RemotePluginOpts): Promise<Plugin> {
   };
 
   const keys = Object.fromEntries(Object.entries(registration.keys ?? {}).map(([a, b]) => [a, Array.isArray(b) ? b : [b]]));
+  // Its entry screen is what its entry key opens on the host's side (src/runtime/
+  // screens.ts): `ui_open` sends the plugin the key event that key would — the action,
+  // and the person's binding for it — under the host's rules. No screen with params
+  // crosses the wire.
+  const entryAction = (registration.entry ?? []).find((a) => Object.hasOwn(keys, a));
+  const screens: Plugin['screens'] = entryAction ? {
+    [entryAction]: {
+      entry: true,
+      title: typeof manifest.description === 'string' && manifest.description.trim() ? manifest.description.trim() : name,
+      open: (a) => {
+        if (stopped) throw new Error(stopped);
+        const id = ownBindings((a as PluginApi).host)[entryAction]?.[0];
+        if (!id) throw new Error(`its key ${entryAction} is not bound`);
+        const parts = id.split('+');
+        const keyName = id.endsWith('++') ? '+' : parts.at(-1)!;
+        send('key', { name: keyName, id, action: entryAction, ...(parts.includes('ctrl') ? { ctrl: true } : {}), ...(parts.includes('alt') ? { meta: true } : {}), ...(parts.includes('shift') ? { shift: true } : {}) });
+        return undefined;
+      },
+    },
+  } : undefined;
   const plugin = make(name, {
     name,
     keys,
     entry: registration.entry,
+    screens,
     description: typeof manifest.description === 'string' ? manifest.description.trim() || undefined : undefined,
     commands,
     tools: toolGroups,

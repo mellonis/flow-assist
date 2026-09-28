@@ -12,7 +12,8 @@ What each version of flow-assist brought, newest first. The version is the one i
   issue opens through the plugin's own tools. Opening asks no y/n, never happens over
   your typing or a question waiting for you — it waits for the end of the turn and says
   so — and never reaches `:plugins`, `/mcp`, the sessions or the settings, or a plugin
-  you have not trusted or have disabled.
+  you have not trusted or have disabled. A plugin in another language opens at its entry,
+  as its key opens it.
   **For plugin authors:** declare your screens in `screens` — the entry screen and any
   other with the params it takes, each with an `open` that sets your state — and open
   them from your tools with `host.open(screen, params)`, whose answer is a sentence to

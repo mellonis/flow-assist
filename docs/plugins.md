@@ -617,12 +617,14 @@ make('tutor', {
 - **The model's list.** Every message's system prompt carries a `## Screens` block, one
   line per plugin with a screen or an entry key: what the screens show (each `title`, or
   the screen's name), the key the person presses (your `entry` action's binding), and
-  what the model opens it with — `ui_open("tutor")` for an entry screen, and each name in
-  a screen's `tools`; with neither, that the person opens it with its key:
+  what the model opens it with — `ui_open("tutor")` for an entry screen (a plugin in
+  another language: its entry key), and each name in a screen's `tools`; with neither,
+  that the person opens it with its key:
   `- tutor — lessons, one lesson · key H · open with ui_open("tutor"), open_lesson`.
   Name your navigation tools there, or the model will reach for `ui_open` alone. The
-  list is read from the plugins as they are at each message: a plugin that joins late,
-  or one disabled or enabled in `:plugins`, is in the next one as it now stands.
+  list is read from the plugins as they are before every round of a turn: a plugin that
+  joins late, even mid-turn, or one disabled or enabled in `:plugins`, is in the next
+  round's list as it now stands.
 - **In the one-shot prompt** there is no screen and no `setup`: your tool has no `host`
   to call, and should say so.
 - An older host ignores `screens` and has no `host.open`: check that it is there. It is
@@ -1032,9 +1034,11 @@ give up that host's own attempts until some other host's restart revives the ser
   `chatNote`, `setConfig` / `unsetConfig`, `toolsChanged` and `ready` are a JS
   plugin's; a remote plugin's tools are the ones its `hello` gave.
 
-- **Declare screens the model can open.** `screens` and `host.open` are a JS plugin's:
-  a remote plugin's entry key is on the model's list (`## Screens`), said as the key the
-  person presses, and its screens open by that key alone.
+- **Declare screens with params, or open one itself.** `screens` and `host.open` are a
+  JS plugin's. A remote plugin's entry screen is what its entry key opens: the model's
+  `ui_open("<name>")` sends it the same `key` event that key would (the entry action,
+  the person's binding for it), under the same rules, and its line on the model's list
+  says `open with ui_open("<name>")`.
 
 - **Mark a config key for the model.** Its `configSchema` is JSON Schema, read into the
   host's zod, and carries no mark: every key of a remote plugin is the person's to set.

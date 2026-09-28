@@ -313,6 +313,45 @@ test('a plugin that joins late gains its line in the next message\'s list', asyn
   await ui.type('again');
   await ui.press('return');
   await until(ui, () => model.requests.length >= 2, 'the second request');
-  expect(systemOf(model, 1)).toContain('- fake — a word finder · key S · the person opens it with its key');
+  expect(systemOf(model, 1)).toContain('- fake — a word finder · key S · open with ui_open("fake")');
+  ui.app.unmount();
+});
+
+test('ui_open opens a remote plugin\'s entry as its key does: the plugin is sent the key event, and its surface comes up', async () => {
+  const model = new ScriptedModel();
+  model.script([{ tool: 'ui_open', args: { screen: 'fake' } }], [{ text: 'Open.' }]);
+  const fake = fakeRemote({ keys: { open: 'S' }, entry: ['open'] }, { description: 'a word finder' });
+  const ui = await bootApp(model, 120, 30, undefined, {}, { chatMode: 'panel', remote: { manifest: fake.manifest, transport: fake.transport } });
+  await ui.press('F');
+  await ui.type('open the word finder');
+  await ui.press('return');
+  await until(ui, () => model.requests.length >= 2, 'the round after ui_open');
+  expect(systemOf(model, 0)).toContain('- fake — a word finder · key S · open with ui_open("fake")');
+  expect(lastResult(model, 1)).toContain('Opened fake:open.');
+  const key = fake.events.find(([m, p]) => m === 'key' && (p as { action?: string }).action === 'open');
+  expect(key?.[1]).toMatchObject({ name: 'S', id: 'S', action: 'open' });
+  // The plugin answers the key as it answers the person's: its surface comes up.
+  fake.frame({ surface: ['Text', {}, 'the finder is open'], keycaps: [{ action: 'open', label: 'find' }], keys: { consume: ['open'] } });
+  await until(ui, () => ui.backend.lastFrame.includes('the finder is open'), 'the remote surface');
+  ui.app.unmount();
+});
+
+test('a plugin that joins mid-turn is in the next round\'s list, with ui_open', async () => {
+  const model = new ScriptedModel();
+  model.script([{ tool: 'datetime', args: {} }, { hold: true }], [{ text: 'done' }]);
+  const fake = fakeRemote({ keys: { open: 'S' }, entry: ['open'] }, { description: 'a word finder' });
+  fake.holdHello();
+  const ui = await bootApp(model, 120, 30, undefined, {}, { chatMode: 'panel', late: true, remote: { manifest: fake.manifest, transport: fake.transport } });
+  await ui.press('F');
+  await ui.type('what time is it');
+  await ui.press('return');
+  await until(ui, () => model.requests.length >= 1, 'the first request');
+  expect(systemOf(model, 0)).not.toContain('- fake —');
+  fake.answerHello();
+  await until(ui, () => ui.plugins.some((p) => p.name === 'fake'), 'the plugin joined');
+  model.release();
+  await until(ui, () => model.requests.length >= 2, 'the next round');
+  expect(systemOf(model, 1)).toContain('- fake — a word finder · key S · open with ui_open("fake")');
+  expect(toolNames(model, 1)).toContain('ui_open');
   ui.app.unmount();
 });

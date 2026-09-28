@@ -1422,15 +1422,15 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // is also what the display list keeps as its system message (and so the
           // session), which is one reason what the screens show is not in it; the other
           // is the cache — it goes at the end of each request instead (`requestTail`,
-          // `screenNow`). Everything but the instructions is taken once per message
-          // (`systemParts`); the instructions are read again for every round
+          // `screenNow`). Everything but the instructions and the screens is taken once per
+          // message (`systemParts`); those two are read again for every round
           // (`AgentOpts.systemPrompt`), so a `cd` mid-turn reaches the next round — a
           // plan read per round would change the cached prefix after every `todo` call.
           const projectBlock = () => instructionsBlock(projectRef.current);
           // The plugins' screens the model can open, and the keys the person presses
-          // (src/runtime/screens.ts): read from the plugins as they are at each message,
+          // (src/runtime/screens.ts): read from the plugins as they are before each round,
           // so a plugin that joined late, or one disabled or enabled in `:plugins`, is
-          // in the next message's list as it now stands. '' with nothing to list.
+          // in the next round's list as it now stands. '' with nothing to list.
           const screensBlock = () => (host.services as { screens?: { promptBlock: () => string } }).screens?.promptBlock() ?? '';
           const systemParts = () => ({
             base: baseStatic(), screens: screensBlock(), memory: memoryBlock(), plan: planBlock(),
@@ -1737,7 +1737,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // each round — a `cd` in this turn is seen by its next round.
                 // The summary is read fresh too: an automatic compaction between two
                 // rounds replaces it.
-                systemPrompt: () => joinSystem({ ...sysParts, summary: summaryBlock() }, projectBlock()),
+                // So is the list of screens: a plugin that joins mid-turn is offered `ui_open` from
+                // the next round, and its line comes with it. An unchanged list is the same bytes,
+                // so a round without a change keeps the cached prefix.
+                systemPrompt: () => joinSystem({ ...sysParts, screens: screensBlock(), summary: summaryBlock() }, projectBlock()),
                 // A line about the turn itself (a tool call the model wrote as text), a
                 // note in the conversation where it happened.
                 onNote: (text: string, detail?: { markup?: string }) => {
@@ -1813,7 +1816,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   apiRef.current = [resumed];
                   markCompacted(next, result.summary, result.incomplete, true);
                   persist();
-                  const sysNow = joinSystem({ ...sysParts, summary: summaryBlock() }, projectBlock());
+                  const sysNow = joinSystem({ ...sysParts, screens: screensBlock(), summary: summaryBlock() }, projectBlock());
                   return { messages: wireMessages([...(sysNow ? [{ role: 'system', content: sysNow } as ChatMessage] : []), resumed], (ref) => resolveImage(ref, [])), ...append };
                 },
                 // What this conversation has loaded; `tools_load` adds to it mid-turn.

@@ -366,8 +366,8 @@ nothing), and the answer says it waits. In the panel the screen is beside the ch
 window, or with the chat over the whole terminal, it is behind the chat until you close
 it. Esc closes it as ever. The assistant never opens `:plugins`, `/mcp`, the sessions or
 the settings for you — those stay yours — and never a plugin you have not trusted or
-have disabled. A plugin in another language is opened by its key alone; the assistant
-tells you which.
+have disabled. A plugin in another language is opened at its entry, as its key opens
+it.
 
 ## Plugins: `:plugins`
 

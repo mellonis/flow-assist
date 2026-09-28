@@ -7,6 +7,9 @@
 // or not the plugin's surface was ever mounted: it sets the plugin's own state, the
 // plugin's `keycaps` say its context is active, and the host mounts the surface.
 //
+// A remote plugin's entry is declared for it by the adapter (src/remote/adapter.ts): its
+// `open` sends the key event the entry key would.
+//
 // Who opens: a plugin (`host.open(screen, params)` — a navigation tool of its own), and
 // the model (`ui_open(plugin)`, the core tool, an entry screen with no params). The
 // rules hold for both:

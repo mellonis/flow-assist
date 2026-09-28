@@ -529,12 +529,20 @@ another's):
   the person trusts and has not disabled, with screens or an `entry` key: the screens'
   titles (else the description), `key <glyph>` of each `entry` action's binding, and
   `open with` `ui_open("<plugin>")` (an entry screen with no `tools` of its own) and
-  every screen's `tools` — else `the person opens it with its key` (a remote plugin: no
-  `screens` over the wire). Plugin text is one line, `sanitizeGroupDescription`ed and cut.
-  It is part of every message's system prompt, after the base (`systemParts.screens`,
-  counted under `system` by the meter), read from the live list each message — so a late
-  join (the `joined` handler's splice) and a `:plugins` disable or enable are in the next
-  message; '' with nothing to list.
+  every screen's `tools` — else `the person opens it with its key`. Plugin text is one
+  line, `sanitizeGroupDescription`ed and cut. It is part of the system prompt after the
+  base (`systemParts.screens`, counted under `system` by the meter), and like the
+  project's instructions it is read again for EVERY round (`AgentOpts.systemPrompt`): a
+  plugin that joins mid-turn is offered `ui_open` from the next round (the tools
+  refresh), and its line comes in the same round; an unchanged list is the same bytes,
+  so the cached prefix holds. A `:plugins` disable or enable is in the next round too;
+  '' with nothing to list.
+- **A remote plugin's entry** is declared by the adapter (`src/remote/adapter.ts`): one
+  screen named after its first bound `hello.entry` action, titled by its manifest's
+  description, whose `open` sends the `key` event that key would (`name`, `id` — the
+  person's binding — and `action`), so the plugin answers it as it answers the key and
+  its next frame's `keycaps` bring the surface up. A stopped plugin refuses. No screen
+  with params crosses the wire, and a remote plugin has no `host.open`.
 - A DEFERRED open is resolved and its params checked again when it runs (`flush`): a
   plugin disabled, untrusted or gone meanwhile is not opened — a log line and a toast.
 - **`ui_open` is offered only when it can work**: `assembleToolRegistry`'s `screens`
