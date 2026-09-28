@@ -307,7 +307,7 @@ const testEnv = (): Record<string, string | undefined> =>
   Object.fromEntries(Object.entries(process.env).filter(([k, v]) => MACHINE_ENV[k] !== v));
 setSecretsEnv(testEnv);
 
-export async function bootApp(model: ScriptedModel, cols = 100, rows = 28, guests?: (make: Make) => Plugin[], extra: Record<string, unknown> = {}, opts: { toastMs?: number; scheme?: 'light' | 'dark' | 'unknown'; clipboardImage?: () => ClipboardImage; pluginsNote?: string; interactive?: InteractiveDeps; chatMode?: 'panel' | 'window' | 'full' | null; backend?: TestBackend; remote?: { manifest: Record<string, unknown>; transport: RestartingTransport }; startDir?: string; frameMeter?: FrameMeter; late?: boolean; untrusted?: string[] } = {}) {
+export async function bootApp(model: ScriptedModel, cols = 100, rows = 28, guests?: (make: Make) => Plugin[], extra: Record<string, unknown> = {}, opts: { toastMs?: number; scheme?: 'light' | 'dark' | 'unknown'; clipboardImage?: () => ClipboardImage; pluginsNote?: string; interactive?: InteractiveDeps; chatMode?: 'panel' | 'window' | 'full' | null; backend?: TestBackend; remote?: { manifest: Record<string, unknown>; transport: RestartingTransport }; startDir?: string; frameMeter?: FrameMeter; late?: boolean; untrusted?: import('../../loader/trust.ts').Untrusted[]; trustNotes?: string[] } = {}) {
   process.env.LLM_TOKEN = '^scripted-llm-token';
   model.install();
   // Sessions go to a fresh temp dir unless a test names one: a test must never write
@@ -346,7 +346,10 @@ export async function bootApp(model: ScriptedModel, cols = 100, rows = 28, guest
   // `opts.late` loads as the interactive app does: a remote plugin joins once its
   // handshake completes, and a plugin's `ready` (a guest's too) is only noted.
   const late = opts.late ? createLatePlugins() : undefined;
-  const plugins = await loadPlugins({ config, repo, renders: renders as never, enabledDir, remoteTransport, late });
+  // Each boot's plugins directory is new, so each boot is a machine of its own with a
+  // trust record of its own (src/loader/trust.ts): its first start trusts its plugin.
+  const trust = enabledDir ? { file: path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-trust-')), 'plugins.trusted.json'), modelShell: false } : undefined;
+  const plugins = await loadPlugins({ config, repo, renders: renders as never, enabledDir, remoteTransport, late, trust });
   if (guests) {
     const added = guests(makeFactory(config as never));
     plugins.push(...added);
@@ -382,7 +385,7 @@ export async function bootApp(model: ScriptedModel, cols = 100, rows = 28, guest
   setStartDirForTests(opts.startDir ?? (firstRoot && fs.existsSync(firstRoot) ? firstRoot : null));
   let app: Awaited<ReturnType<typeof renderApp>>;
   try {
-    app = await renderApp(backend, { plugins, config, tools, late, untrusted: opts.untrusted, onExit: () => { exits++; }, toastMs: opts.toastMs, pluginsNote: opts.pluginsNote, frameMeter: opts.frameMeter, clipboardImage: opts.clipboardImage ?? (() => ({ ok: false, none: true, error: 'no image on the clipboard' })),
+    app = await renderApp(backend, { plugins, config, tools, late, untrusted: opts.untrusted, trustNotes: opts.trustNotes, onExit: () => { exits++; }, toastMs: opts.toastMs, pluginsNote: opts.pluginsNote, frameMeter: opts.frameMeter, clipboardImage: opts.clipboardImage ?? (() => ({ ok: false, none: true, error: 'no image on the clipboard' })),
       // `!!command` never reaches the machine's own `script` or signals from a test: with
       // no `interactive` given, there is no `script`, the program "runs" at once and
       // exits 0, and the signal hold works on an emitter of its own.

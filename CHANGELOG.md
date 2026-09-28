@@ -42,18 +42,28 @@ What each version of flow-assist brought, newest first. The version is the one i
   <name>`. `plugins install` trusts what it installs, the new `plugins trust <name>`
   trusts a plugin linked by hand or by an installer script, `plugins remove` forgets
   it, and `plugins ls` marks an untrusted one. Trust is the plugin's name and where its
-  link leads, so updating it in place keeps it; a link moved elsewhere needs trusting
-  again. A plugin the assistant installs is not trusted until you run `plugins trust`.
-  A memory fact changed or added outside the app is left out of every request and shown
-  in `/memory` as `changed outside flow-assist`; `/memory accept <n>` (or `all`) sends it
-  again. The first start after upgrading trusts the plugins already enabled and accepts
-  the facts already stored, once. From a command the assistant runs, `plugins trust` is
-  refused and nothing is recorded. Like the settings guard, this stops accidents, not a
-  command set on getting round it — docs/safety.md says where it stops.
-  A `memory.json` that turns up after that first start is moved into files as before,
-  but its facts wait for `/memory accept` too.
-  **For installer scripts:** a script that unpacks and links plugins without the binary
-  keeps an updated plugin trusted, but a plugin new to that install needs
+  link leads, so updating it in place keeps it. A link that now leads elsewhere shows
+  both places on the start screen, and `plugins trust` shows both and asks first
+  (`--yes` answers for you). A plugin's name is letters, digits, `.`, `_` and `-`; any
+  other entry is refused. A plugin the assistant installs is not trusted until you run
+  `plugins trust`, whatever was trusted under that name before; a link that is gone is
+  forgotten at the next start.
+  A memory fact changed or added outside the app is left out of every request, of a
+  plugin's list and of `MEMORY.md`, and shown in `/memory` as `changed outside
+  flow-assist` together with the line a request would carry for it; `/memory accept <n>`
+  (or `all`) sends it again as that listing showed it, and refuses if the file changed
+  since. A `memory.json` that turns up after the first start is moved into files as
+  before, but its facts wait for `/memory accept` too.
+  The first start after upgrading — with no record yet — trusts the plugins already
+  enabled and accepts the facts already stored, once, and the start screen names the
+  plugins; a plugins or memory directory first met after that starts with nothing
+  trusted. A record that cannot be read trusts nothing, and the start screen says how
+  to go on. From a command the assistant runs, `plugins trust` is refused and nothing
+  is recorded. Like the settings guard, this stops accidents, not a command set on
+  getting round it — docs/safety.md says where it stops.
+  **For installer scripts:** one that unpacks each version into the same
+  `plugins-available/<name>` and links `../plugins-available/<name>`, without the binary,
+  keeps an updated plugin trusted; a plugin new to that install needs
   `flow-assist plugins trust <name>` once.
 - **A background run and the one-shot prompt read the project's instructions once per
   directory.** Both built the `## Project instructions` section through a closure that

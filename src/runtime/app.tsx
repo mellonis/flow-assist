@@ -169,7 +169,10 @@ export interface RenderAppInput {
   late?: LatePlugins;
   // The enabled plugins the person has not trusted (src/loader/trust.ts): not loaded, and
   // named on the start screen with the command that trusts each.
-  untrusted?: string[];
+  untrusted?: import('../loader/trust.js').Untrusted[];
+  // What the start screen says of the trust records, once: the plugins the first start
+  // trusted, a record that cannot be read.
+  trustNotes?: string[];
 }
 
 // Command-line state lives in a single stable `{ current }` object created in
@@ -345,7 +348,7 @@ const CONSOLE_REDRAW_MS = 200;
 
 export function renderApp(
   root: Backend,
-  { plugins, config, onExit, renders: _renders = {}, tools, toastMs, clipboardImage, pluginsNote, loadNotes = [], interactive, consoleLog, frameMeter, late, untrusted = [] }: RenderAppInput,
+  { plugins, config, onExit, renders: _renders = {}, tools, toastMs, clipboardImage, pluginsNote, loadNotes = [], interactive, consoleLog, frameMeter, late, untrusted = [], trustNotes = [] }: RenderAppInput,
 ) {
   // Resolve config.theme into the full per-modal palette BEFORE anything reads it
   // (createServices, the plugins' `host` and every renderer read `config.theme`): the base of the
@@ -1097,7 +1100,7 @@ export function renderApp(
       // the footer under a modal's dimmed backdrop, like everything else behind it.
       h(Box, { flexGrow: 1, zIndex: 1 },
         overlayComps.filter((c) => !isChat(c) && !isTop(c) && (!c.surface || surfaceActive(c.plugin))).map(({ Comp, key }) => h(Comp as any, { key })),
-        atHome ? renderHome({ title, plugins, keys, builtins: BUILTIN_PLUGINS, width: region.width, pluginsNote, starting: late?.starting(), untrusted }) : null),
+        atHome ? renderHome({ title, plugins, keys, builtins: BUILTIN_PLUGINS, width: region.width, pluginsNote, starting: late?.starting(), untrusted, trustNotes }) : null),
       // The bottom row, and the one place on this screen a drag has something to
       // copy: the command the person typed. Marking the box `selectable: false`
       // whole would be right for what surrounds the command, but would swallow the

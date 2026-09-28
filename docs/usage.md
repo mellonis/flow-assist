@@ -74,8 +74,9 @@ reads a fact in full when its line matters. A fact kept in one project never rea
 another. `/memory` lists them, this project's first; `/memory forget <n>` removes one,
 `/memory forget project`, `global` or `all` a whole list — without asking the model.
 A fact file the app did not write itself — a command changed or added it — is listed as
-`changed outside flow-assist` and not sent until you accept it: `/memory accept <n>`, or
-`/memory accept all` ([safety.md](safety.md), "Plugins and memory changed behind the
+`changed outside flow-assist`, with the line a request would carry for it, and not sent
+until you accept it as that list showed it: `/memory accept <n>`, or `/memory accept
+all` ([safety.md](safety.md), "Plugins and memory changed behind the
 app's back").
 `/clear` says how many it kept. What an older version remembered in `memory.json`
 moves into the global workspace on the first start, and a note says how many facts

@@ -192,7 +192,10 @@ test('with late, a remote plugin is not waited for: it joins after its handshake
     const warned: unknown[] = [];
     const realWarn = console.warn;
     console.warn = (m: unknown) => { warned.push(m); };
-    const plugins = await loadPlugins({ config: {}, repo, enabledDir: enabled, late, remoteTransport: (_m, _d, deps) => { deps.log('[fake] warming up'); return fake.transport; } }).finally(() => { console.warn = realWarn; });
+    // Each round is a machine of its own: its first start trusts its plugin
+    // (src/loader/trust.ts — one first start per record).
+    const trust = { file: join(mkdtempSync(join(tmpdir(), 'fa-late-trust-')), 'plugins.trusted.json'), modelShell: false };
+    const plugins = await loadPlugins({ config: {}, repo, enabledDir: enabled, late, trust, remoteTransport: (_m, _d, deps) => { deps.log('[fake] warming up'); return fake.transport; } }).finally(() => { console.warn = realWarn; });
     expect(warned).toEqual([]);
     expect(plugins.some((p) => p.name === 'fake')).toBe(false);
     expect(late.starting()).toEqual(['fake']);

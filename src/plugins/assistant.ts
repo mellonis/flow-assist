@@ -51,9 +51,9 @@ import { groupOpen, toggleGroup } from '../assistant/view-groups.js';
 import { bindingGlyph, firstGlyph, isKey, isMouseButton, isMouseKey, keyGlyph } from '../playback/keys.js';
 import { hoverEnabled } from '../config/mouse.js';
 import { askKey, askStart, type AskQuestion, type AskState } from '../assistant/ask.js';
-import { keptAfterClear, memoryCommand, type MemoryLists } from '../assistant/memory-command.js';
-import { memoryPromptBlock, migrateMemoryJson, readFacts, removeFact, type Fact } from '../assistant/memory-store.js';
-import { acceptFact, acceptRoot, markFacts, rootAccepted } from '../assistant/memory-trust.js';
+import { keptAfterClear, memoryCommand, type MemoryLists, type Shown } from '../assistant/memory-command.js';
+import { memoryPromptBlock, migrateMemoryJson, readFacts, removeFact, writeIndex, type Fact } from '../assistant/memory-store.js';
+import { acceptFact, firstStart, firstStartPending, markFacts } from '../assistant/memory-trust.js';
 import { memoryFilePath } from '../runtime/services/memory.js';
 import { ensureWorkspace, workspaceFor, workspaceNote, workspaceRoot } from '../assistant/workspace.js';
 import { CONTEXT_WARN_AT, DEFAULT_CONTEXT_WINDOW, cacheLine, contextBadge, estimateTokens, readContext, short as shortTokens } from '../assistant/context-meter.js';
@@ -407,6 +407,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // The conversation's, like the plan: its history calls them, so it is saved
           // with the session, kept through /compact, emptied by /clear.
           const toolSetRef = ui.useRef(createToolSet());
+          // The last `/memory` listing the person saw: what `/memory accept <n>` may accept.
+          const memoryShownRef = ui.useRef<Shown[] | null>(null);
           // What the provider reported for the last turn: its prompt plus the answer it
           // produced is, to a close approximation, the size of the NEXT request.
           const usageRef = ui.useRef<TokenUsage | null>(null);
@@ -1476,13 +1478,12 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // what was one list for every project is every project's now, and some of
               // it may belong to one project only.
               try {
-                // The moved facts are the host's only as part of the root's first look
+                // The moved facts are the host's only as part of the first start
                 // (src/assistant/memory-trust.ts): a memory.json that turns up after it is
                 // a file a command could have written, and its facts wait for the person.
-                const root = workspaceRoot(host.config);
-                const firstLook = !rootAccepted(root);
+                const firstLook = firstStartPending();
                 const { moved } = migrateMemoryJson(memoryFilePath(host.config), workspaceFor(host.config, null, 'global'));
-                if (firstLook) acceptRoot(root);
+                if (firstLook) firstStart(workspaceRoot(host.config));
                 if (moved) {
                   pushNote(`Moved ${moved} ${moved === 1 ? 'memory' : 'memories'} from ${tildePath(memoryFilePath(host.config))} into the global workspace, as files — ${moved === 1 ? 'it is' : 'they are'} every project's now. /memory lists them; ask the assistant to move one that belongs to a single project into it.${firstLook ? '' : ` ${moved === 1 ? 'It is' : 'They are'} not sent until you accept ${moved === 1 ? 'it' : 'them'}: /memory accept.`}`);
                   host.notify();
@@ -2901,11 +2902,18 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // The person's own view of the model's memory; nothing here reaches the
                 // model. A `note` is a display-only message: `apiRef` — the model's
                 // history — is not touched.
-                const res = memoryCommand(arg, memoryLists());
+                // An accept is checked against the last listing the person saw (`shown`).
+                const res = memoryCommand(arg, memoryLists(), memoryShownRef.current);
+                if (res.shown) memoryShownRef.current = res.shown;
                 // Said as it happened: a fact whose file could not be removed is named.
                 const failed = (res.forget ?? []).filter((f) => !removeFact(workspaceFor(host.config, currentProject(), f.scope), f.id));
-                // An accept is the person's word on the text they were shown (its hash).
-                for (const a of res.accept ?? []) acceptFact(workspaceFor(host.config, currentProject(), a.scope), a.id, a.hash);
+                if (res.forget?.length) memoryShownRef.current = null;
+                // An accept records the hash of the text the listing showed, which the
+                // command checked is still the file's; MEMORY.md then lists it.
+                for (const a of res.accept ?? []) {
+                  const ws = workspaceFor(host.config, currentProject(), a.scope);
+                  if (acceptFact(ws, a.id, a.hash)) writeIndex(ws);
+                }
                 pushNote(failed.length ? `${res.note}\nNot removed (the file could not be deleted): ${failed.map((f) => `memory/${f.id}.md`).join(', ')}.` : res.note);
                 setField('');
                 host.notify();

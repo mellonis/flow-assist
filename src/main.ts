@@ -30,7 +30,9 @@ import { stopRemotePlugins } from './remote/lifecycle.js';
 import { noPluginsNote } from './loader/install-root.js';
 import { fetchPluginFromRegistry } from './loader/registry-download.js';
 import { installPluginArchive, isArchiveSource } from './loader/archive-install.js';
-import { checkPluginTrust, trustPlugin, untrustedText, type Untrusted } from './loader/trust.js';
+import { checkPluginTrust, isPluginName, shownName, trustCommand, trustPlugin, unreadableTrustText, untrustedText, type Untrusted } from './loader/trust.js';
+import { createInterface } from 'node:readline/promises';
+import { memoryRecordNotes } from './assistant/memory-trust.js';
 import type { PluginRepo } from './loader/repo.js';
 import type { PluginRepo as RepoShape } from './loader/host-group.js';
 import { loadPlugins } from './loader/build.js';
@@ -224,26 +226,45 @@ export async function runConfig(args: string[], config: Record<string, unknown>,
 // and where its link leads (src/loader/trust.ts) — and so is one they name to
 // `plugins trust`; a host process started from a command the model runs records
 // neither, and says so.
-export type PluginsDeps = { availableDir: string; enabledDir: string; io?: ConfigIo };
+// `confirm` asks the person a y/n (a terminal's, when stdin is one; none otherwise).
+export type PluginsDeps = { availableDir: string; enabledDir: string; io?: ConfigIo; confirm?: ((question: string) => Promise<boolean>) | null };
 
 // What an install says when the model's command ran it: installed, not trusted.
-const notTrustedYet = (name: string) => `plugin '${name}' is not trusted: a command the assistant runs cannot trust a plugin — run \`flow-assist plugins trust ${name}\` yourself`;
+const notTrustedYet = (name: string) => `plugin '${name}' is not trusted: a command the assistant runs cannot trust a plugin — run \`${trustCommand(name)}\` yourself`;
+
+// A y/n on the terminal, when there is one to ask on.
+function terminalConfirm(): ((question: string) => Promise<boolean>) | null {
+  if (!process.stdin.isTTY || !process.stderr.isTTY) return null;
+  return async (question) => {
+    const rl = createInterface({ input: process.stdin, output: process.stderr });
+    try { return /^y(es)?$/i.test((await rl.question(`${question} (y/n) `)).trim()); } finally { rl.close(); }
+  };
+}
 
 export async function runPlugins(args: string[], config: Record<string, unknown>, repo: PluginRepo, deps: PluginsDeps = { availableDir, enabledDir }): Promise<void> {
   const io = deps.io ?? consoleIo;
   const sub = (args[0] ?? '').toLowerCase();
-  const name = args[1];
-  // The person's own install is their word that the plugin may load.
+  const yes = args.includes('--yes');
+  const name = args.slice(1).find((a) => a !== '--yes');
+  // The person's own install is their word that the plugin, as installed now, may load.
   const trustInstalled = (installed: string) => {
-    const t = trustPlugin(deps.enabledDir, installed);
+    const t = trustPlugin(deps.enabledDir, installed, { yes: true });
     if (!t.ok) io.err(inModelShell() ? notTrustedYet(installed) : t.error);
   };
 
   if (sub === 'ls' || sub === 'list') {
     const entries = await repo.list();
-    const untrusted = new Set(checkPluginTrust(deps.enabledDir, await repo.enabledPlugins()).untrusted.map((u) => u.name));
+    // Read only: listing never runs the first start or forgets anything.
+    const check = checkPluginTrust(deps.enabledDir, await repo.enabledPlugins(), { readOnly: true });
+    const untrusted = new Map(check.untrusted.map((u) => [u.name, u]));
+    if (check.unreadable) io.out(unreadableTrustText(check.unreadable));
     for (const e of entries) {
-      const state = e.active ? (untrusted.has(e.name) ? `active, ${untrustedText(e.name)}` : 'active') : 'inactive';
+      const u = untrusted.get(e.name);
+      if (u?.refused || !isPluginName(e.name)) {
+        io.out(`${shownName(e.name)}  [${untrustedText({ name: e.name, refused: true })}]`);
+        continue;
+      }
+      const state = e.active ? (u ? `active, ${untrustedText(u)}` : 'active') : 'inactive';
       const source = e.source && e.source !== 'git' ? ` (${e.source})` : '';
       const missing = e.missingDeps.length ? `  missing: ${e.missingDeps.join(',')}` : '';
       const settingMiss = e.missingSettings?.length ? `  missing settings: ${e.missingSettings.join(',')}` : '';
@@ -278,9 +299,27 @@ export async function runPlugins(args: string[], config: Record<string, unknown>
 
   // A plugin linked or unpacked into plugins-enabled/ some other way — by hand, by a
   // kit's installer, or one whose link now leads elsewhere — loads once trusted here.
+  // A link that leads elsewhere than when it was trusted is shown with both targets and
+  // recorded only after a yes: `--yes`, or the person's y/n on a terminal.
   if (sub === 'trust' && name) {
-    const res = trustPlugin(deps.enabledDir, name);
-    if (res.ok) io.out(`plugin '${name}' trusted (${res.target}) — restart the assistant for the change to take effect`);
+    let res = trustPlugin(deps.enabledDir, name, { yes });
+    if (!res.ok && res.confirm) {
+      io.err(`plugin '${name}' was trusted at ${res.confirm.was}`);
+      io.err(`its link now leads to ${res.confirm.now}`);
+      const ask = deps.confirm === undefined ? terminalConfirm() : deps.confirm;
+      if (!ask) {
+        io.err(`not trusted — run \`${trustCommand(name)} --yes\` to trust the new target`);
+        process.exitCode = 1;
+        return;
+      }
+      if (!(await ask(`trust '${name}' at ${res.confirm.now}?`))) {
+        io.err(`plugin '${name}' is not trusted`);
+        process.exitCode = 1;
+        return;
+      }
+      res = trustPlugin(deps.enabledDir, name, { yes: true });
+    }
+    if (res.ok) io.out(`plugin '${name}' trusted: ${res.target}${res.was ? ` (was ${res.was})` : ''} — restart the assistant for the change to take effect`);
     else {
       io.err(res.error);
       process.exitCode = 1;
@@ -432,7 +471,8 @@ async function runInteractive(config: Record<string, unknown>, repo: PluginRepo)
   const late = createLatePlugins();
   // An enabled plugin the person has not trusted is not loaded; the start screen names it.
   const untrusted: Untrusted[] = [];
-  const plugins = await loadPlugins({ config, repo, renders, enabledDir, notes: loadNotes, late, untrusted });
+  const trustNotes: string[] = [];
+  const plugins = await loadPlugins({ config, repo, renders, enabledDir, notes: loadNotes, late, untrusted, trustNotes });
   const registry = assembleToolRegistry({ plugins, config, repo: repo as unknown as RepoShape });
   // The backend holds the console while it owns the screen; with `onConsole` set every
   // line goes to the log (`L`) at once and nothing is printed again at exit.
@@ -459,7 +499,7 @@ async function runInteractive(config: Record<string, unknown>, repo: PluginRepo)
     void stopRemotePlugins().then(() => process.exit(0));
   };
   const pluginsNote = await missingPluginsNote(repo);
-  handle = await renderApp(backend, { plugins, config, renders: {}, tools: registry, onExit, pluginsNote: pluginsNote ?? undefined, loadNotes, consoleLog, late, untrusted: untrusted.map((u) => u.name) });
+  handle = await renderApp(backend, { plugins, config, renders: {}, tools: registry, onExit, pluginsNote: pluginsNote ?? undefined, loadNotes, consoleLog, late, untrusted, trustNotes: [...trustNotes, ...memoryRecordNotes()] });
 }
 
 // ─── help text ────────────────────────────────────────────────────────────────
@@ -508,6 +548,7 @@ function printPluginsHelp(io: ConfigIo = consoleIo): void {
       '  plugins install <name>    Install and trust a plugin (symlink from plugins-available)',
       '  plugins install <file>    Install and trust a plugin archive (.tar.gz, a path or an https URL)',
       '  plugins trust <name>      Trust a plugin in plugins-enabled that was put there another way',
+      '                            (--yes: trust it though its link leads elsewhere than it did)',
       '  plugins remove <name>     Remove a plugin (unlink from plugins-enabled)',
       '  plugins update [name]     Re-fetch registry-managed plugins (an archive: install the newer one)',
     ].join('\n'),

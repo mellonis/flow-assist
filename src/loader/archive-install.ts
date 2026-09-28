@@ -19,6 +19,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { InstallResult } from './repo.js';
 import { THIS_HOST, pluginCompat } from './compat.js';
+import { isPluginName } from './trust.js';
 
 // The provenance marker (repo.ts's `SOURCE_MARKER`): `archive` tells `list` and
 // `update` the plugin came from a file, so a newer file is how it is updated.
@@ -69,7 +70,7 @@ function checkMembers(archive: string): string {
   }
   if (tops.size !== 1) throw new Error(`a plugin archive has one top-level directory, this one has ${tops.size}`);
   const top = [...tops][0]!;
-  if (top === '.' || top.includes('\\')) throw new Error(`the archive's directory is not a plugin name: ${top}`);
+  if (!isPluginName(top)) throw new Error(`the archive's directory is not a plugin name: ${JSON.stringify(top)}`);
   return top;
 }
 

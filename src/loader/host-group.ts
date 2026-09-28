@@ -9,6 +9,7 @@
 // once the person runs `flow-assist plugins trust <name>`, which the result says.
 
 import type { ToolGroup } from './tools.js';
+import { trustCommand } from './trust.js';
 
 // The plugin-repository shape (`createPluginRepo`'s). Methods are optional
 // here because the repo may be partially constructed in tests/the runtime; the
@@ -19,6 +20,7 @@ export interface PluginRepo {
   remove?: (...args: unknown[]) => Promise<unknown>;
   update?: (...args: unknown[]) => Promise<unknown>;
   enabledPlugins?: (...args: unknown[]) => Promise<unknown>;
+  untrust?: (...args: unknown[]) => Promise<unknown>;
 }
 
 // Extracts the `name` field from a parsed tool-call args object. The `host:plugins_*`
@@ -129,9 +131,12 @@ export const hostGroupTools = (
       }
       case 'host:plugins_install': {
         if (typeof repo.install !== 'function') return 'host:plugins_install — plugin repository not configured.';
+        // Whatever the person trusted under this name before is forgotten first: a stale
+        // word must not load what the model installs now.
+        await repo.untrust?.(argName(args));
         const res = (await repo.install(argName(args))) as { ok?: boolean };
         if (!res?.ok) return withRestartHint(res);
-        return `${JSON.stringify(res)} — installed but not trusted: it loads once the person runs \`flow-assist plugins trust ${argName(args)}\` in a terminal and restarts the assistant`;
+        return `${JSON.stringify(res)} — installed but not trusted: it loads once the person runs \`${trustCommand(argName(args))}\` in a terminal and restarts the assistant`;
       }
       case 'host:plugins_remove': {
         if (typeof repo.remove !== 'function') return 'host:plugins_remove — plugin repository not configured.';

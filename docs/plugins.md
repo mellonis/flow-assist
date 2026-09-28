@@ -25,7 +25,8 @@ trusts what it installs, and a link made any other way — by hand, by an instal
 script — waits for `plugins trust <name>`; until then the start screen says
 `not trusted — flow-assist plugins trust <name>`. Trust is the plugin's name and where
 its link leads, so pulling a newer version into the same directory keeps it, and a link
-moved elsewhere needs trusting again ([safety.md](safety.md), "Plugins and memory
+moved elsewhere needs trusting again. A plugin's name is letters, digits, `.`, `_` and
+`-`, starting with a letter or digit; any other is refused ([safety.md](safety.md), "Plugins and memory
 changed behind the app's back").
 
 ```

@@ -461,9 +461,13 @@ board.
   — and its entry key the start screen, its caps the footer — only once it has.
 - An enabled plugin the person has not trusted ("Secrets") never starts, so it is never
   on that line: it has a dim row of its own at the end of the list, `<name>  not trusted
-  — flow-assist plugins trust <name>` (`renderHome`'s `untrusted`, handed over by
-  `runInteractive` from `loadPlugins`' `untrusted`), shown under the `plugins` heading
-  even when no plugin loaded.
+  — flow-assist plugins trust <name>` — for a retargeted link `not trusted — its link
+  led to <was>, now to <now> — …`, for a refused name `"<name>"  refused — …` with no
+  command (`untrustedText`; `renderHome`'s `untrusted`, handed over by `runInteractive`
+  from `loadPlugins`' `untrusted`), shown under the `plugins` heading even when no
+  plugin loaded. Under the list, dim lines say what the trust records say once
+  (`trustNotes`: the plugins the first start trusted, a record that cannot be read —
+  the loader's and `memoryRecordNotes()`).
 
 ### Remote plugins
 
@@ -1150,15 +1154,22 @@ hold this set together:
     record is under "Secrets"). `readFacts` gives each fact the `hash` of its file's
     text; `markFacts(root, ws, facts)` marks `outside` every fact whose hash is not the
     one recorded for its file — by the file's real directory and name — and is what the
-    chat's `memoryLists` and the tool's `memoryScopes` read through. An `outside` fact
-    is left out of `memoryPromptBlock`, out of the tool's `list` and its `update` /
-    `forget` lookups (`Memory <id> not found`), and out of `/clear`'s kept count; `/memory`
-    lists it as `[changed outside flow-assist]` and `/memory accept <n|all>` records the
-    hash the person was shown (`acceptFact`) — a slash command, so never the model's.
-    `MEMORY.md` is not checked: the prompt's index is built from the facts' files, never
-    from it. The artifacts are never in the prompt, and a `workspace_write` never
-    reaches `memory/`, so neither needs a record. `services.memory` (a plugin's) sees
-    every fact, marked or not: its `save` removes what its list leaves out.
+    chat's `memoryLists`, the tool's `memoryScopes` and `services.memory` read through.
+    An `outside` fact is left out of `memoryPromptBlock`, out of the tool's `list` and
+    its `update` / `forget` lookups (`Memory <id> not found`), out of `/clear`'s kept
+    count, out of `MEMORY.md` (`writeIndex` writes `acceptedOnly`) and out of a
+    plugin's `services.memory` — whose `save` never removes one for being absent from
+    its list nor rewrites one (a rewrite would record the text as the host's own).
+    `/memory` lists it as `[changed outside flow-assist]` with its text AND `sent as:`
+    the index line `indexLine` would send (the name and description are what the model
+    reads, and a planted description may say something the text does not). `/memory
+    accept <n|all>` accepts only what the LAST listing showed: every listing hands the
+    chat its `Shown` (number → scope, id, hash, outside; `memoryShownRef`), and the
+    accept checks the fact still has that hash — else nothing is accepted and the list
+    is shown again; with no listing yet it lists. `acceptFact` records the shown hash
+    and the chat rewrites `MEMORY.md`. A slash command, so never the model's. The
+    prompt's index is built from the facts' files, never from `MEMORY.md`, and the
+    artifacts are never in the prompt; a `workspace_write` never reaches `memory/`.
   - **`memory.json`** — `memoryFilePath(config)`: `config.memory.file`, else
     `memory.json` under `hostStateDir()` — is where an older host kept one list for
     every project. At the chat's start (the timer after the session's own, so a
@@ -1173,7 +1184,7 @@ hold this set together:
     written again, so a retaken claim doubles nothing; a file that does not parse is
     put back where it was. The moved facts are written without a record
     (`addFact(…, { record: false })`): the caller accepts them only when the move is part
-    of the root's first look (`rootAccepted` before, `acceptRoot` after); a `memory.json`
+    of the first start (`firstStartPending` before, `firstStart` after); a `memory.json`
     that turns up later is a file a command could have written, so its facts stay
     `outside` until `/memory accept`, and the note says so. A move says so in a start-up note
     (`pushNote`, journaled once the session has an id) — how many, that they are every
@@ -3688,36 +3699,66 @@ commands; docs and hints never present either mechanism as a boundary.
   process with `FLOW_ASSIST_MODEL_SHELL=1`, and the same limit: they stop the accident,
   not intent (a same-user process can rewrite or delete them; a deleted one makes the
   next start a first start).
-  - **Plugins** — `plugins.trusted.json`: per `plugins-enabled/` directory, by its real
-    path, each trusted plugin's name → the real path its link led to. `loadPlugins`
-    (every path: the app, the one-shot prompt, `config set plugins.…`) checks it
-    BEFORE a manifest is read, so an untrusted plugin is neither imported nor spawned,
-    never `late.expect`ed or `wait`ed; it is a skip line (`[plugins] skip <name>: not
-    trusted — flow-assist plugins trust <name>`, `(its link leads to <path> now)` for a
-    retargeted link) and an entry in the caller's `untrusted`. The name and the target,
-    not a content hash: a `git pull` or a kit's installer (which unpacks over the same
-    directory and makes the relative link again, never calling the binary) keeps it; a
-    command editing a trusted plugin's code is out of scope. A directory with no record
-    is recorded at its first check with everything in it trusted — one log line,
-    `[plugins] trusted at first start: a, b` — except from the model's shell, where
-    nothing is recorded and nothing trusted. What records: `plugins install` (name or
-    archive) and `plugins trust <name>` from the CLI (`runPlugins`, `src/main.ts`), each
-    refused a record under the model's shell (the install still happens, and says so).
-    `repo.remove` forgets (`untrustPlugin`), the model's `host:plugins_remove` included.
-    The model's `host:plugins_install` leaves the plugin untrusted and its result names
-    `flow-assist plugins trust <name>`: the auto mode may answer its y/n
-    (`confirmedByPerson` does not tell it from the person's key), and the y/n shows a
-    name, not what a command may have put in that directory. `plugins ls` marks an
-    untrusted plugin `[active, not trusted — …]`.
-  - **Memory** — `memory.accepted.json`: `roots`, the workspace roots (real paths)
-    whose facts were accepted once, and `files`, a fact file's real path → the hash of
-    the text the host wrote (`addFact` / `saveFact` → `writeFactFile` →
-    `recordFactFile`; `removeFact` forgets) or the person accepted. The first
-    `markFacts` under a root walks it (no link followed) and accepts every fact file
-    there, then records the root — even when the workspace being read holds nothing, so
-    a file planted later in any project's workspace under it is checked, not taken in.
-    Checked at index build only: a hash of text `readFacts` reads anyway and one read
-    of the record.
+  - **Plugins** — `plugins.trusted.json`: `firstStartDone`, and per
+    `plugins-enabled/` directory, by its real path, each trusted plugin's name → the
+    real path its link led to. `loadPlugins` (every path: the app, the one-shot prompt,
+    `config set plugins.…`) checks it BEFORE a manifest is read, so an untrusted plugin
+    is neither imported nor spawned, never `late.expect`ed or `wait`ed; it is a skip line
+    (`[plugins] skip <name>: ` + `untrustedText`) and an entry in the caller's
+    `untrusted` (`{ name, was?, now?, refused? }`). The name and the target, not a
+    content hash: a `git pull`, or an installer that unpacks each version into the same
+    `plugins-available/<name>` and makes the relative link `../plugins-available/<name>`
+    again without the binary, keeps it; a plugin new to such an installer needs one
+    `plugins trust`; a command editing a trusted plugin's code is out of scope.
+    - **Names.** Only `PLUGIN_NAME` (`^[A-Za-z0-9][A-Za-z0-9._-]*$`) is a plugin: the
+      loader refuses any other entry even at a first start, `repo.list` marks it
+      `refused`, `install`, an archive's top directory and `trust` refuse it, and no
+      command line is built from it (it is shown JSON-quoted, `shownName`). Every shown
+      command goes through `trustCommand` / `shellWord` all the same.
+    - **The first start is ONE per record**: only a MISSING record (or one the host wrote
+      with `firstStartDone: false`, a `plugins trust` before any start) trusts every
+      valid entry of the directory it checks, then sets the flag; the list goes to the
+      log and to `trustNotes` (the start screen), and to stderr when not late. A
+      directory first seen after that starts with nothing trusted. From the model's
+      shell a missing record trusts nothing and writes nothing. A record that does not
+      parse to its shape is UNREADABLE: nothing is trusted, `trustNotes` says so, and
+      the next `plugins trust` moves it aside (`.unreadable-<time>`) and starts a new
+      one with the flag set. `plugins ls` reads with `readOnly` — it never runs the
+      first start or prunes.
+    - **Stale entries.** A check forgets every recorded name whose entry is gone from
+      the directory; `repo.remove` forgets too (`untrustPlugin`), and the model's
+      `host:plugins_install` calls `repo.untrust` BEFORE it links, so a name the person
+      trusted earlier never lends that word to what the model installs.
+    - **Retargets.** A name recorded with another target is untrusted with `was` and
+      `now`, shown on the start screen and in the log; `trustPlugin` refuses to record
+      the new target without `yes` and returns both (`confirm`), and `runPlugins trust`
+      prints both and asks on a terminal (`deps.confirm`, a readline y/n on a TTY; none
+      in a pipe) or takes `--yes`.
+    - **What records**: `plugins install` (name or archive, trusting the target it
+      installed) and `plugins trust <name>` from the CLI (`runPlugins`, `src/main.ts`),
+      each refused a record under the model's shell (the install still happens, and
+      says so). The model's `host:plugins_install` leaves the plugin untrusted and its
+      result names the command: the auto mode may answer its y/n (`confirmedByPerson`
+      does not tell it from the person's key), and the y/n shows a name, not what a
+      command may have put in that directory. `plugins ls` marks an untrusted plugin
+      `[active, not trusted — …]`.
+  - **Memory** — `memory.accepted.json`: `firstStartDone`, and `files`, a fact file's
+    real path → the hash of the text the host wrote (`addFact` / `saveFact` →
+    `writeFactFile` → `recordFactFile`; `removeFact` forgets) or the person accepted.
+    The first start is ONE per record, as for plugins: the first `markFacts` with the
+    record missing walks the workspace root it is given (no link followed), accepts
+    every fact file there and sets the flag — even when the workspace being read holds
+    nothing; a root first met after that (another `workspace.dir`) accepts nothing. An
+    unreadable record accepts nothing, `memoryRecordNotes()` says so on the start
+    screen, and the host's next write or the person's accept moves it aside and starts
+    a new one. Checked at index build only: a hash of text `readFacts` reads anyway and
+    one read of the record.
+- **Tests start without either record** (`src/__tests__/helpers/test-setup.ts`, the
+  `bunfig.toml` preload): the host's state is one directory per `bun test` process, and
+  with one first start per record every test after the first would otherwise meet its
+  own plugins and facts as put there from outside. A test that runs two "machines"
+  names a record file of its own (`loadPlugins`' `trust.file`); `bootApp` gives every
+  boot with a remote plugin one, as each boot's plugins directory is new.
 - The test rig builds the set from what a test set itself (`setSecretsEnv` in
   `src/__tests__/helpers/scripted.ts`), never from the machine's own tokens, and its
   `LLM_TOKEN` starts with `^`, a character no streamed test text ends in.

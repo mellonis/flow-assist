@@ -4,3 +4,5 @@
 # they are isolated from one another. The bundled plugins' tests run from
 # plugins-available/.
 pathIgnorePatterns = ["plugins-enabled/**"]
+# Every test starts without the host's trust records (the helper says why).
+preload = ["./src/__tests__/helpers/test-setup.ts"]

@@ -29,7 +29,7 @@ import {
 import { join, resolve } from 'node:path';
 import { THIS_HOST, pluginCompat, readPluginManifest } from './compat.js';
 import { isRemoteManifest } from '../remote/transport.js';
-import { untrustPlugin } from './trust.js';
+import { isPluginName, untrustPlugin } from './trust.js';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -56,6 +56,8 @@ export interface RepoEntry {
   incompatible?: string;
   // A link in plugins-enabled/ to something that is gone.
   broken?: boolean;
+  // A name that is not a plugin name (./trust.ts, `PLUGIN_NAME`): never loaded.
+  refused?: boolean;
   source?: PluginSource;
   surfaces?: string[];
   tools?: string[];
@@ -82,6 +84,8 @@ export interface PluginRepo {
   remove(name: string): Promise<InstallResult>;
   update(name?: string): Promise<InstallResult>;
   enabledPlugins(): Promise<string[]>;
+  // Forgets that a plugin was trusted (./trust.ts).
+  untrust(name: string): Promise<void>;
 }
 
 // A parsed `manifest.json` (subsets we consume; unknown fields preserved).
@@ -105,15 +109,13 @@ const SOURCE_MARKER = '.flow-assist-source';
 const PREVIOUS = '.flow-assist-previous';
 const REGISTRY_SOURCE = 'registry';
 
-// A plugin name must be a single filesystem path segment: non-empty, not `.`/`..`,
-// no path separators, no NUL. Names are joined into `availableDir`/`enabledDir`
-// paths (install/remove/update), so rejecting a name that could traverse or escape
-// the plugin dirs is cheap defense-in-depth against CLI-supplied input. Returns the
-// trimmed name when valid, else null.
+// A plugin name is letters, digits, `.`, `_` and `-`, starting with a letter or digit
+// (./trust.ts, `PLUGIN_NAME`): a single path segment that can never traverse out of the
+// plugin dirs, and a word a shell reads as it is when the host shows a command naming
+// it. Returns the trimmed name when valid, else null.
 function validPluginName(name: string): string | null {
   const s = String(name ?? '').trim();
-  if (!s || s === '.' || s === '..' || s.includes('/') || s.includes('\\') || s.includes('\0')) return null;
-  return s;
+  return isPluginName(s) ? s : null;
 }
 
 // Reads and parses a plugin's manifest, tolerating a missing/blank manifest.
@@ -240,7 +242,7 @@ export function createPluginRepo({ availableDir, enabledDir, projectRoot, fetchP
   // then symlinks it into `enabled`. `fetchPlugin` materializes `plugins-available/<name>/`.
   const fetchAndLink = async (name: string): Promise<InstallResult> => {
     const n = validPluginName(name);
-    if (!n) return { ok: false, error: `plugin '${name}' — invalid name (must be a single path segment)` };
+    if (!n) return { ok: false, error: `plugin '${name}' — invalid name (letters, digits, . _ - only, starting with a letter or digit)` };
     if (!fetchPlugin) {
       return {
         ok: false,
@@ -285,7 +287,7 @@ export function createPluginRepo({ availableDir, enabledDir, projectRoot, fetchP
     // a fetchPlugin is injected, download-then-symlink; otherwise fail cleanly.
     async install(name: string): Promise<InstallResult> {
       const n = validPluginName(name);
-      if (!n) return { ok: false, error: `plugin '${name}' — invalid name (must be a single path segment)` };
+      if (!n) return { ok: false, error: `plugin '${name}' — invalid name (letters, digits, . _ - only, starting with a letter or digit)` };
       const pluginDir = join(availableDir, n);
       const enabledLink = join(enabledDir, n);
       if (existsSync(enabledLink)) {
@@ -314,7 +316,7 @@ export function createPluginRepo({ availableDir, enabledDir, projectRoot, fetchP
     // re-install is instant.
     async remove(name: string): Promise<InstallResult> {
       const n = validPluginName(name);
-      if (!n) return { ok: false, error: `plugin '${name}' — invalid name (must be a single path segment)` };
+      if (!n) return { ok: false, error: `plugin '${name}' — invalid name (letters, digits, . _ - only, starting with a letter or digit)` };
       const enabledLink = join(enabledDir, n);
       if (!existsSync(enabledLink)) {
         return { ok: false, error: `plugin '${n}' is not installed` };
@@ -335,7 +337,7 @@ export function createPluginRepo({ availableDir, enabledDir, projectRoot, fetchP
     async update(name?: string): Promise<InstallResult> {
       const n = name == null ? null : validPluginName(name);
       if (name != null && n === null) {
-        return { ok: false, error: `plugin '${name}' — invalid name (must be a single path segment)` };
+        return { ok: false, error: `plugin '${name}' — invalid name (letters, digits, . _ - only, starting with a letter or digit)` };
       }
       const targets = name ? [n!] : registryManagedNames();
       if (!targets.length) {
@@ -401,6 +403,10 @@ export function createPluginRepo({ availableDir, enabledDir, projectRoot, fetchP
         for (const name of readdirSync(enabledDir)) {
           const link = join(enabledDir, name);
           if (!lstatSync(link).isSymbolicLink() || entries.some((e) => e.name === name)) continue;
+          if (!isPluginName(name)) {
+            entries.push({ name, version: '', description: '', active: true, missingDeps: [], source: 'linked', refused: true });
+            continue;
+          }
           let target: string;
           try {
             target = realpathSync(link);
@@ -427,6 +433,11 @@ export function createPluginRepo({ availableDir, enabledDir, projectRoot, fetchP
         }
       }
       return entries;
+    },
+
+    async untrust(name: string): Promise<void> {
+      const n = validPluginName(name);
+      if (n) untrustPlugin(enabledDir, n);
     },
 
     // Active (enabled) plugin names — the symbols/contents of `plugins-enabled/`.

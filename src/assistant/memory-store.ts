@@ -17,7 +17,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { defaultPidAlive } from './sessions.js';
 import { writePrivate } from './workspace.js';
-import { factHash, forgetFactFile, recordFactFile } from './memory-trust.js';
+import { acceptedOnly, factHash, forgetFactFile, recordFactFile } from './memory-trust.js';
 
 export const MEMORY_DIR = 'memory';
 export const MEMORY_INDEX = 'MEMORY.md';
@@ -122,7 +122,9 @@ export function indexLine(f: Fact, prefix = ''): string {
   return `- [${nameOf(f.name)}](${prefix}${f.id}.md) — ${oneLine(f.description)}`;
 }
 
-export function writeIndex(ws: string, facts: Fact[] = readFacts(ws)): void {
+// MEMORY.md lists only the facts the host wrote or the person accepted (./memory-trust.ts):
+// past the prompt's line cap the model is told to read it.
+export function writeIndex(ws: string, facts: Fact[] = acceptedOnly(ws, readFacts(ws))): void {
   const body = facts.length ? facts.map((f) => indexLine(f)).join('\n') : '(no facts yet)';
   writePrivate(path.join(memDir(ws), MEMORY_INDEX), `# Memory\n\nOne line per fact; each file holds the fact in full.\n\n${body}\n`);
 }

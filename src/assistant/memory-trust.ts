@@ -12,14 +12,18 @@
 // the facts' own files each time — so only the facts are checked. The check is a hash of
 // text the index build reads anyway, and one read of the record.
 //
-// The first check under a workspace root with no record (the first start after this was
-// added, a new `workspace.dir`) accepts every fact file already under it, once. An older
-// host's `memory.json` is moved into files without recording them: its facts are
-// accepted only when the move is part of that first look — a `memory.json` that turns
-// up later is a file anyone could have written, and its facts wait for `/memory accept`. A host
+// The first start — the record MISSING, or written by the host before its first look —
+// accepts every fact file already under the workspace root, once, and the record then
+// says so: a workspace root seen for the first time after that (a new `workspace.dir`)
+// starts with nothing accepted. A record that cannot be read accepts nothing, and the
+// start screen says so. An older host's `memory.json` is moved into files without
+// recording them: its facts are accepted only when the move is part of the first start —
+// a `memory.json` that turns up later is a file anyone could have written, and its facts
+// wait for `/memory accept`. A host
 // process started from a command the model runs (`FLOW_ASSIST_MODEL_SHELL=1`,
 // src/config/load.ts) writes no record at all. Like the settings guard, this stops the
-// accident, not intent: a command that rewrites or deletes the record can forge it.
+// accident, not intent: a command that rewrites or deletes the record can forge it (a
+// deleted one makes the next start a first start).
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -27,9 +31,10 @@ import { hostStateDir, inModelShell } from '../config/load.js';
 
 export const memoryTrustPath = (): string => path.join(hostStateDir(), 'memory.accepted.json');
 
-// `roots`: the workspace roots (real paths) whose facts were accepted once; `files`: a
-// fact file's real path → the hash of the text the host wrote or the person accepted.
-type MemoryRecord = { roots: Record<string, true>; files: Record<string, string> };
+// `firstStartDone`: whether the first start's pass ran; `files`: a fact file's real path
+// → the hash of the text the host wrote or the person accepted.
+type MemoryRecord = { firstStartDone: boolean; files: Record<string, string> };
+type RecordState = 'missing' | 'ok' | 'unreadable';
 
 const INDEX = 'memory.md';
 const WORKSPACE_LEAF = '_workspace';
@@ -41,19 +46,34 @@ const realOr = (p: string): string => { try { return fs.realpathSync(p); } catch
 // A fact file's key: its directory's real path and its own name (the file itself is
 // never followed — a link in its place is not a fact).
 const keyOf = (file: string): string => path.join(realOr(path.dirname(file)), path.basename(file));
+const isMap = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 
-function readRecord(): MemoryRecord {
+// Only ENOENT is a first start; anything that does not parse to the record's shape is
+// unreadable, and accepts nothing.
+function readRecord(): { state: RecordState; rec: MemoryRecord } {
+  const empty = (): MemoryRecord => ({ firstStartDone: false, files: {} });
+  let raw: string;
+  try { raw = fs.readFileSync(memoryTrustPath(), 'utf8'); } catch (e) {
+    return { state: (e as NodeJS.ErrnoException).code === 'ENOENT' ? 'missing' : 'unreadable', rec: empty() };
+  }
   try {
-    const v = JSON.parse(fs.readFileSync(memoryTrustPath(), 'utf8')) as Partial<MemoryRecord>;
-    const obj = (x: unknown) => (x && typeof x === 'object' && !Array.isArray(x) ? x : {});
-    return { roots: obj(v?.roots) as MemoryRecord['roots'], files: obj(v?.files) as MemoryRecord['files'] };
-  } catch { return { roots: {}, files: {} }; }
+    const v = JSON.parse(raw) as unknown;
+    if (!isMap(v) || typeof v.firstStartDone !== 'boolean' || !isMap(v.files) || Object.values(v.files).some((h) => typeof h !== 'string')) return { state: 'unreadable', rec: empty() };
+    const rec = { firstStartDone: v.firstStartDone, files: v.files as Record<string, string> };
+    return { state: rec.firstStartDone ? 'ok' : 'missing', rec };
+  } catch { return { state: 'unreadable', rec: empty() }; }
 }
 
-function writeRecord(rec: MemoryRecord): void {
+// An unreadable record is kept beside it before a new one takes its place — from then on
+// holding only what the host writes and the person accepts.
+function writeRecord(rec: MemoryRecord, state: RecordState): void {
   const file = memoryTrustPath();
   try {
     fs.mkdirSync(path.dirname(file), { recursive: true });
+    if (state === 'unreadable') {
+      try { fs.renameSync(file, `${file}.unreadable-${new Date().toISOString().replace(/[:.]/g, '-')}`); } catch { /* gone meanwhile */ }
+      rec.firstStartDone = true;
+    }
     const tmp = `${file}.${process.pid}.tmp`;
     fs.writeFileSync(tmp, JSON.stringify(rec, null, 2), { mode: 0o600 });
     fs.renameSync(tmp, file);
@@ -63,18 +83,18 @@ function writeRecord(rec: MemoryRecord): void {
 // The host wrote this fact file, with this text.
 export function recordFactFile(file: string, text: string): void {
   if (inModelShell()) return;
-  const rec = readRecord();
+  const { state, rec } = readRecord();
   rec.files[keyOf(file)] = factHash(text);
-  writeRecord(rec);
+  writeRecord(rec, state);
 }
 
 // The host removed this fact file.
 export function forgetFactFile(file: string): void {
-  const rec = readRecord();
+  const { state, rec } = readRecord();
   const key = keyOf(file);
-  if (!(key in rec.files)) return;
+  if (state === 'unreadable' || !(key in rec.files)) return;
   delete rec.files[key];
-  writeRecord(rec);
+  writeRecord(rec, state);
 }
 
 // Every fact file under a workspace root: `<…>/_workspace/memory/<id>.md`, the index and
@@ -106,42 +126,59 @@ function factFilesUnder(root: string): Array<{ key: string; text: string }> {
   return out;
 }
 
-// Whether the facts under a root were accepted once already.
-export function rootAccepted(root: string): boolean {
-  return !!readRecord().roots[realOr(root)];
+// Whether the first start's pass is still to run (the record missing).
+export function firstStartPending(): boolean {
+  return readRecord().state === 'missing';
 }
 
-// Accepts every fact under a root, unless that was done already — the first look.
-export function acceptRoot(root: string): void {
-  acceptRootOnce(root, readRecord());
+// The first start: every fact under the root is accepted, once — not from a command the
+// model runs, and not over a record that cannot be read.
+export function firstStart(root: string): void {
+  const { state, rec } = readRecord();
+  runFirstStart(root, state, rec);
 }
-
-// The first check under a root accepts what is there, once.
-function acceptRootOnce(root: string, rec: MemoryRecord): void {
-  const key = realOr(root);
-  if (rec.roots[key] || inModelShell()) return;
+function runFirstStart(root: string, state: RecordState, rec: MemoryRecord): void {
+  if (state !== 'missing' || inModelShell()) return;
   for (const f of factFilesUnder(root)) rec.files[f.key] = factHash(f.text);
-  rec.roots[key] = true;
-  writeRecord(rec);
+  rec.firstStartDone = true;
+  writeRecord(rec, state);
+}
+
+// What the start screen says when the record cannot be read.
+export function memoryRecordNotes(): string[] {
+  return readRecord().state === 'unreadable'
+    ? [`${memoryTrustPath()} cannot be read — no memory fact is sent; /memory lists them and /memory accept sends one again (the file is then replaced, its old text kept beside it)`]
+    : [];
 }
 
 // The facts of a workspace, each marked `outside` when its text is not what the host
-// wrote or the person accepted. `root` is the workspace root it lies under.
-// The root is accepted first even when this workspace holds nothing yet: a fact put
-// under it later is then checked, not taken in by the first look.
+// wrote or the person accepted. `root` is the workspace root it lies under: the first
+// start runs here, even when this workspace holds nothing yet.
 export function markFacts<F extends { id: string; hash?: string; outside?: boolean }>(root: string, ws: string, facts: F[]): F[] {
-  const rec = readRecord();
-  acceptRootOnce(root, rec);
-  if (!facts.length) return facts;
-  const memDir = realOr(path.join(ws, 'memory'));
-  return facts.map((f) => (f.hash !== undefined && rec.files[path.join(memDir, `${f.id}.md`)] === f.hash ? f : { ...f, outside: true }));
+  const { state, rec } = readRecord();
+  runFirstStart(root, state, rec);
+  return compare(ws, facts, state === 'unreadable' ? null : rec);
 }
 
-// The person accepts a fact changed outside flow-assist: its text as they were shown it.
+// The same marks with no first start run — for MEMORY.md, written after the host's own
+// writes.
+export function acceptedOnly<F extends { id: string; hash?: string; outside?: boolean }>(ws: string, facts: F[]): F[] {
+  const { state, rec } = readRecord();
+  return compare(ws, facts, state === 'unreadable' ? null : rec).filter((f) => !f.outside);
+}
+
+function compare<F extends { id: string; hash?: string; outside?: boolean }>(ws: string, facts: F[], rec: MemoryRecord | null): F[] {
+  if (!facts.length) return facts;
+  const memDir = realOr(path.join(ws, 'memory'));
+  return facts.map((f) => (rec && f.hash !== undefined && rec.files[path.join(memDir, `${f.id}.md`)] === f.hash ? f : { ...f, outside: true }));
+}
+
+// The person accepts a fact changed outside flow-assist: the text they were shown, by
+// its hash (the caller checks it is still the file's).
 export function acceptFact(ws: string, id: string, hash: string): boolean {
   if (inModelShell() || !hash) return false;
-  const rec = readRecord();
+  const { state, rec } = readRecord();
   rec.files[path.join(realOr(path.join(ws, 'memory')), `${id}.md`)] = hash;
-  writeRecord(rec);
+  writeRecord(rec, state);
   return true;
 }

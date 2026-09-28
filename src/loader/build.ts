@@ -43,7 +43,7 @@ import { THIS_HOST, pluginCompat, readPluginManifest } from './compat.js';
 import { isRemoteManifest, remotePlugin, transportFor } from '../remote/index.js';
 import { refreshToolRegistry } from './tools.js';
 import { skipLine, type LatePlugins } from './late.js';
-import { checkPluginTrust, untrustedText, type TrustOptions, type Untrusted } from './trust.js';
+import { checkPluginTrust, shownName, unreadableTrustText, untrustedText, type TrustOptions, type Untrusted } from './trust.js';
 
 // A plugin builder: `build<X>Plugin({ renders, config, make, z, modelMaySet, modelMaySave,
 // appliesOnRestart, toolsChanged })` → Plugin (or a promise of one).
@@ -129,6 +129,9 @@ export interface LoadPluginsOptions {
   // Where the enabled plugins the person has not trusted are listed (./trust.ts): none of
   // their code runs; the start screen names them.
   untrusted?: Untrusted[];
+  // What the start screen says of the trust record, once: the plugins the first start
+  // trusted, or that the record cannot be read.
+  trustNotes?: string[];
   // The trust record's file and whether this runs in the model's shell — a test's own.
   trust?: TrustOptions;
 }
@@ -143,6 +146,7 @@ export async function loadPlugins({
   remoteTransport,
   late,
   untrusted = [],
+  trustNotes = [],
   trust,
 }: LoadPluginsOptions): Promise<Plugin[]> {
   const skip = (name: string, why: string) => {
@@ -171,10 +175,12 @@ export async function loadPlugins({
   let enabled = listed;
   if (enabledDir) {
     const check = checkPluginTrust(enabledDir, listed, trust);
-    if (check.bootstrapped?.length) notes.push(`[plugins] trusted at first start: ${check.bootstrapped.join(', ')}`);
+    const said = (line: string) => { notes.push(`[plugins] ${line}`); trustNotes.push(line); if (!late) console.warn(`[plugins] ${line}`); };
+    if (check.bootstrapped?.length) said(`trusted at first start: ${check.bootstrapped.join(', ')}`);
+    if (check.unreadable) said(unreadableTrustText(check.unreadable));
     for (const u of check.untrusted) {
       untrusted.push(u);
-      skip(u.name, u.movedTo ? `${untrustedText(u.name)} (its link leads to ${u.movedTo} now)` : untrustedText(u.name));
+      skip(shownName(u.name), untrustedText(u));
     }
     enabled = listed.filter((n) => check.trusted.includes(n));
   }

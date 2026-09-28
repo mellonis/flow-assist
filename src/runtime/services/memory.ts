@@ -3,7 +3,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { hostStateDir } from '../../config/load.js';
 import { addFact, MEMORY_DIR, normalizeMemoryText, readFacts, removeFact, saveFact, type Fact } from '../../assistant/memory-store.js';
-import { workspaceFor } from '../../assistant/workspace.js';
+import { workspaceFor, workspaceRoot } from '../../assistant/workspace.js';
+import { markFacts } from '../../assistant/memory-trust.js';
 
 // The memory list an older host kept, one JSON file for every project. It is read to
 // be moved into the global workspace once (src/assistant/memory-store.ts,
@@ -129,16 +130,22 @@ export function purgePluginMemories(config: Record<string, unknown> | undefined,
 // fact (`scope` its plugin's name, else `global`; `label` its type); `save` takes the
 // list back and applies the difference by id — an entry gone is removed, a changed one
 // rewritten, a new one added under the memory tool's own guards (`refuseMemory`: a
-// refused entry is not stored). `filePath` is the global `memory/` directory.
+// refused entry is not stored). `filePath` is the global `memory/` directory. A fact
+// changed outside flow-assist (src/assistant/memory-trust.ts) is not in the list `load`
+// gives, and `save` leaves it as it is — never removed for being absent, never rewritten
+// (a rewrite would record the text as the host's own).
 const asEntry = (f: Fact): Memory => ({ id: f.id, text: f.text, scope: f.plugin ?? 'global', label: f.type, ts: f.mtimeMs });
 const pluginOf = (scope: unknown) => (typeof scope === 'string' && scope && scope !== 'global' && scope !== 'host' ? scope : undefined);
 export function globalMemoryService(config: Record<string, unknown> | undefined) {
   const dir = () => workspaceFor(config, null, 'global');
+  const marked = (ws: string) => markFacts(workspaceRoot(config), ws, readFacts(ws));
   return {
-    load: (): Memory[] => readFacts(dir()).map(asEntry),
+    load: (): Memory[] => marked(dir()).filter((f) => !f.outside).map(asEntry),
     save: (list: Memory[]): void => {
       const ws = dir();
-      const current = new Map(readFacts(ws).map((f) => [f.id, f]));
+      const all = marked(ws);
+      const outside = new Set(all.filter((f) => f.outside).map((f) => f.id));
+      const current = new Map(all.filter((f) => !f.outside).map((f) => [f.id, f]));
       const wanted = new Set(list.map((m) => m.id));
       for (const id of current.keys()) if (!wanted.has(id)) { removeFact(ws, id); current.delete(id); }
       for (const m of list) {
@@ -147,7 +154,7 @@ export function globalMemoryService(config: Record<string, unknown> | undefined)
         if (f.text !== m.text.trim() || (m.label && m.label !== f.type)) saveFact(ws, { ...f, text: m.text.trim(), ...(f.description === f.text ? { description: m.text.trim() } : {}), ...(m.label ? { type: m.label } : {}) });
       }
       for (const m of list) {
-        if (current.has(m.id) || typeof m.text !== 'string' || !m.text.trim()) continue;
+        if (current.has(m.id) || outside.has(m.id) || typeof m.text !== 'string' || !m.text.trim()) continue;
         const have = readFacts(ws).map((f) => ({ id: f.id, text: f.text, ts: f.mtimeMs }));
         if (refuseMemory(have, m.text)) continue;
         addFact(ws, { text: m.text, ...(m.label ? { type: m.label } : {}), ...(pluginOf(m.scope) ? { plugin: pluginOf(m.scope) } : {}) });

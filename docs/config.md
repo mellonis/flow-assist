@@ -75,9 +75,14 @@ never overwritten.
 A plugin loads only when you trust it. `plugins install` trusts what it installs; a
 plugin put into `plugins-enabled/` another way — a link you made by hand, an installer
 script that unpacks and links — is named on the start screen as `not trusted —
-flow-assist plugins trust <name>` until you run that. The first start after upgrading
-trusts everything already enabled, once, and the log (`L`) lists it. `plugins ls` marks
-an untrusted plugin, and `plugins remove` forgets the trust. See
+flow-assist plugins trust <name>` until you run that. An installer script that unpacks
+each version into the same `plugins-available/<name>` and links
+`../plugins-available/<name>` keeps a plugin trusted across updates; a plugin new to it
+needs one `plugins trust`. A link that now leads somewhere else shows both places, and
+`plugins trust` asks before it trusts the new one (`--yes` answers for you). The first
+start after upgrading trusts everything already enabled, once, and the start screen
+lists it. `plugins ls` marks an untrusted plugin, and `plugins remove` forgets the
+trust. See
 [safety.md](safety.md), "Plugins and memory changed behind the app's back".
 
 ```sh

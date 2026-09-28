@@ -10,12 +10,16 @@
 // command that does not go through the model.
 //
 // A fact whose file the host did not write (./memory-trust.ts, `outside`) is listed as
-// `changed outside flow-assist`: it is not in the prompt until the person accepts it
-// with `/memory accept` — their action, never the model's.
+// `changed outside flow-assist`, with the index line the prompt would carry for it
+// (name — description, which is what the model reads) as well as its text: it is not in
+// the prompt until the person accepts it with `/memory accept` — their action, never the
+// model's. An accept takes only what the last listing showed (`Shown`, kept by the
+// chat): a number names that listing's fact, and one whose file changed since, or a
+// number no listing showed, is refused and the list shown again.
 //
 // Pure: the two lists in, text (and what to remove or accept) out. The numbers run
 // through both lists — this project's first, then the global one — as they are shown.
-import type { Fact } from './memory-store.js';
+import { indexLine, MEMORY_DIR, type Fact } from './memory-store.js';
 import type { WorkspaceScope } from './workspace.js';
 
 export interface MemoryLists {
@@ -27,6 +31,9 @@ export interface MemoryLists {
 export interface Forget { scope: WorkspaceScope; id: string }
 // A fact to accept: its text as the person was shown it, by its hash.
 export interface Accept { scope: WorkspaceScope; id: string; hash: string }
+// A listing as the person saw it, by its numbers: which fact each was, the hash of its
+// file then, and whether it was changed outside flow-assist.
+export interface Shown extends Accept { outside: boolean }
 
 export interface MemoryCommandResult {
   // What to show the person (a note in the chat — never sent to the model).
@@ -35,6 +42,9 @@ export interface MemoryCommandResult {
   forget?: Forget[];
   // Present when facts changed outside flow-assist are to be accepted.
   accept?: Accept[];
+  // Present when the note lists the memory: what each number stands for, for the next
+  // accept to be checked against.
+  shown?: Shown[];
 }
 
 export const OUTSIDE_MARK = 'changed outside flow-assist';
@@ -42,6 +52,13 @@ export const OUTSIDE_MARK = 'changed outside flow-assist';
 const clip = (text: string, max = 160) => {
   const one = text.replace(/\s+/g, ' ').trim();
   return one.length > max ? `${one.slice(0, max - 1)}…` : one;
+};
+// Inline code, so the note's markdown draws the line as it would be sent: a fence one
+// backtick longer than any run inside it.
+const code = (text: string): string => {
+  const run = Math.max(0, ...(text.match(/`+/g) ?? []).map((r) => r.length));
+  const tick = '`'.repeat(run + 1);
+  return `${tick} ${text} ${tick}`;
 };
 const plural = (n: number) => `${n} ${n === 1 ? 'memory' : 'memories'}`;
 const numbered = (l: MemoryLists): { scope: WorkspaceScope; fact: Fact }[] => [
@@ -52,7 +69,11 @@ const numbered = (l: MemoryLists): { scope: WorkspaceScope; fact: Fact }[] => [
 export function memoryNote(l: MemoryLists, only?: WorkspaceScope): string {
   const all = numbered(l);
   if (!all.length) return 'Memory is empty. The assistant stores a fact with its `memory` tool when you ask it to remember something.';
-  const row = (i: number, f: Fact) => `${i + 1}. ${f.outside ? `[${OUTSIDE_MARK}] ` : ''}${f.type && f.type !== 'fact' ? `[${f.type}] ` : ''}${clip(f.text)}`;
+  const row = (i: number, f: Fact) => {
+    const line = `${i + 1}. ${f.outside ? `[${OUTSIDE_MARK}] ` : ''}${f.type && f.type !== 'fact' ? `[${f.type}] ` : ''}${clip(f.text)}`;
+    // What the prompt would carry for it, which the text alone does not show.
+    return f.outside ? `${line}\n   sent as: ${code(clip(indexLine(f, `${MEMORY_DIR}/`), 240))}` : line;
+  };
   const outside = all.filter((e) => e.fact.outside && (!only || e.scope === only)).length;
   const section = (scope: WorkspaceScope, title: string, empty: string) => {
     if (only && only !== scope) return [];
@@ -68,11 +89,17 @@ export function memoryNote(l: MemoryLists, only?: WorkspaceScope): string {
   ].join('\n');
 }
 
-export function memoryCommand(arg: string, l: MemoryLists): MemoryCommandResult {
+// What each number of a listing stands for.
+export function shownOf(l: MemoryLists): Shown[] {
+  return numbered(l).map((e) => ({ scope: e.scope, id: e.fact.id, hash: e.fact.hash ?? '', outside: !!e.fact.outside }));
+}
+
+// `shown` — the last listing the person saw (null before the first).
+export function memoryCommand(arg: string, l: MemoryLists, shown: Shown[] | null = null): MemoryCommandResult {
   const [verb = '', target = ''] = arg.trim().split(/\s+/);
-  if (!verb || verb === 'list') return { note: memoryNote(l) };
-  if (verb === 'project' || verb === 'global') return { note: memoryNote(l, verb) };
-  if (verb === 'accept') return acceptCommand(target, numbered(l));
+  if (!verb || verb === 'list') return { note: memoryNote(l), shown: shownOf(l) };
+  if (verb === 'project' || verb === 'global') return { note: memoryNote(l, verb), shown: shownOf(l) };
+  if (verb === 'accept') return acceptCommand(target, l, shown);
   if (verb !== 'forget') return { note: `Unknown: /memory ${verb}. Use /memory [project|global], /memory forget <number>, /memory forget project|global, /memory forget all or /memory accept <number|all>.` };
   const all = numbered(l);
   if (!all.length) return { note: 'Memory is already empty.' };
@@ -93,19 +120,30 @@ export function memoryCommand(arg: string, l: MemoryLists): MemoryCommandResult 
 }
 
 // `/memory accept <number|all>`: a fact changed outside flow-assist goes back into the
-// prompt, as its text is now.
-function acceptCommand(target: string, all: ReturnType<typeof numbered>): MemoryCommandResult {
-  const outside = all.filter((e) => e.fact.outside);
-  if (!outside.length) return { note: `Nothing to accept — no memory was ${OUTSIDE_MARK}.` };
-  const of = (entries: typeof all): Accept[] => entries.map((e) => ({ scope: e.scope, id: e.fact.id, hash: e.fact.hash ?? '' }));
-  if (target === 'all') return { note: `Accepted ${plural(outside.length)} ${OUTSIDE_MARK}; ${outside.length === 1 ? 'its line is' : 'their lines are'} sent from the next message.`, accept: of(outside) };
-  const n = Number(target);
-  const picked = Number.isInteger(n) ? all[n - 1] : undefined;
-  if (!picked || !picked.fact.outside) {
-    const which = all.flatMap((e, i) => (e.fact.outside ? [String(i + 1)] : [])).join(', ');
-    return { note: `/memory accept needs the number of a memory ${OUTSIDE_MARK} (${which}) or "all". /memory shows the list.` };
+// prompt — as the last listing showed it. Its file changed since, or no listing showed
+// it: nothing is accepted, and the list is shown again.
+function acceptCommand(target: string, l: MemoryLists, shown: Shown[] | null): MemoryCommandResult {
+  const again = (why: string): MemoryCommandResult => ({ note: `${why}\n${memoryNote(l)}`, shown: shownOf(l) });
+  if (!shown) return again('/memory accept takes a number from a list you have seen — here it is:');
+  const current = numbered(l);
+  const still = (s: Shown) => current.some((e) => e.scope === s.scope && e.fact.id === s.id && e.fact.hash === s.hash && e.fact.outside);
+  const picked = target === 'all' ? shown.filter((s) => s.outside) : (() => {
+    const n = Number(target);
+    const s = Number.isInteger(n) ? shown[n - 1] : undefined;
+    return s?.outside ? [s] : null;
+  })();
+  if (!picked) {
+    const which = shown.flatMap((s, i) => (s.outside ? [String(i + 1)] : [])).join(', ');
+    return { note: which ? `/memory accept needs the number of a memory ${OUTSIDE_MARK} (${which}) or "all".` : `Nothing to accept — no memory listed was ${OUTSIDE_MARK}.` };
   }
-  return { note: `Accepted: ${clip(picked.fact.text, 100)} — its line is sent from the next message.`, accept: of([picked]) };
+  if (!picked.length) return { note: `Nothing to accept — no memory listed was ${OUTSIDE_MARK}.` };
+  if (!picked.every(still)) return again(`Changed since it was listed — nothing accepted. The list as it is now:`);
+  const accept = picked.map(({ scope, id, hash }) => ({ scope, id, hash }));
+  const one = picked.length === 1 ? current.find((e) => e.scope === picked[0]!.scope && e.fact.id === picked[0]!.id)!.fact : null;
+  return {
+    note: one ? `Accepted: ${clip(one.text, 100)} — its line is sent from the next message.` : `Accepted ${plural(picked.length)} ${OUTSIDE_MARK}; their lines are sent from the next message.`,
+    accept,
+  };
 }
 
 // What `/clear` says about what it did NOT clear.

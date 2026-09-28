@@ -112,22 +112,38 @@ for the global one. So the app keeps a record of what it put there itself.
   put into `plugins-enabled/` another way — by hand, or by an installer script that
   unpacks and links. Any other plugin there is not loaded — none of its code runs — and
   the start screen and the log say `not trusted — flow-assist plugins trust <name>`.
-  Trust is the plugin's name and the place its link leads, so a newer version pulled or
-  unpacked into the same directory stays trusted, and a link that now leads elsewhere
-  is not. A plugin the assistant installs (`host:plugins_install`) is not trusted until
-  you run `plugins trust` yourself; `plugins remove` forgets the trust. The first start
-  after upgrading trusts everything already enabled, once, and the log lists it.
+  Trust is the plugin's name and the place its link leads. An installer that unpacks
+  each version into the same `plugins-available/<name>` and links
+  `../plugins-available/<name>` keeps a plugin trusted across updates; a plugin new to
+  it needs one `plugins trust`. A link that now leads elsewhere is not trusted: the
+  start screen shows where it led and where it leads now, and `plugins trust` shows both
+  and asks before it records the new place (`--yes` answers for you). A name made of
+  anything but letters, digits, `.`, `_` and `-` is refused outright — never loaded, and
+  no command is shown for it. A plugin the assistant installs (`host:plugins_install`)
+  is not trusted until you run `plugins trust` yourself, even under a name you trusted
+  before; `plugins remove`, or a link that is simply gone at a start, forgets the trust.
 - **A memory the app did not write is not sent.** The app keeps the hash of each fact
-  file as it wrote it (through the assistant's `memory` tool) or as you accepted it. A
-  fact file that was changed or added some other way is left out of every request and
-  out of the `memory` tool's own list, and `/memory` shows it as `changed outside
-  flow-assist`; `/memory accept <n>` (or `all`) sends it again as it reads now. The
-  index `memory/MEMORY.md` is never sent — the index in a request is built from the
-  facts' own files — so it needs no check. The first start after upgrading accepts the
-  facts already there, once, and what an older version kept in `memory.json` with them;
-  a `memory.json` that turns up after that is moved into files as usual, but its facts
-  wait for `/memory accept`. The assistant's working files (`artifacts/`) are never
-  sent either; it reads them only when it asks for one.
+  file as it wrote it (through the assistant's `memory` tool, or a plugin's use of the
+  memory) or as you accepted it. A fact file that was changed or added some other way is
+  left out of every request, out of the `memory` tool's and a plugin's list, and out of
+  the index file `memory/MEMORY.md`, and `/memory` shows it as `changed outside
+  flow-assist` — its text, and the line a request would carry for it (its name and
+  description, which is what the assistant reads). `/memory accept <n>` (or `all`) sends
+  it again exactly as that listing showed it: if the file changed since, nothing is
+  accepted and the list is shown again. What an older version kept in `memory.json` is
+  accepted with the first start; a `memory.json` that turns up after that is moved into
+  files as usual, but its facts wait for `/memory accept`. The assistant's working files
+  (`artifacts/`) are never sent; it reads them only when it asks for one.
+- **The first start, and a record that cannot be read.** Both records are files in the
+  app's own directory, `plugins.trusted.json` and `memory.accepted.json`. The first start
+  after upgrading — with no record at all — trusts the plugins already enabled and
+  accepts the facts already stored, once; the start screen names the plugins it
+  trusted. After that, a `plugins-enabled/` directory or a memory directory the app
+  meets for the first time (starting from another install, another `workspace.dir`)
+  starts with nothing trusted. A record that is there but cannot be read — emptied,
+  cut short, not the app's shape — trusts and accepts nothing, and the start screen
+  says so: trust plugins one by one with `plugins trust` and facts with `/memory
+  accept`, and the app writes a new record, keeping the old text beside it.
 
 A command the assistant runs carries the same marker as for the settings: from there,
 `flow-assist plugins trust` is refused, `plugins install` installs without trusting, and
@@ -165,8 +181,10 @@ what you accepted, or take the marker off — and a record that is deleted makes
 next start a first start, which accepts the files as they are.
 
 The plugin and memory records are the same, with the same limits: a command can rewrite
-or delete them (a deleted record makes the next start a first start, which trusts or
-accepts what is there), and take the marker off. Beyond that, trust in a plugin is
+them, or take the marker off. A record that is damaged fails closed — nothing is trusted
+until you say so — but one that is deleted makes the next start a first start, which
+trusts or accepts whatever is there then, a plugin or fact the command put there
+included; so does a record rewritten to look like one from before the first start. Beyond that, trust in a plugin is
 where it lives, not what its code says: a command that edits the code inside a trusted
 plugin's directory is not caught, nor one that writes into a trusted plugin's
 repository. A fact file the assistant reads by its path with `workspace_read` reaches
