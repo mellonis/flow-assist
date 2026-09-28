@@ -2541,7 +2541,13 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     does. Consecutive silent rounds share one trail; a silent round after a step's
     calls leaves an empty step first (`endRound`) so its calls are not taken for the
     step's. Under the answer only the quiet line stays: how long the turn took,
-    `stopped (Esc)`, what it cost.
+    `stopped (Esc)`, what it cost. **That line is the turn's LAST row.** A turn
+    stopped, failed or cut at a limit while a call's block (a command's, a view's) was
+    its newest message, or right after a queued message reached the model, has no
+    message of its own under it — so `send`'s `finally` puts the line on a fresh one
+    rather than on the message above. A call still running at Esc finishes before the
+    turn ends (`agentChat` awaits it), so its trail line, its ✎ mark or its diff lands
+    above the label.
   - **`step` (the default) folds each run to ONE dim row** at the place the run began:
     `▸ ` + the newest step (its last finished sentence, else its first line) and, for
     more than one, `(N steps)` — no count for a run of one (`runRowText`). The row is

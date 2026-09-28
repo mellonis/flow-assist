@@ -2131,7 +2131,15 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                     ? { ...rest, parts: [...(rest.parts ?? []), { kind: 'text', text: live }] }
                     : { ...rest, content: `${rest.content ?? ''}${live}` };
                 });
-                const at = answerAt(next);
+                let at = answerAt(next);
+                // How a turn that did not answer ended is its LAST row. One stopped,
+                // failed or cut at a limit while a tool's block was its newest message (a
+                // command's, a view's), or right after a queued message reached the
+                // model, has no message of its own under that — the round that would have
+                // made one never came — so its closing line gets one, rather than standing
+                // above what the turn did after it. (An answer is always the turn's last
+                // message: `onLiveCommit` puts it on a fresh one under a block.)
+                if ((aborted || failed || roundLimit) && at >= 0 && at < next.length - 1) { next.push({ role: 'assistant', content: '' }); at = next.length - 1; }
                 if (at >= 0) next[at] = { ...next[at]!, duration: finalMs, ...(spent ? { tokens: spent } : {}), ...(cachedSpent ? { cached: cachedSpent } : {}), ...(aborted ? { stopped: true, ...(stopKeyRef.current ? { stoppedBy: stopKeyRef.current } : {}) } : {}), ...(roundLimit ? { roundLimit, ...(lastStep ? { roundLimitAt: lastStep } : {}), ...(limitTokens !== undefined ? { roundLimitTokens: limitTokens } : {}) } : {}) };
                 return next;
               });

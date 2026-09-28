@@ -5,6 +5,11 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **`stopped (Esc)` is the last line of its turn.** A turn stopped while a command's
+  block (or another tool's view) was the newest thing in it drew the label above that
+  block. The label now stands under everything the turn did — a call that was still
+  running at Esc and finished included, its ✎ above the label when it wrote. The same
+  holds for a failed turn and one that stopped at `ai.maxRounds`.
 - **The caret stands where you are, after a CJK character or an emoji too.** In the
   chat's field the caret was drawn one cell off for every wide character before it;
   the session picker's rename and filter fields could draw it on half of an emoji. The
