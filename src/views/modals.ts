@@ -95,7 +95,7 @@ interface ToolRun {
 // position, since a number on screen is what the person and the model would each read
 // differently. Up to MAX_VISIBLE_PLAN rows; a longer plan shows a window around the
 // work and one summary line. Purely presentational — the render never mutates it (the
-// plugin hands over a snapshot of its own plan, `planRef.current.snapshot()`).
+// plugin hands over a snapshot of its own plan, `Conversation.plan.snapshot()`).
 interface PlanItem {
   id: string;
   text: string;

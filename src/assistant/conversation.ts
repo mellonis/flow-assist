@@ -585,9 +585,6 @@ export class Conversation {
     return list[at]!.hold ? 'end' : 'step';
   }
   syncQueue(): void { this.queuedDrawn = this.queue.slice(); this.changed(true); this.deps.notify(); }
-  // The queue emptied by a reset or a switch — drawn empty, as a fresh empty list always
-  // draws (no `deps.notify`: the key handler that resets redraws).
-  clearQueue(): void { this.queue = []; this.draw('queuedDrawn', [], true); }
   // ⏎ while an answer is coming: queued instead of dropped.
   enqueue(text: string): void { this.queue.push({ text }); this.syncQueue(); }
   // ↑ on an empty field: the last queued message back for editing; null with none.

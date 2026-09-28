@@ -13,7 +13,7 @@
 // So it survives /compact, /resume and deletions, identical content shares one id and
 // one stored item, and `recall` takes any unique prefix.
 //
-// What the host KEEPS never changes shape: `apiRef` and the session hold the full
+// What the host KEEPS never changes shape: `Conversation.api` and the session hold the full
 // content; a stub is applied on the way OUT (`applyRecall`, where the chat builds what
 // it sends). Which items are stubbed is conversation state (`RecallState`, owned by the
 // chat like the plan, saved with the session, reset by /clear), decided in BATCHES
@@ -120,7 +120,7 @@ function shellMetaOf(v: unknown): ShellMeta | null {
   return { command: m.command, outcome: typeof m.outcome === 'string' ? m.outcome : '?', ms: Number(m.ms) || 0, lines: Number.isInteger(m.lines) ? (m.lines as number) : 0, ...(m.interactive === true ? { interactive: true } : {}) };
 }
 
-// Every bulky item the model's history (`apiRef`, the host's own shape — a `!command`
+// Every bulky item the model's history (`Conversation.api`, the host's own shape — a `!command`
 // is still role `shell` there) holds, in order of first appearance, each id once. A
 // tool result is bulky over `minChars`; an image — the person's, or one a tool
 // returned beside its result — and a `!command`'s output always are.

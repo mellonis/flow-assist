@@ -8,14 +8,14 @@
 // tool put around it for the model: a tool that frames its text returns `{ text, raw }`
 // (`toolReturn`), `raw` the bare data, `null` when there is none to pipe (a failed call
 // the tool answers in words). Where the host keeps it: the `role: 'tool'` message itself,
-// in the model's history (`apiRef`, and so the session). Its content is the tagged
+// in the model's history (`Conversation.api`, and so the session). Its content is the tagged
 // result; when that is not the data plus the tag — cut, framed — the data rides beside
 // it as `RAW_RESULT`, which no request carries (`apiHistory` for a later turn,
 // `withAttachedImages` within one). Data past `RAW_MAX` is not kept at all, only its
 // length (`RAW_OMITTED`). A result the tool neither framed nor the cap cut is its
 // content without the tag, so nothing is kept twice.
 //
-// Pure: the caller hands in the history to search (the chat's `apiRef` and the turn so
+// Pure: the caller hands in the history to search (the conversation's `api` and the turn so
 // far — never the stubbed copy a request is built from), the recall items for the
 // `res:` alias, and how a wire name reads as the host's.
 import type { ChatMessage } from './agent.js';
