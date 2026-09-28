@@ -22,12 +22,12 @@ import { pickVerb, verbList } from './verbs.js';
 import type { ViewRecord } from './views.js';
 import type { ToolDef } from '../loader/tools.js';
 import { workspaceFor } from './workspace.js';
-import { callOf, type BusyKind, type ChatMirror, type ChatMsg, type ConversationDeps, type ConversationEvent, type ConversationKind, type Queued, type QueueWait, type TurnEnd, type ViewPort } from './conversation-types.js';
+import { callOf, type BusyKind, type ChatMirror, type ChatMsg, type ConversationDeps, type ConversationEvent, type ConversationKind, type Queued, type QueueWait, type SendOptions, type TurnEnd, type ViewPort } from './conversation-types.js';
 import {
   applySession, currentProject, ensureSessionId, journal, journaledChatLLM, journalTo, markSeen, persist, pushNote,
   releaseLockOf, writeSession, NO_FILE,
 } from './conversation-session.js';
-import { askConfigChanges } from './conversation-turn.js';
+import { askConfigChanges, compact, runTurn } from './conversation-turn.js';
 
 export { NO_FILE };
 // Live views, coalesced: the latest record per view waits at most
@@ -168,8 +168,6 @@ export class Conversation {
   queue: Queued[] = [];
   inbox: string[] = [];
   inboxTimer: ReturnType<typeof setInterval> | null = null;
-  // Takes the inbox when nothing holds it (the chat's render assigns it).
-  takeInbox: (mode?: 'turn' | 'rows') => void = () => {};
   // A plugin's news said while a turn runs waits for the turn's end (`note` on the
   // store, bound to `services.chatNote` by the App).
   laterNotes: string[] = [];
@@ -292,6 +290,12 @@ export class Conversation {
     return true;
   }
 
+  // ── the work (src/assistant/conversation-turn.ts)
+  // A turn with the model; false with nothing to send, or with something running.
+  send(text: string, opts?: SendOptions): Promise<boolean> { return runTurn(this, text, opts); }
+  // `/compact`.
+  compact(): void { compact(this); }
+
   // ── the y/n and the question
   // Resolves the y/n pause: ok=true confirms the writing op (tool runs),
   // ok=false declines it (agentChat returns «declined» as the tool result).
@@ -359,6 +363,92 @@ export class Conversation {
     this.imageData = new Map();
     this.imageNoted = new Set();
     this.imageRefusalSaid = false;
+  }
+
+  // ── what waits: the inbox
+  // The inbox: what reaches the chat from outside the conversation — a background
+  // task's result — and is not the person's. It is a queue of its own, apart from
+  // the person's (`queue`): it never enters a running turn and is taken only
+  // when one ends (`takeInbox`). A short interval retries while something
+  // holds it (a y/n, a question) and clears itself once the inbox is empty.
+  // A host-reachable channel to put a message into the chat from OUTSIDE
+  // (a `background` task's result; the chat binds `services.postToChat` to it). An
+  // item is never dropped: it waits in the inbox until it can land.
+  deliver(text: string): void {
+    const q = String(text ?? '').trim();
+    if (!q) return;
+    this.inbox.push(q);
+    if (!this.inboxTimer) this.inboxTimer = setInterval(() => this.takeInbox(), 400);
+    this.takeInbox();
+  }
+  clearInbox(): void { if (this.inboxTimer) { clearInterval(this.inboxTimer); this.inboxTimer = null; } }
+  // ── Two queues meet at a turn's end: the person's (`queue`, delivered at
+  // the next round boundary) and the inbox (`inbox`, never inside a turn).
+  // Every item waiting in the inbox lands at once, each as its own row — on
+  // screen, in the model's history (role 'bg', its `<label> finished:` line
+  // saying what it is), in the journal — and, with the chat closed, in the
+  // unread count and one alert. `keepLast` leaves the last item to `send`, which
+  // draws it as the follow-up turn's message. Returns what it took.
+  landInbox(keepLast = false): string[] {
+    const items = this.inbox;
+    if (!items.length) return [];
+    this.inbox = [];
+    this.clearInbox();
+    const rows = keepLast ? items.slice(0, -1) : items;
+    if (rows.length) {
+      for (const q of rows) this.journal({ t: 'row', role: 'bg', text: q });
+      this.mirror.setMessages((cur) => [...cur, ...rows.map((q): ChatMsg => ({ role: 'bg', content: q }))]);
+      this.api = [...this.api, ...rows.map((q): ChatMessage => ({ role: 'bg', content: q }))];
+      this.persist();
+    }
+    // The chat: with the chat closed, the unread count grows by every item and one alert
+    // names the first (`(+N more)`).
+    this.emit({ type: 'inbox', items, shown: this.port?.open() ?? false });
+    this.deps.notify();
+    return items;
+  }
+  // A y/n or a question waiting for the person holds the inbox (it lands once
+  // answered); so does a running turn, a `!command` or a slash command, and a
+  // queued message about to go out, which carries the inbox itself. A draft
+  // in the field and a closed chat hold nothing.
+  inboxHeld(): boolean { return this.busy || !!this.confirm || !!this.question || this.queue.length > 0; }
+  // Takes the inbox when nothing holds it: the items land, and ONE follow-up turn
+  // runs for all of them (`ai.backgroundFollowUp`, true unless set false; false
+  // keeps the rows, read with the person's next message). `rows` lands what waits
+  // and starts no turn for it.
+  takeInbox(mode: 'turn' | 'rows' = 'turn'): void {
+    if (!this.inbox.length) { this.clearInbox(); return; }
+    if (this.inboxHeld()) return;
+    const followUp = (this.deps.config().ai as { backgroundFollowUp?: unknown } | undefined)?.backgroundFollowUp !== false;
+    if (mode === 'rows' || !followUp) { this.landInbox(); return; }
+    const last = this.landInbox(true).at(-1)!;
+    void this.send(last, { fromInbox: true });
+  }
+  // A turn, a `!command` or a slash command has ended. The person's queued
+  // messages go first, in order, and the first carries the inbox: its rows land
+  // just ahead of it, so the model reads them together and no turn is spent on
+  // them alone. With nothing queued the inbox is taken as it is. A stopped or
+  // failed run puts the queue back into the field (the chat's `restoreQueue`, on
+  // the `turn-end` event every caller emits just before this) and lands the
+  // inbox as rows only: the person has just stopped the work, or it failed. A
+  // turn that ended at a limit (`atLimit`) sends the queue as usual, but with
+  // nothing queued lands the inbox as rows only too: a follow-up turn would take
+  // the place of its `⏎ continue`, and the continued turn reads the rows.
+  afterTurn(ok: boolean, atLimit = false): void {
+    // A screen that waited for this turn opens now — or, the turn stopped or
+    // failed, never (src/runtime/screens.ts).
+    this.deps.screens()?.afterTurn(ok);
+    if (ok && this.queue.length) {
+      setTimeout(() => {
+        const next = this.queue.shift();
+        // ↑ took it back meanwhile.
+        if (!next) { this.takeInbox(); return; }
+        this.syncQueue();
+        if (!this.confirm && !this.question) this.landInbox();
+        void this.send(next.text);
+      }, 0);
+    } else if (ok && !atLimit) setTimeout(() => this.takeInbox(), 0);
+    else this.takeInbox('rows');
   }
 
   // ── what waits: the person's queue

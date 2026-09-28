@@ -839,7 +839,7 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
               (ctx as { pushLog?: (e: string) => void }).pushLog?.(`[bg] ${label}: ${result}`);
               // Return the result to the chat too (the assistant registers `postToChat`):
               // it waits in the chat's inbox until no turn runs, lands as a message of its
-              // own and joins the model's history (the chat's `takeInboxRef` says what follows).
+              // own and joins the model's history (the conversation's `takeInbox` says what follows).
               // The `Background` role label (render) already marks it as a background
               // result, so the text itself does NOT repeat the "[background]" prefix.
               (ctx as { postToChat?: (t: string) => void }).postToChat?.(`${label} finished:\n${result}`);

@@ -289,7 +289,7 @@ the blacklist.
     CONVERSATION block first and then appends the tail as a text block of the last user
     turn (after its tool results), so alternation holds and the tail is uncached. No
     items, no block. The meter counts it as the `on screen` part
-    (`ContextParts.screen`). Only the chat's `send()` passes it: a background task
+    (`ContextParts.screen`). Only the conversation's turn (`runTurn`) passes it: a background task
     (the `background` tool's nested `chatLLM`) and the one-shot CLI (no mounted
     plugins) get none — they run apart from the screen. `/compact` does not see it.
     The chat's title is the labels joined ` · `, cut to the frame
@@ -515,8 +515,8 @@ another's):
   `:` line open (`ui.cmdOpen`) or a y/n or question waiting (`store.chat.asking`), the
   open is DEFERRED and answers at once — a tool that awaited the turn it runs in would
   never end: `<plugin>:<screen> is not open yet: <why>. It opens when this turn ends.`
-  (outside a turn — `store.chat.busy` false — `once the chat is free`). The chat's
-  `afterTurn` calls `screens.afterTurn(ok)`: a turn that ended opens what it held (the
+  (outside a turn — `store.chat.busy` false — `once the chat is free`). The conversation's
+  `afterTurn` (`src/assistant/conversation.ts`) calls `screens.afterTurn(ok)`: a turn that ended opens what it held (the
   draft stays in the field — opening never moves the keyboard), unless a question still
   waits; a stopped or failed turn drops it with a log line, as it restores rather than
   sends the queue. Outside a turn, an App effect (`screens.settle`, after every render)
@@ -1315,7 +1315,7 @@ hold this set together:
   reports usage (`stream_options.include_usage`; a server that refuses the field by
   name is retried once without it and not asked again); until then it is characters/4
   and drawn `~N%`. The reading follows each round of a turn as it lands (`onRound` in
-  `src/plugins/assistant.ts`), not only the turn's last one — a long turn shows it climb
+  `src/assistant/conversation-turn.ts`), not only the turn's last one — a long turn shows it climb
   rather than jump once at the answer. The split between parts is always an estimate,
   scaled to the total.
   The window is `ai.contextWindow` (default 200000) — the API cannot be asked for it.
@@ -1358,7 +1358,7 @@ hold this set together:
   round's reported prompt and answer plus an estimate of what joined after it
   (undefined before the first round and when the provider reports nothing; the chat then
   reads `ctx N%`'s own figure, the question added, or estimates the history with the
-  turn's transcript). Past the threshold the chat compacts `[...sentHistory(),
+  turn's transcript). Past the threshold the conversation compacts `[...sentHistory(),
   ...transcript]` through the same path as `/compact` (`foldIntoHandoff`,
   `markCompacted`, the row `── compacted · auto · ~X → ~Y tokens ──`) and hands back
   what is sent from then on: the system context with the new summary and the person's
@@ -1452,7 +1452,7 @@ hold this set together:
   conversation state, the conversation's `recall` (`RecallState`: the ids, this turn's recalls, turns
   since the last batch), saved as the session's `recall`, reset by `/clear`, never
   module-level. It is decided in BATCHES at the END of a turn (`decideBatch`, in
-  `send()`'s `finally`): replacing old content changes the request's prefix and costs
+  `runTurn`'s `finally`): replacing old content changes the request's prefix and costs
   one prompt-cache miss, so it happens when the measured context passes
   `ai.recall.threshold` (0.5 of `ai.contextWindow`) or every `ai.recall.everyTurns`
   turns (10; 0 — the threshold alone), every eligible item at once; a stub is a pure
@@ -1738,7 +1738,7 @@ hold this set together:
     `lastStep` (and `limitBy: 'tokens'`, `turnTokens` when the token budget ended it),
     and the text of a round cut off, which never reached `onLiveCommit`.
   A turn's events go to the session its question was journaled in (`journalId`, taken
-  in `send()`), even when a `/clear` lands mid-turn — they happened there. A FORK is
+  in `runTurn`), even when a `/clear` lands mid-turn — they happened there. A FORK is
   different: the conversation goes on in the fork, so `journalTo` follows `forkedTo`
   (parent id → fork id, set where `writeSession` forks) and the rest of a turn in
   flight, a `!command` still running and a background task's calls land in the fork's
@@ -2091,7 +2091,7 @@ hardest. Rules the `repo` and `gitlab` plugins hold, each with a test that tries
     conversation's `epoch`** (`Conversation.resetLiveViews` in
     `src/assistant/conversation.ts`); the conversation's `turn` is NOT reset there, it
     belongs to the conversation's whole history, not one turn.
-    `send()` and the `!command` runner each capture `epoch` when they
+    A turn (`runTurn`) and the `!command` runner each capture `epoch` when they
     START; every one of their callbacks that could still fire after a LATER reset —
     a tool's own view (`offerLive`), its `changes` (`onToolRun`), the turn's own
     final `flushLive()`, `!command`'s own completion — compares its captured value
@@ -2311,7 +2311,7 @@ beside it as `images: ImageRef[]` (`{ n, name, path, sha256, mime, bytes, width,
 height }`, `src/assistant/images.ts`) — on the display message only their numbers.
 `apiHistory` passes a user message's `images` through — and a tool message's, the
 images a tool returned beside its result ("A tool can return images" under What the
-model can do); `send()` alone turns them into
+model can do); the turn (`runTurn`) alone turns them into
 `[{type:'text'}, {type:'image_url', image_url:{url:'data:…'}}]` (`wireMessages`) right
 before `chatLLM`, from bytes read when the image was attached or, after a restart,
 read again from the path with the hash checked. A file gone or changed is a `note` in
@@ -2599,7 +2599,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   aborted, `Conversation.canStop`) — for Esc as well: a run that goes on after its abort (a tool that ignores
   its signal) no longer holds them, so the next Ctrl+C arms and the one after exits,
   Esc goes back to its idle steps, and the status line drops `Esc stops`. `/compact`
-  (`runAsyncCommand`) has a controller of its own, passes the signal to its request and
+  (`runCommand`, `src/assistant/conversation-turn.ts`) has a controller of its own, passes the signal to its request and
   races the wait against the abort, so it stops at once (`/compact stopped (^c)`) and a
   late summary is not applied. It **leaves the field the moment it is submitted**, as a
   sent message does (it is in ↑ already), and never touches the field when it ends — a
@@ -3349,7 +3349,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   tool ends (`onToolRun`) the label goes. With no tool running the line says a WORD — a gerund
   picked at random for each model request (`Pondering…`, `Brewing…`;
   `src/assistant/verbs.ts`, `ui.verbs` replaces the list) — with the same shimmer as
-  a tool's label. It is picked when the request goes out (`send`, then `onRound` for
+  a tool's label. It is picked when the request goes out (`runTurn`, then `onRound` for
   the next one) and held in state, never in the render, so it never changes within a
   round, and a new round never repeats the last word. The PHASE is the colour:
   magenta while the model thinks — before the first token, while it reasons, between
@@ -3415,15 +3415,14 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   (the conversation's `continueOffer`) goes with the next message and wherever the empty-answer notice
   is reset.
 - **Two queues: the person's and the inbox.** The person's queue (the conversation's `queue`) is
-  delivered at the next round boundary (the ⏎ bullet above). The **inbox** (the conversation's `inbox`,
-  `src/plugins/assistant.ts`) holds what reaches the chat from outside the conversation
+  delivered at the next round boundary (the ⏎ bullet above). The **inbox** (`Conversation.inbox`,
+  `src/assistant/conversation.ts`) holds what reaches the chat from outside the conversation
   and is not the person's — a **background result** (the `background` tool's nested
   run finishing, through `services.postToChat`), and any later source of the same kind
   goes through it too. The inbox **never enters a running turn**: no round and no tool
   call is interrupted, and nothing lands between a call and its result. It is taken
   only when nothing runs — at a turn's end, a `!command`'s or a slash command's
-  (`afterTurn`), or at once when it arrives idle (`takeInboxRef`, reassigned every
-  render; a 400 ms interval retries while something holds it and clears itself once
+  (`afterTurn`), or at once when it arrives idle (`takeInbox`; a 400 ms interval retries while something holds it and clears itself once
   the inbox is empty). Then **every waiting item lands at once**, each as its own `◆`
   row — on screen, in the model's history as role `bg` (sent as the user's, framed by
   its own `<label> finished:` / `failed:` line, never as the person's words), in the
@@ -3435,7 +3434,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     message is about to go out the inbox is held, so no follow-up turn can take its
     place and drop it;
   - otherwise **ONE follow-up turn** runs for all of them: the items before the last
-    land as rows, and the last goes as `send(q, { fromBackground: true })` — a `bg` row
+    land as rows, and the last goes as `send(q, { fromInbox: true })` — a `bg` row
     too, kept as role `bg` — so the request carries every one of them.
   - **A pending y/n or question holds the inbox** (`inboxHeld`); it lands once
     answered (`answerConfirm` / `answerQuestion` take it). **A draft in the field does not

@@ -77,8 +77,8 @@ export const hostConfigSchema = z.object({
     // every tool in full on every request.
     toolLoading: z.enum(['all', 'onDemand']).optional(),
     // A background task's result lands in the chat when the running turn ends, and
-    // one turn follows for everything that landed (src/plugins/assistant.ts,
-    // `takeInboxRef`); `false` keeps the results as rows, read with the next message.
+    // one turn follows for everything that landed (src/assistant/conversation.ts,
+    // `Conversation.takeInbox`); `false` keeps the results as rows, read with the next message.
     backgroundFollowUp: z.boolean().optional(),
     // The cap on ONE tool result before it joins the model's history (default 40000
     // characters, src/assistant/tool-result-cap.ts). A longer result is cut, the head
