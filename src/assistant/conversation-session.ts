@@ -235,14 +235,15 @@ export function markSeen(c: Conversation): void {
 // would then be recorded as "seen" even though `s` never saw it, and the next save would
 // silently overwrite it. Taking the fingerprint first means a write in that window is
 // instead caught — the next save finds the disk has moved and forks. `dir` — the
-// directory the session's file was found in.
+// directory the session's file was found in. The conversation it opens into is a new
+// one (`/resume`), or the chat's first, which has shown nothing yet (the start); every
+// field below is set from the file whole, never left to what the object was made with.
 export function applySession(c: Conversation, s: Session, fingerprint: SessionFingerprint, dir: string): void {
   c.sessionId = s.id; c.createdAt = s.createdAt;
   c.homes.set(s.id, dir);
   c.sessionProject = s.project ?? null;
-  c.journalBuf = []; // held for the conversation being left
-  // Opened again, a session writes its own journal: a fork's redirect was for what was
-  // in flight when it forked, not for the session for good.
+  c.journalBuf = []; // nothing held: the session's journal begins where its file left off
+  // The session writes its own journal: no redirect of its id to a fork.
   c.forkedTo.delete(s.id);
   let journaled = true;
   try { journaled = !c.deps.sessionsDir() || fs.existsSync(journalPath(dir, s.id)); } catch { /* not an id — nothing to journal */ }
@@ -257,21 +258,21 @@ export function applySession(c: Conversation, s: Session, fingerprint: SessionFi
   c.summary = stripToolMarkup(s.summary ?? '');
   c.plan.load(s.plan);
   c.toolSet.load(s.tools);
-  c.resetLiveViews(); // the calls they tracked belong to the conversation being left
+  c.resetLiveViews(); // no live view tracked: the session's views are as saved
   c.resetImages(s.images ?? [], s.imageSeq ?? 0);
   c.recall = createRecallState(s.recall); // the ids are hashes: they still name the same items
-  c.setAutoMode('ask'); // another conversation is another conversation's mode
-  c.roundTools = false; // the round being written belonged to the conversation being left
+  c.setAutoMode('ask'); // the mode is never saved: an opened session asks
+  c.roundTools = false; // no round is being written
   c.usage = s.usage;
   c.prompts = s.prompts.slice();
   if (c.drawnRows) c.drawnRows = s.messages as ChatMsg[];
   c.setRows(s.messages as ChatMsg[]);
   // After the list is replaced, so the note the directory brings lands in it (said once
-  // — a session that ends in the same note is left as it is). A note still waiting for a
-  // turn's end described the conversation being left.
+  // — a session that ends in the same note is left as it is). No note waits for a turn's
+  // end: none runs.
   c.projectNote = null;
   c.project = { dir: '', root: null, files: [] };
   c.shell.setCwd(s.shellCwd ?? null);
-  // Another conversation: what its commands told the model is told again.
+  // What the session's commands told the model is told again.
   c.shell.told.clear();
 }

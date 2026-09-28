@@ -3877,7 +3877,9 @@ commands; docs and hints never present either mechanism as a boundary.
   (`ConfirmAsk.title` / `hint`), through the `configChanges` host service `renderApp`
   binds — as it starts, before the next request of a turn (`beforeRequest` awaits it),
   after a `!command` and after a turn (`askConfigChanges`,
-  `src/assistant/conversation-turn.ts`). Yes (`applyConfigChange`) accepts it and lays
+  `src/assistant/conversation-turn.ts`) — one that `/clear` stopped included: a
+  conversation the chat has left asks in the one it draws now (`ConversationDeps.current`),
+  so the y/n comes up in the cleared chat as the stopped work unwinds. Yes (`applyConfigChange`) accepts it and lays
   each key on the running config, a key marked `appliesOnRestart` left for the
   restart. No (`declineConfigChange`) writes the accepted content back into the file
   and keeps the rejected text beside it, `<file>.rejected-<time>` (0600), so a restart

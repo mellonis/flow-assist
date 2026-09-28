@@ -114,7 +114,7 @@ const assistantConfig = (host: { config?: unknown }) =>
 
 // What a conversation is handed from the chat's host: every member reads the host when
 // it is called, since the App rebinds some services on every render.
-function chatDeps(host: PluginApi['host'], lockToken: string): ConversationDeps {
+function chatDeps(host: PluginApi['host'], lockToken: string, current: () => Conversation | null): ConversationDeps {
   const svc = () => host.services as Record<string, any>;
   return {
     config: () => host.config,
@@ -135,6 +135,7 @@ function chatDeps(host: PluginApi['host'], lockToken: string): ConversationDeps 
     lockToken,
     // Read when called: a plugin that joins late is seen.
     screens: () => svc().screens as ReturnType<ConversationDeps['screens']>,
+    current,
   };
 }
 
@@ -313,7 +314,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             c.on('inbox', (ev) => viewFx.current.inbox?.(ev));
             c.on('activity', (ev) => viewFx.current.activity?.(ev));
           };
-          if (!convRef.current) { const c = new Conversation(chatDeps(host, lockToken)); bindView(c); convRef.current = c; }
+          if (!convRef.current) { const c = new Conversation(chatDeps(host, lockToken, () => convRef.current)); bindView(c); convRef.current = c; }
           // This render's conversation. `adopt` moves it to the one that replaces it, so a key
           // this render's handler takes before the next render reaches the new one; what
           // outlives a render (a timer, an effect, a service) reads `convRef` instead.
@@ -981,7 +982,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             if (id !== prev.sessionId) prev.releaseLock(); // leaving the old one
             // The session opens into a conversation of its own; the one left is parked.
             prev.close('park');
-            const next = new Conversation(chatDeps(host, lockToken), { turn: prev.turn, verb: prev.verb, drawnRows: prev.drawnRows, memoryMissingSaid: prev.memoryMissingSaid });
+            const next = new Conversation(chatDeps(host, lockToken, () => convRef.current), { turn: prev.turn, verb: prev.verb, drawnRows: prev.drawnRows, memoryMissingSaid: prev.memoryMissingSaid });
             adopt(next);
             next.applySession(s, fp, dir); applySessionView(s);
             (host.services as Record<string, any>).showMessage?.(`Resumed «${s.title || 'session'}»`);
@@ -1089,7 +1090,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // carry over — they are the chat's field's and status line's, and what the chat showed.
           const renew = (prev: Conversation, reason: 'clear' | 'new') => {
             prev.close(reason);
-            const next = new Conversation(chatDeps(host, lockToken), { prompts: prev.prompts, turn: prev.turn, verb: prev.verb, drawnRows: prev.drawnRows, memoryMissingSaid: prev.memoryMissingSaid });
+            const next = new Conversation(chatDeps(host, lockToken, () => convRef.current), { prompts: prev.prompts, turn: prev.turn, verb: prev.verb, drawnRows: prev.drawnRows, memoryMissingSaid: prev.memoryMissingSaid });
             adopt(next);
             next.startFresh();
             // A plugin's news held for the stopped turn's end lands now, under the fresh rows.

@@ -469,8 +469,8 @@ export class Conversation {
   // Leaving the chat or resetting it must not leave the tool hanging: an unanswered
   // question is reported to the model as dismissed.
   dismissQuestion(): void { if (this.question) this.answerQuestion({ ...this.question.state, done: true, cancelled: true }); }
-  // A session opened into this conversation: the calls `liveSeen` / `liveBuf` tracked, and
-  // the pending coalesce timer (if any), are for views of what it held before.
+  // No live view tracked and no coalesce timer pending — the state a session is opened
+  // into (`applySession`).
   resetLiveViews(): void {
     this.liveSeen.clear();
     this.liveBuf.clear();

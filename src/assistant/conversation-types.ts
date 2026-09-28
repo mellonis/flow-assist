@@ -6,6 +6,7 @@ import type { AutoMode } from './auto.js';
 import type { ContextItem } from './screen-context.js';
 import type { TurnPart } from './step.js';
 import type { ViewRecord, ViewRenderers } from './views.js';
+import type { Conversation } from './conversation.js';
 
 // A chat message. `role` is the OpenAI role; `content` may be null when a message
 // carries tool_calls. Extra fields ride along (live/reasoning/parts/duration/…).
@@ -145,4 +146,7 @@ export interface ConversationDeps {
   // The App's screens service (src/runtime/screens.ts): the system prompt's `## Screens`
   // block, and the end of work that opens what a turn held back. Undefined with no App.
   screens: () => { promptBlock(): string; afterTurn(ok: boolean): void } | undefined;
+  // The conversation the chat draws now, where work that outlived a closed one asks
+  // what it must ask the person. Undefined with no chat.
+  current?: () => Conversation | null | undefined;
 }

@@ -789,10 +789,14 @@ export function compact(c: Conversation): void {
 // The y/n sits in the conversation's one confirmation slot, so a write's y/n and this one
 // never stand together; it closes no panel, and the auto mode never answers it.
 export function askConfigChanges(c: Conversation): Promise<void> {
+  // Work that outlived the conversation it ran in (a command /clear stopped) asks in the
+  // conversation the chat draws now, whose own y/n and question decide, as they do for
+  // any check: the guard is the process's, and a closed conversation shows nothing.
+  if (c.closed) {
+    const cur = c.deps.current?.();
+    return cur && cur !== c ? cur.askConfigChanges() : Promise.resolve();
+  }
   if (c.configAsk) return c.configAsk;
-  // A conversation the chat has left asks nothing: nobody would see its y/n. The one the
-  // chat draws asks at its own next check.
-  if (c.closed) return Promise.resolve();
   const svc = (c.deps.services() as { configChanges?: { check(): ConfigChange[]; apply(ch: ConfigChange): { applied: string[]; restart: string[] }; decline(ch: ConfigChange): string | null } }).configChanges;
   if (!svc || c.confirm || c.question) return Promise.resolve();
   const changes = svc.check();
