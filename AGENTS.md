@@ -282,7 +282,7 @@ the blacklist.
     The chat hands `agentChat` a `requestTail` read before EVERY round (a tool that
     changes the screen is seen by the next round); the loop adds it to a COPY of the
     round's messages as a user message flagged `REQUEST_TAIL` — never to `current`, so
-    never the transcript, `apiRef` or the session — and each wire places it:
+    never the transcript, the conversation's `api` or the session — and each wire places it:
     `openAiMessages` joins it to the end of the person's last message (a paragraph, or a
     text part when that message has parts) and after tool results leaves it a user
     message of its own; `anthropicRequest` sets the message breakpoint on the last
@@ -926,7 +926,7 @@ hold this set together:
   `tool.run` would never receive the resolved text), so docs/plugins.md does not name
   it — and `agentChat` resolves it BEFORE the y/n with `findToolResult`
   (`src/assistant/tool-results.ts`, pure) over the turns before this one as the caller
-  keeps them (`toolCtx.toolResultHistory` — the chat's `apiRef`, never the stubbed copy it sends)
+  keeps them (`toolCtx.toolResultHistory` — the conversation's `api`, never the stubbed copy it sends)
   and the turn so far, the latest result of a reused id winning (a provider's ids are
   not unique across rounds). An id that names nothing, a call that failed or was
   declined, a result with no data (`raw: null`), one that is images and no text, one
@@ -1201,7 +1201,7 @@ hold this set together:
   a fact changed outside flow-assist (below), without going through the model
   (`src/assistant/memory-command.ts`, pure: the lists in, a note and what to remove out).
   What the host tells the person this way is a display-only message of role `note`;
-  `apiHistory` drops it, and the model's history (`apiRef`) never holds it.
+  `apiHistory` drops it, and the model's history (the conversation's `api`) never holds it.
   - **A fact is a file, the prompt carries the index.** `memory/<id>.md` holds one fact
     under a front matter — `name`, `description`, `type` (preference, convention, fact,
     reference), and `plugin` on a fact an older host kept for a plugin — and
@@ -1318,7 +1318,7 @@ hold this set together:
   scaled to the total.
   The window is `ai.contextWindow` (default 200000) — the API cannot be asked for it.
   `/compact`, `/clear` and a change of conversation drop the measurement. `/compact`
-  shrinks what the MODEL sees (`apiRef` → a summary in the system context) and leaves
+  shrinks what the MODEL sees (the conversation's `api` → a summary in the system context) and leaves
   the screen alone — the display list keeps the conversation and gains a `note` marking
   where the model's view now begins; wiping the screen read as `/clear`. The note is ONE
   row, `── compacted · ~58k → ~2.1k tokens ──` (the `ctx N%` reading before and after;
@@ -1337,7 +1337,7 @@ hold this set together:
   The WHOLE history the model saw is sent — never its last N messages: what the old
   summary did not hold would be lost for good. The previous summary goes in the same
   request, to carry forward what still holds, and the answer takes its place in
-  `summaryRef` (the session's `summary`) — never appended: appended, every later system
+  the conversation's `summary` (the session's `summary`) — never appended: appended, every later system
   context carried each old summary, stale questions included. An answer that is not a
   handoff (`summaryProblem`: a section heading missing — matched loosely, any case, `#`
   or `**` or a colon — or too short: under 1% of the compacted tokens AND under 1500
@@ -1362,7 +1362,7 @@ hold this set together:
   what is sent from then on: the system context with the new summary and the person's
   message — on its own before the first round; after one, with `RESUMED_NOTE` appended,
   so the model goes on from the handoff's next step rather than beginning again.
-  `apiRef` becomes that message, the turn's transcript starts after it (`turnStart`
+  The conversation's `api` becomes that message, the turn's transcript starts after it (`turnStart`
   moves), and the measured usage is dropped with the history it measured. The
   per-round `systemPrompt` reads the summary fresh (`summaryBlock`), since it changes
   between two rounds of one message. A compaction that fails is logged and the request
@@ -1384,13 +1384,13 @@ hold this set together:
   request: 33.0k prompt · 28.4k from cache · 1.2k written to cache`, a part left out
   when not reported, and `· the provider reports no cache figures` appended when
   neither was. The session keeps it two ways: `usage` (session-wide, the same
-  `TokenUsage` `usageRef` holds) and, on the turn's own answer message, a `cached` sum
+  `TokenUsage` the conversation's `usage` holds) and, on the turn's own answer message, a `cached` sum
   of `cachedTokens` across the turn's rounds (beside `tokens`, the same sum of
   prompt+completion `onRound` already kept) — so a saved chat still shows a turn's
   cache hits, not only what it cost.
 - **The plan (`todo`) belongs to a conversation, not to the process.**
   `createPlan()` in `src/assistant/plan.ts` makes one; its owner passes it to the
-  tool as `ctx.plan`. The chat holds its own (`planRef`), and `/clear` resets it —
+  tool as `ctx.plan`. The conversation holds its own (`plan`), and `/clear` resets it —
   so does the end of a turn that left every item done (a finished plan otherwise hung
   over the chat as "· N done"); a
   background run gets a fresh one, so its checkboxes never appear among the chat's;
@@ -1425,7 +1425,7 @@ hold this set together:
     so a later call that pipes that result reads the data without the reminder. A
     round of `todo` alone (laying out the plan) is not work and carries none.
   The shell's directory is the same kind of state: `createShellState` in
-  `src/assistant/shell.ts`, held by the chat (`shellRef`), handed to run_command and
+  `src/assistant/shell.ts`, held by the conversation (`shell`), handed to run_command and
   `cd` as `ctx.shell`; a background run gets a fresh one — its own to move, so its `cd`
   never moves the parent's — started where the parent conversation's shell is at the
   moment `background` is called, not at the app's own default.
@@ -1443,11 +1443,11 @@ hold this set together:
   carries), so it survives `/compact`, `/resume` and deletions, identical content
   shares one id and one stored item, and `recall` takes any unique prefix or the hash
   alone (an ambiguous one answers with the candidates). **What the host keeps never
-  changes shape**: `apiRef` and the session hold the full content; the stubs are
+  changes shape**: the conversation's `api` and the session hold the full content; the stubs are
   applied on the way OUT — `sentHistory()` in the chat, `applyRecall` over
   `apiHistory`'s output, matched by content hash — for the request, the context meter
   (a stubbed item counts as its stub) and `/compact` alike. Which items are stubbed is
-  conversation state, `recallRef` (`RecallState`: the ids, this turn's recalls, turns
+  conversation state, the conversation's `recall` (`RecallState`: the ids, this turn's recalls, turns
   since the last batch), saved as the session's `recall`, reset by `/clear`, never
   module-level. It is decided in BATCHES at the END of a turn (`decideBatch`, in
   `send()`'s `finally`): replacing old content changes the request's prefix and costs
@@ -1569,7 +1569,7 @@ hold this set together:
   `src/loader/tools.ts`) — shown as one line under the group's heading in the index
   and, once the group's tools are loaded (or sent in full under `'all'`), in full on the
   group's first tool; sanitized (`sanitizeGroupDescription`: control characters and the
-  app's own frame words out) and trusted the same way a tool's own description is. The loaded set is a `ToolSet` owned like the plan: the chat's `toolSetRef`
+  app's own frame words out) and trusted the same way a tool's own description is. The loaded set is a `ToolSet` owned like the plan: the conversation's `toolSet`
   (saved as the session's `tools`, kept by `/compact`, emptied by `/clear`); a background run and the one-shot CLI start from an empty one.
   `agentChat`'s own default is `'all'` — the mode is applied by `services.chatLLM`
   and `runPrompt` from config — and `bootApp` pins `'all'` so an e2e script can call
@@ -1639,7 +1639,7 @@ hold this set together:
   `(dir, id)` function in sessions.ts takes a session's OWN directory; the readers of
   every session — `listSessions`, `sessionRows`, `pruneSessions`, `sweepJournals` — take
   the root and walk the tree (`sessionDirs`, never following a link), and each row they
-  return carries `dir` and `project`. The chat keeps the directory of every session it
+  return carries `dir` and `project`. The conversation keeps the directory of every session it
   has held (`homes`, by id), so a turn, a `!command` or a background task still writing
   to a session it has left, or a fork, finds its journal — the picker's move (below)
   updates this map too, when the id it moved is one this chat still holds, so a
@@ -1650,8 +1650,8 @@ hold this set together:
   picker's own move takes the lock first, precisely so it never does that. The current
   project is the chat's session's once it has one, else where the shell is
   (`currentProject`).
-  A session is ONE object: the screen list, `apiRef` (what the model is sent),
-  `summaryRef`, the plan, the usage reading, the ↑/↓ prompts, the unsent draft, the
+  A session is ONE object: the screen list, the conversation's `api` (what the model is sent),
+  its `summary`, the plan, the usage reading, the ↑/↓ prompts, the unsent draft, the
   loaded tools (`tools`) and the
   shell's directory (`shellCwd`, re-checked against the roots when used) —
   three views of one conversation, saved together or not at all. Not saved: an answer
@@ -1840,7 +1840,7 @@ hold this set together:
   picker's own notice line before that. A ⏎ that `openSession` refuses — an answer still
   coming, or a session another process took since the list was read — keeps the picker
   up, its rows read again. `^n` is `/new`. `^r` renames: this chat's own
-  through its `titleRef`, another through `renameSession`, which takes the lock for the
+  through its conversation's `title`, another through `renameSession`, which takes the lock for the
   write and never writes a HELD session (its next save would fork) or this chat's own;
   a session whose file went since the list was read is said to be gone.
   `^p` moves the row under the cursor into the
@@ -1892,15 +1892,15 @@ hold this set together:
   holds the keys.
   A session's `title` is fixed at its first save — the first non-empty line of the first
   thing the person wrote (a `!command` otherwise), whitespace collapsed and cut at
-  `TITLE_MAX` (70) code points (`cutTitle` / `sessionTitle`) — and kept in the chat's
-  `titleRef`, so it never drifts as old messages are trimmed; `/title <text>` renames it,
+  `TITLE_MAX` (70) code points (`cutTitle` / `sessionTitle`) — and kept in the conversation's
+  `title`, so it never drifts as old messages are trimmed; `/title <text>` renames it,
   `/title` alone says it. No title is ever asked of the model.
   An image is saved as a ref (`images`, `imageSeq` — see "Images" under The chat),
   never as its bytes; the e2e test asserts the file holds no base64.
   **Under `bun test` with no `sessions.dir` nothing touches disk** (`sessionsDir` →
   null): `bootApp` gives every test a temp dir, and a test that renders the app
   directly must not write into, or continue, the person's own chats. A restored
-  screen over an empty `apiRef` looks right and is the bug — the e2e tests assert on
+  screen over an empty `api` looks right and is the bug — the e2e tests assert on
   what the model is SENT after a restart. A view is saved as its record — kind, data,
   phase — never as drawn rows. One saved while it ran reads back as `failed`, and a
   console view from before renderers reads as a record (`normalizeViews`); an entry
@@ -2080,9 +2080,9 @@ hardest. Rules the `repo` and `gitlab` plugins hold, each with a test that tries
     rounds of one turn (a test double restarts at `call_0` every round; some real
     servers send `''` or reuse ids); using it alone would let two commands whose ids
     collided overwrite one another's block.
-  - **A reset — `/clear` and `/resume`, the same places `planRef`
+  - **A reset — `/clear` and `/resume`, the same places the conversation's `plan`
     resets — clears `liveBuf`, `liveSeen` and any pending `liveTimer`, and bumps an
-    `epochRef`** (`resetLiveViews` in `src/plugins/assistant.ts`); `turnRef` is NOT
+    `epochRef`** (`resetLiveViews` in `src/plugins/assistant.ts`); the conversation's `turn` is NOT
     reset there, it belongs to the conversation's whole history, not one turn.
     `send()` and the `!command` runner each capture `epochRef.current` when they
     START; every one of their callbacks that could still fire after a LATER reset —
@@ -2151,14 +2151,14 @@ hardest. Rules the `repo` and `gitlab` plugins hold, each with a test that tries
   whole — and so does the tool message itself when its content is not the data plus the
   tag (the cap cut it, or the tool framed it and returned `{ text, raw }`): the data
   rides beside the content as `raw` (`RAW_RESULT`, `keptRaw` in
-  `src/assistant/tool-results.ts`), in `apiRef` and the session but never sent
+  `src/assistant/tool-results.ts`), in the conversation's `api` and the session but never sent
   (`apiHistory` whitelists fields for a later turn, `withAttachedImages` takes it off
   each round's copy within the turn), which is what `stdinFrom` reads after a restart;
   a result the cap left alone is its content without the tag, kept once. Data over
   `RAW_MAX` (1 MiB of characters) is not kept — only its length, `rawOmitted` — so one
   huge result cannot grow every session save without bound; piping it answers `too
   large to pipe`, never "call again", which would return the same. Only the `role: 'tool'` message pushed into `current` (and so into
-  `transcript`/`apiRef`) is capped, once, for good. A tool declares its own
+  `transcript`/the conversation's `api`) is capped, once, for good. A tool declares its own
   `maxResultChars` on the tool def (the plugin tool type, `src/loader/tools.ts`) to
   raise its OWN cap — for one whose result is large and worth the tokens — clamped to
   a hard ceiling (200000) so a plugin cannot flood the history by declaring a bigger
@@ -2174,7 +2174,7 @@ hardest. Rules the `repo` and `gitlab` plugins hold, each with a test that tries
 
 **The chat's display list is never the model's history.** `agentChat` returns the
 turn's `transcript` (assistant messages with `tool_calls`, every tool result, the
-final answer) and the chat keeps it in a model-side history (`apiRef`) beside the
+final answer) and the chat keeps it in a model-side history (the conversation's `api`) beside the
 display list; `apiHistory()` sends API fields only and never half of a
 call/result pair. Replaying only each turn's final text shows the model a
 conversation in which state changed with no tool call in sight, and it imitates
@@ -2214,7 +2214,7 @@ that fences its broken call gets no correction. `AgentOpts.onNote` carries a lin
 again`, `… again — the turn ends`), drawn as a dim note where it happened.
 
 **A turn that did not finish is closed in the model's history too.** The question
-joins `apiRef` before the request, so it stays on record whatever happens. Left there
+joins the conversation's `api` before the request, so it stays on record whatever happens. Left there
 alone after Esc, it read to the model as a question still waiting: the next request
 showed two user messages in a row, and the model answered both — going back to the
 work the person had stopped. So when `agentChat` throws it hangs the turn's
@@ -2226,7 +2226,7 @@ person, not to be resumed unless they ask), `failedTurn(message)` after an error
 (it failed, with the error's first 200 characters — a retry the person asks for then
 reads as one). The text of the round that was cut off is not kept. The closing
 message is model-side only: the screen already says `stopped (Esc)` or shows the
-error. It is saved with the session like the rest of `apiRef`
+error. It is saved with the session like the rest of the conversation's `api`
 (`turn-end.e2e.test.ts` asserts on what the model is sent next).
 
 **A provider's refusal is read, not pasted** (`llmErrorMessage` in
@@ -2251,7 +2251,7 @@ into its call, and the start-up gate (`configWarnings`) checks the same resoluti
 and the token variable to `ANTHROPIC_API_KEY`. In `agent.ts` the provider is looked at in
 exactly two places, `roundFor` (the round `agentChat` runs; a caller's own `chatRound`, a
 test's stub, wins) and `compactConversation`. **What the host keeps never changes shape**:
-`apiRef` and the session stay OpenAI-shaped, and `anthropicRequest` converts on the way
+the conversation's `api` and the session stay OpenAI-shaped, and `anthropicRequest` converts on the way
 out, every request — system messages into the top-level `system`, `tool_calls` into
 `tool_use` blocks (arguments parsed; `{}` for any that do not), each run of tool results
 into ONE user message with the person's next words after them (turns of one role merge —
@@ -2298,7 +2298,7 @@ thinking) — keep it in step with the API.
 
 **An image is kept as a ref and sent as a part.** `ChatMessage.content` is
 `string | ContentPart[] | null`, but content PARTS exist only on the way to the
-provider: everywhere the host keeps a message (the display list, `apiRef`, the
+provider: everywhere the host keeps a message (the display list, the conversation's `api`, the
 session) its content is a string, and a person's message with images carries them
 beside it as `images: ImageRef[]` (`{ n, name, path, sha256, mime, bytes, width,
 height }`, `src/assistant/images.ts`) — on the display message only their numbers.
@@ -2919,7 +2919,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   - **The reasoning is a block of its own** (`foldId(at, 'thinking')`): a `▸ thinking`
     header in `step` that a click or `^o` opens, always open in `open`.
   - **Round bookkeeping lives outside the state updaters.** Whether the round being
-    streamed carries a call is a ref (`roundToolsRef`), set by `onRoundKind`, read by
+    streamed carries a call is a field of the conversation (`roundTools`), set by `onRoundKind`, read by
     `onLive` when it FIRES and handed to its updater, reset by `onLiveCommit`. The
     updaters are pure functions of the list, and round state lives outside them: kept
     inside, `onLiveCommit` would read round state an updater mutates synchronously, so
@@ -2972,7 +2972,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   file as an image. An attachment is a TOKEN in the field's text, `[Image #N]`, put
   in at the caret with a space after it, drawn in `accent` (in the field and in the
   sent message — not dim, which in the field means "offered"). N counts up for the
-  whole conversation (`imagesRef` N → ref, `imageSeqRef`; saved as the session's
+  whole conversation (the conversation's `images`, N → ref, and `imageSeq`; saved as the session's
   `images` / `imageSeq`, reset by `/clear`). The TEXT decides
   what is sent — the tokens it holds that the map knows, in the order written, each
   once — so a queued message, ↑/↓ recall and the draft carry their images by their
@@ -3139,7 +3139,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   to result) on the
   person's ground, the same live block as the model's commands (one line while it
   runs; `✓ 1.2 s · ~/dir` when it ends, opened by a click to its last lines) — the
-  message is still role `shell` and still joins `apiRef` (`apiHistory` maps `shell` →
+  message is still role `shell` and still joins the conversation's `api` (`apiHistory` maps `shell` →
   `user`) and is read with the next message; no turn is spent. It is saved with the session and
   its line goes into ↑/↓ as `!cmd`; recalling one with ↑ shows it the way it was
   typed — level 1, the field holding `cmd` with the `!` stripped (see the bang-level
@@ -3247,13 +3247,13 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   whatever happened. The
   result is the same `shell` message and console view as `!`'s, marked `interactive`
   (`ConsoleData.interactive`, drawn dim beside the command, kept by `capConsoleData`).
-  It asks whenever something was recorded: the recording joins `apiRef` as `The person
+  It asks whenever something was recorded: the recording joins the conversation's `api` as `The person
   ran an interactive program …`, and a turn starts at once with `INTERACTIVE_ASK` as
   the person's message — `send(…, { hostAsk: true })`: drawn dim, gutter and all
   (`hostAsk` on the display message, `quiet` rows), never put into ↑/↓, and the field
   is left alone (it did not come from there). Nothing recorded — no `script`, or nothing
   left once a full-screen program's own screen is dropped (`!!vim`, `less`, `top`) —
-  and the run is a block on screen only: no `apiRef` entry, no turn, a dim `note`
+  and the run is a block on screen only: no `api` entry, no turn, a dim `note`
   saying the assistant was not asked (a turn on "(no output)" is a request for
   nothing). Whatever the program echoed — a value typed at a prompt that echoes it back
   (a password prompt does not) — is part of the recording: it is sent to the model and
@@ -3288,7 +3288,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   **`services.chatNote(text)`** is a plugin's news from outside a command: the chat
   publishes `note` on `store.chat`, and the App binds the service PER PLUGIN (an own
   prop of the plugin's services view) with `[<plugin>] ` in front, so no plugin's note
-  passes for the host's; during a turn it waits in `laterNotesRef` and is said under
+  passes for the host's; during a turn it waits in the conversation's `laterNotes` and is said under
   the answer, where the project's instructions note is — and so does a command's
   `ctx.say`, prefixed the same way. **`services.setConfig` / `unsetConfig`** are bound
   per plugin too: `setConfigValue` / `unsetConfigValue` with every plugin's schema,
@@ -3349,11 +3349,11 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   text arrives; spelling that out as `thinking…`/`writing…` instead would have
   `writing…` read as a promise of text that is not there yet. The stream callbacks are
   closures made when the message was sent, so anything they READ (the tool label
-  they clear) is kept in a ref beside the state — reading the state there would see
+  they clear) is kept in the conversation (`toolLabel`) beside the state — reading the state there would see
   its send-time value, and a finished tool's label would stay up for the rest of the turn.
   - **The seconds are the running THING's, not the turn's.** They start again whenever
     the line changes hands: a tool the moment it is called (`onTool`), the model's
-    round the moment the tool ends (`segRef`, `beginSegment` in the chat; `t0Ref` still
+    round the moment the tool ends (the conversation's `segmentStartedAt`, `beginSegment` in the chat; its `turnStartedAt` still
     times the turn). One timer from the question to the answer sat at `3m 12s` through
     a build, which says nothing about what is happening. The TURN's total, and what it
     cost, stay on the quiet line under the finished answer (`12.4 s · 3.1k tok`), where
@@ -3361,7 +3361,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   - **What the turn costs is said** (`3.1k tok`, `tokensBadge`): every round's prompt
     plus its completion as the provider reports them (`onRound`'s `usage`), added up
     for the turn. It is not `ctx N%` beside it — that one is how big the NEXT request
-    is, from the last round alone (`usageRef`, the context meter). A provider that
+    is, from the last round alone (the conversation's `usage`, the context meter). A provider that
     reports nothing shows no figure: an estimate that moved on its own would be worse
     than none, and nothing here is estimated.
 - **The tool trail is condensed and capped** (`condenseRuns` / `TRAIL_ROWS` in
@@ -3404,10 +3404,10 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   model's voice (`roundCapTurn`: which limit, where it stopped, not finished, picked up
   on "continue"). Then Enter on the EMPTY field sends `continue`
   (`CONTINUE_WORD`) and the field's hint reads `⏎ continue`; the offer
-  (`continueOfferRef`) goes with the next message and wherever the empty-answer notice
+  (the conversation's `continueOffer`) goes with the next message and wherever the empty-answer notice
   is reset.
-- **Two queues: the person's and the inbox.** The person's queue (`queueRef`) is
-  delivered at the next round boundary (the ⏎ bullet above). The **inbox** (`inboxRef`,
+- **Two queues: the person's and the inbox.** The person's queue (the conversation's `queue`) is
+  delivered at the next round boundary (the ⏎ bullet above). The **inbox** (the conversation's `inbox`,
   `src/plugins/assistant.ts`) holds what reaches the chat from outside the conversation
   and is not the person's — a **background result** (the `background` tool's nested
   run finishing, through `services.postToChat`), and any later source of the same kind
