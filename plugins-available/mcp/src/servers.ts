@@ -261,6 +261,10 @@ export function createServerManager(servers: Array<{ name: string; spec: ServerS
           return isDoubt(err) ? check(e, gen, client) : 'kept';
         },
         status: () => (gen === e.gen && e.state === 'connected' ? null : notConnected(e)),
+        // Asked by the host once the group left its registry: a server that came back
+        // without the tool has nothing to add — the host's own `is gone` answers, never a
+        // "call the tool again" the call would only loop on.
+        gone: () => (e.state === 'connected' && !e.removed ? null : notConnected(e)),
       });
       e.state = 'connected';
       e.attempt = 0;

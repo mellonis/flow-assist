@@ -267,6 +267,29 @@ describe('an answer the server gives to a ping, and a session it forgot', () => 
   // `/mcp remove` in the middle of a turn: the turn's call is told the person removed the
   // server — never that it came back and the tool should be called again. The host asks
   // the group the same through `gone` once the group has left the registry.
+  // The server came back, without one of its tools: the host asks the old group why the
+  // tool left, and must not be told to call it again — it is not coming back. A direct
+  // call to the old group still says the server is there again.
+  test('a server back without a tool: the old group has nothing to add for the host', async () => {
+    let tools: Array<{ name: string }> = [{ name: 'find' }, { name: 'edit' }];
+    const fetch: Fetcher = async (_u, init) => {
+      const body = JSON.parse(String(init.body));
+      if (body.id === undefined) return new Response(null, { status: 202 });
+      const result = body.method === 'initialize' ? { protocolVersion: PROTOCOL_VERSION, serverInfo: { name: 'T', version: '1' }, capabilities: { tools: {} } }
+        : body.method === 'tools/list' ? { tools } : { content: [{ type: 'text', text: 'ok' }] };
+      return Response.json({ jsonrpc: '2.0', id: body.id, result });
+    };
+    const t = fakeTimers();
+    const m = createServerManager([{ name: 'tracker', spec: { url: 'http://x' } }], { fetch, schedule, timers: t.timers });
+    await m.start();
+    const old = m.groups()[0]!;
+    tools = [{ name: 'find' }];
+    await m.restart('tracker');
+    expect(m.groups()[0]).not.toBe(old);
+    expect(old.gone()).toBeNull();
+    await expect(old.exec('tracker:edit', {})).rejects.toThrow('call the tool again');
+  });
+
   test('a call to a server removed since says the person removed it', async () => {
     const s = flaky('ok');
     const t = fakeTimers();

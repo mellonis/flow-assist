@@ -113,13 +113,15 @@ export function frame(server: string, tool: string, text: string, isError: boole
   ].join('\n');
 }
 
-// The server's manager (servers.ts) watches the group through two hooks: `onFail` hears
+// The server's manager (servers.ts) watches the group through three hooks: `onFail` hears
 // every call that failed with an error of the line or the server (not a tool's own
 // `isError` answer) and answers `retry` when it started the server's session anew, so
 // the call is made again — once; `status` says why the group no longer answers (its
 // server dropped or was turned off since the turn's tool list was fixed), and a call
-// gets that instead of reaching a client that is gone.
-export type GroupHooks = { onFail?: (e: unknown) => Promise<unknown> | unknown; status?: () => string | null };
+// gets that instead of reaching a client that is gone; `gone` is what the host is told
+// once the group has left its registry — null while the server is connected (it came
+// back without that tool), so the host's own `is gone` answers.
+export type GroupHooks = { onFail?: (e: unknown) => Promise<unknown> | unknown; status?: () => string | null; gone?: () => string | null };
 export function toolGroup(name: string, spec: ServerSpec, client: McpClient, tools: McpTool[], instructions?: string, hooks: GroupHooks = {}) {
   const byWire = new Map<string, string>();
   const personSays = claimedReadOnly(spec);
@@ -150,7 +152,7 @@ export function toolGroup(name: string, spec: ServerSpec, client: McpClient, too
     tools: defs,
     // Asked by the host when a call reaches a tool of this group after the group left the
     // registry (docs/plugins.md, `toolsChanged`): where the server stands.
-    gone: () => hooks.status?.() ?? null,
+    gone: () => hooks.gone?.() ?? null,
     exec: async (wire: string, args: Record<string, unknown>) => {
       const tool = byWire.get(wire) ?? byWire.get(wire.replace(/__/, ':'));
       if (!tool) throw new Error(`Unknown tool: ${wire}`);
