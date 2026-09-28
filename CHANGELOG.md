@@ -5,6 +5,11 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **The caret stands where you are, after a CJK character or an emoji too.** In the
+  chat's field the caret was drawn one cell off for every wide character before it;
+  the session picker's rename and filter fields could draw it on half of an emoji. The
+  pinned question and the y/n block's capped text are cut between characters, never
+  through an emoji.
 - **A colon typed or pasted into the `:` line stays.** `:config set ai.baseUrl
   https://…` kept `https//…`: every `:` typed while the line was open was dropped, and
   a paste did not reach the line at all. Now `:` opens the line when it is closed and

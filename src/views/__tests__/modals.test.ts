@@ -5,7 +5,7 @@ import { TestBackend } from '@flowtty/core/testing';
 import { MODAL_COLOR_DEFAULTS } from '../../playback/theme.js';
 import { chatRows, condenseRuns, helpEntries, toolSummary, inputVisualRows, mdLines, renderChatModal, renderHelp, renderLogModal, renderReminder, typedLines, type RowOpts } from '../modals.js';
 import { bumpViewRevision } from '../../assistant/views.js';
-import { cutLeft } from '../../cells.js';
+import { cutLeft, headClusters } from '../../cells.js';
 import { pickerStart } from '../../assistant/session-picker.js';
 import type { SessionRow } from '../../assistant/sessions.js';
 
@@ -839,3 +839,52 @@ test('a change title that fits by clusters is not cut from the left', () => {
   const rows = chatRows([msg] as never, { wrap, folds: { open: true, except: new Set() }, viewLines: 20, notes: 'step', detailsKey: '^o', renderers: {}, now: 0, palette: {} }).map(rowText);
   expect(rows.find((r) => r.startsWith('✎'))).toBe(`✎ ${title} · +1 −0`);
 });
+
+// ─── Carets by cluster ───────────────────────────────────────────────────────
+// The caret stands on a whole cluster, at the column the editor moves it to: a CJK
+// character or an emoji before it takes two cells, never one.
+type Grid = { width: number; height: number; get(x: number, y: number): { char: string; style: { inverse?: boolean } } };
+const caretCell = (backend: TestBackend) => {
+  const buf = (backend as unknown as { lastBuffer: Grid }).lastBuffer;
+  for (let y = 0; y < buf.height; y++) for (let x = 0; x < buf.width; x++) {
+    const c = buf.get(x, y);
+    if (c.style.inverse && c.char) return { x, y, char: c.char };
+  }
+  return null;
+};
+const fieldColumn = (backend: TestBackend, y: number, text: string) => {
+  const line = backend.lastFrame!.split('\n')[y]!;
+  return stringWidth(line.slice(0, line.indexOf(text)));
+};
+
+test("the chat field's caret stands after a CJK character and an emoji by their cells", async () => {
+  const backend = new TestBackend(80, 24);
+  // '日' is one UTF-16 unit, '🙂' two: the caret at 3 is right before `a`.
+  const handle = await render(h(renderChatModal, { ...baseChat, input: '日🙂ab', cursor: 3 }), backend);
+  const at = caretCell(backend)!;
+  expect(at.char).toBe('a');
+  expect(at.x).toBe(fieldColumn(backend, at.y, '日') + 4);
+  handle.unmount();
+  // On a cluster of several code points the caret cell is the whole of it.
+  const rows = inputVisualRows('日👍🏽x', 1, 40);
+  expect(rows[0]).toEqual({ before: '日', caret: '👍🏽', after: 'x', start: 0 });
+});
+
+test("the picker's rename field draws its caret on a whole cluster, after a CJK character and an emoji", async () => {
+  const backend = new TestBackend(100, 24);
+  // The caret at 3 stands on `👍🏽` — an emoji and its skin tone, one cluster.
+  const picker = { ...pickerStart(PICKER_ROWS), mode: 'rename' as const, name: '日🙂👍🏽x', nameCaret: 3 };
+  const handle = await render(h(renderChatModal, { ...baseChat, width: 100, picker }), backend);
+  const at = caretCell(backend)!;
+  expect(at.char).toBe('👍🏽');
+  expect(at.x).toBe(fieldColumn(backend, at.y, '日') + 4);
+  expect(backend.lastFrame).toContain('日🙂👍🏽x');
+  handle.unmount();
+});
+
+test('a capped string is cut between clusters, never inside one', () => {
+  expect(headClusters('ab', 5)).toBe('ab');
+  expect(headClusters(`${'a'.repeat(59)}🙂tail`, 60)).toBe(`${'a'.repeat(59)}🙂`);
+  expect(headClusters(`${'a'.repeat(59)}${FAMILY}tail`, 60)).toBe(`${'a'.repeat(59)}${FAMILY}`);
+});
+

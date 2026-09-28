@@ -53,3 +53,14 @@ export function wrapCells(text: string, width: number): string[] {
   }
   return rows;
 }
+
+// At most the first `n` grapheme clusters of `text` — a cap by count, for a string
+// held to a length before it is drawn, cut between clusters so it never ends in half
+// a surrogate pair, half a flag or a dangling joiner. The caller compares the result
+// with `text` to know whether it was cut.
+export function headClusters(text: string, n: number): string {
+  const str = String(text ?? '');
+  if (str.length <= n) return str;
+  const clusters = graphemes(str);
+  return clusters.length <= n ? str : clusters.slice(0, Math.max(0, n)).join('');
+}

@@ -18,7 +18,7 @@ import { askRows, type AskRow, type AskState } from '../assistant/ask.js';
 import { autoBadge, type AutoMode } from '../assistant/auto.js';
 import { VERBS } from '../assistant/verbs.js';
 import { todoMarker } from '../assistant/plan.js';
-import { cellWidth, cutLeft, cutStep } from '../cells.js';
+import { cellWidth, cutLeft, cutStep, headClusters } from '../cells.js';
 import { answerText, readParts, runMarks, runRowText, shownText, trailTone, turnSegments, type NotesMode } from '../assistant/step.js';
 import { isClicked, isOpen, foldId, type FoldState } from '../assistant/folds.js';
 import { imageTokenRanges, splitTokens } from '../assistant/images.js';
@@ -32,7 +32,7 @@ import { formatBytes, pickerGroups, pickerSelected, rowStatus, type OwnStatus, t
 import { runMark, tildePath } from '../assistant/shell.js';
 import { sessionWhen, type SessionRow } from '../assistant/sessions.js';
 import { createContext, createElement as h, memo, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { wrapText } from '@flowtty/core';
+import { nextGrapheme, rowIndexAt, wrapText } from '@flowtty/core';
 import { bindingGlyph, keyGlyph } from '../playback/keys.js';
 import {
   Box,
@@ -421,8 +421,11 @@ export function inputVisualRows(input: string, cur: number, fieldW: number): { b
   const at = caretPosition(input || '', cur, w);
   return rows.map((r, i) => {
     if (i !== at.row) return { before: r.text, caret: '', after: '', start: r.start };
-    const chars = Array.from(r.text);
-    return { before: chars.slice(0, at.col).join(''), caret: chars[at.col] ?? ' ', after: chars.slice(at.col + 1).join(''), start: r.start };
+    // The column is a display column, so it is turned back into an index the way the
+    // editor does (`rowIndexAt`), and the caret cell is the whole cluster there.
+    const off = rowIndexAt(r, at.col) - r.start;
+    const end = nextGrapheme(r.text, off);
+    return { before: r.text.slice(0, off), caret: r.text.slice(off, end) || ' ', after: r.text.slice(end), start: r.start };
   });
 }
 
@@ -444,7 +447,7 @@ function toolRunText(run: ToolRun, wrap: number, n = 1): Span {
             return n === 1 ? '[1 item]' : `[${n} items]`;
           }
           if (typeof v === 'object') {
-            try { return JSON.stringify(v).slice(0, 40); } catch { return '{…}'; }
+            try { return headClusters(JSON.stringify(v), 40); } catch { return '{…}'; }
           }
           return String(v);
         })
@@ -458,7 +461,7 @@ function toolRunText(run: ToolRun, wrap: number, n = 1): Span {
   // A group shares its outcome, so one reason stands for all of it: a call that
   // failed is how a person knows why an answer is thin, count or no count.
   if ((run.outcome === 'error' || run.outcome === 'declined') && run.detail) {
-    text += ` — ${String(run.detail).slice(0, 60)}`;
+    text += ` — ${headClusters(String(run.detail), 60)}`;
   }
   // One terminal row, cut by the cells it takes — a wide character counts two.
   return { text: cutStep(text, Math.max(20, (wrap || 80) - 1)), dim: true };
@@ -1281,7 +1284,8 @@ function ChatMessages({ messages, rowOpts, palette: m, errorColor, onViewport, s
   // under it, so pinning does not shift what the person is reading. Needs flowtty
   // ≥ 1.0.0-alpha.9 — before it an overlay vanished under a padded ancestor (this
   // modal has padding).
-  const stickyText = pinned ? (lastUserText.length > 60 ? `${lastUserText.slice(0, 60)}…` : lastUserText || '…') : null;
+  const stickyHead = pinned ? headClusters(lastUserText, 60) : '';
+  const stickyText = pinned ? (stickyHead !== lastUserText ? `${stickyHead}…` : lastUserText || '…') : null;
   const sticky = useMemo(() => stickyText === null ? null
     // Painted over the rows, so a drag would pick it up in place of the row under it.
     : h(Box, { key: 'chat-sticky', position: 'absolute', top: 0, left: 0, width: '100%', flexDirection: 'row', backgroundColor: m.userBg ?? m.bg, selectable: false },
@@ -1782,7 +1786,7 @@ export function renderChatModal({
             const tail = `${waits}${keys}`;
             return h(Box, { flexDirection: 'row', width: '100%', flexShrink: 0 },
               h(Text, { bold: true, color: m.warn }, `${CAP.enter} queued${queued.length > 1 ? ` (${queued.length})` : ''}: `),
-              h(Text, { wrap: 'truncate', color: m.warn }, `${queued.length > 1 ? '… ' : ''}${queued.at(-1)!.replace(/\s+/g, ' ').slice(0, Math.max(20, wrap - 16 - tail.length))}`),
+              h(Text, { wrap: 'truncate', color: m.warn }, `${queued.length > 1 ? '… ' : ''}${headClusters(queued.at(-1)!.replace(/\s+/g, ' '), Math.max(20, wrap - 16 - tail.length))}`),
               tail ? h(Text, { dim: true, wrap: 'truncate' }, tail) : null);
           })()
         : null,
@@ -1824,9 +1828,10 @@ export function renderChatModal({
                 // word: `/co` + `mpact`. The offer is the accent colour, dimmed; the
                 // other candidates follow, and ⇥ says which key takes them.
                 const caretAt = row.start + row.before.length;
+                const ghostHead = ghost ? nextGrapheme(ghost, 0) : 0;
                 const offer = ghost
-                  ? [h(Text, { key: 'g0', inverse: true, dim: true, color: m.accent }, ghost[0]),
-                     h(Text, { key: 'g1', dim: true, color: m.accent }, ghost.slice(1))]
+                  ? [h(Text, { key: 'g0', inverse: true, dim: true, color: m.accent }, ghost.slice(0, ghostHead)),
+                     h(Text, { key: 'g1', dim: true, color: m.accent }, ghost.slice(ghostHead))]
                   : [h(Text, { key: 'c', inverse: true, ...(tokens.some((t) => t.start <= caretAt && caretAt < t.end) ? { color: m.accent } : {}) }, row.caret)];
                 return h(Box, { key: i, flexDirection: 'row' },
                   prompt,
@@ -1858,7 +1863,9 @@ export function renderChatModal({
 // (cut), whose it is, when it was last used, its size, how many messages. The state and
 // what a key does are src/assistant/session-picker.ts.
 const pickerField = (prompt: string, value: string, caret: number, m: Record<string, string | undefined>) => {
-  const at = Array.from(value.slice(caret))[0] ?? '';
+  // The caret cell is the whole cluster at the caret — a flag, an emoji with its
+  // modifiers — never one code point of it.
+  const at = value.slice(caret, nextGrapheme(value, caret));
   return h(Box, { flexDirection: 'row', width: '100%', selectable: false },
     h(Text, { bold: true, color: m.accent }, prompt),
     h(Text, { wrap: 'truncate' }, value.slice(0, caret)),
@@ -2207,7 +2214,7 @@ export interface ConfirmAsk { name: string; args?: string | unknown; command?: s
 // `line` is a line drawn as it is (the `config set` a `config_set` call stands for).
 // Either takes the arguments' place.
 function confirmView(c: ConfirmAsk) {
-  const cut = (t: string) => (t.length > 1000 ? `${t.slice(0, 1000)}…` : t);
+  const cut = (t: string) => { const head = headClusters(t, 1000); return head !== t ? `${head}…` : t; };
   return {
     title: c.title ?? `⚠ Confirm write: ${c.name}`,
     command: c.command != null ? `${runMark()} ${cut(c.command)}` : c.line != null ? (c.whole ? c.line : cut(c.line)) : null,
@@ -2215,7 +2222,7 @@ function confirmView(c: ConfirmAsk) {
     // call's result (src/assistant/tool-results.ts); drawn under the command line.
     input: c.input ? `${c.command != null ? 'stdin' : 'input'}: result of ${c.input}` : null,
     args: typeof c.args === 'string'
-      ? (c.args.length > 120 ? `${c.args.slice(0, 120)}…` : c.args)
+      ? (headClusters(c.args, 120) !== c.args ? `${headClusters(c.args, 120)}…` : c.args)
       : JSON.stringify(c.args ?? ''),
     hint: c.hint ?? `Press y to confirm · n to decline · ${CAP.esc} to cancel`,
   };
@@ -2274,7 +2281,7 @@ function renderAsk(state: AskState, bg: string | undefined, wrap: number) {
     h(Text, { bold: true, color: 'cyan', wrap: 'wrap' }, title),
     ...rows.map((r, i) => h(Box, { key: i, flexDirection: 'column' },
       h(Text, { bold: r.active, inverse: r.active && !state.typing, wrap: 'truncate' }, `${mark(r)} ${i + 1}. ${r.label}`),
-      r.description ? h(Text, { dim: true, wrap: 'truncate' }, `       ${r.description.slice(0, Math.max(10, wrap - 8))}`) : null)),
+      r.description ? h(Text, { dim: true, wrap: 'truncate' }, `       ${headClusters(r.description, Math.max(10, wrap - 8))}`) : null)),
     state.typing
       ? h(Box, { flexDirection: 'column' }, fieldRows.map((row, i) =>
           h(Box, { key: `f${i}`, flexDirection: 'row' },

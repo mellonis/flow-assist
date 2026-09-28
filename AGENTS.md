@@ -2568,7 +2568,9 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     per-code-point or `.length` count — so a wide character, a flag or a ZWJ sequence
     never pushes a row onto a second line and a cut never splits one; `cutLeft`
     there is the same cut keeping the tail (a path in the `!` hint row, a ✎ change's
-    title). The folded tools summary (`toolSummary`), the text-only help's usage
+    title), and `headClusters` a cap by COUNT (the pinned question's 60, the y/n
+    block's 1000 and 120, a trail's reason) that still cuts between clusters, never
+    inside a surrogate pair or a flag. The folded tools summary (`toolSummary`), the text-only help's usage
     column (`helpText`), a view's rows (`frameView`) and the start screen's columns
     are measured the same way. A trail is
     numbered the same way (`foldId(at, 'tools', n)`, its cap `calls` with the same
@@ -3254,7 +3256,12 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   - The caret (`cursor`) is a **UTF-16 index into the value, resting on a grapheme-
     cluster boundary** — flowtty's unit. `value.slice(0, cursor)` works; `Array.from(value)`
     indices do not. Columns are counted in display width, so a wide cluster (an emoji,
-    a CJK character) takes two.
+    a CJK character) takes two. What is DRAWN goes the same way back: `inputVisualRows`
+    turns the caret's column into an index with flowtty's `rowIndexAt` and draws the
+    whole cluster there (`nextGrapheme`) inverted — the chat's field, the `ask_user`
+    field and the picker's filter and rename fields (`pickerField`) alike — so a wide
+    character before the caret never moves it a cell, and the caret never lands inside
+    a cluster.
   - Newline keys: **Alt+⏎** (what the hints name), Shift+⏎ where the terminal sends
     it, and backslash-then-⏎, which works everywhere.
   - In a draft ↑/↓ move the caret between rows; they walk history only while the
