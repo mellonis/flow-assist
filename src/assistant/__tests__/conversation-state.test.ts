@@ -24,15 +24,16 @@ test('the queue: ⇥ holds one message, an image holds everything behind it, ↑
 test('a live view is placed at once, then coalesced, and its end is never held', async () => {
   const c = new Conversation(fakeDeps());
   const rec = (phase: 'live' | 'done', text: string) => ({ kind: 'console', data: { text }, phase, startedAt: 1, callId: 'k#1' }) as never;
-  c.offerLive(rec('live', 'one'), c.epoch);
+  c.offerLive(rec('live', 'one'));
   expect(c.rows()).toHaveLength(1);
-  c.offerLive(rec('live', 'two'), c.epoch);
+  c.offerLive(rec('live', 'two'));
   expect((c.rows()[0]!.views as { data: { text: string } }[])[0]!.data.text).toBe('one');
   await new Promise((r) => setTimeout(r, LIVE_REDRAW_MS + 50));
   expect((c.rows()[0]!.views as { data: { text: string } }[])[0]!.data.text).toBe('two');
-  c.offerLive(rec('done', 'three'), c.epoch);
+  c.offerLive(rec('done', 'three'));
   expect((c.rows()[0]!.views as { phase: string }[])[0]!.phase).toBe('done');
-  c.offerLive(rec('live', 'stale'), c.epoch - 1); // a reset happened since: dropped
+  c.close('park');
+  c.offerLive(rec('live', 'stale')); // the chat has left it since: dropped
   expect((c.rows()[0]!.views as { data: { text: string } }[])[0]!.data.text).toBe('three');
 });
 

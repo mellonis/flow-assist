@@ -48,14 +48,12 @@ export async function runShell(c: Conversation, cmd: string, interactive = false
   // The person's command gets the same live block as the model's. The message
   // is still role `shell`: it joins c.api and ↑/↓ as it always did. Declared
   // OUTSIDE the try so the catch below can still find the message by `callId`
-  // if something throws after it was pushed; `epoch` is this command's own
-  // conversation identity, captured now — a completion that arrives after a
-  // LATER /clear (or /resume) must not touch the fresh
-  // conversation's messages, session-facing history or shell directory.
+  // if something throws after it was pushed. A completion that arrives after the
+  // chat left this conversation (/clear) touches nothing of it but the journal:
+  // `c.closed` is checked before its messages, history or shell directory.
   const startedAt = Date.now();
   const callId = `shell#${startedAt}`;
   const liveRec = (data: unknown, phase: ViewRecord['phase'] = 'live'): ViewRecord => ({ kind: 'console', data, phase, startedAt, callId });
-  const epoch = c.epoch;
   // Set once an interactive run's recording has joined the model's history: the
   // turn that looks at it starts when this command is done (the `finally`).
   let ask = false;
@@ -73,7 +71,7 @@ export async function runShell(c: Conversation, cmd: string, interactive = false
       outJournal.push(chunk);
       raw += chunk;
       if (raw.length > maxChars * 2) raw = raw.slice(-maxChars);
-      c.offerLive(liveRec(capConsoleData({ command: cmd, cwd: tildePath(cwd), text: raw, showCwd: true })), epoch);
+      c.offerLive(liveRec(capConsoleData({ command: cmd, cwd: tildePath(cwd), text: raw, showCwd: true })));
     };
     // The interactive run holds no AbortController of its own: while it runs the
     // terminal is the program's, and no key reaches the chat (flowtty's TTY
@@ -100,10 +98,9 @@ export async function runShell(c: Conversation, cmd: string, interactive = false
     const move = nextCwd(c.deps.config() as Record<string, unknown>, cwd, r.pwd);
     const { display, forModel } = formatShell(cmd, r, cwd, timeoutMs, { after: move.cwd, note: move.note, ...(interactive ? { interactive: { recorded } } : {}) });
     // Everything from here on is display/model-facing state for THIS
-    // conversation — skipped whole for a stale epoch (a /clear mid-command:
-    // the command still finishes, and without this its block would land in
-    // the fresh, cleared chat).
-    if (epoch === c.epoch) {
+    // conversation — skipped whole once the chat has left it (a /clear
+    // mid-command: the command still finishes, and draws nothing).
+    if (!c.closed) {
       // `cd` sticks, as in a terminal — within the roots.
       if (move.cwd !== cwd) c.shell.setCwd(move.cwd);
       c.flushLive();
@@ -146,7 +143,7 @@ export async function runShell(c: Conversation, cmd: string, interactive = false
     // The block stops ticking rather than waiting forever for a completion
     // that is never coming — marked failed in place, keeping whatever it had
     // already shown (the way a tool's own thrown view does, agent.ts).
-    if (epoch === c.epoch) {
+    if (!c.closed) {
       c.setRows((cur) => {
         const next = cur.slice();
         const at = next.findLastIndex((m) => callOf(m) === callId);
@@ -163,9 +160,9 @@ export async function runShell(c: Conversation, cmd: string, interactive = false
     // it. The chat stays BUSY until that turn has started (the `send` waits one
     // tick, for the render that carries the command's block): a message typed
     // in between queues behind the ask, as behind any turn — never ahead of it.
-    const askNow = ask && epoch === c.epoch;
+    const askNow = ask && !c.closed;
     c.busy = askNow;
-    if (epoch === c.epoch) c.flushLive();
+    if (!c.closed) c.flushLive();
     c.persist();
     if (!askNow) c.setBusyDrawn(false);
     // A command of the person's may have changed a settings file (the guard).
@@ -184,7 +181,7 @@ export async function runShell(c: Conversation, cmd: string, interactive = false
     if (askNow) {
       setTimeout(() => {
         c.busy = false;
-        if (epoch !== c.epoch) { c.setBusyDrawn(false); return; }
+        if (c.closed) { c.setBusyDrawn(false); return; }
         void c.send(INTERACTIVE_ASK, { hostAsk: true });
       }, 0);
     }

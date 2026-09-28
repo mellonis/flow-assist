@@ -136,11 +136,9 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
   // away, and the finished block would come back live, ticking forever.
   c.setRows((cur) => [...(sys ? [{ role: 'system', content: sys } as ChatMsg] : []), ...cur.filter((m) => m.role !== 'system'), ...added]);
   c.turn += 1; // views this turn opens are its own, never the last turn's
-  // This turn's own conversation identity — captured now, compared against
-  // `c.epoch` by every one of this turn's async callbacks that could
-  // still fire after a LATER reset (a tool's view, its changes, the turn's own
-  // final flush): a mismatch means the conversation it was for is gone.
-  const epoch = c.epoch;
+  // Every one of this turn's async callbacks that could still fire after the chat left
+  // this conversation (a tool's view, its changes, the turn's own final flush) checks
+  // `c.closed`: a closed conversation draws nothing more.
   c.persist(); // the question survives a restart even if the answer does not
   c.setBusyDrawn(true);
   c.setPhase('thinking');
@@ -197,7 +195,7 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
       onNote: (text: string, detail?: { markup?: string }) => {
         // The journal keeps the markup the note is about, as evidence.
         if (detail?.markup) c.journalTo(journalId, { t: 'markup', note: text, markup: detail.markup });
-        if (epoch !== c.epoch) return;
+        if (c.closed) return;
         c.setRows((cur) => [...cur, { role: 'note', content: text }]);
         c.deps.notify();
       },
@@ -208,11 +206,11 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
       // goes on from the handoff, so it is not begun again. A compaction that
       // fails is logged and the request goes as it is; Esc stops it with the turn.
       beforeRequest: async ({ round, transcript, measured }: { round: number; transcript: ChatMessage[]; measured?: number }) => {
-        if (epoch !== c.epoch) return;
+        if (c.closed) return;
         // A settings file a command just changed is answered before the model
         // reads another word (the guard, above).
         await c.askConfigChanges();
-        if (epoch !== c.epoch) return;
+        if (c.closed) return;
         // First what the person queued since the last request: it reaches the
         // model now, after the round's results, as their message — each one
         // whose wait is the next step (`queueWait`). On screen it stands where
@@ -258,7 +256,7 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
           c.setToolLabel('');
         }
         if (abort.signal.aborted) throw new DOMException('The operation was aborted.', 'AbortError');
-        if (epoch !== c.epoch) return append;
+        if (c.closed) return append;
         // The person's message stays, the rest is the handoff; what they
         // queued since goes after it, as it would have without the compaction.
         const resumed: ChatMessage = round === 0 ? asked : { ...asked, content: `${q}\n\n${RESUMED_NOTE}` };
@@ -315,7 +313,7 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
       // A view a tool opened, and every change to it. Its message is pushed on
       // the FIRST change, so it has its place — and its fold id — from the
       // start: a block opened while it ran is still open when it ends.
-      onToolLive: (rec: ViewRecord) => c.offerLive(rec, epoch),
+      onToolLive: (rec: ViewRecord) => c.offerLive(rec),
       // What a write changed goes on the answer being written the moment the
       // write lands — a block of its own that stays in the chat. Only on the
       // display message: `c.api` gets the transcript, which never holds it.
@@ -336,12 +334,11 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
         // The call whole — its arguments as the model wrote them, its result as
         // the tool returned it, before the cap and before any stub.
         c.journalTo(journalId, callEndEvent(run, c.deps.viewRenderers()));
-        // A call whose result arrives after a LATER reset (/clear mid-turn,
-        // most often): the conversation it ran in is gone from both the screen
-        // and `c.api`, and every one of this callback's effects — the status
-        // line, the flush, the ✎ diff block — belongs to it, never to whatever
-        // is on screen now.
-        if (epoch !== c.epoch) return;
+        // A call whose result arrives after the chat left this conversation
+        // (/clear mid-turn, most often): it is gone from the screen, and every one
+        // of this callback's effects — the status line, the flush, the ✎ diff
+        // block — belongs to it, never to whatever is on screen now.
+        if (c.closed) return;
         // The tool is done: until the model's next token it is thinking, and
         // the seconds on the line are the round's from here.
         c.endToolSegment();
@@ -614,15 +611,15 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
       const items = c.plan.snapshot();
       if (items.length && items.every((t) => t.status === 'done')) c.plan.reset();
     }
-    // A reset mid-turn already cleared c.liveBuf/c.liveSeen/c.liveTimer — this is
-    // for the ordinary case, and a stale one finds nothing to flush regardless.
-    if (epoch === c.epoch) c.flushLive();
+    // A conversation closed mid-turn already cleared c.liveBuf/c.liveSeen/c.liveTimer —
+    // this is for the ordinary case.
+    if (!c.closed) c.flushLive();
     // The turn is over, so everything in the history has had its turn in full:
     // a batch may now stub it (src/assistant/recall.ts, `decideBatch`) — past
     // the context threshold, or on the turn clock — every eligible item at
     // once, so the request's prefix moves once and not every turn. The
     // reading is the measured one where the provider reports usage.
-    if (epoch === c.epoch) {
+    if (!c.closed) {
       const limits = recallLimits(ai);
       if (limits.enabled && decideBatch(c.recall, c.recallItems(), c.contextReading().ratio, limits)) {
         c.deps.pushLog(`[recall] ${c.recall.stubbed.size} bulky item${c.recall.stubbed.size === 1 ? '' : 's'} now go as stubs`);
@@ -793,6 +790,9 @@ export function compact(c: Conversation): void {
 // never stand together; it closes no panel, and the auto mode never answers it.
 export function askConfigChanges(c: Conversation): Promise<void> {
   if (c.configAsk) return c.configAsk;
+  // A conversation the chat has left asks nothing: nobody would see its y/n. The one the
+  // chat draws asks at its own next check.
+  if (c.closed) return Promise.resolve();
   const svc = (c.deps.services() as { configChanges?: { check(): ConfigChange[]; apply(ch: ConfigChange): { applied: string[]; restart: string[] }; decline(ch: ConfigChange): string | null } }).configChanges;
   if (!svc || c.confirm || c.question) return Promise.resolve();
   const changes = svc.check();

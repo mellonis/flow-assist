@@ -169,8 +169,10 @@ const forkNoteText = (title: string, id: string): string =>
 
 // `silent` — nothing shown, no notify — for the paths that write on the way out (exit,
 // unmount): the screen is not going to be read again, though the fork itself (never
-// overwrite what changed) still happens even there.
+// overwrite what changed) still happens even there. A closed conversation saves nothing:
+// the chat saved it before it closed it.
 export function writeSession(c: Conversation, opts: { silent?: boolean } = {}): void {
+  if (c.closed) return;
   if (c.saveTimer) { clearTimeout(c.saveTimer); c.saveTimer = null; }
   const dir = c.deps.sessionsDir();
   if (!dir || !c.rows().some((m) => personSpoke(m.role))) return; // nothing said or run yet
@@ -213,6 +215,7 @@ export function writeSession(c: Conversation, opts: { silent?: boolean } = {}): 
 // The save 250 ms after the last change: a burst of changes writes once, after the
 // render that carries the change — the list is read as last drawn (`Conversation.rows`).
 export function persist(c: Conversation): void {
+  if (c.closed) return;
   if (c.saveTimer) clearTimeout(c.saveTimer);
   c.saveTimer = setTimeout(() => { c.saveTimer = null; writeSession(c); }, 250);
 }

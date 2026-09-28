@@ -6,7 +6,7 @@ import type { AutoMode } from './auto.js';
 import { DEFAULT_CONTEXT_WINDOW, readContext, type ContextReading } from './context-meter.js';
 import { dataUrl, imageLimits, imagesInText, readImageData, type ImageRef, type LoadedOk, type ResolvedImage } from './images.js';
 import type { JournalEvent } from './journal.js';
-import type { MemoryLists } from './memory-command.js';
+import { keptAfterClear, type MemoryLists } from './memory-command.js';
 import { readFacts } from './memory-store.js';
 import { markFacts, memoryRecordNotes } from './memory-trust.js';
 import { createPlan, type Plan } from './plan.js';
@@ -22,7 +22,7 @@ import { pickVerb, verbList } from './verbs.js';
 import type { ViewRecord } from './views.js';
 import type { ToolDef } from '../loader/tools.js';
 import { workspaceFor } from './workspace.js';
-import { callOf, type BusyKind, type ChatMsg, type ConversationDeps, type ConversationEvent, type ConversationKind, type ConversationSnapshot, type ConversationStatus, type PendingConfirm, type Queued, type QueueWait, type SendOptions, type TurnEnd, type ViewPort } from './conversation-types.js';
+import { callOf, type BusyKind, type ChatMsg, type CloseReason, type ConversationDeps, type ConversationEvent, type ConversationKind, type ConversationSnapshot, type ConversationStatus, type PendingConfirm, type Queued, type QueueWait, type SendOptions, type TurnEnd, type ViewPort } from './conversation-types.js';
 import {
   applySession, currentProject, ensureSessionId, journal, journaledChatLLM, journalTo, markSeen, persist, pushNote,
   releaseLockOf, writeSession, NO_FILE,
@@ -114,17 +114,9 @@ export class Conversation {
   lastEnd: TurnEnd | null = null;
   inTurn = false;
   // Which turn a view belongs to — groups never span two. Never reset: it belongs to
-  // the conversation's whole history.
+  // the chat's whole history, and a conversation that replaces another in the chat
+  // counts on from it.
   turn = 0;
-  // Bumped at every reset (/clear, /resume — the same places `liveSeen` / `liveBuf` are
-  // cleared), never at anything else. `send()` and the `!command` runner each capture it
-  // when they START; every callback of theirs that could still fire after a LATER reset
-  // (a tool's final phase, a change report) compares its own captured value against the
-  // CURRENT one and drops the update if they differ — the turn it was for no longer
-  // exists, in either the display or `api`, and writing into the fresh one would be
-  // exactly the "a stopped command from before /clear reappears in the cleared chat" bug
-  // this guards.
-  epoch = 0;
   abort: AbortController | null = null;
   // Which key stopped the running turn or `!command`: '' for Esc (and for a reset that
   // aborts it), the cap otherwise (`^c`) — the quiet line under the answer and a
@@ -149,6 +141,10 @@ export class Conversation {
   // The last turn ended with reasoning and no final text.
   emptyAnswer = false;
   continueOffer = false;
+  // Whether the round being streamed carries a tool call — heard the moment its first
+  // fragment arrives (`onRoundKind`), and from then on its text is a step, not the answer.
+  // Never read inside a `setRows` updater: every updater is a pure function of the list;
+  // what it needs to know is read when the callback fires, and handed to it.
   roundTools = false;
   liveBuf = new Map<string, ViewRecord>();
   liveSeen = new Set<string>();
@@ -195,9 +191,23 @@ export class Conversation {
   // and `/new` are not forks: what ran before them stays in the session it ran in.
   forkedTo = new Map<string, string>();
 
-  constructor(deps: ConversationDeps) {
+  // The chat has left this conversation for good (`close`): a turn or a `!command` still
+  // running from it writes into it alone, and it draws nothing more.
+  private isClosed = false;
+  get closed(): boolean { return this.isClosed; }
+
+  // `carry` — what a conversation that replaces another in the chat takes over from it:
+  // the ↑/↓ history (the same array), the turn counter, the last verb, the list as the
+  // chat last drew it (until the chat draws this one), and whether the missing memory
+  // record was said.
+  constructor(deps: ConversationDeps, carry: { prompts?: string[]; turn?: number; verb?: string; drawnRows?: ChatMsg[] | null; memoryMissingSaid?: boolean } = {}) {
     this.deps = deps;
     this.shell = createShellState(() => deps.config(), null, () => this.onShellSet());
+    if (carry.prompts) this.prompts = carry.prompts;
+    if (carry.turn) this.turn = carry.turn;
+    if (carry.verb) this.verb = carry.verb;
+    if (carry.drawnRows !== undefined) this.drawnRows = carry.drawnRows;
+    if (carry.memoryMissingSaid) this.memoryMissingSaid = true;
   }
 
   // ── what the chat draws (`getSnapshot`)
@@ -306,6 +316,48 @@ export class Conversation {
   // The list as the model's own reads see it: as the chat last drew it (what a save
   // writes, what the notes' "said once" checks), or the list itself with no chat.
   rows(): ChatMsg[] { return this.drawnRows ?? this.messages; }
+
+  // The chat leaves this conversation for good. What runs is stopped for /clear and /new
+  // (a pending y/n is declined `by: 'reset'`, a question dismissed); for a switch nothing
+  // runs, since the chat refuses one while anything does. Work still in flight afterwards
+  // writes its journal lines where it happened and nothing else: the object draws nothing
+  // more (no listeners), saves nothing (`persist`, `save`) and holds no timer. The save
+  // and the lock's release are the chat's, before it closes.
+  close(reason: CloseReason): void {
+    if (this.isClosed) return;
+    if (reason === 'clear' || reason === 'new') {
+      this.abort?.abort();
+      this.abort = null;
+      if (this.confirm) this.answerConfirm(false, 'reset');
+    }
+    this.dismissQuestion();
+    this.isClosed = true;
+    if (this.liveTimer) { clearTimeout(this.liveTimer); this.liveTimer = null; }
+    this.liveBuf.clear();
+    this.liveSeen.clear();
+    if (this.saveTimer) { clearTimeout(this.saveTimer); this.saveTimer = null; }
+    this.clearInbox();
+    this.inbox = [];
+    this.queue = [];
+    this.projectNote = null; // a note held for a turn's end described the conversation left
+    this.emit({ type: 'closed', reason });
+    this.handlers.clear();
+    this.listeners.clear();
+    this.port = null;
+  }
+
+  // A fresh conversation's first rows: what the memory keeps across a /clear (said, or
+  // the assistant "still knowing" an earlier prompt reads as the reset failing), then —
+  // after the list is set, so the note lands in it — the first root's instructions.
+  startFresh(): void {
+    const l = this.memoryLists();
+    const kept = keptAfterClear([...l.project, ...l.global].filter((f) => !f.outside).length);
+    if (kept) this.journal({ t: 'row', role: 'note', text: kept });
+    this.setRows(kept ? [{ role: 'note', content: kept }] : []);
+    // The default directory (the start directory, or the first root when that lies outside
+    // every one); the new shell's `told` is empty already.
+    this.shell.setCwd(null);
+  }
 
   // ── the session (src/assistant/conversation-session.ts)
   ensureSessionId(): string { return ensureSessionId(this); }
@@ -417,17 +469,12 @@ export class Conversation {
   // Leaving the chat or resetting it must not leave the tool hanging: an unanswered
   // question is reported to the model as dismissed.
   dismissQuestion(): void { if (this.question) this.answerQuestion({ ...this.question.state, done: true, cancelled: true }); }
-  // /clear and /resume both call this: the calls `liveSeen` / `liveBuf` tracked belong
-  // to the conversation being left, and the pending coalesce timer (if any) is for a view
-  // that conversation drew — cancelled, not left to fire into whatever replaces it. The
-  // epoch bump is what actually stops anything already in flight for the old
-  // conversation (a tool's own final phase, `!command`'s own completion) from landing in
-  // the new one; it is the one thing here that is never reset itself.
+  // A session opened into this conversation: the calls `liveSeen` / `liveBuf` tracked, and
+  // the pending coalesce timer (if any), are for views of what it held before.
   resetLiveViews(): void {
     this.liveSeen.clear();
     this.liveBuf.clear();
     if (this.liveTimer) { clearTimeout(this.liveTimer); this.liveTimer = null; }
-    this.epoch += 1;
   }
   resetImages(refs: ImageRef[] = [], seq = 0): void {
     this.images = new Map(refs.map((r) => [r.n, r]));
@@ -721,12 +768,10 @@ export class Conversation {
     this.liveBuf.clear();
     if (recs.length) { this.placeViews(recs); this.deps.notify(); }
   }
-  // `epoch` is the caller's own — captured when the turn or the `!command` that
-  // opened this view STARTED, so a change that arrives after a LATER reset
-  // (/clear, /resume) is dropped here, before it ever touches
-  // `liveBuf`/`liveSeen` or triggers a flush into the fresh conversation.
-  offerLive(rec: ViewRecord, epoch: number): void {
-    if (epoch !== this.epoch) return;
+  // A change that arrives after the chat left this conversation (/clear, /new, /resume)
+  // is dropped here, before it touches `liveBuf` / `liveSeen` or arms a flush.
+  offerLive(rec: ViewRecord): void {
+    if (this.isClosed) return;
     if (!rec.callId) return; // nothing to find this record by again
     this.liveBuf.set(rec.callId, rec);
     const first = !this.liveSeen.has(rec.callId);

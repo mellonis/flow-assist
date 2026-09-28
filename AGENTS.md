@@ -1671,12 +1671,12 @@ hold this set together:
   when there is no project — `projectSessions`, as the start; `/resume <n>` opens one;
   the others are reached through the picker's Tab).
   `/new` starts a new one the same way and leaves the old one OPEN (not closed), so a
-  restart before anything is said in the new one continues the old. Both reset the
-  conversation through one function (`resetConversation` in `src/plugins/assistant.ts`):
-  everything this file says `/clear` resets — the plan, the loaded tools, the recall
-  state, the images' numbering, the auto mode, the notes mode, the folds, the live views,
-  the shell's directory — `/new` resets too. `/new` is refused while an answer or a
-  `!command` runs. 50 sessions are kept per project (`sessions.keep`,
+  restart before anything is said in the new one continues the old. Both give the chat
+  a fresh `Conversation` (`renew` in `src/plugins/assistant.ts`): everything this file
+  says `/clear` resets — the plan, the loaded tools, the recall state, the images'
+  numbering, the auto mode, the notes mode, the folds, the live views, the shell's
+  directory — starts anew with the object, for `/new` too; the ↑/↓ history carries
+  over. `/new` is refused while an answer or a `!command` runs. 50 sessions are kept per project (`sessions.keep`,
   `pruneSessions` groups by the directory a file is in; the top level is one project),
   and a mirror directory a prune or a picker delete leaves empty is removed, with each
   empty parent up to — never including — the sessions directory (`dropEmptyDirs`).
@@ -2086,20 +2086,19 @@ hardest. Rules the `repo` and `gitlab` plugins hold, each with a test that tries
     rounds of one turn (a test double restarts at `call_0` every round; some real
     servers send `''` or reuse ids); using it alone would let two commands whose ids
     collided overwrite one another's block.
-  - **A reset — `/clear` and `/resume`, the same places the conversation's `plan`
-    resets — clears `liveBuf`, `liveSeen` and any pending `liveTimer`, and bumps the
-    conversation's `epoch`** (`Conversation.resetLiveViews` in
-    `src/assistant/conversation.ts`); the conversation's `turn` is NOT reset there, it
-    belongs to the conversation's whole history, not one turn.
-    A turn (`runTurn`) and a `!command` (`runShell`, `src/assistant/conversation-shell.ts`)
-    each capture `epoch` when they
-    START; every one of their callbacks that could still fire after a LATER reset —
-    a tool's own view (`offerLive`), its `changes` (`onToolRun`), the turn's own
-    final `flushLive()`, `!command`'s own completion — compares its captured value
-    against the CURRENT one and drops the update if they differ, rather than
-    finding no message for the old `callId` (the buffer forgot it) and pushing a NEW
-    one into the fresh conversation: without this, a command still running when
-    `/clear` fires would reappear, with its final phase, in the cleared chat.
+  - **A reset — `/clear`, `/new` and `/resume` — makes a new `Conversation`**
+    (`renew` / `openSession` in `src/plugins/assistant.ts`), with its own `liveBuf`,
+    `liveSeen` and `liveTimer`; the one left is closed (`Conversation.close` in
+    `src/assistant/conversation.ts`: its `liveTimer` cleared, its listeners and port
+    dropped). The turn counter (`turn`) carries over to the new object: it belongs to
+    the chat's whole history, so a view's `turn` never repeats one already drawn.
+    Every callback of a turn (`runTurn`) or a `!command` (`runShell`,
+    `src/assistant/conversation-shell.ts`) still running — a tool's own view
+    (`offerLive`), its `changes` (`onToolRun`), the turn's own final `flushLive()`, the
+    command's own completion — writes into the object it started in, and checks
+    `closed` before it draws: a closed conversation journals where the work happened
+    and draws nothing, so a command still running when `/clear` fires never reappears,
+    with its final phase, in the cleared chat.
 - **A shell command is seen before it runs.** `run_command`'s guard is the y/n, not a
   filter on the command; its directory is checked anyway — inside a root by the REAL
   path (`dirAllowed`), a `cd` that leads out is not remembered. `runShell` has exactly
@@ -2577,7 +2576,12 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   read delta by delta (200 reads) draws at most once per read, +3.5 % — the racing
   variants draw 6–9 % more. The
   model's saves and notes read the list as the chat last drew it (`drawnRows`, set by
-  every render), so a save and the journal see what the person saw.
+  every render), so a save and the journal see what the person saw. One conversation per
+  session: `/clear`, `/new` and `/resume` give the chat a new object (`adopt` moves the
+  chat's listeners, its port and what the render's handlers reach to it), and the one
+  left is closed — it saves nothing and draws nothing more. The chat's one lock token is
+  handed to every conversation it makes; the exit hook, the unmount, `postToChat` and
+  the screens' gates read the conversation the chat holds now (`convRef`).
 - **Ctrl+C, Ctrl+D and Ctrl+Z take a second press** (`src/runtime/exit-keys.ts`, pure;
   the App owns the arm). flowtty hands these three to the app BEFORE the terminal
   backend acts (exit, exit, suspend — skipped when a `useInput` handler returns strict
