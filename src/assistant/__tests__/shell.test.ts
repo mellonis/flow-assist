@@ -351,16 +351,16 @@ test('a command that never reads a large stdin still ends with its own exit code
 test('a known secret never leaves the runner: not in a chunk, not in the output, not past a cut', async () => {
   const { buildSecretSet, setActiveSecrets } = await import('../secrets.ts');
   const token = 'tok-' + 'x'.repeat(40) + '-end';
-  setActiveSecrets(buildSecretSet({}, { WB_WIKI_TOKEN: token }));
+  setActiveSecrets(buildSecretSet({}, { WIKI_TOKEN: token }));
   try {
     const half = token.length / 2;
     const chunks: string[] = [];
     // Printed in two writes a moment apart, so the pipe hands it over split.
     const cmd = `printf '%s' '${token.slice(0, half)}'; sleep 0.1; printf '%s\\n' '${token.slice(half)} done'`;
     const r = await runShell(cmd, { cwd: tmp(), onOutput: (c) => chunks.push(c) });
-    expect(chunks.join('')).toBe('‹secret WB_WIKI_TOKEN› done\n');
+    expect(chunks.join('')).toBe('‹secret WIKI_TOKEN› done\n');
     for (const c of chunks) expect(c.includes(token.slice(0, 8)) || c.includes(token.slice(-8))).toBe(false);
-    expect(r.output).toBe('‹secret WB_WIKI_TOKEN› done\n');
+    expect(r.output).toBe('‹secret WIKI_TOKEN› done\n');
     // A tail cut through where the token stood keeps none of it.
     const cut = await runShell(`printf '%s' '${token}'; printf 'abcdef'`, { cwd: tmp(), maxChars: 10 });
     expect(cut.output).not.toContain(token.slice(-8));

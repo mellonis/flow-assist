@@ -4,14 +4,14 @@ import { afterEach, expect, test } from 'bun:test';
 import { activeSecrets, buildSecretSet, redactDeep, redactSecrets, secretStream, setActiveSecrets } from '../secrets.ts';
 
 const TOKEN = 'eyJhbGciOiJIUzI1NiJ9.payload-of-the-token.signature';
-const env = { WB_WIKI_TOKEN: TOKEN, PATH: '/usr/bin:/bin', HOME: '/Users/me', SHORT_TOKEN: 'abc', MY_CONFIG_VALUE: 'nothing-secret-here', TRACKER_URL: 'https://tracker.example.com' };
+const env = { WIKI_TOKEN: TOKEN, PATH: '/usr/bin:/bin', HOME: '/Users/me', SHORT_TOKEN: 'abc', MY_CONFIG_VALUE: 'nothing-secret-here', TRACKER_URL: 'https://tracker.example.com' };
 
 afterEach(() => { setActiveSecrets(null); });
 
 test('a variable whose name says it is a secret is one, by its value', () => {
   const set = buildSecretSet({}, env);
-  expect(redactSecrets(`token=${TOKEN}.`, set)).toBe('token=‹secret WB_WIKI_TOKEN›.');
-  expect(set.names).toContain('WB_WIKI_TOKEN');
+  expect(redactSecrets(`token=${TOKEN}.`, set)).toBe('token=‹secret WIKI_TOKEN›.');
+  expect(set.names).toContain('WIKI_TOKEN');
   expect(set.names).not.toContain('MY_CONFIG_VALUE');
 });
 
@@ -24,7 +24,7 @@ test('a value under 8 characters is withheld but never redacted', () => {
 test('a variable config names is one — ${VAR} anywhere, ai.tokenEnv — but never a system variable', () => {
   const config = { ai: { tokenEnv: 'MY_LLM' }, plugins: { mcp: { servers: { wiki: { url: '${TRACKER_URL}/mcp', env: { PATH: '${PATH}', HOME: '${HOME}' } } } } } };
   const set = buildSecretSet(config, { ...env, MY_LLM: 'llm-credential-1234' });
-  expect(set.names).toEqual(expect.arrayContaining(['MY_LLM', 'TRACKER_URL', 'WB_WIKI_TOKEN']));
+  expect(set.names).toEqual(expect.arrayContaining(['MY_LLM', 'TRACKER_URL', 'WIKI_TOKEN']));
   expect(set.names).not.toContain('PATH');
   expect(set.names).not.toContain('HOME');
   expect(redactSecrets('llm-credential-1234', set)).toBe('‹secret MY_LLM›');
@@ -61,13 +61,13 @@ test('with no set, or an empty one, text is untouched', () => {
 
 test('the active set is what redactSecrets reads by default', () => {
   setActiveSecrets(buildSecretSet({}, env));
-  expect(activeSecrets()?.names).toContain('WB_WIKI_TOKEN');
-  expect(redactSecrets(TOKEN)).toBe('‹secret WB_WIKI_TOKEN›');
+  expect(activeSecrets()?.names).toContain('WIKI_TOKEN');
+  expect(redactSecrets(TOKEN)).toBe('‹secret WIKI_TOKEN›');
 });
 
 test('redactDeep reaches every string of a JSON value', () => {
   const set = buildSecretSet({}, env);
-  expect(redactDeep({ a: [TOKEN, 1, null], b: { c: `x${TOKEN}` }, d: true }, set)).toEqual({ a: ['‹secret WB_WIKI_TOKEN›', 1, null], b: { c: 'x‹secret WB_WIKI_TOKEN›' }, d: true });
+  expect(redactDeep({ a: [TOKEN, 1, null], b: { c: `x${TOKEN}` }, d: true }, set)).toEqual({ a: ['‹secret WIKI_TOKEN›', 1, null], b: { c: 'x‹secret WIKI_TOKEN›' }, d: true });
 });
 
 test('a stream redacts a secret split across chunks, at every split point', () => {
@@ -76,7 +76,7 @@ test('a stream redacts a secret split across chunks, at every split point', () =
   for (let at = 1; at < text.length; at++) {
     const s = secretStream(set);
     const out = s.push(text.slice(0, at)) + s.push(text.slice(at)) + s.flush();
-    expect(out).toBe('before ‹secret WB_WIKI_TOKEN› after\n');
+    expect(out).toBe('before ‹secret WIKI_TOKEN› after\n');
   }
 });
 
@@ -93,7 +93,7 @@ test('a stream split into single characters still redacts, and an encoded form t
     out += got;
   }
   out += s.flush();
-  expect(out).toBe('a ‹secret WB_WIKI_TOKEN› b ‹secret WB_WIKI_TOKEN› c');
+  expect(out).toBe('a ‹secret WIKI_TOKEN› b ‹secret WIKI_TOKEN› c');
 });
 
 test('a stream holds back only what could still become a secret', () => {
@@ -109,16 +109,16 @@ test('the environment for a model\'s command loses every secret variable but the
   const { withheldEnv } = await import('../secrets.ts');
   const set = buildSecretSet({}, env);
   const { env: clean, withheld } = withheldEnv(env, set, ['SHORT_TOKEN']);
-  expect(clean.WB_WIKI_TOKEN).toBeUndefined();
+  expect(clean.WIKI_TOKEN).toBeUndefined();
   expect(clean.SHORT_TOKEN).toBe('abc');
   expect(clean.PATH).toBe('/usr/bin:/bin');
-  expect(withheld).toEqual(['WB_WIKI_TOKEN']);
+  expect(withheld).toEqual(['WIKI_TOKEN']);
 });
 
 test('a held tail that begins a secret is never flushed in clear — 8 or more characters go out as its mark', () => {
   const set = buildSecretSet({}, env);
   const cut = secretStream(set);
-  expect(cut.push(`x ${TOKEN.slice(0, -1)}`) + cut.flush()).toBe('x ‹secret WB_WIKI_TOKEN›');
+  expect(cut.push(`x ${TOKEN.slice(0, -1)}`) + cut.flush()).toBe('x ‹secret WIKI_TOKEN›');
   const short = secretStream(set);
   expect(short.push('x eyJhb') + short.flush()).toBe('x eyJhb');
 });
@@ -126,18 +126,18 @@ test('a held tail that begins a secret is never flushed in clear — 8 or more c
 test('escape codes painted inside a token do not hide it — grep --color', () => {
   const set = buildSecretSet({}, env);
   const painted = `pre ${TOKEN.slice(0, 21)}\u001b[01;31m\u001b[K${TOKEN.slice(21, 28)}\u001b[m\u001b[K${TOKEN.slice(28)} post`;
-  expect(redactSecrets(painted, set)).toBe('pre ‹secret WB_WIKI_TOKEN› post');
+  expect(redactSecrets(painted, set)).toBe('pre ‹secret WIKI_TOKEN› post');
   expect(redactSecrets('\u001b[31mred\u001b[0m', set)).toBe('\u001b[31mred\u001b[0m');
   // Split across chunks, the cut falling inside an escape sequence.
   const at = painted.indexOf('\u001b[01') + 4;
   const s = secretStream(set);
-  expect(s.push(painted.slice(0, at)) + s.push(painted.slice(at)) + s.flush()).toBe('pre ‹secret WB_WIKI_TOKEN› post');
+  expect(s.push(painted.slice(0, at)) + s.push(painted.slice(at)) + s.flush()).toBe('pre ‹secret WIKI_TOKEN› post');
 });
 
 test('an MCP header value with ${VAR} in it is a secret as it is sent, expanded; a plain header is not', () => {
-  const config = { plugins: { mcp: { servers: { wiki: { headers: { 'X-Wiki': 'tok=${WB_WIKI_TOKEN};v=2', Accept: 'application/json' } } } } } };
+  const config = { plugins: { mcp: { servers: { wiki: { headers: { 'X-Wiki': 'tok=${WIKI_TOKEN};v=2', Accept: 'application/json' } } } } } };
   const set = buildSecretSet(config, env);
   expect(redactSecrets(`sent tok=${TOKEN};v=2`, set)).toBe('sent ‹secret plugins.mcp.servers.wiki.headers.X-Wiki›');
-  expect(redactSecrets(TOKEN, set)).toBe('‹secret WB_WIKI_TOKEN›');
+  expect(redactSecrets(TOKEN, set)).toBe('‹secret WIKI_TOKEN›');
   expect(redactSecrets('application/json', set)).toBe('application/json');
 });

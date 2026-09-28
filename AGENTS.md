@@ -3847,7 +3847,7 @@ commands; docs and hints never present either mechanism as a boundary.
   process's environment less every name of the set (`withheldEnv`), except those the
   person lists in `shell.passEnv` (under `shell`, so on the leash — the model can never
   set it; read per command). Its result names what was withheld at its head, once per
-  conversation — `withheld from commands: WB_WIKI_TOKEN, … — shell.passEnv lets a
+  conversation — `withheld from commands: WIKI_TOKEN, … — shell.passEnv lets a
   command see one` — kept in `ShellState.told`, which the chat empties on `/clear`,
   `/new` and opening another session. A background task has a shell state of its own
   and is told again. The person's own `!command` and `!!command` keep the whole

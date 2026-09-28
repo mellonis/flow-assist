@@ -238,14 +238,14 @@ test('a command that never ended is drawn in its place, said not to have finishe
 test('no journal line keeps a known secret, whatever event carries it', async () => {
   const { buildSecretSet, setActiveSecrets } = await import('../secrets.ts');
   const token = 'journal-secret-value-000123';
-  setActiveSecrets(buildSecretSet({}, { WB_WIKI_TOKEN: token }));
+  setActiveSecrets(buildSecretSet({}, { WIKI_TOKEN: token }));
   try {
     const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-journal-')), 'j.log.jsonl');
     appendJournal(file, { t: 'call-start', id: 'c1', name: 'run_command', args: { command: `curl -H "Bearer ${token}"` }, confirm: true } as never);
     appendJournal(file, { t: 'step', text: `Next: use ${token}` } as never);
     const text = fs.readFileSync(file, 'utf8');
     expect(text).not.toContain(token);
-    expect(text.match(/‹secret WB_WIKI_TOKEN›/g)).toHaveLength(2);
+    expect(text.match(/‹secret WIKI_TOKEN›/g)).toHaveLength(2);
   } finally {
     setActiveSecrets(null);
   }

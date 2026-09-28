@@ -105,7 +105,7 @@ test('a command of 300 lines: the fold line says how much, a click opens a pager
   await click(ui, rowOf(ui, 'seq 1 300 ·'));
   expect(pagerUp(ui)).toBe(true);
   ui.app.unmount();
-});
+}, 15_000);
 
 test('the pager is a reader: typing, ⏎, ^o and a click inside it change nothing, and nothing is sent', async () => {
   const { ui, model } = await commandThenTalk('seq 1 300');

@@ -245,26 +245,26 @@ test('run_command runs without the secret variables, names them once per convers
   const { createShellState } = await import('../../assistant/shell.ts');
   const token = 'withheld-token-value-0001';
   const gh = 'passed-gh-token-value-0002';
-  process.env.WB_WIKI_TOKEN = token;
+  process.env.WIKI_TOKEN = token;
   process.env.GH_TOKEN = gh;
-  setActiveSecrets(buildSecretSet({}, { WB_WIKI_TOKEN: token, GH_TOKEN: gh }));
+  setActiveSecrets(buildSecretSet({}, { WIKI_TOKEN: token, GH_TOKEN: gh }));
   try {
     const root = tmp();
     const config = { shell: { roots: [root], passEnv: ['GH_TOKEN'] } };
     const shell = createShellState(() => config);
     const g = shellTools(config);
-    const first = await g.exec('run_command', { command: 'printf "wiki=%s gh=%s\\n" "${WB_WIKI_TOKEN-unset}" "${GH_TOKEN-unset}"' }, { shell } as never) as string;
+    const first = await g.exec('run_command', { command: 'printf "wiki=%s gh=%s\\n" "${WIKI_TOKEN-unset}" "${GH_TOKEN-unset}"' }, { shell } as never) as string;
     expect(first).toContain('wiki=unset gh=‹secret GH_TOKEN›');
-    expect(first).toContain('withheld from commands: WB_WIKI_TOKEN — shell.passEnv lets a command see one');
+    expect(first).toContain('withheld from commands: WIKI_TOKEN — shell.passEnv lets a command see one');
     expect(first).not.toContain(token);
     const second = await g.exec('run_command', { command: 'true' }, { shell } as never) as string;
     expect(second).not.toContain('withheld from commands');
     // A conversation told anew (/clear, another session) is told again.
     shell.told.clear();
     const third = await g.exec('run_command', { command: 'true' }, { shell } as never) as string;
-    expect(third).toContain('withheld from commands: WB_WIKI_TOKEN');
+    expect(third).toContain('withheld from commands: WIKI_TOKEN');
   } finally {
-    delete process.env.WB_WIKI_TOKEN;
+    delete process.env.WIKI_TOKEN;
     delete process.env.GH_TOKEN;
     setActiveSecrets(null);
   }
@@ -280,8 +280,8 @@ test('a background task\'s own ShellState — started at its parent\'s directory
   const { buildSecretSet, setActiveSecrets } = await import('../../assistant/secrets.ts');
   const { createShellState } = await import('../../assistant/shell.ts');
   const token = 'withheld-token-value-0003';
-  process.env.WB_WIKI_TOKEN = token;
-  setActiveSecrets(buildSecretSet({}, { WB_WIKI_TOKEN: token }));
+  process.env.WIKI_TOKEN = token;
+  setActiveSecrets(buildSecretSet({}, { WIKI_TOKEN: token }));
   try {
     const root = tmp();
     const sub = path.join(root, 'sub');
@@ -293,13 +293,13 @@ test('a background task\'s own ShellState — started at its parent\'s directory
     expect(bgShell.cwd()).toBe(sub);
     expect(bgShell.told.size).toBe(0); // its own, not the parent's
     const g = shellTools(bgConfig);
-    const out = await g.exec('run_command', { command: 'printf "wiki=%s\\n" "${WB_WIKI_TOKEN-unset}"' }, { shell: bgShell } as never) as string;
+    const out = await g.exec('run_command', { command: 'printf "wiki=%s\\n" "${WIKI_TOKEN-unset}"' }, { shell: bgShell } as never) as string;
     expect(out).toContain('wiki=unset');
-    expect(out).toContain('withheld from commands: WB_WIKI_TOKEN');
+    expect(out).toContain('withheld from commands: WIKI_TOKEN');
     expect(out).not.toContain(token);
     expect(out).toContain(`Ran in ${sub}`);
   } finally {
-    delete process.env.WB_WIKI_TOKEN;
+    delete process.env.WIKI_TOKEN;
     setActiveSecrets(null);
   }
 });

@@ -1036,13 +1036,13 @@ test('the plan reminder goes only to a result of work that ran, never to a faile
 test('a known secret leaves a turn nowhere: not the result sent, the run, its raw data, a view, a change, the streamed answer or its reasoning', async () => {
   const { buildSecretSet, setActiveSecrets } = await import('../secrets');
   const token = 'agent-secret-value-1234567890';
-  setActiveSecrets(buildSecretSet({}, { WB_WIKI_TOKEN: token }));
+  setActiveSecrets(buildSecretSet({}, { WIKI_TOKEN: token }));
   try {
     const seen: unknown[] = [];
     const run = async (_a: unknown, ctx: any) => {
       const v = ctx.liveView('console', { command: 'env', cwd: '~', text: '' });
-      v.update({ command: 'env', cwd: '~', text: `WB_WIKI_TOKEN=${token}` });
-      ctx.reportChange({ title: '.env', before: '', after: `WB_WIKI_TOKEN=${token}\n` });
+      v.update({ command: 'env', cwd: '~', text: `WIKI_TOKEN=${token}` });
+      ctx.reportChange({ title: '.env', before: '', after: `WIKI_TOKEN=${token}\n` });
       return { text: `framed: ${token}`, raw: token };
     };
     assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
@@ -1071,9 +1071,9 @@ test('a known secret leaves a turn nowhere: not the result sent, the run, its ra
     seen.push(res, live, reasoning);
     const all = JSON.stringify(seen);
     expect(all).not.toContain(token);
-    expect(live).toBe('The token is ‹secret WB_WIKI_TOKEN›.');
-    expect(reasoning).toBe('The token is ‹secret WB_WIKI_TOKEN›.');
-    expect(res.toolRuns[0]!.raw).toBe('‹secret WB_WIKI_TOKEN›');
+    expect(live).toBe('The token is ‹secret WIKI_TOKEN›.');
+    expect(reasoning).toBe('The token is ‹secret WIKI_TOKEN›.');
+    expect(res.toolRuns[0]!.raw).toBe('‹secret WIKI_TOKEN›');
   } finally {
     setActiveSecrets(null);
   }
@@ -1082,7 +1082,7 @@ test('a known secret leaves a turn nowhere: not the result sent, the run, its ra
 test('a held tail is flushed at a round\'s end, a stop and an error — whole, and a begun secret as its mark', async () => {
   const { buildSecretSet, setActiveSecrets } = await import('../secrets');
   const token = 'agent-secret-value-1234567890';
-  setActiveSecrets(buildSecretSet({}, { WB_WIKI_TOKEN: token }));
+  setActiveSecrets(buildSecretSet({}, { WIKI_TOKEN: token }));
   try {
     assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
     // An answer that ends in all but the last character of the token.
@@ -1091,8 +1091,8 @@ test('a held tail is flushed at a round\'s end, a stop and an error — whole, a
       baseUrl: 'http://x', model: 'm', token: 't', onLive: (d: string) => { live += d; }, onLiveCommit: () => {},
       chatRound: async (_m: any[], opts: any) => { opts.onDelta?.(`It is ${token.slice(0, -1)}`); return { content: '', finishReason: 'stop', toolCalls: [] }; },
     } as any);
-    expect(live).toBe('It is ‹secret WB_WIKI_TOKEN›');
-    expect(cut.content).toBe('It is ‹secret WB_WIKI_TOKEN›');
+    expect(live).toBe('It is ‹secret WIKI_TOKEN›');
+    expect(cut.content).toBe('It is ‹secret WIKI_TOKEN›');
     // Stopped mid-round: what was held (an `a` that could begin the token) is not lost.
     let stopped = '';
     await expect(agentChat([{ role: 'user', content: 'go' }], {
@@ -1108,14 +1108,14 @@ test('a held tail is flushed at a round\'s end, a stop and an error — whole, a
 test('the system prompt is sent without a known secret — the chat\'s per-round one and a leading system message alike', async () => {
   const { buildSecretSet, setActiveSecrets } = await import('../secrets');
   const token = 'system-secret-value-0001';
-  setActiveSecrets(buildSecretSet({}, { WB_WIKI_TOKEN: token }));
+  setActiveSecrets(buildSecretSet({}, { WIKI_TOKEN: token }));
   try {
     assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
     const sent: string[] = [];
     const chatRound = async (messages: any[]) => { sent.push(JSON.stringify(messages)); return { content: 'ok', finishReason: 'stop', toolCalls: [] }; };
     await agentChat([{ role: 'system', content: `AGENTS.md says the token is ${token}` }, { role: 'user', content: 'go' }], { baseUrl: 'http://x', model: 'm', token: 't', onLive: () => {}, onLiveCommit: () => {}, chatRound } as any);
     await agentChat([{ role: 'user', content: 'go' }], { baseUrl: 'http://x', model: 'm', token: 't', onLive: () => {}, onLiveCommit: () => {}, chatRound, systemPrompt: () => `memory: ${token}` } as any);
-    for (const s of sent) { expect(s).not.toContain(token); expect(s).toContain('‹secret WB_WIKI_TOKEN›'); }
+    for (const s of sent) { expect(s).not.toContain(token); expect(s).toContain('‹secret WIKI_TOKEN›'); }
   } finally {
     setActiveSecrets(null);
   }
