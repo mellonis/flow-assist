@@ -14,6 +14,10 @@ What each version of flow-assist brought, newest first. The version is the one i
   transcript and `@flow-assist/remote`'s README match them, and a test holds both
   examples' manifests to this host. **For plugin authors:** nothing changes in the
   contract; copy from the examples again if you started from them.
+- **The bundled `gitlab` and `repo` plugins declare no dependencies.** Their stale
+  flowtty alpha.2 and zod devDependencies and their lockfiles are gone: their sources
+  import only Node's modules, and `repo`'s tests take zod from the host's checkout, as
+  `mcp`'s do.
 - **flowtty 1.0.0-alpha.36: Shift+Enter starts a new line.** The TTY backend asks the
   terminal for the kitty keyboard protocol, so in kitty, Ghostty, WezTerm, foot,
   Alacritty and iTerm2 3.5+ Shift+Enter is its own key and breaks the line; the hints

@@ -3413,8 +3413,8 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   starts a process owns its life", which keep flowtty's own re-raise working.
 - **The kitty keyboard protocol is on, and not a setting.** The TTY backend pushes its
   first flag (disambiguate escape codes) once keys are read and pops it on every way
-  out — unmount, `suspend()` (so a `!!command` gets the terminal's legacy keys), a
-  signal, an uncaught error; a terminal without the protocol ignores the request. The
+  out — unmount, `suspend()` (so a `!!command` gets the terminal's legacy keys; `resume()`
+  pushes it again), a signal, an uncaught error; a terminal without the protocol ignores the request. The
   host passes no `kittyKeyboard`. Under it ⇧⏎ is `return` + `shift`, Ctrl+I / Ctrl+M /
   Ctrl+[ are the letters with `ctrl` (never ⇥, ⏎, Esc — no host binding is on them),
   Esc arrives without the backend's wait, and Ctrl+C / Ctrl+D / Ctrl+Z come as CSI-u
@@ -3659,7 +3659,10 @@ From the host root: `bun run typecheck && bun test ./src ./scripts ./packages` (
 path filter keeps a locally dropped-in plugin's suite out of the host run).
 `./packages` is `@flow-assist/remote`'s own suite (the protocol, its codec, `runPlugin`,
 `serveConnections`).
-Plugin tests: `cd plugins-available/<name> && bun test`.
+Plugin tests: `cd plugins-available/<name> && bun test`. A bundled plugin declares no
+dependencies and keeps no lockfile or `node_modules` of its own: its sources import
+only Node's modules, and a test that needs zod (to hand a builder the host's `z`)
+resolves the host's own from the checkout's `node_modules`.
 The host suite must pass with `plugins-available/` empty — a host test never loads a real plugin.
 
 **A test never reaches the person's own files.** `hostStateDir()` (`src/config/load.ts`)

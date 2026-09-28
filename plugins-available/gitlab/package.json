@@ -7,10 +7,5 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "bun test"
-  },
-  "devDependencies": {
-    "@flowtty/react": "^1.0.0-alpha.2",
-    "@flowtty/tty-backend": "^1.0.0-alpha.2",
-    "zod": "^4.6.5"
   }
 }
