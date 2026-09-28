@@ -2595,8 +2595,8 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   or the turn would wait on them) and nothing is armed; Ctrl+D in a field with text is
   the editor's forward delete, consumed (never while the `:` line is open — it owns the
   keyboard then; its own catch-all types no chord as a character). **The keys are
-  claimed only while there is something to stop** (`canStop`: a live `abortRef` not yet
-  aborted) — for Esc as well: a run that goes on after its abort (a tool that ignores
+  claimed only while there is something to stop** (a live abort controller not yet
+  aborted, `Conversation.canStop`) — for Esc as well: a run that goes on after its abort (a tool that ignores
   its signal) no longer holds them, so the next Ctrl+C arms and the one after exits,
   Esc goes back to its idle steps, and the status line drops `Esc stops`. `/compact`
   (`runAsyncCommand`) has a controller of its own, passes the signal to its request and
@@ -3361,7 +3361,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   its send-time value, and a finished tool's label would stay up for the rest of the turn.
   - **The seconds are the running THING's, not the turn's.** They start again whenever
     the line changes hands: a tool the moment it is called (`onTool`), the model's
-    round the moment the tool ends (the conversation's `segmentStartedAt`, `beginSegment` in the chat; its `turnStartedAt` still
+    round the moment the tool ends (the conversation's `segmentStartedAt`, `beginSegment` in the conversation; its `turnStartedAt` still
     times the turn). One timer from the question to the answer sat at `3m 12s` through
     a build, which says nothing about what is happening. The TURN's total, and what it
     cost, stay on the quiet line under the finished answer (`12.4 s · 3.1k tok`), where
@@ -3438,7 +3438,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     land as rows, and the last goes as `send(q, { fromBackground: true })` — a `bg` row
     too, kept as role `bg` — so the request carries every one of them.
   - **A pending y/n or question holds the inbox** (`inboxHeld`); it lands once
-    answered (`settleConfirm` / `settleAsk` take it). **A draft in the field does not
+    answered (`answerConfirm` / `answerQuestion` take it). **A draft in the field does not
     hold it**, and a follow-up turn leaves the field and its ↑ walk alone. **A closed
     chat does not hold it**: the turn runs, and each landed item counts as unread —
     the host footer shows `F chat · ◆ N new` through the chat plugin's `keycaps`,
@@ -3849,7 +3849,8 @@ commands; docs and hints never present either mechanism as a boundary.
   changed outside flow-assist — apply? (y/n)` in the confirmation's place
   (`ConfirmAsk.title` / `hint`), through the `configChanges` host service `renderApp`
   binds — as it starts, before the next request of a turn (`beforeRequest` awaits it),
-  after a `!command` and after a turn. Yes (`applyConfigChange`) accepts it and lays
+  after a `!command` and after a turn (`askConfigChanges`,
+  `src/assistant/conversation-turn.ts`). Yes (`applyConfigChange`) accepts it and lays
   each key on the running config, a key marked `appliesOnRestart` left for the
   restart. No (`declineConfigChange`) writes the accepted content back into the file
   and keeps the rejected text beside it, `<file>.rejected-<time>` (0600), so a restart

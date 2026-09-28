@@ -1,7 +1,7 @@
 // A conversation: the model's history and the list the person reads, what runs and what
 // waits, the session it is saved as. The chat draws one and drives it (AGENTS.md, "The chat").
 import { apiHistory, requestTools, type ChatMessage, type TokenUsage } from './agent.js';
-import type { AskState } from './ask.js';
+import { askStart, type AskQuestion, type AskState } from './ask.js';
 import type { AutoMode } from './auto.js';
 import { DEFAULT_CONTEXT_WINDOW, readContext, type ContextReading } from './context-meter.js';
 import { dataUrl, imageLimits, imagesInText, readImageData, type ImageRef, type LoadedOk, type ResolvedImage } from './images.js';
@@ -18,14 +18,16 @@ import type { Session, SessionFingerprint } from './sessions.js';
 import { createShellState, tildePath, type ShellState } from './shell.js';
 import { baseStatic, memoryBlock, planBlock, projectBlock, summaryBlock } from './system-prompt.js';
 import { createToolSet, toolLoadingMode, type ToolSet } from './tool-loading.js';
+import { pickVerb, verbList } from './verbs.js';
 import type { ViewRecord } from './views.js';
 import type { ToolDef } from '../loader/tools.js';
 import { workspaceFor } from './workspace.js';
-import { callOf, type ChatMirror, type ChatMsg, type ConversationDeps, type ConversationEvent, type ConversationKind, type Queued, type QueueWait, type ViewPort } from './conversation-types.js';
+import { callOf, type BusyKind, type ChatMirror, type ChatMsg, type ConversationDeps, type ConversationEvent, type ConversationKind, type Queued, type QueueWait, type TurnEnd, type ViewPort } from './conversation-types.js';
 import {
   applySession, currentProject, ensureSessionId, journal, journaledChatLLM, journalTo, markSeen, persist, pushNote,
   releaseLockOf, writeSession, NO_FILE,
 } from './conversation-session.js';
+import { askConfigChanges } from './conversation-turn.js';
 
 export { NO_FILE };
 // Live views, coalesced: the latest record per view waits at most
@@ -114,6 +116,10 @@ export class Conversation {
 
   // ── the running thing
   busy = false;
+  // What runs while `busy`: a turn, a `!command`, a `!!command`, a slash command.
+  busyKind: BusyKind = 'turn';
+  // How the last piece of work ended; null before the first.
+  lastEnd: TurnEnd | null = null;
   inTurn = false;
   // Which turn a view belongs to — groups never span two. Never reset: it belongs to
   // the conversation's whole history.
@@ -133,7 +139,13 @@ export class Conversation {
   // command's outcome say `stopped (^c)`. Cleared when one starts.
   stopKey = '';
   toolLabel = '';
+  // What the model is doing when no tool runs: 'writing' only while its text
+  // arrives; before the first token, while it reasons, and between tools (it is
+  // working out the next call) it is 'thinking'.
+  phase: 'thinking' | 'writing' = 'thinking';
   verb = '';
+  // Tool calls in this turn (for the status line).
+  toolCount = 0;
   turnStartedAt = 0;
   segmentStartedAt = 0;
   turnTokens = 0;
@@ -142,6 +154,8 @@ export class Conversation {
   // the turn's cache hits, not a live figure). A round that reported nothing adds nothing.
   turnCached = 0;
   content = '';
+  // The last turn ended with reasoning and no final text.
+  emptyAnswer = false;
   continueOffer = false;
   roundTools = false;
   liveBuf = new Map<string, ViewRecord>();
@@ -236,6 +250,97 @@ export class Conversation {
   applySession(s: Session, fingerprint: SessionFingerprint, dir: string): void { applySession(this, s, fingerprint, dir); }
 
   setAutoMode(mode: AutoMode): void { this.autoMode = mode; this.mirror.setAutoMode(mode); }
+
+  // ── what runs, as the status line draws it
+  setToolLabel(v: string): void { this.toolLabel = v; this.mirror.setToolLabel(v); }
+  setPhase(p: 'thinking' | 'writing'): void { this.phase = p; this.mirror.setPhase(p); }
+  // The word the line says for either phase (src/assistant/verbs.ts): one per
+  // model request, picked when the request goes out — never in the render, so it
+  // cannot change under the person within a round. `verb` is what the next pick
+  // avoids repeating.
+  nextVerb(): void {
+    const word = pickVerb(verbList(this.deps.config() as { ui?: { verbs?: unknown } }), this.verb);
+    this.verb = word;
+    this.mirror.setVerb(word);
+  }
+  setToolCount(n: number): void { this.toolCount = n; this.mirror.setToolCount(n); }
+  setTurnTokens(n: number): void { this.turnTokens = n; this.mirror.setTurnTokens(n); }
+  setEmptyAnswer(on: boolean): void { this.emptyAnswer = on; this.mirror.setEmptyAnswer(on); }
+  setContinueOffer(on: boolean): void { this.continueOffer = on; this.mirror.setContinueOffer(on); }
+  // What is on the status line now starts its own clock.
+  beginSegment(): void { this.segmentStartedAt = Date.now(); this.mirror.setElapsed(0); }
+  // A tool has ended: its label goes, and the clock on the line is the model's
+  // round from here. Only when one was actually running — the callbacks of a turn
+  // all report the end of a tool, and the first of them to fire owns it.
+  endToolSegment(): void { if (this.toolLabel) { this.setToolLabel(''); this.beginSegment(); } }
+
+  // ── stopping what runs
+  // Whether Esc / Ctrl+C have something to stop: a run whose controller has not
+  // been aborted yet. A run that goes on after its abort (a tool that ignores its
+  // signal) does not hold the keys: Esc goes back to its idle steps and Ctrl+C
+  // arms the exit, so the person can always leave.
+  canStop(): boolean { return !!this.abort && !this.abort.signal.aborted; }
+  // Stops what runs: a pending y/n is declined and a question dismissed first (the turn
+  // would wait on them), then the running work is aborted. `glyph` names the key: ''
+  // for Esc, the cap for another.
+  stop(glyph: string): boolean {
+    if (!this.canStop()) return false;
+    if (this.confirm) this.answerConfirm(false, 'stop');
+    this.dismissQuestion();
+    this.stopKey = glyph;
+    this.abort?.abort();
+    return true;
+  }
+
+  // ── the y/n and the question
+  // Resolves the y/n pause: ok=true confirms the writing op (tool runs),
+  // ok=false declines it (agentChat returns «declined» as the tool result).
+  // `by` — who settled it: the person's key, or a stop or reset that closed it.
+  answerConfirm(ok: boolean, by: 'person' | 'stop' | 'reset' = 'person'): void {
+    const p = this.confirm;
+    if (!p) return;
+    this.confirm = null;
+    this.mirror.setPendingConfirm(null);
+    p.resolve(ok, by);
+    this.emit({ type: 'confirm', request: null });
+    this.deps.notify();
+    // The inbox the y/n held lands now (a turn still running holds it on).
+    setTimeout(() => this.takeInbox(), 0);
+  }
+  // The settings-file guard's y/n (src/assistant/conversation-turn.ts), one run at a time.
+  askConfigChanges(): Promise<void> { return askConfigChanges(this); }
+  // `ask_user`: the same kind of pause as the y/n, but the person picks among options.
+  // The chat steps the state key by key (src/assistant/ask.ts) and hands it back.
+  askUser(questions: AskQuestion[]): Promise<AskState> {
+    return new Promise<AskState>((resolve) => {
+      const state = askStart(questions);
+      this.question = { state, resolve };
+      this.mirror.setPendingQuestion(state);
+      // The chat: a question is answered in the conversation — a pager over it closes.
+      this.emit({ type: 'question', state, parked: true });
+      this.deps.notify();
+    });
+  }
+  setQuestion(state: AskState): void {
+    if (!this.question) return;
+    this.question.state = state;
+    this.mirror.setPendingQuestion(state);
+    this.deps.notify();
+  }
+  answerQuestion(done: AskState): void {
+    const a = this.question;
+    if (!a) return;
+    this.question = null;
+    this.mirror.setPendingQuestion(null);
+    a.resolve(done);
+    this.emit({ type: 'question', state: null });
+    this.deps.notify();
+    // The inbox the question held lands now (a turn still running holds it on).
+    setTimeout(() => this.takeInbox(), 0);
+  }
+  // Leaving the chat or resetting it must not leave the tool hanging: an unanswered
+  // question is reported to the model as dismissed.
+  dismissQuestion(): void { if (this.question) this.answerQuestion({ ...this.question.state, done: true, cancelled: true }); }
   // /clear and /resume both call this: the calls `liveSeen` / `liveBuf` tracked belong
   // to the conversation being left, and the pending coalesce timer (if any) is for a view
   // that conversation drew — cancelled, not left to fire into whatever replaces it. The

@@ -12,13 +12,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { addTrigger } from '../loader/registry.js';
 import { bgActiveCount } from '../loader/tools-core.js';
-import { autoBadge, autoCommand, autoConfirms, autoSaid, nextAutoMode, type AutoMode } from '../assistant/auto.js';
-import { pickVerb, verbList } from '../assistant/verbs.js';
+import { autoBadge, autoCommand, autoSaid, nextAutoMode, type AutoMode } from '../assistant/auto.js';
 import { NOTES_MODES, addCalls, callRun, endRound, startsWithNext, notesCommand, notesMode, notesSaid, type CallRun, type NotesMode, type TurnPart } from '../assistant/step.js';
 import { lineTab, lineView, type TabWalk } from '../config/commandline.js';
 import { completePath, completeSlash, listDirectory, type ChatCommandDef } from '../config/fieldcomplete.js';
-import { configSetLine, type CompleteResult } from '../config/commands.js';
-import { RESTART_NOTE, parseValue, type ConfigChange } from '../config/load.js';
+import type { CompleteResult } from '../config/commands.js';
 import { redactDeep, redactSecrets } from '../assistant/secrets.js';
 import { apiHistory, compactConversation, transcriptSoFar } from '../assistant/agent.js';
 import { RESUMED_NOTE, autoCompactLimits, overThreshold } from '../assistant/compaction.js';
@@ -46,13 +44,13 @@ import { allFolded, flipFolds, isClicked, isOpen, openInFull, pageable, toggleFo
 import { groupOpen, toggleGroup } from '../assistant/view-groups.js';
 import { bindingGlyph, firstGlyph, isKey, isMouseButton, isMouseKey, keyGlyph } from '../playback/keys.js';
 import { hoverEnabled } from '../config/mouse.js';
-import { askKey, askStart, type AskQuestion, type AskState } from '../assistant/ask.js';
+import { askKey, type AskQuestion, type AskState } from '../assistant/ask.js';
 import { keptAfterClear, memoryCommand, type Shown } from '../assistant/memory-command.js';
 import { migrateMemoryJson, removeFact, writeIndex } from '../assistant/memory-store.js';
 import { acceptFact, firstStart, firstStartPending } from '../assistant/memory-trust.js';
 import { memoryFilePath } from '../runtime/services/memory.js';
 import { ensureWorkspace, workspaceFor, workspaceNote, workspaceRoot } from '../assistant/workspace.js';
-import { CONTEXT_WARN_AT, cacheLine, contextBadge, estimateTokens, short as shortTokens } from '../assistant/context-meter.js';
+import { CONTEXT_WARN_AT, cacheLine, contextBadge, estimateTokens } from '../assistant/context-meter.js';
 import { createRecallState, decideBatch, recallLimits, recallLine, type RecallSource, type ShellMeta } from '../assistant/recall.js';
 import { contextTitle, screenBlock, type ContextItem } from '../assistant/screen-context.js';
 import {
@@ -66,9 +64,10 @@ import type { PluginApi } from '../runtime/plugin-api.js';
 import { isPanelSpec, panelAnswer, panelKey as commandPanelKey, panelKeys, panelRows, panelStart, panelTop, type PanelSpec, type PanelState } from '../assistant/command-panel.js';
 import type { Command as PluginCommand } from '../loader/plugin.js';
 import { STOPPED_TURN, failedTurn, joinSystem, projectBlock as projectBlockFor, roundCapTurn, summaryBlock as summaryBlockFor, systemParts as systemPartsFor } from '../assistant/system-prompt.js';
-import { answerAt, callOf, type ChatMsg, type ConversationDeps, type Queued, type ViewPort } from '../assistant/conversation-types.js';
+import { answerAt, callOf, type ChatMsg, type ConversationDeps, type ConversationEvent, type Queued, type ViewPort } from '../assistant/conversation-types.js';
 import { Conversation } from '../assistant/conversation.js';
 import { NO_FILE, personSpoke, projectHere } from '../assistant/conversation-session.js';
+import { allServices, configLineOf, confirmWrite, foldIntoHandoff, markCompacted, shellCommandOf } from '../assistant/conversation-turn.js';
 
 // Slash-commands of the chat — a single source for runChatCommand and Tab-completion.
 // `/analyze` is a tracker slash command and is removed.
@@ -89,14 +88,6 @@ const CHAT_COMMAND_DEFS: ChatCommand[] = [
 ];
 const CHAT_COMMANDS = CHAT_COMMAND_DEFS.map((c) => c.name);
 
-// A plain object holding every enumerable service, inherited ones included.
-// `for…in` walks the prototype chain, which is exactly what a spread does not.
-export function allServices(services: object): Record<string, unknown> {
-  const flat: Record<string, unknown> = {};
-  for (const key in services) flat[key] = (services as Record<string, unknown>)[key];
-  return flat;
-}
-
 // `/log [N]`: the person shares the tail of the host log with the model, as their
 // own message. The model has no log tool — what it sees of the log is what the
 // person chose to show, when they chose to show it.
@@ -114,35 +105,7 @@ export function logShareMessage(lines: readonly string[], arg = ''): string | nu
 // (`ai.maxRounds`, `ai.maxTurnTokens`).
 export const CONTINUE_WORD = 'continue';
 export { STOPPED_TURN, failedTurn, roundCapTurn } from '../assistant/system-prompt.js';
-
-// The command of a `run_command` call, so the y/n block can show the line itself
-// rather than its JSON. null — some other tool, or arguments that do not parse.
-export function shellCommandOf(name: string, args: string): string | null {
-  if (name !== 'run_command' && !name.endsWith(':run_command')) return null;
-  try {
-    const a = JSON.parse(args) as { command?: unknown; cwd?: unknown };
-    if (typeof a.command !== 'string') return null;
-    return typeof a.cwd === 'string' && a.cwd.trim() ? `${a.command}   # in ${a.cwd}` : a.command;
-  } catch {
-    return null;
-  }
-}
-
-// The line a `config_set` call stands for — the `config set` command the person would
-// have typed — so the y/n block reads the same as the CLI rather than as JSON. null —
-// some other tool, or arguments that do not parse. Only the host's own tool: a plugin's
-// tool of the same name is registered qualified (`mcp:config_set`) and keeps its
-// arguments on the block, or a line would hide what it really sends.
-export function configLineOf(name: string, args: string): string | null {
-  if (name !== 'config_set') return null;
-  try {
-    const a = JSON.parse(args) as { key?: unknown; value?: unknown; scope?: unknown };
-    if (typeof a.key !== 'string' || (a.scope !== 'session' && a.scope !== 'saved')) return null;
-    return configSetLine(a.key, typeof a.value === 'string' ? parseValue(a.value) : a.value, a.scope);
-  } catch {
-    return null;
-  }
-}
+export { allServices, configLineOf, shellCommandOf } from '../assistant/conversation-turn.js';
 
 // The app-glue dispatched to by the :ask command.
 interface AssistantCtx {
@@ -341,7 +304,19 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // The conversation this chat draws. `useRef`'s argument is evaluated on every render,
           // so the object is made once, into an empty ref, as the lock token is.
           const convRef = ui.useRef<Conversation | null>(null);
-          if (!convRef.current) convRef.current = new Conversation(chatDeps(host, lockToken));
+          // What the chat does when its conversation starts or ends work, parks a y/n or a
+          // question, fails, or lands a background result. Bound once, when the conversation is
+          // made; each handler reaches this render's functions through the ref.
+          const viewFx = ui.useRef<Partial<{ [T in ConversationEvent['type']]: (ev: Extract<ConversationEvent, { type: T }>) => void }>>({});
+          const bindView = (c: Conversation) => {
+            c.on('turn-start', (ev) => viewFx.current['turn-start']?.(ev));
+            c.on('turn-end', (ev) => viewFx.current['turn-end']?.(ev));
+            c.on('confirm', (ev) => viewFx.current.confirm?.(ev));
+            c.on('question', (ev) => viewFx.current.question?.(ev));
+            c.on('notice', (ev) => viewFx.current.notice?.(ev));
+            c.on('inbox', (ev) => viewFx.current.inbox?.(ev));
+          };
+          if (!convRef.current) { const c = new Conversation(chatDeps(host, lockToken)); bindView(c); convRef.current = c; }
           const conv = convRef.current;
           // A pending coalesce timer must not fire into whatever the chat looks like by
           // then — unmounting is a reset the timer itself cannot observe.
@@ -387,22 +362,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // value at send time — empty — so the label of a finished tool never cleared and
           // the chat looked stuck on it while the model was already writing.
           const toolLabel = toolLabelState;
-          const setToolLabel = (v: string) => { conv.toolLabel = v; setToolLabelState(v); };
           // What the model is doing when no tool runs: 'writing' only while its text
           // arrives; before the first token, while it reasons, and between tools (it is
           // working out the next call) it is 'thinking'. One word for all of it read
           // "writing…" while nothing was being written.
           const [phase, setPhase] = ui.useState<'thinking' | 'writing'>('thinking');
-          // The word the line says for either phase (src/assistant/verbs.ts): one per
-          // model request, picked when the request goes out — never in the render, so it
-          // cannot change under the person within a round. `conv.verb` is what the next
-          // pick avoids repeating.
+          // The word the line says for either phase (`Conversation.nextVerb`).
           const [verb, setVerbState] = ui.useState('');
-          const nextVerb = () => {
-            const word = pickVerb(verbList(host.config as { ui?: { verbs?: unknown } }), conv.verb);
-            conv.verb = word;
-            setVerbState(word);
-          };
           // What is open and what is folded (src/assistant/folds.ts): one global
           // state, plus the blocks a click has made an exception of. `details` (^o)
           // is the master switch; a click opens the block under it alone. The
@@ -439,19 +405,12 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // thing has taken. tickRef ticks elapsedMs off `conv.segmentStartedAt`.
           const [elapsedMs, setElapsedMs] = ui.useState(0);
           const tickRef = ui.useRef<ReturnType<typeof setInterval> | null>(null);
-          // What is on the status line now starts its own clock.
-          const beginSegment = () => { conv.segmentStartedAt = Date.now(); setElapsedMs(0); };
-          // A tool has ended: its label goes, and the clock on the line is the model's
-          // round from here. Only when one was actually running — the callbacks below
-          // all report the end of a tool, and the first of them to fire owns it.
-          const endToolSegment = () => { if (conv.toolLabel) { setToolLabel(''); beginSegment(); } };
           // What the provider said this TURN has cost: every round's prompt plus its
           // completion, added up as the rounds report (`onRound`). A different number
           // from the conversation's `usage`, which is the last round alone — the size of the next
           // request, and so how full the context is. Nothing is estimated here: a
           // provider that reports no usage leaves this at 0 and no figure is drawn.
           const [turnTokens, setTurnTokensState] = ui.useState(0);
-          const setTurnTokens = (n: number) => { conv.turnTokens = n; setTurnTokensState(n); };
           // Empty answer: the model output only reasoning (goes to the fold) but no
           // final text. `conv.content` accumulates the final content (onDelta) — by it we
           // decide «empty?» and show an amber status message.
@@ -460,13 +419,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // "continue", and the field's hint says so. Gone with the next message, and
           // wherever the notice above is reset.
           const [continueOffer, setContinueOfferState] = ui.useState(false);
-          const setContinueOffer = (v: boolean) => { conv.continueOffer = v; setContinueOfferState(v); };
           const [toolCount, setToolCount] = ui.useState(0); // tool calls in this turn (for the status)
-          // Whether Esc / Ctrl+C have something to stop: a run whose controller has not
-          // been aborted yet. A run that goes on after its abort (a tool that ignores its
-          // signal) does not hold the keys: Esc goes back to its idle steps and Ctrl+C
-          // arms the exit, so the person can always leave.
-          const canStop = () => !!conv.abort && !conv.abort.signal.aborted;
           // Tab-completion cycle: { base, idx, cmd } — by which prefix the matches were
           // built, the last selected command in that list and its text. Repeat Tab cycles;
           // changing the prefix (typed/deleted) restarts.
@@ -853,20 +806,6 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             setBangLevel(0); // the level is never saved — a restored draft is plain text
             setField(s.draft);
           };
-          const settleAsk = (done: AskState) => {
-            const a = conv.question;
-            if (!a) return;
-            conv.question = null;
-            setPendingQuestion(null);
-            a.resolve(done);
-            host.notify();
-            // The inbox the question held lands now (a turn still running holds it on).
-            setTimeout(() => conv.takeInbox(), 0);
-          };
-          // Leaving the chat or resetting it must not leave the tool hanging: an
-          // unanswered question is reported to the model as dismissed.
-          const dismissAsk = () => { if (conv.question) settleAsk({ ...conv.question.state, done: true, cancelled: true }); };
-
           // ── Esc-exit logic (double Esc) ─────────────────────────────────────────
           const armEsc = () => {
             if (escTimer.current) clearTimeout(escTimer.current);
@@ -881,56 +820,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           };
           const escArmed = escArmAt > 0 && (Date.now() - escArmAt) < 3200;
 
-          // Resolves the y/n pause: ok=true confirms the writing op (tool runs),
-          // ok=false declines it (agentChat returns «declined» as the tool result).
-          // `by` — who settled it: the person's key, or a stop or reset that closed it.
-          // A settings file changed outside the host (src/config/load.ts, the guard) is
-          // put to the person as a y/n of its own, in the confirmation's place: yes lays
-          // it on the running config, no keeps it off until restart. Never answered by
-          // the auto mode — it does not go through `confirmWrite`. A stop or a reset that
-          // closes it answers nothing: the next check asks again. Asked between a round's
-          // results and the next request (`beforeRequest` waits for it), after a
-          // `!command` and after a turn — never over another pending y/n or question.
-          const askConfigChanges = (): Promise<void> => {
-            if (conv.configAsk) return conv.configAsk;
-            const svc = (host.services as { configChanges?: { check(): ConfigChange[]; apply(c: ConfigChange): { applied: string[]; restart: string[] }; decline(c: ConfigChange): string | null } }).configChanges;
-            if (!svc || conv.confirm || conv.question) return Promise.resolve();
-            const changes = svc.check();
-            if (!changes.length) return Promise.resolve();
-            const run = (async () => {
-              for (const change of changes) {
-                const answer = await new Promise<boolean | null>((resolve) => {
-                  conv.confirm = { name: 'config', args: '', resolve: (ok, by = 'person') => resolve(by === 'person' ? ok : null) };
-                  setPendingAsk({ name: 'config', args: '', title: `⚠ ${change.file} changed outside flow-assist — apply? (y/n)`, line: change.lines.join('\n'), whole: true, hint: `y applies it now · n puts the accepted settings back and keeps the change beside the file` });
-                  host.notify();
-                });
-                if (answer === null) break;
-                if (answer) {
-                  const r = svc.apply(change);
-                  conv.pushNote(`Applied ${change.file}: ${[...r.applied, ...r.restart.map((k) => `${k} (${RESTART_NOTE})`)].join(', ')}.`);
-                } else {
-                  const kept = svc.decline(change);
-                  conv.pushNote(`Put the accepted ${change.file} back${kept ? ` — the change is kept in ${path.basename(kept)}` : ''}.`);
-                }
-              }
-            })().finally(() => { conv.configAsk = null; });
-            conv.configAsk = run;
-            return run;
-          };
-
           // A file changed while the app was off is asked about as the app starts.
-          ui.useEffect(() => { const t = setTimeout(() => { void askConfigChanges(); }, 0); return () => clearTimeout(t); }, []);
-
-          const settleConfirm = (ok: boolean, by: 'person' | 'stop' | 'reset' = 'person') => {
-            const p = conv.confirm;
-            if (!p) return;
-            conv.confirm = null;
-            setPendingAsk(null);
-            p.resolve(ok, by);
-            host.notify();
-            // The inbox the y/n held lands now (a turn still running holds it on).
-            setTimeout(() => conv.takeInbox(), 0);
-          };
+          ui.useEffect(() => { const t = setTimeout(() => { void convRef.current!.askConfigChanges(); }, 0); return () => clearTimeout(t); }, []);
 
           // What the person's screens show now, as the plugins describe it
           // (src/assistant/screen-context.ts). Read fresh for every request — every
@@ -985,28 +876,16 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // `hostAsk`: the text is the HOST's request, sent as the person's message (after
           // an interactive `!!command`, "look at what it printed") — drawn as the host's,
           // never kept in ↑/↓.
-          // ── Compaction ── /compact and the automatic one alike: the model's view becomes
-          // a handoff (`compactConversation`) that REPLACES the previous summary, which it
-          // was shown to carry forward. What the PERSON sees stays — the conversation above
-          // is theirs to scroll (wiping it down to the last message instead would read as
-          // /clear); a note marks where the model's view now begins, one row with how big
-          // that view was and is now (the reading `ctx N%` shows), `auto` when nobody
-          // asked, and the summary folded under it.
-          const foldIntoHandoff = async (history: ChatMessage[], signal: AbortSignal) => {
-            const ai = (host.config.ai ?? {}) as Record<string, any>;
-            const result = await compactConversation(history, { ...llmOpts(ai), signal, previous: conv.summary });
-            if (!signal.aborted && result.incomplete) (host.services as Record<string, any>).pushLog?.(`[compact] no usable handoff after a retry: ${result.incomplete}`);
-            return result;
+          viewFx.current = {
+            confirm: (ev) => {
+              if (!ev.request) return;
+              if (contextOpenRef.current) setContextOpen(false);
+              // So does a pager: the y/n is what the person must see and answer.
+              if (pagerRef.current) setPager(null);
+            },
+            // A question is answered in the conversation: a pager over it closes.
+            question: (ev) => { if (ev.parked && pagerRef.current) setPager(null); },
           };
-          const markCompacted = (before: number, summary: string, incomplete: string | undefined, auto: boolean) => {
-            const after = conv.contextReading().used;
-            const sizes = before > 0 && after > 0 ? ` · ~${shortTokens(before)} → ~${shortTokens(after)} tokens` : '';
-            const kept = incomplete ? ' · incomplete, previous kept' : '';
-            const note = `── compacted${auto ? ' · auto' : ''}${sizes}${kept} ──`;
-            conv.journal({ t: 'compact', summary, note, ...(auto ? { auto: true } : {}) });
-            setMessages((cur) => [...cur, { role: 'note', content: note, summary }]);
-          };
-
           const send = async (text: string | null = null, opts: { fromBackground?: boolean; hostAsk?: boolean } = {}) => {
             const q = (text ?? inputRef.current).trim();
             if (!q || conv.busy) return false;
@@ -1097,19 +976,19 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             }
             setError(null);
             setStreaming(true);
-            setPhase('thinking');
-            nextVerb(); // the turn's first request gets a word of its own
+            conv.setPhase('thinking');
+            conv.nextVerb(); // the turn's first request gets a word of its own
             conv.turnStartedAt = Date.now();
             setElapsedMs(0);
             conv.content = '';
-            setEmptyNotice(''); setContinueOffer(false);
-            setToolCount(0);
-            setTurnTokens(0); // what the last turn cost is not what this one costs
+            conv.setEmptyAnswer(false); conv.setContinueOffer(false);
+            conv.setToolCount(0);
+            conv.setTurnTokens(0); // what the last turn cost is not what this one costs
             conv.turnCached = 0;
             resetRound(); // the turn starts with a round nobody knows anything about yet
             // Tick the indicator every 120ms: spinner frame + tenths of a second of
             // whatever is running now (`conv.segmentStartedAt`), not of the whole turn.
-            beginSegment();
+            conv.beginSegment();
             if (tickRef.current) clearInterval(tickRef.current);
             tickRef.current = setInterval(() => setElapsedMs(Date.now() - conv.segmentStartedAt), 120);
             disarmEsc();
@@ -1165,7 +1044,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   if (epoch !== conv.epoch) return;
                   // A settings file a command just changed is answered before the model
                   // reads another word (the guard, above).
-                  await askConfigChanges();
+                  await conv.askConfigChanges();
                   if (epoch !== conv.epoch) return;
                   // First what the person queued since the last request: it reaches the
                   // model now, after the round's results, as their message — each one
@@ -1200,16 +1079,16 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   else if (round === 0) { const r = conv.contextReading(); next = r.measured ? r.used + estimateTokens(q) : r.used; }
                   else next = conv.contextReading(undefined, [...transcript, ...delivered], false).used;
                   if (!overThreshold(next, conv.contextWindow(), limits)) return append;
-                  setToolLabel('⚙ compact…');
+                  conv.setToolLabel('⚙ compact…');
                   let result: Awaited<ReturnType<typeof foldIntoHandoff>>;
                   try {
-                    result = await foldIntoHandoff([...conv.sentHistory(), ...transcript], abort.signal);
+                    result = await foldIntoHandoff(conv, [...conv.sentHistory(), ...transcript], abort.signal);
                   } catch (e) {
                     if (abort.signal.aborted || (e as Error)?.name === 'AbortError') throw e;
                     (host.services as Record<string, any>).pushLog?.(`[compact] the automatic compaction failed, the request goes as it is: ${(e as Error)?.message}`);
                     return append;
                   } finally {
-                    setToolLabel('');
+                    conv.setToolLabel('');
                   }
                   if (abort.signal.aborted) throw new DOMException('The operation was aborted.', 'AbortError');
                   if (epoch !== conv.epoch) return append;
@@ -1219,7 +1098,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   conv.summary = result.summary;
                   conv.usage = null; // the measured size was of the history just replaced
                   conv.api = [resumed];
-                  markCompacted(next, result.summary, result.incomplete, true);
+                  markCompacted(conv, next, result.summary, result.incomplete, true);
                   conv.persist();
                   const sysNow = joinSystem({ ...sysParts, screens: conv.screensBlock(), summary: summaryBlock() }, projectBlock());
                   return { messages: wireMessages([...(sysNow ? [{ role: 'system', content: sysNow } as ChatMessage] : []), resumed], (ref) => conv.resolveImage(ref, [])), ...append };
@@ -1252,14 +1131,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   // The plugin's OWN host-issued token: a plugin can present itself but
                   // not impersonate one.
                   pluginToken: host.pluginToken,
-                  askUser: (questions: AskQuestion[]) => new Promise<AskState>((resolve) => {
-                    const state = askStart(questions);
-                    // A question is answered in the conversation: a pager over it closes.
-                    if (pagerRef.current) setPager(null);
-                    conv.question = { state, resolve };
-                    setPendingQuestion(state);
-                    host.notify();
-                  }),
+                  askUser: (questions: AskQuestion[]) => conv.askUser(questions),
                   // Every service a tool may call through ctx — flattened, not spread:
                   // `host.services` is a per-plugin view whose HOST services sit on its
                   // prototype, and `...obj` copies own properties only. Spreading it
@@ -1272,44 +1144,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   // handed a way to write to the journal itself.
                   chatLLM: conv.journaledChatLLM(journalId),
                 },
-                // The y/n pause on a writing op: agentChat calls confirmWrite for tools
-                // with a write-flag, we set conv.confirm + pendingAsk and wait for the
-                // input-handler to resolve the promise ('y'/Enter — yes, 'n'/Esc — no).
-                confirmWrite: (name: string, argsStr: unknown, info?: { input?: string; inputId?: string; hostShell?: boolean; id?: string }) => new Promise<boolean>((resolve) => {
-                  // The one place a confirmation may be answered without the person:
-                  // the auto mode (src/assistant/auto.ts), which only `all` ever lets
-                  // say yes, never for an unlisted web_fetch or config_set, and for
-                  // run_command only while the person's `shell.autoRun` is on and the
-                  // call is the host's own shell tool (`info.hostShell`) — the key read
-                  // here, at the call, so a value set mid-session holds at once. It
-                  // answers BEFORE anything on screen moves — a call that does not
-                  // pause must not close the `/context` panel the person is reading.
-                  // Nothing here relaxes what agentChat asks about: a tool with no
-                  // write flag never reaches this function, and the trail and the ✎
-                  // diff block still show what ran.
-                  if (autoConfirms(conv.autoMode, name, { autoRun: shellAutoRun(host.config as { shell?: unknown }), hostShell: info?.hostShell === true })) {
-                    conv.journalTo(journalId, { t: 'confirm', ...(info?.id ? { id: info.id } : {}), name, answer: 'yes', by: 'auto' });
-                    resolve(true);
-                    return;
-                  }
-                  const args = typeof argsStr === 'string' ? argsStr : JSON.stringify(argsStr ?? '');
-                  const command = shellCommandOf(name, args);
-                  const line = configLineOf(name, args);
-                  if (contextOpenRef.current) setContextOpen(false);
-                  // So does a pager: the y/n is what the person must see and answer.
-                  if (pagerRef.current) setPager(null);
-                  // The tool whose earlier result the call takes as its input — the
-                  // block says where a command's stdin comes from.
-                  const input = info?.input ? `${info.input}${info.inputId ? ` (${info.inputId})` : ''}` : undefined;
-                  // The answer goes into the journal as it is given.
-                  const answered = (ok: boolean, by: 'person' | 'stop' | 'reset' = 'person') => {
-                    conv.journalTo(journalId, { t: 'confirm', ...(info?.id ? { id: info.id } : {}), name, answer: ok ? 'yes' : 'no', by });
-                    resolve(ok);
-                  };
-                  conv.confirm = { name, args, ...(input ? { input } : {}), resolve: answered };
-                  setPendingAsk({ name, args, ...(command != null ? { command } : {}), ...(line != null ? { line } : {}), ...(input ? { input } : {}) });
-                  host.notify();
-                }),
+                confirmWrite: confirmWrite(conv, journalId),
                 // A view a tool opened, and every change to it. Its message is pushed on
                 // the FIRST change, so it has its place — and its fold id — from the
                 // start: a block opened while it ran is still open when it ends.
@@ -1342,8 +1177,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   if (epoch !== conv.epoch) return;
                   // The tool is done: until the model's next token it is thinking, and
                   // the seconds on the line are the round's from here.
-                  endToolSegment();
-                  setPhase('thinking');
+                  conv.endToolSegment();
+                  conv.setPhase('thinking');
                   // Any view this call opened has already been placed by `onToolLive`,
                   // final phase included — flush now rather than waiting on the coalesce
                   // timer, so it is on screen before the next round's tool label appears.
@@ -1366,9 +1201,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   host.notify();
                 },
                 onTool: (name: string, args: unknown) => {
-                  setToolLabel(`⚙ ${name}(${String(args ?? '').slice(0, 40)})…`);
-                  setToolCount(c => c + 1); // call counter for the turn — in the status line
-                  beginSegment(); // the seconds on the line are this tool's now
+                  conv.setToolLabel(`⚙ ${name}(${String(args ?? '').slice(0, 40)})…`);
+                  conv.setToolCount(conv.toolCount + 1); // call counter for the turn — in the status line
+                  conv.beginSegment(); // the seconds on the line are this tool's now
                   host.notify();
                 },
                 // Diagnostic trace of what EACH round emitted: finish_reason + how many
@@ -1379,7 +1214,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // chat was AMBIGUOUS — this disambiguates it.
                 onRound: (info: { index: number; finishReason: string; toolCalls: number; contentLen: number; usage?: TokenUsage }) => {
                   // This request is done: the next one — after its tools — says a new word.
-                  nextVerb();
+                  conv.nextVerb();
                   // What the turn costs: a round is billed for its prompt and its
                   // answer, and a turn is several rounds. Only what the provider
                   // actually reported is counted — one that reports nothing leaves the
@@ -1389,7 +1224,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                     // from the last round alone — set here too, not only once the turn's
                     // answer arrives, so a long turn shows it climbing round by round.
                     conv.usage = info.usage;
-                    setTurnTokens(conv.turnTokens + info.usage.promptTokens + info.usage.completionTokens);
+                    conv.setTurnTokens(conv.turnTokens + info.usage.promptTokens + info.usage.completionTokens);
                     // `setTurnTokens` above skips its re-render when the sum does not
                     // change (a provider reporting usage with zero new tokens this
                     // round) — notify explicitly so the reading still redraws.
@@ -1418,8 +1253,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 onLive: (delta: string) => {
                   if (!delta) return;
                   roundText += delta;
-                  endToolSegment(); // the tool is done: the model is writing
-                  setPhase('writing');
+                  conv.endToolSegment(); // the tool is done: the model is writing
+                  conv.setPhase('writing');
                   // Read now, not in the updater (see `conv.roundTools`): a tool call that
                   // came before the text makes the text a step from its first character.
                   const quiet = conv.roundTools;
@@ -1435,8 +1270,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // accumulate reasoning in a separate message field (not content!).
                 onReasoning: (delta: string) => {
                   roundReasoning += delta;
-                  endToolSegment(); // the tool is done: the model is thinking
-                  setPhase('thinking');
+                  conv.endToolSegment(); // the tool is done: the model is thinking
+                  conv.setPhase('thinking');
                   setMessages(cur => {
                     const next = cur.slice();
                     const last = next[next.length - 1];
@@ -1494,7 +1329,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // host's line saying where, and the person is offered ⏎ continue.
                 ...(roundLimit ? [{ role: 'assistant', content: roundCapTurn(roundLimit, lastStep || undefined, limitTokens) } as ChatMessage] : []),
               ];
-              if (roundLimit) setContinueOffer(true);
+              if (roundLimit) conv.setContinueOffer(true);
               // The calls are already in the turn, where they were made (`onToolRun`).
               const runs = (chatResult as { toolRuns?: unknown[] } | undefined)?.toolRuns ?? [];
               // After a real write the plugins reload what they show — otherwise an open
@@ -1555,7 +1390,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 ...(roundText ? { cut: roundText } : {}), ...(roundReasoning ? { reasoning: roundReasoning } : {}),
               });
               // A command the turn ran may have changed a settings file (the guard).
-              void askConfigChanges();
+              void conv.askConfigChanges();
               setMessages(cur => {
                 // A round cut off by Esc or an error never said what it was. Its text
                 // stays where it was drawn: a round known to carry a tool call — or
@@ -1595,10 +1430,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 conv.answeredAt = at;
                 if (conv.shows()) conv.seenAt = at;
               }
-              if (!conv.content.trim() && !failed && !aborted && !roundLimit) {
-                const opens = firstGlyph(host.keys.details);
-                setEmptyNotice(`The turn ended without a final answer — only reasoning came back${opens ? ` (${opens} shows it)` : ''}. Narrow the question, or say "continue".`);
-              }
+              if (!conv.content.trim() && !failed && !aborted && !roundLimit) conv.setEmptyAnswer(true);
               // Sync conv.busy to false HERE, not just via the render's
               // `conv.busy = streaming`. If a render is ever
               // skipped — chat closed mid-turn, a runtime batching quirk, an
@@ -1636,7 +1468,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               }
               conv.persist();
               setStreaming(false);
-              setToolLabel('');
+              conv.setToolLabel('');
               conv.abort = null;
               afterTurn(!aborted && !failed, !!roundLimit);
             }
@@ -1664,13 +1496,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // The field is emptied now: the command is in its block from here on.
             setInput(''); inputRef.current = ''; setCursor(0);
             setError(null);
-            setEmptyNotice(''); setContinueOffer(false);
-            setToolCount(0);
+            conv.setEmptyAnswer(false); conv.setContinueOffer(false);
+            conv.setToolCount(0);
             setStreaming(true);
-            setToolLabel(`${runMark(interactive)} ${cmd.length > 60 ? `${cmd.slice(0, 60)}…` : cmd}`);
+            conv.setToolLabel(`${runMark(interactive)} ${cmd.length > 60 ? `${cmd.slice(0, 60)}…` : cmd}`);
             conv.turnStartedAt = Date.now();
             // The command is the only thing running, so the segment is the whole of it.
-            beginSegment();
+            conv.beginSegment();
             if (tickRef.current) clearInterval(tickRef.current);
             tickRef.current = setInterval(() => setElapsedMs(Date.now() - conv.segmentStartedAt), 120);
             disarmEsc();
@@ -1805,8 +1637,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               conv.persist();
               if (!askNow) setStreaming(false);
               // A command of the person's may have changed a settings file (the guard).
-              void askConfigChanges();
-              setToolLabel('');
+              void conv.askConfigChanges();
+              conv.setToolLabel('');
               conv.abort = null;
               if (askNow) {
                 setTimeout(() => {
@@ -1850,9 +1682,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             let ok = false;
             setError(null);
             setStreaming(true);
-            setToolLabel(`⚙ ${label}…`);
+            conv.setToolLabel(`⚙ ${label}…`);
             conv.turnStartedAt = Date.now();
-            beginSegment(); // the command is the one thing running
+            conv.beginSegment(); // the command is the one thing running
             if (tickRef.current) clearInterval(tickRef.current);
             tickRef.current = setInterval(() => setElapsedMs(Date.now() - conv.segmentStartedAt), 120);
             Promise.race([fn(abort.signal), stopped])
@@ -1864,7 +1696,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 if (conv.abort === abort) conv.abort = null;
                 conv.busy = false;
                 setStreaming(false);
-                setToolLabel('');
+                conv.setToolLabel('');
                 // What was queued meanwhile goes out now, as after an answer — unless the
                 // command was stopped or failed: then it comes back into the field.
                 afterTurn(ok);
@@ -1881,14 +1713,14 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               const before = conv.contextReading().used;
               // Compact what the MODEL saw (tool results included, a stubbed item as its
               // stub), not the display list.
-              const { summary, incomplete } = await foldIntoHandoff(conv.sentHistory(), signal);
+              const { summary, incomplete } = await foldIntoHandoff(conv, conv.sentHistory(), signal);
               if (signal.aborted) return; // stopped: the history stays as it was
               conv.summary = summary;
               conv.usage = null; // the measured size was of the history just replaced
               conv.api = [];
               // The loaded tools stay (`conv.toolSet`): the work the summary describes goes on
               // with them, and loading them again would spend a round for nothing.
-              markCompacted(before, summary, incomplete, false);
+              markCompacted(conv, before, summary, incomplete, false);
               conv.persist();
               (host.services as Record<string, any>).showMessage?.('History compacted');
             });
@@ -1986,9 +1818,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 return false;
               }
             }
-            dismissAsk();
+            conv.dismissQuestion();
             conv.queue = []; setQueued([]); conv.inbox = []; clearInboxTimer();
-            setError(null); setEmptyNotice(''); setContinueOffer(false); setToolLabel(''); setToolCount(0);
+            setError(null); conv.setEmptyAnswer(false); conv.setContinueOffer(false); conv.setToolLabel(''); conv.setToolCount(0);
             if (id !== conv.sessionId) conv.releaseLock(); // leaving the old one
             conv.applySession(s, fp, dir); applySessionView(s);
             (host.services as Record<string, any>).showMessage?.(`Resumed «${s.title || 'session'}»`);
@@ -2085,8 +1917,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const resetConversation = () => {
             if (tickRef.current) { clearInterval(tickRef.current); tickRef.current = null; }
             conv.abort?.abort(); conv.abort = null;
-            if (conv.confirm) settleConfirm(false, 'reset');
-            dismissAsk();
+            if (conv.confirm) conv.answerConfirm(false, 'reset');
+            conv.dismissQuestion();
             conv.content = '';
             conv.title = ''; // the next session is named by its own first line
             conv.answeredAt = ''; conv.seenAt = '';
@@ -2130,9 +1962,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             setNotes(configNotes()); // the steps go back to what the config asks for
             resetRound(); // the round being written belonged to work that is gone
             setError(null);
-            setEmptyNotice(''); setContinueOffer(false);
-            setToolCount(0);
-            setToolLabel('');
+            conv.setEmptyAnswer(false); conv.setContinueOffer(false);
+            conv.setToolCount(0);
+            conv.setToolLabel('');
             setElapsedMs(0);
             setFolds(allFolded()); // everything folded again, and no exceptions left over
             setPager(null);
@@ -2564,13 +2396,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // the chat closed.
             if (!openRef.current || (layoutRef.current === 'panel' && focusRef.current !== 'chat')) return undefined;
             disarmEsc();
-            if (key.name === 'c' && canStop()) {
-              if (conv.confirm) settleConfirm(false, 'stop');
-              dismissAsk();
-              conv.stopKey = keyGlyph({ name: 'c', ctrl: true });
-              conv.abort?.abort();
-              return 'handled';
-            }
+            if (key.name === 'c' && conv.canStop()) { conv.stop(keyGlyph({ name: 'c', ctrl: true })); return 'handled'; }
             if (key.name === 'd' && inputRef.current !== '') return 'field';
             return undefined;
           };
@@ -2773,8 +2599,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // The same width the block draws its field in, so the caret moves the
                 // way it is shown to move.
                 const next = askKey(conv.question.state, key, askFieldWidth(chatWrapWidth(width, fullscreenRef.current)));
-                if (next.done) settleAsk(next);
-                else { conv.question.state = next; setPendingQuestion(next); host.notify(); }
+                if (next.done) conv.answerQuestion(next);
+                else conv.setQuestion(next);
                 return true;
               }
               // The context panel holds the keys while it is up; Esc or ⏎ put it away.
@@ -2783,8 +2609,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 return true;
               }
               if (conv.confirm) {
-                if (key.name === 'escape' || key.name === 'n') { settleConfirm(false); return true; }
-                if (key.name === 'y' || key.name === 'return') { settleConfirm(true); return true; }
+                if (key.name === 'escape' || key.name === 'n') { conv.answerConfirm(false); return true; }
+                if (key.name === 'y' || key.name === 'return') { conv.answerConfirm(true); return true; }
                 return true;
               }
               // A plugin's panel holds the keys while it is up, as the picker does: ↑/↓, Esc
@@ -2861,7 +2687,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // is collapse: closeChat folds the panel and hands the plugin the keys);
               // otherwise arm + hint «Esc again to exit» («… to collapse» docked).
               if (key.name === 'escape') {
-                if (canStop()) { conv.stopKey = ''; conv.abort?.abort(); disarmEsc(); return true; }
+                if (conv.stop('')) { disarmEsc(); return true; }
                 if (inputRef.current.length > 0) {
                   setInput(''); inputRef.current = '';
                   setCursor(0);
@@ -3070,9 +2896,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // An armed Ctrl+C / Ctrl+D / Ctrl+Z (the App's, `^c again to exit`) — drawn
             // where `Esc again to exit` is.
             armedHint: (host.services as { armedHint?: string }).armedHint ?? '',
-            // `Esc stops` only while there is something it stops (see `canStop`) — and not
+            // `Esc stops` only while there is something it stops (see `Conversation.canStop`) — and not
             // while a docked chat has given the keyboard to the plugin: Esc is its then.
-            stoppable: canStop() && focused,
+            stoppable: conv.canStop() && focused,
             // What is open and what is folded, the cap of the key that changes it, and
             // the two channels a click needs: where the conversation is on the screen,
             // and which row to put at the top once a fold has changed the rows.
