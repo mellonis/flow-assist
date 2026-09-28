@@ -14,7 +14,7 @@ import { findInstructions, instructionsNote, type ProjectInstructions } from './
 import { applyRecall, bulkyItems, createRecallState, recallLimits, type BulkyItem, type RecallState } from './recall.js';
 import { screenBlock, type ContextItem } from './screen-context.js';
 import { redactSecrets } from './secrets.js';
-import type { Session, SessionFingerprint } from './sessions.js';
+import { unseenAnswer, type Session, type SessionFingerprint } from './sessions.js';
 import { createShellState, tildePath, type ShellState } from './shell.js';
 import { baseStatic, memoryBlock, planBlock, projectBlock, summaryBlock } from './system-prompt.js';
 import { createToolSet, toolLoadingMode, type ToolSet } from './tool-loading.js';
@@ -22,7 +22,7 @@ import { pickVerb, verbList } from './verbs.js';
 import type { ViewRecord } from './views.js';
 import type { ToolDef } from '../loader/tools.js';
 import { workspaceFor } from './workspace.js';
-import { callOf, type BusyKind, type ChatMirror, type ChatMsg, type ConversationDeps, type ConversationEvent, type ConversationKind, type Queued, type QueueWait, type SendOptions, type TurnEnd, type ViewPort } from './conversation-types.js';
+import { callOf, type BusyKind, type ChatMsg, type ConversationDeps, type ConversationEvent, type ConversationKind, type ConversationSnapshot, type ConversationStatus, type PendingConfirm, type Queued, type QueueWait, type SendOptions, type TurnEnd, type ViewPort } from './conversation-types.js';
 import {
   applySession, currentProject, ensureSessionId, journal, journaledChatLLM, journalTo, markSeen, persist, pushNote,
   releaseLockOf, writeSession, NO_FILE,
@@ -40,18 +40,9 @@ export const LIVE_REDRAW_MS = 200;
 // What an image stands for, as its data is cached: its path and its hash.
 export const imageKey = (r: ImageRef) => `${r.path}\0${r.sha256}`;
 
-// A mirror for a conversation no chat draws (a test): it keeps the list and nothing else.
-export function headlessMirror(): ChatMirror {
-  let list: ChatMsg[] = [];
-  const none = () => {};
-  return {
-    drawn: () => list, setDrawn: (l) => { list = l; },
-    setMessages: (next) => { list = typeof next === 'function' ? next(list) : next; },
-    setStreaming: none, setToolLabel: none, setPhase: none, setVerb: none, setToolCount: none, setTurnTokens: none,
-    setEmptyAnswer: none, setContinueOffer: none, setQueued: none, setAutoMode: none,
-    setPendingConfirm: none, setPendingQuestion: none, setElapsed: none,
-  };
-}
+// The fields a chat draws, each written through `draw`.
+type Drawn = 'busyDrawn' | 'toolLabel' | 'phase' | 'verb' | 'toolCount' | 'turnTokens' | 'emptyAnswer'
+  | 'continueOffer' | 'queuedDrawn' | 'autoMode' | 'confirmDrawn' | 'questionDrawn';
 
 let keys = 0;
 
@@ -209,10 +200,86 @@ export class Conversation {
     this.shell = createShellState(() => deps.config(), null, () => this.onShellSet());
   }
 
+  // ── what the chat draws (`getSnapshot`)
+  messages: ChatMsg[] = [];
+  // The list as the chat last drew it; null: no chat reports one.
+  drawnRows: ChatMsg[] | null = null;
+  busyDrawn = false;
+  confirmDrawn: PendingConfirm | null = null;
+  questionDrawn: AskState | null = null;
+  queuedDrawn: Queued[] = [];
+  private version = 0;
+  private snap: ConversationSnapshot | null = null;
+  private listeners = new Set<() => void>();
+  private tellSoon = false;
+
+  // For `useSyncExternalStore`. Fields, not methods: the chat hands React the same two
+  // functions on every render, so React does not subscribe again.
+  subscribe = (listener: () => void): (() => void) => {
+    this.listeners.add(listener);
+    return () => { this.listeners.delete(listener); };
+  };
+  getSnapshot = (): ConversationSnapshot => {
+    if (this.snap?.version !== this.version) {
+      this.snap = {
+        version: this.version, key: this.key, kind: this.kind,
+        messages: this.messages,
+        busy: this.busyDrawn ? this.busyKind : null,
+        activity: { label: this.toolLabel, phase: this.phase, verb: this.verb, toolCount: this.toolCount, turnTokens: this.turnTokens },
+        pendingConfirm: this.confirmDrawn, pendingQuestion: this.questionDrawn,
+        queued: this.queuedDrawn, autoMode: this.autoMode,
+        continueOffer: this.continueOffer, emptyAnswer: this.emptyAnswer,
+      };
+    }
+    return this.snap;
+  };
+  // A change the chat draws. The snapshot moves at once; when the subscribers hear of it
+  // depends on when it happens. The chat's React root is concurrent, and React renders a
+  // store's change as urgent work, before the next await resumes — where a state change
+  // made outside a key handler waits for the scheduler's next task, run from
+  // `setImmediate`, together with every other change made meanwhile. So:
+  // - Outside a turn, and for what the person must see as it happens (the busy mark, the
+  //   y/n, the question, the queue, the auto mode), the subscribers are told at once;
+  //   whatever still waits to be told goes with it.
+  // - While a turn runs, they are told once per macrotask: a stream's deltas draw once
+  //   per network read, not once per delta. The telling waits two `setImmediate` steps,
+  //   behind any task React's scheduler queued in the same turn of the event loop (the
+  //   chat's ticker, the App's notify): that task's render reads this snapshot, and the
+  //   telling then finds nothing new to draw — told first, the two would draw twice.
+  // A write that changes nothing tells nobody, as React skips a state set to the value
+  // it holds.
+  private changed(now = false): void {
+    this.version += 1;
+    if (now || !this.inTurn) { this.tell(); return; }
+    if (this.tellSoon) return;
+    this.tellSoon = true;
+    setImmediate(() => setImmediate(() => { if (this.tellSoon) this.tell(); }));
+  }
+  private tell(): void {
+    this.tellSoon = false;
+    for (const listener of [...this.listeners]) listener();
+  }
+  private draw<K extends Drawn>(key: K, value: Conversation[K], now = false): void {
+    if (Object.is(this[key], value)) return;
+    (this as Conversation)[key] = value;
+    this.changed(now);
+  }
+  setRows(next: ChatMsg[] | ((cur: ChatMsg[]) => ChatMsg[])): void {
+    const list = typeof next === 'function' ? next(this.messages) : next;
+    if (list === this.messages) return;
+    this.messages = list;
+    this.changed();
+  }
+  setBusyDrawn(on: boolean): void { this.draw('busyDrawn', on, true); }
+  drawConfirm(p: PendingConfirm | null): void { this.draw('confirmDrawn', p, true); }
+  drawQuestion(q: AskState | null): void { this.draw('questionDrawn', q, true); }
+  get status(): ConversationStatus {
+    if (this.confirm || this.question) return 'waiting';
+    if (this.busy) return 'working';
+    return unseenAnswer(this.messages, this.answeredAt, this.seenAt) ? 'done' : 'idle';
+  }
+
   // ── the chat that draws it
-  // The chat's React state, written through its setters while the chat draws from its
-  // own state; the chat assigns it on every render.
-  mirror: ChatMirror = headlessMirror();
   port: ViewPort | null = null;
   private handlers = new Map<string, Set<(ev: ConversationEvent) => void>>();
 
@@ -232,8 +299,9 @@ export class Conversation {
   get attached(): boolean { return this.port !== null; }
   // The attached port's `showsEnd()`; false with none.
   shows(): boolean { return this.port?.showsEnd() ?? false; }
-  // The list as the model's own reads see it: as last drawn.
-  rows(): ChatMsg[] { return this.mirror.drawn(); }
+  // The list as the model's own reads see it: as the chat last drew it (what a save
+  // writes, what the notes' "said once" checks), or the list itself with no chat.
+  rows(): ChatMsg[] { return this.drawnRows ?? this.messages; }
 
   // ── the session (src/assistant/conversation-session.ts)
   ensureSessionId(): string { return ensureSessionId(this); }
@@ -248,26 +316,22 @@ export class Conversation {
   currentProject(): string | null { return currentProject(this); }
   applySession(s: Session, fingerprint: SessionFingerprint, dir: string): void { applySession(this, s, fingerprint, dir); }
 
-  setAutoMode(mode: AutoMode): void { this.autoMode = mode; this.mirror.setAutoMode(mode); }
+  setAutoMode(mode: AutoMode): void { this.draw('autoMode', mode, true); }
 
   // ── what runs, as the status line draws it
-  setToolLabel(v: string): void { this.toolLabel = v; this.mirror.setToolLabel(v); }
-  setPhase(p: 'thinking' | 'writing'): void { this.phase = p; this.mirror.setPhase(p); }
+  setToolLabel(v: string): void { this.draw('toolLabel', v); }
+  setPhase(p: 'thinking' | 'writing'): void { this.draw('phase', p); }
   // The word the line says for either phase (src/assistant/verbs.ts): one per
   // model request, picked when the request goes out — never in the render, so it
   // cannot change under the person within a round. `verb` is what the next pick
   // avoids repeating.
-  nextVerb(): void {
-    const word = pickVerb(verbList(this.deps.config() as { ui?: { verbs?: unknown } }), this.verb);
-    this.verb = word;
-    this.mirror.setVerb(word);
-  }
-  setToolCount(n: number): void { this.toolCount = n; this.mirror.setToolCount(n); }
-  setTurnTokens(n: number): void { this.turnTokens = n; this.mirror.setTurnTokens(n); }
-  setEmptyAnswer(on: boolean): void { this.emptyAnswer = on; this.mirror.setEmptyAnswer(on); }
-  setContinueOffer(on: boolean): void { this.continueOffer = on; this.mirror.setContinueOffer(on); }
-  // What is on the status line now starts its own clock.
-  beginSegment(): void { this.segmentStartedAt = Date.now(); this.mirror.setElapsed(0); }
+  nextVerb(): void { this.draw('verb', pickVerb(verbList(this.deps.config() as { ui?: { verbs?: unknown } }), this.verb)); }
+  setToolCount(n: number): void { this.draw('toolCount', n); }
+  setTurnTokens(n: number): void { this.draw('turnTokens', n); }
+  setEmptyAnswer(on: boolean): void { this.draw('emptyAnswer', on); }
+  setContinueOffer(on: boolean): void { this.draw('continueOffer', on); }
+  // What is on the status line now starts its own clock; the chat's seconds start from 0.
+  beginSegment(): void { this.segmentStartedAt = Date.now(); this.emit({ type: 'activity' }); }
   // A tool has ended: its label goes, and the clock on the line is the model's
   // round from here. Only when one was actually running — the callbacks of a turn
   // all report the end of a tool, and the first of them to fire owns it.
@@ -308,7 +372,7 @@ export class Conversation {
     const p = this.confirm;
     if (!p) return;
     this.confirm = null;
-    this.mirror.setPendingConfirm(null);
+    this.drawConfirm(null);
     p.resolve(ok, by);
     this.emit({ type: 'confirm', request: null });
     this.deps.notify();
@@ -323,7 +387,7 @@ export class Conversation {
     return new Promise<AskState>((resolve) => {
       const state = askStart(questions);
       this.question = { state, resolve };
-      this.mirror.setPendingQuestion(state);
+      this.drawQuestion(state);
       // The chat: a question is answered in the conversation — a pager over it closes.
       this.emit({ type: 'question', state, parked: true });
       this.deps.notify();
@@ -332,14 +396,14 @@ export class Conversation {
   setQuestion(state: AskState): void {
     if (!this.question) return;
     this.question.state = state;
-    this.mirror.setPendingQuestion(state);
+    this.drawQuestion(state);
     this.deps.notify();
   }
   answerQuestion(done: AskState): void {
     const a = this.question;
     if (!a) return;
     this.question = null;
-    this.mirror.setPendingQuestion(null);
+    this.drawQuestion(null);
     a.resolve(done);
     this.emit({ type: 'question', state: null });
     this.deps.notify();
@@ -401,7 +465,7 @@ export class Conversation {
     const rows = keepLast ? items.slice(0, -1) : items;
     if (rows.length) {
       for (const q of rows) this.journal({ t: 'row', role: 'bg', text: q });
-      this.mirror.setMessages((cur) => [...cur, ...rows.map((q): ChatMsg => ({ role: 'bg', content: q }))]);
+      this.setRows((cur) => [...cur, ...rows.map((q): ChatMsg => ({ role: 'bg', content: q }))]);
       this.api = [...this.api, ...rows.map((q): ChatMessage => ({ role: 'bg', content: q }))];
       this.persist();
     }
@@ -469,7 +533,10 @@ export class Conversation {
     if (img >= 0) return 'behind';
     return list[at]!.hold ? 'end' : 'step';
   }
-  syncQueue(): void { this.mirror.setQueued(this.queue.slice()); this.deps.notify(); }
+  syncQueue(): void { this.queuedDrawn = this.queue.slice(); this.changed(true); this.deps.notify(); }
+  // The queue emptied by a reset or a switch — drawn empty, as a fresh empty list always
+  // draws (no notify: the key handler that resets redraws).
+  clearQueue(): void { this.queue = []; this.draw('queuedDrawn', [], true); }
   // ⏎ while an answer is coming: queued instead of dropped.
   enqueue(text: string): void { this.queue.push({ text }); this.syncQueue(); }
   // ↑ on an empty field: the last queued message back for editing; null with none.
@@ -564,7 +631,7 @@ export class Conversation {
   pushProjectNote(note: string): void {
     const said = this.rows().findLast((m) => m.role === 'note' && String(m.content ?? '').startsWith('Project instructions:'));
     if (said?.content !== note) this.journal({ t: 'row', role: 'note', text: note });
-    this.mirror.setMessages((cur) => {
+    this.setRows((cur) => {
       const last = cur.findLast((m) => m.role === 'note' && String(m.content ?? '').startsWith('Project instructions:'));
       return last?.content === note ? cur : [...cur, { role: 'note', content: note }];
     });
@@ -628,7 +695,7 @@ export class Conversation {
   // ── Live views (src/assistant/views.ts) ── placing what `turn`/`liveBuf`/`liveSeen`
   // collect.
   placeViews(recs: ViewRecord[]): void {
-    this.mirror.setMessages((cur) => {
+    this.setRows((cur) => {
       const next = cur.slice();
       for (const rec of recs) {
         const at = next.findLastIndex((m) => callOf(m) === rec.callId);

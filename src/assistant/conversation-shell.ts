@@ -29,7 +29,7 @@ export async function runShell(c: Conversation, cmd: string, interactive = false
   pushHistory(c.prompts, encodeBangLine(interactive ? 2 : 1, cmd));
   c.setEmptyAnswer(false); c.setContinueOffer(false);
   c.setToolCount(0);
-  c.mirror.setStreaming(true);
+  c.setBusyDrawn(true);
   // The mark says how it ran, `!` or `‼`.
   c.setToolLabel(`${runMark(interactive)} ${cmd.length > 60 ? `${cmd.slice(0, 60)}…` : cmd}`);
   c.turnStartedAt = Date.now();
@@ -67,7 +67,7 @@ export async function runShell(c: Conversation, cmd: string, interactive = false
   const outJournal = outputJournal((ev) => c.journalTo(journalId, ev));
   try {
     c.liveSeen.add(callId);
-    c.mirror.setMessages((cur) => [...cur, { role: 'shell', content: '', command: cmd, views: [{ ...liveRec(capConsoleData({ command: cmd, cwd: tildePath(cwd), text: '', showCwd: true, interactive })), turn: c.turn }] }]);
+    c.setRows((cur) => [...cur, { role: 'shell', content: '', command: cmd, views: [{ ...liveRec(capConsoleData({ command: cmd, cwd: tildePath(cwd), text: '', showCwd: true, interactive })), turn: c.turn }] }]);
     let raw = '';
     const onOutput = (chunk: string) => {
       outJournal.push(chunk);
@@ -111,7 +111,7 @@ export async function runShell(c: Conversation, cmd: string, interactive = false
       // that one tried to leave the roots and stayed — the same facts the old
       // markdown line carried, now on the live view instead.
       const data = consoleData(cmd, r, cwd, timeoutMs, true, { movedTo: tildePath(move.cwd), note: move.note, interactive });
-      c.mirror.setMessages((cur) => {
+      c.setRows((cur) => {
         const next = cur.slice();
         const at = next.findLastIndex((m) => callOf(m) === callId);
         const done = { role: 'shell', content: display, command: cmd, views: [{ ...liveRec(data, 'done'), turn: c.turn }] };
@@ -147,7 +147,7 @@ export async function runShell(c: Conversation, cmd: string, interactive = false
     // that is never coming — marked failed in place, keeping whatever it had
     // already shown (the way a tool's own thrown view does, agent.ts).
     if (epoch === c.epoch) {
-      c.mirror.setMessages((cur) => {
+      c.setRows((cur) => {
         const next = cur.slice();
         const at = next.findLastIndex((m) => callOf(m) === callId);
         if (at < 0) return cur;
@@ -167,7 +167,7 @@ export async function runShell(c: Conversation, cmd: string, interactive = false
     c.busy = askNow;
     if (epoch === c.epoch) c.flushLive();
     c.persist();
-    if (!askNow) c.mirror.setStreaming(false);
+    if (!askNow) c.setBusyDrawn(false);
     // A command of the person's may have changed a settings file (the guard).
     void c.askConfigChanges();
     c.setToolLabel('');
@@ -184,7 +184,7 @@ export async function runShell(c: Conversation, cmd: string, interactive = false
     if (askNow) {
       setTimeout(() => {
         c.busy = false;
-        if (epoch !== c.epoch) { c.mirror.setStreaming(false); return; }
+        if (epoch !== c.epoch) { c.setBusyDrawn(false); return; }
         void c.send(INTERACTIVE_ASK, { hostAsk: true });
       }, 0);
     }

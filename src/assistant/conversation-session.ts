@@ -160,7 +160,7 @@ export function journaledChatLLM(c: Conversation, from: string) {
 // A row the host says to the person: drawn and journaled.
 export function pushNote(c: Conversation, content: string): void {
   journal(c, { t: 'row', role: 'note', text: content });
-  c.mirror.setMessages((cur) => [...cur, { role: 'note', content }]);
+  c.setRows((cur) => [...cur, { role: 'note', content }]);
 }
 
 // The fork note's text.
@@ -261,8 +261,8 @@ export function applySession(c: Conversation, s: Session, fingerprint: SessionFi
   c.roundTools = false; // the round being written belonged to the conversation being left
   c.usage = s.usage;
   c.prompts = s.prompts.slice();
-  c.mirror.setDrawn(s.messages as ChatMsg[]);
-  c.mirror.setMessages(s.messages as ChatMsg[]);
+  if (c.drawnRows) c.drawnRows = s.messages as ChatMsg[];
+  c.setRows(s.messages as ChatMsg[]);
   // After the list is replaced, so the note the directory brings lands in it (said once
   // — a session that ends in the same note is left as it is). A note still waiting for a
   // turn's end described the conversation being left.

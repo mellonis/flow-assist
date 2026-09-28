@@ -2538,15 +2538,15 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   panel). Stopping always comes first, before clearing the field or taking the queue back: with
   a message queued, doing either first would throw the queued message away on the
   second Esc and only stop the tool on the third.
-  **A queued message never undoes what just ended**: `runTurn` lays its message onto
-  the list with an UPDATER through the chat's `mirror.setMessages`, over the list as
-  React has it, never onto `msgsRef` (what was last DRAWN, which
-  `Conversation.rows()` reads). The queue goes out from a zero-delay timer after a turn, a `!command`
-  or a slash command (and `!!`'s ask likewise), and that timer can run before the
-  render carrying the end: a list built from `msgsRef` would throw the end away — a
-  finished command's block would come back live and tick forever, an answer would
-  lose its last words. This shows up under load; `queued-send-race.e2e.test.ts` makes it deterministic by running
-  zero-delay timers as microtasks. **A stopped or failed turn does not send the queue**
+  **A queued message never undoes what just ended**: the conversation holds ONE list
+  and replaces it on every change (`Conversation.setRows`), so a message sent from the
+  zero-delay timer after a turn, a `!command` or a slash command (and `!!`'s ask
+  likewise) lands on the list as it is, the end included — never on the list as last
+  DRAWN (`Conversation.rows()`), which that timer can run ahead of: a list built from
+  it would throw the end away — a finished command's block would come back live and
+  tick forever, an answer would lose its last words. The drain still goes out from
+  that timer; `queued-send-race.e2e.test.ts` runs zero-delay timers as microtasks to
+  hold the race open. **A stopped or failed turn does not send the queue**
   (`Conversation.restoreQueue`, and the chat's `restoreQueue`, which puts the texts
   back into the field): the queued messages come back into the field in order,
   joined by blank lines, AHEAD of whatever was typed meanwhile — the order they would
@@ -2558,6 +2558,20 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   uses): the TTY backend asks for the kitty keyboard protocol, under which a terminal
   tells ⇧⏎ from ⏎, and one without it (Terminal.app) sends ⇧⏎ as a plain ⏎, which
   sends — Alt+⏎ is the key every terminal with an Alt sends as its own.
+- **The chat draws a `Conversation`'s snapshot** (`src/assistant/conversation.ts`)
+  through `useSyncExternalStore`: the list, the busy mark, the status line's activity,
+  the y/n, the question, the queue, the auto mode — one object, the same until something
+  drawn changes, and around the SAME `messages` array until the list itself is replaced
+  (the rows' memo keys on it). A write that changes nothing tells nobody. The chat's
+  root is concurrent: React renders a store's change as urgent work, before the next
+  await resumes, where a state change made outside a key handler waits for the
+  scheduler's next task. So outside a turn, and for the busy mark, the y/n, the
+  question, the queue and the auto mode at any time, the conversation tells its
+  subscribers at once; while a turn runs, at most once per macrotask, two
+  `setImmediate` steps later — behind any render React's scheduler queued meanwhile, so
+  a stream draws once per network read, as often as the chat's own state did. The
+  model's saves and notes read the list as the chat last drew it (`drawnRows`, set by
+  every render), so a save and the journal see what the person saw.
 - **Ctrl+C, Ctrl+D and Ctrl+Z take a second press** (`src/runtime/exit-keys.ts`, pure;
   the App owns the arm). flowtty hands these three to the app BEFORE the terminal
   backend acts (exit, exit, suspend — skipped when a `useInput` handler returns strict
@@ -3578,7 +3592,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   exception is the docked chat, a plain box in its panel (see "Where the chat is").
   - Rows are cached per message OBJECT (`rowCache`, a WeakMap). It is correct only
     because the chat replaces a message and never mutates one — keep every
-    `setMessages` updater that way.
+    `setRows` that way.
   - The last question, once scrolled out of view, is pinned as an OVERLAY — an
     absolute child of the box, over its top row — so pinning never shifts the rows
     being read. Needs flowtty ≥ 1.0.0-alpha.9 (before it, an overlay and the

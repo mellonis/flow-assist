@@ -70,8 +70,7 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
   // Close the re-entrancy window SYNCHRONOUSLY, before any await: send() is
   // called from the input handler, the inbox, and the slash command. Without
   // this, a follow-up turn for the inbox started while the chat is about to go
-  // idle could double-fire. (The render also syncs
-  // `c.busy = streaming`, but that only runs after React commits.)
+  // idle could double-fire.
   c.busy = true;
   c.busyKind = 'turn';
   const cfg = c.deps.config();
@@ -130,12 +129,12 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
   let roundReasoning = '';
   // The output streams of this turn's run_command calls, by call.
   const callOutputs = new Map<string, ReturnType<typeof outputJournal>>();
-  // An UPDATER, over the list as it is — not a list built from `msgsRef`, which
-  // is what was last DRAWN. A message sent from a zero-delay timer (the queue
-  // after a turn, a `!command` or a slash command; the ask after `!!`) can run
-  // before the render carrying what just ended, and a plain list then threw that
-  // update away: the finished block came back live, ticking forever.
-  c.mirror.setMessages((cur) => [...(sys ? [{ role: 'system', content: sys } as ChatMsg] : []), ...cur.filter((m) => m.role !== 'system'), ...added]);
+  // Over the list as it is (`setRows`), never over `rows()` — the list as last
+  // DRAWN. A message sent from a zero-delay timer (the queue after a turn, a
+  // `!command` or a slash command; the ask after `!!`) can run before the render
+  // carrying what just ended; a list built from what was drawn would throw that
+  // away, and the finished block would come back live, ticking forever.
+  c.setRows((cur) => [...(sys ? [{ role: 'system', content: sys } as ChatMsg] : []), ...cur.filter((m) => m.role !== 'system'), ...added]);
   c.turn += 1; // views this turn opens are its own, never the last turn's
   // This turn's own conversation identity — captured now, compared against
   // `c.epoch` by every one of this turn's async callbacks that could
@@ -143,11 +142,10 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
   // final flush): a mismatch means the conversation it was for is gone.
   const epoch = c.epoch;
   c.persist(); // the question survives a restart even if the answer does not
-  c.mirror.setStreaming(true);
+  c.setBusyDrawn(true);
   c.setPhase('thinking');
   c.nextVerb(); // the turn's first request gets a word of its own
   c.turnStartedAt = Date.now();
-  c.mirror.setElapsed(0);
   c.content = '';
   c.setEmptyAnswer(false); c.setContinueOffer(false);
   c.setToolCount(0);
@@ -200,7 +198,7 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
         // The journal keeps the markup the note is about, as evidence.
         if (detail?.markup) c.journalTo(journalId, { t: 'markup', note: text, markup: detail.markup });
         if (epoch !== c.epoch) return;
-        c.mirror.setMessages((cur) => [...cur, { role: 'note', content: text }]);
+        c.setRows((cur) => [...cur, { role: 'note', content: text }]);
         c.deps.notify();
       },
       // Before every request of the turn: past `ai.autoCompact.threshold` of the
@@ -234,7 +232,7 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
               c.journalTo(journalId, { t: 'row', role: 'user', text: m.text, midTurn: true });
             }
             delivered.push(...now.map((m): ChatMessage => ({ role: 'user', content: m.text })));
-            c.mirror.setMessages((cur) => [...cur, ...now.map((m): ChatMsg => ({ role: 'user', content: m.text }))]);
+            c.setRows((cur) => [...cur, ...now.map((m): ChatMsg => ({ role: 'user', content: m.text }))]);
             c.deps.notify();
           }
         }
@@ -360,7 +358,7 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
         const calls: CallRun[] = call ? [call] : [];
         const changed: TurnPart[] = (run.changes ?? []).map((change) => ({ kind: 'change', change }));
         if (!calls.length && !changed.length) { c.deps.notify(); return; }
-        c.mirror.setMessages(cur => {
+        c.setRows(cur => {
           const next = cur.slice();
           const last = next[next.length - 1];
           if (last?.role === 'assistant') next[next.length - 1] = { ...last, parts: [...addCalls(last.parts ?? [], calls), ...changed] };
@@ -411,7 +409,7 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
       // it is: in `step` it joins its run's row, in `open` it keeps its rows.
       onRoundKind: () => {
         c.roundTools = true;
-        c.mirror.setMessages(cur => {
+        c.setRows(cur => {
           const next = cur.slice();
           const last = next[next.length - 1];
           if (last?.role === 'assistant' && last.live) next[next.length - 1] = { ...last, liveQuiet: true };
@@ -427,7 +425,7 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
         // Read now, not in the updater (see `c.roundTools`): a tool call that
         // came before the text makes the text a step from its first character.
         const quiet = c.roundTools;
-        c.mirror.setMessages(cur => {
+        c.setRows(cur => {
           const next = cur.slice();
           const last = next[next.length - 1];
           if (last?.role === 'assistant') next[next.length - 1] = { ...last, live: (last.live || '') + delta, liveQuiet: quiet || last.liveQuiet === true };
@@ -441,7 +439,7 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
         roundReasoning += delta;
         c.endToolSegment(); // the tool is done: the model is thinking
         c.setPhase('thinking');
-        c.mirror.setMessages(cur => {
+        c.setRows(cur => {
           const next = cur.slice();
           const last = next[next.length - 1];
           if (last?.role === 'assistant') next[next.length - 1] = { ...last, reasoning: (last.reasoning || '') + delta };
@@ -453,10 +451,10 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
       // (`content`), false — a step, appended to the turn's parts in its place.
       // Either way the rows it was drawn with stay where they are.
       onLiveCommit: (text: string, isAnswer: boolean) => {
-        // c.content is fixed SYNCHRONOUSLY (not in the setMessages updater):
-        // react defers the updater to render, while send() reads c.content in
-        // finally right after await — there it would still be empty, and the
-        // «limit of steps» warning popped even on a normal answer.
+        // c.content is fixed here, where the callback fires, never inside the
+        // `setRows` updater below: send() reads it in `finally` right after the
+        // await to tell an answer from an empty turn, and every updater is a pure
+        // function of the list.
         if (isAnswer) c.content = text;
         // A round's text once, when it is known what it is.
         if (isAnswer || text.trim() || roundReasoning) c.journalTo(journalId, { t: isAnswer ? 'answer' : 'step', text, ...(roundReasoning ? { reasoning: roundReasoning } : {}) });
@@ -465,7 +463,7 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
         // callback fires, never in the updater below.
         c.roundTools = false;
         const step: TurnPart[] = !isAnswer && text.trim() ? [{ kind: 'text', text }] : [];
-        c.mirror.setMessages(cur => {
+        c.setRows(cur => {
           const next = cur.slice();
           const last = next[next.length - 1];
           if (last?.role !== 'assistant') {
@@ -559,7 +557,7 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
     });
     // A command the turn ran may have changed a settings file (the guard).
     void c.askConfigChanges();
-    c.mirror.setMessages(cur => {
+    c.setRows(cur => {
       // A round cut off by Esc or an error never said what it was. Its text
       // stays where it was drawn: a round known to carry a tool call — or
       // one that began with the `Next:` plan the prompt asks for before a
@@ -599,14 +597,10 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
       if (c.shows()) c.seenAt = at;
     }
     if (!c.content.trim() && !failed && !aborted && !roundLimit) c.setEmptyAnswer(true);
-    // Sync c.busy to false HERE, not just via the render's
-    // `c.busy = streaming`. If a render is ever
-    // skipped — chat closed mid-turn, a runtime batching quirk, an
-    // aborted turn that does not commit — c.busy would stay true
-    // forever and the inbox would hold EVERY background result
-    // permanently (the chat "stops working" after the first answer).
-    // c.busy mirrors the stream lifecycle synchronously: true
-    // from `send`'s top guard, false again when the stream ends.
+    // c.busy follows the stream lifecycle synchronously: true from `send`'s top
+    // guard, false again HERE when the stream ends. Nothing a render does sets it, so a
+    // render skipped (the chat closed mid-turn, an aborted turn that does not commit)
+    // cannot leave it true — the inbox would hold every background result for good.
     c.busy = false;
     // The directory moved during the turn: its note goes under the answer.
     c.inTurn = false;
@@ -645,7 +639,7 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
       ...(spent ? { tokens: spent } : {}),
       ...(cachedSpent ? { cached: cachedSpent } : {}),
     };
-    c.mirror.setStreaming(false);
+    c.setBusyDrawn(false);
     c.setToolLabel('');
     c.abort = null;
     // The chat: the ticker stops; a stopped or failed turn's queue comes back into the
@@ -689,7 +683,7 @@ export function confirmWrite(c: Conversation, journalId: string) {
     };
     const request: PendingConfirm = { name, args, ...(command != null ? { command } : {}), ...(line != null ? { line } : {}), ...(input ? { input } : {}) };
     c.confirm = { name, args, ...(input ? { input } : {}), resolve: answered };
-    c.mirror.setPendingConfirm(request);
+    c.drawConfirm(request);
     // The chat: the /context panel and a pager close — the y/n is what the person must see.
     c.emit({ type: 'confirm', request });
     c.deps.notify();
@@ -715,7 +709,7 @@ export function markCompacted(c: Conversation, before: number, summary: string, 
   const kept = incomplete ? ' · incomplete, previous kept' : '';
   const note = `── compacted${auto ? ' · auto' : ''}${sizes}${kept} ──`;
   c.journal({ t: 'compact', summary, note, ...(auto ? { auto: true } : {}) });
-  c.mirror.setMessages((cur) => [...cur, { role: 'note', content: note, summary }]);
+  c.setRows((cur) => [...cur, { role: 'note', content: note, summary }]);
 }
 
 // ── generic async slash command ──────────────────────────────────────────
@@ -738,7 +732,7 @@ export function runCommand(c: Conversation, label: string, fn: (signal: AbortSig
   const stopped = new Promise<never>((_, reject) => abort.signal.addEventListener('abort', () => reject(new DOMException('stopped', 'AbortError')), { once: true }));
   let ok = false;
   let failure = '';
-  c.mirror.setStreaming(true);
+  c.setBusyDrawn(true);
   c.setToolLabel(`⚙ ${label}…`);
   c.turnStartedAt = Date.now();
   c.beginSegment(); // the command is the one thing running
@@ -754,7 +748,7 @@ export function runCommand(c: Conversation, label: string, fn: (signal: AbortSig
     .finally(() => {
       if (c.abort === abort) c.abort = null;
       c.busy = false;
-      c.mirror.setStreaming(false);
+      c.setBusyDrawn(false);
       c.setToolLabel('');
       c.lastEnd = { kind: 'command', outcome: ok ? 'done' : abort.signal.aborted ? 'stopped' : 'failed', ms: Date.now() - c.turnStartedAt, ...(failure ? { error: failure } : {}) };
       // The chat: the ticker stops, and a stopped or failed command's queue comes back.
@@ -807,7 +801,7 @@ export function askConfigChanges(c: Conversation): Promise<void> {
     for (const change of changes) {
       const answer = await new Promise<boolean | null>((resolve) => {
         c.confirm = { name: 'config', args: '', resolve: (ok, by = 'person') => resolve(by === 'person' ? ok : null) };
-        c.mirror.setPendingConfirm({ name: 'config', args: '', title: `⚠ ${change.file} changed outside flow-assist — apply? (y/n)`, line: change.lines.join('\n'), whole: true, hint: `y applies it now · n puts the accepted settings back and keeps the change beside the file` });
+        c.drawConfirm({ name: 'config', args: '', title: `⚠ ${change.file} changed outside flow-assist — apply? (y/n)`, line: change.lines.join('\n'), whole: true, hint: `y applies it now · n puts the accepted settings back and keeps the change beside the file` });
         c.deps.notify();
       });
       if (answer === null) break;

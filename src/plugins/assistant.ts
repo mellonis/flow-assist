@@ -8,11 +8,12 @@
 //   - the chat's language is `ai.assistantLanguage` (chatLanguage).
 
 import fs from 'node:fs';
+import { useSyncExternalStore } from 'react';
 import os from 'node:os';
 import path from 'node:path';
 import { addTrigger } from '../loader/registry.js';
 import { bgActiveCount } from '../loader/tools-core.js';
-import { autoBadge, autoCommand, autoSaid, nextAutoMode, type AutoMode } from '../assistant/auto.js';
+import { autoBadge, autoCommand, autoSaid, nextAutoMode } from '../assistant/auto.js';
 import { NOTES_MODES, notesCommand, notesMode, notesSaid, type NotesMode } from '../assistant/step.js';
 import { lineTab, lineView, type TabWalk } from '../config/commandline.js';
 import { completePath, completeSlash, listDirectory, type ChatCommandDef } from '../config/fieldcomplete.js';
@@ -40,7 +41,7 @@ import { allFolded, flipFolds, isClicked, isOpen, openInFull, pageable, toggleFo
 import { groupOpen, toggleGroup } from '../assistant/view-groups.js';
 import { bindingGlyph, firstGlyph, isKey, isMouseButton, isMouseKey, keyGlyph } from '../playback/keys.js';
 import { hoverEnabled } from '../config/mouse.js';
-import { askKey, type AskState } from '../assistant/ask.js';
+import { askKey } from '../assistant/ask.js';
 import { keptAfterClear, memoryCommand, type Shown } from '../assistant/memory-command.js';
 import { migrateMemoryJson, removeFact, writeIndex } from '../assistant/memory-store.js';
 import { acceptFact, firstStart, firstStartPending } from '../assistant/memory-trust.js';
@@ -59,7 +60,7 @@ import type { Plugin } from '../loader/plugin.js';
 import type { PluginApi } from '../runtime/plugin-api.js';
 import { isPanelSpec, panelAnswer, panelKey as commandPanelKey, panelKeys, panelRows, panelStart, panelTop, type PanelSpec, type PanelState } from '../assistant/command-panel.js';
 import type { Command as PluginCommand } from '../loader/plugin.js';
-import type { ChatMsg, ConversationDeps, ConversationEvent, Queued, SendOptions, ViewPort } from '../assistant/conversation-types.js';
+import type { ChatMsg, ConversationDeps, ConversationEvent, SendOptions, ViewPort } from '../assistant/conversation-types.js';
 import { Conversation } from '../assistant/conversation.js';
 import { NO_FILE, personSpoke, projectHere } from '../assistant/conversation-session.js';
 import { configLineOf, shellCommandOf } from '../assistant/conversation-turn.js';
@@ -310,9 +311,27 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             c.on('question', (ev) => viewFx.current.question?.(ev));
             c.on('notice', (ev) => viewFx.current.notice?.(ev));
             c.on('inbox', (ev) => viewFx.current.inbox?.(ev));
+            c.on('activity', (ev) => viewFx.current.activity?.(ev));
           };
           if (!convRef.current) { const c = new Conversation(chatDeps(host, lockToken)); bindView(c); convRef.current = c; }
           const conv = convRef.current;
+          // What the chat draws of its conversation: one snapshot, the same object until
+          // something drawn changes (`Conversation.getSnapshot`).
+          const snap = useSyncExternalStore(conv.subscribe, conv.getSnapshot);
+          const messages = snap.messages as ChatMsg[];
+          const streaming = snap.busy !== null;
+          const { label: toolLabel, phase, verb, toolCount, turnTokens } = snap.activity;
+          const { continueOffer, queued, autoMode } = snap;
+          const pendingAsk = snap.pendingConfirm;
+          const pendingQuestion = snap.pendingQuestion;
+          // The empty-answer line names the key that opens the reasoning, as bound when drawn.
+          const detailsCap = firstGlyph(host.keys.details);
+          const emptyNotice = snap.emptyAnswer ? `The turn ended without a final answer — only reasoning came back${detailsCap ? ` (${detailsCap} shows it)` : ''}. Narrow the question, or say "continue".` : '';
+          // What the chat drew: its clicks map rows of this list, and the conversation's saves and
+          // notes read it (`Conversation.rows`).
+          const drawnRef = ui.useRef<ChatMsg[]>([]);
+          drawnRef.current = messages;
+          conv.drawnRows = messages;
           // A pending coalesce timer must not fire into whatever the chat looks like by
           // then — unmounting is a reset the timer itself cannot observe.
           ui.useEffect(() => () => { const c = convRef.current!; if (c.liveTimer) clearTimeout(c.liveTimer); }, []);
@@ -347,23 +366,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             (t as { unref?: () => void }).unref?.();
             return () => clearInterval(t);
           }, [!!panel]);
-          const [messages, setMessages] = ui.useState<ChatMsg[]>([]);
           const [input, setInput] = ui.useState('');
-          const [streaming, setStreaming] = ui.useState(false);
           const [error, setError] = ui.useState<string | null>(null);
-          const [toolLabelState, setToolLabelState] = ui.useState(''); // «⚙ calling get_issue…» during tool rounds
-          // Mirrored in the conversation (`conv.toolLabel`): the stream callbacks are closures made when the message was
-          // sent, and they read the label to clear it. Reading the state there saw the
-          // value at send time — empty — so the label of a finished tool never cleared and
-          // the chat looked stuck on it while the model was already writing.
-          const toolLabel = toolLabelState;
-          // What the model is doing when no tool runs: 'writing' only while its text
-          // arrives; before the first token, while it reasons, and between tools (it is
-          // working out the next call) it is 'thinking'. One word for all of it read
-          // "writing…" while nothing was being written.
-          const [phase, setPhase] = ui.useState<'thinking' | 'writing'>('thinking');
-          // The word the line says for either phase (`Conversation.nextVerb`).
-          const [verb, setVerbState] = ui.useState('');
           // What is open and what is folded (src/assistant/folds.ts): one global
           // state, plus the blocks a click has made an exception of. `details` (^o)
           // is the master switch; a click opens the block under it alone. The
@@ -400,21 +404,6 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // thing has taken. tickRef ticks elapsedMs off `conv.segmentStartedAt`.
           const [elapsedMs, setElapsedMs] = ui.useState(0);
           const tickRef = ui.useRef<ReturnType<typeof setInterval> | null>(null);
-          // What the provider said this TURN has cost: every round's prompt plus its
-          // completion, added up as the rounds report (`onRound`). A different number
-          // from the conversation's `usage`, which is the last round alone — the size of the next
-          // request, and so how full the context is. Nothing is estimated here: a
-          // provider that reports no usage leaves this at 0 and no figure is drawn.
-          const [turnTokens, setTurnTokensState] = ui.useState(0);
-          // Empty answer: the model output only reasoning (goes to the fold) but no
-          // final text. `conv.content` accumulates the final content (onDelta) — by it we
-          // decide «empty?» and show an amber status message.
-          const [emptyNotice, setEmptyNotice] = ui.useState('');
-          // The last turn stopped at a turn limit: Enter on the empty field sends
-          // "continue", and the field's hint says so. Gone with the next message, and
-          // wherever the notice above is reset.
-          const [continueOffer, setContinueOfferState] = ui.useState(false);
-          const [toolCount, setToolCount] = ui.useState(0); // tool calls in this turn (for the status)
           // Tab-completion cycle: { base, idx, cmd } — by which prefix the matches were
           // built, the last selected command in that list and its text. Repeat Tab cycles;
           // changing the prefix (typed/deleted) restarts.
@@ -422,8 +411,6 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // (src/config/commandline.ts); over as soon as the field is anything else.
           const tabRef = ui.useRef<TabWalk | null>(null);
           const inputRef = ui.useRef(input); inputRef.current = input;
-          const msgsRef = ui.useRef(messages); msgsRef.current = messages;
-          conv.busy = streaming;
           // Input field caret — an index (codepoint) in `input`. Kept in a ref so the
           // handler reads a fresh value.
           const [cursor, setCursor] = ui.useState(0);
@@ -436,9 +423,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // What is left when the turn ends goes out in order then (a stopped or failed
           // turn puts it back into the field instead — `restoreQueue`); ↑ on an empty
           // field takes the last one back until it is delivered. `conv.queue` is what the
-          // handlers act on (`conv.queueWait` is the rule), `queued` mirrors it for the
-          // render.
-          const [queued, setQueued] = ui.useState<Queued[]>([]);
+          // handlers act on (`conv.queueWait` is the rule), the snapshot's `queued` is
+          // what the render draws.
           // Prompt history for ↑/↓. `histAt` is the entry on screen (null = the draft),
           // `histShown` is its text — an arrow only replaces the field while it still
           // shows exactly that, so a draft being typed is never lost to a keypress.
@@ -476,10 +462,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // ── The auto mode (src/assistant/auto.ts) — how much of a turn runs without
           // the y/n. This conversation's and nothing else's: it is not in the session
           // file, so a restart opens on `ask`, and `/clear`, `/resume` and a change of
-          // task put it back there too. `conv.autoMode` is what the confirmation closure reads
-          // (it was made when the message was sent, and would otherwise see the mode of
-          // that moment for the whole turn); the state is for the render.
-          const [autoMode, setAutoModeState] = ui.useState<AutoMode>('ask');
+          // task put it back there too. `conv.autoMode` is the one value: the confirmation
+          // closure reads it when it runs, and the render draws it from the snapshot.
           // ── The steps (src/assistant/step.ts) — how the text the model writes between
           // tool calls is drawn. `plugins.assistant.notes` is where a conversation
           // starts, `/notes` moves it for this one only, and `/clear` puts it back
@@ -491,19 +475,16 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const setNotes = (m: NotesMode) => { notesRef.current = m; setNotesState(m); };
           // Whether the round being streamed carries a tool call — heard the moment
           // its first fragment arrives (`onRoundKind`), and from then on its text is a
-          // step, not the answer. Kept in the conversation (`conv.roundTools`), never inside a
-          // `setMessages` updater: an updater runs when React gets to it, and a round
-          // whose tokens and tool call arrive in one batch could otherwise be read
-          // before its own updater has run — its text lost and the NEXT round taken
-          // for it. Every updater is a pure function of the list; what it needs to know is
-          // read here, when the callback fires, and handed to it.
+          // step, not the answer. Kept in the conversation (`conv.roundTools`), never read
+          // inside a `setRows` updater: every updater is a pure function of the list; what
+          // it needs to know is read when the callback fires, and handed to it.
           const resetRound = () => { conv.roundTools = false; };
           // ── Folds ── the rows a click lands on, and what opening one does to the
           // scroll. The rows are laid out by the view and cached per message object,
           // so asking for them here is a lookup, not a second layout.
           // The display list as the view's own functions read it — the same objects,
           // and so the same cached rows.
-          const drawn = () => msgsRef.current as Parameters<typeof chatRows>[0];
+          const drawn = () => drawnRef.current as Parameters<typeof chatRows>[0];
           // A renderer that cannot draw is said once per kind in the log, not once per
           // frame. `onViewFail` fires from INSIDE `ChatMessages`' render (`frameView`,
           // called while laying out a message's rows) — `pushLog` ends in `notify()`
@@ -686,7 +667,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             setTimeout(() => {
               try { pruneSessions(sessDir, Number.isInteger(sessConf.keep) ? Number(sessConf.keep) : KEEP_SESSIONS); } catch { /* not fatal */ }
               try { sweepJournals(sessDir, typeof sessConf.journalDays === 'number' ? sessConf.journalDays : JOURNAL_DAYS); } catch { /* not fatal */ }
-              if (sessConf.resume === false || msgsRef.current.length) return;
+              if (sessConf.resume === false || drawnRef.current.length) return;
               // The newest session of the project the shell starts in — of all of them
               // when that project has none.
               let here: string | null = null;
@@ -736,12 +717,11 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // y/n pause on a writing operation (write-flag tool → agentChat →
           // confirmWrite): while the promise hangs, input pauses and a confirmation
           // block renders. `conv.confirm` holds { name, args, resolve } — read by the
-          // input-handler (always current); pendingAsk is only for render.
-          const [pendingAsk, setPendingAsk] = ui.useState<{ name: string; args: string; command?: string; line?: string; input?: string; title?: string; hint?: string; whole?: boolean } | null>(null);
+          // input-handler (always current); the snapshot's `pendingConfirm` is what the
+          // render draws.
           // `ask_user`: the same kind of pause, but the person picks among options.
           // `conv.question` is what the input handler steps key by key (always current);
-          // pendingQuestion mirrors it for the render.
-          const [pendingQuestion, setPendingQuestion] = ui.useState<AskState | null>(null);
+          // the snapshot's `pendingQuestion` is what the render draws.
           // What the conversation reads of this chat: made once, attached once.
           const portRef = ui.useRef<ViewPort | null>(null);
           if (!portRef.current) {
@@ -759,28 +739,6 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             };
             conv.attach(portRef.current);
           }
-          // This render's setters: the conversation writes the chat's React state through them.
-          conv.mirror = {
-            drawn: () => msgsRef.current,
-            setDrawn: (list) => { msgsRef.current = list; },
-            setMessages,
-            setStreaming,
-            setToolLabel: (v) => setToolLabelState(v),
-            setPhase,
-            setVerb: (w) => setVerbState(w),
-            setToolCount: (n) => setToolCount(n),
-            setTurnTokens: (n) => setTurnTokensState(n),
-            setEmptyAnswer: (on) => {
-              const opens = firstGlyph(host.keys.details);
-              setEmptyNotice(on ? `The turn ended without a final answer — only reasoning came back${opens ? ` (${opens} shows it)` : ''}. Narrow the question, or say "continue".` : '');
-            },
-            setContinueOffer: (on) => setContinueOfferState(on),
-            setQueued,
-            setAutoMode: (m) => setAutoModeState(m),
-            setPendingConfirm: (p) => setPendingAsk(p),
-            setPendingQuestion,
-            setElapsed: (ms) => setElapsedMs(ms),
-          };
           markSeenRef.current = () => conv.markSeen();
           // The chat's half of opening a saved session (`Conversation.applySession` does
           // the model's first).
@@ -883,6 +841,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               startTicker();
               disarmEsc();
             },
+            // A new segment on the status line: its seconds start from 0.
+            activity: () => setElapsedMs(0),
             'turn-end': (ev) => {
               if (tickRef.current) { clearInterval(tickRef.current); tickRef.current = null; }
               if (ev.end.kind !== 'turn') setElapsedMs(ev.end.ms); // the command's whole time, as its line last said
@@ -1018,7 +978,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               }
             }
             conv.dismissQuestion();
-            conv.queue = []; setQueued([]); conv.inbox = []; conv.clearInbox();
+            conv.clearQueue(); conv.inbox = []; conv.clearInbox();
             setError(null); conv.setEmptyAnswer(false); conv.setContinueOffer(false); conv.setToolLabel(''); conv.setToolCount(0);
             if (id !== conv.sessionId) conv.releaseLock(); // leaving the old one
             conv.applySession(s, fp, dir); applySessionView(s);
@@ -1127,7 +1087,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // already-queued pending ones are stale.)
             conv.inbox = [];
             conv.clearInbox();
-            conv.api = []; conv.summary = ''; conv.queue = []; setQueued([]);
+            conv.api = []; conv.summary = ''; conv.clearQueue();
             // A new conversation starts with no plan: the old one described work the
             // model no longer remembers.
             conv.plan.reset();
@@ -1144,7 +1104,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               const l = conv.memoryLists();
               const kept = keptAfterClear([...l.project, ...l.global].filter((f) => !f.outside).length);
               if (kept) conv.journal({ t: 'row', role: 'note', text: kept });
-              setMessages(kept ? [{ role: 'note', content: kept }] : []);
+              conv.setRows(kept ? [{ role: 'note', content: kept }] : []);
             }
             // Back to the default directory (the start directory, or the first root when
             // that lies outside every one) — after the list is emptied, so the fresh
@@ -1168,7 +1128,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             setFolds(allFolded()); // everything folded again, and no exceptions left over
             setPager(null);
             setPanel(null);
-            setStreaming(false);
+            conv.setBusyDrawn(false); conv.busy = false;
             disarmEsc();
             host.notify();
           };
@@ -1361,7 +1321,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // y/n — that pause is for what the MODEL writes; what is there already is
                 // never overwritten, and the file is the person's alone, as the session is.
                 setField('');
-                const msgs = (msgsRef.current as Record<string, unknown>[]).filter((m) => m.role !== 'system');
+                const msgs = (drawnRef.current as Record<string, unknown>[]).filter((m) => m.role !== 'system');
                 if (!msgs.some((m) => personSpoke(String(m.role)))) { setError('/export: nothing to export yet — nothing has been said in this session'); return; }
                 const id = conv.sessionId;
                 const title = conv.title || sessionTitle(msgs);
@@ -1390,7 +1350,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 const text = cutTitle(arg);
                 setField('');
                 if (!text) {
-                  const now = conv.title || sessionTitle(msgsRef.current as Record<string, unknown>[]);
+                  const now = conv.title || sessionTitle(drawnRef.current as Record<string, unknown>[]);
                   const said = now ? `This session is «${now}» — /title <text> renames it` : 'This session has no title yet — /title <text> gives it one';
                   conv.pushNote(said);
                   host.notify();

@@ -536,7 +536,7 @@ export function toolSummary(runs: ToolRun[], width = 0): string {
 // The rows of ONE message. Laying markdown out is the expensive part of drawing the
 // chat, and the whole conversation is handed to the scroll box on every frame — so
 // the rows are remembered per message object. The chat replaces a message when it
-// changes and never mutates one (see the `setMessages` updaters), which makes the
+// changes and never mutates one (see `Conversation.setRows`), which makes the
 // object itself the right key: only the message that is streaming is laid out again.
 const rowCache = new WeakMap<ChatMsg, Map<string, ChatRow[]>>();
 

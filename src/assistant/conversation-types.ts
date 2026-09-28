@@ -89,9 +89,8 @@ export interface SendOptions {
   fromInbox?: boolean;           // the inbox's follow-up turn (`ai.backgroundFollowUp`, on unless set false): role `bg`, never in ↑/↓, the field and its history walk left alone
 }
 
-// What a chat draws of a conversation: exactly the state the chat kept in React state,
-// so a change draws when a change of that state drew. The same object until `version`
-// moves.
+// What a chat draws of a conversation (`Conversation.getSnapshot`). The same object until
+// `version` moves.
 export interface ConversationSnapshot {
   readonly version: number;
   readonly key: string;
@@ -124,27 +123,6 @@ export interface ViewPort {
   open(): boolean;               // the chat open (an inbox landing while it is closed is unread)
   input(): string;               // the field as typed
   draft(): string;               // the field as a session keeps it ('' for a /command, a !command, a bang level)
-}
-
-// The chat's React state that a conversation still writes while the chat draws from its
-// own state; every member is a setter the chat has. Gone once the chat reads the snapshot.
-export interface ChatMirror {
-  drawn(): ChatMsg[];
-  setDrawn(list: ChatMsg[]): void;
-  setMessages(next: ChatMsg[] | ((cur: ChatMsg[]) => ChatMsg[])): void;
-  setStreaming(on: boolean): void;
-  setToolLabel(label: string): void;
-  setPhase(phase: 'thinking' | 'writing'): void;
-  setVerb(word: string): void;
-  setToolCount(n: number): void;
-  setTurnTokens(n: number): void;
-  setEmptyAnswer(on: boolean): void;
-  setContinueOffer(on: boolean): void;
-  setQueued(list: Queued[]): void;
-  setAutoMode(mode: AutoMode): void;
-  setPendingConfirm(p: PendingConfirm | null): void;
-  setPendingQuestion(q: AskState | null): void;
-  setElapsed(ms: number): void;
 }
 
 // What a conversation needs from the host. Every member is read when it is used: the
