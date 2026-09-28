@@ -94,7 +94,8 @@ export interface SystemParts { base: string; screens: string; memory: string; pl
 // `screens` is the `## Screens` block as the App's screens service builds it
 // (src/runtime/screens.ts, `promptBlock`), '' with nothing to list; `memory` is the block
 // as built for this message (the caller reads the facts; reading them may say a note).
-// The caller evaluates `screens` before `memory`, the order master's object literal has.
+// The caller evaluates `screens` before `memory`: reading the memory may say a note,
+// and the screens are read first.
 export function systemParts(config: Record<string, unknown>, screens: string, memory: string, plan: readonly TodoItem[], summary: string): SystemParts {
   return { base: baseStatic(config), screens, memory, plan: planBlock(plan), summary: summaryBlock(summary) };
 }

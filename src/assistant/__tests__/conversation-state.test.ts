@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { Conversation, LIVE_REDRAW_MS } from '../conversation.ts';
+import { buildSecretSet, setActiveSecrets } from '../secrets.ts';
 import { fakeDeps } from './conversation-deps.ts';
 
 test('the queue: ⇥ holds one message, an image holds everything behind it, ↑ takes the last back', () => {
@@ -55,6 +56,17 @@ test('a plugin\'s note waits out a running turn, and a token in it is never show
   expect(c.rows().at(-1)).toMatchObject({ role: 'note', content: '[mcp] now' });
   c.pluginNote('');
   expect(c.rows()).toHaveLength(1);
+  const TOKEN = 'eyJhbGciOiJIUzI1NiJ9.payload-of-the-token.signature';
+  setActiveSecrets(buildSecretSet({}, { WB_WIKI_TOKEN: TOKEN }));
+  try {
+    c.pluginNote(`[mcp] token=${TOKEN}`);
+    expect(c.rows().at(-1)).toMatchObject({ role: 'note', content: '[mcp] token=‹secret WB_WIKI_TOKEN›' });
+    c.inTurn = true;
+    c.pluginNote(`[mcp] again ${TOKEN}`);
+    expect(c.laterNotes.at(-1)).toBe('[mcp] again ‹secret WB_WIKI_TOKEN›');
+  } finally {
+    setActiveSecrets(null);
+  }
 });
 
 test('the project\'s instructions are said once when the directory brings them', () => {

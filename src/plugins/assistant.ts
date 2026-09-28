@@ -174,7 +174,7 @@ function chatDeps(host: PluginApi['host'], lockToken: string): ConversationDeps 
     pushLog: (line) => svc().pushLog?.(line),
     sessionsDir: () => sessionsDir(host.config),
     lockToken,
-    // Read when called, as master's `(host.services as …).screens?.` reads are.
+    // Read when called: a plugin that joins late is seen.
     screens: () => svc().screens as ReturnType<ConversationDeps['screens']>,
   };
 }

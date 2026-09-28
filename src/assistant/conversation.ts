@@ -19,6 +19,7 @@ import { createShellState, tildePath, type ShellState } from './shell.js';
 import { baseStatic, memoryBlock, planBlock, projectBlock, summaryBlock } from './system-prompt.js';
 import { createToolSet, toolLoadingMode, type ToolSet } from './tool-loading.js';
 import type { ViewRecord } from './views.js';
+import type { ToolDef } from '../loader/tools.js';
 import { workspaceFor } from './workspace.js';
 import { callOf, type ChatMirror, type ChatMsg, type ConversationDeps, type ConversationEvent, type ConversationKind, type Queued, type QueueWait, type ViewPort } from './conversation-types.js';
 import {
@@ -61,7 +62,8 @@ export class Conversation {
   // emptied by /clear — never module state, which would outlive the conversation it
   // describes.
   plan: Plan = createPlan();
-  onShellSet: () => void = () => {};
+  // Setting the shell's directory reads the project's instructions again.
+  onShellSet: () => void = () => this.refreshProject();
   // Where this conversation's shell commands run — `!command` and the model's
   // run_command share it; `cd` moves it. The conversation's, like the plan: a background
   // run gets its own, /clear resets it.
@@ -192,8 +194,6 @@ export class Conversation {
   constructor(deps: ConversationDeps) {
     this.deps = deps;
     this.shell = createShellState(() => deps.config(), null, () => this.onShellSet());
-    // Setting the shell's directory reads the project's instructions again.
-    this.onShellSet = () => this.refreshProject();
   }
 
   // ── the chat that draws it
@@ -325,7 +325,7 @@ export class Conversation {
       // The tools the next request will CARRY — with tools on demand, the core ones,
       // what was loaded and the index; not every tool there is.
       // The history as it goes out: a stubbed item counts as its stub, not its content.
-      { system: [baseStatic(cfg), this.screensBlock(), projectBlock(this.project)].filter(Boolean).join('\n\n'), memory: this.memoryBlock(), plan: planBlock(this.plan.snapshot()), summary: summaryBlock(this.summary), screen: screenBlock(screen), tools: requestTools(this.deps.pluginAiTools() as never, toolLoadingMode(cfg.ai), this.toolSet), messages: [...this.sentHistory(), ...extra] },
+      { system: [baseStatic(cfg), this.screensBlock(), projectBlock(this.project)].filter(Boolean).join('\n\n'), memory: this.memoryBlock(), plan: planBlock(this.plan.snapshot()), summary: summaryBlock(this.summary), screen: screenBlock(screen), tools: requestTools(this.deps.pluginAiTools() as ToolDef[], toolLoadingMode(cfg.ai), this.toolSet), messages: [...this.sentHistory(), ...extra] },
       this.contextWindow(),
       u ? u.promptTokens + u.completionTokens : undefined,
     );
