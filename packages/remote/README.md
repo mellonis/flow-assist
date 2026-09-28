@@ -140,7 +140,7 @@ A remote plugin's `manifest.json` names the process instead of an entry module â
 or `connect` for a shared server (below) â€” and is enabled the same way any plugin is:
 
 ```json
-{ "name": "remote-login", "version": "0.1.0", "hostApi": 2, "flowtty": ">=1.0.0-alpha.36 <1.0.0-alpha.37",
+{ "name": "remote-login", "version": "0.1.0", "hostApi": 2, "flowtty": ">=1.0.0-alpha.37 <1.0.0-alpha.38",
   "run": ["bun", "src/index.ts"] }
 ```
 

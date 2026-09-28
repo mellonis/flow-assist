@@ -2,7 +2,7 @@
   "name": "gitlab",
   "version": "0.1.0",
   "hostApi": 2,
-  "flowtty": ">=1.0.0-alpha.36 <1.0.0-alpha.37",
+  "flowtty": ">=1.0.0-alpha.37 <1.0.0-alpha.38",
   "description": "glab CLI",
   "tools": ["gitlab"]
 }

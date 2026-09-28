@@ -28,7 +28,7 @@ notes/
 ```
 
 ```json
-{ "name": "notes", "version": "0.1.0", "hostApi": 2, "flowtty": ">=1.0.0-alpha.36 <1.0.0-alpha.37",
+{ "name": "notes", "version": "0.1.0", "hostApi": 2, "flowtty": ">=1.0.0-alpha.37 <1.0.0-alpha.38",
   "description": "A notebook the assistant reads and writes", "tools": ["notes"] }
 ```
 
@@ -495,9 +495,9 @@ setup: ({ host }) => { /* once, before any component mounts: seed a store */ },
 - Tab and ⇧⇥ always come through `host.useInputHandler`, never to a flowtty
   component: flowtty's focus cycling does not run in a plugin's screen. So flowtty's
   own focus — not your `isFocused` — rests on the first field mounted until a click
-  moves it, and flowtty keeps that field in view inside the `ui.ScrollBox` around it:
-  a scroll box holding a field scrolls to it when it mounts and cannot be scrolled
-  away from it. Keep fields outside a scroll box.
+  moves it, and only that click reveals it inside a surrounding `ui.ScrollBox` —
+  mounting does not — after which the box keeps following the field while it grows; a
+  scroll the person made is never undone.
 - Keys come through `host.useInputHandler({ mode, priority, handler })`. `mode` is
   `'consume'` (joins the race for the key) or `'observe'` (sees every key, takes
   none). Handlers run from the highest `priority(ui)` down, and a handler takes the
@@ -539,7 +539,7 @@ plugin (checked the same way — [Compatibility](#compatibility)) plus how its p
 reached:
 
 ```json
-{ "name": "remote-login", "version": "0.1.0", "hostApi": 2, "flowtty": ">=1.0.0-alpha.36 <1.0.0-alpha.37",
+{ "name": "remote-login", "version": "0.1.0", "hostApi": 2, "flowtty": ">=1.0.0-alpha.37 <1.0.0-alpha.38",
   "run": ["bun", "src/index.ts"] }
 ```
 
@@ -799,7 +799,7 @@ its stdout. Nothing here is specific to `@flow-assist/remote` — a plugin in C,
 language that reads stdin and writes stdout, exchanges lines exactly like these:
 
 ```
-→ {"jsonrpc":"2.0","id":1,"method":"hello","params":{"hostApi":2,"flowtty":"1.0.0-alpha.36","size":{"terminal":{"width":80,"height":24},"surface":{"width":80,"height":22}},"config":{},"idleMs":60000}}
+→ {"jsonrpc":"2.0","id":1,"method":"hello","params":{"hostApi":2,"flowtty":"1.0.0-alpha.37","size":{"terminal":{"width":80,"height":24},"surface":{"width":80,"height":22}},"config":{},"idleMs":60000}}
 ← {"jsonrpc":"2.0","method":"frame","params":{"surface":null,"keycaps":[],"keys":{"consume":["open"]}}}
 ← {"jsonrpc":"2.0","id":1,"result":{"hostApi":2,"name":"remote-login","keys":{"open":"S","next":"tab","login":"enter","close":"esc"},"entry":["open"],"commands":[],"tools":[]}}
 → {"jsonrpc":"2.0","method":"resize","params":{"terminal":{"width":100,"height":29},"surface":{"width":100,"height":23}}}
@@ -1014,14 +1014,14 @@ one:
   single `ft` object, which has no `host` — `const api2 = 'host' in arg`.
 - **`flowtty`** — a semver range of the flowtty versions the plugin's screens need,
   checked against the flowtty the host runs. While flowtty is in alpha, name the one
-  alpha you built against: `>=1.0.0-alpha.36 <1.0.0-alpha.37` — an alpha may change what the next one gives. A
+  alpha you built against: `>=1.0.0-alpha.37 <1.0.0-alpha.38` — an alpha may change what the next one gives. A
   prerelease is matched only by a range that names one: `^1.0.0`, and even `*`, do not
-  take `1.0.0-alpha.36`. A plugin with no field is loaded unchecked, and the log says
+  take `1.0.0-alpha.37`. A plugin with no field is loaded unchecked, and the log says
   so — a plugin with no screens has nothing to check; the bundled ones declare it.
 
 A plugin that cannot run here is skipped — the rest load — and said so: `plugins ls`
 shows `incompatible: built for host API 1, host provides 2` (or `incompatible: needs
-flowtty ^1.1.0, host has 1.0.0-alpha.36`) beside it — a plugin linked into
+flowtty ^1.1.0, host has 1.0.0-alpha.37`) beside it — a plugin linked into
 `plugins-enabled/` from a repository of its own is listed too, marked `(linked)` — the log (`L`) has a line, and
 `plugins install` refuses it — an archive before anything is unpacked into place. A
 plugin that is a single file has no manifest, so it reads as host API 1 with no

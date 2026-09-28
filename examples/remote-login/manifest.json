@@ -1,1 +1,1 @@
-{ "name": "remote-login", "version": "0.1.0", "description": "a sign-in form, as a plugin in its own process", "hostApi": 2, "flowtty": ">=1.0.0-alpha.36 <1.0.0-alpha.37", "run": ["bun", "src/index.ts"] }
+{ "name": "remote-login", "version": "0.1.0", "description": "a sign-in form, as a plugin in its own process", "hostApi": 2, "flowtty": ">=1.0.0-alpha.37 <1.0.0-alpha.38", "run": ["bun", "src/index.ts"] }

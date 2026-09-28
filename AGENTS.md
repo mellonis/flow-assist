@@ -223,10 +223,11 @@ the blacklist.
   false while the `:` line is open, the log or the help is up, or the chat has the
   keys; a dropdown's popup mutes everything under it on its own). flowtty's OWN focus
   (`useFocus`, the DialogHost's one group) moves in the App only on a click — the host
-  takes Tab — so it rests on the first field mounted, and flowtty keeps that field in
-  view in the nearest `ScrollBox`: a plugin's scroll box holding a field cannot be
-  scrolled away from it (docs/plugins.md says to keep fields out of one). The host's
-  own scroll boxes and the chat's list hold no field.
+  takes Tab — so it rests on the first field mounted. A `ScrollBox` around a field
+  reveals it only when that click moves focus onto it — mounting and auto-focus move
+  nothing — after which the box keeps following the field while it grows; a scroll
+  the person made is never undone. The host's own scroll boxes and the chat's list
+  hold no field.
 - **`modalColors`** — per modal the plugin draws, what its palette differs in from
   the host's modal base (`{ relation: { border: 'blue' } }`). `resolveModalPalettes`
   (`src/playback/theme.ts`) lays it on the base into `theme.modals.<modal>`; the
