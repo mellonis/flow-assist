@@ -221,7 +221,12 @@ the blacklist.
   focused `ListSelect` takes what is typed as its filter — so a plugin gates them
   with `isFocused` from `host.hasKeyboard()` (`pluginHasKeyboard` in `runtime/app.tsx`:
   false while the `:` line is open, the log or the help is up, or the chat has the
-  keys; a dropdown's popup mutes everything under it on its own).
+  keys; a dropdown's popup mutes everything under it on its own). flowtty's OWN focus
+  (`useFocus`, the DialogHost's one group) moves in the App only on a click — the host
+  takes Tab — so it rests on the first field mounted, and flowtty keeps that field in
+  view in the nearest `ScrollBox`: a plugin's scroll box holding a field cannot be
+  scrolled away from it (docs/plugins.md says to keep fields out of one). The host's
+  own scroll boxes and the chat's list hold no field.
 - **`modalColors`** — per modal the plugin draws, what its palette differs in from
   the host's modal base (`{ relation: { border: 'blue' } }`). `resolveModalPalettes`
   (`src/playback/theme.ts`) lays it on the base into `theme.modals.<modal>`; the
@@ -2331,10 +2336,12 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   joined by blank lines, AHEAD of whatever was typed meanwhile — the order they would
   have gone out in; a `!`/`!!`-mode draft keeps its bang(s) and the level drops to 0. A failed
   request would most likely fail again. **↑ on an EMPTY field takes the last queued
-  message back** before it steps into the history. **Alt+⏎** (drawn `⌥⏎` on macOS) is a newline (`NEWLINE_KEY` in
-  `src/views/modals.ts` — the one spelling every hint uses); a blank line is kept.
-  ⇧⏎ works too where the terminal sends it (decoded since flowtty 1.0.0-alpha.7),
-  but the hint names the key that works in every terminal that has an Alt.
+  message back** before it steps into the history. **⇧⏎** is a newline, and so is
+  **Alt+⏎** (drawn `⌥⏎` on macOS); a blank line is kept. The hints name both, Shift
+  first — `⇧⏎/⌥⏎` (`NEWLINE_KEY` in `src/views/modals.ts`, the one spelling every hint
+  uses): the TTY backend asks for the kitty keyboard protocol, under which a terminal
+  tells ⇧⏎ from ⏎, and one without it (Terminal.app) sends ⇧⏎ as a plain ⏎, which
+  sends — Alt+⏎ is the key every terminal with an Alt sends as its own.
 - **Ctrl+C, Ctrl+D and Ctrl+Z take a second press** (`src/runtime/exit-keys.ts`, pure;
   the App owns the arm). flowtty hands these three to the app BEFORE the terminal
   backend acts (exit, exit, suspend — skipped when a `useInput` handler returns strict
@@ -3382,8 +3389,9 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     field and the picker's filter and rename fields (`pickerField`) alike — so a wide
     character before the caret never moves it a cell, and the caret never lands inside
     a cluster.
-  - Newline keys: **Alt+⏎** (what the hints name), Shift+⏎ where the terminal sends
-    it, and backslash-then-⏎, which works everywhere.
+  - Newline keys: **Shift+⏎** where the terminal tells it from ⏎ (the kitty keyboard
+    protocol, below under CLI), **Alt+⏎** — the hints name both, Shift first — and
+    backslash-then-⏎, which works everywhere (docs/usage.md, "New lines").
   - In a draft ↑/↓ move the caret between rows; they walk history only while the
     field is empty or shows an untouched history entry.
   - `chatFieldWidth(width)` is the one place the field's width is computed — the
@@ -3403,6 +3411,15 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   `NO_COLOR` / `FORCE_COLOR`; the host adds no handler or colour flag of its own. A
   plugin with a child process to stop adds one — under the rules in "A plugin that
   starts a process owns its life", which keep flowtty's own re-raise working.
+- **The kitty keyboard protocol is on, and not a setting.** The TTY backend pushes its
+  first flag (disambiguate escape codes) once keys are read and pops it on every way
+  out — unmount, `suspend()` (so a `!!command` gets the terminal's legacy keys), a
+  signal, an uncaught error; a terminal without the protocol ignores the request. The
+  host passes no `kittyKeyboard`. Under it ⇧⏎ is `return` + `shift`, Ctrl+I / Ctrl+M /
+  Ctrl+[ are the letters with `ctrl` (never ⇥, ⏎, Esc — no host binding is on them),
+  Esc arrives without the backend's wait, and Ctrl+C / Ctrl+D / Ctrl+Z come as CSI-u
+  sequences decoded to the same `{ name, ctrl }` the exit keys compare (nothing in the
+  host reads a key's raw `sequence`).
 - **The console goes to the log.** While the TTY backend owns the screen it takes
   `console.log` / `info` / `debug` / `warn` / `error` over, so a line printed there
   never lands in the frame. `runInteractive` passes it

@@ -5,6 +5,21 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **flowtty 1.0.0-alpha.36: Shift+Enter starts a new line.** The TTY backend asks the
+  terminal for the kitty keyboard protocol, so in kitty, Ghostty, WezTerm, foot,
+  Alacritty and iTerm2 3.5+ Shift+Enter is its own key and breaks the line; the hints
+  name it first, `⇧⏎/⌥⏎ new line`, since Terminal.app still sends it as Enter. Alt+Enter
+  and backslash-then-Enter work as before; docs/usage.md says which works where. In
+  those terminals Esc arrives at once, and Ctrl+[, Ctrl+I and Ctrl+M are keys of their
+  own rather than Esc, Tab and Enter — nothing in the host was bound to them. A
+  focusable flowtty field inside a `ScrollBox` now keeps itself in view while it holds
+  flowtty's focus; the host's own scroll boxes hold none, but in a plugin's screen that
+  focus rests on the first field mounted until a click moves it, whatever its
+  `isFocused`, so a plugin's scroll box holding a field scrolls to it and cannot be
+  scrolled away (docs/plugins.md says to keep fields outside one).
+  **For plugin authors:** declare `"flowtty": ">=1.0.0-alpha.36 <1.0.0-alpha.37"` — a
+  manifest still declaring the alpha.35 range is refused as incompatible. The host
+  API number is unchanged.
 - **A background run and the one-shot prompt read the project's instructions once per
   directory.** Both built the `## Project instructions` section through a closure that
   walked the directory and reread every `AGENTS.md` again before every round, even when

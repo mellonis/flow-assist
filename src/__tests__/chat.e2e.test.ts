@@ -2,6 +2,7 @@
 import { afterEach, expect, test } from 'bun:test';
 import { ScriptedModel, bootApp, settle } from './helpers/scripted';
 import { PLAN_REMINDER } from '../assistant/plan';
+import { keyGlyph } from '../playback/keys';
 
 const realFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = realFetch; });
@@ -623,11 +624,17 @@ test('every newline key starts a new line, and none of them sends', async () => 
   model.script([{ text: 'ok' }]);
   const ui = await bootApp(model, 100, 24);
   await ui.press('F');
+  // Shift+Enter is named first; Alt+Enter beside it, for a terminal without the kitty
+  // keyboard protocol, where Shift+Enter arrives as a plain Enter and sends.
+  const shiftEnter = keyGlyph({ name: 'return', shift: true });
+  const altEnter = keyGlyph({ name: 'return', meta: true });
+  expect(ui.backend.lastFrame).toContain(`⏎ sends, ${shiftEnter} or ${altEnter} starts a new line`);
+  expect(ui.backend.lastFrame).toContain(`⏎ send · ${shiftEnter}/${altEnter} new line`);
   await ui.type('a');
-  ui.backend.press({ name: 'return', meta: true }); // Alt+Enter — what the hint names
+  ui.backend.press({ name: 'return', shift: true }); // Shift+Enter — what the hint names first
   await settle();
   await ui.type('b');
-  ui.backend.press({ name: 'return', shift: true }); // Shift+Enter, where the terminal sends it
+  ui.backend.press({ name: 'return', meta: true }); // Alt+Enter, where Shift+Enter sends
   await settle();
   await ui.type('c\\');
   await ui.press('return'); // backslash-then-Enter: works in every terminal

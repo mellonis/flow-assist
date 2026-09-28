@@ -38,6 +38,7 @@ bun run src/cli.ts "summarize ABC-123"        # one-shot prompt
 | Key | What it does |
 |---|---|
 | ⏎ / Esc | send a message / stop the answer (a message sent meanwhile is queued) |
+| Shift+⏎ | a new line (Alt+⏎, or `\` then ⏎, where the terminal sends Shift+⏎ as ⏎) |
 | ↑ ↓ | walk what you typed |
 | `/…`, `!…`, `!!…` | a chat command, a shell command, a program that needs the terminal |
 | Shift+Tab | how much to confirm: the auto mode |

@@ -473,11 +473,6 @@ function toolRunText(run: ToolRun, wrap: number, n = 1): Span {
 const GUTTER = 2;
 // The assistant's mark: on its answers, and signing the chat's frame.
 export const ASSISTANT_MARK = 'ƒ';
-// The key the hints name for a newline. Alt+Enter is what a terminal really sends
-// as a distinguishable key (ESC + CR → `return` with `meta`). Shift+Enter is NOT:
-// without the kitty keyboard protocol most terminals send a bare CR for it, and
-// when one does send CSI-u, flowtty's decoder (alpha.6) names it 'csi-u', not
-// `return` + `shift`. The handler still accepts `shift`, for the day that lands.
 // The caps the chat's hints name. They come from the one glyph dictionary
 // (`keyGlyph`), so a key reads the same here, in the footer and on the keycaps panel
 // — spelling them out by hand here instead would mix `⏎`, `Enter` and `Space` for
@@ -506,8 +501,16 @@ const CAP = {
   pickMove: keyGlyph({ name: 'p', ctrl: true }),
   pickDelete: keyGlyph({ name: 'x', ctrl: true }),
 } as const;
-// Alt+Enter: ⌥⏎ on a Mac, Alt+⏎ elsewhere.
-export const NEWLINE_KEY = keyGlyph({ name: 'return', meta: true });
+// The keys the hints name for a new line, Shift+Enter first. The TTY backend asks
+// the terminal for the kitty keyboard protocol, and a terminal that has it (kitty,
+// Ghostty, WezTerm, foot, Alacritty, iTerm2 3.5+) tells Shift+Enter from Enter. One
+// that does not (Terminal.app) sends a bare CR for it, which submits, so the hint
+// names Alt+Enter beside it (⌥⏎ on a Mac, Alt+⏎ elsewhere), an ESC + CR every
+// terminal with an Alt key sends. Backslash-then-Enter, which works everywhere, is
+// left to docs/usage.md (new lines): a hint row has no room for a third key.
+const SHIFT_ENTER = keyGlyph({ name: 'return', shift: true });
+const ALT_ENTER = keyGlyph({ name: 'return', meta: true });
+export const NEWLINE_KEY = `${SHIFT_ENTER}/${ALT_ENTER}`;
 
 // `todo ×2, memory` — the tools of a turn, in the order first used, with what each of
 // them cost in calls. The line is ONE terminal row like every other, so a turn of
@@ -1366,7 +1369,7 @@ function ChatMessages({ messages, rowOpts, palette: m, errorColor, onViewport, s
   // Nothing said yet: the box holds the invitation instead of rows.
   if (!rows.length) {
     return h(ScrollBox, scroll,
-      h(Text, { dim: true, selectable: false }, `Ask anything. ${CAP.enter} sends, ${NEWLINE_KEY} starts a new line, / opens the commands, !command runs one in the shell.`));
+      h(Text, { dim: true, selectable: false }, `Ask anything. ${CAP.enter} sends, ${SHIFT_ENTER} or ${ALT_ENTER} starts a new line, / opens the commands, !command runs one in the shell.`));
   }
   // Every chat row is exactly ONE terminal line (the pin's arithmetic relies on it),
   // which is what lets the list lay out only the rows in view: the content is exactly

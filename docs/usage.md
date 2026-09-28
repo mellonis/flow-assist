@@ -89,6 +89,19 @@ what the assistant reads back from it is its own earlier note, not your instruct
 `/workspace` lists this project's workspace; `/workspace <path>` shows one of its files
 in the chat, to you only — it is not sent to the assistant.
 
+## New lines
+
+⏎ sends; ⇧⏎ (Shift+Enter) starts a new line. flow-assist asks the terminal for the
+kitty keyboard protocol as it starts and hands it back as it exits, and a terminal that
+has it tells Shift+Enter from Enter: kitty, Ghostty, WezTerm, foot, Alacritty, iTerm2
+3.5 and later, and tmux with `set -s extended-keys on` inside one of them. Terminal.app
+does not — there Shift+Enter is a plain Enter and sends. Two more keys start a new line
+anywhere: ⌥⏎ (Alt+Enter; in Terminal.app with "Use Option as Meta key" on), and a
+backslash typed at the end of the line, then ⏎, which works in every terminal.
+
+In a terminal with the protocol, Ctrl+[ is a key of its own, not Esc, and Ctrl+I and
+Ctrl+M are not ⇥ and ⏎; Esc arrives at once.
+
 ## Typing while it answers: the queue
 
 A message sent while an answer is still coming is queued (`⏎ queued`) and reaches the

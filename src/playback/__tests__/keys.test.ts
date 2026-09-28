@@ -101,6 +101,7 @@ test('drawn, a key is its cap — and the modifiers are part of what was pressed
   expect(keyGlyph('q')).toBe('q');
   expect(keyGlyph({ name: 'r', ctrl: true })).toBe('^r');
   expect(keyGlyph({ name: 'return', meta: true })).toBe('⌥⏎');
+  expect(keyGlyph({ name: 'return', shift: true })).toBe('⇧⏎');
   expect(keyGlyph({ name: 'tab', shift: true })).toBe('⇧⇥');
   // For a character Shift is already in the character: the decoder says 'A'.
   expect(keyGlyph({ name: 'A', shift: true })).toBe('A');
