@@ -1171,7 +1171,11 @@ hold this set together:
     unless a claim is left by a pid that is gone (`defaultPidAlive`, the sessions'
     rule), which it takes over. A fact the global workspace already holds is not
     written again, so a retaken claim doubles nothing; a file that does not parse is
-    put back where it was. A move says so in a start-up note
+    put back where it was. The moved facts are written without a record
+    (`addFact(…, { record: false })`): the caller accepts them only when the move is part
+    of the root's first look (`rootAccepted` before, `acceptRoot` after); a `memory.json`
+    that turns up later is a file a command could have written, so its facts stay
+    `outside` until `/memory accept`, and the note says so. A move says so in a start-up note
     (`pushNote`, journaled once the session has an id) — how many, that they are every
     project's now, `/memory` to see them. It is resolved on every call and never at import: an import-time
     constant is fixed before a test can move it, which is how every e2e test that

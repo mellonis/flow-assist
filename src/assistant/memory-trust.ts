@@ -3,8 +3,8 @@
 // can write a file into `memory/` as well as anyone — past the `memory` tool and its
 // guards, into every later session (the global scope: every project). So the host keeps,
 // in its own state (`memory.accepted.json`, 0600), the hash of each fact file as it last
-// wrote it — `addFact`, `saveFact`, whoever called them: the `memory` tool, the move of
-// an older `memory.json`, a plugin's `services.memory` — or as the person accepted it.
+// wrote it — `addFact`, `saveFact`, whoever called them: the `memory` tool, a plugin's
+// `services.memory` — or as the person accepted it.
 // A fact whose file does not match is left out of the prompt and out of the tool's own
 // list, and `/memory` shows it as `changed outside flow-assist`, with `/memory accept`.
 //
@@ -13,7 +13,10 @@
 // text the index build reads anyway, and one read of the record.
 //
 // The first check under a workspace root with no record (the first start after this was
-// added, a new `workspace.dir`) accepts every fact file already under it, once. A host
+// added, a new `workspace.dir`) accepts every fact file already under it, once. An older
+// host's `memory.json` is moved into files without recording them: its facts are
+// accepted only when the move is part of that first look — a `memory.json` that turns
+// up later is a file anyone could have written, and its facts wait for `/memory accept`. A host
 // process started from a command the model runs (`FLOW_ASSIST_MODEL_SHELL=1`,
 // src/config/load.ts) writes no record at all. Like the settings guard, this stops the
 // accident, not intent: a command that rewrites or deletes the record can forge it.
@@ -101,6 +104,16 @@ function factFilesUnder(root: string): Array<{ key: string; text: string }> {
   };
   walk(root, 0);
   return out;
+}
+
+// Whether the facts under a root were accepted once already.
+export function rootAccepted(root: string): boolean {
+  return !!readRecord().roots[realOr(root)];
+}
+
+// Accepts every fact under a root, unless that was done already — the first look.
+export function acceptRoot(root: string): void {
+  acceptRootOnce(root, readRecord());
 }
 
 // The first check under a root accepts what is there, once.

@@ -129,7 +129,9 @@ export function writeIndex(ws: string, facts: Fact[] = readFacts(ws)): void {
 
 export interface NewFact { text: string; name?: string; description?: string; type?: string; plugin?: string }
 
-export function addFact(ws: string, input: NewFact): Fact {
+// `record: false` — written but not recorded as the host's own (./memory-trust.ts): the
+// move of an older `memory.json`, whose text came from a file, not from the host.
+export function addFact(ws: string, input: NewFact, opts: { record?: boolean } = {}): Fact {
   const text = input.text.trim();
   const name = nameOf(input.name || text.split(/\s+/).slice(0, 8).join(' '));
   const taken = new Set(readFacts(ws).map((f) => f.id));
@@ -137,7 +139,7 @@ export function addFact(ws: string, input: NewFact): Fact {
   try { for (const n of fs.readdirSync(memDir(ws))) taken.add(n.replace(/\.md$/i, '').toLowerCase()); } catch { /* none yet */ }
   const id = slugOf(input.name || name, taken);
   const fact: Fact = { id, name, description: oneLine(input.description || text, 100), type: oneLine(input.type || DEFAULT_TYPE, 40) || DEFAULT_TYPE, text, ...(input.plugin ? { plugin: input.plugin } : {}), mtimeMs: Date.now() };
-  fact.hash = writeFactFile(ws, fact);
+  fact.hash = writeFactFile(ws, fact, opts.record !== false);
   writeIndex(ws);
   return fact;
 }
@@ -148,11 +150,11 @@ export function saveFact(ws: string, fact: Fact): void {
 }
 
 // Every fact file the host writes goes through here, and its hash is recorded as the
-// host's own (./memory-trust.ts). Returns that hash.
-function writeFactFile(ws: string, fact: Fact): string {
+// host's own (./memory-trust.ts) unless `record` is false. Returns that hash.
+function writeFactFile(ws: string, fact: Fact, record = true): string {
   const content = renderFact(fact);
   writePrivate(factPath(ws, fact.id), content);
-  recordFactFile(factPath(ws, fact.id), content);
+  if (record) recordFactFile(factPath(ws, fact.id), content);
   return factHash(content);
 }
 
@@ -241,7 +243,8 @@ export function migrateMemoryJson(file: string, globalWs: string, deps: { pid?: 
     if (have.has(key)) { kept++; continue; }
     const scope = typeof m.scope === 'string' ? m.scope : '';
     const plugin = scope && scope !== 'host' && scope !== 'global' ? scope : undefined;
-    addFact(globalWs, { text: m.text, ...(typeof m.label === 'string' && m.label.trim() ? { type: m.label } : {}), ...(plugin ? { plugin } : {}) });
+    // Not recorded as the host's own: the caller accepts them with the root's first look.
+    addFact(globalWs, { text: m.text, ...(typeof m.label === 'string' && m.label.trim() ? { type: m.label } : {}), ...(plugin ? { plugin } : {}) }, { record: false });
     have.add(key);
     moved++;
   }

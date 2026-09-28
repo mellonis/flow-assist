@@ -124,7 +124,9 @@ for the global one. So the app keeps a record of what it put there itself.
   flow-assist`; `/memory accept <n>` (or `all`) sends it again as it reads now. The
   index `memory/MEMORY.md` is never sent — the index in a request is built from the
   facts' own files — so it needs no check. The first start after upgrading accepts the
-  facts already there, once. The assistant's working files (`artifacts/`) are never
+  facts already there, once, and what an older version kept in `memory.json` with them;
+  a `memory.json` that turns up after that is moved into files as usual, but its facts
+  wait for `/memory accept`. The assistant's working files (`artifacts/`) are never
   sent either; it reads them only when it asks for one.
 
 A command the assistant runs carries the same marker as for the settings: from there,

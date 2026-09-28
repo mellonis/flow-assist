@@ -50,9 +50,11 @@ What each version of flow-assist brought, newest first. The version is the one i
   the facts already stored, once. From a command the assistant runs, `plugins trust` is
   refused and nothing is recorded. Like the settings guard, this stops accidents, not a
   command set on getting round it — docs/safety.md says where it stops.
-  **For kit installers:** a script that unpacks and links plugins without the binary
-  (as the kit's `install.sh` does) keeps an updated plugin trusted, but a plugin new to
-  that install needs `flow-assist plugins trust <name>` once.
+  A `memory.json` that turns up after that first start is moved into files as before,
+  but its facts wait for `/memory accept` too.
+  **For installer scripts:** a script that unpacks and links plugins without the binary
+  keeps an updated plugin trusted, but a plugin new to that install needs
+  `flow-assist plugins trust <name>` once.
 - **A background run and the one-shot prompt read the project's instructions once per
   directory.** Both built the `## Project instructions` section through a closure that
   walked the directory and reread every `AGENTS.md` again before every round, even when

@@ -53,7 +53,7 @@ import { hoverEnabled } from '../config/mouse.js';
 import { askKey, askStart, type AskQuestion, type AskState } from '../assistant/ask.js';
 import { keptAfterClear, memoryCommand, type MemoryLists } from '../assistant/memory-command.js';
 import { memoryPromptBlock, migrateMemoryJson, readFacts, removeFact, type Fact } from '../assistant/memory-store.js';
-import { acceptFact, markFacts } from '../assistant/memory-trust.js';
+import { acceptFact, acceptRoot, markFacts, rootAccepted } from '../assistant/memory-trust.js';
 import { memoryFilePath } from '../runtime/services/memory.js';
 import { ensureWorkspace, workspaceFor, workspaceNote, workspaceRoot } from '../assistant/workspace.js';
 import { CONTEXT_WARN_AT, DEFAULT_CONTEXT_WINDOW, cacheLine, contextBadge, estimateTokens, readContext, short as shortTokens } from '../assistant/context-meter.js';
@@ -1476,9 +1476,15 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // what was one list for every project is every project's now, and some of
               // it may belong to one project only.
               try {
+                // The moved facts are the host's only as part of the root's first look
+                // (src/assistant/memory-trust.ts): a memory.json that turns up after it is
+                // a file a command could have written, and its facts wait for the person.
+                const root = workspaceRoot(host.config);
+                const firstLook = !rootAccepted(root);
                 const { moved } = migrateMemoryJson(memoryFilePath(host.config), workspaceFor(host.config, null, 'global'));
+                if (firstLook) acceptRoot(root);
                 if (moved) {
-                  pushNote(`Moved ${moved} ${moved === 1 ? 'memory' : 'memories'} from ${tildePath(memoryFilePath(host.config))} into the global workspace, as files — ${moved === 1 ? 'it is' : 'they are'} every project's now. /memory lists them; ask the assistant to move one that belongs to a single project into it.`);
+                  pushNote(`Moved ${moved} ${moved === 1 ? 'memory' : 'memories'} from ${tildePath(memoryFilePath(host.config))} into the global workspace, as files — ${moved === 1 ? 'it is' : 'they are'} every project's now. /memory lists them; ask the assistant to move one that belongs to a single project into it.${firstLook ? '' : ` ${moved === 1 ? 'It is' : 'They are'} not sent until you accept ${moved === 1 ? 'it' : 'them'}: /memory accept.`}`);
                   host.notify();
                 }
               } catch (e) { (host.services as Record<string, any>).pushLog?.(`[memory] moving memory.json failed: ${(e as Error).message}`); }
