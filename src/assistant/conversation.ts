@@ -8,17 +8,35 @@ import type { JournalEvent } from './journal.js';
 import { createPlan, type Plan } from './plan.js';
 import type { ProjectInstructions } from './project-instructions.js';
 import { createRecallState, type BulkyItem, type RecallState } from './recall.js';
-import type { SessionFingerprint } from './sessions.js';
+import type { Session, SessionFingerprint } from './sessions.js';
 import { createShellState, type ShellState } from './shell.js';
 import { createToolSet, type ToolSet } from './tool-loading.js';
 import type { ViewRecord } from './views.js';
-import type { ConversationDeps, ConversationKind, Queued } from './conversation-types.js';
+import type { ChatMirror, ChatMsg, ConversationDeps, ConversationEvent, ConversationKind, Queued, ViewPort } from './conversation-types.js';
+import {
+  applySession, currentProject, ensureSessionId, journal, journaledChatLLM, journalTo, markSeen, persist, pushNote,
+  releaseLockOf, writeSession, NO_FILE,
+} from './conversation-session.js';
 
-// The fingerprint of a session nothing has been read or written for yet — the value
-// `sessionFingerprint` reads back for a file that does not exist.
-export const NO_FILE: SessionFingerprint = { rev: 0, mtimeMs: 0, size: 0 };
+export { NO_FILE };
 // Live views are coalesced: the latest record per view waits at most this long.
 export const LIVE_REDRAW_MS = 200;
+
+// What an image stands for, as its data is cached: its path and its hash.
+export const imageKey = (r: ImageRef) => `${r.path}\0${r.sha256}`;
+
+// A mirror for a conversation no chat draws (a test): it keeps the list and nothing else.
+export function headlessMirror(): ChatMirror {
+  let list: ChatMsg[] = [];
+  const none = () => {};
+  return {
+    drawn: () => list, setDrawn: (l) => { list = l; },
+    setMessages: (next) => { list = typeof next === 'function' ? next(list) : next; },
+    setStreaming: none, setToolLabel: none, setPhase: none, setVerb: none, setToolCount: none, setTurnTokens: none,
+    setEmptyAnswer: none, setContinueOffer: none, setQueued: none, setAutoMode: none,
+    setPendingConfirm: none, setPendingQuestion: none, setElapsed: none,
+  };
+}
 
 let keys = 0;
 
@@ -66,6 +84,11 @@ export class Conversation {
   summary = '';
   prompts: string[] = [];
   autoMode: AutoMode = 'ask';
+  // Images (src/assistant/images.ts): what each `[Image #N]` of this conversation stands
+  // for, and the last N given out. The conversation's, like the plan: saved with the
+  // session, emptied by /clear. The TEXT decides what a message sends — the tokens in it
+  // this map knows — so the field, a queued message, ↑/↓ and the draft need nothing
+  // beside their text.
   images = new Map<number, ImageRef>();
   imageSeq = 0;
   // The `data:` URL of an image, once read and found unchanged — built on the way to
@@ -159,5 +182,65 @@ export class Conversation {
     // Where this conversation's shell commands run; setting it reads the project's
     // instructions again (`onShellSet`).
     this.shell = createShellState(() => deps.config(), null, () => this.onShellSet());
+  }
+
+  // ── the chat that draws it
+  // The chat's React state, written through its setters while the chat draws from its
+  // own state; the chat assigns it on every render.
+  mirror: ChatMirror = headlessMirror();
+  port: ViewPort | null = null;
+  private handlers = new Map<string, Set<(ev: ConversationEvent) => void>>();
+
+  on<T extends ConversationEvent['type']>(type: T, fn: (ev: Extract<ConversationEvent, { type: T }>) => void): () => void {
+    let set = this.handlers.get(type);
+    if (!set) this.handlers.set(type, (set = new Set()));
+    const f = fn as (ev: ConversationEvent) => void;
+    set.add(f);
+    return () => { set!.delete(f); };
+  }
+  emit(ev: ConversationEvent): void {
+    for (const fn of [...(this.handlers.get(ev.type) ?? [])]) fn(ev);
+  }
+  // Records the port; the end is seen when the port shows it.
+  attach(port: ViewPort): void { this.port = port; this.markSeen(); }
+  detach(port: ViewPort): void { if (this.port === port) this.port = null; }
+  get attached(): boolean { return this.port !== null; }
+  // The attached port's `showsEnd()`; false with none.
+  shows(): boolean { return this.port?.showsEnd() ?? false; }
+  // The list as the model's own reads see it: as last drawn.
+  rows(): ChatMsg[] { return this.mirror.drawn(); }
+
+  // ── the session (src/assistant/conversation-session.ts)
+  ensureSessionId(): string { return ensureSessionId(this); }
+  journal(ev: JournalEvent, opts?: { person?: boolean }): string { return journal(this, ev, opts); }
+  journalTo(from: string, ev: JournalEvent): void { journalTo(this, from, ev); }
+  journaledChatLLM(from: string) { return journaledChatLLM(this, from); }
+  pushNote(content: string): void { pushNote(this, content); }
+  save(opts?: { silent?: boolean }): void { writeSession(this, opts); }
+  persist(): void { persist(this); }
+  markSeen(): void { markSeen(this); }
+  releaseLock(): void { releaseLockOf(this); }
+  currentProject(): string | null { return currentProject(this); }
+  applySession(s: Session, fingerprint: SessionFingerprint, dir: string): void { applySession(this, s, fingerprint, dir); }
+
+  setAutoMode(mode: AutoMode): void { this.autoMode = mode; this.mirror.setAutoMode(mode); }
+  // /clear and /resume both call this: the calls `liveSeen` / `liveBuf` tracked belong
+  // to the conversation being left, and the pending coalesce timer (if any) is for a view
+  // that conversation drew — cancelled, not left to fire into whatever replaces it. The
+  // epoch bump is what actually stops anything already in flight for the old
+  // conversation (a tool's own final phase, `!command`'s own completion) from landing in
+  // the new one; it is the one thing here that is never reset itself.
+  resetLiveViews(): void {
+    this.liveSeen.clear();
+    this.liveBuf.clear();
+    if (this.liveTimer) { clearTimeout(this.liveTimer); this.liveTimer = null; }
+    this.epoch += 1;
+  }
+  resetImages(refs: ImageRef[] = [], seq = 0): void {
+    this.images = new Map(refs.map((r) => [r.n, r]));
+    this.imageSeq = Math.max(seq, 0, ...refs.map((r) => r.n));
+    this.imageData = new Map();
+    this.imageNoted = new Set();
+    this.imageRefusalSaid = false;
   }
 }

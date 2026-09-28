@@ -1742,7 +1742,9 @@ hold this set together:
   flight, a `!command` still running and a background task's calls land in the fork's
   journal, never in the parent's, which another writer holds now. The redirect is for
   what was in flight: opening the parent again (`applySession`) drops it, and from
-  then on the parent writes its own journal. **No tool writes to
+  then on the parent writes its own journal. The journal, the save and its fork, and
+  opening a session are functions over the conversation in
+  `src/assistant/conversation-session.ts`. **No tool writes to
   the journal** — it is the host's record, and a tool's ctx (a plugin's, a remote
   plugin's, a core tool's) carries nothing that writes there; the host writes every line
   from its own hooks. A background task's own calls (`call-start`, `confirm`, `call`)
@@ -1821,9 +1823,9 @@ hold this set together:
   `done`). `done` rests on two times the session file keeps: `answeredAt`, set when a
   turn ends with a final answer (not stopped, failed, out of rounds or empty), and
   `seenAt`, set when the chat shows the session's end — the conversation on screen
-  (`conversationShown`: the chat open, neither the picker nor the pager drawn in its
-  place; a docked chat that is collapsed is not open): that answer arriving then (the
-  same instant), and `markSeen` when it comes back — the chat opening, the picker or the
+  (the chat's `ViewPort.showsEnd`: the chat open, neither the picker, the pager nor a
+  plugin's panel drawn in its place; a docked chat that is collapsed is not open): that
+  answer arriving then (the same instant), and `Conversation.markSeen` when it comes back — the chat opening, the picker or the
   pager closing, a session opened or continued. `sessionRows` computes
   `held`/`done`/`idle`; the chat hands its own `pickerOwn` to the render, so the word
   follows a turn that starts or ends while the picker is up. It is pure state in
@@ -1936,8 +1938,8 @@ hold this set together:
   `sessionFingerprintsEqual`); the chat remembers the fingerprint it last read or
   wrote (set at every load — start-up continue, `/resume` — and every write,
   fork included). At a load, the fingerprint is taken with a stat BEFORE the
-  content is read, never re-derived after (`applySession` takes it as a
-  caller-supplied argument, not something it looks up itself): a write landing in
+  content is read, never re-derived after (`applySession`, in
+  `src/assistant/conversation-session.ts`, takes it as a caller-supplied argument, not something it looks up itself): a write landing in
   that gap is then a fingerprint this instance never actually saw, so the next
   save finds the disk has moved and forks. Taking it AFTER the content read
   instead would record exactly what a same-moment write left, indistinguishable
