@@ -91,6 +91,9 @@ export interface ToolRegistry {
   groups: ToolGroup[];
   tools: ToolDef[];
   exec(name: string, args: Record<string, unknown>, ctx: ToolCtx): Promise<ToolResult>;
+  // Reads every plugin's groups again into this object — after a plugin joined the list
+  // it was assembled from, or changed its `tools`. Absent on a registry made by hand.
+  refresh?(): void;
 }
 
 export interface AssembledToolRegistryInput {
@@ -132,8 +135,20 @@ export function scopeViews(ctx: ToolCtx, owner: string): ToolCtx {
 // place by `refreshToolRegistry`.
 let currentRegistry: ToolRegistry | null = null;
 let refreshCurrent: (() => void) | null = null;
+// Counts the refreshes of the current registry: a turn reads it before each round and
+// works out its tool list again only when it moved, so a round with nothing new sends
+// the list it sent before, byte for byte.
+let revision = 0;
 
 type Assembled = { groups: ToolGroup[]; tools: ToolDef[]; nameToGroup: Map<string, ToolGroup>; ownName: Map<string, string> };
+
+// Which plugin group holds each bare tool name: a name handed out keeps its holder for as
+// long as the holder still declares it.
+const holdersOf = (a: Assembled): Map<string, string> => {
+  const out = new Map<string, string>();
+  for (const [name, group] of a.nameToGroup) if (!a.ownName.has(name)) out.set(name, group.id);
+  return out;
+};
 
 export function assembleToolRegistry(input: AssembledToolRegistryInput): ToolRegistry {
   // A name clash is said once per registry, not again at every refresh.
@@ -143,7 +158,7 @@ export function assembleToolRegistry(input: AssembledToolRegistryInput): ToolReg
     said.add(line);
     console.warn(line);
   };
-  let state = assemble(input, warn);
+  let state = assemble(input, warn, new Map());
   // The tools a refresh took away, each with the group that last held it: a turn fixes
   // the list it sends when it starts, so it may still call one — the group answers for
   // itself (an MCP server's says it is not connected and when it is tried next), and the
@@ -162,17 +177,23 @@ export function assembleToolRegistry(input: AssembledToolRegistryInput): ToolReg
   };
   // A refresh swaps what this object holds, never the object: the app, its services and
   // the context meter keep the one they were handed.
-  refreshCurrent = () => {
+  const refresh = () => {
     const before = state;
-    state = assemble(input, warn);
+    state = assemble(input, warn, holdersOf(before));
     for (const [name, group] of before.nameToGroup) {
       if (!state.nameToGroup.has(name)) left.set(name, { group, own: before.ownName.get(name) ?? name });
     }
     for (const name of state.nameToGroup.keys()) left.delete(name);
     registry.groups = state.groups;
     registry.tools = state.tools;
+    if (currentRegistry === registry) revision++;
   };
+  // `refresh` touches this registry alone: an App that has gone (a test's) never
+  // reassembles the one assembled after it.
+  registry.refresh = refresh;
+  refreshCurrent = refresh;
   currentRegistry = registry;
+  revision++;
   return registry;
 }
 
@@ -180,15 +201,22 @@ export function assembleToolRegistry(input: AssembledToolRegistryInput): ToolReg
 // plugin whose groups change while the app runs (an MCP server that connects after the
 // start, or is turned off): the plugin sets `tools` on its plugin object and calls this,
 // handed to its builder as `toolsChanged`. `ai.disabledTools` is read again with it.
-// The list a turn sends is fixed when it starts (`agentChat`), so a change reaches the
-// next message's list; a call runs against the registry as it is, and a call to a tool
-// that left since reaches the group that last held it. A no-op before any registry is
-// assembled.
+// A turn reads the list again before each of its rounds (`agentChat`), so a group that
+// arrives mid-turn is sent from the next round on; a call runs against the registry as
+// it is, and a call to a tool that left since reaches the group that last held it. A
+// no-op before any registry is assembled.
 export function refreshToolRegistry(): void {
   refreshCurrent?.();
 }
 
-function assemble({ plugins, config, repo }: AssembledToolRegistryInput, warn: (line: string) => void): Assembled {
+// How many times the current registry has been assembled or refreshed — `agentChat`
+// compares it between rounds.
+export function toolRegistryRevision(): number {
+  return revision;
+}
+
+// `held` — the bare names the last assembly handed out, each with the group that holds it.
+function assemble({ plugins, config, repo }: AssembledToolRegistryInput, warn: (line: string) => void, held: Map<string, string>): Assembled {
   const disabled = (config?.ai as { disabledTools?: string[] } | undefined)?.disabledTools ?? [];
   // The resolved hotkey map (host defaults + plugin keys + config.keys overrides).
   // Handed to the config tool so `config get/explain keys` reports the EFFECTIVE
@@ -231,13 +259,18 @@ function assemble({ plugins, config, repo }: AssembledToolRegistryInput, warn: (
   //
   // A prefix appears only when it is NEEDED: a name already claimed by another group
   // is registered as `<owner>:<name>` instead, and said so. The first claimant keeps
-  // the bare word. `ownName` remembers what the group itself calls the tool, since
-  // that is the name its `exec` understands.
+  // the bare word — first in the list, unless a refresh finds the name already handed
+  // out (`held`, `claim`): then its holder keeps it, so a plugin that joins later, or a
+  // server that connects, never renames a tool the model was already given. `ownName`
+  // remembers what the group itself calls the tool, since that is the name its `exec`
+  // understands.
   const ownName = new Map<string, string>();
+  const claim = new Map<string, ToolGroup>();
   const register = (group: ToolGroup, owner: string = group.id) => {
     group.tools = group.tools.flatMap((t) => {
       const name = t.function.name;
-      const holder = nameToGroup.get(name);
+      const claimed = claim.get(name);
+      const holder = nameToGroup.get(name) ?? (claimed && claimed !== group ? claimed : undefined);
       if (!holder || holder === group) {
         nameToGroup.set(name, group);
         return [t];
@@ -259,6 +292,7 @@ function assemble({ plugins, config, repo }: AssembledToolRegistryInput, warn: (
   if (shell) register(shell);
   if (workspace) register(workspace);
 
+  const pending: Array<[ToolGroup, string]> = [];
   for (const p of plugins) {
     // Plugin-supplied tool groups — used as-is (the plugin author namespaces the
     // tool names with `<plugin.name>:`). Withhold a group whose id is in the
@@ -270,7 +304,7 @@ function assemble({ plugins, config, repo }: AssembledToolRegistryInput, warn: (
       if (disabled.includes(group.id) && !group.alwaysOn) continue;
       const wrapped = { ...group, exec: (name: string, args: Record<string, unknown>, ctx: ToolCtx) => group.exec(name, args, scopeViews({ ...ctx, pluginToken: identityToken(p.name) }, p.name)) };
       groups.push(wrapped);
-      register(wrapped, p.name);
+      pending.push([wrapped, p.name]);
     }
     // Plugin aiTools — standalone `run`-bearing tools. Wrapped in a synthetic
     // group so they appear in the flattened registry and dispatch. Named as the
@@ -318,9 +352,18 @@ function assemble({ plugins, config, repo }: AssembledToolRegistryInput, warn: (
         },
       };
       groups.push(aiGroup);
-      register(aiGroup, p.name);
+      pending.push([aiGroup, p.name]);
     }
   }
+
+  // A bare name the last assembly handed out stays with its holder while the holder
+  // still declares it; the host's own groups hold theirs regardless.
+  for (const [name, id] of held) {
+    if (nameToGroup.has(name)) continue;
+    const holder = pending.find(([g]) => g.id === id && g.tools.some((t) => t.function.name === name));
+    if (holder) claim.set(name, holder[0]);
+  }
+  for (const [group, owner] of pending) register(group, owner);
 
   toolNamesRef.names = groups.flatMap((g) => g.tools.map((t) => t.function.name));
 

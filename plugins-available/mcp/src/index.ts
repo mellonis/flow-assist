@@ -26,9 +26,9 @@
 // `${VAR}` in a url, a header or a stdio server's `env` is taken from the environment: a
 // token lives in env, never in the config file. A command and its arguments are taken
 // literally — they are an argv, and a variable expanded into one could split or smuggle
-// an argument the person never wrote. A server that does not answer is said so in the
-// log and tried again in the background (servers.ts); the rest of the app starts as
-// usual, and the server's tools join when it answers.
+// an argument the person never wrote. The servers are connected in the background
+// (servers.ts): the app draws at once, a server's tools join when it answers, and one
+// that does not is said so in the log and tried again.
 //
 // No runtime dependencies: a plugin loaded from source by the compiled binary cannot
 // import a package from disk. Its settings schema is built with the host's zod (`ctx.z`).
@@ -196,7 +196,7 @@ export async function connectServers(
         ...timeouts,
       });
     try {
-      // Both steps are bounded by `connectTimeoutMs` each: the app starts only after this.
+      // Both steps are bounded by `connectTimeoutMs` each.
       const info = await client.initialize();
       const tools = await client.listTools();
       const unknown = unknownReadOnly(spec, tools);
@@ -218,8 +218,6 @@ export async function connectServers(
   return { groups: results.flatMap((r) => (r.group ? [r.group] : [])), status: results.map((r) => r.status) };
 }
 
-// The builder is async: a server's tools are known only once it has answered. The host
-// waits for it (loader/build.ts).
 // The settings, in the host's zod (handed in as `ctx.z`): `config set` validates a
 // server's keys with it, and the model's config tool can describe them.
 function configSchema(z: any) {
@@ -280,7 +278,12 @@ type BuildCtx = {
   timers?: Timers;
 };
 
-export async function buildMcpPlugin({ make, config, z, toolsChanged, retry, timers }: BuildCtx) {
+// The builder returns at once: a server's tools are known only once it has answered,
+// and the app does not wait for that. `ready` settles when every server has had its
+// first attempt — the one-shot prompt and the CLI wait for it (loader/build.ts); the app
+// names the plugin as starting until then, and each server's group joins the tool index
+// as it connects.
+export function buildMcpPlugin({ make, config, z, toolsChanged, retry, timers }: BuildCtx) {
   const servers = allServers((config?.plugins as Record<string, { servers?: unknown }> | undefined)?.mcp?.servers);
   // The fetch of the moment the plugin was built — a later replacement of the global
   // (a test's scripted model is one) must not take the servers' traffic.
@@ -289,7 +292,24 @@ export async function buildMcpPlugin({ make, config, z, toolsChanged, retry, tim
   let services: Record<string, any> | undefined;
   let plugin: { tools?: unknown[] } | undefined;
   const clock = timers ?? realTimers;
-  const log = (line: string) => services?.pushLog?.(`[mcp] ${line}`);
+  // A line said before `setup` waits for it: a server may answer before the app is up.
+  const early: string[] = [];
+  const log = (line: string) => {
+    const push = services?.pushLog;
+    if (push) push(`[mcp] ${line}`); else early.push(`[mcp] ${line}`);
+  };
+  // What a server's first attempt came to, in the log (L): the start screen only has
+  // room for the count. A connected server's line names every name on its `readOnly`
+  // list it turned out not to offer — a mistyped name is a setting that would otherwise
+  // do nothing at all, quietly.
+  const firstLines = (name: string): string[] => {
+    const v = manager.list().find((s) => s.name === name);
+    if (!v) return [];
+    return [
+      statusLine(v, clock.now()),
+      ...(v.unknownReadOnly?.length ? [`${v.name}: readOnly names ${v.unknownReadOnly.length === 1 ? 'a tool' : 'tools'} this server does not offer — ${v.unknownReadOnly.join(', ')}`] : []),
+    ];
+  };
   const manager = createServerManager(servers, {
     fetch: (u, i) => fetchAtBuild(u, i),
     schedule: retry,
@@ -299,7 +319,11 @@ export async function buildMcpPlugin({ make, config, z, toolsChanged, retry, tim
       plugin.tools = manager.groups();
       toolsChanged?.();
       (plugin as { description?: string }).description = describe();
-      if (event?.kind === 'connected') {
+      if (event && 'first' in event && event.first) {
+        // The start of the run, not news: the log says it, the chat does not — a
+        // continued conversation would gain a row at every start.
+        for (const line of firstLines(event.name)) log(line);
+      } else if (event?.kind === 'connected') {
         const line = `${event.name} connected — ${event.tools} ${event.tools === 1 ? 'tool' : 'tools'}`;
         log(line);
         services?.chatNote?.(line); // the host puts `[mcp]` in front
@@ -318,17 +342,9 @@ export async function buildMcpPlugin({ make, config, z, toolsChanged, retry, tim
   };
   managers.add(manager);
   if (!exitHooked) { exitHooked = true; process.once('exit', stopManagers); }
-  await manager.start();
-  const now = clock.now();
-  const views = manager.list();
-  // One line per server, plus — once, at start — a line for every name on a `readOnly`
-  // list the server turned out not to offer: a mistyped name is a setting that would
-  // otherwise do nothing at all, quietly.
-  const summary = views.flatMap((v) => [
-    statusLine(v, now),
-    ...(v.unknownReadOnly?.length ? [`${v.name}: readOnly names ${v.unknownReadOnly.length === 1 ? 'a tool' : 'tools'} this server does not offer — ${v.unknownReadOnly.join(', ')}`] : []),
-  ]);
-  plugin = make('mcp', {
+  // A server turned off in the config is never tried; the log says so once.
+  for (const v of manager.list()) if (v.state === 'disabled') log(statusLine(v, clock.now()));
+  const built = make('mcp', {
     name: 'mcp',
     tools: manager.groups(),
     surface: undefined,
@@ -336,14 +352,14 @@ export async function buildMcpPlugin({ make, config, z, toolsChanged, retry, tim
     // `/mcp` in the chat, `:mcp` on the command line — the person's, never the model's.
     commands: [mcpCommand(manager, { services: () => services, now: () => clock.now() })],
     description: describe(),
-    // What happened to each server, in the log (L): the start screen only has room for
-    // the count.
     setup: ({ host }: { host: { services?: Record<string, any> } }) => {
       services = host.services;
-      for (const line of summary) host.services?.pushLog?.(`[mcp] ${line}`);
+      for (const line of early.splice(0)) host.services?.pushLog?.(line);
     },
-  }) as { tools?: unknown[] };
-  return plugin;
+  }) as { tools?: unknown[]; ready?: Promise<unknown> };
+  plugin = built;
+  built.ready = manager.start();
+  return built;
 }
 
 export default buildMcpPlugin;

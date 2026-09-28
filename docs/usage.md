@@ -331,6 +331,12 @@ transport, state and how many of its tools run without asking — and from there
 server is disabled, enabled, restarted or its tools listed. The plugin's own page,
 `plugins-available/mcp/README.md`, has the whole command set and its settings.
 
+The screen does not wait for the servers. While they connect, the start screen says so
+under the plugins — `starting: mcp…`, and the same for a plugin in another language
+while its process starts — and each one's tools join as it answers: a message already
+on its way gets them from its next step. The line goes once everything has joined or
+failed; what failed is in the log (`L`).
+
 ## When the app feels slow: `:perf`
 
 `:perf` on the `:` command line says how long the app took to answer your input, over

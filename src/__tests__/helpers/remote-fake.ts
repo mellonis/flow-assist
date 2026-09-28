@@ -12,6 +12,11 @@ export interface FakeRemote {
   crash(): void;
   restart(): void;
   hello: HelloResult;
+  // Holds the next `hello` unanswered until `answerHello()` — or `refuseHello(why)`,
+  // which answers it with an error — so a test can act while the handshake is pending.
+  holdHello(): void;
+  answerHello(): void;
+  refuseHello(why: string): void;
 }
 
 export function fakeRemote(hello: Partial<HelloResult> = {}, manifest: Partial<RemoteManifest & Record<string, unknown>> = {}): FakeRemote {
@@ -27,7 +32,13 @@ export function fakeRemote(hello: Partial<HelloResult> = {}, manifest: Partial<R
   };
   const peer = createPeer({ send: (l) => queueMicrotask(() => toHost.forEach((f) => f(l))), onLine: (f) => { toPlugin.push(f); } });
   const full: HelloResult = { hostApi: 2, ...hello };
-  peer.onRequest('hello', () => full);
+  let held: { answer: () => void; refuse: (e: Error) => void } | null = null;
+  let holding = false;
+  peer.onRequest('hello', () => {
+    if (!holding) return full;
+    holding = false;
+    return new Promise<HelloResult>((resolve, reject) => { held = { answer: () => resolve(full), refuse: reject }; });
+  });
   const events: Array<[string, unknown]> = [];
   for (const m of ['key', 'changed', 'submitted', 'cancelled', 'toggled', 'resize', 'focus', 'blur', 'visible', 'store', 'cache.flushed', 'afterWrite']) peer.onNotify(m, (p) => events.push([m, p]));
   return {
@@ -36,5 +47,8 @@ export function fakeRemote(hello: Partial<HelloResult> = {}, manifest: Partial<R
     frame: (f) => peer.notify('frame', f),
     crash: () => closes.forEach((f) => f({ code: 1 })),
     restart: () => restarts.forEach((f) => f()),
+    holdHello: () => { holding = true; },
+    answerHello: () => { held?.answer(); held = null; },
+    refuseHello: (why) => { held?.refuse(new Error(why)); held = null; },
   };
 }

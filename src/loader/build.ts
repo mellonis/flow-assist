@@ -1,10 +1,18 @@
 // Plugin loader. The host is NOT fs-scanned for built-ins (they live in
 // `src/plugins/`) and DOES fs-resolve the enabled plugin set at startup. `loadPlugins`
 // always builds the four built-ins (core/assistant/keycaps/log), then loads every
-// enabled plugin from `plugins-enabled/` (import its default builder, call it with
-// `{ renders, config, make, z }` and the host's mark registries, and await it — a
-// builder may be async). A broken
-// plugin is skipped with `console.warn`.
+// enabled plugin from `plugins-enabled/`, all of them at once: import its default
+// builder, call it with `{ renders, config, make, z }` and the host's mark registries,
+// and await it — a builder may be async. They join the list in the order they are
+// enabled, whichever finished first. A broken plugin is skipped with a line in the
+// loader's notes.
+//
+// Two ways to wait. By default everything is awaited — every remote plugin's handshake
+// and every plugin's `ready` — which is what the one-shot prompt and the CLI need: they
+// read the tools once, and there is no screen to show anything sooner. Given `late`, a
+// remote plugin is not awaited: its handshake goes on in the background and the plugin
+// joins the running app when it completes, and a plugin's `ready` is only noted
+// (./late.ts). The interactive app loads that way and draws at once.
 //
 // `renders` is the renderer bundle ({ help, chat, log }) that the runtime
 // supplies at startup — the built-in `core.views.help` / `assistant.views.chat` /
@@ -33,6 +41,7 @@ import { appliesOnRestart, modelMaySave, modelMaySet } from '../config/schema.js
 import { THIS_HOST, pluginCompat, readPluginManifest } from './compat.js';
 import { isRemoteManifest, remotePlugin, transportFor } from '../remote/index.js';
 import { refreshToolRegistry } from './tools.js';
+import { skipLine, type LatePlugins } from './late.js';
 
 // A plugin builder: `build<X>Plugin({ renders, config, make, z, modelMaySet, modelMaySave,
 // appliesOnRestart, toolsChanged })` → Plugin (or a promise of one).
@@ -112,6 +121,9 @@ export interface LoadPluginsOptions {
   // How a remote plugin's process is reached (src/remote/transports.ts); a test hands
   // in a transport over in-memory streams.
   remoteTransport?: typeof transportFor;
+  // The running app's: what is not awaited goes here and joins it later (./late.ts).
+  // Absent — everything is awaited.
+  late?: LatePlugins;
 }
 
 export async function loadPlugins({
@@ -122,9 +134,10 @@ export async function loadPlugins({
   enabledDir,
   notes = [],
   remoteTransport,
+  late,
 }: LoadPluginsOptions): Promise<Plugin[]> {
   const skip = (name: string, why: string) => {
-    const line = `[plugins] skip ${name}: ${why}`;
+    const line = skipLine(name, why);
     console.warn(line);
     notes.push(line);
   };
@@ -140,33 +153,45 @@ export async function loadPlugins({
     }
   }
 
-  // Enabled plugins: import each default builder from `plugins-enabled/<name>`.
+  // Enabled plugins, all at once: one that waits on a process or a server does not hold
+  // up the next. Each resolves to its plugin, or to null once its skip is said.
   const enabled = await repo.enabledPlugins();
-  for (const name of enabled) {
+  late?.order(enabled);
+  const loads = enabled.map(async (name): Promise<Plugin | null> => {
     if (!enabledDir) {
       console.warn(`[plugins] skip ${name}: no enabledDir provided`);
-      continue;
+      return null;
     }
     // Whether it can run here is read from its manifest before any of its code runs.
     const manifest = readPluginManifest(join(enabledDir, name));
     const compat = pluginCompat(manifest, THIS_HOST);
     if (!compat.ok) {
       skip(name, compat.reason);
-      continue;
+      return null;
     }
     if (compat.note) notes.push(`[plugins] ${name} ${compat.note}`);
     if (isRemoteManifest(manifest)) {
       // A plugin in another language: a process the host talks to, built into a
       // Plugin by the adapter — the rest of the loader never knows (docs/plugins.md,
       // "A plugin in another language").
-      try {
-        const log = (line: string) => { console.warn(line); notes.push(line); };
+      // What the adapter and the transport say — the process's stderr, a restart. Waiting,
+      // it goes to stderr and the notes the app's log starts with; late, to the app's log
+      // itself, whenever it is said (the console is the screen's then).
+      const log = late ? (line: string) => late.note(line) : (line: string) => { console.warn(line); notes.push(line); };
+      const remote = (async () => {
         const transport = (remoteTransport ?? transportFor)(manifest, join(enabledDir, name), { log });
-        plugins.push(await remotePlugin({ manifest, transport, config, make, log }));
+        return remotePlugin({ manifest, transport, config, make, log });
+      })();
+      if (late) {
+        late.expect(name, remote);
+        return null;
+      }
+      try {
+        return await remote;
       } catch (e) {
         skip(name, (e as Error).message);
+        return null;
       }
-      continue;
     }
     try {
       // Import the entry FILE (not the symlinked directory), so the compiled binary
@@ -177,22 +202,28 @@ export async function loadPlugins({
         build?: unknown;
       };
       const build = (mod.default ?? mod.build) as unknown;
-      if (typeof build === 'function') {
-        // A builder may be async: a plugin whose tools are known only after it has asked
-        // someone (an MCP server lists its tools once connected) returns a promise. It is
-        // the plugin's job to bound that wait — the app starts only after it.
-        const plugin = await (build as (ctx: BuilderCtx) => Plugin | Promise<Plugin>)({ renders, config, make, z, ...EXTRAS });
-        // What the plugin IS, in its author's words, for the start screen — from its
-        // manifest, unless the shape says it itself.
-        plugin.description ??= manifestDescription(join(enabledDir, name));
-        plugins.push(plugin);
-      } else {
+      if (typeof build !== 'function') {
         skip(name, 'default export is not a builder function');
+        return null;
       }
+      // A builder may be async. One whose plugin waits on someone (an MCP server lists
+      // its tools once connected) returns at once and says so with `ready`; it is the
+      // plugin's job to bound that wait.
+      const plugin = await (build as (ctx: BuilderCtx) => Plugin | Promise<Plugin>)({ renders, config, make, z, ...EXTRAS });
+      // What the plugin IS, in its author's words, for the start screen — from its
+      // manifest, unless the shape says it itself.
+      plugin.description ??= manifestDescription(join(enabledDir, name));
+      if (plugin.ready) {
+        if (late) late.wait(plugin.name, plugin.ready);
+        else await plugin.ready.catch(() => undefined);
+      }
+      return plugin;
     } catch (e) {
       skip(name, (e as Error).message);
+      return null;
     }
-  }
+  });
+  for (const plugin of await Promise.all(loads)) if (plugin) plugins.push(plugin);
 
   return plugins;
 }

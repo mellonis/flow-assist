@@ -7,9 +7,10 @@
 // is tried again in the background,
 // after 5 s, 15 s and 60 s, then every 5 minutes, until it answers. A 401 or 403 is not
 // tried again: that is the token, not the network, and the reason says so; `restart`
-// tries it again once the person has fixed it. A server that connects after the start
-// hands its group to `onChange`, which puts it into the tool index (the plugin calls the
-// host's `toolsChanged`) and says so in the chat.
+// tries it again once the person has fixed it. A server that connects hands its group
+// to `onChange`, which puts it into the tool index (the plugin calls the host's
+// `toolsChanged`); one that connects after its first attempt is said in the chat too.
+// The first attempts run in the background (`start`): the app draws without them.
 //
 // Every attempt carries the server's generation: `disable`, `restart` and `remove` start
 // a new one, and an attempt that finishes under an older generation lets go of what it
@@ -78,10 +79,11 @@ type Entry = ServerView & {
 };
 
 export type ServerEvent =
-  // It connected after the start (a retry, a restart, an enable, an add).
-  | { kind: 'connected'; name: string; tools: number }
-  // It failed, at start or later, or dropped.
-  | { kind: 'failed'; name: string; reason: string; retryInMs?: number; auth?: boolean }
+  // It connected — `first` on the first attempt at it, else after a retry, a restart,
+  // an enable, an add.
+  | { kind: 'connected'; name: string; tools: number; first?: true }
+  // It failed, on its first attempt (`first`) or later, or dropped.
+  | { kind: 'failed'; name: string; reason: string; retryInMs?: number; auth?: boolean; first?: true }
   | { kind: 'dropped'; name: string; reason: string };
 
 export type ManagerDeps = {
@@ -183,7 +185,7 @@ export function createServerManager(servers: Array<{ name: string; spec: ServerS
     e.tools = [];
     e.readOnly = 0;
     const retryInMs = retryLater(e);
-    if (later) changed({ kind: 'failed', name: e.name, reason: e.reason, ...(retryInMs !== undefined ? { retryInMs } : {}), ...(auth ? { auth } : {}) });
+    changed({ kind: 'failed', name: e.name, reason: e.reason, ...(retryInMs !== undefined ? { retryInMs } : {}), ...(auth ? { auth } : {}), ...(later ? {} : { first: true as const }) });
   };
 
   // A connected server's line went down (a call found it so, or its process exited):
@@ -227,10 +229,15 @@ export function createServerManager(servers: Array<{ name: string; spec: ServerS
     : e.nextAt !== undefined ? `${e.name} is not connected — retrying in ${inSeconds(e.nextAt, timers.now())}`
     : `${e.name} is not connected — ${e.reason ?? 'no answer'}`;
 
-  // One attempt. `later` — not the start: its success is news for the chat.
+  // One attempt. `later` — not the first: its success is news for the chat.
   async function connect(e: Entry, later: boolean): Promise<void> {
     const problem = specProblem(e.spec);
-    if (problem) { e.state = 'failed'; e.reason = problem; return; }
+    if (problem) {
+      e.state = 'failed';
+      e.reason = problem;
+      changed({ kind: 'failed', name: e.name, reason: problem, ...(later ? {} : { first: true as const }) });
+      return;
+    }
     const gen = ++e.gen;
     letGo(e);
     e.state = 'connecting';
@@ -259,7 +266,7 @@ export function createServerManager(servers: Array<{ name: string; spec: ServerS
       e.detail = `${info.serverName ?? 'server'}${info.serverVersion ? ` ${info.serverVersion}` : ''}`;
       const unknown = unknownReadOnly(e.spec, tools);
       e.unknownReadOnly = unknown.length ? unknown : undefined;
-      if (later) changed({ kind: 'connected', name: e.name, tools: tools.length });
+      changed({ kind: 'connected', name: e.name, tools: tools.length, ...(later ? {} : { first: true as const }) });
     } catch (err) {
       if (gen !== e.gen) return;
       // A server started as a command that did not make it through the handshake is
@@ -273,8 +280,10 @@ export function createServerManager(servers: Array<{ name: string; spec: ServerS
   const get = (name: string) => entries.get(name);
 
   return {
-    // The first attempt at every server not turned off, all at once; the app starts
-    // after it. A server that fails here is tried again in the background.
+    // The first attempt at every server not turned off, all at once; it settles once
+    // each has connected or failed. Nobody waits for it but the one-shot prompt and the
+    // CLI (the plugin's `ready`). A server that fails here is tried again in the
+    // background.
     async start(): Promise<void> {
       await Promise.all([...entries.values()].filter((e) => e.state !== 'disabled').map((e) => connect(e, false)));
     },

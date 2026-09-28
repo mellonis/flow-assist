@@ -86,15 +86,29 @@ export default function buildNotesPlugin({ config, make, z, modelMaySet, modelMa
   the key only when it starts, and every `config set` of it then says so. Use these
   registries, never ones of your own: a mark is looked up by its node in the host's.
 - `make` fills in what the host owns — the name, the config slice, the keys.
-- The builder may be `async` (the `mcp` plugin asks its servers for their tools
-  first); bound the wait yourself, the app starts after it.
+- The builder may be `async`, and the app waits for it before it draws: keep it
+  short. **A plugin that waits on someone** — a server it connects to, a process it
+  starts — returns at once and says so with `ready`, a promise on the plugin object
+  that settles once it is done waiting (either way): the start screen names the plugin
+  as starting until then (`starting: mcp…`), the one-shot prompt and `flow-assist
+  config set plugins.…` wait for it before they read the tools, and its tools join
+  through `toolsChanged` (below) as they come. The `mcp` plugin does this: `ready` is
+  every server's first attempt. Bound the wait yourself. A host older than this
+  ignores `ready` and uses the plugin as its builder returned it.
+
+  ```ts
+  const plugin = make('late', { tools: [] });
+  plugin.ready = connect().then((group) => { plugin.tools = [group]; toolsChanged?.(); });
+  return plugin;
+  ```
 - **Tools that change while the app runs** — a server that connects after the start,
   one turned off — are set on the plugin object `make` returned, followed by a call to
   `toolsChanged()`: the host reads every plugin's `tools` again, `ai.disabledTools`
-  with them. The list a message sends is fixed when its turn starts, so a group that
-  arrives mid-turn is offered from the next message on, in the `tools_load` index like
-  any other; a call runs against the tools as they are, and a call to a tool whose group
-  left since still reaches that group — its `exec` says why it no longer answers.
+  with them. A turn reads the list again before each of its rounds, so a group that
+  arrives mid-turn is offered from the turn's next round on, in the `tools_load` index
+  like any other; a call runs against the tools as they are, and a call to a tool whose
+  group left since still reaches that group — its `exec` says why it no longer answers
+  — and still asks the person first when the tool is a write.
 
   ```ts
   const plugin = make('late', { tools: [] });
@@ -200,7 +214,15 @@ What the host does with it, and what it expects back:
 - **Say failures as failures.** Return a tool's error in its own words; an empty `{}`
   from a broken backend reads to the model like "nothing there".
 - Names are the ones you give (`notes_read`, not `notes:notes_read`); two groups that
-  declare the same name get the later one qualified, and the clash is logged.
+  declare the same name get the later one qualified (`<plugin>:<name>`), and the clash
+  is logged. **A name once handed out keeps its holder** while the holder still
+  declares it: a plugin that joins after the start — one in another language once its
+  handshake completes, an MCP server once it connects — is offered qualified on a
+  clash even when it comes earlier in the enabled order, so the model is never handed a
+  different tool under a name it already has. Two such late plugins that clash with each
+  other resolve by which arrived first, so the bare name may differ from one start to
+  the next. Give your tools names of their own (a prefix of your plugin's, as
+  `notes_read` does) and none of this arises.
 - `ai.disabledTools: ["notes"]` turns the group off per machine.
 - **The first sentence of a description is what the model sees first.** A request
   carries a plugin's tools as an index — the group's name, then each tool's name and
@@ -598,7 +620,12 @@ direction. The host makes these requests:
 `hello` times out at 10 s; a plugin that answers late, with a `hostApi` the host does
 not carry, or whose registration is malformed (its own name, keys, tools or
 `configSchema` do not match the shape the host expects) is refused and the process is
-stopped like any other refused handshake. `shutdown` waits for an update already in
+stopped like any other refused handshake. The app does not wait for the handshake to
+draw: until it completes the start screen says `starting: <name>…`, and the plugin —
+its screens, keys, commands and tools — joins the running app when `hello` is answered
+(a message already on its way gets its tools from its next step); a refused one is a
+`[plugins] skip <name>: …` line in the log, as at any start. The one-shot prompt and
+`flow-assist config set plugins.…` wait for it. `shutdown` waits for an update already in
 flight up to 1 000 ms before closing the connection; a plugin over stdio also ends on
 its own once its stdin closes, which is what happens when the host that spawned it is
 gone.
@@ -881,8 +908,8 @@ give up that host's own attempts until some other host's restart revives the ser
   JS plugin's: a remote plugin's commands are the `:` line's, and its argument
   completes from `values` alone.
 - **Say a note in the chat, change a setting, or change its tools while it runs.**
-  `chatNote`, `setConfig` / `unsetConfig` and `toolsChanged` are a JS plugin's; a remote
-  plugin's tools are the ones its `hello` gave.
+  `chatNote`, `setConfig` / `unsetConfig`, `toolsChanged` and `ready` are a JS
+  plugin's; a remote plugin's tools are the ones its `hello` gave.
 
 - **Mark a config key for the model.** Its `configSchema` is JSON Schema, read into the
   host's zod, and carries no mark: every key of a remote plugin is the person's to set.

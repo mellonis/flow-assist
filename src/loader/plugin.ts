@@ -70,6 +70,11 @@ export type PluginShape = {
   // plugin reloads what it shows — otherwise the screen keeps the text from before
   // the write. May return a promise; a failure is logged.
   afterWrite?: (api: unknown) => unknown;
+  // Settles once the plugin is done with what it waits on at start — the `mcp` plugin's
+  // first attempt at every server, connected or not. The app draws without waiting for
+  // it and names the plugin as starting until then; the one-shot prompt and the CLI wait
+  // for it before they read the tools (docs/plugins.md, the builder's `ready`).
+  ready?: Promise<unknown>;
 };
 
 // A plugin command. The host prefixes the command name at load time; the base
@@ -128,6 +133,7 @@ export interface Plugin {
   chatContext?: (api: unknown) => ContextItem[] | null | undefined;
   chatSubject?: (api: unknown) => string | null | undefined;
   afterWrite?: (api: unknown) => unknown;
+  ready?: Promise<unknown>;
 }
 
 export type MakeFactoryConfig = {

@@ -51,12 +51,14 @@ export function stdioTransport(opts: StdioOpts): Transport & { start(): Promise<
       const [cmd, ...args] = opts.command;
       const c = spawn(path.isAbsolute(cmd!) || cmd!.includes('/') ? path.resolve(opts.cwd, cmd!) : cmd!, args, { cwd: opts.cwd, env: { ...process.env, ...opts.env }, stdio: ['pipe', 'pipe', 'pipe'] });
       child = c;
+      // Known to the exit hook from the moment it exists: a host that exits before the
+      // `spawn` event (a quit during the handshake's first instants) still stops it.
+      live.add(c);
       // `.on`, not `.once`: a second error after a successful spawn (a failed kill,
       // say) must still be heard, or it has no listener and crashes the host.
       c.on('error', (e) => { reject(new Error(`${opts.name}: cannot start ${opts.command.join(' ')}: ${e.message}`)); closeOnce({ error: e.message }); });
       c.once('spawn', () => {
         spawned = true;
-        live.add(c);
         c.unref();
         for (const s of [c.stdin, c.stdout, c.stderr]) (s as { unref?: () => void } | null)?.unref?.();
         resolve();

@@ -4,6 +4,7 @@
 // plugin in another language").
 import { afterEach, expect, test } from 'bun:test';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { ScriptedModel, bootApp, settle } from './helpers/scripted';
 import { transportFor } from '../remote/transports';
@@ -225,4 +226,17 @@ test("a crash draws the stop with the last lines the plugin wrote to stderr", as
     delete process.env.FAKE_STDERR;
     delete process.env.FAKE_CRASH_SAYS;
   }
+});
+
+// The app quits while a remote plugin's handshake is still pending (it joins late, so
+// nothing has registered its stop yet): the process it started is stopped with it,
+// never left behind.
+test('a host that exits during a pending handshake leaves no plugin process behind', async () => {
+  const pidfile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-pid-')), 'pid');
+  const host = Bun.spawn(['bun', path.join(FAKE_DIR, 'late-exit-host.ts'), pidfile], { stdout: 'pipe', stderr: 'pipe' });
+  const code = await host.exited;
+  expect(code).toBe(0);
+  const pid = Number(fs.readFileSync(pidfile, 'utf8'));
+  expect(pid).toBeGreaterThan(0);
+  await until(() => !isAlive(pid), 'the plugin process to end', 300);
 });

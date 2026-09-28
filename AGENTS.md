@@ -151,10 +151,12 @@ from `host.hostApi`.
 
 A plugin module default-exports `build<Name>Plugin({ renders, config, make, z,
 modelMaySet, modelMaySave, appliesOnRestart, toolsChanged })`.
-The builder may be **async** — the loader awaits it — for a plugin whose tools are known
-only after it has asked someone (the `mcp` plugin connects to its servers first, over
-Streamable HTTP or, for a server that is a command, its stdin and stdout); it is
-the plugin's job to bound that wait, since the app starts after it. `z` is the host's
+The builder may be **async** — the loader awaits it, and the app draws after it, so it
+must be short. A plugin whose tools are known only after it has asked someone (the
+`mcp` plugin connects to its servers, over Streamable HTTP or, for a server that is a
+command, its stdin and stdout) returns at once and says so with **`ready`**, a promise
+on the plugin object that settles when it is done waiting, either way; it is the
+plugin's job to bound that wait (see "The first frame waits for nobody" below). `z` is the host's
 zod: a plugin with no bundler, and so no runtime dependencies (the compiled binary
 cannot import a package from disk), still declares its `configSchema` with it. The
 three registries beside it are the host's config marks (`src/config/schema.ts`, "Config
@@ -167,17 +169,25 @@ plugin's servers connect late, drop, are turned off): it sets `tools` on the plu
 object `make` returned and calls it, and `refreshToolRegistry` (`src/loader/tools.ts`)
 assembles every group again INTO the registry object already handed out — the App, its
 services and the context meter hold that object, so it is never replaced — with
-`ai.disabledTools` read again and a name clash said once per registry. `agentChat` fixes
-the list it sends when a turn starts, so a group that arrives mid-turn is sent (and
-indexed) from the next message on: the index stays stable within a turn. A call runs
-against the registry as it is; one to a tool a refresh took away reaches the group that
-last held it (`left` in `assembleToolRegistry`), which says why — an MCP server's
-`<name> is not connected — retrying in N s` — never a bare `Unknown tool`.
+`ai.disabledTools` read again and a name clash said once per registry. Every assemble
+and refresh of the current registry moves `toolRegistryRevision()`, and `agentChat`
+reads it before each round (`readTools`): when it moved, the catalog, the index, the
+group descriptions, the wire names and the defs the y/n reads are worked out again, so
+a group that arrives mid-turn is sent (and indexed) from the turn's next round; when
+it did not, the round sends what the last one sent, byte for byte — a refresh costs one
+prompt-cache miss, a round without one none. A def a refresh took away is KEPT in the
+turn's `toolByName`: a call the model makes from an earlier list still asks the person
+when the tool is a write. A call runs against the registry as it is; one to a tool a
+refresh took away reaches the group that last held it (`left` in
+`assembleToolRegistry`), which says why — an MCP server's `<name> is not connected —
+retrying in N s` — never a bare `Unknown tool`. `registry.refresh()` refreshes that
+registry alone (the App calls it when a plugin joins); the process-wide
+`refreshToolRegistry` refreshes the last one assembled.
 `make(name, shape)` injects `config.plugins.<name>` and qualified keys. The
 returned `shape` has optional: `commands`, `keys`, `keyActions`, `views`,
 `surface`, `modals`, `colors`, `modalColors`, `configSchema`, `components`, `tools`,
 `services`, `aiTools`, `keycaps`, `entry`, `setup`, `chatContext`,
-`chatSubject` (deprecated), `afterWrite`; every hook, and each
+`chatSubject` (deprecated), `afterWrite`, `ready`; every hook, and each
 `components[slot] = ({ ui, host }) => Component`, receives the plugin's pair (below).
 `services` expose host services through `host.services` — the host wins on every
 key it owns, a plugin's same-named key never clobbers it. `setup` runs once,
@@ -281,6 +291,54 @@ the blacklist.
   The host reaches them as `services.chatContext()` / `services.afterWrite()`
   (bound in `runtime/app.tsx`).
 
+### The first frame waits for nobody
+
+The interactive app draws before any plugin that waits on another party is ready
+(`runInteractive`, `src/main.ts`). `loadPlugins` (`src/loader/build.ts`) loads every
+enabled plugin AT ONCE — import, build, a remote plugin's transport — and puts them in
+the list in the order they are enabled, whichever finished first (the order decides who
+keeps a bare tool name and the `chatContext` order). Two modes:
+
+- **Wait** (no `late`): every remote handshake and every plugin's `ready` is awaited.
+  The one-shot prompt and `config set plugins.…` load this way — they read the tools
+  once, have no screen to show sooner, and a remote plugin's `configSchema` is what
+  validates its key.
+- **Late** (`late`, a `LatePlugins` from `src/loader/late.ts`): a remote plugin is not
+  awaited — its promise goes to `late.expect` — and a plugin's `ready` to `late.wait`.
+  The hub keeps what is still starting (`starting()`) and turns each outcome into an
+  event — `joined` with the plugin, `skipped` with the loader's own line (`skipLine`,
+  `[plugins] skip <name>: <why>`), `ready`, and `note` — every line the adapter and the
+  transport say (the process's stderr, a restart during the handshake) — held until the
+  App listens (a fast handshake can land before the first render), then appended to the
+  app's log. None of it is `console.warn`ed: under the TTY backend the console bridge
+  would log it a second time as `[console.warn] …` and print it again at exit.
+- **An exit during a pending handshake** stops the process too: the stdio transport puts
+  a child into its exit hook's `live` set the moment `spawn()` returns, before its
+  `spawn` event, and nothing else knows of it yet (the adapter's stop is registered
+  after `hello`). `remote-transports.e2e.test.ts` holds it with a real host process
+  (`helpers/late-exit-host.ts`) that exits while the fake never answers.
+
+**A plugin joins the running App without a remount** (`renderApp`, `listen` in an effect,
+dropped at unmount so a test's late handshake never reaches the next test's App). It is
+inserted into the SAME `plugins` array the tool registry was assembled from, at its place
+in the enabled order (`joinIndex`, from `late.order`/`rank`, which the loader sets) — so
+keys, the palette, `chatContext` and the start screen follow the config, not the timing
+— and
+`rebuildFromPlugins` builds again INTO the objects already handed out: `keys` (every
+plugin's `host.keys`; a refused-key note said once, `keyNote`), the view and command
+registries (the `:` line and the chat's plugin commands read them), the palette (as a
+scheme change does), `tools.refresh()`, and `services.pluginAiTools`. The components are
+built PER PLUGIN, once (`compsOf`, keyed by the plugin object): a plugin's `setup` and
+factories run on the first render that sees it, and every plugin already mounted keeps
+its component types — a memo over the whole list, rebuilt, would make new types and
+React would mount the chat anew, its turn, draft and queue gone.
+`src/__tests__/late-plugins.e2e.test.ts` holds it against a held handshake (the fake
+remote's `holdHello`): the frame drawn with `starting: fake…`, the plugin joining with
+its entry key and caps, a refused handshake as one skip line, and a turn begun before
+the join sending its tools from the next round with the draft still in the field.
+`bootApp`'s `opts.late` loads that way (a guest's `ready` included); without it the rig
+waits for every plugin, as the one-shot prompt does.
+
 ### A plugin that starts a process owns its life
 
 The `mcp` plugin starts a server given as a `command` and talks MCP over its stdin and
@@ -317,16 +375,24 @@ other non-2xx — drops it — while a 401 or 400 is that call's error alone) lo
 401/403 is the token and is never tried again (`authReason` says so and names `/mcp
 restart`). Every attempt carries the server's generation; `disable`, `restart`,
 `remove` and a drop start a new one, so an attempt that finishes under an older one lets
-go of its client and brings back nothing. A connect after the start calls `onChange`:
-the plugin sets `plugin.tools` and calls the host's `toolsChanged` (the group is in the
-next message's index), keeps the start screen's `N of M servers connected` current,
-logs it and says `<name> connected — 1 tool` / `N tools` through `services.chatNote`,
-which the host draws as `[mcp] …`. `:mcp help`, too long for the one-row toast, opens the chat and is
+go of its client and brings back nothing. The first attempts are `start()`, which the
+builder does not await: it is the plugin's `ready`. Every connect and every failure calls
+`onChange` with its event: the plugin sets `plugin.tools` and calls the host's
+`toolsChanged` (the group is in the next round's index), keeps the start screen's
+`N of M servers connected` current, and logs it. A first attempt's event carries
+`first`: its line goes to the log alone (`statusLine`, and the `readOnly` names the
+server does not offer) — the start of a run is not news, and a continued conversation
+would gain a row at every start. A connect after that also says `<name> connected — 1
+tool` / `N tools` through `services.chatNote`, which the host draws as `[mcp] …`. A line
+said before `setup` (a server that answers before the App is up) waits in `early` and is
+flushed there. `:mcp help`, too long for the one-row toast, opens the chat and is
 said there as a note. Timers are unref'd and cleared at exit (`process.once('exit')`
 stops every manager). The clock and the schedule are injected (`timers`, `retry` —
 builder options the loader never passes), so the tests run the schedule without waiting
 it; `src/__tests__/mcp.e2e.test.ts` holds the late group reaching the index of the next
-request and a 401 asked once.
+request, a 401 asked once, and a connect held past the first frame: the frame drawn,
+`starting: mcp…` on it, and a turn begun before the connect sending the group from its
+next round, its write still asking.
 
 **`/mcp` is the person's lever over them** (`plugins-available/mcp/src/command.ts`, a
 plugin command with `chat: true` and `complete`): bare, a panel in the chat (name,
@@ -382,6 +448,10 @@ board.
 - The block is centred on both axes; inside it rows keep a common left edge.
 - The start screen draws keys with `bindingGlyph(keys[action])` and offers nothing
   that is unbound.
+- While a plugin is still starting (below) the start screen names it on one dim line
+  under the list, `starting: tutor, mcp…` (`startingLine`, `src/views/home.ts`,
+  from `late.starting()`), gone once each has joined or failed. A plugin joins the list
+  — and its entry key the start screen, its caps the footer — only once it has.
 
 ### Remote plugins
 
@@ -432,7 +502,8 @@ protocol as its authors read it is docs/plugins.md, "A plugin in another languag
   must exist before any tool has run. Each answers from a cache keyed by
   `(kind, data, width)`, behind a dim `▸ kind` placeholder while `view.render` is in
   flight.
-- `hello` runs at load, and again after every restart, each with a 10 s timeout; the
+- `hello` runs at load — in the app, in the background: the plugin joins the running
+  app when it is answered (below) — and again after every restart, each with a 10 s timeout; the
   guest rule ("A plugin is a guest", above) still holds a remote plugin to it, since
   `keycaps` reads the last frame the same way for a remote plugin as for one in the
   host's own process.
@@ -477,7 +548,8 @@ protocol as its authors read it is docs/plugins.md, "A plugin in another languag
   (the first of the five need not itself have been quick); a restart that stays up
   longer resets the count. A restart whose `hello` fails ends it the same way, at once
   (`src/remote/adapter.ts`'s `onRestart`). The very first `start()` is never a
-  restart: if it fails, that rejects to the loader alone and nothing is scheduled.
+  restart: if it fails, that rejects to the loader alone — a skip, said in the app's
+  log when the app is already up — and nothing is scheduled.
 - `src/remote/sockets.ts`'s `sockets/`, under `hostStateDir()` at 0700, is the host's
   own place for its sockets; a plugin names its socket, never a path.
 - **The host's own exit** (`src/remote/lifecycle.ts`) asks every remote plugin's
@@ -1311,7 +1383,8 @@ hold this set together:
   (the config default) a request sends the `core` group in full, the tools this
   conversation has LOADED, and `tools_load`, whose description is the index — per
   group, `name — first sentence of the description`. The index does not change as
-  tools load (a stable prefix). `tools_load({ names | group })` is the loop's own
+  tools load (a stable prefix) — only when the registry does: a group that joins
+  mid-turn is in it from the next round (`toolsChanged`, above). `tools_load({ names | group })` is the loop's own
   tool, not the registry's; a group's name given in `names` loads the group (a tool of
   the same name wins), since a model reasonably passes one there and refusing it would
   cost a round; what is sent is worked out again for EVERY round, so a
@@ -1748,7 +1821,15 @@ alike: a plugin that wrote `x:tool` itself gets exactly that.
 
 A prefix appears only when it is NEEDED. **A name is claimed once**: the first group to
 declare it keeps the bare word; a later group's tool is registered as `<plugin>:<name>`
-instead and the clash is said (`[tools] "search" is declared by both …`). The registry
+instead and the clash is said (`[tools] "search" is declared by both …`). "First" is
+the list's order at the first assembly; after that **a name handed out keeps its
+holder** (`held` → `claim` in `assemble`, from the last assembly's bare names) for as
+long as the holder still declares it — a late plugin inserted at its enabled place
+ahead of the holder, or an MCP group that connects, is registered qualified and the
+line says so; a y/n never shows a bare name that now means another tool. Once the
+holder stops declaring it, the next declarer in order takes it. Two late plugins
+clashing with each other therefore resolve by arrival; distinct names (a plugin's own
+prefix) avoid it (docs/plugins.md says so to authors). The registry
 remembers the tool's own name (`ownName`) because that is what the group's `exec`
 understands. Without this a clash is silent: `agentChat` sends one declaration per
 name, so the provider's own "Duplicate tool name" 400 never fires to catch it.

@@ -12,9 +12,13 @@ every Mac with Safari 27:
     config set plugins.mcp.servers.safari.command /usr/bin/safaridriver
     config set plugins.mcp.servers.safari.args '["--mcp"]'
 
-Restart the assistant: the servers are asked for their tools at start. The log (`L`)
-says what each one answered — `webstorm: WebStorm 2026.2, 23 tools`,
-`safari: Safari 1.0.0, 17 tools`, or why it did not.
+Restart the assistant: the servers are asked for their tools at start, in the
+background — the screen is drawn at once, the start screen says `starting: mcp…` until
+every server has answered or failed, and each server's tools join as it answers (a
+message already on its way gets them from its next step). The log (`L`) says what each
+one answered — `webstorm: WebStorm 2026.2, 23 tools`, `safari: Safari 1.0.0, 17
+tools`, or why it did not. A one-shot prompt (`flow-assist "…"`) waits for them before
+it asks the model.
 
 ## A server that is not there
 
@@ -22,8 +26,8 @@ A server that does not answer at start — a gateway that said 502 at that momen
 not open yet — is tried again in the background: after 5 s, 15 s and 60 s, then every
 5 minutes, until it answers. So is one that drops later: a call whose connection is
 refused or reset, a gateway's 502, 503 or 504, a process that exits. Its tools are not offered while it is gone, and when it
-answers they join at your next message — no restart — and the chat says so: `[mcp]
-tracker connected — 12 tools`. A call with no answer within `timeoutMs`, another 5xx or
+answers they join at once — a message already on its way gets them from its next
+step, no restart — and the chat says so: `[mcp] tracker connected — 12 tools`. A call with no answer within `timeoutMs`, another 5xx or
 a 404 is that call's error — a slow search takes no other tool away — unless the
 server, asked at once whether it is there (MCP's `ping`), does not answer either: then
 it has dropped. A 404 to the ping too is a session the server has forgotten (sessions
@@ -75,7 +79,7 @@ A server is reached one of two ways, and exactly one: `url` or `command`.
 | `trusted` | `true` — you believe THIS SERVER's own read-only claims: a tool with `readOnlyHint: true` runs without asking |
 | `readOnly` | YOUR OWN list of this server's tools you have checked and call read-only, by the name the server gives them — each runs without asking. It needs no `trusted`, and it is the only thing that helps a server which makes no claims at all |
 | `enabled` | `false` — keep the entry, do not connect (`/mcp disable <name>` sets it) |
-| `connectTimeoutMs` | the handshake and the tool list, default 1500 — the assistant waits for them at start, so a server that is down (or a command that never answers) costs at most this much |
+| `connectTimeoutMs` | the handshake and the tool list, default 1500 — how long a first attempt may take before the server counts as not there (the app does not wait for it; a one-shot prompt does, at most this much) |
 | `timeoutMs` | a tool call, default 60000 |
 
 `command` and `args` are taken literally: they are an argv, never a shell line, and no

@@ -68,6 +68,7 @@ test('a call through the chat: asked first, sent with the session, answered as d
   // Built before the app — as the loader does — and before the scripted model takes
   // over `fetch`: the plugin keeps the fetch it was built with.
   const shape = await buildMcpPlugin({ make: makeFactory(config as never) as never, config });
+  await (shape as { ready?: Promise<unknown> }).ready;
   const model = new ScriptedModel();
   model.script(
     [{ tool: 'webstorm__get_file_text', args: { path: 'src/answer.ts' } }],
@@ -99,6 +100,7 @@ test('a server\'s `initialize` instructions become its tool group\'s description
   // Built before the app, like the call test above, so the plugin keeps the fetch it
   // was built with rather than the scripted model's.
   const shape = await buildMcpPlugin({ make: makeFactory(config as never) as never, config });
+  await (shape as { ready?: Promise<unknown> }).ready;
   const reg = assembleToolRegistry({ plugins: [shape as never], config, repo: { enabledPlugins: async () => ['mcp'], list: async () => [] } as never });
   const group = reg.groups.find((g) => g.id === 'mcp:webstorm')!;
   expect(group.description).toBe('Statuses are numeric ids: 1 open, 2 done. Look them up before filtering by name.');
@@ -197,6 +199,7 @@ test('/mcp lists the servers in a panel; d disables one at once, saved, and its 
   const { z } = await import('zod');
   // Built with the host's zod, as the loader builds it: the settings are what `d` writes.
   const shape = await buildMcpPlugin({ make: makeFactory(config as never) as never, config, z, toolsChanged: refreshToolRegistry } as never);
+  await (shape as { ready?: Promise<unknown> }).ready;
   const model = new ScriptedModel();
   model.script([{ text: 'ok' }]);
   const app = await bootApp(model, 110, 30, () => [shape as never], config);
@@ -222,4 +225,64 @@ test('/mcp lists the servers in a panel; d disables one at once, saved, and its 
   // The settings file is the process's under `bun test`: what this test saved goes.
   const { unsetConfigValue } = await import('../config/load');
   unsetConfigValue({}, 'plugins.mcp.servers.webstorm', { scope: 'saved' });
+});
+
+// The app does not wait for a server: with its `initialize` held, the first frame is
+// drawn and names mcp as starting. A turn begun then runs with the tools of that moment;
+// once the server answers, its group is in the turn's next round — and a call to one of
+// its tools still waits for the person's y/n.
+test('a server whose connect is held: the app draws at once, and a turn begun before it sees the group from its next round, asking first', async () => {
+  const { default: buildMcpPlugin } = await import('../../plugins-available/mcp/src/index.ts');
+  const { refreshToolRegistry } = await import('../loader/tools');
+  let open!: () => void;
+  const gate = new Promise<void>((r) => { open = r; });
+  const held = Bun.serve({
+    port: 0, hostname: '127.0.0.1',
+    async fetch(req) {
+      const body = await req.json() as { id?: number; method: string };
+      if (body.method === 'initialize') await gate;
+      return server.fetch(new Request(`http://127.0.0.1:${server.port}/stream`, { method: 'POST', headers: req.headers, body: JSON.stringify(body) }));
+    },
+  });
+  try {
+    const config = { plugins: { mcp: { servers: { webstorm: { url: `http://127.0.0.1:${held.port}/stream` } } } } };
+    // Built before the app, as the loader builds it — and not awaited past its return.
+    const shape = await buildMcpPlugin({ make: makeFactory(config as never) as never, config, toolsChanged: refreshToolRegistry } as never);
+    const model = new ScriptedModel();
+    model.script(
+      [{ hold: true }, { tool: 'datetime', args: {} }],
+      [{ tool: 'webstorm__get_file_text', args: { path: 'src/answer.ts' } }],
+      [{ text: 'It exports answer = 42.' }],
+    );
+    const app = await bootApp(model, 110, 30, () => [shape as never], config, { chatMode: null, late: true });
+    expect(app.backend.lastFrame).toContain(': commands');
+    expect(app.backend.lastFrame).toContain('starting: mcp…');
+    expect(app.backend.lastFrame).toContain('MCP — 0 of 1 servers connected');
+    await app.press('F');
+    await app.type('what does answer.ts export?');
+    await app.press('return');
+    for (let i = 0; i < 50 && model.requests.length < 1; i++) await new Promise((r) => setTimeout(r, 10));
+    const sent = (i: number) => ((model.requests[i] as { tools?: { function: { name: string } }[] }).tools ?? []).map((t) => t.function.name);
+    expect(sent(0)).not.toContain('webstorm__get_file_text');
+    open();
+    await (shape as { ready: Promise<unknown> }).ready;
+    model.release();
+    for (let i = 0; i < 100 && !app.backend.lastFrame.includes('Confirm write: webstorm:get_file_text'); i++) await new Promise((r) => setTimeout(r, 10));
+    expect(sent(1)).toContain('webstorm__get_file_text');
+    expect(app.backend.lastFrame).toContain('Confirm write: webstorm:get_file_text');
+    await app.press('y');
+    for (let i = 0; i < 100 && model.requests.length < 3; i++) await new Promise((r) => setTimeout(r, 10));
+    expect(JSON.stringify(model.requests.at(-1))).toContain('export const answer = 42; // src/answer.ts');
+    // A server's first connect is the start of the run, not news: no `[mcp]` row in the
+    // chat for it.
+    expect(app.backend.lastFrame).not.toContain('[mcp] webstorm connected');
+    await app.press('escape');
+    await app.press('escape');
+    await app.press('escape');
+    expect(app.backend.lastFrame).not.toContain('starting:');
+    expect(app.backend.lastFrame).toContain('MCP — 1 of 1 servers connected');
+    app.app.unmount();
+  } finally {
+    held.stop(true);
+  }
 });

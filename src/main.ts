@@ -33,6 +33,7 @@ import { installPluginArchive, isArchiveSource } from './loader/archive-install.
 import type { PluginRepo } from './loader/repo.js';
 import type { PluginRepo as RepoShape } from './loader/host-group.js';
 import { loadPlugins } from './loader/build.js';
+import { createLatePlugins } from './loader/late.js';
 import { assembleToolRegistry, pluginConfigs } from './loader/tools.js';
 import { renderApp } from './runtime/app.js';
 import { refreshSecrets } from './assistant/secrets.js';
@@ -390,7 +391,11 @@ async function runInteractive(config: Record<string, unknown>, repo: PluginRepo)
   guardConfigFiles();
   // What the loader skipped, and why, goes into the app's log too.
   const loadNotes: string[] = [];
-  const plugins = await loadPlugins({ config, repo, renders, enabledDir, notes: loadNotes });
+  // The screen is drawn at once: a remote plugin's process and a plugin that waits on
+  // its servers join the app when they are ready (src/loader/late.ts). The one-shot
+  // prompt and the CLI wait for everything instead — they read the tools once.
+  const late = createLatePlugins();
+  const plugins = await loadPlugins({ config, repo, renders, enabledDir, notes: loadNotes, late });
   const registry = assembleToolRegistry({ plugins, config, repo: repo as unknown as RepoShape });
   // The backend holds the console while it owns the screen; with `onConsole` set every
   // line goes to the log (`L`) at once and nothing is printed again at exit.
@@ -417,7 +422,7 @@ async function runInteractive(config: Record<string, unknown>, repo: PluginRepo)
     void stopRemotePlugins().then(() => process.exit(0));
   };
   const pluginsNote = await missingPluginsNote(repo);
-  handle = await renderApp(backend, { plugins, config, renders: {}, tools: registry, onExit, pluginsNote: pluginsNote ?? undefined, loadNotes, consoleLog });
+  handle = await renderApp(backend, { plugins, config, renders: {}, tools: registry, onExit, pluginsNote: pluginsNote ?? undefined, loadNotes, consoleLog, late });
 }
 
 // ─── help text ────────────────────────────────────────────────────────────────

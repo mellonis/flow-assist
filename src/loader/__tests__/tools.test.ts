@@ -713,6 +713,43 @@ test('a tool name is claimed once: the first plugin keeps the bare word, the sec
   }
 });
 
+// A name handed out keeps its holder: a plugin that joins the list ahead of the holder
+// (its place in the enabled order), or a server that connects late, is offered
+// qualified — the model is never handed a different tool under a name it already has.
+// Once the holder no longer declares the name, it goes to whoever declares it next.
+test('a refresh keeps a bare name with its holder; a plugin that joins ahead of it is offered qualified', async () => {
+  const make = makeFactory({});
+  const group = (id: string, answer: string) => ({
+    id,
+    tools: [{ type: 'function', function: { name: 'search', description: '', parameters: { type: 'object', properties: {} } } }],
+    exec: async () => answer,
+  });
+  const warned: string[] = [];
+  const realWarn = console.warn;
+  console.warn = (m: unknown) => { warned.push(String(m)); };
+  try {
+    const repoPlugin = make('repo', { tools: [group('repo', 'from repo')] });
+    const plugins = [repoPlugin];
+    const reg = assembleToolRegistry({ plugins, config: {}, repo: { list: async () => [] } as any });
+    expect(String(await reg.exec('search', {}, {}))).toBe('from repo');
+    // `late` joins AHEAD of repo in the list — enabled first, arrived later.
+    plugins.unshift(make('late', { tools: [group('late', 'from late')] }));
+    reg.refresh!();
+    const names = reg.groups.flatMap((g) => g.tools.map((t) => t.function.name));
+    expect(names).toContain('search');
+    expect(names).toContain('late:search');
+    expect(String(await reg.exec('search', {}, {}))).toBe('from repo');
+    expect(String(await reg.exec('late:search', {}, {}))).toBe('from late');
+    expect(warned.join('\n')).toContain('"search" is declared by both repo and late — repo keeps the name, late\'s is offered as "late:search"');
+    // The holder stops declaring it: the name is free, and goes to the next declarer.
+    repoPlugin.tools = [];
+    reg.refresh!();
+    expect(String(await reg.exec('search', {}, {}))).toBe('from late');
+  } finally {
+    console.warn = realWarn;
+  }
+});
+
 test('the memory tool says how an entry is written, and refuses a near-copy — in either scope — a paragraph, and a full list', async () => {
   const { root, reg, inProject } = memSetup();
   // The rules ride in the description of every request; a drift out of the prompt is

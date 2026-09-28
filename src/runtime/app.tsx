@@ -12,7 +12,7 @@
 import { pluginConfigs } from '../loader/tools.js';
 import { Box, Text, DialogHost, render, useApp, useColorScheme, useInput, useTerminalSize, type CopyEvent } from '@flowtty/react';
 import { isPrintable, type Backend } from '@flowtty/core';
-import { Fragment, createContext, createElement as h, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, createContext, createElement as h, useContext, useEffect, useRef, useState } from 'react';
 import { HOST_API } from '../version.js';
 import type { PluginApi, PluginHost, PluginUi } from './plugin-api.js';
 import { identityToken } from './plugin-identity.js';
@@ -65,6 +65,7 @@ import type { ColorScheme, Theme } from '../playback/theme.js';
 import type { Command } from '../loader/plugin.js';
 import type { Plugin, PluginShape } from '../loader/plugin.js';
 import { renderHome } from '../views/home.js';
+import { joinIndex, type LatePlugins } from '../loader/late.js';
 import { FOOTER_ROWS, TITLE_ROWS, chatModeOf, panelLayout, type ChatMode, type PanelLayout } from './panel-layout.js';
 
 // The host's own plugins: they ARE the host, so the start screen does not list them
@@ -162,6 +163,10 @@ export interface RenderAppInput {
   // What the frames cost, per kind of input (src/runtime/frame-stats.ts). A test passes
   // its own to read the frames; the app makes one, whose slow frames go to the log.
   frameMeter?: FrameMeter;
+  // The plugins still starting when the app draws (src/loader/late.ts): each joins the
+  // list when it is ready, a skip goes to the log, and the start screen names the ones
+  // still on their way.
+  late?: LatePlugins;
 }
 
 // Command-line state lives in a single stable `{ current }` object created in
@@ -337,7 +342,7 @@ const CONSOLE_REDRAW_MS = 200;
 
 export function renderApp(
   root: Backend,
-  { plugins, config, onExit, renders: _renders = {}, tools, toastMs, clipboardImage, pluginsNote, loadNotes = [], interactive, consoleLog, frameMeter }: RenderAppInput,
+  { plugins, config, onExit, renders: _renders = {}, tools, toastMs, clipboardImage, pluginsNote, loadNotes = [], interactive, consoleLog, frameMeter, late }: RenderAppInput,
 ) {
   // Resolve config.theme into the full per-modal palette BEFORE anything reads it
   // (createServices, the plugins' `host` and every renderer read `config.theme`): the base of the
@@ -397,7 +402,29 @@ export function renderApp(
   const meter = frameMeter ?? createFrameMeter({ onSlow: (line) => services.log.append(line) });
   const viewRegistry = buildViewRegistry(plugins);
   const commandRegistry = buildCommandRegistry(plugins);
-  const keys = buildKeys(plugins, config, undefined, (line) => services.log.append(line));
+  // A key refused for an action is said once, however often the keys are built again.
+  const keyNotes = new Set<string>();
+  const keyNote = (line: string) => { if (!keyNotes.has(line)) { keyNotes.add(line); services.log.append(line); } };
+  const keys = buildKeys(plugins, config, undefined, keyNote);
+  // A plugin that joins after the first frame goes into the SAME list, and what was
+  // built from the list is built again INTO the objects already handed out — the keys
+  // (every plugin's `host.keys`), the view and command registries, the palette, the tool
+  // registry and its aiTools — so nothing that holds one needs it handed again, and no
+  // component is mounted anew.
+  const rebuildFromPlugins = () => {
+    const nextKeys = buildKeys(plugins, config, undefined, keyNote);
+    for (const action of Object.keys(keys)) delete keys[action];
+    Object.assign(keys, nextKeys);
+    Object.assign(viewRegistry, buildViewRegistry(plugins));
+    commandRegistry.splice(0, commandRegistry.length, ...buildCommandRegistry(plugins));
+    const theme = config.theme as Theme;
+    const nextTheme = resolveAppTheme(userTheme, plugins, config, themeScheme);
+    for (const key of Object.keys(theme)) delete theme[key];
+    Object.assign(theme, nextTheme);
+    tools?.refresh?.();
+    const aiTools = (services as unknown as HostServices).pluginAiTools;
+    aiTools.splice(0, aiTools.length, ...(tools?.groups ?? []).filter((g) => g.id.endsWith(':aiTools')).flatMap((g) => g.tools as typeof aiTools));
+  };
   const helpFor = (reg: unknown) => helpForRegistry(reg as Command[]);
 
   // Shared per-app mutable state (created ONCE; read by the App and the
@@ -499,7 +526,7 @@ export function renderApp(
     }
     const { ui: pluginUi, host: hostBase } = apiRef.current;
 
-    // Mount each plugin's `components[slot]` factory EXACTLY once: memoize only
+    // Mount each plugin's `components[slot]` factory EXACTLY once: keep only
     // the component FUNCTION (stable identity → no remount, state preserved),
     // but render a fresh element each App render (so a modal re-renders on
     // `notify()` and re-reads shared mutable state like `services.logs`). Each
@@ -508,66 +535,82 @@ export function renderApp(
     // so the memory `plugin` scope resolves to the true owner — a caller or LLM cannot
     // forge this value.
     // Each plugin's pair, captured so the footer can call the plugin's `keycaps` with
-    // the SAME objects the plugin reads its live state from. Populated by
-    // `overlayComps`; a ref, so it SURVIVES renders where the useMemo does not run (a
-    // fresh `{}` each render would lose the capture and the footer would collapse even
-    // while a board is open). The pairs are stable, and the services/store they point
-    // at are mutated live, so re-reading them each render stays fresh.
+    // the SAME objects the plugin reads its live state from. Filled where a plugin's
+    // components are built (below), once per plugin; a ref, so it survives every
+    // render after that. The pairs are stable, and the services/store they point at
+    // are mutated live, so re-reading them each render stays fresh.
     const apiMap = useRef<Record<string, PluginApi>>({}).current;
     // The plugins whose `chatContext` threw and was logged — once each, for the run.
     const contextFailed = useRef(new Set<string>()).current;
-    const overlayComps = useMemo(
-      () => {
-        const comps: { Comp: () => unknown; key: string; plugin: PluginShape; surface: boolean }[] = [];
-        for (const p of plugins) {
-          // Host contract (AGENTS.md §shape): a plugin's `services` are exposed
-          // through `host.services`, but the HOST must win on keys it owns — a
-          // plugin's no-op `showMessage`/`openBrowser` must never clobber the real
-          // toast/browser. Build a per-plugin view with the host services as the
-          // prototype (host wins via lookup) and only the plugin-OWNED keys (the
-          // lazy getters like `detail`/`boardData`) as own props, preserving their
-          // getter descriptors so they stay live.
-          const pServices = Object.create(services) as Record<string, unknown>;
-          if (p.services) {
-            for (const key of Object.keys(p.services)) {
-              if (key in services) continue;
-              const desc = Object.getOwnPropertyDescriptor(p.services, key);
-              if (desc) Object.defineProperty(pServices, key, desc);
-            }
-          }
-          // The services that act for a plugin are bound to it, as own props of its view:
-          // its news in the chat carries its name, and its config writes reach only its
-          // own settings (`ownSettingsRefusal`), set the way `:config set` sets them.
-          const name = p.name;
-          const scope = (key: string, unset: boolean): string | null => ownSettingsRefusal(name, key)
-            ?? (unset && !configSchemaAt(hostConfigSchema, key, pluginConfigs(plugins)) ? `config: unknown key ${key}` : null);
-          pServices.chatNote = (text: unknown) => (hostBase.store as { chat?: { note?: (t: string) => void } }).chat?.note?.(`[${name}] ${String(text ?? '')}`);
-          pServices.setConfig = (key: string, value: unknown, opts?: { session?: boolean }) => {
-            const no = scope(key, false);
-            return no ? { ok: false, error: no } : setConfigValue(config, key, value, { scope: opts?.session ? 'session' : 'saved', pluginConfigs: pluginConfigs(plugins) });
-          };
-          pServices.unsetConfig = (key: string, opts?: { session?: boolean }) => {
-            const no = scope(key, true);
-            return no ? { ok: false, error: no } : unsetConfigValue(config, key, { scope: opts?.session ? 'session' : 'saved', pluginConfigs: pluginConfigs(plugins) });
-          };
-          // `setup` seeds the plugin's cross-component store BEFORE any component
-          // mounts, so hooks reading the store during render don't throw.
-          const api: PluginApi = { ui: pluginUi, host: { ...hostBase, services: pServices, pluginToken: identityToken(p.name) } };
-          apiMap[p.name] = api;
-          p.setup?.(api);
-          for (const [slot, factory] of Object.entries(p.components ?? {})) {
-            const Comp = factory(api);
-            // A plugin's SURFACE — its own full screen — is the slot named `view`, or
-            // named after `shape.surface`. Everything else (modals, triggers, the
-            // workspace that feeds them) is furniture and is always mounted.
-            const surface = slot === 'view' || (!!p.surface && slot === p.surface);
-            if (typeof Comp === 'function') comps.push({ Comp: Comp as () => unknown, key: `${p.name}:${slot}`, plugin: p, surface });
-          }
+    // Built per plugin, once: a plugin that joins after the first frame gets its own on
+    // the render after it joins, and every plugin already mounted keeps its component
+    // types — built again, they would be new types, and React would mount the chat anew
+    // (its turn, its draft, its queue gone) and every plugin's screen with it.
+    type Comps = { Comp: () => unknown; key: string; plugin: PluginShape; surface: boolean }[];
+    const compsOf = useRef(new Map<Plugin, Comps>()).current;
+    for (const p of plugins) {
+      if (compsOf.has(p)) continue;
+      const comps: Comps = [];
+      compsOf.set(p, comps);
+      // Host contract (AGENTS.md §shape): a plugin's `services` are exposed
+      // through `host.services`, but the HOST must win on keys it owns — a
+      // plugin's no-op `showMessage`/`openBrowser` must never clobber the real
+      // toast/browser. Build a per-plugin view with the host services as the
+      // prototype (host wins via lookup) and only the plugin-OWNED keys (the
+      // lazy getters like `detail`/`boardData`) as own props, preserving their
+      // getter descriptors so they stay live.
+      const pServices = Object.create(services) as Record<string, unknown>;
+      if (p.services) {
+        for (const key of Object.keys(p.services)) {
+          if (key in services) continue;
+          const desc = Object.getOwnPropertyDescriptor(p.services, key);
+          if (desc) Object.defineProperty(pServices, key, desc);
         }
-        return comps;
-      },
-      [plugins, pluginUi, hostBase],
-    );
+      }
+      // The services that act for a plugin are bound to it, as own props of its view:
+      // its news in the chat carries its name, and its config writes reach only its
+      // own settings (`ownSettingsRefusal`), set the way `:config set` sets them.
+      const name = p.name;
+      const scope = (key: string, unset: boolean): string | null => ownSettingsRefusal(name, key)
+        ?? (unset && !configSchemaAt(hostConfigSchema, key, pluginConfigs(plugins)) ? `config: unknown key ${key}` : null);
+      pServices.chatNote = (text: unknown) => (hostBase.store as { chat?: { note?: (t: string) => void } }).chat?.note?.(`[${name}] ${String(text ?? '')}`);
+      pServices.setConfig = (key: string, value: unknown, opts?: { session?: boolean }) => {
+        const no = scope(key, false);
+        return no ? { ok: false, error: no } : setConfigValue(config, key, value, { scope: opts?.session ? 'session' : 'saved', pluginConfigs: pluginConfigs(plugins) });
+      };
+      pServices.unsetConfig = (key: string, opts?: { session?: boolean }) => {
+        const no = scope(key, true);
+        return no ? { ok: false, error: no } : unsetConfigValue(config, key, { scope: opts?.session ? 'session' : 'saved', pluginConfigs: pluginConfigs(plugins) });
+      };
+      // `setup` seeds the plugin's cross-component store BEFORE any component
+      // mounts, so hooks reading the store during render don't throw.
+      const api: PluginApi = { ui: pluginUi, host: { ...hostBase, services: pServices, pluginToken: identityToken(p.name) } };
+      apiMap[p.name] = api;
+      p.setup?.(api);
+      for (const [slot, factory] of Object.entries(p.components ?? {})) {
+        const Comp = factory(api);
+        // A plugin's SURFACE — its own full screen — is the slot named `view`, or
+        // named after `shape.surface`. Everything else (modals, triggers, the
+        // workspace that feeds them) is furniture and is always mounted.
+        const surface = slot === 'view' || (!!p.surface && slot === p.surface);
+        if (typeof Comp === 'function') comps.push({ Comp: Comp as () => unknown, key: `${p.name}:${slot}`, plugin: p, surface });
+      }
+    }
+    const overlayComps = plugins.flatMap((p) => compsOf.get(p) ?? []);
+    // The plugins still starting join here as they come (src/loader/late.ts); what waited
+    // for the App to listen is handed over at once.
+    useEffect(() => late?.listen((event) => {
+      if (event.kind === 'joined') {
+        // Its place in the enabled order, whenever it arrived: the keys, the palette, the
+        // screen context and the start screen follow the config, not the timing.
+        plugins.splice(joinIndex(plugins, event.plugin.name, late.rank), 0, event.plugin);
+        rebuildFromPlugins();
+      } else if (event.kind === 'skipped' || event.kind === 'note') {
+        services.log.append(event.line);
+        (services as unknown as ReactBoundServices).logs = services.log.read();
+      }
+      notify();
+    }), []);
 
     // Every view renderer, the host's and each plugin's: the chat draws a tool's block
     // with the renderer its kind names (src/loader/registry.ts).
@@ -1051,7 +1094,7 @@ export function renderApp(
       // the footer under a modal's dimmed backdrop, like everything else behind it.
       h(Box, { flexGrow: 1, zIndex: 1 },
         overlayComps.filter((c) => !isChat(c) && !isTop(c) && (!c.surface || surfaceActive(c.plugin))).map(({ Comp, key }) => h(Comp as any, { key })),
-        atHome ? renderHome({ title, plugins, keys, builtins: BUILTIN_PLUGINS, width: region.width, pluginsNote }) : null),
+        atHome ? renderHome({ title, plugins, keys, builtins: BUILTIN_PLUGINS, width: region.width, pluginsNote, starting: late?.starting() }) : null),
       // The bottom row, and the one place on this screen a drag has something to
       // copy: the command the person typed. Marking the box `selectable: false`
       // whole would be right for what surrounds the command, but would swallow the

@@ -5,6 +5,31 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **The screen is drawn at once.** The app waited for every plugin before its first
+  frame — a plugin in another language until its process had started and answered, the
+  `mcp` plugin until every server had — which cost one and a half to three seconds at
+  every start, more with a slow server. Now it draws straight away (about 0.2 s here),
+  and the start screen says what is still on its way, `starting: tutor, mcp…`,
+  until each has joined or failed. A plugin that joins brings everything with it — its
+  line on the start screen and the key that leads in, its keys, screens, commands and
+  tools — without a restart and without touching the chat; one that fails is a
+  `[plugins] skip …` line in the log, as before. An MCP server's tools join as it
+  answers. A message sent before then runs with the tools there are, and gets the new
+  ones from its next step; a write among them still asks. A plugin that joins late takes
+  its place in the enabled order, and a tool name the model already has stays with its
+  tool: a late plugin's tool of the same name is offered as `<plugin>:<name>`, said in
+  the log. What a plugin's process writes to stderr while it starts goes to the log
+  (`L`), no longer to the terminal after the app ends. Quitting while a plugin is still
+  starting stops its process too. The plugins also load side by side rather than one
+  after another. `/mcp restart` of a server whose entry is invalid (both `url` and
+  `command`, say) now says why in the log instead of nothing. The one-shot prompt (`flow-assist "…"`) still
+  waits for every plugin and server before it asks the model.
+  **For plugin authors:** a builder that waits on someone — a server, a process —
+  returns at once and sets `ready`, a promise that settles when it is done waiting; the
+  app names the plugin as starting until then, and the one-shot prompt waits for it. Its
+  tools join through `toolsChanged`, which now reaches a turn already running from its
+  next round. An addition: the host API number is unchanged.
+
 - **flowtty 1.0.0-alpha.35.** A wheel flick over a run of identical reports in one
   read is now one `wheelup` / `wheeldown` key with a `count` — the run's length,
   absent for a lone notch — instead of one key per notch. `ScrollBox` and

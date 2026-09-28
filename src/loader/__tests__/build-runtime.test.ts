@@ -116,3 +116,104 @@ test('a builder gets toolsChanged: the groups it sets later reach the registry a
   ((globalThis as Record<string, unknown>).__later as () => void)();
   expect(reg.tools.map((t) => t.function.name)).toContain('later_ping');
 });
+
+// Writes an enabled plugin `name` whose builder body is `body` (it has `make` in scope).
+function plugin(root: string, name: string, body: string) {
+  const dir = join(root, 'plugins-available', name);
+  mkdirSync(join(dir, 'src'), { recursive: true });
+  mkdirSync(join(root, 'plugins-enabled'), { recursive: true });
+  writeFileSync(join(dir, 'package.json'), JSON.stringify({ name, main: './src/index.ts' }));
+  writeFileSync(join(dir, 'manifest.json'), JSON.stringify({ name, version: '1.0.0', hostApi: HOST_API }));
+  writeFileSync(join(dir, 'src', 'index.ts'), `export default async function build({ make }) { ${body} }`);
+  symlinkSync(dir, join(root, 'plugins-enabled', name));
+}
+
+// One plugin waiting does not hold up the next: `slow` finishes only once `quick` has been
+// built — loaded one after another, this would never end. The list keeps the order they
+// are enabled in, whichever finished first.
+test('enabled plugins load at once and join in the order they are enabled', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'fa-parallel-'));
+  const g = globalThis as Record<string, unknown>;
+  g.__quickBuilt = new Promise((r) => { g.__quickDone = r; });
+  plugin(root, 'aslow', `await globalThis.__quickBuilt; return make('aslow', {});`);
+  plugin(root, 'bquick', `globalThis.__quickDone(); return make('bquick', {});`);
+  const enabled = join(root, 'plugins-enabled');
+  const repo = { enabledPlugins: async () => ['aslow', 'bquick'] } as never;
+  const plugins = await loadPlugins({ config: {}, repo, enabledDir: enabled });
+  const names = plugins.map((p) => p.name);
+  expect(names.indexOf('aslow')).toBeGreaterThan(-1);
+  expect(names.indexOf('aslow')).toBeLessThan(names.indexOf('bquick'));
+});
+
+// `ready` — a plugin waiting on someone of its own: awaited by default (the one-shot
+// prompt reads its tools once), only noted with `late` (the app draws without it).
+test('a plugin\'s ready is waited for by default; with late it is starting until it settles', async () => {
+  const { createLatePlugins } = await import('../late');
+  const root = mkdtempSync(join(tmpdir(), 'fa-ready-'));
+  const g = globalThis as Record<string, unknown>;
+  plugin(root, 'waiter', `const p = make('waiter', {}); p.ready = new Promise((r) => { globalThis.__waiterReady = r; }); return p;`);
+  const enabled = join(root, 'plugins-enabled');
+  const repo = createPluginRepo({ availableDir: join(root, 'plugins-available'), enabledDir: enabled, projectRoot: root });
+
+  let loaded = false;
+  const waiting = loadPlugins({ config: {}, repo, enabledDir: enabled }).then((p) => { loaded = true; return p; });
+  await Bun.sleep(20);
+  expect(loaded).toBe(false);
+  (g.__waiterReady as () => void)();
+  expect((await waiting).some((p) => p.name === 'waiter')).toBe(true);
+
+  const late = createLatePlugins();
+  const events: unknown[] = [];
+  late.listen((e) => events.push(e));
+  const plugins = await loadPlugins({ config: {}, repo, enabledDir: enabled, late });
+  expect(plugins.some((p) => p.name === 'waiter')).toBe(true);
+  expect(late.starting()).toEqual(['waiter']);
+  (g.__waiterReady as () => void)();
+  await Bun.sleep(0);
+  expect(late.starting()).toEqual([]);
+  expect(events).toEqual([{ kind: 'ready', name: 'waiter' }]);
+});
+
+// A remote plugin with `late`: the loader returns before its handshake; the plugin joins
+// when it completes, and a refused one is a skip, said in the loader's own words.
+test('with late, a remote plugin is not waited for: it joins after its handshake, or is skipped', async () => {
+  const { createLatePlugins } = await import('../late');
+  const { fakeRemote } = await import('../../__tests__/helpers/remote-fake');
+  for (const outcome of ['answer', 'refuse'] as const) {
+    const fake = fakeRemote();
+    fake.holdHello();
+    const enabled = mkdtempSync(join(tmpdir(), 'fa-late-remote-'));
+    mkdirSync(join(enabled, 'fake'));
+    writeFileSync(join(enabled, 'fake', 'manifest.json'), JSON.stringify(fake.manifest));
+    const repo = { enabledPlugins: async () => ['fake'], list: async () => [] } as never;
+    const late = createLatePlugins();
+    // What the transport says before the handshake (a process's stderr) is a line for the
+    // app's log, never the console: the screen holds the console by then.
+    const warned: unknown[] = [];
+    const realWarn = console.warn;
+    console.warn = (m: unknown) => { warned.push(m); };
+    const plugins = await loadPlugins({ config: {}, repo, enabledDir: enabled, late, remoteTransport: (_m, _d, deps) => { deps.log('[fake] warming up'); return fake.transport; } }).finally(() => { console.warn = realWarn; });
+    expect(warned).toEqual([]);
+    expect(plugins.some((p) => p.name === 'fake')).toBe(false);
+    expect(late.starting()).toEqual(['fake']);
+    const events: Array<{ kind: string; plugin?: { name: string }; line?: string }> = [];
+    late.listen((e) => events.push(e as never));
+    if (outcome === 'answer') fake.answerHello(); else fake.refuseHello('nope');
+    for (let i = 0; i < 50 && events.length < 2; i++) await Bun.sleep(2);
+    expect(late.starting()).toEqual([]);
+    expect(events[0]).toEqual({ kind: 'note', line: '[fake] warming up' });
+    if (outcome === 'answer') expect(events.slice(1).map((e) => [e.kind, e.plugin?.name])).toEqual([['joined', 'fake']]);
+    else expect(events.slice(1)).toEqual([{ kind: 'skipped', name: 'fake', line: '[plugins] skip fake: hello: nope' } as never]);
+  }
+});
+
+test('a plugin that joins goes before the first plugin that comes after it in the enabled order', async () => {
+  const { joinIndex } = await import('../late');
+  const order = ['a', 'b', 'c'];
+  const rank = (n: string) => { const i = order.indexOf(n); return i === -1 ? undefined : i; };
+  const list = (...names: string[]) => names.map((name) => ({ name }));
+  expect(joinIndex(list('core', 'a', 'c'), 'b', rank)).toBe(2);
+  expect(joinIndex(list('core', 'c'), 'a', rank)).toBe(1);
+  expect(joinIndex(list('core', 'a', 'b'), 'c', rank)).toBe(3);
+  expect(joinIndex(list('core', 'a'), 'guest', rank)).toBe(2);
+});

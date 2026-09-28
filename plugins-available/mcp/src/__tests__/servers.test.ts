@@ -107,7 +107,8 @@ describe('a server that is not there', () => {
     const out = await group.exec('tracker:find', {});
     expect(out.text).toContain('ERROR from tracker:find');
     expect(m.groups()).toEqual([]);
-    expect(events[0]).toMatchObject({ kind: 'dropped', name: 'tracker' });
+    expect(events[0]).toMatchObject({ kind: 'connected', name: 'tracker', first: true });
+    expect(events[1]).toMatchObject({ kind: 'dropped', name: 'tracker' });
     expect(t.delays()).toEqual([5_000]);
     s.box.mode = 'ok';
     await t.advance(5_000);

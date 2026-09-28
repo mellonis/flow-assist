@@ -22,6 +22,7 @@ import path from 'node:path';
 import { TestBackend, flush } from '@flowtty/core/testing';
 import type { FrameMeter } from '../../runtime/frame-stats';
 import { loadPlugins } from '../../loader/build.ts';
+import { createLatePlugins } from '../../loader/late.ts';
 import { makeFactory, type Make, type Plugin } from '../../loader/plugin.ts';
 import { assembleToolRegistry } from '../../loader/tools.ts';
 import { renderApp } from '../../runtime/app.tsx';
@@ -306,7 +307,7 @@ const testEnv = (): Record<string, string | undefined> =>
   Object.fromEntries(Object.entries(process.env).filter(([k, v]) => MACHINE_ENV[k] !== v));
 setSecretsEnv(testEnv);
 
-export async function bootApp(model: ScriptedModel, cols = 100, rows = 28, guests?: (make: Make) => Plugin[], extra: Record<string, unknown> = {}, opts: { toastMs?: number; scheme?: 'light' | 'dark' | 'unknown'; clipboardImage?: () => ClipboardImage; pluginsNote?: string; interactive?: InteractiveDeps; chatMode?: 'panel' | 'window' | 'full' | null; backend?: TestBackend; remote?: { manifest: Record<string, unknown>; transport: RestartingTransport }; startDir?: string; frameMeter?: FrameMeter } = {}) {
+export async function bootApp(model: ScriptedModel, cols = 100, rows = 28, guests?: (make: Make) => Plugin[], extra: Record<string, unknown> = {}, opts: { toastMs?: number; scheme?: 'light' | 'dark' | 'unknown'; clipboardImage?: () => ClipboardImage; pluginsNote?: string; interactive?: InteractiveDeps; chatMode?: 'panel' | 'window' | 'full' | null; backend?: TestBackend; remote?: { manifest: Record<string, unknown>; transport: RestartingTransport }; startDir?: string; frameMeter?: FrameMeter; late?: boolean } = {}) {
   process.env.LLM_TOKEN = '^scripted-llm-token';
   model.install();
   // Sessions go to a fresh temp dir unless a test names one: a test must never write
@@ -342,8 +343,18 @@ export async function bootApp(model: ScriptedModel, cols = 100, rows = 28, guest
   }
   const repo = { enabledPlugins: async () => enabled, list: async () => [] } as never;
   const remoteTransport = opts.remote ? () => opts.remote!.transport : undefined;
-  const plugins = await loadPlugins({ config, repo, renders: renders as never, enabledDir, remoteTransport });
-  if (guests) plugins.push(...guests(makeFactory(config as never)));
+  // `opts.late` loads as the interactive app does: a remote plugin joins once its
+  // handshake completes, and a plugin's `ready` (a guest's too) is only noted.
+  const late = opts.late ? createLatePlugins() : undefined;
+  const plugins = await loadPlugins({ config, repo, renders: renders as never, enabledDir, remoteTransport, late });
+  if (guests) {
+    const added = guests(makeFactory(config as never));
+    plugins.push(...added);
+    for (const g of added) if (late && g.ready) late.wait(g.name, g.ready);
+    // A guest comes after the enabled plugins, as it does in the list: a late plugin
+    // takes its place before them.
+    late?.order([...enabled, ...added.map((g) => g.name)]);
+  }
   const tools = assembleToolRegistry({ plugins, config, repo });
   const backend = opts.backend ?? new TestBackend(cols, rows);
   // A dark terminal unless a test says otherwise: the look every frame here was written
@@ -371,7 +382,7 @@ export async function bootApp(model: ScriptedModel, cols = 100, rows = 28, guest
   setStartDirForTests(opts.startDir ?? (firstRoot && fs.existsSync(firstRoot) ? firstRoot : null));
   let app: Awaited<ReturnType<typeof renderApp>>;
   try {
-    app = await renderApp(backend, { plugins, config, tools, onExit: () => { exits++; }, toastMs: opts.toastMs, pluginsNote: opts.pluginsNote, frameMeter: opts.frameMeter, clipboardImage: opts.clipboardImage ?? (() => ({ ok: false, none: true, error: 'no image on the clipboard' })),
+    app = await renderApp(backend, { plugins, config, tools, late, onExit: () => { exits++; }, toastMs: opts.toastMs, pluginsNote: opts.pluginsNote, frameMeter: opts.frameMeter, clipboardImage: opts.clipboardImage ?? (() => ({ ok: false, none: true, error: 'no image on the clipboard' })),
       // `!!command` never reaches the machine's own `script` or signals from a test: with
       // no `interactive` given, there is no `script`, the program "runs" at once and
       // exits 0, and the signal hold works on an emitter of its own.

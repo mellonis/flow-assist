@@ -15,7 +15,7 @@
 // ─── Types ────────────────────────────────────────────────────────────────────
 import crypto from 'node:crypto';
 import type { ToolDef, ToolCtx } from '../loader/tools.js';
-import { chatTools, execChatTool, chatToolDefs, chatToolGroupOf, chatGroupDescriptions } from '../loader/tools.js';
+import { chatTools, execChatTool, chatToolDefs, chatToolGroupOf, chatGroupDescriptions, toolRegistryRevision } from '../loader/tools.js';
 import { isHostShellTool } from '../loader/tools-shell.js';
 import type { ToolRunEntry } from '../runtime/services/log.js';
 import { changeView, type Change, type ChangeView } from './diff.js';
@@ -761,8 +761,6 @@ export async function agentChat(
   // `write`-flagged tool is present and `needsConfirm` fires — the stripped
   // `chatTools()` have no `write`, so confirmation would otherwise never trigger.
   const toolByName = new Map<string, ToolDef>();
-  for (const t of chatToolDefs()) toolByName.set(t.function.name, t);
-  for (const et of extraTools) toolByName.set(et.function.name, et);
   // Wire names. Providers validate a tool name against ^[a-zA-Z0-9_-]{1,128}$ and
   // answer 400 before the model runs, while the host qualifies plugin tools as
   // `plugin:tool`. The translation lives here and nowhere else: what is sent and
@@ -774,16 +772,34 @@ export async function agentChat(
     realName.set(wire, t.function.name);
     return wire === t.function.name ? t : { ...t, function: { ...t.function, name: wire } };
   };
-  const catalog = toolCatalog(extraTools);
   // Tools on demand: what is sent is worked out again for EVERY round — a `tools_load`
   // in one round puts the full definitions into the next. The wire names are mapped
   // for every known tool, not only the ones sent: the model may call a tool it saw
   // only in the index, and that call must still resolve to its real name to be told
   // it is not loaded.
-  const deferred = deferredTools(catalog);
-  const onDemand = toolLoading === 'onDemand' && deferred.size > 0;
-  const groupDescriptions = chatGroupDescriptions();
-  for (const e of catalog) onWire(e.def);
+  // The registry itself is read again before every round too, when it changed since the
+  // last one (`toolRegistryRevision`): a plugin or an MCP server that joins while a turn
+  // runs is in the turn's next round, and a round with nothing new sends the list it
+  // sent before. A tool that left keeps its def here — its y/n still holds for a call
+  // the model makes from an earlier list, which the group that last held it answers.
+  let catalog: CatalogEntry[] = [];
+  let deferred: ReturnType<typeof deferredTools> = new Map();
+  let onDemand = false;
+  let groupDescriptions = new Map<string, string>();
+  let toolsAt = -1;
+  const readTools = () => {
+    const at = toolRegistryRevision();
+    if (at === toolsAt) return;
+    toolsAt = at;
+    for (const t of chatToolDefs()) toolByName.set(t.function.name, t);
+    for (const et of extraTools) toolByName.set(et.function.name, et);
+    catalog = toolCatalog(extraTools);
+    deferred = deferredTools(catalog);
+    onDemand = toolLoading === 'onDemand' && deferred.size > 0;
+    groupDescriptions = chatGroupDescriptions();
+    for (const e of catalog) onWire(e.def);
+  };
+  readTools();
   const roundTools = (): ToolDef[] => toolsToSend(catalog, toolLoading, toolSet, groupDescriptions).map(onWire);
   let content = ''; // final answer (last round without tool_calls)
   let process = ''; // narration of moves from rounds WITH tool_calls — folded
@@ -855,6 +871,7 @@ export async function agentChat(
     for (let i = 0; maxRounds <= 0 || i < maxRounds; i++) {
       if (i > 0 && maxTurnTokens > 0 && spent >= maxTurnTokens) { limitBy = 'tokens'; break; }
       rounds = i + 1;
+      readTools();
       if (opts.beforeRequest) {
         const measured = usage ? usage.promptTokens + usage.completionTokens + estimateTokens(JSON.stringify(current.slice(usageAt))) : undefined;
         const replaced = await opts.beforeRequest({ round: i, transcript: current.slice(turnStart), ...(measured !== undefined ? { measured } : {}) });

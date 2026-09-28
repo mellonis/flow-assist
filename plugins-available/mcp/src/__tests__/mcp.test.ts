@@ -239,7 +239,8 @@ describe('connecting', () => {
     const realFetch = globalThis.fetch;
     globalThis.fetch = ((u: string, i: RequestInit) => fetch(u, i)) as unknown as typeof globalThis.fetch;
     try {
-      const shape = (await buildMcpPlugin({ make: (_n, s) => s, config: { plugins: { mcp: { servers: { webstorm: { url: 'http://x/stream', readOnly: ['no_such_tool'] } } } } } })) as { setup: (api: unknown) => void };
+      const shape = (await buildMcpPlugin({ make: (_n, s) => s, config: { plugins: { mcp: { servers: { webstorm: { url: 'http://x/stream', readOnly: ['no_such_tool'] } } } } } })) as { setup: (api: unknown) => void; ready: Promise<unknown> };
+      await shape.ready;
       const lines: string[] = [];
       shape.setup({ ui: {}, host: { services: { pushLog: (m: string) => lines.push(m) } } });
       expect(lines).toEqual([

@@ -27,6 +27,7 @@ async function boot(servers: Record<string, unknown>, mode = { status: 'ok' as n
   const config = { plugins: { mcp: { servers } } };
   let changed = 0;
   const plugin = await buildMcpPlugin({ make: (_n, s) => s, config, toolsChanged: () => { changed++; }, timers, retry: { delays: [5_000], every: 5_000 } }) as Record<string, any>;
+  await plugin.ready;
   globalThis.fetch = realFetch;
   const set: Array<[string, unknown, boolean]> = [];
   const unset: Array<[string, boolean]> = [];
@@ -62,6 +63,7 @@ describe('what /mcp says', () => {
     const due: Array<() => void> = [];
     const later: Timers = { now: () => 0, set: (fn) => { due.push(fn); return due.length; }, clear: () => {} };
     const plugin = await buildMcpPlugin({ make: (_n, s) => s, config: { plugins: { mcp: { servers: { ide: { url: 'http://x' } } } } }, timers: later }) as Record<string, any>;
+    await plugin.ready;
     globalThis.fetch = realFetch;
     const notes: string[] = [];
     plugin.setup({ ui: {}, host: { services: { pushLog: () => {}, notify: () => {}, chatNote: (t: string) => notes.push(t) } } });

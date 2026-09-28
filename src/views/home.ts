@@ -23,7 +23,7 @@ export const LOGO = [
 
 interface HomePlugin { name: string; description?: string; entry?: string[]; tools?: unknown[]; aiTools?: unknown[] }
 
-export function renderHome({ title, plugins, keys, builtins, width = 80, accent = 'green', pluginsNote }: {
+export function renderHome({ title, plugins, keys, builtins, width = 80, accent = 'green', pluginsNote, starting = [] }: {
   title: string;
   plugins: HomePlugin[];
   // The resolved key map — so what is shown is what is bound NOW.
@@ -36,6 +36,9 @@ export function renderHome({ title, plugins, keys, builtins, width = 80, accent 
   // Where the host looked for plugins and found none. Shown in the plugins' place, so
   // an empty list says where it came from instead of just being missing.
   pluginsNote?: string;
+  // The plugins still starting — a remote plugin's handshake, a plugin waiting on its
+  // servers. Named on one quiet line under the list until each has joined or failed.
+  starting?: string[];
 }) {
   const cap = (action: string) => bindingGlyph(keys[action]);
   // What a person can do from here, each only if its key is bound.
@@ -97,5 +100,12 @@ export function renderHome({ title, plugins, keys, builtins, width = 80, accent 
             // A path can be longer than the screen; it wraps rather than running off.
             h(Box, { width: Math.min(cellWidth(pluginsNote), Math.max(16, width - 6)), marginLeft: 2, flexShrink: 0 },
               h(Text, { dim: true, wrap: 'wrap' }, pluginsNote)))
-        : null));
+        : null,
+    starting.length
+      ? h(Box, { width: Math.min(cellWidth(startingLine(starting)), Math.max(16, width - 6)), flexShrink: 0 },
+          h(Text, { dim: true, wrap: 'wrap' }, startingLine(starting)))
+      : null));
 }
+
+// `starting: tutor, mcp…` — what has not joined yet.
+export const startingLine = (names: string[]) => `starting: ${names.join(', ')}…`;
