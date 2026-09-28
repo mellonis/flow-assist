@@ -396,7 +396,7 @@ export async function bootApp(model: ScriptedModel, cols = 100, rows = 28, guest
   await settle();
   const press = async (...names: string[]) => { for (const name of names) backend.press({ name }); await settle(); };
   const type = async (text: string) => { backend.type(text); await settle(); };
-  return { backend, app, press, type, exits: () => exits, config };
+  return { backend, app, press, type, exits: () => exits, config, tools, plugins };
 }
 
 // A summary in the shape a compaction accepts (src/assistant/compaction.ts): every

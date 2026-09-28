@@ -148,6 +148,9 @@ export function toolGroup(name: string, spec: ServerSpec, client: McpClient, too
     // the way a tool's own description is: this is a server the person configured.
     ...(instructions ? { description: instructions } : {}),
     tools: defs,
+    // Asked by the host when a call reaches a tool of this group after the group left the
+    // registry (docs/plugins.md, `toolsChanged`): where the server stands.
+    gone: () => hooks.status?.() ?? null,
     exec: async (wire: string, args: Record<string, unknown>) => {
       const tool = byWire.get(wire) ?? byWire.get(wire.replace(/__/, ':'));
       if (!tool) throw new Error(`Unknown tool: ${wire}`);

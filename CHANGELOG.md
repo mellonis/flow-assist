@@ -5,6 +5,14 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **A tool a plugin takes away is gone for the rest of the run.** A plugin that dropped
+  a tool while the app ran (a server turned off or gone) left it callable by its name: a
+  model that had seen it could still run it. Now such a call never runs, and the model is
+  told why — `<tool> is gone — <plugin> removed it`. After `/mcp remove`, a call from the step already running is told the
+  server was removed by you, not that it came back and should be called again.
+  **For plugin authors:** a tool group may say for itself why its tools went, with
+  `gone: () => string | null` (docs/plugins.md); your `exec` is no longer called for a
+  tool you took away. The host API number is unchanged.
 - **The examples show what a plugin can do now.** `examples/notes`' command is
   `notebook`, marked `chat: true`, so it answers `/notebook` in the chat with a note as
   well as `:notebook` on the command line (the chat's own `/notes` keeps its name); its

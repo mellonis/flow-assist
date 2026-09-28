@@ -263,6 +263,22 @@ describe('an answer the server gives to a ping, and a session it forgot', () => 
     m.disable('tracker');
     await expect(group.exec('tracker:find', {})).rejects.toThrow('tracker is disabled');
   });
+
+  // `/mcp remove` in the middle of a turn: the turn's call is told the person removed the
+  // server — never that it came back and the tool should be called again. The host asks
+  // the group the same through `gone` once the group has left the registry.
+  test('a call to a server removed since says the person removed it', async () => {
+    const s = flaky('ok');
+    const t = fakeTimers();
+    const m = createServerManager([{ name: 'tracker', spec: { url: 'http://x' } }], { fetch: s.fetch, schedule, timers: t.timers });
+    await m.start();
+    const group = m.groups()[0]!;
+    expect(group.gone()).toBeNull();
+    m.remove('tracker');
+    expect(m.groups()).toEqual([]);
+    await expect(group.exec('tracker:find', {})).rejects.toThrow('tracker was removed by the person');
+    expect(group.gone()).toBe('tracker was removed by the person');
+  });
 });
 
 describe('the person\'s levers', () => {

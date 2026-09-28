@@ -973,10 +973,60 @@ test('refreshToolRegistry re-reads every plugin\'s tools into the registry alrea
   plugin.tools = [];
   refreshToolRegistry();
   expect(reg.tools.map((t) => t.function.name)).not.toContain('late_ping');
-  // A turn fixed its tool list before the group left: a call it makes still reaches the
-  // group, which says for itself why it no longer answers.
-  expect(await reg.exec('late_ping', {}, {})).toBe('pong');
+  // A turn fixed its tool list before the group left, and a model that saw the name may
+  // call it for the rest of the run: the call never runs, and says why.
+  await expect(reg.exec('late_ping', {}, {})).rejects.toThrow('late_ping is gone — late removed it');
   await expect(reg.exec('never_there', {}, {})).rejects.toThrow(/Unknown tool/);
+});
+
+// A tool a plugin dropped is gone for every plugin, not only for one that refuses the
+// call itself: its group is never reached again. A group that knows why it left says so
+// in its own words; a plugin whose tools the person took out is named as disabled, and
+// one no longer in the list as not loaded. A tool that comes back runs again.
+test('a tool a refresh took away never runs again; the answer names why', async () => {
+  const make = makeFactory({});
+  let ran = 0;
+  const ping = { type: 'function' as const, function: { name: 'ping_it', description: 'Ping.', parameters: { type: 'object', properties: {} } } };
+  const group = { id: 'pinger', tools: [ping], exec: async () => { ran++; return 'pong'; } };
+  const plugin = make('pinger', { tools: [group], aiTools: [{ type: 'function', function: { name: 'echo_it', description: 'Echo.', parameters: { type: 'object', properties: {} } }, run: () => { ran++; return 'echo'; } }] });
+  const plugins = [plugin];
+  const reg = assembleToolRegistry({ plugins, config: {}, repo: { list: async () => [] } as any });
+  expect(await reg.exec('ping_it', {}, {})).toBe('pong');
+  expect(reg.has!('ping_it')).toBe(true);
+  ran = 0;
+
+  plugin.tools = [];
+  reg.refresh!();
+  expect(reg.has!('ping_it')).toBe(false);
+  await expect(reg.exec('ping_it', {}, {})).rejects.toThrow('ping_it is gone — pinger removed it');
+  expect(ran).toBe(0);
+
+  // Its own word, when the group has one.
+  plugin.tools = [{ ...group, gone: () => 'pinger lost its line — retrying in 5 s' }];
+  reg.refresh!();
+  plugin.tools = [];
+  reg.refresh!();
+  await expect(reg.exec('ping_it', {}, {})).rejects.toThrow('pinger lost its line — retrying in 5 s');
+
+  // Back again: it runs.
+  plugin.tools = [group];
+  reg.refresh!();
+  expect(await reg.exec('ping_it', {}, {})).toBe('pong');
+
+  // Taken out by the person: the group tool and the ai-tool alike.
+  reg.withhold!('pinger', true);
+  expect(reg.tools.map((t) => t.function.name)).not.toContain('echo_it');
+  ran = 0;
+  await expect(reg.exec('ping_it', {}, {})).rejects.toThrow('ping_it is gone — pinger was disabled');
+  await expect(reg.exec('echo_it', {}, {})).rejects.toThrow('echo_it is gone — pinger was disabled');
+  expect(ran).toBe(0);
+  reg.withhold!('pinger', false);
+  expect(await reg.exec('echo_it', {}, {})).toBe('echo');
+
+  // Out of the list altogether (a remote plugin stopped for its restart).
+  plugins.splice(0, 1);
+  reg.refresh!();
+  await expect(reg.exec('ping_it', {}, {})).rejects.toThrow('ping_it is gone — pinger is not loaded');
 });
 
 test('config_schema says what shell.passEnv does, and the model may not set it', async () => {

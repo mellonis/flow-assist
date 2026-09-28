@@ -15,7 +15,7 @@
 // ─── Types ────────────────────────────────────────────────────────────────────
 import crypto from 'node:crypto';
 import type { ToolDef, ToolCtx } from '../loader/tools.js';
-import { chatTools, execChatTool, chatToolDefs, chatToolGroupOf, chatGroupDescriptions, toolRegistryRevision } from '../loader/tools.js';
+import { chatTools, execChatTool, chatToolDefs, chatToolGroupOf, chatGroupDescriptions, chatToolLive, toolRegistryRevision } from '../loader/tools.js';
 import { isHostShellTool } from '../loader/tools-shell.js';
 import type { ToolRunEntry } from '../runtime/services/log.js';
 import { changeView, type Change, type ChangeView } from './diff.js';
@@ -781,7 +781,7 @@ export async function agentChat(
   // last one (`toolRegistryRevision`): a plugin or an MCP server that joins while a turn
   // runs is in the turn's next round, and a round with nothing new sends the list it
   // sent before. A tool that left keeps its def here — its y/n still holds for a call
-  // the model makes from an earlier list, which the group that last held it answers.
+  // the model makes from an earlier list, which the registry answers with why it is gone.
   let catalog: CatalogEntry[] = [];
   let deferred: ReturnType<typeof deferredTools> = new Map();
   let onDemand = false;
@@ -1199,13 +1199,17 @@ export async function agentChat(
             },
           };
           // Plugin ai-tool → its own `run(args, toolCtx)`; group tool → execChatTool
-          // (lookup by name in the registry). `def.run` exists only on extraTools.
-          // `tools_load` is the loop's own: it changes what the next round sends.
+          // (lookup by name in the registry). `def.run` exists only on extraTools and on a
+          // plugin's aiTools. A def this turn kept after a refresh took its tool away
+          // (its plugin disabled or dropping it) is not run: the registry answers why
+          // the tool is gone. `tools_load` is the loop's own: it changes what the next
+          // round sends.
           if (notLoaded) throw new Error(notLoadedError(tc.name));
+          const runsItself = !!def?.run && chatToolLive(def);
           detail = onDemand && tc.name === TOOLS_LOAD
             ? runToolsLoad(parsed, catalog, toolSet)
-            : def?.run
-              ? await (def.run as (args: Record<string, unknown>, ctx: ToolCtx) => unknown)(parsed, callCtx)
+            : runsItself
+              ? await (def!.run as (args: Record<string, unknown>, ctx: ToolCtx) => unknown)(parsed, callCtx)
               : await execChatTool(tc.name, parsed, callCtx);
           // A result with images beside its text (src/assistant/tool-images.ts): the
           // text is the result, each accepted image is stored and joins the result as a

@@ -85,6 +85,12 @@ export interface ToolGroup {
   // or sent in full — src/assistant/tool-loading.ts), sanitized the same way a tool
   // description is. Absent for a group that is just its tools.
   description?: string;
+  // Why the group's tools no longer answer, once a refresh has taken them out of the
+  // registry — an MCP server's `not connected — retrying in 15 s`. A call the model
+  // makes to such a tool (it saw the name earlier) is answered with this instead of the
+  // host's own `<tool> is gone — <plugin> removed it`; the group's `exec` is never
+  // reached for it. Absent, or null: the host's own words.
+  gone?: () => string | null;
 }
 
 export interface ToolRegistry {
@@ -94,6 +100,11 @@ export interface ToolRegistry {
   // Reads every plugin's groups again into this object — after a plugin joined the list
   // it was assembled from, or changed its `tools`. Absent on a registry made by hand.
   refresh?(): void;
+  // Whether the registry offers `name` now. Absent on a registry made by hand.
+  has?(name: string): boolean;
+  // Takes a plugin's tools out of the registry (`on`), or lets them back in — a plugin
+  // the person disabled while the app runs. Refreshes. Absent on a registry made by hand.
+  withhold?(plugin: string, on: boolean): void;
 }
 
 export interface AssembledToolRegistryInput {
@@ -140,7 +151,8 @@ let refreshCurrent: (() => void) | null = null;
 // the list it sent before, byte for byte.
 let revision = 0;
 
-type Assembled = { groups: ToolGroup[]; tools: ToolDef[]; nameToGroup: Map<string, ToolGroup>; ownName: Map<string, string> };
+// `owner` — the plugin each plugin group came from (a host group is its own).
+type Assembled = { groups: ToolGroup[]; tools: ToolDef[]; nameToGroup: Map<string, ToolGroup>; ownName: Map<string, string>; owner: Map<ToolGroup, string> };
 
 // Which plugin group holds each bare tool name: a name handed out keeps its holder for as
 // long as the holder still declares it.
@@ -158,12 +170,26 @@ export function assembleToolRegistry(input: AssembledToolRegistryInput): ToolReg
     said.add(line);
     console.warn(line);
   };
-  let state = assemble(input, warn, new Map());
-  // The tools a refresh took away, each with the group that last held it: a turn fixes
-  // the list it sends when it starts, so it may still call one — the group answers for
-  // itself (an MCP server's says it is not connected and when it is tried next), and the
-  // model never reads a bare "Unknown tool" for a tool it was offered.
-  const left = new Map<string, { group: ToolGroup; own: string }>();
+  // The plugins whose tools the person took out while the app runs.
+  const withheld = new Set<string>();
+  let state = assemble(input, warn, new Map(), withheld);
+  // The tools a refresh took away, each with the group that last held it and its plugin:
+  // a turn fixes the list it sends when it starts, and a model that saw a name may call
+  // it for the rest of the run. Such a call never runs — the tool is gone — and its answer
+  // says why: the group's own word when it has one (an MCP server's `not connected —
+  // retrying in N s`), else the host's, naming the plugin. Never a bare "Unknown tool" for
+  // a tool the model was offered, and never a "call again" for one that will not come back.
+  // `plugin` — absent for a group of the host's own.
+  const left = new Map<string, { group: ToolGroup; plugin?: string }>();
+  const goneText = (name: string, { group, plugin }: { group: ToolGroup; plugin?: string }): string => {
+    let own: string | null = null;
+    try { own = group.gone?.() ?? null; } catch { own = null; }
+    if (own) return own;
+    const who = plugin ?? group.id;
+    if (plugin && withheld.has(plugin)) return `${name} is gone — ${plugin} was disabled`;
+    if (plugin && !input.plugins.some((p) => p.name === plugin)) return `${name} is gone — ${plugin} is not loaded`;
+    return `${name} is gone — ${who} removed it`;
+  };
   const registry: ToolRegistry = {
     groups: state.groups,
     tools: state.tools,
@@ -171,17 +197,18 @@ export function assembleToolRegistry(input: AssembledToolRegistryInput): ToolReg
       const group = state.nameToGroup.get(name);
       if (group) return group.exec(state.ownName.get(name) ?? name, args ?? {}, ctx);
       const gone = left.get(name);
-      if (gone) return gone.group.exec(gone.own, args ?? {}, ctx);
+      if (gone) throw new Error(goneText(name, gone));
       throw new Error(`Unknown tool: ${name}`);
     },
+    has: (name) => state.nameToGroup.has(name),
   };
   // A refresh swaps what this object holds, never the object: the app, its services and
   // the context meter keep the one they were handed.
   const refresh = () => {
     const before = state;
-    state = assemble(input, warn, holdersOf(before));
+    state = assemble(input, warn, holdersOf(before), withheld);
     for (const [name, group] of before.nameToGroup) {
-      if (!state.nameToGroup.has(name)) left.set(name, { group, own: before.ownName.get(name) ?? name });
+      if (!state.nameToGroup.has(name)) left.set(name, { group, plugin: before.owner.get(group) });
     }
     for (const name of state.nameToGroup.keys()) left.delete(name);
     registry.groups = state.groups;
@@ -191,6 +218,10 @@ export function assembleToolRegistry(input: AssembledToolRegistryInput): ToolReg
   // `refresh` touches this registry alone: an App that has gone (a test's) never
   // reassembles the one assembled after it.
   registry.refresh = refresh;
+  registry.withhold = (plugin, on) => {
+    if (on) withheld.add(plugin); else withheld.delete(plugin);
+    refresh();
+  };
   refreshCurrent = refresh;
   currentRegistry = registry;
   revision++;
@@ -203,8 +234,8 @@ export function assembleToolRegistry(input: AssembledToolRegistryInput): ToolReg
 // handed to its builder as `toolsChanged`. `ai.disabledTools` is read again with it.
 // A turn reads the list again before each of its rounds (`agentChat`), so a group that
 // arrives mid-turn is sent from the next round on; a call runs against the registry as
-// it is, and a call to a tool that left since reaches the group that last held it. A
-// no-op before any registry is assembled.
+// it is, and a call to a tool that left since is answered with why it is gone. A no-op
+// before any registry is assembled.
 export function refreshToolRegistry(): void {
   refreshCurrent?.();
 }
@@ -216,7 +247,8 @@ export function toolRegistryRevision(): number {
 }
 
 // `held` — the bare names the last assembly handed out, each with the group that holds it.
-function assemble({ plugins, config, repo }: AssembledToolRegistryInput, warn: (line: string) => void, held: Map<string, string>): Assembled {
+// `withheld` — plugins whose tools are left out.
+function assemble({ plugins, config, repo }: AssembledToolRegistryInput, warn: (line: string) => void, held: Map<string, string>, withheld: ReadonlySet<string> = new Set()): Assembled {
   const disabled = (config?.ai as { disabledTools?: string[] } | undefined)?.disabledTools ?? [];
   // The resolved hotkey map (host defaults + plugin keys + config.keys overrides).
   // Handed to the config tool so `config get/explain keys` reports the EFFECTIVE
@@ -294,6 +326,7 @@ function assemble({ plugins, config, repo }: AssembledToolRegistryInput, warn: (
 
   const pending: Array<[ToolGroup, string]> = [];
   for (const p of plugins) {
+    if (withheld.has(p.name)) continue;
     // Plugin-supplied tool groups — used as-is (the plugin author namespaces the
     // tool names with `<plugin.name>:`). Withhold a group whose id is in the
     // blacklist unless it is alwaysOn. Each group's exec is wrapped to tag ctx with
@@ -364,6 +397,7 @@ function assemble({ plugins, config, repo }: AssembledToolRegistryInput, warn: (
     if (holder) claim.set(name, holder[0]);
   }
   for (const [group, owner] of pending) register(group, owner);
+  for (const [group] of pending) if (group.id.endsWith(':aiTools')) for (const t of group.tools) madeHere.add(t);
 
   toolNamesRef.names = groups.flatMap((g) => g.tools.map((t) => t.function.name));
 
@@ -372,7 +406,7 @@ function assemble({ plugins, config, repo }: AssembledToolRegistryInput, warn: (
   const tools: ToolDef[] = [];
   for (const g of groups) for (const t of g.tools) tools.push(stripTool(t));
 
-  return { groups, tools, nameToGroup, ownName };
+  return { groups, tools, nameToGroup, ownName, owner: new Map(pending) };
 }
 
 // The LLM-facing (tree-shaken, disabledTools-filtered) tools of the last
@@ -403,6 +437,19 @@ export function chatToolGroupOf(): Map<string, string> {
 // not an empty string.
 export function chatGroupDescriptions(): Map<string, string> {
   return new Map(currentRegistry?.groups.flatMap((g) => (g.description ? [[g.id, g.description] as [string, string]] : [])) ?? []);
+}
+
+// The defs of plugins' aiTools the registry ever made — they carry their `run`, which
+// the agent loop calls itself (src/assistant/agent.ts).
+const madeHere = new WeakSet<ToolDef>();
+
+// Whether a def with its own `run` may still run: one the registry made only while the
+// current registry still holds it — a refresh that took its plugin's tools away leaves
+// it to the registry, which answers why the tool is gone. A def the caller made itself
+// (an agent's `extraTools`) always may.
+export function chatToolLive(def: ToolDef): boolean {
+  if (!madeHere.has(def)) return true;
+  return currentRegistry?.groups.some((g) => g.tools.includes(def)) ?? false;
 }
 
 // Dispatches a tool call to the current registry (source-faithful, module-level).

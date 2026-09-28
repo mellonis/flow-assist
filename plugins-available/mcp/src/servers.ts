@@ -76,6 +76,9 @@ type Entry = ServerView & {
   timer?: unknown;
   client?: McpClient;
   group?: Group;
+  // `/mcp remove` took it out of the run: a call from a turn that saw its tools is told
+  // so, never that it came back.
+  removed?: true;
 };
 
 export type ServerEvent =
@@ -224,7 +227,8 @@ export function createServerManager(servers: Array<{ name: string; spec: ServerS
   };
   // What a call to a group that no longer answers is told.
   const notConnected = (e: Entry): string =>
-    e.state === 'disabled' ? `${e.name} is disabled`
+    e.removed ? `${e.name} was removed by the person`
+    : e.state === 'disabled' ? `${e.name} is disabled`
     : e.state === 'connected' ? `${e.name} was connected again since — call the tool again`
     : e.nextAt !== undefined ? `${e.name} is not connected — retrying in ${inSeconds(e.nextAt, timers.now())}`
     : `${e.name} is not connected — ${e.reason ?? 'no answer'}`;
@@ -336,6 +340,7 @@ export function createServerManager(servers: Array<{ name: string; spec: ServerS
       if (!e) return false;
       e.gen++;
       letGo(e);
+      e.removed = true;
       entries.delete(name);
       changed();
       return true;

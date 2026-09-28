@@ -59,7 +59,9 @@ log too).
 `disable`, `enable`, `add` and `remove` write `config.local.json` as `config set`
 does (`plugins.mcp.servers.<name>.enabled`, the server's whole entry); `--session`
 keeps the change for this run only. A server set in `config.json` is removed there, by
-hand — `/mcp disable` turns it off meanwhile. `headers` and `env` are never taken
+hand — `/mcp disable` turns it off meanwhile. A call the assistant makes to a server's
+tool after it went — from a step it began before — is told why: disabled, not connected
+and when it is tried next, or removed by you. `headers` and `env` are never taken
 from the chat: they hold tokens, and what is typed in the chat is kept in its history
 and its session. Set them with `config set plugins.mcp.servers.<name>.headers '{…}'`.
 The names complete with Tab. The model has no tool for any of this: which servers run

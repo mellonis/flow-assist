@@ -178,12 +178,21 @@ a group that arrives mid-turn is sent (and indexed) from the turn's next round; 
 it did not, the round sends what the last one sent, byte for byte — a refresh costs one
 prompt-cache miss, a round without one none. A def a refresh took away is KEPT in the
 turn's `toolByName`: a call the model makes from an earlier list still asks the person
-when the tool is a write. A call runs against the registry as it is; one to a tool a
-refresh took away reaches the group that last held it (`left` in
-`assembleToolRegistry`), which says why — an MCP server's `<name> is not connected —
-retrying in N s` — never a bare `Unknown tool`. `registry.refresh()` refreshes that
-registry alone (the App calls it when a plugin joins); the process-wide
-`refreshToolRegistry` refreshes the last one assembled.
+when the tool is a write. A call runs against the registry as it is; **a tool a refresh
+took away never runs again**, for the turn in flight and for a model that remembers the
+name later in the run. The registry keeps the group that last held it (`left` in
+`assembleToolRegistry`) and THROWS why it is gone, never reaching that group's `exec`:
+the group's own word when it has one (`ToolGroup.gone()` — the `mcp` plugin's server
+state: `<name> is not connected — retrying in N s`, `<name> was removed by the person`),
+else the host's — `<tool> is gone — <plugin> removed it`, `… — <plugin> was disabled`
+(the person took the plugin's tools out, `registry.withhold`), `… — <plugin> is not
+loaded` (the plugin left the list: a remote plugin being restarted). Never a bare
+`Unknown tool`, and never a "call again" for a tool that is not coming back. A plugin's
+ai-tool carries its own `run`, which `agentChat` calls itself: it does so only while the
+registry still holds that def (`chatToolLive`) — a def the registry made and no longer
+holds goes through `execChatTool` and gets the same answer; a caller's own `extraTools`
+always run. `registry.refresh()` refreshes that registry alone (the App calls it when a
+plugin joins); the process-wide `refreshToolRegistry` refreshes the last one assembled.
 `make(name, shape)` injects `config.plugins.<name>` and qualified keys. The
 returned `shape` has optional: `commands`, `keys`, `keyActions`, `views`,
 `surface`, `modals`, `colors`, `modalColors`, `configSchema`, `components`, `tools`,
@@ -382,7 +391,11 @@ other non-2xx — drops it — while a 401 or 400 is that call's error alone) lo
 401/403 is the token and is never tried again (`authReason` says so and names `/mcp
 restart`). Every attempt carries the server's generation; `disable`, `restart`,
 `remove` and a drop start a new one, so an attempt that finishes under an older one lets
-go of its client and brings back nothing. The first attempts are `start()`, which the
+go of its client and brings back nothing. A call from a turn that saw a server's tools
+before it left is told where the server stands (`notConnected`, which is also the group's
+`gone`): disabled, not connected and when it is tried next, or — after `/mcp remove` —
+`<name> was removed by the person`; `connected again since — call the tool again` only
+when it did come back. The first attempts are `start()`, which the
 builder does not await: it is the plugin's `ready`. Every connect and every failure calls
 `onChange` with its event: the plugin sets `plugin.tools` and calls the host's
 `toolsChanged` (the group is in the next round's index), keeps the start screen's

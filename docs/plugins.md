@@ -115,9 +115,13 @@ export default function buildNotesPlugin({ config, make, z, modelMaySet, modelMa
   `toolsChanged()`: the host reads every plugin's `tools` again, `ai.disabledTools`
   with them. A turn reads the list again before each of its rounds, so a group that
   arrives mid-turn is offered from the turn's next round on, in the `tools_load` index
-  like any other; a call runs against the tools as they are, and a call to a tool whose
-  group left since still reaches that group — its `exec` says why it no longer answers
-  — and still asks the person first when the tool is a write.
+  like any other; a call runs against the tools as they are. A tool whose group left is
+  gone for the rest of the run: a call the model makes to it (from a list it saw
+  earlier) still asks the person first when the tool is a write, then never runs — the
+  model is told `<tool> is gone — <plugin> removed it`. A group that knows better says
+  it itself with `gone`, a function on the group returning a line (or `null` for the
+  host's words); the `mcp` plugin's says where its server stands, `retrying in 15 s`.
+  Your `exec` is never called for a tool you took away.
 
   ```ts
   const plugin = make('late', { tools: [] });
@@ -129,7 +133,7 @@ export default function buildNotesPlugin({ config, make, z, modelMaySet, modelMa
 
 ## Tools for the model
 
-A tool group is `{ id, tools, exec }`. `tools` are OpenAI-format function
+A tool group is `{ id, tools, exec }` (and optionally `description` and `gone`, above). `tools` are OpenAI-format function
 definitions; `exec(name, args, ctx)` runs one and returns a string for the model — or,
 for a tool that has images to show, text with the images beside it (below). The host
 checks `args` against the tool's own `parameters` first: a call missing a required
