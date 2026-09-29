@@ -19,7 +19,7 @@ import type { ViewRecord } from './views.js';
 import type { ToolDef } from '../loader/tools.js';
 import { RESTART_NOTE, type ConfigChange } from '../config/load.js';
 import { keyGlyph } from '../playback/keys.js';
-import { answerAt, type ChatMsg, type SendOptions } from './conversation-types.js';
+import { answerAt, type ChatMsg, type ConversationKind, type SendOptions } from './conversation-types.js';
 import type { Conversation } from './conversation.js';
 
 // A plain object holding every enumerable service, inherited ones included.
@@ -32,6 +32,25 @@ export function allServices(services: object): Record<string, unknown> {
 
 // The y/n block's readings of a call, where the chat and the command line import them.
 export { configLineOf, shellCommandOf } from './confirm-policy.js';
+
+// What a turn is handed that differs by the kind of conversation it runs in. A chat's
+// session gets the person's screens as each request's tail, the round boundary (the
+// queue, the settings-file guard, the automatic compaction), recall and `ask_user`, and
+// withholds nothing. The one-shot prompt has none of them, and is not offered the tools
+// that have nothing to deliver to without the app (AGENTS.md, "CLI").
+export interface TurnShape {
+  screen: boolean;
+  boundary: boolean;
+  recall: boolean;
+  askUser: boolean;
+  withholdTools: readonly string[];
+}
+export const ONESHOT_WITHHELD: readonly string[] = ['background', 'subagent', 'remind'];
+export function turnShape(kind: ConversationKind): TurnShape {
+  return kind === 'oneshot'
+    ? { screen: false, boundary: false, recall: false, askUser: false, withholdTools: ONESHOT_WITHHELD }
+    : { screen: true, boundary: true, recall: true, askUser: true, withholdTools: [] };
+}
 
 // `hostAsk`: the text is the HOST's request, sent as the person's message (after
 // an interactive `!!command`, "look at what it printed") — drawn as the host's,
@@ -46,6 +65,7 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
   c.busy = true;
   c.busyKind = 'turn';
   const cfg = c.deps.config();
+  const shape = turnShape(c.kind);
   // System context is assembled WITHOUT network on every message: replace the
   // old (role system) with a fresh one where memory is current (directive+
   // identity+memory). The chat history (user/assistant) is kept.
@@ -153,7 +173,7 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
       // What the screens show, read again before every round of the turn and
       // sent at the END of its request, after the conversation — past what the
       // provider caches, and never into the history.
-      requestTail: () => screenBlock(c.deps.screen()),
+      requestTail: shape.screen ? () => screenBlock(c.deps.screen()) : undefined,
       // The system prompt with the project's instructions as they are before
       // each round — a `cd` in this turn is seen by its next round.
       // The summary is read fresh too: an automatic compaction between two
@@ -177,7 +197,7 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
       // rest becomes the handoff; mid-turn the message says the work on it
       // goes on from the handoff, so it is not begun again. A compaction that
       // fails is logged and the request goes as it is; Esc stops it with the turn.
-      beforeRequest: async ({ round, transcript, measured }: { round: number; transcript: ChatMessage[]; measured?: number }) => {
+      beforeRequest: !shape.boundary ? undefined : async ({ round, transcript, measured }: { round: number; transcript: ChatMessage[]; measured?: number }) => {
         if (c.closed) return;
         // A settings file a command just changed is answered before the model
         // reads another word (the guard, above).
@@ -243,6 +263,7 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
       // What this conversation has loaded; `tools_load` adds to it mid-turn.
       // The mode (`ai.toolLoading`) is applied by the `chatLLM` service.
       toolSet: c.toolSet,
+      withholdTools: shape.withholdTools,
       toolCtx: {
         plan: c.plan,
         shell: c.shell,
@@ -257,18 +278,18 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
         // (this turn's own are still in full), an image read again from its
         // path with the hash checked — a file gone is the tool's answer, not a
         // note — and the count the /context line shows.
-        recall: {
+        recall: shape.recall ? ({
           items: () => c.recallItems(),
           resolveImage: (ref: ImageRef) => c.resolveImage(ref, []),
           onRecalled: (id: string) => { c.recall.recalled.add(id); },
-        } satisfies RecallSource,
+        } satisfies RecallSource) : undefined,
         // The conversation's project — the workspace its memory and its files
         // are in (src/assistant/workspace.ts), decided at its first message.
         workspaceProject: () => c.currentProject(),
         // The plugin's OWN host-issued token: a plugin can present itself but
         // not impersonate one.
         pluginToken: c.deps.pluginToken,
-        askUser: (questions: AskQuestion[]) => c.askUser(questions),
+        askUser: shape.askUser ? (questions: AskQuestion[]) => c.askUser(questions) : undefined,
         // Every service a tool may call through ctx — flattened, not spread:
         // `host.services` is a per-plugin view whose HOST services sit on its
         // prototype, and `...obj` copies own properties only. Spreading it
@@ -591,7 +612,7 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
     // the context threshold, or on the turn clock — every eligible item at
     // once, so the request's prefix moves once and not every turn. The
     // reading is the measured one where the provider reports usage.
-    if (!c.closed) {
+    if (!c.closed && shape.recall) {
       const limits = recallLimits(ai);
       if (limits.enabled && decideBatch(c.recall, c.recallItems(), c.contextReading().ratio, limits)) {
         c.deps.pushLog(`[recall] ${c.recall.stubbed.size} bulky item${c.recall.stubbed.size === 1 ? '' : 's'} now go as stubs`);
@@ -721,6 +742,9 @@ export function compact(c: Conversation): void {
 // The y/n sits in the conversation's one confirmation slot, so a write's y/n and this one
 // never stand together; it closes no panel, and the auto mode never answers it.
 export function askConfigChanges(c: Conversation): Promise<void> {
+  // Nobody to ask (the one-shot prompt): never asked, never parked. The changed file stays
+  // off, as the start left it, and the next start that can ask does (src/config/load.ts).
+  if (c.deps.canAsk === false) return Promise.resolve();
   // Work that outlived the conversation it ran in (a command /clear stopped) asks in the
   // conversation the chat draws now, whose own y/n and question decide, as they do for
   // any check: the guard is the process's, and a closed conversation shows nothing.

@@ -1047,14 +1047,16 @@ hold this set together:
   `declined` outcome, and a journal that hears `onToolRun` records it as declined by
   the host. Who answers is one closed set of policies (`ConfirmPolicy`,
   `src/assistant/confirm-policy.ts`) and one mapping, `confirmFor`: `ask` (the chat: the
-  auto mode, then the person's y/n), `always-no` (a background task), `none` (nobody to
-  ask: no `confirmWrite`), `allow-writes` (`--allow-writes`) and `caller` (a plugin's own
-  confirmation). `confirm-policy.test.ts` holds each row. A read runs as ever. So passing a `confirmWrite` is a deliberate act, and
-  leaving it out is safe. A caller can also withhold tools (`AgentOpts.withholdTools`):
-  the names are left out of every request, of the index and of `tools_load`, and a call
-  to one answers `Unknown tool` without running — the one-shot prompt withholds
-  `background`, `subagent` and `remind`, which have nothing to deliver to without the
-  app. Where each path stands:
+  auto mode, then the person's y/n), `always-no` (every write declined, journaled
+  `by: 'background'` — the row exists, and its driver arrives with background tasks run
+  as child conversations), `none` (nobody to ask: no `confirmWrite`), `allow-writes`
+  (`--allow-writes`) and `caller` (a plugin's own confirmation).
+  `confirm-policy.test.ts` holds each row. A read runs as ever. So passing a
+  `confirmWrite` is a deliberate act, and leaving it out is safe. A caller can also
+  withhold tools (`AgentOpts.withholdTools`): the names are left out of every request,
+  of the index and of `tools_load`, and a call to one answers `Unknown tool` without
+  running — the one-shot prompt withholds `background`, `subagent` and `remind`, which
+  have nothing to deliver to without the app. Where each path stands:
   - the chat's turn — asks: its y/n closure, which the auto mode may answer;
   - a background task — declines: it passes a confirmation that always says no, which
     `journaledChatLLM` journals as a `confirm` line `by: 'background'`;
@@ -1062,13 +1064,13 @@ hold this set together:
     declines unless the tool passes its own `confirmWrite`, whose answer is journaled
     `by: 'plugin'`; with none, the journal holds the declined call and no `confirm`;
   - the one-shot prompt (`runPrompt`, `src/main.ts`) — declines. `--allow-writes`,
-    given before the prompt, is the person's yes in advance: its policy (`allow-writes`) answers
-    what the auto mode may answer with `shell.autoRun` on (`neverAutomatic` with both
-    consents — so never `config_set`, an unlisted `web_fetch` or a plugin's
-    `run_command`) and says each write it
-    lets through on stderr as it runs (`[write] ! <command>`, else the tool and its
-    arguments — through `sanitizeViewText`, each further line marked `[write]   `, so
-    an escape code or a carriage return in the command cannot hide the line);
+    given before the prompt, is the person's yes in advance: its policy
+    (`allow-writes`) answers what the auto mode may answer with `shell.autoRun` on
+    (`neverAutomatic` with both consents — so never `config_set`, an unlisted
+    `web_fetch` or a plugin's `run_command`) and says each write it lets through on
+    stderr as it runs (`[write] ! <command>`, else the tool and its arguments —
+    through `sanitizeViewText`, each further line marked `[write]   `, so an escape
+    code or a carriage return in the command cannot hide the line);
   - a plugin's `services.chatLLM` — declines unless the plugin passes a `confirmWrite`
     of its own (one that can ask the person);
   - a remote plugin's `host.chatLLM` (`src/remote/adapter.ts`) — always declines: a
@@ -2569,7 +2571,14 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   through `useSyncExternalStore`: the list, the busy mark, the status line's activity,
   the y/n, the question, the queue, the auto mode — one object, the same until something
   drawn changes, and around the SAME `messages` array until the list itself is replaced
-  (the rows' memo keys on it). A write that changes nothing tells nobody. The chat's
+  (the rows' memo keys on it). A conversation has a kind — `session` (the chat's) or
+  `oneshot` (the one-shot prompt's) — and a policy for its writes (`confirm-policy.ts`),
+  both decided when it is made: `Conversation.fresh(deps, { kind, policy })` for a new
+  one, which reads the project's instructions for the start directory,
+  `Conversation.restore(…)` for a saved session. A policy that asks cannot be given
+  where `deps.canAsk` is false (the constructor throws), and the settings-file guard
+  never asks there. What a turn is handed that differs by kind is `turnShape`
+  (`conversation-turn.ts`). A write that changes nothing tells nobody. The chat's
   root is concurrent: React renders a store's change as urgent work, before the next
   await resumes, where a state change made outside a key handler waits for the
   scheduler's next task. So outside a turn, and for the busy mark, the y/n, the

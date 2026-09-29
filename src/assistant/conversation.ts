@@ -49,7 +49,7 @@ let keys = 0;
 
 export class Conversation {
   readonly key = `c${++keys}`;
-  readonly kind: ConversationKind = 'session';
+  readonly kind: ConversationKind;
   readonly deps: ConversationDeps;
   // Who answers a write's y/n in this conversation (src/assistant/confirm-policy.ts):
   // `ask` for the chat's; decided when it is made, never changed.
@@ -203,16 +203,42 @@ export class Conversation {
   // `carry` — what a conversation that replaces another in the chat takes over from it:
   // the ↑/↓ history (the same array), the turn counter, the last verb, the list as the
   // chat last drew it (until the chat draws this one), and whether the missing memory
-  // record was said. `policy` — who answers a write's y/n, `ask` unless said.
-  constructor(deps: ConversationDeps, carry: { prompts?: string[]; turn?: number; verb?: string; drawnRows?: ChatMsg[] | null; memoryMissingSaid?: boolean; policy?: ConfirmPolicy } = {}) {
+  // record was said. `policy` — who answers a write's y/n, `ask` unless said. `kind` —
+  // `session` unless said.
+  constructor(deps: ConversationDeps, carry: { prompts?: string[]; turn?: number; verb?: string; drawnRows?: ChatMsg[] | null; memoryMissingSaid?: boolean; policy?: ConfirmPolicy; kind?: ConversationKind } = {}) {
     this.deps = deps;
     this.policy = carry.policy ?? { kind: 'ask' };
+    this.kind = carry.kind ?? 'session';
+    // Cannot ask ⇒ declines, by construction: a run with nobody to answer is never handed
+    // a y/n that nobody will ever settle.
+    if (this.policy.kind === 'ask' && deps.canAsk === false) {
+      throw new Error('a conversation with nobody to ask cannot have the policy "ask" — give it "none"');
+    }
     this.shell = createShellState(() => deps.config(), null, () => this.onShellSet());
     if (carry.prompts) this.prompts = carry.prompts;
     if (carry.turn) this.turn = carry.turn;
     if (carry.verb) this.verb = carry.verb;
     if (carry.drawnRows !== undefined) this.drawnRows = carry.drawnRows;
     if (carry.memoryMissingSaid) this.memoryMissingSaid = true;
+  }
+
+  // A new conversation as a driver starts one: its kind and policy said, and — as the
+  // chat does when it mounts — the project's instructions read for the shell's start
+  // directory, since making a shell does not read them. `canAsk` must be said here: a
+  // driver that forgets it is never taken for a person.
+  static fresh(deps: ConversationDeps & { canAsk: boolean }, init: { kind: ConversationKind; policy: ConfirmPolicy }): Conversation {
+    const c = new Conversation(deps, init);
+    c.refreshProject();
+    return c;
+  }
+
+  // A saved session opened into a conversation of its own. The caller took `fingerprint`
+  // before it read `session`, and holds the session's lock (`applySession`'s order); the
+  // shell's saved directory reads the project's instructions again.
+  static restore(deps: ConversationDeps & { canAsk: boolean }, session: Session, fingerprint: SessionFingerprint, dir: string, init: { policy: ConfirmPolicy } = { policy: { kind: 'ask' } }): Conversation {
+    const c = new Conversation(deps, { kind: 'session', policy: init.policy });
+    c.applySession(session, fingerprint, dir);
+    return c;
   }
 
   // ── what the chat draws (`getSnapshot`)
@@ -321,6 +347,13 @@ export class Conversation {
   // The list as the model's own reads see it: as the chat last drew it (what a save
   // writes, what the notes' "said once" checks), or the list itself with no chat.
   rows(): ChatMsg[] { return this.drawnRows ?? this.messages; }
+
+  // The last answer in the list: what `/copy` takes (src/assistant/copy.ts), and what the
+  // one-shot prints. '' when no answer has text.
+  lastAnswer(): string {
+    const a = this.messages.findLast((m) => m.role === 'assistant' && String(m.content ?? '').trim());
+    return a ? String(a.content) : '';
+  }
 
   // The chat leaves this conversation for good. What runs is stopped for /clear and /new
   // (a pending y/n is declined `by: 'reset'`, a question dismissed); for a switch nothing

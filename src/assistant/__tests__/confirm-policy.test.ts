@@ -11,25 +11,34 @@ import { Conversation } from '../conversation.ts';
 import { readJournal } from '../journal.ts';
 import { journalPath } from '../sessions.ts';
 import { createShellState } from '../shell.ts';
+import { makeFactory } from '../../loader/plugin.ts';
 import { assembleToolRegistry } from '../../loader/tools.ts';
 import { fakeDeps } from './conversation-deps.ts';
 
 const MAKE = { name: 'run_command', arguments: JSON.stringify({ command: 'echo made > made.txt' }) };
 const CONFIG_SET = { name: 'config_set', arguments: JSON.stringify({ key: 'ui.verbs', value: '["Pondering"]', scope: 'session' }) };
+const PLUGIN_SHELL = { name: 'fakesh:run_command', arguments: JSON.stringify({ command: 'echo made > made.txt' }) };
 
-async function row(policy: ConfirmPolicy, opts: { call?: { name: string; arguments: string }; person?: boolean; autoAll?: boolean; task?: string } = {}) {
+// A plugin whose write-flagged tool has the host shell's name — registered qualified,
+// `fakesh:run_command` — and records its run in `ran`.
+function fakeShellPlugin(ran: { n: number }) {
+  return makeFactory({})('fakesh', { tools: [{ id: 'fakesh', tools: [{ type: 'function', function: { name: 'run_command', description: 'Runs.', parameters: { type: 'object', properties: { command: { type: 'string' } } } }, write: true }], exec: async () => { ran.n++; return 'ran'; } }] });
+}
+
+async function row(policy: ConfirmPolicy, opts: { call?: { name: string; arguments: string }; person?: boolean; autoAll?: boolean; task?: string; plugins?: unknown[] } = {}) {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-policy-')));
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-policy-root-')));
   const deps = fakeDeps({ sessionsDir: () => dir });
   const config = deps.config();
   config.shell = { roots: [root], ...(opts.autoAll ? { autoRun: true } : {}) };
-  assembleToolRegistry({ plugins: [], config, repo: { list: async () => [] } as never });
+  assembleToolRegistry({ plugins: (opts.plugins ?? []) as never, config, repo: { list: async () => [] } as never });
   const conv = new Conversation(deps);
   if (opts.autoAll) conv.setAutoMode('all');
   const journalId = conv.journal({ t: 'row', role: 'user', text: 'make the file' }, { person: true });
   // A y/n that parks is answered as the person's key would answer it.
   let parked = 0;
-  conv.on('confirm', (ev) => { if (ev.request) { parked++; setTimeout(() => conv.answerConfirm(opts.person !== false), 0); } });
+  const requests: unknown[] = [];
+  conv.on('confirm', (ev) => { if (ev.request) { parked++; requests.push(ev.request); setTimeout(() => conv.answerConfirm(opts.person !== false), 0); } });
   const call = opts.call ?? MAKE;
   let n = 0;
   const round = async (): Promise<ChatRoundResult> => (n++ === 0
@@ -45,13 +54,14 @@ async function row(policy: ConfirmPolicy, opts: { call?: { name: string; argumen
     onToolRun: (r) => runs.push(r),
   });
   const confirms = (readJournal(journalPath(conv.homes.get(journalId)!, journalId)) ?? []).filter((e) => e.t === 'confirm');
-  return { starts, runs, confirms, parked, made: fs.existsSync(path.join(root, 'made.txt')) };
+  return { starts, runs, confirms, parked, requests, config, made: fs.existsSync(path.join(root, 'made.txt')) };
 }
 
 test('ask: the y/n parks, the person\'s yes runs the write, journaled by: person', async () => {
   const r = await row({ kind: 'ask' });
   expect(r.starts).toEqual([{ name: 'run_command', confirm: true }]);
   expect(r.parked).toBe(1);
+  expect(r.requests).toMatchObject([{ name: 'run_command', command: 'echo made > made.txt' }]);
   expect(r.runs.map((x) => x.outcome)).toEqual(['applied']);
   expect(r.confirms).toMatchObject([{ id: 'call_1', name: 'run_command', answer: 'yes', by: 'person' }]);
   expect(r.made).toBe(true);
@@ -59,6 +69,7 @@ test('ask: the y/n parks, the person\'s yes runs the write, journaled by: person
 
 test('ask: the person\'s no declines it, journaled by: person', async () => {
   const r = await row({ kind: 'ask' }, { person: false });
+  expect(r.parked).toBe(1);
   expect(r.runs.map((x) => x.outcome)).toEqual(['declined']);
   expect(r.confirms).toMatchObject([{ answer: 'no', by: 'person' }]);
   expect(r.made).toBe(false);
@@ -105,6 +116,17 @@ test('allow-writes: the host\'s shell write runs and is said; config_set is stil
   expect(saidConfig).toEqual([]);
 });
 
+test('allow-writes: a plugin\'s run_command is not the host\'s shell — declined, nothing said, nothing run', async () => {
+  const said: string[] = [];
+  const ran = { n: 0 };
+  const r = await row({ kind: 'allow-writes', say: (l) => said.push(l) }, { call: PLUGIN_SHELL, plugins: [fakeShellPlugin(ran)] });
+  expect(r.starts).toEqual([{ name: 'fakesh:run_command', confirm: true }]);
+  expect(r.runs.map((x) => x.outcome)).toEqual(['declined']);
+  expect(said).toEqual([]);
+  expect(r.confirms).toEqual([]);
+  expect(ran.n).toBe(0);
+});
+
 test('caller: the plugin\'s own answer decides, journaled by: plugin (by: background under a task\'s label)', async () => {
   const yes = await row({ kind: 'caller', confirm: () => true });
   expect(yes.runs.map((x) => x.outcome)).toEqual(['applied']);
@@ -116,4 +138,12 @@ test('caller: the plugin\'s own answer decides, journaled by: plugin (by: backgr
   expect(no.confirms).toMatchObject([{ answer: 'no', by: 'plugin' }]);
   const task = await row({ kind: 'caller', confirm: () => false }, { task: 'clock' });
   expect(task.confirms).toMatchObject([{ answer: 'no', by: 'background', task: 'clock' }]);
+});
+
+test('caller: a plugin\'s yes runs any write, config_set included — nothing the auto mode would refuse is refused here', async () => {
+  const r = await row({ kind: 'caller', confirm: () => true }, { call: CONFIG_SET });
+  expect(r.starts).toEqual([{ name: 'config_set', confirm: true }]);
+  expect(r.runs.map((x) => x.outcome)).toEqual(['applied']);
+  expect(r.confirms).toMatchObject([{ name: 'config_set', answer: 'yes', by: 'plugin' }]);
+  expect((r.config.ui as { verbs?: unknown }).verbs).toEqual(['Pondering']);
 });
