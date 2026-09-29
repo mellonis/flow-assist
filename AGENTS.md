@@ -2614,7 +2614,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   is made: `Conversation.fresh(deps, { kind, policy })` for a new one, which reads the
   project's instructions for the start directory, `Conversation.restore(…)` for a saved
   session. A policy that asks cannot be given where `deps.canAsk` is false (the
-  constructor throws), and neither the settings-file guard nor `ask_user` asks there.
+  constructor throws), and neither the settings-file guard nor `ask_user` asks there. What a host hands a conversation comes from one factory, `hostDeps` (`src/assistant/host-deps.ts`), which reads the host's services when a member is called; `canAsk` is always said.
   What a turn is handed that differs by kind is `turnShape` (`conversation-turn.ts`).
 - **Ctrl+C, Ctrl+D and Ctrl+Z take a second press** (`src/runtime/exit-keys.ts`, pure;
   the App owns the arm). flowtty hands these three to the app BEFORE the terminal

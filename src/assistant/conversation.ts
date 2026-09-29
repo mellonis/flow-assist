@@ -224,9 +224,8 @@ export class Conversation {
 
   // A new conversation as a driver starts one: its kind and policy said, and — as the
   // chat does when it mounts — the project's instructions read for the shell's start
-  // directory, since making a shell does not read them. `canAsk` must be said here: a
-  // driver that forgets it is never taken for a person.
-  static fresh(deps: ConversationDeps & { canAsk: boolean }, init: { kind: ConversationKind; policy: ConfirmPolicy }): Conversation {
+  // directory, since making a shell does not read them.
+  static fresh(deps: ConversationDeps, init: { kind: ConversationKind; policy: ConfirmPolicy }): Conversation {
     const c = new Conversation(deps, init);
     c.refreshProject();
     return c;
@@ -235,7 +234,7 @@ export class Conversation {
   // A saved session opened into a conversation of its own. The caller took `fingerprint`
   // before it read `session`, and holds the session's lock (`applySession`'s order); the
   // shell's saved directory reads the project's instructions again.
-  static restore(deps: ConversationDeps & { canAsk: boolean }, session: Session, fingerprint: SessionFingerprint, dir: string, init: { policy: ConfirmPolicy } = { policy: { kind: 'ask' } }): Conversation {
+  static restore(deps: ConversationDeps, session: Session, fingerprint: SessionFingerprint, dir: string, init: { policy: ConfirmPolicy } = { policy: { kind: 'ask' } }): Conversation {
     const c = new Conversation(deps, { kind: 'session', policy: init.policy });
     c.applySession(session, fingerprint, dir);
     return c;

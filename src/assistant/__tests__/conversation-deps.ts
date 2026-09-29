@@ -23,6 +23,7 @@ export function fakeDeps(over: Partial<ConversationDeps> = {}): ConversationDeps
     pluginAiTools: () => [], pluginToken: undefined, viewRenderers: () => ({}), screen: () => [],
     afterWrite: () => {}, notify: () => { notified++; }, showMessage: () => {}, pushLog: (l) => { log.push(l); },
     sessionsDir: () => null, lockToken: 'test-token', screens: () => undefined,
+    canAsk: true,
     ...over, notified: () => notified, log,
   };
 }

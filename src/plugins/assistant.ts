@@ -19,7 +19,6 @@ import { lineTab, lineView, type TabWalk } from '../config/commandline.js';
 import { completePath, completeSlash, listDirectory, type ChatCommandDef } from '../config/fieldcomplete.js';
 import type { CompleteResult } from '../config/commands.js';
 import { redactDeep, redactSecrets } from '../assistant/secrets.js';
-import { compactConversation } from '../assistant/agent.js';
 import { copyTarget, copyToClipboard } from '../assistant/copy.js';
 import { cdChatTarget, realOf, shellAutoRun, shellRoots, startNote, tildePath } from '../assistant/shell.js';
 import {
@@ -62,6 +61,7 @@ import { isPanelSpec, panelAnswer, panelKey as commandPanelKey, panelKeys, panel
 import type { Command as PluginCommand } from '../loader/plugin.js';
 import type { ChatMsg, ConversationDeps, ConversationEvent, SendOptions, ViewPort } from '../assistant/conversation-types.js';
 import { Conversation } from '../assistant/conversation.js';
+import { hostDeps } from '../assistant/host-deps.js';
 import { personSpoke, projectHere } from '../assistant/conversation-session.js';
 import { configLineOf, shellCommandOf } from '../assistant/confirm-policy.js';
 
@@ -116,28 +116,16 @@ const assistantConfig = (host: { config?: unknown }) =>
 // What a conversation is handed from the chat's host: every member reads the host when
 // it is called, since the App rebinds some services on every render.
 function chatDeps(host: PluginApi['host'], lockToken: string, current: () => Conversation | null): ConversationDeps {
-  const svc = () => host.services as Record<string, any>;
-  return {
+  return hostDeps({
     config: () => host.config,
-    services: () => host.services,
-    chatLLM: (m, o) => svc().chatLLM(m, o),
-    compact: compactConversation,
-    // The App's own array, spliced in place when a plugin joins late or changes its
-    // tools: a turn hands it to `agentChat`, which re-reads the registry every round.
-    pluginAiTools: () => svc().pluginAiTools ?? [],
-    pluginToken: host.pluginToken,
-    viewRenderers: () => (svc().viewRenderers as ViewRenderers | undefined) ?? { console: renderConsole },
-    screen: () => { try { return (svc().chatContext as (() => ContextItem[]) | undefined)?.() ?? []; } catch { return []; } },
-    afterWrite: () => { void (svc().afterWrite as (() => Promise<void>) | undefined)?.(); },
+    services: () => host.services as Record<string, unknown>,
     notify: () => host.notify(),
-    showMessage: (text) => svc().showMessage?.(text),
-    pushLog: (line) => svc().pushLog?.(line),
     sessionsDir: () => sessionsDir(host.config),
     lockToken,
-    // Read when called: a plugin that joins late is seen.
-    screens: () => svc().screens as ReturnType<ConversationDeps['screens']>,
+    canAsk: true,
+    pluginToken: host.pluginToken,
     current,
-  };
+  });
 }
 
 type BuildAssistantParams = {

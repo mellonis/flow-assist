@@ -152,10 +152,10 @@ export interface ConversationDeps {
   pushLog: (line: string) => void;
   sessionsDir: () => string | null;
   lockToken: string;
-  // A person is there to answer a y/n or a question. Absent: true (the chat's). A
-  // conversation whose policy is `ask` cannot be made where this is false, and the
-  // settings-file guard never asks where it is false.
-  canAsk?: boolean;
+  // A person is there to answer a y/n or a question. A conversation whose policy is
+  // `ask` cannot be made where this is false, and the settings-file guard never asks
+  // where it is false.
+  canAsk: boolean;
   // The App's screens service (src/runtime/screens.ts): the system prompt's `## Screens`
   // block, and the end of work that opens what a turn held back. Undefined with no App.
   screens: () => { promptBlock(): string; afterTurn(ok: boolean): void } | undefined;

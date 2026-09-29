@@ -1,7 +1,6 @@
 // The one-shot prompt's conversation (`flow-assist "<prompt>"`, AGENTS.md "CLI"): what it
 // is handed, and what the end of its one turn means on the command line.
-import { compactConversation } from './agent.js';
-import { renderConsole } from './console-view.js';
+import { hostDeps } from './host-deps.js';
 import { redactSecrets } from './secrets.js';
 import { ONESHOT_WITHHELD } from './conversation-turn.js';
 import type { ConversationDeps, TurnEnd } from './conversation-types.js';
@@ -17,21 +16,15 @@ import type { HostServices } from '../runtime/services.js';
 // or a timer running after the answer prints.
 export function oneShotDeps(config: Record<string, unknown>, services: HostServices): ConversationDeps & { canAsk: false } {
   return {
-    config: () => config,
-    services: () => services as unknown as Record<string, unknown>,
-    chatLLM: (messages, opts) => services.chatLLM(messages, { ...opts, withholdTools: [...ONESHOT_WITHHELD, ...(opts?.withholdTools ?? [])] }),
-    compact: compactConversation,
-    pluginAiTools: () => services.pluginAiTools,
-    pluginToken: undefined,
-    viewRenderers: () => ({ console: renderConsole }),
-    screen: () => [],
-    afterWrite: () => { void services.afterWrite(); },
-    notify: () => {},
-    showMessage: () => {},
-    pushLog: () => {},
-    sessionsDir: () => null,
-    lockToken: '',
-    screens: () => undefined,
+    ...hostDeps({
+      config: () => config,
+      services: () => services as unknown as Record<string, unknown>,
+      notify: () => {},
+      sessionsDir: () => null,
+      lockToken: '',
+      canAsk: false,
+      withhold: ONESHOT_WITHHELD,
+    }),
     canAsk: false,
   };
 }
