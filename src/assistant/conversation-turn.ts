@@ -289,7 +289,8 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
         // The plugin's OWN host-issued token: a plugin can present itself but
         // not impersonate one.
         pluginToken: c.deps.pluginToken,
-        askUser: shape.askUser ? (questions: AskQuestion[]) => c.askUser(questions) : undefined,
+        // Nobody answers a question where nobody can answer a y/n (`deps.canAsk`).
+        askUser: shape.askUser && c.deps.canAsk !== false ? (questions: AskQuestion[]) => c.askUser(questions) : undefined,
         // Every service a tool may call through ctx — flattened, not spread:
         // `host.services` is a per-plugin view whose HOST services sit on its
         // prototype, and `...obj` copies own properties only. Spreading it

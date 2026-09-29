@@ -63,6 +63,13 @@ test('a chat\'s session turn keeps what it had: the screen tail, the boundary, r
   expect(o.withholdTools).toEqual([]);
 });
 
+test('a session turn where nobody can answer is handed no ask_user, so no question waits on nobody', async () => {
+  const m = answering('Done.');
+  const c = Conversation.fresh({ ...fakeDeps({ chatLLM: m.chatLLM }), canAsk: false }, { kind: 'session', policy: { kind: 'none' } });
+  await c.send('go');
+  expect(m.seen[0]!.toolCtx.askUser).toBeUndefined();
+});
+
 test('the settings-file guard never asks where nobody can answer', async () => {
   let checked = 0;
   const services = { configChanges: { check: () => { checked++; return [{ file: 'config.json', lines: ['ai.model: a → b'] }]; }, apply: () => ({ applied: [], restart: [] }), decline: () => null } };

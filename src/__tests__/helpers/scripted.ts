@@ -40,11 +40,20 @@ export type Step =
   | { thinking: string; signature: string } | { error: { type: string; message: string } };
 export type Turn = Step[];
 
+// A request as the scripted model recorded it: the body the host sent.
+export type RecordedRequest = { messages: { role: string; content?: unknown }[]; [k: string]: unknown };
+// The text of a request's first user message — what a sub-script usually matches on:
+// a conversation's first question tells its requests from another's.
+export const firstUser = (req: RecordedRequest): string => {
+  const m = req.messages.find((x) => x.role === 'user');
+  return typeof m?.content === 'string' ? m.content : JSON.stringify(m?.content ?? '');
+};
+
 // ─── the scripted model ───────────────────────────────────────────────────────
 export class ScriptedModel {
   private turns: Turn[] = [];
   private gate: (() => void) | null = null;
-  requests: { messages: { role: string }[] }[] = [];
+  requests: RecordedRequest[] = [];
   // What each request was sent to, and with which headers (lower-cased names).
   urls: string[] = [];
   headers: Record<string, string>[] = [];
@@ -59,61 +68,89 @@ export class ScriptedModel {
   script(...turns: Turn[]) { this.turns.push(...turns); }
   release() { this.gate?.(); this.gate = null; }
 
+  // A turn of this script is frozen at a `hold` step, waiting for `release()`.
+  get held(): boolean { return this.gate !== null; }
+
+  // Requests for another conversation, apart from the rest: a request goes to the first
+  // sub-script whose `match` takes it, and otherwise to this script. Each sub-script has
+  // its own turns, its own `hold` / `release()` and its own `requests`; every request is
+  // recorded here too, in the order it came. No test-only header: the wire is checked as
+  // the provider checks it.
+  private routes: { match: (req: RecordedRequest) => boolean; to: ScriptedModel }[] = [];
+  when(match: (req: RecordedRequest) => boolean): ScriptedModel {
+    const to = new ScriptedModel();
+    to.wire = this.wire;
+    this.routes.push({ match, to });
+    return to;
+  }
+
   install() {
     globalThis.fetch = (async (_url: unknown, init: RequestInit) => {
       // A real fetch given a signal that is already aborted rejects before sending
       // anything — so a round started after Esc (a tool that returned once stopped)
       // never reaches the model.
       if (init.signal?.aborted) throw new DOMException('The operation was aborted.', 'AbortError');
-      this.requests.push(JSON.parse(String(init.body)));
+      const req = JSON.parse(String(init.body)) as RecordedRequest;
+      const headers = Object.fromEntries(Object.entries((init.headers ?? {}) as Record<string, string>).map(([k, v]) => [k.toLowerCase(), String(v)]));
+      this.requests.push(req);
       this.urls.push(String(_url));
-      this.headers.push(Object.fromEntries(Object.entries((init.headers ?? {}) as Record<string, string>).map(([k, v]) => [k.toLowerCase(), String(v)])));
-      if (this.wire === 'anthropic') return this.anthropic(init);
-      const turn = this.turns.shift() ?? [{ text: '(the script has no more turns)' }];
-      // A request that does not ask for a stream (/compact's one-shot) gets plain JSON.
-      if (!(this.requests.at(-1) as { stream?: boolean }).stream) {
-        const text = turn.map((st) => ('text' in st ? st.text : '')).join('');
-        return new Response(JSON.stringify({ choices: [{ message: { content: text } }] }), { headers: { 'content-type': 'application/json' } });
-      }
-      const enc = new TextEncoder();
-      const send = (c: ReadableStreamDefaultController, o: unknown) => c.enqueue(enc.encode(`data: ${JSON.stringify(o)}\n\n`));
-      const self = this;
-      const body = new ReadableStream({
-        async start(c) {
-          // Like a real fetch: aborting the request errors its body with an AbortError
-          // (and lets a held step go), so Esc stops a scripted answer as it stops a real one.
-          let stopped = false;
-          init.signal?.addEventListener('abort', () => {
-            stopped = true;
-            c.error(new DOMException('The operation was aborted.', 'AbortError'));
-            self.gate?.();
-          });
-          let calls = 0;
-          // From a text-and-call step on, events are held back and go out in ONE
-          // network chunk — up to the next hold, the end of the round included — as a
-          // provider's last packet may carry all of it.
-          let batch: string | null = null;
-          const emit = (o: unknown) => { if (batch === null) send(c, o); else batch += `data: ${JSON.stringify(o)}\n\n`; };
-          const flushBatch = () => { if (batch) c.enqueue(enc.encode(batch)); batch = null; };
-          for (const step of turn) {
-            if (stopped) return;
-            if ('hold' in step) { flushBatch(); await new Promise<void>((r) => { self.gate = r; }); }
-            else if ('thinking' in step) emit({ choices: [{ delta: { reasoning_content: step.thinking }, finish_reason: null }] });
-            else if ('error' in step) continue;
-            else if ('text' in step && 'tool' in step) { batch ??= ''; emit({ choices: [{ delta: { content: step.text, tool_calls: [{ index: calls, id: `call_${calls++}`, function: { name: step.tool, arguments: JSON.stringify(step.args) } }] }, finish_reason: null }] }); }
-            else if ('text' in step) for (const piece of step.text.match(/.{1,12}/gs) ?? []) emit({ choices: [{ delta: { content: piece }, finish_reason: null }] });
-            else emit({ choices: [{ delta: { tool_calls: [{ index: calls, id: `call_${calls++}`, function: { name: step.tool, arguments: JSON.stringify(step.args) } }] }, finish_reason: null }] });
-          }
-          if (stopped) return;
-          emit({ choices: [{ delta: {}, finish_reason: calls ? 'tool_calls' : 'stop' }] });
-          if (self.usage) emit({ choices: [], usage: self.usage });
-          if (batch === null) c.enqueue(enc.encode('data: [DONE]\n\n'));
-          else { batch += 'data: [DONE]\n\n'; flushBatch(); }
-          c.close();
-        },
-      });
-      return new Response(body, { headers: { 'content-type': 'text/event-stream' } });
+      this.headers.push(headers);
+      const to = this.routes.find((r) => r.match(req))?.to;
+      if (!to) return this.serve(init);
+      to.requests.push(req);
+      to.urls.push(String(_url));
+      to.headers.push(headers);
+      return to.serve(init);
     }) as typeof fetch;
+  }
+
+  // One response from this script: the next turn, on this script's wire.
+  private serve(init: RequestInit): Response {
+    if (this.wire === 'anthropic') return this.anthropic(init);
+    const turn = this.turns.shift() ?? [{ text: '(the script has no more turns)' }];
+    // A request that does not ask for a stream (/compact's one-shot) gets plain JSON.
+    if (!(this.requests.at(-1) as { stream?: boolean }).stream) {
+      const text = turn.map((st) => ('text' in st ? st.text : '')).join('');
+      return new Response(JSON.stringify({ choices: [{ message: { content: text } }] }), { headers: { 'content-type': 'application/json' } });
+    }
+    const enc = new TextEncoder();
+    const send = (c: ReadableStreamDefaultController, o: unknown) => c.enqueue(enc.encode(`data: ${JSON.stringify(o)}\n\n`));
+    const self = this;
+    const body = new ReadableStream({
+      async start(c) {
+        // Like a real fetch: aborting the request errors its body with an AbortError
+        // (and lets a held step go), so Esc stops a scripted answer as it stops a real one.
+        let stopped = false;
+        init.signal?.addEventListener('abort', () => {
+          stopped = true;
+          c.error(new DOMException('The operation was aborted.', 'AbortError'));
+          self.gate?.();
+        });
+        let calls = 0;
+        // From a text-and-call step on, events are held back and go out in ONE
+        // network chunk — up to the next hold, the end of the round included — as a
+        // provider's last packet may carry all of it.
+        let batch: string | null = null;
+        const emit = (o: unknown) => { if (batch === null) send(c, o); else batch += `data: ${JSON.stringify(o)}\n\n`; };
+        const flushBatch = () => { if (batch) c.enqueue(enc.encode(batch)); batch = null; };
+        for (const step of turn) {
+          if (stopped) return;
+          if ('hold' in step) { flushBatch(); await new Promise<void>((r) => { self.gate = r; }); }
+          else if ('thinking' in step) emit({ choices: [{ delta: { reasoning_content: step.thinking }, finish_reason: null }] });
+          else if ('error' in step) continue;
+          else if ('text' in step && 'tool' in step) { batch ??= ''; emit({ choices: [{ delta: { content: step.text, tool_calls: [{ index: calls, id: `call_${calls++}`, function: { name: step.tool, arguments: JSON.stringify(step.args) } }] }, finish_reason: null }] }); }
+          else if ('text' in step) for (const piece of step.text.match(/.{1,12}/gs) ?? []) emit({ choices: [{ delta: { content: piece }, finish_reason: null }] });
+          else emit({ choices: [{ delta: { tool_calls: [{ index: calls, id: `call_${calls++}`, function: { name: step.tool, arguments: JSON.stringify(step.args) } }] }, finish_reason: null }] });
+        }
+        if (stopped) return;
+        emit({ choices: [{ delta: {}, finish_reason: calls ? 'tool_calls' : 'stop' }] });
+        if (self.usage) emit({ choices: [], usage: self.usage });
+        if (batch === null) c.enqueue(enc.encode('data: [DONE]\n\n'));
+        else { batch += 'data: [DONE]\n\n'; flushBatch(); }
+        c.close();
+      },
+    });
+    return new Response(body, { headers: { 'content-type': 'text/event-stream' } });
   }
 
   // ─── the Anthropic wire ─────────────────────────────────────────────────────

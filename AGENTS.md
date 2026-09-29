@@ -1048,8 +1048,7 @@ hold this set together:
   the host. Who answers is one closed set of policies (`ConfirmPolicy`,
   `src/assistant/confirm-policy.ts`) and one mapping, `confirmFor`: `ask` (the chat: the
   auto mode, then the person's y/n), `always-no` (every write declined, journaled
-  `by: 'background'` — the row exists, and its driver arrives with background tasks run
-  as child conversations), `none` (nobody to ask: no `confirmWrite`), `allow-writes`
+  `by: 'background'` — the row exists; no driver uses it yet), `none` (nobody to ask: no `confirmWrite`), `allow-writes`
   (`--allow-writes`) and `caller` (a plugin's own confirmation).
   `confirm-policy.test.ts` holds each row. A read runs as ever. So passing a
   `confirmWrite` is a deliberate act, and leaving it out is safe. A caller can also
@@ -2571,14 +2570,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   through `useSyncExternalStore`: the list, the busy mark, the status line's activity,
   the y/n, the question, the queue, the auto mode — one object, the same until something
   drawn changes, and around the SAME `messages` array until the list itself is replaced
-  (the rows' memo keys on it). A conversation has a kind — `session` (the chat's) or
-  `oneshot` (the one-shot prompt's) — and a policy for its writes (`confirm-policy.ts`),
-  both decided when it is made: `Conversation.fresh(deps, { kind, policy })` for a new
-  one, which reads the project's instructions for the start directory,
-  `Conversation.restore(…)` for a saved session. A policy that asks cannot be given
-  where `deps.canAsk` is false (the constructor throws), and the settings-file guard
-  never asks there. What a turn is handed that differs by kind is `turnShape`
-  (`conversation-turn.ts`). A write that changes nothing tells nobody. The chat's
+  (the rows' memo keys on it). A write that changes nothing tells nobody. The chat's
   root is concurrent: React renders a store's change as urgent work, before the next
   await resumes, where a state change made outside a key handler waits for the
   scheduler's next task. So outside a turn, and for the busy mark, the y/n, the
@@ -2599,6 +2591,13 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   left is closed — it saves nothing and draws nothing more. The chat's one lock token is
   handed to every conversation it makes; the exit hook, the unmount, `postToChat` and
   the screens' gates read the conversation the chat holds now (`convRef`).
+- **A conversation has a kind** — `session` (the chat's) or `oneshot` (the one-shot
+  prompt's) — and a policy for its writes (`confirm-policy.ts`), both decided when it
+  is made: `Conversation.fresh(deps, { kind, policy })` for a new one, which reads the
+  project's instructions for the start directory, `Conversation.restore(…)` for a saved
+  session. A policy that asks cannot be given where `deps.canAsk` is false (the
+  constructor throws), and neither the settings-file guard nor `ask_user` asks there.
+  What a turn is handed that differs by kind is `turnShape` (`conversation-turn.ts`).
 - **Ctrl+C, Ctrl+D and Ctrl+Z take a second press** (`src/runtime/exit-keys.ts`, pure;
   the App owns the arm). flowtty hands these three to the app BEFORE the terminal
   backend acts (exit, exit, suspend — skipped when a `useInput` handler returns strict
@@ -4054,6 +4053,20 @@ writes by default keeps both:
   aborted rejects before it is recorded. End-to-end
   tests drive the app through it; assert on the frame AND on cell styles
   (`backend.lastBuffer`).
+- `src/__tests__/helpers/conversation.ts` — `conversationRig(model, opts)`: ONE
+  conversation on the host's real services and tool registry with only the network
+  replaced, and a sessions directory, memory, workspace and shell root of the test's
+  own — no App. `await rig.conv.send(…)` resolves when the turn ends; `rig.sent(i)`,
+  `rig.conv.api`, `rig.journal(id)`, `rig.sessionFile(id)` read what the model was
+  sent, the history, the journal and the state file; `rig.pending()` /
+  `rig.answerNext(ok)` the y/n; `rig.fresh()` makes another conversation as `/new`
+  does, `rig.open(id)` opens a saved one as `/resume` does. A test whose claims are
+  about what is sent, the history, the journal or the queue uses it
+  (`*.rig.test.ts`); one about cells, keys or layout boots the App.
+  `ScriptedModel.when(match)` gives a sub-script of its own turns and `hold` /
+  `release()` to the requests `match` takes (`firstUser(req)`, a request's first user
+  message, tells one conversation's from another's); `model.held` says a `hold` is
+  reached.
 - `src/__tests__/helpers/session-files.ts` — a booted app's sessions land under a
   mirror of the project the shell starts in (the checkout's git root under `bun test`,
   none where there is no `.git`): a test finds a session's files with `listTree` /
