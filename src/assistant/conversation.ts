@@ -3,6 +3,7 @@
 import { apiHistory, requestTools, type ChatMessage, type TokenUsage } from './agent.js';
 import { askStart, type AskQuestion, type AskState } from './ask.js';
 import type { AutoMode } from './auto.js';
+import type { ConfirmPolicy } from './confirm-policy.js';
 import { DEFAULT_CONTEXT_WINDOW, readContext, type ContextReading } from './context-meter.js';
 import { dataUrl, imageLimits, imagesInText, readImageData, type ImageRef, type LoadedOk, type ResolvedImage } from './images.js';
 import type { JournalEvent } from './journal.js';
@@ -50,6 +51,9 @@ export class Conversation {
   readonly key = `c${++keys}`;
   readonly kind: ConversationKind = 'session';
   readonly deps: ConversationDeps;
+  // Who answers a write's y/n in this conversation (src/assistant/confirm-policy.ts):
+  // `ask` for the chat's; decided when it is made, never changed.
+  readonly policy: ConfirmPolicy;
 
   // ── the model's side
   // The plan is this conversation's: handed to the `todo` tool through the tool context,
@@ -199,9 +203,10 @@ export class Conversation {
   // `carry` — what a conversation that replaces another in the chat takes over from it:
   // the ↑/↓ history (the same array), the turn counter, the last verb, the list as the
   // chat last drew it (until the chat draws this one), and whether the missing memory
-  // record was said.
-  constructor(deps: ConversationDeps, carry: { prompts?: string[]; turn?: number; verb?: string; drawnRows?: ChatMsg[] | null; memoryMissingSaid?: boolean } = {}) {
+  // record was said. `policy` — who answers a write's y/n, `ask` unless said.
+  constructor(deps: ConversationDeps, carry: { prompts?: string[]; turn?: number; verb?: string; drawnRows?: ChatMsg[] | null; memoryMissingSaid?: boolean; policy?: ConfirmPolicy } = {}) {
     this.deps = deps;
+    this.policy = carry.policy ?? { kind: 'ask' };
     this.shell = createShellState(() => deps.config(), null, () => this.onShellSet());
     if (carry.prompts) this.prompts = carry.prompts;
     if (carry.turn) this.turn = carry.turn;

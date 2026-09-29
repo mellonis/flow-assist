@@ -43,9 +43,8 @@ import { refreshSecrets } from './assistant/secrets.js';
 import { consoleBridge } from './runtime/console-log.js';
 import { agentChat } from './assistant/agent.js';
 import { neverAutomatic } from './assistant/auto.js';
-import { shellCommandOf } from './plugins/assistant.js';
-import { sanitizeViewText } from './assistant/views.js';
-import { createShellState, runMark } from './assistant/shell.js';
+import { createShellState } from './assistant/shell.js';
+import { writeLine } from './assistant/confirm-policy.js';
 import { instructionsPrompt } from './assistant/project-instructions.js';
 import { toolLoadingMode } from './assistant/tool-loading.js';
 import { toolResultCapFromConfig } from './assistant/tool-result-cap.js';
@@ -434,17 +433,6 @@ export async function runPrompt(args: string[], config: Record<string, unknown>,
     onLive: (delta: string) => out(delta),
   });
   out('\n' + result.content + '\n');
-}
-
-// A write as the one-shot run says it on stderr: the command line of a `run_command`,
-// else the tool and its arguments. The line is the flag's only safeguard, so it is
-// cleaned as a view's text is (`sanitizeViewText`: no escape code, a carriage return a
-// line break) and each line after the first is marked too — a command cannot erase
-// its own line or pass a line of its own off as other output.
-function writeLine(name: string, argsText: string): string {
-  const command = shellCommandOf(name, argsText);
-  const text = sanitizeViewText(command !== null ? `${runMark()} ${command}` : `${name} ${argsText}`);
-  return text.split('\n').map((line, i) => (i ? `[write]   ${line}` : `[write] ${line}`)).join('\n');
 }
 
 // ─── interactive TUI ──────────────────────────────────────────────────────────

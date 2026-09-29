@@ -1045,7 +1045,11 @@ hold this set together:
   the tool never runs, the model gets a `DECLINED` result saying this run cannot ask
   the person and they can do it in the chat, the tool log and `onToolRun` carry the
   `declined` outcome, and a journal that hears `onToolRun` records it as declined by
-  the host. A read runs as ever. So passing a `confirmWrite` is a deliberate act, and
+  the host. Who answers is one closed set of policies (`ConfirmPolicy`,
+  `src/assistant/confirm-policy.ts`) and one mapping, `confirmFor`: `ask` (the chat: the
+  auto mode, then the person's y/n), `always-no` (a background task), `none` (nobody to
+  ask: no `confirmWrite`), `allow-writes` (`--allow-writes`) and `caller` (a plugin's own
+  confirmation). `confirm-policy.test.ts` holds each row. A read runs as ever. So passing a `confirmWrite` is a deliberate act, and
   leaving it out is safe. A caller can also withhold tools (`AgentOpts.withholdTools`):
   the names are left out of every request, of the index and of `tools_load`, and a call
   to one answers `Unknown tool` without running — the one-shot prompt withholds
@@ -1058,7 +1062,7 @@ hold this set together:
     declines unless the tool passes its own `confirmWrite`, whose answer is journaled
     `by: 'plugin'`; with none, the journal holds the declined call and no `confirm`;
   - the one-shot prompt (`runPrompt`, `src/main.ts`) — declines. `--allow-writes`,
-    given before the prompt, is the person's yes in advance: its `confirmWrite` answers
+    given before the prompt, is the person's yes in advance: its policy (`allow-writes`) answers
     what the auto mode may answer with `shell.autoRun` on (`neverAutomatic` with both
     consents — so never `config_set`, an unlisted `web_fetch` or a plugin's
     `run_command`) and says each write it

@@ -3,6 +3,7 @@
 // Functions over a Conversation, which holds the state; its methods call them.
 import fs from 'node:fs';
 import type { ToolRun } from './agent.js';
+import { confirmFor, type ConfirmWrite } from './confirm-policy.js';
 import { appendJournal, callEndEvent, callStartEvent, rowOf, type JournalEvent } from './journal.js';
 import { createRecallState, saveRecallState } from './recall.js';
 import {
@@ -147,11 +148,7 @@ export function journaledChatLLM(c: Conversation, from: string) {
         rest.onToolRun?.(run);
       },
       ...(typeof answer === 'function' ? {
-        confirmWrite: async (name: string, args: string, info?: { id?: string }) => {
-          const ok = !!(await answer(name, args, info));
-          journalTo(c, from, { t: 'confirm', ...(info?.id ? { id: info.id } : {}), name, answer: ok ? 'yes' : 'no', by: label ? 'background' : 'plugin', ...tag });
-          return ok;
-        },
+        confirmWrite: confirmFor({ kind: 'caller', confirm: answer as ConfirmWrite }, { conv: c, journalId: from, ...(label ? { task: label } : {}) }),
       } : {}),
     } as never);
   };

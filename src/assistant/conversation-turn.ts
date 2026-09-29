@@ -4,8 +4,8 @@
 import path from 'node:path';
 import { transcriptSoFar, type ChatMessage, type compactConversation, type TokenUsage, type ToolRun } from './agent.js';
 import type { AskQuestion } from './ask.js';
-import { autoConfirms } from './auto.js';
 import { RESUMED_NOTE, autoCompactLimits, overThreshold } from './compaction.js';
+import { confirmFor } from './confirm-policy.js';
 import { estimateTokens, short as shortTokens } from './context-meter.js';
 import { imagesInText, isImageRefusal, wireMessages, type ImageRef } from './images.js';
 import { callEndEvent, callStartEvent, outputJournal } from './journal.js';
@@ -13,15 +13,13 @@ import { llmOpts } from './llm-endpoint.js';
 import { pushHistory } from './prompt-history.js';
 import { decideBatch, recallLimits, type RecallSource } from './recall.js';
 import { screenBlock } from './screen-context.js';
-import { shellAutoRun } from './shell.js';
 import { addCalls, callRun, endRound, startsWithNext, type CallRun, type TurnPart } from './step.js';
 import { STOPPED_TURN, failedTurn, joinSystem, projectBlock, roundCapTurn, summaryBlock, systemParts } from './system-prompt.js';
 import type { ViewRecord } from './views.js';
 import type { ToolDef } from '../loader/tools.js';
-import { configSetLine } from '../config/commands.js';
-import { RESTART_NOTE, parseValue, type ConfigChange } from '../config/load.js';
+import { RESTART_NOTE, type ConfigChange } from '../config/load.js';
 import { keyGlyph } from '../playback/keys.js';
-import { answerAt, type ChatMsg, type PendingConfirm, type SendOptions } from './conversation-types.js';
+import { answerAt, type ChatMsg, type SendOptions } from './conversation-types.js';
 import type { Conversation } from './conversation.js';
 
 // A plain object holding every enumerable service, inherited ones included.
@@ -32,34 +30,8 @@ export function allServices(services: object): Record<string, unknown> {
   return flat;
 }
 
-// The command of a `run_command` call, so the y/n block can show the line itself
-// rather than its JSON. null — some other tool, or arguments that do not parse.
-export function shellCommandOf(name: string, args: string): string | null {
-  if (name !== 'run_command' && !name.endsWith(':run_command')) return null;
-  try {
-    const a = JSON.parse(args) as { command?: unknown; cwd?: unknown };
-    if (typeof a.command !== 'string') return null;
-    return typeof a.cwd === 'string' && a.cwd.trim() ? `${a.command}   # in ${a.cwd}` : a.command;
-  } catch {
-    return null;
-  }
-}
-
-// The line a `config_set` call stands for — the `config set` command the person would
-// have typed — so the y/n block reads the same as the CLI rather than as JSON. null —
-// some other tool, or arguments that do not parse. Only the host's own tool: a plugin's
-// tool of the same name is registered qualified (`mcp:config_set`) and keeps its
-// arguments on the block, or a line would hide what it really sends.
-export function configLineOf(name: string, args: string): string | null {
-  if (name !== 'config_set') return null;
-  try {
-    const a = JSON.parse(args) as { key?: unknown; value?: unknown; scope?: unknown };
-    if (typeof a.key !== 'string' || (a.scope !== 'session' && a.scope !== 'saved')) return null;
-    return configSetLine(a.key, typeof a.value === 'string' ? parseValue(a.value) : a.value, a.scope);
-  } catch {
-    return null;
-  }
-}
+// The y/n block's readings of a call, where the chat and the command line import them.
+export { configLineOf, shellCommandOf } from './confirm-policy.js';
 
 // `hostAsk`: the text is the HOST's request, sent as the person's message (after
 // an interactive `!!command`, "look at what it printed") — drawn as the host's,
@@ -309,7 +281,7 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
         // handed a way to write to the journal itself.
         chatLLM: c.journaledChatLLM(journalId),
       },
-      confirmWrite: confirmWrite(c, journalId),
+      confirmWrite: confirmFor(c.policy, { conv: c, journalId }),
       // A view a tool opened, and every change to it. Its message is pushed on
       // the FIRST change, so it has its place — and its fold id — from the
       // start: a block opened while it ran is still open when it ends.
@@ -645,46 +617,6 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
     c.afterTurn(!aborted && !failed, !!roundLimit);
   }
   return true;
-}
-
-// The y/n pause on a write: agentChat calls it for a tool with a write flag, and it
-// waits for the chat's key.
-export function confirmWrite(c: Conversation, journalId: string) {
-  return (name: string, argsStr: unknown, info?: { input?: string; inputId?: string; hostShell?: boolean; id?: string }) => new Promise<boolean>((resolve) => {
-    // The one place a confirmation may be answered without the person:
-    // the auto mode (src/assistant/auto.ts), which only `all` ever lets
-    // say yes, never for an unlisted web_fetch or config_set, and for
-    // run_command only while the person's `shell.autoRun` is on and the
-    // call is the host's own shell tool (`info.hostShell`) — the key read
-    // here, at the call, so a value set mid-session holds at once. It
-    // answers BEFORE anything on screen moves — a call that does not
-    // pause must not close the `/context` panel the person is reading.
-    // Nothing here relaxes what agentChat asks about: a tool with no
-    // write flag never reaches this function, and the trail and the ✎
-    // diff block still show what ran.
-    if (autoConfirms(c.autoMode, name, { autoRun: shellAutoRun(c.deps.config() as { shell?: unknown }), hostShell: info?.hostShell === true })) {
-      c.journalTo(journalId, { t: 'confirm', ...(info?.id ? { id: info.id } : {}), name, answer: 'yes', by: 'auto' });
-      resolve(true);
-      return;
-    }
-    const args = typeof argsStr === 'string' ? argsStr : JSON.stringify(argsStr ?? '');
-    const command = shellCommandOf(name, args);
-    const line = configLineOf(name, args);
-    // The tool whose earlier result the call takes as its input — the
-    // block says where a command's stdin comes from.
-    const input = info?.input ? `${info.input}${info.inputId ? ` (${info.inputId})` : ''}` : undefined;
-    // The answer goes into the journal as it is given.
-    const answered = (ok: boolean, by: 'person' | 'stop' | 'reset' = 'person') => {
-      c.journalTo(journalId, { t: 'confirm', ...(info?.id ? { id: info.id } : {}), name, answer: ok ? 'yes' : 'no', by });
-      resolve(ok);
-    };
-    const request: PendingConfirm = { name, args, ...(command != null ? { command } : {}), ...(line != null ? { line } : {}), ...(input ? { input } : {}) };
-    c.confirm = { name, args, ...(input ? { input } : {}), resolve: answered };
-    c.drawConfirm(request);
-    // The chat: the /context panel and a pager close — the y/n is what the person must see.
-    c.emit({ type: 'confirm', request });
-    c.deps.notify();
-  });
 }
 
 // ── Compaction ── /compact and the automatic one alike: the model's view becomes
