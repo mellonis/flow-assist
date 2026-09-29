@@ -22,8 +22,8 @@ import { redactDeep, redactSecrets } from '../assistant/secrets.js';
 import { copyTarget, copyToClipboard } from '../assistant/copy.js';
 import { cdChatTarget, realOf, shellAutoRun, shellRoots, startNote, tildePath } from '../assistant/shell.js';
 import {
-  JOURNAL_DAYS, KEEP_SESSIONS, acquireLock, closeSession, cutTitle, flushOnExit, journalPath, listSessions, loadSession, lockPath,
-  makeLockToken, dropEmptyDirs, moveSessionToProject, pickToContinue, projectHome, projectSessions, pruneSessions, removeSession, renameSession, sessionFingerprint,
+  JOURNAL_DAYS, KEEP_SESSIONS, acquireLock, closeSession, cutTitle, journalPath, listSessions, loadSession, lockPath,
+  dropEmptyDirs, moveSessionToProject, pickToContinue, projectHome, projectSessions, pruneSessions, removeSession, renameSession, sessionFingerprint,
   sessionRows, sessionTitle, sessionWhen, sessionsDir, sweepJournals, type Session,
 } from '../assistant/sessions.js';
 import { exportMarkdown, readJournal, rowOf, type JournalEvent } from '../assistant/journal.js';
@@ -59,9 +59,9 @@ import type { Plugin } from '../loader/plugin.js';
 import type { PluginApi } from '../runtime/plugin-api.js';
 import { isPanelSpec, panelAnswer, panelKey as commandPanelKey, panelKeys, panelRows, panelStart, panelTop, type PanelSpec, type PanelState } from '../assistant/command-panel.js';
 import type { Command as PluginCommand } from '../loader/plugin.js';
-import type { ChatMsg, ConversationDeps, ConversationEvent, SendOptions, ViewPort } from '../assistant/conversation-types.js';
+import type { ChatMsg, ConversationEvent, SendOptions, ViewPort } from '../assistant/conversation-types.js';
 import { Conversation } from '../assistant/conversation.js';
-import { hostDeps } from '../assistant/host-deps.js';
+import { ConversationRegistry } from '../assistant/registry.js';
 import { personSpoke, projectHere } from '../assistant/conversation-session.js';
 import { configLineOf, shellCommandOf } from '../assistant/confirm-policy.js';
 
@@ -112,21 +112,6 @@ interface AssistantCtx {
 // config.plugins.assistant, as the chat reads it.
 const assistantConfig = (host: { config?: unknown }) =>
   ((host as { config?: { plugins?: Record<string, Record<string, unknown> | undefined> } }).config?.plugins?.assistant ?? {}) as Record<string, unknown>;
-
-// What a conversation is handed from the chat's host: every member reads the host when
-// it is called, since the App rebinds some services on every render.
-function chatDeps(host: PluginApi['host'], lockToken: string, current: () => Conversation | null): ConversationDeps {
-  return hostDeps({
-    config: () => host.config,
-    services: () => host.services as Record<string, unknown>,
-    notify: () => host.notify(),
-    sessionsDir: () => sessionsDir(host.config),
-    lockToken,
-    canAsk: true,
-    pluginToken: host.pluginToken,
-    current,
-  });
-}
 
 type BuildAssistantParams = {
   renders: Record<string, unknown>;
@@ -279,14 +264,24 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             const store = host.store as Record<string, any>;
             store.chat = { ...(store.chat ?? {}), ...patch };
           };
-          // One token for this chat instance's whole life (not per process — see
-          // sessions.ts, "Ownership lock"): what makes a lock this instance's own.
-          // `useRef`'s init runs on every render, so `makeLockToken()` (a UUID) would
-          // otherwise be generated and discarded on every one but the first; the ref
-          // starts empty and is filled in once, here, on the first render only.
-          const lockTokenRef = ui.useRef('');
-          if (!lockTokenRef.current) lockTokenRef.current = makeLockToken();
-          const lockToken = lockTokenRef.current;
+          // The chat's registry, for its whole life: every conversation it draws is made by
+          // it, and it holds the lock token that makes a session's lock this chat's own
+          // (sessions.ts, "Ownership lock") and the exit hook. `useRef`'s argument is
+          // evaluated on every render, so it is made once, into an empty ref.
+          const registryRef = ui.useRef<ConversationRegistry | null>(null);
+          if (!registryRef.current) {
+            registryRef.current = new ConversationRegistry({
+              config: () => host.config,
+              services: () => host.services as Record<string, unknown>,
+              notify: () => host.notify(),
+              sessionsDir: () => sessionsDir(host.config),
+              canAsk: true,
+              pluginToken: host.pluginToken,
+              exitHook: !!sessionsDir(host.config),
+            });
+          }
+          const registry = registryRef.current;
+          const lockToken = registry.lockToken;
           // The conversation this chat draws. `useRef`'s argument is evaluated on every render,
           // so the object is made once, into an empty ref, as the lock token is.
           const convRef = ui.useRef<Conversation | null>(null);
@@ -303,7 +298,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             c.on('inbox', (ev) => viewFx.current.inbox?.(ev));
             c.on('activity', (ev) => viewFx.current.activity?.(ev));
           };
-          if (!convRef.current) { const c = new Conversation(chatDeps(host, lockToken, () => convRef.current)); bindView(c); convRef.current = c; }
+          if (!convRef.current) { const c = registry.create(); bindView(c); convRef.current = c; registry.show(c); }
           // This render's conversation. `adopt` moves it to the one that replaces it, so a key
           // this render's handler takes before the next render reaches the new one; what
           // outlives a render (a timer, an effect, a service) reads `convRef` instead.
@@ -641,13 +636,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           };
           const sessConf = (host.config.sessions ?? {}) as { resume?: unknown; keep?: unknown; journalDays?: unknown };
           const startedRef = ui.useRef(false);
-          const unhookExitRef = ui.useRef<(() => void) | null>(null);
           if (!startedRef.current && sessDir) {
             startedRef.current = true;
-            // Whatever happens at exit, the last change is written (a pending
-            // debounced save would otherwise be lost with the process) and the lock
-            // released, in that order — AFTER the final save.
-            unhookExitRef.current = flushOnExit(() => { const c = convRef.current!; c.save({ silent: true }); c.releaseLock(); });
             setTimeout(() => {
               try { pruneSessions(sessDir, Number.isInteger(sessConf.keep) ? Number(sessConf.keep) : KEEP_SESSIONS); } catch { /* not fatal */ }
               try { sweepJournals(sessDir, typeof sessConf.journalDays === 'number' ? sessConf.journalDays : JOURNAL_DAYS); } catch { /* not fatal */ }
@@ -689,15 +679,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           }
           // Component unmount is the other leaving-the-session trigger (exit, /clear,
           // /resume are handled at their own sites below): a pending coalesce timer must
-          // not fire into whatever the chat looks like by then, and a last, silent save
-          // and the lock's release.
+          // not fire into whatever the chat looks like by then, and every live
+          // conversation's last change is written silently and its lock released after it
+          // (`flushAll`).
           ui.useEffect(() => () => {
             const c = convRef.current!;
-            unhookExitRef.current?.();
             if (c.liveTimer) clearTimeout(c.liveTimer);
-            if (!sessDir) return;
-            c.save({ silent: true });
-            c.releaseLock();
+            registryRef.current!.flushAll();
           }, []);
           // Exit «arming» by Esc: 0 — not armed; else ms when the first Esc was pressed.
           // A second Esc within the window closes the chat; any other key disarms.
@@ -971,7 +959,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             if (id !== prev.sessionId) prev.releaseLock(); // leaving the old one
             // The session opens into a conversation of its own; the one left is parked.
             prev.close('park');
-            const next = new Conversation(chatDeps(host, lockToken, () => convRef.current), { turn: prev.turn, verb: prev.verb, drawnRows: prev.drawnRows, memoryMissingSaid: prev.memoryMissingSaid });
+            const next = registryRef.current!.create({ turn: prev.turn, verb: prev.verb, drawnRows: prev.drawnRows });
             adopt(next);
             next.applySession(s, fp, dir); applySessionView(s);
             (host.services as Record<string, any>).showMessage?.(`Resumed «${s.title || 'session'}»`);
@@ -1070,6 +1058,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             convRef.current?.detach(port);
             bindView(next);
             convRef.current = next;
+            registryRef.current!.show(next);
             conv = next;
             next.attach(port);
           };
@@ -1079,7 +1068,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // carry over — they are the chat's field's and status line's, and what the chat showed.
           const renew = (prev: Conversation, reason: 'clear' | 'new') => {
             prev.close(reason);
-            const next = new Conversation(chatDeps(host, lockToken, () => convRef.current), { prompts: prev.prompts, turn: prev.turn, verb: prev.verb, drawnRows: prev.drawnRows, memoryMissingSaid: prev.memoryMissingSaid });
+            const next = registryRef.current!.create({ prompts: prev.prompts, turn: prev.turn, verb: prev.verb, drawnRows: prev.drawnRows });
             adopt(next);
             next.startFresh();
             // A plugin's news held for the stopped turn's end lands now, under the fresh rows.

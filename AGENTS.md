@@ -2606,9 +2606,12 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   every render), so a save and the journal see what the person saw. One conversation per
   session: `/clear`, `/new` and `/resume` give the chat a new object (`adopt` moves the
   chat's listeners, its port and what the render's handlers reach to it), and the one
-  left is closed — it saves nothing and draws nothing more. The chat's one lock token is
-  handed to every conversation it makes; the exit hook, the unmount, `postToChat` and
-  the screens' gates read the conversation the chat holds now (`convRef`).
+  left is closed — it saves nothing and draws nothing more. The chat makes every
+  conversation through its registry (`ConversationRegistry`), made on its first render:
+  its lock token is every conversation's, its exit hook and the chat's unmount write
+  and release what is live (`flushAll`, which closes nothing), and `adopt` tells it which conversation is on
+  screen. `postToChat` and the screens' gates read the conversation the chat holds now
+  (`convRef`).
 - **A conversation has a kind** — `session` (the chat's) or `oneshot` (the one-shot
   prompt's) — and a policy for its writes (`confirm-policy.ts`), both decided when it
   is made: `Conversation.fresh(deps, { kind, policy })` for a new one, which reads the
@@ -3945,7 +3948,7 @@ commands; docs and hints never present either mechanism as a boundary.
   binds — as it starts, before the next request of a turn (`beforeRequest` awaits it),
   after a `!command` and after a turn (`askConfigChanges`,
   `src/assistant/conversation-turn.ts`) — one that `/clear` stopped included: a
-  conversation the chat has left asks in the one it draws now (`ConversationDeps.current`),
+  conversation the chat has left asks in the one it draws now (`ConversationDeps.current`, the registry's `shown()`),
   so the y/n comes up in the cleared chat as the stopped work unwinds. Yes (`applyConfigChange`) accepts it and lays
   each key on the running config, a key marked `appliesOnRestart` left for the
   restart. No (`declineConfigChange`) writes the accepted content back into the file

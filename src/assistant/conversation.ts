@@ -205,10 +205,9 @@ export class Conversation {
 
   // `carry` — what a conversation that replaces another in the chat takes over from it:
   // the ↑/↓ history (the same array), the turn counter, the last verb, the list as the
-  // chat last drew it (until the chat draws this one), and whether the missing memory
-  // record was said. `policy` — who answers a write's y/n, `ask` unless said. `kind` —
+  // chat last drew it (until the chat draws this one). `policy` — who answers a write's y/n, `ask` unless said. `kind` —
   // `session` unless said.
-  constructor(deps: ConversationDeps, carry: { prompts?: string[]; turn?: number; verb?: string; drawnRows?: ChatMsg[] | null; memoryMissingSaid?: boolean; policy?: ConfirmPolicy; kind?: ConversationKind } = {}) {
+  constructor(deps: ConversationDeps, carry: { prompts?: string[]; turn?: number; verb?: string; drawnRows?: ChatMsg[] | null; policy?: ConfirmPolicy; kind?: ConversationKind } = {}) {
     this.deps = deps;
     this.policy = carry.policy ?? { kind: 'ask' };
     this.kind = carry.kind ?? 'session';
@@ -222,7 +221,6 @@ export class Conversation {
     if (carry.turn) this.turn = carry.turn;
     if (carry.verb) this.verb = carry.verb;
     if (carry.drawnRows !== undefined) this.drawnRows = carry.drawnRows;
-    if (carry.memoryMissingSaid) this.memoryMissingSaid = true;
   }
 
   // A new conversation as a driver starts one: its kind and policy said, and — as the
