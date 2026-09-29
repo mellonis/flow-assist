@@ -5,6 +5,8 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **Bun 1.4.** The host is developed, tested and compiled on Bun 1.4.2; `engines`
+  asks for 1.4 or later. The compiled binary needs no Bun on the machine it runs on.
 - **The assistant opens a plugin's screen when you ask.** "Open the tutor" used to get
   "I cannot open anything" — the assistant knew a plugin's tools, not its screens or the
   key that opens them. Now every message tells it each plugin's screens, the key you

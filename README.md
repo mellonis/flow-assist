@@ -13,7 +13,7 @@ nothing leaves the machine.)
 
 ## Requirements
 
-- Bun 1.3.x — `curl -fsSL https://bun.sh/install | bash`
+- Bun 1.4.x — `curl -fsSL https://bun.sh/install | bash`
 
 ## Install
 

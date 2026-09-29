@@ -31,9 +31,9 @@ past incident may motivate a rule; keep the rule, drop the incident.
 ## Stack
 
 - TypeScript **7.0.2** (native `tsc`), module `NodeNext`, target `ES2022`, `strict`.
-- Bun **1.3.x** — `bun run`, `bun test`. The TUI runs as `bun src/cli.ts`.
+- Bun **1.4.x** — `bun run`, `bun test`. The TUI runs as `bun src/cli.ts`.
   **A `bun build --compile` binary WORKS, given plugins are shipped BUILT** (probed
-  end to end on Bun 1.3.14, 2026-09-21: pack → install → the compiled host draws the
+  end to end on Bun 1.3.14, 2026-09-21, and the kit's binary again on 1.4.2, 2026-09-29: pack → install → the compiled host draws the
   tracker's board). The one limit: inside a compiled binary a runtime `import()` of
   an on-disk package fails with "Cannot find module" when that package's
   `package.json` has an **`exports`** field — scoped or not, string or conditions
