@@ -2616,6 +2616,13 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   session. A policy that asks cannot be given where `deps.canAsk` is false (the
   constructor throws), and neither the settings-file guard nor `ask_user` asks there. What a host hands a conversation comes from one factory, `hostDeps` (`src/assistant/host-deps.ts`), which reads the host's services when a member is called; `canAsk` is always said.
   What a turn is handed that differs by kind is `turnShape` (`conversation-turn.ts`).
+- **A host makes its conversations through one registry** (`ConversationRegistry`,
+  `src/assistant/registry.ts`): the chat one for its life, the one-shot one for its run,
+  a test rig one per rig. The registry holds the host's lock token, what is said once for
+  all of its conversations (the missing memory record), the conversation the chat draws
+  (`shown`, what a closed conversation's settings-file y/n asks in), and the one exit
+  hook: `flushAll()` saves every live conversation silently and releases its lock after
+  that save; it closes nothing.
 - **Ctrl+C, Ctrl+D and Ctrl+Z take a second press** (`src/runtime/exit-keys.ts`, pure;
   the App owns the arm). flowtty hands these three to the app BEFORE the terminal
   backend acts (exit, exit, suspend — skipped when a `useInput` handler returns strict

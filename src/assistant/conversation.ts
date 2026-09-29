@@ -165,8 +165,11 @@ export class Conversation {
   laterNotes: string[] = [];
   // The settings-file guard's run in progress: one at a time.
   configAsk: Promise<void> | null = null;
-  // The missing memory record was said (once while it is missing).
-  memoryMissingSaid = false;
+  // The missing memory record was said (once while it is missing) — once for every
+  // conversation of the host that made it, through `deps.said`.
+  private ownSaid = { memoryMissing: false };
+  get memoryMissingSaid(): boolean { return (this.deps.said ?? this.ownSaid).memoryMissing; }
+  set memoryMissingSaid(v: boolean) { (this.deps.said ?? this.ownSaid).memoryMissing = v; }
 
   // ── the session
   sessionId = '';
