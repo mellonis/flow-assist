@@ -185,12 +185,12 @@ test('collapsed on the right, the turn\'s status is on the plugin\'s bottom row;
   expect(chatFrame(ui).top).toBe(-1);
   expect(g.size.width).toBe(160);
   // The spinner, the seconds, the word, and the key that brings it back.
-  expect(footer()).toMatch(/^ [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] \d+\.\ds · \S+… · \^\] chat · : commands/);
+  expect(footer()).toMatch(/^ [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] (?:<1s|\d+s) · \S+… · \^\] chat · : commands/);
   await press(ui, COLLAPSE);
   expect(chatFrame(ui).left).toBe(104);
   expect(footer()).not.toContain('…');
   // The status line is the chat's own again.
-  expect(ui.backend.lastFrame).toMatch(/\d+\.\ds · \S+… · Esc stops/);
+  expect(ui.backend.lastFrame).toMatch(/(?:<1s|\d+s) · \S+… · Esc stops/);
   model.release();
   await settle(20);
   ui.app.unmount();
@@ -207,7 +207,7 @@ test('collapsed at the bottom, the panel is one status row', async () => {
   await press(ui, COLLAPSE);
   const r = rows(ui);
   expect(chatFrame(ui).top).toBe(-1);
-  expect(r[39]).toMatch(/^ ƒ Flow Assist · [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] \d+\.\ds · \S+… · \^\] chat/);
+  expect(r[39]).toMatch(/^ ƒ Flow Assist · [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] (?:<1s|\d+s) · \S+… · \^\] chat/);
   expect(g.size.height).toBe(33);
   model.release();
   await settle(20);
@@ -631,10 +631,10 @@ test('a collapsed turn\'s seconds tick without redrawing the plugin\'s screen', 
   await press(ui, COLLAPSE);
   await settle(10);
   const footer = () => rows(ui).find((l) => l.includes(': commands')) ?? '';
-  const seconds = () => /(\d+\.\d)s · /.exec(footer())?.[1];
+  const seconds = () => /(<1|\d+)s · /.exec(footer())?.[1];
   const before = seconds();
   const drawnBefore = g.drawn.count;
-  await new Promise((r) => setTimeout(r, 700));
+  await new Promise((r) => setTimeout(r, 1100));
   await settle(2);
   expect(seconds()).not.toBe(before);
   expect(g.drawn.count - drawnBefore).toBeLessThanOrEqual(1);

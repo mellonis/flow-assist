@@ -963,8 +963,10 @@ hold this set together:
   the tail of the output and the outcome row out of the block entirely. The record,
   the journal and `/export` still keep the command whole regardless — only this
   display is capped.
-  Folded, the block is ONE line saying how it ended — `cmd · ✓ 4.2 s`, `✗ exit 1 · 4.2
-  s`, `stopped`, `timed out` — and, when it printed more than a click shows, how much it
+  Every duration the person reads, here and in the turn's timer, is one
+  `formatDuration` (`src/assistant/duration.ts`, pure): whole seconds, never a
+  fraction — `<1s`, `12s`, `3m 5s`, past an hour `1h 2m`.
+  Folded, the block is ONE line saying how it ended — `cmd · ✓ 4s`, `✗ exit 1 · 4s`, `stopped`, `timed out` — and, when it printed more than a click shows, how much it
   holds: `· 40 lines`, or `· last 200 of 300 lines` when the view kept only the tail of
   what was printed (`ConsoleData.lines`, recorded at collection only when it cut —
   past `shell.maxChars` a lower bound); a CLICK opens it
@@ -975,7 +977,7 @@ hold this set together:
   taller than the conversation opens in the pager" under The chat); `^o` opens every
   block in full inline (`VIEW_CAPS.lines`, everything the view kept), which is what
   makes `^o for all` true rather than a second, still-capped state. Consecutive commands of a turn (no other call between them) fold under one
-  `ƒ Ran N commands · ✓ 34.0 s` head — `Running N commands · ! cmd · 4 s` while one runs —
+  `ƒ Ran N commands · ✓ 34s` head — `Running N commands · ! cmd · 4s` while one runs —
   which also takes in the rounds between them that said nothing but their plan (a
   step that is only its `Next:` line, `isPlanOnly`: the head says what ran, which is
   what the plan said would). Opened, they are the commands alone, each its own block
@@ -1459,7 +1461,7 @@ hold this set together:
   (`src/assistant/recall.ts`, pure; the chat owns the state). An attached image, a
   `!`/`!!` output and a tool result over `ai.recall.minChars` (4096) are BULKY ITEMS:
   sent in full in the turn they arrive in — all its rounds — and, from a later batch
-  on, as a one-line stub naming an id: `[! brew update — exit 0 · 24.7 s · 120 lines —
+  on, as a one-line stub naming an id: `[! brew update — exit 0 · 24s · 120 lines —
   recall("out:7d41e0aa")]`, `[image shot.png · 3384×2078 — recall("img:3f9a2c1b")]`,
   `[read_file src/app.ts — 412 lines — recall("res:c02b9f15")]`. An id is
   `<kind>:<first 8 hex of sha256>` of the content (an image's the sha256 its ref
@@ -3205,7 +3207,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   SAME shell colour as the mode's prompt (a command reads as one thing from typing
   to result) on the
   person's ground, the same live block as the model's commands (one line while it
-  runs; `✓ 1.2 s · ~/dir` when it ends, opened by a click to its last lines) — the
+  runs; `✓ 1s · ~/dir` when it ends, opened by a click to its last lines) — the
   message is still role `shell` and still joins the conversation's `api` (`apiHistory` maps `shell` →
   `user`) and is read with the next message; no turn is spent. It is saved with the session and
   its line goes into ↑/↓ as `!cmd`; recalling one with ↑ shows it the way it was
@@ -3424,7 +3426,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     round the moment the tool ends (the conversation's `segmentStartedAt`, `beginSegment` in the conversation; its `turnStartedAt` still
     times the turn). One timer from the question to the answer sat at `3m 12s` through
     a build, which says nothing about what is happening. The TURN's total, and what it
-    cost, stay on the quiet line under the finished answer (`12.4 s · 3.1k tok`), where
+    cost, stay on the quiet line under the finished answer (`12s · 3.1k tok`), where
     they are read afterwards and distract nobody.
   - **What the turn costs is said** (`3.1k tok`, `tokensBadge`): every round's prompt
     plus its completion as the provider reports them (`onRound`'s `usage`), added up

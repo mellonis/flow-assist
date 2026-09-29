@@ -93,7 +93,7 @@ test('!!command hands the terminal over, shows the cleaned recording as its view
   expect(fs.existsSync(path.dirname(seen.recordings[0]!))).toBe(false);
 
   const frame = ui.backend.lastFrame;
-  expect(frame).toMatch(/‼ \.\/greet\.sh · interactive · ✗ exit 1 · \d+\.\d s/);
+  expect(frame).toMatch(/‼ \.\/greet\.sh · interactive · ✗ exit 1 · (?:<1s|\d+s)/);
   // The host's ask is on screen as a message of the person's side — and it is the
   // host's words, drawn dim, not the person's.
   expect(frame).toContain(INTERACTIVE_ASK.slice(0, 40));

@@ -30,6 +30,7 @@ import { renderConsole } from '../assistant/console-view.js';
 import { CELL_FREE, CELL_FULL, CONTEXT_WARN_AT, GRID_COLS, GRID_ROWS, contextFootnote, contextGrid, contextHeading, contextLegend, tokensBadge, type ContextReading, type GridCell } from '../assistant/context-meter.js';
 import { formatBytes, pickerGroups, pickerSelected, rowStatus, type OwnStatus, type PickerState } from '../assistant/session-picker.js';
 import { runMark, tildePath } from '../assistant/shell.js';
+import { formatDuration } from '../assistant/duration.js';
 import { sessionWhen, type SessionRow } from '../assistant/sessions.js';
 import { Fragment, createContext, createElement as h, memo, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { nextGrapheme, rowIndexAt, wrapText } from '@flowtty/core';
@@ -253,8 +254,6 @@ const spin = (ms: number) => SPINNER[Math.floor(ms / 120) % SPINNER.length];
 // the band's leading edge; the window's own ink stands in for white, which vanished on
 // a light ground.
 const TOOL_PULSE = (m: Record<string, string | undefined>) => [m.text ?? 'white', 'cyanBright', m.accent ?? 'cyan'];
-const fmtSec = (ms: number) => `${(ms / 1000).toFixed(1)}s`;
-
 // ─── Markdown → styled lines ──────────────────────────────────────────────────
 // flowtty's layoutMarkdown does the whole layout, GFM tables included; the host
 // only softens the heading marker below.
@@ -1027,7 +1026,7 @@ function chatRowRenderer({ palette: m, errorColor, wrap, detailsKey, hover = fal
         // How long it took and which tools ran — about the answer, not part of it.
         return h(Box, { key, ...hp, flexDirection: 'row', flexShrink: 0, selectable: false },
           h(Text, null, ' '.repeat(GUTTER)),
-          row.duration ? h(Text, { dim: true }, `${fmtSec(row.duration)}${runs.length || row.stopped ? ' · ' : ''}`) : null,
+          row.duration ? h(Text, { dim: true }, `${formatDuration(row.duration)}${runs.length || row.stopped ? ' · ' : ''}`) : null,
           row.stopped ? h(Text, { color: m.warn }, `stopped (${row.stoppedBy ?? CAP.esc})${runs.length ? ' · ' : ''}`) : null,
           runs.length ? h(Text, { dim: tone === 'ok', underline: lit, color: tone === 'error' ? errorColor : tone === 'warn' ? m.warn : m.ok }, `${row.open ? '▾' : '▸'} ${runs.length} tool${runs.length === 1 ? '' : 's'}${wrote ? ' ✎' : ''}: `) : null,
           // The summary is a row like any other: cut it to what is left of the width,
@@ -1766,7 +1765,7 @@ export function renderChatModal({
         // build sat at `3m 12s`, which says nothing about what is happening now. What
         // the turn has cost so far stands beside them, when the provider says.
         ? h(Box, { flexDirection: 'row', overflow: 'hidden' },
-            h(Text, { dim: true, wrap: 'truncate' }, `${spin(elapsed)} ${fmtSec(elapsed)}${toolCount ? ` · ${toolCount} tool call${toolCount === 1 ? '' : 's'}` : ''}${turnTokens ? ` · ${tokensBadge(turnTokens)}` : ''} · `),
+            h(Text, { dim: true, wrap: 'truncate' }, `${spin(elapsed)} ${formatDuration(elapsed)}${toolCount ? ` · ${toolCount} tool call${toolCount === 1 ? '' : 's'}` : ''}${turnTokens ? ` · ${tokensBadge(turnTokens)}` : ''} · `),
             toolLabel
               // `Shimmer` takes the label as a string and colours it per character, so
               // it is the label itself that is handed over, not a styled child.
@@ -2152,7 +2151,7 @@ export function renderChatStatus({ theme, streaming, toolLabel = '', phase = 'wr
   }
   if (!streaming && !toolLabel) return null;
   return h(Box, { key: 'chat-status', flexDirection: 'row', flexShrink: 0, selectable: false },
-    h(Text, { dim: true }, `${spin(elapsed)} ${fmtSec(elapsed)} · `),
+    h(Text, { dim: true }, `${spin(elapsed)} ${formatDuration(elapsed)} · `),
     h(Shimmer, {
       color: toolLabel ? (m.accent ?? 'cyan') : phase === 'thinking' ? 'magenta' : (m.assistantAccent ?? 'green'),
       highlight: TOOL_PULSE(m), width: 4, interval: 70, direction: 'ltr', running: true,

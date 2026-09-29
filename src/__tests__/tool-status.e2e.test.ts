@@ -12,7 +12,7 @@ afterEach(() => { globalThis.fetch = realFetch; });
 
 const statusRow = (frame: string) => frame.split('\n').find((r) => /Esc stops/.test(r)) ?? '';
 // The seconds the status line is showing — of whatever is running now.
-const secondsOn = (frame: string) => Number(/(\d+\.\d)s/.exec(statusRow(frame))?.[1] ?? -1);
+const secondsOn = (frame: string) => ((s) => (s === undefined ? -1 : s === '<1' ? 0 : Number(s)))(/(<1|\d+)s/.exec(statusRow(frame))?.[1]);
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 // The word the line says while no tool runs, and what phase its colour says: magenta
 // while the model thinks, the assistant's accent (green) while its text arrives. The
@@ -128,7 +128,7 @@ test('the line times the running tool, not the turn, and the clock restarts with
   await ui.press('return');
   // Nothing is running but the model's round: the seconds are that round's, and they
   // are the oldest number this turn will show.
-  await wait(1300);
+  await wait(2100);
   await settle(3);
   const round = secondsOn(ui.backend.lastFrame);
   expect(verbOn(ui).phase).toBe('thinking');
@@ -137,8 +137,8 @@ test('the line times the running tool, not the turn, and the clock restarts with
   model.release();
   await settleUntil(() => ui.backend.lastFrame.includes('Confirm write: run_command'));
   await ui.press('y');
-  // Long enough for the line to have ticked: a number read the moment a clock is set
-  // is 0 whichever clock it is, and would say nothing.
+  // The command's clock is its own: well under a second in, where the round's had
+  // passed two.
   await wait(400);
   await settle(3);
   // The first command is running: the line is its, and its seconds are its own — far
@@ -158,7 +158,7 @@ test('the line times the running tool, not the turn, and the clock restarts with
   await settleUntil(() => model.requests.length === 2);
   await settle(10);
   // And the turn's own total is where it is read afterwards: under the answer.
-  expect(ui.backend.lastFrame).toMatch(/│ {3}\d+\.\ds\s/);
+  expect(ui.backend.lastFrame).toMatch(/│ {3}(?:<1s|\d+s)\s/);
   // The two commands are shown by their blocks, and never a second time as calls.
   expect(ui.backend.lastFrame).not.toContain('2 tools');
   ui.app.unmount();

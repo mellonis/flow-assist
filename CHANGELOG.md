@@ -5,6 +5,9 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **A duration is shown in whole seconds.** The turn's timer, a command's line, the
+  `Ran N commands` head, a recall stub and `/export` read `<1s`, `12s`, `3m 5s` and,
+  past an hour, `1h 2m`, where they showed tenths (`12.4 s`).
 - **The one-shot prompt prints its answer once, and says when it stopped at a limit.**
   `flow-assist "<prompt>"` no longer streams: the steps it takes and the answer as it is
   written are not printed, and the answer comes once, when it is done — a script piping

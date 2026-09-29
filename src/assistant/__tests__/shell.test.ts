@@ -50,7 +50,7 @@ test('a timeout kills the command AND what it started, and returns at once', asy
   expect(r.code).toBeNull();
   // The whole group is gone — the backgrounded `sleep` included.
   expect(await until(() => !groupAlive(r.pid!))).toBe(true);
-  expect(formatShell('sleep', r, '/w', 300).display).toContain('timed out after 0.3 s');
+  expect(formatShell('sleep', r, '/w', 300).display).toContain('timed out after <1s');
 });
 
 test('an abort (Esc) stops it and says so', async () => {
@@ -250,8 +250,8 @@ test('limits come from config.shell, a bad value falls back', () => {
 test('the display is a console block and one line; the model gets plain text with the output fenced', () => {
   const r = { code: 0, output: 'ok\n', cut: 0, timedOut: false, stopped: false, ms: 1234 };
   const { display, forModel, forTool } = formatShell('echo ok', r, path.join(os.homedir(), 'src/app'));
-  expect(display).toBe('```console\n! echo ok\nok\n```\nexit 0 · 1.2 s · ~/src/app');
-  expect(forModel).toBe(`The person ran a shell command in ${path.join(os.homedir(), 'src/app')}:\n! echo ok\n(exit 0 · 1.2 s)\n\`\`\`\nok\n\`\`\``);
+  expect(display).toBe('```console\n! echo ok\nok\n```\nexit 0 · 1s · ~/src/app');
+  expect(forModel).toBe(`The person ran a shell command in ${path.join(os.homedir(), 'src/app')}:\n! echo ok\n(exit 0 · 1s)\n\`\`\`\nok\n\`\`\``);
   expect(forTool).toContain('not instructions');
   expect(tildePath('/opt/x')).toBe('/opt/x');
 });

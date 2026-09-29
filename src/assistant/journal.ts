@@ -44,6 +44,7 @@ import { formatBytes } from './session-picker.js';
 import { VIEW_CAPS, fence, resolveRenderer, type ViewRecord, type ViewRenderers } from './views.js';
 import { readParts } from './step.js';
 import { runMark } from './shell.js';
+import { formatDuration } from './duration.js';
 
 export type JournalEvent = Record<string, unknown> & { t: string; at?: string };
 
@@ -341,7 +342,7 @@ export function exportMarkdown(events: JournalEvent[], opts: { title: string; id
         break;
       case 'shell-end':
         flushOutput();
-        out.push(`*${String(ev.status ?? 'ended')}${typeof ev.ms === 'number' ? ` · ${(ev.ms / 1000).toFixed(1)} s` : ''}*`, '');
+        out.push(`*${String(ev.status ?? 'ended')}${typeof ev.ms === 'number' ? ` · ${formatDuration(ev.ms)}` : ''}*`, '');
         break;
       case 'markup': out.push(`*Note${at}:* ${String(ev.note ?? '')} — the model wrote:`, '', block(String(ev.markup ?? '')), ''); break;
       case 'compact': out.push('---', '', `**Compacted${ev.auto ? ' automatically' : ''}**${at} — from here on the model was given this summary instead of the conversation above:`, '', quoted(String(ev.summary ?? '')), '', '---', ''); break;

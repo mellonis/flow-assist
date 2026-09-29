@@ -54,7 +54,7 @@ test('bulky items: each image, each !command output, each tool result over the s
   expect(img!.stub).toBe(`[image shot.png · 3384×2078 — recall("img:aaaaaaaa")]`);
   expect(img!.ref).toBe(ref);
   expect(sh!.id).toBe(itemId('out', hashOf(out)));
-  expect(sh!.stub).toBe(`[! brew update — exit 0 · 24.7 s · 120 lines — recall("${sh!.id}")]`);
+  expect(sh!.stub).toBe(`[! brew update — exit 0 · 24s · 120 lines — recall("${sh!.id}")]`);
   expect(sh!.content).toBe(out);
   expect(tool!.id).toBe(itemId('res', hashOf(res)));
   expect(tool!.stub).toBe(`[read_file src/app.ts — 500 lines — recall("${tool!.id}")]`);

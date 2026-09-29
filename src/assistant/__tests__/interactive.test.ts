@@ -291,7 +291,7 @@ test('the console view keeps the interactive mark through the cap (a live update
   expect(capConsoleData({ command: 'ls', cwd: '~', text: '' }).interactive).toBeUndefined();
   const ctx = { width: 80, folded: true, live: false, failed: false, elapsedMs: 0, lines: 20, moreKey: '^o' };
   const folded = renderConsole(d, ctx).map((l) => l.map((s) => s.text).join(''));
-  expect(folded).toEqual(['git add -p · interactive · ✓ 1.2 s']);
+  expect(folded).toEqual(['git add -p · interactive · ✓ 1s']);
   const open = renderConsole(d, { ...ctx, folded: false }).map((l) => l.map((s) => s.text).join(''));
   expect(open[0]).toBe('git add -p · interactive');
 });

@@ -8,26 +8,26 @@ const d = (over: Partial<ConsoleData> = {}): ConsoleData => ({ command: 'bun tes
 const plain = (spans: { text: string }[]) => spans.map((s) => s.text).join('');
 
 test('the tail says how it ended, not a code to decode', () => {
-  expect(plain(consoleTail(d(), base))).toBe('✓ 4.2 s');
+  expect(plain(consoleTail(d(), base))).toBe('✓ 4s');
   expect(consoleTail(d(), base)[0]!.color).toBe('ok');
-  expect(plain(consoleTail(d({ exitCode: 1, status: 'exit 1' }), base))).toBe('✗ exit 1 · 4.2 s');
+  expect(plain(consoleTail(d({ exitCode: 1, status: 'exit 1' }), base))).toBe('✗ exit 1 · 4s');
   expect(consoleTail(d({ exitCode: 1, status: 'exit 1' }), base)[0]!.color).toBe('warn');
-  expect(plain(consoleTail(d({ exitCode: null, status: 'stopped (Esc)' }), base))).toBe('stopped · 4.2 s');
-  expect(plain(consoleTail(d({ exitCode: null, status: 'timed out after 120 s', ms: 120000 }), base))).toBe('timed out · 120.0 s');
+  expect(plain(consoleTail(d({ exitCode: null, status: 'stopped (Esc)' }), base))).toBe('stopped · 4s');
+  expect(plain(consoleTail(d({ exitCode: null, status: 'timed out after 120 s', ms: 120000 }), base))).toBe('timed out · 2m 0s');
   expect(plain(consoleTail(d(), { ...base, failed: true }))).toBe('✗ failed');
 });
 
 test('while it runs the tail is its clock in whole seconds', () => {
-  expect(plain(consoleTail(d({ exitCode: undefined, ms: undefined, status: undefined }), { ...base, live: true, elapsedMs: 12_900 }))).toBe('12 s');
+  expect(plain(consoleTail(d({ exitCode: undefined, ms: undefined, status: undefined }), { ...base, live: true, elapsedMs: 12_900 }))).toBe('12s');
 });
 
 test('folded, a command is one line; the run mark is the gutter\'s, not the renderer\'s', () => {
-  expect(renderConsole(d({ text: 'a\nb\nc' }), base).map(plain)).toEqual(['bun test · ✓ 4.2 s']);
+  expect(renderConsole(d({ text: 'a\nb\nc' }), base).map(plain)).toEqual(['bun test · ✓ 4s']);
 });
 
 test('folded, a command longer than a click shows says how many lines it holds', () => {
-  expect(renderConsole(d({ text: 'a\nb\nc\nd' }), base).map(plain)).toEqual(['bun test · ✓ 4.2 s · 4 lines']);
-  expect(renderConsole(d({ text: 'a\nb\nc' }), base).map(plain)).toEqual(['bun test · ✓ 4.2 s']);
+  expect(renderConsole(d({ text: 'a\nb\nc\nd' }), base).map(plain)).toEqual(['bun test · ✓ 4s · 4 lines']);
+  expect(renderConsole(d({ text: 'a\nb\nc' }), base).map(plain)).toEqual(['bun test · ✓ 4s']);
 });
 
 test('a view cut at collection remembers how much was printed, and its fold line says it holds the tail', () => {
@@ -38,7 +38,7 @@ test('a view cut at collection remembers how much was printed, and its fold line
   // Capped again — a saved session read back, the final update of a live view — the
   // count it was handed stands.
   expect(capConsoleData(once).lines).toBe(300);
-  expect(renderConsole(once, base).map(plain)).toEqual(['seq 1 300 · ✓ 0.0 s · last 200 of 300 lines']);
+  expect(renderConsole(once, base).map(plain)).toEqual(['seq 1 300 · ✓ <1s · last 200 of 300 lines']);
   // Nothing cut, nothing recorded.
   expect(capConsoleData({ command: 'x', cwd: '~', text: 'a\nb' }).lines).toBeUndefined();
 });
@@ -47,7 +47,7 @@ test('a folded row at a narrow width cuts the command, never the duration and th
   const rec: ViewRecord = { kind: 'console', data: d({ command: 'x'.repeat(300) }), phase: 'done', startedAt: 0 };
   const framed = frameView(rec, { console: renderConsole }, { ...base, width: 24 }, {});
   const text = framed.map((l) => l.spans.map((s) => s.text).join('')).join('\n');
-  expect(text).toContain('✓ 4.2 s');
+  expect(text).toContain('✓ 4s');
   expect(text).toContain('…');
 });
 
@@ -56,8 +56,8 @@ test('the opened block never cuts the command, however long — it wraps across 
   const rec: ViewRecord = { kind: 'console', data: d({ command, text: '' }), phase: 'done', startedAt: 0 };
   const framed = frameView(rec, { console: renderConsole }, { ...base, width: 80, folded: false }, {});
   const rows = framed.map((l) => l.spans.map((s) => s.text).join(''));
-  const tail = rows.pop(); // the outcome row, `✓ 4.2 s`
-  expect(tail).toBe('✓ 4.2 s');
+  const tail = rows.pop(); // the outcome row, `✓ 4s`
+  expect(tail).toBe('✓ 4s');
   expect(rows.join('')).toBe(command);
   expect(rows.some((r) => r.includes('…'))).toBe(false);
 });
@@ -77,7 +77,7 @@ test('a command long enough to wrap past VIEW_CAPS.commandRows cuts to a dim not
   // The last line the run printed, and the outcome, both survive — as the block's
   // very last row.
   expect(rows).toContain('│ line 200');
-  expect(rows.at(-1)).toBe('✓ 4.2 s');
+  expect(rows.at(-1)).toBe('✓ 4s');
 });
 
 test('the same command survives the pager\'s own layout (blockRows), not just frameView directly', async () => {
@@ -90,38 +90,38 @@ test('the same command survives the pager\'s own layout (blockRows), not just fr
     renderers: { console: renderConsole }, now: 0, palette: {},
   }, '0:view:0').map((r) => (r.spans ?? []).map((s) => s.text).join(''));
   expect(rows).toContain('│ line 200');
-  expect(rows.at(-1)).toBe('✓ 4.2 s');
+  expect(rows.at(-1)).toBe('✓ 4s');
 });
 
 test('a person\'s own command also says where it ran', () => {
-  expect(renderConsole(d({ showCwd: true }), base).map(plain)).toEqual(['bun test · ✓ 4.2 s · ~/app']);
+  expect(renderConsole(d({ showCwd: true }), base).map(plain)).toEqual(['bun test · ✓ 4s · ~/app']);
 });
 
 test('a cd inside the command is an arrow to where it left the directory', () => {
-  expect(plain(consoleTail(d({ showCwd: true, movedTo: '~/app/sub' }), base))).toBe('✓ 4.2 s · ~/app → ~/app/sub');
+  expect(plain(consoleTail(d({ showCwd: true, movedTo: '~/app/sub' }), base))).toBe('✓ 4s · ~/app → ~/app/sub');
   // Unchanged (or not set at all): no arrow.
-  expect(plain(consoleTail(d({ showCwd: true, movedTo: '~/app' }), base))).toBe('✓ 4.2 s · ~/app');
-  expect(plain(consoleTail(d({ showCwd: true }), base))).toBe('✓ 4.2 s · ~/app');
+  expect(plain(consoleTail(d({ showCwd: true, movedTo: '~/app' }), base))).toBe('✓ 4s · ~/app');
+  expect(plain(consoleTail(d({ showCwd: true }), base))).toBe('✓ 4s · ~/app');
   // Never drawn without showCwd — a tool's run_command view never sets it.
-  expect(plain(consoleTail(d({ movedTo: '~/app/sub' }), base))).toBe('✓ 4.2 s');
+  expect(plain(consoleTail(d({ movedTo: '~/app/sub' }), base))).toBe('✓ 4s');
 });
 
 test('a cd refused outside the roots says so, and stays fixed wording whatever the note holds', () => {
   expect(plain(consoleTail(d({ showCwd: true, note: 'cd led outside the roots — staying in /tmp/x' }), base)))
-    .toBe('✓ 4.2 s · ~/app · cd led outside the roots — stayed');
+    .toBe('✓ 4s · ~/app · cd led outside the roots — stayed');
   // Never drawn without showCwd.
-  expect(plain(consoleTail(d({ note: 'cd led outside the roots — staying in /tmp/x' }), base))).toBe('✓ 4.2 s');
+  expect(plain(consoleTail(d({ note: 'cd led outside the roots — staying in /tmp/x' }), base))).toBe('✓ 4s');
 });
 
 test('open, the last lines stand under a bar that a drag does not copy', () => {
   const lines = renderConsole(d({ text: '1\n2\n3\n4\n5' }), { ...base, folded: false });
-  expect(lines.map(plain)).toEqual(['bun test', '│ … 2 lines cut · ^o for all', '│ 3', '│ 4', '│ 5', '✓ 4.2 s']);
+  expect(lines.map(plain)).toEqual(['bun test', '│ … 2 lines cut · ^o for all', '│ 3', '│ 4', '│ 5', '✓ 4s']);
   expect(lines[2]![0]).toEqual({ text: '│ ', chrome: true, dim: true });
 });
 
 test('open with nothing cut, and open with no output', () => {
-  expect(renderConsole(d({ text: 'x' }), { ...base, folded: false }).map(plain)).toEqual(['bun test', '│ x', '✓ 4.2 s']);
-  expect(renderConsole(d({ text: '' }), { ...base, folded: false }).map(plain)).toEqual(['bun test', '✓ 4.2 s']);
+  expect(renderConsole(d({ text: 'x' }), { ...base, folded: false }).map(plain)).toEqual(['bun test', '│ x', '✓ 4s']);
+  expect(renderConsole(d({ text: '' }), { ...base, folded: false }).map(plain)).toEqual(['bun test', '✓ 4s']);
 });
 
 test('what a console view keeps is the capped tail', () => {
@@ -153,10 +153,10 @@ test('a multi-line command reads as one flattened line folded, and as its own li
   const command = 'cat <<EOF > file.txt\nline one\nline two\nEOF';
   const rec: ViewRecord = { kind: 'console', data: d({ command }), phase: 'done', startedAt: 0 };
   const folded = frameView(rec, { console: renderConsole }, { ...base, width: 60 }, {}).map((l) => l.spans.map((s) => s.text).join(''));
-  expect(folded).toEqual(['cat <<EOF > file.txt line one line two EOF · ✓ 4.2 s']);
+  expect(folded).toEqual(['cat <<EOF > file.txt line one line two EOF · ✓ 4s']);
   const open = frameView(rec, { console: renderConsole }, { ...base, width: 60, folded: false }, {}).map((l) => l.spans.map((s) => s.text).join(''));
   expect(open.slice(0, 4)).toEqual(['cat <<EOF > file.txt', 'line one', 'line two', 'EOF']);
-  expect(open.at(-1)).toBe('✓ 4.2 s');
+  expect(open.at(-1)).toBe('✓ 4s');
 });
 
 test('capConsoleData caps movedTo and note the way it caps every other field', () => {

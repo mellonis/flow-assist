@@ -23,6 +23,7 @@
 import { cellWidth, cutStep, wrapCells } from '../cells.js';
 import { VIEW_CAPS, sanitizeViewText, type ViewLine, type ViewRenderCtx, type ViewRenderer, type ViewSpan } from './views.js';
 import { shellOutcome, tildePath, type ShellResult } from './shell.js';
+import { formatDuration } from './duration.js';
 
 export interface ConsoleData {
   command: string;
@@ -130,11 +131,9 @@ export function consoleData(cmd: string, r: ShellResult, cwd: string, timeoutMs:
   };
 }
 
-const secs = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
-
 export function consoleTail(d: ConsoleData, ctx: Pick<ViewRenderCtx, 'live' | 'failed' | 'elapsedMs'>): ViewSpan[] {
   if (ctx.failed) return [{ text: '✗ failed', color: 'warn' }];
-  if (ctx.live) return [{ text: `${Math.floor(ctx.elapsedMs / 1000)} s`, dim: true }];
+  if (ctx.live) return [{ text: formatDuration(ctx.elapsedMs), dim: true }];
   const ms = Number(d.ms ?? 0);
   const status = String(d.status ?? '');
   // Where it ran — and, for the person's own command (showCwd), where a `cd` inside
@@ -146,10 +145,10 @@ export function consoleTail(d: ConsoleData, ctx: Pick<ViewRenderCtx, 'live' | 'f
     where.push({ text: ` · ${d.cwd}${moved ? ` → ${d.movedTo}` : ''}`, dim: true });
   }
   if (d.showCwd && d.note) where.push({ text: ' · cd led outside the roots — stayed', dim: true });
-  if (d.exitCode === 0) return [{ text: '✓', color: 'ok' }, { text: ` ${secs(ms)}`, dim: true }, ...where];
-  if (typeof d.exitCode === 'number') return [{ text: `✗ exit ${d.exitCode}`, color: 'warn' }, { text: ` · ${secs(ms)}`, dim: true }, ...where];
+  if (d.exitCode === 0) return [{ text: '✓', color: 'ok' }, { text: ` ${formatDuration(ms)}`, dim: true }, ...where];
+  if (typeof d.exitCode === 'number') return [{ text: `✗ exit ${d.exitCode}`, color: 'warn' }, { text: ` · ${formatDuration(ms)}`, dim: true }, ...where];
   const word = status.startsWith('stopped') ? 'stopped' : status.startsWith('timed out') ? 'timed out' : status || 'no exit code';
-  return [{ text: word, color: 'warn' }, { text: ` · ${secs(ms)}`, dim: true }, ...where];
+  return [{ text: word, color: 'warn' }, { text: ` · ${formatDuration(ms)}`, dim: true }, ...where];
 }
 
 const INTERACTIVE_LABEL = ' · interactive';

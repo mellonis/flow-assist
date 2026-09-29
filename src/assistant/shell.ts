@@ -26,6 +26,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { secretStream } from './secrets.js';
 import { fence } from './views.js';
+import { formatDuration } from './duration.js';
 
 export const SHELL_DEFAULTS = { timeoutMs: 120_000, maxChars: 20_000 };
 // After the shell exits, how long its pipes may stay open. A job it left running with
@@ -338,7 +339,6 @@ export function runShell(cmd: string, opts: ShellOptions): Promise<ShellResult> 
   });
 }
 
-const fmtSecs = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
 // `~/src/app` for a path under the home directory.
 export const tildePath = (p: string, home = os.homedir()) => (home && (p === home || p.startsWith(`${home}/`)) ? `~${p.slice(home.length)}` : p);
 
@@ -358,7 +358,7 @@ export function shellOutcome(r: ShellResult, timeoutMs: number): string {
   if (r.error) return `could not start: ${r.error}`;
   if (r.stopped) return `stopped (${r.stoppedBy || 'Esc'})`;
   if (r.signal) return `killed by ${r.signal}`;
-  if (r.timedOut) return `timed out after ${timeoutMs % 1000 ? fmtSecs(timeoutMs) : `${timeoutMs / 1000} s`}`;
+  if (r.timedOut) return `timed out after ${formatDuration(timeoutMs)}`;
   return `exit ${r.code ?? '?'}`;
 }
 
@@ -382,9 +382,9 @@ export function formatShell(cmd: string, r: ShellResult, cwd: string, timeoutMs 
   const shown = `${mark} ${cmd}${body ? `\n${body}` : ''}`;
   const f = fence(shown);
   const where = moved ? `${tildePath(cwd)} → ${tildePath(after)}` : tildePath(cwd);
-  const display = `${f}console\n${shown}\n${f}\n${[how, fmtSecs(r.ms), where, cutNote, move.note ? 'cd led outside the roots — stayed' : ''].filter(Boolean).join(' · ')}`;
+  const display = `${f}console\n${shown}\n${f}\n${[how, formatDuration(r.ms), where, cutNote, move.note ? 'cd led outside the roots — stayed' : ''].filter(Boolean).join(' · ')}`;
   const mf = fence(body);
-  const status = `(${how} · ${fmtSecs(r.ms)}${cutNote ? `; ${cutNote} — the end is kept` : ''})`;
+  const status = `(${how} · ${formatDuration(r.ms)}${cutNote ? `; ${cutNote} — the end is kept` : ''})`;
   const tty = move.interactive;
   const fenced = body ? `${mf}\n${body}\n${mf}` : tty && !tty.recorded ? '(not recorded — no `script` on PATH)' : '(no output)';
   const dirLine = move.note ?? (moved ? `The directory is now ${after}.` : '');

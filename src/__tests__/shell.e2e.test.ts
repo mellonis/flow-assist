@@ -40,7 +40,7 @@ test('!command runs in the first root, shows its output, and spends no model tur
   const folded = ui.backend.lastFrame;
   expect(folded).toContain('! echo hello; pwd');
   expect(folded).toContain(root.replace(os.homedir(), '~'));
-  expect(folded).toMatch(/echo hello; pwd · ✓ \d+\.\d s/);
+  expect(folded).toMatch(/echo hello; pwd · ✓ (?:<1s|\d+s)/);
   expect(model.requests).toHaveLength(0);
 
   // Folded by default, like the model's own commands — a click opens it to what it
@@ -297,7 +297,7 @@ test('a confirmed run_command folds to one line, and opened its output stands; t
   // proves the OUTPUT is off screen is the bar-prefixed row it would stand behind —
   // `unfence` strips that bar, so the raw frame is checked here instead.)
   const folded = unfence(ui.backend.lastFrame);
-  expect(folded).toMatch(/! echo tool-output-42; echo second-line · ✓ \d+\.\d s/);
+  expect(folded).toMatch(/! echo tool-output-42; echo second-line · ✓ (?:<1s|\d+s)/);
   expect(ui.backend.lastFrame).not.toContain('│ tool-output-42');
   expect(ui.backend.lastFrame).not.toContain('│ second-line');
   expect(folded).toContain('It printed two lines.');

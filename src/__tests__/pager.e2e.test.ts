@@ -77,7 +77,7 @@ test('a command of 300 lines: the fold line says how much, a click opens a pager
   const { ui } = await commandThenTalk('seq 1 300');
   // The fold line says how much there is to read: a view keeps the last 200 lines of
   // what was printed, and says so.
-  expect(ui.backend.lastFrame).toMatch(/seq 1 300 · ✓ \d+\.\d s · last 200 of 300 lines/);
+  expect(ui.backend.lastFrame).toMatch(/seq 1 300 · ✓ (?:<1s|\d+s) · last 200 of 300 lines/);
   const before = ui.backend.lastFrame;
   await click(ui, rowOf(ui, 'seq 1 300 ·'));
   // A pager on screen, the block from its first row — and not two hundred rows pushed
@@ -88,7 +88,7 @@ test('a command of 300 lines: the fold line says how much, a click opens a pager
   // Its own scroll: PgDn to the end (the exit line), PgUp back, the wheel over it.
   for (let i = 0; i < 20; i++) await ui.press('pagedown');
   expect(ui.backend.lastFrame).toContain('│ 300');
-  expect(ui.backend.lastFrame).toMatch(/✓ \d+\.\d s/);
+  expect(ui.backend.lastFrame).toMatch(/✓ (?:<1s|\d+s)/);
   expect(ui.backend.lastFrame).not.toContain('│ 101');
   for (let i = 0; i < 20; i++) await ui.press('pageup');
   expect(ui.backend.lastFrame).toContain('│ 101');

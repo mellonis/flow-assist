@@ -14,6 +14,7 @@ import { clickedOpen, foldId, isOpen, type FoldState } from './folds.js';
 import { isPlanOnly, shownText, type NotesMode, type TurnPart } from './step.js';
 import { isConsoleKind, sanitizeViewText, type ViewRecord } from './views.js';
 import { runMark } from './shell.js';
+import { formatDuration } from './duration.js';
 
 export interface ViewGroup { head: number; members: number[]; hidden: number[] }
 export type GroupMsg = { role: string; content?: unknown; parts?: unknown; reasoning?: unknown; views?: unknown; roundLimit?: unknown; stopped?: unknown };
@@ -71,8 +72,6 @@ export function viewGroups(drawn: GroupMsg[], notes: NotesMode): ViewGroup[] {
   return groups;
 }
 
-const secs = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
-
 // The text is drawn straight into chat rows (never through `frameView`, which
 // sanitizes what it frames) — `sanitizeViewText` here is the same defence in depth,
 // against a command line embedded verbatim from the tool's own data. The success
@@ -84,13 +83,13 @@ export function groupHeadText(recs: ViewRecord[], now: number): { text: string; 
   if (running) {
     const data = running.data as { command?: unknown; interactive?: boolean } | undefined;
     const cmd = String(data?.command ?? '');
-    return sanitize([{ text: `Running ${n} commands · ${runMark(data?.interactive)} ${cmd} · ${Math.floor(Math.max(0, now - running.startedAt) / 1000)} s` }]);
+    return sanitize([{ text: `Running ${n} commands · ${runMark(data?.interactive)} ${cmd} · ${formatDuration(Math.max(0, now - running.startedAt))}` }]);
   }
   const total = recs.reduce((t, r) => t + Number((r.data as { ms?: unknown })?.ms ?? 0), 0);
   const failed = recs.filter((r) => r.phase === 'failed' || (r.data as { exitCode?: unknown })?.exitCode !== 0).length;
   return sanitize(failed
-    ? [{ text: `Ran ${n} commands · ` }, { text: `✗ ${failed} failed`, color: 'warn' }, { text: ` · ${secs(total)}` }]
-    : [{ text: `Ran ${n} commands · ` }, { text: '✓', color: 'ok' }, { text: ` ${secs(total)}` }]);
+    ? [{ text: `Ran ${n} commands · ` }, { text: `✗ ${failed} failed`, color: 'warn' }, { text: ` · ${formatDuration(total)}` }]
+    : [{ text: `Ran ${n} commands · ` }, { text: '✓', color: 'ok' }, { text: ` ${formatDuration(total)}` }]);
 }
 
 // Open when its own id says so, or when the person opened one of its members with a

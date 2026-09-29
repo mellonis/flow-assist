@@ -239,7 +239,7 @@ URL as an image. A model that cannot take images: `config set ai.images.enabled 
 
 Bulky things — an image, a `!command`'s output, a large tool result — are sent to the
 model in full in the turn they arrive in, and later as a one-line stub naming an id
-(`[! brew update — exit 0 · 24.7 s · 120 lines — recall("out:7d41e0aa")]`) that the
+(`[! brew update — exit 0 · 24s · 120 lines — recall("out:7d41e0aa")]`) that the
 assistant reads again with its `recall` tool when it needs the content; the screen and
 the session keep everything. Stubbing happens in batches, once the context passes half
 the window (`ai.recall.threshold`) or every ten turns (`ai.recall.everyTurns`), so the
@@ -274,8 +274,8 @@ limits are yours to set; the assistant cannot change them.
 ### Your own: `!command`
 
 `!command` in the chat runs a shell command yourself (`!bun test src/features`): it is
-one folded line while it runs (`bun test src/features · 3 s`) and stays folded, its tail
-settled, once it ends (`· ✓ 4.2 s`); the output lands in the conversation and the
+one folded line while it runs (`bun test src/features · 3s`) and stays folded, its tail
+settled, once it ends (`· ✓ 4s`); the output lands in the conversation and the
 assistant sees it with your next message, without spending a turn on it. Esc stops it.
 Commands start where you started flow-assist, when that lies inside a configured root
 (`config set shell.roots '["~/src/app"]'`); otherwise the first root, with a note

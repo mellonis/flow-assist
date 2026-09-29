@@ -5,7 +5,7 @@
 // it stays in the model's history and rides every later request. So a BULKY ITEM (an
 // image, a `!`/`!!` output, a tool result over `ai.recall.minChars`) is sent in full in
 // the turn it arrives in, all its rounds, and from a later batch on as a short stub
-// naming an id: `[! brew update — exit 0 · 24.7 s · 120 lines — recall("out:7d41e0aa")]`.
+// naming an id: `[! brew update — exit 0 · 24s · 120 lines — recall("out:7d41e0aa")]`.
 // The `recall` core tool brings the item back for one turn — an image as an image.
 //
 // An id is a CONTENT HASH, `<kind>:<first 8 hex of sha256>` — `img:` an image (the
@@ -27,6 +27,7 @@ import crypto from 'node:crypto';
 import type { ChatMessage } from './agent.js';
 import { contentText, type ImageRef, type ResolvedImage } from './images.js';
 import { RUN_MARK, runMark } from './shell.js';
+import { formatDuration } from './duration.js';
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 // `ai.recall`: on by default. `threshold` is the share of `ai.contextWindow` past which
@@ -71,8 +72,6 @@ export const hashOf = (text: string): string => crypto.createHash('sha256').upda
 export const itemId = (kind: BulkyKind, hash: string): string => `${kind}:${hash.slice(0, 8)}`;
 const RECALL_CALL = (id: string) => `recall("${id}")`;
 const countLines = (text: string): number => (text ? text.split('\n').length : 0);
-const fmtSecs = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
-
 // The head a recall's own result starts with (`recallResult`), read back by the stub
 // of that result so it points at the item recalled rather than offering a second id.
 const RECALLED_HEAD = /^(?:OK: )?\[recalled ((?:img|out|res):[0-9a-f]{8}) — /;
@@ -86,7 +85,7 @@ export function imageStub(ref: ImageRef): string {
 // read off the text's own first line — `$ ` in a session saved by an older build,
 // else `!`/`‼` — and the count is the message's.
 function shellStub(id: string, meta: ShellMeta | null, content: string): string {
-  if (meta) return `[${runMark(meta.interactive)} ${meta.command} — ${meta.outcome} · ${fmtSecs(meta.ms)} · ${meta.lines} lines — ${RECALL_CALL(id)}]`;
+  if (meta) return `[${runMark(meta.interactive)} ${meta.command} — ${meta.outcome} · ${formatDuration(meta.ms)} · ${meta.lines} lines — ${RECALL_CALL(id)}]`;
   const line = /^([$!‼]) (.+)$/m.exec(content);
   const mark = runMark(line?.[1] === RUN_MARK.interactive);
   return `[${mark} ${line?.[2] ?? '…'} — ${countLines(content)} lines — ${RECALL_CALL(id)}]`;

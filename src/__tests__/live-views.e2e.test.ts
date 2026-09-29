@@ -35,7 +35,7 @@ test('the command is a line in the chat before it ends, and a click shows what i
   await settleUntil(() => rowOf(ui, 'echo first; sleep') >= 0);
   expect(rowOf(ui, 'echo first; sleep')).toBeGreaterThanOrEqual(0);
   expect(ui.backend.lastFrame).not.toContain('Done.');
-  expect(ui.backend.lastFrame).toMatch(/echo first; sleep 1\.5; echo second · \d+ s/);
+  expect(ui.backend.lastFrame).toMatch(/echo first; sleep 1\.5; echo second · (?:<1s|\d+s)/);
   await click(ui, rowOf(ui, 'echo first; sleep'));
   await settleUntil(() => ui.backend.lastFrame.includes('│ first'));
   expect(ui.backend.lastFrame).toContain('│ first');
@@ -44,7 +44,7 @@ test('the command is a line in the chat before it ends, and a click shows what i
   expect(ui.backend.lastFrame).toContain('Done.');
   // Opened while it ran, it is still open now that it has ended.
   expect(ui.backend.lastFrame).toContain('│ second');
-  expect(ui.backend.lastFrame).toMatch(/✓ \d+\.\d s/);
+  expect(ui.backend.lastFrame).toMatch(/✓ (?:<1s|\d+s)/);
   ui.app.unmount();
 });
 
@@ -52,17 +52,17 @@ test('left folded, it ends folded — one line with its outcome', async () => {
   const { ui } = await running('echo hi; exit 3');
   await settleUntil(() => ui.backend.lastFrame.includes('Done.'));
   expect(ui.backend.lastFrame).toContain('Done.');
-  expect(ui.backend.lastFrame).toMatch(/echo hi; exit 3 · ✗ exit 3 · \d+\.\d s/);
+  expect(ui.backend.lastFrame).toMatch(/echo hi; exit 3 · ✗ exit 3 · (?:<1s|\d+s)/);
   expect(ui.backend.lastFrame).not.toContain('│ hi');
   ui.app.unmount();
 });
 
 test('the clock moves while nothing is printed', async () => {
   const { ui } = await running('sleep 2.5');
-  await settleUntil(() => /sleep 2\.5 · 0 s/.test(ui.backend.lastFrame));
-  expect(ui.backend.lastFrame).toMatch(/sleep 2\.5 · 0 s/);
-  await settleUntil(() => /sleep 2\.5 · [12] s/.test(ui.backend.lastFrame));
-  expect(ui.backend.lastFrame).toMatch(/sleep 2\.5 · [12] s/);
+  await settleUntil(() => /sleep 2\.5 · <1s/.test(ui.backend.lastFrame));
+  expect(ui.backend.lastFrame).toMatch(/sleep 2\.5 · <1s/);
+  await settleUntil(() => /sleep 2\.5 · [12]s/.test(ui.backend.lastFrame));
+  expect(ui.backend.lastFrame).toMatch(/sleep 2\.5 · [12]s/);
   // The budget is counted in settle rounds, not time: on an idle machine 300 of them
   // pass before a 2.5 s sleep ends. The wait is for the command's own clock.
   await settleUntil(() => ui.backend.lastFrame.includes('Done.'), 1500);
@@ -85,12 +85,12 @@ test('the person\'s own !command is live too, and says where it ran', async () =
   await ui.press('F');
   await ui.type('!echo one; sleep 1.2; echo two');
   await ui.press('return');
-  await settleUntil(() => /echo one; sleep 1\.2; echo two · \d+ s/.test(ui.backend.lastFrame));
+  await settleUntil(() => /echo one; sleep 1\.2; echo two · (?:<1s|\d+s)/.test(ui.backend.lastFrame));
   // Live, not the finished line — while it runs the tail is a bare running clock
-  // ("· N s"), never the "✓ N.N s" the block settles on once it ends.
-  expect(ui.backend.lastFrame).toMatch(/echo one; sleep 1\.2; echo two · \d+ s/);
-  await settleUntil(() => /✓ \d+\.\d s · /.test(ui.backend.lastFrame));
-  expect(ui.backend.lastFrame).toMatch(/✓ \d+\.\d s · /);
+  // ("· Ns"), never the "✓ Ns" the block settles on once it ends.
+  expect(ui.backend.lastFrame).toMatch(/echo one; sleep 1\.2; echo two · (?:<1s|\d+s)/);
+  await settleUntil(() => /✓ (?:<1s|\d+s) · /.test(ui.backend.lastFrame));
+  expect(ui.backend.lastFrame).toMatch(/✓ (?:<1s|\d+s) · /);
   ui.app.unmount();
 });
 
@@ -158,8 +158,8 @@ test('the model is sent a !command\'s output as plain text, and never a view', a
   await ui.press('F');
   await ui.type('!echo marker-42');
   await ui.press('return');
-  await settleUntil(() => /✓ \d/.test(ui.backend.lastFrame));
-  expect(ui.backend.lastFrame).toMatch(/✓ \d/);
+  await settleUntil(() => /✓ (?:<1s|\d+s)/.test(ui.backend.lastFrame));
+  expect(ui.backend.lastFrame).toMatch(/✓ (?:<1s|\d+s)/);
   await ui.type('what did it print');
   await ui.press('return');
   await settleUntil(() => ui.backend.lastFrame.includes('Seen.'));
@@ -193,7 +193,7 @@ test('three commands in a row fold under one head, and open into their own block
   }
   await settleUntil(() => ui.backend.lastFrame.includes('All set.'));
   expect(ui.backend.lastFrame).toContain('All set.');
-  expect(ui.backend.lastFrame).toMatch(/Ran 3 commands · ✓ \d+\.\d s/);
+  expect(ui.backend.lastFrame).toMatch(/Ran 3 commands · ✓ (?:<1s|\d+s)/);
   expect(ui.backend.lastFrame).not.toContain('echo two ·');
   // The head takes the place of every step line, the first one included.
   for (const step of ['one.', 'two.', 'three.']) expect(ui.backend.lastFrame).not.toContain(step);
@@ -332,8 +332,8 @@ test('a session keeps what a view IS, not how it was drawn, and a restart draws 
   const again = await bootApp(new ScriptedModel(), 100, 24, undefined, { sessions: { dir } });
   await settle(6);
   await again.press('F');
-  await settleUntil(() => /echo saved · ✓ \d+\.\d s/.test(again.backend.lastFrame));
-  expect(again.backend.lastFrame).toMatch(/echo saved · ✓ \d+\.\d s/);
+  await settleUntil(() => /echo saved · ✓ (?:<1s|\d+s)/.test(again.backend.lastFrame));
+  expect(again.backend.lastFrame).toMatch(/echo saved · ✓ (?:<1s|\d+s)/);
   again.app.unmount();
 });
 

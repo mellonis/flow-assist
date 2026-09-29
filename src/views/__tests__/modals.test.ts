@@ -343,9 +343,9 @@ test('chat shows the async-command spinner status line while streaming', async (
     backend,
   );
   // The status line is `<spinner> <elapsed> · <toolLabel>` — the tool label ("compact")
-  // and the formatted duration (3.2s) both appear.
+  // and the formatted duration (3s) both appear.
   expect(backend.lastFrame).toContain('compact');
-  expect(backend.lastFrame).toContain('3.2s');
+  expect(backend.lastFrame).toContain('3s');
   handle.unmount();
 });
 
