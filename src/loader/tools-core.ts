@@ -257,10 +257,9 @@ export function bgActiveCount(): number {
 
 // ─── The assistant's task plan ────────────────────────────────────────────────
 // The plan is the CONVERSATION's (`src/assistant/plan.ts`): whoever owns one — the
-// chat, a background run, an eval — creates it and passes it as `ctx.plan`. A caller
-// with no conversation of its own (the one-shot CLI, a bare `execChatTool`) gets
-// `processPlan`, which lives as long as the process — for a one-shot that IS the
-// conversation.
+// chat, the one-shot prompt, a background run, an eval — creates it and passes it as
+// `ctx.plan`. A caller with no conversation of its own (a bare `execChatTool`) gets
+// `processPlan`, which lives as long as the process.
 export type { TodoItem, TodoStatus } from '../assistant/plan.js';
 const processPlan = createPlan();
 

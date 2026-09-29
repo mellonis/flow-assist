@@ -5,6 +5,22 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **The one-shot prompt prints its answer once, and says when it stopped at a limit.**
+  `flow-assist "<prompt>"` no longer streams: the steps it takes and the answer as it is
+  written are not printed, and the answer comes once, when it is done — a script piping
+  the one-shot sees no streaming. `ai.maxRounds` and `ai.maxTurnTokens` now bound it as
+  they bound the chat, and a turn stopped by one says so on stderr and exits with code 2
+  (a failure stays code 1). Its model is now told what the chat's is: the language and
+  the short `Next:` line before a tool, who it is talking to, and the memory's index. It
+  is not offered `background` or `remind`, which have nothing to deliver to without the
+  app, and its `todo` plan is its own. An empty prompt (`flow-assist ""`) is refused with
+  code 1 instead of being sent. A failure or a limit it says on stderr — and an error
+  before the turn starts, such as a plugin that fails to load — has a known secret
+  replaced by its mark, as the chat's lines and the `--allow-writes` line already do; the
+  last step a limit names is redacted before it is shortened, so no part of a secret is
+  left. A settings file changed on disk while it runs is said at the end in one line
+  (`settings file changed outside flow-assist — not applied`) and not applied; the exit
+  code is the turn's.
 - **Bun 1.4.** The host is developed, tested and compiled on Bun 1.4.2; `engines`
   asks for 1.4 or later. The compiled binary needs no Bun on the machine it runs on.
 - **The assistant opens a plugin's screen when you ask.** "Open the tutor" used to get

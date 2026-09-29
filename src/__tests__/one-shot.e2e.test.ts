@@ -64,7 +64,7 @@ test('a one-shot run declines every write, tells the model why, and still runs a
   expect(command).toContain('cannot ask the person');
   expect(read).toStartWith('OK:');
   expect(config).toStartWith('DECLINED:');
-  expect(out).toContain('All done.');
+  expect(out).toBe('All done.\n');
   expect(err).not.toContain('echo made');
 });
 

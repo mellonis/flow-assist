@@ -126,6 +126,10 @@ const LAYERS = new WeakMap<object, ConfigLayers>();
 //   a restart — a `kill` included — starts on the accepted config.
 // - A write of the host's is made on top of the accepted content; a file that held
 //   something else has that text kept beside it first, never lost.
+// - The one-shot prompt never arms the guard and never asks: it hashes the files before
+//   its run and after it (`settingsFileHashes`, `settingsChangedSince`) and says on
+//   stderr that one changed; the change is not applied, and the next start that can ask
+//   does.
 type Seen = { mtimeMs: number; size: number; hash: string; content: Record<string, unknown> | null };
 const SEEN = new Map<string, Seen>();
 const PENDING = new Map<string, ConfigChange>();
@@ -216,6 +220,23 @@ export function unguardConfigFiles(): void {
   SEEN.clear();
   PENDING.clear();
   DECLINED.clear();
+}
+
+// The settings files' texts as hashes, by path — a read that leaves the guard as it is:
+// nothing seen, pending, declined or accepted changes. A caller with nobody to ask (the
+// one-shot prompt) takes it before its run and asks `settingsChangedSince` after, to
+// say that a file changed while it ran; the change is not applied.
+export function settingsFileHashes(): Map<string, string> {
+  return new Map(guardedPaths().map((p) => [p, hashOf(readRaw(p))]));
+}
+// Whether a settings file holds, now, a text it held neither at `before` nor as the
+// host's own last read or write (`SEEN`, which a write of the host's updates): a change
+// made outside flow-assist since `before`.
+export function settingsChangedSince(before: Map<string, string>): boolean {
+  return guardedPaths().some((p) => {
+    const now = hashOf(readRaw(p));
+    return now !== before.get(p) && now !== SEEN.get(p)?.hash;
+  });
 }
 
 // A value as the change's line shows it: masked at a secret-looking key, a known

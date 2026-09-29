@@ -290,8 +290,9 @@ the blacklist.
     turn (after its tool results), so alternation holds and the tail is uncached. No
     items, no block. The meter counts it as the `on screen` part
     (`ContextParts.screen`). Only the conversation's turn (`runTurn`) passes it: a background task
-    (the `background` tool's nested `chatLLM`) and the one-shot CLI (no mounted
-    plugins) get none — they run apart from the screen. `/compact` does not see it.
+    (the `background` tool's nested `chatLLM`) and the one-shot prompt
+    (`turnShape('oneshot')`: no screen) get none — they run apart from the screen.
+    `/compact` does not see it.
     The chat's title is the labels joined ` · `, cut to the frame
     (`ƒ Flow Assist · Board: Frontend · Issue ABC-1`), the plain name with none.
     **The screen changing never switches the session**: opening the chat continues
@@ -1023,14 +1024,16 @@ hold this set together:
   round's copy, never the history), so a `cd` is seen by the next round of the same
   turn, and a round whose text did not change sends the message it had — re-reading
   the plan per round would miss the cache after every `todo`. It is never a message in
-  the history, so it is never stubbed, compacted or duplicated. A background run and
-  the one-shot prompt have no chat to read it on `setCwd`, so each wires the same rule
-  itself: a shell state of its own (`ctx.shell`, so `cd` holds between calls), built
+  the history, so it is never stubbed, compacted or duplicated. A background run has
+  no conversation to read it on `setCwd`, so it wires the same rule itself: a shell
+  state of its own (`ctx.shell`, so `cd` holds between calls), built
   with an `onSet` that calls `instructionsPrompt`'s own `refresh` — read once for the
   starting directory, again only when `setCwd` moves it, never from the `systemPrompt`
   function `instructionsPrompt` also returns, which every round calls for what
   `refresh` last found, under the caller's own base prompt; a background run is never
-  handed the chat's reading. The
+  handed the chat's reading. The one-shot prompt is a conversation: `Conversation.fresh`
+  reads the section for the start directory, and a `cd` reads it again, as in the chat.
+  The
   chat says which files were picked up in a `note` row (`Project instructions: ~/p/
   AGENTS.md`) only when the list changes; during a turn the note waits for the turn's
   end (a note between rounds would split the turn's message), and a list that already
@@ -1048,8 +1051,9 @@ hold this set together:
   the host. Who answers is one closed set of policies (`ConfirmPolicy`,
   `src/assistant/confirm-policy.ts`) and one mapping, `confirmFor`: `ask` (the chat: the
   auto mode, then the person's y/n), `always-no` (every write declined, journaled
-  `by: 'background'` — the row exists; no driver uses it yet), `none` (nobody to ask: no `confirmWrite`), `allow-writes`
-  (`--allow-writes`) and `caller` (a plugin's own confirmation).
+  `by: 'background'` — the row exists; no driver uses it yet), `none` (nobody to ask:
+  no `confirmWrite`), `allow-writes` (`--allow-writes`) and `caller` (a plugin's own
+  confirmation).
   `confirm-policy.test.ts` holds each row. A read runs as ever. So passing a
   `confirmWrite` is a deliberate act, and leaving it out is safe. A caller can also
   withhold tools (`AgentOpts.withholdTools`): the names are left out of every request,
@@ -1062,14 +1066,16 @@ hold this set together:
   - a tool's `ctx.chatLLM` in the chat (`journaledChatLLM` with no `taskLabel`) —
     declines unless the tool passes its own `confirmWrite`, whose answer is journaled
     `by: 'plugin'`; with none, the journal holds the declined call and no `confirm`;
-  - the one-shot prompt (`runPrompt`, `src/main.ts`) — declines. `--allow-writes`,
-    given before the prompt, is the person's yes in advance: its policy
-    (`allow-writes`) answers what the auto mode may answer with `shell.autoRun` on
-    (`neverAutomatic` with both consents — so never `config_set`, an unlisted
-    `web_fetch` or a plugin's `run_command`) and says each write it lets through on
-    stderr as it runs (`[write] ! <command>`, else the tool and its arguments —
-    through `sanitizeViewText`, each further line marked `[write]   `, so an escape
-    code or a carriage return in the command cannot hide the line);
+  - the one-shot prompt (`runPrompt`, `src/main.ts`) — one `oneshot` conversation made
+    where nobody can answer (`canAsk: false`), with the policy `none`: it declines.
+    `--allow-writes`, given before the prompt, gives it the policy `allow-writes`
+    instead — the person's yes in advance: it answers what the auto mode may answer
+    with `shell.autoRun` on (`neverAutomatic` with both consents — so never
+    `config_set`, an unlisted `web_fetch` or a plugin's `run_command`) and says each
+    write it lets through on stderr as it runs (`[write] ! <command>`, else the tool
+    and its arguments — through `sanitizeViewText`, each further line marked
+    `[write]   `, so an escape code or a carriage return in the command cannot hide
+    the line, and a known secret in it is its mark);
   - a plugin's `services.chatLLM` — declines unless the plugin passes a `confirmWrite`
     of its own (one that can ask the person);
   - a remote plugin's `host.chatLLM` (`src/remote/adapter.ts`) — always declines: a
@@ -1188,8 +1194,10 @@ hold this set together:
     `Conversation.currentProject` (`src/assistant/conversation-session.ts`) to its
     tools as `ctx.workspaceProject`, and a background task's
     nested run keeps it, its ctx being the chat's spread); a caller with no conversation
-    — the one-shot prompt, a plugin's own `chatLLM` — takes the project of the call's
-    shell directory (`callProject`). With no project the project's scope IS the global one.
+    — a plugin's own `chatLLM` — takes the project of the call's shell directory
+    (`callProject`); the one-shot prompt's conversation never gets a session id (it
+    has no sessions directory), so its project is the one its shell is in at each
+    call, the same reading. With no project the project's scope IS the global one.
   - **`/workspace [path]` is the person's look into it** (`workspaceNote`): no path lists
     the project's workspace, a path shows that file fenced (`fence`) — a `note`, display
     only, never sent to the model: what the model wrote there is not the person's
@@ -1236,8 +1244,10 @@ hold this set together:
   - **The scope.** `scope: "project"` (the default) is the conversation's project —
     decided at its first message, as a session's is, and handed to the tools as
     `ctx.workspaceProject` (`Conversation.currentProject`, kept by a background task's
-    nested run); a caller with no conversation (the one-shot prompt) takes the project
-    of the call's shell directory (`callProject`). `"global"` is every project — the person's own
+    nested run); the one-shot prompt's conversation, which never gets a
+    session id, takes the project its shell is in at each call; a plugin's own
+    `chatLLM`, with no conversation, the project of the call's shell directory
+    (`callProject`). `"global"` is every project — the person's own
     preferences; `"host"` is read as global. `"plugin"` keeps a GLOBAL fact for the
     plugin whose tool calls, named only through the identity token the host issued it
     (`resolveIdentityToken`; a raw name in the ctx counts for nothing, and a call with no
@@ -1378,7 +1388,8 @@ hold this set together:
   per-round `systemPrompt` reads the summary fresh (`summaryBlock`), since it changes
   between two rounds of one message. A compaction that fails is logged and the request
   goes as it is; Esc stops it with the turn. Only the chat passes the hook: a
-  background run and the one-shot CLI never compact. `ai` is under the model's leash,
+  background run and the one-shot prompt (`turnShape('oneshot')`: no request
+  boundary) never compact. `ai` is under the model's leash,
   so the key carries no mark — `config_set` refuses it. A note whose text already carries the
   summary inline (an older format) is drawn as saved, without folding it. There is no
   `/refresh-context`: the system prompt is assembled anew for every message, so the
@@ -1405,8 +1416,9 @@ hold this set together:
   so does the end of a turn that left every item done (a finished plan otherwise hung
   over the chat as "· N done"); a
   background run gets a fresh one, so its checkboxes never appear among the chat's;
-  an eval trial makes one per trial. Only a caller with no conversation of its own
-  (the one-shot CLI, a bare `execChatTool`) falls back to the process-wide plan.
+  an eval trial makes one per trial. The one-shot prompt keeps its conversation's
+  own, so the plan reminder can fire there. Only a caller with no conversation of its
+  own (a bare `execChatTool`) falls back to the process-wide plan.
   - **How the plan is drawn.** flowtty's checkbox glyphs, from `checkboxMarker(…,
     'none')` through `todoMarker` in `plan.ts` — ☐ pending, ⊟ in progress (the partial
     box), ☑ done (in flowtty's checked green) — in the plan's OWN order, done items in
@@ -1533,7 +1545,8 @@ hold this set together:
   `▣` is East-Asian-ambiguous like the `◆` marker and counts one cell in flowtty's
   grid) — never the image, and `condenseRuns` never folds a call that carries marks
   into a `×N`; the session keeps the marks and the refs, never bytes.
-  `AgentOpts.imageLimits` carries `ai.images` in (`services.chatLLM`, `runPrompt`); a
+  `AgentOpts.imageLimits` carries `ai.images` in (`services.chatLLM`, which the chat,
+  a background task and the one-shot all go through); a
   caller that says nothing gets the defaults.
 - **A request carries the core tools and an INDEX of the rest** (tools on demand,
   `src/assistant/tool-loading.ts`, pure; wired in `agentChat`). Every tool's full
@@ -1581,9 +1594,10 @@ hold this set together:
   and, once the group's tools are loaded (or sent in full under `'all'`), in full on the
   group's first tool; sanitized (`sanitizeGroupDescription`: control characters and the
   app's own frame words out) and trusted the same way a tool's own description is. The loaded set is a `ToolSet` owned like the plan: the conversation's `toolSet`
-  (saved as the session's `tools`, kept by `/compact`, emptied by `/clear`); a background run and the one-shot CLI start from an empty one.
+  (saved as the session's `tools`, kept by `/compact`, emptied by `/clear`); a background run and the one-shot prompt's fresh
+  conversation start from an empty one.
   `agentChat`'s own default is `'all'` — the mode is applied by `services.chatLLM`
-  and `runPrompt` from config — and `bootApp` pins `'all'` so an e2e script can call
+  from config, for every caller — and `bootApp` pins `'all'` so an e2e script can call
   the tool it tests; `tool-loading.e2e.test.ts` opts in. The context meter measures
   `requestTools(...)`, what is really sent. `host:tools_list` still lists every name;
   the index made it mostly redundant.
@@ -1766,7 +1780,7 @@ hold this set together:
   tool's) is a background task: each line is tagged `task` with that label and its y/n
   answers are `by: 'background'`. Any other caller is a plugin tool asking the model:
   no `task` tag, and its own answers are `by: 'plugin'`. The one-shot prompt has no
-  journal. A line over
+  journal: its conversation has no sessions directory. A line over
   `JOURNAL_LINE_MAX` (4 MiB) is written with its largest fields replaced by a note of
   their size and named in `omitted` (`journalLine`).
   The journal needs the session's id, which is given when the session first has
@@ -2016,8 +2030,9 @@ hardest. Rules the `repo` and `gitlab` plugins hold, each with a test that tries
 - **A configured root is never deleted**, confirmed or not.
 - **A write shows what it changed.** A tool that edits text calls
   `ctx.reportChange({ title, before, after })` once the write has succeeded — the
-  host gives every call that function (`agentChat`); a caller with no chat (the
-  one-shot CLI, a test's bare ctx) gives none, so call it as `ctx?.reportChange?.(…)`.
+  host gives every call that function (`agentChat`); a tool run outside it (a
+  bare `execChatTool`, a test's bare ctx) gets none, so call it as
+  `ctx?.reportChange?.(…)`.
   The host diffs the two (`src/assistant/diff.ts`, pure: LCS over what is left
   between the common head and tail, 3 lines of context, 80 diff lines drawn and the
   rest counted, a text with a NUL named and not drawn) and the chat keeps a
@@ -2181,8 +2196,9 @@ hardest. Rules the `repo` and `gitlab` plugins hold, each with a test that tries
   number; it is stripped before the def reaches the wire, like `write`/`run`.
   `run_command` already keeps only the tail of its own output (`shell.maxChars`,
   default 20000) before this cap ever sees it, so the smaller of the two numbers
-  wins without either needing to know about the other. `services.chatLLM` and the
-  one-shot CLI resolve `ai.toolResultMaxChars` once from config
+  wins without either needing to know about the other. `services.chatLLM` — the
+  path the chat, a background task and the one-shot all take — resolves
+  `ai.toolResultMaxChars` once from config
   (`toolResultCapFromConfig`) and pass it as `agentChat`'s `toolResultMaxChars`; a
   caller that says nothing gets `TOOL_RESULT_MAX_CHARS_DEFAULT`.
 
@@ -2261,9 +2277,9 @@ The streamed round and `/compact`'s one-shot both use it.
 case-blind) an OpenAI-compatible chat-completions API, `anthropic` Anthropic's own
 Messages API; a value that is neither `openai` nor `anthropic` is said once in the log
 (`llmConfigNotes`), never refused — the schema has always taken any string. Every
-caller — the chat's send and `/compact`, a background task, the one-shot prompt, and
-`services.chatLLM` itself for a plugin that passes less — spreads `llmOpts(config.ai)`
-into its call, and the start-up gate (`configWarnings`) checks the same resolution: with `anthropic` the base URL defaults to `https://api.anthropic.com/v1`
+caller — the chat's send and `/compact`, a background task, and `services.chatLLM`
+itself, which is the one-shot prompt's path and serves a plugin that passes less —
+spreads `llmOpts(config.ai)` into its call, and the start-up gate (`configWarnings`) checks the same resolution: with `anthropic` the base URL defaults to `https://api.anthropic.com/v1`
 and the token variable to `ANTHROPIC_API_KEY`. In `agent.ts` the provider is looked at in
 exactly two places, `roundFor` (the round `agentChat` runs; a caller's own `chatRound`, a
 test's stub, wins) and `compactConversation`. **What the host keeps never changes shape**:
@@ -3709,10 +3725,31 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   page the model has read — and leaves what it installs untrusted.
   `runPlugins(args, config, repo, deps)` takes the dirs and the output lines (`io`) as
   `runConfig` does, so a test runs it on a root of its own.
-- any other arg — a one-shot `<prompt>` chat with the loaded tool registry. It
-  declines every write; `--allow-writes` before the prompt lets them run, each said on
-  stderr ("a path to the model that cannot ask the person declines writes", above). A
-  bare `--allow-writes` with no prompt is an error, exit code 1.
+- any other arg — a one-shot `<prompt>`: ONE headless conversation
+  (`Conversation.fresh(oneShotDeps(…), { kind: 'oneshot', … })`,
+  `src/assistant/oneshot.ts`) on the loaded tool registry and the host's services. Its
+  model is told what the chat's is — the language and the `Next:` shape, who it talks
+  to, the memory's index, the project's instructions — and `ai.maxRounds` /
+  `ai.maxTurnTokens` bound its turn. Nobody can answer it (`canAsk: false`): it
+  declines every write, and `--allow-writes` before the prompt lets them run, each said
+  on stderr ("a path to the model that cannot ask the person declines writes", above).
+  It has no screen, no journal and no session file, and is not offered `background`,
+  `subagent` or `remind` (`withholdTools`), which have nothing to deliver to without
+  the app. Nothing is streamed: the answer is printed once, on stdout, when the turn
+  ends. Exit codes (`oneShotOutcome`): 0 — an answer (an empty line for a turn that
+  gave reasoning and no text); 2 — a limit, said on stderr (`flow-assist: stopped
+  after N rounds (ai.maxRounds) — no answer; last step: …`); 1 — a failure (the
+  provider's error on stderr), an empty prompt, a bare `--allow-writes` with no
+  prompt, or anything that fails before the turn. Every stderr line about the turn —
+  the failure, the limit, `[write]` — passes `redactSecrets`, as the chat's lines do,
+  and so does the message of a throw before the turn; the last step is redacted
+  before it is cut to 80 characters, so the cut never leaves part of a secret. A
+  signal ends it as ever. The settings-file guard never asks there and is never
+  armed: a file changed since it was accepted is said at the start
+  (`configStartupNotes`) and not used, and one that changes on disk during the run is
+  said once at the end (`settings file changed outside flow-assist — not applied`,
+  `settingsChangedSince` in `src/config/load.ts`), is not applied, and leaves the exit
+  code as the turn made it; the next start that can ask asks about it.
 
 ## Config & environment
 

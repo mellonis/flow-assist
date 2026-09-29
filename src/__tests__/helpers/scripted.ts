@@ -68,7 +68,8 @@ export class ScriptedModel {
   script(...turns: Turn[]) { this.turns.push(...turns); }
   release() { this.gate?.(); this.gate = null; }
 
-  // A turn of this script is frozen at a `hold` step, waiting for `release()`.
+  // A turn of this script is frozen at a `hold` step, waiting for `release()`. An abort
+  // lets the held step go but leaves this true until the next `release()` or hold.
   get held(): boolean { return this.gate !== null; }
 
   // Requests for another conversation, apart from the rest: a request goes to the first

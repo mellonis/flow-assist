@@ -1,7 +1,7 @@
 // The CLI. Classifies argv into a subcommand (`parseCli`), then `main`
 // dispatches: no args → interactive TUI (`renderApp`), `config …` → the config
 // subcommand (get/set/unset/help on the host schema), `plugins ls|install|trust|remove|update`
-// → the plugin repo, any other argv → a one-shot `<prompt>` chat via `agentChat`,
+// → the plugin repo, any other argv → a one-shot `<prompt>`: one headless conversation (src/assistant/oneshot.ts),
 // and `--help`/`--version`.
 //
 // The program's entry point is `cli.ts`, which sets NODE_ENV before importing this
@@ -14,7 +14,7 @@
 import { projectRoot, availableDir, enabledDir } from './install.js';
 import { existsSync } from 'node:fs';
 import { TtyBackend, isInteractive } from '@flowtty/tty-backend';
-import { configStartupNotes, guardConfigFiles, inModelShell, loadConfig } from './config/load.js';
+import { configStartupNotes, guardConfigFiles, inModelShell, loadConfig, settingsChangedSince, settingsFileHashes } from './config/load.js';
 
 import {
   configSource,
@@ -39,18 +39,10 @@ import { loadPlugins, loadTrustedPlugin } from './loader/build.js';
 import { createLatePlugins } from './loader/late.js';
 import { assembleToolRegistry, pluginConfigs } from './loader/tools.js';
 import { renderApp } from './runtime/app.js';
-import { refreshSecrets } from './assistant/secrets.js';
+import { redactSecrets, refreshSecrets } from './assistant/secrets.js';
 import { consoleBridge } from './runtime/console-log.js';
-import { agentChat } from './assistant/agent.js';
-import { neverAutomatic } from './assistant/auto.js';
-import { createShellState } from './assistant/shell.js';
-import { writeLine } from './assistant/confirm-policy.js';
-import { instructionsPrompt } from './assistant/project-instructions.js';
-import { toolLoadingMode } from './assistant/tool-loading.js';
-import { toolResultCapFromConfig } from './assistant/tool-result-cap.js';
-import { imageLimits } from './assistant/images.js';
-import { llmOpts } from './assistant/llm-endpoint.js';
-import { createLogService } from './runtime/services/log.js';
+import { Conversation } from './assistant/conversation.js';
+import { oneShotDeps, oneShotOutcome } from './assistant/oneshot.js';
 import { createServices } from './runtime/services.js';
 import { hostVersion } from './version.js';
 import { renderChatModal, renderHelp, renderLogModal, renderReminder } from './views/modals.js';
@@ -149,7 +141,7 @@ export async function main(argv: string[]): Promise<void> {
         return;
       }
       gateLlmConfig(config);
-      await runPrompt(parsed.args, config, repo, parsed.allowWrites ? { allowWrites: true } : {});
+      process.exitCode = await runPrompt(parsed.args, config, repo, parsed.allowWrites ? { allowWrites: true } : {});
       return;
     case 'interactive':
       gateLlmConfig(config);
@@ -374,7 +366,8 @@ function gateLlmConfig(config: Record<string, unknown>): void {
 // ─── one-shot prompt ──────────────────────────────────────────────────────────
 // What a one-shot run is handed besides its prompt: `allowWrites` from the command
 // line, and where it reads its plugins and writes its answer — the install's own and
-// the process's streams unless a test gives its own.
+// the process's streams unless a test gives its own. It returns the exit code
+// (`src/assistant/oneshot.ts`, `oneShotOutcome`).
 export type PromptDeps = {
   allowWrites?: boolean;
   enabledDir?: string;
@@ -382,57 +375,44 @@ export type PromptDeps = {
   err?: (text: string) => void;
 };
 
-export async function runPrompt(args: string[], config: Record<string, unknown>, repo: PluginRepo, deps: PromptDeps = {}): Promise<void> {
+export async function runPrompt(args: string[], config: Record<string, unknown>, repo: PluginRepo, deps: PromptDeps = {}): Promise<number> {
+  // The settings files as the run finds them: one that changes on disk while it runs is
+  // said at the end, and not applied (src/config/load.ts, the guard).
+  const settingsBefore = settingsFileHashes();
   const prompt = args.join(' ');
-  const ai = (config.ai ?? {}) as Record<string, unknown>;
   const dir = deps.enabledDir ?? enabledDir;
   const out = deps.out ?? ((text: string) => { process.stdout.write(text); });
   const err = deps.err ?? ((text: string) => { process.stderr.write(text); });
-  const plugins = await loadPlugins({ config, repo, renders, enabledDir: dir });
-  const registry = assembleToolRegistry({ plugins, config, repo: repo as unknown as RepoShape });
-  const log = createLogService(config);
-  // On stderr, so an answer piped elsewhere stays clean.
-  const note = noPluginsNote(dir, (await repo.enabledPlugins()).length, existsSync);
-  if (note) err(`[plugins] ${note}\n`);
-
-  // Plugin ai-tools live in the assembled registry as synthetic groups whose id
-  // ends with `:aiTools` — collect their tools for the agent's extraTools.
-  const aiTools = registry.groups.filter((g) => g.id.endsWith(':aiTools')).flatMap((g) => g.tools);
-
-  // The one-shot prompt has no TUI, so build the host services (real openBrowser,
-  // cache, log, memory) and pass them as toolCtx. An ai-tool's run already fuses
-  // the owning plugin's services; host services here supply the REAL primitives
-  // (open_browser spawns `open`, not a tracker no-op stub) that one-shot lacks.
-  const services = createServices({ config, tools: registry, repo, onExit: () => {} });
-
-  // The one-shot prompt's own shell directory, so `cd` holds from one call to the next,
-  // and the project's instructions for it, read once per directory and again only when
-  // `cd` moves it (src/assistant/project-instructions.ts).
-  let refreshInstructions = () => {};
-  const shell = createShellState(() => config, null, () => refreshInstructions());
-  const instructions = instructionsPrompt(config, shell);
-  refreshInstructions = instructions.refresh;
-  const result = await agentChat([{ role: 'user', content: prompt }], {
-    ...llmOpts(ai),
-    systemPrompt: instructions.systemPrompt,
-    extraTools: aiTools,
-    toolLoading: toolLoadingMode(ai),
-    toolResultMaxChars: toolResultCapFromConfig(ai),
-    imageLimits: imageLimits(ai),
-    toolCtx: { ...services, shell } as never,
-    logToolRun: log.logToolRun,
-    // Nobody is there to answer a y/n, so with no `confirmWrite` the loop declines every
-    // write. `--allow-writes` is the person's yes given in advance — to what the chat's
-    // auto mode may answer with `shell.autoRun` on, never to `config_set` or an unlisted
-    // `web_fetch` — and each write it lets through is said on stderr as it runs.
-    ...(deps.allowWrites ? { confirmWrite: (name: string, argsText: string, info?: { hostShell?: boolean }) => {
-      if (neverAutomatic(name, { autoRun: true, hostShell: !!info?.hostShell })) return false;
-      err(`${writeLine(name, argsText)}\n`);
-      return true;
-    } } : {}),
-    onLive: (delta: string) => out(delta),
-  });
-  out('\n' + result.content + '\n');
+  let conv: Conversation | null = null;
+  try {
+    const plugins = await loadPlugins({ config, repo, renders, enabledDir: dir });
+    const registry = assembleToolRegistry({ plugins, config, repo: repo as unknown as RepoShape });
+    // On stderr, so an answer piped elsewhere stays clean.
+    const note = noPluginsNote(dir, (await repo.enabledPlugins()).length, existsSync);
+    if (note) err(`[plugins] ${note}\n`);
+    // The host's services with the REAL primitives (open_browser spawns `open`), and its
+    // `chatLLM`, which applies the config's limits and tool loading as the chat's does.
+    const services = createServices({ config, tools: registry, repo, onExit: () => {} });
+    // One conversation nobody can answer: every write declined, or — `--allow-writes` —
+    // the person's yes given in advance, each write said on stderr as it runs.
+    conv = Conversation.fresh(oneShotDeps(config, services), {
+      kind: 'oneshot',
+      policy: deps.allowWrites ? { kind: 'allow-writes', say: (line) => err(`${line}\n`) } : { kind: 'none' },
+    });
+    const sent = await conv.send(prompt);
+    const said = oneShotOutcome(sent ? conv.lastEnd : null, conv.lastAnswer(), settingsChangedSince(settingsBefore));
+    if (said.out !== undefined) out(said.out);
+    if (said.err) err(said.err);
+    return said.code;
+  } catch (e) {
+    // A throw on the way (a plugin that fails to load) reaches the command line's own
+    // printing (src/cli.ts) as ever, its message redacted as every other stderr line.
+    throw new Error(redactSecrets(e instanceof Error ? e.message : String(e)), { cause: e });
+  } finally {
+    // Its timers go with it (the save it arms, with nowhere to save), or they would hold
+    // the process open.
+    conv?.close('exit');
+  }
 }
 
 // ─── interactive TUI ──────────────────────────────────────────────────────────

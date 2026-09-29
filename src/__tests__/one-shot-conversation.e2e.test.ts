@@ -1,0 +1,302 @@
+// The one-shot prompt as a conversation (`runPrompt` over a `oneshot` Conversation): what
+// its model is told, what bounds its turn, what it prints and how it exits, which tools
+// it is not offered, whose plan it keeps, and that it leaves no session behind.
+import { afterEach, expect, test } from 'bun:test';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { chatLanguage } from '../assistant/agent';
+import { addFact } from '../assistant/memory-store';
+import { firstStart } from '../assistant/memory-trust';
+import { PLAN_REMINDER } from '../assistant/plan';
+import { activeSecrets, refreshSecrets, setActiveSecrets } from '../assistant/secrets';
+import { workspaceFor, workspaceRoot } from '../assistant/workspace';
+import { acceptedConfigPath, hostStateDir } from '../config/load';
+import { assembleToolRegistry, execChatTool } from '../loader/tools';
+import { bgActiveCount } from '../loader/tools-core';
+import { runPrompt } from '../main';
+import { ScriptedModel } from './helpers/scripted';
+import { listTree } from './helpers/session-files';
+
+const realFetch = globalThis.fetch;
+afterEach(() => { globalThis.fetch = realFetch; });
+
+type Msg = { role: string; content?: unknown };
+const tmp = (prefix: string) => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
+// stderr's lines, the note about an empty plugins directory left out.
+const said = (err: string) => err.split('\n').filter((l) => l && !l.startsWith('[plugins]'));
+const toolNames = (m: ScriptedModel, i: number) => ((m.requests[i] as { tools?: { function: { name: string } }[] }).tools ?? []).map((t) => t.function.name);
+const toolResults = (m: ScriptedModel, i = -1) => (m.requests.at(i)!.messages as Msg[]).filter((x) => x.role === 'tool').map((x) => String(x.content));
+
+async function oneShot(model: ScriptedModel, o: { prompt?: string[]; ai?: Record<string, unknown>; extra?: Record<string, unknown>; before?: (config: Record<string, unknown>, root: string) => void; fetch?: typeof fetch; allowWrites?: boolean; during?: (request: number) => void } = {}) {
+  process.env.LLM_TOKEN = '^scripted-llm-token';
+  model.install();
+  if (o.fetch) globalThis.fetch = o.fetch;
+  // Something that happens while the turn runs: called with each request's index, before
+  // the request is served.
+  if (o.during) {
+    const served = globalThis.fetch;
+    let n = 0;
+    globalThis.fetch = (async (url: Parameters<typeof fetch>[0], init?: RequestInit) => { o.during!(n++); return served(url, init); }) as typeof fetch;
+  }
+  const root = tmp('fa-oneshot2-');
+  const config: Record<string, unknown> = {
+    ai: { baseUrl: 'http://scripted.model', model: 'scripted', toolLoading: 'all', ...o.ai },
+    fs: { roots: [root] },
+    memory: { file: path.join(tmp('fa-oneshot2-memory-'), 'memory.json') },
+    workspace: { dir: tmp('fa-oneshot2-workspace-') },
+    ...o.extra,
+  };
+  o.before?.(config, root);
+  const repo = { enabledPlugins: async () => [], list: async () => [] } as never;
+  const out: string[] = []; const err: string[] = [];
+  const code = await runPrompt(o.prompt ?? ['do', 'it'], config, repo, { enabledDir: tmp('fa-oneshot2-enabled-'), ...(o.allowWrites ? { allowWrites: true } : {}), out: (s) => out.push(s), err: (s) => err.push(s) });
+  return { root, config, code, out: out.join(''), err: err.join('') };
+}
+
+// A known secret for one test's run, put back after it: the environment variable and the
+// active set. The run's `before` calls `refreshSecrets(config)` to take it in.
+const SECRET = 'oneshot-secret-4242-value';
+const MARK = '‹secret FA_ONESHOT_API_TOKEN›';
+async function withSecret(run: () => Promise<void>): Promise<void> {
+  const before = activeSecrets();
+  process.env.FA_ONESHOT_API_TOKEN = SECRET;
+  try { await run(); } finally {
+    delete process.env.FA_ONESHOT_API_TOKEN;
+    setActiveSecrets(before);
+  }
+}
+
+test('D17: the answer is printed once, when the turn ends — no step and no streamed text reach stdout', async () => {
+  const model = new ScriptedModel();
+  model.script([{ text: 'Next: read the clock', tool: 'datetime', args: {} }], [{ text: 'It is noon.' }]);
+  const r = await oneShot(model);
+  expect(r.code).toBe(0);
+  expect(r.out).toBe('It is noon.\n');
+  expect(said(r.err)).toEqual([]);
+});
+
+test('Q3: a turn that ends with reasoning and no text prints one empty line — never an earlier step — and exits 0', async () => {
+  const model = new ScriptedModel();
+  model.script([{ text: 'Next: read the clock', tool: 'datetime', args: {} }], [{ thinking: 'nothing more to say' }]);
+  const r = await oneShot(model);
+  expect(r.code).toBe(0);
+  expect(r.out).toBe('\n');
+  expect(said(r.err)).toEqual([]);
+});
+
+test('D4: the one-shot\'s model is told what the chat\'s is — the language and the Next: shape, who it talks to, the memory\'s index — and the project\'s instructions stay', async () => {
+  const model = new ScriptedModel();
+  model.script([{ text: 'ok' }]);
+  const r = await oneShot(model, {
+    extra: { user: { name: 'Ada Lovelace' } },
+    before: (config, root) => {
+      // The start's pass: the facts stored now are the host's (a one-shot never runs it).
+      firstStart(workspaceRoot(config));
+      addFact(workspaceFor(config, null, 'global'), { text: 'ONESHOT-FACT the person indents with tabs' });
+      fs.writeFileSync(path.join(root, 'AGENTS.md'), 'ONESHOT-INSTRUCTIONS: run the tests before answering.\n');
+    },
+  });
+  expect(r.code).toBe(0);
+  const first = (model.requests[0]!.messages as Msg[])[0]!;
+  expect(first.role).toBe('system');
+  const system = String(first.content);
+  expect(system).toContain(`Always respond in ${chatLanguage(r.config.ai as never)}`);
+  expect(system).toContain('starts with "Next:"');
+  expect(system).toContain('You are talking to Ada Lovelace');
+  expect(system).toContain('ONESHOT-FACT');
+  expect(system).toContain('ONESHOT-INSTRUCTIONS');
+});
+
+test('D5, D6: a one-shot turn stops at ai.maxRounds — the limit on stderr, nothing on stdout, exit code 2', async () => {
+  const model = new ScriptedModel();
+  model.script(...Array.from({ length: 3 }, () => [{ tool: 'datetime', args: {} }]), [{ text: 'never' }]);
+  const r = await oneShot(model, { ai: { maxRounds: 2 } });
+  expect(model.requests).toHaveLength(2);
+  expect(r.code).toBe(2);
+  expect(r.out).toBe('');
+  expect(said(r.err)).toEqual(['flow-assist: stopped after 2 rounds (ai.maxRounds) — no answer; last step: datetime {}']);
+});
+
+test('D5, D6: a one-shot turn stops at ai.maxTurnTokens the same way', async () => {
+  const model = new ScriptedModel();
+  // A cache figure of 0: every prompt token is new; 610 a request, past 1000 after the second.
+  model.usage = { prompt_tokens: 600, completion_tokens: 10, prompt_tokens_details: { cached_tokens: 0 } };
+  model.script(...Array.from({ length: 4 }, () => [{ tool: 'datetime', args: {} }]), [{ text: 'never' }]);
+  const r = await oneShot(model, { ai: { maxTurnTokens: 1000 } });
+  expect(model.requests).toHaveLength(2);
+  expect(r.code).toBe(2);
+  expect(said(r.err)).toEqual(['flow-assist: stopped after 1220 tokens (ai.maxTurnTokens) — no answer; last step: datetime {}']);
+});
+
+test('D26: the one-shot is not offered background or remind, and a call to one answers as an unknown tool', async () => {
+  const model = new ScriptedModel();
+  model.script([{ tool: 'background', args: { task: 'count the files' } }], [{ text: 'Could not.' }]);
+  const r = await oneShot(model);
+  const offered = toolNames(model, 0);
+  expect(offered).not.toContain('background');
+  expect(offered).not.toContain('remind');
+  expect(offered).toContain('datetime');
+  expect(toolResults(model)).toEqual(['ERROR: Unknown tool: background']);
+  expect(bgActiveCount()).toBe(0);
+  expect(r.out).toBe('Could not.\n');
+});
+
+test('K8: the one-shot plans on its own plan — the reminder fires there, and the process\'s plan is left alone', async () => {
+  assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as never });
+  const before = await execChatTool('todo', { action: 'list' }, {});
+  const model = new ScriptedModel();
+  model.script(
+    [{ tool: 'todo', args: { action: 'set', todos: [{ text: 'one' }, { text: 'two' }] } }],
+    [{ tool: 'datetime', args: {} }],
+    [{ text: 'Done.' }],
+  );
+  await oneShot(model);
+  const datetime = toolResults(model, 2).at(-1)!;
+  expect(datetime).toStartWith('OK:');
+  expect(datetime).toEndWith(PLAN_REMINDER);
+  expect(await execChatTool('todo', { action: 'list' }, {})).toEqual(before);
+});
+
+test('the one-shot leaves no session behind — no state file, no journal, no lock — even with a sessions directory configured', async () => {
+  const sessions = tmp('fa-oneshot2-sessions-');
+  const model = new ScriptedModel();
+  model.script([{ tool: 'datetime', args: {} }], [{ text: 'Noon.' }]);
+  const r = await oneShot(model, { extra: { sessions: { dir: sessions } } });
+  expect(r.code).toBe(0);
+  expect(listTree(sessions)).toEqual([]);
+});
+
+test('a known secret the model writes reaches stdout only as its mark', async () => {
+  const before = activeSecrets();
+  process.env.FA_ONESHOT_API_TOKEN = 'oneshot-secret-4242-value';
+  try {
+    const model = new ScriptedModel();
+    model.script([{ text: 'The token is oneshot-secret-4242-value, keep it safe.' }]);
+    const r = await oneShot(model, { before: (config) => { refreshSecrets(config); } });
+    expect(r.out).not.toContain('oneshot-secret-4242-value');
+    expect(r.out).toContain('‹secret FA_ONESHOT_API_TOKEN›');
+  } finally {
+    delete process.env.FA_ONESHOT_API_TOKEN;
+    setActiveSecrets(before);
+  }
+});
+
+test('a failed turn says the provider\'s error on stderr, prints nothing and exits 1', async () => {
+  const model = new ScriptedModel();
+  const r = await oneShot(model, { fetch: (async () => new Response('upstream is down', { status: 500 })) as unknown as typeof fetch });
+  expect(r.code).toBe(1);
+  expect(r.out).toBe('');
+  expect(said(r.err)).toHaveLength(1);
+  expect(r.err).toContain('upstream is down');
+});
+
+test('an empty prompt is refused on stderr with exit code 1, and nothing is sent', async () => {
+  const model = new ScriptedModel();
+  const r = await oneShot(model, { prompt: ['  '] });
+  expect(r.code).toBe(1);
+  expect(model.requests).toHaveLength(0);
+  expect(said(r.err)).toEqual(['flow-assist: the prompt is empty — flow-assist "your request"']);
+});
+
+test('the failure line is redacted: a known secret in the provider\'s error reaches stderr only as its mark', async () => {
+  await withSecret(async () => {
+    const model = new ScriptedModel();
+    const r = await oneShot(model, {
+      before: (config) => { refreshSecrets(config); },
+      fetch: (async () => new Response(`upstream is down for ${SECRET}`, { status: 500 })) as unknown as typeof fetch,
+    });
+    expect(r.code).toBe(1);
+    expect(said(r.err)).toHaveLength(1);
+    expect(r.err).toContain('upstream is down');
+    expect(r.err).not.toContain(SECRET);
+    expect(r.err).toContain(MARK);
+  });
+});
+
+test('the [write] line of --allow-writes is redacted: a known secret in the command is said only as its mark', async () => {
+  await withSecret(async () => {
+    const model = new ScriptedModel();
+    model.script([{ tool: 'run_command', args: { command: `echo ${SECRET} > made.txt` } }], [{ text: 'Made.' }]);
+    const r = await oneShot(model, { allowWrites: true, before: (config) => { refreshSecrets(config); } });
+    expect(r.err).not.toContain(SECRET);
+    expect(said(r.err)).toEqual([`[write] ! echo ${MARK} > made.txt`]);
+  });
+});
+
+test('the limit line is redacted: a known secret in the last step\'s arguments is said only as its mark', async () => {
+  await withSecret(async () => {
+    const model = new ScriptedModel();
+    // `datetime`'s one parameter is a free string; the step stays inside the 80-character cut.
+    model.script([{ tool: 'datetime', args: {} }], [{ tool: 'datetime', args: { zone: SECRET } }], [{ text: 'never' }]);
+    const r = await oneShot(model, { ai: { maxRounds: 2 }, before: (config) => { refreshSecrets(config); } });
+    expect(r.code).toBe(2);
+    expect(r.out).toBe('');
+    expect(said(r.err)).toHaveLength(1);
+    expect(r.err).toContain('flow-assist: stopped after 2 rounds (ai.maxRounds) — no answer; last step: datetime');
+    expect(r.err).not.toContain(SECRET);
+    expect(r.err).toContain(MARK);
+  });
+});
+
+test('a known secret the cut of the last step would go through is redacted before the cut — no part of it reaches stderr', async () => {
+  await withSecret(async () => {
+    const model = new ScriptedModel();
+    // `datetime {"zone":"` is 18 characters; 52 more put the secret across the 80-character cut.
+    model.script([{ tool: 'datetime', args: {} }], [{ tool: 'datetime', args: { zone: `${'z'.repeat(52)}${SECRET}` } }], [{ text: 'never' }]);
+    const r = await oneShot(model, { ai: { maxRounds: 2 }, before: (config) => { refreshSecrets(config); } });
+    expect(r.code).toBe(2);
+    expect(said(r.err)).toHaveLength(1);
+    expect(r.err).toContain(`last step: datetime {"zone":"${'z'.repeat(52)}‹secret`);
+    expect(r.err).not.toContain(SECRET.slice(0, 8));
+  });
+});
+
+test('a throw before the turn reaches the command line with a known secret as its mark', async () => {
+  await withSecret(async () => {
+    const config: Record<string, unknown> = { ai: { baseUrl: 'http://scripted.model', model: 'scripted' } };
+    refreshSecrets(config);
+    const repo = { enabledPlugins: async () => { throw new Error(`the plugins directory is unreadable: ${SECRET}`); }, list: async () => [] } as never;
+    let thrown: unknown = null;
+    try {
+      await runPrompt(['do', 'it'], config, repo, { enabledDir: tmp('fa-oneshot2-enabled-'), out: () => {}, err: () => {} });
+    } catch (e) { thrown = e; }
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toBe(`the plugins directory is unreadable: ${MARK}`);
+  });
+});
+
+// The settings files live in the host's state directory. This test points it at a scratch
+// directory of its own (`XDG_CONFIG_HOME`, with NODE_ENV other than `test` for the run),
+// so it never touches the directory the rest of the suite shares.
+test('a settings file changed during the run is said once at the end, not applied, and the exit code stays the turn\'s', async () => {
+  const scratch = tmp('fa-oneshot2-xdg-');
+  const kept = { nodeEnv: process.env.NODE_ENV, xdg: process.env.XDG_CONFIG_HOME };
+  process.env.XDG_CONFIG_HOME = scratch;
+  process.env.NODE_ENV = 'oneshot-settings-test';
+  try {
+    // Before anything is written: the state directory is the scratch one.
+    const dir = hostStateDir();
+    expect(dir).toBe(path.join(scratch, 'flow-assist'));
+    fs.mkdirSync(dir, { recursive: true });
+    const files = ['config.json', 'config.local.json'].map((f) => path.join(dir, f));
+    const accepted = () => (fs.existsSync(acceptedConfigPath()) ? fs.readFileSync(acceptedConfigPath(), 'utf8') : null);
+    expect(accepted()).toBeNull();
+    const model = new ScriptedModel();
+    model.script([{ tool: 'datetime', args: {} }], [{ text: 'Noon.' }]);
+    // Both files change on disk between the turn's two requests, by no write of the host's.
+    const r = await oneShot(model, {
+      during: (n) => { if (n === 1) for (const f of files) fs.writeFileSync(f, JSON.stringify({ ui: { verbs: ['Changed'] } })); },
+    });
+    expect(model.requests).toHaveLength(2);
+    expect(r.code).toBe(0);
+    expect(r.out).toBe('Noon.\n');
+    // One line however many files changed.
+    expect(said(r.err)).toEqual(['settings file changed outside flow-assist — not applied']);
+    // Nothing applied: no accepted record was written.
+    expect(accepted()).toBeNull();
+  } finally {
+    if (kept.nodeEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = kept.nodeEnv;
+    if (kept.xdg === undefined) delete process.env.XDG_CONFIG_HOME; else process.env.XDG_CONFIG_HOME = kept.xdg;
+  }
+});

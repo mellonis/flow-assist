@@ -976,7 +976,9 @@ export async function agentChat(
       }
       if (r.toolCalls.length) {
         askedAgain = false;
-        const step = r.toolCalls.map((tc) => `${realName.get(tc.name) ?? tc.name} ${tc.arguments || '{}'}`).join(', ');
+        // Redacted BEFORE the cut: a known secret the cut went through would leave a
+        // part of itself that no redaction afterwards can recognise.
+        const step = redactSecrets(r.toolCalls.map((tc) => `${realName.get(tc.name) ?? tc.name} ${tc.arguments || '{}'}`).join(', '));
         lastStep = step.length > 80 ? `${step.slice(0, 79)}…` : step;
       }
       if (!r.toolCalls.length) {
