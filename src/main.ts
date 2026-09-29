@@ -1,8 +1,8 @@
-// The CLI. Classifies argv into a subcommand (`parseCli`), then `main`
-// dispatches: no args → interactive TUI (`renderApp`), `config …` → the config
-// subcommand (get/set/unset/help on the host schema), `plugins ls|install|trust|remove|update`
-// → the plugin repo, any other argv → a one-shot `<prompt>`: one headless conversation (src/assistant/oneshot.ts),
-// and `--help`/`--version`.
+// The CLI. Classifies argv into a subcommand (`parseCli`), then `main` dispatches: no
+// args → interactive TUI (`renderApp`), `config …` → the config subcommand
+// (get/set/unset/help on the host schema), `plugins ls|install|trust|remove|update` →
+// the plugin repo, any other argv → a one-shot `<prompt>`: one headless conversation
+// (src/assistant/oneshot.ts), and `--help`/`--version`.
 //
 // The program's entry point is `cli.ts`, which sets NODE_ENV before importing this
 // module (see there); this one is never run directly, so a test imports its pure
@@ -405,8 +405,10 @@ export async function runPrompt(args: string[], config: Record<string, unknown>,
     if (said.err) err(said.err);
     return said.code;
   } catch (e) {
-    // A throw on the way (a plugin that fails to load) reaches the command line's own
-    // printing (src/cli.ts) as ever, its message redacted as every other stderr line.
+    // A throw on the way (the plugin repository unreadable, a provider's client failing
+    // outside the turn) reaches the command line's own printing (src/cli.ts), its
+    // message redacted as every other stderr line. A plugin that fails to load is not a
+    // throw: the loader skips it, and its line is redacted there (`skipLine`).
     throw new Error(redactSecrets(e instanceof Error ? e.message : String(e)), { cause: e });
   } finally {
     // Its timers go with it (the save it arms, with nowhere to save), or they would hold

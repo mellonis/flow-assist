@@ -43,6 +43,7 @@ import { THIS_HOST, pluginCompat, readPluginManifest } from './compat.js';
 import { isRemoteManifest, remotePlugin, transportFor } from '../remote/index.js';
 import { refreshToolRegistry } from './tools.js';
 import { skipLine, type LatePlugins } from './late.js';
+import { redactSecrets } from '../assistant/secrets.js';
 import { checkPluginTrust, isTrustedNow, pluginTrustOf, shownName, unreadableTrustText, untrustedOf, untrustedText, type TrustOptions, type Untrusted } from './trust.js';
 
 // A plugin builder: `build<X>Plugin({ renders, config, make, z, modelMaySet, modelMaySave,
@@ -186,7 +187,9 @@ export async function loadEnabledPlugin(name: string, { config, enabledDir, rend
     // A plugin in another language: a process the host talks to, built into a Plugin by
     // the adapter — the rest of the loader never knows (docs/plugins.md, "A plugin in
     // another language").
-    const say = log ?? ((line: string) => console.warn(line));
+    // Its lines are redacted, as every line the host prints: a process can say a secret.
+    const sink = log ?? ((line: string) => console.warn(line));
+    const say = (line: string) => sink(redactSecrets(line));
     const transport = (remoteTransport ?? transportFor)(manifest, at, { log: say });
     return remotePlugin({ manifest, transport, config, make, log: say });
   }
@@ -234,7 +237,7 @@ export async function loadPlugins({
     try {
       plugins.push(build({ renders, config, make, z, ...EXTRAS }));
     } catch (e) {
-      console.warn(`[plugins] builtin skipped: ${(e as Error).message}`);
+      console.warn(`[plugins] builtin skipped: ${redactSecrets((e as Error).message)}`);
     }
   }
 

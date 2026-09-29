@@ -8,6 +8,7 @@
 // Events that come before the App listens (a fast handshake lands between the loader
 // and the first render) wait here and are handed over when it does.
 import type { Plugin } from './plugin.js';
+import { redactSecrets } from '../assistant/secrets.js';
 
 export type LateEvent =
   // A plugin that was on its way joins the list.
@@ -40,7 +41,9 @@ export interface LatePlugins {
   listen(sink: (event: LateEvent) => void): () => void;
 }
 
-export const skipLine = (name: string, why: string) => `[plugins] skip ${name}: ${why}`;
+// The reason is redacted (src/assistant/secrets.ts): a plugin's error can carry a secret,
+// and the line goes to stderr and the app's log as it is.
+export const skipLine = (name: string, why: string) => `[plugins] skip ${name}: ${redactSecrets(why)}`;
 
 // Where a plugin that joins goes in the list: before the first plugin that comes after
 // it in the enabled order. A plugin with no place in it (a built-in) is passed over, so

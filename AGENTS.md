@@ -325,7 +325,7 @@ keeps a bare tool name and the `chatContext` order). Two modes:
   awaited — its promise goes to `late.expect` — and a plugin's `ready` to `late.wait`.
   The hub keeps what is still starting (`starting()`) and turns each outcome into an
   event — `joined` with the plugin, `skipped` with the loader's own line (`skipLine`,
-  `[plugins] skip <name>: <why>`), `ready`, and `note` — every line the adapter and the
+  `[plugins] skip <name>: <why>`, the reason redacted), `ready`, and `note` — every line the adapter and the
   transport say (the process's stderr, a restart during the handshake) — held until the
   App listens (a fast handshake can land before the first render), then appended to the
   app's log. None of it is `console.warn`ed: under the TTY backend the console bridge
@@ -3742,8 +3742,12 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   provider's error on stderr), an empty prompt, a bare `--allow-writes` with no
   prompt, or anything that fails before the turn. Every stderr line about the turn —
   the failure, the limit, `[write]` — passes `redactSecrets`, as the chat's lines do,
-  and so does the message of a throw before the turn; the last step is redacted
-  before it is cut to 80 characters, so the cut never leaves part of a secret. A
+  and so do the message of a throw before the turn and the loader's own lines on
+  stderr: a plugin that fails to load is skipped, not thrown, and its
+  `[plugins] skip <name>: <why>` (`skipLine`), a built-in's `builtin skipped` and a
+  remote plugin's lines are redacted where they are made, for the app's log as well.
+  The last step is redacted before it is cut to 80 characters, so the cut never
+  leaves part of a secret. A
   signal ends it as ever. The settings-file guard never asks there and is never
   armed: a file changed since it was accepted is said at the start
   (`configStartupNotes`) and not used, and one that changes on disk during the run is

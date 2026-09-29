@@ -15,6 +15,8 @@ import { acceptedConfigPath, hostStateDir } from '../config/load';
 import { assembleToolRegistry, execChatTool } from '../loader/tools';
 import { bgActiveCount } from '../loader/tools-core';
 import { runPrompt } from '../main';
+import { createPluginRepo } from '../loader/repo';
+import { HOST_API } from '../version';
 import { ScriptedModel } from './helpers/scripted';
 import { listTree } from './helpers/session-files';
 
@@ -28,7 +30,7 @@ const said = (err: string) => err.split('\n').filter((l) => l && !l.startsWith('
 const toolNames = (m: ScriptedModel, i: number) => ((m.requests[i] as { tools?: { function: { name: string } }[] }).tools ?? []).map((t) => t.function.name);
 const toolResults = (m: ScriptedModel, i = -1) => (m.requests.at(i)!.messages as Msg[]).filter((x) => x.role === 'tool').map((x) => String(x.content));
 
-async function oneShot(model: ScriptedModel, o: { prompt?: string[]; ai?: Record<string, unknown>; extra?: Record<string, unknown>; before?: (config: Record<string, unknown>, root: string) => void; fetch?: typeof fetch; allowWrites?: boolean; during?: (request: number) => void } = {}) {
+async function oneShot(model: ScriptedModel, o: { prompt?: string[]; ai?: Record<string, unknown>; extra?: Record<string, unknown>; before?: (config: Record<string, unknown>, root: string) => void; fetch?: typeof fetch; allowWrites?: boolean; during?: (request: number) => void; repo?: unknown; enabledDir?: string } = {}) {
   process.env.LLM_TOKEN = '^scripted-llm-token';
   model.install();
   if (o.fetch) globalThis.fetch = o.fetch;
@@ -48,9 +50,9 @@ async function oneShot(model: ScriptedModel, o: { prompt?: string[]; ai?: Record
     ...o.extra,
   };
   o.before?.(config, root);
-  const repo = { enabledPlugins: async () => [], list: async () => [] } as never;
+  const repo = (o.repo ?? { enabledPlugins: async () => [], list: async () => [] }) as never;
   const out: string[] = []; const err: string[] = [];
-  const code = await runPrompt(o.prompt ?? ['do', 'it'], config, repo, { enabledDir: tmp('fa-oneshot2-enabled-'), ...(o.allowWrites ? { allowWrites: true } : {}), out: (s) => out.push(s), err: (s) => err.push(s) });
+  const code = await runPrompt(o.prompt ?? ['do', 'it'], config, repo, { enabledDir: o.enabledDir ?? tmp('fa-oneshot2-enabled-'), ...(o.allowWrites ? { allowWrites: true } : {}), out: (s) => out.push(s), err: (s) => err.push(s) });
   return { root, config, code, out: out.join(''), err: err.join('') };
 }
 
@@ -135,6 +137,9 @@ test('D26: the one-shot is not offered background or remind, and a call to one a
   const r = await oneShot(model);
   const offered = toolNames(model, 0);
   expect(offered).not.toContain('background');
+  // `subagent` is withheld by name; no tool of that name is registered today, so this
+  // holds as a guard for when one is.
+  expect(offered).not.toContain('subagent');
   expect(offered).not.toContain('remind');
   expect(offered).toContain('datetime');
   expect(toolResults(model)).toEqual(['ERROR: Unknown tool: background']);
@@ -266,19 +271,28 @@ test('a throw before the turn reaches the command line with a known secret as it
   });
 });
 
-// The settings files live in the host's state directory. This test points it at a scratch
-// directory of its own (`XDG_CONFIG_HOME`, with NODE_ENV other than `test` for the run),
-// so it never touches the directory the rest of the suite shares.
-test('a settings file changed during the run is said once at the end, not applied, and the exit code stays the turn\'s', async () => {
+// The host's state directory — the settings files, the plugins' trust record — pointed at
+// a scratch directory of the test's own for `run`: `XDG_CONFIG_HOME`, with NODE_ENV other
+// than `test` (under `test` the process shares one directory), both put back after. It
+// fails before `run` if the directory is not the scratch one, so nothing reaches another.
+async function withOwnStateDir(run: (dir: string) => Promise<void>): Promise<void> {
   const scratch = tmp('fa-oneshot2-xdg-');
   const kept = { nodeEnv: process.env.NODE_ENV, xdg: process.env.XDG_CONFIG_HOME };
   process.env.XDG_CONFIG_HOME = scratch;
-  process.env.NODE_ENV = 'oneshot-settings-test';
+  process.env.NODE_ENV = 'oneshot-state-test';
   try {
-    // Before anything is written: the state directory is the scratch one.
     const dir = hostStateDir();
     expect(dir).toBe(path.join(scratch, 'flow-assist'));
     fs.mkdirSync(dir, { recursive: true });
+    await run(dir);
+  } finally {
+    if (kept.nodeEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = kept.nodeEnv;
+    if (kept.xdg === undefined) delete process.env.XDG_CONFIG_HOME; else process.env.XDG_CONFIG_HOME = kept.xdg;
+  }
+}
+
+test('a settings file changed during the run is said once at the end, not applied, and the exit code stays the turn\'s', async () => {
+  await withOwnStateDir(async (dir) => {
     const files = ['config.json', 'config.local.json'].map((f) => path.join(dir, f));
     const accepted = () => (fs.existsSync(acceptedConfigPath()) ? fs.readFileSync(acceptedConfigPath(), 'utf8') : null);
     expect(accepted()).toBeNull();
@@ -295,8 +309,36 @@ test('a settings file changed during the run is said once at the end, not applie
     expect(said(r.err)).toEqual(['settings file changed outside flow-assist — not applied']);
     // Nothing applied: no accepted record was written.
     expect(accepted()).toBeNull();
-  } finally {
-    if (kept.nodeEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = kept.nodeEnv;
-    if (kept.xdg === undefined) delete process.env.XDG_CONFIG_HOME; else process.env.XDG_CONFIG_HOME = kept.xdg;
-  }
+  });
+});
+
+test('a plugin that fails to load is skipped on stderr with a known secret in its error said only as its mark', async () => {
+  await withSecret(() => withOwnStateDir(async () => {
+    // An enabled plugin whose builder throws with the secret in its message. The state
+    // directory is new, so the first start trusts it and its code runs.
+    const root = tmp('fa-oneshot2-plugins-');
+    const avail = path.join(root, 'plugins-available');
+    const enabled = path.join(root, 'plugins-enabled');
+    const plug = path.join(avail, 'leaky');
+    fs.mkdirSync(path.join(plug, 'src'), { recursive: true });
+    fs.mkdirSync(enabled, { recursive: true });
+    fs.writeFileSync(path.join(plug, 'package.json'), JSON.stringify({ name: 'leaky', main: './src/index.ts' }));
+    fs.writeFileSync(path.join(plug, 'manifest.json'), JSON.stringify({ name: 'leaky', version: '1.0.0', hostApi: HOST_API }));
+    fs.writeFileSync(path.join(plug, 'src', 'index.ts'), `export default function build() { throw new Error('cannot reach the server with ${SECRET}'); }`);
+    fs.symlinkSync(plug, path.join(enabled, 'leaky'));
+    const repo = createPluginRepo({ availableDir: avail, enabledDir: enabled, projectRoot: root });
+    const warned: string[] = [];
+    const warn = console.warn;
+    console.warn = (...a: unknown[]) => { warned.push(a.map(String).join(' ')); };
+    const model = new ScriptedModel();
+    model.script([{ text: 'Fine.' }]);
+    let r: Awaited<ReturnType<typeof oneShot>>;
+    try {
+      r = await oneShot(model, { repo, enabledDir: enabled, before: (config) => { refreshSecrets(config); } });
+    } finally { console.warn = warn; }
+    expect(r.code).toBe(0);
+    const skip = warned.filter((l) => l.startsWith('[plugins] skip leaky:'));
+    expect(skip).toEqual([`[plugins] skip leaky: cannot reach the server with ${MARK}`]);
+    expect([...warned, r.err].join('\n')).not.toContain(SECRET.slice(0, 8));
+  }));
 });

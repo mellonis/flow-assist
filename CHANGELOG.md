@@ -12,15 +12,22 @@ What each version of flow-assist brought, newest first. The version is the one i
   they bound the chat, and a turn stopped by one says so on stderr and exits with code 2
   (a failure stays code 1). Its model is now told what the chat's is: the language and
   the short `Next:` line before a tool, who it is talking to, and the memory's index. It
-  is not offered `background` or `remind`, which have nothing to deliver to without the
-  app, and its `todo` plan is its own. An empty prompt (`flow-assist ""`) is refused with
-  code 1 instead of being sent. A failure or a limit it says on stderr — and an error
-  before the turn starts, such as a plugin that fails to load — has a known secret
-  replaced by its mark, as the chat's lines and the `--allow-writes` line already do; the
-  last step a limit names is redacted before it is shortened, so no part of a secret is
-  left. A settings file changed on disk while it runs is said at the end in one line
-  (`settings file changed outside flow-assist — not applied`) and not applied; the exit
-  code is the turn's.
+  is not offered `background`, `subagent` or `remind`, which have nothing to deliver to
+  without the app, and its `todo` plan is its own. An empty prompt (`flow-assist ""`) is
+  refused with code 1 instead of being sent. A failure or a limit it says on stderr, and
+  an error thrown before the turn starts, has a known secret replaced by its mark, as
+  the chat's lines and the `--allow-writes` line already do. A settings file changed on
+  disk while it runs is said at the end in one line (`settings file changed outside
+  flow-assist — not applied`) and not applied; the exit code is the turn's.
+- **A known secret no longer shows in part where a long step or a plugin's error is
+  printed.** A turn stopped at `ai.maxRounds` or `ai.maxTurnTokens` names its last step
+  cut to 80 characters; the step is now redacted before it is cut, so a secret the cut
+  went through is its mark rather than its first characters — in the chat's "stopped
+  after … · last:" line, in the session journal's record of the stop, and in the note
+  that tells the model where it stopped, as in the one-shot's limit line. The loader's
+  lines are redacted as well: `[plugins] skip <name>: <why>` for a plugin that fails to
+  load, `builtin skipped`, and what a plugin in another language says — on stderr and in
+  the app's log alike.
 - **Bun 1.4.** The host is developed, tested and compiled on Bun 1.4.2; `engines`
   asks for 1.4 or later. The compiled binary needs no Bun on the machine it runs on.
 - **The assistant opens a plugin's screen when you ask.** "Open the tutor" used to get
