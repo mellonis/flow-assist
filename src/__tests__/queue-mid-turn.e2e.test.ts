@@ -1,6 +1,8 @@
 // A message queued during a running turn reaches the model at the next request
 // boundary — after the current tool results — as the person's message; ↑ takes it back
 // until then, and ⇥ on the empty field holds it for the turn's end instead.
+// What reaches the model, and when, is queue-mid-turn.rig.test.ts; this file is what the
+// queue line, the field and the list show.
 import { afterEach, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -11,8 +13,6 @@ import { png } from './helpers/image-fixtures';
 const realFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 const settleUntil = async (ok: () => boolean, n = 300) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
-type Msg = { role: string; content: unknown };
-const messages = (model: ScriptedModel, i: number) => (model.requests[i] as { messages: Msg[] }).messages;
 const fieldRow = (frame: string) => frame.split('\n').filter((r) => r.includes('› ')).at(-1) ?? '';
 
 async function heldTurn() {
@@ -29,42 +29,28 @@ async function heldTurn() {
   return { model, ui };
 }
 
-test('a queued message reaches the model after the current step, as the person\'s message, and the turn goes on with it', async () => {
+test('a queued message stands on screen where it reached the model: after the current step, before the answer it led to', async () => {
   const { model, ui } = await heldTurn();
   expect(ui.backend.lastFrame).toContain('reaches the model after this step');
-  expect(model.requests).toHaveLength(1);
   model.release();
   await settleUntil(() => ui.backend.lastFrame.includes('Adjusted.'));
   await settle(10);
-  // Delivered at the boundary: after the call and its result, in the same turn.
-  const sent = messages(model, 1);
-  expect(sent.at(-1)).toEqual({ role: 'user', content: 'not there, the other file' });
-  expect(sent.at(-2)!.role).toBe('tool');
-  // No second turn was started for it.
-  expect(model.requests).toHaveLength(2);
   const frame = ui.backend.lastFrame;
   expect(frame).not.toMatch(/queued/);
   // On screen it stands where it reached the model: before the answer it led to.
   expect(frame.indexOf('not there, the other file')).toBeLessThan(frame.indexOf('Adjusted.'));
-  // And it stays in the model's history for the next turn.
-  model.script([{ text: 'ok' }]);
-  await ui.type('next');
-  await ui.press('return');
-  await settle(20);
-  expect(JSON.stringify(messages(model, 2))).toContain('not there, the other file');
 });
 
-test('↑ takes a queued message back before it is delivered', async () => {
+test('↑ puts a queued message back into the field before it is delivered', async () => {
   const { model, ui } = await heldTurn();
   await ui.press('up');
   expect(fieldRow(ui.backend.lastFrame)).toContain('not there, the other file');
   expect(ui.backend.lastFrame).not.toContain('reaches the model after this step');
   model.release();
   await settleUntil(() => ui.backend.lastFrame.includes('Adjusted.'));
-  expect(JSON.stringify(messages(model, 1))).not.toContain('not there');
 });
 
-test('⇥ on the empty field holds the queued message for the turn\'s end', async () => {
+test('⇥ on the empty field says the queued message is held to the turn\'s end', async () => {
   const { model, ui } = await heldTurn();
   expect(ui.backend.lastFrame).toContain('⇥ hold to end');
   await ui.press('tab');
@@ -72,13 +58,9 @@ test('⇥ on the empty field holds the queued message for the turn\'s end', asyn
   model.script([{ text: 'Now the other file.' }]);
   model.release();
   await settleUntil(() => ui.backend.lastFrame.includes('Now the other file.'));
-  // Not delivered mid-turn: the turn ended, then it went out as a turn of its own.
-  expect(JSON.stringify(messages(model, 1))).not.toContain('not there');
-  expect(model.requests).toHaveLength(3);
-  expect(messages(model, 2).at(-1)).toEqual({ role: 'user', content: 'not there, the other file' });
 });
 
-test('⇥ holds only the message it was pressed on: a correction typed after it reaches the model mid-turn while the note waits', async () => {
+test('the queue line describes the last message: a correction typed after a held one goes after this step', async () => {
   const { model, ui } = await heldTurn();
   await ui.press('tab'); // this note, and only it, goes at the turn's end
   await ui.type('and a correction');
@@ -88,13 +70,9 @@ test('⇥ holds only the message it was pressed on: a correction typed after it 
   model.script([{ text: 'Now the note.' }]);
   model.release();
   await settleUntil(() => ui.backend.lastFrame.includes('Now the note.'));
-  // The correction went in at the boundary, the held note waited for the end.
-  expect(messages(model, 1).at(-1)).toEqual({ role: 'user', content: 'and a correction' });
-  expect(JSON.stringify(messages(model, 1))).not.toContain('not there');
-  expect(messages(model, 2).at(-1)).toEqual({ role: 'user', content: 'not there, the other file' });
 });
 
-test('a message naming an image waits for the turn\'s end, and keeps the ones behind it waiting — the line says so for each', async () => {
+test('the queue line says a message naming an image, and the ones behind it, wait for the turn\'s end', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-queue-img-'));
   const shot = path.join(dir, 'shot.png');
   fs.writeFileSync(shot, png(40, 30));
@@ -115,9 +93,4 @@ test('a message naming an image waits for the turn\'s end, and keeps the ones be
   expect(ui.backend.lastFrame).toContain('at the end of the turn (behind an image)');
   model.release();
   await settleUntil(() => ui.backend.lastFrame.includes('And the rest.'));
-  // Nothing was delivered mid-turn: the image and the text after it went in order after.
-  expect(JSON.stringify(messages(model, 1))).not.toContain('look at this');
-  expect(JSON.stringify(messages(model, 1))).not.toContain('and then this');
-  expect(JSON.stringify(messages(model, 2))).toContain('look at this');
-  expect(messages(model, 3).at(-1)).toEqual({ role: 'user', content: 'and then this' });
 });
