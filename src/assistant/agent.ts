@@ -260,6 +260,12 @@ export interface AgentOpts {
   // the project's instructions) is seen by the next round of the same turn. A round
   // whose text did not change sends the message it had, so the cached prefix holds.
   systemPrompt?: () => string | null;
+  // Tools this run is not offered: left out of every request, of tools on demand's
+  // index and of what `tools_load` can load, and a call the model makes to one anyway is
+  // answered as a tool that does not exist — it never runs. A caller that cannot deliver
+  // what a tool promises withholds it (the one-shot prompt: no chat for a background
+  // result to land in, no screen for a reminder's banner).
+  withholdTools?: readonly string[];
   // Any remaining OpenAI-ish options (tools, signal, …) — spread into the round.
   [key: string]: unknown;
 }
@@ -737,6 +743,7 @@ export async function agentChat(
     imageLimits: limits = { ...IMAGE_DEFAULTS },
     requestTail,
     systemPrompt,
+    withholdTools = [],
     ...opts
   }: AgentOpts = {},
 ): Promise<AgentResult> {
@@ -767,6 +774,9 @@ export async function agentChat(
   // what the model calls use the wire name, everything inside the host — lookup,
   // confirmation, the trail the person sees — uses the real one.
   const realName = new Map<string, string>();
+  // What this run withholds (`AgentOpts.withholdTools`): never in `toolByName`, the
+  // catalog or the wire names, so no request, index, `tools_load` or markup check sees it.
+  const withheld = new Set(withholdTools);
   const onWire = (t: ToolDef): ToolDef => {
     const wire = t.function.name.replace(/[^a-zA-Z0-9_-]/g, '__').slice(0, 128);
     realName.set(wire, t.function.name);
@@ -791,9 +801,9 @@ export async function agentChat(
     const at = toolRegistryRevision();
     if (at === toolsAt) return;
     toolsAt = at;
-    for (const t of chatToolDefs()) toolByName.set(t.function.name, t);
-    for (const et of extraTools) toolByName.set(et.function.name, et);
-    catalog = toolCatalog(extraTools);
+    for (const t of chatToolDefs()) if (!withheld.has(t.function.name)) toolByName.set(t.function.name, t);
+    for (const et of extraTools) if (!withheld.has(et.function.name)) toolByName.set(et.function.name, et);
+    catalog = toolCatalog(extraTools).filter((e) => !withheld.has(e.name));
     deferred = deferredTools(catalog);
     onDemand = toolLoading === 'onDemand' && deferred.size > 0;
     groupDescriptions = chatGroupDescriptions();
@@ -1028,6 +1038,18 @@ export async function agentChat(
         const tc = { ...called, name: realName.get(called.name) ?? called.name };
         onTool(tc.name, tc.arguments);
         const def = toolByName.get(tc.name);
+        // A tool this run withholds answers as one that does not exist: it was never
+        // offered, and it never runs — `background` is a core tool the registry would run.
+        if (withheld.has(tc.name)) {
+          const args = callParse.ok ? callParse.args : {};
+          const detail = `Error: Unknown tool: ${tc.name}`;
+          current.push({ role: 'tool', tool_call_id: tc.id, content: modelToolResult('error', detail) });
+          logRun({ name: tc.name, write: false, outcome: 'error', detail, args });
+          const run: ToolRun = { id: tc.id, name: tc.name, args, write: false, outcome: 'error', detail };
+          toolRuns.push(run);
+          opts.onToolRun?.(run);
+          continue;
+        }
         if (!callParse.ok) {
           // Arguments that don't parse to a JSON object: not run, no y/n — the tool
           // never asked for what arrived and opens no view. The model is told plainly

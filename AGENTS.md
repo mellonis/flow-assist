@@ -1046,7 +1046,11 @@ hold this set together:
   the person and they can do it in the chat, the tool log and `onToolRun` carry the
   `declined` outcome, and a journal that hears `onToolRun` records it as declined by
   the host. A read runs as ever. So passing a `confirmWrite` is a deliberate act, and
-  leaving it out is safe. Where each path stands:
+  leaving it out is safe. A caller can also withhold tools (`AgentOpts.withholdTools`):
+  the names are left out of every request, of the index and of `tools_load`, and a call
+  to one answers `Unknown tool` without running — the one-shot prompt withholds
+  `background`, `subagent` and `remind`, which have nothing to deliver to without the
+  app. Where each path stands:
   - the chat's turn — asks: its y/n closure, which the auto mode may answer;
   - a background task — declines: it passes a confirmation that always says no, which
     `journaledChatLLM` journals as a `confirm` line `by: 'background'`;
