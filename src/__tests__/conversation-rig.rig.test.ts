@@ -4,10 +4,10 @@
 // nobody can answer.
 import { afterEach, expect, test } from 'bun:test';
 import { ScriptedModel, firstUser } from './helpers/scripted';
-import { conversationRig } from './helpers/conversation';
+import { closeRigs, conversationRig } from './helpers/conversation';
 
 const realFetch = globalThis.fetch;
-afterEach(() => { globalThis.fetch = realFetch; });
+afterEach(() => { globalThis.fetch = realFetch; closeRigs(); });
 
 test('a turn goes through the host\'s services: the answer, the history, the journal, the saved file', async () => {
   const model = new ScriptedModel();

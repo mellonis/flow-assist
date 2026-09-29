@@ -13,7 +13,8 @@ What each version of flow-assist brought, newest first. The version is the one i
   (a failure stays code 1). Its model is now told what the chat's is: the language and
   the short `Next:` line before a tool, who it is talking to, and the memory's index. It
   is not offered `background`, `subagent` or `remind`, which have nothing to deliver to
-  without the app, and its `todo` plan is its own. An empty prompt (`flow-assist ""`) is
+  without the app — nor is a model run a plugin's tool starts inside it — and its `todo`
+  plan is its own. An empty prompt (`flow-assist ""`) is
   refused with code 1 instead of being sent. A failure or a limit it says on stderr, and
   an error thrown before the turn starts, has a known secret replaced by its mark, as
   the chat's lines and the `--allow-writes` line already do. A settings file changed on

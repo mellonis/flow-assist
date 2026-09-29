@@ -47,7 +47,22 @@ export type Sent = ChatMessage & { tool_calls?: { id: string; function: { name: 
 
 export type Rig = ReturnType<typeof conversationRig>;
 
+// Every conversation a rig made since the last `closeRigs`, and the LLM_TOKEN the first
+// of them found.
+const made: Conversation[] = [];
+let tokenBefore: { value: string | undefined } | null = null;
+
+// Closes every conversation a rig made (their timers go, the 250 ms save among them) and
+// puts LLM_TOKEN back as it was. A rig test file calls it in its `afterEach`.
+export function closeRigs(): void {
+  for (const c of made.splice(0)) c.close('exit');
+  if (!tokenBefore) return;
+  if (tokenBefore.value === undefined) delete process.env.LLM_TOKEN; else process.env.LLM_TOKEN = tokenBefore.value;
+  tokenBefore = null;
+}
+
 export function conversationRig(model: ScriptedModel, opts: RigOptions = {}) {
+  tokenBefore ??= { value: process.env.LLM_TOKEN };
   process.env.LLM_TOKEN = '^scripted-llm-token';
   model.install();
   // By their real paths: the shell compares roots by it, and the temporary directory may
@@ -98,7 +113,7 @@ export function conversationRig(model: ScriptedModel, opts: RigOptions = {}) {
   // the start directory is read when the shell is made, and reset at once.
   const attached = (make: () => Conversation): Conversation => {
     setStartDirForTests(root);
-    try { const c = make(); c.attach(port); return c; } finally { setStartDirForTests(null); }
+    try { const c = make(); made.push(c); c.attach(port); return c; } finally { setStartDirForTests(null); }
   };
   const homeOf = (id: string) => homeIn(sessionsDir!, id);
   let conv = attached(() => Conversation.fresh(deps, init));

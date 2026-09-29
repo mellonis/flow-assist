@@ -4,10 +4,10 @@
 // screen and the key are round-cap.e2e.test.ts.
 import { afterEach, expect, test } from 'bun:test';
 import { ScriptedModel } from './helpers/scripted';
-import { conversationRig, type Sent } from './helpers/conversation';
+import { closeRigs, conversationRig, type Sent } from './helpers/conversation';
 
 const realFetch = globalThis.fetch;
-afterEach(() => { globalThis.fetch = realFetch; });
+afterEach(() => { globalThis.fetch = realFetch; closeRigs(); });
 
 test('a turn stopped at ai.maxRounds closes in the model\'s history with where it stopped, and continue carries it on', async () => {
   const model = new ScriptedModel();

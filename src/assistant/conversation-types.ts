@@ -50,6 +50,13 @@ export function answerAt(list: ChatMsg[]): number {
   return -1;
 }
 
+// The last answer in a list: the last assistant message with text, as a string — what
+// `/copy` takes (src/assistant/copy.ts) and what the one-shot prints. '' with none.
+export function lastAnswerOf(list: readonly { role?: string; content?: unknown }[]): string {
+  const a = list.findLast((m) => m.role === 'assistant' && String(m.content ?? '').trim());
+  return a ? String(a.content) : '';
+}
+
 // The call a message's view belongs to — a live one, or a discarded one's.
 export const callOf = (m: ChatMsg): string | undefined => (m.views as ViewRecord[] | undefined)?.[0]?.callId ?? m.discardedCallId;
 

@@ -23,7 +23,7 @@ import { pickVerb, verbList } from './verbs.js';
 import type { ViewRecord } from './views.js';
 import type { ToolDef } from '../loader/tools.js';
 import { workspaceFor } from './workspace.js';
-import { callOf, type BusyKind, type ChatMsg, type CloseReason, type ConversationDeps, type ConversationEvent, type ConversationKind, type ConversationSnapshot, type ConversationStatus, type PendingConfirm, type Queued, type QueueWait, type SendOptions, type TurnEnd, type ViewPort } from './conversation-types.js';
+import { callOf, lastAnswerOf, type BusyKind, type ChatMsg, type CloseReason, type ConversationDeps, type ConversationEvent, type ConversationKind, type ConversationSnapshot, type ConversationStatus, type PendingConfirm, type Queued, type QueueWait, type SendOptions, type TurnEnd, type ViewPort } from './conversation-types.js';
 import {
   applySession, currentProject, ensureSessionId, journal, journaledChatLLM, journalTo, markSeen, persist, pushNote,
   releaseLockOf, writeSession, NO_FILE,
@@ -348,12 +348,8 @@ export class Conversation {
   // writes, what the notes' "said once" checks), or the list itself with no chat.
   rows(): ChatMsg[] { return this.drawnRows ?? this.messages; }
 
-  // The last answer in the list: what `/copy` takes (src/assistant/copy.ts), and what the
-  // one-shot prints. '' when no answer has text.
-  lastAnswer(): string {
-    const a = this.messages.findLast((m) => m.role === 'assistant' && String(m.content ?? '').trim());
-    return a ? String(a.content) : '';
-  }
+  // The last answer in the list (`lastAnswerOf`). '' when no answer has text.
+  lastAnswer(): string { return lastAnswerOf(this.messages); }
 
   // The chat leaves this conversation for good. What runs is stopped for /clear and /new
   // (a pending y/n is declined `by: 'reset'`, a question dismissed); for a switch nothing

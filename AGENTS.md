@@ -3735,7 +3735,8 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   on stderr ("a path to the model that cannot ask the person declines writes", above).
   It has no screen, no journal and no session file, and is not offered `background`,
   `subagent` or `remind` (`withholdTools`), which have nothing to deliver to without
-  the app. Nothing is streamed: the answer is printed once, on stdout, when the turn
+  the app — nor is any model run a tool starts inside it through `ctx.chatLLM`
+  (`oneShotDeps` withholds them on every run it makes). Nothing is streamed: the answer is printed once, on stdout, when the turn
   ends. Exit codes (`oneShotOutcome`): 0 — an answer (an empty line for a turn that
   gave reasoning and no text); 2 — a limit, said on stderr (`flow-assist: stopped
   after N rounds (ai.maxRounds) — no answer; last step: …`); 1 — a failure (the
@@ -4101,7 +4102,9 @@ writes by default keeps both:
   `rig.conv.api`, `rig.journal(id)`, `rig.sessionFile(id)` read what the model was
   sent, the history, the journal and the state file; `rig.pending()` /
   `rig.answerNext(ok)` the y/n; `rig.fresh()` makes another conversation as `/new`
-  does, `rig.open(id)` opens a saved one as `/resume` does. A test whose claims are
+  does, `rig.open(id)` opens a saved one as `/resume` does; `closeRigs()` in the
+  file's `afterEach` closes every conversation a rig made and puts `LLM_TOKEN` back.
+  A test whose claims are
   about what is sent, the history, the journal or the queue uses it
   (`*.rig.test.ts`); one about cells, keys or layout boots the App.
   `ScriptedModel.when(match)` gives a sub-script of its own turns and `hold` /

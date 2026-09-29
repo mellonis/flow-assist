@@ -8,11 +8,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { imageToken, loadImageFile } from '../assistant/images';
 import { ScriptedModel } from './helpers/scripted';
-import { conversationRig } from './helpers/conversation';
+import { closeRigs, conversationRig } from './helpers/conversation';
 import { png } from './helpers/image-fixtures';
 
 const realFetch = globalThis.fetch;
-afterEach(() => { globalThis.fetch = realFetch; });
+afterEach(() => { globalThis.fetch = realFetch; closeRigs(); });
 type Msg = { role: string; content: unknown };
 
 // The first round calls a tool and then holds: the person queues a message meanwhile.

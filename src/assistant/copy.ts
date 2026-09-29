@@ -5,15 +5,15 @@
 // and Apple Terminal has none (`services.copy`, `onCopySelection` in runtime/app.tsx).
 import { spawnSync } from 'node:child_process';
 import { layoutMarkdownDetailed } from '@flowtty/react';
+import { lastAnswerOf } from './conversation-types.js';
 
 type Message = { role?: string; content?: unknown };
 
 // What `/copy [code|answer]` takes from the conversation. Bare: the last code block of
 // the last answer, or the whole answer when it has none.
 export function copyTarget(messages: Message[], arg: string): { text: string; what: string } | { error: string } {
-  const answer = [...messages].reverse().find((m) => m.role === 'assistant' && String(m.content ?? '').trim());
-  if (!answer) return { error: 'nothing to copy yet — no answer in this chat' };
-  const text = String(answer.content);
+  const text = lastAnswerOf(messages);
+  if (!text) return { error: 'nothing to copy yet — no answer in this chat' };
   const mode = arg.trim().toLowerCase();
   if (mode && mode !== 'code' && mode !== 'answer') return { error: `/copy takes "code" or "answer", not "${arg.trim()}"` };
   if (mode === 'answer') return { text, what: 'the answer' };

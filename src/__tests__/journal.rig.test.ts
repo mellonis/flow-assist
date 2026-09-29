@@ -8,11 +8,11 @@ import path from 'node:path';
 import type { Make } from '../loader/plugin.ts';
 import { bgActiveCount } from '../loader/tools-core.ts';
 import { ScriptedModel, handoff } from './helpers/scripted';
-import { conversationRig, type Rig } from './helpers/conversation';
+import { closeRigs, conversationRig, type Rig } from './helpers/conversation';
 import { sessionIdOf } from './helpers/session-files';
 
 const realFetch = globalThis.fetch;
-afterEach(() => { globalThis.fetch = realFetch; });
+afterEach(() => { globalThis.fetch = realFetch; closeRigs(); });
 
 // A foreign write to a session's state file — a hand edit, an older host: the next save forks.
 function foreignWrite(rig: Rig): string {

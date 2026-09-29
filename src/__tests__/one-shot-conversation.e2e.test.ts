@@ -21,7 +21,11 @@ import { ScriptedModel } from './helpers/scripted';
 import { listTree } from './helpers/session-files';
 
 const realFetch = globalThis.fetch;
-afterEach(() => { globalThis.fetch = realFetch; });
+const realToken = process.env.LLM_TOKEN;
+afterEach(() => {
+  globalThis.fetch = realFetch;
+  if (realToken === undefined) delete process.env.LLM_TOKEN; else process.env.LLM_TOKEN = realToken;
+});
 
 type Msg = { role: string; content?: unknown };
 const tmp = (prefix: string) => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
@@ -145,6 +149,33 @@ test('D26: the one-shot is not offered background or remind, and a call to one a
   expect(toolResults(model)).toEqual(['ERROR: Unknown tool: background']);
   expect(bgActiveCount()).toBe(0);
   expect(r.out).toBe('Could not.\n');
+});
+
+test('D26: a plugin tool\'s own chatLLM in the one-shot is not offered background, subagent or remind either', async () => {
+  // An enabled plugin whose tool asks the model through `ctx.chatLLM`.
+  const enabledDir = tmp('fa-oneshot2-enabled-');
+  const dir = path.join(enabledDir, 'asker');
+  fs.mkdirSync(dir);
+  fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify({ name: 'asker', version: '0.1.0', hostApi: HOST_API, tools: ['asker'] }));
+  fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'asker', version: '0.1.0', type: 'module', main: './index.mjs' }));
+  fs.writeFileSync(path.join(dir, 'index.mjs'), `export default function ({ make }) {
+  return make('asker', { name: 'asker', tools: [{ id: 'asker', tools: [{ type: 'function', function: { name: 'ask_model', description: 'Asks the model.', parameters: { type: 'object', properties: {} } } }],
+    exec: async (_name, _args, ctx) => String((await ctx.chatLLM([{ role: 'user', content: 'look it up' }], {}))?.content ?? '') }] });
+}
+`);
+  const repo = { enabledPlugins: async () => ['asker'], list: async () => [] };
+  const model = new ScriptedModel();
+  model.script([{ tool: 'ask_model', args: {} }], [{ text: 'nested done' }], [{ text: 'Done.' }]);
+  const r = await oneShot(model, { repo, enabledDir });
+  expect(r.out).toBe('Done.\n');
+  expect(model.requests).toHaveLength(3);
+  // Request 1 is the nested run's: it asks on its own messages.
+  expect((model.requests[1].messages as Msg[]).some((m) => m.role === 'user' && m.content === 'look it up')).toBe(true);
+  const nested = toolNames(model, 1);
+  expect(nested).toContain('datetime');
+  expect(nested).not.toContain('background');
+  expect(nested).not.toContain('subagent');
+  expect(nested).not.toContain('remind');
 });
 
 test('K8: the one-shot plans on its own plan — the reminder fires there, and the process\'s plan is left alone', async () => {

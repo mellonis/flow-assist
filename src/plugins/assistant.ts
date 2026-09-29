@@ -63,7 +63,7 @@ import type { Command as PluginCommand } from '../loader/plugin.js';
 import type { ChatMsg, ConversationDeps, ConversationEvent, SendOptions, ViewPort } from '../assistant/conversation-types.js';
 import { Conversation } from '../assistant/conversation.js';
 import { personSpoke, projectHere } from '../assistant/conversation-session.js';
-import { configLineOf, shellCommandOf } from '../assistant/conversation-turn.js';
+import { configLineOf, shellCommandOf } from '../assistant/confirm-policy.js';
 
 // Slash-commands of the chat — a single source for runChatCommand and Tab-completion.
 // `/analyze` is a tracker slash command and is removed.
@@ -101,7 +101,8 @@ export function logShareMessage(lines: readonly string[], arg = ''): string | nu
 // (`ai.maxRounds`, `ai.maxTurnTokens`).
 export const CONTINUE_WORD = 'continue';
 export { STOPPED_TURN, failedTurn, roundCapTurn } from '../assistant/system-prompt.js';
-export { allServices, configLineOf, shellCommandOf } from '../assistant/conversation-turn.js';
+export { allServices } from '../assistant/conversation-turn.js';
+export { configLineOf, shellCommandOf } from '../assistant/confirm-policy.js';
 
 // The app-glue dispatched to by the :ask command.
 interface AssistantCtx {

@@ -6,10 +6,10 @@
 import { afterEach, expect, test } from 'bun:test';
 import { keyGlyph } from '../playback/keys';
 import { ScriptedModel } from './helpers/scripted';
-import { conversationRig, type Sent } from './helpers/conversation';
+import { closeRigs, conversationRig, type Sent } from './helpers/conversation';
 
 const realFetch = globalThis.fetch;
-afterEach(() => { globalThis.fetch = realFetch; });
+afterEach(() => { globalThis.fetch = realFetch; closeRigs(); });
 
 // Two user messages side by side read to the model as a question still waiting.
 function noUserPairs(sent: Sent[]) {

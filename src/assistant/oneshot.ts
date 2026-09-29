@@ -3,6 +3,7 @@
 import { compactConversation } from './agent.js';
 import { renderConsole } from './console-view.js';
 import { redactSecrets } from './secrets.js';
+import { ONESHOT_WITHHELD } from './conversation-turn.js';
 import type { ConversationDeps, TurnEnd } from './conversation-types.js';
 import type { HostServices } from '../runtime/services.js';
 
@@ -10,12 +11,15 @@ import type { HostServices } from '../runtime/services.js';
 // session file, no journal, no lock — and no App to redraw. The services are the host's
 // own (`createServices`), whose `chatLLM` applies the config's limits, tool loading,
 // result cap, image limits and endpoint, as the chat's does. No `current` and no
-// settings-file service: the guard never asks here.
+// settings-file service: the guard never asks here. Every run of the model it makes
+// withholds `ONESHOT_WITHHELD`, the turn's own and each a tool starts through
+// `ctx.chatLLM` alike: a nested run offered `background` or `remind` could leave work
+// or a timer running after the answer prints.
 export function oneShotDeps(config: Record<string, unknown>, services: HostServices): ConversationDeps & { canAsk: false } {
   return {
     config: () => config,
     services: () => services as unknown as Record<string, unknown>,
-    chatLLM: (messages, opts) => services.chatLLM(messages, opts),
+    chatLLM: (messages, opts) => services.chatLLM(messages, { ...opts, withholdTools: [...ONESHOT_WITHHELD, ...(opts?.withholdTools ?? [])] }),
     compact: compactConversation,
     pluginAiTools: () => services.pluginAiTools,
     pluginToken: undefined,

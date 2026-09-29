@@ -30,9 +30,6 @@ export function allServices(services: object): Record<string, unknown> {
   return flat;
 }
 
-// The y/n block's readings of a call, where the chat and the command line import them.
-export { configLineOf, shellCommandOf } from './confirm-policy.js';
-
 // What a turn is handed that differs by the kind of conversation it runs in. A chat's
 // session gets the person's screens as each request's tail, the round boundary (the
 // queue, the settings-file guard, the automatic compaction), recall and `ask_user`, and
