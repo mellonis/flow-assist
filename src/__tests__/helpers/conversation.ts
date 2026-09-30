@@ -5,15 +5,15 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { compactConversation, type ChatMessage } from '../../assistant/agent.ts';
+import type { ChatMessage } from '../../assistant/agent.ts';
 import type { ConfirmPolicy } from '../../assistant/confirm-policy.ts';
-import { renderConsole } from '../../assistant/console-view.ts';
 import { Conversation } from '../../assistant/conversation.ts';
-import type { ConversationDeps, ConversationKind, PendingConfirm, ViewPort } from '../../assistant/conversation-types.ts';
+import type { ConversationKind, PendingConfirm, ViewPort } from '../../assistant/conversation-types.ts';
 import { readJournal, type JournalEvent } from '../../assistant/journal.ts';
 import { firstStart, firstStartPending } from '../../assistant/memory-trust.ts';
+import { ConversationRegistry } from '../../assistant/registry.ts';
 import { workspaceRoot } from '../../assistant/workspace.ts';
-import { acquireLock, journalPath, loadSession, makeLockToken, sessionFingerprint, type Session } from '../../assistant/sessions.ts';
+import { acquireLock, journalPath, loadSession, sessionFingerprint, type Session } from '../../assistant/sessions.ts';
 import { setStartDirForTests } from '../../assistant/shell.ts';
 import { makeFactory, type Make, type Plugin } from '../../loader/plugin.ts';
 import { assembleToolRegistry } from '../../loader/tools.ts';
@@ -89,24 +89,16 @@ export function conversationRig(model: ScriptedModel, opts: RigOptions = {}) {
   // The memory's first-start pass, as the chat runs it when it opens: without it every
   // turn says the record is missing, in a note row (and a journal line) of its own.
   if (firstStartPending()) firstStart(workspaceRoot(config));
-  const deps: ConversationDeps & { canAsk: boolean } = {
+  // The rig's conversations are made as the chat makes its own: through a registry,
+  // one per rig, on the host's real services.
+  const registry = new ConversationRegistry({
     config: () => config,
     services: () => services as unknown as Record<string, unknown>,
-    chatLLM: (m, o) => services.chatLLM(m, o),
-    compact: compactConversation,
-    pluginAiTools: () => services.pluginAiTools,
-    pluginToken: undefined,
-    viewRenderers: () => ({ console: renderConsole }),
-    screen: () => [],
-    afterWrite: () => {},
     notify: () => {},
-    showMessage: (text) => { toasts.push(text); },
-    pushLog: (line) => { log.push(line); },
     sessionsDir: () => sessionsDir,
-    lockToken: makeLockToken(),
-    screens: () => undefined,
     canAsk: opts.canAsk ?? true,
-  };
+  });
+  const deps = registry.deps();
   const port = new FakePort(opts.shown ?? true);
   const init = { kind: opts.kind ?? 'session', policy: opts.policy ?? { kind: 'ask' } };
   // The shell starts in the rig's root, as bootApp starts the chat's in its first root;
@@ -116,18 +108,18 @@ export function conversationRig(model: ScriptedModel, opts: RigOptions = {}) {
     try { const c = make(); made.push(c); c.attach(port); return c; } finally { setStartDirForTests(null); }
   };
   const homeOf = (id: string) => homeIn(sessionsDir!, id);
-  let conv = attached(() => Conversation.fresh(deps, init));
+  let conv = attached(() => registry.fresh(init));
 
   const rig = {
     get conv(): Conversation { return conv; },
-    model, config, services, deps, root, sessionsDir, port, toasts, log,
+    model, config, services, deps, registry, root, sessionsDir, port, toasts, log,
     requests: model.requests,
     // The messages request `i` sent (the last one by default), the system message left out.
     sent(i = -1): Sent[] { return ((model.requests.at(i)?.messages ?? []) as Sent[]).filter((m) => m.role !== 'system'); },
     // Request `i`'s messages whole, the system message included.
     messages(i: number): Sent[] { return (model.requests.at(i)?.messages ?? []) as Sent[]; },
     // Another conversation on the same host, as `/new` makes one; it becomes `rig.conv`.
-    fresh(): Conversation { conv = attached(() => Conversation.fresh(deps, init)); return conv; },
+    fresh(): Conversation { conv = attached(() => registry.fresh(init)); return conv; },
     // A saved session opened as the chat opens one — the fingerprint, then the file, then
     // the lock — into a conversation of its own; it becomes `rig.conv`.
     open(id: string): Conversation {
@@ -135,8 +127,8 @@ export function conversationRig(model: ScriptedModel, opts: RigOptions = {}) {
       const fingerprint = sessionFingerprint(dir, id);
       const session = loadSession(dir, id);
       if (!session) throw new Error(`rig.open: no readable session ${id} under ${sessionsDir}`);
-      acquireLock(dir, id, deps.lockToken);
-      conv = attached(() => Conversation.restore(deps, session, fingerprint, dir, { policy: init.policy }));
+      acquireLock(dir, id, registry.lockToken);
+      conv = attached(() => registry.restore(session, fingerprint, dir, { policy: init.policy }));
       return conv;
     },
     // Every journal / state file under the sessions directory, as paths relative to it.

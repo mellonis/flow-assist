@@ -1,33 +1,7 @@
 // The one-shot prompt's conversation (`flow-assist "<prompt>"`, AGENTS.md "CLI"): what it
 // is handed, and what the end of its one turn means on the command line.
-import { hostDeps } from './host-deps.js';
 import { redactSecrets } from './secrets.js';
-import { ONESHOT_WITHHELD } from './conversation-turn.js';
-import type { ConversationDeps, TurnEnd } from './conversation-types.js';
-import type { HostServices } from '../runtime/services.js';
-
-// Headless: nobody to ask (`canAsk: false`), no screen, no sessions directory — so no
-// session file, no journal, no lock — and no App to redraw. The services are the host's
-// own (`createServices`), whose `chatLLM` applies the config's limits, tool loading,
-// result cap, image limits and endpoint, as the chat's does. No `current` and no
-// settings-file service: the guard never asks here. Every run of the model it makes
-// withholds `ONESHOT_WITHHELD`, the turn's own and each a tool starts through
-// `ctx.chatLLM` alike: a nested run offered `background` or `remind` could leave work
-// or a timer running after the answer prints.
-export function oneShotDeps(config: Record<string, unknown>, services: HostServices): ConversationDeps & { canAsk: false } {
-  return {
-    ...hostDeps({
-      config: () => config,
-      services: () => services as unknown as Record<string, unknown>,
-      notify: () => {},
-      sessionsDir: () => null,
-      lockToken: '',
-      canAsk: false,
-      withhold: ONESHOT_WITHHELD,
-    }),
-    canAsk: false,
-  };
-}
+import type { TurnEnd } from './conversation-types.js';
 
 // What the one-shot prints and how it exits, from how its turn ended — decided by the
 // outcome, never by whether an answer has text (a failed turn can leave cut text in the

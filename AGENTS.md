@@ -3738,8 +3738,8 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   `runPlugins(args, config, repo, deps)` takes the dirs and the output lines (`io`) as
   `runConfig` does, so a test runs it on a root of its own.
 - any other arg — a one-shot `<prompt>`: ONE headless conversation
-  (`Conversation.fresh(oneShotDeps(…), { kind: 'oneshot', … })`,
-  `src/assistant/oneshot.ts`) on the loaded tool registry and the host's services. Its
+  (`registry.fresh({ kind: 'oneshot', … })` on a registry of its own,
+  `runPrompt` in `src/main.ts`) on the loaded tool registry and the host's services. Its
   model is told what the chat's is — the language and the `Next:` shape, who it talks
   to, the memory's index, the project's instructions — and `ai.maxRounds` /
   `ai.maxTurnTokens` bound its turn. Nobody can answer it (`canAsk: false`): it
@@ -3748,7 +3748,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   It has no screen, no journal and no session file, and is not offered `background`,
   `subagent` or `remind` (`withholdTools`), which have nothing to deliver to without
   the app — nor is any model run a tool starts inside it through `ctx.chatLLM`
-  (`oneShotDeps` withholds them on every run it makes). Nothing is streamed: the answer is printed once, on stdout, when the turn
+  (its registry's `withhold` covers every run it makes). Nothing is streamed: the answer is printed once, on stdout, when the turn
   ends. Exit codes (`oneShotOutcome`): 0 — an answer (an empty line for a turn that
   gave reasoning and no text); 2 — a limit, said on stderr (`flow-assist: stopped
   after N rounds (ai.maxRounds) — no answer; last step: …`); 1 — a failure (the
@@ -4115,7 +4115,8 @@ writes by default keeps both:
   sent, the history, the journal and the state file; `rig.pending()` /
   `rig.answerNext(ok)` the y/n; `rig.fresh()` makes another conversation as `/new`
   does, `rig.open(id)` opens a saved one as `/resume` does; `closeRigs()` in the
-  file's `afterEach` closes every conversation a rig made and puts `LLM_TOKEN` back.
+  file's `afterEach` closes every conversation a rig made and puts `LLM_TOKEN` back. Its
+  conversations are made by a registry of its own (`rig.registry`), as the chat's are.
   A test whose claims are
   about what is sent, the history, the journal or the queue uses it
   (`*.rig.test.ts`); one about cells, keys or layout boots the App.

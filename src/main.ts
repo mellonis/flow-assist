@@ -42,7 +42,9 @@ import { renderApp } from './runtime/app.js';
 import { redactSecrets, refreshSecrets } from './assistant/secrets.js';
 import { consoleBridge } from './runtime/console-log.js';
 import { Conversation } from './assistant/conversation.js';
-import { oneShotDeps, oneShotOutcome } from './assistant/oneshot.js';
+import { oneShotOutcome } from './assistant/oneshot.js';
+import { ConversationRegistry } from './assistant/registry.js';
+import { ONESHOT_WITHHELD } from './assistant/conversation-turn.js';
 import { createServices } from './runtime/services.js';
 import { hostVersion } from './version.js';
 import { renderChatModal, renderHelp, renderLogModal, renderReminder } from './views/modals.js';
@@ -395,7 +397,23 @@ export async function runPrompt(args: string[], config: Record<string, unknown>,
     const services = createServices({ config, tools: registry, repo, onExit: () => {} });
     // One conversation nobody can answer: every write declined, or — `--allow-writes` —
     // the person's yes given in advance, each write said on stderr as it runs.
-    conv = Conversation.fresh(oneShotDeps(config, services), {
+    // Headless: nobody to ask (`canAsk: false`), no screen, no sessions directory — so no
+    // session file, no journal, no lock — and no App to redraw. The services are the host's
+    // own (`createServices`), whose `chatLLM` applies the config's limits, tool loading,
+    // result cap, image limits and endpoint, as the chat's does. Nothing is shown, so
+    // `current` finds nothing, and there is no settings-file service: the guard never asks
+    // here. Every run of the model it makes withholds `ONESHOT_WITHHELD`, the turn's own and
+    // each a tool starts through `ctx.chatLLM` alike: a nested run offered `background` or
+    // `remind` could leave work or a timer running after the answer prints.
+    const conversations = new ConversationRegistry({
+      config: () => config,
+      services: () => services as unknown as Record<string, unknown>,
+      notify: () => {},
+      sessionsDir: () => null,
+      canAsk: false,
+      withhold: ONESHOT_WITHHELD,
+    });
+    conv = conversations.fresh({
       kind: 'oneshot',
       policy: deps.allowWrites ? { kind: 'allow-writes', say: (line) => err(`${line}\n`) } : { kind: 'none' },
     });
