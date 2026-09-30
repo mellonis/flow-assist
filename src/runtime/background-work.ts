@@ -1,7 +1,7 @@
 // Whether the code running now is a background task's (its `task` conversation's run,
-// `Conversation.startChild`), carried through every await of that run — a plugin's tool the task calls
-// included, which has no ctx of the chat's to tell it. What only the chat's own turn may
-// do (open a screen, src/runtime/screens.ts) asks this.
+// `Conversation.startChild`), carried through every await of that run — a plugin's tool
+// the task calls included, which has no ctx of the chat's to tell it. What only the
+// chat's own turn may do (open a screen, src/runtime/screens.ts) asks this.
 import { AsyncLocalStorage } from 'node:async_hooks';
 
 const work = new AsyncLocalStorage<true>();

@@ -2636,7 +2636,8 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   three), the rest wait FIFO, and a session's own turn never takes or waits for one. The
   `background` tool (`src/loader/tools-core.ts`) arms the task with its delay's timer
   (counted, holding no slot), disarms it with the same handle when the delay ends, then
-  admits the run, which takes a slot until it settles; the chat's
+  admits the run, which takes a slot until it settles — its last notify comes a tick
+  after, once the slot is free; the chat's
   `N in background` is `backgroundCount()`, over every conversation of the registry, so
   it outlives `/clear`. A task's result says `stopped after N rounds — last: …` when its
   twelve rounds ran out, and a `failed`/`stopped` end is reported as a failure.

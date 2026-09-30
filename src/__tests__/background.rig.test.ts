@@ -31,9 +31,10 @@ test('a task runs in the background and reports back', async () => {
   const task = taskScript(model, 'run the build');
   task.script([{ tool: 'run_command', args: { command: 'echo x > made.txt' } }], [{ text: 'build ok' }]);
   const rig = conversationRig(model, { inbox: true, ai: { backgroundFollowUp: false } });
-  let notifies = 0;
-  // The turn's ctx reads the host's services when it is built.
-  (rig.services as unknown as { notify: () => void }).notify = () => { notifies++; };
+  // The count the chat would draw at each notify. The turn's ctx reads the host's
+  // services when it is built.
+  const counts: number[] = [];
+  (rig.services as unknown as { notify: () => void }).notify = () => { counts.push(rig.registry.children.backgroundCount()); };
   await rig.conv.send('build it in the background');
   const answer = rig.journal().find((e) => e.t === 'call' && !e.task && e.name === 'background');
   expect(String(answer?.result)).toContain('Background task started (build)');
@@ -50,8 +51,10 @@ test('a task runs in the background and reports back', async () => {
   expect(rig.toasts).toContain('⏳ build done');
   // No "[background]" prefix: the row's role marks it.
   expect(delivered(rig)).toEqual(['build finished:\nbuild ok']);
-  // Once when the task is armed, once when it ends.
-  expect(notifies).toBe(2);
+  // Once when the task is armed, once when it ends — after its slot frees, so the last
+  // render shows none in the background.
+  await rig.until(() => counts.length === 2);
+  expect(counts).toEqual([1, 0]);
   // Its write was declined — the task has nobody to answer a y/n.
   expect(fs.existsSync(path.join(rig.root, 'made.txt'))).toBe(false);
   expect(rig.journal().find((e) => e.t === 'confirm' && e.task === 'build')).toMatchObject({ answer: 'no', by: 'background' });

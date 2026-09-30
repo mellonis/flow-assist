@@ -736,7 +736,6 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
         // with no delay: the turn that called this sends its next request first.
         const timer = setTimeout(() => {
           slots.disarm(timer);
-          // The slot frees when this run settles.
           slots.admit(async () => {
             const failed = (msg: string) => {
               c.showMessage?.(`⚠ ${label} failed: ${msg}`);
@@ -756,7 +755,9 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
             } catch (e) {
               failed(e instanceof Error ? e.message : String(e));
             } finally {
-              c.notify?.();
+              // The slot frees once this run settles; the notify waits a tick, so the
+              // chat's count it redraws has this task gone.
+              setTimeout(() => c.notify?.(), 0);
             }
           });
         }, ms);
