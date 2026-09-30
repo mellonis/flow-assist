@@ -35,6 +35,12 @@ What each version of flow-assist brought, newest first. The version is the one i
   session's journal, so a journal no longer ends mid-task without saying why, and reads
   as stopped, never as `failed`, on screen and in the log; `/export` shows it, with its
   time, as `*<label> stopped (clear)*` or `(exit)`.
+- **Quitting stops every command still running.** At exit, a `!command` or a model's
+  `run_command` still running in any conversation is stopped — its process group is
+  killed — where before only a background task's was.
+- **An open session picker follows a session held here as it is put away.** When a
+  session you left while its tasks ran ends and is put away, its `here · working` row
+  becomes the file's status without a key press.
 - **A duration is shown in whole seconds.** The turn's timer, a command's line, the
   `Ran N commands` head, a recall stub and `/export` read `<1s`, `12s`, `3m 5s` and,
   past an hour, `1h 2m`, where they showed tenths (`12.4 s`).

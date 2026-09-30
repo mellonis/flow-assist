@@ -24,7 +24,8 @@ note says where the others are.
 keys.sessions <key>` moves it) — lists the current project's saved sessions, newest
 first, with their titles, when each was last used, its size, and what it is doing —
 `this chat · working` while an answer or a command runs, `here · working` for a session
-you left while its background tasks run (it stays open in this process until they end),
+you left while its background tasks run (it stays open in this process until they end,
+and the row changes to the file's status by itself when it is put away),
 `in use elsewhere` when another flow-assist process has it open, `done` when its last
 answer or background result came while you were not looking — your own session's row
 too (`this chat · done`), for one that came while the picker was open (your own row
@@ -152,7 +153,8 @@ runs — `/new`, `/resume`, the picker — and it stays open here until the task
 (`here · working` in the picker): the result is a message there, not in the chat on
 screen, which gets only a toast naming it, and no turn starts for it. `/clear` stops the
 cleared session's tasks. A task stopped by `/clear` or by quitting says so in its
-session's journal, and `/export` shows it with its time (`*<label> stopped (exit)*`).
+session's journal, and `/export` shows it with its time (`*<label> stopped (exit)*`). Quitting also stops a `!command` or an
+assistant `run_command` still running in any conversation.
 
 ## Clicks, folds and the pager
 
