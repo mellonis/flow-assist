@@ -351,6 +351,9 @@ export class Conversation {
 
   // ── the chat that draws it
   port: ViewPort | null = null;
+  // The draft as the port last had it, for a save made while no port is attached
+  // (`snapshotSession`).
+  keptDraft = '';
   private handlers = new Map<string, Set<(ev: ConversationEvent) => void>>();
 
   on<T extends ConversationEvent['type']>(type: T, fn: (ev: Extract<ConversationEvent, { type: T }>) => void): () => void {
@@ -365,9 +368,6 @@ export class Conversation {
   }
   // Records the port; the end is seen when the port shows it.
   attach(port: ViewPort): void { this.port = port; this.keptDraft = ''; this.markSeen(); }
-  // The draft as the port last had it, for a save made while no port is attached
-  // (`snapshotSession`).
-  keptDraft = '';
   detach(port: ViewPort): void {
     if (this.port !== port) return;
     this.keptDraft = port.draft();

@@ -1860,18 +1860,22 @@ hold this set together:
   (`unseenAnswer`); `idle` otherwise, drawn as nothing (this chat's own is
   `this chat`). This chat's own row is its conversation's `status`, so it reads
   `this chat · done` when an answer or a result came while the picker covered the
-  chat's end. **A session held here** — left by `/new` or a switch while its
-  background tasks run (the registry keeps it loaded and locked until they end) —
+  chat's end — its own turn's status only (working, waiting, done or nothing), never
+  its tasks': those show in the footer's `N in background`. **A session held here** —
+  left by `/new` or a switch while its background tasks run (the registry keeps it
+  loaded and locked until they end) —
   reads `ours` from its lock; the chat marks it `here` (a `LockState` `lockState`
   never returns: `pickerRows` sets it for a row that is not the session on screen and
   that `registry.statusOf` finds live here), with that status — `working` while its
   tasks run, even when a result that already landed is unseen (it reads `done` from
-  its file once put away), unless a y/n or a question waits — drawn `here · working`. ⏎ on it takes that conversation back as it is (`openSession`
-  → `reclaimLive`); delete and move are refused ("still runs its background tasks
-  here"); a rename goes through the conversation that holds it, as this chat's own
-  does, so its later saves keep the new title. `done` rests on two times the session
-  file keeps: `answeredAt`, set when a turn ends with a final answer (not stopped,
-  failed, out of rounds or empty) and when a background result lands as a row
+  its file once put away), unless a y/n or a question waits — drawn `here · working`.
+  ⏎ on it takes that conversation back as it is (`openSession` → `reclaimLive`, which
+  drops the list the chat last drew of it, so a save before the next render writes
+  what landed while it was away); delete and move are refused ("still runs its
+  background tasks here"); a rename goes through the conversation that holds it, as this
+  chat's own does, so its later saves keep the new title. `done` rests on two times the
+  session file keeps: `answeredAt`, set when a turn ends with a final answer (not
+  stopped, failed, out of rounds or empty) and when a background result lands as a row
   (`landInbox`), and `seenAt`, set when the chat shows the session's end — the
   conversation on screen (the chat's `ViewPort.showsEnd`: the chat open, neither the
   picker, the pager nor a plugin's panel drawn in its place; a docked chat that is
@@ -2729,31 +2733,32 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   (which may have ended, or be in its last turn with its inbox about to go) —
   (`childResultText`: `<label> finished:` or `<label> failed:`, then
   `childResultBody`: the text and the limit, or the reason), never to whatever the chat
-  shows. A closed session's `deliver` lands nothing: the end then carries `delivered: ''` and no
-  `landedIn`. Otherwise it carries `delivered` (the text) and `landedIn` (the title of
-  the session it landed in, and `onScreen`: it is the registry's `shown`, or none is
-  shown), from which the tool's toast reads `⏳ <label> done`, or `⏳ <label> done — in
-  «<title>»` (`in an untitled session` for an empty title) when it landed elsewhere. The
-  starting conversation counts its children (`children`: armed, queued or running;
-  `childTimers`: the delay timer of each one still armed, handed over by the caller
-  through `armed(timer)` and dropped by `fired()` when it fires) from `startChild` until
-  the result is in, and emits `children` with the count at both ends. The result is
-  delivered BEFORE the child is untracked (in a `finally`, so a throwing delivery still
-  untracks it), so whoever sees the count fall finds it already in. **A task that ends
-  hands its children still live to its own parent** (`handChildrenUp`, run only by a
-  task's `close('park')`): they are that parent's to count from then on — the session
-  counts a grandchild whose task is over — and their results go to the session.
-  **Only `close('clear')` and `close('parent')` stop the subtree** (`stopChildren`):
-  each child still counted is closed with `'parent'` — its turn aborted, one still
-  armed has its timer cleared and its count disarmed (a timer that fired was disarmed
-  when it fired, so only `childTimers` is disarmed), one queued for a slot sends nothing
-  when its run comes — and a task closed so writes its `task-end` line (`by: 'clear'`)
-  into the session's journal through its route's `raw` and delivers nothing
-  (`stoppedWithParent`). `/new` closes nothing: the chat leaves the session through
-  the registry's `retire`, and its tasks run on. `close('exit')` touches no child: at
-  exit the registry's `closeAll` writes each task's `task-end` line (`by: 'exit'`),
-  clears and disarms every timer of a task still waiting on its delay, and closes the
-  tree itself, deepest first; `close('exit')` of a task stops its own turn.
+  shows. A closed session's `deliver` lands nothing: the end then carries
+  `delivered: ''` and no `landedIn`. Otherwise it carries `delivered` (the text) and
+  `landedIn` (the title of the session it landed in, and `onScreen`: it is the
+  registry's `shown`, or none is shown), from which the tool's toast reads `⏳ <label>
+  done`, or `⏳ <label> done — in «<title>»` (`in an untitled session` for an empty
+  title) when it landed elsewhere. The starting conversation counts its children
+  (`children`: armed, queued or running; `childTimers`: the delay timer of each one
+  still armed, handed over by the caller through `armed(timer)` and dropped by `fired()`
+  when it fires) from `startChild` until the result is in, and emits `children` with the
+  count at both ends. The result is delivered BEFORE the child is untracked (in a
+  `finally`, so a throwing delivery still untracks it), so whoever sees the count fall
+  finds it already in. **A task that ends hands its children still live to its own
+  parent** (`handChildrenUp`, run only by a task's `close('park')`): they are that
+  parent's to count from then on — the session counts a grandchild whose task is over —
+  and their results go to the session. **Only `close('clear')` and `close('parent')`
+  stop the subtree** (`stopChildren`): each child still counted is closed with
+  `'parent'` — its turn aborted, one still armed has its timer cleared and its count
+  disarmed (a timer that fired was disarmed when it fired, so only `childTimers` is
+  disarmed), one queued for a slot sends nothing when its run comes — and a task closed
+  so writes its `task-end` line (`by: 'clear'`) into the session's journal through its
+  route's `raw` and delivers nothing (`stoppedWithParent`). `/new` closes nothing: the
+  chat leaves the session through the registry's `retire`, and its tasks run on.
+  `close('exit')` touches no child: at exit the registry's `closeAll` writes each task's
+  `task-end` line (`by: 'exit'`), clears and disarms every timer of a task still waiting
+  on its delay, and closes the tree itself, deepest first; `close('exit')` of a task
+  stops its own turn.
 - **Ctrl+C, Ctrl+D and Ctrl+Z take a second press** (`src/runtime/exit-keys.ts`, pure;
   the App owns the arm). flowtty hands these three to the app BEFORE the terminal
   backend acts (exit, exit, suspend — skipped when a `useInput` handler returns strict
@@ -3621,9 +3626,9 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   finishing: its `run()` delivers it into the inbox of the session its chain started
   from, never into whatever the chat shows), and any later source of the same kind goes
   through it too. `services.postToChat` is the plugins' channel into it, for the
-  conversation the chat shows. The inbox **never enters a running turn**: no round and no tool
-  call is interrupted, and nothing lands between a call and its result. It is taken
-  only when nothing runs — at a turn's end, a `!command`'s or a slash command's
+  conversation the chat shows. The inbox **never enters a running turn**: no round and
+  no tool call is interrupted, and nothing lands between a call and its result. It is
+  taken only when nothing runs — at a turn's end, a `!command`'s or a slash command's
   (`afterTurn`), or at once when it arrives idle (`takeInbox`; a 400 ms interval retries while something holds it and clears itself once
   the inbox is empty). Then **every waiting item lands at once**, each as its own `◆`
   row — on screen, in the model's history as role `bg` (sent as the user's, framed by
@@ -3663,9 +3668,9 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     next message there. `/clear` empties the inbox; `/new` and opening another session
     land what waits in it as rows of the session left (`park`), or keep it there while
     that session's tasks run. `/clear` also stops the cleared session's tasks — a
-    running one is aborted and delivers nothing, a delayed one is cancelled; after `/new` or opening
-    another session a task still running delivers into the session it was started
-    from, and a closed one takes nothing.
+    running one is aborted and delivers nothing, a delayed one is cancelled; after
+    `/new` or opening another session a task still running delivers into the session it
+    was started from, and a closed one takes nothing.
   - **The model is told this contract, not a kinder one.** `background`'s description
     (`src/loader/tools-core.ts`) says a result lands in the chat as `<label>
     finished:` (or `failed:`) when the current turn ends, never in the middle of it;

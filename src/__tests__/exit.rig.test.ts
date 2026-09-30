@@ -49,7 +49,7 @@ test('at exit a headless session with a running task is saved and unlocked, and 
   expect(fs.existsSync(lockOf(rig, a.sessionId))).toBe(false);
   expect(rig.sessionFile(a.sessionId)?.messages.some((m) => (m as { content?: unknown }).content === 'find it in the background')).toBe(true);
   expect(taskEnds(rig, a)).toMatchObject([{ t: 'task-end', task: 'find', outcome: 'stopped', by: 'exit' }]);
-  expect(exportMarkdown(rig.journal(a.sessionId), { title: '', id: a.sessionId })).toContain('*find stopped (exit)*');
+  expect(exportMarkdown(rig.journal(a.sessionId), { title: '', id: a.sessionId })).toMatch(/\*find stopped \(exit\)\* · \d{4}-\d{2}-\d{2} \d{2}:\d{2}\n/);
   expect(a.closeReason).toBe('exit');
   expect(child!.closeReason).toBe('exit');
   expect(rig.registry.live()).toEqual([]);

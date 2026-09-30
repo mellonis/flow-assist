@@ -349,7 +349,7 @@ export function exportMarkdown(events: JournalEvent[], opts: { title: string; id
         break;
       case 'markup': out.push(`*Note${at}:* ${String(ev.note ?? '')} — the model wrote:`, '', block(String(ev.markup ?? '')), ''); break;
       case 'compact': out.push('---', '', `**Compacted${ev.auto ? ' automatically' : ''}**${at} — from here on the model was given this summary instead of the conversation above:`, '', quoted(String(ev.summary ?? '')), '', '---', ''); break;
-      case 'task-end': out.push(`*${String(ev.task ?? '')} stopped (${String(ev.by ?? '')})*`, ''); break;
+      case 'task-end': out.push(`*${String(ev.task ?? '')} stopped (${String(ev.by ?? '')})*${at}`, ''); break;
       case 'end': {
         if (typeof ev.cut === 'string' && ev.cut) out.push(`**Assistant**${at} (cut off)`, '', ev.cut, '');
         const how = [ev.stopped ? `stopped (${String(ev.stopped)})` : '', ev.failed ? `failed: ${String(ev.failed)}` : '', ev.roundLimit ? `stopped after ${ev.limitBy === 'tokens' ? `${String(ev.turnTokens)} tokens (ai.maxTurnTokens)` : `${String(ev.roundLimit)} rounds (ai.maxRounds)`} — no answer${ev.lastStep ? `; last step: ${String(ev.lastStep)}` : ''}` : ''].filter(Boolean);

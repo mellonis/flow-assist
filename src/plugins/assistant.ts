@@ -967,6 +967,11 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             leave(prev);
             registryRef.current!.reclaim(live);
             const draft = live.keptDraft; // before `adopt`: attaching clears it
+            // The list the chat drew of it before it was left lacks what landed since: until
+            // the next render draws it again, a save writes its own `messages`. Dropped here,
+            // not on detach — a conversation made for `/new` or a switch carries the drawn
+            // list of the one left, read after it was detached.
+            live.drawnRows = null;
             adopt(live);
             applySessionView({ draft } as Session);
             (host.services as Record<string, any>).showMessage?.(`Resumed «${live.title || 'session'}»`);

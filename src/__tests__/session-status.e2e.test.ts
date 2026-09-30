@@ -18,7 +18,7 @@ const saved = (dir: string, text: string) => listTree(dir).filter((n) => n.endsW
   .map((n) => JSON.parse(fs.readFileSync(path.join(dir, n), 'utf8')))
   .find((s) => s.messages.some((m: { content: unknown }) => m.content === text));
 
-test("this chat's row says working while its turn runs, and nothing once it ends", async () => {
+test("this chat's row says working while its turn runs, and no longer once it ends", async () => {
   const dir = dirOf();
   const model = new ScriptedModel();
   model.script([{ hold: true }, { text: 'the long answer' }]);

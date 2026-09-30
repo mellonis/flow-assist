@@ -7,32 +7,34 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 - **A background task is a conversation of its own.** A task that runs out of its twelve
   rounds now says so at the end of its result (`stopped after 12 rounds — last: …`),
-  where it read `finished:` with no output or a partial text. Esc or `/new` during the
-  turn that started a task no longer stops a tool the task runs, such as its
-  `web_fetch`: a task has its own abort. `/clear` stops the cleared session's tasks
+  where it read `finished:` with no output or a partial text. Esc during the turn that
+  started a task no longer stops a tool the task runs, such as its `web_fetch`: a task
+  has its own abort. `/clear` stops the cleared session's tasks
   (below). A task cannot `recall` the chat's bulky items.
   Two settings: `ai.subagentDepth` (2 by default, at least 1) is how deep a chain of
   tasks starting tasks may go, and the refusal names it; `sessions.maxRunning` (4 by
   default) bounds the tasks running at once to one less than it, three at the default,
   as before.
-- **A task's result goes home, to the session that started it.** After `/new`,
-  `/resume` or the picker's ⏎ while a task runs, its result is a row in the session it
-  was started from — in that session's file and journal — not in the chat on screen,
-  which gets only the toast, naming the other session (`⏳ <label> done — in «<title>»`,
-  or `in an untitled session`), and no row and no `◆ N new`. A result that lands in a
-  session nobody is looking at starts no follow-up turn: it is read with the next
-  message sent there. A task started by a task that has already ended delivers into the
-  session too, not into whatever the chat shows. A session left while its tasks run
-  stays open in this process, locked, until they end — another flow-assist process sees
-  it `in use elsewhere` meanwhile; the picker shows it `here · working`, and ⏎ takes it
-  back as it was, with its draft. `/clear` now stops the cleared session's tasks: a
-  running one is stopped and says nothing on screen (the log says `[bg] <label> stopped
-  with its conversation`), a delayed one is cancelled. `done` reads wider: a session
-  whose last row is a background result nobody has seen reads `done` in the picker, and
-  the chat's own row can read `this chat · done`. A task stopped by `/clear` or by the
-  app exiting writes a `task-end` line into its session's journal, so a journal no
-  longer ends mid-task without saying why; `/export` shows it as `*<label> stopped
-  (clear)*` or `(exit)`.
+- **A task's result goes home, to the session that started it.** After `/new`, `/resume`
+  or the picker's ⏎ while a task runs, its result is a row in the session it was started
+  from — in that session's file and journal — not in the chat on screen, which gets only
+  the toast, naming the other session (`⏳ <label> done — in «<title>»`, or `in an
+  untitled session`), and no row and no `◆ N new`. A result that lands in a session you
+  left starts no follow-up turn: it is read with the next message sent there (your own
+  session still gets its follow-up, even behind an open picker). A task started by a
+  task that has already ended delivers into the session too, not into whatever the chat
+  shows. A session left while its tasks run stays open in this process, locked, until
+  they end — another flow-assist process sees it `in use elsewhere` meanwhile; the
+  picker shows it `here · working`, and ⏎ takes it back as it was, with its draft.
+  `/clear` now stops the cleared session's tasks: a running one is stopped and says
+  nothing on screen (the log says `[bg] <label> stopped with its conversation`), a
+  delayed one is cancelled. `done` reads wider: a session whose last row is a background
+  result nobody has seen reads `done` in the picker, and the chat's own row can read
+  `this chat · done` (its own turn's status: its tasks are the `N in background` count).
+  A task stopped by `/clear` or by the app exiting writes a `task-end` line into its
+  session's journal, so a journal no longer ends mid-task without saying why, and reads
+  as stopped, never as `failed`, on screen and in the log; `/export` shows it, with its
+  time, as `*<label> stopped (clear)*` or `(exit)`.
 - **A duration is shown in whole seconds.** The turn's timer, a command's line, the
   `Ran N commands` head, a recall stub and `/export` read `<1s`, `12s`, `3m 5s` and,
   past an hour, `1h 2m`, where they showed tenths (`12.4 s`).
