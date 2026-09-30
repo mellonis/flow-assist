@@ -745,7 +745,7 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
             try {
               const r = await started.run();
               if (r.outcome === 'failed' || r.outcome === 'stopped') { failed(r.error ?? r.outcome); return; }
-              const result = (r.text || '(no output)') + (r.outcome === 'limit' && r.limit ? `\nstopped after ${r.limit.rounds} rounds — last: ${r.limit.lastStep}` : '');
+              const result = (r.text || '(no output)') + (r.outcome === 'limit' && r.limit ? `\nstopped ${r.limit.by === 'tokens' ? 'at the token budget after' : 'after'} ${r.limit.rounds} rounds — last: ${r.limit.lastStep}` : '');
               c.showMessage?.(`⏳ ${label} done`);
               c.pushLog?.(`[bg] ${label}: ${result}`);
               // It waits in the chat's inbox until no turn runs, and lands as a row of its

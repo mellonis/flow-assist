@@ -15,7 +15,9 @@
 export const MAX_ROUNDS_DEFAULT = 150;
 export const MAX_TURN_TOKENS_DEFAULT = 2_000_000;
 
-const wholeOrDefault = (n: unknown, dflt: number): number => (typeof n === 'number' && Number.isInteger(n) && n >= 0 ? n : dflt);
+// A whole number at or above `floor` (0 unless said), else the default: a hand-edited
+// value that is not one never becomes NaN or a negative bound.
+export const wholeOrDefault = (n: unknown, dflt: number, floor = 0): number => (typeof n === 'number' && Number.isInteger(n) && n >= floor ? n : dflt);
 
 export function maxRoundsOf(ai: unknown): number {
   return wholeOrDefault((ai as { maxRounds?: unknown } | undefined)?.maxRounds, MAX_ROUNDS_DEFAULT);

@@ -77,8 +77,8 @@ test('remind parses a duration/clock and delegates to the host setReminder', asy
 });
 
 // ─── todo (plan) tool ──────────────────────────────────────────────────────────
-// Session-only plan state is MODULE-level, so each test resets it
-// through the `clear` action to avoid leaking into the next test. The plan is a
+// A plan belongs to a conversation; these tests share one context-free registry, so each
+// resets the plan through the `clear` action to avoid leaking into the next test. The plan is a
 // scratchpad the assistant maintains: low-stakes, reversible, no write-confirm.
 
 test('todo add creates a pending item, assigns an id and notifies', async () => {

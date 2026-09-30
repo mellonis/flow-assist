@@ -14,6 +14,7 @@ import { createPlan, type Plan } from './plan.js';
 import { findInstructions, instructionsNote, type ProjectInstructions } from './project-instructions.js';
 import { applyRecall, bulkyItems, createRecallState, recallLimits, type BulkyItem, type RecallState } from './recall.js';
 import { screenBlock, type ContextItem } from './screen-context.js';
+import { wholeOrDefault } from './rounds.js';
 import { redactSecrets } from './secrets.js';
 import { unseenAnswer, type Session, type SessionFingerprint } from './sessions.js';
 import { createShellState, tildePath, type ShellState } from './shell.js';
@@ -467,7 +468,7 @@ export class Conversation {
   // `ai.subagentDepth`. Nothing runs until `run()`, which closes the child when it ends;
   // the caller admits and schedules it.
   startChild(spec: ChildSpec, journalId: string): ChildStart {
-    const max = Number((this.deps.config().ai as { subagentDepth?: unknown } | undefined)?.subagentDepth ?? 2);
+    const max = wholeOrDefault((this.deps.config().ai as { subagentDepth?: unknown } | undefined)?.subagentDepth, 2, 1);
     if (this.depth >= max) return { refused: `Background chaining depth exceeded (max ${max}) — finish this task; do not spawn further background tasks.` };
     const deps: ConversationDeps = {
       ...this.deps,
@@ -482,9 +483,13 @@ export class Conversation {
     const kept = new Set(['call-start', 'confirm', 'call']);
     child.journalRoute = (ev) => { if (kept.has(ev.t)) this.journalTo(journalId, { task: spec.label, ...ev }); };
     child.shell.setCwd(this.shell.cwd());
+    let ran = false;
     const run = async (): Promise<ChildResult> => {
+      // A child runs once: a second `run` sends nothing on the closed child.
+      if (ran) return { outcome: 'failed', text: '', error: 'already run' };
+      ran = true;
       try {
-        // An empty task (or a second `run`) starts no turn: a failure, said as one.
+        // An empty task starts no turn: a failure, said as one.
         if (!(await asBackgroundWork(() => child.send(spec.prompt)))) return { outcome: 'failed', text: '', error: 'nothing to send' };
         const end = child.lastEnd;
         const outcome = (end?.outcome ?? 'failed') as ChildResult['outcome'];
@@ -492,7 +497,7 @@ export class Conversation {
           outcome,
           text: child.content.trim(),
           ...(end?.error ? { error: end.error } : {}),
-          ...(outcome === 'limit' && end?.limit ? { limit: { rounds: end.limit.rounds, lastStep: end.limit.lastStep } } : {}),
+          ...(outcome === 'limit' && end?.limit ? { limit: { rounds: end.limit.rounds, lastStep: end.limit.lastStep, ...(end.limit.by ? { by: end.limit.by } : {}) } } : {}),
         };
       } finally {
         // Its save and inbox timers go with it.

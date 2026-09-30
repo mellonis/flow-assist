@@ -171,6 +171,39 @@ test('a task at its round cap says so', async () => {
   expect(delivered(rig)).toEqual(['L finished:\n(no output)\nstopped after 12 rounds — last: datetime {}']);
 });
 
+test('a task at the token budget says so', async () => {
+  const model = new ScriptedModel();
+  model.script([{ tool: 'background', args: { task: 'spend', label: 'T' } }], [{ text: 'Started.' }]);
+  const task = taskScript(model, 'spend');
+  task.usage = { prompt_tokens: 600, completion_tokens: 10, prompt_tokens_details: { cached_tokens: 0 } };
+  task.script(...Array.from({ length: 4 }, () => [{ tool: 'datetime', args: {} }]), [{ text: 'never' }]);
+  const rig = conversationRig(model, { inbox: true, ai: { backgroundFollowUp: false, maxTurnTokens: 1000 } });
+  await rig.conv.send('go');
+  await settled(rig, 1);
+  expect(delivered(rig)).toEqual(['T finished:\n(no output)\nstopped at the token budget after 2 rounds — last: datetime {}']);
+});
+
+test('a non-numeric sessions.maxRunning still runs tasks, three at a time', async () => {
+  const model = new ScriptedModel();
+  for (let i = 0; i < 5; i++) taskScript(model, `t${i}`).script([{ text: `r${i}` }]);
+  model.script(
+    [0, 1, 2, 3, 4].map((i) => ({ tool: 'background', args: { task: `t${i}`, label: `t${i}` } })),
+    [{ text: 'Started five.' }],
+  );
+  const rig = conversationRig(model, { inbox: true, ai: { backgroundFollowUp: false }, extra: { sessions: { maxRunning: 'many' } } });
+  let concurrent = 0, peak = 0;
+  const served = globalThis.fetch;
+  globalThis.fetch = (async (url: Parameters<typeof fetch>[0], init?: RequestInit) => {
+    const isTask = String(init?.body).includes(WORKER);
+    if (isTask) { concurrent++; peak = Math.max(peak, concurrent); await new Promise((r) => setTimeout(r, 30)); }
+    try { return await served(url, init); } finally { if (isTask) concurrent--; }
+  }) as typeof fetch;
+  await rig.conv.send('five at once');
+  await settled(rig, 5);
+  expect(delivered(rig)).toHaveLength(5);
+  expect(peak).toBe(3);
+});
+
 test('the parent\'s Esc does not reach a task\'s tool', async () => {
   let entered = false;
   let seen: AbortSignal | undefined;

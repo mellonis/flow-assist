@@ -5,6 +5,7 @@
 // said once for all of them, the conversation the chat draws, and the one exit hook.
 import { Conversation } from './conversation.js';
 import type { ConfirmPolicy } from './confirm-policy.js';
+import { wholeOrDefault } from './rounds.js';
 import type { ConversationDeps, ConversationKind } from './conversation-types.js';
 import { hostDeps, type DepsSource } from './host-deps.js';
 import { flushOnExit, makeLockToken, type Session, type SessionFingerprint } from './sessions.js';
@@ -58,8 +59,8 @@ export class ConversationRegistry {
     const timers = new Set<ReturnType<typeof setTimeout>>();
     const queue: Array<() => Promise<void>> = [];
     const limit = (): number => {
-      const sessions = this.init.config().sessions as { maxRunning?: number } | undefined;
-      return Math.max(1, (sessions?.maxRunning ?? 4) - 1);
+      const sessions = this.init.config().sessions as { maxRunning?: unknown } | undefined;
+      return Math.max(1, wholeOrDefault(sessions?.maxRunning, 4, 2) - 1);
     };
     const start = (run: () => Promise<void>): void => {
       running++;

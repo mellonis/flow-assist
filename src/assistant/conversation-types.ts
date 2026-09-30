@@ -61,8 +61,9 @@ export function lastAnswerOf(list: readonly { role?: string; content?: unknown }
 // The call a message's view belongs to — a live one, or a discarded one's.
 export const callOf = (m: ChatMsg): string | undefined => (m.views as ViewRecord[] | undefined)?.[0]?.callId ?? m.discardedCallId;
 
-// 'session': a chat's — saved, journaled, locked, continued. 'oneshot': `flow-assist
-// "<prompt>"` — nobody to ask, no screen, no journal, no session file. Children come later.
+// 'session': a chat's — saved, journaled, locked, continued. 'task': a background task's
+// child conversation — no screen, no journal or file of its own, twelve rounds. 'oneshot':
+// `flow-assist "<prompt>"` — nobody to ask, no screen, no journal, no session file.
 export type ConversationKind = 'session' | 'task' | 'oneshot';
 export type BusyKind = 'turn' | 'shell' | 'interactive' | 'command';
 export type ConversationStatus = 'working' | 'waiting' | 'done' | 'idle';
@@ -178,7 +179,7 @@ export interface ChildResult {
   outcome: 'answer' | 'empty' | 'limit' | 'stopped' | 'failed';
   text: string;                  // the child's final text, trimmed ('' when none)
   error?: string;                // the turn's error, when it failed
-  limit?: { rounds: number; lastStep: string };
+  limit?: { rounds: number; lastStep: string; by?: 'tokens' };
 }
 // What `startChild` hands back: a refusal said to the model, or the child and its run.
 export type ChildStart = { refused: string } | { child: Conversation; run: () => Promise<ChildResult> };

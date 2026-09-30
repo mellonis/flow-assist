@@ -1,7 +1,7 @@
 // A conversation starts a child of its own (`startChild`, AGENTS.md (a conversation starts
-// a child)): a `task`
-// conversation whose tool calls are journaled in its parent's turn, tagged with its
-// label, in its parent's project, from its parent's directory — and no file of its own.
+// a child)): a `task` conversation whose tool calls are journaled in its parent's turn,
+// tagged with its label, in its parent's project, from its parent's directory — and no
+// file of its own.
 import { afterEach, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -200,4 +200,37 @@ test('`deliver` on a closed conversation lands nothing', async () => {
   await new Promise((r) => setTimeout(r, 450));
   expect(rig.conv.messages.length).toBe(rows);
   expect(rig.journal().length).toBe(lines);
+});
+
+test('a non-numeric ai.subagentDepth refuses at the default depth', () => {
+  const model = new ScriptedModel();
+  const rig = conversationRig(model, { ai: { subagentDepth: 'deep' } });
+  const { child } = startFrom(rig, spec('a', 'one'));
+  const second = child.startChild(spec('b', 'two'), '');
+  if ('refused' in second) throw new Error('a second level starts at the default depth');
+  children.push(second.child);
+  const third = second.child.startChild(spec('c', 'three'), '');
+  expect(third).toEqual({ refused: 'Background chaining depth exceeded (max 2) — finish this task; do not spawn further background tasks.' });
+});
+
+test('a second run sends nothing and fails with a reason', async () => {
+  const model = new ScriptedModel();
+  model.script([{ text: 'done' }], [{ text: 'again' }]);
+  const rig = conversationRig(model);
+  const { run } = startFrom(rig, spec('o', 'once'));
+  expect((await run()).text).toBe('done');
+  expect(await run()).toEqual({ outcome: 'failed', text: '', error: 'already run' });
+  expect(model.requests.length).toBe(1);
+});
+
+test('a child stopped by the token budget carries `by: tokens`', async () => {
+  const model = new ScriptedModel();
+  model.usage = { prompt_tokens: 600, completion_tokens: 10, prompt_tokens_details: { cached_tokens: 0 } };
+  model.script(...Array.from({ length: 4 }, () => [{ tool: 'datetime', args: {} }]), [{ text: 'never' }]);
+  const rig = conversationRig(model, { ai: { maxTurnTokens: 1000 } });
+  const { run } = startFrom(rig, spec('T', 'spend'));
+  const result = await run();
+  expect(model.requests).toHaveLength(2);
+  expect(result.outcome).toBe('limit');
+  expect(result.limit?.by).toBe('tokens');
 });

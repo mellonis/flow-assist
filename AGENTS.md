@@ -2612,8 +2612,8 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   which conversation is on screen. `postToChat` and the screens' gates read the
   conversation the chat holds now (`convRef`).
 - **A conversation has a kind** — `session` (the chat's), `task` (a background task's) or
-  `oneshot` (the one-shot prompt's) — and a policy for its writes (`confirm-policy.ts`), both decided when it
-  is made: `Conversation.fresh(deps, { kind, policy })` for a new one, which reads the
+  `oneshot` (the one-shot prompt's) — and a policy for its writes (`confirm-policy.ts`),
+  both decided when it is made: `Conversation.fresh(deps, { kind, policy })` for a new one, which reads the
   project's instructions for the start directory, `Conversation.restore(…)` for a saved
   session. A policy that asks cannot be given where `deps.canAsk` is false (the
   constructor throws), and neither the settings-file guard nor `ask_user` asks there.
@@ -2645,8 +2645,8 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   `src/assistant/conversation.ts`; a turn hands it to its tools as `ctx.startChild`, with
   the host's slots as `ctx.childSlots`): a `task` conversation (`parent`, `depth` one more,
   `label`) with its own plan, shell, tool set and abort, and the `always-no` policy. Its
-  deps are its parent's with no sessions directory, no screens, nobody to ask, no alert
-  and a silent `pushLog`. It keeps no journal or state file: its `journalRoute` sends its
+  deps are its parent's with no sessions directory, no screens, nobody to ask, no redraw
+  (`notify`) and a silent `pushLog`. It keeps no journal or state file: its `journalRoute` sends its
   `call-start`, `confirm` and `call` lines — and nothing else — to its parent's
   `journalTo` under the parent turn's journal id, tagged `{ task: <label>, ...line }` (a
   grandchild's own label kept). Its project is its parent's (`inheritedProject`, read
@@ -2654,9 +2654,10 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   workspace follow it; its shell starts in its parent's directory, and its `cd` moves
   only its own (and the project instructions its per-round prompt reads). A
   conversation at depth `ai.subagentDepth` (2 by default) cannot start another: it is
-  refused at once, the refusal naming the number. `startChild` neither admits, arms nor delays: the
-  caller schedules `run()`, which sends the task as background work, answers the end
-  (`outcome`, the trimmed text, the error, the round limit with its last step) and
+  refused at once, the refusal naming the number. `startChild` neither admits, arms nor
+  delays: the caller schedules `run()` (once: a second call fails with `already run`),
+  which sends the task as background work, answers the end
+  (`outcome`, the trimmed text, the error, the round or token limit with its last step) and
   closes the child (`park`: its save and inbox timers go). A closed conversation's
   `deliver` lands nothing.
 - **Ctrl+C, Ctrl+D and Ctrl+Z take a second press** (`src/runtime/exit-keys.ts`, pure;

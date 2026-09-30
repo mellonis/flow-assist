@@ -51,9 +51,7 @@ version, at the top level), readable by you only (`sessions.resume: false` start
 run empty; `sessions.keep` — how many are kept per project, 50 by default;
 `sessions.maxRunning` — how many conversations of the process may work at once, your
 own turn included, 4 by default, so a turn's background tasks run three at a time).
-What a
-restart restores is bounded — the last 400 messages of the
-conversation, fewer of the commands' output blocks — but each session also keeps a
+What a restart restores is bounded — the last 400 messages of the conversation, fewer of the commands' output blocks — but each session also keeps a
 journal beside it, `<id>.log.jsonl`: everything as it happened — every tool call with
 its whole arguments and result and the y/n you gave it, a background task's calls under
 its name, every `!command` with its whole output (up to 8 MiB), every `/compact` summary
