@@ -2672,12 +2672,16 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   counted under a live conversation, running or armed, writes `{ t: 'task-end', task,
   outcome: 'stopped', by: 'exit' }` into its session's journal through its route's
   `raw` (synchronous, so it lands from `process.on('exit')` too), then every
-  conversation closes with `'exit'`, deepest first. The app's exit path
+  conversation closes with `'exit'`, deepest first — a task's turn stopped as a
+  parent's stop stops it, so no tool call or model request follows its `task-end` line
+  (a tool already running finishes, its `call` line written). The app's exit path
   (`src/main.ts`) runs the exit hooks (`runExitHooks`, `sessions.ts`) BEFORE its unmount
   and before it waits for remote plugins to stop: a task ending in that wait finds its
   session closed and delivers nothing, where a session only flushed would be parked and
   saved with its lock already released; the process's own `exit` then finds no hook
-  left.
+  left. A termination signal (SIGTERM, SIGHUP, an outside SIGINT) takes the same path:
+  `src/main.ts` listens for them before flowtty does, so its listener runs first, and
+  flowtty, seeing another listener, unmounts without re-raising the signal.
   A session the chat leaves goes through it: `retire(c)` parks it at once when no task
   of its own is counted (`children`), else marks it `headless` and parks it when its
   `children` event says 0 — after the last result landed, since a task is untracked
@@ -2748,7 +2752,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   (`stoppedWithParent`). `close('new')` and `close('exit')` touch no
   child: `/new` leaves the session's tasks running, and at exit the registry's
   `closeAll` writes each task's `task-end` line (`by: 'exit'`) and closes the tree
-  itself, deepest first.
+  itself, deepest first; `close('exit')` of a task stops its own turn.
 - **Ctrl+C, Ctrl+D and Ctrl+Z take a second press** (`src/runtime/exit-keys.ts`, pure;
   the App owns the arm). flowtty hands these three to the app BEFORE the terminal
   backend acts (exit, exit, suspend — skipped when a `useInput` handler returns strict

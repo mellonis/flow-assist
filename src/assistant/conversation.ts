@@ -391,8 +391,10 @@ export class Conversation {
   // The conversation ends: /clear closes it, a session the chat left is put away
   // (`'park'`, by the registry's `park` — at once, or when its last task ends), a task
   // that ends is parked too, a parent's stop closes a task (`'parent'`), an exit closes
-  // everything. What runs is stopped for /clear and a stop by the parent: a pending y/n
-  // is declined `by: 'reset'`, a question dismissed; a session is left only while
+  // everything. What runs is stopped for /clear, a stop by the parent, and a task's exit
+  // (its turn must not go on calling tools after its journal says it stopped; a
+  // session's own turn ends with the process): a pending y/n is declined `by: 'reset'`,
+  // a question dismissed; a session is left only while
   // nothing of its own runs, since the chat refuses a switch or /new while anything
   // does. The tasks it started are stopped only by /clear and by a stop from its own
   // parent (`stopChildren`); a task that ends hands the ones still live to its parent
@@ -410,7 +412,7 @@ export class Conversation {
     if (reason === 'parent') this.journalRoute?.raw({ t: 'task-end', task: this.label, outcome: 'stopped', by: 'clear' });
     if (reason === 'clear' || reason === 'parent') this.stopChildren();
     else if (reason === 'park' && this.kind === 'task') this.handChildrenUp();
-    if (reason === 'clear' || reason === 'new' || reason === 'parent') {
+    if (reason === 'clear' || reason === 'new' || reason === 'parent' || (reason === 'exit' && this.kind === 'task')) {
       this.abort?.abort();
       this.abort = null;
       if (this.confirm) this.answerConfirm(false, 'reset');

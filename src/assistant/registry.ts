@@ -199,9 +199,12 @@ export class ConversationRegistry {
   // conversation saved and its lock released. Then each task still counted, running or
   // waiting on its delay, writes `task-end … stopped` into its session's journal (through
   // its route's `raw`, the one its filtered route would not carry), so no journal ends
-  // mid-task without saying why; and everything closes, deepest first. A task still in
-  // flight afterwards delivers nowhere, and no session is parked or saved again: its lock
-  // is gone by then, and another process may already hold the session.
+  // mid-task without saying why; and everything closes, deepest first — a task's turn
+  // stopped as a parent's stop stops it, so it calls no tool and asks the model nothing
+  // after that line (a tool already running finishes, and its `call` line is written).
+  // A task that ends afterwards delivers nowhere, and no session is parked or saved
+  // again (a closed conversation has no listeners, and `park` skips a closed one): its
+  // lock is gone by then, and another process may already hold the session.
   closeAll(reason: Extract<CloseReason, 'exit'>): void {
     this.flushAll();
     const deepestFirst: Conversation[] = [];
@@ -215,7 +218,6 @@ export class ConversationRegistry {
       try { c.journalRoute?.raw({ t: 'task-end', task: c.label, outcome: 'stopped', by: reason }); }
       catch { /* exiting: one journal's failure never skips the others */ }
     }
-    for (const off of this.watches.values()) off();
     this.watches.clear();
     for (const c of deepestFirst) {
       try { c.close(reason); } catch { /* exiting */ }

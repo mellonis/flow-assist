@@ -510,6 +510,11 @@ async function runInteractive(config: Record<string, unknown>, repo: PluginRepo)
     // leaves running.
     void stopRemotePlugins().then(() => process.exit(0));
   };
+  // A termination signal (SIGTERM, SIGHUP, SIGINT from outside — Ctrl+C in the app is a
+  // key) exits the way quitting does. Registered before the app's own listener, so the
+  // sessions' exit hooks run before its unmount; with a listener of ours on the signal
+  // the app does not re-raise it, and one arriving again finds `exiting` set.
+  for (const sig of ['SIGTERM', 'SIGHUP', 'SIGINT'] as const) process.on(sig, onExit);
   const pluginsNote = await missingPluginsNote(repo);
   handle = await renderApp(backend, { plugins, config, renders: {}, tools: registry, onExit, pluginsNote: pluginsNote ?? undefined, loadNotes, consoleLog, late, untrusted, trustNotes: [...trustNotes, ...memoryRecordNotes()], site });
 }
