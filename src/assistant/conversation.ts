@@ -484,7 +484,8 @@ export class Conversation {
     child.shell.setCwd(this.shell.cwd());
     const run = async (): Promise<ChildResult> => {
       try {
-        await asBackgroundWork(() => child.send(spec.prompt));
+        // An empty task (or a second `run`) starts no turn: a failure, said as one.
+        if (!(await asBackgroundWork(() => child.send(spec.prompt)))) return { outcome: 'failed', text: '', error: 'nothing to send' };
         const end = child.lastEnd;
         const outcome = (end?.outcome ?? 'failed') as ChildResult['outcome'];
         return {

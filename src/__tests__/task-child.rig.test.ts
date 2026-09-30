@@ -1,4 +1,5 @@
-// A conversation starts a child of its own (`startChild`, AGENTS.md "registry"): a `task`
+// A conversation starts a child of its own (`startChild`, AGENTS.md (a conversation starts
+// a child)): a `task`
 // conversation whose tool calls are journaled in its parent's turn, tagged with its
 // label, in its parent's project, from its parent's directory — and no file of its own.
 import { afterEach, expect, test } from 'bun:test';
@@ -63,6 +64,31 @@ test('a child\'s calls land in the parent\'s journal tagged `task`, and it write
   const tagged = rig.journal().filter((e) => e.task);
   expect(tagged.map((e) => [e.t, e.task])).toEqual([['call-start', 'часы'], ['call', 'часы']]);
   expect(tagged.map((e) => e.name)).toEqual(['datetime', 'datetime']);
+});
+
+test('a child whose run outlasts a save leaves no file of its own', async () => {
+  const model = new ScriptedModel();
+  model.script([{ hold: true }, { text: 'slow answer' }]);
+  const rig = conversationRig(model);
+  const { run } = startFrom(rig, spec('slow', 'take your time'));
+  await new Promise((r) => setTimeout(r, 300)); // the parent's own files settle first
+  const tree = listTree(rig.sessionsDir!);
+  const running = run();
+  await rig.until(() => model.requests.length === 1);
+  await new Promise((r) => setTimeout(r, 400)); // past the child's 250 ms save
+  model.release();
+  expect(await running).toEqual({ outcome: 'answer', text: 'slow answer' });
+  await new Promise((r) => setTimeout(r, 300));
+  expect(listTree(rig.sessionsDir!)).toEqual(tree);
+});
+
+test('a child whose run sends nothing fails with a reason', async () => {
+  const model = new ScriptedModel();
+  const rig = conversationRig(model);
+  const { child, run } = startFrom(rig, spec('e', '   '));
+  expect(await run()).toEqual({ outcome: 'failed', text: '', error: 'nothing to send' });
+  expect(model.requests.length).toBe(0);
+  expect(child.closed).toBe(true);
 });
 
 test('a grandchild\'s line keeps its own label when it passes through its parent\'s route', () => {

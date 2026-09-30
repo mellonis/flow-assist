@@ -2647,9 +2647,9 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   grandchild's own label kept). Its project is its parent's (`inheritedProject`, read
   first by `currentProject`), whatever root its shell moves to — the memory and the
   workspace follow it; its shell starts in its parent's directory, and its `cd` moves
-  only its own (and the project instructions its per-round prompt reads). At
-  `ai.subagentDepth` (2 by default: a task may start one more) it is refused at once,
-  the refusal naming the number. `startChild` neither admits, arms nor delays: the
+  only its own (and the project instructions its per-round prompt reads). A
+  conversation at depth `ai.subagentDepth` (2 by default) cannot start another: it is
+  refused at once, the refusal naming the number. `startChild` neither admits, arms nor delays: the
   caller schedules `run()`, which sends the task as background work, answers the end
   (`outcome`, the trimmed text, the error, the round limit with its last step) and
   closes the child (`park`: its save and inbox timers go). A closed conversation's
