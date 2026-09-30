@@ -43,7 +43,8 @@ A session is named by the first line you wrote; `/title <text>` renames it. `/ne
 starts a fresh session and keeps the current one as it is — a restart before you say
 anything continues it; while an answer is still coming it says to stop it (Esc) first.
 `/clear` also starts a fresh session, but it stops an answer that is still coming and
-marks the old session closed, so a restart starts empty. `/resume` lists the current
+the session's background tasks, and marks the old session closed, so a restart starts
+empty. `/resume` lists the current
 project's saved sessions (the top level's when there is no project) and `/resume <n>`
 opens one; the others are a Tab away in `/sessions`.
 
@@ -144,6 +145,13 @@ not stop it. It gets twelve rounds; one that runs out of them
 says so at the end of its result (`stopped after 12 rounds — last: …`). A task may start
 one follow-up task of its own; `ai.subagentDepth` (2 by default) is how deep such a chain
 may go. At most three run at once (`sessions.maxRunning`, above); the rest wait their turn.
+
+A task's result goes to the session that started it. Leave that session while the task
+runs — `/new`, `/resume`, the picker — and it stays open here until the task ends
+(`here · working` in the picker): the result is a message there, not in the chat on
+screen, which gets only a toast naming it, and no turn starts for it. `/clear` stops the
+cleared session's tasks. A task stopped by `/clear` or by quitting says so in its
+session's journal, and `/export` shows it (`*<label> stopped (exit)*`).
 
 ## Clicks, folds and the pager
 

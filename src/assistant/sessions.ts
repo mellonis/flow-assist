@@ -599,6 +599,16 @@ export function flushOnExit(fn: () => void): () => void {
   atExit.add(fn);
   return () => { atExit.delete(fn); };
 }
+// The app's own exit path runs the hooks at once, before anything it waits on (remote
+// plugins stopping): work that ends in that wait must find its conversation already
+// closed, not saving into a session whose lock is gone. Each runs once; the process's
+// `exit` finds none left.
+export function runExitHooks(): void {
+  for (const f of [...atExit]) {
+    atExit.delete(f);
+    try { f(); } catch { /* exiting */ }
+  }
+}
 
 // ─── Ownership lock ─────────────────────────────────────────────────────────────
 // A session held by a live chat has a lock beside it, `<id>.lock` — `{ pid, host,

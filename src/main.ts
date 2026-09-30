@@ -44,6 +44,7 @@ import { consoleBridge } from './runtime/console-log.js';
 import { Conversation } from './assistant/conversation.js';
 import { oneShotOutcome } from './assistant/oneshot.js';
 import { ConversationRegistry } from './assistant/registry.js';
+import { runExitHooks } from './assistant/sessions.js';
 import { ONESHOT_WITHHELD } from './assistant/conversation-turn.js';
 import { createServices } from './runtime/services.js';
 import { hostVersion } from './version.js';
@@ -492,6 +493,11 @@ async function runInteractive(config: Record<string, unknown>, repo: PluginRepo)
   const onExit = () => {
     if (exiting) return;
     exiting = true;
+    // The sessions' exit hooks first, while nothing has been awaited: every live
+    // conversation is saved, unlocked and closed, and each task still running says so in
+    // its session's journal (./assistant/registry.ts, `closeAll`). The unmount after it
+    // finds nothing left to write.
+    runExitHooks();
     handle?.unmount();
     backend.dispose?.();
     // What was printed through the console while the app ran, now that the terminal is

@@ -1766,7 +1766,8 @@ hold this set together:
     `lastStep` (and `limitBy: 'tokens'`, `turnTokens` when the token budget ended it),
     and the text of a round cut off, which never reached `onLiveCommit`.
   - `task-end` — a background task that stopped without finishing: `task` (its label),
-    `outcome: 'stopped'` and `by` — `clear` when `/clear` stopped it with its session.
+    `outcome: 'stopped'` and `by` — `clear` when `/clear` stopped it with its session,
+    `exit` when the process exited while it ran or waited on its delay (`closeAll`).
     Written through the child's route's `raw`, past the filter that keeps a task's own
     lines to `call-start`, `confirm` and `call`; `/export` draws it as `*<label> stopped
     (<by>)*`.
@@ -2642,8 +2643,9 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   from its file (`openFromFile`); `/resume` of the session on screen keeps the object
   on screen and refreshes only the view. The chat makes every
   conversation through its registry (`ConversationRegistry`), made on its first render:
-  its lock token is every conversation's, its exit hook and the chat's unmount write
-  and release what is live (`flushAll`, which closes nothing), and `adopt` tells it
+  its lock token is every conversation's, the chat's unmount writes and releases what
+  is live (`flushAll`, which closes nothing), its exit hook closes everything
+  (`closeAll('exit')`), and `adopt` tells it
   which conversation is on screen. `postToChat` and the screens' gates read the
   conversation the chat holds now (`convRef`).
 - **A conversation has a kind** — `session` (the chat's), `task` (a background task's) or
@@ -2663,8 +2665,19 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   a test rig one per rig. The registry holds the host's lock token, what is said once for
   all of its conversations (the missing memory record), the conversation the chat draws
   (`shown`, what a closed conversation's settings-file y/n asks in), and the one exit
-  hook: `flushAll()` saves every live conversation silently and releases its lock after
-  that save (each in its own try, so one failing save skips no other); it closes nothing.
+  hook, `closeAll('exit')`. `flushAll()` saves every live conversation silently and
+  releases its lock after that save (each in its own try, so one failing save skips no
+  other); it closes nothing — the chat's unmount runs it, and a test process unmounts
+  chats whose work goes on. `closeAll('exit')` runs `flushAll()`, then each task still
+  counted under a live conversation, running or armed, writes `{ t: 'task-end', task,
+  outcome: 'stopped', by: 'exit' }` into its session's journal through its route's
+  `raw` (synchronous, so it lands from `process.on('exit')` too), then every
+  conversation closes with `'exit'`, deepest first. The app's exit path
+  (`src/main.ts`) runs the exit hooks (`runExitHooks`, `sessions.ts`) BEFORE its unmount
+  and before it waits for remote plugins to stop: a task ending in that wait finds its
+  session closed and delivers nothing, where a session only flushed would be parked and
+  saved with its lock already released; the process's own `exit` then finds no hook
+  left.
   A session the chat leaves goes through it: `retire(c)` parks it at once when no task
   of its own is counted (`children`), else marks it `headless` and parks it when its
   `children` event says 0 — after the last result landed, since a task is untracked
@@ -2672,8 +2685,9 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   and only then releases its lock and closes it (`'park'`); `reclaim(c)` takes a kept
   one back (the watch dropped, `headless` cleared). `bySession(id)` is the open
   conversation holding a session here, if any; `statusOf(id)` is its status for the
-  picker — `working` while it is idle and its tasks run (not `Conversation.status`,
-  which others read as "a turn runs") — and null when it is not live.
+  picker — `working` while its tasks run, whatever its own status but a waiting y/n or
+  question (not `Conversation.status`, which others read as "a turn runs") — and null
+  when it is not live.
   It also holds the child slots (`children`, handed to every conversation in its deps):
   the count of background tasks (armed, queued, running) and the cap — a task starts
   while fewer than `max(1, sessions.maxRunning - 1)` run (`maxRunning` 4 by default, so
@@ -2732,7 +2746,9 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   when its run comes — and a task closed so writes its `task-end` line (`by: 'clear'`)
   into the session's journal through its route's `raw` and delivers nothing
   (`stoppedWithParent`). `close('new')` and `close('exit')` touch no
-  child: `/new` leaves the session's tasks running.
+  child: `/new` leaves the session's tasks running, and at exit the registry's
+  `closeAll` writes each task's `task-end` line (`by: 'exit'`) and closes the tree
+  itself, deepest first.
 - **Ctrl+C, Ctrl+D and Ctrl+Z take a second press** (`src/runtime/exit-keys.ts`, pure;
   the App owns the arm). flowtty hands these three to the app BEFORE the terminal
   backend acts (exit, exit, suspend — skipped when a `useInput` handler returns strict

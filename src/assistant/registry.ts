@@ -6,7 +6,7 @@
 import { Conversation } from './conversation.js';
 import type { ConfirmPolicy } from './confirm-policy.js';
 import { wholeOrDefault } from './rounds.js';
-import type { ConversationDeps, ConversationKind, ConversationStatus } from './conversation-types.js';
+import type { CloseReason, ConversationDeps, ConversationKind, ConversationStatus } from './conversation-types.js';
 import { hostDeps, type DepsSource } from './host-deps.js';
 import { flushOnExit, makeLockToken, type Session, type SessionFingerprint } from './sessions.js';
 
@@ -30,8 +30,10 @@ export interface ChildSlots {
 }
 
 export interface RegistryInit extends Omit<DepsSource, 'lockToken' | 'current'> {
-  // One exit hook for the registry: whatever happens at exit, every live conversation's
-  // last change is written and its lock released, in that order.
+  // One exit hook for the registry (`closeAll('exit')`): whatever happens at exit, every
+  // live conversation's last change is written and its lock released, in that order, each
+  // task still counted says in its session's journal that it stopped, and all of them
+  // close.
   exitHook?: boolean;
 }
 
@@ -50,7 +52,7 @@ export class ConversationRegistry {
 
   constructor(private readonly init: RegistryInit) {
     this.canAsk = init.canAsk;
-    if (init.exitHook) this.unhookExit = flushOnExit(() => this.flushAll());
+    if (init.exitHook) this.unhookExit = flushOnExit(() => this.closeAll('exit'));
   }
 
   private makeSlots(): ChildSlots {
@@ -190,6 +192,33 @@ export class ConversationRegistry {
         c.save({ silent: true });
         c.releaseLock();
       } catch { /* exiting: one conversation's failure never skips the others */ }
+    }
+  }
+
+  // The process exits: synchronous, like `flushAll`, which it starts with — every live
+  // conversation saved and its lock released. Then each task still counted, running or
+  // waiting on its delay, writes `task-end … stopped` into its session's journal (through
+  // its route's `raw`, the one its filtered route would not carry), so no journal ends
+  // mid-task without saying why; and everything closes, deepest first. A task still in
+  // flight afterwards delivers nowhere, and no session is parked or saved again: its lock
+  // is gone by then, and another process may already hold the session.
+  closeAll(reason: Extract<CloseReason, 'exit'>): void {
+    this.flushAll();
+    const deepestFirst: Conversation[] = [];
+    const walk = (c: Conversation): void => {
+      for (const child of c.children) walk(child);
+      deepestFirst.push(c);
+    };
+    for (const c of [...this.convs]) walk(c);
+    for (const c of deepestFirst) {
+      if (c.kind !== 'task' || c.closed) continue;
+      try { c.journalRoute?.raw({ t: 'task-end', task: c.label, outcome: 'stopped', by: reason }); }
+      catch { /* exiting: one journal's failure never skips the others */ }
+    }
+    for (const off of this.watches.values()) off();
+    this.watches.clear();
+    for (const c of deepestFirst) {
+      try { c.close(reason); } catch { /* exiting */ }
     }
   }
 }

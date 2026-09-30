@@ -35,7 +35,7 @@
 //            text of a round cut off
 //   task-end a background task that stopped without finishing: `task` (its label),
 //            `outcome` stopped, and `by` — what stopped it (`clear`: its session was
-//            cleared)
+//            cleared; `exit`: the process exited while it ran or waited)
 //
 // `/export` renders a journal as markdown (`exportMarkdown`).
 //
