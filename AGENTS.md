@@ -1862,9 +1862,10 @@ hold this set together:
   chat's end. **A session held here** — left by `/new` or a switch while its
   background tasks run (the registry keeps it loaded and locked until they end) —
   reads `ours` from its lock; the chat marks it `here` (a `LockState` `lockState`
-  never returns: `pickerRows` sets it from `registry.bySession` for a row that is not
-  the session on screen) with `registry.statusOf` (`working` while its tasks run),
-  drawn `here · working`. ⏎ on it takes that conversation back as it is (`openSession`
+  never returns: `pickerRows` sets it for a row that is not the session on screen and
+  that `registry.statusOf` finds live here), with that status — `working` while its
+  tasks run, even when a result that already landed is unseen (it reads `done` from
+  its file once put away), unless a y/n or a question waits — drawn `here · working`. ⏎ on it takes that conversation back as it is (`openSession`
   → `reclaimLive`); delete and move are refused ("still runs its background tasks
   here"); a rename goes through the conversation that holds it, as this chat's own
   does, so its later saves keep the new title. `done` rests on two times the session

@@ -125,14 +125,16 @@ export class ConversationRegistry {
     for (const c of this.convs) if (!c.closed && c.sessionId === id) return c;
     return undefined;
   }
-  // How a live session reads to the picker: its own status, but `working` while it is
-  // idle and its tasks run — kept here, not in `Conversation.status`, which others read
-  // as "a turn runs". null when no conversation here holds it.
+  // How a live session reads to the picker: `working` while its tasks run, whatever its
+  // last answer or result (an unseen one reads `done` from its file once it is put
+  // away), unless a y/n or a question waits; its own status otherwise. Kept here, not in
+  // `Conversation.status`, which others read as "a turn runs". null when no
+  // conversation here holds it.
   statusOf(id: string): ConversationStatus | null {
     const c = this.bySession(id);
     if (!c) return null;
     const own = c.status;
-    return own === 'idle' && c.children.size ? 'working' : own;
+    return c.children.size && own !== 'waiting' ? 'working' : own;
   }
   // What parks each conversation kept headless when its last task ends.
   private readonly watches = new Map<Conversation, () => void>();

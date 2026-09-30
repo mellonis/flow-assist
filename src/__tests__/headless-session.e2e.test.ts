@@ -257,3 +257,41 @@ test("an answer that lands behind the open picker makes this chat's own row `thi
   expect(rowOf(ui.backend.lastFrame!, 'an own question')).toMatch(/an own question\s+this chat · done\s/);
   ui.app.unmount();
 });
+
+test('a session left with two tasks reads `here · working` after the first result lands in it, and `done` once the second ends', async () => {
+  const model = new ScriptedModel();
+  const dir = dirOf();
+  model.script([{ tool: 'background', args: { task: 'slow job', label: 'job' } }], [{ tool: 'background', args: { task: 'second job', label: 'job2' } }], [{ text: 'Started both.' }]);
+  const first = model.when((req) => system(req).includes('Task: slow job'));
+  first.script([{ hold: true }, { text: 'job result' }]);
+  const second = model.when((req) => system(req).includes('Task: second job'));
+  second.script([{ hold: true }, { text: 'second result' }]);
+  const ui = await bootApp(model, 100, 28, undefined, { sessions: { dir } }, { toastMs: 10_000 });
+  await ui.press('F');
+  await ui.type('session A question');
+  await ui.press('return');
+  await settleUntil(() => first.held && second.held && (ui.backend.lastFrame ?? '').includes('Started both.'));
+  await settleUntil(() => saved(dir, 'session A question') !== undefined);
+  const idA = saved(dir, 'session A question')!.id;
+  await ui.type('/new');
+  await ui.press('return');
+  await settle(4);
+
+  first.release();
+  await settleUntil(() => (ui.backend.lastFrame ?? '').includes('⏳ job done — in «session A question»'));
+  await pastTick();
+  // The first result is in A, unseen; the second task still runs.
+  expect(fs.existsSync(lockOf(dir, idA))).toBe(true);
+  await chord(ui, 's');
+  expect(rowOf(ui.backend.lastFrame!, 'session A question')).toMatch(/session A question\s+here · working\s/);
+  ui.backend.press({ name: 'escape' });
+  await settle(2);
+
+  second.release();
+  await settleUntil(() => !fs.existsSync(lockOf(dir, idA)));
+  await pastTick();
+  expect(bgRows(saved(dir, 'session A question'))).toHaveLength(2);
+  await chord(ui, 's');
+  expect(rowOf(ui.backend.lastFrame!, 'session A question')).toMatch(/session A question\s+done\s/);
+  ui.app.unmount();
+});
