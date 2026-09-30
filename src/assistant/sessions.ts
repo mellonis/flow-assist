@@ -609,6 +609,13 @@ export function runExitHooks(): void {
     try { f(); } catch { /* exiting */ }
   }
 }
+// A termination signal (SIGTERM, SIGHUP, SIGINT from outside — Ctrl+C in the app is a
+// key) exits the way quitting does. Called before the app is rendered, this listener
+// runs before flowtty's own, so the exit hooks run before its unmount; and with a
+// listener of ours on the signal flowtty does not re-raise it.
+export function exitOnSignals(onExit: () => void): void {
+  for (const sig of ['SIGTERM', 'SIGHUP', 'SIGINT'] as const) process.on(sig, onExit);
+}
 
 // ─── Ownership lock ─────────────────────────────────────────────────────────────
 // A session held by a live chat has a lock beside it, `<id>.lock` — `{ pid, host,

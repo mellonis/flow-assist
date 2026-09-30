@@ -2691,8 +2691,9 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   session closed and delivers nothing, where a session only flushed would be parked and
   saved with its lock already released; the process's own `exit` then finds no hook
   left. A termination signal (SIGTERM, SIGHUP, an outside SIGINT) takes the same path:
-  `src/main.ts` listens for them before flowtty does, so its listener runs first, and
-  flowtty, seeing another listener, unmounts without re-raising the signal.
+  `src/main.ts` listens for them (`exitOnSignals`, `sessions.ts`) before flowtty does,
+  so its listener runs first, and flowtty, seeing another listener, unmounts without
+  re-raising the signal (`src/__tests__/signal-exit.e2e.test.ts` sends a real SIGTERM).
   A session the chat leaves goes through it: `retire(c)` parks it at once when no task
   of its own is counted (`children`), else marks it `headless` and parks it when its
   `children` event says 0 — after the last result landed, since a task is untracked

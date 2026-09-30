@@ -44,7 +44,7 @@ import { consoleBridge } from './runtime/console-log.js';
 import { Conversation } from './assistant/conversation.js';
 import { oneShotOutcome } from './assistant/oneshot.js';
 import { ConversationRegistry } from './assistant/registry.js';
-import { runExitHooks } from './assistant/sessions.js';
+import { exitOnSignals, runExitHooks } from './assistant/sessions.js';
 import { ONESHOT_WITHHELD } from './assistant/conversation-turn.js';
 import { createServices } from './runtime/services.js';
 import { hostVersion } from './version.js';
@@ -510,11 +510,10 @@ async function runInteractive(config: Record<string, unknown>, repo: PluginRepo)
     // leaves running.
     void stopRemotePlugins().then(() => process.exit(0));
   };
-  // A termination signal (SIGTERM, SIGHUP, SIGINT from outside — Ctrl+C in the app is a
-  // key) exits the way quitting does. Registered before the app's own listener, so the
-  // sessions' exit hooks run before its unmount; with a listener of ours on the signal
-  // the app does not re-raise it, and one arriving again finds `exiting` set.
-  for (const sig of ['SIGTERM', 'SIGHUP', 'SIGINT'] as const) process.on(sig, onExit);
+  // A termination signal exits the way quitting does. Registered before the app's own
+  // listener, so the sessions' exit hooks run before its unmount; one arriving again
+  // finds `exiting` set.
+  exitOnSignals(onExit);
   const pluginsNote = await missingPluginsNote(repo);
   handle = await renderApp(backend, { plugins, config, renders: {}, tools: registry, onExit, pluginsNote: pluginsNote ?? undefined, loadNotes, consoleLog, late, untrusted, trustNotes: [...trustNotes, ...memoryRecordNotes()], site });
 }
