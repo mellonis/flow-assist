@@ -60,11 +60,15 @@ export function pickerGroups(state: PickerState): PickerGroup[] {
 export const pickerMatches = (state: PickerState): SessionRow[] => pickerGroups(state).flatMap((g) => g.rows);
 export const pickerSelected = (state: PickerState): SessionRow | undefined => pickerMatches(state)[state.cursor];
 
-// A list read again (after a rename or a delete) keeps the filter, and the cursor where
-// it still can be.
+// A list read again (after a rename or a delete, or when a session moves) keeps the
+// filter, and the cursor on the session it was on — a session put away sorts anew, and
+// the highlight goes with it. A session gone leaves the cursor where it still can be.
 export function pickerReload(state: PickerState, rows: SessionRow[], notice = ''): PickerState {
   const next: PickerState = { ...state, rows, mode: 'list', notice };
-  return { ...next, cursor: Math.min(state.cursor, Math.max(0, pickerMatches(next).length - 1)) };
+  const matches = pickerMatches(next);
+  const id = pickerSelected(state)?.id;
+  const at = id === undefined ? -1 : matches.findIndex((r) => r.id === id);
+  return { ...next, cursor: at >= 0 ? at : Math.min(state.cursor, Math.max(0, matches.length - 1)) };
 }
 
 // A row's status as drawn: this chat's own session is its conversation's status — `done`

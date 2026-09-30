@@ -344,7 +344,20 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // Closed, it gives the conversation back: an answer that came behind it is seen
           // (`markSeen`, through a ref — it is defined further down).
           const markSeenRef = ui.useRef<() => void>(() => {});
-          const setPicker = (next: PickerState | null) => { pickerRef.current = next; setPickerState(next); if (!next) markSeenRef.current(); host.notify(); };
+          // A registry change while a rename is typed or a delete confirmed is not read
+          // then (a reload would drop it); the list catches up on the return to its list
+          // mode (`pickerRows`, through a ref — it is defined further down).
+          const missedRef = ui.useRef(false);
+          const pickerRowsRef = ui.useRef<(() => SessionRow[]) | null>(null);
+          const setPicker = (value: PickerState | null) => {
+            let next = value;
+            if (!next) missedRef.current = false;
+            else if (next.mode === 'list' && missedRef.current && pickerRowsRef.current) {
+              missedRef.current = false;
+              next = pickerReload(next, pickerRowsRef.current(), next.notice);
+            }
+            pickerRef.current = next; setPickerState(next); if (!next) markSeenRef.current(); host.notify();
+          };
           // A plugin command's panel (`ctx.openPanel`, src/assistant/command-panel.ts),
           // drawn in the conversation's place as the picker is; null — none. Its rows are
           // the plugin's and read at every draw, and a tick redraws it every second while
@@ -1020,13 +1033,16 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             const status = registryRef.current!.statusOf(r.id);
             return status ? { ...r, lock: 'here', status } : r;
           });
+          pickerRowsRef.current = pickerRows;
           // An open picker follows the registry: when a session held here is put away (or
           // one is left to run headless), the list is read again — in its list mode only,
           // since a reload returns to it and would drop a rename being typed or a delete
-          // being confirmed. The filter and the cursor stay (`pickerReload`).
+          // being confirmed; it catches up on the return to the list (`setPicker`). The
+          // filter stays, and the cursor stays on its session (`pickerReload`).
           ui.useEffect(() => registryRef.current!.onChange(() => {
             const p = pickerRef.current;
-            if (!p || p.mode !== 'list' || !sessDirRef.current) return;
+            if (!p || !sessDirRef.current) return;
+            if (p.mode !== 'list') { missedRef.current = true; return; }
             setPicker(pickerReload(p, pickerRows(), p.notice));
           }), []);
           // The picker: the list is read here, after a rename or a delete, and when the

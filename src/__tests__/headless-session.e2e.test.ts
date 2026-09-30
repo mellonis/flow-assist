@@ -349,3 +349,60 @@ test('a rename being typed in the open picker survives a session held here being
   expect(titleIn(dir, idB)).toBe('half typed name done');
   ui.app.unmount();
 });
+
+test('the open picker\'s cursor stays on its session when a session held here is put away and sorts to the top', async () => {
+  const model = new ScriptedModel();
+  const { dir, ui, task, idA } = await startWithTask(model);
+  model.script([{ text: 'B answer' }]);
+  model.script([{ text: 'C answer' }]);
+  for (const q of ['session B question', 'session C question']) {
+    await ui.type('/new');
+    await ui.press('return');
+    await settle(4);
+    await ui.type(q);
+    await ui.press('return');
+    await settleUntil(() => saved(dir, q) !== undefined);
+  }
+  await chord(ui, 's');
+  await ui.press('down'); // from C, this chat's, to B
+  expect(rowOf(ui.backend.lastFrame!, 'session B question')).toContain('› session B question');
+
+  task.release();
+  await settleUntil(() => !fs.existsSync(lockOf(dir, idA)));
+  await pastTick();
+  const frame = ui.backend.lastFrame!;
+  expect(rowOf(frame, 'session A question')).toMatch(/session A question\s+done\s/);
+  expect(rowOf(frame, 'session B question')).toContain('› session B question');
+  expect(rowOf(frame, 'session A question')).not.toContain('›');
+  expect(rowOf(frame, 'session C question')).not.toContain('›');
+  ui.app.unmount();
+});
+
+test('Esc out of a rename returns to a list that caught up: a session put away meanwhile reads its file status, not `here`', async () => {
+  const model = new ScriptedModel();
+  const { dir, ui, task, idA } = await startWithTask(model);
+  model.script([{ text: 'B answer' }]);
+  await ui.type('/new');
+  await ui.press('return');
+  await settle(4);
+  await ui.type('session B question');
+  await ui.press('return');
+  await settleUntil(() => saved(dir, 'session B question') !== undefined);
+  await chord(ui, 's');
+  expect(rowOf(ui.backend.lastFrame!, 'session A question')).toMatch(/session A question\s+here · working\s/);
+  await ui.type('session B');
+  await chord(ui, 'r');
+  await ui.type(' typed');
+
+  task.release();
+  await settleUntil(() => !fs.existsSync(lockOf(dir, idA)));
+  await pastTick();
+  expect(ui.backend.lastFrame).toContain('session B question typed'); // still renaming
+  await ui.press('escape'); // back to the list
+  await ui.press('escape'); // the filter cleared: every row shows
+  await settle(4);
+  const row = rowOf(ui.backend.lastFrame!, 'session A question');
+  expect(row).toMatch(/session A question\s+done\s/);
+  expect(row).not.toContain('here');
+  ui.app.unmount();
+});

@@ -1871,11 +1871,14 @@ hold this set together:
   its file once put away), unless a y/n or a question waits — drawn `here · working`.
   The open picker follows the registry: on each change it hears (`registry.onChange`,
   subscribed once by the chat, which reads the picker, the sessions directory and the
-  lock token through refs) it reads the list again, keeping the filter and the cursor
-  (`pickerReload`) — so a session held here that is put away while the picker is open
-  turns from `here · working` to what its file says with no key pressed. Only in its
-  list mode: a reload returns to it, so a rename being typed or a delete being
-  confirmed is left as it is, and the list catches up at the next change or read.
+  lock token through refs) it reads the list again, keeping the filter, and the cursor
+  on the session it was on (`pickerReload`: a session put away sorts anew, and the
+  highlight stays with its row, not its index; a row gone leaves it where it still can
+  be) — so a session held here that is put away while the picker is open turns from
+  `here · working` to what its file says with no key pressed. Only in its list mode: a
+  reload returns to it, so a rename being typed or a delete being confirmed is left as
+  it is; a change heard meanwhile is remembered, and the list catches up on the return
+  to it (Esc out of the rename, n or Esc on the confirm — the chat's `setPicker`).
   ⏎ on it takes that conversation back as it is (`openSession` → `reclaimLive`, which
   drops the list the chat last drew of it, so a save before the next render writes
   what landed while it was away); delete and move are refused ("still runs its
