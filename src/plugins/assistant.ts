@@ -288,14 +288,23 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // question, fails, or lands a background result. Bound once, when the conversation is
           // made; each handler reaches this render's functions through the ref.
           const viewFx = ui.useRef<Partial<{ [T in ConversationEvent['type']]: (ev: Extract<ConversationEvent, { type: T }>) => void }>>({});
+          // Each bound conversation's unbinders: one the chat leaves while its tasks run stays
+          // loaded, and must not drive this chat's clock, unread count or alert meanwhile.
+          const unbindRef = ui.useRef(new Map<Conversation, Array<() => void>>());
           const bindView = (c: Conversation) => {
-            c.on('turn-start', (ev) => viewFx.current['turn-start']?.(ev));
-            c.on('turn-end', (ev) => viewFx.current['turn-end']?.(ev));
-            c.on('confirm', (ev) => viewFx.current.confirm?.(ev));
-            c.on('question', (ev) => viewFx.current.question?.(ev));
-            c.on('notice', (ev) => viewFx.current.notice?.(ev));
-            c.on('inbox', (ev) => viewFx.current.inbox?.(ev));
-            c.on('activity', (ev) => viewFx.current.activity?.(ev));
+            unbindRef.current.set(c, [
+              c.on('turn-start', (ev) => viewFx.current['turn-start']?.(ev)),
+              c.on('turn-end', (ev) => viewFx.current['turn-end']?.(ev)),
+              c.on('confirm', (ev) => viewFx.current.confirm?.(ev)),
+              c.on('question', (ev) => viewFx.current.question?.(ev)),
+              c.on('notice', (ev) => viewFx.current.notice?.(ev)),
+              c.on('inbox', (ev) => viewFx.current.inbox?.(ev)),
+              c.on('activity', (ev) => viewFx.current.activity?.(ev)),
+            ]);
+          };
+          const unbindView = (c: Conversation) => {
+            for (const off of unbindRef.current.get(c) ?? []) off();
+            unbindRef.current.delete(c);
           };
           if (!convRef.current) { const c = registry.create(); bindView(c); convRef.current = c; registry.show(c); }
           // This render's conversation. `adopt` moves it to the one that replaces it, so a key
@@ -928,6 +937,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // Switches this chat to a saved session — `/resume <n>` and the picker's ⏎. The
           // one being left is written first, so it is on the list to come back to; one
           // another flow-assist process holds is refused with a note naming its lock.
+          // The session already on screen stays as it is: only the view is refreshed. One
+          // still live here (left while its tasks run) is taken back as it is
+          // (`reclaimLive`); any other is read from its file (`openFromFile`).
           // true — switched.
           // `dir` — the directory its file is in (a list's row says).
           const openSession = (id: string, title: string, dir: string): boolean => {
@@ -935,6 +947,33 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             if (!sessDir) return false;
             if (prev.busy) { setError('an answer is still coming — stop it (Esc) before switching sessions'); return false; }
             prev.save();
+            if (id === prev.sessionId) {
+              // No second conversation on its file and no park: its tasks deliver into it,
+              // and its lock stays where it is.
+              setError(null);
+              applySessionView({ draft: prev.port?.draft() ?? prev.keptDraft } as Session);
+              (host.services as Record<string, any>).showMessage?.(`Resumed «${prev.title || 'session'}»`);
+              host.notify();
+              return true;
+            }
+            const live = registryRef.current!.bySession(id);
+            return live ? reclaimLive(prev, live) : openFromFile(prev, id, title, dir);
+          };
+          // A session left while its tasks run is still loaded here, holding its lock: the
+          // chat takes that conversation back, with the draft it kept — never a second one
+          // made from its file. Folds, notes and the pager start afresh.
+          const reclaimLive = (prev: Conversation, live: Conversation): boolean => {
+            setError(null);
+            leave(prev);
+            registryRef.current!.reclaim(live);
+            const draft = live.keptDraft; // before `adopt`: attaching clears it
+            adopt(live);
+            applySessionView({ draft } as Session);
+            (host.services as Record<string, any>).showMessage?.(`Resumed «${live.title || 'session'}»`);
+            host.notify();
+            return true;
+          };
+          const openFromFile = (prev: Conversation, id: string, title: string, dir: string): boolean => {
             // The fingerprint first, stat before the content read just below — see
             // applySession's own comment for why the order matters.
             const fp = sessionFingerprint(dir, id);
@@ -943,21 +982,19 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // Held by another live flow-assist process: refuse and stay put. Own lock
             // already, or free/stale, and this acquires it — side-effect free when held,
             // so nothing to undo on the refusal.
-            if (id !== prev.sessionId) {
-              const outcome = acquireLock(dir, id, lockToken);
-              if (outcome.status === 'held') {
-                prev.pushNote(`Session "${title || id}" is open in another flow-assist process. (lock: ${lockPath(dir, id)})`);
-                // `/resume <n>` in the field is the command, done; from the picker the
-                // field holds the person's draft, which stays.
-                if (/^\s*\//.test(inputRef.current)) setField('');
-                host.notify();
-                return false;
-              }
+            const outcome = acquireLock(dir, id, lockToken);
+            if (outcome.status === 'held') {
+              prev.pushNote(`Session "${title || id}" is open in another flow-assist process. (lock: ${lockPath(dir, id)})`);
+              // `/resume <n>` in the field is the command, done; from the picker the
+              // field holds the person's draft, which stays.
+              if (/^\s*\//.test(inputRef.current)) setField('');
+              host.notify();
+              return false;
             }
             setError(null);
-            if (id !== prev.sessionId) prev.releaseLock(); // leaving the old one
-            // The session opens into a conversation of its own; the one left is parked.
-            prev.close('park');
+            // The session opens into a conversation of its own; the one left is parked, or
+            // kept loaded while its tasks run.
+            leave(prev);
             const next = registryRef.current!.create({ turn: prev.turn, verb: prev.verb, drawnRows: prev.drawnRows });
             adopt(next);
             next.applySession(s, fp, dir); applySessionView(s);
@@ -1049,24 +1086,36 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               }
             }
           };
+          // The chat leaves `prev` for another: its view handlers go, and the registry parks it
+          // — or, while its tasks run, keeps it loaded and headless until they end (`retire`).
+          const leave = (prev: Conversation) => {
+            unbindView(prev);
+            prev.detach(portRef.current!);
+            registryRef.current!.retire(prev);
+          };
           // Leaves the conversation on screen for a new one: the chat's listeners and port move to
           // it, and it is what the chat draws from the next render on (and what this render's
           // handler reaches at once).
           const adopt = (next: Conversation) => {
             const port = portRef.current!;
             convRef.current?.detach(port);
-            bindView(next);
+            // One taken back was unbound when it was left and is bound again here.
+            if (!unbindRef.current.has(next)) bindView(next);
             convRef.current = next;
             registryRef.current!.show(next);
             conv = next;
             next.attach(port);
           };
-          // A fresh conversation in this chat — `/clear` and `/new` both. The one left is closed
-          // (what it ran is stopped; a late callback journals where it happened and draws nothing);
-          // the person's ↑/↓ history, the turn counter, the last verb and the list as last drawn
-          // carry over — they are the chat's field's and status line's, and what the chat showed.
+          // A fresh conversation in this chat — `/clear` and `/new` both. `/clear` closes the one
+          // left (what it ran is stopped; a late callback journals where it happened and draws
+          // nothing); `/new` leaves it (`leave`). The person's ↑/↓ history, the turn counter,
+          // the last verb and the list as last drawn carry over — they are the chat's field's
+          // and status line's, and what the chat showed.
           const renew = (prev: Conversation, reason: 'clear' | 'new') => {
-            prev.close(reason);
+            // `/new` leaves the session as it is (parked, or kept while its tasks run);
+            // `/clear` closes it, and its tasks stop with it.
+            if (reason === 'new') leave(prev);
+            else { unbindView(prev); prev.close(reason); }
             const next = registryRef.current!.create({ prompts: prev.prompts, turn: prev.turn, verb: prev.verb, drawnRows: prev.drawnRows });
             adopt(next);
             next.startFresh();
@@ -1098,7 +1147,6 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             const prev = convRef.current!;
             if (prev.busy) { setError('an answer is still coming — stop it (Esc) before starting a new session'); return false; }
             prev.save();
-            prev.releaseLock();
             renew(prev, 'new');
             (host.services as Record<string, any>).showMessage?.('New session — /sessions lists the others');
             return true;

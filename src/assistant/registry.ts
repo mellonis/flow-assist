@@ -6,7 +6,7 @@
 import { Conversation } from './conversation.js';
 import type { ConfirmPolicy } from './confirm-policy.js';
 import { wholeOrDefault } from './rounds.js';
-import type { ConversationDeps, ConversationKind } from './conversation-types.js';
+import type { ConversationDeps, ConversationKind, ConversationStatus } from './conversation-types.js';
 import { hostDeps, type DepsSource } from './host-deps.js';
 import { flushOnExit, makeLockToken, type Session, type SessionFingerprint } from './sessions.js';
 
@@ -118,6 +118,60 @@ export class ConversationRegistry {
   }
 
   live(): readonly Conversation[] { return [...this.convs]; }
+
+  // ── a session the chat leaves while its tasks run
+  // The open conversation holding session `id`, if one is live here.
+  bySession(id: string): Conversation | undefined {
+    for (const c of this.convs) if (!c.closed && c.sessionId === id) return c;
+    return undefined;
+  }
+  // How a live session reads to the picker: its own status, but `working` while it is
+  // idle and its tasks run — kept here, not in `Conversation.status`, which others read
+  // as "a turn runs". null when no conversation here holds it.
+  statusOf(id: string): ConversationStatus | null {
+    const c = this.bySession(id);
+    if (!c) return null;
+    const own = c.status;
+    return own === 'idle' && c.children.size ? 'working' : own;
+  }
+  // What parks each conversation kept headless when its last task ends.
+  private readonly watches = new Map<Conversation, () => void>();
+  // The chat leaves `c` (a switch, `/new`). With no task of its own left it is parked
+  // now; otherwise it stays loaded, locked and headless, and is parked once its last
+  // task's result has landed in it.
+  retire(c: Conversation): 'parked' | 'kept' {
+    if (!c.children.size) { this.park(c); return 'parked'; }
+    c.headless = true;
+    const off = c.on('children', (ev) => {
+      if (ev.count) return;
+      this.watches.delete(c);
+      off();
+      this.park(c);
+    });
+    this.watches.set(c, off);
+    this.notifyChange();
+    return 'kept';
+  }
+  // The chat takes a headless conversation back: it is no longer parked when its tasks end.
+  reclaim(c: Conversation): void {
+    this.watches.get(c)?.();
+    this.watches.delete(c);
+    c.headless = false;
+  }
+  // A conversation the chat has left, put away: what waits in its inbox lands as rows, it
+  // is saved, and only then is its lock released and the object closed — a result that
+  // landed in it is in its file before another process may take the session.
+  park(c: Conversation): void {
+    if (c.closed) return;
+    c.takeInbox('rows');
+    c.save({ silent: true });
+    c.releaseLock();
+    c.close('park');
+    this.notifyChange();
+  }
+  // The chat redraws what reads the registry (the footer's count, the picker).
+  private notifyChange(): void { try { this.init.notify(); } catch { /* a redraw is never fatal */ } }
+
   show(c: Conversation): void { this.onScreen = c; }
   shown(): Conversation | null { return this.onScreen; }
 

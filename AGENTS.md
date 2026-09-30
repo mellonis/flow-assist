@@ -1687,7 +1687,8 @@ hold this set together:
   port is attached: with one, the list as the chat last drew it and the draft the port
   holds; with none, the conversation's own `messages` and the draft it kept when its
   port left (`keptDraft`), so a conversation kept loaded without a view never saves a
-  stale drawn list or an empty draft. A
+  stale drawn list or an empty draft. The list half is `currentRows()`, which the
+  project instructions' "said once" check reads too. A
   write is temp file + rename; a file that does not parse is skipped. On start the
   newest session of the project the shell starts in is continued (`pickToContinue`)
   unless `/clear` closed it; another project's is NEVER continued in its place — a
@@ -1959,8 +1960,11 @@ hold this set together:
   lock is acquired when a session first gets its id (a fresh one, or the one a
   start-up/`/resume` continues) and released — after the final save — on exit
   (`flushOnExit`), `/clear`, `/new`, `/resume` to another session, and
-  component unmount. `pruneSessions` leaves a HELD session's file alone regardless
-  of the keep count (deleting it out from under a live process would be a second
+  component unmount — except that a session left by `/new` or `/resume` while its
+  background tasks run keeps its lock until the last one ends, and is saved and
+  released then (the registry's `retire` and `park`): another process sees it held
+  meanwhile. `/resume` of the session already on screen leaves its lock as it is.
+  `pruneSessions` leaves a HELD session's file alone regardless of the keep count (deleting it out from under a live process would be a second
   way to lose data) and separately sweeps any `.lock` whose session file is already
   gone, unless that lock is itself still held. A session the host would continue
   that is HELD is left alone — a new one starts instead — and `/resume` of a HELD
@@ -2610,11 +2614,19 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   guards this in React commits: an answer read at once draws a couple of times, and one
   read delta by delta (200 reads) draws at most once per read, +3.5 % — the racing
   variants draw 6–9 % more. The
-  model's saves and notes read the list as the chat last drew it (`drawnRows`, set by
-  every render), so a save and the journal see what the person saw. One conversation per
-  session: `/clear`, `/new` and `/resume` give the chat a new object (`adopt` moves the
-  chat's listeners, its port and what the render's handlers reach to it), and the one
-  left is closed — it saves nothing and draws nothing more. The chat makes every
+  model's saves and notes read the list as the chat last drew it while a port draws the
+  conversation (`drawnRows`, set by every render; `currentRows`), so a save and the
+  journal see what the person saw; with no port they read its own `messages`. One
+  conversation per session: `/clear`, `/new` and `/resume` give the chat another object
+  (`adopt` moves the chat's listeners, its port and what the render's handlers reach
+  to it). `/clear` closes the one left. `/new` and `/resume` leave it (`leave`: its
+  view handlers unbound, its port detached, then the registry's `retire`): closed at
+  once when none of its tasks runs, else kept loaded, locked and drawn by nobody until
+  they end — it draws nothing on this chat meanwhile (no clock, unread count, alert or
+  row; only a task's toast names it). `/resume` of that session while it is kept takes
+  the same object back, with the draft it kept (`reclaimLive`), never a second one read
+  from its file (`openFromFile`); `/resume` of the session on screen keeps the object
+  on screen and refreshes only the view. The chat makes every
   conversation through its registry (`ConversationRegistry`), made on its first render:
   its lock token is every conversation's, its exit hook and the chat's unmount write
   and release what is live (`flushAll`, which closes nothing), and `adopt` tells it
@@ -2639,6 +2651,15 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   (`shown`, what a closed conversation's settings-file y/n asks in), and the one exit
   hook: `flushAll()` saves every live conversation silently and releases its lock after
   that save (each in its own try, so one failing save skips no other); it closes nothing.
+  A session the chat leaves goes through it: `retire(c)` parks it at once when no task
+  of its own is counted (`children`), else marks it `headless` and parks it when its
+  `children` event says 0 — after the last result landed, since a task is untracked
+  only after its delivery; `park(c)` lands what waits in its inbox as rows, saves it,
+  and only then releases its lock and closes it (`'park'`); `reclaim(c)` takes a kept
+  one back (the watch dropped, `headless` cleared). `bySession(id)` is the open
+  conversation holding a session here, if any; `statusOf(id)` is its status for the
+  picker — `working` while it is idle and its tasks run (not `Conversation.status`,
+  which others read as "a turn runs") — and null when it is not live.
   It also holds the child slots (`children`, handed to every conversation in its deps):
   the count of background tasks (armed, queued, running) and the cap — a task starts
   while fewer than `max(1, sessions.maxRunning - 1)` run (`maxRunning` 4 by default, so
@@ -3602,9 +3623,12 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     out after a limit and carries them, as after any turn.
   - `ai.backgroundFollowUp` (read `!== false`, so true when unset) is what starts the
     follow-up turn; `false` keeps rows only — the items land the same way and are read
-    with the person's next message. `/clear`, `/new` and opening another session empty
-    the inbox. `/clear` also stops the cleared session's tasks — a running one is
-    aborted and delivers nothing, a delayed one is cancelled; after `/new` or opening
+    with the person's next message. A session left while its tasks run (`headless`)
+    starts no follow-up either: a result lands in it as a row, read with the person's
+    next message there. `/clear` empties the inbox; `/new` and opening another session
+    land what waits in it as rows of the session left (`park`), or keep it there while
+    that session's tasks run. `/clear` also stops the cleared session's tasks — a
+    running one is aborted and delivers nothing, a delayed one is cancelled; after `/new` or opening
     another session a task still running delivers into the session it was started
     from, and a closed one takes nothing.
   - **The model is told this contract, not a kinder one.** `background`'s description

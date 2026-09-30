@@ -69,6 +69,10 @@ export class Conversation {
   // timer of each one still armed.
   readonly children = new Set<Conversation>();
   readonly childTimers = new Map<Conversation, ReturnType<typeof setTimeout>>();
+  // Left by the chat while its children run (the registry's `retire`): kept loaded and
+  // locked, drawn by nobody, until the last one ends. A result lands in it as a row and
+  // starts no turn (`takeInbox`).
+  headless = false;
   readonly deps: ConversationDeps;
   // Who answers a write's y/n in this conversation (src/assistant/confirm-policy.ts):
   // `ask` for the chat's; decided when it is made, never changed.
@@ -372,9 +376,14 @@ export class Conversation {
   get attached(): boolean { return this.port !== null; }
   // The attached port's `showsEnd()`; false with none.
   shows(): boolean { return this.port?.showsEnd() ?? false; }
-  // The list as the model's own reads see it: as the chat last drew it (what a save
-  // writes, what the notes' "said once" checks), or the list itself with no chat.
+  // The list as the model's own reads see it: as the chat last drew it, or the list
+  // itself with no chat.
   rows(): ChatMsg[] { return this.drawnRows ?? this.messages; }
+  // The list as it stands for a save and for the notes' "said once" check: as the chat
+  // last drew it while a port draws it; with none (a conversation kept loaded without a
+  // view), its own `messages`, since the drawn list stopped when its port left and lacks
+  // what landed since.
+  currentRows(): ChatMsg[] { return this.port ? this.rows() : this.messages; }
 
   // The last answer in the list (`lastAnswerOf`). '' when no answer has text.
   lastAnswer(): string { return lastAnswerOf(this.messages); }
@@ -742,7 +751,9 @@ export class Conversation {
     if (!this.inbox.length) { this.clearInbox(); return; }
     if (this.inboxHeld()) return;
     const followUp = (this.deps.config().ai as { backgroundFollowUp?: unknown } | undefined)?.backgroundFollowUp !== false;
-    if (mode === 'rows' || !followUp) { this.landInbox(); return; }
+    // A conversation nobody draws starts no turn: what landed is read with the person's
+    // next message there.
+    if (mode === 'rows' || !followUp || this.headless) { this.landInbox(); return; }
     const last = this.landInbox(true).at(-1)!;
     void this.send(last, { fromInbox: true });
   }
@@ -880,7 +891,7 @@ export class Conversation {
   // A note is said once: not again when the list already ends in the same one
   // (a continued session that said it before the restart).
   pushProjectNote(note: string): void {
-    const said = this.rows().findLast((m) => m.role === 'note' && String(m.content ?? '').startsWith('Project instructions:'));
+    const said = this.currentRows().findLast((m) => m.role === 'note' && String(m.content ?? '').startsWith('Project instructions:'));
     if (said?.content !== note) this.journal({ t: 'row', role: 'note', text: note });
     this.setRows((cur) => {
       const last = cur.findLast((m) => m.role === 'note' && String(m.content ?? '').startsWith('Project instructions:'));

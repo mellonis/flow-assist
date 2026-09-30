@@ -70,13 +70,11 @@ export function releaseLockOf(c: Conversation): void {
 // What a save writes depends on whether anybody draws the conversation. With a port
 // attached it is the list as the chat last drew it, and the draft the port holds. With
 // none (a conversation kept loaded without a view) nothing draws, so the drawn list may
-// lag a row that landed since: it is the conversation's own `messages` and the draft it
-// kept when it was detached.
-function savedRows(c: Conversation) { return c.port ? c.rows() : c.messages; }
-
+// lag a row that landed since: it is the conversation's own `messages`
+// (`Conversation.currentRows`) and the draft it kept when it was detached.
 export function snapshotSession(c: Conversation): Session {
   ensureSessionId(c);
-  const rows = savedRows(c) as Record<string, unknown>[];
+  const rows = c.currentRows() as Record<string, unknown>[];
   if (!c.title) c.title = sessionTitle(rows);
   return {
     version: SESSION_VERSION, id: c.sessionId, title: c.title, createdAt: c.createdAt, updatedAt: new Date().toISOString(),
@@ -182,7 +180,7 @@ export function writeSession(c: Conversation, opts: { silent?: boolean } = {}): 
   if (c.closed) return;
   if (c.saveTimer) { clearTimeout(c.saveTimer); c.saveTimer = null; }
   const dir = c.deps.sessionsDir();
-  if (!dir || !savedRows(c).some((m) => personSpoke(m.role))) return; // nothing said or run yet
+  if (!dir || !c.currentRows().some((m) => personSpoke(m.role))) return; // nothing said or run yet
   try {
     const snap = snapshotSession(c);
     const home = homeOf(c, snap.id) ?? projectHome(dir, snap.project ?? null);
