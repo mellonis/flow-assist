@@ -2698,14 +2698,14 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   three), the rest wait FIFO, and a session's own turn never takes or waits for one. The
   `background` tool (`src/loader/tools-core.ts`) arms the task with its delay's timer
   (counted, holding no slot), disarms it with the same handle when the delay ends and
-  tells the conversation so (`fired`), then admits the run, which takes a slot until it settles — its last notify comes a tick
-  after, once the slot is free; the chat's
+  tells the conversation so (`fired`), then admits the run, which takes a slot until it
+  settles — its last notify comes a tick after, once the slot is free; the chat's
   `N in background` is `backgroundCount()`, over every conversation of the registry, so
   it counts the tasks of a session left by `/new` too (`/clear` stops the cleared
   session's own). A task's result says `stopped after N rounds — last: …` when its
   twelve rounds ran out, and a `failed`/`stopped` end is reported as a failure — but for
-  a task stopped with its conversation (`stoppedWithParent`), which only the log names:
-  `[bg] <label> stopped with its conversation`, no toast, no row.
+  a task stopped with its conversation or at exit (`stoppedWithParent`), which only the
+  log names: `[bg] <label> stopped with its conversation`, no toast, no row.
 - **A conversation starts a child of its own** (`startChild(spec, journalId)`, in
   `src/assistant/conversation.ts`; a turn hands it to its tools as `ctx.startChild`, with
   the host's slots as `ctx.childSlots`): a `task` conversation (`parent`, `depth` one more,
@@ -2751,8 +2751,9 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   into the session's journal through its route's `raw` and delivers nothing
   (`stoppedWithParent`). `/new` closes nothing: the chat leaves the session through
   the registry's `retire`, and its tasks run on. `close('exit')` touches no child: at
-  exit the registry's `closeAll` writes each task's `task-end` line (`by: 'exit'`) and
-  closes the tree itself, deepest first; `close('exit')` of a task stops its own turn.
+  exit the registry's `closeAll` writes each task's `task-end` line (`by: 'exit'`),
+  clears and disarms every timer of a task still waiting on its delay, and closes the
+  tree itself, deepest first; `close('exit')` of a task stops its own turn.
 - **Ctrl+C, Ctrl+D and Ctrl+Z take a second press** (`src/runtime/exit-keys.ts`, pure;
   the App owns the arm). flowtty hands these three to the app BEFORE the terminal
   backend acts (exit, exit, suspend — skipped when a `useInput` handler returns strict

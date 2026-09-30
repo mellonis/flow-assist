@@ -589,8 +589,8 @@ export class Conversation {
       ran = true;
       // Stopped while it waited for its delay or a slot: it sends nothing.
       const r: ChildResult = child.closed ? { outcome: 'stopped', text: '' } : await outcomeOf();
-      // Stopped with the conversation that holds it: its result goes nowhere.
-      const stopped = child.closeReason === 'parent';
+      // Stopped with the conversation that holds it, or at exit: its result goes nowhere.
+      const stopped = child.closeReason === 'parent' || child.closeReason === 'exit';
       // Its save and inbox timers go with it; its own live children move to its parent.
       child.close('park');
       // The result goes to the session the chain started from — the nearest ancestor

@@ -745,7 +745,7 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
             };
             try {
               const r = await started.run();
-              // Stopped with its conversation (`/clear`): only the log says so.
+              // Stopped with its conversation (`/clear`, or the exit): only the log says so.
               if (r.stoppedWithParent) { c.pushLog?.(`[bg] ${label} stopped with its conversation`); return; }
               if (r.outcome === 'failed' || r.outcome === 'stopped') { failed(r.error ?? r.outcome); return; }
               // The log says the result without its `<label> finished:` line.

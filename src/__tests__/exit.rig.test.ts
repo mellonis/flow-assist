@@ -136,3 +136,44 @@ test('at exit a task in the middle of its turn stops: no tool call and no reques
   expect(mark.runs.n).toBe(0);
   expect(taskRequests()).toBe(1);
 });
+
+// What the tool said about task `label`, on screen and in the log.
+const saidAbout = (rig: Rig, label: string) => ({
+  toasts: rig.toasts.filter((t) => t.includes(label)),
+  log: rig.log.filter((l) => l.startsWith(`[bg] ${label}`)),
+});
+
+test('a task running at exit reads stopped, not failed: no toast, and the log says it stopped with its conversation', async () => {
+  const model = new ScriptedModel();
+  model.script([{ tool: 'background', args: { task: 'find it', label: 'find' } }], [{ text: 'Started.' }]);
+  const task = taskScript(model, 'find it');
+  task.script([{ hold: true }, { text: 'found it' }]);
+  const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
+  await rig.conv.send('find it in the background');
+  await rig.until(() => task.held);
+  rig.registry.closeAll('exit');
+  task.release();
+  await rig.until(() => rig.registry.children.backgroundCount() === 0, 3_000);
+  await new Promise((r) => setTimeout(r, 20));
+  expect(saidAbout(rig, 'find')).toEqual({ toasts: [], log: ['[bg] find stopped with its conversation'] });
+});
+
+test('a task waiting on its delay at exit never starts: its timer is cleared, the count drops at once, and nothing is said', async () => {
+  const model = new ScriptedModel();
+  model.script([{ tool: 'background', args: { task: 'later', label: 'late', in: '0.2 seconds' } }], [{ text: 'Started.' }]);
+  const task = taskScript(model, 'later');
+  task.script([{ text: 'late done' }]);
+  const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
+  const s = rig.conv;
+  await s.send('later, in the background');
+  expect(s.childTimers.size).toBe(1);
+  expect(rig.registry.children.backgroundCount()).toBe(1);
+  rig.registry.closeAll('exit');
+  expect(s.childTimers.size).toBe(0);
+  expect(rig.registry.children.backgroundCount()).toBe(0);
+  // Past the delay: a timer left armed would have fired by now.
+  await new Promise((r) => setTimeout(r, 400));
+  expect(model.requests.filter((r) => system(r).includes('Task: later'))).toHaveLength(0);
+  expect(saidAbout(rig, 'late')).toEqual({ toasts: [], log: [] });
+  expect(rig.registry.children.backgroundCount()).toBe(0);
+});

@@ -190,8 +190,8 @@ export interface ChildResult {
   // any).
   delivered?: string;
   landedIn?: { title: string; onScreen: boolean };
-  // Stopped because the conversation holding it was cleared: nothing was delivered, and
-  // the tool says nothing on screen.
+  // Stopped because the conversation holding it was cleared, or because the process
+  // exits: nothing was delivered, and the tool says nothing on screen.
   stoppedWithParent?: true;
 }
 // A child's result without its header line: the reason it failed, or its text and the
