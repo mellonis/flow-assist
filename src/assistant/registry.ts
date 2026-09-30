@@ -163,6 +163,8 @@ export class ConversationRegistry {
   // landed in it is in its file before another process may take the session.
   park(c: Conversation): void {
     if (c.closed) return;
+    // Lands what waits. Nothing holds the inbox here: the chat leaves a conversation only
+    // while nothing of its own runs, and one left runs no turn of its own.
     c.takeInbox('rows');
     c.save({ silent: true });
     c.releaseLock();

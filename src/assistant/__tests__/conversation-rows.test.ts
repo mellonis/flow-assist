@@ -1,8 +1,10 @@
-// The project's instructions are said once against the list as it stands: as the chat
-// last drew it while a port draws the conversation, its own list with none — the drawn
-// list stopped when the port left (AGENTS.md (a session is one object)).
+// The list as it stands (`Conversation.currentRows`): as the chat last drew it while a
+// port draws the conversation, its own list with none — the drawn list stopped when the
+// port left. A save writes it, and the project's instructions are said once against it
+// (AGENTS.md (sessions survive a restart)).
 import { expect, test } from 'bun:test';
 import { Conversation } from '../conversation.ts';
+import { snapshotSession } from '../conversation-session.ts';
 import type { JournalEvent } from '../journal.ts';
 import type { ViewPort } from '../conversation-types.ts';
 import { fakeDeps } from './conversation-deps.ts';
@@ -32,4 +34,14 @@ test('with a port, the drawn list is what was said: a note it ends in is not jou
   c.attach(port);
   c.pushProjectNote(NOTE);
   expect(lines).toEqual([]);
+});
+
+test('a save of a conversation a port draws writes the list as drawn, not its own', () => {
+  const c = new Conversation(fakeDeps());
+  c.setRows([{ role: 'user', content: 'asked' }]);
+  const drawn = c.messages;
+  c.setRows((cur) => [...cur, { role: 'bg', content: 'not drawn yet' }]);
+  c.attach(port);
+  c.drawnRows = drawn;
+  expect(snapshotSession(c).messages).toEqual([{ role: 'user', content: 'asked' }]);
 });

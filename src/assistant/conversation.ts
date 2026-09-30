@@ -376,8 +376,8 @@ export class Conversation {
   get attached(): boolean { return this.port !== null; }
   // The attached port's `showsEnd()`; false with none.
   shows(): boolean { return this.port?.showsEnd() ?? false; }
-  // The list as the model's own reads see it: as the chat last drew it, or the list
-  // itself with no chat.
+  // The list as the chat last drew it, or `messages` when none was drawn. A save and the
+  // notes read `currentRows`, which asks this only while a port draws the conversation.
   rows(): ChatMsg[] { return this.drawnRows ?? this.messages; }
   // The list as it stands for a save and for the notes' "said once" check: as the chat
   // last drew it while a port draws it; with none (a conversation kept loaded without a
@@ -388,15 +388,20 @@ export class Conversation {
   // The last answer in the list (`lastAnswerOf`). '' when no answer has text.
   lastAnswer(): string { return lastAnswerOf(this.messages); }
 
-  // The chat leaves this conversation for good, or a task ends. What runs is stopped for
-  // /clear, /new and a stop by the parent (`'parent'`): a pending y/n is declined `by:
-  // 'reset'`, a question dismissed; for a switch nothing runs, since the chat refuses one
-  // while anything does. The tasks it started are stopped only by /clear and by a stop
-  // from its own parent (`stopChildren`); a task that ends (`park`) hands the ones still
-  // live to its parent (`handChildrenUp`); /new and an exit leave them running. Work still
-  // in flight afterwards writes its journal lines where it happened and nothing else: the
-  // object draws nothing more (no listeners), saves nothing (`persist`, `save`) and holds
-  // no timer. The save and the lock's release are the chat's, before it closes.
+  // The conversation ends: /clear closes it, a session the chat left is put away
+  // (`'park'`, by the registry's `park` — at once, or when its last task ends), a task
+  // that ends is parked too, a parent's stop closes a task (`'parent'`), an exit closes
+  // everything. What runs is stopped for /clear and a stop by the parent: a pending y/n
+  // is declined `by: 'reset'`, a question dismissed; a session is left only while
+  // nothing of its own runs, since the chat refuses a switch or /new while anything
+  // does. The tasks it started are stopped only by /clear and by a stop from its own
+  // parent (`stopChildren`); a task that ends hands the ones still live to its parent
+  // (`handChildrenUp`); a park of a session has none left, and an exit leaves them
+  // running. Work still in flight afterwards writes its journal lines where it happened
+  // and nothing else: the object draws nothing more (no listeners), saves nothing
+  // (`persist`, `save`) and holds no timer. The save and the lock's release come first,
+  // from whoever closes it: the chat for /clear, the registry's `park` for a session
+  // left.
   close(reason: CloseReason): void {
     if (this.isClosed) return;
     this.closeReason = reason;

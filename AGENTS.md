@@ -1964,14 +1964,15 @@ hold this set together:
   background tasks run keeps its lock until the last one ends, and is saved and
   released then (the registry's `retire` and `park`): another process sees it held
   meanwhile. `/resume` of the session already on screen leaves its lock as it is.
-  `pruneSessions` leaves a HELD session's file alone regardless of the keep count (deleting it out from under a live process would be a second
-  way to lose data) and separately sweeps any `.lock` whose session file is already
-  gone, unless that lock is itself still held. A session the host would continue
-  that is HELD is left alone — a new one starts instead — and `/resume` of a HELD
-  session refuses; both say so with a display note naming the lock file so a person
-  can go clear it by hand: `Session "<title or id>" is open in another flow-assist
-  process (lock: <path>)`, with `— started a new one.` inserted before the
-  parenthetical for the start-up case. **A save also checks the disk — not only
+  `pruneSessions` leaves a HELD session's file alone regardless of the keep count
+  (deleting it out from under a live process would be a second way to lose data) and
+  separately sweeps any `.lock` whose session file is already gone, unless that lock
+  is itself still held. A session the host would continue that is HELD is left alone
+  — a new one starts instead — and `/resume` of a HELD session refuses; both say so
+  with a display note naming the lock file so a person can go clear it by hand:
+  `Session "<title or id>" is open in another flow-assist process (lock: <path>)`,
+  with `— started a new one.` inserted before the parenthetical for the start-up
+  case. **A save also checks the disk — not only
   the rev.** Every session file carries a `rev`, bumped by `saveSession` on every
   write (absent — an older host — reads as 0) and returned together with the
   file's own `mtimeMs`/`size` as one fingerprint (`sessionFingerprint`,
