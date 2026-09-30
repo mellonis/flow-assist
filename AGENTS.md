@@ -2659,18 +2659,22 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   which sends the task as background work, answers the end
   (`outcome`, the trimmed text, the error, the round or token limit with its last step),
   closes the child (`park`: its save and inbox timers go) and **delivers its result to
-  the conversation that started it** (`childResultText`: `<label> finished:` with the
-  text and the limit, or `<label> failed:`), never to whatever the chat shows. A closed
-  conversation's `deliver` lands nothing: the end then carries `delivered: ''` and no
+  the session its chain started from** — the nearest ancestor that is not a task, so a
+  grandchild's result goes to the session too, never to the task that started it
+  (which may have ended, or be in its last turn with its inbox about to go) —
+  (`childResultText`: `<label> finished:` or `<label> failed:`, then
+  `childResultBody`: the text and the limit, or the reason), never to whatever the chat
+  shows. A closed session's `deliver` lands nothing: the end then carries `delivered: ''` and no
   `landedIn`. Otherwise it carries `delivered` (the text) and `landedIn` (the title of
-  the conversation it landed in, and `onScreen`: it is the registry's `shown`, or none is
+  the session it landed in, and `onScreen`: it is the registry's `shown`, or none is
   shown), from which the tool's toast reads `⏳ <label> done`, or `⏳ <label> done — in
   «<title>»` (`in an untitled session` for an empty title) when it landed elsewhere. The
   starting conversation counts its children (`children`: armed, queued or running;
   `childTimers`: the delay timer each one was armed with, handed over by the caller
   through `armed(timer)`) from `startChild` until the result is in, and emits `children` with
-  the count at both ends. The result is delivered BEFORE the child is untracked, so
-  whoever sees the count fall finds it already in.
+  the count at both ends. The result is delivered BEFORE the child is untracked (in a
+  `finally`, so a throwing delivery still untracks it), so whoever sees the count fall
+  finds it already in.
 - **Ctrl+C, Ctrl+D and Ctrl+Z take a second press** (`src/runtime/exit-keys.ts`, pure;
   the App owns the arm). flowtty hands these three to the app BEFORE the terminal
   backend acts (exit, exit, suspend — skipped when a `useInput` handler returns strict
@@ -3535,8 +3539,8 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   delivered at the next round boundary (the ⏎ bullet above). The **inbox** (`Conversation.inbox`,
   `src/assistant/conversation.ts`) holds what reaches the chat from outside the conversation
   and is not the person's — a **background result** (a background task
-  finishing: its `run()` delivers it into the inbox of the conversation that started
-  it, never into whatever the chat shows), and any later source of the same kind goes
+  finishing: its `run()` delivers it into the inbox of the session its chain started
+  from, never into whatever the chat shows), and any later source of the same kind goes
   through it too. `services.postToChat` is the plugins' channel into it, for the
   conversation the chat shows. The inbox **never enters a running turn**: no round and no tool
   call is interrupted, and nothing lands between a call and its result. It is taken
@@ -3576,8 +3580,8 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   - `ai.backgroundFollowUp` (read `!== false`, so true when unset) is what starts the
     follow-up turn; `false` keeps rows only — the items land the same way and are read
     with the person's next message. `/clear`, `/new` and opening another session empty
-    the inbox (a task still running delivers into the conversation that started it, and
-    a closed one takes nothing).
+    the inbox (a task still running delivers into the session it was started from, and a
+    closed one takes nothing).
   - **The model is told this contract, not a kinder one.** `background`'s description
     (`src/loader/tools-core.ts`) says a result lands in the chat as `<label>
     finished:` (or `failed:`) when the current turn ends, never in the middle of it;

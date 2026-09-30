@@ -18,7 +18,7 @@ import { markFacts } from '../assistant/memory-trust.js';
 import { tildePath } from '../assistant/shell.js';
 import { openInBrowser } from '../runtime/services.js';
 import { inBackgroundWork } from '../runtime/background-work.js';
-import { childResultText, type ChildSpec, type ChildStart } from '../assistant/conversation-types.js';
+import { childResultBody, type ChildSpec, type ChildStart } from '../assistant/conversation-types.js';
 import type { ChildSlots } from '../assistant/registry.js';
 import { resolveIdentityToken } from '../runtime/plugin-identity.js';
 import { DEFAULT_THEME } from '../playback/theme.js';
@@ -709,7 +709,7 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
         // called this (AGENTS.md, "A conversation starts a child of its own"): its own
         // plan, shell, tool set and abort, no recall and nobody to ask, every write
         // declined, twelve rounds. The tool answers at once; when the task ends its result
-        // goes into the inbox of the conversation that started it (`run()` delivers it),
+        // goes into the inbox of the session its chain started from (`run()` delivers it),
         // and the tool says so in the toast and the log line.
         const task = String(args.task ?? '').trim();
         if (!task) return 'task is required — the work to do in the background.';
@@ -746,7 +746,7 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
               const r = await started.run();
               if (r.outcome === 'failed' || r.outcome === 'stopped') { failed(r.error ?? r.outcome); return; }
               // The log says the result without its `<label> finished:` line.
-              c.pushLog?.(`[bg] ${label}: ${childResultText(label, r).slice(`${label} finished:\n`.length)}`);
+              c.pushLog?.(`[bg] ${label}: ${childResultBody(r)}`);
               // Landed nowhere (its conversation was closed first): nothing to point at.
               const home = r.landedIn;
               if (!home) return;

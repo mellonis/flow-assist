@@ -471,7 +471,8 @@ export class Conversation {
   // tagged `task: <label>` (a grandchild's own label kept). Refused past
   // `ai.subagentDepth`. It is one of this conversation's `children` from here until its
   // result is in. Nothing runs until `run()`, which closes the child when it ends and
-  // delivers its result here; the caller admits and schedules it, and hands its delay
+  // delivers its result to this conversation's session (itself, unless it is a task);
+  // the caller admits and schedules it, and hands its delay
   // timer to `armed`.
   startChild(spec: ChildSpec, journalId: string): ChildStart {
     const max = wholeOrDefault((this.deps.config().ai as { subagentDepth?: unknown } | undefined)?.subagentDepth, 2, 1);
@@ -516,23 +517,31 @@ export class Conversation {
       const r = await outcomeOf();
       // Its save and inbox timers go with it.
       child.close('park');
-      // The result goes to the conversation that started the child, never to whatever
-      // the chat draws; a closed one takes nothing.
+      // The result goes to the session the chain started from — the nearest ancestor
+      // that is not a task — never to whatever the chat draws, and never to a task: one
+      // that started this child may have ended, or be in its last turn, with its inbox
+      // about to go. A closed session takes nothing.
       const to = child.parent;
+      let home = to;
+      while (home && home.kind === 'task') home = home.parent;
       let delivered = '';
       let landedIn: ChildResult['landedIn'];
-      if (to && !to.closed) {
-        delivered = childResultText(spec.label, r);
-        to.deliver(delivered);
-        const shown = to.deps.current?.();
-        landedIn = { title: to.title, onScreen: !shown || shown === to };
-      }
-      // Untracked only AFTER the delivery: whoever watches the count reach 0 finds the
-      // result already in.
-      if (to) {
-        to.children.delete(child);
-        to.childTimers.delete(child);
-        to.emit({ type: 'children', count: to.children.size });
+      try {
+        if (home && !home.closed) {
+          delivered = childResultText(spec.label, r);
+          home.deliver(delivered);
+          const shown = home.deps.current?.();
+          landedIn = { title: home.title, onScreen: !shown || shown === home };
+        }
+      } finally {
+        // Untracked by the conversation that started it only AFTER the delivery: whoever
+        // watches the count reach 0 finds the result already in. Untracked even when the
+        // delivery throws, so a child is never counted forever.
+        if (to) {
+          to.children.delete(child);
+          to.childTimers.delete(child);
+          to.emit({ type: 'children', count: to.children.size });
+        }
       }
       return { ...r, delivered, ...(landedIn ? { landedIn } : {}) };
     };

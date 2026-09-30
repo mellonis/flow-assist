@@ -1,6 +1,6 @@
-// A task's result goes to the conversation that started it (AGENTS.md (a conversation
-// starts a child)), never to whatever the chat shows when it ends; that conversation
-// counts the children it started until each one's result is in it.
+// A task's result goes to the session its chain started from (AGENTS.md (a conversation
+// starts a child)), never to whatever the chat shows when it ends; the conversation that
+// started a task counts it until its result is in.
 import { afterEach, expect, test } from 'bun:test';
 import type { Conversation } from '../assistant/conversation.ts';
 import { ScriptedModel, type RecordedRequest } from './helpers/scripted';
@@ -89,4 +89,26 @@ test('a delayed task is one of its conversation\'s children while armed, its tim
   expect(rig.conv.children.size).toBe(1);
   const [child] = [...rig.conv.children];
   expect(rig.conv.childTimers.has(child!)).toBe(true);
+});
+
+test('a grandchild\'s result lands in the session, though the task that started it has finished', async () => {
+  const model = new ScriptedModel();
+  model.script([{ tool: 'background', args: { task: 'one', label: 'a' } }], [{ text: 'Started.' }]);
+  taskScript(model, 'one').script([{ tool: 'background', args: { task: 'two', label: 'b' } }], [{ text: 'a done' }]);
+  const two = taskScript(model, 'two');
+  two.script([{ hold: true }, { text: 'b done' }]);
+  const rig = conversationRig(model, { inbox: true, ai: { backgroundFollowUp: false } });
+  const first = rig.conv;
+  rig.registry.show(first);
+  await first.send('go');
+  await rig.until(() => two.held && bgRows(first).length === 1 && first.title !== '', 3_000);
+  // Its task is over: only the grandchild runs.
+  expect(first.children.size).toBe(0);
+  rig.registry.show(rig.fresh());
+  two.release();
+  await rig.until(() => rig.registry.children.backgroundCount() === 0 && bgRows(first).length === 2, 3_000);
+  expect(bgRows(first)).toEqual(['a finished:\na done', 'b finished:\nb done']);
+  expect(rig.journal(first.sessionId).filter((e) => e.t === 'row' && e.role === 'bg').map((e) => e.text)).toEqual(['a finished:\na done', 'b finished:\nb done']);
+  expect(bgRows(rig.conv)).toEqual([]);
+  expect(rig.toasts).toContain(`⏳ b done — in «${first.title}»`);
 });

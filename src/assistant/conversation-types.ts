@@ -181,18 +181,23 @@ export interface ChildResult {
   text: string;                  // the child's final text, trimmed ('' when none)
   error?: string;                // the turn's error, when it failed
   limit?: { rounds: number; lastStep: string; by?: 'tokens' };
-  // The text delivered to the conversation that started the child ('' when none was:
-  // that conversation was closed first), and where it landed: its title, and whether it
-  // is the conversation on screen (or no chat draws any).
+  // The text delivered to the session the child's chain started from ('' when none was:
+  // that session was closed first), and where it landed: its title, and whether it is
+  // the conversation on screen (or no chat draws any).
   delivered?: string;
   landedIn?: { title: string; onScreen: boolean };
 }
-// A child's result as the conversation that started it reads it: `<label> finished:`
-// with the text and the limit it stopped at, or `<label> failed:` with the reason.
-export function childResultText(label: string, r: ChildResult): string {
-  if (r.outcome === 'failed' || r.outcome === 'stopped') return `${label} failed:\n${r.error ?? r.outcome}`;
+// A child's result without its header line: the reason it failed, or its text and the
+// limit it stopped at.
+export function childResultBody(r: ChildResult): string {
+  if (r.outcome === 'failed' || r.outcome === 'stopped') return r.error ?? r.outcome;
   const lim = r.outcome === 'limit' && r.limit ? `\nstopped ${r.limit.by === 'tokens' ? 'at the token budget after' : 'after'} ${r.limit.rounds} rounds — last: ${r.limit.lastStep}` : '';
-  return `${label} finished:\n${(r.text || '(no output)') + lim}`;
+  return (r.text || '(no output)') + lim;
+}
+// A child's result as its session reads it: `<label> finished:` or `<label> failed:`,
+// then the body.
+export function childResultText(label: string, r: ChildResult): string {
+  return `${label} ${r.outcome === 'failed' || r.outcome === 'stopped' ? 'failed' : 'finished'}:\n${childResultBody(r)}`;
 }
 // What `startChild` hands back: a refusal said to the model, or the child, its run, and
 // `armed`, which records the delay timer that will start it.
