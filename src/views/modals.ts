@@ -1650,7 +1650,7 @@ export function renderChatModal({
   imagesOn?: boolean;
   // `/sessions`: the picker, drawn in the conversation's place (null — closed).
   picker?: PickerState | null;
-  // What this chat is doing, for its own row in the picker.
+  // What this chat's conversation is doing, for its own row in the picker.
   pickerOwn?: OwnStatus;
   // A plugin command's panel, drawn in the conversation's place (null — none).
   panel?: CommandPanelView | null;
@@ -1966,10 +1966,12 @@ export function renderSessionPicker({ width, height, theme, picker, own = 'idle'
     const meta = `${sessionWhen(r.updatedAt, today)} · ${formatBytes(r.bytes)} · ${r.turns} msg${r.turns === 1 ? '' : 's'}`;
     const title = r.title || '(untitled)';
     // Whose it is and what it is doing, in a word: this chat's own (and what it is
-    // doing), another process's, an answer not seen yet; nothing when it is idle.
+    // doing), one held here for its background tasks (and what it is doing), another
+    // process's, an answer not seen yet; nothing when it is idle.
     const status = rowStatus(r, own);
     const mark = status === 'held' ? { text: 'in use elsewhere', style: { color: m.warn } }
       : r.lock === 'ours' ? { text: status === 'idle' ? 'this chat' : `this chat · ${status}`, style: status === 'waiting' ? { color: m.warn } : { dim: true } }
+      : r.lock === 'here' ? { text: status === 'idle' ? 'here' : `here · ${status}`, style: status === 'waiting' ? { color: m.warn } : { dim: true } }
       : status === 'done' ? { text: 'done', style: { color: m.assistantAccent ?? 'green' } }
       : null;
     // The title is what a person picks by, so it keeps up to half the row; the meta gives

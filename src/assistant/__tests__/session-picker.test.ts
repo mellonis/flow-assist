@@ -174,3 +174,20 @@ test("a row's status: this chat's is what the chat is doing; any other's is what
   expect(rowStatus(row({ status: 'done' }), 'working')).toBe('done');
   expect(rowStatus(row({}), 'idle')).toBe('idle');
 });
+
+// ─── a session held here for its background tasks ─────────────────────────────
+
+test("a row held here for its background tasks opens on ⏎, keeps its own status, and refuses delete and move until they end", () => {
+  const rows = [row({ id: 'a', title: 'Current chat', lock: 'ours' }), row({ id: 'h', title: 'Left one', lock: 'here', status: 'working' })];
+  const start = pickerStart(rows);
+  expect(press(start, 'down', 'return').actions).toEqual([{ kind: 'open', id: 'h' }]);
+  expect(rowStatus(rows[1]!, 'idle')).toBe('working');
+  const del = press(start, 'down', ctrl('x')).state;
+  expect(del.mode).toBe('list');
+  expect(del.notice).toBe('"Left one" still runs its background tasks here — it cannot be deleted until they end');
+  const moved = press(start, 'down', ctrl('p'));
+  expect(moved.actions).toEqual([]);
+  expect(moved.state.notice).toBe('"Left one" still runs its background tasks here — it cannot be moved until they end');
+  // A rename goes through: the chat routes it to the conversation that holds the session.
+  expect(press(start, 'down', ctrl('r')).state.mode).toBe('rename');
+});

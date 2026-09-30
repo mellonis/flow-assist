@@ -203,8 +203,8 @@ export class Conversation {
   title = '';
   sessionProject: string | null = null;
   homes = new Map<string, string>();
-  // When the session's last turn ended with an answer, and when the chat last showed the
-  // session's end — the picker's `done` is an answer after that (sessions.ts,
+  // When the session's last answer or background result came, and when the chat last
+  // showed the session's end — the picker's `done` is one after that (sessions.ts,
   // `unseenAnswer`). '' — never.
   answeredAt = '';
   seenAt = '';
@@ -735,6 +735,10 @@ export class Conversation {
       for (const q of rows) this.journal({ t: 'row', role: 'bg', text: q });
       this.setRows((cur) => [...cur, ...rows.map((q): ChatMsg => ({ role: 'bg', content: q }))]);
       this.api = [...this.api, ...rows.map((q): ChatMessage => ({ role: 'bg', content: q }))];
+      // A result is read like an answer: `done` in the picker until a chat shows it.
+      const at = new Date().toISOString();
+      this.answeredAt = at;
+      if (this.shows()) this.seenAt = at;
       this.persist();
     }
     // The chat: with the chat closed, the unread count grows by every item and one alert

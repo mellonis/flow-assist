@@ -164,3 +164,96 @@ test('/resume of the session on screen with nothing running keeps its lock as it
   expect(lockMark(lockOf(dir, idA))).toBe(before);
   ui.app.unmount();
 });
+
+// ─── the picker ──────────────────────────────────────────────────────────────
+// A session held here reads `here · working` and is taken back on ⏎; a result nobody saw
+// reads `done` (AGENTS.md (A session held here)).
+
+const rowOf = (frame: string, text: string) => frame.split('\n').find((r) => r.includes(text)) ?? '';
+const chord = async (ui: Awaited<ReturnType<typeof bootApp>>, name: string) => { ui.backend.press({ name, ctrl: true }); await settle(); };
+const titleIn = (dir: string, id: string): string => {
+  const name = listTree(dir).find((n) => sessionIdOf(n) === id && n.endsWith('.json'));
+  return name ? String((JSON.parse(fs.readFileSync(path.join(dir, name), 'utf8')) as { title?: unknown }).title ?? '') : '';
+};
+
+test("the picker says a session left while its task runs is `here · working`, and ⏎ on it takes that conversation back", async () => {
+  const model = new ScriptedModel();
+  const { dir, ui, task, idA } = await startWithTask(model);
+  const before = lockMark(lockOf(dir, idA));
+  await ui.type('/new');
+  await ui.press('return');
+  await settle(4);
+  await chord(ui, 's');
+  expect(rowOf(ui.backend.lastFrame!, 'session A question')).toMatch(/session A question\s+here · working\s/);
+  await ui.type('session A');
+  await ui.press('return');
+  await settle(4);
+  expect(ui.backend.lastFrame).toContain('Started it.');
+  expect(ui.backend.lastFrame).toContain('Resumed «session A question»');
+  // The same conversation: its lock is the one it held all along.
+  expect(lockMark(lockOf(dir, idA))).toBe(before);
+
+  model.script([{ text: 'Follow-up on the job.' }]);
+  task.release();
+  await settleUntil(() => (ui.backend.lastFrame ?? '').includes('Follow-up on the job.'));
+  expect(ui.backend.lastFrame).toContain('job result');
+  ui.app.unmount();
+});
+
+test('renamed from the picker while its task runs, the session keeps the new title after it is put away', async () => {
+  const model = new ScriptedModel();
+  const { dir, ui, task, idA } = await startWithTask(model);
+  await ui.type('/new');
+  await ui.press('return');
+  await settle(4);
+  await chord(ui, 's');
+  await ui.type('session A');
+  await chord(ui, 'r');
+  await chord(ui, 'u'); // the field starts with the title; ^u empties it
+  await ui.type('Renamed while away');
+  await ui.press('return');
+  expect(ui.backend.lastFrame).toContain('Renamed to «Renamed while away»');
+  expect(titleIn(dir, idA)).toBe('Renamed while away');
+
+  task.release();
+  await settleUntil(() => !fs.existsSync(lockOf(dir, idA)));
+  await pastTick();
+  // Put away with the result in it: its own save kept the new title.
+  expect(fs.existsSync(lockOf(dir, idA))).toBe(false);
+  expect(bgRows(saved(dir, 'session A question'))).toEqual([RESULT]);
+  expect(titleIn(dir, idA)).toBe('Renamed while away');
+  ui.app.unmount();
+});
+
+test('a result that landed in a session nobody drew reads `done` in the picker', async () => {
+  const model = new ScriptedModel();
+  const { dir, ui, task, idA } = await startWithTask(model);
+  await ui.type('/new');
+  await ui.press('return');
+  await settle(4);
+  task.release();
+  await settleUntil(() => !fs.existsSync(lockOf(dir, idA)));
+  await pastTick();
+  await chord(ui, 's');
+  const row = rowOf(ui.backend.lastFrame!, 'session A question');
+  expect(row).toMatch(/session A question\s+done\s/);
+  expect(row).not.toContain('here');
+  ui.app.unmount();
+});
+
+test("an answer that lands behind the open picker makes this chat's own row `this chat · done`", async () => {
+  const model = new ScriptedModel();
+  model.script([{ hold: true }, { text: 'the hidden answer' }]);
+  const dir = dirOf();
+  const ui = await bootApp(model, 100, 28, undefined, { sessions: { dir } });
+  await ui.press('F');
+  await ui.type('an own question');
+  await ui.press('return');
+  await settle(6);
+  await chord(ui, 's');
+  expect(rowOf(ui.backend.lastFrame!, 'an own question')).toContain('this chat · working');
+  model.release();
+  await settleUntil(() => !rowOf(ui.backend.lastFrame!, 'an own question').includes('working'));
+  expect(rowOf(ui.backend.lastFrame!, 'an own question')).toMatch(/an own question\s+this chat · done\s/);
+  ui.app.unmount();
+});

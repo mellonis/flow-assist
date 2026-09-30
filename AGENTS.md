@@ -1848,26 +1848,38 @@ hold this set together:
   `Sessions · all · N`. The filter works in both, and a scope with nothing in it says
   Tab shows all. Newest first, one row each: the title, its status in a word,
   `sessionWhen`, the file's size (`formatBytes`), the messages. **The status**
-  (`SessionStatus`) comes from what is on disk and in this process — nothing runs in
-  the background: `working` — this chat's session while a turn or a `!command` runs
-  (drawn `this chat · working`); `waiting` — this chat's while a y/n or a question
-  waits (`this chat · waiting`; a y/n or question is drawn over the picker, so the
-  word is there for the frame that shows both — `rowStatus` holds it); `held` —
-  another process has the lock (`in use elsewhere`, `lockState`); `done` — the last
-  thing said in it is an answer no chat has shown since it came (`unseenAnswer`); `idle`
-  otherwise, drawn as nothing (this chat's own is `this chat`, being on screen — never
-  `done`). `done` rests on two times the session file keeps: `answeredAt`, set when a
-  turn ends with a final answer (not stopped, failed, out of rounds or empty), and
-  `seenAt`, set when the chat shows the session's end — the conversation on screen
-  (the chat's `ViewPort.showsEnd`: the chat open, neither the picker, the pager nor a
-  plugin's panel drawn in its place; a docked chat that is collapsed is not open): that
-  answer arriving then (the same instant), and `Conversation.markSeen` when it comes
-  back — the chat opening, the picker or the pager closing, a session opened or
-  continued. `sessionRows` computes
-  `held`/`done`/`idle`; the chat hands its own `pickerOwn` to the render, so the word
-  follows a turn that starts or ends while the picker is up. It is pure state in
-  `src/assistant/session-picker.ts` (`pickerKey`, the `ask.ts` pattern) drawn by
-  `renderSessionPicker`
+  (`SessionStatus`) comes from what is on disk and in this process: `working` — this
+  chat's session while a turn or a `!command` runs (drawn `this chat · working`), or a
+  session this process holds for its background tasks while they run (drawn
+  `here · working`, below); `waiting` — this chat's while a y/n or a question waits
+  (`this chat · waiting`; a y/n or question is drawn over the picker, so the word is
+  there for the frame that shows both — `rowStatus` holds it); `held` — another
+  process has the lock (`in use elsewhere`, `lockState`); `done` — the last thing said
+  in it is an answer or a background result no chat has shown since it came
+  (`unseenAnswer`); `idle` otherwise, drawn as nothing (this chat's own is
+  `this chat`). This chat's own row is its conversation's `status`, so it reads
+  `this chat · done` when an answer or a result came while the picker covered the
+  chat's end. **A session held here** — left by `/new` or a switch while its
+  background tasks run (the registry keeps it loaded and locked until they end) —
+  reads `ours` from its lock; the chat marks it `here` (a `LockState` `lockState`
+  never returns: `pickerRows` sets it from `registry.bySession` for a row that is not
+  the session on screen) with `registry.statusOf` (`working` while its tasks run),
+  drawn `here · working`. ⏎ on it takes that conversation back as it is (`openSession`
+  → `reclaimLive`); delete and move are refused ("still runs its background tasks
+  here"); a rename goes through the conversation that holds it, as this chat's own
+  does, so its later saves keep the new title. `done` rests on two times the session
+  file keeps: `answeredAt`, set when a turn ends with a final answer (not stopped,
+  failed, out of rounds or empty) and when a background result lands as a row
+  (`landInbox`), and `seenAt`, set when the chat shows the session's end — the
+  conversation on screen (the chat's `ViewPort.showsEnd`: the chat open, neither the
+  picker, the pager nor a plugin's panel drawn in its place; a docked chat that is
+  collapsed is not open): that answer arriving then (the same instant), and
+  `Conversation.markSeen` when it comes back — the chat opening, the picker or the
+  pager closing, a session opened or continued. `sessionRows` computes
+  `held`/`done`/`idle`; the chat hands its conversation's `status` to the render as
+  `pickerOwn`, so the word follows a turn that starts or ends while the picker is up.
+  It is pure state in `src/assistant/session-picker.ts` (`pickerKey`, the `ask.ts`
+  pattern) drawn by `renderSessionPicker`
   (`src/views/modals.ts`) in the conversation's place, in the chat's own frame, in every
   mode. `sessionRows` reads the list when the picker opens and after a rename or a
   delete, never per keystroke: one file parsed at a time, and of each only the title and

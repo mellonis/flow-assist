@@ -23,14 +23,19 @@ note says where the others are.
 `/sessions` — or Ctrl+S from any screen (`config set
 keys.sessions <key>` moves it) — lists the current project's saved sessions, newest
 first, with their titles, when each was last used, its size, and what it is doing —
-`this chat · working` while an answer or a command runs, `in use elsewhere` when another
-flow-assist process has it open, `done` when its last answer came while you were not
-looking; Tab shows every session, grouped under each project's path. Type to filter by
-the title or by any word of the conversation; ⏎ opens one (the session you are in is
-saved first), Ctrl+N starts a new one, Ctrl+R renames, Ctrl+P moves it into the current
-project (its file and journal with it), Ctrl+X deletes after a y/n.
+`this chat · working` while an answer or a command runs, `here · working` for a session
+you left while its background tasks run (it stays open in this process until they end),
+`in use elsewhere` when another flow-assist process has it open, `done` when its last
+answer or background result came while you were not looking — your own session's row
+too (`this chat · done`), for one that came while the picker was open; Tab shows every
+session, grouped under each project's path. Type to filter by the title or by any word
+of the conversation; ⏎ opens one (the session you are in is saved first; a `here` one is
+taken back as you left it, draft included), Ctrl+N starts a new one, Ctrl+R renames,
+Ctrl+P moves it into the current project (its file and journal with it), Ctrl+X deletes
+after a y/n.
 A session open in another process can be neither opened, renamed, moved nor deleted
-from here, and your own open session refuses a move too — switch away from it first.
+from here, and your own open session refuses a move too — switch away from it first. A
+`here` one can be opened and renamed, but not moved or deleted until its tasks end.
 
 ### Naming, `/new`, `/clear` and `/resume`
 

@@ -88,7 +88,7 @@ export interface Session {
   recall?: { stubbed: string[]; turns: number }; // the bulky items sent as stubs (by id) and the turns since the last batch (./recall.ts)
   closed?: boolean;                    // left with /clear — listed, never continued on start
   project?: string | null;             // the project it started in (`projectOf`), decided once; absent — none
-  answeredAt?: string;                 // when its last turn ended with an answer; absent — none yet
+  answeredAt?: string;                 // when an answer or a background result last came; absent — none yet
   seenAt?: string;                     // when a chat last showed its end (`unseenAnswer`)
   rev?: number;                        // bumped by every saveSession; absent (an older host) reads as 0
 }
@@ -436,23 +436,24 @@ export interface SessionRow { id: string; title: string; updatedAt: string; turn
 // What a session is doing, for the picker to say — from what is on disk and in this
 // process, nothing running in the background: `working` and `waiting` are this chat's
 // own session while a turn or a `!command` runs, or while a y/n or a question waits
-// (the chat says, session-picker.ts `rowStatus`); `held` — another live process has
-// its lock; `done` — its last message is an answer no chat has shown since it came
-// (`unseenAnswer`); `idle` otherwise.
+// (the chat says, session-picker.ts `rowStatus`), and a session this process still
+// holds for its background tasks while they run (the chat's registry says); `held` —
+// another live process has its lock; `done` — its last message is an answer or a
+// background result no chat has shown since it came (`unseenAnswer`); `idle` otherwise.
 export type SessionStatus = 'working' | 'waiting' | 'held' | 'done' | 'idle';
 
 // Whether a session ends in an answer nobody has seen: the last thing said in it — by
 // the person, the model, a command or a background result; notes and views are not
-// said — is the model's answer, and it came after the last time a chat showed the end.
-// The times are ISO strings, compared as such; an answer seen at the moment it came
-// is seen.
+// said — is the model's answer or a background result, and it came after the last time
+// a chat showed the end. The times are ISO strings, compared as such; an answer seen at
+// the moment it came is seen.
 export function unseenAnswer(messages: unknown[], answeredAt: string, seenAt: string): boolean {
   if (!answeredAt || (seenAt && seenAt >= answeredAt)) return false;
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i] as Record<string, unknown> | null;
     if (!m || typeof m !== 'object') continue;
-    if (m.role === 'assistant') return true;
-    if (m.role === 'user' || m.role === 'shell' || m.role === 'bg') return false;
+    if (m.role === 'assistant' || m.role === 'bg') return true;
+    if (m.role === 'user' || m.role === 'shell') return false;
   }
   return false;
 }
@@ -727,8 +728,10 @@ export function makeLockToken(): string {
 
 // Read-only: whose a session is right now, for a list to say — `ours` (this token's),
 // `held` (another live chat's, here or on another host), `free` (no lock, or a stale
-// one). Never creates, unlinks or touches the lock file.
-export type LockState = 'free' | 'ours' | 'held';
+// one). Never creates, unlinks or touches the lock file. `here` is never returned: it is
+// how the chat marks a session its process holds that is not the one on screen (one
+// left while its background tasks run), from its registry.
+export type LockState = 'free' | 'ours' | 'held' | 'here';
 export function lockState(dir: string, id: string, token: string, deps: LockDeps = {}): LockState {
   const c = classifyLock(lockPath(dir, id), token, deps.host ?? os.hostname(), deps.pidAlive ?? defaultPidAlive);
   return c === 'stale' ? 'free' : c.status === 'held' ? 'held' : 'ours';

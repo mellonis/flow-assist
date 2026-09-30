@@ -772,3 +772,10 @@ test('nothing a session file holds keeps a known secret — a tool call\'s argum
     setActiveSecrets(null);
   }
 });
+
+test('unseenAnswer: a background result that is the last message is unseen like an answer', () => {
+  const msgs = [{ role: 'user', content: 'q' }, { role: 'assistant', content: 'a' }, { role: 'bg', content: 'job finished:\nr' }, { role: 'note', content: 'n' }];
+  expect(unseenAnswer(msgs, '2026-09-21T10:00:05.000Z', '2026-09-21T10:00:04.000Z')).toBe(true);
+  expect(unseenAnswer(msgs, '2026-09-21T10:00:05.000Z', '2026-09-21T10:00:05.000Z')).toBe(false);
+  expect(unseenAnswer([...msgs, { role: 'user', content: 'next' }], '2026-09-21T10:00:05.000Z', '')).toBe(false);
+});

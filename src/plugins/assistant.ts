@@ -23,7 +23,7 @@ import { cdChatTarget, realOf, shellAutoRun, shellRoots, startNote, tildePath } 
 import {
   JOURNAL_DAYS, KEEP_SESSIONS, acquireLock, closeSession, cutTitle, journalPath, listSessions, loadSession, lockPath,
   dropEmptyDirs, moveSessionToProject, pickToContinue, projectHome, projectSessions, pruneSessions, removeSession, renameSession, sessionFingerprint,
-  sessionRows, sessionTitle, sessionWhen, sessionsDir, sweepJournals, type Session,
+  sessionRows, sessionTitle, sessionWhen, sessionsDir, sweepJournals, type Session, type SessionRow,
 } from '../assistant/sessions.js';
 import { exportMarkdown, readJournal, rowOf, type JournalEvent } from '../assistant/journal.js';
 import { pickerKey, pickerReload, pickerStart, type PickerAction, type PickerState } from '../assistant/session-picker.js';
@@ -1002,6 +1002,14 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             host.notify();
             return true;
           };
+          // The list as the picker draws it: a session this process holds that is not the one
+          // on screen — left while its background tasks run — reads `here`, with what the
+          // registry says it is doing (`working` while its tasks run).
+          const pickerRows = (): SessionRow[] => sessionRows(sessDir!, lockToken).map((r) => {
+            if (r.lock !== 'ours' || r.id === convRef.current!.sessionId) return r;
+            const status = registryRef.current!.statusOf(r.id);
+            return status ? { ...r, lock: 'here', status } : r;
+          });
           // The picker: the list is read here and after a rename or a delete — never per
           // keystroke; the filter runs over what was read. The conversation in this chat
           // is written first, so it is listed as it is now. A pending y/n or question is
@@ -1021,7 +1029,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // the plugin had the keys stands: the pager goes, and so does a panel.
             setPager(null);
             setPanel(null);
-            setPicker(pickerStart(sessionRows(sessDir, lockToken), conv.currentProject()));
+            setPicker(pickerStart(pickerRows(), conv.currentProject()));
           };
           // What a picker key asked for (session-picker.ts' `PickerAction`).
           const pickerAction = (a: PickerAction) => {
@@ -1036,20 +1044,25 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 if (openSession(a.id, titleOf(a.id), dirOf(a.id))) { setPicker(null); return; }
                 // Refused — an answer still coming (the error line says so), or taken by
                 // another process since the list was read: the picker stays, re-read.
-                const rows = sessionRows(sessDir, lockToken);
+                const rows = pickerRows();
                 const now = rows.find((r) => r.id === a.id);
                 setPicker(pickerReload(p, rows, now?.lock === 'held' ? `"${titleOf(a.id)}" is open in another flow-assist process — it cannot be opened here` : ''));
                 return;
               }
               case 'rename': {
                 const title = cutTitle(a.title);
+                // A session a conversation here holds — this chat's, or one held for its
+                // background tasks — is renamed through that conversation, so its own saves
+                // keep the new title; any other through its file.
+                const live = registryRef.current!.bySession(a.id);
                 let outcome = 'renamed';
-                if (a.id === conv.sessionId) { conv.title = title; conv.save(); }
+                if (live) { live.title = title; live.save(); }
                 else outcome = renameSession(dirOf(a.id), a.id, title, lockToken);
                 const notice = outcome === 'held' ? `"${titleOf(a.id)}" is open in another flow-assist process — it cannot be renamed here`
                   : outcome === 'missing' ? `"${titleOf(a.id)}" is gone — its file was removed`
+                  : outcome === 'ours' ? `"${titleOf(a.id)}" could not be renamed here — this process holds its lock`
                   : `Renamed to «${title}»`;
-                setPicker(pickerReload(p, sessionRows(sessDir, lockToken), notice));
+                setPicker(pickerReload(p, pickerRows(), notice));
                 return;
               }
               case 'delete': {
@@ -1057,8 +1070,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 if (done === 'deleted') dropEmptyDirs(dirOf(a.id), sessDir); // a project's last one
                 const notice = done === 'deleted' ? `Deleted «${titleOf(a.id)}»`
                   : done === 'held' ? `"${titleOf(a.id)}" is open in another flow-assist process — it cannot be deleted`
+                  : a.id !== conv.sessionId ? `"${titleOf(a.id)}" still runs its background tasks here — it cannot be deleted until they end`
                   : `"${titleOf(a.id)}" is the session in this chat — it cannot be deleted from here`;
-                setPicker(pickerReload(p, sessionRows(sessDir, lockToken), notice));
+                setPicker(pickerReload(p, pickerRows(), notice));
                 return;
               }
               case 'move': {
@@ -1077,11 +1091,12 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 }
                 const notice = outcome === 'moved' ? `Moved «${titleOf(a.id)}» to ${dest ? tildePath(dest) : 'no project'}`
                   : outcome === 'held' ? `"${titleOf(a.id)}" is open in another flow-assist process — it cannot be moved`
+                  : outcome === 'ours' && a.id !== conv.sessionId ? `"${titleOf(a.id)}" still runs its background tasks here — it cannot be moved until they end`
                   : outcome === 'ours' ? `"${titleOf(a.id)}" is the session in this chat — switch away first`
                   : outcome === 'here' ? `"${titleOf(a.id)}" is already in this project`
                   : outcome === 'missing' ? `"${titleOf(a.id)}" is gone — its file was removed`
                   : `"${titleOf(a.id)}" could not be moved — a session already exists there`;
-                setPicker(pickerReload(p, sessionRows(sessDir, lockToken), notice));
+                setPicker(pickerReload(p, pickerRows(), notice));
                 return;
               }
             }
@@ -2038,9 +2053,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               const q = panelRef.current;
               if (q && index !== q.cursor) setPanel({ ...q, cursor: index });
             },
-            // What this chat is doing, for its own row: a y/n or a question waits, or a
-            // turn or a `!command` runs.
-            pickerOwn: pendingAsk || pendingQuestion ? 'waiting' : streaming ? 'working' : 'idle',
+            // What this chat's conversation is doing, for its own row: a y/n or a question
+            // waits, a turn or a `!command` runs, or an answer or a result came while the
+            // picker covered the chat's end (`done`).
+            pickerOwn: conv.status,
             queued: queued.map((m) => m.text),
             // What the last queued message waits for: the turn's next step, or its end
             // (held, ⇥) — none outside a turn, where it goes when the command ends.

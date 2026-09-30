@@ -7,6 +7,7 @@
 // bindings and paste behave as they do there.
 import { editorReducer } from '@flowtty/core';
 import { keyGlyph } from '../playback/keys.js';
+import type { ConversationStatus } from './conversation-types.js';
 import type { SessionRow, SessionStatus } from './sessions.js';
 
 export type PickerKey = { name?: string; ctrl?: boolean; meta?: boolean; shift?: boolean; text?: string };
@@ -66,10 +67,12 @@ export function pickerReload(state: PickerState, rows: SessionRow[], notice = ''
   return { ...next, cursor: Math.min(state.cursor, Math.max(0, pickerMatches(next).length - 1)) };
 }
 
-// A row's status as drawn: this chat's own session is what the chat is doing — it is
-// on screen, so never `done`; any other's is what `sessionRows` read from its file and
-// lock (sessions.ts, `SessionStatus`).
-export type OwnStatus = 'working' | 'waiting' | 'idle';
+// A row's status as drawn: this chat's own session is its conversation's status — `done`
+// too, for an answer or a result that came while the picker covered the chat's end; a
+// session held here for its background tasks is the status the chat gives its row; any
+// other's is what `sessionRows` read from its file and lock (sessions.ts,
+// `SessionStatus`).
+export type OwnStatus = ConversationStatus;
 export const rowStatus = (row: SessionRow, own: OwnStatus): SessionStatus => (row.lock === 'ours' ? own : row.status ?? 'idle');
 
 export function formatBytes(n: number): string {
@@ -119,6 +122,8 @@ export function pickerKey(state: PickerState, key: PickerKey, width = 60): Picke
     if (!row) return { state };
     if (row.lock === 'held') return { state: { ...state, notice: held(row, 'opened here') } };
     if (row.lock === 'ours') return { state, action: { kind: 'close' } }; // already this chat's
+    // A free row, and one held here for its background tasks (`here`): the chat takes that
+    // one back as it is.
     return { state, action: { kind: 'open', id: row.id } };
   }
   if (name === 'tab' && !key.ctrl && !key.meta && !key.shift) {
@@ -134,17 +139,19 @@ export function pickerKey(state: PickerState, key: PickerKey, width = 60): Picke
     if (!row) return { state };
     if (row.lock === 'held') return { state: { ...state, notice: held(row, 'deleted') } };
     if (row.lock === 'ours') return { state: { ...state, notice: `"${label(row)}" is the session in this chat — open another one or start a new one (${NEW_CAP}) first` } };
+    if (row.lock === 'here') return { state: { ...state, notice: `"${label(row)}" still runs its background tasks here — it cannot be deleted until they end` } };
     return { state: { ...state, mode: 'delete', notice: '' } };
   }
   // Move it to the CURRENT project (`state.project`, fixed for the picker's life). The
-  // chat's own open session and one another process holds are refused here, purely,
-  // the same way rename/delete refuse them — the actual move (sessions.ts,
-  // `moveSessionToProject`) re-checks both with the lock, since a picker row can be
-  // stale by the time a key is pressed.
+  // chat's own open session, one held here for its background tasks, and one another
+  // process holds are refused here, purely, the same way delete refuses them — the
+  // actual move (sessions.ts, `moveSessionToProject`) re-checks them with the lock,
+  // since a picker row can be stale by the time a key is pressed.
   if (key.ctrl && name === 'p') {
     if (!row) return { state };
     if (row.lock === 'held') return { state: { ...state, notice: held(row, 'moved') } };
     if (row.lock === 'ours') return { state: { ...state, notice: `"${label(row)}" is the session in this chat — switch away first` } };
+    if (row.lock === 'here') return { state: { ...state, notice: `"${label(row)}" still runs its background tasks here — it cannot be moved until they end` } };
     if ((row.project ?? null) === state.project) return { state: { ...state, notice: `"${label(row)}" is already in this project` } };
     return { state, action: { kind: 'move', id: row.id } };
   }
