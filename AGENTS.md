@@ -2630,7 +2630,11 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   all of its conversations (the missing memory record), the conversation the chat draws
   (`shown`, what a closed conversation's settings-file y/n asks in), and the one exit
   hook: `flushAll()` saves every live conversation silently and releases its lock after
-  that save; it closes nothing.
+  that save (each in its own try, so one failing save skips no other); it closes nothing.
+  It also holds the child slots (`children`, handed to every conversation in its deps):
+  the count of background tasks (armed, queued, running) and the cap — a task starts
+  while fewer than `max(1, sessions.maxRunning - 1)` run (`maxRunning` 4 by default, so
+  three), the rest wait FIFO, and a session's own turn never takes or waits for one.
 - **Ctrl+C, Ctrl+D and Ctrl+Z take a second press** (`src/runtime/exit-keys.ts`, pure;
   the App owns the arm). flowtty hands these three to the app BEFORE the terminal
   backend acts (exit, exit, suspend — skipped when a `useInput` handler returns strict

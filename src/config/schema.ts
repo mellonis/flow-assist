@@ -80,6 +80,8 @@ export const hostConfigSchema = z.object({
     // one turn follows for everything that landed (src/assistant/conversation.ts,
     // `Conversation.takeInbox`); `false` keeps the results as rows, read with the next message.
     backgroundFollowUp: z.boolean().optional(),
+    // How deep a chain of background tasks may go (default 2).
+    subagentDepth: z.number().int().min(1).optional(),
     // The cap on ONE tool result before it joins the model's history (default 40000
     // characters, src/assistant/tool-result-cap.ts). A longer result is cut, the head
     // kept and a short tail, with a note naming how much was cut. Display — a view, the
@@ -142,6 +144,9 @@ export const hostConfigSchema = z.object({
     resume: z.boolean().register(modelMaySet, RESUME).register(modelMaySave, RESUME),
     keep: z.number().int().positive(),
     journalDays: z.number().int().nonnegative(),
+    // How many conversations of this process may work at once, the chat's own turn
+    // included; a turn's background tasks take max(1, maxRunning - 1) at a time.
+    maxRunning: z.number().int().min(2),
   }).partial().register(appliesOnRestart, {}).optional(),
   // Legacy: `shell.roots` and `plugins.repo.roots` replace this. Still accepted and
   // read for one release —

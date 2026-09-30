@@ -48,7 +48,10 @@ Sessions live in `sessions/` in the
 config directory, under a mirror of their project's path
 (`sessions/Users/me/app/<id>.json`; a session with no project, and one saved by an older
 version, at the top level), readable by you only (`sessions.resume: false` starts every
-run empty; `sessions.keep` — how many are kept per project, 50 by default). What a
+run empty; `sessions.keep` — how many are kept per project, 50 by default;
+`sessions.maxRunning` — how many conversations of the process may work at once, your
+own turn included, 4 by default, so a turn's background tasks run three at a time).
+What a
 restart restores is bounded — the last 400 messages of the
 conversation, fewer of the commands' output blocks — but each session also keeps a
 journal beside it, `<id>.log.jsonl`: everything as it happened — every tool call with

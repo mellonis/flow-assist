@@ -1,6 +1,7 @@
 // The vocabulary of a conversation: what the chat draws (`ChatMsg`), what waits, what
 // runs, what the chat is told, and what a conversation needs from the host and the chat.
 import type { AgentOpts, AgentResult, ChatMessage } from './agent.js';
+import type { ChildSlots } from './registry.js';
 import type { AskState } from './ask.js';
 import type { AutoMode } from './auto.js';
 import type { ContextItem } from './screen-context.js';
@@ -165,4 +166,7 @@ export interface ConversationDeps {
   // The conversation the chat draws now, where work that outlived a closed one asks
   // what it must ask the person. Undefined with no chat.
   current?: () => Conversation | null | undefined;
+  // The host's slots for background tasks (src/assistant/registry.ts). Absent: no
+  // background tasks.
+  children?: ChildSlots;
 }

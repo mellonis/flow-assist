@@ -9,6 +9,25 @@ import type { ConversationDeps, ConversationKind } from './conversation-types.js
 import { hostDeps, type DepsSource } from './host-deps.js';
 import { flushOnExit, makeLockToken, type Session, type SessionFingerprint } from './sessions.js';
 
+// The host's bookkeeping for background tasks, shared by every conversation it makes
+// (AGENTS.md, "A host makes its conversations through one registry").
+export interface ChildSlots {
+  // A task counted from the moment it is armed (its delay starts): what `N in background`
+  // shows. `timer` is the delay's handle, kept so `cancelArmed` can stop a task that has
+  // not started.
+  arm(timer?: ReturnType<typeof setTimeout>): void;
+  // An armed task that starts, ends, or never starts.
+  disarm(timer?: ReturnType<typeof setTimeout>): void;
+  // Clears every armed task that has not started yet: its timer and its count.
+  cancelArmed(): void;
+  // Runs `run` now when a slot is free, else queues it (FIFO); the slot frees when `run` settles.
+  admit(run: () => Promise<void>): void;
+  // Armed + queued + running.
+  backgroundCount(): number;
+  // Running only.
+  running(): number;
+}
+
 export interface RegistryInit extends Omit<DepsSource, 'lockToken' | 'current'> {
   // One exit hook for the registry: whatever happens at exit, every live conversation's
   // last change is written and its lock released, in that order.
@@ -23,6 +42,9 @@ export class ConversationRegistry {
   private readonly said = { memoryMissing: false };
   private readonly convs = new Set<Conversation>();
   private onScreen: Conversation | null = null;
+  // Tasks run at most `max(1, sessions.maxRunning - 1)` at a time (default 4, so three): a
+  // session's own turn keeps the slot the count leaves it and never waits on a task.
+  readonly children: ChildSlots = this.makeSlots();
   private unhookExit: (() => void) | null = null;
 
   constructor(private readonly init: RegistryInit) {
@@ -30,10 +52,45 @@ export class ConversationRegistry {
     if (init.exitHook) this.unhookExit = flushOnExit(() => this.flushAll());
   }
 
+  private makeSlots(): ChildSlots {
+    let armed = 0;
+    let running = 0;
+    const timers = new Set<ReturnType<typeof setTimeout>>();
+    const queue: Array<() => Promise<void>> = [];
+    const limit = (): number => {
+      const sessions = this.init.config().sessions as { maxRunning?: number } | undefined;
+      return Math.max(1, (sessions?.maxRunning ?? 4) - 1);
+    };
+    const start = (run: () => Promise<void>): void => {
+      running++;
+      const done = (): void => {
+        running--;
+        const next = queue.shift();
+        if (next && running < limit()) start(next);
+        else if (next) queue.unshift(next);
+      };
+      let p: Promise<void>;
+      try { p = run(); } catch (e) { p = Promise.reject(e); }
+      p.then(done, done);
+    };
+    return {
+      arm: (timer) => { armed++; if (timer !== undefined) timers.add(timer); },
+      disarm: (timer) => { armed = Math.max(0, armed - 1); if (timer !== undefined) timers.delete(timer); },
+      cancelArmed: () => {
+        for (const t of timers) clearTimeout(t);
+        armed = Math.max(0, armed - timers.size);
+        timers.clear();
+      },
+      admit: (run) => { if (running < limit()) start(run); else queue.push(run); },
+      backgroundCount: () => armed + queue.length + running,
+      running: () => running,
+    };
+  }
+
   // What a conversation of this host is handed; `current` is the one the chat draws.
   deps(): ConversationDeps {
     const { exitHook: _exitHook, ...src } = this.init;
-    return { ...hostDeps({ ...src, lockToken: this.lockToken, current: () => this.onScreen }), said: this.said };
+    return { ...hostDeps({ ...src, lockToken: this.lockToken, current: () => this.onScreen }), said: this.said, children: this.children };
   }
 
   private track(c: Conversation): Conversation {
@@ -70,8 +127,10 @@ export class ConversationRegistry {
     this.unhookExit?.();
     this.unhookExit = null;
     for (const c of [...this.convs]) {
-      c.save({ silent: true });
-      c.releaseLock();
+      try {
+        c.save({ silent: true });
+        c.releaseLock();
+      } catch { /* exiting: one conversation's failure never skips the others */ }
     }
   }
 }
