@@ -135,6 +135,13 @@ and the footer's `◆ N new` and a desktop notification say something came in.
 `config set ai.backgroundFollowUp false` keeps the results as messages only, read with
 your next message.
 
+A task works on its own: it cannot ask you anything, whatever would wait for your y/n (a
+command, a file change, a fetch off the allowlist) is declined, and Esc in the chat does
+not stop it. It gets twelve rounds; one that runs out of them
+says so at the end of its result (`stopped after 12 rounds — last: …`). A task may start
+one follow-up task of its own; `ai.subagentDepth` (2 by default) is how deep such a chain
+may go. At most three run at once (`sessions.maxRunning`, above); the rest wait their turn.
+
 ## Clicks, folds and the pager
 
 **Click what you want to read.** Everything the chat folds — a turn's tool calls, what

@@ -6,7 +6,6 @@ import { afterEach, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Make } from '../loader/plugin.ts';
-import { bgActiveCount } from '../loader/tools-core.ts';
 import { ScriptedModel, handoff } from './helpers/scripted';
 import { closeRigs, conversationRig, type Rig } from './helpers/conversation';
 import { sessionIdOf } from './helpers/session-files';
@@ -261,7 +260,7 @@ test('a background task\'s own calls are journaled in the session that started i
   await rig.conv.send('узнай время в фоне');
   // The task runs detached: it is over only when nothing is in flight, and before this test
   // returns, or its next request would reach the real fetch.
-  await rig.until(() => bgActiveCount() === 0 && rig.journal().some((e) => e.t === 'call' && e.task === 'часы'));
+  await rig.until(() => rig.registry.children.backgroundCount() === 0 && rig.journal().some((e) => e.t === 'call' && e.task === 'часы'));
   const events = rig.journal();
   expect(events.find((e) => e.t === 'call-start' && e.task === 'часы')).toMatchObject({ name: 'datetime', args: {} });
   expect(events.find((e) => e.t === 'call' && e.task === 'часы')).toMatchObject({ name: 'datetime', outcome: 'ok' });

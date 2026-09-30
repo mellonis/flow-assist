@@ -13,7 +13,6 @@ import { activeSecrets, refreshSecrets, setActiveSecrets } from '../assistant/se
 import { workspaceFor, workspaceRoot } from '../assistant/workspace';
 import { acceptedConfigPath, hostStateDir } from '../config/load';
 import { assembleToolRegistry, execChatTool } from '../loader/tools';
-import { bgActiveCount } from '../loader/tools-core';
 import { runPrompt } from '../main';
 import { createPluginRepo } from '../loader/repo';
 import { HOST_API } from '../version';
@@ -147,7 +146,10 @@ test('D26: the one-shot is not offered background or remind, and a call to one a
   expect(offered).not.toContain('remind');
   expect(offered).toContain('datetime');
   expect(toolResults(model)).toEqual(['ERROR: Unknown tool: background']);
-  expect(bgActiveCount()).toBe(0);
+  // No task was started: past the hop a task's first request would take, no request
+  // the model saw carries the worker prompt.
+  await new Promise((res) => setTimeout(res, 50));
+  expect(model.requests.some((q) => q.messages.some((m) => m.role === 'system' && String(m.content).includes('You are a background worker')))).toBe(false);
   expect(r.out).toBe('Could not.\n');
 });
 

@@ -313,14 +313,12 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
         askUser: shape.askUser && c.deps.canAsk !== false ? (questions: AskQuestion[]) => c.askUser(questions) : undefined,
         // Every service a tool may call through ctx — flattened, not spread:
         // `host.services` is a per-plugin view whose HOST services sit on its
-        // prototype, and `...obj` copies own properties only. Spreading it
-        // silently handed tools a ctx with no chatLLM, config, showMessage or
-        // pushLog — `background` answered "no LLM service" and nothing ran.
+        // prototype, and `...obj` copies own properties only. A spread would hand
+        // tools a ctx with no chatLLM, config, showMessage or pushLog, silently.
         ...allServices(c.deps.services()),
-        // A run a tool starts through the host's LLM service — the `background`
-        // tool's — has its calls journaled by the host, in this turn's session
-        // (following a fork), tagged with the task's label (`task`). No tool is
-        // handed a way to write to the journal itself.
+        // A run a tool starts through the host's LLM service — a plugin tool asking
+        // the model — has its calls journaled by the host, in this turn's session
+        // (following a fork). No tool is handed a way to write to the journal itself.
         chatLLM: c.journaledChatLLM(journalId),
         // A background task started from this turn: a child conversation whose calls are
         // journaled here, under this turn's journal id — and the host's slots it waits

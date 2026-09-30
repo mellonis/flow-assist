@@ -8,7 +8,6 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { assembleToolRegistry } from '../tools';
 import { hostConfigSchema } from '../../config/schema.js';
-import { bgActiveCount } from '../tools-core.js';
 import { makeFactory } from '../plugin';
 import { identityToken } from '../../runtime/plugin-identity.js';
 import { addFact, readFacts } from '../../assistant/memory-store.js';
@@ -77,12 +76,8 @@ test('remind parses a duration/clock and delegates to the host setReminder', asy
   expect(noText).toContain('text is required');
 });
 
-// Yields a macrotask so a detached background run can finish its (immediate)
-// work and deliver the result before the assertion runs.
-const flushBg = () => new Promise<void>((r) => setTimeout(r, 0));
-
 // ─── todo (plan) tool ──────────────────────────────────────────────────────────
-// Session-only plan state is MODULE-level (like bgActive), so each test resets it
+// Session-only plan state is MODULE-level, so each test resets it
 // through the `clear` action to avoid leaking into the next test. The plan is a
 // scratchpad the assistant maintains: low-stakes, reversible, no write-confirm.
 
@@ -254,121 +249,11 @@ test('background requires a task', async () => {
   expect(out).toContain('task is required');
 });
 
-test('background is unavailable without an LLM service', async () => {
+test('background is unavailable where no conversation hands startChild', async () => {
   const make = makeFactory({});
   const reg = assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
   const out = await reg.exec('background', { task: 'do it' }, {});
-  expect(out).toContain('unavailable');
-});
-
-test('background offloads a detached task and reports the result when done', async () => {
-  const make = makeFactory({});
-  const reg = assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
-  const logs: string[] = [];
-  const msgs: string[] = [];
-  const chatPosts: string[] = [];
-  let notifies = 0;
-  let capturedOpts: Record<string, unknown> | null = null;
-  let capturedMsgs: unknown[] | null = null;
-  const ctx = {
-    chatLLM: async (msgs: unknown[], opts: Record<string, unknown>) => { capturedMsgs = msgs; capturedOpts = opts; return { content: 'build ok' }; },
-    pushLog: (e: string) => logs.push(e),
-    showMessage: (m: string) => msgs.push(m),
-    notify: () => { notifies++; },
-    postToChat: (t: string) => chatPosts.push(t),
-    pluginAiTools: [],
-    // The chat toolCtx carries the host config; the nested run derives its LLM
-    // creds from here + the env var (the same way the chat's send() does).
-    config: { ai: { baseUrl: 'http://llm.local', model: 'test-model', tokenEnv: 'FLOW_ASSIST_BG_TOKEN' } },
-  } as any;
-  process.env.FLOW_ASSIST_BG_TOKEN = 'secret';
-  const out = await reg.exec('background', { task: 'run the build', label: 'build' }, ctx);
-  expect(out).toContain('Background task started');
-  expect(out).toContain('build');
-  await flushBg(); // let the detached run finish + deliver
-  expect(logs.join('\n')).toContain('[bg] build: build ok');
-  expect(msgs.join('\n')).toContain('build');
-  // After the run completes, the in-flight count returns to zero.
-  expect(bgActiveCount()).toBe(0);
-  // notify() fires TWICE: once when the task is ARMED (the chat's live "N in
-  // background" indicator bumps up as the task is scheduled) and once in `finally`
-  // as it completes (bumps back down).
-  expect(notifies).toBe(2);
-  // The result is also injected back into the chat (the assistant's postToChat).
-  // No "[background]" prefix — the chat's Background role label carries the marker.
-  expect(chatPosts.join('\n')).toContain('build finished');
-  expect(chatPosts.join('\n')).toContain('build ok');
-  // The nested run is READ-ONLY: writes are declined so an autonomous task can
-  // never mutate host state silently (no human to answer a y/n prompt).
-  expect(typeof capturedOpts?.confirmWrite).toBe('function');
-  expect((capturedOpts?.confirmWrite as () => boolean)()).toBe(false);
-  // The nested run got the LLM creds — without them agentChat throws "LLM_TOKEN is
-  // not set" and the task fails even though the chat itself authenticates.
-  expect(capturedOpts?.baseUrl).toBe('http://llm.local');
-  expect(capturedOpts?.model).toBe('test-model');
-  expect(capturedOpts?.token).toBe('secret');
-  // The nested run's system prompt GROUNDS time: it must tell the fresh agent to call
-  // `datetime` for a now-sensitive question (never answer from stale memory) — that is
-  // what makes the result the ACTUAL time at fire-time, not a guess.
-  const sysPrompt = String((capturedMsgs?.[0] as { role?: string; content?: string } | undefined)?.content ?? '');
-  expect(sysPrompt).toContain('`datetime` tool');
-  expect(sysPrompt).toContain('stale');
-  delete process.env.FLOW_ASSIST_BG_TOKEN;
-});
-
-test('background honors a start delay (not scheduled to run yet)', async () => {
-  const make = makeFactory({});
-  const reg = assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
-  const logs: string[] = [];
-  const ctx = {
-    chatLLM: async () => ({ content: 'late' }),
-    pushLog: (e: string) => logs.push(e),
-    showMessage: () => {},
-    notify: () => {},
-    pluginAiTools: [],
-  } as any;
-  const out = await reg.exec('background', { task: 'x', in: '3 minutes' }, ctx);
-  expect(out).toContain('in 180s');
-  // Deferred: the 180s timer has not fired, so no result is delivered yet.
-  expect(logs.length).toBe(0);
-  // Even though the task hasn't fired, it is IN FLIGHT (armed) — the chat's «N in
-  // background» indicator must reflect a scheduled-but-not-yet-starting task.
-  expect(bgActiveCount()).toBe(1);
-});
-
-test('background bursts are QUEUED, not dropped (concurrency cap bounds parallel runs)', async () => {
-  const make = makeFactory({});
-  const reg = assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
-  const chatPosts: string[] = [];
-  // Simulate real work so the runs overlap: each nested agent takes ~20ms. This
-  // makes the MAX-concurrency cap actually engage when 5 tasks fire at once.
-  let concurrent = 0, peak = 0;
-  const ctx = {
-    chatLLM: async () => {
-      concurrent++; peak = Math.max(peak, concurrent);
-      await new Promise((r) => setTimeout(r, 20));
-      concurrent--;
-      return { content: 'ok' };
-    },
-    pushLog: () => {}, showMessage: () => {}, notify: () => {},
-    postToChat: (t: string) => chatPosts.push(t),
-    pluginAiTools: [],
-    config: { ai: { baseUrl: 'http://llm.local', model: 'm', tokenEnv: 'FLOW_ASSIST_BG_TOKEN' } },
-  } as any;
-  process.env.FLOW_ASSIST_BG_TOKEN = 'secret';
-  const outs: string[] = [];
-  for (let i = 0; i < 5; i++) outs.push(await reg.exec('background', { task: `t${i}`, label: `t${i}`, in: '0s' }, ctx));
-  // No task is rejected — every one is accepted (they may wait for a slot).
-  expect(outs.join('\n')).not.toContain('Too many');
-  expect(outs.join('\n')).toMatch(/Background task started/);
-  // Wait for all five to run (3 concurrent + 2 queued → ~3 batches × 20ms).
-  await new Promise((r) => setTimeout(r, 250));
-  // EVERY task delivered its result to the chat — none was silently dropped.
-  expect(chatPosts).toHaveLength(5);
-  expect(chatPosts.join('\n')).toMatch(/t4 finished/);
-  // The cap still bounds CONCURRENT runs (the safety valve holds).
-  expect(peak).toBeLessThanOrEqual(3);
-  delete process.env.FLOW_ASSIST_BG_TOKEN;
+  expect(out).toBe('Background tasks unavailable: no conversation to run them in (the host must be interactive).');
 });
 
 test('ai.disabledTools withholds a whole group', () => {
@@ -665,19 +550,6 @@ test('ask_user hands validated questions to the chat and reads the answer back',
   expect(await reg.exec('ask_user', args, {})).toMatch(/nobody to ask/i);
 });
 
-test('a background task cannot put a question to the person', async () => {
-  const reg = assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
-  let nested: Record<string, unknown> | undefined;
-  const chatLLM = async (_messages: unknown[], opts: Record<string, unknown>) => { nested = opts.toolCtx as Record<string, unknown>; return { content: 'done' }; };
-  await reg.exec('background', { task: 'summarize the repo' }, { chatLLM, askUser: async () => ({ cancelled: false, answers: [] }), postToChat: () => {} } as any);
-  for (let i = 0; i < 20 && !nested; i++) await new Promise((r) => setTimeout(r, 5));
-  expect(nested).toBeDefined();
-  expect(nested!.askUser).toBeUndefined();
-  // …and with no hook the tool says so instead of hanging.
-  const args = { questions: [{ question: 'q?', options: [{ label: 'a' }, { label: 'b' }] }] };
-  expect(await reg.exec('ask_user', args, nested as any)).toMatch(/nobody to ask/i);
-});
-
 test('a tool name is claimed once: the first plugin keeps the bare word, the second is offered qualified', async () => {
   const make = makeFactory({});
   const group = (id: string, answer: string) => ({
@@ -789,28 +661,6 @@ test('the memory tool says how an entry is written, and refuses a near-copy — 
   expect(String(await reg.exec('memory', { action: 'add', text: 'one too many', scope: 'global' }, ctx))).toContain('Memory stored');
 });
 
-test('a background run carries the project\'s instructions for its own shell directory, and cd there answers from its own reading', async () => {
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-bg-instr-')));
-  fs.mkdirSync(path.join(root, 'proj'));
-  fs.writeFileSync(path.join(root, 'proj', 'AGENTS.md'), 'BG RULE');
-  const config = { shell: { roots: [root] } };
-  const reg = assembleToolRegistry({ plugins: [], config, repo: { list: async () => [] } as any });
-  let opts: Record<string, unknown> | undefined;
-  const chatLLM = async (_m: unknown[], o: Record<string, unknown>) => { opts = o; return { content: 'done' }; };
-  // The chat's own reading must not leak into the background run's answers.
-  const chats = () => ({ dir: '/chat', root: '/chat', files: [{ path: '/chat/AGENTS.md', text: 'x', cut: 0 }] });
-  await reg.exec('background', { task: 'look at proj' }, { chatLLM, config, projectInstructions: chats, postToChat: () => {} } as any);
-  for (let i = 0; i < 20 && !opts; i++) await new Promise((r) => setTimeout(r, 5));
-  const nested = opts!.toolCtx as Record<string, any>;
-  expect(nested.projectInstructions).toBeUndefined();
-  const system = opts!.systemPrompt as () => string;
-  expect(system()).not.toContain('## Project instructions');
-  const answer = await reg.exec('cd', { path: 'proj' }, nested as any);
-  expect(answer).toContain(path.join(root, 'proj', 'AGENTS.md'));
-  expect(system()).toContain('## Project instructions');
-  expect(system()).toContain('BG RULE');
-});
-
 // The model is told what it may change, and why, beside the key — and what waits for a
 // restart — so it knows what to do itself and what to hand back as a command.
 test('config_schema prints the marks beside a key, with the reason', async () => {
@@ -872,18 +722,6 @@ test('the workspace tools write, read and list the project\'s workspace — a wr
   expect(String(await reg.exec('workspace_list', {}, inProject('/p/b')))).toContain('empty');
   await reg.exec('workspace_write', { path: 'artifacts/everywhere.md', content: 'g', scope: 'global' }, ctxA);
   expect(String(await reg.exec('workspace_list', { scope: 'global' }, inProject('/p/b')))).toContain('artifacts/everywhere.md');
-});
-
-test('a background task works in its conversation\'s project, not in the one its fresh shell starts in', async () => {
-  const { root, reg } = memSetup();
-  let opts: Record<string, unknown> | undefined;
-  const chatLLM = async (_m: unknown[], o: Record<string, unknown>) => { opts = o; return { content: 'done' }; };
-  await reg.exec('background', { task: 'remember it' }, { chatLLM, workspaceProject: () => '/p/a', postToChat: () => {} } as any);
-  for (let i = 0; i < 20 && !opts; i++) await new Promise((r) => setTimeout(r, 5));
-  const nested = opts!.toolCtx as Record<string, any>;
-  expect(nested.workspaceProject()).toBe('/p/a');
-  await reg.exec('memory', { action: 'add', text: 'Found by the background task.' }, nested as any);
-  expect(readFacts(workspaceDir(root, '/p/a')).map((f) => f.text)).toEqual(['Found by the background task.']);
 });
 
 test('a fact under a hand-made file name is forgotten too, and a name that leads out is never one', async () => {

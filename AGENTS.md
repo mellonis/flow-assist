@@ -289,8 +289,8 @@ the blacklist.
     CONVERSATION block first and then appends the tail as a text block of the last user
     turn (after its tool results), so alternation holds and the tail is uncached. No
     items, no block. The meter counts it as the `on screen` part
-    (`ContextParts.screen`). Only the conversation's turn (`runTurn`) passes it: a background task
-    (the `background` tool's nested `chatLLM`) and the one-shot prompt
+    (`ContextParts.screen`). Only the chat's session turn passes it: a background task
+    (`turnShape('task')`) and the one-shot prompt
     (`turnShape('oneshot')`: no screen) get none — they run apart from the screen.
     `/compact` does not see it.
     The chat's title is the labels joined ` · `, cut to the frame
@@ -548,10 +548,11 @@ another's):
   takes it — else `it does not take its entry key S now`. The plugin answers it as it
   answers the key, and its next frame's `keycaps` bring the surface up. No screen with
   params crosses the wire, and a remote plugin has no `host.open`.
-- **Background work opens nothing**: the `background` tool runs its nested `chatLLM`
-  under `asBackgroundWork` (`src/runtime/background-work.ts`, an `AsyncLocalStorage`), so
-  every await of it — a plugin's tool calling `host.open` included, which has no ctx of
-  the chat's — reads `inBackgroundWork()`; `screens.open` and `ui_open` refuse there.
+- **Background work opens nothing**: a background task's conversation runs its turn
+  under `asBackgroundWork` (`src/runtime/background-work.ts`, an `AsyncLocalStorage`;
+  `Conversation.startChild`), so every await of it — a plugin's tool calling `host.open`
+  included, which has no ctx of the chat's — reads `inBackgroundWork()`; `screens.open`
+  and `ui_open` refuse there.
 - A stopped or failed turn's `afterTurn(false)` drops what it deferred BEFORE looking at
   `asking()` — a settings y/n (`askConfigChanges`) may be up as the turn ends.
 - The list caps a line's screens and tools at `LINE_ITEMS_MAX` (8, then `+N more`) and
@@ -564,8 +565,8 @@ another's):
   (the app's registry — `runInteractive`, `bootApp`; never the one-shot prompt's) and a
   non-withheld plugin with an entry screen; a refresh recomputes it, and a call from an
   older list answers the core group's `gone` (`no plugin in the app has a screen it can
-  open now`). A refusal throws (the model reads an error), a background run
-  (`_bgDepth`) and a run with no `services.screens` refuse too.
+  open now`). A refusal throws (the model reads an error), background work and a run
+  with no `services.screens` refuse too.
 
 `src/__tests__/screens.e2e.test.ts` holds it. `HOST_API` stays: `screens` is an optional
 field an older host ignores, and `host.open` / `close` are optional members a plugin
@@ -1026,14 +1027,11 @@ hold this set together:
   round's copy, never the history), so a `cd` is seen by the next round of the same
   turn, and a round whose text did not change sends the message it had — re-reading
   the plan per round would miss the cache after every `todo`. It is never a message in
-  the history, so it is never stubbed, compacted or duplicated. A background run has
-  no conversation to read it on `setCwd`, so it wires the same rule itself: a shell
-  state of its own (`ctx.shell`, so `cd` holds between calls), built
-  with an `onSet` that calls `instructionsPrompt`'s own `refresh` — read once for the
-  starting directory, again only when `setCwd` moves it, never from the `systemPrompt`
-  function `instructionsPrompt` also returns, which every round calls for what
-  `refresh` last found, under the caller's own base prompt; a background run is never
-  handed the chat's reading. The one-shot prompt is a conversation: `Conversation.fresh`
+  the history, so it is never stubbed, compacted or duplicated. A background task is a
+  conversation too, so the same rule holds there: its shell starts in its parent's
+  directory and its own `cd` reads the section again, its per-round system prompt (the
+  worker prompt) carries the project block of its own reading, and it is never handed
+  the chat's reading. The one-shot prompt is a conversation: `Conversation.fresh`
   reads the section for the start directory, and a `cd` reads it again, as in the chat.
   The
   chat says which files were picked up in a `note` row (`Project instructions: ~/p/
@@ -1053,7 +1051,7 @@ hold this set together:
   the host. Who answers is one closed set of policies (`ConfirmPolicy`,
   `src/assistant/confirm-policy.ts`) and one mapping, `confirmFor`: `ask` (the chat: the
   auto mode, then the person's y/n), `always-no` (every write declined, journaled
-  `by: 'background'` — the row exists; no driver uses it yet), `none` (nobody to ask:
+  `by: 'background'` — a background task's conversation), `none` (nobody to ask:
   no `confirmWrite`), `allow-writes` (`--allow-writes`) and `caller` (a plugin's own
   confirmation).
   `confirm-policy.test.ts` holds each row. A read runs as ever. So passing a
@@ -1063,8 +1061,8 @@ hold this set together:
   running — the one-shot prompt withholds `background`, `subagent` and `remind`, which
   have nothing to deliver to without the app. Where each path stands:
   - the chat's turn — asks: its y/n closure, which the auto mode may answer;
-  - a background task — declines: it passes a confirmation that always says no, which
-    `journaledChatLLM` journals as a `confirm` line `by: 'background'`;
+  - a background task — declines: a background task's conversation has the policy
+    `always-no`, journaled as a `confirm` line `by: 'background'`, tagged with its label;
   - a tool's `ctx.chatLLM` in the chat (`journaledChatLLM` with no `taskLabel`) —
     declines unless the tool passes its own `confirmWrite`, whose answer is journaled
     `by: 'plugin'`; with none, the journal holds the declined call and no `confirm`;
@@ -1121,7 +1119,7 @@ hold this set together:
   since it only loosens a pause the person already chose with `/auto all`, so a
   `:config set --session shell.autoRun true` holds for the next command. A
   background task is
-  untouched: it is handed a confirmation that always answers no, and the chat's mode
+  untouched: its conversation has the policy `always-no`, and the chat's mode
   never reaches it; the person's own `!command` is untouched too. The decision lives in
   the one place the chat already pauses — the `confirmWrite` closure — and it changes
   nothing about what `agentChat` asks about: a tool never skips its own write flag.
@@ -1194,8 +1192,8 @@ hold this set together:
   - The project is the conversation's, decided at its first message as a session's is
     (`ensureSessionId` records it with or without a sessions directory; the chat hands
     `Conversation.currentProject` (`src/assistant/conversation-session.ts`) to its
-    tools as `ctx.workspaceProject`, and a background task's
-    nested run keeps it, its ctx being the chat's spread); a caller with no conversation
+    tools as `ctx.workspaceProject`, and a background task keeps it: the child inherits
+    its parent's project); a caller with no conversation
     — a plugin's own `chatLLM` — takes the project of the call's shell directory
     (`callProject`); the one-shot prompt's conversation never gets a session id (it
     has no sessions directory), so its project is the one its shell is in at each
@@ -1245,8 +1243,8 @@ hold this set together:
     the model's own earlier notes — data to weigh, never the person's instruction.
   - **The scope.** `scope: "project"` (the default) is the conversation's project —
     decided at its first message, as a session's is, and handed to the tools as
-    `ctx.workspaceProject` (`Conversation.currentProject`, kept by a background task's
-    nested run); the one-shot prompt's conversation, which never gets a
+    `ctx.workspaceProject` (`Conversation.currentProject`; the child a background task
+    runs in inherits its parent's project); the one-shot prompt's conversation, which never gets a
     session id, takes the project its shell is in at each call; a plugin's own
     `chatLLM`, with no conversation, the project of the call's shell directory
     (`callProject`). `"global"` is every project — the person's own
@@ -1776,13 +1774,13 @@ hold this set together:
   the journal** — it is the host's record, and a tool's ctx (a plugin's, a remote
   plugin's, a core tool's) carries nothing that writes there; the host writes every line
   from its own hooks. A background task's own calls (`call-start`, `confirm`, `call`)
-  are journaled that way too: the chat hands its tools its LLM service wrapped
-  (`journaledChatLLM`), which adds its own `onToolStart`/`onToolRun` hooks to the nested
-  run — and a `confirmWrite` hook only when the caller passed a confirmation — and writes
-  to the session whose turn started it. A run with a `taskLabel` (the `background`
-  tool's) is a background task: each line is tagged `task` with that label and its y/n
-  answers are `by: 'background'`. Any other caller is a plugin tool asking the model:
-  no `task` tag, and its own answers are `by: 'plugin'`. The one-shot prompt has no
+  go to the session whose turn started it through the child's `journalRoute` (below),
+  each tagged `task` with its label, its y/n answers `by: 'background'`. A tool that asks
+  the model itself is handed the host's LLM service wrapped (`journaledChatLLM`), which
+  adds its own `onToolStart`/`onToolRun` hooks to that run — and a `confirmWrite` hook
+  only when the caller passed a confirmation — and writes to the session whose turn
+  called the tool: no `task` tag (unless the caller names a `taskLabel`), and its own
+  answers are `by: 'plugin'`. The one-shot prompt has no
   journal: its conversation has no sessions directory. A line over
   `JOURNAL_LINE_MAX` (4 MiB) is written with its largest fields replaced by a note of
   their size and named in `omitted` (`journalLine`).
@@ -2635,7 +2633,13 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   It also holds the child slots (`children`, handed to every conversation in its deps):
   the count of background tasks (armed, queued, running) and the cap — a task starts
   while fewer than `max(1, sessions.maxRunning - 1)` run (`maxRunning` 4 by default, so
-  three), the rest wait FIFO, and a session's own turn never takes or waits for one.
+  three), the rest wait FIFO, and a session's own turn never takes or waits for one. The
+  `background` tool (`src/loader/tools-core.ts`) arms the task with its delay's timer
+  (counted, holding no slot), disarms it with the same handle when the delay ends, then
+  admits the run, which takes a slot until it settles; the chat's
+  `N in background` is `backgroundCount()`, over every conversation of the registry, so
+  it outlives `/clear`. A task's result says `stopped after N rounds — last: …` when its
+  twelve rounds ran out, and a `failed`/`stopped` end is reported as a failure.
 - **A conversation starts a child of its own** (`startChild(spec, journalId)`, in
   `src/assistant/conversation.ts`; a turn hands it to its tools as `ctx.startChild`, with
   the host's slots as `ctx.childSlots`): a `task` conversation (`parent`, `depth` one more,
@@ -3517,8 +3521,8 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
 - **Two queues: the person's and the inbox.** The person's queue (the conversation's `queue`) is
   delivered at the next round boundary (the ⏎ bullet above). The **inbox** (`Conversation.inbox`,
   `src/assistant/conversation.ts`) holds what reaches the chat from outside the conversation
-  and is not the person's — a **background result** (the `background` tool's nested
-  run finishing, through `services.postToChat`), and any later source of the same kind
+  and is not the person's — a **background result** (a background task
+  finishing, through `services.postToChat`), and any later source of the same kind
   goes through it too. The inbox **never enters a running turn**: no round and no tool
   call is interrupted, and nothing lands between a call and its result. It is taken
   only when nothing runs — at a turn's end, a `!command`'s or a slash command's
@@ -3576,8 +3580,8 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   component re-renders, so a value assigned during render is one frame stale.
 - A tool's ctx is built with `allServices(host.services)`, never `...host.services`:
   host services sit on the PROTOTYPE of the per-plugin services view, and a spread
-  copies own properties only. The spread silently gave tools a ctx with no
-  `chatLLM`/`config`/`showMessage`, and `background` answered "no LLM service".
+  copies own properties only. A spread silently hands tools a ctx with no
+  `chatLLM`/`config`/`showMessage`/`pushLog`.
 - The conversation is a flowtty **`<ScrollList anchor="bottom" rowHeight={1}>`**
   (`ChatMessages` in `src/views/modals.ts`): it takes the rows the column leaves,
   follows new rows until the person scrolls up or a long answer's first row reaches

@@ -3,7 +3,6 @@
 import { expect, test } from 'bun:test';
 import { agentChat, type ChatRoundResult, type ToolRun } from '../agent.ts';
 import { assembleToolRegistry, type ToolDef } from '../../loader/tools.ts';
-import { bgActiveCount } from '../../loader/tools-core.ts';
 
 const registry = () => assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as never });
 const names = (o: Record<string, unknown>) => ((o.tools ?? []) as { function: { name: string } }[]).map((t) => t.function.name);
@@ -12,6 +11,7 @@ const done: ChatRoundResult = { content: 'done', reasoning: '', finishReason: 's
 test('every tool in full: a withheld tool is never sent, and a call to it answers as unknown and never runs', async () => {
   registry();
   const offered: string[][] = [];
+  let started = 0;
   let n = 0;
   const round = async (_m: unknown, o: Record<string, unknown>): Promise<ChatRoundResult> => {
     offered.push(names(o));
@@ -26,8 +26,8 @@ test('every tool in full: a withheld tool is never sent, and a call to it answer
     chatRound: round as never,
     withholdTools: ['background', 'subagent', 'remind'],
     onToolRun: (r) => runs.push(r),
-    // Were `background` to run, it would take this service and count a task.
-    toolCtx: { chatLLM: async () => { throw new Error('a withheld tool ran'); } } as never,
+    // Were `background` to run, it would start a task through this hook.
+    toolCtx: { startChild: () => { started++; throw new Error('a withheld tool ran'); }, childSlots: {} } as never,
   });
   expect(offered).toHaveLength(2);
   for (const sent of offered) {
@@ -38,7 +38,8 @@ test('every tool in full: a withheld tool is never sent, and a call to it answer
   expect(runs.map((r) => [r.name, r.outcome])).toEqual([['background', 'error'], ['datetime', 'ok']]);
   expect(runs[0]!.detail).toBe('Error: Unknown tool: background');
   expect(res.transcript.filter((m) => m.role === 'tool').map((m) => String(m.content))[0]).toBe('ERROR: Unknown tool: background');
-  expect(bgActiveCount()).toBe(0);
+  // No task was started: the hook a task starts through was never called.
+  expect(started).toBe(0);
 });
 
 test('tools on demand: a withheld tool is in neither the request nor the index, and tools_load cannot load it', async () => {

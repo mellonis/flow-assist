@@ -31,6 +31,7 @@ export interface RigOptions {
   guests?: (make: Make) => Plugin[];    // plugins of the test's own, made as the loader makes them
   shown?: boolean;                      // the port shows the conversation's end (true unless said)
   sessions?: boolean;                   // a sessions directory of the test's own (true unless said)
+  inbox?: boolean;                      // `services.postToChat` delivers to `rig.conv`, as the chat binds it (false unless said)
 }
 
 // What a chat's view answers when the conversation asks: its end shown or not, the field empty.
@@ -47,14 +48,17 @@ export type Sent = ChatMessage & { tool_calls?: { id: string; function: { name: 
 
 export type Rig = ReturnType<typeof conversationRig>;
 
-// Every conversation a rig made since the last `closeRigs`, and the LLM_TOKEN the first
-// of them found.
+// Every conversation a rig made since the last `closeRigs`, every rig's registry, and the
+// LLM_TOKEN the first of them found.
 const made: Conversation[] = [];
+const registries: ConversationRegistry[] = [];
 let tokenBefore: { value: string | undefined } | null = null;
 
-// Closes every conversation a rig made (their timers go, the 250 ms save among them) and
-// puts LLM_TOKEN back as it was. A rig test file calls it in its `afterEach`.
+// Cancels every background task still waiting on its delay, closes every conversation a
+// rig made (their timers go, the 250 ms save among them) and puts LLM_TOKEN back as it
+// was. A rig test file calls it in its `afterEach`.
 export function closeRigs(): void {
+  for (const r of registries.splice(0)) r.children.cancelArmed();
   for (const c of made.splice(0)) c.close('exit');
   if (!tokenBefore) return;
   if (tokenBefore.value === undefined) delete process.env.LLM_TOKEN; else process.env.LLM_TOKEN = tokenBefore.value;
@@ -98,6 +102,7 @@ export function conversationRig(model: ScriptedModel, opts: RigOptions = {}) {
     sessionsDir: () => sessionsDir,
     canAsk: opts.canAsk ?? true,
   });
+  registries.push(registry);
   const deps = registry.deps();
   const port = new FakePort(opts.shown ?? true);
   const init = { kind: opts.kind ?? 'session', policy: opts.policy ?? { kind: 'ask' } };
@@ -165,5 +170,8 @@ export function conversationRig(model: ScriptedModel, opts: RigOptions = {}) {
     // The conversation's timers go (the 250 ms save among them), as at exit.
     close(): void { conv.close('exit'); },
   };
+  // A background task's result, delivered as the chat delivers it: into the conversation
+  // the rig holds when the task ends.
+  if (opts.inbox) (services as unknown as { postToChat: (text: string) => void }).postToChat = (text) => rig.conv.deliver(text);
   return rig;
 }

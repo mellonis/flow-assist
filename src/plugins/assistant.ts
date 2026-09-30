@@ -12,7 +12,6 @@ import { useSyncExternalStore } from 'react';
 import os from 'node:os';
 import path from 'node:path';
 import { addTrigger } from '../loader/registry.js';
-import { bgActiveCount } from '../loader/tools-core.js';
 import { autoBadge, autoCommand, autoSaid, nextAutoMode } from '../assistant/auto.js';
 import { NOTES_MODES, notesCommand, notesMode, notesSaid, type NotesMode } from '../assistant/step.js';
 import { lineTab, lineView, type TabWalk } from '../config/commandline.js';
@@ -2016,9 +2015,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             viewRenderers,
             now: Date.now(),
             onViewFail,
-            // Live count of IN-FLIGHT background tasks (the host re-renders via
-            // notify() when one is armed or completes).
-            bgCount: bgActiveCount(),
+            // Background tasks in flight — armed, queued or running — over every
+            // conversation of the registry, so the count outlives `/clear` (the tool
+            // notifies when one is armed and when it ends).
+            bgCount: registryRef.current!.children.backgroundCount(),
             ...(() => {
               const r = conv.contextReading(screen);
               // How many of the history's items go as stubs now — after /compact the

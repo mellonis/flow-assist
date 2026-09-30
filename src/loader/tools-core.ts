@@ -17,16 +17,16 @@ import { callProject, ensureWorkspace, listWorkspace, readScope, readWorkspaceFi
 import { markFacts } from '../assistant/memory-trust.js';
 import { tildePath } from '../assistant/shell.js';
 import { openInBrowser } from '../runtime/services.js';
-import { workerPrompt } from '../assistant/conversation-turn.js';
-import { asBackgroundWork, inBackgroundWork } from '../runtime/background-work.js';
+import { inBackgroundWork } from '../runtime/background-work.js';
+import type { ChildSpec, ChildStart } from '../assistant/conversation-types.js';
+import type { ChildSlots } from '../assistant/registry.js';
 import { resolveIdentityToken } from '../runtime/plugin-identity.js';
 import { DEFAULT_THEME } from '../playback/theme.js';
 import { writtenKey } from '../playback/keys.js';
 import { createPlan, type Plan } from '../assistant/plan.js';
 import type { ToolGroup, ToolDef } from './tools.js';
 import { WEB_DEFAULTS } from '../assistant/web-fetch.js';
-import { SHELL_DEFAULTS, createShellState, type ShellState } from '../assistant/shell.js';
-import { instructionsPrompt } from '../assistant/project-instructions.js';
+import { SHELL_DEFAULTS } from '../assistant/shell.js';
 import { parseAskArgs, askResult, type AskQuestion, type AskState } from '../assistant/ask.js';
 import type { Change } from '../assistant/diff.js';
 import { TOOLS_LOAD } from '../assistant/tool-loading.js';
@@ -35,7 +35,7 @@ import { IMAGE_DEFAULTS, type ImageRef } from '../assistant/images.js';
 import { AUTO_COMPACT_DEFAULTS } from '../assistant/compaction.js';
 import { MAX_ROUNDS_DEFAULT, MAX_TURN_TOKENS_DEFAULT } from '../assistant/rounds.js';
 import { RECALL_DEFAULTS, findItem, recallLimits, recallResult, type RecallSource } from '../assistant/recall.js';
-import { ANTHROPIC_BASE_URL, DEFAULT_MAX_TOKENS, llmOpts } from '../assistant/llm-endpoint.js';
+import { ANTHROPIC_BASE_URL, DEFAULT_MAX_TOKENS } from '../assistant/llm-endpoint.js';
 
 // Runtime context handed to core tools by the caller: the conversation's project (the
 // workspace the memory and the workspace tools work in — absent, where the call's shell
@@ -212,49 +212,6 @@ function parseReminderMs(inArg: string, atArg: string): { ms: number } | { error
     return { ms: Math.max(0, target.getTime() - now.getTime()) };
   }
   return { error: '`in` (a duration) or `at` (a clock time) is required.' };
-}
-
-// Background-task concurrency: a module-level counter + FIFO queue so a runaway
-// agent cannot spawn unbounded CONCURRENT detached agent runs (each is a live LLM
-// call). Schedule is unbounded — a task is just a timer until it fires — but at
-// most MAX run at once. Overflow is QUEUED, not dropped: when a running task frees
-// a slot the next queued one is promoted. (Dropping silently turned a burst — e.g.
-// several "run X in 1s" — into tasks that "didn't start" from the user's view.)
-let bgRunning = 0;
-const MAX_BG_TASKS = 3;
-const bgQueue: Array<() => void> = [];
-// A background task may chain follow-up background tasks (a task whose subtask
-// needs further work — e.g. "build, then fix and rebuild on failure"). But an
-// agent must NOT recurse `background` forever: this caps how deep a chain may go
-// (0 = the main chat's task · 1 = a task it spawned · 2 = deepest, no further).
-const MAX_BG_DEPTH = 2;
-// In-flight background work — what the chat's «N in background» indicator counts. A task
-// is counted from the moment it is SCHEDULED (its `in`/`at` delay armed) until it
-// fully completes: armed-but-delayed + queued-for-a-slot + running. `bgRunning` is
-// the execution cap; `bgActive` is the user-facing count.
-let bgActive = 0;
-
-// Runs `run` under the concurrency cap: start immediately if a slot is free,
-// otherwise enqueue and start when the next slot frees. The counter covers only
-// RUNNING tasks (not merely-scheduled ones), so delayed tasks don't hold a slot.
-function runBg(run: () => Promise<void>): void {
-  const start = () => {
-    bgRunning++;
-    void run().finally(() => {
-      bgRunning--;
-      const next = bgQueue.shift();
-      if (next) next(); // promote the next queued task into the freed slot
-    });
-  };
-  if (bgRunning < MAX_BG_TASKS) start();
-  else bgQueue.push(start);
-}
-
-// Live count of IN-FLIGHT background tasks (armed / queued / running), for the
-// chat's «N in background» indicator. The host's notify() drives the re-render that
-// updates it — called when a task is armed, when it starts, and when it completes.
-export function bgActiveCount(): number {
-  return bgActive;
 }
 
 // ─── The assistant's task plan ────────────────────────────────────────────────
@@ -568,7 +525,7 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
       case 'ui_open': {
         // The screens are the running app's (src/runtime/screens.ts); a background task
         // runs apart from the screen, and a run with no app has none.
-        if (inBackgroundWork() || Number((ctx as { _bgDepth?: number })._bgDepth ?? 0) > 0) throw new Error('ui_open: screens are not opened from background work — ask in the chat.');
+        if (inBackgroundWork()) throw new Error('ui_open: screens are not opened from background work — ask in the chat.');
         const screens = (ctx as { screens?: { uiOpen: (name: string) => Promise<{ ok: boolean; text: string }> } }).screens;
         if (!screens) throw new Error('ui_open: there is no screen here — the app is not running.');
         // A refusal is the call's error, so the model reads it as one; opened, or waiting
@@ -748,13 +705,11 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
         return `Reminder set: "${text}" in ${Math.round(parsed.ms / 1000)}s — a banner will pop here (Esc dismisses).`;
       }
       case 'background': {
-        // Offload a self-contained task to a DETACHED agent run: parse the task,
-        // schedule a nested agentChat (via ctx.chatLLM — the same agent loop with
-        // tool access) that runs autonomously, and deliver the result when it
-        // completes. The tool returns immediately, so the chat stays usable while
-        // the task works. Read-only by default (confirmWrite declines writes): an
-        // autonomous task has no human to answer a y/n, and a hidden write is a
-        // side effect — so writes are declined, not silently applied.
+        // Offload a self-contained task to a CHILD conversation of the one whose turn
+        // called this (AGENTS.md, "A conversation starts a child of its own"): its own
+        // plan, shell, tool set and abort, no recall and nobody to ask, every write
+        // declined, twelve rounds. The tool answers at once; the result is delivered when
+        // the task ends, as the toast, the log line and a row in the chat's inbox.
         const task = String(args.task ?? '').trim();
         if (!task) return 'task is required — the work to do in the background.';
         const label = String(args.label ?? '').trim() || task.slice(0, 40);
@@ -767,94 +722,46 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
           if ('error' in parsed) return parsed.error;
           ms = parsed.ms;
         }
-        const chatLLM = (ctx as { chatLLM?: (messages: unknown[], opts: Record<string, unknown>) => Promise<{ content?: string }> }).chatLLM;
-        if (typeof chatLLM !== 'function') return 'Background tasks unavailable: no LLM service (the host must be interactive).';
-        // Chaining depth: a background task may spawn follow-up background tasks
-        // (the nested agent has `background` in its tool set and it is read-only,
-        // so it is always allowed). But a chain must not recurse forever — cap how
-        // deep it may go. `_bgDepth` is threaded through toolCtx by the caller.
-        const depth = Number((ctx as { _bgDepth?: number })._bgDepth ?? 0);
-        if (depth >= MAX_BG_DEPTH) return `Background chaining depth exceeded (max ${MAX_BG_DEPTH}) — finish this task; do not spawn further background tasks.`;
-        // A focused one-shot agent: autonomous, tool-using, returns a concise result.
-        // Grounding rule: the agent is FRESH (no conversation context), so a time/date
-        // question is answered from stale or absent memory unless it calls `datetime`.
-        // Demand the tool for anything "now"-sensitive — that is what makes the result
-        // the ACTUAL time at fire-time, not a guess.
-        const prompt = workerPrompt(task);
-        const extraTools = (ctx as { pluginAiTools?: ToolDef[] }).pluginAiTools ?? [];
-        // Spread the live toolCtx so the nested run's tools resolve config, memory
-        // plugin scope, and host services the same way the chat's do. Thread the
-        // chain depth so a follow-up background task knows how deep it is.
-        // …minus `askUser`: a background task runs while the person is doing something
-        // else, and a question popping up would seize every key mid-sentence. With
-        // no hook, `ask_user` answers "nobody to ask" and the task proceeds on a
-        // stated assumption.
-        // A background run is a conversation of its own: it plans on its own plan and
-        // never touches the checkboxes of the chat that started it.
-        // Its shell directory is its own too — a fresh `ShellState`, so its own `cd`
-        // (and run_command, though that is declined there anyway) never moves the
-        // parent's — but it STARTS where the parent conversation's shell is right now,
-        // not at the app's own default: the person asked for help with the task at
-        // hand, not with wherever the process happened to start.
-        // So are its loaded tools: it is given no `toolSet`, so it starts from the index
-        // and loads what it needs, and nothing it loads reaches the chat's set.
-        const bgConfig = ((ctx as { config?: Record<string, unknown> }).config ?? {}) as Record<string, unknown>;
-        const parentCwd = (ctx as { shell?: ShellState }).shell?.cwd() ?? null;
-        // It reads the project's instructions for that directory itself — never the
-        // chat's reading, which describes the chat's directory — once per directory,
-        // again only when its own `cd` moves it (`instructionsPrompt`).
-        let refreshBgInstructions = () => {};
-        const bgShell = createShellState(() => bgConfig, parentCwd, () => refreshBgInstructions());
-        const bgInstructions = instructionsPrompt(bgConfig, bgShell, prompt);
-        refreshBgInstructions = bgInstructions.refresh;
-        const toolCtx = { ...(ctx as Record<string, unknown>), _bgDepth: depth + 1, askUser: undefined, plan: createPlan(), shell: bgShell, projectInstructions: undefined };
-        // The nested run needs its OWN LLM credentials — the same way the chat's
-        // send() derives them (`llmOpts(ai)`: the provider, base URL, model, token).
-        // `ctx` is the chat's toolCtx (config + host services), so read ai.* from it;
-        // without these agentChat throws "LLM_TOKEN is not set" and the task fails
-        // even though the chat itself authenticates fine.
-        const ai = ((ctx as { config?: { ai?: Record<string, unknown> } }).config?.ai ?? {}) as Record<string, unknown>;
-        // Count the task as in-flight from the moment it is ARMED (its delay starts),
-        // so the chat's «N in background» indicator reflects a scheduled-but-not-yet-firing
-        // task too — and re-render NOW so the count appears during the wait.
-        bgActive++;
-        (ctx as { notify?: () => void }).notify?.();
-        setTimeout(() => {
-          void runBg(async () => {
+        const c = ctx as {
+          startChild?: (spec: ChildSpec) => ChildStart; childSlots?: ChildSlots;
+          showMessage?: (m: string) => void; pushLog?: (e: string) => void; postToChat?: (t: string) => void; notify?: () => void;
+        };
+        const slots = c.childSlots;
+        if (typeof c.startChild !== 'function' || !slots) return 'Background tasks unavailable: no conversation to run them in (the host must be interactive).';
+        // Refused past `ai.subagentDepth`: the refusal is the tool's answer.
+        const started = c.startChild({ kind: 'task', label, prompt: task, by: 'model' });
+        if ('refused' in started) return started.refused;
+        // Counted from the moment it is armed, so the chat's «N in background» shows a
+        // task waiting on its delay too; a delayed task holds no slot. The timer runs even
+        // with no delay: the turn that called this sends its next request first.
+        const timer = setTimeout(() => {
+          slots.disarm(timer);
+          // The slot frees when this run settles.
+          slots.admit(async () => {
+            const failed = (msg: string) => {
+              c.showMessage?.(`⚠ ${label} failed: ${msg}`);
+              c.pushLog?.(`[bg] ${label} error: ${msg}`);
+              c.postToChat?.(`${label} failed:\n${msg}`);
+            };
             try {
-              // Text only: a background task never gets images. It has no person to have
-              // attached one, and the model's own words cannot make the host read a file
-              // as an image.
-              // Marked as background work through every await: a plugin's tool it calls
-              // is told so too (src/runtime/background-work.ts).
-              const res = await asBackgroundWork(() => chatLLM(
-                [{ role: 'system', content: prompt }, { role: 'user', content: task }],
-                // `taskLabel` names the task to the host, which journals the run's calls
-                // under it; the tool itself writes nothing there.
-                { extraTools: extraTools as ToolDef[], toolCtx, maxRounds: 12, confirmWrite: () => false, taskLabel: label,
-                  systemPrompt: bgInstructions.systemPrompt,
-                  ...llmOpts(ai) },
-              ));
-              const result = String(res?.content ?? '').trim() || '(no output)';
-              (ctx as { showMessage?: (m: string) => void }).showMessage?.(`⏳ ${label} done`);
-              (ctx as { pushLog?: (e: string) => void }).pushLog?.(`[bg] ${label}: ${result}`);
-              // Return the result to the chat too (the assistant registers `postToChat`):
-              // it waits in the chat's inbox until no turn runs, lands as a message of its
-              // own and joins the model's history (the conversation's `takeInbox` says what follows).
-              // The `Background` role label (render) already marks it as a background
-              // result, so the text itself does NOT repeat the "[background]" prefix.
-              (ctx as { postToChat?: (t: string) => void }).postToChat?.(`${label} finished:\n${result}`);
+              const r = await started.run();
+              if (r.outcome === 'failed' || r.outcome === 'stopped') { failed(r.error ?? r.outcome); return; }
+              const result = (r.text || '(no output)') + (r.outcome === 'limit' && r.limit ? `\nstopped after ${r.limit.rounds} rounds — last: ${r.limit.lastStep}` : '');
+              c.showMessage?.(`⏳ ${label} done`);
+              c.pushLog?.(`[bg] ${label}: ${result}`);
+              // It waits in the chat's inbox until no turn runs, and lands as a row of its
+              // own whose role marks it as a background result — so the text carries no
+              // "[background]" prefix.
+              c.postToChat?.(`${label} finished:\n${result}`);
             } catch (e) {
-              const msg = e instanceof Error ? e.message : String(e);
-              (ctx as { showMessage?: (m: string) => void }).showMessage?.(`⚠ ${label} failed: ${msg}`);
-              (ctx as { pushLog?: (e: string) => void }).pushLog?.(`[bg] ${label} error: ${msg}`);
-              (ctx as { postToChat?: (t: string) => void }).postToChat?.(`${label} failed:\n${msg}`);
+              failed(e instanceof Error ? e.message : String(e));
             } finally {
-              bgActive--;
-              (ctx as { notify?: () => void }).notify?.();
+              c.notify?.();
             }
           });
         }, ms);
+        slots.arm(timer);
+        c.notify?.();
         return `Background task started (${label})${ms ? `, to begin in ${Math.round(ms / 1000)}s` : ''} — the result appears in the chat when it ends, and you see it on your next turn.`;
       }
       case 'todo': {

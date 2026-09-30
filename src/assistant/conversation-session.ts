@@ -133,8 +133,9 @@ export function journal(c: Conversation, ev: JournalEvent, opts: { person?: bool
 
 // The host's LLM service as a tool is handed it: the nested run's calls, their start,
 // their y/n and their end, go into the journal of `from`'s session. A caller that names
-// a `taskLabel` (the `background` tool) is a background task and its lines carry the
-// label; any other is a plugin tool asking the model. Only a caller that passed a
+// a `taskLabel` has its lines carry the label and its y/n answered `by: 'background'`;
+// any other is a plugin tool asking the model. (A `background` task is a conversation
+// of its own and journals through its `journalRoute`, not through this.) Only a caller that passed a
 // confirmation gets a y/n, journaled as its answer; with none, agentChat declines each
 // write itself and the journal hears it as a declined call.
 export function journaledChatLLM(c: Conversation, from: string) {

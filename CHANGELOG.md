@@ -5,6 +5,15 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **A background task is a conversation of its own.** A task that runs out of its twelve
+  rounds now says so at the end of its result (`stopped after 12 rounds — last: …`),
+  where it read `finished:` with no output or a partial text. Esc, `/clear` or `/new`
+  during the turn that started a task no longer stops a tool the task runs, such as its
+  `web_fetch`: a task has its own abort. A task cannot `recall` the chat's bulky items.
+  Two settings: `ai.subagentDepth` (2 by default, at least 1) is how deep a chain of
+  tasks starting tasks may go, and the refusal names it; `sessions.maxRunning` (4 by
+  default) bounds the tasks running at once to one less than it, three at the default,
+  as before.
 - **A duration is shown in whole seconds.** The turn's timer, a command's line, the
   `Ran N commands` head, a recall stub and `/export` read `<1s`, `12s`, `3m 5s` and,
   past an hour, `1h 2m`, where they showed tenths (`12.4 s`).

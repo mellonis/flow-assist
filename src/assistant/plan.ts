@@ -3,7 +3,7 @@
 //
 // A plan belongs to a CONVERSATION, never to the process: module-level state would
 // let `/clear` start a new conversation under the old plan, a
-// background task's nested run write into the plan of the chat that started it, and
+// background task write into the plan of the chat that started it, and
 // one test's plan bleed into the next test's. `createPlan()` makes one; whoever owns the
 // conversation holds it and hands it to the tool through the tool context
 // (`ctx.plan`). In-memory only — it is a scratchpad for the turn at hand, not the

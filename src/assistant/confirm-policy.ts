@@ -14,7 +14,7 @@ export type ConfirmWrite = NonNullable<AgentOpts['confirmWrite']>;
 
 export type ConfirmPolicy =
   | { kind: 'ask' }                                            // the auto mode first, then a y/n the person answers in the chat
-  | { kind: 'always-no' }                                      // every write declined, journaled `by: 'background'`; no driver uses it yet
+  | { kind: 'always-no' }                                      // every write declined, journaled `by: 'background'`: the policy of a background task's conversation
   | { kind: 'none' }                                           // nobody to ask: no confirmWrite at all, so agentChat declines before the call starts
   | { kind: 'allow-writes'; say: (line: string) => void }      // `--allow-writes`: what the auto mode may answer with `shell.autoRun` on, each write said
   | { kind: 'caller'; confirm: ConfirmWrite };                 // a plugin tool's own confirmation, journaled `by: 'plugin'`
