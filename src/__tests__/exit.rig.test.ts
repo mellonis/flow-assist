@@ -208,6 +208,10 @@ test('at exit a session\'s !command is stopped: its process group is gone, and n
     expect(await groupGone(pid!)).toBe(true);
     await running;
     await new Promise((r) => setTimeout(r, 20));
+    // The command stopped because the process exits, and its journal says so.
+    const ends = rig.journal(s.sessionId).filter((e) => e.t === 'shell-end');
+    expect(ends.at(-1)).toMatchObject({ status: 'stopped (exit)' });
+    expect(exportMarkdown(rig.journal(s.sessionId), { title: '', id: s.sessionId })).toContain('*stopped (exit)');
     expect(fs.existsSync(saveDir) ? fs.readFileSync(saveDir, 'utf8') : null).toBe(before);
     expect(rig.toasts).toHaveLength(toasts);
     expect(fs.existsSync(lockOf(rig, s.sessionId))).toBe(false);
@@ -236,6 +240,10 @@ test('at exit a session turn\'s run_command is stopped: its process group is gon
     expect(await groupGone(pid!)).toBe(true);
     await turn;
     await new Promise((r) => setTimeout(r, 20));
+    // The turn stopped because the process exits, and its journal says so.
+    const ends = rig.journal(s.sessionId).filter((e) => e.t === 'end');
+    expect(ends.at(-1)).toMatchObject({ stopped: 'exit' });
+    expect(exportMarkdown(rig.journal(s.sessionId), { title: '', id: s.sessionId })).toContain('*stopped (exit)*');
     expect(fs.existsSync(saveFile) ? fs.readFileSync(saveFile, 'utf8') : null).toBe(before);
     expect(rig.toasts).toHaveLength(toasts);
     expect(fs.existsSync(lockOf(rig, s.sessionId))).toBe(false);

@@ -243,9 +243,11 @@ export class ConversationRegistry {
     // Whatever runs stops with the process, a session's turn or `!command` as well as a
     // task's: an abort kills a command's process group, which would otherwise outlive
     // us. After the save, so the aborted run's `finally` changes nothing that was
-    // written; before `close`, which clears the handlers.
+    // written; before `close`, which clears the handlers. The stop key names the
+    // reason, so the journal and the export say the run stopped at exit, not by Esc; a
+    // pending y/n is left as it is (unlike `stop`, which declines it).
     for (const c of deepestFirst) {
-      try { c.abort?.abort(); } catch { /* exiting */ }
+      try { if (c.abort) { c.stopKey = reason; c.abort.abort(); } } catch { /* exiting */ }
     }
     for (const c of deepestFirst) {
       try { c.close(reason); } catch { /* exiting */ }
