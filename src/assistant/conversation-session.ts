@@ -37,7 +37,9 @@ export const projectHere = (c: Conversation): string | null =>
 
 // The project the lists open on: this conversation's session's, once it has one; else
 // where the shell is — the memory's, the workspace's and the lists' project.
-export const currentProject = (c: Conversation): string | null => (c.sessionId ? c.sessionProject : projectHere(c));
+// A child's is its parent's, whatever directory its shell moves to (`inheritedProject`).
+export const currentProject = (c: Conversation): string | null =>
+  (c.inheritedProject !== undefined ? c.inheritedProject : c.sessionId ? c.sessionProject : projectHere(c));
 
 // A session gets its id — and its lock — when it first has something to keep: its
 // first save, or the first thing its journal records. Its project is decided here too,
@@ -94,8 +96,10 @@ export function snapshotSession(c: Conversation): Session {
 // gives it one — a start with nothing said leaves no journal. A session opened from a
 // state file with no journal beside it (saved before journals, or its journal swept by
 // retention) brings the rows it holds into the journal it starts (`journalImport`),
-// marked `imported`. `forkedTo` redirects an id a fork left to the fork.
+// marked `imported`. `forkedTo` redirects an id a fork left to the fork. A child keeps
+// no journal: its lines go through its `journalRoute` to its parent's.
 export function journalTo(c: Conversation, from: string, ev: JournalEvent): void {
+  if (c.journalRoute) { c.journalRoute(ev); return; }
   let id = from;
   for (let i = 0; i < 64 && c.forkedTo.has(id); i++) id = c.forkedTo.get(id)!;
   if (!c.deps.sessionsDir() || !id) return;
@@ -108,6 +112,7 @@ export function journalTo(c: Conversation, from: string, ev: JournalEvent): void
 // `person` — the event is something the person said or ran (or the question a turn
 // starts from): the session gets its id if it has none.
 export function journal(c: Conversation, ev: JournalEvent, opts: { person?: boolean } = {}): string {
+  if (c.journalRoute) { c.journalRoute(ev); return ''; }
   const dir = c.deps.sessionsDir();
   if (!dir) return '';
   const stamped = { ...ev, at: ev.at ?? new Date().toISOString() };

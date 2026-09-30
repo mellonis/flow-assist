@@ -19,7 +19,7 @@ import type { ViewRecord } from './views.js';
 import type { ToolDef } from '../loader/tools.js';
 import { RESTART_NOTE, type ConfigChange } from '../config/load.js';
 import { keyGlyph } from '../playback/keys.js';
-import { answerAt, type ChatMsg, type ConversationKind, type SendOptions } from './conversation-types.js';
+import { answerAt, type ChatMsg, type ChildSpec, type ConversationKind, type SendOptions } from './conversation-types.js';
 import type { Conversation } from './conversation.js';
 
 // A plain object holding every enumerable service, inherited ones included.
@@ -322,6 +322,11 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
         // (following a fork), tagged with the task's label (`task`). No tool is
         // handed a way to write to the journal itself.
         chatLLM: c.journaledChatLLM(journalId),
+        // A background task started from this turn: a child conversation whose calls are
+        // journaled here, under this turn's journal id — and the host's slots it waits
+        // for (src/assistant/registry.ts).
+        startChild: (spec: ChildSpec) => c.startChild(spec, journalId),
+        childSlots: c.deps.children,
       },
       confirmWrite: confirmFor(c.policy, { conv: c, journalId, ...(c.kind === 'task' ? { task: c.label } : {}) }),
       // A view a tool opened, and every change to it. Its message is pushed on

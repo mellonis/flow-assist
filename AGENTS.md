@@ -1766,8 +1766,9 @@ hold this set together:
   in `runTurn`), even when a `/clear` lands mid-turn — they happened there. A FORK is
   different: the conversation goes on in the fork, so `journalTo` follows `forkedTo`
   (parent id → fork id, set where `writeSession` forks) and the rest of a turn in
-  flight, a `!command` still running and a background task's calls land in the fork's
-  journal, never in the parent's, which another writer holds now. The redirect is for
+  flight, a `!command` still running and a child's calls (its `journalRoute` writes
+  through its parent's `journalTo`, below) land in the fork's journal, never in the
+  parent's, which another writer holds now. The redirect is for
   what was in flight: opening the parent again (`applySession`) drops it, and from
   then on the parent writes its own journal. The journal, the save and its fork, and
   opening a session are functions over the conversation in
@@ -2635,6 +2636,24 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   the count of background tasks (armed, queued, running) and the cap — a task starts
   while fewer than `max(1, sessions.maxRunning - 1)` run (`maxRunning` 4 by default, so
   three), the rest wait FIFO, and a session's own turn never takes or waits for one.
+- **A conversation starts a child of its own** (`startChild(spec, journalId)`, in
+  `src/assistant/conversation.ts`; a turn hands it to its tools as `ctx.startChild`, with
+  the host's slots as `ctx.childSlots`): a `task` conversation (`parent`, `depth` one more,
+  `label`) with its own plan, shell, tool set and abort, and the `always-no` policy. Its
+  deps are its parent's with no sessions directory, no screens, nobody to ask, no alert
+  and a silent `pushLog`. It keeps no journal or state file: its `journalRoute` sends its
+  `call-start`, `confirm` and `call` lines — and nothing else — to its parent's
+  `journalTo` under the parent turn's journal id, tagged `{ task: <label>, ...line }` (a
+  grandchild's own label kept). Its project is its parent's (`inheritedProject`, read
+  first by `currentProject`), whatever root its shell moves to — the memory and the
+  workspace follow it; its shell starts in its parent's directory, and its `cd` moves
+  only its own (and the project instructions its per-round prompt reads). At
+  `ai.subagentDepth` (2 by default: a task may start one more) it is refused at once,
+  the refusal naming the number. `startChild` neither admits, arms nor delays: the
+  caller schedules `run()`, which sends the task as background work, answers the end
+  (`outcome`, the trimmed text, the error, the round limit with its last step) and
+  closes the child (`park`: its save and inbox timers go). A closed conversation's
+  `deliver` lands nothing.
 - **Ctrl+C, Ctrl+D and Ctrl+Z take a second press** (`src/runtime/exit-keys.ts`, pure;
   the App owns the arm). flowtty hands these three to the app BEFORE the terminal
   backend acts (exit, exit, suspend — skipped when a `useInput` handler returns strict

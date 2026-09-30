@@ -170,3 +170,15 @@ export interface ConversationDeps {
   // background tasks.
   children?: ChildSlots;
 }
+
+// A child a conversation starts from a turn: the `background` tool's task.
+export interface ChildSpec { kind: 'task'; label: string; prompt: string; by: 'model' | 'person' }
+// How a child's run ended, as the tool that started it reports it.
+export interface ChildResult {
+  outcome: 'answer' | 'empty' | 'limit' | 'stopped' | 'failed';
+  text: string;                  // the child's final text, trimmed ('' when none)
+  error?: string;                // the turn's error, when it failed
+  limit?: { rounds: number; lastStep: string };
+}
+// What `startChild` hands back: a refusal said to the model, or the child and its run.
+export type ChildStart = { refused: string } | { child: Conversation; run: () => Promise<ChildResult> };

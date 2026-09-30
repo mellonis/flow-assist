@@ -23,7 +23,8 @@ import { pickVerb, verbList } from './verbs.js';
 import type { ViewRecord } from './views.js';
 import type { ToolDef } from '../loader/tools.js';
 import { workspaceFor } from './workspace.js';
-import { callOf, lastAnswerOf, type BusyKind, type ChatMsg, type CloseReason, type ConversationDeps, type ConversationEvent, type ConversationKind, type ConversationSnapshot, type ConversationStatus, type PendingConfirm, type Queued, type QueueWait, type SendOptions, type TurnEnd, type ViewPort } from './conversation-types.js';
+import { asBackgroundWork } from '../runtime/background-work.js';
+import { callOf, lastAnswerOf, type BusyKind, type ChatMsg, type ChildResult, type ChildSpec, type ChildStart, type CloseReason, type ConversationDeps, type ConversationEvent, type ConversationKind, type ConversationSnapshot, type ConversationStatus, type PendingConfirm, type Queued, type QueueWait, type SendOptions, type TurnEnd, type ViewPort } from './conversation-types.js';
 import {
   applySession, currentProject, ensureSessionId, journal, journaledChatLLM, journalTo, markSeen, persist, pushNote,
   releaseLockOf, writeSession, NO_FILE,
@@ -52,6 +53,16 @@ export class Conversation {
   readonly kind: ConversationKind;
   // A `task`'s label, which tags its journal lines in the conversation that started it.
   label = '';
+  // The tree: the conversation that started this one (null for a session) and how deep
+  // it is (a session 0, its task 1, …).
+  parent: Conversation | null = null;
+  depth = 0;
+  // A child's journal lines go through this to its parent's (a task keeps no journal of
+  // its own); null for a conversation that journals itself.
+  journalRoute: ((ev: JournalEvent) => void) | null = null;
+  // A child's project is its parent's, whatever directory its shell moves to; undefined:
+  // decided as a session decides it.
+  inheritedProject: string | null | undefined = undefined;
   readonly deps: ConversationDeps;
   // Who answers a write's y/n in this conversation (src/assistant/confirm-policy.ts):
   // `ask` for the chat's; decided when it is made, never changed.
@@ -447,6 +458,49 @@ export class Conversation {
     return true;
   }
 
+  // ── children
+  // A background task started from the turn journaled as `journalId`: a `task`
+  // conversation with its own plan, shell (starting where this one's is), tool set and
+  // abort; no screens, no one to ask, no log lines, and no journal or state file of its
+  // own — its `call-start`, `confirm` and `call` lines go into this turn's journal,
+  // tagged `task: <label>` (a grandchild's own label kept). Refused past
+  // `ai.subagentDepth`. Nothing runs until `run()`, which closes the child when it ends;
+  // the caller admits and schedules it.
+  startChild(spec: ChildSpec, journalId: string): ChildStart {
+    const max = Number((this.deps.config().ai as { subagentDepth?: unknown } | undefined)?.subagentDepth ?? 2);
+    if (this.depth >= max) return { refused: `Background chaining depth exceeded (max ${max}) — finish this task; do not spawn further background tasks.` };
+    const deps: ConversationDeps = {
+      ...this.deps,
+      sessionsDir: () => null, screens: () => undefined, screen: () => [], canAsk: false,
+      notify: () => {}, pushLog: () => {}, current: undefined,
+    };
+    const child = new Conversation(deps, { kind: 'task', policy: { kind: 'always-no' } });
+    child.parent = this;
+    child.depth = this.depth + 1;
+    child.label = spec.label;
+    child.inheritedProject = this.currentProject();
+    const kept = new Set(['call-start', 'confirm', 'call']);
+    child.journalRoute = (ev) => { if (kept.has(ev.t)) this.journalTo(journalId, { task: spec.label, ...ev }); };
+    child.shell.setCwd(this.shell.cwd());
+    const run = async (): Promise<ChildResult> => {
+      try {
+        await asBackgroundWork(() => child.send(spec.prompt));
+        const end = child.lastEnd;
+        const outcome = (end?.outcome ?? 'failed') as ChildResult['outcome'];
+        return {
+          outcome,
+          text: child.content.trim(),
+          ...(end?.error ? { error: end.error } : {}),
+          ...(outcome === 'limit' && end?.limit ? { limit: { rounds: end.limit.rounds, lastStep: end.limit.lastStep } } : {}),
+        };
+      } finally {
+        // Its save and inbox timers go with it.
+        child.close('park');
+      }
+    };
+    return { child, run };
+  }
+
   // ── the work (src/assistant/conversation-turn.ts)
   // A turn with the model; false with nothing to send, or with something running.
   send(text: string, opts?: SendOptions): Promise<boolean> { return runTurn(this, text, opts); }
@@ -528,8 +582,10 @@ export class Conversation {
   // holds it (a y/n, a question) and clears itself once the inbox is empty.
   // A host-reachable channel to put a message into the chat from OUTSIDE
   // (a `background` task's result; the chat binds `services.postToChat` to it). An
-  // item is never dropped: it waits in the inbox until it can land.
+  // item is never dropped while the conversation is open: it waits in the inbox until it
+  // can land. A closed conversation takes nothing.
   deliver(text: string): void {
+    if (this.closed) return;
     const q = String(text ?? '').trim();
     if (!q) return;
     this.inbox.push(q);
