@@ -2757,8 +2757,10 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   chat leaves the session through the registry's `retire`, and its tasks run on.
   `close('exit')` touches no child: at exit the registry's `closeAll` writes each task's
   `task-end` line (`by: 'exit'`), clears and disarms every timer of a task still waiting
-  on its delay, and closes the tree itself, deepest first; `close('exit')` of a task
-  stops its own turn.
+  on its delay, aborts every live conversation's turn (a session's `!command` or turn
+  as well as a task's, so every running command's process group is killed and none
+  outlives the process; a pending y/n is left as is), and closes the tree itself,
+  deepest first; `close('exit')` of a task stops its own turn.
 - **Ctrl+C, Ctrl+D and Ctrl+Z take a second press** (`src/runtime/exit-keys.ts`, pure;
   the App owns the arm). flowtty hands these three to the app BEFORE the terminal
   backend acts (exit, exit, suspend — skipped when a `useInput` handler returns strict

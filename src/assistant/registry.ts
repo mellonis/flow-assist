@@ -228,6 +228,13 @@ export class ConversationRegistry {
       }
     }
     this.watches.clear();
+    // Whatever runs stops with the process, a session's turn or `!command` as well as a
+    // task's: an abort kills a command's process group, which would otherwise outlive
+    // us. After the save, so the aborted run's `finally` changes nothing that was
+    // written; before `close`, which clears the handlers.
+    for (const c of deepestFirst) {
+      try { c.abort?.abort(); } catch { /* exiting */ }
+    }
     for (const c of deepestFirst) {
       try { c.close(reason); } catch { /* exiting */ }
     }

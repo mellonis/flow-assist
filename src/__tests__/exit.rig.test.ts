@@ -3,6 +3,7 @@
 // (AGENTS.md (a host makes its conversations through one registry)).
 import { afterEach, expect, test } from 'bun:test';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import type { Conversation } from '../assistant/conversation.ts';
 import type { Make } from '../loader/plugin.ts';
@@ -176,4 +177,69 @@ test('a task waiting on its delay at exit never starts: its timer is cleared, th
   expect(model.requests.filter((r) => system(r).includes('Task: later'))).toHaveLength(0);
   expect(saidAbout(rig, 'late')).toEqual({ toasts: [], log: [] });
   expect(rig.registry.children.backgroundCount()).toBe(0);
+});
+
+// Whether a process group still has a member: signal 0 throws ESRCH once it is gone.
+const groupAlive = (pid: number): boolean => { try { process.kill(-pid, 0); return true; } catch { return false; } };
+const killGroup = (pid: number): void => { try { process.kill(-pid, 'SIGKILL'); } catch { /* already gone */ } };
+const groupGone = async (pid: number, ms = 3_000): Promise<boolean> => {
+  const end = Date.now() + ms;
+  while (Date.now() < end) { if (!groupAlive(pid)) return true; await new Promise((r) => setTimeout(r, 25)); }
+  return !groupAlive(pid);
+};
+const readPid = (file: string): number | null => {
+  try { const n = Number(fs.readFileSync(file, 'utf8').trim()); return Number.isInteger(n) && n > 0 ? n : null; } catch { return null; }
+};
+
+test('at exit a session\'s !command is stopped: its process group is gone, and nothing is saved or said afterwards', async () => {
+  const rig = conversationRig(new ScriptedModel());
+  const s = rig.conv;
+  const pidFile = path.join(rig.root, 'pid');
+  let pid: number | null = null;
+  try {
+    const running = s.runShell(`echo $$ > '${pidFile}'; sleep 30`);
+    await rig.until(() => readPid(pidFile) !== null);
+    pid = readPid(pidFile);
+    expect(groupAlive(pid!)).toBe(true);
+    const saveDir = path.join(homeIn(rig.sessionsDir!, s.sessionId), `${s.sessionId}.json`);
+    rig.registry.closeAll('exit');
+    const before = fs.existsSync(saveDir) ? fs.readFileSync(saveDir, 'utf8') : null;
+    const toasts = rig.toasts.length;
+    expect(await groupGone(pid!)).toBe(true);
+    await running;
+    await new Promise((r) => setTimeout(r, 20));
+    expect(fs.existsSync(saveDir) ? fs.readFileSync(saveDir, 'utf8') : null).toBe(before);
+    expect(rig.toasts).toHaveLength(toasts);
+    expect(fs.existsSync(lockOf(rig, s.sessionId))).toBe(false);
+  } finally {
+    if (pid) killGroup(pid);
+  }
+});
+
+test('at exit a session turn\'s run_command is stopped: its process group is gone, and nothing is saved or said afterwards', async () => {
+  const model = new ScriptedModel();
+  const pidPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-exit-pid-')), 'pid');
+  const pidFile = () => pidPath;
+  model.script([{ tool: 'run_command', args: { command: `echo $$ > '${pidPath}'; sleep 30` } }], [{ text: 'never' }]);
+  const rig = conversationRig(model, { shell: { autoRun: true }, policy: { kind: 'allow-writes', say: () => {} } });
+  const s = rig.conv;
+  let pid: number | null = null;
+  try {
+    const turn = s.send('run it');
+    await rig.until(() => readPid(pidFile()) !== null);
+    pid = readPid(pidFile());
+    expect(groupAlive(pid!)).toBe(true);
+    const saveFile = path.join(homeIn(rig.sessionsDir!, s.sessionId), `${s.sessionId}.json`);
+    rig.registry.closeAll('exit');
+    const before = fs.existsSync(saveFile) ? fs.readFileSync(saveFile, 'utf8') : null;
+    const toasts = rig.toasts.length;
+    expect(await groupGone(pid!)).toBe(true);
+    await turn;
+    await new Promise((r) => setTimeout(r, 20));
+    expect(fs.existsSync(saveFile) ? fs.readFileSync(saveFile, 'utf8') : null).toBe(before);
+    expect(rig.toasts).toHaveLength(toasts);
+    expect(fs.existsSync(lockOf(rig, s.sessionId))).toBe(false);
+  } finally {
+    if (pid) killGroup(pid);
+  }
 });
