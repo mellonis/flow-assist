@@ -127,6 +127,7 @@ export type ConversationEvent =
   | { type: 'question'; state: AskState | null; parked?: boolean }
   | { type: 'notice'; text: string; level: 'error' }
   | { type: 'inbox'; items: string[]; shown: boolean }   // every item that landed together; `shown`: the chat is open
+  | { type: 'children'; count: number }   // a child started or its result is in: how many there are now
   | { type: 'closed'; reason: CloseReason };
 
 // What a conversation asks of the chat that draws it: reads only.
@@ -180,6 +181,21 @@ export interface ChildResult {
   text: string;                  // the child's final text, trimmed ('' when none)
   error?: string;                // the turn's error, when it failed
   limit?: { rounds: number; lastStep: string; by?: 'tokens' };
+  // The text delivered to the conversation that started the child ('' when none was:
+  // that conversation was closed first), and where it landed: its title, and whether it
+  // is the conversation on screen (or no chat draws any).
+  delivered?: string;
+  landedIn?: { title: string; onScreen: boolean };
 }
-// What `startChild` hands back: a refusal said to the model, or the child and its run.
-export type ChildStart = { refused: string } | { child: Conversation; run: () => Promise<ChildResult> };
+// A child's result as the conversation that started it reads it: `<label> finished:`
+// with the text and the limit it stopped at, or `<label> failed:` with the reason.
+export function childResultText(label: string, r: ChildResult): string {
+  if (r.outcome === 'failed' || r.outcome === 'stopped') return `${label} failed:\n${r.error ?? r.outcome}`;
+  const lim = r.outcome === 'limit' && r.limit ? `\nstopped ${r.limit.by === 'tokens' ? 'at the token budget after' : 'after'} ${r.limit.rounds} rounds — last: ${r.limit.lastStep}` : '';
+  return `${label} finished:\n${(r.text || '(no output)') + lim}`;
+}
+// What `startChild` hands back: a refusal said to the model, or the child, its run, and
+// `armed`, which records the delay timer that will start it.
+export type ChildStart =
+  | { refused: string }
+  | { child: Conversation; run: () => Promise<ChildResult>; armed: (timer: ReturnType<typeof setTimeout>) => void };

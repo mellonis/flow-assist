@@ -18,7 +18,7 @@ import { markFacts } from '../assistant/memory-trust.js';
 import { tildePath } from '../assistant/shell.js';
 import { openInBrowser } from '../runtime/services.js';
 import { inBackgroundWork } from '../runtime/background-work.js';
-import type { ChildSpec, ChildStart } from '../assistant/conversation-types.js';
+import { childResultText, type ChildSpec, type ChildStart } from '../assistant/conversation-types.js';
 import type { ChildSlots } from '../assistant/registry.js';
 import { resolveIdentityToken } from '../runtime/plugin-identity.js';
 import { DEFAULT_THEME } from '../playback/theme.js';
@@ -708,8 +708,9 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
         // Offload a self-contained task to a CHILD conversation of the one whose turn
         // called this (AGENTS.md, "A conversation starts a child of its own"): its own
         // plan, shell, tool set and abort, no recall and nobody to ask, every write
-        // declined, twelve rounds. The tool answers at once; the result is delivered when
-        // the task ends, as the toast, the log line and a row in the chat's inbox.
+        // declined, twelve rounds. The tool answers at once; when the task ends its result
+        // goes into the inbox of the conversation that started it (`run()` delivers it),
+        // and the tool says so in the toast and the log line.
         const task = String(args.task ?? '').trim();
         if (!task) return 'task is required — the work to do in the background.';
         const label = String(args.label ?? '').trim() || task.slice(0, 40);
@@ -724,7 +725,7 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
         }
         const c = ctx as {
           startChild?: (spec: ChildSpec) => ChildStart; childSlots?: ChildSlots;
-          showMessage?: (m: string) => void; pushLog?: (e: string) => void; postToChat?: (t: string) => void; notify?: () => void;
+          showMessage?: (m: string) => void; pushLog?: (e: string) => void; notify?: () => void;
         };
         const slots = c.childSlots;
         if (typeof c.startChild !== 'function' || !slots) return 'Background tasks unavailable: no conversation to run them in (the host must be interactive).';
@@ -740,18 +741,19 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
             const failed = (msg: string) => {
               c.showMessage?.(`⚠ ${label} failed: ${msg}`);
               c.pushLog?.(`[bg] ${label} error: ${msg}`);
-              c.postToChat?.(`${label} failed:\n${msg}`);
             };
             try {
               const r = await started.run();
               if (r.outcome === 'failed' || r.outcome === 'stopped') { failed(r.error ?? r.outcome); return; }
-              const result = (r.text || '(no output)') + (r.outcome === 'limit' && r.limit ? `\nstopped ${r.limit.by === 'tokens' ? 'at the token budget after' : 'after'} ${r.limit.rounds} rounds — last: ${r.limit.lastStep}` : '');
-              c.showMessage?.(`⏳ ${label} done`);
-              c.pushLog?.(`[bg] ${label}: ${result}`);
-              // It waits in the chat's inbox until no turn runs, and lands as a row of its
-              // own whose role marks it as a background result — so the text carries no
-              // "[background]" prefix.
-              c.postToChat?.(`${label} finished:\n${result}`);
+              // The log says the result without its `<label> finished:` line.
+              c.pushLog?.(`[bg] ${label}: ${childResultText(label, r).slice(`${label} finished:\n`.length)}`);
+              // Landed nowhere (its conversation was closed first): nothing to point at.
+              const home = r.landedIn;
+              if (!home) return;
+              // The toast is the chat's: it names the session the result went to when that
+              // is not the one on screen.
+              const where = home.onScreen ? '' : home.title ? ` — in «${home.title}»` : ' — in an untitled session';
+              c.showMessage?.(`⏳ ${label} done${where}`);
             } catch (e) {
               failed(e instanceof Error ? e.message : String(e));
             } finally {
@@ -761,6 +763,7 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
             }
           });
         }, ms);
+        started.armed(timer);
         slots.arm(timer);
         c.notify?.();
         return `Background task started (${label})${ms ? `, to begin in ${Math.round(ms / 1000)}s` : ''} — the result appears in the chat when it ends, and you see it on your next turn.`;

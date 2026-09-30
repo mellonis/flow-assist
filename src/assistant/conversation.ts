@@ -25,7 +25,7 @@ import type { ViewRecord } from './views.js';
 import type { ToolDef } from '../loader/tools.js';
 import { workspaceFor } from './workspace.js';
 import { asBackgroundWork } from '../runtime/background-work.js';
-import { callOf, lastAnswerOf, type BusyKind, type ChatMsg, type ChildResult, type ChildSpec, type ChildStart, type CloseReason, type ConversationDeps, type ConversationEvent, type ConversationKind, type ConversationSnapshot, type ConversationStatus, type PendingConfirm, type Queued, type QueueWait, type SendOptions, type TurnEnd, type ViewPort } from './conversation-types.js';
+import { callOf, childResultText, lastAnswerOf, type BusyKind, type ChatMsg, type ChildResult, type ChildSpec, type ChildStart, type CloseReason, type ConversationDeps, type ConversationEvent, type ConversationKind, type ConversationSnapshot, type ConversationStatus, type PendingConfirm, type Queued, type QueueWait, type SendOptions, type TurnEnd, type ViewPort } from './conversation-types.js';
 import {
   applySession, currentProject, ensureSessionId, journal, journaledChatLLM, journalTo, markSeen, persist, pushNote,
   releaseLockOf, writeSession, NO_FILE,
@@ -64,6 +64,10 @@ export class Conversation {
   // A child's project is its parent's, whatever directory its shell moves to; undefined:
   // decided as a session decides it.
   inheritedProject: string | null | undefined = undefined;
+  // The children started from this conversation whose result is not in yet (armed,
+  // queued or running), and the delay timer each one was armed with.
+  readonly children = new Set<Conversation>();
+  readonly childTimers = new Map<Conversation, ReturnType<typeof setTimeout>>();
   readonly deps: ConversationDeps;
   // Who answers a write's y/n in this conversation (src/assistant/confirm-policy.ts):
   // `ask` for the chat's; decided when it is made, never changed.
@@ -465,8 +469,10 @@ export class Conversation {
   // abort; no screens, no one to ask, no log lines, and no journal or state file of its
   // own — its `call-start`, `confirm` and `call` lines go into this turn's journal,
   // tagged `task: <label>` (a grandchild's own label kept). Refused past
-  // `ai.subagentDepth`. Nothing runs until `run()`, which closes the child when it ends;
-  // the caller admits and schedules it.
+  // `ai.subagentDepth`. It is one of this conversation's `children` from here until its
+  // result is in. Nothing runs until `run()`, which closes the child when it ends and
+  // delivers its result here; the caller admits and schedules it, and hands its delay
+  // timer to `armed`.
   startChild(spec: ChildSpec, journalId: string): ChildStart {
     const max = wholeOrDefault((this.deps.config().ai as { subagentDepth?: unknown } | undefined)?.subagentDepth, 2, 1);
     if (this.depth >= max) return { refused: `Background chaining depth exceeded (max ${max}) — finish this task; do not spawn further background tasks.` };
@@ -483,11 +489,11 @@ export class Conversation {
     const kept = new Set(['call-start', 'confirm', 'call']);
     child.journalRoute = (ev) => { if (kept.has(ev.t)) this.journalTo(journalId, { task: spec.label, ...ev }); };
     child.shell.setCwd(this.shell.cwd());
+    this.children.add(child);
+    this.emit({ type: 'children', count: this.children.size });
     let ran = false;
-    const run = async (): Promise<ChildResult> => {
-      // A child runs once: a second `run` sends nothing on the closed child.
-      if (ran) return { outcome: 'failed', text: '', error: 'already run' };
-      ran = true;
+    // The end, as the tool reports it; never throws.
+    const outcomeOf = async (): Promise<ChildResult> => {
       try {
         // An empty task starts no turn: a failure, said as one.
         if (!(await asBackgroundWork(() => child.send(spec.prompt)))) return { outcome: 'failed', text: '', error: 'nothing to send' };
@@ -499,12 +505,39 @@ export class Conversation {
           ...(end?.error ? { error: end.error } : {}),
           ...(outcome === 'limit' && end?.limit ? { limit: { rounds: end.limit.rounds, lastStep: end.limit.lastStep, ...(end.limit.by ? { by: end.limit.by } : {}) } } : {}),
         };
-      } finally {
-        // Its save and inbox timers go with it.
-        child.close('park');
+      } catch (e) {
+        return { outcome: 'failed', text: '', error: e instanceof Error ? e.message : String(e) };
       }
     };
-    return { child, run };
+    const run = async (): Promise<ChildResult> => {
+      // A child runs once: a second `run` sends nothing on the closed child.
+      if (ran) return { outcome: 'failed', text: '', error: 'already run' };
+      ran = true;
+      const r = await outcomeOf();
+      // Its save and inbox timers go with it.
+      child.close('park');
+      // The result goes to the conversation that started the child, never to whatever
+      // the chat draws; a closed one takes nothing.
+      const to = child.parent;
+      let delivered = '';
+      let landedIn: ChildResult['landedIn'];
+      if (to && !to.closed) {
+        delivered = childResultText(spec.label, r);
+        to.deliver(delivered);
+        const shown = to.deps.current?.();
+        landedIn = { title: to.title, onScreen: !shown || shown === to };
+      }
+      // Untracked only AFTER the delivery: whoever watches the count reach 0 finds the
+      // result already in.
+      if (to) {
+        to.children.delete(child);
+        to.childTimers.delete(child);
+        to.emit({ type: 'children', count: to.children.size });
+      }
+      return { ...r, delivered, ...(landedIn ? { landedIn } : {}) };
+    };
+    const armed = (timer: ReturnType<typeof setTimeout>): void => { this.childTimers.set(child, timer); };
+    return { child, run, armed };
   }
 
   // ── the work (src/assistant/conversation-turn.ts)
@@ -586,8 +619,9 @@ export class Conversation {
   // the person's (`queue`): it never enters a running turn and is taken only
   // when one ends (`takeInbox`). A short interval retries while something
   // holds it (a y/n, a question) and clears itself once the inbox is empty.
-  // A host-reachable channel to put a message into the chat from OUTSIDE
-  // (a `background` task's result; the chat binds `services.postToChat` to it). An
+  // A channel to put a message into this conversation from OUTSIDE: a child's result
+  // (`startChild`'s `run()`), and a plugin's through `services.postToChat`, which the
+  // chat binds to the conversation it shows. An
   // item is never dropped while the conversation is open: it waits in the inbox until it
   // can land. A closed conversation takes nothing.
   deliver(text: string): void {

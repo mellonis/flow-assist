@@ -30,14 +30,14 @@ function startFrom(rig: Rig, s: ChildSpec) {
 test('a child sends the worker prompt with its task, answers with its text, and is closed when its run ends', async () => {
   const model = new ScriptedModel();
   model.script([{ text: '  Сейчас полдень.  ' }]);
-  const rig = conversationRig(model);
+  const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
   const { child, run } = startFrom(rig, spec('часы', 'узнать время'));
   expect(child.kind).toBe('task');
   expect(child.label).toBe('часы');
   expect(child.parent).toBe(rig.conv);
   expect(child.depth).toBe(1);
   const result = await run();
-  expect(result).toEqual({ outcome: 'answer', text: 'Сейчас полдень.' });
+  expect(result).toMatchObject({ outcome: 'answer', text: 'Сейчас полдень.' });
   const sys = rig.messages(0)[0]!;
   expect(sys.role).toBe('system');
   expect(String(sys.content)).toContain('You are a background worker');
@@ -49,7 +49,7 @@ test('a child sends the worker prompt with its task, answers with its text, and 
 test('a child\'s calls land in the parent\'s journal tagged `task`, and it writes no file of its own', async () => {
   const model = new ScriptedModel();
   model.script([{ tool: 'datetime', args: {} }], [{ text: 'noon' }]);
-  const rig = conversationRig(model);
+  const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
   const { run } = startFrom(rig, spec('часы', 'узнать время'));
   await new Promise((r) => setTimeout(r, 300)); // the parent's own files settle first
   const journals = rig.journals();
@@ -69,7 +69,7 @@ test('a child\'s calls land in the parent\'s journal tagged `task`, and it write
 test('a child whose run outlasts a save leaves no file of its own', async () => {
   const model = new ScriptedModel();
   model.script([{ hold: true }, { text: 'slow answer' }]);
-  const rig = conversationRig(model);
+  const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
   const { run } = startFrom(rig, spec('slow', 'take your time'));
   await new Promise((r) => setTimeout(r, 300)); // the parent's own files settle first
   const tree = listTree(rig.sessionsDir!);
@@ -77,16 +77,16 @@ test('a child whose run outlasts a save leaves no file of its own', async () => 
   await rig.until(() => model.requests.length === 1);
   await new Promise((r) => setTimeout(r, 400)); // past the child's 250 ms save
   model.release();
-  expect(await running).toEqual({ outcome: 'answer', text: 'slow answer' });
+  expect(await running).toMatchObject({ outcome: 'answer', text: 'slow answer' });
   await new Promise((r) => setTimeout(r, 300));
   expect(listTree(rig.sessionsDir!)).toEqual(tree);
 });
 
 test('a child whose run sends nothing fails with a reason', async () => {
   const model = new ScriptedModel();
-  const rig = conversationRig(model);
+  const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
   const { child, run } = startFrom(rig, spec('e', '   '));
-  expect(await run()).toEqual({ outcome: 'failed', text: '', error: 'nothing to send' });
+  expect(await run()).toMatchObject({ outcome: 'failed', text: '', error: 'nothing to send' });
   expect(model.requests.length).toBe(0);
   expect(child.closed).toBe(true);
 });
@@ -103,7 +103,7 @@ test('a grandchild\'s line keeps its own label when it passes through its parent
 test('a write the child attempts is declined, journaled `confirm` by background with its task', async () => {
   const model = new ScriptedModel();
   model.script([{ tool: 'run_command', args: { command: 'echo x > made.txt' } }], [{ text: 'could not' }]);
-  const rig = conversationRig(model);
+  const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
   const { run } = startFrom(rig, spec('w', 'make a file'));
   await run();
   expect(fs.existsSync(path.join(rig.root, 'made.txt'))).toBe(false);
@@ -116,7 +116,7 @@ test('a write the child attempts is declined, journaled `confirm` by background 
 test('a child\'s shell starts at its parent\'s directory, and its `cd` does not move the parent\'s', async () => {
   const model = new ScriptedModel();
   model.script([{ tool: 'cd', args: { path: '../b' } }], [{ text: 'moved' }]);
-  const rig = conversationRig(model);
+  const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
   const a = path.join(rig.root, 'a');
   const b = path.join(rig.root, 'b');
   fs.mkdirSync(a);
@@ -137,7 +137,7 @@ test('a child writes memory in its parent\'s project, whatever root its shell mo
     [{ tool: 'memory', args: { action: 'add', text: 'Found by the background task.' } }],
     [{ text: 'saved' }],
   );
-  const rig = conversationRig(model);
+  const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
   (rig.config.shell as { roots: string[] }).roots.push(OTHER);
   const { run } = startFrom(rig, spec('m', 'remember'));
   await run();
@@ -152,7 +152,7 @@ test('a child writes memory in its parent\'s project, whatever root its shell mo
 test('a child\'s system prompt follows its own `cd` into a directory with its own AGENTS.md', async () => {
   const model = new ScriptedModel();
   model.script([{ tool: 'cd', args: { path: 'proj' } }], [{ text: 'seen' }]);
-  const rig = conversationRig(model);
+  const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
   fs.mkdirSync(path.join(rig.root, 'proj'));
   fs.writeFileSync(path.join(rig.root, 'proj', 'AGENTS.md'), 'BG RULE');
   fs.writeFileSync(path.join(rig.root, 'AGENTS.md'), 'CHAT RULE');
@@ -178,7 +178,7 @@ test('at the configured depth a child is refused at once, naming the number', ()
 test('a child stopped at its twelve rounds returns `limit` with its last step', async () => {
   const model = new ScriptedModel();
   model.script(...Array.from({ length: 20 }, () => [{ tool: 'datetime', args: {} }]));
-  const rig = conversationRig(model);
+  const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
   const { child, run } = startFrom(rig, spec('L', 'loop'));
   const result = await run();
   expect(model.requests.length).toBe(12);
@@ -216,7 +216,7 @@ test('a non-numeric ai.subagentDepth refuses at the default depth', () => {
 test('a second run sends nothing and fails with a reason', async () => {
   const model = new ScriptedModel();
   model.script([{ text: 'done' }], [{ text: 'again' }]);
-  const rig = conversationRig(model);
+  const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
   const { run } = startFrom(rig, spec('o', 'once'));
   expect((await run()).text).toBe('done');
   expect(await run()).toEqual({ outcome: 'failed', text: '', error: 'already run' });
@@ -227,7 +227,7 @@ test('a child stopped by the token budget carries `by: tokens`', async () => {
   const model = new ScriptedModel();
   model.usage = { prompt_tokens: 600, completion_tokens: 10, prompt_tokens_details: { cached_tokens: 0 } };
   model.script(...Array.from({ length: 4 }, () => [{ tool: 'datetime', args: {} }]), [{ text: 'never' }]);
-  const rig = conversationRig(model, { ai: { maxTurnTokens: 1000 } });
+  const rig = conversationRig(model, { ai: { backgroundFollowUp: false, maxTurnTokens: 1000 } });
   const { run } = startFrom(rig, spec('T', 'spend'));
   const result = await run();
   expect(model.requests).toHaveLength(2);
