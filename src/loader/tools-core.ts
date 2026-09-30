@@ -737,6 +737,7 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
         // with no delay: the turn that called this sends its next request first.
         const timer = setTimeout(() => {
           slots.disarm(timer);
+          started.fired();
           slots.admit(async () => {
             const failed = (msg: string) => {
               c.showMessage?.(`⚠ ${label} failed: ${msg}`);
@@ -744,6 +745,8 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
             };
             try {
               const r = await started.run();
+              // Stopped with its conversation (`/clear`): only the log says so.
+              if (r.stoppedWithParent) { c.pushLog?.(`[bg] ${label} stopped with its conversation`); return; }
               if (r.outcome === 'failed' || r.outcome === 'stopped') { failed(r.error ?? r.outcome); return; }
               // The log says the result without its `<label> finished:` line.
               c.pushLog?.(`[bg] ${label}: ${childResultBody(r)}`);

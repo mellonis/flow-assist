@@ -93,7 +93,7 @@ test('opened where the end shows, an unseen answer is seen', () => {
   expect(c.autoMode).toBe('ask');
 });
 
-test('a nested run is journaled in the session that started it, a task\'s lines tagged', async () => {
+test('a nested run is journaled in the session that started it', async () => {
   const dir = tmp();
   const calls: string[] = [];
   const deps = fakeDeps({
@@ -107,9 +107,9 @@ test('a nested run is journaled in the session that started it, a task\'s lines 
   });
   const c = new Conversation(deps);
   const id = c.journal({ t: 'row', role: 'user', text: 'go' }, { person: true });
-  await c.journaledChatLLM(id)([], { taskLabel: 'scan', confirmWrite: () => false });
+  await c.journaledChatLLM(id)([], { confirmWrite: () => false });
   expect(calls).toEqual(['false']);
   const lines = readJournal(journalPath(c.homes.get(id)!, id))!;
-  expect(lines.filter((l) => l.task === 'scan').map((l) => l.t)).toEqual(['call-start', 'confirm', 'call']);
-  expect(lines.find((l) => l.t === 'confirm')).toMatchObject({ answer: 'no', by: 'background' });
+  expect(lines.filter((l) => l.t !== 'start' && l.t !== 'row').map((l) => l.t)).toEqual(['call-start', 'confirm', 'call']);
+  expect(lines.find((l) => l.t === 'confirm')).toMatchObject({ answer: 'no', by: 'plugin' });
 });

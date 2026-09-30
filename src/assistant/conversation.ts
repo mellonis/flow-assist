@@ -25,7 +25,7 @@ import type { ViewRecord } from './views.js';
 import type { ToolDef } from '../loader/tools.js';
 import { workspaceFor } from './workspace.js';
 import { asBackgroundWork } from '../runtime/background-work.js';
-import { callOf, childResultText, lastAnswerOf, type BusyKind, type ChatMsg, type ChildResult, type ChildSpec, type ChildStart, type CloseReason, type ConversationDeps, type ConversationEvent, type ConversationKind, type ConversationSnapshot, type ConversationStatus, type PendingConfirm, type Queued, type QueueWait, type SendOptions, type TurnEnd, type ViewPort } from './conversation-types.js';
+import { callOf, childResultText, lastAnswerOf, type BusyKind, type ChatMsg, type ChildResult, type ChildSpec, type ChildStart, type CloseReason, type JournalRoute, type ConversationDeps, type ConversationEvent, type ConversationKind, type ConversationSnapshot, type ConversationStatus, type PendingConfirm, type Queued, type QueueWait, type SendOptions, type TurnEnd, type ViewPort } from './conversation-types.js';
 import {
   applySession, currentProject, ensureSessionId, journal, journaledChatLLM, journalTo, markSeen, persist, pushNote,
   releaseLockOf, writeSession, NO_FILE,
@@ -60,12 +60,13 @@ export class Conversation {
   depth = 0;
   // A child's journal lines go through this to its parent's (a task keeps no journal of
   // its own); null for a conversation that journals itself.
-  journalRoute: ((ev: JournalEvent) => void) | null = null;
+  journalRoute: JournalRoute | null = null;
   // A child's project is its parent's, whatever directory its shell moves to; undefined:
   // decided as a session decides it.
   inheritedProject: string | null | undefined = undefined;
   // The children started from this conversation whose result is not in yet (armed,
-  // queued or running), and the delay timer each one was armed with.
+  // queued or running) — and those a task that ended handed up to it — and the delay
+  // timer of each one still armed.
   readonly children = new Set<Conversation>();
   readonly childTimers = new Map<Conversation, ReturnType<typeof setTimeout>>();
   readonly deps: ConversationDeps;
@@ -220,6 +221,8 @@ export class Conversation {
   // running from it writes into it alone, and it draws nothing more.
   private isClosed = false;
   get closed(): boolean { return this.isClosed; }
+  // Why it was closed; null while open.
+  closeReason: CloseReason | null = null;
 
   // `carry` — what a conversation that replaces another in the chat takes over from it:
   // the ↑/↓ history (the same array), the turn counter, the last verb, the list as the
@@ -369,15 +372,24 @@ export class Conversation {
   // The last answer in the list (`lastAnswerOf`). '' when no answer has text.
   lastAnswer(): string { return lastAnswerOf(this.messages); }
 
-  // The chat leaves this conversation for good. What runs is stopped for /clear and /new
-  // (a pending y/n is declined `by: 'reset'`, a question dismissed); for a switch nothing
-  // runs, since the chat refuses one while anything does. Work still in flight afterwards
-  // writes its journal lines where it happened and nothing else: the object draws nothing
-  // more (no listeners), saves nothing (`persist`, `save`) and holds no timer. The save
-  // and the lock's release are the chat's, before it closes.
+  // The chat leaves this conversation for good, or a task ends. What runs is stopped for
+  // /clear, /new and a stop by the parent (`'parent'`): a pending y/n is declined `by:
+  // 'reset'`, a question dismissed; for a switch nothing runs, since the chat refuses one
+  // while anything does. The tasks it started are stopped only by /clear and by a stop
+  // from its own parent (`stopChildren`); a task that ends (`park`) hands the ones still
+  // live to its parent (`handChildrenUp`); /new and an exit leave them running. Work still
+  // in flight afterwards writes its journal lines where it happened and nothing else: the
+  // object draws nothing more (no listeners), saves nothing (`persist`, `save`) and holds
+  // no timer. The save and the lock's release are the chat's, before it closes.
   close(reason: CloseReason): void {
     if (this.isClosed) return;
-    if (reason === 'clear' || reason === 'new') {
+    this.closeReason = reason;
+    // A task stopped with its conversation says so in its session's journal, which its
+    // own filtered route would not carry.
+    if (reason === 'parent') this.journalRoute?.raw({ t: 'task-end', task: this.label, outcome: 'stopped', by: 'clear' });
+    if (reason === 'clear' || reason === 'parent') this.stopChildren();
+    else if (reason === 'park' && this.kind === 'task') this.handChildrenUp();
+    if (reason === 'clear' || reason === 'new' || reason === 'parent') {
       this.abort?.abort();
       this.abort = null;
       if (this.confirm) this.answerConfirm(false, 'reset');
@@ -396,6 +408,38 @@ export class Conversation {
     this.handlers.clear();
     this.listeners.clear();
     this.port = null;
+  }
+
+  // Every child still counted is stopped (`'parent'`); one still waiting on its delay has
+  // its timer cleared and its count disarmed here — a timer that fired was disarmed when
+  // it fired, and the run of a task already started frees its own slot.
+  private stopChildren(): void {
+    if (!this.children.size) return;
+    for (const child of [...this.children]) {
+      const timer = this.childTimers.get(child);
+      if (timer !== undefined) { clearTimeout(timer); this.deps.children?.disarm(timer); }
+      child.close('parent');
+    }
+    this.children.clear();
+    this.childTimers.clear();
+    this.emit({ type: 'children', count: 0 });
+  }
+
+  // A task that ends hands the children still live to its parent: their results already
+  // go to the session, and the parent now counts them, so it knows they still run.
+  private handChildrenUp(): void {
+    const up = this.parent;
+    if (!up || !this.children.size) return;
+    for (const child of this.children) {
+      child.parent = up;
+      up.children.add(child);
+      const timer = this.childTimers.get(child);
+      if (timer !== undefined) up.childTimers.set(child, timer);
+    }
+    this.children.clear();
+    this.childTimers.clear();
+    this.emit({ type: 'children', count: 0 });
+    up.emit({ type: 'children', count: up.children.size });
   }
 
   // A fresh conversation's first rows: what the memory keeps across a /clear (said, or
@@ -470,10 +514,11 @@ export class Conversation {
   // own — its `call-start`, `confirm` and `call` lines go into this turn's journal,
   // tagged `task: <label>` (a grandchild's own label kept). Refused past
   // `ai.subagentDepth`. It is one of this conversation's `children` from here until its
-  // result is in. Nothing runs until `run()`, which closes the child when it ends and
-  // delivers its result to this conversation's session (itself, unless it is a task);
-  // the caller admits and schedules it, and hands its delay
-  // timer to `armed`.
+  // result is in (or, when this is a task that ends first, its parent's). Nothing runs
+  // until `run()`, which closes the child when it ends and delivers its result to this
+  // conversation's session (itself, unless it is a task) — nothing when /clear stopped
+  // it with its conversation. The caller admits and schedules it, hands its delay timer
+  // to `armed`, and calls `fired` when that timer fires.
   startChild(spec: ChildSpec, journalId: string): ChildStart {
     const max = wholeOrDefault((this.deps.config().ai as { subagentDepth?: unknown } | undefined)?.subagentDepth, 2, 1);
     if (this.depth >= max) return { refused: `Background chaining depth exceeded (max ${max}) — finish this task; do not spawn further background tasks.` };
@@ -488,7 +533,12 @@ export class Conversation {
     child.label = spec.label;
     child.inheritedProject = this.currentProject();
     const kept = new Set(['call-start', 'confirm', 'call']);
-    child.journalRoute = (ev) => { if (kept.has(ev.t)) this.journalTo(journalId, { task: spec.label, ...ev }); };
+    const raw = (ev: JournalEvent): void => {
+      const tagged = { task: spec.label, ...ev };
+      if (this.journalRoute) this.journalRoute.raw(tagged);
+      else this.journalTo(journalId, tagged);
+    };
+    child.journalRoute = Object.assign((ev: JournalEvent) => { if (kept.has(ev.t)) this.journalTo(journalId, { task: spec.label, ...ev }); }, { raw });
     child.shell.setCwd(this.shell.cwd());
     this.children.add(child);
     this.emit({ type: 'children', count: this.children.size });
@@ -514,8 +564,11 @@ export class Conversation {
       // A child runs once: a second `run` sends nothing on the closed child.
       if (ran) return { outcome: 'failed', text: '', error: 'already run' };
       ran = true;
-      const r = await outcomeOf();
-      // Its save and inbox timers go with it.
+      // Stopped while it waited for its delay or a slot: it sends nothing.
+      const r: ChildResult = child.closed ? { outcome: 'stopped', text: '' } : await outcomeOf();
+      // Stopped with the conversation that holds it: its result goes nowhere.
+      const stopped = child.closeReason === 'parent';
+      // Its save and inbox timers go with it; its own live children move to its parent.
       child.close('park');
       // The result goes to the session the chain started from — the nearest ancestor
       // that is not a task — never to whatever the chat draws, and never to a task: one
@@ -527,7 +580,7 @@ export class Conversation {
       let delivered = '';
       let landedIn: ChildResult['landedIn'];
       try {
-        if (home && !home.closed) {
+        if (!stopped && home && !home.closed) {
           delivered = childResultText(spec.label, r);
           home.deliver(delivered);
           const shown = home.deps.current?.();
@@ -543,10 +596,12 @@ export class Conversation {
           to.emit({ type: 'children', count: to.children.size });
         }
       }
-      return { ...r, delivered, ...(landedIn ? { landedIn } : {}) };
+      return { ...r, delivered, ...(landedIn ? { landedIn } : {}), ...(stopped ? { stoppedWithParent: true as const } : {}) };
     };
     const armed = (timer: ReturnType<typeof setTimeout>): void => { this.childTimers.set(child, timer); };
-    return { child, run, armed };
+    // Whoever counts the child now: the one that started it, or one a task handed it to.
+    const fired = (): void => { child.parent?.childTimers.delete(child); };
+    return { child, run, armed, fired };
   }
 
   // ── the work (src/assistant/conversation-turn.ts)

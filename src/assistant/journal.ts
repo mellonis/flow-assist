@@ -33,6 +33,9 @@
 //   compact  a `/compact`: the `summary` the model was given from then on
 //   end      how a turn ended: its duration, what it cost, stopped or failed, and the
 //            text of a round cut off
+//   task-end a background task that stopped without finishing: `task` (its label),
+//            `outcome` stopped, and `by` — what stopped it (`clear`: its session was
+//            cleared)
 //
 // `/export` renders a journal as markdown (`exportMarkdown`).
 //
@@ -346,6 +349,7 @@ export function exportMarkdown(events: JournalEvent[], opts: { title: string; id
         break;
       case 'markup': out.push(`*Note${at}:* ${String(ev.note ?? '')} — the model wrote:`, '', block(String(ev.markup ?? '')), ''); break;
       case 'compact': out.push('---', '', `**Compacted${ev.auto ? ' automatically' : ''}**${at} — from here on the model was given this summary instead of the conversation above:`, '', quoted(String(ev.summary ?? '')), '', '---', ''); break;
+      case 'task-end': out.push(`*${String(ev.task ?? '')} stopped (${String(ev.by ?? '')})*`, ''); break;
       case 'end': {
         if (typeof ev.cut === 'string' && ev.cut) out.push(`**Assistant**${at} (cut off)`, '', ev.cut, '');
         const how = [ev.stopped ? `stopped (${String(ev.stopped)})` : '', ev.failed ? `failed: ${String(ev.failed)}` : '', ev.roundLimit ? `stopped after ${ev.limitBy === 'tokens' ? `${String(ev.turnTokens)} tokens (ai.maxTurnTokens)` : `${String(ev.roundLimit)} rounds (ai.maxRounds)`} — no answer${ev.lastStep ? `; last step: ${String(ev.lastStep)}` : ''}` : ''].filter(Boolean);

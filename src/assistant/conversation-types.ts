@@ -7,6 +7,7 @@ import type { AutoMode } from './auto.js';
 import type { ContextItem } from './screen-context.js';
 import type { TurnPart } from './step.js';
 import type { ViewRecord, ViewRenderers } from './views.js';
+import type { JournalEvent } from './journal.js';
 import type { Conversation } from './conversation.js';
 
 // A chat message. `role` is the OpenAI role; `content` may be null when a message
@@ -67,7 +68,8 @@ export const callOf = (m: ChatMsg): string | undefined => (m.views as ViewRecord
 export type ConversationKind = 'session' | 'task' | 'oneshot';
 export type BusyKind = 'turn' | 'shell' | 'interactive' | 'command';
 export type ConversationStatus = 'working' | 'waiting' | 'done' | 'idle';
-export type CloseReason = 'clear' | 'new' | 'park' | 'exit';
+// 'parent': a task stopped because the conversation that holds it was cleared.
+export type CloseReason = 'clear' | 'new' | 'park' | 'exit' | 'parent';
 
 // What runs now, as the status line draws it. Kept after the work ends, as the chat's
 // state was: the next start resets each field. (The seconds are the chat's own ticker,
@@ -182,10 +184,14 @@ export interface ChildResult {
   error?: string;                // the turn's error, when it failed
   limit?: { rounds: number; lastStep: string; by?: 'tokens' };
   // The text delivered to the session the child's chain started from ('' when none was:
-  // that session was closed first), and where it landed: its title, and whether it is
-  // the conversation on screen (or no chat draws any).
+  // that session was closed first, or the child was stopped with it), and where it
+  // landed: its title, and whether it is the conversation on screen (or no chat draws
+  // any).
   delivered?: string;
   landedIn?: { title: string; onScreen: boolean };
+  // Stopped because the conversation holding it was cleared: nothing was delivered, and
+  // the tool says nothing on screen.
+  stoppedWithParent?: true;
 }
 // A child's result without its header line: the reason it failed, or its text and the
 // limit it stopped at.
@@ -199,8 +205,13 @@ export function childResultBody(r: ChildResult): string {
 export function childResultText(label: string, r: ChildResult): string {
   return `${label} ${r.outcome === 'failed' || r.outcome === 'stopped' ? 'failed' : 'finished'}:\n${childResultBody(r)}`;
 }
-// What `startChild` hands back: a refusal said to the model, or the child, its run, and
-// `armed`, which records the delay timer that will start it.
+// What `startChild` hands back: a refusal said to the model, or the child, its run,
+// `armed`, which records the delay timer that will start it, and `fired`, which the
+// caller calls when that timer fires — so a stop disarms only a task still waiting on
+// its delay.
 export type ChildStart =
   | { refused: string }
-  | { child: Conversation; run: () => Promise<ChildResult>; armed: (timer: ReturnType<typeof setTimeout>) => void };
+  | { child: Conversation; run: () => Promise<ChildResult>; armed: (timer: ReturnType<typeof setTimeout>) => void; fired: () => void };
+// A child's way into its parent's journal: called, it keeps only the lines a task
+// journals (`call-start`, `confirm`, `call`); `raw` writes any line, past that filter.
+export type JournalRoute = ((ev: JournalEvent) => void) & { raw: (ev: JournalEvent) => void };

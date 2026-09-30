@@ -1063,7 +1063,7 @@ hold this set together:
   - the chat's turn — asks: its y/n closure, which the auto mode may answer;
   - a background task — declines: a background task's conversation has the policy
     `always-no`, journaled as a `confirm` line `by: 'background'`, tagged with its label;
-  - a tool's `ctx.chatLLM` in the chat (`journaledChatLLM` with no `taskLabel`) —
+  - a tool's `ctx.chatLLM` in the chat (`journaledChatLLM`) —
     declines unless the tool passes its own `confirmWrite`, whose answer is journaled
     `by: 'plugin'`; with none, the journal holds the declined call and no `confirm`;
   - the one-shot prompt (`runPrompt`, `src/main.ts`) — one `oneshot` conversation made
@@ -1760,6 +1760,11 @@ hold this set together:
     `end` — how the turn ended: duration, tokens, stopped or failed, `roundLimit` with
     `lastStep` (and `limitBy: 'tokens'`, `turnTokens` when the token budget ended it),
     and the text of a round cut off, which never reached `onLiveCommit`.
+  - `task-end` — a background task that stopped without finishing: `task` (its label),
+    `outcome: 'stopped'` and `by` — `clear` when `/clear` stopped it with its session.
+    Written through the child's route's `raw`, past the filter that keeps a task's own
+    lines to `call-start`, `confirm` and `call`; `/export` draws it as `*<label> stopped
+    (<by>)*`.
   A turn's events go to the session its question was journaled in (`journalId`, taken
   in `runTurn`), even when a `/clear` lands mid-turn — they happened there. A FORK is
   different: the conversation goes on in the fork, so `journalTo` follows `forkedTo`
@@ -1779,7 +1784,7 @@ hold this set together:
   the model itself is handed the host's LLM service wrapped (`journaledChatLLM`), which
   adds its own `onToolStart`/`onToolRun` hooks to that run — and a `confirmWrite` hook
   only when the caller passed a confirmation — and writes to the session whose turn
-  called the tool: no `task` tag (unless the caller names a `taskLabel`), and its own
+  called the tool: no `task` tag, and its own
   answers are `by: 'plugin'`. The one-shot prompt has no
   journal: its conversation has no sessions directory. A line over
   `JOURNAL_LINE_MAX` (4 MiB) is written with its largest fields replaced by a note of
@@ -2635,12 +2640,15 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   while fewer than `max(1, sessions.maxRunning - 1)` run (`maxRunning` 4 by default, so
   three), the rest wait FIFO, and a session's own turn never takes or waits for one. The
   `background` tool (`src/loader/tools-core.ts`) arms the task with its delay's timer
-  (counted, holding no slot), disarms it with the same handle when the delay ends, then
-  admits the run, which takes a slot until it settles — its last notify comes a tick
+  (counted, holding no slot), disarms it with the same handle when the delay ends and
+  tells the conversation so (`fired`), then admits the run, which takes a slot until it settles — its last notify comes a tick
   after, once the slot is free; the chat's
   `N in background` is `backgroundCount()`, over every conversation of the registry, so
-  it outlives `/clear`. A task's result says `stopped after N rounds — last: …` when its
-  twelve rounds ran out, and a `failed`/`stopped` end is reported as a failure.
+  it counts the tasks of a session left by `/new` too (`/clear` stops the cleared
+  session's own). A task's result says `stopped after N rounds — last: …` when its
+  twelve rounds ran out, and a `failed`/`stopped` end is reported as a failure — but for
+  a task stopped with its conversation (`stoppedWithParent`), which only the log names:
+  `[bg] <label> stopped with its conversation`, no toast, no row.
 - **A conversation starts a child of its own** (`startChild(spec, journalId)`, in
   `src/assistant/conversation.ts`; a turn hands it to its tools as `ctx.startChild`, with
   the host's slots as `ctx.childSlots`): a `task` conversation (`parent`, `depth` one more,
@@ -2670,11 +2678,22 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   shown), from which the tool's toast reads `⏳ <label> done`, or `⏳ <label> done — in
   «<title>»` (`in an untitled session` for an empty title) when it landed elsewhere. The
   starting conversation counts its children (`children`: armed, queued or running;
-  `childTimers`: the delay timer each one was armed with, handed over by the caller
-  through `armed(timer)`) from `startChild` until the result is in, and emits `children` with
-  the count at both ends. The result is delivered BEFORE the child is untracked (in a
-  `finally`, so a throwing delivery still untracks it), so whoever sees the count fall
-  finds it already in.
+  `childTimers`: the delay timer of each one still armed, handed over by the caller
+  through `armed(timer)` and dropped by `fired()` when it fires) from `startChild` until
+  the result is in, and emits `children` with the count at both ends. The result is
+  delivered BEFORE the child is untracked (in a `finally`, so a throwing delivery still
+  untracks it), so whoever sees the count fall finds it already in. **A task that ends
+  hands its children still live to its own parent** (`handChildrenUp`, run only by a
+  task's `close('park')`): they are that parent's to count from then on — the session
+  counts a grandchild whose task is over — and their results go to the session.
+  **Only `close('clear')` and `close('parent')` stop the subtree** (`stopChildren`):
+  each child still counted is closed with `'parent'` — its turn aborted, one still
+  armed has its timer cleared and its count disarmed (a timer that fired was disarmed
+  when it fired, so only `childTimers` is disarmed), one queued for a slot sends nothing
+  when its run comes — and a task closed so writes its `task-end` line (`by: 'clear'`)
+  into the session's journal through its route's `raw` and delivers nothing
+  (`stoppedWithParent`). `close('new')` and `close('exit')` touch no
+  child: `/new` leaves the session's tasks running.
 - **Ctrl+C, Ctrl+D and Ctrl+Z take a second press** (`src/runtime/exit-keys.ts`, pure;
   the App owns the arm). flowtty hands these three to the app BEFORE the terminal
   backend acts (exit, exit, suspend — skipped when a `useInput` handler returns strict
@@ -3580,8 +3599,10 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   - `ai.backgroundFollowUp` (read `!== false`, so true when unset) is what starts the
     follow-up turn; `false` keeps rows only — the items land the same way and are read
     with the person's next message. `/clear`, `/new` and opening another session empty
-    the inbox (a task still running delivers into the session it was started from, and a
-    closed one takes nothing).
+    the inbox. `/clear` also stops the cleared session's tasks — a running one is
+    aborted and delivers nothing, a delayed one is cancelled; after `/new` or opening
+    another session a task still running delivers into the session it was started
+    from, and a closed one takes nothing.
   - **The model is told this contract, not a kinder one.** `background`'s description
     (`src/loader/tools-core.ts`) says a result lands in the chat as `<label>
     finished:` (or `failed:`) when the current turn ends, never in the middle of it;

@@ -131,30 +131,27 @@ export function journal(c: Conversation, ev: JournalEvent, opts: { person?: bool
   return id;
 }
 
-// The host's LLM service as a tool is handed it: the nested run's calls, their start,
-// their y/n and their end, go into the journal of `from`'s session. A caller that names
-// a `taskLabel` has its lines carry the label and its y/n answered `by: 'background'`;
-// any other is a plugin tool asking the model. (A `background` task is a conversation
-// of its own and journals through its `journalRoute`, not through this.) Only a caller
-// that passed a confirmation gets a y/n, journaled as its answer; with none, agentChat
+// The host's LLM service as a tool is handed it — a plugin tool asking the model: the
+// nested run's calls, their start, their y/n and their end, go into the journal of
+// `from`'s session. (A `background` task is a conversation of its own and journals
+// through its `journalRoute`, not through this.) Only a caller that passed a
+// confirmation gets a y/n, journaled as its answer `by: 'plugin'`; with none, agentChat
 // declines each write itself and the journal hears it as a declined call.
 export function journaledChatLLM(c: Conversation, from: string) {
   return (messages: unknown[], opts: Record<string, any> = {}) => {
-    const label = typeof opts.taskLabel === 'string' && opts.taskLabel ? opts.taskLabel : null;
-    const tag = label ? { task: label } : {};
-    const { taskLabel: _label, confirmWrite: answer, ...rest } = opts;
+    const { confirmWrite: answer, ...rest } = opts;
     return c.deps.chatLLM(messages as ChatMessage[], {
       ...rest,
       onToolStart: (call: { id?: string; name: string; args: Record<string, unknown>; confirm: boolean }) => {
-        journalTo(c, from, callStartEvent(call, tag));
+        journalTo(c, from, callStartEvent(call));
         rest.onToolStart?.(call);
       },
       onToolRun: (run: ToolRun) => {
-        journalTo(c, from, callEndEvent(run, c.deps.viewRenderers(), tag));
+        journalTo(c, from, callEndEvent(run, c.deps.viewRenderers()));
         rest.onToolRun?.(run);
       },
       ...(typeof answer === 'function' ? {
-        confirmWrite: confirmFor({ kind: 'caller', confirm: answer as ConfirmWrite }, { conv: c, journalId: from, ...(label ? { task: label } : {}) }),
+        confirmWrite: confirmFor({ kind: 'caller', confirm: answer as ConfirmWrite }, { conv: c, journalId: from }),
       } : {}),
     } as never);
   };
