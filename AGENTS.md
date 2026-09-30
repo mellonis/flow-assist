@@ -2612,8 +2612,8 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   and release what is live (`flushAll`, which closes nothing), and `adopt` tells it
   which conversation is on screen. `postToChat` and the screens' gates read the
   conversation the chat holds now (`convRef`).
-- **A conversation has a kind** — `session` (the chat's) or `oneshot` (the one-shot
-  prompt's) — and a policy for its writes (`confirm-policy.ts`), both decided when it
+- **A conversation has a kind** — `session` (the chat's), `task` (a background task's) or
+  `oneshot` (the one-shot prompt's) — and a policy for its writes (`confirm-policy.ts`), both decided when it
   is made: `Conversation.fresh(deps, { kind, policy })` for a new one, which reads the
   project's instructions for the start directory, `Conversation.restore(…)` for a saved
   session. A policy that asks cannot be given where `deps.canAsk` is false (the
@@ -2621,7 +2621,9 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   What a host hands a conversation comes from one factory, `hostDeps`
   (`src/assistant/host-deps.ts`), which reads the host's services when a member is
   called; `canAsk` is always said. What a turn is handed that differs by kind is
-  `turnShape` (`conversation-turn.ts`).
+  `turnShape` (`conversation-turn.ts`), a table with a row per kind; the `task` row hands the
+  worker prompt (plus the project block) as the system prompt, twelve rounds, no screen tail,
+  round boundary, recall, `ask_user` or images, and withholds nothing.
 - **A host makes its conversations through one registry** (`ConversationRegistry`,
   `src/assistant/registry.ts`): the chat one for its life, the one-shot one for its run,
   a test rig one per rig. The registry holds the host's lock token, what is said once for

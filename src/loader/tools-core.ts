@@ -17,6 +17,7 @@ import { callProject, ensureWorkspace, listWorkspace, readScope, readWorkspaceFi
 import { markFacts } from '../assistant/memory-trust.js';
 import { tildePath } from '../assistant/shell.js';
 import { openInBrowser } from '../runtime/services.js';
+import { workerPrompt } from '../assistant/conversation-turn.js';
 import { asBackgroundWork, inBackgroundWork } from '../runtime/background-work.js';
 import { resolveIdentityToken } from '../runtime/plugin-identity.js';
 import { DEFAULT_THEME } from '../playback/theme.js';
@@ -778,7 +779,7 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
         // question is answered from stale or absent memory unless it calls `datetime`.
         // Demand the tool for anything "now"-sensitive — that is what makes the result
         // the ACTUAL time at fire-time, not a guess.
-        const prompt = 'You are a background worker. Complete the task below autonomously using the available tools, then return ONLY a concise result (a few sentences). Do not ask questions or wait for the user — act. You may spawn a follow-up `background` task if the work needs a further step (e.g. "build, then fix and rebuild on failure"), but keep the chain at most ONE level and only if it is genuinely needed. IMPORTANT: if the task asks for the current time, date, weekday, or a relative duration, you MUST call the `datetime` tool to get it (never answer from memory — it will be stale).\n\nTask: ' + task;
+        const prompt = workerPrompt(task);
         const extraTools = (ctx as { pluginAiTools?: ToolDef[] }).pluginAiTools ?? [];
         // Spread the live toolCtx so the nested run's tools resolve config, memory
         // plugin scope, and host services the same way the chat's do. Thread the

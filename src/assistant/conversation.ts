@@ -50,6 +50,8 @@ let keys = 0;
 export class Conversation {
   readonly key = `c${++keys}`;
   readonly kind: ConversationKind;
+  // A `task`'s label, which tags its journal lines in the conversation that started it.
+  label = '';
   readonly deps: ConversationDeps;
   // Who answers a write's y/n in this conversation (src/assistant/confirm-policy.ts):
   // `ask` for the chat's; decided when it is made, never changed.

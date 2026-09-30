@@ -62,7 +62,7 @@ export const callOf = (m: ChatMsg): string | undefined => (m.views as ViewRecord
 
 // 'session': a chat's — saved, journaled, locked, continued. 'oneshot': `flow-assist
 // "<prompt>"` — nobody to ask, no screen, no journal, no session file. Children come later.
-export type ConversationKind = 'session' | 'oneshot';
+export type ConversationKind = 'session' | 'task' | 'oneshot';
 export type BusyKind = 'turn' | 'shell' | 'interactive' | 'command';
 export type ConversationStatus = 'working' | 'waiting' | 'done' | 'idle';
 export type CloseReason = 'clear' | 'new' | 'park' | 'exit';

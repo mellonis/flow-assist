@@ -36,17 +36,34 @@ export function allServices(services: object): Record<string, unknown> {
 // withholds nothing. The one-shot prompt has none of them, and is not offered the tools
 // that have nothing to deliver to without the app (AGENTS.md, "CLI").
 export interface TurnShape {
+  // 'chat': the person's system prompt (directive, identity, memory, plan, summary, screens,
+  // project). 'worker': the background worker's prompt with the task in it, plus the project
+  // block, read again every round.
+  system: 'chat' | 'worker';
   screen: boolean;
   boundary: boolean;
   recall: boolean;
   askUser: boolean;
+  images: boolean;
+  // A cap on the rounds of a turn, over the config's `ai.maxRounds`.
+  maxRounds?: number;
   withholdTools: readonly string[];
 }
 export const ONESHOT_WITHHELD: readonly string[] = ['background', 'subagent', 'remind'];
+export const TASK_ROUNDS = 12;
+const SHAPES: Record<ConversationKind, TurnShape> = {
+  session: { system: 'chat', screen: true, boundary: true, recall: true, askUser: true, images: true, withholdTools: [] },
+  task: { system: 'worker', screen: false, boundary: false, recall: false, askUser: false, images: false, maxRounds: TASK_ROUNDS, withholdTools: [] },
+  oneshot: { system: 'chat', screen: false, boundary: false, recall: false, askUser: false, images: true, withholdTools: ONESHOT_WITHHELD },
+};
 export function turnShape(kind: ConversationKind): TurnShape {
-  return kind === 'oneshot'
-    ? { screen: false, boundary: false, recall: false, askUser: false, withholdTools: ONESHOT_WITHHELD }
-    : { screen: true, boundary: true, recall: true, askUser: true, withholdTools: [] };
+  return SHAPES[kind];
+}
+
+// The system prompt of a background worker, with its task.
+const WORKER_PROMPT = 'You are a background worker. Complete the task below autonomously using the available tools, then return ONLY a concise result (a few sentences). Do not ask questions or wait for the user — act. You may spawn a follow-up `background` task if the work needs a further step (e.g. "build, then fix and rebuild on failure"), but keep the chain at most ONE level and only if it is genuinely needed. IMPORTANT: if the task asks for the current time, date, weekday, or a relative duration, you MUST call the `datetime` tool to get it (never answer from memory — it will be stale).\n\nTask: ';
+export function workerPrompt(task: string): string {
+  return WORKER_PROMPT + task;
 }
 
 // `hostAsk`: the text is the HOST's request, sent as the person's message (after
@@ -67,8 +84,13 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
   // old (role system) with a fresh one where memory is current (directive+
   // identity+memory). The chat history (user/assistant) is kept.
   // The screens are read first, then the memory (reading it may say a note).
-  const sysParts = systemParts(cfg, c.screensBlock(), c.memoryBlock(), c.plan.snapshot(), c.summary);
-  const sys = joinSystem(sysParts, projectBlock(c.project));
+  // A worker reads no screens and no memory: its prompt is the task, the project's
+  // instructions after it (`TurnShape.system`).
+  const sysParts = shape.system === 'chat' ? systemParts(cfg, c.screensBlock(), c.memoryBlock(), c.plan.snapshot(), c.summary) : undefined;
+  const chatSystem = (parts: ReturnType<typeof systemParts>, fresh: boolean) =>
+    joinSystem(fresh ? { ...parts, screens: c.screensBlock(), summary: summaryBlock(c.summary) } : parts, projectBlock(c.project));
+  const workerSystem = () => [workerPrompt(q), projectBlock(c.project)].filter(Boolean).join('\n\n');
+  const sys = sysParts ? chatSystem(sysParts, false) : workerSystem();
   // DISPLAY source vs LLM role are split: a `background` result stays role 'bg'
   // on screen and in the kept history (it is NOT the person's own message), while
   // for the model it is still a prompt to answer — `apiHistory` maps 'bg' →
@@ -87,7 +109,7 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
   if (!opts.fromInbox && !opts.hostAsk) pushHistory(c.prompts, q);
   // The images the text names, in the order it names them. A background result
   // is the model's writing and carries none.
-  const images = opts.fromInbox || opts.hostAsk ? [] : imagesInText(q, c.images);
+  const images = opts.fromInbox || opts.hostAsk || !shape.images ? [] : imagesInText(q, c.images);
   const asked: ChatMessage = { role: 'user', content: q, ...(images.length ? { images } : {}) };
   apiMsgs.push(asked);
   // What goes to the provider: every image of the history as a part — read now,
@@ -178,7 +200,8 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
       // So is the list of screens: a plugin that joins mid-turn is offered `ui_open` from
       // the next round, and its line comes with it. An unchanged list is the same bytes,
       // so a round without a change keeps the cached prefix.
-      systemPrompt: () => joinSystem({ ...sysParts, screens: c.screensBlock(), summary: summaryBlock(c.summary) }, projectBlock(c.project)),
+      systemPrompt: sysParts ? () => chatSystem(sysParts, true) : workerSystem,
+      ...(shape.maxRounds ? { maxRounds: shape.maxRounds } : {}),
       // A line about the turn itself (a tool call the model wrote as text), a
       // note in the conversation where it happened.
       onNote: (text: string, detail?: { markup?: string }) => {
@@ -254,7 +277,7 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
         c.api = [resumed];
         markCompacted(c, next, result.summary, result.incomplete, true);
         c.persist();
-        const sysNow = joinSystem({ ...sysParts, screens: c.screensBlock(), summary: summaryBlock(c.summary) }, projectBlock(c.project));
+        const sysNow = sysParts ? chatSystem(sysParts, true) : '';
         return { messages: wireMessages([...(sysNow ? [{ role: 'system', content: sysNow } as ChatMessage] : []), resumed], (ref) => c.resolveImage(ref, [])), ...append };
       },
       // What this conversation has loaded; `tools_load` adds to it mid-turn.
@@ -300,7 +323,7 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
         // handed a way to write to the journal itself.
         chatLLM: c.journaledChatLLM(journalId),
       },
-      confirmWrite: confirmFor(c.policy, { conv: c, journalId }),
+      confirmWrite: confirmFor(c.policy, { conv: c, journalId, ...(c.kind === 'task' ? { task: c.label } : {}) }),
       // A view a tool opened, and every change to it. Its message is pushed on
       // the FIRST change, so it has its place — and its fold id — from the
       // start: a block opened while it ran is still open when it ends.
