@@ -175,8 +175,20 @@ export class ConversationRegistry {
     c.close('park');
     this.notifyChange();
   }
-  // The chat redraws what reads the registry (the footer's count, the picker).
-  private notifyChange(): void { try { this.init.notify(); } catch { /* a redraw is never fatal */ } }
+  // What reads the registry hears it changed: the host redraws (the footer's count, the
+  // picker), then each `onChange` listener runs — each on its own, so one that throws
+  // skips neither the redraw nor the others.
+  private readonly changeListeners = new Set<() => void>();
+  onChange(fn: () => void): () => void {
+    this.changeListeners.add(fn);
+    return () => { this.changeListeners.delete(fn); };
+  }
+  private notifyChange(): void {
+    try { this.init.notify(); } catch { /* a redraw is never fatal */ }
+    for (const fn of [...this.changeListeners]) {
+      try { fn(); } catch { /* a listener is never fatal */ }
+    }
+  }
 
   show(c: Conversation): void { this.onScreen = c; }
   shown(): Conversation | null { return this.onScreen; }

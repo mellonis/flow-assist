@@ -1869,6 +1869,13 @@ hold this set together:
   that `registry.statusOf` finds live here), with that status — `working` while its
   tasks run, even when a result that already landed is unseen (it reads `done` from
   its file once put away), unless a y/n or a question waits — drawn `here · working`.
+  The open picker follows the registry: on each change it hears (`registry.onChange`,
+  subscribed once by the chat, which reads the picker, the sessions directory and the
+  lock token through refs) it reads the list again, keeping the filter and the cursor
+  (`pickerReload`) — so a session held here that is put away while the picker is open
+  turns from `here · working` to what its file says with no key pressed. Only in its
+  list mode: a reload returns to it, so a rename being typed or a delete being
+  confirmed is left as it is, and the list catches up at the next change or read.
   ⏎ on it takes that conversation back as it is (`openSession` → `reclaimLive`, which
   drops the list the chat last drew of it, so a save before the next render writes
   what landed while it was away); delete and move are refused ("still runs its
@@ -2695,7 +2702,10 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   conversation holding a session here, if any; `statusOf(id)` is its status for the
   picker — `working` while its tasks run, whatever its own status but a waiting y/n or
   question (not `Conversation.status`, which others read as "a turn runs") — and null
-  when it is not live.
+  when it is not live. Whatever changes what it holds (a conversation left headless, one
+  put away) redraws the host and then runs each `onChange(fn)` listener (the call
+  returns the unsubscriber), each in its own try, so one that throws skips neither the
+  redraw nor the others.
   It also holds the child slots (`children`, handed to every conversation in its deps):
   the count of background tasks (armed, queued, running) and the cap — a task starts
   while fewer than `max(1, sessions.maxRunning - 1)` run (`maxRunning` 4 by default, so

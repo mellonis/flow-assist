@@ -295,3 +295,57 @@ test('a session left with two tasks reads `here · working` after the first resu
   expect(rowOf(ui.backend.lastFrame!, 'session A question')).toMatch(/session A question\s+done\s/);
   ui.app.unmount();
 });
+
+// ─── the open picker follows the registry ────────────────────────────────────
+// A session held here that is put away while the picker is open reads its file's status
+// with no key pressed; a rename being typed is left as it is (AGENTS.md (A session held here)).
+
+test('an open picker re-reads a session held here as it is put away: `here · working`, then its file status, with no key pressed', async () => {
+  const model = new ScriptedModel();
+  const { dir, ui, task, idA } = await startWithTask(model);
+  await ui.type('/new');
+  await ui.press('return');
+  await settle(4);
+  await chord(ui, 's');
+  expect(rowOf(ui.backend.lastFrame!, 'session A question')).toMatch(/session A question\s+here · working\s/);
+
+  task.release();
+  await settleUntil(() => !fs.existsSync(lockOf(dir, idA)));
+  await pastTick();
+  const frame = ui.backend.lastFrame!;
+  expect(frame).toContain('Sessions ·'); // still open
+  const row = rowOf(frame, 'session A question');
+  expect(row).toMatch(/session A question\s+done\s/);
+  expect(row).not.toContain('here');
+  ui.app.unmount();
+});
+
+test('a rename being typed in the open picker survives a session held here being put away', async () => {
+  const model = new ScriptedModel();
+  const { dir, ui, task, idA } = await startWithTask(model);
+  model.script([{ text: 'B answer' }]);
+  await ui.type('/new');
+  await ui.press('return');
+  await settle(4);
+  await ui.type('session B question');
+  await ui.press('return');
+  await settleUntil(() => saved(dir, 'session B question') !== undefined);
+  const idB = saved(dir, 'session B question')!.id;
+  await chord(ui, 's');
+  await ui.type('session B');
+  await chord(ui, 'r');
+  await chord(ui, 'u');
+  await ui.type('half typed name');
+  expect(ui.backend.lastFrame).toContain('half typed name');
+
+  task.release();
+  await settleUntil(() => !fs.existsSync(lockOf(dir, idA)));
+  await pastTick();
+  // Still in rename, with what was typed; the rename then goes through.
+  expect(ui.backend.lastFrame).toContain('half typed name');
+  await ui.type(' done');
+  await ui.press('return');
+  expect(ui.backend.lastFrame).toContain('Renamed to «half typed name done»');
+  expect(titleIn(dir, idB)).toBe('half typed name done');
+  ui.app.unmount();
+});

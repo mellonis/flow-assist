@@ -597,6 +597,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // first has something to keep; `/clear` starts a new one and leaves the old
           // for `/resume`.
           const sessDir = sessionsDir(host.config);
+          // The same, for what is bound once and runs later (the picker's re-read on a
+          // registry change).
+          const sessDirRef = ui.useRef<string | null>(null);
+          sessDirRef.current = sessDir;
           // What `/resume` numbers: the current project's sessions, newest first — the
           // top level's when there is no project. The picker's Tab reaches the others.
           const resumeList = () => (sessDir ? projectSessions(listSessions(sessDir), conv.currentProject()) : []);
@@ -1009,17 +1013,27 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           };
           // The list as the picker draws it: a session this process holds that is not the one
           // on screen — left while its background tasks run — reads `here`, with what the
-          // registry says it is doing (`working` while its tasks run).
-          const pickerRows = (): SessionRow[] => sessionRows(sessDir!, lockToken).map((r) => {
+          // registry says it is doing (`working` while its tasks run). It reads through refs
+          // only, so the listener below, bound once, reads what is current.
+          const pickerRows = (): SessionRow[] => sessionRows(sessDirRef.current!, registryRef.current!.lockToken).map((r) => {
             if (r.lock !== 'ours' || r.id === convRef.current!.sessionId) return r;
             const status = registryRef.current!.statusOf(r.id);
             return status ? { ...r, lock: 'here', status } : r;
           });
-          // The picker: the list is read here and after a rename or a delete — never per
-          // keystroke; the filter runs over what was read. The conversation in this chat
-          // is written first, so it is listed as it is now. A pending y/n or question is
-          // answered before anything else: the chat opens on it, and the key is pressed
-          // again once it is answered.
+          // An open picker follows the registry: when a session held here is put away (or
+          // one is left to run headless), the list is read again — in its list mode only,
+          // since a reload returns to it and would drop a rename being typed or a delete
+          // being confirmed. The filter and the cursor stay (`pickerReload`).
+          ui.useEffect(() => registryRef.current!.onChange(() => {
+            const p = pickerRef.current;
+            if (!p || p.mode !== 'list' || !sessDirRef.current) return;
+            setPicker(pickerReload(p, pickerRows(), p.notice));
+          }), []);
+          // The picker: the list is read here, after a rename or a delete, and when the
+          // registry changes (above) — never per keystroke; the filter runs over what was
+          // read. The conversation in this chat is written first, so it is listed as it is
+          // now. A pending y/n or question is answered before anything else: the chat opens
+          // on it, and the key is pressed again once it is answered.
           const openPicker = () => {
             // Closed, collapsed, or docked with the plugin at the keys: the chat opens and
             // takes the keyboard, or the picker would draw where no key reaches it.
