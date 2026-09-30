@@ -2749,10 +2749,10 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   when it fired, so only `childTimers` is disarmed), one queued for a slot sends nothing
   when its run comes — and a task closed so writes its `task-end` line (`by: 'clear'`)
   into the session's journal through its route's `raw` and delivers nothing
-  (`stoppedWithParent`). `close('new')` and `close('exit')` touch no
-  child: `/new` leaves the session's tasks running, and at exit the registry's
-  `closeAll` writes each task's `task-end` line (`by: 'exit'`) and closes the tree
-  itself, deepest first; `close('exit')` of a task stops its own turn.
+  (`stoppedWithParent`). `/new` closes nothing: the chat leaves the session through
+  the registry's `retire`, and its tasks run on. `close('exit')` touches no child: at
+  exit the registry's `closeAll` writes each task's `task-end` line (`by: 'exit'`) and
+  closes the tree itself, deepest first; `close('exit')` of a task stops its own turn.
 - **Ctrl+C, Ctrl+D and Ctrl+Z take a second press** (`src/runtime/exit-keys.ts`, pure;
   the App owns the arm). flowtty hands these three to the app BEFORE the terminal
   backend acts (exit, exit, suspend — skipped when a `useInput` handler returns strict

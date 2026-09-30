@@ -412,7 +412,7 @@ export class Conversation {
     if (reason === 'parent') this.journalRoute?.raw({ t: 'task-end', task: this.label, outcome: 'stopped', by: 'clear' });
     if (reason === 'clear' || reason === 'parent') this.stopChildren();
     else if (reason === 'park' && this.kind === 'task') this.handChildrenUp();
-    if (reason === 'clear' || reason === 'new' || reason === 'parent' || (reason === 'exit' && this.kind === 'task')) {
+    if (reason === 'clear' || reason === 'parent' || (reason === 'exit' && this.kind === 'task')) {
       this.abort?.abort();
       this.abort = null;
       if (this.confirm) this.answerConfirm(false, 'reset');

@@ -257,8 +257,8 @@ test('a delayed task whose task has ended is the session\'s, its timer with it, 
   expect(rig.registry.children.backgroundCount()).toBe(0);
 });
 
-// A running task and a delayed one; `reason` closes their session.
-async function leftWithTasks(reason: 'new' | 'exit') {
+// A session with a running task and a delayed one.
+async function withTasks() {
   const model = new ScriptedModel();
   model.script(
     [{ tool: 'background', args: { task: 'now', label: 'r' } }, { tool: 'background', args: { task: 'x', label: 'late', in: '3 minutes' } }],
@@ -268,19 +268,40 @@ async function leftWithTasks(reason: 'new' | 'exit') {
   now.script([{ hold: true }, { text: 'r done' }]);
   const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
   const first = rig.conv;
+  rig.registry.show(first);
   await first.send('go');
   await rig.until(() => now.held);
-  const tasks = [...first.children];
-  first.close(reason);
+  return { rig, first, now, tasks: [...first.children] };
+}
+const untouched = (rig: Rig, first: Conversation, tasks: Conversation[]) => {
   expect(tasks.map((t) => t.closed)).toEqual([false, false]);
   expect(first.children.size).toBe(2);
   expect(first.childTimers.size).toBe(1);
   expect(rig.registry.children.backgroundCount()).toBe(2);
+};
+
+test('/new stops none of the session\'s tasks: the session is kept, and the running one\'s result lands in it', async () => {
+  const { rig, first, now, tasks } = await withTasks();
+  // The chat's `/new`: the view leaves, another conversation is shown, the one left retires.
+  first.detach(rig.port);
+  rig.registry.show(rig.fresh());
+  expect(rig.registry.retire(first)).toBe('kept');
+  untouched(rig, first, tasks);
+  now.release();
+  await rig.until(() => rig.registry.children.backgroundCount() === 1);
+  expect(rig.log).toContain('[bg] r: r done');
+  expect(bgRows(first)).toEqual(['r finished:\nr done']);
+  // The delayed one still holds it loaded.
+  expect(first.closed).toBe(false);
+  expect(taskEnds(rig, first)).toEqual([]);
+});
+
+test('an exit close touches no task', async () => {
+  const { rig, first, now, tasks } = await withTasks();
+  first.close('exit');
+  untouched(rig, first, tasks);
   now.release();
   await rig.until(() => rig.registry.children.backgroundCount() === 1);
   expect(rig.log).toContain('[bg] r: r done');
   expect(taskEnds(rig, first)).toEqual([]);
-}
-
-test('/new stops none of the session\'s tasks', () => leftWithTasks('new'));
-test('an exit close touches no task', () => leftWithTasks('exit'));
+});

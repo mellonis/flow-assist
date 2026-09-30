@@ -68,8 +68,9 @@ export const callOf = (m: ChatMsg): string | undefined => (m.views as ViewRecord
 export type ConversationKind = 'session' | 'task' | 'oneshot';
 export type BusyKind = 'turn' | 'shell' | 'interactive' | 'command';
 export type ConversationStatus = 'working' | 'waiting' | 'done' | 'idle';
-// 'parent': a task stopped because the conversation that holds it was cleared.
-export type CloseReason = 'clear' | 'new' | 'park' | 'exit' | 'parent';
+// 'parent': a task stopped because the conversation that holds it was cleared, or
+// stopped with the task holding it.
+export type CloseReason = 'clear' | 'park' | 'exit' | 'parent';
 
 // What runs now, as the status line draws it. Kept after the work ends, as the chat's
 // state was: the next start resets each field. (The seconds are the chat's own ticker,
