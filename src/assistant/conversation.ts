@@ -360,8 +360,15 @@ export class Conversation {
     for (const fn of [...(this.handlers.get(ev.type) ?? [])]) fn(ev);
   }
   // Records the port; the end is seen when the port shows it.
-  attach(port: ViewPort): void { this.port = port; this.markSeen(); }
-  detach(port: ViewPort): void { if (this.port === port) this.port = null; }
+  attach(port: ViewPort): void { this.port = port; this.keptDraft = ''; this.markSeen(); }
+  // The draft as the port last had it, for a save made while no port is attached
+  // (`snapshotSession`).
+  keptDraft = '';
+  detach(port: ViewPort): void {
+    if (this.port !== port) return;
+    this.keptDraft = port.draft();
+    this.port = null;
+  }
   get attached(): boolean { return this.port !== null; }
   // The attached port's `showsEnd()`; false with none.
   shows(): boolean { return this.port?.showsEnd() ?? false; }

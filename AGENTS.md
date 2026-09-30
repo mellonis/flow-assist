@@ -1683,7 +1683,11 @@ hold this set together:
   in progress (`live`), a pending y/n or question, the queues. Saves: 250 ms after a
   question, an answer's end, `/compact`, a background result; at once on closing the
   chat, `/clear`, `/new`, `/resume`, opening the picker (`/sessions`), and at process
-  exit (`flushOnExit`). A
+  exit (`flushOnExit`). What a save writes depends on whether a
+  port is attached: with one, the list as the chat last drew it and the draft the port
+  holds; with none, the conversation's own `messages` and the draft it kept when its
+  port left (`keptDraft`), so a conversation kept loaded without a view never saves a
+  stale drawn list or an empty draft. A
   write is temp file + rename; a file that does not parse is skipped. On start the
   newest session of the project the shell starts in is continued (`pickToContinue`)
   unless `/clear` closed it; another project's is NEVER continued in its place — a
