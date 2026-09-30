@@ -153,8 +153,9 @@ runs — `/new`, `/resume`, the picker — and it stays open here until the task
 (`here · working` in the picker): the result is a message there, not in the chat on
 screen, which gets only a toast naming it, and no turn starts for it. `/clear` stops the
 cleared session's tasks. A task stopped by `/clear` or by quitting says so in its
-session's journal, and `/export` shows it with its time (`*<label> stopped (exit)*`). Quitting also stops a `!command` or an
-assistant `run_command` still running in any conversation.
+session's journal, and `/export` shows it with its time (`*<label> stopped (exit)*`).
+Quitting also stops a `!command` or an assistant `run_command` still running in any
+conversation.
 
 ## Clicks, folds and the pager
 

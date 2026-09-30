@@ -222,7 +222,8 @@ test('at exit a session\'s !command is stopped: its process group is gone, and n
 
 test('at exit a session turn\'s run_command is stopped: its process group is gone, and nothing is saved or said afterwards', async () => {
   const model = new ScriptedModel();
-  const pidPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-exit-pid-')), 'pid');
+  const pidDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-exit-pid-'));
+  const pidPath = path.join(pidDir, 'pid');
   const pidFile = () => pidPath;
   model.script([{ tool: 'run_command', args: { command: `echo $$ > '${pidPath}'; sleep 30` } }], [{ text: 'never' }]);
   const rig = conversationRig(model, { shell: { autoRun: true }, policy: { kind: 'allow-writes', say: () => {} } });
@@ -249,5 +250,6 @@ test('at exit a session turn\'s run_command is stopped: its process group is gon
     expect(fs.existsSync(lockOf(rig, s.sessionId))).toBe(false);
   } finally {
     if (pid) killGroup(pid);
+    fs.rmSync(pidDir, { recursive: true, force: true });
   }
 });
