@@ -283,7 +283,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const registry = registryRef.current;
           const lockToken = registry.lockToken;
           // The conversation this chat draws. `useRef`'s argument is evaluated on every render,
-          // so the object is made once, into an empty ref, as the lock token is.
+          // so the object is made once, into an empty ref, as the registry is.
           const convRef = ui.useRef<Conversation | null>(null);
           // What the chat does when its conversation starts or ends work, parks a y/n or a
           // question, fails, or lands a background result. Bound once, when the conversation is

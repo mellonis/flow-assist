@@ -2609,16 +2609,19 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   left is closed — it saves nothing and draws nothing more. The chat makes every
   conversation through its registry (`ConversationRegistry`), made on its first render:
   its lock token is every conversation's, its exit hook and the chat's unmount write
-  and release what is live (`flushAll`, which closes nothing), and `adopt` tells it which conversation is on
-  screen. `postToChat` and the screens' gates read the conversation the chat holds now
-  (`convRef`).
+  and release what is live (`flushAll`, which closes nothing), and `adopt` tells it
+  which conversation is on screen. `postToChat` and the screens' gates read the
+  conversation the chat holds now (`convRef`).
 - **A conversation has a kind** — `session` (the chat's) or `oneshot` (the one-shot
   prompt's) — and a policy for its writes (`confirm-policy.ts`), both decided when it
   is made: `Conversation.fresh(deps, { kind, policy })` for a new one, which reads the
   project's instructions for the start directory, `Conversation.restore(…)` for a saved
   session. A policy that asks cannot be given where `deps.canAsk` is false (the
-  constructor throws), and neither the settings-file guard nor `ask_user` asks there. What a host hands a conversation comes from one factory, `hostDeps` (`src/assistant/host-deps.ts`), which reads the host's services when a member is called; `canAsk` is always said.
-  What a turn is handed that differs by kind is `turnShape` (`conversation-turn.ts`).
+  constructor throws), and neither the settings-file guard nor `ask_user` asks there.
+  What a host hands a conversation comes from one factory, `hostDeps`
+  (`src/assistant/host-deps.ts`), which reads the host's services when a member is
+  called; `canAsk` is always said. What a turn is handed that differs by kind is
+  `turnShape` (`conversation-turn.ts`).
 - **A host makes its conversations through one registry** (`ConversationRegistry`,
   `src/assistant/registry.ts`): the chat one for its life, the one-shot one for its run,
   a test rig one per rig. The registry holds the host's lock token, what is said once for
@@ -4109,17 +4112,16 @@ writes by default keeps both:
   (`backend.lastBuffer`).
 - `src/__tests__/helpers/conversation.ts` — `conversationRig(model, opts)`: ONE
   conversation on the host's real services and tool registry with only the network
-  replaced, and a sessions directory, memory, workspace and shell root of the test's
-  own — no App. `await rig.conv.send(…)` resolves when the turn ends; `rig.sent(i)`,
-  `rig.conv.api`, `rig.journal(id)`, `rig.sessionFile(id)` read what the model was
-  sent, the history, the journal and the state file; `rig.pending()` /
-  `rig.answerNext(ok)` the y/n; `rig.fresh()` makes another conversation as `/new`
-  does, `rig.open(id)` opens a saved one as `/resume` does; `closeRigs()` in the
-  file's `afterEach` closes every conversation a rig made and puts `LLM_TOKEN` back. Its
-  conversations are made by a registry of its own (`rig.registry`), as the chat's are.
-  A test whose claims are
-  about what is sent, the history, the journal or the queue uses it
-  (`*.rig.test.ts`); one about cells, keys or layout boots the App.
+  replaced, and a sessions directory, memory, workspace and shell root of the test's own
+  — no App. `await rig.conv.send(…)` resolves when the turn ends; `rig.sent(i)`,
+  `rig.conv.api`, `rig.journal(id)`, `rig.sessionFile(id)` read what the model was sent,
+  the history, the journal and the state file; `rig.pending()` / `rig.answerNext(ok)`
+  the y/n; `rig.fresh()` makes another conversation as `/new` does, `rig.open(id)` opens
+  a saved one as `/resume` does; `closeRigs()` in the file's `afterEach` closes every
+  conversation a rig made and puts `LLM_TOKEN` back. Its conversations are made by a
+  registry of its own (`rig.registry`), as the chat's are, one missing-memory note for
+  all of them. A test whose claims are about what is sent, the history, the journal or
+  the queue uses it (`*.rig.test.ts`); one about cells, keys or layout boots the App.
   `ScriptedModel.when(match)` gives a sub-script of its own turns and `hold` /
   `release()` to the requests `match` takes (`firstUser(req)`, a request's first user
   message, tells one conversation's from another's); `model.held` says a `hold` is

@@ -1,7 +1,7 @@
-// Every conversation a host runs is made here, by one of these (AGENTS.md, "A
-// conversation has a kind"): the chat has one for its life, the one-shot one for its
-// run, a test rig one per rig. It holds what is the host's rather than any one
-// conversation's: the lock token that makes a session's lock this host's own, what is
+// Every conversation a host runs is made here, by one of these (AGENTS.md, "A host makes
+// its conversations through one registry"): the chat has one for its life, the one-shot
+// one for its run, a test rig one per rig. It holds what is the host's rather than any
+// one conversation's: the lock token that makes a session's lock this host's own, what is
 // said once for all of them, the conversation the chat draws, and the one exit hook.
 import { Conversation } from './conversation.js';
 import type { ConfirmPolicy } from './confirm-policy.js';

@@ -205,8 +205,8 @@ export class Conversation {
 
   // `carry` — what a conversation that replaces another in the chat takes over from it:
   // the ↑/↓ history (the same array), the turn counter, the last verb, the list as the
-  // chat last drew it (until the chat draws this one). `policy` — who answers a write's y/n, `ask` unless said. `kind` —
-  // `session` unless said.
+  // chat last drew it (until the chat draws this one). `policy` — who answers a write's
+  // y/n, `ask` unless said. `kind` — `session` unless said.
   constructor(deps: ConversationDeps, carry: { prompts?: string[]; turn?: number; verb?: string; drawnRows?: ChatMsg[] | null; policy?: ConfirmPolicy; kind?: ConversationKind } = {}) {
     this.deps = deps;
     this.policy = carry.policy ?? { kind: 'ask' };
