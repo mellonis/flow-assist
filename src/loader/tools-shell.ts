@@ -223,6 +223,8 @@ const shellGroup = (config: Record<string, unknown>): ToolGroup => ({
     const { env, withheld } = withheldEnv(process.env, activeSecrets() ?? buildSecretSet(config), shellPassEnv(config));
     const r = await runShell(cmd, { cwd, timeoutMs, maxChars, signal, env: { ...env, [MODEL_SHELL_ENV]: '1' }, ...(onOutput ? { onOutput } : {}), ...(stdin != null ? { stdin } : {}) });
     if (r.error) throw new Error(`run_command: could not start /bin/sh: ${r.error}`);
+    // The key that stopped the turn names the stop, as it does for a `!command`.
+    if (r.stopped) { const by = (ctx as { stopKey?: () => string }).stopKey?.(); if (by) r.stoppedBy = by; }
     live?.update(consoleData(cmd, r, cwd, timeoutMs));
     const move = nextCwd(config, cwd, r.pwd);
     if (move.cwd !== cwd) shell.setCwd(move.cwd);

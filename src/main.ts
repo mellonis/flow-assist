@@ -498,17 +498,21 @@ async function runInteractive(config: Record<string, unknown>, repo: PluginRepo)
     // its session's journal (./assistant/registry.ts, `closeAll`). The unmount after it
     // finds nothing left to write.
     runExitHooks();
-    handle?.unmount();
-    backend.dispose?.();
+    // Each in its own try: a failing unmount never keeps the process from exiting.
+    try { handle?.unmount(); } catch (e) { process.stderr.write(`unmount failed: ${(e as Error)?.message ?? e}\n`); }
+    try { backend.dispose?.(); } catch (e) { process.stderr.write(`dispose failed: ${(e as Error)?.message ?? e}\n`); }
     // What was printed through the console while the app ran, now that the terminal is
     // the shell's again: the log that showed it is gone with the app.
-    const printed = consoleLog.kept();
-    if (printed.length) process.stderr.write(`${printed.join('\n')}\n`);
+    try {
+      const printed = consoleLog.kept();
+      if (printed.length) process.stderr.write(`${printed.join('\n')}\n`);
+    } catch (e) { process.stderr.write(`console replay failed: ${(e as Error)?.message ?? e}\n`); }
     // Every remote plugin gets a chance to say `shutdown` and its transport a chance
     // to close cleanly (./remote/lifecycle.ts) before the process itself goes; the
     // exit hook (./remote/transport-stdio.ts) is the backstop for whatever this
     // leaves running.
-    void stopRemotePlugins().then(() => process.exit(0));
+    const exit = () => process.exit(0);
+    void stopRemotePlugins().then(exit, exit);
   };
   // A termination signal exits the way quitting does. Registered before the app's own
   // listener, so the sessions' exit hooks run before its unmount; one arriving again

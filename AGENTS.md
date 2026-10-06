@@ -2745,7 +2745,8 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   and before it waits for remote plugins to stop: a task ending in that wait finds its
   session closed and delivers nothing, where a session only flushed would be parked and
   saved with its lock already released; the process's own `exit` then finds no hook
-  left. A termination signal (SIGTERM, SIGHUP, an outside SIGINT) takes the same path:
+  left. The unmount, the backend's dispose and the console replay each run in their own `try`, and a
+  rejected wait for remote plugins exits too, so none of them keeps the process from exiting. A termination signal (SIGTERM, SIGHUP, an outside SIGINT) takes the same path:
   `src/main.ts` listens for them (`exitOnSignals`, `sessions.ts`) before flowtty does,
   so its listener runs first, and flowtty, seeing another listener, unmounts without
   re-raising the signal (`src/__tests__/signal-exit.e2e.test.ts` sends a real SIGTERM).

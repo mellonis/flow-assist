@@ -287,6 +287,8 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
       toolCtx: {
         plan: c.plan,
         shell: c.shell,
+        // The key that stopped this turn, which a stopped command names.
+        stopKey: () => c.stopKey,
         // The model's history as the chat keeps it — whole, never stubbed —
         // where an earlier call's result is found by its id (run_command's
         // stdinFrom, src/assistant/tool-results.ts).
