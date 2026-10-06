@@ -1704,7 +1704,8 @@ hold this set together:
   says `/clear` resets — the plan, the loaded tools, the recall state, the images'
   numbering, the auto mode, the notes mode, the folds, the live views, the shell's
   directory — starts anew with the object, for `/new` too; the ↑/↓ history carries
-  over. `/new` is refused while an answer or a `!command` runs. 50 sessions are kept per project (`sessions.keep`,
+  over. `/new` and `/resume` are not refused while an answer or a `!command` runs: the
+  turn goes on in the session left (headless, below). 50 sessions are kept per project (`sessions.keep`,
   `pruneSessions` groups by the directory a file is in; the top level is one project),
   and a mirror directory a prune or a picker delete leaves empty is removed, with each
   empty parent up to — never including — the sessions directory (`dropEmptyDirs`).
@@ -1988,8 +1989,8 @@ hold this set together:
   lock is acquired when a session first gets its id (a fresh one, or the one a
   start-up/`/resume` continues) and released — after the final save — on exit
   (`flushOnExit`), `/clear`, `/new`, `/resume` to another session, and
-  component unmount — except that a session left by `/new` or `/resume` while its
-  background tasks run keeps its lock until the last one ends, and is saved and
+  component unmount — except that a session left by `/new` or `/resume` while it
+  works or waits (a turn, a y/n, background tasks) keeps its lock until the last one ends, and is saved and
   released then (the registry's `retire` and `park`): another process sees it held
   meanwhile. `/resume` of the session already on screen leaves its lock as it is.
   `pruneSessions` leaves a HELD session's file alone regardless of the keep count
@@ -2650,8 +2651,9 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   (`adopt` moves the chat's listeners, its port and what the render's handlers reach
   to it). `/clear` closes the one left. `/new` and `/resume` leave it (`leave`: its
   view handlers unbound, its port detached, then the registry's `retire`): closed at
-  once when none of its tasks runs, else kept loaded, locked and drawn by nobody until
-  they end — it draws nothing on this chat meanwhile (no clock, unread count, alert or
+  once when nothing of its own is left, else kept loaded, locked and drawn by nobody
+  until it is quiescent — its turn, a `!command`, a y/n or its tasks go on in it, and
+  it draws nothing on this chat meanwhile (no clock, unread count, alert or
   row; only a task's toast names it). `/resume` of that session while it is kept takes
   the same object back, with the draft it kept (`reclaimLive`), never a second one read
   from its file (`openFromFile`); `/resume` of the session on screen keeps the object
@@ -2719,7 +2721,10 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   conversation still has work of its own`), saving and releasing nothing — work going
   on in a closed conversation would write into an object that saves nothing, so a
   trigger the watch missed shows as a session never put away, loaded and locked, never
-  as lost rows. `reclaim(c)` takes a kept one back (the watch dropped, `headless`
+  as lost rows. A deferred check whose park throws (a failed save or release) writes a
+  line to the host's log (`pushLog`) and keeps the watch, so the next trigger retries.
+  `retire` of a conversation already kept drops its earlier watch first, so one trigger
+  is one check. `reclaim(c)` takes a kept one back (the watch dropped, `headless`
   cleared; a check already deferred finds no watch and does nothing). `bySession(id)`
   is the open conversation holding a session here, if any; `statusOf(id)` is its status
   for the picker — `waiting` while a y/n or a question waits in it, else `working`
@@ -3698,7 +3703,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     out after a limit and carries them, as after any turn.
   - `ai.backgroundFollowUp` (read `!== false`, so true when unset) is what starts the
     follow-up turn; `false` keeps rows only — the items land the same way and are read
-    with the person's next message. A session left while its tasks run (`headless`)
+    with the person's next message. A session left while it works or waits (`headless`)
     starts no follow-up either: a result lands in it as a row, read with the person's
     next message there. `/clear` empties the inbox; `/new` and opening another session
     land what waits in it as rows of the session left (`park`), or keep it there while

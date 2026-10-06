@@ -288,7 +288,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // question, fails, or lands a background result. Bound once, when the conversation is
           // made; each handler reaches this render's functions through the ref.
           const viewFx = ui.useRef<Partial<{ [T in ConversationEvent['type']]: (ev: Extract<ConversationEvent, { type: T }>) => void }>>({});
-          // Each bound conversation's unbinders: one the chat leaves while its tasks run stays
+          // Each bound conversation's unbinders: one the chat leaves while it works or waits stays
           // loaded, and must not drive this chat's clock, unread count or alert meanwhile.
           const unbindRef = ui.useRef(new Map<Conversation, Array<() => void>>());
           const bindView = (c: Conversation) => {
@@ -955,17 +955,16 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // one being left is written first, so it is on the list to come back to; one
           // another flow-assist process holds is refused with a note naming its lock.
           // The session already on screen stays as it is: only the view is refreshed. One
-          // still live here (left while its tasks run) is taken back as it is
+          // still live here (left while it works or waits) is taken back as it is
           // (`reclaimLive`); any other is read from its file (`openFromFile`).
           // true — switched.
           // `dir` — the directory its file is in (a list's row says).
           const openSession = (id: string, title: string, dir: string): boolean => {
             const prev = convRef.current!;
             if (!sessDir) return false;
-            if (prev.busy) { setError('an answer is still coming — stop it (Esc) before switching sessions'); return false; }
             prev.save();
             if (id === prev.sessionId) {
-              // No second conversation on its file and no park: its tasks deliver into it,
+              // No second conversation on its file and no park: its turn and its tasks go on in it,
               // and its lock stays where it is.
               setError(null);
               applySessionView({ draft: prev.port?.draft() ?? prev.keptDraft } as Session);
@@ -976,7 +975,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             const live = registryRef.current!.bySession(id);
             return live ? reclaimLive(prev, live) : openFromFile(prev, id, title, dir);
           };
-          // A session left while its tasks run is still loaded here, holding its lock: the
+          // A session left while it works or waits is still loaded here, holding its lock: the
           // chat takes that conversation back, with the draft it kept — never a second one
           // made from its file. Folds, notes and the pager start afresh.
           const reclaimLive = (prev: Conversation, live: Conversation): boolean => {
@@ -1015,7 +1014,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             }
             setError(null);
             // The session opens into a conversation of its own; the one left is parked, or
-            // kept loaded while its tasks run.
+            // kept loaded while it works or waits.
             leave(prev);
             const next = registryRef.current!.create({ turn: prev.turn, verb: prev.verb, drawnRows: prev.drawnRows });
             adopt(next);
@@ -1025,8 +1024,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             return true;
           };
           // The list as the picker draws it: a session this process holds that is not the one
-          // on screen — left while its background tasks run — reads `here`, with what the
-          // registry says it is doing (`working` while its tasks run). It reads through refs
+          // on screen — left while it works or waits — reads `here`, with what the
+          // registry says it is doing (`working` while it runs). It reads through refs
           // only, so the listener below, bound once, reads what is current.
           const pickerRows = (): SessionRow[] => sessionRows(sessDirRef.current!, registryRef.current!.lockToken).map((r) => {
             if (r.lock !== 'ours' || r.id === convRef.current!.sessionId) return r;
@@ -1077,8 +1076,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               case 'new': if (startNew()) setPicker(null); return;
               case 'open': {
                 if (openSession(a.id, titleOf(a.id), dirOf(a.id))) { setPicker(null); return; }
-                // Refused — an answer still coming (the error line says so), or taken by
-                // another process since the list was read: the picker stays, re-read.
+                // Taken by another process since the list was read: the picker stays,
+                // re-read.
                 const rows = pickerRows();
                 const now = rows.find((r) => r.id === a.id);
                 setPicker(pickerReload(p, rows, now?.lock === 'held' ? `"${titleOf(a.id)}" is open in another flow-assist process — it cannot be opened here` : ''));
@@ -1137,7 +1136,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             }
           };
           // The chat leaves `prev` for another: its view handlers go, and the registry parks it
-          // — or, while its tasks run, keeps it loaded and headless until they end (`retire`).
+          // — or, while it works or waits, keeps it loaded and headless until it is quiescent
+          // (`retire`).
           const leave = (prev: Conversation) => {
             unbindView(prev);
             prev.detach(portRef.current!);
@@ -1162,7 +1162,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // the last verb and the list as last drawn carry over — they are the chat's field's
           // and status line's, and what the chat showed.
           const renew = (prev: Conversation, reason: 'clear' | 'new') => {
-            // `/new` leaves the session as it is (parked, or kept while its tasks run);
+            // `/new` leaves the session as it is (parked, or kept while it works or waits);
             // `/clear` closes it, and its tasks stop with it.
             if (reason === 'new') leave(prev);
             else { unbindView(prev); prev.close(reason); }
@@ -1192,10 +1192,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           };
           // `/new`: a fresh session, the one being left written and kept as it is — not
           // closed (what `/clear` does), so a restart with nothing said since continues
-          // it. Refused while an answer or a `!command` runs, as a switch is.
+          // it. A turn or a `!command` still running goes on in the session left.
           const startNew = (): boolean => {
             const prev = convRef.current!;
-            if (prev.busy) { setError('an answer is still coming — stop it (Esc) before starting a new session'); return false; }
             prev.save();
             renew(prev, 'new');
             (host.services as Record<string, any>).showMessage?.('New session — /sessions lists the others');

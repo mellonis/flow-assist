@@ -128,3 +128,53 @@ test('a session left with nothing of its own is parked at once', async () => {
   expect(rig.conv).not.toBe(a);
   expect(rig.registry.shown()).toBe(rig.conv);
 });
+
+test('a left session taken back mid-turn is not parked when its turn ends', async () => {
+  const { sub, rig } = await heldTurnInA();
+  const { left: a, outcome } = rig.switchTo();
+  expect(outcome).toBe('kept');
+  rig.switchTo(a);
+  expect(rig.conv).toBe(a);
+  sub.release();
+  await rig.until(() => sub.held);
+  sub.release();
+  await rig.idle();
+  await tick(300);
+  expect(a.closed).toBe(false);
+  expect(fs.existsSync(lockOf(rig, a.sessionId))).toBe(true);
+  expect(contents(rig, a)).toContain('Answer A.');
+});
+
+test('a session retired twice is watched once: one trigger is one check', async () => {
+  const { sub, rig } = await heldTurnInA();
+  const { left: a } = rig.switchTo();
+  expect(rig.registry.retire(a)).toBe('kept');
+  let reads = 0;
+  const quiescent = rig.registry.quiescent.bind(rig.registry);
+  rig.registry.quiescent = (c) => { if (c === a) reads++; return quiescent(c); };
+  a.emit({ type: 'children', count: 0 });
+  await tick(50);
+  expect(reads).toBe(1);
+  expect(a.closed).toBe(false);
+  sub.release();
+});
+
+test('a park that throws in the deferred check is logged and retried by the next trigger', async () => {
+  const { sub, rig } = await heldTurnInA();
+  const { left: a } = rig.switchTo();
+  const release = a.releaseLock.bind(a);
+  let failed = false;
+  a.releaseLock = () => { if (!failed) { failed = true; throw new Error('disk gone'); } release(); };
+  sub.release();
+  await rig.until(() => sub.held);
+  sub.release();
+  await rig.until(() => failed);
+  await tick(50);
+  expect(a.closed).toBe(false);
+  expect(rig.log.some((l) => l.includes('disk gone'))).toBe(true);
+  // The watch is still there: a later trigger parks it.
+  a.emit({ type: 'children', count: 0 });
+  await rig.until(() => a.closed);
+  expect(a.closeReason).toBe('park');
+  expect(fs.existsSync(lockOf(rig, a.sessionId))).toBe(false);
+});

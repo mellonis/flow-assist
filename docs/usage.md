@@ -43,7 +43,9 @@ from here, and your own open session refuses a move too — switch away from it 
 
 A session is named by the first line you wrote; `/title <text>` renames it. `/new`
 starts a fresh session and keeps the current one as it is — a restart before you say
-anything continues it; while an answer is still coming it says to stop it (Esc) first.
+anything continues it. If an answer is still coming, the session you leave goes on
+working: the picker shows it (`here · working`), and Esc does not reach it from another
+session.
 `/clear` also starts a fresh session, but it stops an answer that is still coming and
 the session's background tasks, and marks the old session closed, so a restart starts
 empty. `/resume` lists the current

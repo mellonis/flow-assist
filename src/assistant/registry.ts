@@ -165,6 +165,8 @@ export class ConversationRegistry {
   retire(c: Conversation): 'parked' | 'kept' {
     if (this.quiescent(c)) { this.park(c); return 'parked'; }
     c.headless = true;
+    this.watches.get(c)?.();
+    this.watches.delete(c);
     let pending = false;
     const check = (): void => {
       if (pending) return;
@@ -172,9 +174,14 @@ export class ConversationRegistry {
       setTimeout(() => {
         pending = false;
         if (c.closed || !this.watches.has(c) || !this.quiescent(c)) return;
+        // A park that throws (a failed save or release) leaves the session loaded and
+        // locked: the watch stays, so the next trigger retries, and the log says why.
+        try { this.park(c); } catch (e) {
+          try { (this.init.services().pushLog as ((line: string) => void) | undefined)?.(`registry.park: ${c.sessionId}: ${e instanceof Error ? e.message : String(e)}`); } catch { /* a log line is never fatal */ }
+          return;
+        }
         this.watches.get(c)?.();
         this.watches.delete(c);
-        this.park(c);
       }, 0);
     };
     const offs = [

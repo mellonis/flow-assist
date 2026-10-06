@@ -394,9 +394,8 @@ export class Conversation {
   // everything. What runs is stopped for /clear, a stop by the parent, and a task's exit
   // (its turn must not go on calling tools after its journal says it stopped; a
   // session's own turn ends with the process): a pending y/n is declined `by: 'reset'`,
-  // a question dismissed; a session is left only while
-  // nothing of its own runs, since the chat refuses a switch or /new while anything
-  // does. The tasks it started are stopped only by /clear and by a stop from its own
+  // a question dismissed; a session left while it
+  // works is kept by the registry and closed only once it is quiescent. The tasks it started are stopped only by /clear and by a stop from its own
   // parent (`stopChildren`); a task that ends hands the ones still live to its parent
   // (`handChildrenUp`); a park of a session has none left, and an exit leaves them
   // running. Work still in flight afterwards writes its journal lines where it happened
