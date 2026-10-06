@@ -1140,6 +1140,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // (`retire`).
           const leave = (prev: Conversation) => {
             unbindView(prev);
+            // The clock, the `/memory` listing and an open `/context` were the session
+            // on screen's: its `turn-end` no longer reaches this chat, and a number from
+            // a listing names that session's facts.
+            if (tickRef.current) { clearInterval(tickRef.current); tickRef.current = null; }
+            setElapsedMs(0);
+            memoryShownRef.current = null;
+            if (contextOpenRef.current) setContextOpen(false);
             prev.detach(portRef.current!);
             registryRef.current!.retire(prev);
           };
@@ -1155,21 +1162,26 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             registryRef.current!.show(next);
             conv = next;
             next.attach(port);
+            // One taken back while it works shows its clock again, from its segment.
+            if (next.busy) { setElapsedMs(Date.now() - next.segmentStartedAt); startTicker(); }
           };
           // A fresh conversation in this chat — `/clear` and `/new` both. `/clear` closes the one
           // left (what it ran is stopped; a late callback journals where it happened and draws
           // nothing); `/new` leaves it (`leave`). The person's ↑/↓ history, the turn counter,
           // the last verb and the list as last drawn carry over — they are the chat's field's
-          // and status line's, and what the chat showed.
+          // and status line's, and what the chat showed. After `/new` the history is a copy: the
+          // session left still pushes what it delivers mid-turn, which is not this one's.
           const renew = (prev: Conversation, reason: 'clear' | 'new') => {
             // `/new` leaves the session as it is (parked, or kept while it works or waits);
             // `/clear` closes it, and its tasks stop with it.
             if (reason === 'new') leave(prev);
             else { unbindView(prev); prev.close(reason); }
-            const next = registryRef.current!.create({ prompts: prev.prompts, turn: prev.turn, verb: prev.verb, drawnRows: prev.drawnRows });
+            const next = registryRef.current!.create({ prompts: reason === 'new' ? [...prev.prompts] : prev.prompts, turn: prev.turn, verb: prev.verb, drawnRows: prev.drawnRows });
             adopt(next);
             next.startFresh();
-            // A plugin's news held for the stopped turn's end lands now, under the fresh rows.
+            // A plugin's news held for the stopped turn's end lands now, under the fresh rows:
+            // the news is the host's, said to the person, so it follows the person to the new
+            // session — after `/new` too, where the turn goes on in the one left.
             const held = prev.laterNotes; prev.laterNotes = [];
             for (const n of held) next.pluginNote(n);
             resetView();

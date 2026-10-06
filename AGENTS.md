@@ -1704,7 +1704,10 @@ hold this set together:
   says `/clear` resets — the plan, the loaded tools, the recall state, the images'
   numbering, the auto mode, the notes mode, the folds, the live views, the shell's
   directory — starts anew with the object, for `/new` too; the ↑/↓ history carries
-  over. `/new` and `/resume` are not refused while an answer or a `!command` runs: the
+  over (as a copy after `/new`: the session left still pushes what it delivers
+  mid-turn, and that stays out of this one's; `/clear`'s closed one pushes nothing). A
+  plugin's news held for a stopped or left turn's end follows the person to the new
+  session, after `/new` too. `/new` and `/resume` are not refused while an answer or a `!command` runs: the
   turn goes on in the session left (headless, below). 50 sessions are kept per project (`sessions.keep`,
   `pruneSessions` groups by the directory a file is in; the top level is one project),
   and a mirror directory a prune or a picker delete leaves empty is removed, with each
@@ -2658,7 +2661,10 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   once when nothing of its own is left, else kept loaded, locked and drawn by nobody
   until it is quiescent — its turn, a `!command`, a y/n or its tasks go on in it, and
   it draws nothing on this chat meanwhile (no clock, unread count, alert or
-  row; only a task's toast names it). `/resume` of that session while it is kept takes
+  row; only a task's toast names it). The clock (`leave` stops it and zeroes it) and the `/memory`
+  listing a number was taken from (`leave` forgets it, so `/memory accept <n>` lists
+  again) are the session on screen's; `adopt` starts the clock again, from the
+  segment's start, for a conversation taken back while it works. `/resume` of that session while it is kept takes
   the same object back, with the draft it kept (`reclaimLive`), never a second one read
   from its file (`openFromFile`); `/resume` of the session on screen keeps the object
   on screen and refreshes only the view. The chat makes every
