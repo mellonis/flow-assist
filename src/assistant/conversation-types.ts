@@ -168,8 +168,9 @@ export interface ConversationDeps {
   // its own.
   said?: { memoryMissing: boolean; configAsking: Map<string, Conversation> };
   // The App's screens service (src/runtime/screens.ts): the system prompt's `## Screens`
-  // block, and the end of work that opens what a turn held back. Undefined with no App.
-  screens: () => { promptBlock(): string; afterTurn(ok: boolean): void } | undefined;
+  // block, the end of work that opens what a turn held back, and the drop of what a
+  // conversation the chat leaves had deferred. Undefined with no App.
+  screens: () => { promptBlock(): string; afterTurn(ok: boolean): void; dropFor?(owner: object): void } | undefined;
   // The conversation the chat draws now, where work that outlived a closed one asks
   // what it must ask the person. Undefined with no chat.
   current?: () => Conversation | null | undefined;

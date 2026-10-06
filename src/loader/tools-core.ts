@@ -17,7 +17,7 @@ import { callProject, ensureWorkspace, listWorkspace, readScope, readWorkspaceFi
 import { markFacts } from '../assistant/memory-trust.js';
 import { tildePath } from '../assistant/shell.js';
 import { openInBrowser } from '../runtime/services.js';
-import { inBackgroundWork } from '../runtime/background-work.js';
+import { inBackgroundWork, inUnattachedWork } from '../runtime/background-work.js';
 import { childResultBody, type ChildSpec, type ChildStart } from '../assistant/conversation-types.js';
 import type { ChildSlots } from '../assistant/registry.js';
 import { resolveIdentityToken } from '../runtime/plugin-identity.js';
@@ -524,10 +524,12 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
       }
       case 'ui_open': {
         // The screens are the running app's (src/runtime/screens.ts); a background task
-        // runs apart from the screen, and a run with no app has none.
+        // runs apart from the screen, a run with no app has none, and a session the
+        // person left has none of its own.
         if (inBackgroundWork()) throw new Error('ui_open: screens are not opened from background work — ask in the chat.');
         const screens = (ctx as { screens?: { uiOpen: (name: string) => Promise<{ ok: boolean; text: string }> } }).screens;
         if (!screens) throw new Error('ui_open: there is no screen here — the app is not running.');
+        if (inUnattachedWork()) throw new Error('ui_open: this session is not on screen — the person is in another one; ask when they come back.');
         // A refusal is the call's error, so the model reads it as one; opened, or waiting
         // for the person, is the answer.
         const res = await screens.uiOpen(String(args.screen ?? ''));

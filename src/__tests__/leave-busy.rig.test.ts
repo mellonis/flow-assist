@@ -4,8 +4,11 @@
 import { afterEach, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
-import type { Conversation } from '../assistant/conversation.ts';
-import { ScriptedModel, firstUser } from './helpers/scripted';
+import { workHome, type Conversation } from '../assistant/conversation.ts';
+import type { Make } from '../loader/plugin.ts';
+import { inBackgroundWork } from '../runtime/background-work.ts';
+import { createScreens } from '../runtime/screens.ts';
+import { ScriptedModel, firstUser, type RecordedRequest } from './helpers/scripted';
 import { closeRigs, conversationRig, FakePort, type Rig } from './helpers/conversation';
 import { homeIn } from './helpers/session-files';
 
@@ -340,3 +343,172 @@ test('a conversation never shown and never left announces nothing', async () => 
   expect(alerts).toHaveLength(0);
   rig.answerNext(false);
 });
+
+// A stub of the App's screens service that records each turn's end it is told of.
+function flushesOf(rig: Rig): boolean[] {
+  const flushed: boolean[] = [];
+  (rig.services as unknown as { screens: unknown }).screens = { promptBlock: () => '', afterTurn: (ok: boolean) => { flushed.push(ok); } };
+  return flushed;
+}
+
+test('only a session that was not left flushes deferred screens at its turn\'s end', async () => {
+  const { model, sub, rig } = await heldTurnInA();
+  const flushed = flushesOf(rig);
+  const { left: a } = rig.switchTo();
+  const b = rig.conv;
+  sub.release();
+  await rig.until(() => sub.held);
+  sub.release();
+  await rig.until(() => a.closed);
+  expect(a.closeReason).toBe('park');
+  expect(flushed).toEqual([]);
+  model.script([{ text: 'B answer.' }]);
+  await b.send('question B');
+  expect(flushed).toEqual([true]);
+});
+
+test('/clear during a turn still drops that turn\'s deferred screens', async () => {
+  const { sub, rig } = await heldTurnInA();
+  const flushed = flushesOf(rig);
+  // As the chat's `/clear` closes it: the port goes with the close, before the stopped
+  // turn reaches its end.
+  rig.conv.close('clear');
+  expect(rig.conv.attached).toBe(false);
+  await rig.until(() => flushed.length > 0, 3000);
+  expect(flushed).toEqual([false]);
+  sub.release();
+});
+
+const WORKER = 'You are a background worker';
+const systemOf = (req: RecordedRequest): string => String(req.messages.find((m) => m.role === 'system')?.content ?? '');
+const isTask = (req: RecordedRequest, task: string) => systemOf(req).includes(WORKER) && systemOf(req).includes(`Task: ${task}`);
+const isSession = (req: RecordedRequest, question: string) => !systemOf(req).includes(WORKER) && firstUser(req).includes(question);
+// A guest tool with no arguments that runs `read` where it is called from.
+const probeTool = (name: string, read: () => void) => (make: Make) => make(`${name}-plugin`, {
+  tools: [{
+    id: name,
+    tools: [{ type: 'function', function: { name, description: 'Reads where it is called from.', parameters: { type: 'object', properties: {} } } }],
+    exec: async () => { read(); return 'read'; },
+  }],
+});
+
+test('a task queued behind another session\'s task works for its own session', async () => {
+  const homes: (Conversation | null)[] = [];
+  const model = new ScriptedModel();
+  model.when((req) => isSession(req, 'question B')).script([{ tool: 'background', args: { task: 'job B', label: 'tb' } }], [{ text: 'Started B.' }]);
+  model.when((req) => isSession(req, 'question A')).script([{ tool: 'background', args: { task: 'job A', label: 'ta' } }], [{ text: 'Started A.' }]);
+  const tb = model.when((req) => isTask(req, 'job B'));
+  tb.script([{ hold: true }, { tool: 'whose', args: {} }], [{ text: 'b done' }]);
+  const ta = model.when((req) => isTask(req, 'job A'));
+  ta.script([{ tool: 'whose', args: {} }], [{ text: 'a done' }]);
+  // One task at a time.
+  const rig = conversationRig(model, { ai: { backgroundFollowUp: false }, extra: { sessions: { maxRunning: 2 } }, guests: (make) => [probeTool('whose', () => { homes.push(workHome()); })(make)] });
+  const b = rig.conv;
+  await b.send('question B');
+  await rig.until(() => tb.held);
+  const a = rig.fresh();
+  await a.send('question A');
+  // B's task holds the one slot; A's has left its delay and waits behind it.
+  await rig.until(() => rig.registry.children.backgroundCount() === 2 && a.childTimers.size === 0);
+  await tick();
+  expect(rig.registry.children.running()).toBe(1);
+  expect(ta.requests).toHaveLength(0);
+  expect(b.closed).toBe(false);
+  tb.release();
+  await rig.until(() => rig.registry.children.backgroundCount() === 0 && homes.length === 2, 5000);
+  expect(homes[0]).toBe(b);
+  expect(homes[1]).toBe(a);
+});
+
+test('a follow-up turn after a grandchild\'s result is not background work', async () => {
+  const marks: boolean[] = [];
+  const model = new ScriptedModel();
+  model.when((req) => isTask(req, 'one')).script([{ tool: 'background', args: { task: 'two', label: 'b' } }], [{ text: 'a done' }]);
+  const two = model.when((req) => isTask(req, 'two'));
+  two.script([{ hold: true }, { text: 'b done' }]);
+  // The session: its own turn, then one follow-up turn per result, each calling the tool.
+  model.script(
+    [{ tool: 'background', args: { task: 'one', label: 'a' } }], [{ text: 'Started.' }],
+    [{ tool: 'mark', args: {} }], [{ text: 'Read a.' }],
+    [{ tool: 'mark', args: {} }], [{ text: 'Read b.' }],
+  );
+  const rig = conversationRig(model, { guests: (make) => [probeTool('mark', () => { marks.push(inBackgroundWork()); })(make)] });
+  const first = rig.conv;
+  rig.registry.show(first);
+  await first.send('go');
+  // Task `a` started `b` and ended; its result's follow-up turn is over, `b` still held.
+  await rig.until(() => two.held && marks.length === 1 && first.rows().some((m) => m.content === 'Read a.') && !first.busy, 5000);
+  two.release();
+  await rig.until(() => marks.length === 2 && first.rows().some((m) => m.content === 'Read b.') && !first.busy, 5000);
+  // The second one is started from inside task `a`'s run, which is background work.
+  expect(marks).toEqual([false, false]);
+});
+
+test('a task\'s own turn is still background work', async () => {
+  const marks: boolean[] = [];
+  const opens: string[] = [];
+  const model = new ScriptedModel();
+  model.script([{ tool: 'background', args: { task: 'one', label: 'a' } }], [{ text: 'Started.' }]);
+  model.when((req) => isTask(req, 'one')).script([{ tool: 'mark', args: {} }, { tool: 'open_it', args: {} }], [{ text: 'a done' }]);
+  let opened = 0;
+  const screens = createScreens({
+    plugins: [{ name: 'shown', screens: { main: { entry: true, open: () => { opened++; } } } }] as never,
+    builtins: ['core'], disabled: new Set(), untrusted: () => [], starting: () => [], keys: {}, apiOf: () => ({}),
+    busy: () => false, blocker: () => null, asking: () => false, covered: () => false, notify: () => {}, log: () => {}, say: () => {},
+  });
+  const rig = conversationRig(model, {
+    ai: { backgroundFollowUp: false },
+    guests: (make) => [
+      probeTool('mark', () => { marks.push(inBackgroundWork()); })(make),
+      // A plugin's navigation tool, and the model's `ui_open`, both through the screens' rules.
+      make('opener', {
+        tools: [{
+          id: 'opener',
+          tools: [{ type: 'function', function: { name: 'open_it', description: 'Opens a screen.', parameters: { type: 'object', properties: {} } } }],
+          exec: async () => { opens.push((await screens.open('shown', 'main')).text, (await screens.uiOpen('shown')).text); return 'asked'; },
+        }],
+      }),
+    ],
+  });
+  await rig.conv.send('go');
+  await rig.until(() => rig.registry.children.backgroundCount() === 0 && opens.length === 2, 5000);
+  expect(marks).toEqual([true]);
+  expect(opens).toEqual(['Not opened: screens are not opened from background work.', 'Not opened: screens are not opened from background work.']);
+  expect(opened).toBe(0);
+});
+
+for (const outcome of ['kept', 'parked'] as const) {
+  test(`a screen a session deferred is dropped when the chat leaves it (${outcome})`, async () => {
+    const model = new ScriptedModel();
+    const sub = model.when((req) => firstUser(req).includes('question A'));
+    // Kept: left while its second request is held. Parked: left once the turn is over.
+    sub.script([{ tool: 'open_it', args: {} }], [...(outcome === 'kept' ? [{ hold: true } as const] : []), { text: 'Answer A.' }]);
+    const log: string[] = [];
+    // A question waits for the person, so the open is deferred and the turn's end keeps it.
+    const screens = createScreens({
+      plugins: [{ name: 'shown', screens: { main: { entry: true, open: () => {} } } }] as never,
+      builtins: ['core'], disabled: new Set(), untrusted: () => [], starting: () => [], keys: {}, apiOf: () => ({}),
+      busy: () => true, blocker: () => 'a question waits', asking: () => true, covered: () => false, notify: () => {}, log: (line) => { log.push(line); }, say: () => {},
+    });
+    const rig = conversationRig(model, {
+      ai: { backgroundFollowUp: false },
+      guests: (make) => [make('opener', {
+        tools: [{
+          id: 'opener',
+          tools: [{ type: 'function', function: { name: 'open_it', description: 'Opens a screen.', parameters: { type: 'object', properties: {} } } }],
+          exec: async () => (await screens.uiOpen('shown')).text,
+        }],
+      })],
+    });
+    (rig.services as unknown as { screens: unknown }).screens = screens;
+    rig.registry.show(rig.conv);
+    const sent = rig.conv.send('question A');
+    if (outcome === 'kept') await rig.until(() => sub.held);
+    else { await sent; await rig.idle(); }
+    expect(screens.pending()).toEqual(['shown:main']);
+    expect(rig.switchTo().outcome).toBe(outcome);
+    expect(screens.pending()).toEqual([]);
+    expect(log).toContain('[screens] shown:main not opened — its session was left');
+    sub.release();
+  });
+}

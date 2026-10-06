@@ -21,6 +21,8 @@
 //   (for the chat to be free, outside a turn), and the answer says so at once — a tool
 //   that awaited the turn it runs in would wait forever;
 // - a turn the person stopped, or one that failed, opens nothing it deferred;
+// - a screen is its session's: a session the person left opens none, and one it
+//   deferred before it was left is dropped;
 // - the answer is always a sentence a tool can hand back as it is.
 // Esc closes a screen as it closes any: the plugin's own key. `host.close(screen)` asks
 // the plugin to close one, when it declared how.
@@ -30,7 +32,7 @@ import { bindingGlyph } from '../playback/keys.js';
 import { toolArgsError } from '../assistant/tool-args.js';
 import { sanitizeGroupDescription } from '../assistant/tool-loading.js';
 import { cutStep } from '../cells.js';
-import { inBackgroundWork } from './background-work.js';
+import { inBackgroundWork, inUnattachedWork, workOwner, type WorkOwner } from './background-work.js';
 
 // One screen as a plugin declares it.
 export interface ScreenDecl {
@@ -118,6 +120,8 @@ export interface Screens {
   afterTurn: (ok: boolean) => void;
   settle: () => void;
   pending: () => string[];
+  // `owner` was left: what its work deferred is dropped.
+  dropFor: (owner: object) => void;
   // The system prompt's `## Screens` block; '' with nothing to list.
   promptBlock: () => string;
 }
@@ -131,7 +135,9 @@ const capped = (items: string[]): string => (items.length > LINE_ITEMS_MAX ? `${
 type Resolved = { plugin: Plugin; name: string; decl: ScreenDecl; key: string };
 
 export function createScreens(d: ScreensDeps): Screens {
-  const deferred: Array<{ r: Resolved; params: Record<string, unknown> }> = [];
+  // `owner`: whose work deferred it (src/runtime/background-work.ts); undefined for an
+  // open nobody's turn made — a plugin's own key.
+  const deferred: Array<{ r: Resolved; params: Record<string, unknown>; owner: WorkOwner | undefined }> = [];
   const builtin = (name: string) => d.builtins.includes(name);
   const usable = (p: Plugin) => !builtin(p.name) && !d.disabled.has(p.name) && !d.untrusted().some((u) => u.name === p.name);
 
@@ -185,6 +191,8 @@ export function createScreens(d: ScreensDeps): Screens {
   const open = async (from: string | null, screen: string, paramsIn?: unknown): Promise<ScreenResult> => {
     // A background task runs apart from the screen: whatever it calls opens nothing.
     if (inBackgroundWork()) return { ok: false, text: 'Not opened: screens are not opened from background work.' };
+    // A session nobody draws opens nothing over the one on screen.
+    if (inUnattachedWork()) return { ok: false, text: 'Not opened: this session is not on screen — the person is in another one.' };
     const r = resolve(from, screen);
     if (typeof r === 'string') return { ok: false, text: `Not opened: ${r}.` };
     if (paramsIn != null && (typeof paramsIn !== 'object' || Array.isArray(paramsIn))) return { ok: false, screen: r.key, text: `Not opened: ${r.key}'s params are an object.` };
@@ -199,7 +207,7 @@ export function createScreens(d: ScreensDeps): Screens {
     if (why) {
       const at = deferred.findIndex((x) => x.r.key === r.key);
       if (at >= 0) deferred.splice(at, 1);
-      deferred.push({ r, params });
+      deferred.push({ r, params, owner: workOwner() });
       const when = d.busy() ? 'when this turn ends' : 'once the chat is free';
       d.log(`[screens] ${r.key} waits — ${why}`);
       return { ok: true, deferred: true, screen: r.key, text: `${r.key} is not open yet: ${why}. It opens ${when}.` };
@@ -273,6 +281,12 @@ export function createScreens(d: ScreensDeps): Screens {
       flush(true);
     },
     pending: () => deferred.map((x) => x.r.key),
+    dropFor: (owner) => {
+      for (const x of deferred.filter((e) => e.owner === owner)) {
+        deferred.splice(deferred.indexOf(x), 1);
+        d.log(`[screens] ${x.r.key} not opened — its session was left`);
+      }
+    },
     promptBlock: () => {
       const lines: string[] = [];
       for (const p of d.plugins) {

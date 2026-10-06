@@ -517,7 +517,8 @@ another's):
   open is DEFERRED and answers at once — a tool that awaited the turn it runs in would
   never end: `<plugin>:<screen> is not open yet: <why>. It opens when this turn ends.`
   (outside a turn — `store.chat.busy` false — `once the chat is free`). The conversation's
-  `afterTurn` (`src/assistant/conversation.ts`) calls `screens.afterTurn(ok)`: a turn that ended opens what it held (the
+  `afterTurn` (`src/assistant/conversation.ts`) calls `screens.afterTurn(ok)` unless the
+  chat left it (`headless`): a turn that ended opens what it held (the
   draft stays in the field — opening never moves the keyboard), unless a question still
   waits; a stopped or failed turn drops it with a log line, as it restores rather than
   sends the queue. Outside a turn, an App effect (`screens.settle`, after every render)
@@ -548,11 +549,40 @@ another's):
   takes it — else `it does not take its entry key S now`. The plugin answers it as it
   answers the key, and its next frame's `keycaps` bring the surface up. No screen with
   params crosses the wire, and a remote plugin has no `host.open`.
-- **Background work opens nothing**: a background task's conversation runs its turn
-  under `asBackgroundWork` (`src/runtime/background-work.ts`, an `AsyncLocalStorage`;
-  `Conversation.startChild`), so every await of it — a plugin's tool calling `host.open`
-  included, which has no ctx of the chat's — reads `inBackgroundWork()`; `screens.open`
-  and `ui_open` refuse there.
+- **A screen is its session's: two refusals by whose work asks**
+  (`src/runtime/background-work.ts`, two `AsyncLocalStorage`s, each carried through
+  every await of the work — a plugin's tool calling `host.open` included, which has no
+  ctx of the chat's):
+  - **background work opens nothing** — a background task's conversation runs its turn
+    under `asBackgroundWork` (`Conversation.startChild`); `screens.open` answers `Not
+    opened: screens are not opened from background work.`, `ui_open` throws `ui_open:
+    screens are not opened from background work — ask in the chat.`;
+  - **a session not on screen opens nothing** — every `Conversation.send` runs its turn
+    as its own work (`asConversationWork(this, …)`; `workOwner()` hands back a
+    `WorkOwner`, `{ attached, kind }`, so the runtime layer imports no `Conversation`),
+    and `inUnattachedWork()` is "the owner is a `session` and no view draws it NOW" —
+    asked at the call, since a turn may be left or taken back midway: `screens.open`
+    answers `Not opened: this session is not on screen — the person is in another
+    one.`, `ui_open` throws `ui_open: this session is not on screen — the person is in
+    another one; ask when they come back.` (after its "no screen here" check, so a run
+    with no app still reads that). The background check comes first, so a task reads
+    its own text; this is the ONE rule that asks "attached right now" — the others
+    about a session left read `headless` (a bare conversation, or one `/clear` just
+    closed, has no port either).
+
+  Every `send` sets its own owner, a task's too, and none reads the one it was called
+  in: a queued task is started from the `done()` of the run that freed its slot
+  (`ChildSlots.admit`), in that run's context. A `session`'s `send` also runs outside
+  the background mark (`asForegroundWork`): a follow-up turn started by a grandchild's
+  result is started from inside a task's run; a task's own turn stays marked.
+- **A deferred open records whose work deferred it** (`workOwner()` at the defer;
+  undefined for a plugin's own key). `screens.dropFor(owner)` removes that owner's
+  entries, each with `[screens] <key> not opened — its session was left` in the log;
+  the registry's `retire` calls it first, for a session parked and one kept alike —
+  `screens.settle` would otherwise open it over the next session, which is idle. A
+  left session's `afterTurn` flushes nothing (above); `/clear` closes the conversation,
+  port and all, before its stopped turn's `afterTurn(false)`, which still drops what
+  that turn deferred — why the gate reads `headless`, not `attached`.
 - A stopped or failed turn's `afterTurn(false)` drops what it deferred BEFORE looking at
   `asking()` — a settings y/n (`askConfigChanges`) may be up as the turn ends.
 - The list caps a line's screens and tools at `LINE_ITEMS_MAX` (8, then `+N more`) and
@@ -565,10 +595,11 @@ another's):
   (the app's registry — `runInteractive`, `bootApp`; never the one-shot prompt's) and a
   non-withheld plugin with an entry screen; a refresh recomputes it, and a call from an
   older list answers the core group's `gone` (`no plugin in the app has a screen it can
-  open now`). A refusal throws (the model reads an error), background work and a run
-  with no `services.screens` refuse too.
+  open now`). A refusal throws (the model reads an error); background work, a run
+  with no `services.screens` and a session not on screen refuse too.
 
-`src/__tests__/screens.e2e.test.ts` holds it. `HOST_API` stays: `screens` is an optional
+`src/__tests__/screens.e2e.test.ts` holds it; whose work asks is held by
+`src/runtime/__tests__/work-owner.test.ts` and the `leave-busy` rig and e2e files. `HOST_API` stays: `screens` is an optional
 field an older host ignores, and `host.open` / `close` are optional members a plugin
 checks for before it calls them (docs/plugins.md, "Compatibility").
 
@@ -2674,8 +2705,15 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   its lock token is every conversation's, the chat's unmount writes and releases what
   is live (`flushAll`, which closes nothing), its exit hook closes everything
   (`closeAll('exit')`), and `adopt` tells it
-  which conversation is on screen. `postToChat` and the screens' gates read the
-  conversation the chat holds now (`convRef`).
+  which conversation is on screen. The screens' gates (`store.chat.busy`, `typing`,
+  `asking`) read the conversation the chat holds now (`convRef`); `postToChat` and
+  `store.chat.note` read whose work calls them — `workHome()`
+  (`src/assistant/conversation.ts`): the conversation whose turn runs the caller
+  (`workOwner()`), or for a task the nearest ancestor that is not one, null outside any
+  turn. A plugin's tool called by a left session's turn posts into that session, not
+  into the one on screen; with no owner (a plugin's own poller, a key), or with that
+  session already closed, the message goes to the conversation on screen. The owner
+  outlives the turn in what a tool left running (a timer, a promise).
 - **A conversation has a kind** — `session` (the chat's), `task` (a background task's) or
   `oneshot` (the one-shot prompt's) — and a policy for its writes (`confirm-policy.ts`),
   both decided when it is made: `Conversation.fresh(deps, { kind, policy })` for a new one, which reads the
@@ -2719,8 +2757,9 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   shifts the queue and the turn it starts sets `busy` in the same synchronous step, so
   the two clauses cover that hop between them); no settings-file ask is in flight
   (`configAsk`, which clears a microtask after its y/n's answer, while its loop may
-  already have parked the next change). `retire(c)` parks a quiescent one at once
-  (`'parked'`); otherwise it marks it `headless` and watches it (`'kept'`): a
+  already have parked the next change). `retire(c)` first drops the screens the
+  conversation's work deferred (`screens.dropFor`, "Screens the model can open"), then
+  parks a quiescent one at once (`'parked'`); otherwise it marks it `headless` and watches it (`'kept'`): a
   `children` event, a `turn-end`, a y/n settled (`confirm` with no request) or a
   question settled (`question` with no state) each ask for one check, deferred a
   macrotask (`setTimeout(0)`, one pending at a time), which reads the predicate again
@@ -3566,7 +3605,8 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   **`services.chatNote(text)`** is a plugin's news from outside a command: the chat
   publishes `note` on `store.chat`, and the App binds the service PER PLUGIN (an own
   prop of the plugin's services view) with `[<plugin>] ` in front, so no plugin's note
-  passes for the host's; during a turn it waits in the conversation's `laterNotes` and is said under
+  passes for the host's; it goes to the session whose work says it (`workHome()`), else
+  to the one on screen; during a turn it waits in the conversation's `laterNotes` and is said under
   the answer, where the project's instructions note is — and so does a command's
   `ctx.say`, prefixed the same way. **`services.setConfig` / `unsetConfig`** are bound
   per plugin too: `setConfigValue` / `unsetConfigValue` with every plugin's schema,
@@ -3690,8 +3730,8 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   and is not the person's — a **background result** (a background task
   finishing: its `run()` delivers it into the inbox of the session its chain started
   from, never into whatever the chat shows), and any later source of the same kind goes
-  through it too. `services.postToChat` is the plugins' channel into it, for the
-  conversation the chat shows. The inbox **never enters a running turn**: no round and
+  through it too. `services.postToChat` (a tool's `ctx.postToChat`) is the plugins' channel into it: the inbox of
+  the session whose work posts (`workHome()`), else of the conversation the chat shows. The inbox **never enters a running turn**: no round and
   no tool call is interrupted, and nothing lands between a call and its result. It is
   taken only when nothing runs — at a turn's end, a `!command`'s or a slash command's
   (`afterTurn`), or at once when it arrives idle (`takeInbox`; a 400 ms interval retries while something holds it and clears itself once

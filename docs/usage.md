@@ -391,7 +391,9 @@ the key that opens them, and opens one for you — the entry screen with `ui_ope
 board or an issue with the plugin's own tools when it has them. Opening a screen asks no
 y/n. While you type in the chat or on the `:` line, or a question waits for your answer,
 it waits for the end of the assistant's turn and then opens, your draft kept in the field
-(a turn you stop opens nothing); the answer says it waits. A plugin's own field is not
+(a turn you stop opens nothing); the answer says it waits. A session you left while it
+works (`/new`, `/resume`) opens nothing over the one you are in — the assistant there is
+told you are away — and a screen it had waiting when you left is dropped. A plugin's own field is not
 watched: a screen may open while you type there. In the panel the screen is beside the chat; in a
 window, or with the chat over the whole terminal, it is behind the chat until you close
 it. Esc closes it as ever. The assistant never opens `:plugins`, `/mcp`, the sessions or

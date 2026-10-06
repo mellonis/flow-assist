@@ -24,7 +24,7 @@ import { pickVerb, verbList } from './verbs.js';
 import type { ViewRecord } from './views.js';
 import type { ToolDef } from '../loader/tools.js';
 import { workspaceFor } from './workspace.js';
-import { asBackgroundWork } from '../runtime/background-work.js';
+import { asBackgroundWork, asConversationWork, asForegroundWork, workOwner } from '../runtime/background-work.js';
 import { callOf, childResultText, lastAnswerOf, type BusyKind, type ChatMsg, type ChildResult, type ChildSpec, type ChildStart, type CloseReason, type JournalRoute, type ConversationDeps, type ConversationEvent, type ConversationKind, type ConversationSnapshot, type ConversationStatus, type PendingConfirm, type Queued, type QueueWait, type SendOptions, type TurnEnd, type ViewPort } from './conversation-types.js';
 import {
   applySession, currentProject, ensureSessionId, journal, journaledChatLLM, journalTo, markSeen, persist, pushNote,
@@ -629,8 +629,15 @@ export class Conversation {
   }
 
   // ── the work (src/assistant/conversation-turn.ts)
-  // A turn with the model; false with nothing to send, or with something running.
-  send(text: string, opts?: SendOptions): Promise<boolean> { return runTurn(this, text, opts); }
+  // A turn with the model; false with nothing to send, or with something running. It
+  // runs as this conversation's work (src/runtime/background-work.ts), whatever started
+  // it: a queued task is started by the run that freed its slot, a follow-up turn by the
+  // task whose result it reads. A session's turn is never background work; a task's
+  // stays under the mark `startChild` sends it with.
+  send(text: string, opts?: SendOptions): Promise<boolean> {
+    const turn = () => asConversationWork(this, () => runTurn(this, text, opts));
+    return this.kind === 'session' ? asForegroundWork(turn) : turn();
+  }
   // `/compact`.
   compact(): void { compact(this); }
   // The person's `!command`, or `!!command` with `interactive` (src/assistant/conversation-shell.ts);
@@ -709,7 +716,7 @@ export class Conversation {
   // holds it (a y/n, a question) and clears itself once the inbox is empty.
   // A channel to put a message into this conversation from OUTSIDE: a child's result
   // (`startChild`'s `run()`), and a plugin's through `services.postToChat`, which the
-  // chat binds to the conversation it shows. An
+  // chat binds to the session whose work posts it (`workHome`), else the one it shows. An
   // item is never dropped while the conversation is open: it waits in the inbox until it
   // can land. A closed conversation takes nothing.
   deliver(text: string): void {
@@ -781,8 +788,11 @@ export class Conversation {
   // the place of its `⏎ continue`, and the continued turn reads the rows.
   afterTurn(ok: boolean, atLimit = false): void {
     // A screen that waited for this turn opens now — or, the turn stopped or
-    // failed, never (src/runtime/screens.ts).
-    this.deps.screens()?.afterTurn(ok);
+    // failed, never (src/runtime/screens.ts). Not for a conversation the chat left: the
+    // screen is another session's, and what this one deferred went at the leave. The
+    // rule reads `headless`, not the port: `/clear` closes a conversation, port and all,
+    // before its stopped turn gets here, and that turn still drops what it deferred.
+    if (!this.headless) this.deps.screens()?.afterTurn(ok);
     // A conversation the chat left stops or fails with no view to put its queue back into
     // the field (the chat's `restoreQueue` is unbound with the view): the texts go ahead of
     // the kept draft, the order the view uses, so they are saved with the session and come
@@ -1013,4 +1023,14 @@ export class Conversation {
     if (first || rec.phase !== 'live') { this.flushLive(); return; }
     this.liveTimer ??= setTimeout(() => this.flushLive(), LIVE_REDRAW_MS);
   }
+}
+
+// The session the running work belongs to (src/runtime/background-work.ts): the
+// owner itself, or for a task the nearest ancestor that is not one — where its result
+// goes too. null outside any conversation's work.
+export function workHome(): Conversation | null {
+  const owner = workOwner();
+  let home = owner instanceof Conversation ? owner : null;
+  while (home && home.kind === 'task') home = home.parent;
+  return home;
 }

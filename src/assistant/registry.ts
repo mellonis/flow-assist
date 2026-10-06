@@ -187,6 +187,8 @@ export class ConversationRegistry {
   // the emit is still walking, and `turn-end` comes before what the turn's end starts),
   // and only after what settles a microtask later (the settings ask).
   retire(c: Conversation): 'parked' | 'kept' {
+    // Left, parked or kept: a screen its work deferred opens over no other session.
+    c.deps.screens()?.dropFor?.(c);
     if (this.quiescent(c)) { this.park(c); return 'parked'; }
     c.headless = true;
     // Left while it already waits: the answer it needs is said now.

@@ -354,3 +354,99 @@ test('a pager open when the settings y/n is asked is still open under it', async
   await settleUntil(() => frameOf(ui).includes('Configured.'));
   ui.app.unmount();
 });
+
+// A guest with a screen and tools of its own: `tell` posts into the chat both ways a
+// plugin can (its call's `postToChat`, its own `chatNote`), `arm` leaves two posts
+// waiting for the test to fire them after the call has answered, `show` opens its screen
+// through `host.open` and answers what it was told.
+type SrvState = { host: any; opened: number; fire: Record<string, () => void> };
+const srv = (state: SrvState) => (make: import('../loader/plugin.ts').Make) => [make('srv', {
+  description: 'a server',
+  setup: (api: any) => { state.host = api.host; },
+  screens: { main: { entry: true, title: 'main', open: () => { state.opened++; } } },
+  aiTools: [
+    { type: 'function', function: { name: 'tell', description: 'Posts into the chat.', parameters: { type: 'object', properties: {} } }, run: async (_args: unknown, ctx: { postToChat: (text: string) => void }) => { ctx.postToChat('from A'); state.host.services.chatNote('note A'); return 'told'; } },
+    {
+      type: 'function', function: { name: 'arm', description: 'Posts later.', parameters: { type: 'object', properties: {} } },
+      run: async (_args: unknown, ctx: { postToChat: (text: string) => void }) => {
+        for (const when of ['early', 'late']) void new Promise<void>((r) => { state.fire[when] = r; }).then(() => ctx.postToChat(`${when} from A`));
+        return 'armed';
+      },
+    },
+    { type: 'function', function: { name: 'show', description: 'Opens the screen.', parameters: { type: 'object', properties: {} } }, run: async () => (await state.host.open('main')).text },
+  ],
+} as never)];
+// A's turn held before `calls`, then held again before its answer; B is asked after `/new`.
+async function leftBeforeCalls(calls: { tool: string; args: unknown }[]) {
+  const dir = dirOf();
+  const state: SrvState = { host: null, opened: 0, fire: {} };
+  const model = new ScriptedModel();
+  const aSub = model.when((req) => firstUser(req).includes('session A question'));
+  aSub.script([{ hold: true }, ...calls], [{ hold: true }, { text: 'A final answer.' }]);
+  model.script([{ text: 'B answer.' }]);
+  const ui = await bootApp(model, 100, 28, srv(state) as never, { sessions: { dir } }, { toastMs: 10_000 });
+  await ui.press('F');
+  await ask(ui, 'session A question');
+  await settleUntil(() => aSub.held && !!saved(dir, 'session A question'));
+  const idA = saved(dir, 'session A question')!.id;
+  await ask(ui, '/new');
+  await settle(4);
+  await ask(ui, 'session B question');
+  await settleUntil(() => frameOf(ui).includes('B answer.'));
+  // A's round goes on, left: its calls run, and its next request is held.
+  aSub.release();
+  await settleUntil(() => aSub.held && aSub.requests.length === 2);
+  await settle(10);
+  return { dir, state, model, aSub, ui, idA };
+}
+
+test('a plugin tool a left turn calls posts into that session', async () => {
+  const { dir, model, aSub, ui, idA } = await leftBeforeCalls([{ tool: 'tell', args: {} }]);
+  expect(frameOf(ui)).toContain('B answer.');
+  expect(frameOf(ui)).not.toContain('from A');
+  expect(frameOf(ui)).not.toContain('note A');
+  aSub.release();
+  await settleUntil(() => !fs.existsSync(lockOf(dir, idA)));
+  await settle(10);
+  const a = saved(dir, 'session A question')!;
+  expect(a.messages.filter((m) => m.role === 'bg').map((m) => m.content)).toEqual(['from A']);
+  expect(a.messages.map((m) => m.content)).toContain('[srv] note A');
+  expect(frameOf(ui)).not.toContain('from A');
+  expect(frameOf(ui)).not.toContain('note A');
+  // B was asked once: nothing landed in it to start a turn of its own.
+  expect(model.requests.filter((r) => firstUser(r).includes('session B question'))).toHaveLength(1);
+  await settleUntil(() => !!saved(dir, 'session B question'));
+  expect(JSON.stringify(saved(dir, 'session B question')!.messages)).not.toMatch(/from A|note A/);
+  ui.app.unmount();
+});
+
+test('a left turn opens no screen: ui_open and a plugin\'s host.open are refused, each in its own words', async () => {
+  const { dir, state, aSub, ui, idA } = await leftBeforeCalls([{ tool: 'ui_open', args: { screen: 'srv' } }, { tool: 'show', args: {} }]);
+  const results = (aSub.requests[1]!.messages as { role: string; content?: unknown }[]).filter((m) => m.role === 'tool').map((m) => String(m.content));
+  expect(results).toHaveLength(2);
+  expect(results[0]).toContain('ui_open: this session is not on screen — the person is in another one; ask when they come back.');
+  expect(results[1]).toContain('Not opened: this session is not on screen — the person is in another one.');
+  expect(state.opened).toBe(0);
+  aSub.release();
+  await settleUntil(() => !fs.existsSync(lockOf(dir, idA)));
+  expect(state.opened).toBe(0);
+  ui.app.unmount();
+});
+
+test('what a left turn\'s tool left waiting posts into that session while it is open, and into the one on screen once it is put away', async () => {
+  const { dir, state, model, aSub, ui, idA } = await leftBeforeCalls([{ tool: 'arm', args: {} }]);
+  state.fire.early!();
+  await settle(10);
+  expect(frameOf(ui)).not.toContain('early from A');
+  aSub.release();
+  await settleUntil(() => !fs.existsSync(lockOf(dir, idA)));
+  expect(saved(dir, 'session A question')!.messages.filter((m) => m.role === 'bg').map((m) => m.content)).toEqual(['early from A']);
+  expect(frameOf(ui)).not.toContain('early from A');
+  // A is put away: what its tool still posts has no session of its own to go to.
+  model.script([{ text: 'Read it.' }]);
+  state.fire.late!();
+  await settleUntil(() => frameOf(ui).includes('Read it.'));
+  expect(frameOf(ui)).toContain('late from A');
+  expect(JSON.stringify(saved(dir, 'session A question')!.messages)).not.toContain('late from A');
+  ui.app.unmount();
+});

@@ -435,7 +435,9 @@ entry: ['notes'],                     // the key that leads in, on the start scr
   connected in the background — drawn with your plugin's name in front (`[mcp] tracker
   connected — 12 tools`; write the text without it). It is held while a turn runs and
   said under its answer, since a note in the middle would split the turn; so is
-  `ctx.say` from a command. A one-shot prompt has no chat, so say it in the log as
+  `ctx.say` from a command. Said from a tool the model called, it goes to the session
+  whose turn called the tool, on screen or not; from anywhere else, to the session on
+  screen. A one-shot prompt has no chat, so say it in the log as
   well.
 - `host.services.setConfig(key, value, { session })` and `unsetConfig(key, { session })`
   change a setting the way `config set` / `config unset` do — checked against the
@@ -611,7 +613,10 @@ make('tutor', {
   from background work.` The mark follows what that run starts — its awaits, its
   timers, a process's output — but not a callback you registered before it and that
   fires later; a plugin that opens its own screen from such a callback opens it as if
-  the person were there. Only a loaded plugin's screens open, and only while the person trusts it and has not disabled it; the host's
+  the person were there. Nor does anything open from the turn of a session the
+  person left while it works (`/new`, `/resume`): `Not opened: this session is not on
+  screen — the person is in another one.`, and a screen that session had waiting is
+  dropped when it is left. Only a loaded plugin's screens open, and only while the person trusts it and has not disabled it; the host's
   own panels — `:plugins`, `/mcp`, the session picker, the settings, the help, the log —
   never do. A screen that opens while the chat covers the plugin's side (a window, the
   whole terminal) is said to be behind the chat.

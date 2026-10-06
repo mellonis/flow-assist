@@ -59,7 +59,7 @@ import type { PluginApi } from '../runtime/plugin-api.js';
 import { isPanelSpec, panelAnswer, panelKey as commandPanelKey, panelKeys, panelRows, panelStart, panelTop, type PanelSpec, type PanelState } from '../assistant/command-panel.js';
 import type { Command as PluginCommand } from '../loader/plugin.js';
 import type { ChatMsg, ConversationEvent, SendOptions, ViewPort } from '../assistant/conversation-types.js';
-import { Conversation } from '../assistant/conversation.js';
+import { Conversation, workHome } from '../assistant/conversation.js';
 import { ConversationRegistry } from '../assistant/registry.js';
 import { personSpoke, projectHere } from '../assistant/conversation-session.js';
 import { configLineOf, shellCommandOf } from '../assistant/confirm-policy.js';
@@ -1677,17 +1677,21 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             : [];
           const pagerShown = !!pager && pagerRows.length > 0;
           pagerShownRef.current = pagerShown;
-          (host.store as Record<string, any>).chat = { open, unread, mode, focus, openChat, closeChat, send, messages, streaming, toolLabel, cursor, escArmed, pendingConfirm: pendingAsk, ctrlKey, panelKey, pointer, note: (text: string) => convRef.current!.pluginNote(text), statusRow: statusRow ? liveChatStatus(() => statusRef.current as never, collapsedBusy) : null, footerStatus, layout, needRows,
+          // What a plugin says from inside a turn — a tool of its own, a task's — belongs to
+          // the session whose work it is, on screen or left (`workHome`); said from nowhere
+          // (its own poller, a key), or for a session already put away, to the one on screen.
+          const postHome = (): Conversation => { const home = workHome(); return home && !home.closed ? home : convRef.current!; };
+          (host.store as Record<string, any>).chat = { open, unread, mode, focus, openChat, closeChat, send, messages, streaming, toolLabel, cursor, escArmed, pendingConfirm: pendingAsk, ctrlKey, panelKey, pointer, note: (text: string) => postHome().pluginNote(text), statusRow: statusRow ? liveChatStatus(() => statusRef.current as never, collapsedBusy) : null, footerStatus, layout, needRows,
             // What holds back a screen a plugin or the model opens (src/runtime/screens.ts),
             // read from the refs at the moment it is asked.
             // The draft counts while the chat has the keys: folded away, or with the keys on
             // the plugin's side, nobody is typing into it.
             busy: () => convRef.current!.busy, typing: () => focusedRef.current && inputRef.current.trim() !== '', asking: () => !!convRef.current!.confirm || !!convRef.current!.question };
           // A host-reachable channel to put a message into the chat from OUTSIDE (a
-          // `background` task's result, `Conversation.deliver`). Registered per render
-          // (idempotent), so a detached timer holding an older copy still reaches the
-          // conversation this chat draws.
-          (host.services as Record<string, any>).postToChat = (text: string) => convRef.current!.deliver(text);
+          // plugin's, `Conversation.deliver`), into the session `postHome` names.
+          // Registered per render (idempotent), so a detached timer holding an older copy
+          // still reaches the conversation this chat draws.
+          (host.services as Record<string, any>).postToChat = (text: string) => postHome().deliver(text);
           // While the chat is open it owns the KEYBOARD: priority 100 (like log/tags).
           // The host dims the overlay-detail via ui.modalActive, so its consumer (also
           // 100) does not contend for 'r'/'c' etc.
