@@ -39,7 +39,7 @@ Ctrl+R renames, Ctrl+P moves it into the current project (its file and journal w
 Ctrl+X deletes after a y/n.
 A session open in another process can be neither opened, renamed, moved nor deleted
 from here, and your own open session refuses a move too — switch away from it first. A
-`here` one can be opened and renamed, but not moved or deleted until its tasks end.
+`here` one can be opened and renamed, but not moved or deleted until it is put away.
 
 ### Naming, `/new`, `/clear` and `/resume`
 

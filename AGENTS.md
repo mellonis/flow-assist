@@ -1918,8 +1918,9 @@ hold this set together:
   to it (Esc out of the rename, n or Esc on the confirm — the chat's `setPicker`).
   ⏎ on it takes that conversation back as it is (`openSession` → `reclaimLive`, which
   drops the list the chat last drew of it, so a save before the next render writes
-  what landed while it was away); delete and move are refused ("still runs its
-  background tasks here"); a rename goes through the conversation that holds it, as this
+  what landed while it was away); delete and move are refused ("is still open
+  here" — a `here` row may run its own turn or wait on an answer, not only keep
+  background tasks); a rename goes through the conversation that holds it, as this
   chat's own does, so its later saves keep the new title. `done` rests on two times the
   session file keeps: `answeredAt`, set when a turn ends with a final answer (not
   stopped, failed, out of rounds or empty) and when a background result lands as a row

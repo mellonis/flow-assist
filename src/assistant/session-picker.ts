@@ -143,7 +143,7 @@ export function pickerKey(state: PickerState, key: PickerKey, width = 60): Picke
     if (!row) return { state };
     if (row.lock === 'held') return { state: { ...state, notice: held(row, 'deleted') } };
     if (row.lock === 'ours') return { state: { ...state, notice: `"${label(row)}" is the session in this chat — open another one or start a new one (${NEW_CAP}) first` } };
-    if (row.lock === 'here') return { state: { ...state, notice: `"${label(row)}" still runs its background tasks here — it cannot be deleted until they end` } };
+    if (row.lock === 'here') return { state: { ...state, notice: `"${label(row)}" is still open here — it cannot be deleted until it is put away` } };
     return { state: { ...state, mode: 'delete', notice: '' } };
   }
   // Move it to the CURRENT project (`state.project`, fixed for the picker's life). The
@@ -155,7 +155,7 @@ export function pickerKey(state: PickerState, key: PickerKey, width = 60): Picke
     if (!row) return { state };
     if (row.lock === 'held') return { state: { ...state, notice: held(row, 'moved') } };
     if (row.lock === 'ours') return { state: { ...state, notice: `"${label(row)}" is the session in this chat — switch away first` } };
-    if (row.lock === 'here') return { state: { ...state, notice: `"${label(row)}" still runs its background tasks here — it cannot be moved until they end` } };
+    if (row.lock === 'here') return { state: { ...state, notice: `"${label(row)}" is still open here — it cannot be moved until it is put away` } };
     if ((row.project ?? null) === state.project) return { state: { ...state, notice: `"${label(row)}" is already in this project` } };
     return { state, action: { kind: 'move', id: row.id } };
   }
