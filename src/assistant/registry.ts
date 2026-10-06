@@ -42,7 +42,7 @@ export class ConversationRegistry {
   // "Ownership lock").
   readonly lockToken = makeLockToken();
   readonly canAsk: boolean;
-  private readonly said = { memoryMissing: false };
+  private readonly said = { memoryMissing: false, configAsking: new Map<string, Conversation>() };
   private readonly convs = new Set<Conversation>();
   private onScreen: Conversation | null = null;
   // Tasks run at most `max(1, sessions.maxRunning - 1)` at a time (default 4, so three): a

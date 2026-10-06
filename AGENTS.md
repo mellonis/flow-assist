@@ -4155,7 +4155,18 @@ commands; docs and hints never present either mechanism as a boundary.
   after a `!command` and after a turn (`askConfigChanges`,
   `src/assistant/conversation-turn.ts`) — one that `/clear` stopped included: a
   conversation the chat has left asks in the one it draws now (`ConversationDeps.current`, the registry's `shown()`),
-  so the y/n comes up in the cleared chat as the stopped work unwinds. Yes (`applyConfigChange`) accepts it and lays
+  so the y/n comes up in the cleared chat as the stopped work unwinds. One change is
+  asked in one conversation at a time: the guard is the process's, the y/n a
+  conversation's, so the first conversation to see a change asks it
+  (`said.configAsking`, file path to asker, shared by a host's conversations) and every
+  other open one leaves it to that one — a left turn's y/n waits headless (a toast and
+  an alert say so) and the turn waits on it, while the chat on screen asks nothing
+  about that file; the asker is dropped at its answer and in the `finally`, and a
+  closed asker holds nothing. While it waits, the change is off for every session, as
+  any unanswered change is. The answer re-checks: only a change still pending with the
+  same content hash is applied or declined; otherwise the note `<file> was already
+  answered, or changed again since — nothing done here.` is pushed and the loop goes
+  on, so opposite answers never leave the running config apart from the file. Yes (`applyConfigChange`) accepts it and lays
   each key on the running config, a key marked `appliesOnRestart` left for the
   restart. No (`declineConfigChange`) writes the accepted content back into the file
   and keeps the rejected text beside it, `<file>.rejected-<time>` (0600), so a restart

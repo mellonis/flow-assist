@@ -779,10 +779,14 @@ export function askConfigChanges(c: Conversation): Promise<void> {
   if (c.configAsk) return c.configAsk;
   const svc = (c.deps.services() as { configChanges?: { check(): ConfigChange[]; apply(ch: ConfigChange): { applied: string[]; restart: string[] }; decline(ch: ConfigChange): string | null } }).configChanges;
   if (!svc || c.confirm || c.question) return Promise.resolve();
-  const changes = svc.check();
+  // The guard is the process's, the y/n a conversation's: a change another open
+  // conversation is asking about is left to it (AGENTS.md (Secrets)).
+  const asking = c.configAskers;
+  const changes = svc.check().filter((ch) => { const o = asking.get(ch.path); return !o || o === c || o.closed; });
   if (!changes.length) return Promise.resolve();
   const run = (async () => {
     for (const change of changes) {
+      asking.set(change.path, c);
       const answer = await new Promise<boolean | null>((resolve) => {
         c.confirm = { name: 'config', args: '', resolve: (ok, by = 'person') => resolve(by === 'person' ? ok : null) };
         const request = { name: 'config', args: '', title: `⚠ ${change.file} changed outside flow-assist — apply? (y/n)`, line: change.lines.join('\n'), whole: true, hint: `y applies it now · n puts the accepted settings back and keeps the change beside the file` };
@@ -791,7 +795,15 @@ export function askConfigChanges(c: Conversation): Promise<void> {
         c.emit({ type: 'confirm', request, host: true });
         c.deps.notify();
       });
+      asking.delete(change.path);
       if (answer === null) break;
+      // A y/n answered late (a left conversation's waits for the person) may find the
+      // change answered elsewhere, or the file changed again: only a change still pending
+      // as it was asked is applied or declined.
+      if (!svc.check().some((x) => x.path === change.path && x.hash === change.hash)) {
+        c.pushNote(`${change.file} was already answered, or changed again since — nothing done here.`);
+        continue;
+      }
       if (answer) {
         const r = svc.apply(change);
         c.pushNote(`Applied ${change.file}: ${[...r.applied, ...r.restart.map((k) => `${k} (${RESTART_NOTE})`)].join(', ')}.`);
@@ -800,7 +812,7 @@ export function askConfigChanges(c: Conversation): Promise<void> {
         c.pushNote(`Put the accepted ${change.file} back${kept ? ` — the change is kept in ${path.basename(kept)}` : ''}.`);
       }
     }
-  })().finally(() => { c.configAsk = null; });
+  })().finally(() => { c.configAsk = null; for (const [p, o] of asking) if (o === c) asking.delete(p); });
   c.configAsk = run;
   return run;
 }

@@ -190,9 +190,11 @@ export class Conversation {
   configAsk: Promise<void> | null = null;
   // The missing memory record was said (once while it is missing) — once for every
   // conversation of the host that made it, through `deps.said`.
-  private ownSaid = { memoryMissing: false };
+  private ownSaid = { memoryMissing: false, configAsking: new Map<string, Conversation>() };
   get memoryMissingSaid(): boolean { return (this.deps.said ?? this.ownSaid).memoryMissing; }
   set memoryMissingSaid(v: boolean) { (this.deps.said ?? this.ownSaid).memoryMissing = v; }
+  // Which conversation asks about which settings file: shared by a host's conversations.
+  get configAskers(): Map<string, Conversation> { return (this.deps.said ?? this.ownSaid).configAsking; }
 
   // ── the session
   sessionId = '';

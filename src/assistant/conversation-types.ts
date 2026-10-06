@@ -163,8 +163,10 @@ export interface ConversationDeps {
   // where it is false.
   canAsk: boolean;
   // What is said once for every conversation of a host, not once per conversation: the
-  // missing memory record. Absent: the conversation keeps its own.
-  said?: { memoryMissing: boolean };
+  // missing memory record, and which conversation is asking about a settings file (a file
+  // is asked in one at a time, AGENTS.md (Secrets)). Absent: the conversation keeps
+  // its own.
+  said?: { memoryMissing: boolean; configAsking: Map<string, Conversation> };
   // The App's screens service (src/runtime/screens.ts): the system prompt's `## Screens`
   // block, and the end of work that opens what a turn held back. Undefined with no App.
   screens: () => { promptBlock(): string; afterTurn(ok: boolean): void } | undefined;
