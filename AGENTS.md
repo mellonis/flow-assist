@@ -2619,7 +2619,11 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   back into the field): the queued messages come back into the field in order,
   joined by blank lines, AHEAD of whatever was typed meanwhile — the order they would
   have gone out in; a `!`/`!!`-mode draft keeps its bang(s) and the level drops to 0. A failed
-  request would most likely fail again. **↑ on an EMPTY field takes the last queued
+  request would most likely fail again. A conversation the chat has LEFT (`headless`) has
+  no view to put them back: `afterTurn` moves them, on a `stopped` or `failed` `lastEnd`,
+  into the kept draft ahead of what was typed at the leave, so they are saved with the
+  session and the park is not held by a queue (a `!command` that could not run is neither,
+  and a conversation merely without a port is not left: its queue stays for its owner). **↑ on an EMPTY field takes the last queued
   message back** before it steps into the history. **⇧⏎** is a newline, and so is
   **Alt+⏎** (drawn `⌥⏎` on macOS); a blank line is kept. The hints name both, Shift
   first — `⇧⏎/⌥⏎` (`NEWLINE_KEY` in `src/views/modals.ts`, the one spelling every hint

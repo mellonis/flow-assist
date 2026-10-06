@@ -781,6 +781,17 @@ export class Conversation {
     // A screen that waited for this turn opens now — or, the turn stopped or
     // failed, never (src/runtime/screens.ts).
     this.deps.screens()?.afterTurn(ok);
+    // A conversation the chat left stops or fails with no view to put its queue back into
+    // the field (the chat's `restoreQueue` is unbound with the view): the texts go ahead of
+    // the kept draft, the order the view uses, so they are saved with the session and come
+    // back on attach. A queue left here would hold the session, and its lock, for as long
+    // as the person stays away. The run's end is `lastEnd`, set by every caller before
+    // `turn-end` and this call (a `!command` that could not run is not `ok`, yet is no
+    // stop and no failure).
+    if (this.headless && this.queue.length && (this.lastEnd?.outcome === 'stopped' || this.lastEnd?.outcome === 'failed')) {
+      const texts = this.restoreQueue()!;
+      this.keptDraft = [...texts, this.keptDraft].filter((t) => t.trim()).join('\n\n');
+    }
     if (ok && this.queue.length) {
       setTimeout(() => {
         const next = this.queue.shift();

@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Conversation } from '../assistant/conversation.ts';
 import { ScriptedModel, firstUser } from './helpers/scripted';
-import { closeRigs, conversationRig, type Rig } from './helpers/conversation';
+import { closeRigs, conversationRig, FakePort, type Rig } from './helpers/conversation';
 import { homeIn } from './helpers/session-files';
 
 afterEach(() => { closeRigs(); });
@@ -177,4 +177,46 @@ test('a park that throws in the deferred check is logged and retried by the next
   await rig.until(() => a.closed);
   expect(a.closeReason).toBe('park');
   expect(fs.existsSync(lockOf(rig, a.sessionId))).toBe(false);
+});
+
+class DraftPort extends FakePort {
+  constructor(private text: string) { super(true); }
+  draft(): string { return this.text; }
+}
+
+test('a left turn that fails with a queued message puts the queue into the saved draft and is parked', async () => {
+  const realFetch = globalThis.fetch;
+  try {
+    const { sub, rig } = await heldTurnInA();
+    rig.conv.enqueue('queued while it ran');
+    rig.conv.toggleHoldLast();
+    const { left: a } = rig.switchTo();
+    // The next request fails: the provider is gone.
+    globalThis.fetch = (async () => { throw new Error('network down'); }) as unknown as typeof fetch;
+    sub.release();
+    await rig.until(() => a.closed, 10_000);
+    expect(a.lastEnd).toMatchObject({ kind: 'turn', outcome: 'failed' });
+    expect(fs.existsSync(lockOf(rig, a.sessionId))).toBe(false);
+    expect(rig.sessionFile(a.sessionId)?.draft).toBe('queued while it ran');
+  } finally { globalThis.fetch = realFetch; }
+});
+
+test('a left turn that fails puts the queue ahead of the draft kept at the leave', async () => {
+  const realFetch = globalThis.fetch;
+  try {
+    const { sub, rig } = await heldTurnInA();
+    const a = rig.conv;
+    a.enqueue('queued while it ran');
+    a.toggleHoldLast();
+    // The field held text when the person left: the port gives it up on detach.
+    a.detach(rig.port);
+    const typed = new DraftPort('typed at the leave');
+    a.attach(typed);
+    a.detach(typed);
+    rig.switchTo();
+    globalThis.fetch = (async () => { throw new Error('network down'); }) as unknown as typeof fetch;
+    sub.release();
+    await rig.until(() => a.closed, 10_000);
+    expect(rig.sessionFile(a.sessionId)?.draft).toBe('queued while it ran\n\ntyped at the leave');
+  } finally { globalThis.fetch = realFetch; }
 });
