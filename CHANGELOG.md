@@ -41,6 +41,26 @@ What each version of flow-assist brought, newest first. The version is the one i
 - **An open session picker follows a session held here as it is put away.** When a
   session you left while its tasks ran ends and is put away, its `here · working` row
   becomes the file's status without a key press.
+- **A session left while it works continues in this process, locked, and waits for your
+  answer if it reaches one.** `/resume`, the picker's ⏎ and `/new` no longer refuse
+  while an answer runs — the session you leave stays open and locked in this process
+  (`in use elsewhere` in another flow-assist process), shown `here · working` in the
+  picker, and you take it back as you left it on ⏎ or `/resume <n>`. A left turn that
+  fails or stops puts the queued messages into that session's saved draft. A left
+  session that reaches a y/n or a question waits (`here · waiting`) and says so once
+  with a toast and a system alert; keys typed elsewhere answer nothing there, and you
+  open it and answer to let it go. A settings-file change is asked in one conversation
+  at a time, and re-checked at the answer. `ui_open` and a plugin's `host.open` are
+  refused from a turn of a session you left, and a screen the session deferred is
+  dropped; a plugin's `postToChat` and `chatNote` land in that session, not the one on
+  screen, and a task's own follow-up turn may open screens again. After `/new` during a
+  turn, a message the left session delivers mid-turn stays out of the new session's ↑
+  history. A `/memory` listing is forgotten on a switch; `/memory accept <n>` asks for a
+  fresh one. A `run_command` stopped by `^c` or at exit names the key (`stopped (^c)`,
+  `stopped (exit)`). **A limit:** Esc cannot stop a turn of a session you left; come back
+  to it to stop it. Two things do not change: a plugin's news held for a turn's end still
+  follows you to a new session on `/new`, and `!` while the assistant works is still
+  refused.
 - **A duration is shown in whole seconds.** The turn's timer, a command's line, the
   `Ran N commands` head, a recall stub and `/export` read `<1s`, `12s`, `3m 5s` and,
   past an hour, `1h 2m`, where they showed tenths (`12.4 s`).
