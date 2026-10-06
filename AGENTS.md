@@ -2697,15 +2697,34 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   `src/main.ts` listens for them (`exitOnSignals`, `sessions.ts`) before flowtty does,
   so its listener runs first, and flowtty, seeing another listener, unmounts without
   re-raising the signal (`src/__tests__/signal-exit.e2e.test.ts` sends a real SIGTERM).
-  A session the chat leaves goes through it: `retire(c)` parks it at once when no task
-  of its own is counted (`children`), else marks it `headless` and parks it when its
-  `children` event says 0 — after the last result landed, since a task is untracked
-  only after its delivery; `park(c)` lands what waits in its inbox as rows, saves it,
-  and only then releases its lock and closes it (`'park'`); `reclaim(c)` takes a kept
-  one back (the watch dropped, `headless` cleared). `bySession(id)` is the open
-  conversation holding a session here, if any; `statusOf(id)` is its status for the
-  picker — `working` while its tasks run, whatever its own status but a waiting y/n or
-  question (not `Conversation.status`, which others read as "a turn runs") — and null
+  A session the chat leaves goes through it, and is put away only once it is
+  **quiescent** — `quiescent(c)`, six clauses: no turn, `!command`, `!!` ask's hop or
+  slash command runs (`busy`); no task of its own is counted (`children` — a task is
+  untracked only after its delivery, so its result has landed); no y/n waits
+  (`confirm`); no question waits (`question`); nothing is queued (`queue` — the drain
+  shifts the queue and the turn it starts sets `busy` in the same synchronous step, so
+  the two clauses cover that hop between them); no settings-file ask is in flight
+  (`configAsk`, which clears a microtask after its y/n's answer, while its loop may
+  already have parked the next change). `retire(c)` parks a quiescent one at once
+  (`'parked'`); otherwise it marks it `headless` and watches it (`'kept'`): a
+  `children` event, a `turn-end`, a y/n settled (`confirm` with no request) or a
+  question settled (`question` with no state) each ask for one check, deferred a
+  macrotask (`setTimeout(0)`, one pending at a time), which reads the predicate again
+  and parks when it holds. Deferred, never run inside the event: a park closes the
+  object and clears the handlers the `emit` is still walking; `turn-end` is emitted
+  before the turn's end starts what follows it (the queue's next message); and the
+  settings ask settles a microtask after its y/n's event. `park(c)` lands what waits in
+  its inbox as rows, saves it, and only then releases its lock and closes it
+  (`'park'`); it **throws** on a conversation that is not quiescent (`registry.park: the
+  conversation still has work of its own`), saving and releasing nothing — work going
+  on in a closed conversation would write into an object that saves nothing, so a
+  trigger the watch missed shows as a session never put away, loaded and locked, never
+  as lost rows. `reclaim(c)` takes a kept one back (the watch dropped, `headless`
+  cleared; a check already deferred finds no watch and does nothing). `bySession(id)`
+  is the open conversation holding a session here, if any; `statusOf(id)` is its status
+  for the picker — `waiting` while a y/n or a question waits in it, else `working`
+  while a turn of its own or one of its tasks runs, else its own status (not
+  `Conversation.status`, which others read as "a turn runs") — and null
   when it is not live. Whatever changes what it holds (a conversation left headless, one
   put away) redraws the host and then runs each `onChange(fn)` listener (the call
   returns the unsubscriber), each in its own try, so one that throws skips neither the

@@ -121,15 +121,16 @@ export class ConversationRegistry {
 
   live(): readonly Conversation[] { return [...this.convs]; }
 
-  // ── a session the chat leaves while its tasks run
+  // ── a session the chat leaves while it has work of its own
   // The open conversation holding session `id`, if one is live here.
   bySession(id: string): Conversation | undefined {
     for (const c of this.convs) if (!c.closed && c.sessionId === id) return c;
     return undefined;
   }
-  // How a live session reads to the picker: `working` while its tasks run, whatever its
-  // last answer or result (an unseen one reads `done` from its file once it is put
-  // away), unless a y/n or a question waits; its own status otherwise. Kept here, not in
+  // How a live session reads to the picker. One held here with nobody drawing it may be
+  // running its own turn or waiting for an answer, and its own status says so; with
+  // neither it reads `working` while its tasks run, whatever its last answer or result
+  // (an unseen one reads `done` from its file once it is put away). Kept here, not in
   // `Conversation.status`, which others read as "a turn runs". null when no
   // conversation here holds it.
   statusOf(id: string): ConversationStatus | null {
@@ -138,25 +139,56 @@ export class ConversationRegistry {
     const own = c.status;
     return c.children.size && own !== 'waiting' ? 'working' : own;
   }
-  // What parks each conversation kept headless when its last task ends.
+  // Nothing of its own is left (AGENTS.md (a host makes its conversations through one
+  // registry)), clause by clause:
+  // - `busy`: a turn, a `!command`, a `!!` ask's hop or a slash command runs;
+  // - `children`: a task it started has not delivered its result yet;
+  // - `confirm`, `question`: a y/n or a question waits for the person;
+  // - `queue`: a message waits for the turn's end. The drain shifts the queue and the turn
+  //   it starts sets `busy` in the same synchronous step, so `queue.length || busy` covers
+  //   that hop;
+  // - `configAsk`: the settings-file ask is in flight. It clears a microtask after its
+  //   y/n's answer, and its loop may park the next change before that.
+  quiescent(c: Conversation): boolean {
+    return !c.busy && c.children.size === 0 && !c.confirm && !c.question && c.queue.length === 0 && !c.configAsk;
+  }
+  // What parks each conversation kept headless once it is quiescent: one "off" per
+  // conversation, dropping every listener of its watch.
   private readonly watches = new Map<Conversation, () => void>();
-  // The chat leaves `c` (a switch, `/new`). With no task of its own left it is parked
-  // now; otherwise it stays loaded, locked and headless, and is parked once its last
-  // task's result has landed in it.
+  // The chat leaves `c` (a switch, `/new`). Quiescent, it is parked now; otherwise it
+  // stays loaded, locked and headless — its turn going on, its y/n waiting, its tasks
+  // running — and is parked once it is quiescent. Whatever may have ended its work asks
+  // for one check, and every check is deferred a macrotask and reads the predicate
+  // again: never from inside an `emit` (a park closes the object and clears the handlers
+  // the emit is still walking, and `turn-end` comes before what the turn's end starts),
+  // and only after what settles a microtask later (the settings ask).
   retire(c: Conversation): 'parked' | 'kept' {
-    if (!c.children.size) { this.park(c); return 'parked'; }
+    if (this.quiescent(c)) { this.park(c); return 'parked'; }
     c.headless = true;
-    const off = c.on('children', (ev) => {
-      if (ev.count) return;
-      this.watches.delete(c);
-      off();
-      this.park(c);
-    });
-    this.watches.set(c, off);
+    let pending = false;
+    const check = (): void => {
+      if (pending) return;
+      pending = true;
+      setTimeout(() => {
+        pending = false;
+        if (c.closed || !this.watches.has(c) || !this.quiescent(c)) return;
+        this.watches.get(c)?.();
+        this.watches.delete(c);
+        this.park(c);
+      }, 0);
+    };
+    const offs = [
+      c.on('children', check),
+      c.on('turn-end', check),
+      c.on('confirm', (ev) => { if (!ev.request) check(); }),
+      c.on('question', (ev) => { if (!ev.state) check(); }),
+    ];
+    this.watches.set(c, () => { for (const off of offs) off(); });
     this.notifyChange();
     return 'kept';
   }
-  // The chat takes a headless conversation back: it is no longer parked when its tasks end.
+  // The chat takes a headless conversation back: its watch is dropped, so it is no
+  // longer parked when it comes to rest (a check already deferred finds no watch).
   reclaim(c: Conversation): void {
     this.watches.get(c)?.();
     this.watches.delete(c);
@@ -164,11 +196,15 @@ export class ConversationRegistry {
   }
   // A conversation the chat has left, put away: what waits in its inbox lands as rows, it
   // is saved, and only then is its lock released and the object closed — a result that
-  // landed in it is in its file before another process may take the session.
+  // landed in it is in its file before another process may take the session. Only a
+  // quiescent one: work going on in a closed conversation would write into an object
+  // that saves nothing, so a park asked too early throws instead, and a trigger the
+  // watch missed shows as a session never put away.
   park(c: Conversation): void {
     if (c.closed) return;
-    // Lands what waits. Nothing holds the inbox here: the chat leaves a conversation only
-    // while nothing of its own runs, and one left runs no turn of its own.
+    if (!this.quiescent(c)) throw new Error('registry.park: the conversation still has work of its own');
+    // Lands what waits. Nothing holds the inbox here: the conversation is quiescent, so
+    // no turn of its own runs or is about to.
     c.takeInbox('rows');
     c.save({ silent: true });
     c.releaseLock();

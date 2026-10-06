@@ -169,6 +169,27 @@ export function conversationRig(model: ScriptedModel, opts: RigOptions = {}) {
     },
     // The conversation's timers go (the 250 ms save among them), as at exit.
     close(): void { conv.close('exit'); },
+    // The chat's switch, in the order its `leave` and `adopt` take: the port leaves the
+    // conversation on screen, the registry retires it (parked at once, or kept while it
+    // has work of its own), then `next` — one still open here is taken back, else a fresh
+    // one is made — is shown and gets the port; it becomes `rig.conv`.
+    switchTo(next?: Conversation): { left: Conversation; outcome: 'parked' | 'kept' } {
+      const left = conv;
+      left.detach(port);
+      const outcome = registry.retire(left);
+      let to: Conversation;
+      if (next && !next.closed) { registry.reclaim(next); to = next; }
+      else {
+        setStartDirForTests(root);
+        try { to = registry.fresh(init); made.push(to); } finally { setStartDirForTests(null); }
+      }
+      registry.show(to);
+      to.attach(port);
+      conv = to;
+      return { left, outcome };
+    },
+    // The y/n waiting in `c`, drawn by the chat or not; null with none.
+    pendingIn(c: Conversation): PendingConfirm | null { return c.confirmDrawn; },
   };
   // A background task's result, delivered as the chat delivers it: into the conversation
   // the rig holds when the task ends.

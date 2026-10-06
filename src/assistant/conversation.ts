@@ -69,9 +69,9 @@ export class Conversation {
   // timer of each one still armed.
   readonly children = new Set<Conversation>();
   readonly childTimers = new Map<Conversation, ReturnType<typeof setTimeout>>();
-  // Left by the chat while its children run (the registry's `retire`): kept loaded and
-  // locked, drawn by nobody, until the last one ends. A result lands in it as a row and
-  // starts no turn (`takeInbox`).
+  // Left by the chat while it has work of its own (the registry's `retire`): kept loaded
+  // and locked, drawn by nobody, until nothing of its own is left. A result lands in it
+  // as a row and starts no turn (`takeInbox`).
   headless = false;
   readonly deps: ConversationDeps;
   // Who answers a write's y/n in this conversation (src/assistant/confirm-policy.ts):

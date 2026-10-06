@@ -11,6 +11,7 @@ test('park lands the inbox, saves, releases the lock, closes, then tells the cha
   const registry = new ConversationRegistry({ canAsk: false, notify: () => calls.push('notify') } as unknown as RegistryInit);
   const c = {
     closed: false,
+    busy: false, children: new Set(), confirm: null, question: null, queue: [], configAsk: null,
     takeInbox: (mode?: string) => calls.push(`takeInbox:${mode}`),
     save: (opts?: { silent?: boolean }) => calls.push(`save:${opts?.silent ? 'silent' : 'loud'}`),
     releaseLock: () => calls.push('releaseLock'),
@@ -18,4 +19,20 @@ test('park lands the inbox, saves, releases the lock, closes, then tells the cha
   } as unknown as Conversation;
   registry.park(c);
   expect(calls).toEqual(['takeInbox:rows', 'save:silent', 'releaseLock', 'close:park', 'notify']);
+});
+
+test('park refuses a conversation that still has work', () => {
+  const calls: string[] = [];
+  const registry = new ConversationRegistry({ canAsk: false, notify: () => calls.push('notify') } as unknown as RegistryInit);
+  const c = {
+    closed: false,
+    busy: true, children: new Set(), confirm: null, question: null, queue: [], configAsk: null,
+    takeInbox: (mode?: string) => calls.push(`takeInbox:${mode}`),
+    save: (opts?: { silent?: boolean }) => calls.push(`save:${opts?.silent ? 'silent' : 'loud'}`),
+    releaseLock: () => calls.push('releaseLock'),
+    close: (reason: string) => calls.push(`close:${reason}`),
+  } as unknown as Conversation;
+  expect(() => registry.park(c)).toThrow('registry.park: the conversation still has work of its own');
+  // Nothing saved, nothing released, nobody told.
+  expect(calls).toEqual([]);
 });
