@@ -1872,7 +1872,9 @@ hold this set together:
   never returns: `pickerRows` sets it for a row that is not the session on screen and
   that `registry.statusOf` finds live here), with that status — `working` while its
   tasks run, even when a result that already landed is unseen (it reads `done` from
-  its file once put away), unless a y/n or a question waits — drawn `here · working`.
+  its file once put away), unless a y/n or a question waits — drawn `here · working`, or
+  `here · waiting` for the left session's own y/n or question (its turn paused on it,
+  not parked until the person comes back and answers; the registry says it once, below).
   The open picker follows the registry: on each change it hears (`registry.onChange`,
   subscribed once by the chat, which reads the picker, the sessions directory and the
   lock token through refs) it reads the list again, keeping the filter, and the cursor
@@ -2734,7 +2736,20 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   as lost rows. A deferred check whose park throws (a failed save or release) writes a
   line to the host's log (`pushLog`) and keeps the watch, so the next trigger retries.
   `retire` of a conversation already kept drops its earlier watch first, so one trigger
-  is one check. `reclaim(c)` takes a kept one back (the watch dropped, `headless`
+  is one check. **What the registry hears from every conversation it makes** (`track`):
+  `confirm` and `question`. A `session` that is `headless` — left, not merely without a
+  view: a bare conversation, a one-shot's or a rig's that was never shown, is not — and
+  moves to waiting (a y/n, a question with `parked`) gets a toast and an alert
+  (`services.showMessage`, `services.alert('flow-assist', …)`, each in its own try)
+  naming it: `⏸ «<title>» waits for your answer — a y/n` (`a settings y/n` for the
+  settings guard's, `a question` for `ask_user`; `an untitled session` with no title),
+  once until it leaves waiting (`waitingSaid`), then the picker re-reads. `retire` says
+  it for a conversation left while it already waits; leaving waiting re-reads the
+  picker only when something had been said, so an on-screen y/n's answer does not
+  touch an open picker. A conversation closed or taken back (`reclaim`) forgets it.
+  The settings guard's own y/n carries `host: true` on its `confirm` event: the view
+  closes no panel for it (a pager or the /context panel stays open under it), unlike a
+  tool's y/n. `reclaim(c)` takes a kept one back (the watch dropped, `headless`
   cleared; a check already deferred finds no watch and does nothing). `bySession(id)`
   is the open conversation holding a session here, if any; `statusOf(id)` is its status
   for the picker — `waiting` while a y/n or a question waits in it, else `working`

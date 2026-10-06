@@ -126,7 +126,7 @@ export type ConversationEvent =
   | { type: 'turn-start'; kind: BusyKind; label: string; hostAsk?: boolean; fromInbox?: boolean }
   | { type: 'turn-end'; end: TurnEnd }
   | { type: 'activity' }          // a new segment began: the chat's seconds start again from 0
-  | { type: 'confirm'; request: PendingConfirm | null }
+  | { type: 'confirm'; request: PendingConfirm | null; host?: true }   // `host`: the settings guard's own y/n, which closes no panel
   | { type: 'question'; state: AskState | null; parked?: boolean }
   | { type: 'notice'; text: string; level: 'error' }
   | { type: 'inbox'; items: string[]; shown: boolean }   // every item that landed together; `shown`: the chat is open

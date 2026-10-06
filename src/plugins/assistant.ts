@@ -852,7 +852,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               if (ev.end.outcome === 'stopped' || ev.end.outcome === 'failed') restoreQueue();
             },
             confirm: (ev) => {
-              if (!ev.request) return;
+              if (!ev.request || ev.host) return;
               if (contextOpenRef.current) setContextOpen(false);
               // So does a pager: the y/n is what the person must see and answer.
               if (pagerRef.current) setPager(null);

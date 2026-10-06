@@ -101,8 +101,32 @@ export class ConversationRegistry {
     c.on('closed', () => {
       this.convs.delete(c);
       if (this.onScreen === c) this.onScreen = null;
+      this.waitingSaid.delete(c);
     });
+    // What a session nobody draws needs an answer to, said once (`movedToWaiting`).
+    c.on('confirm', (ev) => { if (ev.request) this.movedToWaiting(c, ev.host ? 'a settings y/n' : 'a y/n'); else this.leftWaiting(c); });
+    c.on('question', (ev) => { if (ev.state && ev.parked) this.movedToWaiting(c, 'a question'); else if (!ev.state) this.leftWaiting(c); });
     return c;
+  }
+  // The sessions whose move to waiting is already said, until they leave waiting.
+  private readonly waitingSaid = new Set<Conversation>();
+  // A session the chat has left (`headless`) that now needs an answer: a toast and an
+  // alert name it, once until it leaves waiting, and the picker re-reads. A conversation
+  // with no view that was never shown is not "left" and says nothing.
+  private movedToWaiting(c: Conversation, what: string): void {
+    if (!c.headless || c.kind !== 'session' || this.waitingSaid.has(c)) return;
+    this.waitingSaid.add(c);
+    const svc = this.init.services() as { showMessage?: (t: string) => void; alert?: (title: string, body?: string) => void };
+    const who = c.title ? `«${c.title}»` : 'an untitled session';
+    const text = `${who} waits for your answer — ${what}`;
+    try { svc.showMessage?.(`⏸ ${text}`); } catch { /* a toast is never fatal */ }
+    try { svc.alert?.('flow-assist', text); } catch { /* an alert is never fatal */ }
+    this.notifyChange();
+  }
+  // Nothing waits any more: the next move to waiting is said again. The picker re-reads
+  // only when something was said, so an on-screen y/n's answer does not touch it.
+  private leftWaiting(c: Conversation): void {
+    if (this.waitingSaid.delete(c)) this.notifyChange();
   }
 
   // A conversation that replaces another in the chat, with what it carries over.
@@ -165,6 +189,8 @@ export class ConversationRegistry {
   retire(c: Conversation): 'parked' | 'kept' {
     if (this.quiescent(c)) { this.park(c); return 'parked'; }
     c.headless = true;
+    // Left while it already waits: the answer it needs is said now.
+    if (c.confirm || c.question) this.movedToWaiting(c, c.question ? 'a question' : c.confirm?.name === 'config' ? 'a settings y/n' : 'a y/n');
     this.watches.get(c)?.();
     this.watches.delete(c);
     let pending = false;
@@ -200,6 +226,7 @@ export class ConversationRegistry {
     this.watches.get(c)?.();
     this.watches.delete(c);
     c.headless = false;
+    this.waitingSaid.delete(c);
   }
   // A conversation the chat has left, put away: what waits in its inbox lands as rows, it
   // is saved, and only then is its lock released and the object closed — a result that

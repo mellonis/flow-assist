@@ -785,7 +785,10 @@ export function askConfigChanges(c: Conversation): Promise<void> {
     for (const change of changes) {
       const answer = await new Promise<boolean | null>((resolve) => {
         c.confirm = { name: 'config', args: '', resolve: (ok, by = 'person') => resolve(by === 'person' ? ok : null) };
-        c.drawConfirm({ name: 'config', args: '', title: `⚠ ${change.file} changed outside flow-assist — apply? (y/n)`, line: change.lines.join('\n'), whole: true, hint: `y applies it now · n puts the accepted settings back and keeps the change beside the file` });
+        const request = { name: 'config', args: '', title: `⚠ ${change.file} changed outside flow-assist — apply? (y/n)`, line: change.lines.join('\n'), whole: true, hint: `y applies it now · n puts the accepted settings back and keeps the change beside the file` };
+        c.drawConfirm(request);
+        // The settings guard's y/n, not a tool's: a view that closes its panels for a tool's y/n leaves them here.
+        c.emit({ type: 'confirm', request, host: true });
         c.deps.notify();
       });
       if (answer === null) break;

@@ -6,11 +6,21 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { readJournal, type JournalEvent } from '../assistant/journal.ts';
+import { acceptedConfigPath, guardConfigFiles, hostStateDir, loadConfig, resetSessionConfig, unguardConfigFiles } from '../config/load.ts';
 import { ScriptedModel, bootApp, firstUser, settle } from './helpers/scripted';
 import { homeIn, listTree, sessionIdOf } from './helpers/session-files';
 
 const realFetch = globalThis.fetch;
-afterEach(() => { globalThis.fetch = realFetch; });
+const localConfig = () => path.join(hostStateDir(), 'config.local.json');
+afterEach(() => {
+  globalThis.fetch = realFetch;
+  // The settings guard is the process's: whatever a test armed or wrote is put back.
+  unguardConfigFiles();
+  resetSessionConfig();
+  fs.rmSync(localConfig(), { force: true });
+  fs.rmSync(acceptedConfigPath(), { force: true });
+  for (const f of fs.readdirSync(hostStateDir())) if (f.includes('.rejected-')) fs.rmSync(path.join(hostStateDir(), f));
+});
 
 const settleUntil = async (ok: () => boolean, n = 400) => { for (let i = 0; i < n && !ok(); i++) await settle(1); };
 const dirOf = () => fs.mkdtempSync(path.join(os.tmpdir(), 'fa-leave-busy-'));
@@ -229,5 +239,118 @@ test('a /memory listing is forgotten on a switch: a number from it accepts nothi
   await ask(ui, 'after');
   await settle(10);
   expect(JSON.stringify(model.requests.at(-1)!.messages.filter((m) => m.role === 'system'))).not.toContain('evil.example');
+  ui.app.unmount();
+});
+
+// A holds a turn that reaches a y/n for `echo hi`; `/new` leaves it for B, and the y/n is
+// raised while A is left. `toast`: the waiting toast was seen on the way.
+async function leftYesNo() {
+  const dir = dirOf();
+  const model = new ScriptedModel();
+  const aSub = model.when((req) => firstUser(req).includes('session A question'));
+  aSub.script([{ hold: true }, { tool: 'run_command', args: { command: 'echo hi' } }], [{ text: 'Ran it.' }]);
+  model.script([{ text: 'B answer.' }]);
+  const ui = await bootApp(model, 100, 28, undefined, { sessions: { dir } }, { toastMs: 10_000 });
+  await ui.press('F');
+  await ask(ui, 'session A question');
+  await settleUntil(() => aSub.held && !!saved(dir, 'session A question'));
+  const idA = saved(dir, 'session A question')!.id;
+  await ask(ui, '/new');
+  await settle(4);
+  await ask(ui, 'session B question');
+  await settleUntil(() => frameOf(ui).includes('B answer.'));
+  let toast = false;
+  aSub.release();
+  await settleUntil(() => { if (frameOf(ui).includes('waits for your answer')) toast = true; return toast; });
+  return { dir, ui, aSub, idA, toast };
+}
+const waitingAlerts = (ui: UI) => ui.backend.notifications.filter((n) => JSON.stringify(n).includes('waits for your answer'));
+
+test('a left session\'s y/n: one toast, one alert, here · waiting; keys in B answer nothing; the picker ⏎ onto it does not answer it, the next key does', async () => {
+  const { dir, ui, aSub, idA, toast } = await leftYesNo();
+  expect(toast).toBe(true);
+  expect(waitingAlerts(ui)).toHaveLength(1);
+  expect(rowOf(await pickerFrame(ui), 'session A question')).toContain('here · waiting');
+  // Keys in B go to B: `y` and ⏎ are typed into B's field, and nothing answers A's y/n.
+  await ui.type('y');
+  await ui.press('return');
+  await settle(20);
+  await new Promise((r) => setTimeout(r, 400));
+  expect(aSub.requests).toHaveLength(1);
+  expect(fs.existsSync(lockOf(dir, idA))).toBe(true);
+  expect(waitingAlerts(ui)).toHaveLength(1);
+
+  // ⏎ in the picker attaches A: its y/n shows, and that ⏎ answered nothing.
+  await pick(ui, 'session A question');
+  await settle(10);
+  await new Promise((r) => setTimeout(r, 300));
+  expect(frameOf(ui)).toContain('echo hi');
+  expect(aSub.requests).toHaveLength(1);
+  // The next key does.
+  await ui.press('y');
+  await settleUntil(() => frameOf(ui).includes('Ran it.'));
+  expect(aSub.requests).toHaveLength(2);
+  expect(waitingAlerts(ui)).toHaveLength(1);
+  ui.app.unmount();
+});
+
+test('/resume <n> typed onto a waiting session attaches it and answers nothing', async () => {
+  const { ui, aSub } = await leftYesNo();
+  ui.backend.press({ name: 's', ctrl: true });
+  await settle(3);
+  const rows = frameOf(ui).split('\n');
+  await ui.press('escape');
+  await settle(2);
+  // The row number of A in the list, as `/resume <n>` counts.
+  const n = rows.filter((r) => /session [AB] question/.test(r)).findIndex((r) => r.includes('session A question')) + 1;
+  await ask(ui, `/resume ${n}`);
+  await settle(10);
+  await new Promise((r) => setTimeout(r, 300));
+  expect(frameOf(ui)).toContain('echo hi');
+  expect(aSub.requests).toHaveLength(1);
+  ui.app.unmount();
+});
+
+test('a pager open when the settings y/n is asked is still open under it', async () => {
+  fs.mkdirSync(hostStateDir(), { recursive: true });
+  fs.rmSync(acceptedConfigPath(), { force: true });
+  fs.writeFileSync(localConfig(), '{}');
+  loadConfig();
+  guardConfigFiles();
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-leave-busy-root-')));
+  const model = new ScriptedModel();
+  const sub = model.when((req) => firstUser(req).includes('count then wait'));
+  // Round 1 prints a block taller than the room; round 2 is held while the pager is
+  // opened and the settings file is edited; round 3 follows the guard's y/n.
+  sub.script([{ tool: 'run_command', args: { command: 'seq 1 300' } }], [{ hold: true }, { tool: 'datetime', args: {} }], [{ text: 'Configured.' }]);
+  const ui = await bootApp(model, 120, 34, undefined, { shell: { roots: [root], timeoutMs: 20000 } });
+  await ui.press('F');
+  await ask(ui, 'count then wait');
+  await settleUntil(() => frameOf(ui).includes('Confirm write'));
+  await ui.press('y');
+  await settleUntil(() => sub.held);
+  // A click on the block's fold line opens it in the pager.
+  const at = frameOf(ui).split('\n').findIndex((r) => r.includes('seq 1 300'));
+  expect(at).toBeGreaterThanOrEqual(0);
+  const x = frameOf(ui).split('\n')[at]!.indexOf('seq 1 300');
+  ui.backend.mouse('down', x, at);
+  ui.backend.mouse('up', x, at);
+  await settle(6);
+  const hint = 'the wheel scroll · Esc close';
+  expect(frameOf(ui)).toContain(hint);
+  // The file changes outside the app; the held round goes on and the next request is
+  // preceded by the guard's y/n. The pager stays open.
+  fs.writeFileSync(localConfig(), '{"shell":{"autoRun":true}}');
+  sub.release();
+  await settleUntil(() => sub.requests.length >= 2 && frameOf(ui).includes('changed outside flow-assist') || !frameOf(ui).includes(hint), 100);
+  await settle(20);
+  expect(sub.requests).toHaveLength(2);
+  expect(frameOf(ui)).toContain(hint);
+  // Closed, the y/n is what is under it.
+  await ui.press('escape');
+  await settleUntil(() => frameOf(ui).includes('changed outside flow-assist'));
+  expect(frameOf(ui)).toContain('changed outside flow-assist — apply? (y/n)');
+  await ui.press('n');
+  await settleUntil(() => frameOf(ui).includes('Configured.'));
   ui.app.unmount();
 });

@@ -25,7 +25,9 @@ keys.sessions <key>` moves it) — lists the current project's saved sessions, n
 first, with their titles, when each was last used, its size, and what it is doing —
 `this chat · working` while an answer or a command runs, `here · working` for a session
 you left while its background tasks run (it stays open in this process until they end,
-and the row changes to the file's status by itself when it is put away),
+and the row changes to the file's status by itself when it is put away; `here · waiting`
+when it stopped on a y/n or a question — a toast and a system alert say so once, and it
+waits until you open it and answer, since keys typed elsewhere answer nothing there),
 `in use elsewhere` when another flow-assist process has it open, `done` when its last
 answer or background result came while you were not looking — your own session's row
 too (`this chat · done`), for one that came while the picker was open (your own row

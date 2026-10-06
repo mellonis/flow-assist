@@ -220,3 +220,123 @@ test('a left turn that fails puts the queue ahead of the draft kept at the leave
     expect(rig.sessionFile(a.sessionId)?.draft).toBe('queued while it ran\n\ntyped at the leave');
   } finally { globalThis.fetch = realFetch; }
 });
+
+// A session whose turn reaches a y/n for `echo hi`, with `alert` counted on the services.
+function yesNoRig(alerts: string[]) {
+  const model = new ScriptedModel();
+  const sub = model.when((req) => firstUser(req).includes('question A'));
+  sub.script([{ hold: true }, { tool: 'run_command', args: { command: 'echo hi' } }], [{ text: 'Ran it.' }]);
+  const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
+  (rig.services as unknown as { alert: (t: string, b?: string) => void }).alert = (_t, b) => { alerts.push(String(b)); };
+  return { model, sub, rig };
+}
+const waits = (rig: Rig, tail = 'waits for your answer') => rig.toasts.filter((t) => t.includes(tail));
+
+test('a left session\'s y/n reads waiting, is said once with a toast and an alert, answers nothing, and holds the park until answered after attach', async () => {
+  const alerts: string[] = [];
+  const { sub, rig } = yesNoRig(alerts);
+  rig.registry.show(rig.conv);
+  void rig.conv.send('question A');
+  await rig.until(() => sub.held && rig.conv.sessionId !== '');
+  const { left: a } = rig.switchTo();
+  sub.release();
+  await rig.until(() => !!rig.pendingIn(a));
+  expect(rig.pendingIn(a)?.name).toBe('run_command');
+  expect(rig.registry.statusOf(a.sessionId)).toBe('waiting');
+  expect(waits(rig)).toHaveLength(1);
+  expect(waits(rig)[0]).toContain('a y/n');
+  expect(alerts).toHaveLength(1);
+  await tick(500);
+  expect(a.closed).toBe(false);
+  expect(sub.requests).toHaveLength(1); // nothing answered it: the command did not run
+  rig.switchTo(a);
+  a.answerConfirm(true);
+  await rig.until(() => contents(rig, a).includes('Ran it.'));
+  expect(a.closed).toBe(false); // attached again: never parked
+  expect(waits(rig)).toHaveLength(1);
+  expect(alerts).toHaveLength(1);
+});
+
+test('a left session\'s ask_user reads waiting with its toast, and holds the park until answered', async () => {
+  const model = new ScriptedModel();
+  const sub = model.when((req) => firstUser(req).includes('question A'));
+  sub.script([{ hold: true }, { tool: 'ask_user', args: { questions: [{ question: 'Which one?', options: [{ label: 'left' }, { label: 'right' }] }] } }], [{ text: 'Went left.' }]);
+  const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
+  rig.registry.show(rig.conv);
+  void rig.conv.send('question A');
+  await rig.until(() => sub.held && rig.conv.sessionId !== '');
+  const { left: a } = rig.switchTo();
+  sub.release();
+  await rig.until(() => !!a.question);
+  expect(rig.registry.statusOf(a.sessionId)).toBe('waiting');
+  expect(waits(rig, 'waits for your answer — a question')).toHaveLength(1);
+  await tick(300);
+  expect(a.closed).toBe(false);
+  a.dismissQuestion();
+  await rig.until(() => a.closed, 3000);
+});
+
+test('a settings y/n in a left session is named as one', async () => {
+  const model = new ScriptedModel();
+  const sub = model.when((req) => firstUser(req).includes('question A'));
+  sub.script([{ hold: true }, { text: 'Answer A.' }]);
+  const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
+  let armed = false;
+  let applied = false;
+  const change = { file: 'config.local.json', path: path.join(rig.root, 'config.local.json'), keys: ['shell.autoRun'], lines: ['shell.autoRun: (unset) → true'], hash: 'h1', mtimeMs: 1, size: 1, content: {}, raw: '{}' };
+  (rig.services as unknown as { configChanges: unknown }).configChanges = {
+    check: () => (armed && !applied ? [change] : []),
+    apply: () => { applied = true; return { applied: ['shell.autoRun'], restart: [] }; },
+    decline: () => null,
+  };
+  rig.registry.show(rig.conv);
+  void rig.conv.send('question A');
+  await rig.until(() => sub.held && rig.conv.sessionId !== '');
+  const { left: a } = rig.switchTo();
+  armed = true;
+  sub.release();
+  await rig.until(() => a.confirm?.name === 'config');
+  expect(waits(rig)).toHaveLength(1);
+  expect(waits(rig)[0].endsWith('a settings y/n')).toBe(true);
+  a.answerConfirm(true);
+  await rig.until(() => a.closed, 3000);
+});
+
+test('a session left while its y/n waits is announced once', async () => {
+  const alerts: string[] = [];
+  const { sub, rig } = yesNoRig(alerts);
+  rig.registry.show(rig.conv);
+  void rig.conv.send('question A');
+  await rig.until(() => sub.held && rig.conv.sessionId !== '');
+  sub.release();
+  await rig.until(() => !!rig.pendingIn(rig.conv));
+  // On screen: asked, not left, so nothing is said yet.
+  expect(waits(rig)).toHaveLength(0);
+  expect(alerts).toHaveLength(0);
+  const { left: a, outcome } = rig.switchTo();
+  expect(outcome).toBe('kept');
+  expect(waits(rig)).toHaveLength(1);
+  expect(alerts).toHaveLength(1);
+  // Retired again while it still waits: the same wait is not said twice.
+  expect(rig.registry.retire(a)).toBe('kept');
+  await tick(100);
+  expect(waits(rig)).toHaveLength(1);
+  expect(alerts).toHaveLength(1);
+  a.answerConfirm(false);
+  await rig.until(() => a.closed, 5000);
+});
+
+test('a conversation never shown and never left announces nothing', async () => {
+  const alerts: string[] = [];
+  const { sub, rig } = yesNoRig(alerts);
+  // No registry.show: the rig's conversation is on no screen and was never left.
+  void rig.conv.send('question A');
+  await rig.until(() => sub.held && rig.conv.sessionId !== '');
+  sub.release();
+  await rig.until(() => !!rig.pendingIn(rig.conv));
+  await tick(100);
+  expect(rig.registry.shown()).toBeNull();
+  expect(waits(rig)).toHaveLength(0);
+  expect(alerts).toHaveLength(0);
+  rig.answerNext(false);
+});
