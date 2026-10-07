@@ -25,10 +25,17 @@ export interface ChildSlots {
   // settles. Returns what takes it out of the queue again: true when it was still queued
   // (then `run` never runs), false when it had started.
   admit(run: () => Promise<void>): () => boolean;
-  // Armed + queued + running.
+  // Armed + queued + running, the waiting ones among the running.
   backgroundCount(): number;
-  // Running only.
+  // Running and not waiting for the person: what is held against the limit.
   running(): number;
+  // Running children that wait for the person's answer. They are counted by
+  // `backgroundCount` and hold no slot.
+  waitingCount(): number;
+  // A running child began to wait (+1) or its wait ended (-1). A begun wait frees its slot
+  // at once, so the queue admits what it can; an ended one takes the slot back without
+  // asking, so the count may stand over the limit until jobs end.
+  markWaiting(delta: 1 | -1): void;
 }
 
 export interface RegistryInit extends Omit<DepsSource, 'lockToken' | 'current'> {
@@ -59,21 +66,23 @@ export class ConversationRegistry {
 
   private makeSlots(): ChildSlots {
     let armed = 0;
+    // Started runs, the ones waiting for the person included; `held` is what the limit
+    // counts.
     let running = 0;
+    let waiting = 0;
+    const held = (): number => running - waiting;
     const timers = new Set<ReturnType<typeof setTimeout>>();
     const queue: Array<() => Promise<void>> = [];
     const limit = (): number => {
       const sessions = this.init.config().sessions as { maxRunning?: unknown } | undefined;
       return Math.max(1, wholeOrDefault(sessions?.maxRunning, 4, 2) - 1);
     };
+    const admitQueued = (): void => {
+      while (queue.length && held() < limit()) start(queue.shift()!);
+    };
     const start = (run: () => Promise<void>): void => {
       running++;
-      const done = (): void => {
-        running--;
-        const next = queue.shift();
-        if (next && running < limit()) start(next);
-        else if (next) queue.unshift(next);
-      };
+      const done = (): void => { running--; admitQueued(); };
       let p: Promise<void>;
       try { p = run(); } catch (e) { p = Promise.reject(e); }
       p.then(done, done);
@@ -87,7 +96,7 @@ export class ConversationRegistry {
         timers.clear();
       },
       admit: (run) => {
-        if (running < limit()) { start(run); return () => false; }
+        if (held() < limit()) { start(run); return () => false; }
         queue.push(run);
         return () => {
           const at = queue.indexOf(run);
@@ -97,7 +106,12 @@ export class ConversationRegistry {
         };
       },
       backgroundCount: () => armed + queue.length + running,
-      running: () => running,
+      running: held,
+      waitingCount: () => waiting,
+      markWaiting: (delta) => {
+        waiting = Math.min(running, Math.max(0, waiting + delta));
+        if (delta > 0) admitQueued();
+      },
     };
   }
 
@@ -116,6 +130,13 @@ export class ConversationRegistry {
     });
     // What a session nobody draws needs an answer to, said once (`movedToWaiting`).
     c.on('confirm', (ev) => { if (ev.request) this.movedToWaiting(c, ev.host ? 'a settings y/n' : 'a y/n'); else this.leftWaiting(c); });
+    // A y/n of a child below it, parked or answered; the label is the owner's, read from
+    // what the session offers.
+    c.on('asking', () => {
+      const o = c.offered();
+      if (c.subtreeWaiting && o) this.movedToWaiting(c, `a y/n from ${o.path[o.path.length - 1] ?? 'a subagent'}`);
+      else this.leftWaiting(c);
+    });
     c.on('question', (ev) => { if (ev.state && ev.parked) this.movedToWaiting(c, 'a question'); else if (!ev.state) this.leftWaiting(c); });
     // A left session's turn ending moves its status without a render of the chat's own
     // (the chat hears only the session it shows); whether it is put away is the watch's.
@@ -141,6 +162,7 @@ export class ConversationRegistry {
   // Nothing waits any more: the next move to waiting is said again. The picker re-reads
   // only when something was said, so an on-screen y/n's answer does not touch it.
   private leftWaiting(c: Conversation): void {
+    if (c.confirm || c.question || c.subtreeWaiting) return;
     if (this.waitingSaid.delete(c)) this.notifyChange();
   }
 
@@ -178,7 +200,8 @@ export class ConversationRegistry {
     const c = this.bySession(id);
     if (!c) return null;
     const own = c.status;
-    return c.children.size && own !== 'waiting' ? 'working' : own;
+    if (own === 'waiting' || c.subtreeWaiting) return 'waiting';
+    return c.children.size ? 'working' : own;
   }
   // Nothing of its own is left (AGENTS.md (a host makes its conversations through one
   // registry)), clause by clause:
@@ -210,6 +233,7 @@ export class ConversationRegistry {
     c.headless = true;
     // Left while it already waits: the answer it needs is said now.
     if (c.confirm || c.question) this.movedToWaiting(c, c.question ? 'a question' : c.confirm?.name === 'config' ? 'a settings y/n' : 'a y/n');
+    else if (c.subtreeWaiting) this.movedToWaiting(c, `a y/n from ${c.offered()?.path.at(-1) ?? 'a subagent'}`);
     this.watches.get(c)?.();
     this.watches.delete(c);
     let pending = false;

@@ -46,7 +46,7 @@ test('a stop before the delay ends takes the child out of the schedule and settl
     admit: (run: () => Promise<void>) => { trace.push('admit'); void run(); return () => false; },
     backgroundCount: () => 0, running: () => 0,
   };
-  const child = {} as { leaveSchedule?: () => boolean; delayedUntil?: number | null };
+  const child = { on: () => () => {} } as { on: () => () => void; leaveSchedule?: () => boolean; delayedUntil?: number | null };
   const toasts: string[] = [];
   scheduleChild({ kind: 'subagent', label: 'z', prompt: 'p', by: 'person' }, 60_000, {
     startChild: () => ({

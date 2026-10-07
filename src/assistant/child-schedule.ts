@@ -20,6 +20,15 @@ export type ChildScheduled = { refused: string } | { child: Conversation; label:
 export function scheduleChild(spec: ChildSpec, delayMs: number, deps: ChildScheduleDeps): ChildScheduled {
   const { slots } = deps;
   const label = spec.label;
+  // Whether this child's wait for the person is counted against its slot. A running child
+  // that parks a y/n gives its slot up until the answer; the count is kept here, from the
+  // child's own `confirm` events, so a run that ends while waiting hands it back.
+  let counted = false;
+  const markWaiting = (on: boolean): void => {
+    if (on === counted) return;
+    counted = on;
+    slots.markWaiting(on ? 1 : -1);
+  };
   // Refused past `ai.subagentDepth`: the refusal is returned, the caller words the answer.
   const started = deps.startChild(spec);
   if ('refused' in started) return { refused: started.refused };
@@ -49,6 +58,8 @@ export function scheduleChild(spec: ChildSpec, delayMs: number, deps: ChildSched
     } catch (e) {
       failed(e instanceof Error ? e.message : String(e));
     } finally {
+      // A wait counted at the run's end is handed back before the slot frees.
+      markWaiting(false);
       // The slot frees once this run settles; the notify waits a tick, so the
       // chat's count it redraws has this task gone.
       setTimeout(() => deps.notify?.(), 0);
@@ -67,6 +78,7 @@ export function scheduleChild(spec: ChildSpec, delayMs: number, deps: ChildSched
     dequeue = slots.admit(async () => { phase = 'running'; await settle(); });
   }, delayMs);
   started.armed(timer);
+  started.child.on('confirm', (ev) => { if (phase === 'running' || !ev.request) markWaiting(!!ev.request); });
   slots.arm(timer);
   // A stop before the run began takes the child out of the schedule — its timer cleared
   // and its count disarmed, or its place in the queue given up — and settles it at once:

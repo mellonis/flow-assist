@@ -236,7 +236,7 @@ export function childResultText(label: string, r: ChildResult): string {
 export interface EndedChild { label: string; kind: ChildSpec['kind']; outcome: ChildResult['outcome']; ms: number; tokens: number }
 // A child still counted, as a listing reads it. `startedAt`: when its turn began (null
 // before); `until`: when its delay ends (null unless it is delayed).
-export interface RunningChild { label: string; kind: ChildSpec['kind']; status: 'working' | 'queued' | 'delayed'; startedAt: number | null; until: number | null }
+export interface RunningChild { label: string; kind: ChildSpec['kind']; status: 'working' | 'waiting' | 'queued' | 'delayed'; startedAt: number | null; until: number | null }
 // What `startChild` hands back: a refusal said to the model, or the child, its run,
 // `armed`, which records the delay timer that will start it, and `fired`, which the
 // caller calls when that timer fires — so a stop disarms only a task still waiting on

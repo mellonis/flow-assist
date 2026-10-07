@@ -498,14 +498,14 @@ export class Conversation {
 
   // The children whose result came in here, oldest first (at most twenty).
   get endedChildren(): readonly EndedChild[] { return this.ended; }
-  // The children still counted, as a listing reads them: working, queued for a slot, or
-  // delayed until a time.
+  // The children still counted, as a listing reads them: working, waiting for the person's
+  // answer, queued for a slot, or delayed until a time.
   runningChildren(): RunningChild[] {
     return [...this.children].map((c): RunningChild => {
       const delayed = this.childTimers.has(c);
       return {
         label: c.label, kind: c.kind as RunningChild['kind'],
-        status: delayed ? 'delayed' : c.busy ? 'working' : 'queued',
+        status: delayed ? 'delayed' : c.confirm ? 'waiting' : c.busy ? 'working' : 'queued',
         startedAt: c.busy ? c.turnStartedAt : null,
         until: delayed ? c.delayedUntil : null,
       };

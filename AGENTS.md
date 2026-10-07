@@ -1925,8 +1925,9 @@ A saved history that holds calls under the name `background` is sent as it is. T
   that `registry.statusOf` finds live here), with that status — `working` while its
   tasks run, even when a result that already landed is unseen (it reads `done` from
   its file once put away), unless a y/n or a question waits — drawn `here · working`, or
-  `here · waiting` for the left session's own y/n or question (its turn paused on it,
-  not parked until the person comes back and answers; the registry says it once, below).
+  `here · waiting` for the left session's own y/n or question, or one a subagent below it
+  parked (its turn paused on it, not parked until the person comes back and answers; the
+  registry says it once, below).
   The open picker follows the registry: on each change it hears (`registry.onChange`,
   subscribed once by the chat, which reads the picker, the sessions directory and the
   lock token through refs) it reads the list again, keeping the filter, and the cursor
@@ -2834,13 +2835,18 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   parks it then), or until the exit. No timer retries.
   `retire` of a conversation already kept drops its earlier watch first, so one trigger
   is one check. **What the registry hears from every conversation it makes** (`track`):
-  `confirm` and `question`. A `session` that is `headless` — left, not merely without a
+  `confirm`, `question` and `asking`. A `session` that is `headless` — left, not merely without a
   view: a bare conversation, a one-shot's or a rig's that was never shown, is not — and
   moves to waiting (a y/n, a question with `parked`) gets a toast and an alert
   (`services.showMessage`, `services.alert('flow-assist', …)`, each in its own try)
   naming it: `⏸ «<title>» waits for your answer — a y/n` (`a settings y/n` for the
   settings guard's, `a question` for `ask_user`; `an untitled session` with no title),
-  once until it leaves waiting (`waitingSaid`), then the picker re-reads. `retire` says
+  once until it leaves waiting (`waitingSaid`), then the picker re-reads. A y/n a child
+  parks below the session arrives as `asking` and is said the same way, naming the label
+  of the child that owns the oldest request: `⏸ «<title>» waits for your answer — a y/n
+  from <label>`; a session on screen says nothing about its own subtree. Nothing waits
+  any more — no y/n of its own, no question, nothing below — only then is it forgotten,
+  so a later wait is said again. `retire` says
   it for a conversation left while it already waits; leaving waiting re-reads the
   picker only when something had been said, so an on-screen y/n's answer does not
   touch an open picker. A conversation closed or taken back (`reclaim`) forgets it, so
@@ -2850,7 +2856,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   tool's y/n. `reclaim(c)` takes a kept one back (the watch dropped, `headless`
   cleared; a check already deferred finds no watch and does nothing). `bySession(id)`
   is the open conversation holding a session here, if any; `statusOf(id)` is its status
-  for the picker — `waiting` while a y/n or a question waits in it, else `working`
+  for the picker — `waiting` while a y/n or a question waits in it or anywhere below it, else `working`
   while a turn of its own or one of its tasks runs, else its own status (not
   `Conversation.status`, which others read as "a turn runs") — and null
   when it is not live. Whatever changes what it holds (a conversation left headless, one
@@ -2865,7 +2871,8 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   the ids of sessions it put away while their status read `done`, read after the inbox
   landed and added only once the save, the release and the close went through (a park
   that throws adds nothing). `attention()` is `{ waiting, done }`: `waiting` counts
-  the live `session` conversations that are `headless` and read `waiting` (`statusOf`),
+  the live `session` conversations that are `headless` and read `waiting` (`statusOf`,
+  which a waiting subagent below the session makes true),
   `done` the remembered ids; the session on screen is in neither — it is not `headless`,
   and every way onto the screen forgets its id first.
   A `session` that was `headless` when it was parked (read on entering `park`: `retire`
@@ -2888,7 +2895,14 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   It also holds the child slots (`children`, handed to every conversation in its deps):
   the count of background tasks (armed, queued, running) and the cap — a task starts
   while fewer than `max(1, sessions.maxRunning - 1)` run (`maxRunning` 4 by default, so
-  three), the rest wait FIFO, and a session's own turn never takes or waits for one. The
+  three), the rest wait FIFO, and a session's own turn never takes or waits for one. A
+  running child that parks a y/n gives its slot up until the answer: `scheduleChild`
+  tells the slots (`markWaiting(+1)` / `markWaiting(-1)`) from the child's own `confirm`
+  events, and also when a run ends with its wait counted. `running()` is what is held
+  against the limit (the waiting ones left out), `waitingCount()` the waiting ones; a
+  wait that begins admits what the queue can at once, a wait that ends takes the slot
+  back without asking, so the held count may stand over the limit until jobs end.
+  `backgroundCount()` counts a waiting child too. The
   `subagent` tool (`src/loader/tools-core.ts`) parses its arguments and hands the rest to
   `scheduleChild` (`src/assistant/child-schedule.ts`, the child schedule: a caller outside a
   turn gets the same one), which arms the task with its delay's timer
@@ -2991,8 +3005,8 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   `{ type: 'asking' }` and runs the root's `deps.notify`; the ancestors are read from
   `parent` at the event, never kept from the start, so a child handed up to the session
   when its starter ended reports there. The settings-file y/n is never parked in a child.
-  `runningChildren()` lists the children still counted (label, kind, `working`, `queued`
-  or `delayed`, when its turn began, when its delay ends) for a view to read.
+  `runningChildren()` lists the children still counted (label, kind, `working`, `waiting`
+  for the person's answer, `queued` or `delayed`, when its turn began, when its delay ends) for a view to read.
   `close('exit')` touches no child: at exit the registry's `closeAll` writes each child's
   end line (a task's `task-end` with `by: 'exit'`, a subagent's `subagent` end), clears and disarms every timer of a task still waiting
   on its delay, aborts every live conversation's turn (a session's `!command` or turn

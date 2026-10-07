@@ -19,7 +19,7 @@ function fakeSlots(trace: string[]): ChildSlots {
 
 function fakeStart(trace: string[], result: Partial<ChildResult> = {}): ChildStart {
   return {
-    child: {} as never,
+    child: { on: () => () => {} } as never,
     run: async () => { trace.push('run'); return { outcome: 'answer', text: 'ok', ...result } as ChildResult; },
     armed: () => { trace.push('armed'); },
     fired: () => { trace.push('fired'); },
