@@ -2141,8 +2141,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             bgCount: registryRef.current!.children.backgroundCount() + registryRef.current!.leftRunning(),
             // The other sessions that wait for an answer or were put away unread: the
             // one on screen never counts itself.
-            waitingElsewhere: registryRef.current!.attention(conv).waiting,
-            unreadElsewhere: registryRef.current!.attention(conv).done,
+            ...(() => { const o = registryRef.current!.attention(conv); return { waitingElsewhere: o.waiting, unreadElsewhere: o.done }; })(),
             ...(() => {
               const r = conv.contextReading(screen);
               // How many of the history's items go as stubs now — after /compact the
