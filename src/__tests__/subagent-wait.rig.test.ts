@@ -221,7 +221,8 @@ test('a waiting grandchild, scheduled under a child, is counted the same way', a
   subScript(model, 'inner job').script(write('g.txt'), [{ text: 'inner' }]);
   const rig = conversationRig(model, bg);
   rig.registry.show(rig.conv);
-  const outer = scheduled(rig, spec('outer', 'outer job', { by: 'model' }));
+  // The outer job may ask, so the job it starts may too.
+  const outer = scheduled(rig, spec('outer', 'outer job', { by: 'model', write: true }));
   const inner = scheduled(rig, spec('inner', 'inner job'), outer);
   await rig.until(() => inner.confirm !== null);
   expect(counts(rig)).toMatchObject({ held: 1, waiting: 1 });

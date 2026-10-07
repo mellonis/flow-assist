@@ -29,8 +29,9 @@ What each version of flow-assist brought, newest first. The version is the one i
   auto mode `all`, and a command still asks unless `shell.autoRun` is on; the mode of the
   conversation you start it from never passes to a subagent. The assistant's `subagent`
   tool takes `write: true` for a task that may ask you the same way; without it a write
-  is declined, as before. A subagent still cannot ask you a question, and the y/n for a
-  changed settings file is asked in a chat session only, never in a subagent.
+  is declined, and a task that cannot ask cannot start one that can. A subagent cannot
+  ask you a question, and the y/n for a changed settings file is asked in a chat session
+  only, never in a subagent.
 - **A background task is a conversation of its own.** A task that runs out of its twelve
   rounds now says so at the end of its result (`stopped after 12 rounds — last: …`),
   where it read `finished:` with no output or a partial text. Esc during the turn that

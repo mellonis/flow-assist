@@ -1,6 +1,6 @@
 // A child that may write parks its y/n like a session's, and the conversations above it
-// know what to offer the person (AGENTS.md (a conversation starts a child)): the oldest
-// request of the subtree, labelled by its path, one at a time; the answer goes to its
+// know what to offer the person (AGENTS.md (a conversation starts a child of its own)):
+// the oldest request of the subtree, labelled by its path, one at a time; the answer goes to its
 // owner; the settings-file guard never runs below a session.
 import { afterEach, expect, test } from 'bun:test';
 import fs from 'node:fs';
@@ -312,7 +312,7 @@ test('the subagent tool with write: true starts a task that may ask: its request
   expect(answers(rig, 'tk')).toMatchObject([{ answer: 'yes', by: 'person', task: 'tk' }]);
 });
 
-test('the subagent tool without write, or with write: false, declines a write as before: nothing is offered', async () => {
+test('the subagent tool without write, or with write: false, declines a write: nothing is offered', async () => {
   for (const extra of [{}, { write: false }]) {
     const model = new ScriptedModel();
     model.script([{ tool: 'subagent', args: { task: 'make u', label: 'uk', ...extra } }], [{ text: 'Started.' }]);
@@ -350,4 +350,37 @@ test('the starting conversation\'s auto mode never reaches a child', async () =>
   expect(made(rig, 'in.txt')).toBe(false);
   rig.conv.offered()!.owner.answerConfirm(false);
   await done;
+});
+
+// A task the model started without `write` calls the subagent tool itself and asks for a
+// task that writes: session -> task -> task, through the real tool path.
+test('a task that cannot ask cannot start one that can: the inner write is declined and nothing is offered', async () => {
+  const model = new ScriptedModel();
+  model.script([{ tool: 'subagent', args: { task: 'outer t', label: 'outer' } }], [{ text: 'Started.' }]);
+  worker(model, 'outer t').script([{ tool: 'subagent', args: { task: 'inner t', label: 'inner', write: true } }], [{ text: 'outer done' }]);
+  worker(model, 'inner t').script(write('inner.txt'), [{ text: 'inner done' }]);
+  const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
+  await rig.conv.send('go');
+  await rig.until(() => answers(rig, 'inner').length > 0 && rig.registry.children.backgroundCount() === 0, 5_000);
+  expect(answers(rig, 'inner')).toMatchObject([{ answer: 'no', by: 'background' }]);
+  expect(rig.conv.offered()).toBeNull();
+  expect(made(rig, 'inner.txt')).toBe(false);
+});
+
+test('a task that writes starts one that writes: the inner request is offered as outer › inner', async () => {
+  const model = new ScriptedModel();
+  model.script([{ tool: 'subagent', args: { task: 'outer t', label: 'outer', write: true } }], [{ text: 'Started.' }]);
+  // The outer task is held after it starts the inner one, so the inner is still its child.
+  const outer = worker(model, 'outer t');
+  outer.script([{ tool: 'subagent', args: { task: 'inner t', label: 'inner', write: true } }], [{ hold: true }, { text: 'outer done' }]);
+  worker(model, 'inner t').script(write('inner.txt'), [{ text: 'inner done' }]);
+  const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
+  await rig.conv.send('go');
+  await rig.until(() => rig.conv.offered() !== null, 5_000);
+  expect(rig.conv.offered()!.path).toEqual(['outer', 'inner']);
+  expect(made(rig, 'inner.txt')).toBe(false);
+  rig.conv.offered()!.owner.answerConfirm(true);
+  outer.release();
+  await rig.until(() => rig.registry.children.backgroundCount() === 0, 5_000);
+  expect(made(rig, 'inner.txt')).toBe(true);
 });

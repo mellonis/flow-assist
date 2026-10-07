@@ -647,10 +647,12 @@ export class Conversation {
     if (this.depth >= max) return { refused: `Background chaining depth exceeded (max ${max}) — finish this task; do not spawn further background tasks.` };
     // A child that may write asks the person where the host has one; every other child
     // declines. `canAsk` is the host's, read at the root: a child's own deps say false
-    // for a read-only child.
+    // for a read-only child. A child that cannot ask cannot start one that can: only a
+    // session, or a child that asks itself, passes the right on.
     let host: Conversation = this;
     while (host.parent) host = host.parent;
-    const asks = host.deps.canAsk !== false && (spec.write === true || (spec.kind === 'subagent' && spec.by === 'person'));
+    const starterAsks = !this.parent || this.policy.kind === 'ask';
+    const asks = starterAsks && host.deps.canAsk !== false && (spec.write === true || (spec.kind === 'subagent' && spec.by === 'person'));
     const deps: ConversationDeps = {
       ...this.deps,
       sessionsDir: () => null, screens: () => undefined, screen: () => [], canAsk: asks,

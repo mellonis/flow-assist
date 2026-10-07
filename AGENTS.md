@@ -2956,7 +2956,9 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   for a subagent the person starts and for any spec with `write: true` (the `subagent` tool's
   `write` argument starts a `task` with it: twelve rounds, the worker prompt, its y/n
   offered to the session like a subagent's — `write` absent or false is `always-no`), where the host's
-  root can ask at all (`canAsk`; with nobody to ask such a child declines). Its
+  root can ask at all (`canAsk`; with nobody to ask such a child declines) and the starter
+  can: a session, or a child that asks itself. A child that cannot ask cannot start one
+  that can, whatever its spec says. Its
   deps are its parent's with no sessions directory, no screens, no redraw
   (`notify`) and a silent `pushLog`; `canAsk` is true only for a child whose policy
   asks, and `ask_user` is off in every child. It keeps no journal or state file: its `journalRoute` sends its
