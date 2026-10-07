@@ -21,8 +21,10 @@ export interface ChildSlots {
   disarm(timer?: ReturnType<typeof setTimeout>): void;
   // Clears every armed task that has not started yet: its timer and its count.
   cancelArmed(): void;
-  // Runs `run` now when a slot is free, else queues it (FIFO); the slot frees when `run` settles.
-  admit(run: () => Promise<void>): void;
+  // Runs `run` now when a slot is free, else queues it (FIFO); the slot frees when `run`
+  // settles. Returns what takes it out of the queue again: true when it was still queued
+  // (then `run` never runs), false when it had started.
+  admit(run: () => Promise<void>): () => boolean;
   // Armed + queued + running.
   backgroundCount(): number;
   // Running only.
@@ -84,7 +86,16 @@ export class ConversationRegistry {
         armed = Math.max(0, armed - timers.size);
         timers.clear();
       },
-      admit: (run) => { if (running < limit()) start(run); else queue.push(run); },
+      admit: (run) => {
+        if (running < limit()) { start(run); return () => false; }
+        queue.push(run);
+        return () => {
+          const at = queue.indexOf(run);
+          if (at < 0) return false;
+          queue.splice(at, 1);
+          return true;
+        };
+      },
       backgroundCount: () => armed + queue.length + running,
       running: () => running,
     };

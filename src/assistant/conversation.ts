@@ -25,7 +25,7 @@ import type { ViewRecord } from './views.js';
 import type { ToolDef } from '../loader/tools.js';
 import { workspaceFor } from './workspace.js';
 import { asBackgroundWork, asConversationWork, asForegroundWork, outsideWork, workOwner } from '../runtime/background-work.js';
-import { callOf, childResultText, lastAnswerOf, type BusyKind, type ChatMsg, type ChildResult, type ChildSpec, type ChildStart, type CloseReason, type JournalRoute, type ConversationDeps, type ConversationEvent, type ConversationKind, type ConversationSnapshot, type ConversationStatus, type PendingConfirm, type Queued, type QueueWait, type SendOptions, type TurnEnd, type ViewPort } from './conversation-types.js';
+import { callOf, childResultText, lastAnswerOf, type BusyKind, type ChatMsg, type ChildResult, type EndedChild, type RunningChild, type ChildSpec, type ChildStart, type CloseReason, type JournalRoute, type ConversationDeps, type ConversationEvent, type ConversationKind, type ConversationSnapshot, type ConversationStatus, type PendingConfirm, type Queued, type QueueWait, type SendOptions, type TurnEnd, type ViewPort } from './conversation-types.js';
 import {
   applySession, currentProject, ensureSessionId, journal, journaledChatLLM, journalTo, markSeen, persist, pushNote,
   releaseLockOf, writeSession, NO_FILE,
@@ -39,6 +39,8 @@ export { NO_FILE };
 // redraws, not thousands. A view's first state and its final phase are placed at
 // once — the block must appear when the call starts, and its end must not wait.
 export const LIVE_REDRAW_MS = 200;
+// How many ended children a conversation remembers.
+export const MAX_ENDED = 20;
 
 // What an image stands for, as its data is cached: its path and its hash.
 export const imageKey = (r: ImageRef) => `${r.path}\0${r.sha256}`;
@@ -71,6 +73,14 @@ export class Conversation {
   // timer of each one still armed.
   readonly children = new Set<Conversation>();
   readonly childTimers = new Map<Conversation, ReturnType<typeof setTimeout>>();
+  // The last twenty children whose result came in here, as plain data; emptied by /clear.
+  private ended: EndedChild[] = [];
+  // A child's place in the host's schedule, set by `scheduleChild`: when its delay ends,
+  // and what takes it out of the schedule before its run began (true when it did).
+  delayedUntil: number | null = null;
+  leaveSchedule: (() => boolean) | null = null;
+  // `stopSubtree` was called: the child's run, if it has not begun, sends nothing.
+  private stopRequested = false;
   // Left by the chat while it has work of its own (the registry's `retire`): kept loaded
   // and locked, drawn by nobody, until nothing of its own is left. A result lands in it
   // as a row and starts no turn (`takeInbox`).
@@ -184,6 +194,8 @@ export class Conversation {
   // ── what waits
   queue: Queued[] = [];
   inbox: string[] = [];
+  // Inbox items that start no follow-up turn (a stopped child's row), by their text.
+  private quietItems = new Set<string>();
   inboxTimer: ReturnType<typeof setInterval> | null = null;
   // A plugin's news said while a turn runs waits for the turn's end (`note` on the
   // store, bound to `services.chatNote` by the App).
@@ -416,6 +428,7 @@ export class Conversation {
   close(reason: CloseReason): void {
     if (this.isClosed) return;
     this.closeReason = reason;
+    if (reason === 'clear') this.ended = [];
     // A child stopped with its conversation says so in its session's journal, which its
     // own filtered route would not carry.
     if (reason === 'parent') this.journalStopped('clear');
@@ -434,6 +447,7 @@ export class Conversation {
     if (this.saveTimer) { clearTimeout(this.saveTimer); this.saveTimer = null; }
     this.clearInbox();
     this.inbox = [];
+    this.quietItems.clear();
     this.queue = [];
     this.projectNote = null; // a note held for a turn's end described the conversation left
     this.emit({ type: 'closed', reason });
@@ -448,6 +462,38 @@ export class Conversation {
   journalStopped(by: 'clear' | 'exit'): void {
     if (this.kind === 'subagent') this.journalRoute?.raw({ t: 'subagent', label: this.label, by: this.spawnedBy ?? 'model', event: 'end', outcome: 'stopped', stoppedBy: by });
     else this.journalRoute?.raw({ t: 'task-end', task: this.label, outcome: 'stopped', by });
+  }
+
+  // The children whose result came in here, oldest first (at most twenty).
+  get endedChildren(): readonly EndedChild[] { return this.ended; }
+  // The children still counted, as a listing reads them: working, queued for a slot, or
+  // delayed until a time.
+  runningChildren(): RunningChild[] {
+    return [...this.children].map((c): RunningChild => {
+      const delayed = this.childTimers.has(c);
+      return {
+        label: c.label, kind: c.kind as RunningChild['kind'],
+        status: delayed ? 'delayed' : c.busy ? 'working' : 'queued',
+        startedAt: c.busy ? c.turnStartedAt : null,
+        until: delayed ? c.delayedUntil : null,
+      };
+    });
+  }
+  private remember(e: EndedChild): void {
+    this.ended = [...this.ended, e].slice(-MAX_ENDED);
+  }
+
+  // The person stops this child and everything it started. Its own turn is aborted and its
+  // result — the text it had — is delivered once; every child of its own is closed with
+  // `'parent'` and delivers nothing; one that has not begun (waiting on its delay or for a
+  // slot) leaves the schedule and sends nothing. false when it was stopped already or is
+  // closed. `glyph` names the key, as `stop` does.
+  stopSubtree(glyph: string): boolean {
+    if (this.closed || this.stopRequested) return false;
+    this.stopRequested = true;
+    this.stopChildren();
+    if (!this.stop(glyph)) this.leaveSchedule?.();
+    return true;
   }
 
   // Every child still counted is stopped (`'parent'`); one still waiting on its delay has
@@ -601,7 +647,8 @@ export class Conversation {
         const outcome = (end?.outcome ?? 'failed') as ChildResult['outcome'];
         return {
           outcome,
-          text: child.content.trim(),
+          // A turn stopped mid-answer keeps what it had written.
+          text: (outcome === 'stopped' ? child.content.trim() || lastAnswerOf(child.messages).trim() : child.content.trim()),
           ...(end ? { ms: end.ms } : {}),
           ...(end?.tokens ? { tokens: end.tokens } : {}),
           ...(end?.error ? { error: end.error } : {}),
@@ -616,7 +663,7 @@ export class Conversation {
       if (ran) return { outcome: 'failed', text: '', error: 'already run' };
       ran = true;
       // Stopped while it waited for its delay or a slot: it sends nothing.
-      const r: ChildResult = child.closed ? { outcome: 'stopped', text: '' } : await outcomeOf();
+      const r: ChildResult = child.closed || child.stopRequested ? { outcome: 'stopped', text: '' } : await outcomeOf();
       // Stopped with the conversation that holds it, or at exit: its result goes nowhere.
       const stopped = child.closeReason === 'parent' || child.closeReason === 'exit';
       // A subagent says how it ended in its parent's journal; one stopped with its
@@ -636,7 +683,9 @@ export class Conversation {
       try {
         if (!stopped && home && !home.closed) {
           delivered = childResultText(spec.label, r);
-          home.deliver(delivered);
+          // A stopped child's row is read with the person's next message: they have just
+          // stopped the work and asked for no more.
+          home.deliver(delivered, r.outcome === 'stopped' ? { quiet: true } : undefined);
           const shown = home.deps.current?.();
           landedIn = { title: home.title, onScreen: !shown || shown === home };
         }
@@ -645,6 +694,7 @@ export class Conversation {
         // watches the count reach 0 finds the result already in. Untracked even when the
         // delivery throws, so a child is never counted forever.
         if (to) {
+          if (!stopped) to.remember({ label: spec.label, kind: spec.kind, outcome: r.outcome, ms: r.ms ?? 0, tokens: r.tokens ?? 0 });
           to.children.delete(child);
           to.childTimers.delete(child);
           to.emit({ type: 'children', count: to.children.size });
@@ -749,11 +799,13 @@ export class Conversation {
   // chat binds to the session whose work posts it (`workHome`), else the one it shows. An
   // item is never dropped while the conversation is open: it waits in the inbox until it
   // can land. A closed conversation takes nothing.
-  deliver(text: string): void {
+  // `quiet`: the item lands as a row and starts no follow-up turn (`takeInbox`).
+  deliver(text: string, opts: { quiet?: boolean } = {}): void {
     if (this.closed) return;
     const q = String(text ?? '').trim();
     if (!q) return;
     this.inbox.push(q);
+    if (opts.quiet) this.quietItems.add(q);
     if (!this.inboxTimer) this.inboxTimer = setInterval(() => this.takeInbox(), 400);
     this.takeInbox();
   }
@@ -769,6 +821,7 @@ export class Conversation {
     const items = this.inbox;
     if (!items.length) return [];
     this.inbox = [];
+    this.quietItems.clear();
     this.clearInbox();
     const rows = keepLast ? items.slice(0, -1) : items;
     if (rows.length) {
@@ -802,7 +855,11 @@ export class Conversation {
     const followUp = (this.deps.config().ai as { backgroundFollowUp?: unknown } | undefined)?.backgroundFollowUp !== false;
     // A conversation nobody draws starts no turn: what landed is read with the person's
     // next message there.
-    if (mode === 'rows' || !followUp || this.headless) { this.landInbox(); return; }
+    // Quiet items go first, so the item the follow-up turn answers is never one of them;
+    // with nothing but quiet items there is no turn.
+    const quiet = this.inbox.filter((t) => this.quietItems.has(t));
+    if (quiet.length && quiet.length < this.inbox.length) this.inbox = [...quiet, ...this.inbox.filter((t) => !this.quietItems.has(t))];
+    if (mode === 'rows' || !followUp || this.headless || quiet.length === this.inbox.length) { this.landInbox(); return; }
     const last = this.landInbox(true).at(-1)!;
     void this.send(last, { fromInbox: true });
   }

@@ -36,9 +36,9 @@ function startFrom(rig: Rig, s: ChildSpec, from: Conversation = rig.conv) {
 }
 // The same child, scheduled through the host's slots with no delay: the toast, the log,
 // the slot.
-function scheduled(rig: Rig, s: ChildSpec, from: Conversation = rig.conv) {
+function scheduled(rig: Rig, s: ChildSpec, from: Conversation = rig.conv, delayMs = 0) {
   const id = from.journal({ t: 'row', role: 'user', text: 'q' }, { person: true });
-  const r = scheduleChild(s, 0, {
+  const r = scheduleChild(s, delayMs, {
     startChild: (sp) => from.startChild(sp, id), slots: rig.registry.children,
     showMessage: rig.services.showMessage, pushLog: rig.services.pushLog, notify: () => {},
   });
@@ -268,4 +268,203 @@ test('the settings-file guard never runs in a subagent: nothing is parked, nothi
   expect(child.confirm).toBeNull();
   expect(child.configAsk).toBeNull();
   expect(checked).toBe(0);
+});
+
+// ── stopping one, and remembering the ended
+const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// A session whose follow-up turn is on and which the chat shows: a stopped child's row must
+// still start no turn in it.
+const attachedRig = (model: ScriptedModel, ai: Record<string, unknown> = {}, extra?: Record<string, unknown>) =>
+  conversationRig(model, { inbox: true, ai: { backgroundFollowUp: true, ...ai }, ...(extra ? { extra } : {}) });
+
+test('a subagent stopped mid-turn delivers `stopped:` and the text it had; no follow-up turn starts, and one toast says so', async () => {
+  const model = new ScriptedModel();
+  const sub = subScript(model, 'write it');
+  sub.script([{ text: 'half an answer' }, { hold: true }, { text: 'never' }]);
+  const rig = attachedRig(model);
+  const first = rig.conv;
+  rig.registry.show(first);
+  const child = scheduled(rig, spec('w', 'write it'));
+  await rig.until(() => sub.held);
+  expect(child.stopSubtree('')).toBe(true);
+  await rig.until(() => bgRows(first).length === 1);
+  await settled(rig);
+  await wait(60);
+  expect(bgRows(first)).toEqual(['w stopped:\nhalf an answer']);
+  expect(rig.toasts).toEqual(['■ w stopped']);
+  expect(rig.log).toContain('[bg] w stopped');
+  // Only the subagent's own request went out: the row started no turn in the session.
+  expect(model.requests).toHaveLength(1);
+  expect(first.busy).toBe(false);
+  expect(rig.journal().filter((e) => e.t === 'subagent' && e.event === 'end')).toMatchObject([{ label: 'w', outcome: 'stopped' }]);
+});
+
+test('a subagent stopped before it said anything delivers `stopped before it said anything`', async () => {
+  const model = new ScriptedModel();
+  const sub = subScript(model, 'think');
+  sub.script([{ hold: true }, { text: 'never' }]);
+  const rig = attachedRig(model);
+  const first = rig.conv;
+  const child = scheduled(rig, spec('t', 'think'));
+  await rig.until(() => sub.held);
+  child.stopSubtree('^c');
+  await rig.until(() => bgRows(first).length === 1);
+  await settled(rig);
+  expect(bgRows(first)).toEqual(['t stopped:\nstopped before it said anything']);
+  expect(child.lastEnd).toMatchObject({ outcome: 'stopped', stoppedBy: '^c' });
+});
+
+test('a second stop does nothing: one row, one toast', async () => {
+  const model = new ScriptedModel();
+  const sub = subScript(model, 'again');
+  sub.script([{ hold: true }, { text: 'never' }]);
+  const rig = attachedRig(model);
+  const first = rig.conv;
+  const child = scheduled(rig, spec('a', 'again'));
+  await rig.until(() => sub.held);
+  expect(child.stopSubtree('')).toBe(true);
+  expect(child.stopSubtree('')).toBe(false);
+  await rig.until(() => bgRows(first).length === 1);
+  await settled(rig);
+  expect(child.stopSubtree('')).toBe(false);
+  await wait(30);
+  expect(bgRows(first)).toHaveLength(1);
+  expect(rig.toasts).toEqual(['■ a stopped']);
+});
+
+test('stopped while delayed: no request is sent, the arm count and the timer are released, the row is delivered', async () => {
+  const model = new ScriptedModel();
+  const rig = attachedRig(model);
+  const first = rig.conv;
+  const child = scheduled(rig, spec('d', 'later'), first, 180_000);
+  expect(rig.registry.children.backgroundCount()).toBe(1);
+  expect(first.childTimers.size).toBe(1);
+  expect(child.stopSubtree('')).toBe(true);
+  await rig.until(() => bgRows(first).length === 1);
+  await settled(rig);
+  expect(rig.registry.children.backgroundCount()).toBe(0);
+  expect(first.childTimers.size).toBe(0);
+  expect(first.children.size).toBe(0);
+  expect(model.requests).toHaveLength(0);
+  expect(bgRows(first)).toEqual(['d stopped:\nstopped before it said anything']);
+  expect(rig.toasts).toEqual(['■ d stopped']);
+});
+
+test('stopped while queued for a slot: it leaves the queue at once, sends nothing, and the one running goes on', async () => {
+  const model = new ScriptedModel();
+  const one = subScript(model, 'one');
+  one.script([{ hold: true }, { text: 'one done' }]);
+  const two = subScript(model, 'two');
+  two.script([{ text: 'never sent' }]);
+  const rig = attachedRig(model, { backgroundFollowUp: false }, { sessions: { maxRunning: 2 } });
+  const first = rig.conv;
+  scheduled(rig, spec('a', 'one'));
+  const b = scheduled(rig, spec('b', 'two'));
+  await rig.until(() => one.held && rig.registry.children.backgroundCount() === 2);
+  expect(rig.registry.children.running()).toBe(1);
+  expect(b.stopSubtree('')).toBe(true);
+  // Its place in the queue is given up now, not when a slot frees.
+  expect(rig.registry.children.backgroundCount()).toBe(1);
+  await rig.until(() => bgRows(first).length === 1);
+  expect(bgRows(first)).toEqual(['b stopped:\nstopped before it said anything']);
+  one.release();
+  await rig.until(() => bgRows(first).length === 2);
+  await settled(rig);
+  expect(two.requests).toHaveLength(0);
+  expect(bgRows(first)[1]).toBe('a finished:\none done');
+});
+
+test('stopping a subagent closes the tasks it started: they deliver nothing, only it does', async () => {
+  const model = new ScriptedModel();
+  const sub = subScript(model, 'parent job');
+  sub.script([{ tool: 'subagent', args: { task: 'child job', label: 'g' } }], [{ hold: true }, { text: 'never' }]);
+  const g = model.when((req) => system(req).includes('Task: child job'));
+  g.script([{ hold: true }, { text: 'g done' }]);
+  const rig = attachedRig(model);
+  const first = rig.conv;
+  const s = scheduled(rig, spec('s', 'parent job'));
+  await rig.until(() => g.held && sub.held);
+  const [grandchild] = [...s.children];
+  expect(grandchild!.label).toBe('g');
+  expect(s.stopSubtree('')).toBe(true);
+  expect(grandchild!.closeReason).toBe('parent');
+  expect(s.children.size).toBe(0);
+  await rig.until(() => bgRows(first).length === 1);
+  await settled(rig);
+  g.release();
+  await wait(60);
+  expect(bgRows(first)).toEqual(['s stopped:\nstopped before it said anything']);
+  expect(rig.toasts).toEqual(['■ s stopped']);
+  expect(rig.log).toContain('[bg] g stopped with its conversation');
+  expect(g.requests).toHaveLength(1);
+});
+
+test('a child closed because its parent closes still delivers nothing', async () => {
+  const model = new ScriptedModel();
+  const sub = subScript(model, 'cleared');
+  sub.script([{ hold: true }, { text: 'never' }]);
+  const rig = attachedRig(model);
+  const first = rig.conv;
+  scheduled(rig, spec('c', 'cleared'));
+  await rig.until(() => sub.held);
+  first.close('clear');
+  await settled(rig);
+  expect(bgRows(first)).toEqual([]);
+  expect(rig.toasts).toEqual([]);
+  expect(first.endedChildren).toEqual([]);
+});
+
+test('the ended children are remembered as plain data, newest last, twenty at most, until /clear', async () => {
+  const model = new ScriptedModel();
+  const sub = model.when((req) => system(req).includes("The person's task:") && (req as { stream?: boolean }).stream === true);
+  sub.usage = { prompt_tokens: 40, completion_tokens: 2 };
+  sub.script(...Array.from({ length: 22 }, (_, i) => [{ text: `r${i}` }]));
+  const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
+  const first = rig.conv;
+  for (let i = 0; i < 22; i++) await startFrom(rig, spec(`c${i}`, `job ${i}`)).run();
+  const ended = first.endedChildren;
+  expect(ended).toHaveLength(20);
+  expect(ended.map((e) => e.label)).toEqual(Array.from({ length: 20 }, (_, i) => `c${i + 2}`));
+  expect(Object.keys(ended[0]!).sort()).toEqual(['kind', 'label', 'ms', 'outcome', 'tokens']);
+  expect(ended[0]).toMatchObject({ kind: 'subagent', outcome: 'answer', tokens: 42 });
+  expect(typeof ended[0]!.ms).toBe('number');
+  expect(() => JSON.stringify(ended)).not.toThrow();
+  first.close('clear');
+  expect(first.endedChildren).toEqual([]);
+});
+
+test('a stopped child is remembered with its outcome; one handed up is remembered where it settles', async () => {
+  const model = new ScriptedModel();
+  const sub = subScript(model, 'one');
+  sub.script([{ tool: 'subagent', args: { task: 'two', label: 'g', in: '3 minutes' } }], [{ text: 's done' }]);
+  const rig = attachedRig(model, { backgroundFollowUp: false });
+  const first = rig.conv;
+  const s = scheduled(rig, spec('s', 'one'));
+  await rig.until(() => s.closed && first.children.size === 1, 5_000);
+  const [g] = [...first.children];
+  expect(g!.parent).toBe(first);
+  g!.stopSubtree('');
+  await rig.until(() => first.endedChildren.length === 2, 5_000);
+  expect(first.endedChildren.map((e) => [e.label, e.kind, e.outcome])).toEqual([['s', 'subagent', 'answer'], ['g', 'task', 'stopped']]);
+  expect(s.endedChildren).toEqual([]);
+});
+
+test('the running children are listed with their status: working, queued for a slot, delayed', async () => {
+  const model = new ScriptedModel();
+  const one = subScript(model, 'one');
+  one.script([{ hold: true }, { text: 'x' }]);
+  const rig = attachedRig(model, { backgroundFollowUp: false }, { sessions: { maxRunning: 2 } });
+  const first = rig.conv;
+  scheduled(rig, spec('a', 'one'));
+  scheduled(rig, spec('b', 'two'));
+  const before = Date.now();
+  scheduled(rig, spec('c', 'three'), first, 120_000);
+  await rig.until(() => one.held);
+  const list = first.runningChildren();
+  expect(list.map((c) => [c.label, c.kind, c.status])).toEqual([['a', 'subagent', 'working'], ['b', 'subagent', 'queued'], ['c', 'subagent', 'delayed']]);
+  expect(list[0]!.startedAt).toBeGreaterThanOrEqual(before - 1_000);
+  expect(list[1]!.startedAt).toBeNull();
+  expect(list[2]!.until).toBeGreaterThanOrEqual(before + 119_000);
+  expect(list[0]!.until).toBeNull();
 });

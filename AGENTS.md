@@ -2894,9 +2894,16 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   `N in background` is `backgroundCount()`, over every conversation of the registry, so
   it counts the tasks of a session left by `/new` too (`/clear` stops the cleared
   session's own). A task's result says `stopped after N rounds — last: …` when its
-  twelve rounds ran out, and a `failed`/`stopped` end is reported as a failure — but for
-  a task stopped with its conversation or at exit (`stoppedWithParent`), which only the
-  log names: `[bg] <label> stopped with its conversation`, no toast, no row.
+  twelve rounds ran out, and a `failed` end is reported as a failure (`⚠ <label> failed:
+  …`). A child the person stopped (`stopSubtree`, below) says so in one line, `■ <label>
+  stopped`, and never also a `done` or `failed` toast; one stopped with its conversation
+  or at exit (`stoppedWithParent`) is named only by the log, `[bg] <label> stopped with
+  its conversation`: no toast, no row. `admit` hands back what gives a queued run's place
+  up again (true while it was still queued); `scheduleChild` keeps the child's place in
+  the schedule (`armed`, `queued` or `running`) and gives the child `leaveSchedule`, which
+  a stop before the run began calls: an armed child has its timer cleared and its count
+  disarmed, a queued one leaves the queue, and either is settled at once by its own run,
+  which sends nothing. It also sets `delayedUntil` for a delayed child.
 - **A conversation starts a child of its own** (`startChild(spec, journalId)`, in
   `src/assistant/conversation.ts`; a turn hands it to its tools as `ctx.startChild`, with
   the host's slots as `ctx.childSlots`): a `task` or `subagent` conversation (`ChildSpec.kind`;
@@ -2949,6 +2956,21 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   `outcome: 'stopped'` and `stoppedBy: 'clear'`) into the session's journal through its
   route's `raw` and delivers nothing (`stoppedWithParent`). `/new` closes nothing: the
   chat leaves the session through the registry's `retire`, and its tasks run on.
+  **`stopSubtree(glyph)` is the person's stop of one child and everything under it**: the
+  child's own turn is aborted (`stop`), or — before its run began — it leaves the schedule
+  (`leaveSchedule`); every child it started is closed with `'parent'` (they deliver
+  nothing); the child itself delivers once, `<label> stopped:` and the text it had
+  written (the last answer text of its rows; the steps of its tool-calling rounds are not
+  text it said), or `stopped before it said anything`, to the session as any result is.
+  That row is delivered quiet (`deliver(text, { quiet: true })`): it lands as a row and
+  starts no follow-up turn even with `ai.backgroundFollowUp` on and the session shown —
+  the person has just stopped the work. A second call, and a call on a closed child, do
+  nothing. **A conversation remembers its ended children** (`endedChildren`: label, kind,
+  outcome, `ms`, `tokens`, plain data, the last twenty, newest last) in the conversation
+  that holds the child when its result settles — after a hand-up, the one it was handed
+  to — not for one stopped with its conversation; `close('clear')` empties it.
+  `runningChildren()` lists the children still counted (label, kind, `working`, `queued`
+  or `delayed`, when its turn began, when its delay ends) for a view to read.
   `close('exit')` touches no child: at exit the registry's `closeAll` writes each child's
   end line (a task's `task-end` with `by: 'exit'`, a subagent's `subagent` end), clears and disarms every timer of a task still waiting
   on its delay, aborts every live conversation's turn (a session's `!command` or turn

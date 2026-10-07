@@ -23,42 +23,65 @@ export function scheduleChild(spec: ChildSpec, delayMs: number, deps: ChildSched
   // Refused past `ai.subagentDepth`: the refusal is returned, the caller words the answer.
   const started = deps.startChild(spec);
   if ('refused' in started) return { refused: started.refused };
+  // The run and what is said of its end: the log, the toast. Shared by the slot a run is
+  // admitted into and by a stop that takes a child out of the schedule before it began.
+  const settle = async (): Promise<void> => {
+    const failed = (msg: string) => {
+      deps.showMessage?.(`⚠ ${label} failed: ${msg}`);
+      deps.pushLog?.(`[bg] ${label} error: ${msg}`);
+    };
+    try {
+      const r = await started.run();
+      // Stopped with its conversation (`/clear`, or the exit): only the log says so.
+      if (r.stoppedWithParent) { deps.pushLog?.(`[bg] ${label} stopped with its conversation`); return; }
+      // Stopped by the person: one line, never also a result toast.
+      if (r.outcome === 'stopped') { deps.pushLog?.(`[bg] ${label} stopped`); deps.showMessage?.(`■ ${label} stopped`); return; }
+      if (r.outcome === 'failed') { failed(r.error ?? r.outcome); return; }
+      // The log says the result without its `<label> finished:` line.
+      deps.pushLog?.(`[bg] ${label}: ${childResultBody(r)}`);
+      // Landed nowhere (its conversation was closed first): nothing to point at.
+      const home = r.landedIn;
+      if (!home) return;
+      // The toast is the chat's: it names the session the result went to when that
+      // is not the one on screen.
+      const where = home.onScreen ? '' : home.title ? ` — in «${home.title}»` : ' — in an untitled session';
+      deps.showMessage?.(`⏳ ${label} done${where}`);
+    } catch (e) {
+      failed(e instanceof Error ? e.message : String(e));
+    } finally {
+      // The slot frees once this run settles; the notify waits a tick, so the
+      // chat's count it redraws has this task gone.
+      setTimeout(() => deps.notify?.(), 0);
+    }
+  };
+  // Where the child is in the schedule, for a stop that comes before its run begins.
+  let phase: 'armed' | 'queued' | 'running' = 'armed';
+  let dequeue: (() => boolean) | null = null;
   // Counted from the moment it is armed, so the chat's «N in background» shows a
   // task waiting on its delay too; a delayed task holds no slot. The timer runs even
   // with no delay: the turn that called this sends its next request first.
   const timer = setTimeout(() => {
     slots.disarm(timer);
     started.fired();
-    slots.admit(async () => {
-      const failed = (msg: string) => {
-        deps.showMessage?.(`⚠ ${label} failed: ${msg}`);
-        deps.pushLog?.(`[bg] ${label} error: ${msg}`);
-      };
-      try {
-        const r = await started.run();
-        // Stopped with its conversation (`/clear`, or the exit): only the log says so.
-        if (r.stoppedWithParent) { deps.pushLog?.(`[bg] ${label} stopped with its conversation`); return; }
-        if (r.outcome === 'failed' || r.outcome === 'stopped') { failed(r.error ?? r.outcome); return; }
-        // The log says the result without its `<label> finished:` line.
-        deps.pushLog?.(`[bg] ${label}: ${childResultBody(r)}`);
-        // Landed nowhere (its conversation was closed first): nothing to point at.
-        const home = r.landedIn;
-        if (!home) return;
-        // The toast is the chat's: it names the session the result went to when that
-        // is not the one on screen.
-        const where = home.onScreen ? '' : home.title ? ` — in «${home.title}»` : ' — in an untitled session';
-        deps.showMessage?.(`⏳ ${label} done${where}`);
-      } catch (e) {
-        failed(e instanceof Error ? e.message : String(e));
-      } finally {
-        // The slot frees once this run settles; the notify waits a tick, so the
-        // chat's count it redraws has this task gone.
-        setTimeout(() => deps.notify?.(), 0);
-      }
-    });
+    phase = 'queued';
+    dequeue = slots.admit(async () => { phase = 'running'; await settle(); });
   }, delayMs);
   started.armed(timer);
   slots.arm(timer);
+  // A stop before the run began takes the child out of the schedule — its timer cleared
+  // and its count disarmed, or its place in the queue given up — and settles it at once:
+  // its run sends nothing. false when it already runs.
+  started.child.delayedUntil = delayMs > 0 ? Date.now() + delayMs : null;
+  started.child.leaveSchedule = () => {
+    if (phase === 'armed') {
+      clearTimeout(timer);
+      slots.disarm(timer);
+      started.fired();
+    } else if (phase !== 'queued' || !dequeue?.()) return false;
+    phase = 'running';
+    void settle();
+    return true;
+  };
   deps.notify?.();
   return { child: started.child, label };
 }

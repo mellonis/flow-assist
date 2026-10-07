@@ -203,18 +203,27 @@ export interface ChildResult {
   ms?: number;
   tokens?: number;
 }
-// A child's result without its header line: the reason it failed, or its text and the
-// limit it stopped at.
+// What a stopped child says when it had said nothing yet.
+export const STOPPED_EMPTY = 'stopped before it said anything';
+// A child's result without its header line: the reason it failed, the text a stopped one
+// had written (or that it had written none), or its text and the limit it stopped at.
 export function childResultBody(r: ChildResult): string {
-  if (r.outcome === 'failed' || r.outcome === 'stopped') return r.error ?? r.outcome;
+  if (r.outcome === 'stopped') return r.text || STOPPED_EMPTY;
+  if (r.outcome === 'failed') return r.error ?? r.outcome;
   const lim = r.outcome === 'limit' && r.limit ? `\nstopped ${r.limit.by === 'tokens' ? 'at the token budget after' : 'after'} ${r.limit.rounds} rounds — last: ${r.limit.lastStep}` : '';
   return (r.text || '(no output)') + lim;
 }
-// A child's result as its session reads it: `<label> finished:` or `<label> failed:`,
-// then the body.
+// A child's result as its session reads it: `<label> finished:`, `<label> failed:` or
+// `<label> stopped:`, then the body.
 export function childResultText(label: string, r: ChildResult): string {
-  return `${label} ${r.outcome === 'failed' || r.outcome === 'stopped' ? 'failed' : 'finished'}:\n${childResultBody(r)}`;
+  return `${label} ${r.outcome === 'failed' ? 'failed' : r.outcome === 'stopped' ? 'stopped' : 'finished'}:\n${childResultBody(r)}`;
 }
+// What a conversation remembers of a child whose result is in: plain data, never the
+// conversation itself.
+export interface EndedChild { label: string; kind: ChildSpec['kind']; outcome: ChildResult['outcome']; ms: number; tokens: number }
+// A child still counted, as a listing reads it. `startedAt`: when its turn began (null
+// before); `until`: when its delay ends (null unless it is delayed).
+export interface RunningChild { label: string; kind: ChildSpec['kind']; status: 'working' | 'queued' | 'delayed'; startedAt: number | null; until: number | null }
 // What `startChild` hands back: a refusal said to the model, or the child, its run,
 // `armed`, which records the delay timer that will start it, and `fired`, which the
 // caller calls when that timer fires — so a stop disarms only a task still waiting on
