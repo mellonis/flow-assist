@@ -24,7 +24,7 @@ import { pickVerb, verbList } from './verbs.js';
 import type { ViewRecord } from './views.js';
 import type { ToolDef } from '../loader/tools.js';
 import { workspaceFor } from './workspace.js';
-import { asBackgroundWork, asConversationWork, asForegroundWork, workOwner } from '../runtime/background-work.js';
+import { asBackgroundWork, asConversationWork, asForegroundWork, outsideWork, workOwner } from '../runtime/background-work.js';
 import { callOf, childResultText, lastAnswerOf, type BusyKind, type ChatMsg, type ChildResult, type ChildSpec, type ChildStart, type CloseReason, type JournalRoute, type ConversationDeps, type ConversationEvent, type ConversationKind, type ConversationSnapshot, type ConversationStatus, type PendingConfirm, type Queued, type QueueWait, type SendOptions, type TurnEnd, type ViewPort } from './conversation-types.js';
 import {
   applySession, currentProject, ensureSessionId, journal, journaledChatLLM, journalTo, markSeen, persist, pushNote,
@@ -329,7 +329,9 @@ export class Conversation {
   }
   private tell(): void {
     this.tellSoon = false;
-    for (const listener of [...this.listeners]) listener();
+    // The listeners are the host's (the chat's store subscription): what they draw is
+    // nobody's work (src/runtime/background-work.ts).
+    outsideWork(() => { for (const listener of [...this.listeners]) listener(); });
   }
   private draw<K extends Drawn>(key: K, value: Conversation[K], now = false): void {
     if (Object.is(this[key], value)) return;
@@ -365,8 +367,10 @@ export class Conversation {
     set.add(f);
     return () => { set!.delete(f); };
   }
+  // The handlers are the host's (the chat's view, the registry): they run as nobody's
+  // work, like the listeners `tell` calls.
   emit(ev: ConversationEvent): void {
-    for (const fn of [...(this.handlers.get(ev.type) ?? [])]) fn(ev);
+    outsideWork(() => { for (const fn of [...(this.handlers.get(ev.type) ?? [])]) fn(ev); });
   }
   // Records the port; the end is seen when the port shows it.
   attach(port: ViewPort): void { this.port = port; this.keptDraft = ''; this.markSeen(); }

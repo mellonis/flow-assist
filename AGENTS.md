@@ -2714,7 +2714,18 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   turn. A plugin's tool called by a left session's turn posts into that session, not
   into the one on screen; with no owner (a plugin's own poller, a key), or with that
   session already closed, the message goes to the conversation on screen. The owner
-  outlives the turn in what a tool left running (a timer, a promise).
+  outlives the turn in what a tool left running (a timer, a promise), and ends where a
+  conversation hands control to the host — `outsideWork(fn)`
+  (`src/runtime/background-work.ts`) runs `fn` with no owner, the background mark left
+  as it is: around the store listeners `tell` calls, around every handler `emit` calls
+  (the chat's view, the registry's `track` and its park watch), and in the App's
+  `notify` (`src/runtime/app.tsx`), the one redraw every caller reaches — a
+  conversation's `deps.notify`, the registry's, a tool's `ctx.notify`. React schedules
+  its work in the context of whoever asked for it, so without that a render, a
+  component's effect and any timer it starts while a turn streams would read that
+  turn's session as their owner: a plugin's `host.open` from an effect refused as "not
+  on screen" while a left session streams, its note posted into that session. A
+  plugin's tool that sets its own component's state directly is outside this.
 - **A conversation has a kind** — `session` (the chat's), `task` (a background task's) or
   `oneshot` (the one-shot prompt's) — and a policy for its writes (`confirm-policy.ts`),
   both decided when it is made: `Conversation.fresh(deps, { kind, policy })` for a new one, which reads the

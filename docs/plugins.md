@@ -616,7 +616,9 @@ make('tutor', {
   the person were there. Nor does anything open from the turn of a session the
   person left while it works (`/new`, `/resume`): `Not opened: this session is not on
   screen — the person is in another one.`, and a screen that session had waiting is
-  dropped when it is left. Only a loaded plugin's screens open, and only while the person trusts it and has not disabled it; the host's
+  dropped when it is left. That is about the turn and what its tools start: your
+  component's renders and effects are never a session's work, whatever streams
+  meanwhile, so a screen opened from an effect opens as if the person asked. Only a loaded plugin's screens open, and only while the person trusts it and has not disabled it; the host's
   own panels — `:plugins`, `/mcp`, the session picker, the settings, the help, the log —
   never do. A screen that opens while the chat covers the plugin's side (a window, the
   whole terminal) is said to be behind the chat.

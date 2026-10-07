@@ -73,6 +73,7 @@ import { redactDeep } from '../assistant/secrets.js';
 import { isRemotePlugin, stopRemotePlugin } from '../remote/index.js';
 import { UntrustedPluginError } from '../loader/build.js';
 import { createScreens } from './screens.js';
+import { outsideWork } from './background-work.js';
 import { FOOTER_ROWS, TITLE_ROWS, chatModeOf, panelLayout, type ChatMode, type PanelLayout } from './panel-layout.js';
 
 // The host's own plugins: they ARE the host, so the start screen does not list them
@@ -546,7 +547,10 @@ export function renderApp(
     const [, setTick] = useState(0);
     const toast = useToast(toastMs);
     const app = useApp();
-    const notify = () => setTick((t) => t + 1);
+    // A redraw is asked from inside a turn too — a conversation's, a tool's — and what
+    // React then renders, a plugin's component and its effects included, is nobody's
+    // work (./background-work.ts).
+    const notify = () => outsideWork(() => setTick((t) => t + 1));
     // The terminal switched between light and dark (macOS does it by itself at
     // sunset and sunrise): lay the other scheme's palette into the SAME theme object
     // — a plugin may hold a reference to it — before anything below renders with it.

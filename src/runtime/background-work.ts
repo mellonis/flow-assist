@@ -10,6 +10,9 @@
 //   it was called in. What belongs to a session rather than to the screen (a screen it
 //   opens, a message a plugin posts) asks `workOwner()`.
 // Both outlive the turn in whatever it left running (a timer a plugin's tool started).
+// The owner ends where a conversation hands control to the host (`outsideWork`): what
+// the app draws while a turn streams, and what a component starts from there, is
+// nobody's work.
 import { AsyncLocalStorage } from 'node:async_hooks';
 
 const work = new AsyncLocalStorage<boolean>();
@@ -30,6 +33,11 @@ const owner = new AsyncLocalStorage<WorkOwner>();
 // Runs `fn` as `o`'s work: everything it awaits reads `workOwner()` as `o`.
 export const asConversationWork = <T>(o: WorkOwner, fn: () => T): T => owner.run(o, fn);
 export const workOwner = (): WorkOwner | undefined => owner.getStore();
+// Runs `fn` as nobody's work: where a conversation hands control to the host — a redraw,
+// its listeners — what the host does next, and whatever that starts (a render, an
+// effect, a timer of a plugin's component), is not the turn's. The background mark
+// stays: a follow-up turn a task's result starts reads it until its own `send`.
+export const outsideWork = <T>(fn: () => T): T => owner.exit(fn);
 // A session's work while no view draws it — the person is in another one. Asked at the
 // call, not at the turn's start: a turn may be left, or taken back, midway.
 export const inUnattachedWork = (): boolean => { const o = owner.getStore(); return !!o && o.kind === 'session' && !o.attached; };

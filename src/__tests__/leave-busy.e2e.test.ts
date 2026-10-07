@@ -5,6 +5,7 @@ import { afterEach, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { workHome } from '../assistant/conversation.ts';
 import { readJournal, type JournalEvent } from '../assistant/journal.ts';
 import { acceptedConfigPath, guardConfigFiles, hostStateDir, loadConfig, resetSessionConfig, unguardConfigFiles } from '../config/load.ts';
 import { ScriptedModel, bootApp, firstUser, settle } from './helpers/scripted';
@@ -448,5 +449,87 @@ test('what a left turn\'s tool left waiting posts into that session while it is 
   await settleUntil(() => frameOf(ui).includes('Read it.'));
   expect(frameOf(ui)).toContain('late from A');
   expect(JSON.stringify(saved(dir, 'session A question')!.messages)).not.toContain('late from A');
+  ui.app.unmount();
+});
+
+// A guest that is always mounted: while `on`, each render and each effect of its component
+// records the session whose work it reads itself to be, and its first effect opens its
+// own screen through `host.open`.
+const whose = () => (workHome() ? 'a session' : null);
+type WatchState = { host: any; on: boolean; renders: unknown[]; effects: unknown[]; opens: string[]; opened: number };
+const watch = (state: WatchState) => (make: import('../loader/plugin.ts').Make) => [make('watch', {
+  description: 'a watcher',
+  setup: (api: any) => { state.host = api.host; },
+  screens: { main: { entry: true, title: 'main', open: () => { state.opened++; } } },
+  aiTools: [{
+    type: 'function', function: { name: 'toast_it', description: 'Says it in a toast.', parameters: { type: 'object', properties: {} } },
+    run: async (_args: unknown, ctx: { showMessage: (text: string) => void }) => {
+      ctx.showMessage('said by the tool');
+      // The call is still running: what is drawn meanwhile is not its end's redraw.
+      await new Promise((r) => setTimeout(r, 60));
+      return 'said';
+    },
+  }],
+  components: {
+    furniture: (api: any) => function Furniture() {
+      if (state.on) state.renders.push(whose());
+      api.ui.useEffect(() => {
+        if (!state.on) return;
+        if (!state.effects.length) void state.host.open('main').then((r: { text: string }) => { state.opens.push(r.text); });
+        state.effects.push(whose());
+      });
+      return null;
+    },
+  },
+} as never)];
+
+test('what the app draws while a left turn streams is nobody\'s work: a plugin\'s effect reads no session, and opens its own screen', async () => {
+  const dir = dirOf();
+  const state: WatchState = { host: null, on: false, renders: [], effects: [], opens: [], opened: 0 };
+  const model = new ScriptedModel();
+  const aSub = model.when((req) => firstUser(req).includes('session A question'));
+  aSub.script([{ hold: true }, { text: 'Next: the time.' }, { tool: 'datetime', args: {} }], [{ hold: true }, { text: 'A final answer.' }]);
+  const ui = await bootApp(model, 100, 28, watch(state) as never, { sessions: { dir } }, { toastMs: 10_000 });
+  await ui.press('F');
+  await ask(ui, 'session A question');
+  await settleUntil(() => aSub.held && !!saved(dir, 'session A question'));
+  const idA = saved(dir, 'session A question')!.id;
+  await ask(ui, '/new');
+  await settle(4);
+  // A's round streams, calls its tool and asks again, left; the app redraws meanwhile.
+  state.on = true;
+  aSub.release();
+  await settleUntil(() => aSub.held && aSub.requests.length === 2 && state.effects.length > 0 && state.opens.length > 0);
+  await settle(10);
+  state.on = false;
+  expect(state.effects.length).toBeGreaterThan(0);
+  expect(state.effects.filter((home) => home !== null)).toEqual([]);
+  expect(state.renders.filter((home) => home !== null)).toEqual([]);
+  expect(state.opens).toHaveLength(1);
+  expect(state.opens[0]).toContain('Opened watch:main');
+  expect(state.opened).toBe(1);
+  aSub.release();
+  await settleUntil(() => !fs.existsSync(lockOf(dir, idA)));
+  ui.app.unmount();
+});
+
+test('what the app draws while the turn on screen streams is nobody\'s work either', async () => {
+  const state: WatchState = { host: null, on: false, renders: [], effects: [], opens: [], opened: 0 };
+  const model = new ScriptedModel();
+  model.script([{ hold: true }, { text: 'Next: a toast.' }, { tool: 'toast_it', args: {} }], [{ hold: true }, { text: 'The answer, in a few words more than one chunk holds.' }]);
+  const ui = await bootApp(model, 100, 28, watch(state) as never, { sessions: { dir: dirOf() } }, { toastMs: 10_000 });
+  await ui.press('F');
+  await ask(ui, 'a question');
+  await settleUntil(() => model.held);
+  state.on = true;
+  model.release();
+  await settleUntil(() => model.held && model.requests.length === 2 && frameOf(ui).includes('said by the tool'));
+  model.release();
+  await settleUntil(() => frameOf(ui).includes('more than one chunk holds.') && state.opens.length > 0);
+  await settle(10);
+  state.on = false;
+  expect(state.effects.length).toBeGreaterThan(0);
+  expect(state.effects.filter((home) => home !== null)).toEqual([]);
+  expect(state.renders.filter((home) => home !== null)).toEqual([]);
   ui.app.unmount();
 });

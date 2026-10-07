@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { workHome, type Conversation } from '../assistant/conversation.ts';
 import type { Make } from '../loader/plugin.ts';
-import { inBackgroundWork } from '../runtime/background-work.ts';
+import { inBackgroundWork, workOwner } from '../runtime/background-work.ts';
 import { createScreens } from '../runtime/screens.ts';
 import { ScriptedModel, firstUser, type RecordedRequest } from './helpers/scripted';
 import { closeRigs, conversationRig, FakePort, type Rig } from './helpers/conversation';
@@ -623,4 +623,41 @@ test('a settings file answered is free at once, though its asker still asks abou
   a.answerConfirm(true);
   await tick();
   expect(guard.answered).toEqual(['apply f1.json', 'apply f1.json', 'apply f2.json']);
+});
+
+test('a conversation\'s listeners and handlers run as nobody\'s work; a tool of the same turn as the turn\'s', async () => {
+  const told: unknown[] = [];
+  const heard: unknown[] = [];
+  const called: unknown[] = [];
+  const model = new ScriptedModel();
+  model.script([{ text: 'Next: a look.' }, { tool: 'look', args: {} }], [{ text: 'Looked.' }]);
+  const rig = conversationRig(model, { guests: (make) => [probeTool('look', () => { called.push(workOwner()); })(make)] });
+  const c = rig.conv;
+  c.subscribe(() => { told.push(workOwner()); });
+  for (const type of ['turn-start', 'activity', 'turn-end'] as const) c.on(type, () => { heard.push(workOwner()); });
+  await c.send('look');
+  await rig.idle();
+  expect(called).toEqual([c]);
+  expect(told.length).toBeGreaterThan(2);
+  expect(told.filter((o) => o !== undefined)).toEqual([]);
+  expect(heard.length).toBeGreaterThan(1);
+  expect(heard.filter((o) => o !== undefined)).toEqual([]);
+});
+
+test('a handler that hears a grandchild\'s end is nobody\'s work, and the background mark of the run it comes from stays', async () => {
+  const heard: { owner: unknown; background: boolean }[] = [];
+  const model = new ScriptedModel();
+  model.script([{ tool: 'background', args: { task: 'one', label: 'a' } }], [{ text: 'Started.' }]);
+  model.when((req) => isTask(req, 'one')).script([{ tool: 'background', args: { task: 'two', label: 'b' } }], [{ text: 'a done' }]);
+  const two = model.when((req) => isTask(req, 'two'));
+  two.script([{ hold: true }, { text: 'b done' }]);
+  const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
+  const first = rig.conv;
+  await first.send('go');
+  await rig.until(() => two.held && first.children.size === 1 && !first.busy, 5000);
+  first.on('children', () => { heard.push({ owner: workOwner(), background: inBackgroundWork() }); });
+  two.release();
+  await rig.until(() => rig.registry.children.backgroundCount() === 0 && heard.length === 1, 5000);
+  // `b` was started from task `a`'s turn: its run, and the event it ends with, carry that mark.
+  expect(heard).toEqual([{ owner: undefined, background: true }]);
 });
