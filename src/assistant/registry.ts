@@ -298,13 +298,13 @@ export class ConversationRegistry {
     for (const c of this.convs) if (!c.closed && c.kind === 'session' && c.headless && c.busy) n++;
     return n;
   }
-  // What the person is owed by sessions other than `except` (the one on screen): the live
-  // ones left on a y/n or a question, and the ones put away unread (a session on screen is
-  // never among those: every way onto the screen forgets it first).
-  attention(except?: Conversation): { waiting: number; done: number } {
+  // What the person is owed by the sessions they are not in: the live ones left on a y/n
+  // or a question, and the ones put away unread. The session on screen is in neither: it
+  // is not `headless`, and every way onto the screen forgets its id first.
+  attention(): { waiting: number; done: number } {
     let waiting = 0;
     for (const c of this.convs) {
-      if (c === except || c.closed || c.kind !== 'session' || !c.headless) continue;
+      if (c.closed || c.kind !== 'session' || !c.headless) continue;
       if (this.statusOf(c.sessionId) === 'waiting') waiting++;
     }
     return { waiting, done: this.unseen.size };

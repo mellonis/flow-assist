@@ -73,7 +73,6 @@ test('the session on screen is never counted', async () => {
   await rig.until(() => !!rig.pendingIn(rig.conv));
   expect(rig.registry.statusOf(rig.conv.sessionId)).toBe('waiting');
   expect(rig.registry.attention()).toEqual({ waiting: 0, done: 0 });
-  expect(rig.registry.attention(rig.conv)).toEqual({ waiting: 0, done: 0 });
 });
 
 test('a session left while idle and already read adds nothing', async () => {

@@ -1898,7 +1898,7 @@ hold this set together:
   chat's end — its own turn's status only (working, waiting, done or nothing), never
   its tasks': those show in the footer's `N in background`. **The other sessions** show
   on the chat's hint row as `⏸ N` (left on a y/n or a question) and `● N` (put away with
-  an answer nobody read; `registry.attention(conv)`), a zero part omitted and nothing
+  an answer nobody read; `registry.attention()`), a zero part omitted and nothing
   drawn when both are zero. They sit in the hint row's always-kept sibling cell beside the
   auto and context badges, never in its left cell, which is cut from the right and
   replaced whole while a turn streams, while Esc is armed and in shell-cwd mode. The
@@ -2838,12 +2838,13 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   turn; the chat's `N in background` is `children.backgroundCount()` (tasks, unchanged)
   plus it, and `track` redraws on a headless session's `turn-end` (whether it is put away
   stays the watch's).
-  **What the person is owed** (`attention(except?)`, `forget(id)`): the registry keeps
+  **What the person is owed** (`attention()`, `forget(id)`): the registry keeps
   the ids of sessions it put away while their status read `done`, read after the inbox
   landed and added only once the save, the release and the close went through (a park
-  that throws adds nothing). `attention(except)` is `{ waiting, done }`: `waiting` counts
+  that throws adds nothing). `attention()` is `{ waiting, done }`: `waiting` counts
   the live `session` conversations that are `headless` and read `waiting` (`statusOf`),
-  `done` the remembered ids; `except` — the session on screen — is left out of `waiting`.
+  `done` the remembered ids; the session on screen is in neither — it is not `headless`,
+  and every way onto the screen forgets its id first.
   A `session` that was `headless` when it was parked (read on entering `park`: `retire`
   parks a session at rest before it sets `headless`, so one left at rest is counted and
   announced by nobody) and is added says so once, by a toast only and no alert
