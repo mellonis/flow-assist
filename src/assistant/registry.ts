@@ -264,7 +264,8 @@ export class ConversationRegistry {
     // Only a park that went through remembers it; one that threw leaves the session live.
     if (unread && c.sessionId) {
       this.unseen.add(c.sessionId);
-      if (left) this.finishedSaid(c);
+      // A task's result that landed is already named by its own toast, which says where.
+      if (left && c.messages.findLast((m) => m.role === 'assistant' || m.role === 'bg')?.role === 'assistant') this.finishedSaid(c);
     }
     this.notifyChange();
   }

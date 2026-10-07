@@ -322,3 +322,18 @@ test('the missing-memory note is said once in a session left, and again on scree
     fs.writeFileSync(memoryTrustPath(), record);
   }
 });
+
+test('a left session whose unread thing is a task\'s result is counted but not announced (the result has its own toast)', async () => {
+  const { sub, rig } = await heldTurn();
+  const { left: a } = rig.switchTo();
+  const task = {} as Conversation;
+  a.children.add(task); // keeps it loaded when its own turn ends
+  sub.release();
+  await rig.until(() => !a.busy);
+  a.deliver('job finished:\nok'); // lands as a row after the answer
+  a.children.delete(task);
+  a.emit({ type: 'children', count: 0 });
+  await rig.until(() => a.closed);
+  expect(rig.registry.attention().done).toBe(1);
+  expect(finished(rig)).toEqual([]);
+});

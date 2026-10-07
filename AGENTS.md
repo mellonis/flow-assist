@@ -2839,8 +2839,9 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   parks a session at rest before it sets `headless`, so one left at rest is counted and
   announced by nobody) and is added says so once, by a toast only and no alert
   (`● «<title>» finished — its answer is unread`, `an untitled session` with no title),
-  named as `movedToWaiting` names it, and only after the park went through; never from
-  `closeAll`.
+  named as `movedToWaiting` names it, only after the park went through, only when the
+  unread thing is the session's own answer (a task's result has its toast, which says where),
+  and never from `closeAll`.
   `forget(id)` drops one and redraws only when it dropped something; `reclaim` and
   `restore` call it for their conversation, so a session opened here is never owed. The set
   is memory only: it does not outlive the process, and the picker's own `done` stays the
