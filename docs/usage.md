@@ -40,7 +40,9 @@ left whose answer you have not read (nothing when there are none; the session yo
 is never counted; the count is lost on a restart, the picker's `done` is not). Tab shows
 every session, grouped under each project's path. Type to filter by the title
 or by any word of the conversation; ⏎ opens one (the session you are in is saved first;
-a `here` one is taken back as you left it: draft, unfolded blocks, notes mode, place in the list and the caret in the draft), Ctrl+N starts a new one,
+a `here` one is taken back as you left it: its draft with the caret, unfolded blocks,
+notes mode and place in the list; one already put away opens as any saved session does,
+folded and at the end), Ctrl+N starts a new one,
 Ctrl+R renames, Ctrl+P moves it into the current project (its file and journal with it),
 Ctrl+X deletes after a y/n.
 A session open in another process can be neither opened, renamed, moved nor deleted

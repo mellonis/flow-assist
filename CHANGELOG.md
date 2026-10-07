@@ -82,6 +82,15 @@ What each version of flow-assist brought, newest first. The version is the one i
   limits: with the chat folded away there is no hint row, so the toasts (and the alert of a
   session that waits) are the only signals; and the `●` count does not survive a restart —
   the picker's `done`, read from the files, does.
+- **A session taken back while it is still open here keeps its view.** A session you left
+  while it works or waits (`here · working`, `here · waiting`) now comes back through the
+  picker's ⏎ or `/resume <n>` with its unfolded blocks and its notes mode as you left them,
+  at the line you were reading — still the same line when rows arrived meanwhile — or at
+  the end if you were there, and with the caret where it stood in your draft; before, it
+  came back folded and at the end. **Limits:** a session that was put away while you were
+  elsewhere comes back as any saved session does, folded and at the end, since none of this
+  is saved in its file; and a draft that grew while you were away — a stopped or failed turn
+  puts its queued messages ahead of it — comes back with the caret at its end.
 - **What a turn calls belongs to its session, not to whatever is on screen.** A settings
   file changed outside flow-assist is asked about in one session at a time: while a
   session you left holds that y/n, the one on screen does not ask it too, and a change
