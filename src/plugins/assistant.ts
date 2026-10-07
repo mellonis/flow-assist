@@ -1016,6 +1016,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // The session opens into a conversation of its own; the one left is parked, or
             // kept loaded while it works or waits.
             leave(prev);
+            registryRef.current!.forget(id); // opened here: not owed any more
             const next = registryRef.current!.create({ turn: prev.turn, verb: prev.verb, drawnRows: prev.drawnRows });
             adopt(next);
             next.applySession(s, fp, dir); applySessionView(s);
@@ -1028,6 +1029,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // registry says it is doing (`working` while it runs). It reads through refs
           // only, so the listener below, bound once, reads what is current.
           const pickerRows = (): SessionRow[] => sessionRows(sessDirRef.current!, registryRef.current!.lockToken).map((r) => {
+            // A session put away unread that another process holds now, or whose file reads
+            // read, is no longer owed here (`forget` redraws only when it dropped one).
+            if (r.lock === 'held' || (r.lock === 'free' && r.status !== 'done')) registryRef.current!.forget(r.id);
             if (r.lock !== 'ours' || r.id === convRef.current!.sessionId) return r;
             const status = registryRef.current!.statusOf(r.id);
             return status ? { ...r, lock: 'here', status } : r;
@@ -1101,7 +1105,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               }
               case 'delete': {
                 const done = removeSession(dirOf(a.id), a.id, lockToken);
-                if (done === 'deleted') dropEmptyDirs(dirOf(a.id), sessDir); // a project's last one
+                if (done === 'deleted') { registryRef.current!.forget(a.id); dropEmptyDirs(dirOf(a.id), sessDir); } // a project's last one
                 const notice = done === 'deleted' ? `Deleted «${titleOf(a.id)}»`
                   : done === 'held' ? `"${titleOf(a.id)}" is open in another flow-assist process — it cannot be deleted`
                   : a.id !== conv.sessionId ? `"${titleOf(a.id)}" is still open here — it cannot be deleted until it is put away`
@@ -1118,6 +1122,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 const dest = conv.currentProject();
                 const outcome = moveSessionToProject(from, a.id, sessDir, dest, lockToken);
                 if (outcome === 'moved') {
+                  registryRef.current!.forget(a.id);
                   dropEmptyDirs(from, sessDir); // the project's last session there, its mirror dir too
                   // A background task, or a fork, still writing to this id by its OLD home
                   // would otherwise miss it (AGENTS.md, "sessions per project" — `conv.homes`).
@@ -2134,6 +2139,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // notifies when one is armed and when it ends), and the turns of sessions
             // left running (`leftRunning`, redrawn by the registry when one ends).
             bgCount: registryRef.current!.children.backgroundCount() + registryRef.current!.leftRunning(),
+            // The other sessions that wait for an answer or were put away unread: the
+            // one on screen never counts itself.
+            waitingElsewhere: registryRef.current!.attention(conv).waiting,
+            unreadElsewhere: registryRef.current!.attention(conv).done,
             ...(() => {
               const r = conv.contextReading(screen);
               // How many of the history's items go as stubs now — after /compact the

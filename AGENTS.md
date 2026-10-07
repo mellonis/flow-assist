@@ -1896,7 +1896,17 @@ hold this set together:
   `this chat`). This chat's own row is its conversation's `status`, so it reads
   `this chat · done` when an answer or a result came while the picker covered the
   chat's end — its own turn's status only (working, waiting, done or nothing), never
-  its tasks': those show in the footer's `N in background`. **A session held here** —
+  its tasks': those show in the footer's `N in background`. **The other sessions** show
+  on the chat's hint row as `⏸ N` (left on a y/n or a question) and `● N` (put away with
+  an answer nobody read; `registry.attention(conv)`), a zero part omitted and nothing
+  drawn when both are zero. They sit in the hint row's always-kept sibling cell beside the
+  auto and context badges, never in its left cell, which is cut from the right and
+  replaced whole while a turn streams, while Esc is armed and in shell-cwd mode. The
+  session on screen never counts, covered by a picker or not. The unread set (not the
+  picker's `done`, which is the file's) is dropped when a session is opened here
+  (`reclaim`, `restore`, `openFromFile`), deleted or moved from the picker, and by a
+  picker read that finds its row held by another process or already read. **A session
+  held here** —
   left by `/new` or a switch while its background tasks run (the registry keeps it
   loaded and locked until they end) —
   reads `ours` from its lock; the chat marks it `here` (a `LockState` `lockState`

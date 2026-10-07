@@ -1501,6 +1501,8 @@ export function renderChatModal({
   onViewFail,
   completion = null,
   bgCount = 0,
+  waitingElsewhere = 0,
+  unreadElsewhere = 0,
   contextBadge = '',
   contextWarn = false,
   contextPanel = null,
@@ -1615,6 +1617,10 @@ export function renderChatModal({
   onViewFail?: (kind: string, why: string) => void;
   completion?: Completion | null;
   bgCount?: number;
+  // Other sessions of this host that wait for an answer (`⏸`) and ones put away with an
+  // answer nobody read (`●`), drawn beside the badges, which no state of the hint hides.
+  waitingElsewhere?: number;
+  unreadElsewhere?: number;
   // `ctx 12%` (assistant/context-meter.ts); yellow once it is time to /compact.
   contextBadge?: string;
   contextWarn?: boolean;
@@ -1801,6 +1807,9 @@ export function renderChatModal({
                   imagesOn && `${CAP.image} image`, `${CAP.auto} auto`, bgCount > 0 && `${bgCount} in background`].filter(Boolean).join(' · ')))),
       // A sibling of the hint, not part of it: the left cell is the hint OR the status
       // of a running turn, and the mode has to stay on screen through both.
+      waitingElsewhere > 0 || unreadElsewhere > 0 ? h(Text, { wrap: 'truncate' },
+        waitingElsewhere > 0 ? h(Text, { color: m.warn }, `  ⏸ ${waitingElsewhere}`) : null,
+        unreadElsewhere > 0 ? h(Text, { color: m.assistantAccent ?? 'green' }, `  ● ${unreadElsewhere}`) : null) : null,
       autoBadge(autoMode, autoRun) ? h(Text, { color: m.warn, bold: true }, `  ${autoBadge(autoMode, autoRun)}`) : null,
       contextBadge ? h(Text, contextWarn ? { color: 'yellow' } : { dim: true }, `  ${contextBadge}`) : null),
       // The task plan sits ABOVE the input (not above the messages) — the newest
