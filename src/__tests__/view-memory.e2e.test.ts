@@ -145,3 +145,77 @@ test('an entry shares no exception set with the live folds: a click made after i
   expect([...entry.folds.except]).toEqual(['1:calls']);
   expect(allFolded().except.size).toBe(0);
 });
+
+// ─── The place in the list ────────────────────────────────────────────────────
+// A: a turn with a tool call (its block opened by a click, so the rows above the place
+// are laid out with the restored folds) and, in a later turn, thirty remarks, then a second turn held on
+// its first step. `scrolled` pages up first. A is left by `/new`; while it is away its
+// held step goes on and lands a tool call in it.
+const REMARKS = Array.from({ length: 30 }, (_, i) => `Remark number ${i + 1}.`).join('\n\n');
+const topRemark = (ui: UI) => Number(/Remark number (\d+)\./.exec(frameOf(ui))?.[1] ?? NaN);
+async function leftInPlace(scrolled: boolean) {
+  const model = new ScriptedModel();
+  const aSub = model.when((req) => firstUser(req).includes('session A question'));
+  aSub.script(
+    [{ tool: 'datetime', args: {} }],
+    [{ text: 'A first.' }],
+    [{ text: REMARKS }],
+    [{ hold: true }, { tool: 'datetime', args: {} }],
+    [{ hold: true }, { text: 'Closing words.' }],
+  );
+  model.script([{ text: 'B answer.' }]);
+  const ui = await bootApp(model, 100, 24, undefined, { sessions: { dir: dirOf() } }, { toastMs: 10_000 });
+  await ui.press('F');
+  await ask(ui, 'session A question');
+  await settleUntil(() => frameOf(ui).includes('A first.'));
+  await settle(6);
+  await ask(ui, 'session A remarks');
+  await settleUntil(() => frameOf(ui).includes('Remark number 30.'));
+  await settle(6);
+  await ask(ui, 'session A again');
+  await settleUntil(() => aSub.held);
+  if (scrolled) {
+    for (let i = 0; i < 40 && rowOf(ui, '1 tool: datetime') < 0; i++) await ui.press('pageup');
+    await click(ui, rowOf(ui, '1 tool: datetime'));
+    expect(frameOf(ui)).toMatch(OPEN);
+    for (let i = 0; i < 2; i++) await ui.press('pagedown');
+    await settle(6);
+  }
+  const before = topRemark(ui);
+  const line = rowOf(ui, `Remark number ${before}.`);
+  await ask(ui, '/new');
+  await settle(4);
+  await ask(ui, 'session B question');
+  await settleUntil(() => frameOf(ui).includes('B answer.'));
+  await settle(4);
+  // Rows reach A while it is away.
+  aSub.release();
+  await settleUntil(() => aSub.held);
+  await settle(10);
+  return { ui, aSub, before, line };
+}
+
+test('a session left scrolled up comes back at the same line, though rows arrived while it was away', async () => {
+  const { ui, aSub, before, line } = await leftInPlace(true);
+  expect(before).toBeLessThan(30);
+  await pick(ui, 'session A question');
+  expect(frameOf(ui)).toContain('Resumed «session A question»');
+  // The very row, not only the remark: the opened block above it is a row or two.
+  expect(topRemark(ui)).toBe(before);
+  expect(rowOf(ui, `Remark number ${before}.`)).toBe(line);
+  expect(frameOf(ui)).not.toContain('Remark number 30.');
+  aSub.release();
+  await settle(6);
+  ui.app.unmount();
+});
+
+test('a session left at its end comes back at its end, and follows what arrives next', async () => {
+  const { ui, aSub } = await leftInPlace(false);
+  await pick(ui, 'session A question');
+  expect(frameOf(ui)).toContain('Resumed «session A question»');
+  expect(frameOf(ui)).toMatch(/1 tool: datetime/);
+  aSub.release();
+  await settleUntil(() => frameOf(ui).includes('Closing words.'));
+  expect(frameOf(ui)).toContain('Closing words.');
+  ui.app.unmount();
+});

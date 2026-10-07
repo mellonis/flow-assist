@@ -1477,6 +1477,7 @@ export function renderChatModal({
   detailsKey = '^o',
   onViewport,
   scrollTo = null,
+  listKey,
   cursor = 0,
   escArmed = false,
   armedHint = '',
@@ -1555,6 +1556,9 @@ export function renderChatModal({
   // Put this row at the top of the conversation once the rows have changed — under
   // the pin (`pin: true`, opening a block) or at the literal row (closing one).
   scrollTo?: { row: number; n: number; pin?: boolean } | null;
+  // Names the conversation the list shows: another one is another list, with its own
+  // scroll and following state, starting at its end.
+  listKey?: string;
   cursor?: number;
   escArmed?: boolean;
   // An armed Ctrl+C / Ctrl+D / Ctrl+Z says so (`^c again to exit`) where Esc's arm is
@@ -1743,7 +1747,7 @@ export function renderChatModal({
       },
       // Under the pager the conversation is not drawn and hears no key: PgUp/PgDn and
       // the wheel are the pager's, and the conversation stays where it was left.
-      h(ChatMessages, { messages, rowOpts: { wrap, folds, viewLines, notes, detailsKey, renderers: viewRenderers, now, palette: m, onViewFail }, palette: m, errorColor: theme?.error, onViewport, scrollTo, keysActive: focused && !pager, wheel, toEnd, hidden: !!pager, streaming, hover }),
+      h(ChatMessages, { key: listKey, messages, rowOpts: { wrap, folds, viewLines, notes, detailsKey, renderers: viewRenderers, now, palette: m, onViewFail }, palette: m, errorColor: theme?.error, onViewport, scrollTo, keysActive: focused && !pager, wheel, toEnd, hidden: !!pager, streaming, hover }),
       // The pager, in the conversation's place: the block's rows at the conversation's
       // width, with a scroll of their own.
       pager

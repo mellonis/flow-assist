@@ -753,9 +753,15 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // notes mode and everything folded. The pager is closed either way.
           const restoreView = (of?: Conversation) => {
             const m = of ? viewMemory.current!.get(of) : undefined;
-            if (m) {
+            // Whatever the list was asked for belongs to the list it was asked of: a list
+            // is made for each conversation (`listKey`), and starts at its end.
+            setScrollTo(null);
+            if (m && of) {
               setNotes(m.notes);
-              setFolds(recalledFolds(m));
+              const folds = recalledFolds(m);
+              setFolds(folds);
+              // After the folds: the row counts what is laid out with them.
+              if (m.place) askScroll(anchorRow(of.messages as Parameters<typeof chatRows>[0], rowOpts(folds), m.place));
             } else {
               setNotes(configNotes()); // its own answer to how the steps are drawn
               setFolds(allFolded()); // and the exceptions pointed into a conversation that is gone
@@ -1173,7 +1179,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             memoryShownRef.current = null;
             if (contextOpenRef.current) setContextOpen(false);
             // Before `detach`: the folds and notes mode still describe `prev`.
-            viewMemory.current!.set(prev, rememberView(foldsRef.current, notesRef.current));
+            viewMemory.current!.set(prev, rememberView(foldsRef.current, notesRef.current, viewportRef.current && !viewportRef.current.atEnd ? rowAnchor(drawn(), rowOpts(foldsRef.current), viewportRef.current.scrollTop) : null));
             prev.detach(portRef.current!);
             registryRef.current!.retire(prev);
           };
@@ -2080,6 +2086,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             detailsKey: firstGlyph(host.keys.details),
             onViewport: (v: Viewport) => { viewportRef.current = v; },
             scrollTo,
+            listKey: conv.key,
             bangLevel,
             // Where `!` / `!!` will run, for the hint row in shell mode — read only
             // there, since `cwd()` checks the directory against the roots on disk.
