@@ -24,7 +24,7 @@ test('assembles built-in core + host + plugin groups, deduped by name', () => {
   expect(names).toContain('config_schema');
   expect(names).toContain('datetime');
   expect(names).toContain('remind');
-  expect(names).toContain('background');
+  expect(names).toContain('subagent');
   expect(names).toContain('todo');
   expect(names).toContain('host:plugins_list');
   expect(names).toContain('host:plugins_update');
@@ -245,14 +245,14 @@ test('todo clear empties the plan', async () => {
 test('background requires a task', async () => {
   const make = makeFactory({});
   const reg = assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
-  const out = await reg.exec('background', {}, {});
+  const out = await reg.exec('subagent', {}, {});
   expect(out).toContain('task is required');
 });
 
 test('background is unavailable where no conversation hands startChild', async () => {
   const make = makeFactory({});
   const reg = assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
-  const out = await reg.exec('background', { task: 'do it' }, {});
+  const out = await reg.exec('subagent', { task: 'do it' }, {});
   expect(out).toBe('Background tasks unavailable: no conversation to run them in (the host must be interactive).');
 });
 
@@ -317,7 +317,7 @@ test('a plugin tool\'s maxResultChars never reaches the wire-facing tool def', (
 
 test('background\'s description promises only what the default keeps: the results land after the turn, and one turn reads them', () => {
   const reg = assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
-  const desc = reg.tools.find((t) => t.function.name === 'background')!.function.description;
+  const desc = reg.tools.find((t) => t.function.name === 'subagent')!.function.description;
   // By default a turn follows once the results have landed — one for all that
   // arrived, never inside a running one; `ai.backgroundFollowUp: false` turns it off,
   // so the model may not promise a report the person may have switched off.

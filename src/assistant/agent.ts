@@ -1041,7 +1041,7 @@ export async function agentChat(
         onTool(tc.name, tc.arguments);
         const def = toolByName.get(tc.name);
         // A tool this run withholds answers as one that does not exist: it was never
-        // offered, and it never runs — `background` is a core tool the registry would run.
+        // offered, and it never runs — `subagent` is a core tool the registry would run.
         if (withheld.has(tc.name)) {
           const args = callParse.ok ? callParse.args : {};
           const detail = `Error: Unknown tool: ${tc.name}`;

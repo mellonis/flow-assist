@@ -157,7 +157,7 @@ test('the chat opened again mid-answer follows the end it opens at', async () =>
 test('a background result landing under an anchored answer does not move the reader', async () => {
   const model = new ScriptedModel();
   model.script(
-    [{ tool: 'background', args: { task: 'count the TODO comments' } }],
+    [{ tool: 'subagent', args: { task: 'count the TODO comments' } }],
     // The turn is held open, so the result — shown only once no turn is being
     // written — can only land after the answer has stopped at its first line.
     [{ text: items('answer line', 1, 40) }, { hold: true }],
@@ -204,7 +204,7 @@ test('the next message sent from an anchored answer scrolls to the end', async (
 test('a background result landing under a short answer is followed, as it always was', async () => {
   const model = new ScriptedModel();
   model.script(
-    [{ tool: 'background', args: { task: 'count the TODO comments' } }],
+    [{ tool: 'subagent', args: { task: 'count the TODO comments' } }],
     // Just short enough: its first line is the row under the pinned question.
     [{ text: items('answer line', 1, 19) }],
     [{ text: 'There are 14 TODO comments.' }],

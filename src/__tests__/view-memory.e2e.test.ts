@@ -232,7 +232,7 @@ async function leftAtItsEnd(away: boolean) {
   aSub.script(
     [{ text: 'A first.' }],
     [{ text: REMARKS }],
-    away ? [{ hold: true }, { text: 'A final answer.' }] : [{ tool: 'background', args: { task: 'slow job', label: 'job' } }],
+    away ? [{ hold: true }, { text: 'A final answer.' }] : [{ tool: 'subagent', args: { task: 'slow job', label: 'job' } }],
     [{ text: 'Started it.' }],
   );
   model.script([{ text: 'B first.' }], [{ text: 'B second.' }], [{ text: REMARKS }]);
@@ -321,7 +321,7 @@ async function leftWithDraft(failTurn: boolean) {
   task.script([{ hold: true }, { text: 'job result' }]);
   model.script(
     [{ text: 'B answer.' }],
-    [{ tool: 'background', args: { task: 'slow job', label: 'job' } }],
+    [{ tool: 'subagent', args: { task: 'slow job', label: 'job' } }],
     [{ text: 'Started it.' }],
     [{ hold: true }, { text: 'Second.' }],
   );

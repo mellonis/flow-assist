@@ -17,27 +17,27 @@ test('every tool in full: a withheld tool is never sent, and a call to it answer
     offered.push(names(o));
     if (n++ > 0) return done;
     return { content: '', reasoning: '', finishReason: 'tool_calls', toolCalls: [
-      { id: 'c1', name: 'background', arguments: '{"task":"count the files"}' },
+      { id: 'c1', name: 'subagent', arguments: '{"task":"count the files"}' },
       { id: 'c2', name: 'datetime', arguments: '{}' },
     ] };
   };
   const runs: ToolRun[] = [];
   const res = await agentChat([{ role: 'user', content: 'go' }], {
     chatRound: round as never,
-    withholdTools: ['background', 'subagent', 'remind'],
+    withholdTools: ['subagent', 'remind'],
     onToolRun: (r) => runs.push(r),
-    // Were `background` to run, it would start a task through this hook.
+    // Were `subagent` to run, it would start a task through this hook.
     toolCtx: { startChild: () => { started++; throw new Error('a withheld tool ran'); }, childSlots: {} } as never,
   });
   expect(offered).toHaveLength(2);
   for (const sent of offered) {
-    expect(sent).not.toContain('background');
+    expect(sent).not.toContain('subagent');
     expect(sent).not.toContain('remind');
     expect(sent).toContain('datetime');
   }
-  expect(runs.map((r) => [r.name, r.outcome])).toEqual([['background', 'error'], ['datetime', 'ok']]);
-  expect(runs[0]!.detail).toBe('Error: Unknown tool: background');
-  expect(res.transcript.filter((m) => m.role === 'tool').map((m) => String(m.content))[0]).toBe('ERROR: Unknown tool: background');
+  expect(runs.map((r) => [r.name, r.outcome])).toEqual([['subagent', 'error'], ['datetime', 'ok']]);
+  expect(runs[0]!.detail).toBe('Error: Unknown tool: subagent');
+  expect(res.transcript.filter((m) => m.role === 'tool').map((m) => String(m.content))[0]).toBe('ERROR: Unknown tool: subagent');
   // No task was started: the hook a task starts through was never called.
   expect(started).toBe(0);
 });
@@ -57,12 +57,12 @@ test('tools on demand: a withheld tool is in neither the request nor the index, 
     chatRound: round as never,
     toolLoading: 'onDemand',
     extraTools: [extra('ext_open'), extra('ext_hidden')],
-    withholdTools: ['background', 'ext_hidden'],
+    withholdTools: ['subagent', 'ext_hidden'],
     onToolRun: (r) => runs.push(r),
   });
   expect(offered).toHaveLength(2);
   for (const o of offered) {
-    expect(names(o)).not.toContain('background');
+    expect(names(o)).not.toContain('subagent');
     expect(names(o)).not.toContain('ext_hidden');
     // The index is the tools_load tool's description: the withheld name is not in it.
     expect(JSON.stringify(o.tools)).not.toContain('ext_hidden');

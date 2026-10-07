@@ -130,7 +130,7 @@ test('a background task starts where its parent conversation\'s shell currently 
   const model = new ScriptedModel();
   model.script(
     [{ tool: 'cd', args: { path: 'sub' } }],
-    [{ tool: 'background', args: { task: 'where am I' } }],
+    [{ tool: 'subagent', args: { task: 'where am I' } }],
     [{ text: 'Started it in the background.' }],
     // The nested run: asks its own shell where it is (read-only — no y/n).
     [{ tool: 'cd', args: { path: '.' } }],

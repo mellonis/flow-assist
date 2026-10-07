@@ -136,16 +136,16 @@ test('D5, D6: a one-shot turn stops at ai.maxTurnTokens the same way', async () 
 
 test('D26: the one-shot is not offered background or remind, and a call to one answers as an unknown tool', async () => {
   const model = new ScriptedModel();
-  model.script([{ tool: 'background', args: { task: 'count the files' } }], [{ text: 'Could not.' }]);
+  model.script([{ tool: 'subagent', args: { task: 'count the files' } }], [{ text: 'Could not.' }]);
   const r = await oneShot(model);
   const offered = toolNames(model, 0);
-  expect(offered).not.toContain('background');
+  expect(offered).not.toContain('subagent');
   // `subagent` is withheld by name; no tool of that name is registered today, so this
   // holds as a guard for when one is.
   expect(offered).not.toContain('subagent');
   expect(offered).not.toContain('remind');
   expect(offered).toContain('datetime');
-  expect(toolResults(model)).toEqual(['ERROR: Unknown tool: background']);
+  expect(toolResults(model)).toEqual(['ERROR: Unknown tool: subagent']);
   // No task was started: past the hop a task's first request would take, no request
   // the model saw carries the worker prompt.
   await new Promise((res) => setTimeout(res, 50));
@@ -175,7 +175,7 @@ test('D26: a plugin tool\'s own chatLLM in the one-shot is not offered backgroun
   expect((model.requests[1].messages as Msg[]).some((m) => m.role === 'user' && m.content === 'look it up')).toBe(true);
   const nested = toolNames(model, 1);
   expect(nested).toContain('datetime');
-  expect(nested).not.toContain('background');
+  expect(nested).not.toContain('subagent');
   expect(nested).not.toContain('subagent');
   expect(nested).not.toContain('remind');
 });

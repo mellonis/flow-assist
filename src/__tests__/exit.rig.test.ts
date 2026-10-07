@@ -27,7 +27,7 @@ const bgSaved = (rig: Rig, c: Conversation) => (rig.sessionFile(c.sessionId)?.me
 // A stays loaded, locked and headless while the task runs.
 async function headlessWithTask() {
   const model = new ScriptedModel();
-  model.script([{ tool: 'background', args: { task: 'find it', label: 'find' } }], [{ text: 'Started.' }]);
+  model.script([{ tool: 'subagent', args: { task: 'find it', label: 'find' } }], [{ text: 'Started.' }]);
   const task = taskScript(model, 'find it');
   task.script([{ hold: true }, { text: 'found it' }]);
   const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
@@ -72,9 +72,9 @@ test('at exit a headless session with a running task is saved and unlocked, and 
 
 test('at exit the tree closes deepest first, and a grandchild says it stopped too', async () => {
   const model = new ScriptedModel();
-  model.script([{ tool: 'background', args: { task: 'one', label: 'a' } }], [{ text: 'Started.' }]);
+  model.script([{ tool: 'subagent', args: { task: 'one', label: 'a' } }], [{ text: 'Started.' }]);
   const one = taskScript(model, 'one');
-  one.script([{ tool: 'background', args: { task: 'two', label: 'b' } }], [{ hold: true }, { text: 'a done' }]);
+  one.script([{ tool: 'subagent', args: { task: 'two', label: 'b' } }], [{ hold: true }, { text: 'a done' }]);
   const two = taskScript(model, 'two');
   two.script([{ hold: true }, { text: 'b done' }]);
   const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
@@ -118,7 +118,7 @@ function marker() {
 test('at exit a task in the middle of its turn stops: no tool call and no request after its task-end line', async () => {
   const mark = marker();
   const model = new ScriptedModel();
-  model.script([{ tool: 'background', args: { task: 'find it', label: 'find' } }], [{ text: 'Started.' }]);
+  model.script([{ tool: 'subagent', args: { task: 'find it', label: 'find' } }], [{ text: 'Started.' }]);
   const task = taskScript(model, 'find it');
   task.script([{ hold: true }, { tool: 'mark', args: {} }], [{ text: 'found it' }]);
   const rig = conversationRig(model, { ai: { backgroundFollowUp: false }, guests: (make) => [mark.make(make)] });
@@ -146,7 +146,7 @@ const saidAbout = (rig: Rig, label: string) => ({
 
 test('a task running at exit reads stopped, not failed: no toast, and the log says it stopped with its conversation', async () => {
   const model = new ScriptedModel();
-  model.script([{ tool: 'background', args: { task: 'find it', label: 'find' } }], [{ text: 'Started.' }]);
+  model.script([{ tool: 'subagent', args: { task: 'find it', label: 'find' } }], [{ text: 'Started.' }]);
   const task = taskScript(model, 'find it');
   task.script([{ hold: true }, { text: 'found it' }]);
   const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
@@ -161,7 +161,7 @@ test('a task running at exit reads stopped, not failed: no toast, and the log sa
 
 test('a task waiting on its delay at exit never starts: its timer is cleared, the count drops at once, and nothing is said', async () => {
   const model = new ScriptedModel();
-  model.script([{ tool: 'background', args: { task: 'later', label: 'late', in: '0.2 seconds' } }], [{ text: 'Started.' }]);
+  model.script([{ tool: 'subagent', args: { task: 'later', label: 'late', in: '0.2 seconds' } }], [{ text: 'Started.' }]);
   const task = taskScript(model, 'later');
   task.script([{ text: 'late done' }]);
   const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });

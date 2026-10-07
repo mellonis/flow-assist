@@ -270,7 +270,7 @@ test('run_command runs without the secret variables, names them once per convers
   }
 });
 
-// A background task's own `ShellState` (tools-core.ts's `background` case:
+// A background task's own `ShellState` (tools-core.ts's `subagent` case:
 // `createShellState(() => bgConfig, parentCwd)`, starting where the parent
 // conversation's shell was, not at the app's default) runs `run_command` no
 // differently from the chat's own — the clean environment and the once-per-Set

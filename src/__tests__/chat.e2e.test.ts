@@ -436,12 +436,12 @@ test('a wheel key with a count scrolls as far as that many single notches', asyn
   byOneKey.app.unmount();
 });
 
-// A turn that hands work to the background: the model calls `background`, says so,
+// A turn that hands work to the background: the model calls `subagent`, says so,
 // and the nested run answers with RESULT. Three requests in all — with
 // `ai.backgroundFollowUp: false`, a fourth would be the chat spending a turn on the
 // result by itself.
 const backgroundScript = (model: ScriptedModel, result: string) => model.script(
-  [{ tool: 'background', args: { task: 'count the TODO comments' } }],
+  [{ tool: 'subagent', args: { task: 'count the TODO comments' } }],
   [{ text: 'Started it in the background.' }],
   [{ text: result }],
 );
@@ -543,7 +543,7 @@ test('a background result does not open the chat — the footer says it is waiti
   const model = new ScriptedModel();
   // The nested run is held, so the task is still working when the chat is closed.
   model.script(
-    [{ tool: 'background', args: { task: 'count the TODO comments' } }],
+    [{ tool: 'subagent', args: { task: 'count the TODO comments' } }],
     [{ text: 'Started it in the background.' }],
     [{ hold: true }, { text: 'There are 14 TODO comments.' }],
   );
@@ -722,7 +722,7 @@ test('/clear starts a conversation with no plan, and a new chat does not inherit
 test('a background task plans on its own plan, not on the chat\'s', async () => {
   const model = new ScriptedModel();
   model.script(
-    [{ tool: 'background', args: { task: 'sweep the repo' } }],
+    [{ tool: 'subagent', args: { task: 'sweep the repo' } }],
     [{ text: 'Started it in the background.' }],
     // The nested run: it makes a plan of its own, then reports.
     [{ tool: 'todo', args: { action: 'add', items: ['nested step'] } }],

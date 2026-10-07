@@ -226,7 +226,7 @@ test('a background task cannot run a command — nobody is there to say yes', as
   const root = rootDir();
   const model = new ScriptedModel();
   model.script(
-    [{ tool: 'background', args: { task: 'create a file' } }],
+    [{ tool: 'subagent', args: { task: 'create a file' } }],
     [{ text: 'Started it in the background.' }],
     [{ tool: 'run_command', args: { command: 'touch made.txt' } }],
     [{ text: 'Could not.' }],
@@ -545,7 +545,7 @@ test('a background run does not move the chat\'s directory', async () => {
   fs.mkdirSync(path.join(root, 'sub'));
   const model = new ScriptedModel();
   model.script(
-    [{ tool: 'background', args: { task: 'go elsewhere' } }],
+    [{ tool: 'subagent', args: { task: 'go elsewhere' } }],
     [{ text: 'Started.' }],
     [{ tool: 'run_command', args: { command: 'cd ..' } }],
     [{ text: 'Could not.' }],

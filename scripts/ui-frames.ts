@@ -228,7 +228,7 @@ const scenarios: Record<string, () => Promise<void>> = {
   async bg() {
     const model = new ScriptedModel();
     model.script(
-      [{ tool: 'background', args: { task: 'count the TODO comments in the repo' } }],
+      [{ tool: 'subagent', args: { task: 'count the TODO comments in the repo' } }],
       [{ text: 'Started it in the background.' }],
       [{ text: 'There are 14 TODO comments.' }], // the nested run
       [{ text: 'The background task finished: 14 TODO comments.' }], // the reply to its result

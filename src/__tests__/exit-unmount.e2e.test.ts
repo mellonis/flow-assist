@@ -27,7 +27,7 @@ const journalOf = (dir: string, id: string): JournalEvent[] => {
 test('unmounting the chat stops no task: the session left gets its result, and no task-end line', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-exit-unmount-e2e-'));
   const model = new ScriptedModel();
-  model.script([{ tool: 'background', args: { task: 'slow job', label: 'job' } }], [{ text: 'Started it.' }]);
+  model.script([{ tool: 'subagent', args: { task: 'slow job', label: 'job' } }], [{ text: 'Started it.' }]);
   const task = model.when((req) => system(req).includes('Task: slow job'));
   task.script([{ hold: true }, { text: 'job result' }]);
   const ui = await bootApp(model, 100, 28, undefined, { sessions: { dir } }, { toastMs: 10_000 });

@@ -41,7 +41,7 @@ const chatRequests = (model: ScriptedModel) => model.requests.filter((r) => !sys
 // Session A asks; its answer starts a background task, held until the test releases it.
 async function startWithTask(model: ScriptedModel) {
   const dir = dirOf();
-  model.script([{ tool: 'background', args: { task: 'slow job', label: 'job' } }], [{ text: 'Started it.' }]);
+  model.script([{ tool: 'subagent', args: { task: 'slow job', label: 'job' } }], [{ text: 'Started it.' }]);
   const task = model.when((req) => system(req).includes('Task: slow job'));
   task.script([{ hold: true }, { text: 'job result' }]);
   const ui = await bootApp(model, 100, 28, undefined, { sessions: { dir } }, { toastMs: 10_000 });
@@ -261,7 +261,7 @@ test("an answer that lands behind the open picker makes this chat's own row `thi
 test('a session left with two tasks reads `here · working` after the first result lands in it, and `done` once the second ends', async () => {
   const model = new ScriptedModel();
   const dir = dirOf();
-  model.script([{ tool: 'background', args: { task: 'slow job', label: 'job' } }], [{ tool: 'background', args: { task: 'second job', label: 'job2' } }], [{ text: 'Started both.' }]);
+  model.script([{ tool: 'subagent', args: { task: 'slow job', label: 'job' } }], [{ tool: 'subagent', args: { task: 'second job', label: 'job2' } }], [{ text: 'Started both.' }]);
   const first = model.when((req) => system(req).includes('Task: slow job'));
   first.script([{ hold: true }, { text: 'job result' }]);
   const second = model.when((req) => system(req).includes('Task: second job'));

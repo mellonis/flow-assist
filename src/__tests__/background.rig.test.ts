@@ -1,4 +1,4 @@
-// The `background` tool end to end (AGENTS.md, "A conversation starts a child of its
+// The `subagent` tool end to end (AGENTS.md, "A conversation starts a child of its
 // own"): a task is a child conversation of the one whose turn called the tool — its
 // requests carry the worker prompt, its writes are declined, its result comes back as the
 // toast, the log line and an inbox row of that conversation — and it runs in the host's slots, under the
@@ -27,7 +27,7 @@ const taskCall = (rig: Rig, label: string, name: string) => rig.journal().find((
 
 test('a task runs in the background and reports back', async () => {
   const model = new ScriptedModel();
-  model.script([{ tool: 'background', args: { task: 'run the build', label: 'build' } }], [{ text: 'Started.' }]);
+  model.script([{ tool: 'subagent', args: { task: 'run the build', label: 'build' } }], [{ text: 'Started.' }]);
   const task = taskScript(model, 'run the build');
   task.script([{ tool: 'run_command', args: { command: 'echo x > made.txt' } }], [{ text: 'build ok' }]);
   const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
@@ -36,7 +36,7 @@ test('a task runs in the background and reports back', async () => {
   const counts: number[] = [];
   (rig.services as unknown as { notify: () => void }).notify = () => { counts.push(rig.registry.children.backgroundCount()); };
   await rig.conv.send('build it in the background');
-  const answer = rig.journal().find((e) => e.t === 'call' && !e.task && e.name === 'background');
+  const answer = rig.journal().find((e) => e.t === 'call' && !e.task && e.name === 'subagent');
   expect(String(answer?.result)).toContain('Background task started (build)');
   await settled(rig, 1);
   // The task's request reached the scripted endpoint with the host's credentials, and its
@@ -62,10 +62,10 @@ test('a task runs in the background and reports back', async () => {
 
 test('a delayed task is counted from arming and says when it starts', async () => {
   const model = new ScriptedModel();
-  model.script([{ tool: 'background', args: { task: 'x', label: 'late', in: '3 minutes' } }], [{ text: 'Scheduled.' }]);
+  model.script([{ tool: 'subagent', args: { task: 'x', label: 'late', in: '3 minutes' } }], [{ text: 'Scheduled.' }]);
   const rig = conversationRig(model);
   await rig.conv.send('later, please');
-  const answer = rig.journal().find((e) => e.t === 'call' && e.name === 'background');
+  const answer = rig.journal().find((e) => e.t === 'call' && e.name === 'subagent');
   expect(String(answer?.result)).toContain('in 180s');
   // In flight though not started: the chat's `N in background` counts it.
   expect(rig.registry.children.backgroundCount()).toBe(1);
@@ -80,7 +80,7 @@ test('bursts are queued, not dropped: five tasks from one turn all deliver, at m
   const model = new ScriptedModel();
   for (let i = 0; i < 5; i++) taskScript(model, `t${i}`).script([{ text: `r${i}` }]);
   model.script(
-    [0, 1, 2, 3, 4].map((i) => ({ tool: 'background', args: { task: `t${i}`, label: `t${i}` } })),
+    [0, 1, 2, 3, 4].map((i) => ({ tool: 'subagent', args: { task: `t${i}`, label: `t${i}` } })),
     [{ text: 'Started five.' }],
   );
   const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
@@ -93,7 +93,7 @@ test('bursts are queued, not dropped: five tasks from one turn all deliver, at m
     try { return await served(url, init); } finally { if (isTask) concurrent--; }
   }) as typeof fetch;
   await rig.conv.send('five at once');
-  const answers = rig.journal().filter((e) => e.t === 'call' && e.name === 'background').map((e) => String(e.result));
+  const answers = rig.journal().filter((e) => e.t === 'call' && e.name === 'subagent').map((e) => String(e.result));
   expect(answers).toHaveLength(5);
   for (const a of answers) expect(a).toContain('Background task started');
   await settled(rig, 5);
@@ -104,7 +104,7 @@ test('bursts are queued, not dropped: five tasks from one turn all deliver, at m
 
 test('a task cannot put a question to the person: ask_user answers "nobody to ask"', async () => {
   const model = new ScriptedModel();
-  model.script([{ tool: 'background', args: { task: 'ask', label: 'q' } }], [{ text: 'Started.' }]);
+  model.script([{ tool: 'subagent', args: { task: 'ask', label: 'q' } }], [{ text: 'Started.' }]);
   taskScript(model, 'ask').script(
     [{ tool: 'ask_user', args: { questions: [{ question: 'q?', options: [{ label: 'a' }, { label: 'b' }] }] } }],
     [{ text: 'assumed a' }],
@@ -118,7 +118,7 @@ test('a task cannot put a question to the person: ask_user answers "nobody to as
 
 test('a task reads the project instructions for its own shell, and its cd answers from its own reading', async () => {
   const model = new ScriptedModel();
-  model.script([{ tool: 'background', args: { task: 'look at proj', label: 'p' } }], [{ text: 'Started.' }]);
+  model.script([{ tool: 'subagent', args: { task: 'look at proj', label: 'p' } }], [{ text: 'Started.' }]);
   const task = taskScript(model, 'look at proj');
   task.script([{ tool: 'cd', args: { path: 'proj' } }], [{ text: 'seen' }]);
   const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
@@ -142,7 +142,7 @@ test('a task reads the project instructions for its own shell, and its cd answer
 const OTHER = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-bg-other-')));
 test('a task works in its conversation\'s project, whatever its shell does', async () => {
   const model = new ScriptedModel();
-  model.script([{ tool: 'background', args: { task: 'remember', label: 'm' } }], [{ text: 'Started.' }]);
+  model.script([{ tool: 'subagent', args: { task: 'remember', label: 'm' } }], [{ text: 'Started.' }]);
   taskScript(model, 'remember').script(
     [{ tool: 'cd', args: { path: OTHER } }],
     [{ tool: 'memory', args: { action: 'add', text: 'Found by the background task.' } }],
@@ -161,7 +161,7 @@ test('a task works in its conversation\'s project, whatever its shell does', asy
 
 test('a task at its round cap says so', async () => {
   const model = new ScriptedModel();
-  model.script([{ tool: 'background', args: { task: 'loop', label: 'L' } }], [{ text: 'Started.' }]);
+  model.script([{ tool: 'subagent', args: { task: 'loop', label: 'L' } }], [{ text: 'Started.' }]);
   const task = taskScript(model, 'loop');
   task.script(...Array.from({ length: 12 }, () => [{ tool: 'datetime', args: {} }]));
   const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
@@ -173,7 +173,7 @@ test('a task at its round cap says so', async () => {
 
 test('a task at the token budget says so', async () => {
   const model = new ScriptedModel();
-  model.script([{ tool: 'background', args: { task: 'spend', label: 'T' } }], [{ text: 'Started.' }]);
+  model.script([{ tool: 'subagent', args: { task: 'spend', label: 'T' } }], [{ text: 'Started.' }]);
   const task = taskScript(model, 'spend');
   task.usage = { prompt_tokens: 600, completion_tokens: 10, prompt_tokens_details: { cached_tokens: 0 } };
   task.script(...Array.from({ length: 4 }, () => [{ tool: 'datetime', args: {} }]), [{ text: 'never' }]);
@@ -187,7 +187,7 @@ test('a non-numeric sessions.maxRunning still runs tasks, three at a time', asyn
   const model = new ScriptedModel();
   for (let i = 0; i < 5; i++) taskScript(model, `t${i}`).script([{ text: `r${i}` }]);
   model.script(
-    [0, 1, 2, 3, 4].map((i) => ({ tool: 'background', args: { task: `t${i}`, label: `t${i}` } })),
+    [0, 1, 2, 3, 4].map((i) => ({ tool: 'subagent', args: { task: `t${i}`, label: `t${i}` } })),
     [{ text: 'Started five.' }],
   );
   const rig = conversationRig(model, { ai: { backgroundFollowUp: false }, extra: { sessions: { maxRunning: 'many' } } });
@@ -222,7 +222,7 @@ test('the parent\'s Esc does not reach a task\'s tool', async () => {
     }],
   });
   const model = new ScriptedModel();
-  model.script([{ tool: 'background', args: { task: 'probe', label: 'p' } }], [{ hold: true }, { text: 'never' }]);
+  model.script([{ tool: 'subagent', args: { task: 'probe', label: 'p' } }], [{ hold: true }, { text: 'never' }]);
   taskScript(model, 'probe').script([{ tool: 'probe_signal', args: {} }], [{ text: 'probed' }]);
   const rig = conversationRig(model, { ai: { backgroundFollowUp: false }, guests: (make) => [probe(make)] });
   const turn = rig.conv.send('go');
@@ -239,12 +239,12 @@ test('the parent\'s Esc does not reach a task\'s tool', async () => {
 
 test('a chain refuses at the configured depth', async () => {
   const model = new ScriptedModel();
-  model.script([{ tool: 'background', args: { task: 'one', label: 'a' } }], [{ text: 'Started.' }]);
-  taskScript(model, 'one').script([{ tool: 'background', args: { task: 'two', label: 'b' } }], [{ text: 'a done' }]);
+  model.script([{ tool: 'subagent', args: { task: 'one', label: 'a' } }], [{ text: 'Started.' }]);
+  taskScript(model, 'one').script([{ tool: 'subagent', args: { task: 'two', label: 'b' } }], [{ text: 'a done' }]);
   const rig = conversationRig(model, { ai: { backgroundFollowUp: false, subagentDepth: 1 } });
   await rig.conv.send('go');
   await settled(rig, 1);
-  expect(String(taskCall(rig, 'a', 'background')?.result)).toContain('depth exceeded (max 1)');
+  expect(String(taskCall(rig, 'a', 'subagent')?.result)).toContain('depth exceeded (max 1)');
   expect(model.requests.some((r) => system(r).includes('Task: two'))).toBe(false);
   expect(delivered(rig)).toEqual(['a finished:\na done']);
 });

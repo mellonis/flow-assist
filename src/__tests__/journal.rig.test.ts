@@ -251,7 +251,7 @@ test('a fork in the middle of a turn: the rest of the turn lands in the fork\'s 
 test('a background task\'s own calls are journaled in the session that started it, under the task\'s label', async () => {
   const model = new ScriptedModel();
   model.script(
-    [{ tool: 'background', args: { task: 'узнать время', label: 'часы' } }],
+    [{ tool: 'subagent', args: { task: 'узнать время', label: 'часы' } }],
     [{ text: 'Запустил.' }],
     [{ tool: 'datetime', args: {} }],
     [{ text: 'Сейчас полдень.' }],

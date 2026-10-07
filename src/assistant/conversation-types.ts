@@ -179,7 +179,7 @@ export interface ConversationDeps {
   children?: ChildSlots;
 }
 
-// A child a conversation starts from a turn: the `background` tool's task.
+// A child a conversation starts from a turn: the `subagent` tool's task.
 export interface ChildSpec { kind: 'task'; label: string; prompt: string; by: 'model' | 'person' }
 // How a child's run ended, as the tool that started it reports it.
 export interface ChildResult {

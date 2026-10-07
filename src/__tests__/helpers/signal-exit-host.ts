@@ -16,7 +16,7 @@ exitOnSignals(() => { runExitHooks(); process.exit(0); });
 
 const isTask = (req: RecordedRequest) => String(req.messages.find((m) => m.role === 'system')?.content ?? '').includes('Task: slow job');
 const model = new ScriptedModel();
-model.script([{ tool: 'background', args: { task: 'slow job', label: 'job' } }], [{ text: 'Started it.' }]);
+model.script([{ tool: 'subagent', args: { task: 'slow job', label: 'job' } }], [{ text: 'Started it.' }]);
 const task = model.when(isTask);
 task.script([{ hold: true }, { text: 'never sent' }]);
 const ui = await bootApp(model, 100, 28, undefined, { sessions: { dir } });

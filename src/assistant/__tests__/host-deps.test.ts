@@ -17,9 +17,9 @@ test('hostDeps: a run with nothing to withhold is handed the options object itse
 
 test('hostDeps: withheld names come first, then the run\'s own', async () => {
   let seen: { withholdTools?: readonly string[]; maxRounds?: number } = {};
-  const d = hostDeps(source({ chatLLM: async (_m: unknown, o: typeof seen) => { seen = o; return { content: '' }; } }, { withhold: ['background', 'remind'] }));
+  const d = hostDeps(source({ chatLLM: async (_m: unknown, o: typeof seen) => { seen = o; return { content: '' }; } }, { withhold: ['subagent', 'remind'] }));
   await d.chatLLM([], { maxRounds: 3, withholdTools: ['x'] } as never);
-  expect(seen.withholdTools).toEqual(['background', 'remind', 'x']);
+  expect(seen.withholdTools).toEqual(['subagent', 'remind', 'x']);
   expect(seen.maxRounds).toBe(3);
 });
 

@@ -404,7 +404,7 @@ export async function runPrompt(args: string[], config: Record<string, unknown>,
     // result cap, image limits and endpoint, as the chat's does. Nothing is shown, so
     // `current` finds nothing, and there is no settings-file service: the guard never asks
     // here. Every run of the model it makes withholds `ONESHOT_WITHHELD`, the turn's own and
-    // each a tool starts through `ctx.chatLLM` alike: a nested run offered `background` or
+    // each a tool starts through `ctx.chatLLM` alike: a nested run offered `subagent` or
     // `remind` could leave work or a timer running after the answer prints.
     const conversations = new ConversationRegistry({
       config: () => config,

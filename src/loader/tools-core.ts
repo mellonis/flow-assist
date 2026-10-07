@@ -407,8 +407,8 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
     {
       type: 'function',
       function: {
-        name: 'background',
-        description: 'Run a task in the BACKGROUND: offload a self-contained job to a separate agent run that has tool access; the call returns at once and the chat stays usable. When the task ends, its result lands in the chat as a message of its own (`<label> finished:` and the result, or `<label> failed:` and the error) — when your current turn ends, never in the middle of it. Then you get one turn for all the results that landed together (or read them with the person\'s queued message). The person may have turned that off (`ai.backgroundFollowUp: false`: the results then wait for their next message), so do not promise to act on results when they arrive ("when they report, I will save each one"): say the results will come into the chat and you will look at them then, or the person can ask you to carry on. When results have arrived since your last answer, your next answer opens with what came back — a line per task — before anything else. Call when the user wants something done later without blocking the conversation — e.g. "count the tests in src in the background", "запусти сборку в фоне". `task` (required): the work to do, in natural language. `label`: a short name for the task/notification (default: the task, clipped). `in`/`at`: an optional delay before it starts (a duration like "10 seconds", or a clock time). The task runs read-only (write tools are declined) and bounded (up to 12 tool rounds). You may spawn a follow-up `background` task for a further step, but keep the chain to ONE level. The chat shows how many background tasks are in flight.',
+        name: 'subagent',
+        description: 'Run a task in the BACKGROUND: offload a self-contained job to a separate agent run that has tool access; the call returns at once and the chat stays usable. When the task ends, its result lands in the chat as a message of its own (`<label> finished:` and the result, or `<label> failed:` and the error) — when your current turn ends, never in the middle of it. Then you get one turn for all the results that landed together (or read them with the person\'s queued message). The person may have turned that off (`ai.backgroundFollowUp: false`: the results then wait for their next message), so do not promise to act on results when they arrive ("when they report, I will save each one"): say the results will come into the chat and you will look at them then, or the person can ask you to carry on. When results have arrived since your last answer, your next answer opens with what came back — a line per task — before anything else. Call when the user wants something done later without blocking the conversation — e.g. "count the tests in src in the background", "запусти сборку в фоне". `task` (required): the work to do, in natural language. `label`: a short name for the task/notification (default: the task, clipped). `in`/`at`: an optional delay before it starts (a duration like "10 seconds", or a clock time). The task runs read-only (write tools are declined) and bounded (up to 12 tool rounds). You may spawn a follow-up `subagent` task for a further step, but keep the chain to ONE level. The chat shows how many background tasks are in flight.',
         parameters: { type: 'object', properties: {
           task: { type: 'string', description: 'The work to do in the background, in natural language — e.g. "count the tests in src and report the number".' },
           label: { type: 'string', description: 'Optional short name for the task/notification (default: the task, clipped to ~40 chars).' },
@@ -697,7 +697,7 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
         // tool is a thin parser — the host runtime does the scheduling, so it
         // stays alive across the agent turn and fires even on later re-renders.
         // Banner-only: a reminder cannot run a host action (that scope is the
-        // `background` tool, which offloads work and reports the result).
+        // `subagent` tool, which offloads work and reports the result).
         const text = String(args.text ?? '').trim();
         if (!text) return 'text is required — the reminder content to fire.';
         const parsed = parseReminderMs(String(args.in ?? ''), String(args.at ?? ''));
@@ -707,7 +707,7 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
         set(text, parsed.ms);
         return `Reminder set: "${text}" in ${Math.round(parsed.ms / 1000)}s — a banner will pop here (Esc dismisses).`;
       }
-      case 'background': {
+      case 'subagent': {
         // Offload a self-contained task to a CHILD conversation of the one whose turn
         // called this (AGENTS.md, "A conversation starts a child of its own"): its own
         // plan, shell, tool set and abort, no recall and nobody to ask, every write

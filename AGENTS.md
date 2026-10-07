@@ -840,10 +840,10 @@ there is no `/fullscreen`.
 ## What the model can do (the `core` tool group)
 
 `memory`, `workspace_read`, `config_schema`, `config_set`, `datetime`, `remind`,
-`background`, `todo`, `ask_user`, `open_url`, `recall`, `ui_open` (a plugin's entry screen —
+`subagent`, `todo`, `ask_user`, `open_url`, `recall`, `ui_open` (a plugin's entry screen —
 "Screens the model can open" above; offered while one can be opened), plus `host:plugins_list`;
-`workspace_write` and `workspace_list` are the on-demand `workspace` group. Three rules
-hold this set together:
+`workspace_write` and `workspace_list` are the on-demand `workspace` group.
+A saved history that holds calls under the name `background` is sent as it is. Three rules hold this set together:
 
 - **A plugin's config key is validated by the plugin's schema — everywhere.**
   `configSchemaAt` (`src/config/load.ts`) resolves a key through the host schema and,
@@ -1089,7 +1089,7 @@ hold this set together:
   `confirmWrite` is a deliberate act, and leaving it out is safe. A caller can also
   withhold tools (`AgentOpts.withholdTools`): the names are left out of every request,
   of the index and of `tools_load`, and a call to one answers `Unknown tool` without
-  running — the one-shot prompt withholds `background`, `subagent` and `remind`, which
+  running — the one-shot prompt withholds `subagent` and `remind`, which
   have nothing to deliver to without the app. Where each path stands:
   - the chat's turn — asks: its y/n closure, which the auto mode may answer;
   - a background task — declines: a background task's conversation has the policy
@@ -1482,7 +1482,7 @@ hold this set together:
   `src/assistant/shell.ts`, held by the conversation (`shell`), handed to run_command and
   `cd` as `ctx.shell`; a background run gets a fresh one — its own to move, so its `cd`
   never moves the parent's — started where the parent conversation's shell is at the
-  moment `background` is called, not at the app's own default.
+  moment `subagent` is called, not at the app's own default.
   **Tool state that describes a conversation is never module-level** — as a module
   variable the plan outlived `/clear`, was shared with background runs, and leaked
   from one test into the next.
@@ -1770,7 +1770,7 @@ hold this set together:
     records what was running.
   - `confirm` — the y/n's answer, `yes`/`no`, and `by`: `person` (their key), `auto`
     (the auto mode answered), `background` (a background task's run answered — the
-    `background` tool's declines every write), `stop` (Ctrl+C stopped the turn while it
+    `subagent` tool's declines every write), `stop` (Ctrl+C stopped the turn while it
     was up) or `reset` (`/clear` or `/new` closed it). The call id reaches
     `confirmWrite` as `info.id`.
   - `call` — from `onToolRun`: the arguments, the outcome, `result` as the tool returned
@@ -2866,7 +2866,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   the count of background tasks (armed, queued, running) and the cap — a task starts
   while fewer than `max(1, sessions.maxRunning - 1)` run (`maxRunning` 4 by default, so
   three), the rest wait FIFO, and a session's own turn never takes or waits for one. The
-  `background` tool (`src/loader/tools-core.ts`) parses its arguments and hands the rest to
+  `subagent` tool (`src/loader/tools-core.ts`) parses its arguments and hands the rest to
   `scheduleChild` (`src/assistant/child-schedule.ts`, the child schedule: a caller outside a
   turn gets the same one), which arms the task with its delay's timer
   (counted, holding no slot), disarms it with the same handle when the delay ends and
@@ -3842,7 +3842,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     running one is aborted and delivers nothing, a delayed one is cancelled; after
     `/new` or opening another session a task still running delivers into the session it
     was started from, and a closed one takes nothing.
-  - **The model is told this contract, not a kinder one.** `background`'s description
+  - **The model is told this contract, not a kinder one.** `subagent`'s description
     (`src/loader/tools-core.ts`) says a result lands in the chat as `<label>
     finished:` (or `failed:`) when the current turn ends, never in the middle of it;
     that one turn then follows for all the results that landed (or the person's queued
@@ -4057,8 +4057,8 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   `ai.maxTurnTokens` bound its turn. Nobody can answer it (`canAsk: false`): it
   declines every write, and `--allow-writes` before the prompt lets them run, each said
   on stderr ("a path to the model that cannot ask the person declines writes", above).
-  It has no screen, no journal and no session file, and is not offered `background`,
-  `subagent` or `remind` (`withholdTools`), which have nothing to deliver to without
+  It has no screen, no journal and no session file, and is not offered `subagent`
+  or `remind` (`withholdTools`), which have nothing to deliver to without
   the app — nor is any model run a tool starts inside it through `ctx.chatLLM`
   (its registry's `withhold` covers every run it makes). Nothing is streamed: the answer is printed once, on stdout, when the turn
   ends. Exit codes (`oneShotOutcome`): 0 — an answer (an empty line for a turn that

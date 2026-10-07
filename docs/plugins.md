@@ -610,7 +610,7 @@ make('tutor', {
   the answer says so at once — `tutor:lessons is not open yet: the person is typing in
   the chat. It opens when this turn ends.` The host sees only those two fields: a field
   on your own screen is yours to guard. A turn the person stopped, or one that failed,
-  opens nothing it held back. Nothing opens from background work (the `background`
+  opens nothing it held back. Nothing opens from background work (the `subagent`
   tool's run, a tool of yours it calls included): `Not opened: screens are not opened
   from background work.` The mark follows what that run starts — its awaits, its
   timers, a process's output — but not a callback you registered before it and that

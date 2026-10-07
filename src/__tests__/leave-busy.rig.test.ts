@@ -395,8 +395,8 @@ const probeTool = (name: string, read: () => void) => (make: Make) => make(`${na
 test('a task queued behind another session\'s task works for its own session', async () => {
   const homes: (Conversation | null)[] = [];
   const model = new ScriptedModel();
-  model.when((req) => isSession(req, 'question B')).script([{ tool: 'background', args: { task: 'job B', label: 'tb' } }], [{ text: 'Started B.' }]);
-  model.when((req) => isSession(req, 'question A')).script([{ tool: 'background', args: { task: 'job A', label: 'ta' } }], [{ text: 'Started A.' }]);
+  model.when((req) => isSession(req, 'question B')).script([{ tool: 'subagent', args: { task: 'job B', label: 'tb' } }], [{ text: 'Started B.' }]);
+  model.when((req) => isSession(req, 'question A')).script([{ tool: 'subagent', args: { task: 'job A', label: 'ta' } }], [{ text: 'Started A.' }]);
   const tb = model.when((req) => isTask(req, 'job B'));
   tb.script([{ hold: true }, { tool: 'whose', args: {} }], [{ text: 'b done' }]);
   const ta = model.when((req) => isTask(req, 'job A'));
@@ -423,12 +423,12 @@ test('a task queued behind another session\'s task works for its own session', a
 test('a follow-up turn after a grandchild\'s result is not background work', async () => {
   const marks: boolean[] = [];
   const model = new ScriptedModel();
-  model.when((req) => isTask(req, 'one')).script([{ tool: 'background', args: { task: 'two', label: 'b' } }], [{ text: 'a done' }]);
+  model.when((req) => isTask(req, 'one')).script([{ tool: 'subagent', args: { task: 'two', label: 'b' } }], [{ text: 'a done' }]);
   const two = model.when((req) => isTask(req, 'two'));
   two.script([{ hold: true }, { text: 'b done' }]);
   // The session: its own turn, then one follow-up turn per result, each calling the tool.
   model.script(
-    [{ tool: 'background', args: { task: 'one', label: 'a' } }], [{ text: 'Started.' }],
+    [{ tool: 'subagent', args: { task: 'one', label: 'a' } }], [{ text: 'Started.' }],
     [{ tool: 'mark', args: {} }], [{ text: 'Read a.' }],
     [{ tool: 'mark', args: {} }], [{ text: 'Read b.' }],
   );
@@ -448,7 +448,7 @@ test('a task\'s own turn is still background work', async () => {
   const marks: boolean[] = [];
   const opens: string[] = [];
   const model = new ScriptedModel();
-  model.script([{ tool: 'background', args: { task: 'one', label: 'a' } }], [{ text: 'Started.' }]);
+  model.script([{ tool: 'subagent', args: { task: 'one', label: 'a' } }], [{ text: 'Started.' }]);
   model.when((req) => isTask(req, 'one')).script([{ tool: 'mark', args: {} }, { tool: 'open_it', args: {} }], [{ text: 'a done' }]);
   let opened = 0;
   const screens = createScreens({
@@ -647,8 +647,8 @@ test('a conversation\'s listeners and handlers run as nobody\'s work; a tool of 
 test('a handler that hears a grandchild\'s end is nobody\'s work, and the background mark of the run it comes from stays', async () => {
   const heard: { owner: unknown; background: boolean }[] = [];
   const model = new ScriptedModel();
-  model.script([{ tool: 'background', args: { task: 'one', label: 'a' } }], [{ text: 'Started.' }]);
-  model.when((req) => isTask(req, 'one')).script([{ tool: 'background', args: { task: 'two', label: 'b' } }], [{ text: 'a done' }]);
+  model.script([{ tool: 'subagent', args: { task: 'one', label: 'a' } }], [{ text: 'Started.' }]);
+  model.when((req) => isTask(req, 'one')).script([{ tool: 'subagent', args: { task: 'two', label: 'b' } }], [{ text: 'a done' }]);
   const two = model.when((req) => isTask(req, 'two'));
   two.script([{ hold: true }, { text: 'b done' }]);
   const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });

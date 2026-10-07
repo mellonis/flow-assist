@@ -49,7 +49,7 @@ export interface TurnShape {
   maxRounds?: number;
   withholdTools: readonly string[];
 }
-export const ONESHOT_WITHHELD: readonly string[] = ['background', 'subagent', 'remind'];
+export const ONESHOT_WITHHELD: readonly string[] = ['subagent', 'remind'];
 export const TASK_ROUNDS = 12;
 const SHAPES: Record<ConversationKind, TurnShape> = {
   session: { system: 'chat', screen: true, boundary: true, recall: true, askUser: true, images: true, withholdTools: [] },
@@ -61,7 +61,7 @@ export function turnShape(kind: ConversationKind): TurnShape {
 }
 
 // The system prompt of a background worker, with its task.
-const WORKER_PROMPT = 'You are a background worker. Complete the task below autonomously using the available tools, then return ONLY a concise result (a few sentences). Do not ask questions or wait for the user — act. You may spawn a follow-up `background` task if the work needs a further step (e.g. "build, then fix and rebuild on failure"), but keep the chain at most ONE level and only if it is genuinely needed. IMPORTANT: if the task asks for the current time, date, weekday, or a relative duration, you MUST call the `datetime` tool to get it (never answer from memory — it will be stale).\n\nTask: ';
+const WORKER_PROMPT = 'You are a background worker. Complete the task below autonomously using the available tools, then return ONLY a concise result (a few sentences). Do not ask questions or wait for the user — act. You may spawn a follow-up `subagent` task if the work needs a further step (e.g. "build, then fix and rebuild on failure"), but keep the chain at most ONE level and only if it is genuinely needed. IMPORTANT: if the task asks for the current time, date, weekday, or a relative duration, you MUST call the `datetime` tool to get it (never answer from memory — it will be stale).\n\nTask: ';
 export function workerPrompt(task: string): string {
   return WORKER_PROMPT + task;
 }
@@ -91,7 +91,7 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
     joinSystem(fresh ? { ...parts, screens: c.screensBlock(), summary: summaryBlock(c.summary) } : parts, projectBlock(c.project));
   const workerSystem = () => [workerPrompt(q), projectBlock(c.project)].filter(Boolean).join('\n\n');
   const sys = sysParts ? chatSystem(sysParts, false) : workerSystem();
-  // DISPLAY source vs LLM role are split: a `background` result stays role 'bg'
+  // DISPLAY source vs LLM role are split: a background result stays role 'bg'
   // on screen and in the kept history (it is NOT the person's own message), while
   // for the model it is still a prompt to answer — `apiHistory` maps 'bg' →
   // 'user', framed by its own `<label> finished:` line.

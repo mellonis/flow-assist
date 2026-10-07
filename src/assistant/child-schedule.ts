@@ -1,6 +1,6 @@
 // The schedule of a child conversation: start it, arm its delay, and when the delay ends
 // admit its run into a slot and report how it ended (AGENTS.md (child schedule)). The
-// `background` tool and any caller outside a turn share it, so the order is one:
+// `subagent` tool and any caller outside a turn share it, so the order is one:
 // start → timer → disarm → fired → admit → run → log / toast → notify.
 import { childResultBody, type ChildSpec, type ChildStart } from './conversation-types.js';
 import type { Conversation } from './conversation.js';

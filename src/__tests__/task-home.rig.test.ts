@@ -21,7 +21,7 @@ const bgRows = (c: Conversation): string[] => c.rows().filter((m) => m.role === 
 // would show.
 async function startHeld(label: string) {
   const model = new ScriptedModel();
-  model.script([{ tool: 'background', args: { task: 'find it', label } }], [{ text: 'Started.' }]);
+  model.script([{ tool: 'subagent', args: { task: 'find it', label } }], [{ text: 'Started.' }]);
   const task = taskScript(model, 'find it');
   task.script([{ hold: true }, { text: 'found it' }]);
   const rig = conversationRig(model, { inbox: true, ai: { backgroundFollowUp: false } });
@@ -70,7 +70,7 @@ test('a result landing in the conversation on screen names none', async () => {
 
 test('`children` counts a task from its start to its result, and the result is in before it is untracked', async () => {
   const model = new ScriptedModel();
-  model.script([{ tool: 'background', args: { task: 'find it', label: 'find' } }], [{ text: 'Started.' }]);
+  model.script([{ tool: 'subagent', args: { task: 'find it', label: 'find' } }], [{ text: 'Started.' }]);
   taskScript(model, 'find it').script([{ text: 'found it' }]);
   const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
   const first = rig.conv;
@@ -85,7 +85,7 @@ test('`children` counts a task from its start to its result, and the result is i
 
 test('a delayed task is one of its conversation\'s children while armed, its timer with it', async () => {
   const model = new ScriptedModel();
-  model.script([{ tool: 'background', args: { task: 'x', label: 'late', in: '3 minutes' } }], [{ text: 'Scheduled.' }]);
+  model.script([{ tool: 'subagent', args: { task: 'x', label: 'late', in: '3 minutes' } }], [{ text: 'Scheduled.' }]);
   const rig = conversationRig(model);
   await rig.conv.send('later, please');
   expect(rig.conv.children.size).toBe(1);
@@ -95,8 +95,8 @@ test('a delayed task is one of its conversation\'s children while armed, its tim
 
 test('a grandchild\'s result lands in the session, though the task that started it has finished', async () => {
   const model = new ScriptedModel();
-  model.script([{ tool: 'background', args: { task: 'one', label: 'a' } }], [{ text: 'Started.' }]);
-  taskScript(model, 'one').script([{ tool: 'background', args: { task: 'two', label: 'b' } }], [{ text: 'a done' }]);
+  model.script([{ tool: 'subagent', args: { task: 'one', label: 'a' } }], [{ text: 'Started.' }]);
+  taskScript(model, 'one').script([{ tool: 'subagent', args: { task: 'two', label: 'b' } }], [{ text: 'a done' }]);
   const two = taskScript(model, 'two');
   two.script([{ hold: true }, { text: 'b done' }]);
   const rig = conversationRig(model, { inbox: true, ai: { backgroundFollowUp: false } });
@@ -142,7 +142,7 @@ const taskEnds = (rig: Rig, c: Conversation) => rig.journal(c.sessionId).filter(
 test('/clear stops a running task: nothing is delivered, the log and the journal say so', async () => {
   const probe = abortProbe();
   const model = new ScriptedModel();
-  model.script([{ tool: 'background', args: { task: 'wait', label: 'p' } }], [{ text: 'Started.' }]);
+  model.script([{ tool: 'subagent', args: { task: 'wait', label: 'p' } }], [{ text: 'Started.' }]);
   taskScript(model, 'wait').script([{ tool: 'wait_abort', args: {} }], [{ text: 'never' }]);
   const rig = conversationRig(model, { inbox: true, ai: { backgroundFollowUp: false }, guests: (make) => [probe.make(make)] });
   const first = rig.conv;
@@ -171,9 +171,9 @@ test('/clear stops a running task: nothing is delivered, the log and the journal
 test('/clear cancels a delayed task and disarms only what is still armed', async () => {
   const model = new ScriptedModel();
   model.script(
-    [{ tool: 'background', args: { task: 'now', label: 'r' } }, { tool: 'background', args: { task: 'x', label: 'late', in: '3 minutes' } }],
+    [{ tool: 'subagent', args: { task: 'now', label: 'r' } }, { tool: 'subagent', args: { task: 'x', label: 'late', in: '3 minutes' } }],
     [{ text: 'Started.' }],
-    [{ tool: 'background', args: { task: 'y', label: 'other', in: '3 minutes' } }],
+    [{ tool: 'subagent', args: { task: 'y', label: 'other', in: '3 minutes' } }],
     [{ text: 'Scheduled.' }],
   );
   const now = taskScript(model, 'now');
@@ -200,7 +200,7 @@ test('/clear cancels a delayed task and disarms only what is still armed', async
 
 test('/clear stops a task queued for a slot before it sends anything', async () => {
   const model = new ScriptedModel();
-  model.script([{ tool: 'background', args: { task: 'one', label: 'a' } }, { tool: 'background', args: { task: 'two', label: 'b' } }], [{ text: 'Started.' }]);
+  model.script([{ tool: 'subagent', args: { task: 'one', label: 'a' } }, { tool: 'subagent', args: { task: 'two', label: 'b' } }], [{ text: 'Started.' }]);
   const one = taskScript(model, 'one');
   one.script([{ hold: true }, { text: 'never' }]);
   const rig = conversationRig(model, { ai: { backgroundFollowUp: false }, extra: { sessions: { maxRunning: 2 } } });
@@ -218,9 +218,9 @@ test('/clear stops a task queued for a slot before it sends anything', async () 
 
 test('/clear stops a task\'s own task too, each saying so in the session\'s journal', async () => {
   const model = new ScriptedModel();
-  model.script([{ tool: 'background', args: { task: 'one', label: 'a' } }], [{ text: 'Started.' }]);
+  model.script([{ tool: 'subagent', args: { task: 'one', label: 'a' } }], [{ text: 'Started.' }]);
   const one = taskScript(model, 'one');
-  one.script([{ tool: 'background', args: { task: 'two', label: 'b' } }], [{ hold: true }, { text: 'never' }]);
+  one.script([{ tool: 'subagent', args: { task: 'two', label: 'b' } }], [{ hold: true }, { text: 'never' }]);
   const two = taskScript(model, 'two');
   two.script([{ hold: true }, { text: 'never' }]);
   const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
@@ -243,8 +243,8 @@ test('/clear stops a task\'s own task too, each saying so in the session\'s jour
 
 test('a delayed task whose task has ended is the session\'s, its timer with it, and /clear cancels it', async () => {
   const model = new ScriptedModel();
-  model.script([{ tool: 'background', args: { task: 'one', label: 'a' } }], [{ text: 'Started.' }]);
-  taskScript(model, 'one').script([{ tool: 'background', args: { task: 'two', label: 'b', in: '3 minutes' } }], [{ text: 'a done' }]);
+  model.script([{ tool: 'subagent', args: { task: 'one', label: 'a' } }], [{ text: 'Started.' }]);
+  taskScript(model, 'one').script([{ tool: 'subagent', args: { task: 'two', label: 'b', in: '3 minutes' } }], [{ text: 'a done' }]);
   const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
   const first = rig.conv;
   await first.send('go');
@@ -261,7 +261,7 @@ test('a delayed task whose task has ended is the session\'s, its timer with it, 
 async function withTasks() {
   const model = new ScriptedModel();
   model.script(
-    [{ tool: 'background', args: { task: 'now', label: 'r' } }, { tool: 'background', args: { task: 'x', label: 'late', in: '3 minutes' } }],
+    [{ tool: 'subagent', args: { task: 'now', label: 'r' } }, { tool: 'subagent', args: { task: 'x', label: 'late', in: '3 minutes' } }],
     [{ text: 'Started.' }],
   );
   const now = taskScript(model, 'now');
