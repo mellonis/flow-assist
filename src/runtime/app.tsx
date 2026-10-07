@@ -1143,7 +1143,8 @@ export function renderApp(
       // selects). While the chat waits for an answer (a y/n, a question) none of its own
       // keys acts: a `y` meant for the chat must never trust a plugin here.
       if (hostPanel.current && !ui.cmdOpen && !isMouseKey(k.name)) {
-        const waits = (chat?.needRows?.(80) ?? 0) > 0; // any width: only whether it is 0
+        // Only the chat's own question or y/n: a subagent's waits without holding the plugin's panel.
+        const waits = chat?.asking ? !!chat.asking() : (chat?.needRows?.(80) ?? 0) > 0;
         if (waits && !['up', 'down', 'escape'].includes(String(k.name))) {
           const cap = bindingGlyph(keys.chatFocus);
           setHostPanel({ ...hostPanel.current, notice: `⚠ the chat waits for your answer${cap ? ` — ${cap} to answer it` : ''}; nothing here acts until then` });

@@ -174,15 +174,28 @@ conversation.
 **`/subagent <prompt>`** (`/sub` for short) hands a job to a subagent that works beside the
 chat: you go on talking while it runs, and its answer lands as a `◆` message when it
 ends, as a background task's does. It may read what the assistant reads without asking
-you; it may not yet write, and whatever would wait for your y/n (a command, a file change,
-a fetch off the allowlist) is declined. It cannot ask you a question either. It gets the
+you. It may also write: each write (a command, a file change, a fetch off the allowlist)
+stops for your y/n, and the y/n is asked where you started the subagent. It cannot ask
+you a question. It gets the
 rounds and the token budget of `ai.maxRounds` and `ai.maxTurnTokens`, not a task's twelve,
 and counts toward the three that run at once. The prompt is sent as you
 typed it, line breaks included (⇧⏎ makes one).
 
 `--with-context` first on the line also hands over the conversation's summary — what
 `/compact` left — and nothing else of the history; with no summary yet, nothing starts and
-the line says so. `--auto` needs writes, so it is refused.
+the line says so. `--auto` is refused.
+
+**A subagent's y/n** looks like the assistant's own, with the subagent's name in the title
+(`⚠ fix-tests › read-logs · Confirm write: run_command`), and stands where you type. It is
+answered with `y` or `n` alone, and only when the line is empty and you have paused: a key
+pressed in the moment the block appears, or right after another key, is typed as a letter
+instead, so a request that arrives under your fingers is never answered by them. ⏎ and Esc
+never answer it. With text in the line, one line above it says `⏸ <name> waits for a y/n
+— clear the line to answer`, and the text stays yours. With several waiting, one shows at a
+time, the oldest first; your own conversation's y/n comes before them and keeps its keys.
+A picker, a command's panel or the pager that is open stays open: the request shows after you close
+it. In `/subagent`'s list such a job reads `waiting`. A subagent that waits does not count
+toward the three that run at once.
 
 `/subagent` alone lists this conversation's jobs, the running ones numbered
 (`1 · find-the-failing · working · 1m 12s`), then the last twenty that ended

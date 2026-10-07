@@ -762,6 +762,32 @@ there is no `/fullscreen`.
   question is usually about) and moves the layout by a few rows; the window is for the
   terminal where no growth can hold it (100×22: the default panel is 12 rows, the
   question 17). Collapsed, nothing is needed (the strip says it waits).
+- **A subagent's y/n (subagent y/n)** is the OLDEST request parked anywhere below the
+  conversation on screen (`Conversation.offered()`: own first, with an empty `path`; else
+  the oldest, `path` the labels from the child the conversation started down to the
+  owner), drawn by the chat only while its OWN list is what the chat shows — no picker,
+  command panel, pager or `/context`, and no y/n or question of its own. Those stay open;
+  the request is drawn after they close and never closes them (an own y/n still closes the
+  pager and `/context`). The view binds the `asking` event every child's `confirm` raises on
+  its ancestors, and redraws. With an EMPTY field (no text, bang level 0) the block stands
+  in the field's place: title `⚠ <path> · Confirm write: <tool>` cut to one line
+  (`ConfirmAsk.path`), hint `y yes · n no`. With a draft in the field one line above it says
+  `⏸ <path> waits for a y/n — clear the line to answer` (`renderChatModal`'s `askNotice`);
+  that line is a row of the field's place, counted by `besides`/`planFit` and by
+  `pendingChatRows`' `notice` (the draft's rows plus one), so neither the plan nor a bottom
+  panel's list is squeezed. Only `y` and `n`, only on an empty field, answer it, and only
+  after a pause: `src/assistant/child-ask-guard.ts` — an answer counts 600 ms after the
+  request first came on screen (a request seen anew after a gap with none shown, or a
+  different one, arms from then) and 600 ms after the person's last key of any kind (every
+  key the chat handler gets is noted, whoever takes it). `askClock` is the guard's clock
+  and the seam a test moves instead of sleeping. A `y`/`n` that does not count is not
+  swallowed: it types its letter, which turns the block into the notice. ⏎ and Esc never
+  answer it; every other key goes to its usual handler. The answer is
+  `owner.answerConfirm`, the request's owner, never the attached conversation. An own
+  y/n keeps its keys (y / ⏎ yes, n / Esc no, every other key swallowed) and no pause, and
+  is offered first. `needRows` and the collapsed chat's `? waiting for you` read the same
+  `offered()` as the drawing; the other `conv.confirm` readers (the picker, panel and pager
+  guards, `store.chat.asking`, `inboxHeld`) mean the conversation's own.
 - **In a chat with few rows the plan gives way, never the field.** The field's group
   never shrinks (`flexShrink: 0`, its whole height kept, so a 12-row bottom panel with
   a three-item plan still shows the field and its hint) and the conversation keeps at
@@ -2525,7 +2551,8 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   exit keys AND the chat's chords — it never keeps the person from the chat: Ctrl+] or
   the collapse key acting closes it — it holds every other key while up (`ui.hostPanel`,
   and `pluginHasKeyboard` is false). While the chat waits for an answer (`needRows` of
-  `store.chat` non-zero: a y/n or a question, open or not) none of its own keys acts —
+  `store.chat` `asking()`: the chat's OWN y/n or question, open or not — a subagent's
+  y/n does not hold the panel) none of its own keys acts —
   ↑/↓ and Esc only, and a notice names the chat's key — so a `y` meant for the chat never
   trusts a plugin. A 1 s tick redraws it, and its rows are redacted before they are drawn. One row per
   plugin — the list's own in order, then every other enabled, disabled, starting,

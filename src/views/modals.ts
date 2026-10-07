@@ -1486,6 +1486,7 @@ export function renderChatModal({
   autoMode = 'ask',
   autoRun = false,
   pendingConfirm = null,
+  askNotice = null,
   pendingQuestion = null,
   queued = [],
   queueWaits = null,
@@ -1581,6 +1582,9 @@ export function renderChatModal({
   // `command`: a run_command call — shown whole and wrapped, since the person is
   // deciding on exactly that line.
   pendingConfirm?: ConfirmAsk | null;
+  // One line above the field: a subagent waits for a y/n that a field with a draft cannot
+  // take (AGENTS.md (subagent y/n)). It is a row of the field's place.
+  askNotice?: string | null;
   pendingQuestion?: AskState | null;
   // Messages sent while an answer was coming; they go out, in order, when the turn ends
   // (a stopped or failed turn puts them back into the field). ↑ on an empty field takes
@@ -1695,7 +1699,7 @@ export function renderChatModal({
   const ghost = atEnd ? completion?.ghost ?? '' : '';
   const label = atEnd ? completion?.label ?? '' : '';
   const others = atEnd ? completion?.others ?? [] : [];
-  const confirmAsk = pendingConfirm ? confirmView(pendingConfirm) : null;
+  const confirmAsk = pendingConfirm ? confirmView(pendingConfirm, wrap) : null;
   // What the field's place holds: the question, `/context`, the y/n, or the field.
   const fieldPlace = pendingQuestion
     ? askBlockRows(pendingQuestion, wrap)
@@ -1703,7 +1707,7 @@ export function renderChatModal({
     ? contextPanelRows(contextPanel, wrap, contextCacheLine, contextRecallLine)
     : confirmAsk
     ? confirmBlockRows(confirmAsk, wrap)
-    : visible.length;
+    : visible.length + (askNotice ? 1 : 0);
   // Everything in the column but the conversation and the plan — the error, the hint
   // row, the queue line, the field's place — each with the gap above it. The frame's
   // border and padding take 4 rows.
@@ -1871,7 +1875,9 @@ export function renderChatModal({
               h(Text, { color: theme?.error, selectable: false }, confirmAsk.hint))
           // The field is where the person types — its caret, prompt and placeholder are
           // not text to copy, and a drag over it must not pick them up.
-          : h(Box, { flexDirection: 'column', width: '100%', backgroundColor: m.fieldBg, selectable: false },
+          : h(Box, { flexDirection: 'column', width: '100%' },
+              askNotice ? h(Text, { color: m.warn, wrap: 'truncate', selectable: false }, askNotice) : null,
+              h(Box, { flexDirection: 'column', width: '100%', backgroundColor: m.fieldBg, selectable: false },
               visible.map((row, i) => {
                 // The prompt marks the field's first line; it dims while an answer is
                 // coming, when ⏎ queues instead of sending. A non-zero bang level swaps
@@ -1914,7 +1920,7 @@ export function renderChatModal({
                     // of it, never the placeholder's dim, or it would grey out whenever
                     // the caret moved back.
                     : row.after ? typed(row.after, caretAt + row.caret.length, 'a') : null);
-              })),
+              }))),
       ),
     ),
   );
@@ -2271,17 +2277,21 @@ function askView(state: AskState, wrap: number) {
 // What a y/n block is given: a write the model asked for, or — with `title` and `hint`
 // of its own — a question the host asks (a settings file changed outside it); `whole`
 // keeps its `line` uncut (the host's question bounds its own lines).
-export interface ConfirmAsk { name: string; args?: string | unknown; command?: string; line?: string; input?: string; title?: string; hint?: string; whole?: boolean }
+export interface ConfirmAsk { name: string; args?: string | unknown; command?: string; line?: string; input?: string; title?: string; hint?: string; whole?: boolean;
+  // The labels of the subagent that asks, from the one the conversation started down to it:
+  // the request is a subagent's, not the conversation's own. Its title names them and its
+  // hint carries only the two keys that answer it (AGENTS.md (subagent y/n)).
+  path?: string[] }
 
 // The y/n block's pieces, the same way.
 // `command` is a shell command, drawn behind the ordinary run mark — only
 // `run_command` reaches this block, and the model's own run is never interactive;
 // `line` is a line drawn as it is (the `config set` a `config_set` call stands for).
 // Either takes the arguments' place.
-function confirmView(c: ConfirmAsk) {
+function confirmView(c: ConfirmAsk, wrap: number) {
   const cut = (t: string) => { const head = headClusters(t, 1000); return head !== t ? `${head}…` : t; };
   return {
-    title: c.title ?? `⚠ Confirm write: ${c.name}`,
+    title: c.path?.length ? cutStep(`⚠ ${c.path.join(' › ')} · Confirm write: ${c.name}`, Math.max(10, wrap - 4)) : c.title ?? `⚠ Confirm write: ${c.name}`,
     command: c.command != null ? `${runMark()} ${cut(c.command)}` : c.line != null ? (c.whole ? c.line : cut(c.line)) : null,
     // Where the call's input comes from — a command's stdin, piped from an earlier
     // call's result (src/assistant/tool-results.ts); drawn under the command line.
@@ -2289,7 +2299,7 @@ function confirmView(c: ConfirmAsk) {
     args: typeof c.args === 'string'
       ? (headClusters(c.args, 120) !== c.args ? `${headClusters(c.args, 120)}…` : c.args)
       : JSON.stringify(c.args ?? ''),
-    hint: c.hint ?? `Press y to confirm · n to decline · ${CAP.esc} to cancel`,
+    hint: c.path?.length ? 'y yes · n no' : c.hint ?? `Press y to confirm · n to decline · ${CAP.esc} to cancel`,
   };
 }
 
@@ -2302,16 +2312,19 @@ const textRows = (text: string, width: number) => Math.max(1, wrapText(text, Mat
 // up, the block — and the gaps between them. 0 when nothing is pending. The App grows a
 // bottom panel to it, and draws the chat as a window while it is pending when even that
 // would leave the plugin less than its least (src/runtime/panel-layout.ts).
-export function pendingChatRows({ width, question, confirm, todo, queued = 0 }: {
+export function pendingChatRows({ width, question, confirm, notice = 0, todo, queued = 0 }: {
   width: number;
   question?: AskState | null;
   confirm?: ConfirmAsk | null;
+  // The rows of the field's place when a subagent's y/n waits behind a draft: the notice
+  // line and the field. They stand where the block would, and are counted the same way.
+  notice?: number;
   todo?: PlanItem[] | null;
   queued?: number;
 }): number {
-  if (!question && !confirm) return 0;
+  if (!question && !confirm && !notice) return 0;
   const wrap = chatWrapWidth(width, true);
-  const block = question ? askBlockRows(question, wrap) : confirmBlockRows(confirmView(confirm!), wrap);
+  const block = question ? askBlockRows(question, wrap) : notice && !confirm ? notice : confirmBlockRows(confirmView(confirm!, wrap), wrap);
   const planRows = question ? 0 : planBlockRows(planView(todo ?? []));
   const parts = [1, 1, planRows, queued ? 1 : 0, block].filter((n) => n > 0);
   // The frame's border and padding, the parts, a gap between each two.
