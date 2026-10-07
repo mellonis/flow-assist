@@ -43,7 +43,7 @@ async function pick(ui: UI, text: string) {
 }
 
 // A holds its turn (one request, then the answer); `/new` leaves it for B, which answers.
-async function leftHeld(last: Parameters<ScriptedModel['script']>[0][]) {
+async function leftHeld(last: Parameters<ScriptedModel['script']>[0][], width = 100) {
   const dir = dirOf();
   const model = new ScriptedModel();
   const aSub = model.when((req) => firstUser(req).includes('session A question'));
@@ -52,7 +52,7 @@ async function leftHeld(last: Parameters<ScriptedModel['script']>[0][]) {
   bSub.script([{ text: 'B answer.' }]);
   const cSub = model.when((req) => firstUser(req).includes('session C question'));
   cSub.script([{ hold: true }, { text: 'C answer.' }]);
-  const ui = await bootApp(model, 100, 28, undefined, { sessions: { dir } }, { toastMs: 10_000 });
+  const ui = await bootApp(model, width, 28, undefined, { sessions: { dir } }, { toastMs: 10_000 });
   await ui.press('F');
   await ask(ui, 'session A question');
   await settleUntil(() => aSub.held && !!saved(dir, 'session A question'));
@@ -157,6 +157,17 @@ test('a session opened by /resume is not owed any more, and no picker read has t
   await ask(ui, '/new');
   await settle(6);
   expect(hintRow(frameOf(ui))).not.toContain('●');
+  ui.app.unmount();
+});
+
+test('the turn of a session left running counts as one in background on the session on screen, until it ends', async () => {
+  // Wide, so the hint row keeps its last cell.
+  const { ui, aSub } = await leftHeld([[{ hold: true }, { text: 'A final answer.' }]], 140);
+  await settleUntil(() => frameOf(ui).includes('1 in background'));
+  expect(hintRow(frameOf(ui))).toContain('1 in background');
+  aSub.release();
+  await settleUntil(() => !frameOf(ui).includes('in background'));
+  expect(frameOf(ui)).not.toContain('in background');
   ui.app.unmount();
 });
 

@@ -4372,8 +4372,8 @@ commands; docs and hints never present either mechanism as a boundary.
     against nothing — and the chat says so once (`memoryRecordNotes('later')` from
     `Conversation.memoryBlock`: once for the host, set only by a conversation the chat
     has not left, and once in the rows of each conversation that has not said it, so a
-    left session says it in its own rows and the session on screen still says it at its
-    next turn); at a start, a missing record, or one the host wrote before any
+    left session says it in its own rows and the session on screen says it at its next
+    render (the chat reads the memory block at every render)); at a start, a missing record, or one the host wrote before any
     first pass (`firstStartDone: false`, "pending" — its own fact writes, which it does
     compare against), is a line on the start screen (`memoryRecordNotes('start')`, in
     `runInteractive`'s `trustNotes`). An
