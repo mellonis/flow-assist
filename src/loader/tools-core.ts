@@ -18,7 +18,8 @@ import { markFacts } from '../assistant/memory-trust.js';
 import { tildePath } from '../assistant/shell.js';
 import { openInBrowser } from '../runtime/services.js';
 import { inBackgroundWork, inUnattachedWork } from '../runtime/background-work.js';
-import { childResultBody, type ChildSpec, type ChildStart } from '../assistant/conversation-types.js';
+import { type ChildSpec, type ChildStart } from '../assistant/conversation-types.js';
+import { scheduleChild } from '../assistant/child-schedule.js';
 import type { ChildSlots } from '../assistant/registry.js';
 import { resolveIdentityToken } from '../runtime/plugin-identity.js';
 import { DEFAULT_THEME } from '../playback/theme.js';
@@ -730,47 +731,14 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
           showMessage?: (m: string) => void; pushLog?: (e: string) => void; notify?: () => void;
         };
         const slots = c.childSlots;
-        if (typeof c.startChild !== 'function' || !slots) return 'Background tasks unavailable: no conversation to run them in (the host must be interactive).';
-        // Refused past `ai.subagentDepth`: the refusal is the tool's answer.
-        const started = c.startChild({ kind: 'task', label, prompt: task, by: 'model' });
-        if ('refused' in started) return started.refused;
-        // Counted from the moment it is armed, so the chat's «N in background» shows a
-        // task waiting on its delay too; a delayed task holds no slot. The timer runs even
-        // with no delay: the turn that called this sends its next request first.
-        const timer = setTimeout(() => {
-          slots.disarm(timer);
-          started.fired();
-          slots.admit(async () => {
-            const failed = (msg: string) => {
-              c.showMessage?.(`⚠ ${label} failed: ${msg}`);
-              c.pushLog?.(`[bg] ${label} error: ${msg}`);
-            };
-            try {
-              const r = await started.run();
-              // Stopped with its conversation (`/clear`, or the exit): only the log says so.
-              if (r.stoppedWithParent) { c.pushLog?.(`[bg] ${label} stopped with its conversation`); return; }
-              if (r.outcome === 'failed' || r.outcome === 'stopped') { failed(r.error ?? r.outcome); return; }
-              // The log says the result without its `<label> finished:` line.
-              c.pushLog?.(`[bg] ${label}: ${childResultBody(r)}`);
-              // Landed nowhere (its conversation was closed first): nothing to point at.
-              const home = r.landedIn;
-              if (!home) return;
-              // The toast is the chat's: it names the session the result went to when that
-              // is not the one on screen.
-              const where = home.onScreen ? '' : home.title ? ` — in «${home.title}»` : ' — in an untitled session';
-              c.showMessage?.(`⏳ ${label} done${where}`);
-            } catch (e) {
-              failed(e instanceof Error ? e.message : String(e));
-            } finally {
-              // The slot frees once this run settles; the notify waits a tick, so the
-              // chat's count it redraws has this task gone.
-              setTimeout(() => c.notify?.(), 0);
-            }
-          });
-        }, ms);
-        started.armed(timer);
-        slots.arm(timer);
-        c.notify?.();
+        const startChild = c.startChild;
+        if (typeof startChild !== 'function' || !slots) return 'Background tasks unavailable: no conversation to run them in (the host must be interactive).';
+        // Refused past `ai.subagentDepth`: the refusal is the tool's answer. The schedule
+        // itself (AGENTS.md (child schedule)) is one function the slash commands share.
+        const scheduled = scheduleChild({ kind: 'task', label, prompt: task, by: 'model' }, ms, {
+          startChild: (spec) => startChild.call(c, spec), slots, showMessage: c.showMessage, pushLog: c.pushLog, notify: c.notify,
+        });
+        if ('refused' in scheduled) return scheduled.refused;
         return `Background task started (${label})${ms ? `, to begin in ${Math.round(ms / 1000)}s` : ''} — the result appears in the chat when it ends, and you see it on your next turn.`;
       }
       case 'todo': {

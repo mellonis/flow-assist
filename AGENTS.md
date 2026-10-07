@@ -2866,7 +2866,9 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   the count of background tasks (armed, queued, running) and the cap — a task starts
   while fewer than `max(1, sessions.maxRunning - 1)` run (`maxRunning` 4 by default, so
   three), the rest wait FIFO, and a session's own turn never takes or waits for one. The
-  `background` tool (`src/loader/tools-core.ts`) arms the task with its delay's timer
+  `background` tool (`src/loader/tools-core.ts`) parses its arguments and hands the rest to
+  `scheduleChild` (`src/assistant/child-schedule.ts`, the child schedule: a caller outside a
+  turn gets the same one), which arms the task with its delay's timer
   (counted, holding no slot), disarms it with the same handle when the delay ends and
   tells the conversation so (`fired`), then admits the run, which takes a slot until it
   settles — its last notify comes a tick after, once the slot is free; the chat's
