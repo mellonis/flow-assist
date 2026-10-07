@@ -1,8 +1,8 @@
 // What the chat remembers of a conversation's view while the conversation is left
 // loaded and taken back (AGENTS.md (a host makes its conversations through one
-// registry)): the folds, the notes mode the place in the list and the caret. Pure: the chat owns
-// the map, keyed by the conversation object, so an entry is never read for another
-// one and goes with the object.
+// registry)): the folds, the notes mode, the place in the list and the caret. Pure:
+// the chat owns the map, keyed by the conversation object, so an entry is never read
+// for another one and goes with the object.
 import type { FoldState } from './folds.js';
 import type { NotesMode } from './step.js';
 

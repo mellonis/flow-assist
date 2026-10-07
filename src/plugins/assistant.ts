@@ -401,8 +401,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // The block open in the pager (its fold id), or null — a block a click opened
           // that is taller than the rows the conversation has for it. The conversation's,
           // like the folds: Esc closes it, and closing the chat, /clear and a session read
-          // from its file drop it. `pagerShownRef` says whether the last render drew it: only a pager on
-          // screen holds the keys.
+          // from its file drop it. `pagerShownRef` says whether the last render drew it:
+          // only a pager on screen holds the keys.
           const [pager, setPagerState] = ui.useState<string | null>(null);
           const pagerRef = ui.useRef<string | null>(null);
           const pagerShownRef = ui.useRef(false);
@@ -753,9 +753,6 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // notes mode and everything folded. The pager is closed either way.
           const restoreView = (of?: Conversation) => {
             const m = of ? viewMemory.current!.get(of) : undefined;
-            // Whatever the list was asked for belongs to the list it was asked of: a list
-            // is made for each conversation (`listKey`), and starts at its end.
-            setScrollTo(null);
             if (m && of) {
               setNotes(m.notes);
               const folds = recalledFolds(m);
@@ -2096,7 +2093,6 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             detailsKey: firstGlyph(host.keys.details),
             onViewport: (v: Viewport) => { viewportRef.current = v; },
             scrollTo,
-            listKey: conv.key,
             bangLevel,
             // Where `!` / `!!` will run, for the hint row in shell mode — read only
             // there, since `cwd()` checks the directory against the roots on disk.

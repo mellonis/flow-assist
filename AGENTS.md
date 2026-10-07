@@ -2710,14 +2710,14 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   again) are the session on screen's; `adopt` starts the clock again, from the
   segment's start, for a conversation taken back while it works. `/resume` of that session while it is kept takes
   the same object back, with the draft it kept (`reclaimLive`), never a second one read
-  from its file (`openFromFile`). `leave` writes what the chat showed of it — its folds (the exception set copied),
-  its notes mode, the caret in its draft and its place in the list (at its end, else the row at its top as a message
-  and an offset, `rowAnchor`) — into a map keyed by the object
-  (`src/assistant/view-memory.ts`), and the taken-back conversation's view reset reads that
-  entry instead of resetting (`applySessionView`; the place is asked after the folds are
-  set, since the row counts what is laid out with them); the caret is put back only into the very draft it was in — one that grew while the session was away, a stopped or failed turn's queue put ahead of it, has the caret at its end). The list is keyed by the
-  conversation, so each one has a list of its own with its own scroll and following state,
-  starting at its end. A session put away, one read from its file, `/clear` and `/new`
+  from its file (`openFromFile`). `leave` writes what the chat showed of it — its folds (the exception
+  set copied), its notes mode, the caret in its draft and its place in the list (at its
+  end, else the row at its top as a message and an offset, `rowAnchor`) — into a map keyed
+  by the object (`src/assistant/view-memory.ts`), and the taken-back conversation's view
+  reset reads that entry instead of resetting (`applySessionView`). The place is asked
+  after the folds are set, since the row counts what is laid out with them. The caret is
+  put back only into the very draft it was in: one that grew while the session was away
+  (a stopped or failed turn's queue goes ahead of it) has the caret at its end. A session put away, one read from its file, `/clear` and `/new`
   have no entry and open folded, on the config's notes mode, at the end. The pager is
   closed on every switch. `/resume` of the session on screen keeps the object
   on screen and refreshes only the view. The chat makes every
