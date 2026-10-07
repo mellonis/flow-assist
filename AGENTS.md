@@ -1806,6 +1806,13 @@ A saved history that holds calls under the name `background` is sent as it is. T
     Written through the child's route's `raw`, past the filter that keeps a task's own
     lines to `call-start`, `confirm` and `call`; `/export` draws it as `*<label> stopped
     (<by>)*`.
+  - `subagent` — a subagent started or ended: `label`, `by` (`model` or `person`, who
+    started it), `event` (`start` or `end`) and, on an end, its `outcome`
+    (`answer`, `empty`, `limit`, `failed` or `stopped`); one stopped with its session or at
+    exit says what stopped it in `stoppedBy` (`clear` or `exit`). Tagged `subagent: <label>`
+    like its calls, written through the route's `raw`; `/export` draws
+    `*Subagent «<label>» started (by you | by the model)*` and `*Subagent «<label>»
+    finished | failed | stopped …*`.
   A turn's events go to the session its question was journaled in (`journalId`, taken
   in `runTurn`), even when a `/clear` lands mid-turn — they happened there. A FORK is
   different: the conversation goes on in the fork, so `journalTo` follows `forkedTo`
@@ -1821,7 +1828,7 @@ A saved history that holds calls under the name `background` is sent as it is. T
   plugin's, a core tool's) carries nothing that writes there; the host writes every line
   from its own hooks. A background task's own calls (`call-start`, `confirm`, `call`)
   go to the session whose turn started it through the child's `journalRoute` (below),
-  each tagged `task` with its label, its y/n answers `by: 'background'`. A tool that asks
+  each tagged `task` with its label (`subagent` for a subagent's), its y/n answers `by: 'background'`. A tool that asks
   the model itself is handed the host's LLM service wrapped (`journaledChatLLM`), which
   adds its own `onToolStart`/`onToolRun` hooks to that run — and a `confirmWrite` hook
   only when the caller passed a confirmation — and writes to the session whose turn
@@ -2745,7 +2752,8 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   turn's session as their owner: a plugin's `host.open` from an effect refused as "not
   on screen" while a left session streams, its note posted into that session. A
   plugin's tool that sets its own component's state directly is outside this.
-- **A conversation has a kind** — `session` (the chat's), `task` (a background task's) or
+- **A conversation has a kind** — `session` (the chat's), `task` (a background task's),
+  `subagent` (a read-only job the person's work runs in beside the chat) or
   `oneshot` (the one-shot prompt's) — and a policy for its writes (`confirm-policy.ts`),
   both decided when it is made: `Conversation.fresh(deps, { kind, policy })` for a new one, which reads the
   project's instructions for the start directory, `Conversation.restore(…)` for a saved
@@ -2756,7 +2764,17 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   called; `canAsk` is always said. What a turn is handed that differs by kind is
   `turnShape` (`conversation-turn.ts`), a table with a row per kind; the `task` row hands the
   worker prompt (plus the project block) as the system prompt, twelve rounds, no screen tail,
-  round boundary, recall, `ask_user` or images, and withholds nothing.
+  round boundary, recall, `ask_user` or images, and withholds nothing. The `subagent` row
+  hands the same worker prompt with the person's prompt framed as `The person's task:`,
+  then the memory block and the language directive (read once for the message) and,
+  read again every round, the project block and the conversation's own summary — a
+  summary handed over at the start (`ChildSpec.summary`) or one an automatic compaction
+  made, so a long run keeps its context; no screen tail; the round boundary on (the
+  automatic compaction; the queue and the settings-file guard find nothing to do in a
+  child); recall on; no `ask_user`, no images; no round cap of its own, so the config's
+  `ai.maxRounds` and `ai.maxTurnTokens` apply; `remind` is withheld. A child says nothing
+  of a missing memory record and spends no flag of the host's once-only note: nobody
+  draws its rows.
 - **A host makes its conversations through one registry** (`ConversationRegistry`,
   `src/assistant/registry.ts`): the chat one for its life, the one-shot one for its run,
   a test rig one per rig. The registry holds the host's lock token, what is said once for
@@ -2765,9 +2783,10 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   hook, `closeAll('exit')`. `flushAll()` saves every live conversation silently and
   releases its lock after that save (each in its own try, so one failing save skips no
   other); it closes nothing — the chat's unmount runs it, and a test process unmounts
-  chats whose work goes on. `closeAll('exit')` runs `flushAll()`, then each task still
+  chats whose work goes on. `closeAll('exit')` runs `flushAll()`, then each child still
   counted under a live conversation, running or armed, writes `{ t: 'task-end', task,
-  outcome: 'stopped', by: 'exit' }` into its session's journal through its route's
+  outcome: 'stopped', by: 'exit' }` (a subagent: its `subagent` end line, `stoppedBy:
+  'exit'`) into its session's journal through its route's
   `raw` (synchronous, so it lands from `process.on('exit')` too), then every
   conversation closes with `'exit'`, deepest first — a task's turn stopped as a
   parent's stop stops it, so no tool call or model request follows its `task-end` line
@@ -2880,13 +2899,16 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   log names: `[bg] <label> stopped with its conversation`, no toast, no row.
 - **A conversation starts a child of its own** (`startChild(spec, journalId)`, in
   `src/assistant/conversation.ts`; a turn hands it to its tools as `ctx.startChild`, with
-  the host's slots as `ctx.childSlots`): a `task` conversation (`parent`, `depth` one more,
-  `label`) with its own plan, shell, tool set and abort, and the `always-no` policy. Its
+  the host's slots as `ctx.childSlots`): a `task` or `subagent` conversation (`ChildSpec.kind`;
+  `parent`, `depth` one more, `label`, `spawnedBy`) with its own plan, shell, tool set and abort, and the `always-no` policy. Its
   deps are its parent's with no sessions directory, no screens, nobody to ask, no redraw
   (`notify`) and a silent `pushLog`. It keeps no journal or state file: its `journalRoute` sends its
   `call-start`, `confirm` and `call` lines — and nothing else — to its parent's
   `journalTo` under the parent turn's journal id, tagged `{ task: <label>, ...line }` (a
-  grandchild's own label kept). Its project is its parent's (`inheritedProject`, read
+  subagent's lines `{ subagent: <label>, ...line }`; a grandchild's own label kept). A
+  subagent also writes `{ t: 'subagent', label, by, event: 'start' | 'end', outcome? }`
+  lines into that journal through the route's `raw`: the start when it is made, the end
+  when its run settles (the journal's line list, above). Its project is its parent's (`inheritedProject`, read
   first by `currentProject`), whatever root its shell moves to — the memory and the
   workspace follow it; its shell starts in its parent's directory, and its `cd` moves
   only its own (and the project instructions its per-round prompt reads). A
@@ -2896,8 +2918,8 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   which sends the task as background work, answers the end
   (`outcome`, the trimmed text, the error, the round or token limit with its last step),
   closes the child (`park`: its save and inbox timers go) and **delivers its result to
-  the session its chain started from** — the nearest ancestor that is not a task, so a
-  grandchild's result goes to the session too, never to the task that started it
+  the session its chain started from** — the nearest ancestor that has no parent, so a
+  grandchild's result goes to the session too, never to the task or subagent that started it
   (which may have ended, or be in its last turn with its inbox about to go) —
   (`childResultText`: `<label> finished:` or `<label> failed:`, then
   `childResultBody`: the text and the limit, or the reason), never to whatever the chat
@@ -2913,22 +2935,26 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   count at both ends. The result is delivered BEFORE the child is untracked (in a
   `finally`, so a throwing delivery still untracks it), so whoever sees the count fall
   finds it already in. **A task that ends hands its children still live to its own
-  parent** (`handChildrenUp`, run only by a task's `close('park')`): they are that
+  parent** (`handChildrenUp`, run only by a child's `close('park')`): they are that
   parent's to count from then on — the session counts a grandchild whose task is over —
-  and their results go to the session. **Only `close('clear')` and `close('parent')`
+  and their results go to the session; **the rules about "a child" read `parent`, not the
+  kind**: this hand-up, the walk to the session (`run`, `workHome`), the abort at
+  `close('exit')` and `closeAll`'s end line. The result carries `ms` and `tokens` from the child's
+  last end. **Only `close('clear')` and `close('parent')`
   stop the subtree** (`stopChildren`): each child still counted is closed with
   `'parent'` — its turn aborted, one still armed has its timer cleared and its count
   disarmed (a timer that fired was disarmed when it fired, so only `childTimers` is
   disarmed), one queued for a slot sends nothing when its run comes — and a task closed
-  so writes its `task-end` line (`by: 'clear'`) into the session's journal through its
+  so writes its `task-end` line (`by: 'clear'`; a subagent's `subagent` end line with
+  `outcome: 'stopped'` and `stoppedBy: 'clear'`) into the session's journal through its
   route's `raw` and delivers nothing (`stoppedWithParent`). `/new` closes nothing: the
   chat leaves the session through the registry's `retire`, and its tasks run on.
-  `close('exit')` touches no child: at exit the registry's `closeAll` writes each task's
-  `task-end` line (`by: 'exit'`), clears and disarms every timer of a task still waiting
+  `close('exit')` touches no child: at exit the registry's `closeAll` writes each child's
+  end line (a task's `task-end` with `by: 'exit'`, a subagent's `subagent` end), clears and disarms every timer of a task still waiting
   on its delay, aborts every live conversation's turn (a session's `!command` or turn
-  as well as a task's, so every running command's process group is killed and none
+  as well as a child's, so every running command's process group is killed and none
   outlives the process; a pending y/n is left as is), and closes the tree itself,
-  deepest first; `close('exit')` of a task stops its own turn.
+  deepest first; `close('exit')` of a child stops its own turn.
 - **Ctrl+C, Ctrl+D and Ctrl+Z take a second press** (`src/runtime/exit-keys.ts`, pure;
   the App owns the arm). flowtty hands these three to the app BEFORE the terminal
   backend acts (exit, exit, suspend — skipped when a `useInput` handler returns strict

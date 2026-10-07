@@ -21,15 +21,15 @@ export type ConfirmPolicy =
 
 // Where a policy's answers are journaled: the conversation, the journal id of the turn or
 // nested run the call belongs to (`journalTo` follows it into a fork), and a background
-// task's label, which tags its lines and makes its answers `by: 'background'`.
-export interface ConfirmScope { conv: Conversation; journalId: string; task?: string }
+// task's or subagent's label, which tags its lines and makes its answers `by: 'background'`.
+export interface ConfirmScope { conv: Conversation; journalId: string; task?: string; subagent?: string }
 
 // The `confirmWrite` a run is handed, or none. `none` returns nothing on purpose:
 // agentChat then declines every write before it starts, with no `onToolStart` and no
 // `confirm` line — the one rule for a run that cannot ask.
 export function confirmFor(policy: ConfirmPolicy, scope: ConfirmScope): ConfirmWrite | undefined {
   const { conv, journalId } = scope;
-  const tag = scope.task ? { task: scope.task } : {};
+  const tag = scope.task ? { task: scope.task } : scope.subagent ? { subagent: scope.subagent } : {};
   const answered = (name: string, info: { id?: string } | undefined, ok: boolean, by: 'background' | 'plugin') =>
     conv.journalTo(journalId, { t: 'confirm', ...(info?.id ? { id: info.id } : {}), name, answer: ok ? 'yes' : 'no', by, ...tag });
   switch (policy.kind) {
@@ -52,7 +52,7 @@ export function confirmFor(policy: ConfirmPolicy, scope: ConfirmScope): ConfirmW
     case 'caller':
       return async (name, args, info) => {
         const ok = !!(await policy.confirm(name, args, info));
-        answered(name, info, ok, scope.task ? 'background' : 'plugin');
+        answered(name, info, ok, scope.task || scope.subagent ? 'background' : 'plugin');
         return ok;
       };
     default: {

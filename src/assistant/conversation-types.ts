@@ -63,9 +63,11 @@ export function lastAnswerOf(list: readonly { role?: string; content?: unknown }
 export const callOf = (m: ChatMsg): string | undefined => (m.views as ViewRecord[] | undefined)?.[0]?.callId ?? m.discardedCallId;
 
 // 'session': a chat's — saved, journaled, locked, continued. 'task': a background task's
-// child conversation — no screen, no journal or file of its own, twelve rounds. 'oneshot':
+// child conversation — no screen, no journal or file of its own, twelve rounds. 'subagent':
+// a child conversation the person's work runs in — read-only, no journal or file of its own,
+// the config's round and token limits, its own summary kept through a compaction. 'oneshot':
 // `flow-assist "<prompt>"` — nobody to ask, no screen, no journal, no session file.
-export type ConversationKind = 'session' | 'task' | 'oneshot';
+export type ConversationKind = 'session' | 'task' | 'subagent' | 'oneshot';
 export type BusyKind = 'turn' | 'shell' | 'interactive' | 'command';
 export type ConversationStatus = 'working' | 'waiting' | 'done' | 'idle';
 // 'parent': a task stopped because the conversation that holds it was cleared, or
@@ -179,8 +181,9 @@ export interface ConversationDeps {
   children?: ChildSlots;
 }
 
-// A child a conversation starts from a turn: the `subagent` tool's task.
-export interface ChildSpec { kind: 'task'; label: string; prompt: string; by: 'model' | 'person' }
+// A child a conversation starts: the `subagent` tool's task, or a subagent. `summary` is
+// the parent's summary handed to a subagent as the start of its own.
+export interface ChildSpec { kind: 'task' | 'subagent'; label: string; prompt: string; by: 'model' | 'person'; summary?: string }
 // How a child's run ended, as the tool that started it reports it.
 export interface ChildResult {
   outcome: 'answer' | 'empty' | 'limit' | 'stopped' | 'failed';
@@ -196,6 +199,9 @@ export interface ChildResult {
   // Stopped because the conversation holding it was cleared, or because the process
   // exits: nothing was delivered, and the tool says nothing on screen.
   stoppedWithParent?: true;
+  // How long the child's last turn ran and what it cost, from its last end.
+  ms?: number;
+  tokens?: number;
 }
 // A child's result without its header line: the reason it failed, or its text and the
 // limit it stopped at.

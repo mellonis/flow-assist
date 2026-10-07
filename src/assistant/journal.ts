@@ -23,7 +23,8 @@
 //            returned), `raw` (the data behind a framed result, whole; `null` — none),
 //            the `images` it returned (names and sizes), what it `changes`d, the
 //            `views` it left in their final state with their text
-//            A call made by a background task carries `task`, the task's label.
+//            A call made by a background task carries `task`, the task's label; one made
+//            by a subagent carries `subagent`, its label.
 //   shell    a `!command` the person ran, written when it starts: `command`, `cwd`
 //            (from a state file: with its `output` too)
 //   shell-out  its output as it arrives, in chunks (`text`), whole — more than the
@@ -36,6 +37,10 @@
 //   task-end a background task that stopped without finishing: `task` (its label),
 //            `outcome` stopped, and `by` — what stopped it (`clear`: its session was
 //            cleared; `exit`: the process exited while it ran or waited)
+//   subagent a subagent started or ended: `label`, `by` (who started it: `model` or
+//            `person`), `event` (`start` or `end`) and, on an end, its `outcome`; one
+//            stopped with its session or at exit also says what stopped it (`stoppedBy`:
+//            `clear` or `exit`). Tagged `subagent` like its calls.
 //
 // `/export` renders a journal as markdown (`exportMarkdown`).
 //
@@ -251,7 +256,7 @@ const CONFIRMED_BY: Record<string, string> = {
 // `confirm` — the y/n's answer, when the call waited on one.
 function callBlock(ev: Record<string, unknown>, confirm?: Record<string, unknown>): string {
   const outcome = ev.t === 'call-start' ? 'did not finish' : String(ev.outcome ?? '');
-  const head = `${String(ev.name ?? 'call')} · ${outcome}${ev.write ? ' · write' : ''}${typeof ev.task === 'string' ? ` · background task «${ev.task}»` : ''}`;
+  const head = `${String(ev.name ?? 'call')} · ${outcome}${ev.write ? ' · write' : ''}${typeof ev.task === 'string' ? ` · background task «${ev.task}»` : typeof ev.subagent === 'string' ? ` · subagent «${ev.subagent}»` : ''}`;
   const out = ['<details>', `<summary>${head.replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' })[c]!)}</summary>`, ''];
   out.push('Arguments:', '', block(asText(ev.args ?? {}), 'json'), '');
   if (confirm) out.push(`Asked y/n — answered ${String(confirm.answer)} by ${CONFIRMED_BY[String(confirm.by)] ?? String(confirm.by)}.`, '');
@@ -291,13 +296,13 @@ export function exportMarkdown(events: JournalEvent[], opts: { title: string; id
   };
   // A call's output, stitched the same way, by the call's key.
   const callOut = new Map<string, { text: string; note: string }>();
-  const keyOf = (ev: JournalEvent) => `${String(ev.task ?? '')}\u0000${String(ev.id ?? '')}\u0000${String(ev.name ?? '')}`;
+  const keyOf = (ev: JournalEvent) => `${String(ev.task ?? '')}\u0000${String(ev.subagent ?? '')}\u0000${String(ev.id ?? '')}\u0000${String(ev.name ?? '')}`;
   for (const ev of events) {
     const at = when(ev.at);
     // Anything of the conversation after a command that never ended: its output is
-    // drawn where it stands, not below what came after. A background task's calls run
-    // beside a command and do not close it.
-    if (shellOpen && ev.t !== 'shell-out' && ev.t !== 'shell-end' && typeof ev.task !== 'string') flushOutput(true);
+    // drawn where it stands, not below what came after. A background task's or a
+    // subagent's calls run beside a command and do not close it.
+    if (shellOpen && ev.t !== 'shell-out' && ev.t !== 'shell-end' && typeof ev.task !== 'string' && typeof ev.subagent !== 'string') flushOutput(true);
     const text = typeof ev.text === 'string' ? ev.text : '';
     switch (ev.t) {
       case 'row':
@@ -349,6 +354,11 @@ export function exportMarkdown(events: JournalEvent[], opts: { title: string; id
         break;
       case 'markup': out.push(`*Note${at}:* ${String(ev.note ?? '')} — the model wrote:`, '', block(String(ev.markup ?? '')), ''); break;
       case 'compact': out.push('---', '', `**Compacted${ev.auto ? ' automatically' : ''}**${at} — from here on the model was given this summary instead of the conversation above:`, '', quoted(String(ev.summary ?? '')), '', '---', ''); break;
+      case 'subagent':
+        out.push(ev.event === 'start'
+          ? `*Subagent «${String(ev.label ?? '')}» started (${ev.by === 'person' ? 'by you' : 'by the model'})*${at}`
+          : `*Subagent «${String(ev.label ?? '')}» ${ev.outcome === 'answer' || ev.outcome === 'empty' ? 'finished' : String(ev.outcome ?? 'ended')}${typeof ev.stoppedBy === 'string' ? ` (${ev.stoppedBy})` : ''}*${at}`, '');
+        break;
       case 'task-end': out.push(`*${String(ev.task ?? '')} stopped (${String(ev.by ?? '')})*${at}`, ''); break;
       case 'end': {
         if (typeof ev.cut === 'string' && ev.cut) out.push(`**Assistant**${at} (cut off)`, '', ev.cut, '');

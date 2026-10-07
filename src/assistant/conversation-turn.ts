@@ -14,7 +14,7 @@ import { pushHistory } from './prompt-history.js';
 import { decideBatch, recallLimits, type RecallSource } from './recall.js';
 import { screenBlock } from './screen-context.js';
 import { addCalls, callRun, endRound, startsWithNext, type CallRun, type TurnPart } from './step.js';
-import { STOPPED_TURN, failedTurn, joinSystem, projectBlock, roundCapTurn, summaryBlock, systemParts } from './system-prompt.js';
+import { STOPPED_TURN, failedTurn, joinSystem, languageDirective, projectBlock, roundCapTurn, summaryBlock, systemParts } from './system-prompt.js';
 import type { ViewRecord } from './views.js';
 import type { ToolDef } from '../loader/tools.js';
 import { RESTART_NOTE, type ConfigChange } from '../config/load.js';
@@ -38,8 +38,10 @@ export function allServices(services: object): Record<string, unknown> {
 export interface TurnShape {
   // 'chat': the person's system prompt (directive, identity, memory, plan, summary, screens,
   // project). 'worker': the background worker's prompt with the task in it, plus the project
-  // block, read again every round.
-  system: 'chat' | 'worker';
+  // block, read again every round. 'subagent': the worker's prompt with the person's task
+  // framed as theirs, the memory block and the language directive, plus the project block
+  // and the conversation's own summary, both read again every round.
+  system: 'chat' | 'worker' | 'subagent';
   screen: boolean;
   boundary: boolean;
   recall: boolean;
@@ -51,9 +53,11 @@ export interface TurnShape {
 }
 export const ONESHOT_WITHHELD: readonly string[] = ['subagent', 'remind'];
 export const TASK_ROUNDS = 12;
+export const SUBAGENT_WITHHELD: readonly string[] = ['remind'];
 const SHAPES: Record<ConversationKind, TurnShape> = {
   session: { system: 'chat', screen: true, boundary: true, recall: true, askUser: true, images: true, withholdTools: [] },
   task: { system: 'worker', screen: false, boundary: false, recall: false, askUser: false, images: false, maxRounds: TASK_ROUNDS, withholdTools: [] },
+  subagent: { system: 'subagent', screen: false, boundary: true, recall: true, askUser: false, images: false, withholdTools: SUBAGENT_WITHHELD },
   oneshot: { system: 'chat', screen: false, boundary: false, recall: false, askUser: false, images: true, withholdTools: ONESHOT_WITHHELD },
 };
 export function turnShape(kind: ConversationKind): TurnShape {
@@ -61,9 +65,13 @@ export function turnShape(kind: ConversationKind): TurnShape {
 }
 
 // The system prompt of a background worker, with its task.
-const WORKER_PROMPT = 'You are a background worker. Complete the task below autonomously using the available tools, then return ONLY a concise result (a few sentences). Do not ask questions or wait for the user — act. You may spawn a follow-up `subagent` task if the work needs a further step (e.g. "build, then fix and rebuild on failure"), but keep the chain at most ONE level and only if it is genuinely needed. IMPORTANT: if the task asks for the current time, date, weekday, or a relative duration, you MUST call the `datetime` tool to get it (never answer from memory — it will be stale).\n\nTask: ';
+const WORKER_PROMPT = 'You are a background worker. Complete the task below autonomously using the available tools, then return ONLY a concise result (a few sentences). Do not ask questions or wait for the user — act. You may spawn a follow-up `subagent` task if the work needs a further step (e.g. "build, then fix and rebuild on failure"), but keep the chain at most ONE level and only if it is genuinely needed. IMPORTANT: if the task asks for the current time, date, weekday, or a relative duration, you MUST call the `datetime` tool to get it (never answer from memory — it will be stale).\n\n';
 export function workerPrompt(task: string): string {
-  return WORKER_PROMPT + task;
+  return `${WORKER_PROMPT}Task: ${task}`;
+}
+// The same worker prompt for a subagent: the task is the person's own, framed as that.
+export function subagentPrompt(task: string): string {
+  return `${WORKER_PROMPT}The person's task: ${task}`;
 }
 
 // `hostAsk`: the text is the HOST's request, sent as the person's message (after
@@ -89,7 +97,11 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
   const sysParts = shape.system === 'chat' ? systemParts(cfg, c.screensBlock(), c.memoryBlock(), c.plan.snapshot(), c.summary) : undefined;
   const chatSystem = (parts: ReturnType<typeof systemParts>, fresh: boolean) =>
     joinSystem(fresh ? { ...parts, screens: c.screensBlock(), summary: summaryBlock(c.summary) } : parts, projectBlock(c.project));
-  const workerSystem = () => [workerPrompt(q), projectBlock(c.project)].filter(Boolean).join('\n\n');
+  // A subagent's memory block is read once for the message, as a chat's is.
+  const subagentHead = shape.system === 'subagent' ? [subagentPrompt(q), c.memoryBlock(), languageDirective(cfg)].filter(Boolean).join('\n\n') : '';
+  const workerSystem = () => shape.system === 'subagent'
+    ? [subagentHead, projectBlock(c.project), summaryBlock(c.summary)].filter(Boolean).join('\n\n')
+    : [workerPrompt(q), projectBlock(c.project)].filter(Boolean).join('\n\n');
   const sys = sysParts ? chatSystem(sysParts, false) : workerSystem();
   // DISPLAY source vs LLM role are split: a background result stays role 'bg'
   // on screen and in the kept history (it is NOT the person's own message), while
@@ -277,7 +289,7 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
         c.api = [resumed];
         markCompacted(c, next, result.summary, result.incomplete, true);
         c.persist();
-        const sysNow = sysParts ? chatSystem(sysParts, true) : '';
+        const sysNow = sysParts ? chatSystem(sysParts, true) : shape.system === 'subagent' ? workerSystem() : '';
         return { messages: wireMessages([...(sysNow ? [{ role: 'system', content: sysNow } as ChatMessage] : []), resumed], (ref) => c.resolveImage(ref, [])), ...append };
       },
       // What this conversation has loaded; `tools_load` adds to it mid-turn.
@@ -328,7 +340,7 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
         startChild: (spec: ChildSpec) => c.startChild(spec, journalId),
         childSlots: c.deps.children,
       },
-      confirmWrite: confirmFor(c.policy, { conv: c, journalId, ...(c.kind === 'task' ? { task: c.label } : {}) }),
+      confirmWrite: confirmFor(c.policy, { conv: c, journalId, ...(c.kind === 'task' ? { task: c.label } : c.kind === 'subagent' ? { subagent: c.label } : {}) }),
       // A view a tool opened, and every change to it. Its message is pushed on
       // the FIRST change, so it has its place — and its fold id — from the
       // start: a block opened while it ran is still open when it ends.

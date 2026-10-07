@@ -49,6 +49,11 @@ export function baseStatic(config: Record<string, unknown>): string {
   return [directive, identity, writeLangDirective].filter(Boolean).join('\n\n');
 }
 
+// The language directive alone, for a prompt that is not the chat's whole base.
+export function languageDirective(config: Record<string, unknown>): string {
+  return `Always respond in ${chatLanguage(config.ai as Record<string, unknown>)}.`;
+}
+
 // The memory's INDEX for the system prompt — never every fact's text: every
 // message reads it again, so a fact added or edited mid-session is in the next
 // one. The facts are the conversation's project's and the global ones, as read and

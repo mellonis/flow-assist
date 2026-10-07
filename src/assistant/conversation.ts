@@ -52,8 +52,10 @@ let keys = 0;
 export class Conversation {
   readonly key = `c${++keys}`;
   readonly kind: ConversationKind;
-  // A `task`'s label, which tags its journal lines in the conversation that started it.
+  // A child's label, which tags its journal lines in the conversation that started it.
   label = '';
+  // Who started a child: the model through its tool, or the person.
+  spawnedBy: 'model' | 'person' | null = null;
   // The tree: the conversation that started this one (null for a session) and how deep
   // it is (a session 0, its task 1, …).
   parent: Conversation | null = null;
@@ -414,12 +416,12 @@ export class Conversation {
   close(reason: CloseReason): void {
     if (this.isClosed) return;
     this.closeReason = reason;
-    // A task stopped with its conversation says so in its session's journal, which its
+    // A child stopped with its conversation says so in its session's journal, which its
     // own filtered route would not carry.
-    if (reason === 'parent') this.journalRoute?.raw({ t: 'task-end', task: this.label, outcome: 'stopped', by: 'clear' });
+    if (reason === 'parent') this.journalStopped('clear');
     if (reason === 'clear' || reason === 'parent') this.stopChildren();
-    else if (reason === 'park' && this.kind === 'task') this.handChildrenUp();
-    if (reason === 'clear' || reason === 'parent' || (reason === 'exit' && this.kind === 'task')) {
+    else if (reason === 'park' && this.parent) this.handChildrenUp();
+    if (reason === 'clear' || reason === 'parent' || (reason === 'exit' && this.parent)) {
       this.abort?.abort();
       this.abort = null;
       if (this.confirm) this.answerConfirm(false, 'reset');
@@ -438,6 +440,14 @@ export class Conversation {
     this.handlers.clear();
     this.listeners.clear();
     this.port = null;
+  }
+
+  // The line a child that stops without finishing leaves in its parent's journal, through
+  // its route's `raw`: a task's `task-end`, a subagent's `subagent` end. `by` is what
+  // stopped it: `clear` (its session was cleared) or `exit`.
+  journalStopped(by: 'clear' | 'exit'): void {
+    if (this.kind === 'subagent') this.journalRoute?.raw({ t: 'subagent', label: this.label, by: this.spawnedBy ?? 'model', event: 'end', outcome: 'stopped', stoppedBy: by });
+    else this.journalRoute?.raw({ t: 'task-end', task: this.label, outcome: 'stopped', by });
   }
 
   // Every child still counted is stopped (`'parent'`); one still waiting on its delay has
@@ -538,11 +548,13 @@ export class Conversation {
   }
 
   // ── children
-  // A background task started from the turn journaled as `journalId`: a `task`
-  // conversation with its own plan, shell (starting where this one's is), tool set and
-  // abort; no screens, no one to ask, no log lines, and no journal or state file of its
-  // own — its `call-start`, `confirm` and `call` lines go into this turn's journal,
-  // tagged `task: <label>` (a grandchild's own label kept). Refused past
+  // A child started from the turn journaled as `journalId`: a `task` (a background
+  // task) or a `subagent` conversation with its own plan, shell (starting where this
+  // one's is), tool set and abort; no screens, no one to ask, no log lines, and no
+  // journal or state file of its own — its `call-start`, `confirm` and `call` lines go
+  // into this turn's journal, tagged `task: <label>` (`subagent: <label>` for a subagent;
+  // a grandchild's own label kept), and a subagent's `subagent` start and end lines
+  // with them. Refused past
   // `ai.subagentDepth`. It is one of this conversation's `children` from here until its
   // result is in (or, when this is a task that ends first, its parent's). Nothing runs
   // until `run()`, which closes the child when it ends and delivers its result to this
@@ -557,21 +569,28 @@ export class Conversation {
       sessionsDir: () => null, screens: () => undefined, screen: () => [], canAsk: false,
       notify: () => {}, pushLog: () => {}, current: undefined,
     };
-    const child = new Conversation(deps, { kind: 'task', policy: { kind: 'always-no' } });
+    const child = new Conversation(deps, { kind: spec.kind, policy: { kind: 'always-no' } });
     child.parent = this;
     child.depth = this.depth + 1;
     child.label = spec.label;
+    child.spawnedBy = spec.by;
+    // The summary handed over is the start of the subagent's own: it rides every round's
+    // system prompt, and a compaction of a long run folds it into the next one.
+    if (spec.kind === 'subagent' && spec.summary) child.summary = spec.summary;
     child.inheritedProject = this.currentProject();
     const kept = new Set(['call-start', 'confirm', 'call']);
+    // A task's lines carry `task: <label>`, a subagent's `subagent: <label>`.
+    const tag = (ev: JournalEvent): JournalEvent => (spec.kind === 'subagent' ? { subagent: spec.label, ...ev } : { task: spec.label, ...ev });
     const raw = (ev: JournalEvent): void => {
-      const tagged = { task: spec.label, ...ev };
+      const tagged = tag(ev);
       if (this.journalRoute) this.journalRoute.raw(tagged);
       else this.journalTo(journalId, tagged);
     };
-    child.journalRoute = Object.assign((ev: JournalEvent) => { if (kept.has(ev.t)) this.journalTo(journalId, { task: spec.label, ...ev }); }, { raw });
+    child.journalRoute = Object.assign((ev: JournalEvent) => { if (kept.has(ev.t)) this.journalTo(journalId, tag(ev)); }, { raw });
     child.shell.setCwd(this.shell.cwd());
     this.children.add(child);
     this.emit({ type: 'children', count: this.children.size });
+    if (spec.kind === 'subagent') raw({ t: 'subagent', label: spec.label, by: spec.by, event: 'start' });
     let ran = false;
     // The end, as the tool reports it; never throws.
     const outcomeOf = async (): Promise<ChildResult> => {
@@ -583,6 +602,8 @@ export class Conversation {
         return {
           outcome,
           text: child.content.trim(),
+          ...(end ? { ms: end.ms } : {}),
+          ...(end?.tokens ? { tokens: end.tokens } : {}),
           ...(end?.error ? { error: end.error } : {}),
           ...(outcome === 'limit' && end?.limit ? { limit: { rounds: end.limit.rounds, lastStep: end.limit.lastStep, ...(end.limit.by ? { by: end.limit.by } : {}) } } : {}),
         };
@@ -598,15 +619,18 @@ export class Conversation {
       const r: ChildResult = child.closed ? { outcome: 'stopped', text: '' } : await outcomeOf();
       // Stopped with the conversation that holds it, or at exit: its result goes nowhere.
       const stopped = child.closeReason === 'parent' || child.closeReason === 'exit';
+      // A subagent says how it ended in its parent's journal; one stopped with its
+      // conversation said so when it was closed.
+      if (spec.kind === 'subagent' && !stopped) raw({ t: 'subagent', label: spec.label, by: spec.by, event: 'end', outcome: r.outcome });
       // Its save and inbox timers go with it; its own live children move to its parent.
       child.close('park');
       // The result goes to the session the chain started from — the nearest ancestor
-      // that is not a task — never to whatever the chat draws, and never to a task: one
+      // that is not a child — never to whatever the chat draws, and never to a child: one
       // that started this child may have ended, or be in its last turn, with its inbox
       // about to go. A closed session takes nothing.
       const to = child.parent;
       let home = to;
-      while (home && home.kind === 'task') home = home.parent;
+      while (home?.parent) home = home.parent;
       let delivered = '';
       let landedIn: ChildResult['landedIn'];
       try {
@@ -923,8 +947,9 @@ export class Conversation {
     // host, and once in each conversation that has not said it. A conversation the chat
     // left says it in its own rows only: nobody draws them, so the host's flag stays for
     // the one on screen.
+    // A child draws its rows for nobody: it says nothing and spends nobody's flag.
     const missing = memoryRecordNotes('later');
-    if (missing.length && !this.memoryMissingSaid && !this.memoryNoteHere) {
+    if (missing.length && !this.parent && !this.memoryMissingSaid && !this.memoryNoteHere) {
       this.memoryNoteHere = true;
       if (!this.headless) this.memoryMissingSaid = true;
       for (const n of missing) this.pluginNote(n);
@@ -1038,11 +1063,11 @@ export class Conversation {
 }
 
 // The session the running work belongs to (src/runtime/background-work.ts): the
-// owner itself, or for a task the nearest ancestor that is not one — where its result
+// owner itself, or for a child the nearest ancestor that is not one — where its result
 // goes too. null outside any conversation's work.
 export function workHome(): Conversation | null {
   const owner = workOwner();
   let home = owner instanceof Conversation ? owner : null;
-  while (home && home.kind === 'task') home = home.parent;
+  while (home?.parent) home = home.parent;
   return home;
 }

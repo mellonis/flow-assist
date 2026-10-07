@@ -342,8 +342,9 @@ export class ConversationRegistry {
   }
 
   // The process exits: synchronous, like `flushAll`, which it starts with — every live
-  // conversation saved and its lock released. Then each task still counted, running or
-  // waiting on its delay, writes `task-end … stopped` into its session's journal (through
+  // conversation saved and its lock released. Then each child still counted, running or
+  // waiting on its delay, writes its end (`task-end … stopped`, a subagent's `subagent`
+  // end line) into its session's journal (through
   // its route's `raw`, the one its filtered route would not carry), so no journal ends
   // mid-task without saying why; and everything closes, deepest first — a task's turn
   // stopped as a parent's stop stops it, so it calls no tool and asks the model nothing
@@ -362,8 +363,8 @@ export class ConversationRegistry {
     };
     for (const c of [...this.convs]) walk(c);
     for (const c of deepestFirst) {
-      if (c.kind !== 'task' || c.closed) continue;
-      try { c.journalRoute?.raw({ t: 'task-end', task: c.label, outcome: 'stopped', by: reason }); }
+      if (!c.parent || c.closed) continue;
+      try { c.journalStopped(reason); }
       catch { /* exiting: one journal's failure never skips the others */ }
     }
     for (const c of deepestFirst) {
