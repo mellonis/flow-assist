@@ -41,26 +41,44 @@ What each version of flow-assist brought, newest first. The version is the one i
 - **An open session picker follows a session held here as it is put away.** When a
   session you left while its tasks ran ends and is put away, its `here · working` row
   becomes the file's status without a key press.
-- **A session left while it works continues in this process, locked, and waits for your
-  answer if it reaches one.** `/resume`, the picker's ⏎ and `/new` no longer refuse
-  while an answer runs — the session you leave stays open and locked in this process
-  (`in use elsewhere` in another flow-assist process), shown `here · working` in the
-  picker, and you take it back as you left it on ⏎ or `/resume <n>`. A left turn that
-  fails or stops puts the queued messages into that session's saved draft. A left
-  session that reaches a y/n or a question waits (`here · waiting`) and says so once
-  with a toast and a system alert; keys typed elsewhere answer nothing there, and you
-  open it and answer to let it go. A settings-file change is asked in one conversation
-  at a time, and re-checked at the answer. `ui_open` and a plugin's `host.open` are
-  refused from a turn of a session you left, and a screen the session deferred is
-  dropped; a plugin's `postToChat` and `chatNote` land in that session, not the one on
-  screen, and a task's own follow-up turn may open screens again. After `/new` during a
-  turn, a message the left session delivers mid-turn stays out of the new session's ↑
-  history. A `/memory` listing is forgotten on a switch; `/memory accept <n>` asks for a
-  fresh one. A `run_command` stopped by `^c` or at exit names the key (`stopped (^c)`,
-  `stopped (exit)`). **A limit:** Esc cannot stop a turn of a session you left; come back
-  to it to stop it. Two things do not change: a plugin's news held for a turn's end still
-  follows you to a new session on `/new`, and `!` while the assistant works is still
-  refused.
+- **A session you leave while it works goes on working, and waits for you if it needs an
+  answer.** `/resume`, the picker's ⏎ and `/new` no longer refuse while an answer, a
+  `!command` or a slash command runs. The session you leave goes on here, in this process,
+  and stays locked — another flow-assist process reads it `in use elsewhere` — and the
+  picker shows it `here · working`; ⏎ on its row or `/resume <n>` takes it back as you
+  left it, draft and all. It is put away once nothing of its own is left — its turn, its
+  background tasks, a y/n or a question, a queued message — and from then on its row reads
+  its file's status (`done`, until you have seen the answer). A left session that reaches
+  a y/n or a question waits, `here · waiting`, and says so once with a toast and a system
+  alert: `⏸ «<title>» waits for your answer — a y/n` (`a settings y/n`, `a question`; `an
+  untitled session` with no title); taken back and left again unanswered, it says so
+  again. Keys typed in another session answer nothing there: you open it and answer. A
+  left turn that is stopped or fails puts its queued messages into that session's saved
+  draft, ahead of what you had typed there, where a turn on screen puts them back into the
+  field. The turn's timer, the ↑ history and a `/memory` listing follow the session on
+  screen: the timer runs again for a session taken back while it works, a message a left
+  session sends mid-turn stays out of the new session's ↑ history, and a `/memory` listing
+  is forgotten on a switch, so `/memory accept <n>` asks for a fresh one. A row of a
+  session held here cannot be deleted or moved yet, and the picker says why: `"<title>" is
+  still open here — it cannot be deleted until it is put away`. A `run_command` stopped by
+  `^c` or at the exit names the key (`stopped (^c)`, `stopped (exit)`). **A limit:** Esc
+  reaches only the session on screen — open the other one to stop its turn. Two things do
+  not change: a plugin's news held for a turn's end still follows you to the new session
+  on `/new`, and `!` while the assistant works is still refused.
+- **What a turn calls belongs to its session, not to whatever is on screen.** A settings
+  file changed outside flow-assist is asked about in one session at a time: while a
+  session you left holds that y/n, the one on screen does not ask it too, and a change
+  answered or taken in another session meanwhile is not asked again. The answer is checked
+  against the file once more, and one that comes too late changes nothing and says `<file>
+  was already answered, or changed again since — nothing done here.` A turn of a session
+  you left opens no screen, because the screen is showing another session: `ui_open` and a
+  plugin's `host.open` are refused there (`this session is not on screen — the person is
+  in another one`), and a screen that session had waiting for its turn's end is dropped
+  when you leave it. A background task still opens none; the follow-up turn its result
+  starts in its session is that session's own turn, not background work, and may open one
+  — after a task started by another task it was refused. A message or a note a plugin's
+  tool posts into the chat goes to the session whose turn called the tool, on screen or
+  not, and to the session on screen once that one is put away.
 - **A duration is shown in whole seconds.** The turn's timer, a command's line, the
   `Ran N commands` head, a recall stub and `/export` read `<1s`, `12s`, `3m 5s` and,
   past an hour, `1h 2m`, where they showed tenths (`12.4 s`).

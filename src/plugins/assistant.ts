@@ -1140,9 +1140,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // (`retire`).
           const leave = (prev: Conversation) => {
             unbindView(prev);
-            // The clock, the `/memory` listing and an open `/context` were the session
-            // on screen's: its `turn-end` no longer reaches this chat, and a number from
-            // a listing names that session's facts.
+            // The clock, the `/memory` listing and an open `/context` are the session on
+            // screen's: a left one's `turn-end` reaches no view to stop the clock, and a
+            // number from a listing names that session's facts.
             if (tickRef.current) { clearInterval(tickRef.current); tickRef.current = null; }
             setElapsedMs(0);
             memoryShownRef.current = null;
@@ -1689,8 +1689,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             busy: () => convRef.current!.busy, typing: () => focusedRef.current && inputRef.current.trim() !== '', asking: () => !!convRef.current!.confirm || !!convRef.current!.question };
           // A host-reachable channel to put a message into the chat from OUTSIDE (a
           // plugin's, `Conversation.deliver`), into the session `postHome` names.
-          // Registered per render (idempotent), so a detached timer holding an older copy
-          // still reaches the conversation this chat draws.
+          // Registered per render (idempotent); an older copy a detached timer holds
+          // asks `postHome` as this one does.
           (host.services as Record<string, any>).postToChat = (text: string) => postHome().deliver(text);
           // While the chat is open it owns the KEYBOARD: priority 100 (like log/tags).
           // The host dims the overlay-detail via ui.modalActive, so its consumer (also

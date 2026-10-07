@@ -60,7 +60,7 @@ async function pickerFrame(ui: UI): Promise<string> {
 }
 
 for (const how of ['/resume', '/new'] as const) {
-  test(`#83 via ${how}: a held turn in A goes on headless — its journal, B on screen, here · working — and A is parked done; attaching clears it`, async () => {
+  test(`left via ${how}: a held turn in A goes on headless — its journal, B on screen, here · working — and A is parked done; attaching clears it`, async () => {
     const dir = dirOf();
     const model = new ScriptedModel();
     const aSub = model.when((req) => firstUser(req).includes('session A question'));

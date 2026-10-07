@@ -24,8 +24,8 @@ export const asBackgroundWork = <T>(fn: () => T): T => work.run(true, fn);
 export const asForegroundWork = <T>(fn: () => T): T => work.run(false, fn);
 export const inBackgroundWork = (): boolean => work.getStore() === true;
 
-// A conversation, as this layer reads one: whether a view draws it at the moment it is asked, and its kind
-// (`session`, `task`, `oneshot`).
+// A conversation, as this layer reads one: whether a view draws it at the moment it is
+// asked, and its kind (`session`, `task`, `oneshot`).
 export interface WorkOwner { readonly attached: boolean; readonly kind: string }
 
 const owner = new AsyncLocalStorage<WorkOwner>();

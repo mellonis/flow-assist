@@ -400,15 +400,15 @@ export class Conversation {
   // everything. What runs is stopped for /clear, a stop by the parent, and a task's exit
   // (its turn must not go on calling tools after its journal says it stopped; a
   // session's own turn ends with the process): a pending y/n is declined `by: 'reset'`,
-  // a question dismissed; a session left while it
-  // works is kept by the registry and closed only once it is quiescent. The tasks it started are stopped only by /clear and by a stop from its own
-  // parent (`stopChildren`); a task that ends hands the ones still live to its parent
-  // (`handChildrenUp`); a park of a session has none left, and an exit leaves them
-  // running. Work still in flight afterwards writes its journal lines where it happened
-  // and nothing else: the object draws nothing more (no listeners), saves nothing
-  // (`persist`, `save`) and holds no timer. The save and the lock's release come first,
-  // from whoever closes it: the chat for /clear, the registry's `park` for a session
-  // left.
+  // a question dismissed; a session left while it works is kept by the registry and
+  // closed only once it is quiescent. The tasks it started are stopped only by /clear
+  // and by a stop from its own parent (`stopChildren`); a task that ends hands the ones
+  // still live to its parent (`handChildrenUp`); a park of a session has none left, and
+  // an exit leaves them running. Work still in flight afterwards writes its journal
+  // lines where it happened and nothing else: the object draws nothing more (no
+  // listeners), saves nothing (`persist`, `save`) and holds no timer. The save and the
+  // lock's release come first, from whoever closes it: the chat for /clear, the
+  // registry's `park` for a session left.
   close(reason: CloseReason): void {
     if (this.isClosed) return;
     this.closeReason = reason;
@@ -802,8 +802,7 @@ export class Conversation {
     // the kept draft, the order the view uses, so they are saved with the session and come
     // back on attach. A queue left here would hold the session, and its lock, for as long
     // as the person stays away. The run's end is `lastEnd`, set by every caller before
-    // `turn-end` and this call (a `!command` that could not run is not `ok`, yet is no
-    // stop and no failure).
+    // `turn-end` and this call.
     if (this.headless && this.queue.length && (this.lastEnd?.outcome === 'stopped' || this.lastEnd?.outcome === 'failed')) {
       const texts = this.restoreQueue()!;
       this.keptDraft = [...texts, this.keptDraft].filter((t) => t.trim()).join('\n\n');

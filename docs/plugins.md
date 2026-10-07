@@ -436,9 +436,11 @@ entry: ['notes'],                     // the key that leads in, on the start scr
   connected — 12 tools`; write the text without it). It is held while a turn runs and
   said under its answer, since a note in the middle would split the turn; so is
   `ctx.say` from a command. Said from a tool the model called, it goes to the session
-  whose turn called the tool, on screen or not; from anywhere else, to the session on
-  screen. A one-shot prompt has no chat, so say it in the log as
-  well.
+  whose turn called the tool while that session is open, on screen or not, and to the
+  session on screen once that one is put away; from anywhere else, to the session on
+  screen. A note held for a turn's end follows the person: when they start a new
+  session with `/new` while the turn still runs, it is said there, not in the session
+  they left. A one-shot prompt has no chat, so say it in the log as well.
 - `host.services.setConfig(key, value, { session })` and `unsetConfig(key, { session })`
   change a setting the way `config set` / `config unset` do — checked against the
   schema (yours for your key), saved to `config.local.json` or kept for this run with
