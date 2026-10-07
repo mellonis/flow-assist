@@ -788,6 +788,12 @@ export function askConfigChanges(c: Conversation): Promise<void> {
   if (!changes.length) return Promise.resolve();
   const run = (async () => {
     for (const change of changes) {
+      // The batch was read before the first y/n, which may wait for as long as the person
+      // is away: by its turn a change may be another open conversation's to ask, or be
+      // answered there already. Neither is asked here, and nothing is said of it.
+      const asker = asking.get(change.path);
+      if (asker && asker !== c && !asker.closed) continue;
+      if (!svc.check().some((x) => x.path === change.path && x.hash === change.hash)) continue;
       asking.set(change.path, c);
       const answer = await new Promise<boolean | null>((resolve) => {
         c.confirm = { name: 'config', args: '', resolve: (ok, by = 'person') => resolve(by === 'person' ? ok : null) };
@@ -797,7 +803,8 @@ export function askConfigChanges(c: Conversation): Promise<void> {
         c.emit({ type: 'confirm', request, host: true });
         c.deps.notify();
       });
-      asking.delete(change.path);
+      // Its own entry only: a conversation closed while it asked may find the next asker's.
+      if (asking.get(change.path) === c) asking.delete(change.path);
       if (answer === null) break;
       // A y/n answered late (a left conversation's waits for the person) may find the
       // change answered elsewhere, or the file changed again: only a change still pending

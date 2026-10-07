@@ -4203,8 +4203,12 @@ commands; docs and hints never present either mechanism as a boundary.
   (`said.configAsking`, file path to asker, shared by a host's conversations) and every
   other open one leaves it to that one — a left turn's y/n waits headless (a toast and
   an alert say so) and the turn waits on it, while the chat on screen asks nothing
-  about that file; the asker is dropped at its answer and in the `finally`, and a
-  closed asker holds nothing. While it waits, the change is off for every session, as
+  about that file; an asker drops its own entry, and only its own, at its answer and in
+  the `finally`, and a closed asker holds nothing. A conversation reads its batch of
+  changes once, before its first y/n, which may wait for as long as the person is away —
+  so each change is looked at again when its turn in the loop comes: one another open
+  conversation asks by then, and one no longer pending with the hash it was read with
+  (answered elsewhere, or changed again), is skipped without a y/n and without a note. While it waits, the change is off for every session, as
   any unanswered change is. The answer re-checks: only a change still pending with the
   same content hash is applied or declined; otherwise the note `<file> was already
   answered, or changed again since — nothing done here.` is pushed and the loop goes

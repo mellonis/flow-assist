@@ -512,3 +512,115 @@ for (const outcome of ['kept', 'parked'] as const) {
     sub.release();
   });
 }
+
+// The settings guard as a stub: `pending` is what `check` answers, `apply` and `decline`
+// take a change out of it and are logged.
+function settingsGuard(rig: Rig) {
+  const change = (file: string, hash = 'h1') => ({ file, path: path.join(rig.root, file), keys: ['k'], lines: ['k: (unset) → 1'], hash, mtimeMs: 1, size: 1, content: {}, raw: '{}' });
+  const guard = { pending: [] as ReturnType<typeof change>[], answered: [] as string[], change };
+  const take = (how: string) => (ch: { file: string; path: string }) => { guard.pending = guard.pending.filter((x) => x.path !== ch.path); guard.answered.push(`${how} ${ch.file}`); };
+  (rig.services as unknown as { configChanges: unknown }).configChanges = {
+    check: () => [...guard.pending],
+    apply: (ch: { file: string; path: string }) => { take('apply')(ch); return { applied: ['k'], restart: [] }; },
+    decline: (ch: { file: string; path: string }) => { take('decline')(ch); return null; },
+  };
+  return guard;
+}
+// Two sessions of one host, both open; nothing runs in either.
+function twoSessions() {
+  const rig = conversationRig(new ScriptedModel(), { ai: { backgroundFollowUp: false } });
+  const a = rig.conv;
+  const b = rig.fresh();
+  return { rig, a, b, guard: settingsGuard(rig) };
+}
+const asks = (c: Conversation) => c.confirmDrawn?.title ?? '';
+const notes = (c: Conversation) => c.rows().map((m) => String(m.content));
+
+test('a settings change answered in another session meanwhile is not asked again, and nothing is said of it', async () => {
+  const { a, b, guard } = twoSessions();
+  guard.pending = [guard.change('f1.json'), guard.change('f2.json')];
+  void a.askConfigChanges();
+  expect(asks(a)).toContain('f1.json changed outside flow-assist');
+  // The other session asks what is nobody's yet, and the person answers it there.
+  void b.askConfigChanges();
+  expect(asks(b)).toContain('f2.json changed outside flow-assist');
+  b.answerConfirm(true);
+  await tick();
+  a.answerConfirm(true);
+  await tick();
+  expect(guard.answered).toEqual(['apply f2.json', 'apply f1.json']);
+  expect(a.confirm).toBeNull();
+  expect(a.configAsk).toBeNull();
+  expect(notes(a)).toEqual(['Applied f1.json: k.']);
+});
+
+test('a settings change another session still asks is left to it when its turn in the batch comes', async () => {
+  const { a, b, guard } = twoSessions();
+  guard.pending = [guard.change('f1.json'), guard.change('f2.json')];
+  void a.askConfigChanges();
+  void b.askConfigChanges();
+  expect(asks(b)).toContain('f2.json changed outside flow-assist');
+  a.answerConfirm(true);
+  await tick();
+  // f2 is still the other session's: not asked here too, and still its own to answer.
+  expect(a.confirm).toBeNull();
+  expect(asks(b)).toContain('f2.json changed outside flow-assist');
+  b.answerConfirm(false);
+  await tick();
+  expect(guard.answered).toEqual(['apply f1.json', 'decline f2.json']);
+  expect(notes(a)).toEqual(['Applied f1.json: k.']);
+});
+
+test('a settings file answered in one session and changed again is asked by another', async () => {
+  const { a, b, guard } = twoSessions();
+  guard.pending = [guard.change('f1.json')];
+  void a.askConfigChanges();
+  a.answerConfirm(true);
+  await tick();
+  expect(guard.answered).toEqual(['apply f1.json']);
+  guard.pending = [guard.change('f1.json', 'h2')];
+  void b.askConfigChanges();
+  expect(asks(b)).toContain('f1.json changed outside flow-assist');
+  b.answerConfirm(false);
+  await tick();
+});
+
+test('a settings change whose asker was closed is asked by the next session at once', async () => {
+  const { rig, a, b, guard } = twoSessions();
+  guard.pending = [guard.change('f1.json')];
+  void a.askConfigChanges();
+  expect(asks(a)).toContain('f1.json changed outside flow-assist');
+  // As `/clear` closes it: the y/n is declined by the reset, and its entry is still the
+  // closed conversation's when the next one asks in the same step.
+  a.close('clear');
+  void b.askConfigChanges();
+  expect(asks(b)).toContain('f1.json changed outside flow-assist');
+  await tick();
+  // The closed asker's unwinding leaves the entry of the one asking it since: a third
+  // session finds the change taken.
+  const third = rig.fresh();
+  void third.askConfigChanges();
+  expect(third.confirm).toBeNull();
+  expect(asks(b)).toContain('f1.json changed outside flow-assist');
+  b.answerConfirm(true);
+  await tick();
+  expect(guard.answered).toEqual(['apply f1.json']);
+  expect(notes(b)).toEqual(['Applied f1.json: k.']);
+});
+
+test('a settings file answered is free at once, though its asker still asks about another', async () => {
+  const { a, b, guard } = twoSessions();
+  guard.pending = [guard.change('f1.json'), guard.change('f2.json')];
+  void a.askConfigChanges();
+  a.answerConfirm(true);
+  await tick();
+  expect(asks(a)).toContain('f2.json changed outside flow-assist');
+  // f1 changes again while its first asker waits on f2.
+  guard.pending = [...guard.pending, guard.change('f1.json', 'h2')];
+  void b.askConfigChanges();
+  expect(asks(b)).toContain('f1.json changed outside flow-assist');
+  b.answerConfirm(true);
+  a.answerConfirm(true);
+  await tick();
+  expect(guard.answered).toEqual(['apply f1.json', 'apply f1.json', 'apply f2.json']);
+});
