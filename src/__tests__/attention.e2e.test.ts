@@ -7,6 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { acceptedConfigPath, hostStateDir, resetSessionConfig, unguardConfigFiles } from '../config/load.ts';
 import { ScriptedModel, bootApp, firstUser, settle } from './helpers/scripted';
+import { acquireLock } from '../assistant/sessions.ts';
 import { homeIn, listTree } from './helpers/session-files';
 
 const realFetch = globalThis.fetch;
@@ -154,6 +155,69 @@ test('a session opened by /resume is not owed any more, and no picker read has t
   await settleUntil(() => frameOf(ui).includes('A final answer.'));
   expect(hintRow(frameOf(ui))).not.toContain('●');
   await ask(ui, '/new');
+  await settle(6);
+  expect(hintRow(frameOf(ui))).not.toContain('●');
+  ui.app.unmount();
+});
+
+// ─── What a picker read reconciles ────────────────────────────────────────────
+// A put away unread (`● 1` on B's hint row); the picker is opened and closed, which reads
+// the saved list again.
+async function parkedUnread() {
+  const t = await leftHeld([[{ hold: true }, { text: 'A final answer.' }]]);
+  t.aSub.release();
+  await settleUntil(() => !fs.existsSync(lockOf(t.dir, t.idA)));
+  await settleUntil(() => hintRow(frameOf(t.ui)).includes('● 1'));
+  expect(hintRow(frameOf(t.ui))).toContain('● 1');
+  return t;
+}
+async function readThePicker(ui: UI) {
+  ui.backend.press({ name: 's', ctrl: true });
+  await settle(4);
+  await ui.press('escape');
+  await settle(6);
+}
+const jsonOf = (dir: string, id: string) => path.join(homeIn(dir, id), `${id}.json`);
+
+test('a session whose file is gone is no longer counted once the picker has read the list', async () => {
+  const { dir, ui, idA } = await parkedUnread();
+  for (const n of listTree(dir)) if (path.basename(n).startsWith(idA)) fs.rmSync(path.join(dir, n));
+  expect(hintRow(frameOf(ui))).toContain('● 1'); // nothing has read the list yet
+  await readThePicker(ui);
+  expect(hintRow(frameOf(ui))).not.toContain('●');
+  ui.app.unmount();
+});
+
+test('a session another process holds is no longer counted once the picker has read the list', async () => {
+  const { dir, ui, idA } = await parkedUnread();
+  expect(acquireLock(homeIn(dir, idA), idA, 'another-process').status).toBe('acquired');
+  await readThePicker(ui);
+  expect(hintRow(frameOf(ui))).not.toContain('●');
+  ui.app.unmount();
+});
+
+test('a session whose file reads as read is no longer counted once the picker has read the list', async () => {
+  const { dir, ui, idA } = await parkedUnread();
+  const file = jsonOf(dir, idA);
+  const s = JSON.parse(fs.readFileSync(file, 'utf8')) as { seenAt?: string; answeredAt?: string };
+  s.seenAt = '9999-12-31T00:00:00.000Z';
+  fs.writeFileSync(file, JSON.stringify(s));
+  await readThePicker(ui);
+  expect(hintRow(frameOf(ui))).not.toContain('●');
+  ui.app.unmount();
+});
+
+test('a session deleted from the picker is no longer counted', async () => {
+  const { ui } = await parkedUnread();
+  ui.backend.press({ name: 's', ctrl: true });
+  await settle(4);
+  await ui.press('down');
+  ui.backend.press({ name: 'x', ctrl: true });
+  await settle(4);
+  await ui.press('y');
+  await settle(4);
+  expect(frameOf(ui)).toContain('Deleted «session A question»');
+  await ui.press('escape');
   await settle(6);
   expect(hintRow(frameOf(ui))).not.toContain('●');
   ui.app.unmount();

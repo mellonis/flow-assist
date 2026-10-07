@@ -2843,7 +2843,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   landed and added only once the save, the release and the close went through (a park
   that throws adds nothing). `attention(except)` is `{ waiting, done }`: `waiting` counts
   the live `session` conversations that are `headless` and read `waiting` (`statusOf`),
-  `done` the remembered ids; `except` — the session on screen — counts in neither.
+  `done` the remembered ids; `except` — the session on screen — is left out of `waiting`.
   A `session` that was `headless` when it was parked (read on entering `park`: `retire`
   parks a session at rest before it sets `headless`, so one left at rest is counted and
   announced by nobody) and is added says so once, by a toast only and no alert
@@ -2851,10 +2851,16 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   named as `movedToWaiting` names it, only after the park went through, only when the
   unread thing is the session's own answer (a task's result has its toast, which says where),
   and never from `closeAll`.
-  `forget(id)` drops one and redraws only when it dropped something; `reclaim` and
-  `restore` call it for their conversation, so a session opened here is never owed. The set
-  is memory only: it does not outlive the process, and the picker's own `done` stays the
-  file's.
+  `forget(id)` drops one and redraws only when it dropped something; `restore` calls it
+  for its conversation, and so do opening a session from its file and the picker's read,
+  so a session opened here is never owed (a live one taken back (`reclaim`) was never put
+  away). The picker's read of the saved list (`pickerRows`, every project, never the
+  filtered view) reconciles the set: it forgets a session another process holds or whose
+  file reads as read, and `keepUnseen(ids)` drops every id the read did not find (a file
+  removed or pruned elsewhere, or deleted from the picker), each redrawing once and only
+  when it dropped something. A move keeps the id: a moved session is still unread. The
+  set is memory only: it does not outlive the process, and the picker's own `done` stays
+  the file's.
   It also holds the child slots (`children`, handed to every conversation in its deps):
   the count of background tasks (armed, queued, running) and the cap — a task starts
   while fewer than `max(1, sessions.maxRunning - 1)` run (`maxRunning` 4 by default, so

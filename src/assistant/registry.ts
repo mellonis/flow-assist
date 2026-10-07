@@ -239,7 +239,6 @@ export class ConversationRegistry {
     this.watches.delete(c);
     c.headless = false;
     this.waitingSaid.delete(c);
-    this.forget(c.sessionId);
   }
   // A conversation the chat has left, put away: what waits in its inbox lands as rows, it
   // is saved, and only then is its lock released and the object closed — a result that
@@ -283,6 +282,15 @@ export class ConversationRegistry {
   forget(id: string): void {
     if (this.unseen.delete(id)) this.notifyChange();
   }
+  // Keeps only the remembered ids among `ids` (the sessions a read of the saved list found):
+  // one whose file is gone — removed, or pruned by another process — is owed to nobody.
+  // Redraws once, and only when it dropped something.
+  keepUnseen(ids: Iterable<string>): void {
+    const keep = new Set(ids);
+    let dropped = false;
+    for (const id of [...this.unseen]) if (!keep.has(id)) { this.unseen.delete(id); dropped = true; }
+    if (dropped) this.notifyChange();
+  }
   // The turns running in sessions the chat has left: work the person started that goes on
   // where they are not looking (the chat's `N in background` adds it to the tasks').
   leftRunning(): number {
@@ -291,15 +299,15 @@ export class ConversationRegistry {
     return n;
   }
   // What the person is owed by sessions other than `except` (the one on screen): the live
-  // ones left on a y/n or a question, and the ones put away unread.
+  // ones left on a y/n or a question, and the ones put away unread (a session on screen is
+  // never among those: every way onto the screen forgets it first).
   attention(except?: Conversation): { waiting: number; done: number } {
     let waiting = 0;
     for (const c of this.convs) {
       if (c === except || c.closed || c.kind !== 'session' || !c.headless) continue;
       if (this.statusOf(c.sessionId) === 'waiting') waiting++;
     }
-    const done = this.unseen.size - (except && this.unseen.has(except.sessionId) ? 1 : 0);
-    return { waiting, done };
+    return { waiting, done: this.unseen.size };
   }
   // What reads the registry hears it changed: the host redraws (the footer's count, the
   // picker), then each `onChange` listener runs — each on its own, so one that throws

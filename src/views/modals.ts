@@ -1805,11 +1805,11 @@ export function renderChatModal({
               ? (() => { const rest = [`${CAP.tab} path`, `${CAP.upDown} history`].join(' · '); return `${cutLeft(shellCwd, Math.max(8, wrap - rest.length - 3))} · ${rest}`; })()
               : ([`${CAP.upDown} history`, `wheel or ${CAP.page} scroll`, detailsKey && `${detailsKey} details`, '/ commands',
                   imagesOn && `${CAP.image} image`, `${CAP.auto} auto`, bgCount > 0 && `${bgCount} in background`].filter(Boolean).join(' · ')))),
-      // A sibling of the hint, not part of it: the left cell is the hint OR the status
-      // of a running turn, and the mode has to stay on screen through both.
       waitingElsewhere > 0 || unreadElsewhere > 0 ? h(Text, { wrap: 'truncate' },
         waitingElsewhere > 0 ? h(Text, { color: m.warn }, `  ⏸ ${waitingElsewhere}`) : null,
         unreadElsewhere > 0 ? h(Text, { color: m.assistantAccent ?? 'green' }, `  ● ${unreadElsewhere}`) : null) : null,
+      // A sibling of the hint, not part of it: the left cell is the hint OR the status
+      // of a running turn, and the mode has to stay on screen through both.
       autoBadge(autoMode, autoRun) ? h(Text, { color: m.warn, bold: true }, `  ${autoBadge(autoMode, autoRun)}`) : null,
       contextBadge ? h(Text, contextWarn ? { color: 'yellow' } : { dim: true }, `  ${contextBadge}`) : null),
       // The task plan sits ABOVE the input (not above the messages) — the newest

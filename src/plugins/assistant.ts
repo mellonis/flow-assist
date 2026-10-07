@@ -1057,14 +1057,19 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // on screen — left while it works or waits — reads `here`, with what the
           // registry says it is doing (`working` while it runs). It reads through refs
           // only, so the listener below, bound once, reads what is current.
-          const pickerRows = (): SessionRow[] => sessionRows(sessDirRef.current!, registryRef.current!.lockToken).map((r) => {
+          const pickerRows = (): SessionRow[] => {
+            const read = sessionRows(sessDirRef.current!, registryRef.current!.lockToken);
             // A session put away unread that another process holds now, or whose file reads
-            // read, is no longer owed here (`forget` redraws only when it dropped one).
-            if (r.lock === 'held' || (r.lock === 'free' && r.status !== 'done')) registryRef.current!.forget(r.id);
-            if (r.lock !== 'ours' || r.id === convRef.current!.sessionId) return r;
-            const status = registryRef.current!.statusOf(r.id);
-            return status ? { ...r, lock: 'here', status } : r;
-          });
+            // as read, is no longer owed here, nor is one whose file is gone (`forget` and
+            // `keepUnseen` redraw only when they dropped one). The read covers every project.
+            for (const r of read) if (r.lock === 'held' || (r.lock === 'free' && r.status !== 'done')) registryRef.current!.forget(r.id);
+            registryRef.current!.keepUnseen(read.map((r) => r.id));
+            return read.map((r) => {
+              if (r.lock !== 'ours' || r.id === convRef.current!.sessionId) return r;
+              const status = registryRef.current!.statusOf(r.id);
+              return status ? { ...r, lock: 'here', status } : r;
+            });
+          };
           pickerRowsRef.current = pickerRows;
           // An open picker follows the registry: when a session held here is put away (or
           // one is left to run headless), the list is read again — in its list mode only,
@@ -1134,7 +1139,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               }
               case 'delete': {
                 const done = removeSession(dirOf(a.id), a.id, lockToken);
-                if (done === 'deleted') { registryRef.current!.forget(a.id); dropEmptyDirs(dirOf(a.id), sessDir); } // a project's last one
+                if (done === 'deleted') dropEmptyDirs(dirOf(a.id), sessDir); // a project's last one
                 const notice = done === 'deleted' ? `Deleted «${titleOf(a.id)}»`
                   : done === 'held' ? `"${titleOf(a.id)}" is open in another flow-assist process — it cannot be deleted`
                   : a.id !== conv.sessionId ? `"${titleOf(a.id)}" is still open here — it cannot be deleted until it is put away`
@@ -1151,7 +1156,6 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 const dest = conv.currentProject();
                 const outcome = moveSessionToProject(from, a.id, sessDir, dest, lockToken);
                 if (outcome === 'moved') {
-                  registryRef.current!.forget(a.id);
                   dropEmptyDirs(from, sessDir); // the project's last session there, its mirror dir too
                   // A background task, or a fork, still writing to this id by its OLD home
                   // would otherwise miss it (AGENTS.md, "sessions per project" — `conv.homes`).

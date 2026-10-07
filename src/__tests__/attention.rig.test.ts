@@ -125,23 +125,6 @@ async function putAwayUnread(): Promise<{ rig: Rig; id: string }> {
   return { rig, id: left.sessionId };
 }
 
-test('attention leaves out the session it is told to', async () => {
-  const { rig, id } = await putAwayUnread();
-  // Another conversation holding the id of the one put away, as one opened where it is drawn.
-  const twin = rig.fresh();
-  twin.sessionId = id;
-  expect(rig.registry.attention().done).toBe(1);
-  expect(rig.registry.attention(twin).done).toBe(0);
-});
-
-test('taking a conversation back drops its id from the unread set', async () => {
-  const { rig, id } = await putAwayUnread();
-  const twin = rig.fresh();
-  twin.sessionId = id;
-  rig.registry.reclaim(twin);
-  expect(rig.registry.attention().done).toBe(0);
-});
-
 test('forget notifies only when it removed something', async () => {
   const { rig, id } = await putAwayUnread();
   let heard = 0;
@@ -149,6 +132,18 @@ test('forget notifies only when it removed something', async () => {
   rig.registry.forget('not-there');
   expect(heard).toBe(0);
   rig.registry.forget(id);
+  expect(heard).toBe(1);
+  expect(rig.registry.attention().done).toBe(0);
+});
+
+test('keepUnseen drops the ids a read did not find, and notifies once only when it dropped some', async () => {
+  const { rig, id } = await putAwayUnread();
+  let heard = 0;
+  rig.registry.onChange(() => { heard++; });
+  rig.registry.keepUnseen([id, 'another']);
+  expect(heard).toBe(0);
+  expect(rig.registry.attention().done).toBe(1);
+  rig.registry.keepUnseen(['another']);
   expect(heard).toBe(1);
   expect(rig.registry.attention().done).toBe(0);
 });

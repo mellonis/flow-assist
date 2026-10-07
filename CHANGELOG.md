@@ -70,8 +70,9 @@ What each version of flow-assist brought, newest first. The version is the one i
   left that were put away with an answer you have not read; a part that is zero is not
   shown, nothing is drawn when both are, and the session on screen never counts itself.
   The count stays on the row while a turn streams. `● N` goes down when you open such a
-  session here, delete or move it, or when another flow-assist process takes it or its
-  file reads as read. A session you left that finishes its turn says so once, by a toast
+  session here or delete it, and, the next time you open the session list, for one that
+  another flow-assist process took, that was read elsewhere or whose file is gone; a
+  session moved to another project stays counted. A session you left that finishes its turn says so once, by a toast
   only and no system alert: `● «<title>» finished — its answer is unread` (`an untitled
   session` with no title); one left already at rest says nothing, and a background task's
   result is named by the task's own toast (`⏳ <task> done — in «<title>»`) and adds no
