@@ -108,6 +108,8 @@ export class ConversationRegistry {
     c.on('question', (ev) => { if (ev.state && ev.parked) this.movedToWaiting(c, 'a question'); else if (!ev.state) this.leftWaiting(c); });
     return c;
   }
+  // How a toast names a session.
+  private nameOf(c: Conversation): string { return c.title ? `«${c.title}»` : 'an untitled session'; }
   // The sessions whose move to waiting is already said, until they leave waiting.
   private readonly waitingSaid = new Set<Conversation>();
   // A session the chat has left (`headless`) that now needs an answer: a toast and an
@@ -117,8 +119,7 @@ export class ConversationRegistry {
     if (!c.headless || c.kind !== 'session' || this.waitingSaid.has(c)) return;
     this.waitingSaid.add(c);
     const svc = this.init.services() as { showMessage?: (t: string) => void; alert?: (title: string, body?: string) => void };
-    const who = c.title ? `«${c.title}»` : 'an untitled session';
-    const text = `${who} waits for your answer — ${what}`;
+    const text = `${this.nameOf(c)} waits for your answer — ${what}`;
     try { svc.showMessage?.(`⏸ ${text}`); } catch { /* a toast is never fatal */ }
     try { svc.alert?.('flow-assist', text); } catch { /* an alert is never fatal */ }
     this.notifyChange();
@@ -246,6 +247,9 @@ export class ConversationRegistry {
   park(c: Conversation): void {
     if (c.closed) return;
     if (!this.quiescent(c)) throw new Error('registry.park: the conversation still has work of its own');
+    // Read before the park changes anything. A session parked from `retire` at rest is not yet
+    // headless, and nothing finished while the person was away from it.
+    const left = c.headless && c.kind === 'session';
     // Lands what waits. Nothing holds the inbox here: the conversation is quiescent, so
     // no turn of its own runs or is about to.
     c.takeInbox('rows');
@@ -255,8 +259,18 @@ export class ConversationRegistry {
     c.releaseLock();
     c.close('park');
     // Only a park that went through remembers it; one that threw leaves the session live.
-    if (unread && c.sessionId) this.unseen.add(c.sessionId);
+    if (unread && c.sessionId) {
+      this.unseen.add(c.sessionId);
+      if (left) this.finishedSaid(c);
+    }
     this.notifyChange();
+  }
+  // A session left that has finished: its answer is waiting unread, a toast says so once
+  // (a toast only, no alert; AGENTS.md (a host makes its conversations through one
+  // registry)).
+  private finishedSaid(c: Conversation): void {
+    const svc = this.init.services() as { showMessage?: (t: string) => void };
+    try { svc.showMessage?.(`● ${this.nameOf(c)} finished — its answer is unread`); } catch { /* a toast is never fatal */ }
   }
   // Sessions put away with an answer or a result nobody has read, by id, until one is
   // opened here (`forget`). The badge counts them (`attention`); the picker's own `done`

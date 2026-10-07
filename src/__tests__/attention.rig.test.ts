@@ -8,6 +8,8 @@ import { closeRigs, conversationRig, type Rig } from './helpers/conversation';
 
 afterEach(() => { closeRigs(); });
 
+const tick = (ms = 30) => new Promise((r) => setTimeout(r, ms));
+
 // A session on screen whose turn is held at its first request; the answer follows.
 async function heldTurn() {
   const model = new ScriptedModel();
@@ -148,4 +150,109 @@ test('forget notifies only when it removed something', async () => {
   rig.registry.forget(id);
   expect(heard).toBe(1);
   expect(rig.registry.attention().done).toBe(0);
+});
+
+// What a left session's finish says: a toast, never an alert.
+const finished = (rig: Rig) => rig.toasts.filter((t) => t.includes('finished — its answer is unread'));
+const withAlerts = (rig: Rig): string[] => {
+  const alerts: string[] = [];
+  (rig.services as unknown as { alert: (t: string, b?: string) => void }).alert = (_t, b) => { alerts.push(String(b)); };
+  return alerts;
+};
+
+test('a session left that finishes says so once by a toast and raises no alert', async () => {
+  const { sub, rig } = await heldTurn();
+  const alerts = withAlerts(rig);
+  const { left: a } = rig.switchTo();
+  sub.release();
+  await rig.until(() => a.closed);
+  expect(a.title).not.toBe('');
+  expect(finished(rig)).toEqual([`● «${a.title}» finished — its answer is unread`]);
+  expect(alerts).toEqual([]);
+  expect(rig.registry.attention().done).toBe(1);
+  await tick(50);
+  expect(finished(rig)).toHaveLength(1);
+});
+
+test('a session with no title is named as untitled', async () => {
+  const { sub, rig } = await heldTurn();
+  const { left: a } = rig.switchTo();
+  // The title is fixed by a save, which the park does first: a save that writes nothing leaves none.
+  a.save = () => {};
+  a.title = '';
+  sub.release();
+  await rig.until(() => a.closed);
+  expect(finished(rig)).toEqual(['● an untitled session finished — its answer is unread']);
+});
+
+test('a conversation parked without ever being left says nothing, though its answer is unread', async () => {
+  const model = new ScriptedModel();
+  model.script([{ text: 'Answer A.' }]);
+  const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
+  rig.port.shown = false;
+  rig.registry.show(rig.conv);
+  await rig.conv.send('question A');
+  await rig.idle(); // the answer came with nothing shown: unread
+  expect(rig.conv.status).toBe('done');
+  rig.registry.park(rig.conv); // not headless: nobody left it
+  expect(finished(rig)).toEqual([]);
+  expect(rig.registry.attention().done).toBe(1);
+});
+
+test('a session left at rest and already read says nothing', async () => {
+  const model = new ScriptedModel();
+  model.script([{ text: 'Answer A.' }]);
+  const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
+  const a = await answeredAndLeft(rig);
+  expect(a.closed).toBe(true);
+  expect(finished(rig)).toEqual([]);
+  expect(rig.registry.attention().done).toBe(0);
+});
+
+test('a session left at rest whose answer came behind a cover is counted but not announced', async () => {
+  const model = new ScriptedModel();
+  model.script([{ text: 'Answer A.' }]);
+  const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
+  rig.port.shown = false; // a picker or a pager covers the chat's end
+  const a = await answeredAndLeft(rig);
+  expect(a.closed).toBe(true);
+  expect(finished(rig)).toEqual([]);
+  expect(rig.registry.attention().done).toBe(1);
+});
+
+test('a session left that ends with no answer to read says nothing', async () => {
+  const model = new ScriptedModel();
+  const sub = model.when((req) => firstUser(req).includes('question A'));
+  sub.script([{ hold: true }, { text: '' }]);
+  const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
+  rig.registry.show(rig.conv);
+  void rig.conv.send('question A');
+  await rig.until(() => sub.held && rig.conv.sessionId !== '');
+  const { left: a } = rig.switchTo();
+  sub.release();
+  await rig.until(() => a.closed);
+  expect(a.status).toBe('idle');
+  expect(finished(rig)).toEqual([]);
+  expect(rig.registry.attention().done).toBe(0);
+});
+
+test('the exit parks nothing and says nothing', async () => {
+  const { sub, rig } = await heldTurn();
+  const { left: a } = rig.switchTo();
+  rig.registry.closeAll('exit');
+  sub.release();
+  await tick(100);
+  expect(a.closeReason).toBe('exit');
+  expect(finished(rig)).toEqual([]);
+  expect(rig.registry.attention().done).toBe(0);
+});
+
+test('a finish is not said when the park throws', async () => {
+  const { sub, rig } = await heldTurn();
+  const { left: a } = rig.switchTo();
+  a.save = () => { throw new Error('disk full'); };
+  sub.release();
+  await rig.until(() => rig.log.some((l) => l.includes('disk full')));
+  expect(finished(rig)).toEqual([]);
+  a.save = () => {};
 });

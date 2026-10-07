@@ -2821,6 +2821,12 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   that throws adds nothing). `attention(except)` is `{ waiting, done }`: `waiting` counts
   the live `session` conversations that are `headless` and read `waiting` (`statusOf`),
   `done` the remembered ids; `except` — the session on screen — counts in neither.
+  A `session` that was `headless` when it was parked (read on entering `park`: `retire`
+  parks a session at rest before it sets `headless`, so one left at rest is counted and
+  announced by nobody) and is added says so once, by a toast only and no alert
+  (`● «<title>» finished — its answer is unread`, `an untitled session` with no title),
+  named as `movedToWaiting` names it, and only after the park went through; never from
+  `closeAll`.
   `forget(id)` drops one and redraws only when it dropped something; `reclaim` and
   `restore` call it for their conversation, so a session opened here is never owed. The set
   is memory only: it does not outlive the process, and the picker's own `done` stays the
