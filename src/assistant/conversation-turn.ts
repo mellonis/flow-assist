@@ -5,7 +5,7 @@ import path from 'node:path';
 import { transcriptSoFar, type ChatMessage, type compactConversation, type TokenUsage, type ToolRun } from './agent.js';
 import type { AskQuestion } from './ask.js';
 import { RESUMED_NOTE, autoCompactLimits, overThreshold } from './compaction.js';
-import { confirmFor } from './confirm-policy.js';
+import { confirmFor, parkedAt } from './confirm-policy.js';
 import { estimateTokens, short as shortTokens } from './context-meter.js';
 import { imagesInText, isImageRefusal, wireMessages, type ImageRef } from './images.js';
 import { callEndEvent, callStartEvent, outputJournal } from './journal.js';
@@ -783,6 +783,10 @@ export function askConfigChanges(c: Conversation): Promise<void> {
   // Nobody to ask (the one-shot prompt): never asked, never parked. The changed file stays
   // off, as the start left it, and the next start that can ask does (src/config/load.ts).
   if (c.deps.canAsk === false) return Promise.resolve();
+  // A child never asks about the file: the guard is the person's, and a child's y/n is
+  // for the write it was started to make. A conversation handed up to the session still
+  // has its parent.
+  if (c.parent) return Promise.resolve();
   // Work that outlived the conversation it ran in (a command /clear stopped) asks in the
   // conversation the chat draws now, whose own y/n and question decide, as they do for
   // any check: the guard is the process's, and a closed conversation shows nothing.
@@ -809,7 +813,7 @@ export function askConfigChanges(c: Conversation): Promise<void> {
       asking.set(change.path, c);
       const answer = await new Promise<boolean | null>((resolve) => {
         c.confirm = { name: 'config', args: '', resolve: (ok, by = 'person') => resolve(by === 'person' ? ok : null) };
-        const request = { name: 'config', args: '', title: `⚠ ${change.file} changed outside flow-assist — apply? (y/n)`, line: change.lines.join('\n'), whole: true, hint: `y applies it now · n puts the accepted settings back and keeps the change beside the file` };
+        const request = { name: 'config', args: '', title: `⚠ ${change.file} changed outside flow-assist — apply? (y/n)`, line: change.lines.join('\n'), whole: true, hint: `y applies it now · n puts the accepted settings back and keeps the change beside the file`, at: parkedAt() };
         c.drawConfirm(request);
         // The settings guard's y/n, not a tool's: a view that closes its panels for a tool's y/n leaves them here.
         c.emit({ type: 'confirm', request, host: true });

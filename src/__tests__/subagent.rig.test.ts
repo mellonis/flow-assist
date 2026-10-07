@@ -83,11 +83,11 @@ test('a subagent\'s request carries the framed task, the memory block and the la
   expect(rig.sent(0)).toEqual([{ role: 'user', content: 'check the style' }]);
 });
 
-test('a write is declined and journaled `confirm` by background, tagged `subagent`', async () => {
+test('a model\'s subagent declines a write, journaled `confirm` by background, tagged `subagent`', async () => {
   const model = new ScriptedModel();
   model.script([{ tool: 'run_command', args: { command: 'echo x > made.txt' } }], [{ text: 'could not' }]);
   const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
-  const { run } = startFrom(rig, spec('w', 'make a file'));
+  const { run } = startFrom(rig, spec('w', 'make a file', { by: 'model' }));
   await run();
   expect(fs.existsSync(path.join(rig.root, 'made.txt'))).toBe(false);
   const tagged = rig.journal().filter((e) => e.subagent === 'w' && e.t !== 'subagent');

@@ -10,6 +10,14 @@ import { parseValue } from '../config/load.js';
 import type { PendingConfirm } from './conversation-types.js';
 import type { Conversation } from './conversation.js';
 
+// When a y/n is parked: milliseconds since the epoch, raised by one when the clock has not
+// moved since the last, so two requests are never equally old.
+let lastAt = 0;
+export function parkedAt(): number {
+  lastAt = Math.max(Date.now(), lastAt + 1);
+  return lastAt;
+}
+
 export type ConfirmWrite = NonNullable<AgentOpts['confirmWrite']>;
 
 export type ConfirmPolicy =
@@ -122,7 +130,7 @@ export function askPerson(c: Conversation, journalId: string): ConfirmWrite {
       c.journalTo(journalId, { t: 'confirm', ...(info?.id ? { id: info.id } : {}), name, answer: ok ? 'yes' : 'no', by });
       resolve(ok);
     };
-    const request: PendingConfirm = { name, args, ...(command != null ? { command } : {}), ...(line != null ? { line } : {}), ...(input ? { input } : {}) };
+    const request: PendingConfirm = { name, args, ...(command != null ? { command } : {}), ...(line != null ? { line } : {}), ...(input ? { input } : {}), at: parkedAt() };
     c.confirm = { name, args, ...(input ? { input } : {}), resolve: answered };
     c.drawConfirm(request);
     // The chat: the /context panel and a pager close — the y/n is what the person must see.

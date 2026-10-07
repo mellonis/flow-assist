@@ -102,7 +102,14 @@ export interface TurnEnd {
 
 // A y/n waiting on a write, as the block draws it — or the settings-file guard's own y/n
 // (`name: 'config'`), which brings its own title, hint and whole-text flag.
-export interface PendingConfirm { name: string; args: string; command?: string; line?: string; input?: string; title?: string; hint?: string; whole?: boolean }
+// `at` is when it was parked (ms since the epoch, never repeated within a process), which
+// orders the requests of a conversation's children oldest first.
+export interface PendingConfirm { name: string; args: string; command?: string; line?: string; input?: string; title?: string; hint?: string; whole?: boolean; at: number }
+
+// The y/n a conversation shows the person: its own, else the oldest of its descendants'.
+// `owner` is the conversation whose request it is, and so the one that takes the answer;
+// `path` is the labels from the first child down to the owner (empty for its own).
+export interface Offered { request: PendingConfirm; owner: Conversation; path: string[] }
 
 export interface SendOptions {
   hostAsk?: boolean;             // the host's ask after a `!!command`: drawn dim, never in ↑/↓
@@ -133,6 +140,7 @@ export type ConversationEvent =
   | { type: 'activity' }          // a new segment began: the chat's seconds start again from 0
   | { type: 'confirm'; request: PendingConfirm | null; host?: true }   // `host`: the settings guard's own y/n, which closes no panel
   | { type: 'question'; state: AskState | null; parked?: boolean }
+  | { type: 'asking' }            // a y/n of a descendant was parked or answered: what this conversation offers may have changed
   | { type: 'notice'; text: string; level: 'error' }
   | { type: 'inbox'; items: string[]; shown: boolean }   // every item that landed together; `shown`: the chat is open
   | { type: 'children'; count: number }   // a child started or its result is in: how many there are now
@@ -186,7 +194,9 @@ export interface ConversationDeps {
 
 // A child a conversation starts: the `subagent` tool's task, or a subagent. `summary` is
 // the parent's summary handed to a subagent as the start of its own.
-export interface ChildSpec { kind: 'task' | 'subagent'; label: string; prompt: string; by: 'model' | 'person'; summary?: string }
+// `write`: the child may change things, each write asking the person (a subagent the person
+// starts always may); without it a child declines every write.
+export interface ChildSpec { kind: 'task' | 'subagent'; label: string; prompt: string; by: 'model' | 'person'; summary?: string; write?: boolean }
 // How a child's run ended, as the tool that started it reports it.
 export interface ChildResult {
   outcome: 'answer' | 'empty' | 'limit' | 'stopped' | 'failed';

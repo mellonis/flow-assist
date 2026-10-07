@@ -1094,6 +1094,9 @@ A saved history that holds calls under the name `background` is sent as it is. T
   - the chat's turn — asks: its y/n closure, which the auto mode may answer;
   - a background task — declines: a background task's conversation has the policy
     `always-no`, journaled as a `confirm` line `by: 'background'`, tagged with its label;
+    so does a subagent the model starts. A child that may write (`ChildSpec.write`, and
+    every subagent the person starts) has the policy `ask` instead, where the host has a
+    person at all (see "A conversation starts a child of its own");
   - a tool's `ctx.chatLLM` in the chat (`journaledChatLLM`) —
     declines unless the tool passes its own `confirmWrite`, whose answer is journaled
     `by: 'plugin'`; with none, the journal holds the declined call and no `confirm`;
@@ -1150,8 +1153,8 @@ A saved history that holds calls under the name `background` is sent as it is. T
   since it only loosens a pause the person already chose with `/auto all`, so a
   `:config set --session shell.autoRun true` holds for the next command. A
   background task is
-  untouched: its conversation has the policy `always-no`, and the chat's mode
-  never reaches it; the person's own `!command` is untouched too. The decision lives in
+  untouched: its conversation has the policy `always-no` (a child that may write
+  keeps its own mode, which starts at `ask`), and the chat's mode never reaches it; the person's own `!command` is untouched too. The decision lives in
   the one place the chat already pauses — the `confirmWrite` closure — and it changes
   nothing about what `agentChat` asks about: a tool never skips its own write flag.
   What ran under the mode is still shown, the ✎ diff block and the tool trail as usual.
@@ -2754,7 +2757,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   on screen" while a left session streams, its note posted into that session. A
   plugin's tool that sets its own component's state directly is outside this.
 - **A conversation has a kind** — `session` (the chat's), `task` (a background task's),
-  `subagent` (a read-only job the person's work runs in beside the chat) or
+  `subagent` (a job the person's work runs in beside the chat, read-only unless the person started it) or
   `oneshot` (the one-shot prompt's) — and a policy for its writes (`confirm-policy.ts`),
   both decided when it is made: `Conversation.fresh(deps, { kind, policy })` for a new one, which reads the
   project's instructions for the start directory, `Conversation.restore(…)` for a saved
@@ -2771,8 +2774,8 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   read again every round, the project block and the conversation's own summary — a
   summary handed over at the start (`ChildSpec.summary`) or one an automatic compaction
   made, so a long run keeps its context; no screen tail; the round boundary on (the
-  automatic compaction; the queue and the settings-file guard find nothing to do in a
-  child); recall on; no `ask_user`, no images; no round cap of its own, so the config's
+  automatic compaction; the queue finds nothing to do in a child, and the settings-file
+  guard never runs in a conversation that has a parent); recall on; no `ask_user`, no images; no round cap of its own, so the config's
   `ai.maxRounds` and `ai.maxTurnTokens` apply; `remind` is withheld from its own turn and from every run a tool starts through `ctx.chatLLM` (the child's `chatLLM` adds it to the list). A child says nothing
   of a missing memory record and spends no flag of the host's once-only note: nobody
   draws its rows.
@@ -2908,9 +2911,12 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
 - **A conversation starts a child of its own** (`startChild(spec, journalId)`, in
   `src/assistant/conversation.ts`; a turn hands it to its tools as `ctx.startChild`, with
   the host's slots as `ctx.childSlots`): a `task` or `subagent` conversation (`ChildSpec.kind`;
-  `parent`, `depth` one more, `label`, `spawnedBy`) with its own plan, shell, tool set and abort, and the `always-no` policy. Its
-  deps are its parent's with no sessions directory, no screens, nobody to ask, no redraw
-  (`notify`) and a silent `pushLog`. It keeps no journal or state file: its `journalRoute` sends its
+  `parent`, `depth` one more, `label`, `spawnedBy`) with its own plan, shell, tool set and abort, and the policy `always-no` — or `ask`
+  for a subagent the person starts and for any spec with `write: true`, where the host's
+  root can ask at all (`canAsk`; with nobody to ask such a child declines). Its
+  deps are its parent's with no sessions directory, no screens, no redraw
+  (`notify`) and a silent `pushLog`; `canAsk` is true only for a child whose policy
+  asks, and `ask_user` is off in every child. It keeps no journal or state file: its `journalRoute` sends its
   `call-start`, `confirm` and `call` lines — and nothing else — to its parent's
   `journalTo` under the parent turn's journal id, tagged `{ task: <label>, ...line }` (a
   subagent's lines `{ subagent: <label>, ...line }`; a grandchild's own label kept). A
@@ -2971,6 +2977,20 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   outcome, `ms`, `tokens`, plain data, the last twenty, newest last) in the conversation
   that holds the child when its result settles — after a hand-up, the one it was handed
   to — not for one stopped with its conversation; `close('clear')` empties it.
+  **A child's y/n is parked in the child and offered upward.** The request is parked as a
+  session's is (`askPerson`: the child's own auto mode first, then `confirm` and
+  `confirmDrawn`), its answer journaled through the child's route under its tag, `by:
+  person | auto | stop | reset`; it is declined by a clear (`reset`), by a parent's close
+  (`reset`) and by `stopSubtree` (`stop`), and left as it is at exit. `PendingConfirm.at`
+  is when it was parked (milliseconds, never repeated within a process).
+  `offered()` is what a conversation shows the person: its own drawn request first
+  (`path` empty, `owner` itself), else the OLDEST parked anywhere below it, with `path`
+  the labels from the first child down to the `owner` — the conversation whose
+  `answerConfirm` takes the answer; `subtreeWaiting` is true while any descendant waits.
+  A child's `confirm` event, raised and answered, is repeated on every ancestor as
+  `{ type: 'asking' }` and runs the root's `deps.notify`; the ancestors are read from
+  `parent` at the event, never kept from the start, so a child handed up to the session
+  when its starter ended reports there. The settings-file y/n is never parked in a child.
   `runningChildren()` lists the children still counted (label, kind, `working`, `queued`
   or `delayed`, when its turn began, when its delay ends) for a view to read.
   `close('exit')` touches no child: at exit the registry's `closeAll` writes each child's

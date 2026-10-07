@@ -25,7 +25,7 @@ import type { ViewRecord } from './views.js';
 import type { ToolDef } from '../loader/tools.js';
 import { workspaceFor } from './workspace.js';
 import { asBackgroundWork, asConversationWork, asForegroundWork, outsideWork, workOwner } from '../runtime/background-work.js';
-import { callOf, childResultText, lastAnswerOf, type BusyKind, type ChatMsg, type ChildResult, type EndedChild, type RunningChild, type ChildSpec, type ChildStart, type CloseReason, type StoppedBy, type JournalRoute, type ConversationDeps, type ConversationEvent, type ConversationKind, type ConversationSnapshot, type ConversationStatus, type PendingConfirm, type Queued, type QueueWait, type SendOptions, type TurnEnd, type ViewPort } from './conversation-types.js';
+import { callOf, childResultText, lastAnswerOf, type BusyKind, type ChatMsg, type ChildResult, type EndedChild, type RunningChild, type ChildSpec, type ChildStart, type CloseReason, type StoppedBy, type JournalRoute, type ConversationDeps, type ConversationEvent, type ConversationKind, type ConversationSnapshot, type ConversationStatus, type Offered, type PendingConfirm, type Queued, type QueueWait, type SendOptions, type TurnEnd, type ViewPort } from './conversation-types.js';
 import {
   applySession, currentProject, ensureSessionId, journal, journaledChatLLM, journalTo, keepPersonWork, markSeen, persist, pushNote,
   releaseLockOf, writeSession, NO_FILE,
@@ -387,6 +387,37 @@ export class Conversation {
   // work, like the listeners `tell` calls.
   emit(ev: ConversationEvent): void {
     outsideWork(() => { for (const fn of [...(this.handlers.get(ev.type) ?? [])]) fn(ev); });
+    if (ev.type === 'confirm' && this.parent) this.askedUp();
+  }
+  // A child's y/n was parked or answered: every conversation above it hears `asking`, and
+  // the host redraws through the root's `notify` (a child's own is silent). The ancestors
+  // are read now, from `parent`, so a child handed up to the session reports to it.
+  private askedUp(): void {
+    let root: Conversation = this;
+    for (let a = this.parent; a; a = a.parent) { a.emit({ type: 'asking' }); root = a; }
+    root.deps.notify();
+  }
+  // The y/n this conversation shows the person: its own first (`path` empty), else the
+  // oldest parked anywhere below it, with the labels from the first child down to the
+  // conversation that owns it. null with none.
+  offered(): Offered | null {
+    if (this.confirmDrawn) return { request: this.confirmDrawn, owner: this, path: [] };
+    let best: Offered | null = null;
+    const walk = (c: Conversation, path: string[]): void => {
+      for (const child of c.children) {
+        const at = [...path, child.label];
+        const r = child.confirmDrawn;
+        if (r && (!best || r.at < best.request.at)) best = { request: r, owner: child, path: at };
+        walk(child, at);
+      }
+    };
+    walk(this, []);
+    return best;
+  }
+  // Something below this conversation waits for the person.
+  get subtreeWaiting(): boolean {
+    for (const c of this.children) if (c.confirm || c.subtreeWaiting) return true;
+    return false;
   }
   // Records the port; the end is seen when the port shows it.
   attach(port: ViewPort): void { this.port = port; this.keptDraft = ''; this.markSeen(); }
@@ -437,7 +468,8 @@ export class Conversation {
     if (reason === 'clear' || reason === 'parent' || (reason === 'exit' && this.parent)) {
       this.abort?.abort();
       this.abort = null;
-      if (this.confirm) this.answerConfirm(false, 'reset');
+      // At the exit a pending y/n is left as it is, as a session's is.
+      if (this.confirm && reason !== 'exit') this.answerConfirm(false, 'reset');
     }
     this.dismissQuestion();
     this.isClosed = true;
@@ -597,7 +629,9 @@ export class Conversation {
   // ── children
   // A child started from the turn journaled as `journalId`: a `task` (a background
   // task) or a `subagent` conversation with its own plan, shell (starting where this
-  // one's is), tool set and abort; no screens, no one to ask, no log lines, and no
+  // one's is), tool set and abort; no screens, no log lines, nobody to ask unless it may write
+  // (`spec.write`, or a subagent the person starts: then its y/n is parked in it and offered
+  // upward, `offered`), and no
   // journal or state file of its own — its `call-start`, `confirm` and `call` lines go
   // into this turn's journal, tagged `task: <label>` (`subagent: <label>` for a subagent;
   // a grandchild's own label kept), and a subagent's `subagent` start and end lines
@@ -611,15 +645,21 @@ export class Conversation {
   startChild(spec: ChildSpec, journalId: string): ChildStart {
     const max = wholeOrDefault((this.deps.config().ai as { subagentDepth?: unknown } | undefined)?.subagentDepth, 2, 1);
     if (this.depth >= max) return { refused: `Background chaining depth exceeded (max ${max}) — finish this task; do not spawn further background tasks.` };
+    // A child that may write asks the person where the host has one; every other child
+    // declines. `canAsk` is the host's, read at the root: a child's own deps say false
+    // for a read-only child.
+    let host: Conversation = this;
+    while (host.parent) host = host.parent;
+    const asks = host.deps.canAsk !== false && (spec.write === true || (spec.kind === 'subagent' && spec.by === 'person'));
     const deps: ConversationDeps = {
       ...this.deps,
-      sessionsDir: () => null, screens: () => undefined, screen: () => [], canAsk: false,
+      sessionsDir: () => null, screens: () => undefined, screen: () => [], canAsk: asks,
       notify: () => {}, pushLog: () => {}, current: undefined,
       // What a subagent's own turn is not offered, a run a tool starts for it is not
       // offered either: the names are added where nested runs inherit them.
       ...(spec.kind === 'subagent' ? { chatLLM: (m, o) => this.deps.chatLLM(m, { ...o, withholdTools: [...new Set([...SUBAGENT_WITHHELD, ...(o?.withholdTools ?? [])])] }) } : {}),
     };
-    const child = new Conversation(deps, { kind: spec.kind, policy: { kind: 'always-no' } });
+    const child = new Conversation(deps, { kind: spec.kind, policy: asks ? { kind: 'ask' } : { kind: 'always-no' } });
     child.parent = this;
     child.depth = this.depth + 1;
     child.label = spec.label;
