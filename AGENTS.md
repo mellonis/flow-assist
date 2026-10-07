@@ -1802,14 +1802,15 @@ A saved history that holds calls under the name `background` is sent as it is. T
     and the text of a round cut off, which never reached `onLiveCommit`.
   - `task-end` — a background task that stopped without finishing: `task` (its label),
     `outcome: 'stopped'` and `by` — `clear` when `/clear` stopped it with its session,
-    `exit` when the process exited while it ran or waited on its delay (`closeAll`).
-    Written through the child's route's `raw`, past the filter that keeps a task's own
+    `exit` when the process exited while it ran or waited on its delay (`closeAll`),
+    `person` when the person stopped it with `/subagent stop` (or stopped the job it
+    belonged to). Written through the child's route's `raw`, past the filter that keeps a task's own
     lines to `call-start`, `confirm` and `call`; `/export` draws it as `*<label> stopped
-    (<by>)*`.
+    (<by>)*`, `person` read as `by you`.
   - `subagent` — a subagent started or ended: `label`, `by` (`model` or `person`, who
     started it), `event` (`start` or `end`) and, on an end, its `outcome`
     (`answer`, `empty`, `limit`, `failed` or `stopped`); one stopped with its session or at
-    exit says what stopped it in `stoppedBy` (`clear` or `exit`). Tagged `subagent: <label>`
+    exit, or by the person, says what stopped it in `stoppedBy` (`clear`, `exit` or `person`). Tagged `subagent: <label>`
     like its calls, written through the route's `raw`; `/export` draws
     `*Subagent «<label>» started (by you | by the model)*` and `*Subagent «<label>»
     finished | failed | stopped …*`.
@@ -2772,7 +2773,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   made, so a long run keeps its context; no screen tail; the round boundary on (the
   automatic compaction; the queue and the settings-file guard find nothing to do in a
   child); recall on; no `ask_user`, no images; no round cap of its own, so the config's
-  `ai.maxRounds` and `ai.maxTurnTokens` apply; `remind` is withheld. A child says nothing
+  `ai.maxRounds` and `ai.maxTurnTokens` apply; `remind` is withheld from its own turn and from every run a tool starts through `ctx.chatLLM` (the child's `chatLLM` adds it to the list). A child says nothing
   of a missing memory record and spends no flag of the host's once-only note: nobody
   draws its rows.
 - **A host makes its conversations through one registry** (`ConversationRegistry`,
@@ -2954,7 +2955,8 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   disarmed), one queued for a slot sends nothing when its run comes — and a task closed
   so writes its `task-end` line (`by: 'clear'`; a subagent's `subagent` end line with
   `outcome: 'stopped'` and `stoppedBy: 'clear'`) into the session's journal through its
-  route's `raw` and delivers nothing (`stoppedWithParent`). `/new` closes nothing: the
+  route's `raw` and delivers nothing (`stoppedWithParent`). When the person's stop closes
+  the subtree, the children write `by: 'person'` / `stoppedBy: 'person'` instead. `/new` closes nothing: the
   chat leaves the session through the registry's `retire`, and its tasks run on.
   **`stopSubtree(glyph)` is the person's stop of one child and everything under it**: the
   child's own turn is aborted (`stop`), or — before its run began — it leaves the schedule
@@ -2996,7 +2998,10 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   the conversation's running children of both kinds, numbered (`working`, `queued`, or
   `in <time>` for a delayed task), then the ended ones (`done`, `failed`, `stopped`, the
   duration, the tokens), or `no subagents here`; `/subagent stop <n|label>` takes the
-  running child by its number in that listing or by its label and calls `stopSubtree`.
+  running child by its number in the listing last printed (the chat keeps its labels, so a
+  job that ended since leaves its number unanswered rather than shifting the others; with
+  no listing printed, a number names nothing) or by its label against the live children,
+  and calls `stopSubtree`.
 - **Ctrl+C, Ctrl+D and Ctrl+Z take a second press** (`src/runtime/exit-keys.ts`, pure;
   the App owns the arm). flowtty hands these three to the app BEFORE the terminal
   backend acts (exit, exit, suspend — skipped when a `useInput` handler returns strict

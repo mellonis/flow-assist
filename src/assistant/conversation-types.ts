@@ -73,6 +73,9 @@ export type ConversationStatus = 'working' | 'waiting' | 'done' | 'idle';
 // 'parent': a task stopped because the conversation that holds it was cleared, or
 // stopped with the task holding it.
 export type CloseReason = 'clear' | 'park' | 'exit' | 'parent';
+// What stopped a child that did not finish: its session was cleared, the process exited,
+// or the person stopped it (or the child it was closed with).
+export type StoppedBy = 'clear' | 'exit' | 'person';
 
 // What runs now, as the status line draws it. Kept after the work ends, as the chat's
 // state was: the next start resets each field. (The seconds are the chat's own ticker,

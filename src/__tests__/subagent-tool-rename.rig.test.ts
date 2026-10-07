@@ -43,7 +43,7 @@ test('a saved session with `background` calls in its history sends its next requ
   expect(rig.sent().some((m) => m.role === 'tool')).toBe(true);
   expect(rig.sent().at(-1)?.content).toBe('and now?');
   expect(opened.lastAnswer()).toBe('Still fine.');
-  // The tool on offer carries its new name only.
+  // The tool on offer carries the name `subagent` only.
   expect(toolNames(last)).toContain('subagent');
   expect(toolNames(last)).not.toContain('background');
 });

@@ -182,12 +182,15 @@ typed it, line breaks included (⇧⏎ makes one).
 
 `--with-context` first on the line also hands over the conversation's summary — what
 `/compact` left — and nothing else of the history; with no summary yet, nothing starts and
-the line says so. `--auto` needs writes, so it is refused for now.
+the line says so. `--auto` needs writes, so it is refused.
 
 `/subagent` alone lists this conversation's jobs, the running ones numbered
 (`1 · find-the-failing · working · 1m 12s`), then the last twenty that ended
-(`find-the-failing · done · 2m 3s · 14k tokens`). `/subagent stop <number or name>` stops
-one and whatever it started: what it had written so far comes back as a `◆ <label>
+(`find-the-failing · done · 2m 3s · 14k tokens`). The list is this conversation's; the
+`N in background` count on the hint row covers every conversation at once.
+`/subagent stop <number or name>` reads a number against the list you last saw (a job that
+ended since keeps the others' numbers, and its own is answered with a line), so list first;
+a name needs no list. It stops one and whatever it started: what it had written so far comes back as a `◆ <label>
 stopped:` message, with one toast and no follow-up turn. A prompt that begins with the
 word `stop` would be read as this command, so put another word before it.
 

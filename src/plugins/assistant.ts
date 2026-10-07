@@ -287,6 +287,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // The conversation this chat draws. `useRef`'s argument is evaluated on every render,
           // so the object is made once, into an empty ref, as the registry is.
           const convRef = ui.useRef<Conversation | null>(null);
+          // The labels of the last `/subagent` listing and the conversation it described:
+          // `/subagent stop <n>` reads a number against that listing, not the live list.
+          const listedRef = ui.useRef<{ conv: Conversation; labels: string[] } | null>(null);
           // What the chat does when its conversation starts or ends work, parks a y/n or a
           // question, fails, or lands a background result. Bound once, when the conversation is
           // made; each handler reaches this render's functions through the ref.
@@ -1560,14 +1563,17 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 if (line.kind === 'error') { setError(line.text); return; }
                 if (line.kind === 'list') {
                   setField('');
-                  conv.pushNote(subagentListing(conv.runningChildren(), conv.endedChildren));
+                  const running = conv.runningChildren();
+                  listedRef.current = { conv, labels: running.map((c) => c.label) };
+                  conv.pushNote(subagentListing(running, conv.endedChildren));
                   host.notify();
                   return;
                 }
                 if (line.kind === 'stop') {
-                  const at = stopTargetIndex(conv.runningChildren(), line.target);
+                  const listed = listedRef.current?.conv === conv ? listedRef.current.labels : null;
+                  const at = stopTargetIndex(conv.runningChildren(), line.target, listed);
                   const child = at < 0 ? undefined : [...conv.children][at];
-                  if (!child) { setError(`/subagent stop: no running subagent «${line.target}» — /subagent lists them`); return; }
+                  if (!child) { setError(`/subagent stop: no running subagent ${/^\d+$/.test(line.target) ? `numbered ${line.target}` : `«${line.target}»`} — /subagent lists them`); return; }
                   setField('');
                   child.stopSubtree('/subagent stop');
                   host.notify();

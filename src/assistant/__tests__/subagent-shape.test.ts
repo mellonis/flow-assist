@@ -98,3 +98,25 @@ test('a child says nothing of a missing memory record and spends nobody\'s once-
   expect(said.memoryMissing).toBe(true);
   expect(session.messages.some((m) => m.role === 'note')).toBe(true);
 });
+
+test('a run a subagent\'s tool starts through ctx.chatLLM has no `remind` either; a task is offered what it was', async () => {
+  const seen: Record<string, any>[] = [];
+  const chatLLM = (async (_wire: unknown[], o: Record<string, any> = {}) => {
+    seen.push({ ...o });
+    return { content: 'x', transcript: [{ role: 'assistant', content: 'x' }], toolRuns: [] };
+  }) as never;
+  const session = new Conversation(fakeDeps({ chatLLM }));
+  for (const kind of ['subagent', 'task'] as const) {
+    seen.length = 0;
+    const started = session.startChild({ kind, label: kind, prompt: 'do it', by: 'person' }, 'journal-id');
+    if ('refused' in started) throw new Error(started.refused);
+    await started.child.send('do it');
+    await seen[0]!.toolCtx.chatLLM([{ role: 'user', content: 'nested' }], {});
+    expect(seen).toHaveLength(2);
+    const expected = kind === 'subagent' ? ['remind'] : undefined;
+    expect(seen[1]!.withholdTools).toEqual(expected);
+    // The caller's own list is kept, once.
+    await seen[0]!.toolCtx.chatLLM([{ role: 'user', content: 'nested' }], { withholdTools: ['x', 'remind'] });
+    expect(seen[2]!.withholdTools).toEqual(kind === 'subagent' ? ['remind', 'x'] : ['x', 'remind']);
+  }
+});

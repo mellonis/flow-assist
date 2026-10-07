@@ -27,13 +27,19 @@ test('a label is cut from the first words and made unique among the live ones', 
 
 const running = (label: string, over = {}) => ({ label, kind: 'subagent' as const, status: 'working' as const, startedAt: 1_000, until: null, ...over });
 
-test('a stop names a running child by its number or its label', () => {
+test('a stop names a running child by its number in the last listing or by its label', () => {
   const list = [running('a'), running('B')];
-  expect(stopTargetIndex(list, '2')).toBe(1);
-  expect(stopTargetIndex(list, '3')).toBe(-1);
-  expect(stopTargetIndex(list, '0')).toBe(-1);
-  expect(stopTargetIndex(list, 'b')).toBe(1);
-  expect(stopTargetIndex(list, 'nope')).toBe(-1);
+  expect(stopTargetIndex(list, '2', ['a', 'B'])).toBe(1);
+  expect(stopTargetIndex(list, '3', ['a', 'B'])).toBe(-1);
+  expect(stopTargetIndex(list, '0', ['a', 'B'])).toBe(-1);
+  expect(stopTargetIndex(list, 'b', null)).toBe(1);
+  expect(stopTargetIndex(list, 'nope', ['a', 'B'])).toBe(-1);
+  // No listing was printed: a number names nothing.
+  expect(stopTargetIndex(list, '1', null)).toBe(-1);
+  // The listing said 1 a, 2 b, 3 c; a has ended since. Number 2 is still b, number 1 is gone.
+  const later = [running('b'), running('c')];
+  expect(stopTargetIndex(later, '2', ['a', 'b', 'c'])).toBe(0);
+  expect(stopTargetIndex(later, '1', ['a', 'b', 'c'])).toBe(-1);
 });
 
 test('the listing numbers the running ones, then the ended ones with duration and tokens', () => {

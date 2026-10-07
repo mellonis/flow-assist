@@ -400,6 +400,51 @@ test('stopping a subagent closes the tasks it started: they deliver nothing, onl
   expect(g.requests).toHaveLength(1);
 });
 
+// ── what the journal says about a stop
+const endsOf = (rig: Rig, t: 'subagent' | 'task-end') => rig.journal().filter((e) => e.t === t && (t === 'task-end' || e.event === 'end'));
+
+test('a subagent the person stops says so in its end line, and /export reads "by you"', async () => {
+  const model = new ScriptedModel();
+  const sub = subScript(model, 'by hand');
+  sub.script([{ hold: true }, { text: 'never' }]);
+  const rig = attachedRig(model, { backgroundFollowUp: false });
+  const child = scheduled(rig, spec('h', 'by hand'));
+  await rig.until(() => sub.held);
+  child.stopSubtree('');
+  await settled(rig);
+  expect(endsOf(rig, 'subagent')).toMatchObject([{ label: 'h', outcome: 'stopped', stoppedBy: 'person' }]);
+  expect(exportMarkdown(rig.journal(), { title: 't', id: rig.conv.sessionId })).toContain('*Subagent «h» stopped (by you)*');
+});
+
+test('a task the person stops writes its task-end line by the person; the one that finishes writes none', async () => {
+  const model = new ScriptedModel();
+  const t = model.when((req) => system(req).includes('Task: slow job'));
+  t.script([{ hold: true }, { text: 'never' }]);
+  const rig = attachedRig(model, { backgroundFollowUp: false });
+  const task = scheduled(rig, { kind: 'task', label: 'tk', prompt: 'slow job', by: 'model' });
+  await rig.until(() => t.held);
+  task.stopSubtree('');
+  await settled(rig);
+  expect(endsOf(rig, 'task-end')).toMatchObject([{ task: 'tk', outcome: 'stopped', by: 'person' }]);
+  expect(exportMarkdown(rig.journal(), { title: 't', id: rig.conv.sessionId })).toContain('*tk stopped (by you)*');
+});
+
+test('the children closed because their parent was stopped write the person too, not a clear', async () => {
+  const model = new ScriptedModel();
+  const sub = subScript(model, 'parent job');
+  sub.script([{ tool: 'subagent', args: { task: 'child job', label: 'g' } }], [{ hold: true }, { text: 'never' }]);
+  const g = model.when((req) => system(req).includes('Task: child job'));
+  g.script([{ hold: true }, { text: 'g done' }]);
+  const rig = attachedRig(model, { backgroundFollowUp: false });
+  const s = scheduled(rig, spec('s', 'parent job'));
+  await rig.until(() => g.held && sub.held);
+  s.stopSubtree('');
+  await settled(rig);
+  g.release();
+  expect(endsOf(rig, 'task-end')).toMatchObject([{ task: 'g', outcome: 'stopped', by: 'person' }]);
+  expect(endsOf(rig, 'subagent')).toMatchObject([{ label: 's', outcome: 'stopped', stoppedBy: 'person' }]);
+});
+
 test('a child closed because its parent closes still delivers nothing', async () => {
   const model = new ScriptedModel();
   const sub = subScript(model, 'cleared');
@@ -413,6 +458,8 @@ test('a child closed because its parent closes still delivers nothing', async ()
   expect(bgRows(first)).toEqual([]);
   expect(rig.toasts).toEqual([]);
   expect(first.endedChildren).toEqual([]);
+  // A subagent cleared with its session still writes its end line, by the clear.
+  expect(endsOf(rig, 'subagent')).toMatchObject([{ label: 'c', outcome: 'stopped', stoppedBy: 'clear' }]);
 });
 
 test('the ended children are remembered as plain data, newest last, twenty at most, until /clear', async () => {

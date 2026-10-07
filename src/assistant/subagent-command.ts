@@ -50,11 +50,14 @@ export function subagentLabel(prompt: string, taken: readonly string[]): string 
   return `${base}-${n}`;
 }
 
-// The running child a `stop` names: its number in the listing, or its name. -1 for none.
-export function stopTargetIndex(running: readonly RunningChild[], target: string): number {
+// The running child a `stop` names, as an index into `running`: a number is read against
+// `listed`, the labels of the listing the person last saw (null when none was printed),
+// so a job that ended since leaves its number unanswered instead of shifting the others;
+// a name is read against the live children. -1 for none.
+export function stopTargetIndex(running: readonly RunningChild[], target: string, listed: readonly string[] | null): number {
   if (/^\d+$/.test(target)) {
-    const n = Number(target);
-    return n >= 1 && n <= running.length ? n - 1 : -1;
+    const label = listed?.[Number(target) - 1];
+    return label === undefined ? -1 : running.findIndex((c) => c.label === label);
   }
   const wanted = target.toLowerCase();
   return running.findIndex((c) => c.label.toLowerCase() === wanted);

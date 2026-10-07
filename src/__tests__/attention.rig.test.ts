@@ -93,7 +93,7 @@ test('a session put away with a result that landed in the park is counted as don
   await rig.idle();
   // A result waiting in the inbox: it lands as a row inside the park, after the answer
   // was read, so only the status read after the landing sees it unseen.
-  (rig.conv as unknown as { inbox: string[] }).inbox.push('job finished:\nok');
+  rig.conv.inbox.push({ text: 'job finished:\nok', quiet: false });
   const { left: a } = rig.switchTo();
   expect(a.closed).toBe(true);
   expect(rig.registry.attention()).toEqual({ waiting: 0, done: 1 });
@@ -118,7 +118,7 @@ async function putAwayUnread(): Promise<{ rig: Rig; id: string }> {
   rig.registry.show(rig.conv);
   await rig.conv.send('question A');
   await rig.idle();
-  (rig.conv as unknown as { inbox: string[] }).inbox.push('job finished:\nok');
+  rig.conv.inbox.push({ text: 'job finished:\nok', quiet: false });
   const { left } = rig.switchTo();
   expect(rig.registry.attention().done).toBe(1);
   return { rig, id: left.sessionId };

@@ -36,11 +36,12 @@
 //            text of a round cut off
 //   task-end a background task that stopped without finishing: `task` (its label),
 //            `outcome` stopped, and `by` — what stopped it (`clear`: its session was
-//            cleared; `exit`: the process exited while it ran or waited)
+//            cleared; `exit`: the process exited while it ran or waited; `person`: the person
+//            stopped it, or the job it belonged to)
 //   subagent a subagent started or ended: `label`, `by` (who started it: `model` or
 //            `person`), `event` (`start` or `end`) and, on an end, its `outcome`; one
 //            stopped with its session or at exit also says what stopped it (`stoppedBy`:
-//            `clear` or `exit`). Tagged `subagent` like its calls.
+//            `clear`, `exit` or `person`). Tagged `subagent` like its calls.
 //
 // `/export` renders a journal as markdown (`exportMarkdown`).
 //
@@ -272,6 +273,9 @@ function callBlock(ev: Record<string, unknown>, confirm?: Record<string, unknown
   return out.join('\n');
 }
 
+// Who stopped a child that did not finish, as `/export` says it.
+const stoppedByText = (by: string): string => (by === 'person' ? 'by you' : by);
+
 export function exportMarkdown(events: JournalEvent[], opts: { title: string; id: string; noJournal?: boolean }): string {
   const out: string[] = [`# ${opts.title.replace(/\s+/g, ' ').trim() || opts.id}`, '', `Session \`${opts.id}\``, ''];
   const start = events.find((e) => e.t === 'start');
@@ -357,9 +361,9 @@ export function exportMarkdown(events: JournalEvent[], opts: { title: string; id
       case 'subagent':
         out.push(ev.event === 'start'
           ? `*Subagent «${String(ev.label ?? '')}» started (${ev.by === 'person' ? 'by you' : 'by the model'})*${at}`
-          : `*Subagent «${String(ev.label ?? '')}» ${ev.outcome === 'answer' || ev.outcome === 'empty' ? 'finished' : String(ev.outcome ?? 'ended')}${typeof ev.stoppedBy === 'string' ? ` (${ev.stoppedBy})` : ''}*${at}`, '');
+          : `*Subagent «${String(ev.label ?? '')}» ${ev.outcome === 'answer' || ev.outcome === 'empty' ? 'finished' : String(ev.outcome ?? 'ended')}${typeof ev.stoppedBy === 'string' ? ` (${stoppedByText(ev.stoppedBy)})` : ''}*${at}`, '');
         break;
-      case 'task-end': out.push(`*${String(ev.task ?? '')} stopped (${String(ev.by ?? '')})*${at}`, ''); break;
+      case 'task-end': out.push(`*${String(ev.task ?? '')} stopped (${stoppedByText(String(ev.by ?? ''))})*${at}`, ''); break;
       case 'end': {
         if (typeof ev.cut === 'string' && ev.cut) out.push(`**Assistant**${at} (cut off)`, '', ev.cut, '');
         const how = [ev.stopped ? `stopped (${String(ev.stopped)})` : '', ev.failed ? `failed: ${String(ev.failed)}` : '', ev.roundLimit ? `stopped after ${ev.limitBy === 'tokens' ? `${String(ev.turnTokens)} tokens (ai.maxTurnTokens)` : `${String(ev.roundLimit)} rounds (ai.maxRounds)`} — no answer${ev.lastStep ? `; last step: ${String(ev.lastStep)}` : ''}` : ''].filter(Boolean);

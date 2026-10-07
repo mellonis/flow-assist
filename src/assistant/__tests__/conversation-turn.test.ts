@@ -156,3 +156,59 @@ test('with follow-ups off, results land as rows, together, when nothing holds th
   expect(c.api.map((m) => m.role)).toEqual(['bg', 'bg']);
   c.clearInbox();
 });
+
+// ── quiet items: rows that start no follow-up turn
+function heldFirst(asked: string[]) {
+  let release!: () => void;
+  const inner = asking(asked) as unknown as (w: unknown, o: unknown) => Promise<unknown>;
+  const chatLLM = (async (w: unknown, o: unknown) => {
+    if (!asked.length) await new Promise<void>((r) => { release = r; });
+    return inner(w, o);
+  }) as never;
+  return { chatLLM, release: () => release() };
+}
+const settleMs = () => new Promise((r) => setTimeout(r, 20));
+
+test('quiet items land first, so the follow-up turn answers the item that is not quiet', async () => {
+  const asked: string[] = [];
+  const h = heldFirst(asked);
+  const c = new Conversation(fakeDeps({ chatLLM: h.chatLLM }));
+  const turn = c.send('go');
+  c.deliver('a finished:\nthe news');
+  c.deliver('b stopped:\nwhat it had', { quiet: true });
+  h.release();
+  await turn;
+  await settleMs();
+  expect(asked).toEqual(['go', 'a finished:\nthe news']);
+  const bg = c.rows().filter((m) => m.role === 'bg').map((m) => m.content);
+  // The quiet row is a row before the message the turn answered.
+  expect(bg).toEqual(['b stopped:\nwhat it had', 'a finished:\nthe news']);
+  c.clearInbox();
+});
+
+test('a normal item with the same text as a quiet one, waiting together, still starts its follow-up turn', async () => {
+  const asked: string[] = [];
+  const h = heldFirst(asked);
+  const c = new Conversation(fakeDeps({ chatLLM: h.chatLLM }));
+  const turn = c.send('go');
+  c.deliver('x stopped:\nsame', { quiet: true });
+  c.deliver('x stopped:\nsame');
+  h.release();
+  await turn;
+  await settleMs();
+  expect(asked).toEqual(['go', 'x stopped:\nsame']);
+  c.clearInbox();
+});
+
+test('nothing quiet is left behind after a land: a later normal item with the same text starts its turn', async () => {
+  const asked: string[] = [];
+  const c = new Conversation(fakeDeps({ chatLLM: asking(asked) }));
+  c.deliver('x stopped:\nsame', { quiet: true });
+  await settleMs();
+  expect(asked).toEqual([]);
+  expect(c.rows().filter((m) => m.role === 'bg')).toHaveLength(1);
+  c.deliver('x stopped:\nsame');
+  await settleMs();
+  expect(asked).toEqual(['x stopped:\nsame']);
+  c.clearInbox();
+});
