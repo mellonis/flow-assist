@@ -27,7 +27,7 @@ import { workspaceFor } from './workspace.js';
 import { asBackgroundWork, asConversationWork, asForegroundWork, outsideWork, workOwner } from '../runtime/background-work.js';
 import { callOf, childResultText, lastAnswerOf, type BusyKind, type ChatMsg, type ChildResult, type EndedChild, type RunningChild, type ChildSpec, type ChildStart, type CloseReason, type JournalRoute, type ConversationDeps, type ConversationEvent, type ConversationKind, type ConversationSnapshot, type ConversationStatus, type PendingConfirm, type Queued, type QueueWait, type SendOptions, type TurnEnd, type ViewPort } from './conversation-types.js';
 import {
-  applySession, currentProject, ensureSessionId, journal, journaledChatLLM, journalTo, markSeen, persist, pushNote,
+  applySession, currentProject, ensureSessionId, journal, journaledChatLLM, journalTo, keepPersonWork, markSeen, persist, pushNote,
   releaseLockOf, writeSession, NO_FILE,
 } from './conversation-session.js';
 import { askConfigChanges, compact, runTurn } from './conversation-turn.js';
@@ -543,6 +543,7 @@ export class Conversation {
 
   // ── the session (src/assistant/conversation-session.ts)
   ensureSessionId(): string { return ensureSessionId(this); }
+  keepPersonWork(line: string): string { return keepPersonWork(this, line); }
   journal(ev: JournalEvent, opts?: { person?: boolean }): string { return journal(this, ev, opts); }
   journalTo(from: string, ev: JournalEvent): void { journalTo(this, from, ev); }
   journaledChatLLM(from: string) { return journaledChatLLM(this, from); }

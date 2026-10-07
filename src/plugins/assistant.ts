@@ -64,6 +64,8 @@ import { Conversation, workHome } from '../assistant/conversation.js';
 import { ConversationRegistry } from '../assistant/registry.js';
 import { personSpoke, projectHere } from '../assistant/conversation-session.js';
 import { configLineOf, shellCommandOf } from '../assistant/confirm-policy.js';
+import { scheduleChild } from '../assistant/child-schedule.js';
+import { parseSubagentLine, stopTargetIndex, subagentLabel, subagentListing } from '../assistant/subagent-command.js';
 
 // Slash-commands of the chat — a single source for runChatCommand and Tab-completion.
 // `/analyze` is a tracker slash command and is removed.
@@ -76,7 +78,7 @@ import { configLineOf, shellCommandOf } from '../assistant/confirm-policy.js';
 // sessions directory is known (`chatCommandDefs` in the chat).
 type ChatCommand = HistoryCommand & ChatCommandDef;
 const CHAT_COMMAND_DEFS: ChatCommand[] = [
-  { name: 'compact' }, { name: 'context' }, { name: 'copy' }, { name: 'image' }, { name: 'resume' }, { name: 'sessions' }, { name: 'new' }, { name: 'title' }, { name: 'export' }, { name: 'clear' }, { name: 'memory', values: ['project', 'global', 'forget', 'accept'] }, { name: 'workspace' },
+  { name: 'compact' }, { name: 'context' }, { name: 'subagent' }, { name: 'sub' }, { name: 'copy' }, { name: 'image' }, { name: 'resume' }, { name: 'sessions' }, { name: 'new' }, { name: 'title' }, { name: 'export' }, { name: 'clear' }, { name: 'memory', values: ['project', 'global', 'forget', 'accept'] }, { name: 'workspace' },
   // `cd`'s own argument is a path, not a fixed set of values — its completion is
   // special-cased in `chatComplete`, the way shell mode's own path completion is.
   { name: 'cd' },
@@ -1545,6 +1547,49 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 }
                 const why = first && !first.images ? first.error : undefined;
                 setError(`not attached: ${why ?? `no image at ${raw}`}`);
+                return;
+              }
+              case 'subagent':
+              case 'sub': {
+                // A job of the person's beside the chat: read-only, its answer a row of the
+                // session. The prompt is the line's raw rest — its spacing and line breaks
+                // reach the model — not the whitespace-split `arg`. Nothing here is a turn:
+                // it is allowed while one runs.
+                const line = parseSubagentLine(cmd.replace(/^\S+\s*/, ''));
+                const say = (text: string) => (host.services as Record<string, any>).showMessage?.(text);
+                if (line.kind === 'error') { setError(line.text); return; }
+                if (line.kind === 'list') {
+                  setField('');
+                  conv.pushNote(subagentListing(conv.runningChildren(), conv.endedChildren));
+                  host.notify();
+                  return;
+                }
+                if (line.kind === 'stop') {
+                  const at = stopTargetIndex(conv.runningChildren(), line.target);
+                  const child = at < 0 ? undefined : [...conv.children][at];
+                  if (!child) { setError(`/subagent stop: no running subagent «${line.target}» — /subagent lists them`); return; }
+                  setField('');
+                  child.stopSubtree('/subagent stop');
+                  host.notify();
+                  return;
+                }
+                if (line.auto) { setError('/subagent --auto needs writes, which a subagent cannot do yet — it reads and reports'); return; }
+                if (line.withContext && !conv.summary.trim()) { setError('no summary to hand over yet — /compact makes one, or start it without --with-context'); return; }
+                const slots = conv.deps.children;
+                if (!slots) { setError('/subagent: subagents are unavailable here'); return; }
+                // The parent's own journal takes the child's lines: its session is made
+                // here when nobody has spoken (`keepPersonWork`).
+                const journalId = conv.keepPersonWork(`/${cmd.trim()}`);
+                const label = subagentLabel(line.prompt, conv.runningChildren().map((c) => c.label));
+                const started = scheduleChild(
+                  { kind: 'subagent', label, prompt: line.prompt, by: 'person', ...(line.withContext ? { summary: conv.summary } : {}) },
+                  0,
+                  { startChild: (spec) => conv.startChild(spec, journalId), slots, showMessage: say, pushLog: conv.deps.pushLog, notify: () => host.notify() },
+                );
+                if ('refused' in started) { setError(`/subagent: ${started.refused}`); return; }
+                setField('');
+                say(`subagent «${label}» started`);
+                host.notify();
                 return;
               }
               case 'compact': compactNow(); return;

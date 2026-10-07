@@ -2961,7 +2961,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   (`leaveSchedule`); every child it started is closed with `'parent'` (they deliver
   nothing); the child itself delivers once, `<label> stopped:` and the text it had
   written (the last answer text of its rows; the steps of its tool-calling rounds are not
-  text it said), or `stopped before it said anything`, to the session as any result is.
+  text it said), or `nothing said yet`, to the session as any result is.
   That row is delivered quiet (`deliver(text, { quiet: true })`): it lands as a row and
   starts no follow-up turn even with `ai.backgroundFollowUp` on and the session shown —
   the person has just stopped the work. A second call, and a call on a closed child, do
@@ -2977,6 +2977,26 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   as well as a child's, so every running command's process group is killed and none
   outlives the process; a pending y/n is left as is), and closes the tree itself,
   deepest first; `close('exit')` of a child stops its own turn.
+  **The subagent command** (`/subagent`, `/sub`; `src/assistant/subagent-command.ts` for the
+  text, the `subagent` case of the chat's command switch for the rest) starts a `subagent`
+  child through `scheduleChild` with no delay, `by: 'person'`. It reads the line's RAW rest
+  (`cmd`, not the whitespace-split `arg`), so the spacing and line breaks of the prompt
+  reach the model; `--with-context` and `--auto` count only as the first words, and `stop`
+  as the first word is the stop command (a prompt that starts with the word `stop` is
+  written another way). Nothing in it is a turn, so it is never refused while one runs;
+  the child's lines go to the journal of the conversation's own session, which
+  `keepPersonWork` makes when nobody has spoken: the line the person typed becomes the
+  first `user` row (display only — the model's history never holds it), which gives the
+  session its id, its lock and a journal with a start line, and the save timer writes the
+  state file beside it, so the journal is never one the sweep finds with no state file. The
+  label is cut from the prompt's first three words, lower-case and hyphenated, and made
+  unique among the live children (`-2`, `-3`). `--with-context` hands `conv.summary` and
+  nothing else — with none, nothing starts and the line says a `/compact` makes one;
+  `--auto` is refused until a subagent can write. `/subagent` alone puts a note listing
+  the conversation's running children of both kinds, numbered (`working`, `queued`, or
+  `in <time>` for a delayed task), then the ended ones (`done`, `failed`, `stopped`, the
+  duration, the tokens), or `no subagents here`; `/subagent stop <n|label>` takes the
+  running child by its number in that listing or by its label and calls `stopSubtree`.
 - **Ctrl+C, Ctrl+D and Ctrl+Z take a second press** (`src/runtime/exit-keys.ts`, pure;
   the App owns the arm). flowtty hands these three to the app BEFORE the terminal
   backend acts (exit, exit, suspend — skipped when a `useInput` handler returns strict

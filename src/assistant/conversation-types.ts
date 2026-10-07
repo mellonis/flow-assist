@@ -204,7 +204,7 @@ export interface ChildResult {
   tokens?: number;
 }
 // What a stopped child says when it had said nothing yet.
-export const STOPPED_EMPTY = 'stopped before it said anything';
+export const STOPPED_EMPTY = 'nothing said yet';
 // A child's result without its header line: the reason it failed, the text a stopped one
 // had written (or that it had written none), or its text and the limit it stopped at.
 export function childResultBody(r: ChildResult): string {

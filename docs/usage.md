@@ -169,6 +169,31 @@ session's journal, and `/export` shows it with its time (`*<label> stopped (exit
 Quitting also stops a `!command` or an assistant `run_command` still running in any
 conversation.
 
+## Subagents you start
+
+**`/subagent <prompt>`** (`/sub` for short) hands a job to a subagent that works beside the
+chat: you go on talking while it runs, and its answer lands as a `◆` message when it
+ends, as a background task's does. It may read what the assistant reads without asking
+you; it may not yet write, and whatever would wait for your y/n (a command, a file change,
+a fetch off the allowlist) is declined. It cannot ask you a question either. It gets the
+rounds and the token budget of `ai.maxRounds` and `ai.maxTurnTokens`, not a task's twelve,
+and counts toward the three that run at once. The prompt is sent as you
+typed it, line breaks included (⇧⏎ makes one).
+
+`--with-context` first on the line also hands over the conversation's summary — what
+`/compact` left — and nothing else of the history; with no summary yet, nothing starts and
+the line says so. `--auto` needs writes, so it is refused for now.
+
+`/subagent` alone lists this conversation's jobs, the running ones numbered
+(`1 · find-the-failing · working · 1m 12s`), then the last twenty that ended
+(`find-the-failing · done · 2m 3s · 14k tokens`). `/subagent stop <number or name>` stops
+one and whatever it started: what it had written so far comes back as a `◆ <label>
+stopped:` message, with one toast and no follow-up turn. A prompt that begins with the
+word `stop` would be read as this command, so put another word before it.
+
+Started in a chat where nothing was said yet, `/subagent` makes the conversation a saved
+session like a first message would; the line you typed is its first message.
+
 ## Clicks, folds and the pager
 
 **Click what you want to read.** Everything the chat folds — a turn's tool calls, what

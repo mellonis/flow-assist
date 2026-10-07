@@ -300,7 +300,7 @@ test('a subagent stopped mid-turn delivers `stopped:` and the text it had; no fo
   expect(rig.journal().filter((e) => e.t === 'subagent' && e.event === 'end')).toMatchObject([{ label: 'w', outcome: 'stopped' }]);
 });
 
-test('a subagent stopped before it said anything delivers `stopped before it said anything`', async () => {
+test('a subagent stopped before it spoke delivers `nothing said yet`', async () => {
   const model = new ScriptedModel();
   const sub = subScript(model, 'think');
   sub.script([{ hold: true }, { text: 'never' }]);
@@ -311,7 +311,7 @@ test('a subagent stopped before it said anything delivers `stopped before it sai
   child.stopSubtree('^c');
   await rig.until(() => bgRows(first).length === 1);
   await settled(rig);
-  expect(bgRows(first)).toEqual(['t stopped:\nstopped before it said anything']);
+  expect(bgRows(first)).toEqual(['t stopped:\nnothing said yet']);
   expect(child.lastEnd).toMatchObject({ outcome: 'stopped', stoppedBy: '^c' });
 });
 
@@ -347,7 +347,7 @@ test('stopped while delayed: no request is sent, the arm count and the timer are
   expect(first.childTimers.size).toBe(0);
   expect(first.children.size).toBe(0);
   expect(model.requests).toHaveLength(0);
-  expect(bgRows(first)).toEqual(['d stopped:\nstopped before it said anything']);
+  expect(bgRows(first)).toEqual(['d stopped:\nnothing said yet']);
   expect(rig.toasts).toEqual(['■ d stopped']);
 });
 
@@ -367,7 +367,7 @@ test('stopped while queued for a slot: it leaves the queue at once, sends nothin
   // Its place in the queue is given up now, not when a slot frees.
   expect(rig.registry.children.backgroundCount()).toBe(1);
   await rig.until(() => bgRows(first).length === 1);
-  expect(bgRows(first)).toEqual(['b stopped:\nstopped before it said anything']);
+  expect(bgRows(first)).toEqual(['b stopped:\nnothing said yet']);
   one.release();
   await rig.until(() => bgRows(first).length === 2);
   await settled(rig);
@@ -394,7 +394,7 @@ test('stopping a subagent closes the tasks it started: they deliver nothing, onl
   await settled(rig);
   g.release();
   await wait(60);
-  expect(bgRows(first)).toEqual(['s stopped:\nstopped before it said anything']);
+  expect(bgRows(first)).toEqual(['s stopped:\nnothing said yet']);
   expect(rig.toasts).toEqual(['■ s stopped']);
   expect(rig.log).toContain('[bg] g stopped with its conversation');
   expect(g.requests).toHaveLength(1);

@@ -14,7 +14,7 @@ afterEach(() => { for (const r of made.splice(0)) { r.flushAll(); for (const c o
 test('a stopped result reads `<label> stopped:` and the text it had, or that it said nothing; finished and failed keep their heads', () => {
   expect(childResultText('w', { outcome: 'stopped', text: 'half an answer' })).toBe('w stopped:\nhalf an answer');
   expect(childResultText('w', { outcome: 'stopped', text: '' })).toBe(`w stopped:\n${STOPPED_EMPTY}`);
-  expect(childResultBody({ outcome: 'stopped', text: '' })).toBe('stopped before it said anything');
+  expect(childResultBody({ outcome: 'stopped', text: '' })).toBe('nothing said yet');
   expect(childResultText('w', { outcome: 'answer', text: 'ok' })).toBe('w finished:\nok');
   expect(childResultText('w', { outcome: 'failed', text: '', error: 'boom' })).toBe('w failed:\nboom');
 });

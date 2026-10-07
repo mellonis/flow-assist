@@ -62,6 +62,20 @@ export function ensureSessionId(c: Conversation): string {
   return c.sessionId;
 }
 
+// Work the person starts with no message of its own (a subagent, from a conversation
+// nobody has spoken in): the conversation becomes a saved session the way a first message
+// would make it. The line the person typed is the first row of theirs, which gives the
+// session its id, its lock and a journal with a start line; the save follows, so a state
+// file stands beside that journal. Where the person has spoken already, the session
+// exists and nothing is added. Returns the session's journal id.
+export function keepPersonWork(c: Conversation, line: string): string {
+  if (c.sessionId && c.currentRows().some((m) => personSpoke(m.role))) return c.sessionId;
+  c.journal({ t: 'row', role: 'user', text: line }, { person: true });
+  c.setRows((cur) => [...cur, { role: 'user', content: line }]);
+  c.persist();
+  return ensureSessionId(c);
+}
+
 export function releaseLockOf(c: Conversation): void {
   const home = homeOf(c, c.sessionId);
   if (home && c.sessionId) releaseLock(home, c.sessionId, c.deps.lockToken);
