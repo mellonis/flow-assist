@@ -284,3 +284,70 @@ test('scheduled through the host\'s slots, a subagent that waits still settles o
   await rig.until(() => rig.registry.children.backgroundCount() === 0);
   expect(made(rig, 's.txt')).toBe(true);
 });
+
+const worker = (model: ScriptedModel, task: string) => model.when((req) => system(req).includes('You are a background worker') && system(req).includes(`Task: ${task}`));
+const landed = (rig: Rig): string[] => rig.conv.rows().filter((m) => m.role === 'bg').map((m) => String(m.content));
+const over = (rig: Rig) => rig.until(() => rig.registry.children.backgroundCount() === 0 && landed(rig).length === 1, 5_000);
+
+test('the subagent tool with write: true starts a task that may ask: its request is offered under the label, and it still stops at twelve rounds', async () => {
+  const model = new ScriptedModel();
+  model.script([{ tool: 'subagent', args: { task: 'make t', label: 'tk', write: true } }], [{ text: 'Started.' }]);
+  const task = worker(model, 'make t');
+  task.script(write('t.txt'), ...Array.from({ length: 20 }, () => [{ tool: 'datetime', args: {} }]));
+  const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
+  await rig.conv.send('make it');
+  const call = rig.journal().find((e) => e.t === 'call' && !e.task && e.name === 'subagent');
+  expect(String(call?.result)).toContain('Background task started (tk)');
+  expect(String(call?.result)).toContain('may ask');
+  await rig.until(() => rig.conv.offered() !== null);
+  const o = rig.conv.offered()!;
+  expect(o.path).toEqual(['tk']);
+  expect(o.request.name).toBe('run_command');
+  expect(made(rig, 't.txt')).toBe(false);
+  o.owner.answerConfirm(true);
+  await over(rig);
+  expect(made(rig, 't.txt')).toBe(true);
+  expect(landed(rig)[0]).toMatch(/^tk .*12 rounds/s);
+  expect(task.requests).toHaveLength(12);
+  expect(answers(rig, 'tk')).toMatchObject([{ answer: 'yes', by: 'person', task: 'tk' }]);
+});
+
+test('the subagent tool without write, or with write: false, declines a write as before: nothing is offered', async () => {
+  for (const extra of [{}, { write: false }]) {
+    const model = new ScriptedModel();
+    model.script([{ tool: 'subagent', args: { task: 'make u', label: 'uk', ...extra } }], [{ text: 'Started.' }]);
+    worker(model, 'make u').script(write('u.txt'), [{ text: 'could not' }]);
+    const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
+    await rig.conv.send('make it');
+    await over(rig);
+    expect(rig.conv.offered()).toBeNull();
+    expect(made(rig, 'u.txt')).toBe(false);
+    expect(answers(rig, 'uk')).toMatchObject([{ answer: 'no', by: 'background' }]);
+    closeRigs();
+  }
+});
+
+test('a subagent\'s auto mode `all` still asks run_command while shell.autoRun is off', async () => {
+  const model = new ScriptedModel();
+  subScript(model, 'auto off').script(write('ao.txt'), [{ text: 'asked' }]);
+  const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
+  const { child, done } = begin(rig, spec('ao', 'auto off'));
+  child.setAutoMode('all');
+  await rig.until(() => rig.conv.offered() !== null);
+  expect(made(rig, 'ao.txt')).toBe(false);
+  rig.conv.offered()!.owner.answerConfirm(false);
+  await done;
+});
+
+test('the starting conversation\'s auto mode never reaches a child', async () => {
+  const model = new ScriptedModel();
+  subScript(model, 'inherit').script(write('in.txt'), [{ text: 'asked' }]);
+  const rig = conversationRig(model, { shell: { autoRun: true }, ai: { backgroundFollowUp: false } });
+  rig.conv.setAutoMode('all');
+  const { child, done } = begin(rig, spec('inh', 'inherit'));
+  expect(child.autoMode).toBe('ask');
+  await rig.until(() => rig.conv.offered() !== null);
+  expect(made(rig, 'in.txt')).toBe(false);
+  rig.conv.offered()!.owner.answerConfirm(false);
+  await done;
+});

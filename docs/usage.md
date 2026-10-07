@@ -153,9 +153,11 @@ and the footer's `◆ N new` and a desktop notification say something came in.
 `config set ai.backgroundFollowUp false` keeps the results as messages only, read with
 your next message.
 
-A task works on its own: it cannot ask you anything, whatever would wait for your y/n (a
-command, a file change, a fetch off the allowlist) is declined, and Esc in the chat does
-not stop it. It gets twelve rounds; one that runs out of them
+A task works on its own: it cannot ask you a question, and Esc in the chat does
+not stop it. Whatever would wait for your y/n (a command, a file change, a fetch off the
+allowlist) is declined, unless the assistant started the task with `write: true`: then each
+write stops for your yes, asked as a subagent's is (see Subagents you start), and the task
+that waits does not hold one of the running places. It gets twelve rounds; one that runs out of them
 says so at the end of its result (`stopped after 12 rounds — last: …`). A task may start
 one follow-up task of its own; `ai.subagentDepth` (2 by default) is how deep such a chain
 may go. At most three run at once (`sessions.maxRunning`, above); the rest wait their turn.
@@ -183,7 +185,12 @@ typed it, line breaks included (⇧⏎ makes one).
 
 `--with-context` first on the line also hands over the conversation's summary — what
 `/compact` left — and nothing else of the history; with no summary yet, nothing starts and
-the line says so. `--auto` is refused.
+the line says so.
+
+`--auto` first on the line starts the subagent in the auto mode `all`: the writes that mode
+answers are answered without asking, as in a chat (`/auto`), and a command still asks
+unless `shell.autoRun` is on. The mode of the conversation you start it from never passes to a
+subagent; without `--auto` every write asks. The flags may come in either order.
 
 **A subagent's y/n** looks like the assistant's own, with the subagent's name in the title
 (`⚠ fix-tests › read-logs · Confirm write: run_command`), and stands where you type. It is

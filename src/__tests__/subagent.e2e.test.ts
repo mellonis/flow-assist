@@ -209,13 +209,14 @@ test('--with-context with no summary starts nothing and says why', async () => {
   ui.app.unmount();
 });
 
-test('--auto is refused with the reason, and nothing starts', async () => {
-  const { model, ui } = await chat('AUTO-ONE', [{ text: 'should not run' }]);
+test('--auto is accepted as a leading flag, with --with-context in either order: the subagent starts', async () => {
+  const { model, child, ui } = await chat('AUTO-ONE', [{ text: 'read it' }]);
   await ask(ui, '/subagent --auto AUTO-ONE fix it');
-  await settleUntil(() => frameOf(ui).includes('needs writes'));
-  expect(frameOf(ui)).toContain('/subagent --auto needs writes, which a subagent cannot do yet');
-  await settle(10);
-  expect(model.requests).toHaveLength(0);
+  await settleUntil(() => frameOf(ui).includes('◆ auto-one-fix finished:'));
+  expect(frameOf(ui)).not.toContain('needs writes');
+  expect(child.requests).toHaveLength(1);
+  expect(firstUser(child.requests[0]!)).toBe('AUTO-ONE fix it');
+  expect(model.requests).toHaveLength(1);
   ui.app.unmount();
 });
 
@@ -278,14 +279,12 @@ test('after the person has spoken, /subagent adds no row of its own', async () =
 
 test('a refused command makes no session and leaves no row', async () => {
   const { dir, model, ui } = await chat('REFUSED-ONE', [{ text: 'should not run' }]);
-  await ask(ui, '/subagent --auto REFUSED-ONE fix it');
-  await settleUntil(() => frameOf(ui).includes('needs writes'));
-  await wipe(ui, '/subagent --auto REFUSED-ONE fix it');
   await ask(ui, '/subagent --with-context REFUSED-ONE anyway');
   await settleUntil(() => frameOf(ui).includes('no summary to hand over yet'));
   await new Promise((r) => setTimeout(r, 400));
   expect(listTree(dir)).toEqual([]);
-  expect(frameOf(ui)).not.toContain('/subagent --auto REFUSED-ONE');
+  await wipe(ui, '/subagent --with-context REFUSED-ONE anyway');
+  expect(frameOf(ui)).not.toContain('/subagent --with-context REFUSED-ONE');
   expect(model.requests).toHaveLength(0);
   ui.app.unmount();
 });

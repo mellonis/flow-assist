@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { askClock } from '../assistant/child-ask-guard.ts';
+import { listTree } from './helpers/session-files';
 import { ScriptedModel, bootApp, firstUser, settle } from './helpers/scripted';
 
 const realFetch = globalThis.fetch;
@@ -32,7 +33,7 @@ const touch = (root: string, name: string) => [{ tool: 'run_command', args: { co
 
 // A booted chat; one scripted child for each mark, each asking for one write and then
 // saying what came of it.
-async function boot(marks: string[], opts: { cols?: number; rows?: number; mode?: 'window' | 'panel'; guest?: (make: never) => never; hold?: boolean; toastMs?: number } = {}) {
+async function boot(marks: string[], opts: { cols?: number; rows?: number; mode?: 'window' | 'panel'; guest?: (make: never) => never; hold?: boolean; toastMs?: number; autoRun?: boolean } = {}) {
   clock.t = 10_000;
   askClock.now = () => clock.t;
   const d = dirs();
@@ -43,7 +44,7 @@ async function boot(marks: string[], opts: { cols?: number; rows?: number; mode?
     child.script(...(opts.hold ? [[{ hold: true }, ...touch(d.root, file)]] : [touch(d.root, file)]), [{ text: `${mark} settled` }]);
     return { child, file: path.join(d.root, file) };
   });
-  const ui = await bootApp(model, opts.cols ?? 140, opts.rows ?? 34, opts.guest as never, { sessions: { dir: d.sessions }, shell: { roots: [d.root] }, ai: { baseUrl: 'http://scripted.model', model: 'scripted', toolLoading: 'all', backgroundFollowUp: false } }, { toastMs: opts.toastMs ?? 10_000, ...(opts.mode ? { chatMode: opts.mode } : {}) });
+  const ui = await bootApp(model, opts.cols ?? 140, opts.rows ?? 34, opts.guest as never, { sessions: { dir: d.sessions }, shell: { roots: [d.root], ...(opts.autoRun ? { autoRun: true } : {}) }, ai: { baseUrl: 'http://scripted.model', model: 'scripted', toolLoading: 'all', backgroundFollowUp: false } }, { toastMs: opts.toastMs ?? 10_000, ...(opts.mode ? { chatMode: opts.mode } : {}) });
   await ui.press('F');
   return { ...d, model, children, ui };
 }
@@ -352,5 +353,49 @@ test('a bottom panel grows by the notice line when a multi-line draft is in the 
   await settleUntil(() => frameOf(ui).includes(NOTICE));
   await settle(6);
   expect(chatTop(ui)).toBe(without - 1);
+  ui.app.unmount();
+});
+
+// The confirm lines of the session saved in `dir`.
+async function confirms(dir: string): Promise<Record<string, unknown>[]> {
+  await settleUntil(() => listTree(dir).some((n) => n.endsWith('.log.jsonl')), 200);
+  const file = listTree(dir).find((n) => n.endsWith('.log.jsonl'));
+  if (!file) return [];
+  return fs.readFileSync(path.join(dir, file), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l) as Record<string, unknown>).filter((e) => e.t === 'confirm');
+}
+
+test('--auto answers a write by itself, with no block: the journal says by auto under the subagent', async () => {
+  const { sessions, children: [a], ui } = await boot(['AUTOY-ONE'], { autoRun: true });
+  await ask(ui, '/subagent --auto AUTOY-ONE do it');
+  await settleUntil(() => frameOf(ui).includes('◆ autoy-one-do finished:'));
+  expect(frameOf(ui)).not.toContain(BLOCK);
+  expect(fs.existsSync(a!.file)).toBe(true);
+  await new Promise((r) => setTimeout(r, 300));
+  expect(await confirms(sessions)).toMatchObject([{ name: 'run_command', answer: 'yes', by: 'auto', subagent: 'autoy-one-do' }]);
+  ui.app.unmount();
+});
+
+test('--auto does not answer run_command while shell.autoRun is off: the block asks', async () => {
+  const { children: [a], ui } = await boot(['AUTON-ONE']);
+  await ask(ui, '/subagent --auto AUTON-ONE do it');
+  await settleUntil(() => frameOf(ui).includes(BLOCK));
+  expect(fs.existsSync(a!.file)).toBe(false);
+  pause();
+  await ui.press('n');
+  await settleUntil(() => frameOf(ui).includes('◆ auton-one-do finished:'));
+  expect(fs.existsSync(a!.file)).toBe(false);
+  ui.app.unmount();
+});
+
+test('the conversation\'s own /auto all does not reach a subagent started without the flag', async () => {
+  const { children: [a], ui } = await boot(['PARENT-ONE'], { autoRun: true });
+  await ask(ui, '/auto all');
+  await settle(4);
+  await ask(ui, '/subagent PARENT-ONE do it');
+  await settleUntil(() => frameOf(ui).includes(BLOCK));
+  expect(fs.existsSync(a!.file)).toBe(false);
+  pause();
+  await ui.press('y');
+  await settleUntil(() => fs.existsSync(a!.file));
   ui.app.unmount();
 });

@@ -1564,7 +1564,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               }
               case 'subagent':
               case 'sub': {
-                // A job of the person's beside the chat: read-only, its answer a row of the
+                // A job of the person's beside the chat: each write asks, its answer a row of the
                 // session. The prompt is the line's raw rest — its spacing and line breaks
                 // reach the model — not the whitespace-split `arg`. Nothing here is a turn:
                 // it is allowed while one runs.
@@ -1589,7 +1589,6 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   host.notify();
                   return;
                 }
-                if (line.auto) { setError('/subagent --auto needs writes, which a subagent cannot do yet — it reads and reports'); return; }
                 if (line.withContext && !conv.summary.trim()) { setError('no summary to hand over yet — /compact makes one, or start it without --with-context'); return; }
                 const slots = conv.deps.children;
                 if (!slots) { setError('/subagent: subagents are unavailable here'); return; }
@@ -1603,6 +1602,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   { startChild: (spec) => conv.startChild(spec, journalId), slots, showMessage: say, pushLog: conv.deps.pushLog, notify: () => host.notify() },
                 );
                 if ('refused' in started) { setError(`/subagent: ${started.refused}`); return; }
+                // Its own mode, set before the schedule's timer lets its first turn go: the
+                // starting conversation's mode is never the child's.
+                if (line.auto) started.child.setAutoMode('all');
                 setField('');
                 say(`subagent «${label}» started`);
                 host.notify();

@@ -1799,7 +1799,7 @@ A saved history that holds calls under the name `background` is sent as it is. T
     records what was running.
   - `confirm` — the y/n's answer, `yes`/`no`, and `by`: `person` (their key), `auto`
     (the auto mode answered), `background` (a background task's run answered — the
-    `subagent` tool's declines every write), `stop` (Ctrl+C stopped the turn while it
+    `subagent` tool's task declines every write unless started with `write: true`), `stop` (Ctrl+C stopped the turn while it
     was up) or `reset` (`/clear` or `/new` closed it). The call id reaches
     `confirmWrite` as `info.id`.
   - `call` — from `onToolRun`: the arguments, the outcome, `result` as the tool returned
@@ -2953,7 +2953,9 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   `src/assistant/conversation.ts`; a turn hands it to its tools as `ctx.startChild`, with
   the host's slots as `ctx.childSlots`): a `task` or `subagent` conversation (`ChildSpec.kind`;
   `parent`, `depth` one more, `label`, `spawnedBy`) with its own plan, shell, tool set and abort, and the policy `always-no` — or `ask`
-  for a subagent the person starts and for any spec with `write: true`, where the host's
+  for a subagent the person starts and for any spec with `write: true` (the `subagent` tool's
+  `write` argument starts a `task` with it: twelve rounds, the worker prompt, its y/n
+  offered to the session like a subagent's — `write` absent or false is `always-no`), where the host's
   root can ask at all (`canAsk`; with nobody to ask such a child declines). Its
   deps are its parent's with no sessions directory, no screens, no redraw
   (`notify`) and a silent `pushLog`; `canAsk` is true only for a child whose policy
@@ -3055,7 +3057,10 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   label is cut from the prompt's first three words, lower-case and hyphenated, and made
   unique among the live children (`-2`, `-3`). `--with-context` hands `conv.summary` and
   nothing else — with none, nothing starts and the line says a `/compact` makes one;
-  `--auto` is refused until a subagent can write. `/subagent` alone puts a note listing
+  `--auto` sets the child's own auto mode to `all` (`setAutoMode`) on the child
+  `scheduleChild` returns, before the schedule's timer lets its first turn go — the
+  starting conversation's mode is never copied (`autoConfirms` reads the asking
+  conversation's own mode, and `shell.autoRun` applies as in a session). `/subagent` alone puts a note listing
   the conversation's running children of both kinds, numbered (`working`, `queued`, or
   `in <time>` for a delayed task), then the ended ones (`done`, `failed`, `stopped`, the
   duration, the tokens), or `no subagents here`; `/subagent stop <n|label>` takes the
@@ -3983,7 +3988,8 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     message carries them); that `ai.backgroundFollowUp: false` turns that off, so the
     model must not promise to act on results when they arrive, only say they will come
     into the chat and it will look at them then; and that when results arrived since
-    its last answer, the next answer opens with what came back, a line per task. The
+    its last answer, the next answer opens with what came back, a line per task. It also
+    says the task is read-only unless `write: true`, which makes each write ask the person. The
     call's own answer says the same (`the result appears in the chat when it ends, and
     you see it on your next turn`), and so does `config_schema`'s note for
     `ai.backgroundFollowUp` (`KEY_DEFAULTS`, the key is in `hostConfigSchema`'s `ai`).
