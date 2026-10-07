@@ -197,7 +197,7 @@ test('two subagents ask: one block at a time, the older first, and the next arms
   ui.app.unmount();
 });
 
-test('the conversation\'s own y/n comes first, with today\'s keys; the subagent\'s is offered after it', async () => {
+test('the conversation\'s own y/n comes first, answered by ⏎ at once; the subagent\'s is offered after it', async () => {
   const { model, children: [a], ui } = await boot(['BOTH-ONE'], { hold: true });
   await ask(ui, '/subagent BOTH-ONE do it');
   await settleUntil(() => a!.child.held);
@@ -210,7 +210,7 @@ test('the conversation\'s own y/n comes first, with today\'s keys; the subagent\
   // The own block, with its own title and hint.
   expect(frameOf(ui)).toContain('Press y to confirm · n to decline');
   expect(frameOf(ui)).not.toContain('both-one-do ·');
-  // Today's keys, at once: ⏎ answers, no pause.
+  // At once: ⏎ answers, no pause.
   await ui.press('return');
   await settleUntil(() => frameOf(ui).includes('⚠ both-one-do ·'));
   expect(frameOf(ui)).toContain('parent done');
@@ -397,5 +397,198 @@ test('the conversation\'s own /auto all does not reach a subagent started withou
   pause();
   await ui.press('y');
   await settleUntil(() => fs.existsSync(a!.file));
+  ui.app.unmount();
+});
+
+// ---- the keyboard and the pause --------------------------------------------------------
+
+const FOCUS = { name: ']', ctrl: true };
+// A docked chat with one subagent whose block is on screen and has been for a while.
+async function dockedBlock(mark: string, opts: { rows?: number } = {}) {
+  const r = await boot([mark], { hold: true, cols: 160, rows: opts.rows ?? 40, mode: 'panel', guest: boards as never });
+  await ask(r.ui, `/subagent ${mark} do it`);
+  await settleUntil(() => r.children[0]!.child.held);
+  r.children[0]!.child.release();
+  await settleUntil(() => frameOf(r.ui).includes(BLOCK));
+  pause();
+  return r;
+}
+
+test('the chat key back to the chat, then y at once, does not answer; after the pause it does', async () => {
+  const { children: [a], ui } = await dockedBlock('KBD-ONE');
+  ui.backend.press(FOCUS); // the plugin has the keys; the block stays drawn
+  await settle();
+  expect(frameOf(ui)).toContain(BLOCK);
+  clock.t += 5000;
+  ui.backend.press(FOCUS); // the chat has them again
+  await settle();
+  await ui.press('y');
+  await settle(4);
+  expect(fs.existsSync(a!.file)).toBe(false);
+  expect(frameOf(ui)).toContain('waits for a y/n'); // it was typed
+  await ui.press('backspace');
+  await settleUntil(() => frameOf(ui).includes(BLOCK));
+  pause();
+  await ui.press('y');
+  await settleUntil(() => fs.existsSync(a!.file));
+  ui.app.unmount();
+});
+
+test('the same when the chat key also closes the :plugins panel', async () => {
+  const { children: [a], ui } = await dockedBlock('KBD-TWO');
+  ui.backend.press(FOCUS);
+  await settle();
+  await ui.press(':');
+  await ui.type('plugins');
+  await ui.press('return');
+  await settleUntil(() => frameOf(ui).includes('Flow Assist · Plugins'));
+  clock.t += 5000;
+  ui.backend.press(FOCUS); // closes the panel and gives the chat the keys
+  await settle();
+  expect(frameOf(ui)).not.toContain('Flow Assist · Plugins');
+  await ui.press('y');
+  await settle(4);
+  expect(fs.existsSync(a!.file)).toBe(false);
+  await ui.press('backspace');
+  await settleUntil(() => frameOf(ui).includes(BLOCK));
+  pause();
+  await ui.press('y');
+  await settleUntil(() => fs.existsSync(a!.file));
+  ui.app.unmount();
+});
+
+test('a click into the chat, then y at once, does not answer', async () => {
+  const { children: [a], ui } = await dockedBlock('KBD-THREE');
+  ui.backend.press(FOCUS);
+  await settle();
+  clock.t += 5000;
+  ui.backend.mouse('down', 120, chatTop(ui) + 2);
+  ui.backend.mouse('up', 120, chatTop(ui) + 2);
+  await settle();
+  await ui.press('y');
+  await settle(4);
+  expect(fs.existsSync(a!.file)).toBe(false);
+  expect(frameOf(ui)).toContain('waits for a y/n');
+  await ui.press('backspace');
+  await settleUntil(() => frameOf(ui).includes(BLOCK));
+  pause();
+  await ui.press('y');
+  await settleUntil(() => fs.existsSync(a!.file));
+  ui.app.unmount();
+});
+
+test('a key the App takes first (the exit key) counts as the last keystroke', async () => {
+  const { children: [a], ui } = await dockedBlock('KBD-FOUR');
+  ui.backend.press({ name: 'c', ctrl: true }); // arms the exit; the chat is not asked
+  await settle();
+  await ui.press('y');
+  await settle(4);
+  expect(fs.existsSync(a!.file)).toBe(false);
+  ui.app.unmount();
+});
+
+test('ctrl+y and meta+y do not answer; ctrl+n does not decline', async () => {
+  const { children: [a], ui } = await boot(['MOD-ONE']);
+  await ask(ui, '/subagent MOD-ONE do it');
+  await settleUntil(() => frameOf(ui).includes(BLOCK));
+  pause();
+  for (const k of [{ name: 'y', ctrl: true }, { name: 'y', meta: true }, { name: 'n', ctrl: true }, { name: 'n', meta: true }]) {
+    ui.backend.press(k);
+    await settle(3);
+    pause();
+  }
+  expect(fs.existsSync(a!.file)).toBe(false);
+  expect(frameOf(ui)).not.toContain('◆ mod-one-do finished:');
+  await ui.press('y');
+  await settleUntil(() => fs.existsSync(a!.file));
+  ui.app.unmount();
+});
+
+test('in shell mode the notice says to leave it, and y types as part of the command', async () => {
+  const { children: [a], ui } = await boot(['BANG-ONE']);
+  await ask(ui, '/subagent BANG-ONE do it');
+  await settleUntil(() => frameOf(ui).includes(BLOCK));
+  pause();
+  await ui.press('!');
+  await settleUntil(() => frameOf(ui).includes('leave shell mode to answer'));
+  expect(frameOf(ui)).not.toContain('clear the line');
+  expect(frameOf(ui)).not.toContain(BLOCK);
+  pause();
+  await ui.press('y');
+  await settle(4);
+  expect(fs.existsSync(a!.file)).toBe(false);
+  expect(frameOf(ui)).toContain('leave shell mode to answer');
+  ui.app.unmount();
+});
+
+test('the conversation\'s own y/n that takes the block\'s place is not answered by keys already on their way', async () => {
+  const { model, root, children: [a], ui } = await boot(['TAKE-ONE'], { hold: true });
+  await ask(ui, '/subagent TAKE-ONE do it');
+  await settleUntil(() => a!.child.held);
+  model.script([{ hold: true }, ...touch(root, 'own.txt')], [{ text: 'parent done' }]);
+  await ask(ui, 'hello');
+  await settleUntil(() => model.held);
+  a!.child.release();
+  await settleUntil(() => frameOf(ui).includes(BLOCK));
+  pause(); // the block is armed and the person is about to answer it
+  model.release();
+  await settleUntil(() => frameOf(ui).includes('Press y to confirm'));
+  expect(frameOf(ui)).not.toContain('take-one-do ·');
+  await ui.press('y');
+  await ui.press('return');
+  await settle(4);
+  expect(fs.existsSync(path.join(root, 'own.txt'))).toBe(false);
+  expect(frameOf(ui)).toContain('Press y to confirm');
+  pause();
+  await ui.press('y');
+  await settleUntil(() => fs.existsSync(path.join(root, 'own.txt')));
+  ui.app.unmount();
+});
+
+test('an own y/n with no subagent\'s block on screen is answered at once', async () => {
+  const { model, root, ui } = await boot([]);
+  model.script([{ tool: 'run_command', args: { command: `touch ${path.join(root, 'own.txt')}` } }], [{ text: 'done' }]);
+  await ask(ui, 'hello');
+  await settleUntil(() => frameOf(ui).includes('Press y to confirm'));
+  await ui.press('y');
+  await settleUntil(() => fs.existsSync(path.join(root, 'own.txt')));
+  ui.app.unmount();
+});
+
+test('the conversation\'s own question is drawn, not a subagent\'s block; the block comes after it', async () => {
+  const { model, children: [a], ui } = await boot(['QST-ONE'], { hold: true, cols: 100, rows: 32, mode: 'panel', guest: boards as never });
+  await ask(ui, '/subagent QST-ONE do it');
+  await settleUntil(() => a!.child.held);
+  model.script([{ tool: 'ask_user', args: { questions: [{ question: 'Which branch?', options: [{ label: 'master' }, { label: 'develop' }] }] } }], [{ text: 'Using it.' }]);
+  await ask(ui, 'which?');
+  await settleUntil(() => frameOf(ui).includes('Which branch?'));
+  await settle(6);
+  const top = chatTop(ui);
+  a!.child.release();
+  await settleUntil(() => a!.child.requests.length >= 1);
+  await settle(10);
+  expect(frameOf(ui)).toContain('Which branch?');
+  expect(frameOf(ui)).not.toContain(BLOCK);
+  // The panel is the question's size: the block asks for no rows beside it.
+  expect(chatTop(ui)).toBe(top);
+  await ui.press('escape'); // dismisses the question
+  await settleUntil(() => frameOf(ui).includes(BLOCK));
+  ui.app.unmount();
+});
+
+test('on a terminal where the block would undock the chat, the chat stays docked and a line says so', async () => {
+  const { children: [a], ui } = await boot(['SMALL-ONE'], { hold: true, cols: 100, rows: 20, mode: 'panel', guest: boards as never });
+  expect(frameOf(ui)).toContain('BOARD-SURFACE');
+  await ask(ui, '/subagent SMALL-ONE do it');
+  await settleUntil(() => a!.child.held);
+  a!.child.release();
+  await settleUntil(() => frameOf(ui).includes('the panel is too small to show it'));
+  expect(frameOf(ui)).toContain('BOARD-SURFACE');
+  expect(frameOf(ui)).not.toContain(BLOCK);
+  pause();
+  await ui.press('y'); // no block is drawn: nothing to answer, the letter types
+  await settle(4);
+  expect(fs.existsSync(a!.file)).toBe(false);
+  expect(frameOf(ui)).toContain('BOARD-SURFACE');
   ui.app.unmount();
 });

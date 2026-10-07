@@ -775,17 +775,29 @@ there is no `/fullscreen`.
   `⏸ <path> waits for a y/n — clear the line to answer` (`renderChatModal`'s `askNotice`);
   that line is a row of the field's place, counted by `besides`/`planFit` and by
   `pendingChatRows`' `notice` (the draft's rows plus one), so neither the plan nor a bottom
-  panel's list is squeezed. Only `y` and `n`, only on an empty field, answer it, and only
-  after a pause: `src/assistant/child-ask-guard.ts` — an answer counts 600 ms after the
-  request first came on screen (a request seen anew after a gap with none shown, or a
-  different one, arms from then) and 600 ms after the person's last key of any kind (every
-  key the chat handler gets is noted, whoever takes it). `askClock` is the guard's clock
-  and the seam a test moves instead of sleeping. A `y`/`n` that does not count is not
+  panel's list is squeezed. In shell mode (bang level above 0) the notice says `leave shell
+  mode to answer`. A request never turns a docked chat into a window: it may grow a
+  panel, but not past the rows that leave the plugin its least (`PLUGIN_MIN_ROWS`), and
+  a block that would need more is replaced by the notice, worded `the panel is too small
+  to show it; /subagent stop declines it`, which no key answers (`childShape` decides
+  block or notice). Only `y` and `n`, only on an empty field with the block drawn,
+  answer it, and only after a pause: `src/assistant/child-ask-guard.ts` — an answer counts
+  600 ms after the request first came on screen with the keyboard in the chat (a request
+  seen anew after a gap with none shown, or a different one, arms from then) and 600 ms
+  after the person's last key of any kind: every key the chat handler gets is noted, and
+  so is every key the App takes first (`store.chat.noteKey`, from `keyPath.first` when it
+  consumes a key). While the chat lacks the keyboard — collapsed, the plugin's side
+  focused, the runtime's panel or the `:` line up — the guard is told nothing is shown, so
+  the chat regaining the keyboard (the chat key, the collapse key, a click, a closed
+  panel) arms afresh. `askClock` is the guard's clock and the seam a test moves instead
+  of sleeping. A `y`/`n` that does not count is not
   swallowed: it types its letter, which turns the block into the notice. ⏎ and Esc never
   answer it; every other key goes to its usual handler. The answer is
   `owner.answerConfirm`, the request's owner, never the attached conversation. An own
-  y/n keeps its keys (y / ⏎ yes, n / Esc no, every other key swallowed) and no pause, and
-  is offered first. `needRows` and the collapsed chat's `? waiting for you` read the same
+  y/n keeps its keys (y / ⏎ yes, n / Esc no, every other key swallowed) and is offered
+  first. It answers at once, except when it takes the place of a subagent's block that
+  is on screen: then, for 600 ms from that moment, every key is swallowed and none
+  answers it. `needRows` and the collapsed chat's `? waiting for you` read the same
   `offered()` as the drawing; the other `conv.confirm` readers (the picker, panel and pager
   guards, `store.chat.asking`, `inboxHeld`) mean the conversation's own.
 - **In a chat with few rows the plan gives way, never the field.** The field's group
@@ -2550,11 +2562,13 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   it opens the runtime's own panel (`hostPanel`): in step 1 of the key path, after the
   exit keys AND the chat's chords — it never keeps the person from the chat: Ctrl+] or
   the collapse key acting closes it — it holds every other key while up (`ui.hostPanel`,
-  and `pluginHasKeyboard` is false). While the chat waits for an answer (`needRows` of
-  `store.chat` `asking()`: the chat's OWN y/n or question, open or not — a subagent's
-  y/n does not hold the panel) none of its own keys acts —
+  and `pluginHasKeyboard` is false). While the chat shows a request that waits for an
+  answer (`store.chat.needRows` above zero: its OWN y/n or question, open or not, or a
+  subagent's y/n drawn at the keys the chat has) none of its own keys acts —
   ↑/↓ and Esc only, and a notice names the chat's key — so a `y` meant for the chat never
-  trusts a plugin. A 1 s tick redraws it, and its rows are redacted before they are drawn. One row per
+  trusts a plugin. A subagent's y/n is not drawn under this panel (`services.hostKeys()`,
+  read by `childAskNow`), so `needRows` does not count it and the panel's keys act; it is
+  drawn, and armed afresh, once the panel closes. A 1 s tick redraws it, and its rows are redacted before they are drawn. One row per
   plugin — the list's own in order, then every other enabled, disabled, starting,
   untrusted or skipped name — with its version and its state: `disabled (restart to
   unload)`, `disabled`, `not trusted` (with `was`/`now`), `starting…`
@@ -2872,8 +2886,8 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   parks below the session arrives as `asking` and is said the same way, naming the label
   of the child that owns the oldest request: `⏸ «<title>» waits for your answer — a y/n
   from <label>`; a session on screen says nothing about its own subtree. Nothing waits
-  any more — no y/n of its own, no question, nothing below — only then is it forgotten,
-  so a later wait is said again. `retire` says
+  only when nothing waits — no y/n of its own, no question, nothing below — is it
+  forgotten, so a later wait is said again. `retire` says
   it for a conversation left while it already waits; leaving waiting re-reads the
   picker only when something had been said, so an on-screen y/n's answer does not
   touch an open picker. A conversation closed or taken back (`reclaim`) forgets it, so

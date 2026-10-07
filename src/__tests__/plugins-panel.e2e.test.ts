@@ -7,7 +7,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { TestBackend } from '@flowtty/core/testing';
-import { ScriptedModel, bootApp, settle } from './helpers/scripted';
+import { askClock } from '../assistant/child-ask-guard';
+import { ScriptedModel, bootApp, firstUser, settle } from './helpers/scripted';
 import { fakeRemote } from './helpers/remote-fake';
 import { FLOWTTY_VERSION, HOST_API } from '../version';
 import { loadPlugins } from '../loader/build';
@@ -17,7 +18,8 @@ import { renderApp } from '../runtime/app';
 import { renderChatModal, renderHelp, renderLogModal, renderReminder } from '../views/modals';
 
 const realFetch = globalThis.fetch;
-afterEach(() => { globalThis.fetch = realFetch; });
+const realAskNow = askClock.now;
+afterEach(() => { globalThis.fetch = realFetch; askClock.now = realAskNow; });
 
 type Ui = Awaited<ReturnType<typeof bootApp>>;
 const until = async (ui: { backend: TestBackend }, ok: () => boolean, what: string, n = 300) => {
@@ -403,6 +405,61 @@ test('with the chat waiting for a y/n, y in the panel does nothing; ^] reaches t
   expect(ui.backend.lastFrame).not.toContain('Flow Assist · Plugins');
   await ui.press('y');
   await until(ui, () => wrote === 1, 'the write answered');
+  expect(fs.readFileSync(d.trustFile, 'utf8')).toBe(before);
+  ui.app.unmount();
+});
+
+// A subagent's y/n is not drawn under the panel: its keys stay the panel's, and the
+// request is there, armed afresh, once the panel is closed.
+test('with a subagent\'s y/n pending and the panel up, no block is drawn and y acts on the panel; the request is offered after the panel closes', async () => {
+  const d = pluginDirs();
+  const good = jsPlugin(d, 'good');
+  jsPlugin(d, 'other');
+  trustRecord(d, { good });
+  const before = fs.readFileSync(d.trustFile, 'utf8');
+  const clock = { t: 10_000 };
+  askClock.now = () => clock.t;
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-plugins-sub-')));
+  const file = path.join(root, 'sub.txt');
+  const model = new ScriptedModel();
+  const child = model.when((req) => firstUser(req).includes('PNL-ONE'));
+  child.script([{ hold: true }, { tool: 'run_command', args: { command: `touch ${file}` } }], [{ text: 'sub settled' }]);
+  const ui = await bootApp(model, 160, 40, undefined, { shell: { roots: [root] }, ai: { baseUrl: 'http://scripted.model', model: 'scripted', toolLoading: 'all', backgroundFollowUp: false } }, { dirs: d, trustFile: d.trustFile, chatMode: 'panel' });
+  await ui.press('F');
+  await ui.type('/subagent PNL-ONE go');
+  await ui.press('return');
+  await until(ui, () => child.held, 'the subagent held');
+  ui.backend.press({ name: ']', ctrl: true });
+  await settle();
+  await openPanel(ui);
+  await cursorTo(ui, 'other');
+  child.release();
+  await until(ui, () => child.requests.length >= 1, 'the subagent\'s write');
+  await settle(10);
+  // Nothing of the request is on screen, and nothing waits on it: the panel's rows act.
+  expect(ui.backend.lastFrame).not.toContain('Confirm write');
+  expect(ui.backend.lastFrame).not.toContain('y yes · n no');
+  clock.t += 5000;
+  await ui.press('y');
+  await until(ui, () => ui.backend.lastFrame.includes('Trust other?'), 'the panel acts on y');
+  expect(ui.backend.lastFrame).not.toContain('the chat waits for your answer');
+  expect(fs.readFileSync(d.trustFile, 'utf8')).toBe(before);
+  expect(fs.existsSync(file)).toBe(false);
+  await ui.press('escape'); // declines the confirmation
+  await settle();
+  // The chat's key closes the panel; the request is there and a y at once is a letter.
+  ui.backend.press({ name: ']', ctrl: true });
+  await settle();
+  expect(ui.backend.lastFrame).not.toContain('Flow Assist · Plugins');
+  await until(ui, () => ui.backend.lastFrame.includes('Confirm write: run_command'), 'the block after the panel');
+  await ui.press('y');
+  await settle(4);
+  expect(fs.existsSync(file)).toBe(false);
+  await ui.press('backspace');
+  await until(ui, () => ui.backend.lastFrame.includes('Confirm write: run_command'), 'the block again');
+  clock.t += 700;
+  await ui.press('y');
+  await until(ui, () => fs.existsSync(file), 'the write answered');
   expect(fs.readFileSync(d.trustFile, 'utf8')).toBe(before);
   ui.app.unmount();
 });

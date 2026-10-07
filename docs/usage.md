@@ -195,13 +195,18 @@ subagent; without `--auto` every write asks. The flags may come in either order.
 **A subagent's y/n** looks like the assistant's own, with the subagent's name in the title
 (`⚠ fix-tests › read-logs · Confirm write: run_command`), and stands where you type. It is
 answered with `y` or `n` alone, and only when the line is empty and you have paused: a key
-pressed in the moment the block appears, or right after another key, is typed as a letter
+pressed in the moment the block appears, in the moment the chat gets the keyboard back
+(the chat key, a click, a closed panel), or right after another key, is typed as a letter
 instead, so a request that arrives under your fingers is never answered by them. ⏎ and Esc
-never answer it. With text in the line, one line above it says `⏸ <name> waits for a y/n
-— clear the line to answer`, and the text stays yours. With several waiting, one shows at a
-time, the oldest first; your own conversation's y/n comes before them and keeps its keys.
-A picker, a command's panel or the pager that is open stays open: the request shows after you close
-it. In `/subagent`'s list such a job reads `waiting`. A subagent that waits does not count
+never answer it. With text in the line, or in shell mode, one line above it says `⏸ <name>
+waits for a y/n — clear the line to answer` (`leave shell mode to answer` in shell mode),
+and the text stays yours. With several waiting, one shows at a time, the oldest first; your
+own conversation's y/n comes before them and keeps its keys, except that when it takes the
+place of a subagent's block you are looking at, it waits the same pause. A picker, a
+command's panel, the pager or the `:plugins` panel that is open stays open: the request
+shows after you close it. On a terminal too small to give the chat the rows for the block,
+the chat stays docked and a line says the panel is too small to show it; `/subagent stop`
+declines it. In `/subagent`'s list such a job reads `waiting`. A subagent that waits does not count
 toward the three that run at once.
 
 `/subagent` alone lists this conversation's jobs, the running ones numbered

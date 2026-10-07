@@ -20,18 +20,20 @@ What each version of flow-assist brought, newest first. The version is the one i
   subagent you started attempts (a command, a file change, a fetch off the allowlist)
   stops for your y/n. The request is drawn where you type, titled with the subagent's
   name, and answered with `y` or `n` alone, only on an empty line and only after a short
-  pause (a key pressed as the block appears, or right after another, types a letter
-  instead); ⏎ and Esc never answer it. With text in the line, one line above it says the
-  subagent waits, and your text stays yours. One request shows at a time, the oldest
-  first, and your own conversation's y/n comes before them. An open picker, panel or
+  pause (a key pressed as the block appears, as the chat gets the keyboard back, or right
+  after another, types a letter instead); ⏎ and Esc never answer it. With text in the
+  line, or in shell mode, one line above it says the subagent waits, and your text stays
+  yours. It is not drawn under the plugins panel, and it never turns a docked chat into
+  a window: on a terminal too small for it, a line says so. One request shows at a time, the oldest
+  first, and your own conversation's y/n comes before them (when it takes the place of a
+  subagent's block, its keys wait the same short pause). An open picker, panel or
   pager stays open: the request shows after it closes. A subagent that waits does not
   hold one of the places for running jobs. `/subagent --auto <prompt>` starts it in the
   auto mode `all`, and a command still asks unless `shell.autoRun` is on; the mode of the
   conversation you start it from never passes to a subagent. The assistant's `subagent`
   tool takes `write: true` for a task that may ask you the same way; without it a write
   is declined, and a task that cannot ask cannot start one that can. A subagent cannot
-  ask you a question, and the y/n for a changed settings file is asked in a chat session
-  only, never in a subagent.
+  ask you a question, and the y/n for a changed settings file is asked in a chat session only, never in a subagent.
 - **A background task is a conversation of its own.** A task that runs out of its twelve
   rounds now says so at the end of its result (`stopped after 12 rounds — last: …`),
   where it read `finished:` with no output or a partial text. Esc during the turn that

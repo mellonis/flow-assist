@@ -34,7 +34,7 @@ import { editorReducer } from '@flowtty/core';
 import { z } from 'zod';
 import { appliesOnRestart, modelMaySave, modelMaySet } from '../config/schema.js';
 import { anchorRow, askFieldWidth, blockRows, roomForBlock, chatFieldWidth, chatRows, chatWrapWidth, firstFoldRow, inputVisualRows, liveChatStatus, pagerTitle, pendingChatRows, renderChatStatus, renderChatStrip, rowAnchor, viewGroupFor, type RowOpts, type Viewport } from '../views/modals.js';
-import { CHAT_MODES, chatModeOf, inRect, type ChatMode, type PanelLayout } from '../runtime/panel-layout.js';
+import { CHAT_MODES, PLUGIN_MIN_ROWS, chatModeOf, inRect, type ChatMode, type PanelLayout } from '../runtime/panel-layout.js';
 import { recalledFolds, rememberView, type ViewMemory } from '../assistant/view-memory.js';
 import { allFolded, flipFolds, isClicked, isOpen, openInFull, pageable, toggleFold, type FoldState } from '../assistant/folds.js';
 import { groupOpen, toggleGroup } from '../assistant/view-groups.js';
@@ -65,7 +65,7 @@ import { ConversationRegistry } from '../assistant/registry.js';
 import { personSpoke, projectHere } from '../assistant/conversation-session.js';
 import { configLineOf, shellCommandOf } from '../assistant/confirm-policy.js';
 import { scheduleChild } from '../assistant/child-schedule.js';
-import { createAskGuard } from '../assistant/child-ask-guard.js';
+import { ASK_ARM_MS, askClock, createAskGuard } from '../assistant/child-ask-guard.js';
 import { parseSubagentLine, stopTargetIndex, subagentLabel, subagentListing } from '../assistant/subagent-command.js';
 
 // Slash-commands of the chat — a single source for runChatCommand and Tab-completion.
@@ -303,6 +303,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // when a key may answer such a y/n (AGENTS.md (subagent y/n)).
           const [, setAskTick] = ui.useState(0);
           const askGuard = ui.useRef(createAskGuard());
+          const ownSeenRef = ui.useRef<unknown>(null);
+          const ownArmedAt = ui.useRef<number | null>(null);
+          const childBlockRef = ui.useRef(false);
           const bindView = (c: Conversation) => {
             unbindRef.current.set(c, [
               c.on('turn-start', (ev) => viewFx.current['turn-start']?.(ev)),
@@ -1767,23 +1770,39 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // A subagent's y/n counts only while it is drawn: the conversation list is what the
           // chat shows, and the conversation itself asks nothing. Drawn in the field's
           // place when the field is empty, else as the notice line above the field.
+          // Under the runtime's own panel (`:plugins`) it is not drawn either: that panel
+          // holds the keys, and a `y` meant for the block would go to the panel's row.
+          const hostKeys = () => (host.services as { hostKeys?: () => { panel: boolean; line: boolean } }).hostKeys?.() ?? { panel: false, line: false };
           const childAskNow = (): Offered | null => {
             const c = convRef.current!;
-            if (c.confirm || c.question || pickerRef.current || panelRef.current || contextOpenRef.current || pagerShownRef.current) return null;
+            if (c.confirm || c.question || pickerRef.current || panelRef.current || contextOpenRef.current || pagerShownRef.current || hostKeys().panel) return null;
             const o = c.offered();
             return o && o.path.length ? o : null;
           };
           const fieldEmpty = () => inputRef.current === '' && bangLevelRef.current === 0;
+          // How a subagent's y/n is shown at a width: the block in the field's place when the
+          // field is empty and the block fits the rows a docked panel can be given (it may
+          // grow the panel, never so far that the plugin has less than its least — the chat
+          // does not leave the dock for it), else the notice line above the field.
+          const childShape = (w: number): 'block' | 'notice' | null => {
+            const child = childAskNow();
+            if (!child) return null;
+            if (!fieldEmpty()) return 'notice';
+            if (!dock) return 'block';
+            const limit = dock.side === 'bottom' ? dock.region.height + dock.panel.height - PLUGIN_MIN_ROWS : dock.panel.height;
+            const rows = pendingChatRows({ width: w, confirm: { ...child.request, path: child.path }, todo: conv.plan.snapshot(), queued: conv.queue.length });
+            return rows > limit ? 'notice' : 'block';
+          };
           const needRows = (w: number): number => {
             const c = conv.confirm;
             const child = childAskNow();
             if (child) {
-              const empty = fieldEmpty();
+              const block = childShape(w) === 'block';
               const draft = inputVisualRows(inputRef.current, cursorRef.current, chatFieldWidth(w, true)).length;
               return pendingChatRows({
                 width: w,
-                confirm: empty ? { ...child.request, path: child.path } : null,
-                notice: empty ? 0 : Math.min(5, draft) + 1,
+                confirm: block ? { ...child.request, path: child.path } : null,
+                notice: block ? 0 : Math.min(5, draft) + 1,
                 todo: conv.plan.snapshot(),
                 queued: conv.queue.length,
               });
@@ -1808,12 +1827,25 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           pagerShownRef.current = pagerShown;
           // The subagent's y/n this render draws, if any; the guard learns it is on screen.
           const shownChild = open ? childAskNow() : null;
-          askGuard.current.show(shownChild?.request ?? null);
+          // The guard counts a block only while the chat has the keyboard: with the plugin,
+          // the runtime's panel or the `:` line holding the keys, it is told nothing is
+          // shown, and getting the keyboard back arms afresh.
+          const guardSees = (c: Offered | null): object | null => (c && focusedRef.current && !hostKeys().panel && !hostKeys().line ? c.request : null);
+          const shownShape = shownChild ? childShape(dock?.panel.width ?? width) : null;
+          askGuard.current.show(guardSees(shownChild));
+          // The conversation's own y/n that takes a subagent's block's place is armed too:
+          // the keys already on their way to the block must not answer it.
+          const ownNow = convRef.current!.confirm ?? null;
+          if (ownNow !== ownSeenRef.current) {
+            ownSeenRef.current = ownNow;
+            ownArmedAt.current = ownNow && childBlockRef.current ? askClock.now() : null;
+          }
+          childBlockRef.current = !!shownChild && childShape(dock?.panel.width ?? width) === 'block';
           // What a plugin says from inside a turn — a tool of its own, a task's — belongs to
           // the session whose work it is, on screen or left (`workHome`); said from nowhere
           // (its own poller, a key), or for a session already put away, to the one on screen.
           const postHome = (): Conversation => { const home = workHome(); return home && !home.closed ? home : convRef.current!; };
-          (host.store as Record<string, any>).chat = { open, unread, mode, focus, openChat, closeChat, send, messages, streaming, toolLabel, cursor, escArmed, pendingConfirm: pendingAsk, ctrlKey, panelKey, pointer, note: (text: string) => postHome().pluginNote(text), statusRow: statusRow ? liveChatStatus(() => statusRef.current as never, collapsedBusy) : null, footerStatus, layout, needRows,
+          (host.store as Record<string, any>).chat = { open, unread, mode, focus, openChat, closeChat, send, messages, streaming, toolLabel, cursor, escArmed, pendingConfirm: pendingAsk, ctrlKey, panelKey, pointer, noteKey: () => askGuard.current.note(), note: (text: string) => postHome().pluginNote(text), statusRow: statusRow ? liveChatStatus(() => statusRef.current as never, collapsedBusy) : null, footerStatus, layout, needRows,
             // What holds back a screen a plugin or the model opens (src/runtime/screens.ts),
             // read from the refs at the moment it is asked.
             // The draft counts while the chat has the keys: folded away, or with the keys on
@@ -1854,8 +1886,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               if (isMouseKey(key.name)) return isMouseButton(key.name) && mouse(key);
               // A subagent's y/n: an answer counts only after a pause (AGENTS.md (subagent
               // y/n)). Every key is noted, whoever takes it; the pause is read as of before it.
-              askGuard.current.show(childAskNow()?.request ?? null);
+              askGuard.current.show(guardSees(childAskNow()));
               const askArmed = askGuard.current.press();
+              // A request that took a block's place under this key is armed from this key.
+              if (conv.confirm && conv.confirm !== ownSeenRef.current) {
+                ownSeenRef.current = conv.confirm;
+                ownArmedAt.current = childBlockRef.current ? askClock.now() : null;
+              }
               // The pager is a reader: Esc brings the conversation back, and every other
               // key stops here — nothing reaches the field, the folds or the model.
               // PgUp/PgDn and the wheel are its own list's, which hears them first.
@@ -1894,6 +1931,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 return true;
               }
               if (conv.confirm) {
+                if (ownArmedAt.current !== null && askClock.now() - ownArmedAt.current < ASK_ARM_MS) return true;
                 if (key.name === 'escape' || key.name === 'n') { conv.answerConfirm(false); return true; }
                 if (key.name === 'y' || key.name === 'return') { conv.answerConfirm(true); return true; }
                 return true;
@@ -1903,7 +1941,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // key — ⏎ and Esc included — goes on to its usual handler, and a `y` that does
               // not count types its letter.
               const childAsk = childAskNow();
-              if (childAsk && askArmed && fieldEmpty() && (key.name === 'y' || key.name === 'n') && !key.ctrl && !key.meta) {
+              if (childAsk && askArmed && childShape(dock?.panel.width ?? width) === 'block' && (key.name === 'y' || key.name === 'n') && !key.ctrl && !key.meta) {
                 childAsk.owner.answerConfirm(key.name === 'y');
                 return true;
               }
@@ -2222,8 +2260,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             wheel: wheelRef,
             toEnd: toEndRef,
             escWord: layout === 'panel' ? 'collapse' : 'close',
-            pendingConfirm: pendingAsk ?? (shownChild && fieldEmpty() ? { ...shownChild.request, path: shownChild.path } : null),
-            askNotice: shownChild && !fieldEmpty() && !pendingAsk ? `⏸ ${shownChild.path.join(' › ')} waits for a y/n — clear the line to answer` : null,
+            pendingConfirm: pendingAsk ?? (shownChild && shownShape === 'block' ? { ...shownChild.request, path: shownChild.path } : null),
+            askNotice: shownChild && shownShape === 'notice' && !pendingAsk
+              ? `⏸ ${shownChild.path.join(' › ')} waits for a y/n — ${!fieldEmpty() ? `${bangLevel > 0 ? 'leave shell mode' : 'clear the line'} to answer` : 'the panel is too small to show it; /subagent stop declines it'}`
+              : null,
             pendingQuestion,
             picker,
             // A plugin command's panel: its rows as the plugin gives them now, its keys

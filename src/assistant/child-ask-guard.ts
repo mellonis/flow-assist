@@ -16,6 +16,8 @@ export interface AskGuard {
   show(request: object | null): void;
   // A key arrived: whether an answer would count as of BEFORE it, then the key is noted.
   press(): boolean;
+  // A key the host took before the chat heard it: noted as the last keystroke, no answer.
+  note(): void;
 }
 
 export function createAskGuard(): AskGuard {
@@ -33,6 +35,9 @@ export function createAskGuard(): AskGuard {
       const armed = shown !== null && now - shownAt >= ASK_ARM_MS && now - lastKey >= ASK_ARM_MS;
       lastKey = now;
       return armed;
+    },
+    note() {
+      lastKey = askClock.now();
     },
   };
 }

@@ -241,6 +241,8 @@ type ChatStore = {
   panelKey?: (which: 'focus' | 'collapse') => boolean;
   // A click at a cell: the chat moves the keyboard to the pane under it.
   pointer?: (x: number, y: number) => void;
+  // A key the host took first: the chat notes it as the person's last keystroke.
+  noteKey?: () => void;
   // The rows the open chat needs at a panel `width` columns wide to show a pending
   // question or y/n whole; 0 when nothing is pending.
   needRows?: (width: number) => number;
@@ -536,6 +538,7 @@ export function renderApp(
   // Shared per-app mutable state (created ONCE; read by the App and the
   // fallback handler so a re-render never resets them).
   const ui: UiState = { cmdOpen: false, modalActive: false };
+  (services as unknown as HostServices).hostKeys = () => ({ panel: !!ui.hostPanel, line: !!ui.cmdOpen });
   const cmdline = { current: { open: false, input: '', history: [], historyIdx: -1, walk: null } as CommandLineState };
   // The host's place in key delivery (see `HostKeyPath`); the App fills in its steps.
   const keyPath: HostKeyPath = { first: () => undefined, last: () => undefined, pressed: () => undefined, pass: 1, heard: false };
@@ -1092,7 +1095,7 @@ export function renderApp(
     // component on screen. A flowtty component takes the keys it acts on (a focused
     // list takes what is typed as its filter), and one in a
     // plugin's screen would otherwise keep the person from the chat.
-    keyPath.first = (k, popup) => {
+    const firstStep: HostKeyPath['first'] = (k, popup) => {
       // A popup open over the screen has every key but the exit keys: they arm and fire
       // as everywhere else, and nothing under the popup is asked.
       // The three keys flowtty lets an app take before the terminal backend acts
@@ -1143,8 +1146,10 @@ export function renderApp(
       // selects). While the chat waits for an answer (a y/n, a question) none of its own
       // keys acts: a `y` meant for the chat must never trust a plugin here.
       if (hostPanel.current && !ui.cmdOpen && !isMouseKey(k.name)) {
-        // Only the chat's own question or y/n: a subagent's waits without holding the plugin's panel.
-        const waits = chat?.asking ? !!chat.asking() : (chat?.needRows?.(80) ?? 0) > 0;
+        // What the chat needs rows for is what it shows: its own question or y/n, or
+        // a subagent's y/n drawn at the keys it has. A subagent's y/n is not drawn
+        // under this panel, so it does not hold the panel's keys.
+        const waits = (chat?.needRows?.(80) ?? 0) > 0;
         if (waits && !['up', 'down', 'escape'].includes(String(k.name))) {
           const cap = bindingGlyph(keys.chatFocus);
           setHostPanel({ ...hostPanel.current, notice: `⚠ the chat waits for your answer${cap ? ` — ${cap} to answer it` : ''}; nothing here acts until then` });
@@ -1158,6 +1163,13 @@ export function renderApp(
       // drag still selects.
       if (k.name === 'mousedown' && typeof k.x === 'number' && typeof k.y === 'number') chat?.pointer?.(k.x, k.y);
       return undefined;
+    };
+    // A key taken here never reaches the chat's handler; the chat still notes it as the
+    // person's last keystroke, so a subagent's y/n cannot be answered right after it.
+    keyPath.first = (k, popup) => {
+      const taken = firstStep(k, popup);
+      if (taken === true && !isMouseKey(k.name)) chatStore()?.noteKey?.();
+      return taken;
     };
     keyPath.pressed = (k) => {
       if (typeof k.x === 'number' && typeof k.y === 'number') chatStore()?.pointer?.(k.x, k.y);

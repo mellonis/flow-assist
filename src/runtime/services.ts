@@ -115,6 +115,11 @@ export interface HostServices {
   // null while it is not a panel. The App lays the screen out and says it here, before
   // any plugin renders; the chat reads its side from it, and which pane a click is in.
   chatDock: import('./panel-layout.js').PanelLayout | null;
+  // Who has the keys besides the chat, asked live: the runtime's own panel (`:plugins`)
+  // and the `:` line each hold every key while they are up. The chat draws no
+  // subagent's y/n under the panel, and counts no answer from a stretch it did not
+  // have the keyboard for.
+  hostKeys: () => { panel: boolean; line: boolean };
   // The chat's side of two plugin hooks (`chatContext` / `afterWrite` in the plugin
   // shape): what the person's screens show now — every plugin's items, in load order,
   // sanitized and capped (src/assistant/screen-context.ts; a plugin with only the
@@ -248,6 +253,7 @@ export function createServices({ config, tools, repo, onExit }: CreateServicesOp
     setOverlay: () => {},
     armedHint: '',
     chatDock: null,
+    hostKeys: () => ({ panel: false, line: false }),
     chatContext: () => [],
     afterWrite: async () => {},
     chatNote: () => {},
