@@ -778,6 +778,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             histAt.current = null;
             setBangLevel(0); // the level is never saved — a restored draft is plain text
             setField(s.draft);
+            // The caret goes back only into the draft it was in: one that grew while the
+            // conversation was away has the caret at its end, as any restored draft has.
+            const caret = of ? viewMemory.current!.get(of)?.caret : null;
+            if (caret && caret.text === s.draft) setCursor(caret.at);
           };
           // ── Esc-exit logic (double Esc) ─────────────────────────────────────────
           const armEsc = () => {
@@ -1169,6 +1173,12 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // The chat leaves `prev` for another: its view handlers go, and the registry parks it
           // — or, while it works or waits, keeps it loaded and headless until it is quiescent
           // (`retire`).
+          // The caret with the text `detach` will keep as the draft (`port.draft()`: nothing
+          // for a /command or a `!` line), or null when there is none to place it in.
+          const draftCaret = (): ViewMemory['caret'] => {
+            const text = portRef.current!.draft();
+            return text ? { text, at: cursorRef.current } : null;
+          };
           const leave = (prev: Conversation) => {
             unbindView(prev);
             // The clock, the `/memory` listing and an open `/context` are the session on
@@ -1179,7 +1189,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             memoryShownRef.current = null;
             if (contextOpenRef.current) setContextOpen(false);
             // Before `detach`: the folds and notes mode still describe `prev`.
-            viewMemory.current!.set(prev, rememberView(foldsRef.current, notesRef.current, viewportRef.current && !viewportRef.current.atEnd ? rowAnchor(drawn(), rowOpts(foldsRef.current), viewportRef.current.scrollTop) : null));
+            viewMemory.current!.set(prev, rememberView(foldsRef.current, notesRef.current, viewportRef.current && !viewportRef.current.atEnd ? rowAnchor(drawn(), rowOpts(foldsRef.current), viewportRef.current.scrollTop) : null, draftCaret()));
             prev.detach(portRef.current!);
             registryRef.current!.retire(prev);
           };

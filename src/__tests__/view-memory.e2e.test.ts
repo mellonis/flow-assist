@@ -219,3 +219,82 @@ test('a session left at its end comes back at its end, and follows what arrives 
   expect(frameOf(ui)).toContain('Closing words.');
   ui.app.unmount();
 });
+
+// ─── The caret in the draft ───────────────────────────────────────────────────
+// A: its answer starts a background task, which keeps the session loaded; a second turn
+// is held on its first step. A draft `abcdef` is left with the caret after `abc`, and A
+// is left through the picker (B is a saved session), so the field still holds the draft.
+const fieldRow = (ui: UI) => frameOf(ui).split('\n').filter((r) => r.includes('› ')).at(-1) ?? '';
+async function leftWithDraft(failTurn: boolean) {
+  const model = new ScriptedModel();
+  const task = model.when((req) => String(req.messages.find((m) => m.role === 'system')?.content ?? '').includes('Task: slow job'));
+  task.script([{ hold: true }, { text: 'job result' }]);
+  model.script(
+    [{ text: 'B answer.' }],
+    [{ tool: 'background', args: { task: 'slow job', label: 'job' } }],
+    [{ text: 'Started it.' }],
+    [{ hold: true }, { text: 'Second.' }],
+  );
+  const ui = await bootApp(model, 100, 28, undefined, { sessions: { dir: dirOf() } }, { toastMs: 10_000 });
+  // The second turn's request is refused (a 400, which is not retried) once `release()` lets
+  // it go: the turn fails while its session is away.
+  let reached = false;
+  let gate: (() => void) | null = null;
+  const scripted = globalThis.fetch;
+  if (failTurn) {
+    globalThis.fetch = (async (url: unknown, init: RequestInit) => {
+      if (String(init?.body).includes('session A second')) {
+        reached = true;
+        await new Promise<void>((r) => { gate = r; });
+        return new Response(JSON.stringify({ error: { message: 'refused' } }), { status: 400, headers: { 'content-type': 'application/json' } });
+      }
+      return scripted(url as string, init);
+    }) as typeof fetch;
+  }
+  const release = () => { if (failTurn) gate?.(); else model.release(); };
+  const held = () => (failTurn ? reached : model.held);
+  await ui.press('F');
+  await ask(ui, 'session B question');
+  await settleUntil(() => frameOf(ui).includes('B answer.'));
+  await ask(ui, '/new');
+  await settle(4);
+  await ask(ui, 'session A question');
+  await settleUntil(() => task.held && frameOf(ui).includes('Started it.'));
+  await ask(ui, 'session A second');
+  await settleUntil(held);
+  if (failTurn) { await ask(ui, 'queued text'); await settle(4); }
+  await ui.type('abcdef');
+  for (let i = 0; i < 3; i++) await ui.press('left');
+  await settle(2);
+  await pick(ui, 'session B question');
+  expect(frameOf(ui)).toContain('B answer.');
+  return { ui, release, task };
+}
+
+test('a draft left with the caret in the middle comes back with the caret there', async () => {
+  const { ui, release, task } = await leftWithDraft(false);
+  await pick(ui, 'session A question');
+  expect(frameOf(ui)).toContain('Resumed «session A question»');
+  expect(fieldRow(ui)).toContain('abcdef');
+  await ui.type('X');
+  await settle(2);
+  expect(fieldRow(ui)).toContain('abcXdef');
+  release();
+  task.release();
+  ui.app.unmount();
+});
+
+test('a draft that grew while the session was away comes back with the caret at its end', async () => {
+  const { ui, release, task } = await leftWithDraft(true);
+  // The turn fails while A is away: its queued message goes ahead of the draft.
+  release();
+  await settle(30);
+  await pick(ui, 'session A question');
+  expect(frameOf(ui)).toContain('Resumed «session A question»');
+  expect(fieldRow(ui)).toContain('queued text');
+  await ui.type('X');
+  await settle(2);
+  expect(frameOf(ui)).toContain('abcdefX');
+  task.release();
+  ui.app.unmount();
+});
