@@ -193,6 +193,8 @@ export class Conversation {
   private ownSaid = { memoryMissing: false, configAsking: new Map<string, Conversation>() };
   get memoryMissingSaid(): boolean { return (this.deps.said ?? this.ownSaid).memoryMissing; }
   set memoryMissingSaid(v: boolean) { (this.deps.said ?? this.ownSaid).memoryMissing = v; }
+  // The missing-record note is already in this conversation's own rows.
+  private memoryNoteHere = false;
   // Which conversation asks about which settings file: shared by a host's conversations.
   get configAskers(): Map<string, Conversation> { return (this.deps.said ?? this.ownSaid).configAsking; }
 
@@ -917,10 +919,17 @@ export class Conversation {
   // The prompt's memory index (src/assistant/system-prompt.ts, `memoryBlock`), from the
   // facts as read now.
   memoryBlock(): string {
-    // A record gone missing while the app runs sends nothing, and says so once.
+    // A record gone missing while the app runs sends nothing, and says so once for the
+    // host, and once in each conversation that has not said it. A conversation the chat
+    // left says it in its own rows only: nobody draws them, so the host's flag stays for
+    // the one on screen.
     const missing = memoryRecordNotes('later');
-    if (missing.length && !this.memoryMissingSaid) { this.memoryMissingSaid = true; for (const n of missing) this.pluginNote(n); }
-    if (!missing.length) this.memoryMissingSaid = false;
+    if (missing.length && !this.memoryMissingSaid && !this.memoryNoteHere) {
+      this.memoryNoteHere = true;
+      if (!this.headless) this.memoryMissingSaid = true;
+      for (const n of missing) this.pluginNote(n);
+    }
+    if (!missing.length) { this.memoryMissingSaid = false; this.memoryNoteHere = false; }
     const l = this.memoryLists();
     return memoryBlock(l.project, l.global);
   }

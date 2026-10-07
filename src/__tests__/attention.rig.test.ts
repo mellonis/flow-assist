@@ -2,6 +2,7 @@
 // question, and the ones put away with an answer nobody read (AGENTS.md (a host makes its
 // conversations through one registry)).
 import { afterEach, expect, test } from 'bun:test';
+import fs from 'node:fs';
 import type { Conversation } from '../assistant/conversation.ts';
 import { ScriptedModel, firstUser } from './helpers/scripted';
 import { closeRigs, conversationRig, type Rig } from './helpers/conversation';
@@ -283,4 +284,41 @@ test('a left turn that ends without the session being put away redraws', async (
   expect(rig.registry.leftRunning()).toBe(0);
   expect(heard).toBeGreaterThan(0);
   a.children.delete(task);
+});
+
+// A record that goes missing while the app runs: every turn's memory block says so, once.
+const noteRows = (c: Conversation) => c.currentRows().filter((m) => m.role === 'note' && String(m.content).includes('is missing — no memory fact is sent'));
+
+test('the missing-memory note is said once in a session left, and again on screen', async () => {
+  const { memoryTrustPath } = await import('../assistant/memory-trust.ts');
+  const model = new ScriptedModel();
+  const sub = model.when((req) => firstUser(req).includes('question A'));
+  sub.script([{ hold: true }, { text: 'A1.' }], [{ text: 'A2.' }], [{ text: 'A3.' }]);
+  model.script([{ text: 'B1.' }], [{ text: 'B2.' }], [{ text: 'B3.' }]);
+  const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
+  const record = fs.readFileSync(memoryTrustPath(), 'utf8');
+  try {
+    rig.registry.show(rig.conv);
+    void rig.conv.send('question A');
+    await rig.until(() => sub.held && rig.conv.sessionId !== '');
+    fs.rmSync(memoryTrustPath()); // the record goes missing while the first turn runs
+    rig.conv.enqueue('second A');
+    rig.conv.toggleHoldLast();
+    rig.conv.enqueue('third A');
+    rig.conv.toggleHoldLast();
+    const { left: a } = rig.switchTo();
+    sub.release();
+    await rig.until(() => a.closed, 15_000);
+    // Two turns ran in the left session after the record went: one note there.
+    expect(noteRows(a)).toHaveLength(1);
+    const b = rig.conv;
+    await b.send('question B');
+    await rig.idle();
+    expect(noteRows(b)).toHaveLength(1); // not spent where nobody reads
+    await b.send('again B');
+    await rig.idle();
+    expect(noteRows(b)).toHaveLength(1);
+  } finally {
+    fs.writeFileSync(memoryTrustPath(), record);
+  }
 });
