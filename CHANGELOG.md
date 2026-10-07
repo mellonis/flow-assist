@@ -5,6 +5,18 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **`/subagent` starts a read-only job beside the chat.** `/subagent <prompt>` (or
+  `/sub`) hands the prompt, as typed, to a subagent that works while you go on talking;
+  its answer lands as a `◆ <label> finished:` message. `--with-context` first on the line
+  hands over the conversation's summary (what `/compact` left) and nothing else of the
+  history. `/subagent` alone lists the conversation's running jobs, numbered, and the
+  last twenty that ended; `/subagent stop <number or name>` stops one with whatever it
+  started, and what it had written so far comes back as a `◆ <label> stopped:` message,
+  with one toast and no follow-up turn. A subagent cannot write or ask you anything yet:
+  whatever would wait for your y/n is declined, and `--auto` is refused. The model's tool
+  for the same job is called `subagent`, not `background`; the jobs it starts are still
+  tasks. A background job that is stopped says `stopped` and gives the text it had, where
+  it read `failed: stopped`.
 - **A background task is a conversation of its own.** A task that runs out of its twelve
   rounds now says so at the end of its result (`stopped after 12 rounds — last: …`),
   where it read `finished:` with no output or a partial text. Esc during the turn that
