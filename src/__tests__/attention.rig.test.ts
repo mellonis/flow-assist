@@ -256,3 +256,31 @@ test('a finish is not said when the park throws', async () => {
   expect(finished(rig)).toEqual([]);
   a.save = () => {};
 });
+
+test('a left session\'s running turn counts as running until it ends; the one on screen never does', async () => {
+  const { sub, rig } = await heldTurn();
+  expect(rig.registry.leftRunning()).toBe(0); // on screen
+  const { left: a } = rig.switchTo();
+  expect(rig.registry.leftRunning()).toBe(1);
+  expect(rig.registry.children.backgroundCount()).toBe(0); // the tasks' count is its own
+  sub.release();
+  await rig.until(() => a.closed);
+  expect(rig.registry.leftRunning()).toBe(0);
+});
+
+test('a left turn that ends without the session being put away redraws', async () => {
+  const { sub, rig } = await heldTurn();
+  const { left: a } = rig.switchTo();
+  // A task still counted keeps the session loaded when its own turn ends.
+  const task = {} as Conversation;
+  a.children.add(task);
+  let heard = 0;
+  rig.registry.onChange(() => { heard++; });
+  sub.release();
+  await rig.until(() => !a.busy);
+  await tick(50);
+  expect(a.closed).toBe(false);
+  expect(rig.registry.leftRunning()).toBe(0);
+  expect(heard).toBeGreaterThan(0);
+  a.children.delete(task);
+});

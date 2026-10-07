@@ -31,7 +31,7 @@ waits until you open it and answer, since keys typed elsewhere answer nothing th
 `in use elsewhere` when another flow-assist process has it open, `done` when its last
 answer or background result came while you were not looking (a session you left that finishes its turn says so once, with a toast `● «title» finished — its answer is unread` and no system alert) — your own session's row
 too (`this chat · done`), for one that came while the picker was open (your own row
-shows only your own turn; its background tasks are the footer's `N in background`);
+shows only your own turn; its background tasks, and the turn of a session you left, are the footer's `N in background`);
 Tab shows every session, grouped under each project's path. Type to filter by the title
 or by any word of the conversation; ⏎ opens one (the session you are in is saved first;
 a `here` one is taken back as you left it, draft included), Ctrl+N starts a new one,

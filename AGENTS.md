@@ -2812,9 +2812,13 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   while a turn of its own or one of its tasks runs, else its own status (not
   `Conversation.status`, which others read as "a turn runs") — and null
   when it is not live. Whatever changes what it holds (a conversation left headless, one
-  put away) redraws the host and then runs each `onChange(fn)` listener (the call
+  put away, a left session's turn ending) redraws the host and then runs each `onChange(fn)` listener (the call
   returns the unsubscriber), each in its own try, so one that throws skips neither the
   redraw nor the others.
+  `leftRunning()` counts the `session` conversations that are `headless` with a running
+  turn; the chat's `N in background` is `children.backgroundCount()` (tasks, unchanged)
+  plus it, and `track` redraws on a headless session's `turn-end` (whether it is put away
+  stays the watch's).
   **What the person is owed** (`attention(except?)`, `forget(id)`): the registry keeps
   the ids of sessions it put away while their status read `done`, read after the inbox
   landed and added only once the save, the release and the close went through (a park

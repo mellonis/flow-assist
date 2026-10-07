@@ -2131,8 +2131,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             onViewFail,
             // Background tasks in flight — armed, queued or running — over every
             // conversation of the registry, so the count outlives `/clear` (the tool
-            // notifies when one is armed and when it ends).
-            bgCount: registryRef.current!.children.backgroundCount(),
+            // notifies when one is armed and when it ends), and the turns of sessions
+            // left running (`leftRunning`, redrawn by the registry when one ends).
+            bgCount: registryRef.current!.children.backgroundCount() + registryRef.current!.leftRunning(),
             ...(() => {
               const r = conv.contextReading(screen);
               // How many of the history's items go as stubs now — after /compact the

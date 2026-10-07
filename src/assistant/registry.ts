@@ -106,6 +106,9 @@ export class ConversationRegistry {
     // What a session nobody draws needs an answer to, said once (`movedToWaiting`).
     c.on('confirm', (ev) => { if (ev.request) this.movedToWaiting(c, ev.host ? 'a settings y/n' : 'a y/n'); else this.leftWaiting(c); });
     c.on('question', (ev) => { if (ev.state && ev.parked) this.movedToWaiting(c, 'a question'); else if (!ev.state) this.leftWaiting(c); });
+    // A left session's turn ending moves its status without a render of the chat's own
+    // (the chat hears only the session it shows); whether it is put away is the watch's.
+    c.on('turn-end', () => { if (c.headless) this.notifyChange(); });
     return c;
   }
   // How a toast names a session.
@@ -278,6 +281,13 @@ export class ConversationRegistry {
   private readonly unseen = new Set<string>();
   forget(id: string): void {
     if (this.unseen.delete(id)) this.notifyChange();
+  }
+  // The turns running in sessions the chat has left: work the person started that goes on
+  // where they are not looking (the chat's `N in background` adds it to the tasks').
+  leftRunning(): number {
+    let n = 0;
+    for (const c of this.convs) if (!c.closed && c.kind === 'session' && c.headless && c.busy) n++;
+    return n;
   }
   // What the person is owed by sessions other than `except` (the one on screen): the live
   // ones left on a y/n or a question, and the ones put away unread.
