@@ -400,9 +400,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const pressRef = ui.useRef<{ x: number; y: number; at: number } | null>(null);
           // The block open in the pager (its fold id), or null — a block a click opened
           // that is taller than the rows the conversation has for it. The conversation's,
-          // like the folds: Esc closes it, and closing the chat, /clear and a session read
-          // from its file drop it. `pagerShownRef` says whether the last render drew it:
-          // only a pager on screen holds the keys.
+          // like the folds: Esc closes it, and closing the chat, /clear, a session read
+          // from its file and a session taken back drop it. `pagerShownRef` says whether
+          // the last render drew it: only a pager on screen holds the keys.
           const [pager, setPagerState] = ui.useState<string | null>(null);
           const pagerRef = ui.useRef<string | null>(null);
           const pagerShownRef = ui.useRef(false);
@@ -759,9 +759,11 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               setFolds(folds);
               // After the folds: the row counts what is laid out with them.
               if (m.place) askScroll(anchorRow(of.messages as Parameters<typeof chatRows>[0], rowOpts(folds), m.place));
+              else toEndRef.current?.(); // left at its end: the list keeps no offset of the one left
             } else {
               setNotes(configNotes()); // its own answer to how the steps are drawn
               setFolds(allFolded()); // and the exceptions pointed into a conversation that is gone
+              toEndRef.current?.(); // a conversation's start is its end
             }
             setPager(null);
           };
@@ -1167,15 +1169,15 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               }
             }
           };
-          // The chat leaves `prev` for another: its view handlers go, and the registry parks it
-          // — or, while it works or waits, keeps it loaded and headless until it is quiescent
-          // (`retire`).
           // The caret with the text `detach` will keep as the draft (`port.draft()`: nothing
           // for a /command or a `!` line), or null when there is none to place it in.
           const draftCaret = (): ViewMemory['caret'] => {
             const text = portRef.current!.draft();
             return text ? { text, at: cursorRef.current } : null;
           };
+          // The chat leaves `prev` for another: its view handlers go, and the registry parks it
+          // — or, while it works or waits, keeps it loaded and headless until it is quiescent
+          // (`retire`).
           const leave = (prev: Conversation) => {
             unbindView(prev);
             // The clock, the `/memory` listing and an open `/context` are the session on

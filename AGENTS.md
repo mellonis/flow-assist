@@ -2718,7 +2718,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   after the folds are set, since the row counts what is laid out with them. The caret is
   put back only into the very draft it was in: one that grew while the session was away
   (a stopped or failed turn's queue goes ahead of it) has the caret at its end. A session put away, one read from its file, `/clear` and `/new`
-  have no entry and open folded, on the config's notes mode, at the end. The pager is
+  have no entry and open folded, on the config's notes mode, at the end; so does one left at its end (the list keeps its scroll offset across a switch, so the chat asks it to its end). The pager is
   closed on every switch. `/resume` of the session on screen keeps the object
   on screen and refreshes only the view. The chat makes every
   conversation through its registry (`ConversationRegistry`), made on its first render:

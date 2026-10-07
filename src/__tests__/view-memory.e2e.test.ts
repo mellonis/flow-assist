@@ -1,8 +1,8 @@
 // A session the chat leaves while it works stays loaded here and is taken back as the
 // same conversation: its unfolded blocks and its notes mode come back with it. One put
 // away, one read from its file and a cleared one open as any saved session does —
-// folded, on the config's notes mode (AGENTS.md (a host makes its conversations through
-// one registry)).
+// folded, on the config's notes mode (AGENTS.md (The chat draws a `Conversation`'s
+// snapshot)).
 import { afterEach, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -98,8 +98,7 @@ test('a session put away while it was left opens folded, on the config\'s notes 
   const { ui, aSub } = await leftWhileHeld(dirOf());
   // Its turn ends while it is away: nothing of its own is left, so it is put away.
   aSub.release();
-  await settleUntil(() => !frameOf(ui).includes('A final answer.') && aSub.held === false);
-  await settle(20);
+  await settleUntil(() => frameOf(ui).includes('finished — its answer is unread'));
   await pick(ui, 'session A question');
   expect(frameOf(ui)).toContain('A final answer.');
   expect(frameOf(ui)).toMatch(FOLDED);
@@ -136,7 +135,7 @@ test('/clear folds everything and never brings back what the session had open', 
 
 test('an entry shares no exception set with the live folds: a click made after it was written does not reach it', () => {
   const live = { open: false, except: new Set(['1:calls']) };
-  const entry = rememberView(live, 'open');
+  const entry = rememberView(live, 'open', null, null);
   live.except.add('3:calls');
   expect([...entry.folds.except]).toEqual(['1:calls']);
   // And the folds it hands back are the chat's to change.
@@ -220,6 +219,97 @@ test('a session left at its end comes back at its end, and follows what arrives 
   ui.app.unmount();
 });
 
+// A: three asks, the second answered with the remarks; left at its end by `/new`. B: three
+// asks as well, the third answered with the remarks, then paged up — the list is the same
+// one for both, and the count of asks does not tell the switch apart. `away` lets A's held
+// turn finish while it is away, so it is put away and read from its file; otherwise a task
+// keeps it loaded.
+async function leftAtItsEnd(away: boolean) {
+  const model = new ScriptedModel();
+  const task = model.when((req) => String(req.messages.find((m) => m.role === 'system')?.content ?? '').includes('Task: slow job'));
+  task.script([{ hold: true }, { text: 'job result' }]);
+  const aSub = model.when((req) => firstUser(req).includes('session A one'));
+  aSub.script(
+    [{ text: 'A first.' }],
+    [{ text: REMARKS }],
+    away ? [{ hold: true }, { text: 'A final answer.' }] : [{ tool: 'background', args: { task: 'slow job', label: 'job' } }],
+    [{ text: 'Started it.' }],
+  );
+  model.script([{ text: 'B first.' }], [{ text: 'B second.' }], [{ text: REMARKS }]);
+  const ui = await bootApp(model, 100, 24, undefined, { sessions: { dir: dirOf() } }, { toastMs: 10_000 });
+  await ui.press('F');
+  await ask(ui, 'session A one');
+  await settleUntil(() => frameOf(ui).includes('A first.'));
+  await ask(ui, 'session A two');
+  await settleUntil(() => frameOf(ui).includes('Remark number 30.'));
+  await ask(ui, 'session A three');
+  // Away: the turn is held and ends while the session is left, so it is put away. Not away:
+  // its answer starts a task, which keeps the session loaded and quiet.
+  await settleUntil(() => (away ? aSub.held : task.held && frameOf(ui).includes('Started it.')));
+  await ask(ui, '/new');
+  await settle(4);
+  if (away) {
+    aSub.release();
+    await settleUntil(() => frameOf(ui).includes('finished — its answer is unread'));
+  }
+  await ask(ui, 'session B one');
+  await settleUntil(() => frameOf(ui).includes('B first.'));
+  await ask(ui, 'session B two');
+  await settleUntil(() => frameOf(ui).includes('B second.'));
+  await ask(ui, 'session B three');
+  await settleUntil(() => frameOf(ui).includes('Remark number 30.'));
+  await settle(6);
+  // One page up reaches the top of the long answer; two down leave it paged up.
+  await ui.press('pageup');
+  await ui.press('pagedown');
+  await ui.press('pagedown');
+  await settle(4);
+  expect(frameOf(ui)).not.toContain('Remark number 30.');
+  return { ui, release: () => task.release() };
+}
+// The row number `/resume` takes for the session whose first message reads `text`.
+async function numberOf(ui: UI, text: string) {
+  ui.backend.press({ name: 's', ctrl: true });
+  await settle(3);
+  const rows = frameOf(ui).split('\n').filter((r) => / msgs? │/.test(r));
+  await ui.press('escape');
+  await settle(2);
+  const at = rows.findIndex((r) => r.includes(text));
+  if (at < 0) throw new Error(`numberOf: no row with ${text}`);
+  return at + 1;
+}
+
+for (const away of [false, true]) {
+  test(`a session ${away ? 'put away at its end, read from its file,' : 'left at its end'} comes back at its end through /resume, though the one left is paged up and has as many asks`, async () => {
+    const { ui, release } = await leftAtItsEnd(away);
+    // Not through the picker: closing it mounts the list anew. B is newer, so A is the second.
+    await ask(ui, '/resume 2');
+    await settleUntil(() => frameOf(ui).includes('Resumed «session A one»'));
+    await settle(6);
+    expect(frameOf(ui)).toContain('session A three');
+    
+    expect(frameOf(ui)).not.toContain('↓ new');
+    release();
+    await settle(4);
+    ui.app.unmount();
+  }, 20_000);
+}
+
+test('/resume of the session already on screen folds what was opened, though the session was left and taken back before', async () => {
+  const { ui, aSub } = await leftWhileHeld(dirOf());
+  await pick(ui, 'session A question');
+  expect(frameOf(ui)).toMatch(OPEN);
+  const n = await numberOf(ui, 'session A question');
+  await ask(ui, `/resume ${n}`);
+  await settleUntil(() => frameOf(ui).includes('Resumed «session A question»'));
+  await settle(6);
+  expect(frameOf(ui)).toMatch(FOLDED);
+  expect(frameOf(ui)).not.toMatch(OPEN);
+  aSub.release();
+  await settle(4);
+  ui.app.unmount();
+});
+
 // ─── The caret in the draft ───────────────────────────────────────────────────
 // A: its answer starts a background task, which keeps the session loaded; a second turn
 // is held on its first step. A draft `abcdef` is left with the caret after `abc`, and A
@@ -235,7 +325,7 @@ async function leftWithDraft(failTurn: boolean) {
     [{ text: 'Started it.' }],
     [{ hold: true }, { text: 'Second.' }],
   );
-  const ui = await bootApp(model, 100, 28, undefined, { sessions: { dir: dirOf() } }, { toastMs: 10_000 });
+  const ui = await bootApp(model, 140, 28, undefined, { sessions: { dir: dirOf() } }, { toastMs: 10_000 });
   // The second turn's request is refused (a 400, which is not retried) once `release()` lets
   // it go: the turn fails while its session is away.
   let reached = false;
@@ -287,8 +377,11 @@ test('a draft left with the caret in the middle comes back with the caret there'
 test('a draft that grew while the session was away comes back with the caret at its end', async () => {
   const { ui, release, task } = await leftWithDraft(true);
   // The turn fails while A is away: its queued message goes ahead of the draft.
+  // The count of what runs in the background is B's to show: A's turn and its task are two,
+  // and it is one once the turn has failed.
+  await settleUntil(() => frameOf(ui).includes('2 in background'));
   release();
-  await settle(30);
+  await settleUntil(() => frameOf(ui).includes('1 in background'));
   await pick(ui, 'session A question');
   expect(frameOf(ui)).toContain('Resumed «session A question»');
   expect(fieldRow(ui)).toContain('queued text');
