@@ -776,11 +776,13 @@ there is no `/fullscreen`.
   that line is a row of the field's place, counted by `besides`/`planFit` and by
   `pendingChatRows`' `notice` (the draft's rows plus one), so neither the plan nor a bottom
   panel's list is squeezed. In shell mode (bang level above 0) the notice says `leave shell
-  mode to answer`. A request never turns a docked chat into a window: it may grow a
-  panel, but not past the rows that leave the plugin its least (`PLUGIN_MIN_ROWS`), and
-  a block that would need more is replaced by the notice, worded `the panel is too small
-  to show it; /subagent stop declines it`, which no key answers (`childShape` decides
-  block or notice). Only `y` and `n`, only on an empty field with the block drawn,
+  mode to answer`. A request does not undock a docked chat: it may grow a
+  panel, but not past the rows that leave the plugin its least (`PLUGIN_MIN_ROWS`); the
+  session's plan gives way first (`needRows` counts it only when the block fits beside
+  it), and a block that needs more even with no plan is replaced by the notice, `<path>
+  waits for a y/n — no room to show it; /subagent stop <label> declines it` (the path is
+  cut, not the instruction), which no key answers (`childShape` decides block or
+  notice). A chat that is already a window shows the block there. Only `y` and `n`, only on an empty field with the block drawn,
   answer it, and only after a pause: `src/assistant/child-ask-guard.ts` — an answer counts
   600 ms after the request first came on screen with the keyboard in the chat (a request
   seen anew after a gap with none shown, or a different one, arms from then) and 600 ms
@@ -2885,8 +2887,8 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   once until it leaves waiting (`waitingSaid`), then the picker re-reads. A y/n a child
   parks below the session arrives as `asking` and is said the same way, naming the label
   of the child that owns the oldest request: `⏸ «<title>» waits for your answer — a y/n
-  from <label>`; a session on screen says nothing about its own subtree. Nothing waits
-  only when nothing waits — no y/n of its own, no question, nothing below — is it
+  from <label>`; a session on screen says nothing about its own subtree. Only when
+  nothing waits — no y/n of its own, no question, nothing below — is it
   forgotten, so a later wait is said again. `retire` says
   it for a conversation left while it already waits; leaving waiting re-reads the
   picker only when something had been said, so an on-screen y/n's answer does not

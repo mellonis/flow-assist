@@ -1780,18 +1780,32 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             return o && o.path.length ? o : null;
           };
           const fieldEmpty = () => inputRef.current === '' && bangLevelRef.current === 0;
+          // The rows a subagent's block needs at a width, with the session's plan or without.
+          const childBlockRows = (child: Offered, w: number, plan: boolean): number =>
+            pendingChatRows({ width: w, confirm: { ...child.request, path: child.path }, todo: plan ? conv.plan.snapshot() : [], queued: conv.queue.length });
+          // The most rows a docked panel can be given: past it the plugin has less than its
+          // least. A chat that is not docked has no such limit.
+          const dockLimit = (): number => !dock ? Infinity : dock.side === 'bottom' ? dock.region.height + dock.panel.height - PLUGIN_MIN_ROWS : dock.panel.height;
           // How a subagent's y/n is shown at a width: the block in the field's place when the
-          // field is empty and the block fits the rows a docked panel can be given (it may
-          // grow the panel, never so far that the plugin has less than its least — the chat
-          // does not leave the dock for it), else the notice line above the field.
+          // field is empty and it fits the rows a docked panel can be given (it may grow the
+          // panel, never so far that the chat leaves the dock; the plan gives way first), else
+          // the notice line above the field.
           const childShape = (w: number): 'block' | 'notice' | null => {
             const child = childAskNow();
             if (!child) return null;
             if (!fieldEmpty()) return 'notice';
-            if (!dock) return 'block';
-            const limit = dock.side === 'bottom' ? dock.region.height + dock.panel.height - PLUGIN_MIN_ROWS : dock.panel.height;
-            const rows = pendingChatRows({ width: w, confirm: { ...child.request, path: child.path }, todo: conv.plan.snapshot(), queued: conv.queue.length });
-            return rows > limit ? 'notice' : 'block';
+            return childBlockRows(child, w, false) > dockLimit() ? 'notice' : 'block';
+          };
+          // The notice for a block that cannot be shown: the path is cut to leave the
+          // instruction whole, which names the label `/subagent stop` takes.
+          const tooSmall = (c: Offered): string => {
+            const label = c.path[c.path.length - 1]!;
+            const tail = ` waits for a y/n — no room to show it; /subagent stop ${label} declines it`;
+            const room = (dock?.panel.width ?? width) - 6 - 2 - tail.length;
+            const path = c.path.join(' › ');
+            if (room >= path.length) return `${path}${tail}`;
+            if (room > 1) return `…${path.slice(path.length - room + 1)}${tail}`;
+            return `no room for ${label}'s y/n; /subagent stop ${label} declines it`;
           };
           const needRows = (w: number): number => {
             const c = conv.confirm;
@@ -1799,11 +1813,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             if (child) {
               const block = childShape(w) === 'block';
               const draft = inputVisualRows(inputRef.current, cursorRef.current, chatFieldWidth(w, true)).length;
+              // With the plan when the block fits beside it, else the plan gives way.
+              const plan = !block || childBlockRows(child, w, true) <= dockLimit();
               return pendingChatRows({
                 width: w,
                 confirm: block ? { ...child.request, path: child.path } : null,
                 notice: block ? 0 : Math.min(5, draft) + 1,
-                todo: conv.plan.snapshot(),
+                todo: plan ? conv.plan.snapshot() : [],
                 queued: conv.queue.length,
               });
             }
@@ -2262,7 +2278,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             escWord: layout === 'panel' ? 'collapse' : 'close',
             pendingConfirm: pendingAsk ?? (shownChild && shownShape === 'block' ? { ...shownChild.request, path: shownChild.path } : null),
             askNotice: shownChild && shownShape === 'notice' && !pendingAsk
-              ? `⏸ ${shownChild.path.join(' › ')} waits for a y/n — ${!fieldEmpty() ? `${bangLevel > 0 ? 'leave shell mode' : 'clear the line'} to answer` : 'the panel is too small to show it; /subagent stop declines it'}`
+              ? (!fieldEmpty()
+                ? `⏸ ${shownChild.path.join(' › ')} waits for a y/n — ${bangLevel > 0 ? 'leave shell mode' : 'clear the line'} to answer`
+                : `⏸ ${tooSmall(shownChild)}`)
               : null,
             pendingQuestion,
             picker,

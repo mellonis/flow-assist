@@ -23,8 +23,9 @@ What each version of flow-assist brought, newest first. The version is the one i
   pause (a key pressed as the block appears, as the chat gets the keyboard back, or right
   after another, types a letter instead); ⏎ and Esc never answer it. With text in the
   line, or in shell mode, one line above it says the subagent waits, and your text stays
-  yours. It is not drawn under the plugins panel, and it never turns a docked chat into
-  a window: on a terminal too small for it, a line says so. One request shows at a time, the oldest
+  yours. It is not drawn under the plugins panel, and it does not undock a docked chat
+  (the plan gives way, and on a terminal too small even so, a line names `/subagent stop`
+  for it); a chat that is already a window shows it there. One request shows at a time, the oldest
   first, and your own conversation's y/n comes before them (when it takes the place of a
   subagent's block, its keys wait the same short pause). An open picker, panel or
   pager stays open: the request shows after it closes. A subagent that waits does not

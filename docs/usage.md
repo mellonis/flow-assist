@@ -205,8 +205,9 @@ own conversation's y/n comes before them and keeps its keys, except that when it
 place of a subagent's block you are looking at, it waits the same pause. A picker, a
 command's panel, the pager or the `:plugins` panel that is open stays open: the request
 shows after you close it. On a terminal too small to give the chat the rows for the block,
-the chat stays docked and a line says the panel is too small to show it; `/subagent stop`
-declines it. In `/subagent`'s list such a job reads `waiting`. A subagent that waits does not count
+the chat stays docked (the plan gives way first) and a line says there is no room to show
+it; `/subagent stop <name>` declines it, with the subagent's name from that line. A chat that is
+already a window shows the block there. In `/subagent`'s list such a job reads `waiting`. A subagent that waits does not count
 toward the three that run at once.
 
 `/subagent` alone lists this conversation's jobs, the running ones numbered

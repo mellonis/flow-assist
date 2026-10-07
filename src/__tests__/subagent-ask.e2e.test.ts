@@ -582,7 +582,8 @@ test('on a terminal where the block would undock the chat, the chat stays docked
   await ask(ui, '/subagent SMALL-ONE do it');
   await settleUntil(() => a!.child.held);
   a!.child.release();
-  await settleUntil(() => frameOf(ui).includes('the panel is too small to show it'));
+  await settleUntil(() => frameOf(ui).includes('no room to show it'));
+  expect(rowsOf(ui).find((r) => r.includes('no room to show it'))).toContain('/subagent stop small-one-do declines it');
   expect(frameOf(ui)).toContain('BOARD-SURFACE');
   expect(frameOf(ui)).not.toContain(BLOCK);
   pause();
@@ -590,5 +591,49 @@ test('on a terminal where the block would undock the chat, the chat stays docked
   await settle(4);
   expect(fs.existsSync(a!.file)).toBe(false);
   expect(frameOf(ui)).toContain('BOARD-SURFACE');
+  ui.app.unmount();
+});
+
+test('a click into the chat while the : line is up, and Esc closing the line, then y at once, does not answer', async () => {
+  const { children: [a], ui } = await dockedBlock('LINE-ONE');
+  ui.backend.press(FOCUS); // the plugin has the keys
+  await settle();
+  await ui.press(':'); // the line has them
+  await settle();
+  ui.backend.mouse('down', 120, chatTop(ui) + 2);
+  ui.backend.mouse('up', 120, chatTop(ui) + 2);
+  await settle();
+  clock.t += 5000;
+  await ui.press('escape'); // closes the line; the keyboard is the chat's
+  await settle();
+  await ui.press('y');
+  await settle(4);
+  expect(fs.existsSync(a!.file)).toBe(false);
+  expect(frameOf(ui)).toContain('waits for a y/n');
+  await ui.press('backspace');
+  await settleUntil(() => frameOf(ui).includes(BLOCK));
+  pause();
+  await ui.press('y');
+  await settleUntil(() => fs.existsSync(a!.file));
+  ui.app.unmount();
+});
+
+test('with a plan up on a 24-row bottom dock the plan gives way to the block, and y after the pause answers', async () => {
+  const { model, children: [a], ui } = await boot(['PLAN-TWO'], { hold: true, cols: 100, rows: 24, mode: 'panel', guest: boards as never });
+  model.script([{ tool: 'todo', args: { action: 'add', items: ['read the diff', 'run the tests', 'write the summary'] } }], [{ text: 'Planned.' }]);
+  await ask(ui, '/subagent PLAN-TWO do it');
+  await settleUntil(() => a!.child.held);
+  await ask(ui, 'plan it');
+  await settleUntil(() => frameOf(ui).includes('Planned.'));
+  a!.child.release();
+  await settleUntil(() => frameOf(ui).includes(BLOCK));
+  await settle(6);
+  expect(frameOf(ui)).not.toContain('no room to show it');
+  expect(frameOf(ui)).toContain('BOARD-SURFACE');
+  expect(frameOf(ui)).toContain('y yes · n no');
+  expect(frameOf(ui)).not.toContain('▾ plan');
+  pause();
+  await ui.press('y');
+  await settleUntil(() => fs.existsSync(a!.file));
   ui.app.unmount();
 });
