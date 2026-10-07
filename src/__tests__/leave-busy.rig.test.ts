@@ -661,3 +661,25 @@ test('a handler that hears a grandchild\'s end is nobody\'s work, and the backgr
   // `b` was started from task `a`'s turn: its run, and the event it ends with, carry that mark.
   expect(heard).toEqual([{ owner: undefined, background: true }]);
 });
+
+test('a session taken back and left again while its y/n still waits is announced again', async () => {
+  const alerts: string[] = [];
+  const { sub, rig } = yesNoRig(alerts);
+  rig.registry.show(rig.conv);
+  void rig.conv.send('question A');
+  await rig.until(() => sub.held && rig.conv.sessionId !== '');
+  sub.release();
+  await rig.until(() => !!rig.pendingIn(rig.conv));
+  const { left: a } = rig.switchTo();
+  expect(waits(rig)).toHaveLength(1);
+  expect(alerts).toHaveLength(1);
+  // Taken back, looked at, and left unanswered.
+  rig.switchTo(a);
+  expect(rig.conv).toBe(a);
+  expect(waits(rig)).toHaveLength(1);
+  expect(rig.switchTo().outcome).toBe('kept');
+  expect(waits(rig)).toHaveLength(2);
+  expect(alerts).toHaveLength(2);
+  a.answerConfirm(false);
+  await rig.until(() => a.closed, 5000);
+});

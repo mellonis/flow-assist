@@ -2786,7 +2786,10 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   on in a closed conversation would write into an object that saves nothing, so a
   trigger the watch missed shows as a session never put away, loaded and locked, never
   as lost rows. A deferred check whose park throws (a failed save or release) writes a
-  line to the host's log (`pushLog`) and keeps the watch, so the next trigger retries.
+  line to the host's log (`pushLog`); the watch stays, but a conversation that reached
+  `park` has nothing of its own left to trigger it, so the session stays loaded, locked
+  and shown `here` in the picker until the person opens it and leaves it again (`retire`
+  parks it then), or until the exit. No timer retries.
   `retire` of a conversation already kept drops its earlier watch first, so one trigger
   is one check. **What the registry hears from every conversation it makes** (`track`):
   `confirm` and `question`. A `session` that is `headless` — left, not merely without a
@@ -2798,7 +2801,8 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   once until it leaves waiting (`waitingSaid`), then the picker re-reads. `retire` says
   it for a conversation left while it already waits; leaving waiting re-reads the
   picker only when something had been said, so an on-screen y/n's answer does not
-  touch an open picker. A conversation closed or taken back (`reclaim`) forgets it.
+  touch an open picker. A conversation closed or taken back (`reclaim`) forgets it, so
+  one taken back and left again while it still waits is announced again.
   The settings guard's own y/n carries `host: true` on its `confirm` event: the view
   closes no panel for it (a pager or the /context panel stays open under it), unlike a
   tool's y/n. `reclaim(c)` takes a kept one back (the watch dropped, `headless`

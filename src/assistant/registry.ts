@@ -202,10 +202,13 @@ export class ConversationRegistry {
       setTimeout(() => {
         pending = false;
         if (c.closed || !this.watches.has(c) || !this.quiescent(c)) return;
-        // A park that throws (a failed save or release) leaves the session loaded and
-        // locked: the watch stays, so the next trigger retries, and the log says why.
+        // A park that throws (a failed save or release) leaves the session loaded, locked
+        // and shown `here`, and the log says why. The watch stays, but nothing of the
+        // session's own is left to ask for another check: it stays so until the person
+        // opens it and leaves it again, or until the exit.
         try { this.park(c); } catch (e) {
-          try { (this.init.services().pushLog as ((line: string) => void) | undefined)?.(`registry.park: ${c.sessionId}: ${e instanceof Error ? e.message : String(e)}`); } catch { /* a log line is never fatal */ }
+          const svc = this.init.services() as { pushLog?: (line: string) => void };
+          try { svc.pushLog?.(`registry.park: ${c.sessionId}: ${e instanceof Error ? e.message : String(e)}`); } catch { /* a log line is never fatal */ }
           return;
         }
         this.watches.get(c)?.();
@@ -222,8 +225,9 @@ export class ConversationRegistry {
     this.notifyChange();
     return 'kept';
   }
-  // The chat takes a headless conversation back: its watch is dropped, so it is no
-  // longer parked when it comes to rest (a check already deferred finds no watch).
+  // The chat takes a headless conversation back: its watch is dropped, so coming to rest
+  // parks nothing (a check already deferred finds no watch), and what it waits for is
+  // said again if it is left again.
   reclaim(c: Conversation): void {
     this.watches.get(c)?.();
     this.watches.delete(c);
