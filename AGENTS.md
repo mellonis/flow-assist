@@ -2815,6 +2815,16 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   put away) redraws the host and then runs each `onChange(fn)` listener (the call
   returns the unsubscriber), each in its own try, so one that throws skips neither the
   redraw nor the others.
+  **What the person is owed** (`attention(except?)`, `forget(id)`): the registry keeps
+  the ids of sessions it put away while their status read `done`, read after the inbox
+  landed and added only once the save, the release and the close went through (a park
+  that throws adds nothing). `attention(except)` is `{ waiting, done }`: `waiting` counts
+  the live `session` conversations that are `headless` and read `waiting` (`statusOf`),
+  `done` the remembered ids; `except` — the session on screen — counts in neither.
+  `forget(id)` drops one and redraws only when it dropped something; `reclaim` and
+  `restore` call it for their conversation, so a session opened here is never owed. The set
+  is memory only: it does not outlive the process, and the picker's own `done` stays the
+  file's.
   It also holds the child slots (`children`, handed to every conversation in its deps):
   the count of background tasks (armed, queued, running) and the cap — a task starts
   while fewer than `max(1, sessions.maxRunning - 1)` run (`maxRunning` 4 by default, so

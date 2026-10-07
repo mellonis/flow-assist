@@ -140,7 +140,9 @@ export class ConversationRegistry {
   // A saved session, opened into a conversation of its own (`Conversation.restore`). The
   // caller took the fingerprint before it read the session, and holds its lock.
   restore(session: Session, fingerprint: SessionFingerprint, dir: string, init?: { policy: ConfirmPolicy }): Conversation {
-    return this.track(Conversation.restore(this.deps(), session, fingerprint, dir, init));
+    const c = Conversation.restore(this.deps(), session, fingerprint, dir, init);
+    this.forget(c.sessionId);
+    return this.track(c);
   }
 
   live(): readonly Conversation[] { return [...this.convs]; }
@@ -233,6 +235,7 @@ export class ConversationRegistry {
     this.watches.delete(c);
     c.headless = false;
     this.waitingSaid.delete(c);
+    this.forget(c.sessionId);
   }
   // A conversation the chat has left, put away: what waits in its inbox lands as rows, it
   // is saved, and only then is its lock released and the object closed — a result that
@@ -246,10 +249,32 @@ export class ConversationRegistry {
     // Lands what waits. Nothing holds the inbox here: the conversation is quiescent, so
     // no turn of its own runs or is about to.
     c.takeInbox('rows');
+    // Read after the inbox landed: what it brought is unseen by a conversation nobody shows.
+    const unread = c.status === 'done';
     c.save({ silent: true });
     c.releaseLock();
     c.close('park');
+    // Only a park that went through remembers it; one that threw leaves the session live.
+    if (unread && c.sessionId) this.unseen.add(c.sessionId);
     this.notifyChange();
+  }
+  // Sessions put away with an answer or a result nobody has read, by id, until one is
+  // opened here (`forget`). The badge counts them (`attention`); the picker's own `done`
+  // is the file's. It does not outlive the process.
+  private readonly unseen = new Set<string>();
+  forget(id: string): void {
+    if (this.unseen.delete(id)) this.notifyChange();
+  }
+  // What the person is owed by sessions other than `except` (the one on screen): the live
+  // ones left on a y/n or a question, and the ones put away unread.
+  attention(except?: Conversation): { waiting: number; done: number } {
+    let waiting = 0;
+    for (const c of this.convs) {
+      if (c === except || c.closed || c.kind !== 'session' || !c.headless) continue;
+      if (this.statusOf(c.sessionId) === 'waiting') waiting++;
+    }
+    const done = this.unseen.size - (except && this.unseen.has(except.sessionId) ? 1 : 0);
+    return { waiting, done };
   }
   // What reads the registry hears it changed: the host redraws (the footer's count, the
   // picker), then each `onChange` listener runs — each on its own, so one that throws
