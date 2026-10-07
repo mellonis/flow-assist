@@ -65,6 +65,23 @@ What each version of flow-assist brought, newest first. The version is the one i
   reaches only the session on screen — open the other one to stop its turn. Two things do
   not change: a plugin's news held for a turn's end still follows you to the new session
   on `/new`, and `!` while the assistant works is still refused.
+- **The hint row says how many other sessions need you.** Under the chat's field it shows
+  `⏸ N` — other sessions open here that wait for your answer — and `● N` — sessions you
+  left that were put away with an answer you have not read; a part that is zero is not
+  shown, nothing is drawn when both are, and the session on screen never counts itself.
+  The count stays on the row while a turn streams. `● N` goes down when you open such a
+  session here, delete or move it, or when another flow-assist process takes it or its
+  file reads as read. A session you left that finishes its turn says so once, by a toast
+  only and no system alert: `● «<title>» finished — its answer is unread` (`an untitled
+  session` with no title); one left already at rest says nothing, and a background task's
+  result is named by the task's own toast (`⏳ <task> done — in «<title>»`) and adds no
+  second one. `N in background` now counts the running turn of a session you left, as one
+  more. The note that the memory record is missing (`<path> is missing — no memory fact is
+  sent until the next start, which accepts every fact stored then; /memory lists them`) is
+  said again in the session on screen when it was first said in one you had left. Two
+  limits: with the chat folded away there is no hint row, so the toasts (and the alert of a
+  session that waits) are the only signals; and the `●` count does not survive a restart —
+  the picker's `done`, read from the files, does.
 - **What a turn calls belongs to its session, not to whatever is on screen.** A settings
   file changed outside flow-assist is asked about in one session at a time: while a
   session you left holds that y/n, the one on screen does not ask it too, and a change

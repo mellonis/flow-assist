@@ -29,10 +29,16 @@ and the row changes to the file's status by itself when it is put away; `here ·
 when it stopped on a y/n or a question — a toast and a system alert say so once, and it
 waits until you open it and answer, since keys typed elsewhere answer nothing there),
 `in use elsewhere` when another flow-assist process has it open, `done` when its last
-answer or background result came while you were not looking (a session you left that finishes its turn says so once, with a toast `● «title» finished — its answer is unread` and no system alert) — your own session's row
+answer or background result came while you were not looking — your own session's row
 too (`this chat · done`), for one that came while the picker was open (your own row
-shows only your own turn; its background tasks, and the turn of a session you left, are the footer's `N in background`);
-The row under the chat's field shows, at its right, `⏸ N` for the other sessions waiting for your answer and `● N` for the ones you left whose answer you have not read (nothing when there are none; the session you are in is never counted). Tab shows every session, grouped under each project's path. Type to filter by the title
+shows only your own turn; its background tasks, and the turn of a session you left, are
+the footer's `N in background`). A session you left that finishes its turn says so once,
+with a toast (`● «title» finished — its answer is unread`) and no system alert; a
+background task's result has its own toast. The row under the chat's field shows, at its
+right, `⏸ N` for the other sessions waiting for your answer and `● N` for the ones you
+left whose answer you have not read (nothing when there are none; the session you are in
+is never counted; the count is lost on a restart, the picker's `done` is not). Tab shows
+every session, grouped under each project's path. Type to filter by the title
 or by any word of the conversation; ⏎ opens one (the session you are in is saved first;
 a `here` one is taken back as you left it, draft included), Ctrl+N starts a new one,
 Ctrl+R renames, Ctrl+P moves it into the current project (its file and journal with it),
