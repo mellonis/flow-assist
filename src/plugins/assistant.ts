@@ -35,6 +35,7 @@ import { z } from 'zod';
 import { appliesOnRestart, modelMaySave, modelMaySet } from '../config/schema.js';
 import { anchorRow, askFieldWidth, blockRows, roomForBlock, chatFieldWidth, chatRows, chatWrapWidth, firstFoldRow, liveChatStatus, pagerTitle, pendingChatRows, renderChatStatus, renderChatStrip, rowAnchor, viewGroupFor, type RowOpts, type Viewport } from '../views/modals.js';
 import { CHAT_MODES, chatModeOf, inRect, type ChatMode, type PanelLayout } from '../runtime/panel-layout.js';
+import { recalledFolds, rememberView, type ViewMemory } from '../assistant/view-memory.js';
 import { allFolded, flipFolds, isClicked, isOpen, openInFull, pageable, toggleFold, type FoldState } from '../assistant/folds.js';
 import { groupOpen, toggleGroup } from '../assistant/view-groups.js';
 import { bindingGlyph, firstGlyph, isKey, isMouseButton, isMouseKey, keyGlyph } from '../playback/keys.js';
@@ -377,11 +378,16 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // What is open and what is folded (src/assistant/folds.ts): one global
           // state, plus the blocks a click has made an exception of. `details` (^o)
           // is the master switch; a click opens the block under it alone. The
-          // conversation's, like the auto mode — never saved, and `/clear` and `/resume`
-          // both come back to everything folded.
+          // conversation's, like the auto mode — never saved: `/clear` and a session read
+          // from its file come back to everything folded, a session taken back while it is
+          // still loaded here keeps them.
           const [folds, setFoldsState] = ui.useState<FoldState>(allFolded());
           const foldsRef = ui.useRef(folds);
           const setFolds = (s: FoldState) => { foldsRef.current = s; setFoldsState(s); };
+          // The view of each conversation the chat has left (`leave`), read back only
+          // for that same object when it is taken back (`applySessionView`).
+          const viewMemory = ui.useRef<WeakMap<Conversation, ViewMemory> | null>(null);
+          if (!viewMemory.current) viewMemory.current = new WeakMap();
           // What the conversation last said about where it is on the screen — the
           // view reports it, and a click is turned into a row with it.
           const viewportRef = ui.useRef<Viewport | null>(null);
@@ -394,8 +400,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const pressRef = ui.useRef<{ x: number; y: number; at: number } | null>(null);
           // The block open in the pager (its fold id), or null — a block a click opened
           // that is taller than the rows the conversation has for it. The conversation's,
-          // like the folds: Esc closes it, and closing the chat, /clear and /resume drop
-          // it. `pagerShownRef` says whether the last render drew it: only a pager on
+          // like the folds: Esc closes it, and closing the chat, /clear and a session read
+          // from its file drop it. `pagerShownRef` says whether the last render drew it: only a pager on
           // screen holds the keys.
           const [pager, setPagerState] = ui.useState<string | null>(null);
           const pagerRef = ui.useRef<string | null>(null);
@@ -742,12 +748,26 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             conv.attach(portRef.current);
           }
           markSeenRef.current = () => convRef.current!.markSeen();
+          // The notes mode and the folds of a conversation the chat shows: its remembered
+          // ones when it left them (`leave`), else a conversation's start — the config's
+          // notes mode and everything folded. The pager is closed either way.
+          const restoreView = (of?: Conversation) => {
+            const m = of ? viewMemory.current!.get(of) : undefined;
+            if (m) {
+              setNotes(m.notes);
+              setFolds(recalledFolds(m));
+            } else {
+              setNotes(configNotes()); // its own answer to how the steps are drawn
+              setFolds(allFolded()); // and the exceptions pointed into a conversation that is gone
+            }
+            setPager(null);
+          };
           // The chat's half of opening a saved session (`Conversation.applySession` does
           // the model's first).
-          const applySessionView = (s: Session) => {
-            setNotes(configNotes()); // its own answer to how the steps are drawn
-            setFolds(allFolded()); // and the exceptions pointed into a conversation that is gone
-            setPager(null);
+          // `of` is the conversation taken back, when it is one the chat left loaded: its
+          // remembered folds and notes mode replace those two resets.
+          const applySessionView = (s: Session, of?: Conversation) => {
+            restoreView(of);
             setPanel(null);
             histAt.current = null;
             setBangLevel(0); // the level is never saved — a restored draft is plain text
@@ -977,7 +997,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           };
           // A session left while it works or waits is still loaded here, holding its lock: the
           // chat takes that conversation back, with the draft it kept — never a second one
-          // made from its file. Folds, notes and the pager start afresh.
+          // made from its file. Its folds and notes mode come back as it was left.
           const reclaimLive = (prev: Conversation, live: Conversation): boolean => {
             setError(null);
             leave(prev);
@@ -989,7 +1009,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // list of the one left, read after it was detached.
             live.drawnRows = null;
             adopt(live);
-            applySessionView({ draft } as Session);
+            applySessionView({ draft } as Session, live);
             (host.services as Record<string, any>).showMessage?.(`Resumed «${live.title || 'session'}»`);
             host.notify();
             return true;
@@ -1152,6 +1172,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             setElapsedMs(0);
             memoryShownRef.current = null;
             if (contextOpenRef.current) setContextOpen(false);
+            // Before `detach`: the folds and notes mode still describe `prev`.
+            viewMemory.current!.set(prev, rememberView(foldsRef.current, notesRef.current));
             prev.detach(portRef.current!);
             registryRef.current!.retire(prev);
           };
@@ -1198,11 +1220,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             setInput(''); inputRef.current = '';
             setCursor(0);
             setBangLevel(0); // a fresh conversation opens on a plain prompt
-            setNotes(configNotes()); // the steps go back to what the config asks for
             setError(null);
             setElapsedMs(0);
-            setFolds(allFolded()); // everything folded again, and no exceptions left over
-            setPager(null);
+            restoreView();
             setPanel(null);
             disarmEsc();
             host.notify();

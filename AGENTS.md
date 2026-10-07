@@ -2710,7 +2710,12 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   again) are the session on screen's; `adopt` starts the clock again, from the
   segment's start, for a conversation taken back while it works. `/resume` of that session while it is kept takes
   the same object back, with the draft it kept (`reclaimLive`), never a second one read
-  from its file (`openFromFile`); `/resume` of the session on screen keeps the object
+  from its file (`openFromFile`). `leave` writes what the chat showed of it — its folds (the exception set copied)
+  and its notes mode — into a map keyed by the object (`src/assistant/view-memory.ts`), and
+  the taken-back conversation's view reset reads that entry instead of resetting
+  (`applySessionView`). A session put away, one read from its file, `/clear` and `/new`
+  have no entry and open folded, on the config's notes mode. The pager is closed on every
+  switch. `/resume` of the session on screen keeps the object
   on screen and refreshes only the view. The chat makes every
   conversation through its registry (`ConversationRegistry`), made on its first render:
   its lock token is every conversation's, the chat's unmount writes and releases what
