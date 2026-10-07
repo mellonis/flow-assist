@@ -5,18 +5,32 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
-- **`/subagent` starts a read-only job beside the chat.** `/subagent <prompt>` (or
+- **`/subagent` starts a job beside the chat, and it may write.** `/subagent <prompt>` (or
   `/sub`) hands the prompt, as typed, to a subagent that works while you go on talking;
   its answer lands as a `◆ <label> finished:` message. `--with-context` first on the line
   hands over the conversation's summary (what `/compact` left) and nothing else of the
-  history. `/subagent` alone lists the conversation's running jobs, numbered, and the
-  last twenty that ended; `/subagent stop <number or name>` stops one with whatever it
-  started, and what it had written so far comes back as a `◆ <label> stopped:` message,
-  with one toast and no follow-up turn. A subagent cannot write or ask you anything yet:
-  whatever would wait for your y/n is declined, and `--auto` is refused. The model's tool
-  for the same job is called `subagent`, not `background`; the jobs it starts are still
-  tasks. A background job that is stopped says `stopped` and gives the text it had, where
-  it read `failed: stopped`.
+  history. `/subagent` alone lists the conversation's jobs, numbered (one that waits for
+  your answer reads `waiting`), and the last twenty that ended; `/subagent stop <number
+  or name>` stops one with whatever it started, and what it had written so far comes back
+  as a `◆ <label> stopped:` message, with one toast and no follow-up turn. The model's
+  tool for the same job is called `subagent`, not `background`; the jobs it starts are
+  still tasks. A background job that is stopped says `stopped` and gives the text it had,
+  where it read `failed: stopped`.
+- **A subagent's writes ask you, in the conversation that started it.** Each write a
+  subagent you started attempts (a command, a file change, a fetch off the allowlist)
+  stops for your y/n. The request is drawn where you type, titled with the subagent's
+  name, and answered with `y` or `n` alone, only on an empty line and only after a short
+  pause (a key pressed as the block appears, or right after another, types a letter
+  instead); ⏎ and Esc never answer it. With text in the line, one line above it says the
+  subagent waits, and your text stays yours. One request shows at a time, the oldest
+  first, and your own conversation's y/n comes before them. An open picker, panel or
+  pager stays open: the request shows after it closes. A subagent that waits does not
+  hold one of the places for running jobs. `/subagent --auto <prompt>` starts it in the
+  auto mode `all`, and a command still asks unless `shell.autoRun` is on; the mode of the
+  conversation you start it from never passes to a subagent. The assistant's `subagent`
+  tool takes `write: true` for a task that may ask you the same way; without it a write
+  is declined, as before. A subagent still cannot ask you a question, and the y/n for a
+  changed settings file is asked in a chat session only, never in a subagent.
 - **A background task is a conversation of its own.** A task that runs out of its twelve
   rounds now says so at the end of its result (`stopped after 12 rounds — last: …`),
   where it read `finished:` with no output or a partial text. Esc during the turn that
