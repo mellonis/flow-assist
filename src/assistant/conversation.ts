@@ -25,7 +25,7 @@ import type { ViewRecord } from './views.js';
 import type { ToolDef } from '../loader/tools.js';
 import { workspaceFor } from './workspace.js';
 import { asBackgroundWork, asConversationWork, asForegroundWork, outsideWork, workOwner } from '../runtime/background-work.js';
-import { callOf, childResultText, lastAnswerOf, type BusyKind, type ChatMsg, type ChildResult, type EndedChild, type RunningChild, type ChildSpec, type ChildStart, type CloseReason, type StoppedBy, type JournalRoute, type ConversationDeps, type ConversationEvent, type ConversationKind, type ConversationSnapshot, type ConversationStatus, type Offered, type PendingConfirm, type Queued, type QueueWait, type SendOptions, type TurnEnd, type ViewPort } from './conversation-types.js';
+import { callOf, childResultText, lastAnswerOf, type BusyKind, type ChatMsg, type ChildResult, type EndedChild, type RunningChild, type ChildSpec, type ChildStart, type CloseReason, type StoppedBy, type JournalRoute, type ConversationDeps, type ConversationEvent, type ConversationKind, type ConversationSnapshot, type ConversationStatus, type Offered, type PendingConfirm, type Queued, type QueueWait, type SendOptions, type TurnEnd, type TreeNode, type ViewPort } from './conversation-types.js';
 import {
   applySession, currentProject, ensureSessionId, journal, journaledChatLLM, journalTo, keepPersonWork, markSeen, persist, pushNote,
   releaseLockOf, writeSession, NO_FILE,
@@ -40,7 +40,9 @@ export { NO_FILE };
 // once — the block must appear when the call starts, and its end must not wait.
 export const LIVE_REDRAW_MS = 200;
 // How many ended children a conversation remembers.
-export const MAX_ENDED = 20;
+export // How long a change of a child's latest step is held before the tree is told again.
+const TREE_HOLD_MS = 200;
+const MAX_ENDED = 20;
 
 // What an image stands for, as its data is cached: its path and its hash.
 export const imageKey = (r: ImageRef) => `${r.path}\0${r.sha256}`;
@@ -146,7 +148,14 @@ export class Conversation {
   imageRefusalSaid = false;
 
   // ── the running thing
-  busy = false;
+  private busyNow = false;
+  // A child's flip is a change of the tree it belongs to (`AGENTS.md (agent tree)`).
+  get busy(): boolean { return this.busyNow; }
+  set busy(on: boolean) {
+    if (this.busyNow === on) return;
+    this.busyNow = on;
+    if (this.parent) this.treeChanged(this.parent);
+  }
   // What runs while `busy`: a turn, a `!command`, a `!!command`, a slash command.
   busyKind: BusyKind = 'turn';
   // How the last piece of work ended; null before the first.
@@ -389,12 +398,36 @@ export class Conversation {
     outsideWork(() => { for (const fn of [...(this.handlers.get(ev.type) ?? [])]) fn(ev); });
     if (ev.type === 'confirm' && this.parent) this.askedUp();
   }
+  // The `tree` events held back: one window per root, 200 ms long, in which a change of a
+  // child's latest step is told once at its end (`treeChanged`).
+  private treeHold: { timer: ReturnType<typeof setTimeout>; from: Conversation | null } | null = null;
+  // Something below `from` (a conversation and the ones above it) changed what the live
+  // children show: every one of them hears `tree`, and the host redraws through the root's
+  // `notify`. The ancestors are read now, from `parent`, as `askedUp` reads them. A change
+  // of the latest step is `held`: the first goes at once, the rest of a 200 ms window are
+  // told as one at its end. A closed root hears nothing and holds no timer.
+  private treeChanged(from: Conversation | null, held = false): void {
+    if (!from) return;
+    let root: Conversation = from;
+    while (root.parent) root = root.parent;
+    if (root.closed) return;
+    if (held) {
+      if (root.treeHold) { root.treeHold.from = from; return; }
+      const hold = { timer: setTimeout(() => {
+        root.treeHold = null;
+        if (hold.from && !root.closed) root.treeChanged(hold.from, true);
+      }, TREE_HOLD_MS), from: null as Conversation | null };
+      root.treeHold = hold;
+    }
+    for (let a: Conversation | null = from; a; a = a.parent) a.emit({ type: 'tree' });
+    root.deps.notify();
+  }
   // A child's y/n was parked or answered: every conversation above it hears `asking`, and
   // the host redraws through the root's `notify` (a child's own is silent). The ancestors
   // are read now, from `parent`, so a child handed up to the session reports to it.
   private askedUp(): void {
     let root: Conversation = this;
-    for (let a = this.parent; a; a = a.parent) { a.emit({ type: 'asking' }); root = a; }
+    for (let a = this.parent; a; a = a.parent) { a.emit({ type: 'asking' }); a.emit({ type: 'tree' }); root = a; }
     root.deps.notify();
   }
   // The y/n this conversation shows the person: its own first (`path` empty), else the
@@ -476,6 +509,7 @@ export class Conversation {
     if (this.liveTimer) { clearTimeout(this.liveTimer); this.liveTimer = null; }
     this.liveBuf.clear();
     this.liveSeen.clear();
+    if (this.treeHold) { clearTimeout(this.treeHold.timer); this.treeHold = null; }
     if (this.saveTimer) { clearTimeout(this.saveTimer); this.saveTimer = null; }
     this.clearInbox();
     this.inbox = [];
@@ -502,14 +536,47 @@ export class Conversation {
   // answer, queued for a slot, or delayed until a time.
   runningChildren(): RunningChild[] {
     return [...this.children].map((c): RunningChild => {
-      const delayed = this.childTimers.has(c);
-      return {
-        label: c.label, kind: c.kind as RunningChild['kind'],
-        status: delayed ? 'delayed' : c.confirm ? 'waiting' : c.busy ? 'working' : 'queued',
-        startedAt: c.busy ? c.turnStartedAt : null,
-        until: delayed ? c.delayedUntil : null,
-      };
+      const s = this.childState(c);
+      return { label: c.label, kind: c.kind as RunningChild['kind'], ...s };
     });
+  }
+  // What a child of this conversation is doing: the one rule the listing and the tree share.
+  private childState(c: Conversation): Pick<RunningChild, 'status' | 'startedAt' | 'until'> {
+    const delayed = this.childTimers.has(c);
+    return {
+      status: delayed ? 'delayed' : c.confirm ? 'waiting' : c.busy ? 'working' : 'queued',
+      startedAt: c.busy ? c.turnStartedAt : null,
+      until: delayed ? c.delayedUntil : null,
+    };
+  }
+  // The live descendants, depth first, the children of each in the order they started.
+  tree(): TreeNode[] {
+    const out: TreeNode[] = [];
+    const walk = (c: Conversation, depth: number): number => {
+      let count = 0;
+      for (const child of c.children) {
+        const s = c.childState(child);
+        const node: TreeNode = {
+          key: child.key, label: child.label, kind: child.kind as TreeNode['kind'], depth, status: s.status,
+          latest: s.status === 'working' ? child.toolLabel || child.verb : '', startedAt: s.startedAt, until: s.until, below: 0,
+        };
+        out.push(node);
+        node.below = walk(child, depth + 1);
+        count += 1 + node.below;
+      }
+      return count;
+    };
+    walk(this, 1);
+    return out;
+  }
+  // The live descendant with this key, else null.
+  nodeByKey(key: string): Conversation | null {
+    for (const child of this.children) {
+      if (child.key === key) return child;
+      const found = child.nodeByKey(key);
+      if (found) return found;
+    }
+    return null;
   }
   private remember(e: EndedChild): void {
     this.ended = [...this.ended, e].slice(-MAX_ENDED);
@@ -541,6 +608,7 @@ export class Conversation {
     this.children.clear();
     this.childTimers.clear();
     this.emit({ type: 'children', count: 0 });
+    this.treeChanged(this);
   }
 
   // A task that ends hands the children still live to its parent: their results already
@@ -558,6 +626,7 @@ export class Conversation {
     this.childTimers.clear();
     this.emit({ type: 'children', count: 0 });
     up.emit({ type: 'children', count: up.children.size });
+    this.treeChanged(up);
   }
 
   // A fresh conversation's first rows: what the memory keeps across a /clear (said, or
@@ -590,7 +659,11 @@ export class Conversation {
   setAutoMode(mode: AutoMode): void { this.draw('autoMode', mode, true); }
 
   // ── what runs, as the status line draws it
-  setToolLabel(v: string): void { this.draw('toolLabel', v); }
+  setToolLabel(v: string): void {
+    const changed = this.toolLabel !== v;
+    this.draw('toolLabel', v);
+    if (changed && this.parent) this.treeChanged(this.parent, true);
+  }
   setPhase(p: 'thinking' | 'writing'): void { this.draw('phase', p); }
   // The word the line says for either phase (src/assistant/verbs.ts): one per
   // model request, picked when the request goes out — never in the render, so it
@@ -682,6 +755,7 @@ export class Conversation {
     child.shell.setCwd(this.shell.cwd());
     this.children.add(child);
     this.emit({ type: 'children', count: this.children.size });
+    this.treeChanged(this);
     if (spec.kind === 'subagent') raw({ t: 'subagent', label: spec.label, by: spec.by, event: 'start' });
     let ran = false;
     // The end, as the tool reports it; never throws.
@@ -747,13 +821,14 @@ export class Conversation {
           to.children.delete(child);
           to.childTimers.delete(child);
           to.emit({ type: 'children', count: to.children.size });
+          to.treeChanged(to);
         }
       }
       return { ...r, delivered, ...(landedIn ? { landedIn } : {}), ...(stopped ? { stoppedWithParent: true as const } : {}) };
     };
     const armed = (timer: ReturnType<typeof setTimeout>): void => { this.childTimers.set(child, timer); };
     // Whoever counts the child now: the one that started it, or one a task handed it to.
-    const fired = (): void => { child.parent?.childTimers.delete(child); };
+    const fired = (): void => { const up = child.parent; up?.childTimers.delete(child); up?.treeChanged(up); };
     return { child, run, armed, fired };
   }
 

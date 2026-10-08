@@ -140,6 +140,7 @@ export type ConversationEvent =
   | { type: 'activity' }          // a new segment began: the chat's seconds start again from 0
   | { type: 'confirm'; request: PendingConfirm | null; host?: true }   // `host`: the settings guard's own y/n, which closes no panel
   | { type: 'question'; state: AskState | null; parked?: boolean }
+  | { type: 'tree' }              // something below this conversation changed what the live children show: a start or an end, a status, the latest step
   | { type: 'asking' }            // a y/n of a descendant was parked or answered: what this conversation offers may have changed
   | { type: 'notice'; text: string; level: 'error' }
   | { type: 'inbox'; items: string[]; shown: boolean }   // every item that landed together; `shown`: the chat is open
@@ -237,6 +238,11 @@ export interface EndedChild { label: string; kind: ChildSpec['kind']; outcome: C
 // A child still counted, as a listing reads it. `startedAt`: when its turn began (null
 // before); `until`: when its delay ends (null unless it is delayed).
 export interface RunningChild { label: string; kind: ChildSpec['kind']; status: 'working' | 'waiting' | 'queued' | 'delayed'; startedAt: number | null; until: number | null }
+// A live descendant of a conversation, as the agent tree draws it (`Conversation.tree`).
+// `key` is the descendant's conversation key; `depth` is 1 for a child of the conversation
+// asked; `latest` is the tool it runs, else the verb of its round while it works, else '';
+// `below` counts its live descendants.
+export interface TreeNode { key: string; label: string; kind: ChildSpec['kind']; depth: number; status: RunningChild['status']; latest: string; startedAt: number | null; until: number | null; below: number }
 // What `startChild` hands back: a refusal said to the model, or the child, its run,
 // `armed`, which records the delay timer that will start it, and `fired`, which the
 // caller calls when that timer fires — so a stop disarms only a task still waiting on

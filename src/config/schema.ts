@@ -38,6 +38,7 @@ export function isLeashKey(key: string): boolean {
 // Why the model may change a host key, said beside it (`config_schema`).
 const MOUSE = { reason: 'whether the app takes the mouse or leaves it to the terminal — undone with one command' };
 const HOVER = { reason: 'whether what a click acts on is underlined under the pointer — a look, undone with one command' };
+const AGENT_ROWS = { reason: 'how many rows the live subagents take under the field — a look, undone with one command' };
 const VERBS = { reason: 'the words on the status line while the model works — a look, undone with one command' };
 const RESUME = { reason: 'whether the chat continues the latest conversation on start — nothing is lost either way' };
 
@@ -121,12 +122,15 @@ export const hostConfigSchema = z.object({
   // click acts on — a fold line in the chat, a row of the session picker or a command's
   // panel — is underlined under it (src/config/mouse.ts). `config set ui.hover false`
   // keeps the mouse and drops the motion reports, for a terminal or a link that feels them.
+  // `agentRows` (4; 0 — none) — how many rows the conversation's live subagents and tasks
+  // may take under the field (src/assistant/agent-tree.ts).
   // `verbs` — the words the chat's status line picks from while the model works (one
   // per request, src/assistant/verbs.ts); an empty list keeps the built-in ones.
   ui: z.object({
     // The backend is opened with the mouse or without it when the app starts.
     mouse: z.boolean().register(modelMaySet, MOUSE).register(modelMaySave, MOUSE).register(appliesOnRestart, {}).optional(),
     hover: z.boolean().register(modelMaySet, HOVER).register(modelMaySave, HOVER).register(appliesOnRestart, {}).optional(),
+    agentRows: z.number().int().min(0).max(8).register(modelMaySet, AGENT_ROWS).register(modelMaySave, AGENT_ROWS).optional(),
     verbs: z.array(z.string()).register(modelMaySet, VERBS).register(modelMaySave, VERBS).optional(),
   }).optional(),
   // `file` — the memory list an older host kept; it is moved into the global workspace
