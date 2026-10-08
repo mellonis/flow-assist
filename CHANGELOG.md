@@ -25,6 +25,10 @@ What each version of flow-assist brought, newest first. The version is the one i
   order with the time each has spent, then the last twenty that ended with how they ended.
   `x` and `y` stop the node under the cursor, as in the rows; Esc closes it. A subagent's
   y/n is not drawn or answerable while it is open.
+- **A y/n of the conversation's own that arrives over a command's panel, or while the
+  cursor is in the rows, takes no answer for 600 ms.** A `y` on its way to the panel or
+  to the stop question does not approve the write. It applies to every command's panel,
+  a plugin's included; with neither on screen an own y/n is answered at once, as before.
 - **`/subagent` starts a job beside the chat, and it may write.** `/subagent <prompt>` (or
   `/sub`) hands the prompt, as typed, to a subagent that works while you go on talking;
   its answer lands as a `◆ <label> finished:` message. `--with-context` first on the line
