@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { askClock } from '../assistant/child-ask-guard.ts';
+import { acceptedConfigPath, guardConfigFiles, hostStateDir, loadConfig, resetSessionConfig, unguardConfigFiles } from '../config/load.ts';
 import { ScriptedModel, bootApp, firstUser, settle } from './helpers/scripted';
 
 const realFetch = globalThis.fetch;
@@ -741,4 +742,87 @@ test('a question with no watch and no cursor takes a key at once', async () => {
   await settleUntil(() => frameOf(ui).includes('Using it.'));
   expect(frameOf(ui)).not.toContain('Which branch?');
   ui.app.unmount();
+});
+
+// ---- the settings file's y/n (the session's own, asked by the host) ----
+
+const settingsFile = () => path.join(hostStateDir(), 'config.local.json');
+const SETTINGS = 'changed outside flow-assist';
+function guardSettings() {
+  fs.mkdirSync(hostStateDir(), { recursive: true });
+  fs.rmSync(acceptedConfigPath(), { force: true });
+  fs.writeFileSync(settingsFile(), '{}');
+  loadConfig();
+  guardConfigFiles();
+}
+function unguardSettings() {
+  unguardConfigFiles();
+  resetSessionConfig();
+  fs.rmSync(settingsFile(), { force: true });
+  fs.rmSync(acceptedConfigPath(), { force: true });
+  for (const f of fs.readdirSync(hostStateDir())) if (f.includes('.rejected-')) fs.rmSync(path.join(hostStateDir(), f));
+}
+const HELD_MAIN = [[{ hold: true }, { tool: 'datetime', args: {} }], [{ text: 'main done' }]];
+
+test('the settings file\'s y/n ends a watch: a y inside the pause creates the child\'s file in no case, and after it only the setting is applied', async () => {
+  guardSettings();
+  try {
+    const root = tmpRoot();
+    const file = path.join(root, 'PONE.txt');
+    const { children: [a], ui, model } = await boot([{ mark: 'PONE', script: asks('PONE', file) }], { root, main: HELD_MAIN });
+    await ask(ui, '/subagent PONE do it');
+    await settleUntil(() => a!.held);
+    await ask(ui, 'main go');
+    await settleUntil(() => model.held);
+    await settleUntil(() => frameOf(ui).includes('⚙ pone-do'));
+    await watchFromRows(ui);
+    expect(watching(ui)).toBe(true);
+    a!.release();
+    await settleUntil(() => frameOf(ui).includes(BLOCK));
+    clock.t += 5000;
+    fs.writeFileSync(settingsFile(), '{"shell":{"autoRun":true}}');
+    model.release();
+    await settleUntil(() => frameOf(ui).includes(SETTINGS));
+    expect(watching(ui)).toBe(false);
+    expect(frameOf(ui)).toContain('apply? (y/n)');
+    expect(frameOf(ui)).not.toContain(BLOCK);
+    clock.t += 50;
+    await ui.press('y');
+    await settle(6);
+    expect(fs.existsSync(file)).toBe(false);
+    expect(frameOf(ui)).toContain(SETTINGS);
+    clock.t += 700;
+    await ui.press('y');
+    await settleUntil(() => frameOf(ui).includes('Applied config.local.json'));
+    expect(fs.existsSync(file)).toBe(false);
+    ui.app.unmount();
+  } finally { unguardSettings(); }
+});
+
+test('with the settings file\'s y/n up after a watch, x and y inside the pause stop nothing', async () => {
+  guardSettings();
+  try {
+    const { children: [a], ui, model } = await boot([{ mark: 'PTWO' }], { main: HELD_MAIN });
+    await ask(ui, '/subagent PTWO do it');
+    await settleUntil(() => a!.held);
+    await ask(ui, 'main go');
+    await settleUntil(() => model.held);
+    await settleUntil(() => frameOf(ui).includes('⚙ ptwo-do'));
+    await watchFromRows(ui);
+    expect(watching(ui)).toBe(true);
+    clock.t += 5000;
+    fs.writeFileSync(settingsFile(), '{"shell":{"autoRun":true}}');
+    model.release();
+    await settleUntil(() => frameOf(ui).includes(SETTINGS));
+    expect(watching(ui)).toBe(false);
+    clock.t += 50;
+    await ui.press('x');
+    await ui.press('y');
+    await settle(6);
+    expect(frameOf(ui)).not.toContain('stopped');
+    expect(frameOf(ui)).toContain(SETTINGS);
+    expect(a!.held).toBe(true);
+    a!.release();
+    ui.app.unmount();
+  } finally { unguardSettings(); }
 });

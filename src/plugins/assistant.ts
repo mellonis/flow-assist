@@ -848,6 +848,16 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             }
             host.notify();
           };
+          // The session's own y/n or question ends the watch and takes the keys with the
+          // 600 ms pause an own request over the tree cursor has.
+          const endWatchForOwnAsk = () => {
+            endWatch();
+            const c = convRef.current!;
+            ownSeenRef.current = c.confirm ?? null;
+            ownArmedAt.current = c.confirm ? askClock.now() : null;
+            questionSeenRef.current = c.question ?? null;
+            questionArmedAt.current = c.question ? askClock.now() : null;
+          };
           const restoreView = (of?: Conversation) => {
             const m = of ? viewMemory.current!.get(of) : undefined;
             if (m && of) {
@@ -983,14 +993,12 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               if (ev.end.outcome === 'stopped' || ev.end.outcome === 'failed') restoreQueue();
             },
             confirm: (ev) => {
-              if (!ev.request || ev.host) return;
-              // The session's own y/n is what the person must see: it ends a watch, and is
-              // armed as one over the tree cursor is.
-              if (watchRef.current) {
-                endWatch();
-                ownSeenRef.current = convRef.current!.confirm ?? null;
-                ownArmedAt.current = askClock.now();
-              }
+              if (!ev.request) return;
+              // The session's own y/n, the settings file's included, is what the person must
+              // see: it ends a watch, and is armed as one over the tree cursor is.
+              if (watchRef.current) endWatchForOwnAsk();
+              // The settings file's y/n closes neither a pager nor `/context`.
+              if (ev.host) return;
               if (contextOpenRef.current) setContextOpen(false);
               // So does a pager: the y/n is what the person must see and answer.
               if (pagerRef.current) setPager(null);
@@ -998,11 +1006,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // A question is answered in the conversation: a pager over it closes.
             question: (ev) => {
               if (ev.parked && pagerRef.current) setPager(null);
-              if (ev.parked && watchRef.current) {
-                endWatch();
-                questionSeenRef.current = convRef.current!.question ?? null;
-                questionArmedAt.current = askClock.now();
-              }
+              if (ev.parked && watchRef.current) endWatchForOwnAsk();
             },
             notice: (ev) => setError(ev.text),
             // Landed while the chat is closed: counted unread, and one alert.
@@ -2028,6 +2032,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const guardSees = (c: Offered | null): object | null => (c && focusedRef.current && !hostKeys().panel && !hostKeys().line ? c.request : null);
           const shownShape = shownChild ? childShape(dock?.panel.width ?? width) : null;
           // A watched child's request is shown the same way: one request at a time.
+          // A watch is never up over the session's own y/n or question: it ends here if one
+          // got through, and the session's y/n is never drawn inside it.
+          if (watchRef.current && (convRef.current!.confirm || convRef.current!.question)) endWatchForOwnAsk();
           if (watchRef.current?.ask && watchAskNow()) setWatch({ ...watchRef.current, ask: false });
           askGuard.current.show(guardSees(shownChild ?? (open ? watchAskNow() : null)));
           // The conversation's own y/n that takes a subagent's block's place is armed too:
@@ -2555,7 +2562,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             wheel: wheelRef,
             toEnd: toEndRef,
             escWord: layout === 'panel' ? 'collapse' : 'close',
-            pendingConfirm: pendingAsk ?? (shownChild && shownShape === 'block' ? { ...shownChild.request, path: shownChild.path } : null),
+            pendingConfirm: watching ? null : pendingAsk ?? (shownChild && shownShape === 'block' ? { ...shownChild.request, path: shownChild.path } : null),
             askNotice: shownChild && shownShape === 'notice' && !pendingAsk
               ? (!fieldEmpty()
                 ? `⏸ ${shownChild.path.join(' › ')} waits for a y/n — ${bangLevel > 0 ? 'leave shell mode' : 'clear the line'} to answer`
