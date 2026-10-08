@@ -1919,7 +1919,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const ownNow = convRef.current!.confirm ?? null;
           if (ownNow !== ownSeenRef.current) {
             ownSeenRef.current = ownNow;
-            ownArmedAt.current = ownNow && childBlockRef.current ? askClock.now() : null;
+            ownArmedAt.current = ownNow && (childBlockRef.current || treeSelRef.current.at !== null || panelRef.current) ? askClock.now() : null;
           }
           childBlockRef.current = !!shownChild && childShape(dock?.panel.width ?? width) === 'block';
           // What a plugin says from inside a turn — a tool of its own, a task's — belongs to
@@ -1972,7 +1972,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // A request that took a block's place under this key is armed from this key.
               if (conv.confirm && conv.confirm !== ownSeenRef.current) {
                 ownSeenRef.current = conv.confirm;
-                ownArmedAt.current = childBlockRef.current ? askClock.now() : null;
+                ownArmedAt.current = childBlockRef.current || treeSelRef.current.at !== null || panelRef.current ? askClock.now() : null;
               }
               // The pager is a reader: Esc brings the conversation back, and every other
               // key stops here — nothing reaches the field, the folds or the model.

@@ -468,6 +468,51 @@ test('an own y/n that arrives while the cursor is in the rows takes the keys as 
   ui.app.unmount();
 });
 
+// The conversation's own y/n that lands while a stop question is up (or a panel is drawn) is
+// armed like one that takes a child block's place: the `y` on its way to the question must
+// not approve the write.
+async function ownRequestOver(open: 'rows' | 'agents') {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-tree-own-')));
+  const booted = await boot([{ mark: 'AAA' }, { mark: 'BBB' }], { main: [[{ hold: true }, { tool: 'run_command', args: { command: `touch ${path.join(dir, 'OWN.txt')}` } }], [{ text: 'main done' }]] });
+  const { children: [a, b], ui, model } = booted;
+  await ask(ui, '/subagent AAA go');
+  await ask(ui, '/subagent BBB go');
+  await settleUntil(() => a!.held && b!.held);
+  await ask(ui, 'main go');
+  await settleUntil(() => model.held);
+  await settleUntil(() => frameOf(ui).includes('⚙ bbb-go'));
+  if (open === 'rows') await ui.press('down'); else { await ask(ui, '/agents'); await settleUntil(() => panelOpen(ui)); }
+  await ui.press('x');
+  expect(frameOf(ui)).toContain('y yes · n no');
+  model.release();
+  await settleUntil(() => frameOf(ui).includes(BLOCK));
+  expect(frameOf(ui)).toContain(BLOCK);
+  return { ...booted, own: path.join(dir, 'OWN.txt') };
+}
+
+for (const open of ['rows', 'agents'] as const) {
+  test(`an own y/n that lands over the ${open === 'rows' ? 'tree cursor' : '/agents panel'} waits out the pause`, async () => {
+    const { children: [a, b], ui, own } = await ownRequestOver(open);
+    clock.t += 50;
+    await ui.press('y');
+    await settle(4);
+    expect(fs.existsSync(own)).toBe(false);
+    expect(frameOf(ui)).not.toMatch(/(aaa|bbb)-go stopped/);
+    a!.release(); b!.release();
+    ui.app.unmount();
+  });
+
+  test(`after the pause the y approves an own request that landed over the ${open === 'rows' ? 'tree cursor' : '/agents panel'}`, async () => {
+    const { children: [a, b], ui, own } = await ownRequestOver(open);
+    clock.t += 600;
+    await ui.press('y');
+    await settleUntil(() => fs.existsSync(own));
+    expect(fs.existsSync(own)).toBe(true);
+    a!.release(); b!.release();
+    ui.app.unmount();
+  });
+}
+
 test('the chat collapsed and opened again has the cursor in the field', async () => {
   const { children: [a], ui } = await boot([{ mark: 'AAA' }], { cols: 160, rows: 40, mode: 'panel' });
   await ask(ui, '/subagent AAA go');
