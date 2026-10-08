@@ -85,17 +85,19 @@ export function panelKey(state: PanelState, key: Key): PanelStep {
   const { rows } = panelRows(state);
   const last = Math.max(0, rows.length - 1);
   const cursor = panelCursor(state, rows);
+  // The cursor's row is remembered by id only for a panel that follows its rows.
+  const atOf = (to: number): { at?: string } => (panelTop(state).follow && rows[to] ? { at: rows[to]!.id } : {});
   if (key.name === 'escape') {
     return { state: state.stack.length > 1 ? { stack: state.stack.slice(0, -1), cursor: 0, notice: '' } : null };
   }
   if (key.name === 'up' || key.name === 'down') {
     const to = key.name === 'up' ? Math.max(0, cursor - 1) : Math.min(last, cursor + 1);
-    return { state: { ...state, cursor: to, ...(rows[to] ? { at: rows[to]!.id } : {}) } };
+    return { state: { ...state, cursor: to, ...atOf(to) } };
   }
   if (key.ctrl || key.meta) return { state };
   const def = panelKeys(state).find((k) => k.key === key.name);
   if (!def) return { state };
-  return { state: { ...state, cursor, notice: '', ...(rows[cursor] ? { at: rows[cursor]!.id } : {}) }, run: { def, id: rows[cursor]?.id ?? null } };
+  return { state: { ...state, cursor, notice: '', ...atOf(cursor) }, run: { def, id: rows[cursor]?.id ?? null } };
 }
 
 const isSpec = (v: unknown): v is PanelSpec => !!v && typeof v === 'object' && typeof (v as PanelSpec).rows === 'function' && typeof (v as PanelSpec).title === 'string';

@@ -1592,6 +1592,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 setField('');
                 const asked = conv;
                 let asking: string | null = null;
+                // The question about a node that has ended is dropped where it is read, so the
+                // hint and `x` come back.
+                const pending = (): string | null => { if (asking !== null && !asked.nodeByKey(asking)) asking = null; return asking; };
                 const stopKeys: PanelKeyDef[] = [{
                   key: 'x', label: 'stop',
                   run: (id) => {
@@ -1609,8 +1612,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   title: 'Agents',
                   follow: true,
                   empty: 'no subagents here',
-                  rows: () => agentsPanelRows(asked.tree(), asked.endedChildren, Date.now(), asking),
-                  get keys() { return asking !== null ? answerKeys : stopKeys; },
+                  rows: () => agentsPanelRows(asked.tree(), asked.endedChildren, Date.now(), pending()),
+                  get keys() { return pending() !== null ? answerKeys : stopKeys; },
                 });
                 return;
               }
@@ -1832,7 +1835,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           };
           const fieldEmpty = () => inputRef.current === '' && bangLevelRef.current === 0;
           // The tree rows the chat draws for `props` (the chat's props without `tree`): the
-          // render and the keys both ask here, so the rows a key reaches are the rows drawn.
+          // render and the keys both ask here: the geometry is the render's, the nodes are read at the key.
           const treeNow = (props: Record<string, unknown>) => {
             const room = chatRoom(props as unknown as Parameters<typeof chatRoom>[0]);
             const nodes = conv.tree();
@@ -2019,10 +2022,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               }
               // The cursor in the tree rows (AGENTS.md (agent tree)): every key is the rows'.
               // ↑/↓ move, ↑ on the first row and Esc go back to the field, `x` asks to stop
-              // the node and `y` stops it with what it started. Nothing reaches the field, the
-              // model, Esc's stages or a subagent's y/n (`childAskNow` is null here, and this
-              // key was noted by the guard above).
+              // the node and `y` stops it with what it started. Besides the sessions key,
+              // nothing reaches the field, the model, Esc's stages or a subagent's y/n
+              // (`childAskNow` is null here, and this key was noted by the guard above).
               if (treeSelRef.current.at !== null) {
+                // The sessions key is the one key besides these that works from the rows: the
+                // cursor and its question go, and the picker opens.
+                if (isKey(host.keys.sessions ?? [], key)) { setTreeSel(NO_TREE_SEL); openPicker(); return true; }
                 const sel = treeSelRef.current;
                 const stops = treeStops();
                 const i = stops.findIndex((r) => r.key === sel.at);
@@ -2402,7 +2408,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               const p = pickerRef.current;
               if (p) { if (p.mode === 'list' && index !== p.cursor) setPicker({ ...p, cursor: index, notice: '' }); return; }
               const q = panelRef.current;
-              if (q && index !== panelCursor(q, panelRows(q).rows)) setPanel({ ...q, cursor: index, at: panelRows(q).rows[index]?.id });
+              if (!q) return;
+              // Only a panel that follows its rows reads them here, to remember the clicked
+              // row by id; any other keeps the index alone.
+              if (panelTop(q).follow) {
+                const { rows } = panelRows(q);
+                if (index !== panelCursor(q, rows)) setPanel({ ...q, cursor: index, at: rows[index]?.id });
+              } else if (index !== q.cursor) setPanel({ ...q, cursor: index });
             },
             // What this chat's conversation is doing, for its own row: a y/n or a question
             // waits, a turn or a `!command` runs, or an answer or a result came while the

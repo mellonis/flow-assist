@@ -439,7 +439,7 @@ test('x then y with a child\'s request waiting stops the node and approves nothi
   ui.app.unmount();
 });
 
-test('an own y/n that arrives while the cursor is in the rows takes the keys as it always did, and the cursor does not come back', async () => {
+test('an own y/n that arrives while the cursor is in the rows takes the keys, and the cursor does not come back', async () => {
   const root0 = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-tree-own-')));
   const { children: [a, b], ui, model, root } = await boot([{ mark: 'AAA' }, { mark: 'BBB' }], { main: [[{ hold: true }, { tool: 'run_command', args: { command: `touch ${path.join(root0, 'OWN.txt')}` } }], [{ text: 'main done' }]] });
   void root;
@@ -651,5 +651,112 @@ test('with a child waiting for a y/n and /agents open, y answers nothing and the
   await settleUntil(() => fs.existsSync(path.join(root, 'ASKW.txt')));
   expect(fs.existsSync(path.join(root, 'ASKW.txt'))).toBe(true);
   stay!.release();
+  ui.app.unmount();
+});
+
+test('in /agents the question about a node that has ended is dropped: the hint and x come back', async () => {
+  const { children: [a, b], ui } = await boot([{ mark: 'AAA' }, { mark: 'BBB' }]);
+  await ask(ui, '/subagent AAA go');
+  await ask(ui, '/subagent BBB go');
+  await settleUntil(() => a!.held && b!.held);
+  await ask(ui, '/agents');
+  await settleUntil(() => panelOpen(ui) && frameOf(ui).includes('bbb-go'));
+  await ui.press('x');
+  expect(frameOf(ui)).toContain('stop aaa-go? y yes · n no');
+  a!.release();
+  await settleUntil(() => rowsOf(ui).some((r) => /aaa-go.*done/.test(r)));
+  expect(frameOf(ui)).not.toContain('y yes · n no');
+  expect(frameOf(ui)).toContain('x stop');
+  await ui.press('up');
+  await ui.press('x');
+  expect(frameOf(ui)).toContain('stop bbb-go? y yes · n no');
+  await ui.press('n');
+  b!.release();
+  ui.app.unmount();
+});
+
+test('the sessions key works from the rows: it clears the cursor and the stop question and opens the picker', async () => {
+  const { children: [a, b], ui } = await twoHeld();
+  await ui.press('down');
+  await ui.press('x');
+  expect(frameOf(ui)).toContain('stop aaa-go? y yes · n no');
+  ui.backend.press({ name: 's', ctrl: true });
+  await settleUntil(() => frameOf(ui).includes('Sessions ·'));
+  expect(frameOf(ui)).toContain('Sessions ·');
+  await ui.press('escape');
+  await settleUntil(() => !frameOf(ui).includes('Sessions ·'));
+  expect(inRows(ui)).toBe(false);
+  expect(frameOf(ui)).not.toContain('y yes · n no');
+  expect(frameOf(ui)).toContain('⚙ aaa-go');
+  a!.release(); b!.release();
+  ui.app.unmount();
+});
+
+test('a y in the rows with no question stops nothing, and Ctrl+Y with a question up stops nothing', async () => {
+  const { children: [a, b], ui } = await twoHeld();
+  await ui.press('down');
+  await ui.press('y');
+  await settle(4);
+  expect(frameOf(ui)).not.toMatch(/(aaa|bbb)-go stopped/);
+  expect(inRows(ui)).toBe(true);
+  await ui.press('x');
+  expect(frameOf(ui)).toContain('stop aaa-go? y yes · n no');
+  ui.backend.press({ name: 'y', ctrl: true });
+  await settle(4);
+  expect(frameOf(ui)).not.toMatch(/(aaa|bbb)-go stopped/);
+  expect(frameOf(ui)).toContain('stop aaa-go? y yes · n no');
+  await ui.press('n');
+  a!.release(); b!.release();
+  ui.app.unmount();
+});
+
+test('in /agents x, ↓, y stops nothing: the question is for the row it was asked on', async () => {
+  const { children: [a, b], ui } = await twoHeld();
+  await ask(ui, '/agents');
+  await settleUntil(() => panelOpen(ui) && frameOf(ui).includes('bbb-go'));
+  await ui.press('x');
+  await ui.press('down');
+  await ui.press('y');
+  await settle(4);
+  expect(frameOf(ui)).not.toMatch(/(aaa|bbb)-go.*stopped/);
+  expect(frameOf(ui)).toContain('⚙ aaa-go');
+  expect(frameOf(ui)).toContain('⚙ bbb-go');
+  a!.release(); b!.release();
+  ui.app.unmount();
+});
+
+test('a click in /agents after ↑/↓ puts the cursor on the clicked row', async () => {
+  const { children: [a, b], ui } = await twoHeld();
+  await ask(ui, '/agents');
+  await settleUntil(() => panelOpen(ui) && frameOf(ui).includes('bbb-go'));
+  await ui.press('down');
+  const y = rowAt(ui, 'aaa-go');
+  ui.backend.mouse('down', 12, y);
+  ui.backend.mouse('up', 12, y);
+  await settle(6);
+  await ui.press('x');
+  expect(frameOf(ui)).toContain('stop aaa-go? y yes · n no');
+  await ui.press('n');
+  a!.release(); b!.release();
+  ui.app.unmount();
+});
+
+test('a list at its end stays at its end when a row appears and when it leaves', async () => {
+  const lines = Array.from({ length: 14 }, (_, i) => `- answer line ${String(i + 1).padStart(2, '0')}`).join('\n');
+  const { children: [a], ui } = await boot([{ mark: 'AAA' }], { main: [[{ text: lines }]] });
+  await ask(ui, 'print them');
+  await settleUntil(() => frameOf(ui).includes('answer line 14'));
+  const last = () => rowAt(ui, 'answer line 14');
+  expect(last()).toBeGreaterThan(0);
+  await ask(ui, '/subagent AAA go');
+  await settleUntil(() => a!.held && frameOf(ui).includes('⚙ aaa-go'));
+  expect(frameOf(ui)).toContain('answer line 14');
+  // The last row of the conversation is still the end of the answer, or what came after it.
+  expect(rowAt(ui, '⚙ aaa-go')).toBeGreaterThan(last());
+  a!.release();
+  await settleUntil(() => frameOf(ui).includes('◆ aaa-go finished:'));
+  await settleUntil(() => !frameOf(ui).includes('⚙ aaa-go'));
+  expect(frameOf(ui)).toContain('answer line 14');
+  expect(rowAt(ui, '◆ aaa-go finished:')).toBeGreaterThan(last());
   ui.app.unmount();
 });

@@ -178,3 +178,71 @@ test('a root closed inside the hold tells nobody afterwards and keeps no timer',
   child.setToolLabel('⚙ three…');
   expect(seen.notify).toBe(1);
 });
+
+// What the root's latest `tree` saw: the live nodes' labels as the host would read them then.
+function lastSeen(rig: Rig) {
+  const seen = { labels: [] as string[], count: 0 };
+  rig.conv.on('tree', () => { seen.count++; seen.labels = rig.conv.tree().map((n) => n.label); });
+  return seen;
+}
+
+test('the root hears of a grandchild that ends, of children stopped with their parent, and of children handed up', async () => {
+  const model = new ScriptedModel();
+  const innerScript = subScript(model, 'inner job');
+  innerScript.script([{ hold: true }], [{ text: 'inner' }]);
+  subScript(model, 'outer job').script([{ text: 'outer is over' }]);
+  const rig = rigOf(model);
+  const seen = lastSeen(rig);
+  // A grandchild ends: the root's latest tree no longer lists it.
+  const outer = begin(rig, spec('outer', 'o'), rig.conv, false);
+  const inner = begin(rig, spec('inner', 'inner job'), outer.child);
+  await rig.until(() => innerScript.held);
+  expect(seen.labels).toEqual(['outer', 'inner']);
+  innerScript.release();
+  await inner.done;
+  expect(seen.labels).toEqual(['outer']);
+  // A parent stopped with a child under it: the root's latest tree lists the parent alone.
+  begin(rig, spec('kid', 'k'), outer.child, false);
+  expect(seen.labels).toEqual(['outer', 'kid']);
+  (outer.child as unknown as { stopChildren(by: string): void }).stopChildren('person');
+  expect(seen.labels).toEqual(['outer']);
+});
+
+test('children handed up to the root are told to it', async () => {
+  const model = new ScriptedModel();
+  subScript(model, 'outer job').script([{ text: 'outer is over' }]);
+  const innerScript = subScript(model, 'inner job');
+  innerScript.script([{ hold: true }], [{ text: 'inner' }]);
+  const rig = rigOf(model);
+  const outer = begin(rig, spec('outer', 'outer job'), rig.conv, false);
+  const inner = begin(rig, spec('inner', 'inner job'), outer.child);
+  await rig.until(() => innerScript.held);
+  const seen = lastSeen(rig);
+  (outer.child as unknown as { handChildrenUp(): void }).handChildrenUp();
+  expect(seen.count).toBe(1);
+  expect(seen.labels).toEqual(['outer', 'inner']);
+  expect(rig.conv.tree().map((n) => [n.label, n.depth])).toEqual([['outer', 1], ['inner', 1]]);
+  innerScript.release();
+  await inner.done;
+});
+
+test('two conversations that changed their step inside one window are each told at its end, with their ancestors', async () => {
+  const rig = rigOf(new ScriptedModel());
+  const mid1 = begin(rig, spec('mid1', 'm'), rig.conv, false);
+  const mid2 = begin(rig, spec('mid2', 'm'), rig.conv, false);
+  const g1 = begin(rig, spec('g1', 'g'), mid1.child, false);
+  const g2 = begin(rig, spec('g2', 'g'), mid2.child, false);
+  const seen = spy(rig);
+  const heard = { mid1: 0, mid2: 0 };
+  mid1.child.on('tree', () => { heard.mid1++; });
+  mid2.child.on('tree', () => { heard.mid2++; });
+  // The first goes at once and opens the window; the others are held in it.
+  g1.child.setToolLabel('⚙ one…');
+  g2.child.setToolLabel('⚙ two…');
+  g1.child.setToolLabel('⚙ three…');
+  expect(heard).toEqual({ mid1: 1, mid2: 0 });
+  expect(seen).toEqual({ tree: 1, notify: 1 });
+  await wait(260);
+  expect(heard).toEqual({ mid1: 2, mid2: 1 });
+  expect(seen).toEqual({ tree: 2, notify: 2 });
+});

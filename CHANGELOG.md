@@ -17,7 +17,8 @@ What each version of flow-assist brought, newest first. The version is the one i
   to the first row (not from a history entry, not in shell mode); ↑ and ↓ walk the rows,
   ↑ on the first and Esc go back to the line. `x` asks `stop <name> and N below it? y yes
   · n no` in place of that row, and `y` stops the node and what it started, as
-  `/subagent stop` does. While the cursor is in the rows every key is theirs, and a
+  `/subagent stop` does. While the cursor is in the rows every key is theirs, except
+  the sessions key, which clears the cursor and opens the picker; a
   subagent's y/n cannot be answered: a line says `⏸ <name> waits for a y/n — Esc to
   answer`, and after Esc the block is armed afresh like any block that has just appeared.
 - **`/agents` shows the whole tree.** In the conversation's place: the live nodes in tree

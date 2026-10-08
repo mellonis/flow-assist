@@ -235,7 +235,7 @@ node started stands under it, indented. A task is marked `(task)`. The rows carr
 `ui.agentRows` is how many rows may be drawn: 4 by default, 0 to 8, 0 for none. With more
 live nodes than that, the ones waiting for you come first, then the working ones, then the
 rest, and the last row reads `+3 more — /agents`. In a short chat the rows give way first,
-down to none, keeping four rows of conversation; then the plan gives way, as it always did.
+down to none, keeping four rows of conversation; then the plan gives way.
 The field, the hint row and a y/n never do. The rows are not drawn while a question, your own
 y/n, a subagent's y/n block, `/context`, the pager, a picker or a command's panel is.
 
@@ -245,19 +245,22 @@ in shell mode). ↑ and ↓ walk the rows; ↑ on the first row, or Esc, goes ba
 and the hint row names the keys while you are in the rows. `x` asks `stop <name> and 2
 below it? y yes · n no` in place of that row; `y` stops the node and everything it started
 (the same stop as `/subagent stop`, written to the journal as yours), `n` or Esc leaves it
-running. Every other key is swallowed there: nothing is typed and nothing is sent. The cursor
-follows its node when the rows change; when its node ends it moves to the nearest row, and
+running; with a question up, the first Esc only drops it. The sessions key, Ctrl+C, the
+wheel and PgUp/PgDn still work there; every other key is swallowed: nothing is typed and
+nothing is sent. The
+cursor follows its node when the rows change; when its node ends it moves to the nearest row, and
 with no row left the line has the keys again.
 
 A subagent's y/n cannot be answered from the rows. While the cursor is in them, a waiting
-subagent shows as the one line `⏸ <name> waits for a y/n — Esc to answer`; after Esc its
+subagent shows as the one line `⏸ <name> waits for a y/n — Esc to answer` (with a stop
+question up, the first Esc drops the question and the next one leaves the rows); after Esc its
 block is drawn and, like any block that has just appeared, waits a short pause before a `y`
 counts. A subagent that waits while the line is empty draws its block in place of the rows,
 so the rows are away exactly then; `/agents` or `/subagent stop <name>` still reach it.
 
 **`/agents`** opens the whole tree where the conversation is: the live nodes in tree order
-with `<state> · <time spent>`, then the last twenty that ended (`done`, `failed`, `stopped`,
-the time and the tokens). ↑ and ↓ move, `x` asks the same question in place of the row and
+with `<state> · <time spent>`, then the last twenty that ended (`done`, `failed`, `stopped`, `empty`,
+`limit`, the time and the tokens). ↑ and ↓ move, `x` asks the same question in place of the row and
 `y` stops the node, Esc closes. On an ended row `x` only says there is nothing to stop. The
 cursor stays on its node while others start and end. `/subagent` still prints the
 numbered list that `stop <number>` reads.

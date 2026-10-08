@@ -177,3 +177,35 @@ test('setConfig and unsetConfig refuse every key outside the calling plugin\'s o
   expect(other!.setConfig('plugins.srv.flag', false, { session: true }).ok).toBe(false);
   ui.app.unmount();
 });
+
+test('a click on a row of a panel that does not follow moves the cursor without reading the plugin\'s rows', async () => {
+  let calls = 0;
+  const servers = ['alpha', 'beta'];
+  const make = (m: Make) => [m('pn', {
+    name: 'pn',
+    commands: [{
+      name: 'pn', usage: 'pn', description: 'A panel', chat: true,
+      run: (ctx: any) => { ctx.openPanel({ title: 'Plain', rows: () => { calls++; return servers.map((id) => ({ id, text: id })); }, keys: [{ key: 'r', label: 'go', run: (id: string) => `went ${id}` }] }); },
+    }],
+  } as never)];
+  const ui = await bootApp(new ScriptedModel(), 110, 30, make);
+  await ui.press('F');
+  await ui.type('/pn');
+  await ui.press('return');
+  await settle(4);
+  expect(frame(ui)).toContain('Plain');
+  const rowY = (t: string) => frame(ui).split('\n').findIndex((r) => r.includes(t));
+  // The cursor is on the first row: a click there changes nothing and reads no rows.
+  const before = calls;
+  ui.backend.mouse('down', 14, rowY('alpha'));
+  ui.backend.mouse('up', 14, rowY('alpha'));
+  await settle(6);
+  expect(calls).toBe(before);
+  // A click on the second moves the cursor there.
+  ui.backend.mouse('down', 14, rowY('beta'));
+  ui.backend.mouse('up', 14, rowY('beta'));
+  await settle(6);
+  await ui.press('r');
+  expect(frame(ui)).toContain('went beta');
+  ui.app.unmount();
+});

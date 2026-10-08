@@ -950,6 +950,22 @@ test('the chat draws the tree as the last block: one line per row, the cursor ro
   expect(asking.join('\n')).not.toContain('⚙ b · working');
 });
 
+test('the cursor row is drawn inverse, the others are not, and the block is out of every selection', async () => {
+  const backend = new TestBackend(80, 24);
+  const rows = treeRowsOf('a', 'b');
+  const handle = await render(h(renderChatModal, { ...baseChat, tree: { rows, more: 0, cursor: 'b', ask: null } } as never), backend);
+  const lines = backend.lastFrame!.split('\n');
+  const y = (t: string) => lines.findIndex((l) => l.includes(t));
+  const grid = (backend as unknown as { lastBuffer: Grid }).lastBuffer;
+  const inverseOn = (row: number) => { for (let x = 0; x < grid.width; x++) { const c = grid.get(x, row); if (c.style.inverse && c.char.trim()) return true; } return false; };
+  expect(inverseOn(y('⚙ b · working'))).toBe(true);
+  expect(inverseOn(y('⚙ a · working'))).toBe(false);
+  // A selection over the rows takes nothing of them.
+  const text = handle.select({ x: 0, y: y('⚙ a · working') }, { x: 79, y: y('⚙ b · working') });
+  expect(text).not.toContain('working');
+  handle.unmount();
+});
+
 test('the tree is not drawn under a y/n, and a row is cut to one line', async () => {
   const backend = new TestBackend(40, 24);
   const long = [{ key: 'a', text: `⚙ ${'w'.repeat(80)}`, tone: 'work' as const }];

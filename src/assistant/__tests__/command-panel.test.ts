@@ -92,3 +92,21 @@ test('a key on a following panel runs on the row the cursor follows', () => {
   rows.shift();
   expect(panelKey(s, { name: 'x' }).run?.id).toBe('b');
 });
+
+test('a panel that does not follow records no row id on ↑/↓ or on a key', () => {
+  let s = panelStart(spec(['a', 'b']));
+  s = panelKey(s, { name: 'down' }).state!;
+  expect(s.at).toBeUndefined();
+  expect(panelKey(s, { name: 'r' }).state!.at).toBeUndefined();
+});
+
+test('a panel pushed over a following one starts without the parent\'s row id', () => {
+  const follow: PanelSpec = { title: 'Agents', follow: true, rows: () => [{ id: 'a', text: 'a' }, { id: 'b', text: 'b' }] };
+  let s = panelStart(follow);
+  s = panelKey(s, { name: 'down' }).state!;
+  expect(s.at).toBe('b');
+  s = panelAnswer(s, spec(['p', 'q']));
+  expect(s.stack.length).toBe(2);
+  expect(s.at).toBeUndefined();
+  expect(panelCursor(s, panelRows(s).rows)).toBe(0);
+});

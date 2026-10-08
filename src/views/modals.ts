@@ -1537,9 +1537,10 @@ const TREE_LIST_MIN = 4;
 // How many tree rows the column has room for: `min(max, nodes)` reduced until the
 // conversation list keeps four rows with the whole plan block counted — the tree gives way
 // before the plan does. The block's gap above is part of what it reserves; the block has
-// no line of its own besides the rows, the stop question taking the cursor row's place and
-// the keys the hint row's. 0 when `hidden`. `besides` and `planFull` are `chatRoom`'s. The chat draws exactly this
-// many rows, and its keys reach exactly these (AGENTS.md (agent tree)).
+// no line of its own besides the rows, the stop question taking the cursor row's place
+// and the keys the hint row's. 0 when `hidden`. `besides` and `planFull` are
+// `chatRoom`'s. The chat draws this many rows, and its keys use the same geometry, with
+// the nodes read at the key (AGENTS.md (agent tree)).
 export function treeBudget({ boxH, besides, planFull, nodes, max, hidden }: { boxH: number; besides: number; planFull: number; nodes: number; max: number; hidden: boolean }): number {
   if (hidden || max <= 0 || nodes <= 0) return 0;
   const free = boxH - 4 - besides - (planFull > 0 ? 1 + planFull : 0) - TREE_LIST_MIN;

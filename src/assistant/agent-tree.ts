@@ -72,7 +72,7 @@ export function treeCursor(prevKey: string | null, prevIndex: number, rows: read
   return stops[Math.min(Math.max(prevIndex, 0), stops.length - 1)]!.key;
 }
 
-// The question under the rows before a stop; `y` stops the node and what it started.
+// The question that stands in place of the cursor's row before a stop; `y` stops the node and what it started.
 export function stopQuestion(node: Pick<TreeNode, 'label' | 'below'>): string {
   return `stop ${node.label}${node.below ? ` and ${node.below} below it` : ''}? y yes · n no`;
 }

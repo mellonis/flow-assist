@@ -398,29 +398,40 @@ export class Conversation {
     outsideWork(() => { for (const fn of [...(this.handlers.get(ev.type) ?? [])]) fn(ev); });
     if (ev.type === 'confirm' && this.parent) this.askedUp();
   }
-  // The `tree` events held back: one window per root, 200 ms long, in which a change of a
-  // child's latest step is told once at its end (`treeChanged`).
-  private treeHold: { timer: ReturnType<typeof setTimeout>; from: Conversation | null } | null = null;
+  // The `tree` events held back: one window per root, 200 ms long, in which the conversations
+  // whose latest step changed are remembered, each once, and told at its end (`treeChanged`).
+  private treeHold: { timer: ReturnType<typeof setTimeout>; held: Set<Conversation> } | null = null;
   // Something below `from` (a conversation and the ones above it) changed what the live
   // children show: every one of them hears `tree`, and the host redraws through the root's
-  // `notify`. The ancestors are read now, from `parent`, as `askedUp` reads them. A change
-  // of the latest step is `held`: the first goes at once, the rest of a 200 ms window are
-  // told as one at its end. A closed root hears nothing and holds no timer.
+  // `notify`. The ancestors are read from `parent` when they are told, as `askedUp` reads
+  // them. A change of the latest step is `held`: the first goes at once, the rest of a
+  // 200 ms window are remembered by conversation and told at its end, each of them and its
+  // ancestors once, the root's `notify` once. A closed root hears nothing and holds no timer.
   private treeChanged(from: Conversation | null, held = false): void {
     if (!from) return;
     let root: Conversation = from;
     while (root.parent) root = root.parent;
     if (root.closed) return;
     if (held) {
-      if (root.treeHold) { root.treeHold.from = from; return; }
-      const hold = { timer: setTimeout(() => {
-        root.treeHold = null;
-        if (hold.from && !root.closed) root.treeChanged(hold.from, true);
-      }, TREE_HOLD_MS), from: null as Conversation | null };
-      root.treeHold = hold;
+      if (root.treeHold) { root.treeHold.held.add(from); return; }
+      root.armTreeHold();
     }
-    for (let a: Conversation | null = from; a; a = a.parent) a.emit({ type: 'tree' });
-    root.deps.notify();
+    root.tellTree([from]);
+  }
+  // Opens a window on this root; its end tells what was held and opens the next one.
+  private armTreeHold(): void {
+    const hold = { timer: setTimeout(() => {
+      this.treeHold = null;
+      const held = [...hold.held];
+      if (held.length && !this.closed) { this.armTreeHold(); this.tellTree(held); }
+    }, TREE_HOLD_MS), held: new Set<Conversation>() };
+    this.treeHold = hold;
+  }
+  // Each of `from` and every conversation above it hears `tree` once; the root redraws once.
+  private tellTree(from: readonly Conversation[]): void {
+    const told = new Set<Conversation>();
+    for (const f of from) for (let a: Conversation | null = f; a; a = a.parent) if (!told.has(a)) { told.add(a); a.emit({ type: 'tree' }); }
+    this.deps.notify();
   }
   // A child's y/n was parked or answered: every conversation above it hears `asking`, and
   // the host redraws through the root's `notify` (a child's own is silent). The ancestors

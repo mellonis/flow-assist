@@ -814,8 +814,10 @@ there is no `/fullscreen`.
   happened and on every ancestor read at the event (a child may have moved), then the root's
   `deps.notify()` once: a child that starts, ends, is stopped or handed up, flips busy,
   parks or has answered a y/n, or ends its delay. A change of the latest step is held: the
-  first goes at once, the rest of a 200 ms window as one at its end, so a child running
-  tool after tool does not redraw the chat at the tool's pace. A closed root says nothing.
+  first goes at once, the conversations that changed in the rest of a 200 ms window are
+  remembered, each once, and at its end each of them and its ancestors hear `tree` once and
+  the root's `notify` runs once, so a child running tool after tool does not redraw the
+  chat at the tool's pace. A closed root says nothing.
   The rows are `src/assistant/agent-tree.ts`: `treeRows` makes one terminal line per node
   (`<mark> <label> · <state>`, two cells of indent per level, no clock), keeps at most
   `ui.agentRows` (4, 0 to 8) and, over that, the waiting nodes first, then the working, then
@@ -829,15 +831,21 @@ there is no `/fullscreen`.
   never the field, the hint row or a y/n. The block is the gap and the rows, nothing else: the
   stop question takes the place of the cursor row's text and the keys are named in the hint
   row's left cell. The plugin asks `treeNow` for the rows, in the render and in the key
-  handler alike, so a key reaches exactly the rows that are drawn.
+  handler alike: the geometry (`chatRoom`, the budget) is the last render's, the nodes are
+  read from `Conversation.tree()` at the key, so a node that changed between the two can
+  reorder the stops under the key (the question names the node the cursor is on, so no wrong
+  node is stopped).
   **The cursor** (`treeSel`: the node's key and whether its stop question is up) enters with
   ↓ on an empty field, with no history entry shown before the key (the ↓ that ends a history
   walk does not also enter) and bang level 0, when a row is drawn. With it in the rows the
   chat handler gives every key to one branch, after a question, `/context` and an own y/n and
   before everything else: ↑ / ↓ move, ↑ on the first row and Esc leave, `x` asks, `y` calls
   `stopSubtree` on the node (the stop `/subagent stop` makes, journaled as the person's),
-  `n` / Esc drop the question, anything else is swallowed. Esc there is never the turn's stop,
-  the field's clear or the exit arm. **A request is not answerable from the rows:**
+  `n` / Esc drop the question (Esc with a question up drops only the question; the next Esc
+  leaves the rows), the sessions key clears the cursor and the question and opens the picker,
+  anything else is swallowed. Ctrl+C, the wheel and PgUp/PgDn are heard above this handler.
+  Esc there is never the turn's stop, the field's clear or the exit arm. **A request is not
+  answerable from the rows:**
   `childAskNow` is null while the cursor is in them, so a waiting subagent shows as the
   notice line `⏸ <path> waits for a y/n — Esc to answer`, the guard is told nothing is shown
   (Esc then arms the block afresh), and every key is noted. The cursor and its question are
@@ -847,7 +855,10 @@ there is no `/fullscreen`.
   its cursor stays on its row id as rows start and end) whose rows are
   `agentsPanelRows`: live nodes with the time spent, then the ended ones; `x` asks in place
   of the row and `y` stops, as in the rows; an ended row refuses with a notice. A subagent's
-  block is never drawn under it (the panel hides it), so a `y` there answers nothing.
+  block is never drawn under it (the panel hides it), so a subagent's request is not
+  answerable there. The conversation's own request that arrives while the cursor is in the
+  rows or a panel is drawn is armed like one that takes a block's place (`ownArmedAt`): the
+  `y` already on its way to the stop question waits out the 600 ms pause.
 - **In a chat with few rows the plan gives way, never the field.** The field's group
   never shrinks (`flexShrink: 0`, its whole height kept, so a 12-row bottom panel with
   a three-item plan still shows the field and its hint) and the conversation keeps at
