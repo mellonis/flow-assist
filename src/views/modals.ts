@@ -1536,14 +1536,14 @@ const TREE_LIST_MIN = 4;
 
 // How many tree rows the column has room for: `min(max, nodes)` reduced until the
 // conversation list keeps four rows with the whole plan block counted — the tree gives way
-// before the plan does. The block's gap above and its last line (the keys, or the stop
-// question) are part of what it reserves, so the line may appear without moving a row.
-// 0 when `hidden`. `besides` and `planFull` are `chatRoom`'s. The chat draws exactly this
+// before the plan does. The block's gap above is part of what it reserves; the block has
+// no line of its own besides the rows, the stop question taking the cursor row's place and
+// the keys the hint row's. 0 when `hidden`. `besides` and `planFull` are `chatRoom`'s. The chat draws exactly this
 // many rows, and its keys reach exactly these (AGENTS.md (agent tree)).
 export function treeBudget({ boxH, besides, planFull, nodes, max, hidden }: { boxH: number; besides: number; planFull: number; nodes: number; max: number; hidden: boolean }): number {
   if (hidden || max <= 0 || nodes <= 0) return 0;
   const free = boxH - 4 - besides - (planFull > 0 ? 1 + planFull : 0) - TREE_LIST_MIN;
-  return Math.max(0, Math.min(max, nodes, free - 2));
+  return Math.max(0, Math.min(max, nodes, free - 1));
 }
 
 // The tree as `renderChatModal` draws it (`treeRows`' rows, then the cursor and the question).
@@ -1787,8 +1787,9 @@ export function renderChatModal({
   // The tree under the field: what budget leaves it, and the rows that block takes with
   // its gap — the plan gives way to it only after the list's four rows are safe.
   const treeShown = tree && !room.hidden ? tree.rows.slice(0, treeBudget({ boxH, besides, planFull: room.planFull, nodes: tree.rows.length, max: tree.rows.length, hidden: false })) : [];
-  const treeLast = treeShown.length > 0 && (tree!.cursor !== null || tree!.ask !== null);
-  const treeBlock = treeShown.length ? 1 + treeShown.length + (treeLast ? 1 : 0) : 0;
+  const treeBlock = treeShown.length ? 1 + treeShown.length : 0;
+  // The cursor is in the rows: the hint row names their keys.
+  const treeKeys = treeShown.length > 0 && tree!.cursor !== null;
   const planShape = planFit(boxH - 4, besides + treeBlock, room.planFull);
   const oneLine = planShape === 'line' ? planLine(planList) : null;
 
@@ -1842,7 +1843,7 @@ export function renderChatModal({
       pager ? h(Text, { dim: true, selectable: false, wrap: 'truncate' }, `${CAP.page} or the wheel scroll · ${CAP.esc} close`) :
       h(Box, { flexDirection: 'row', width: '100%', flexShrink: 0, selectable: false },
       h(Box, { flexGrow: 1, flexShrink: 1, overflow: 'hidden' },
-      (!escArmed && !armedHint && (streaming || toolLabel))
+      (!escArmed && !armedHint && !treeKeys && (streaming || toolLabel))
         // Working: what is happening NOW is the bright part. A tool that is running
         // pulses through the accent colours; with none running the model is either
         // thinking (waiting for its first token, reasoning, working out the next tool
@@ -1865,11 +1866,13 @@ export function renderChatModal({
                   children: `${verb || VERBS[0]}…`,
                 })),
             stoppable ? h(Text, { dim: true, wrap: 'truncate' }, ` · ${CAP.esc} stops`) : null)
-        : h(Text, (emptyNotice && !streaming && !toolLabel && !escArmed && !armedHint) ? { color: 'yellow', wrap: 'truncate' } : { dim: true, wrap: 'truncate' },
+        : h(Text, (emptyNotice && !streaming && !toolLabel && !escArmed && !armedHint && !treeKeys) ? { color: 'yellow', wrap: 'truncate' } : { dim: true, wrap: 'truncate' },
         armedHint
           ? armedHint
           : escArmed
           ? `${CAP.esc} again to ${escWord === 'collapse' ? 'collapse' : 'exit'}`
+          : treeKeys
+          ? `${CAP.upDown} move · x stop · ${CAP.esc} back`
           : emptyNotice
               ? `⚠ ${emptyNotice}`
               // `⇧⇥ auto` goes LAST of the keys: the row is cut at the window's width,
@@ -1999,14 +2002,17 @@ export function renderChatModal({
               }))),
       ),
       // The live subagents and tasks, the last block of the column: one line per row, the
-      // cursor's row inverted as a picker's is, and under them the keys or the stop question.
-      // Chrome, not conversation: out of every selection.
+      // cursor's row inverted as a picker's is, or, once `x` was pressed, replaced by the stop
+      // question in the warn colour. Chrome, not conversation: out of every selection.
       treeShown.length ? h(Box, { key: 'tree', flexDirection: 'column', width: '100%', flexShrink: 0, selectable: false },
-        treeShown.map((r) => h(Text, {
-          key: r.key || 'more', wrap: 'truncate',
-          ...(r.key !== '' && r.key === tree!.cursor ? { inverse: true } : r.tone === 'warn' ? { color: m.warn } : r.tone === 'dim' ? { dim: true } : {}),
-        }, r.text)),
-        treeLast ? h(Text, { dim: true, wrap: 'truncate' }, tree!.ask ?? `x stop · ${CAP.esc} back`) : null) : null,
+        treeShown.map((r) => {
+          const at = r.key !== '' && r.key === tree!.cursor;
+          const asking = at && tree!.ask !== null;
+          return h(Text, {
+            key: r.key || 'more', wrap: 'truncate',
+            ...(asking ? { color: m.warn, bold: true } : at ? { inverse: true } : r.tone === 'warn' ? { color: m.warn } : r.tone === 'dim' ? { dim: true } : {}),
+          }, asking ? cutStep(tree!.ask!, wrap) : r.text);
+        })) : null,
     ),
   );
 }

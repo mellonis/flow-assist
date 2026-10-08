@@ -905,13 +905,14 @@ test('treeBudget gives min(max, nodes), nothing when hidden, and keeps four list
   expect(budget({ nodes: 0 })).toBe(0);
   expect(budget({ max: 0 })).toBe(0);
   expect(budget({ hidden: true })).toBe(0);
-  // 12 rows: border and padding 4, hint 2, field 2, list 4, the block's gap and last line 2.
+  // 12 rows: border and padding 4, hint 2, field 2, list 4; the block's gap takes one more.
   const tight = { boxH: 12, besides: 4, planFull: 0 };
-  expect(budget({ ...tight, boxH: 14 })).toBe(0);
-  expect(budget({ ...tight, boxH: 16 })).toBe(2);
+  expect(budget({ ...tight, boxH: 13 })).toBe(0);
+  expect(budget({ ...tight, boxH: 14 })).toBe(1);
+  expect(budget({ ...tight, boxH: 16 })).toBe(3);
   // The whole plan block counts before any tree row does.
-  expect(budget({ ...tight, boxH: 18, planFull: 3 })).toBe(0);
-  expect(budget({ ...tight, boxH: 20, planFull: 3 })).toBe(2);
+  expect(budget({ ...tight, boxH: 17, planFull: 3 })).toBe(0);
+  expect(budget({ ...tight, boxH: 18, planFull: 3 })).toBe(1);
 });
 
 test('chatRoom says hidden for a question, a y/n, /context, the pager, the picker and a panel', () => {
@@ -922,7 +923,7 @@ test('chatRoom says hidden for a question, a y/n, /context, the pager, the picke
   expect(room({ panel: {} }).hidden).toBe(true);
 });
 
-test('the chat draws the tree as the last block: one line per row, the cursor row inverted, the keys line only with a cursor', async () => {
+test('the chat draws the tree as the last block: one line per row, the cursor row inverted, the stop question in its place, the keys in the hint row', async () => {
   const rows = treeRowsOf('a', 'b');
   const draw = async (tree: unknown) => {
     const backend = new TestBackend(80, 24);
@@ -935,12 +936,18 @@ test('the chat draws the tree as the last block: one line per row, the cursor ro
   const at = quiet.findIndex((l) => l.includes('⚙ a · working'));
   expect(at).toBeGreaterThan(quiet.findIndex((l) => l.includes('› ')));
   expect(quiet[at + 1]).toContain('⚙ b · working');
+  // The block is its rows alone: nothing under the last one.
+  expect(quiet.slice(at + 2).join('').replace(/[│╰╯─\s]/g, '')).toBe('');
   expect(quiet.join('\n')).not.toContain('x stop');
+  expect(quiet.join('\n')).toContain('history');
   const onB = await draw({ rows, more: 0, cursor: 'b', ask: null });
-  expect(onB.join('\n')).toContain('x stop · Esc back');
+  expect(onB.join('\n')).toContain('↑↓ move · x stop · Esc back');
+  expect(onB.join('\n')).not.toContain('history');
+  expect(onB[onB.findIndex((l) => l.includes('⚙ b · working')) + 1] ?? '').not.toContain('x stop');
   const asking = await draw({ rows, more: 0, cursor: 'b', ask: 'stop b? y yes · n no' });
-  expect(asking.join('\n')).toContain('stop b? y yes · n no');
-  expect(asking.join('\n')).not.toContain('x stop');
+  const q = asking.findIndex((l) => l.includes('stop b? y yes · n no'));
+  expect(q).toBe(asking.findIndex((l) => l.includes('⚙ a · working')) + 1);
+  expect(asking.join('\n')).not.toContain('⚙ b · working');
 });
 
 test('the tree is not drawn under a y/n, and a row is cut to one line', async () => {

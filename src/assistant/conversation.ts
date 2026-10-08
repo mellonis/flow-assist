@@ -40,9 +40,9 @@ export { NO_FILE };
 // once — the block must appear when the call starts, and its end must not wait.
 export const LIVE_REDRAW_MS = 200;
 // How many ended children a conversation remembers.
-export // How long a change of a child's latest step is held before the tree is told again.
+export const MAX_ENDED = 20;
+// How long a change of a child's latest step is held before the tree is told again.
 const TREE_HOLD_MS = 200;
-const MAX_ENDED = 20;
 
 // What an image stands for, as its data is cached: its path and its hash.
 export const imageKey = (r: ImageRef) => `${r.path}\0${r.sha256}`;
