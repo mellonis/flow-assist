@@ -3,7 +3,8 @@ import { createElement as h } from 'react';
 import { render, stringWidth } from '@flowtty/react';
 import { TestBackend } from '@flowtty/core/testing';
 import { MODAL_COLOR_DEFAULTS } from '../../playback/theme.js';
-import { chatRows, condenseRuns, helpEntries, toolSummary, inputVisualRows, mdLines, renderChatModal, renderHelp, renderLogModal, renderReminder, typedLines, type RowOpts } from '../modals.js';
+import { chatRows, condenseRuns, helpEntries, toolSummary, inputVisualRows, mdLines, chatRoom, renderChatModal, treeBudget, renderHelp, renderLogModal, renderReminder, typedLines, type RowOpts } from '../modals.js';
+import { askStart } from '../../assistant/ask.js';
 import { bumpViewRevision } from '../../assistant/views.js';
 import { cutLeft, headClusters } from '../../cells.js';
 import { pickerStart } from '../../assistant/session-picker.js';
@@ -888,3 +889,69 @@ test('a capped string is cut between clusters, never inside one', () => {
   expect(headClusters(`${'a'.repeat(59)}${FAMILY}tail`, 60)).toBe(`${'a'.repeat(59)}${FAMILY}`);
 });
 
+
+// The live subagents under the field (AGENTS.md (agent tree)): one budget serves what is
+// drawn and what a key may reach.
+const room = (over: Record<string, unknown> = {}) => chatRoom({ width: 80, height: 24, input: '', ...over });
+const budget = (over: Partial<Parameters<typeof treeBudget>[0]> = {}) => {
+  const r = room();
+  return treeBudget({ boxH: r.boxH, besides: r.besides, planFull: r.planFull, nodes: 9, max: 4, hidden: r.hidden, ...over });
+};
+const treeRowsOf = (...keys: string[]) => keys.map((key) => ({ key, text: `⚙ ${key} · working`, tone: 'work' as const }));
+
+test('treeBudget gives min(max, nodes), nothing when hidden, and keeps four list rows with the whole plan', () => {
+  expect(budget()).toBe(4);
+  expect(budget({ nodes: 2 })).toBe(2);
+  expect(budget({ nodes: 0 })).toBe(0);
+  expect(budget({ max: 0 })).toBe(0);
+  expect(budget({ hidden: true })).toBe(0);
+  // 12 rows: border and padding 4, hint 2, field 2, list 4, the block's gap and last line 2.
+  const tight = { boxH: 12, besides: 4, planFull: 0 };
+  expect(budget({ ...tight, boxH: 14 })).toBe(0);
+  expect(budget({ ...tight, boxH: 16 })).toBe(2);
+  // The whole plan block counts before any tree row does.
+  expect(budget({ ...tight, boxH: 18, planFull: 3 })).toBe(0);
+  expect(budget({ ...tight, boxH: 20, planFull: 3 })).toBe(2);
+});
+
+test('chatRoom says hidden for a question, a y/n, /context, the pager, the picker and a panel', () => {
+  expect(room().hidden).toBe(false);
+  expect(room({ pendingConfirm: { name: 'run_command', args: '{}' } }).hidden).toBe(true);
+  expect(room({ pendingQuestion: askStart([{ question: 'q?', header: 'h', options: [{ label: 'a', description: 'd' }, { label: 'b', description: 'e' }] }] as never) }).hidden).toBe(true);
+  expect(room({ pager: { rows: [], title: 't' } }).hidden).toBe(true);
+  expect(room({ panel: {} }).hidden).toBe(true);
+});
+
+test('the chat draws the tree as the last block: one line per row, the cursor row inverted, the keys line only with a cursor', async () => {
+  const rows = treeRowsOf('a', 'b');
+  const draw = async (tree: unknown) => {
+    const backend = new TestBackend(80, 24);
+    const handle = await render(h(renderChatModal, { ...baseChat, tree } as never), backend);
+    const frame = backend.lastFrame ?? '';
+    handle.unmount();
+    return frame.split('\n');
+  };
+  const quiet = await draw({ rows, more: 0, cursor: null, ask: null });
+  const at = quiet.findIndex((l) => l.includes('⚙ a · working'));
+  expect(at).toBeGreaterThan(quiet.findIndex((l) => l.includes('› ')));
+  expect(quiet[at + 1]).toContain('⚙ b · working');
+  expect(quiet.join('\n')).not.toContain('x stop');
+  const onB = await draw({ rows, more: 0, cursor: 'b', ask: null });
+  expect(onB.join('\n')).toContain('x stop · Esc back');
+  const asking = await draw({ rows, more: 0, cursor: 'b', ask: 'stop b? y yes · n no' });
+  expect(asking.join('\n')).toContain('stop b? y yes · n no');
+  expect(asking.join('\n')).not.toContain('x stop');
+});
+
+test('the tree is not drawn under a y/n, and a row is cut to one line', async () => {
+  const backend = new TestBackend(40, 24);
+  const long = [{ key: 'a', text: `⚙ ${'w'.repeat(80)}`, tone: 'work' as const }];
+  const handle = await render(h(renderChatModal, { ...baseChat, width: 40, tree: { rows: long, more: 0, cursor: null, ask: null } } as never), backend);
+  const frame = backend.lastFrame ?? '';
+  handle.unmount();
+  expect(frame.split('\n').filter((l) => l.includes('wwww'))).toHaveLength(1);
+  const b2 = new TestBackend(80, 60);
+  const h2 = await render(h(renderChatModal, { ...baseChat, height: 60, pendingConfirm: { name: 'run_command', args: '{}' }, tree: { rows: treeRowsOf('a'), more: 0, cursor: null, ask: null } } as never), b2);
+  expect(b2.lastFrame).not.toContain('⚙ a · working');
+  h2.unmount();
+});

@@ -33,7 +33,8 @@ import { renderConsole } from '../assistant/console-view.js';
 import { editorReducer } from '@flowtty/core';
 import { z } from 'zod';
 import { appliesOnRestart, modelMaySave, modelMaySet } from '../config/schema.js';
-import { anchorRow, askFieldWidth, blockRows, roomForBlock, chatFieldWidth, chatRows, chatWrapWidth, firstFoldRow, inputVisualRows, liveChatStatus, pagerTitle, pendingChatRows, renderChatStatus, renderChatStrip, rowAnchor, viewGroupFor, type RowOpts, type Viewport } from '../views/modals.js';
+import { agentRowsOf, treeRows } from '../assistant/agent-tree.js';
+import { anchorRow, askFieldWidth, blockRows, roomForBlock, chatFieldWidth, chatRoom, chatRows, chatWrapWidth, firstFoldRow, inputVisualRows, liveChatStatus, pagerTitle, pendingChatRows, treeBudget, renderChatStatus, renderChatStrip, rowAnchor, viewGroupFor, type RowOpts, type Viewport } from '../views/modals.js';
 import { CHAT_MODES, PLUGIN_MIN_ROWS, chatModeOf, inRect, type ChatMode, type PanelLayout } from '../runtime/panel-layout.js';
 import { recalledFolds, rememberView, type ViewMemory } from '../assistant/view-memory.js';
 import { allFolded, flipFolds, isClicked, isOpen, openInFull, pageable, toggleFold, type FoldState } from '../assistant/folds.js';
@@ -312,6 +313,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               c.on('turn-end', (ev) => viewFx.current['turn-end']?.(ev)),
               c.on('confirm', (ev) => viewFx.current.confirm?.(ev)),
               c.on('asking', (ev) => viewFx.current.asking?.(ev)),
+              c.on('tree', (ev) => viewFx.current.tree?.(ev)),
               c.on('question', (ev) => viewFx.current.question?.(ev)),
               c.on('notice', (ev) => viewFx.current.notice?.(ev)),
               c.on('inbox', (ev) => viewFx.current.inbox?.(ev)),
@@ -874,6 +876,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // A subagent below this conversation parked a y/n or had it answered: what is
             // offered changed, and nothing in this conversation's own snapshot says so.
             asking: () => { setAskTick((t) => t + 1); host.notify(); },
+            // The live children changed: draw again. The root's own `notify` redraws the host.
+            tree: () => { setAskTick((t) => t + 1); },
             'turn-start': (ev) => {
               // The command leaves the field the moment it is submitted, as a sent
               // message does (it is in ↑ already); what the person types while it runs
@@ -2239,7 +2243,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // started (`tabRef`), not from the field. Only with the caret at the end of a
           // one-line field, where the offer can be drawn.
           const completion = !input.includes('\n') && cursor >= input.length ? lineView(input, tabRef.current, chatComplete) : null;
-          return (host.viewRegistry.chat as (p: Record<string, unknown>) => unknown)({
+          const chatProps: Record<string, unknown> = {
             width, height, theme: host.config.theme, messages, input, streaming, error, toolLabel, phase, verb, cursor, escArmed,
             // An armed Ctrl+C / Ctrl+D / Ctrl+Z (the App's, `^c again to exit`) — drawn
             // where `Esc again to exit` is.
@@ -2352,7 +2356,16 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // mutates the tool's module state. Re-read every render, so a plan the
             // LLM edits (via notify()) shows up immediately.
             todo: conv.plan.snapshot(),
-          });
+          };
+          // The live subagents and tasks of this conversation, as rows under the field: as
+          // many as the column has room for (`treeBudget`, the one rule the view applies too).
+          // The cursor is in the field for now.
+          const room = chatRoom(chatProps as unknown as Parameters<typeof chatRoom>[0]);
+          const nodes = conv.tree();
+          const rowsMax = agentRowsOf(host.config as Record<string, unknown>);
+          const fit = treeBudget({ boxH: room.boxH, besides: room.besides, planFull: room.planFull, nodes: nodes.length, max: rowsMax, hidden: room.hidden });
+          const shownTree = fit > 0 ? { ...treeRows(nodes, fit, room.wrap), cursor: null, ask: null } : null;
+          return (host.viewRegistry.chat as (p: Record<string, unknown>) => unknown)({ ...chatProps, tree: shownTree });
         };
       },
     },

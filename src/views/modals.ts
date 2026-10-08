@@ -17,6 +17,7 @@
 import { askRows, type AskRow, type AskState } from '../assistant/ask.js';
 import { autoBadge, type AutoMode } from '../assistant/auto.js';
 import { VERBS } from '../assistant/verbs.js';
+import type { TreeRow } from '../assistant/agent-tree.js';
 import { todoMarker } from '../assistant/plan.js';
 import { cellWidth, cutLeft, cutStep, headClusters } from '../cells.js';
 import { answerText, readParts, runMarks, runRowText, shownText, trailTone, turnSegments, type NotesMode } from '../assistant/step.js';
@@ -1461,6 +1462,93 @@ export function planFit(rows: number, others: number, full: number): 'full' | 'l
   return full <= room ? 'full' : room >= 1 ? 'line' : 'none';
 }
 
+// The chat frame's height in a `height`-row area: the whole area when it is the panel or
+// the terminal, else a window of 82% with a margin.
+export function chatBoxHeight(height: number, fullscreen: boolean): number {
+  return fullscreen ? height : Math.min(Math.floor(height * 0.82), height - 4);
+}
+
+// What `renderChatModal` reads to measure its column; the chat's key handler passes the
+// same values to `chatRoom` to learn what is drawn.
+export interface ChatRoomInput {
+  width: number;
+  height: number;
+  fullscreen?: boolean;
+  error?: string | null;
+  input: string;
+  cursor?: number;
+  queued?: string[];
+  pendingQuestion?: AskState | null;
+  pendingConfirm?: ConfirmAsk | null;
+  askNotice?: string | null;
+  contextPanel?: ContextReading | null;
+  contextCacheLine?: string;
+  contextRecallLine?: string;
+  todo?: PlanItem[] | null;
+  pager?: PagerView | null;
+  picker?: PickerState | null;
+  panel?: CommandPanelView | null;
+}
+
+// The measures of the chat's column, in one place so what is drawn and what a key may
+// act on cannot disagree. `besides` is everything in the column but the conversation, the
+// plan and the tree — the error, the hint row, the queue line, the field's place — each
+// with the gap above it (the frame's border and padding take 4 rows more); `planFull` is
+// the rows of the whole plan block. `hidden`: a question, a y/n, `/context`, the pager, the
+// picker or a command panel takes the column, and the tree is not drawn.
+export function chatRoom(p: ChatRoomInput) {
+  const { width, height, error = null, input, cursor = 0, queued = [], pendingQuestion = null, pendingConfirm = null, askNotice = null, contextPanel = null, contextCacheLine = '', contextRecallLine = '', todo = null, pager = null, picker = null, panel = null } = p;
+  const fullscreen = p.fullscreen ?? false;
+  const boxW = chatBoxWidth(width, fullscreen);
+  const boxH = chatBoxHeight(height, fullscreen);
+  const wrap = chatWrapWidth(width, fullscreen);
+  const fieldW = chatFieldWidth(width, fullscreen); // the prompt lives in the gutter
+  const fieldRows = inputVisualRows(input, cursor, fieldW);
+  const caretLi = Math.max(0, fieldRows.findIndex((r) => r.caret !== ''));
+  const MAX_INPUT_LINES = 5;
+  const visible = windowAround(fieldRows, caretLi, MAX_INPUT_LINES).items;
+  // The conversation is a scroll box that takes what the column leaves, so the plan,
+  // the queue line, the field and the question block (each `flexShrink: 0`) take their
+  // own rows. Heights are added up for one thing only: whether the plan fits whole.
+  // The todo plan block: in-progress items first, then pending, capped at
+  // MAX_VISIBLE_PLAN active rows; done items are counted, not listed.
+  // An open question takes the plan's room: the person is answering, not planning.
+  const planList = (pendingQuestion ? [] : (todo ?? [])) as PlanItem[];
+  const { shown: planShown, summary: planSummary } = planView(planList);
+  const confirmAsk = pendingConfirm ? confirmView(pendingConfirm, wrap) : null;
+  // What the field's place holds: the question, `/context`, the y/n, or the field.
+  const fieldPlace = pendingQuestion
+    ? askBlockRows(pendingQuestion, wrap)
+    : contextPanel
+    ? contextPanelRows(contextPanel, wrap, contextCacheLine, contextRecallLine)
+    : confirmAsk
+    ? confirmBlockRows(confirmAsk, wrap)
+    : visible.length + (askNotice ? 1 : 0);
+  const besides = [error ? textRows(`⚠ ${error}`, boxW - 4) : 0, 1, queued.length ? 1 : 0, fieldPlace]
+    .filter((n) => n > 0).reduce((a, n) => a + n + 1, 0);
+  const planFull = planBlockRows({ shown: planShown, summary: planSummary });
+  const hidden = !!(pager || picker || panel || contextPanel || pendingQuestion || pendingConfirm);
+  return { boxW, boxH, wrap, fieldRows, visible, planList, planShown, planSummary, confirmAsk, fieldPlace, besides, planFull, hidden };
+}
+
+// The conversation list keeps at least this many rows before any tree row is drawn.
+const TREE_LIST_MIN = 4;
+
+// How many tree rows the column has room for: `min(max, nodes)` reduced until the
+// conversation list keeps four rows with the whole plan block counted — the tree gives way
+// before the plan does. The block's gap above and its last line (the keys, or the stop
+// question) are part of what it reserves, so the line may appear without moving a row.
+// 0 when `hidden`. `besides` and `planFull` are `chatRoom`'s. The chat draws exactly this
+// many rows, and its keys reach exactly these (AGENTS.md (agent tree)).
+export function treeBudget({ boxH, besides, planFull, nodes, max, hidden }: { boxH: number; besides: number; planFull: number; nodes: number; max: number; hidden: boolean }): number {
+  if (hidden || max <= 0 || nodes <= 0) return 0;
+  const free = boxH - 4 - besides - (planFull > 0 ? 1 + planFull : 0) - TREE_LIST_MIN;
+  return Math.max(0, Math.min(max, nodes, free - 2));
+}
+
+// The tree as `renderChatModal` draws it (`treeRows`' rows, then the cursor and the question).
+export interface TreeView { rows: TreeRow[]; more: number; cursor: string | null; ask: string | null }
+
 export function renderChatModal({
   width,
   height,
@@ -1522,9 +1610,14 @@ export function renderChatModal({
   picker = null,
   pickerOwn = 'idle',
   panel = null,
+  tree = null,
   hover = false,
   onPickRow,
 }: {
+  // The live subagents and tasks of the conversation, as rows under the field (null — none).
+  // `cursor` is the key of the row the cursor is on (null — it is in the field), `ask` the
+  // stop question once `x` was pressed. The rows are what `treeBudget` left them.
+  tree?: TreeView | null;
   // The backend reports hover: what a click acts on is underlined under the pointer.
   hover?: boolean;
   // A click on a row of the session picker or a command panel: the cursor goes there,
@@ -1669,28 +1762,20 @@ export function renderChatModal({
   // it, and the picker comes back once it is answered. So for a plugin's panel.
   if (picker && !pendingQuestion && !pendingConfirm) return renderSessionPicker({ width, height, theme, picker, own: pickerOwn, now, error, fullscreen, docked, focused, hover, onPickRow });
   if (panel && !pendingQuestion && !pendingConfirm) return renderCommandPanel({ width, height, theme, panel, error, fullscreen, docked, focused, hover, onPickRow });
-  const boxW = chatBoxWidth(width, fullscreen);
-  const boxH = fullscreen ? height : Math.min(Math.floor(height * 0.82), height - 4);
-  const wrap = chatWrapWidth(width, fullscreen);
+  // The column's measures, shared with whoever must know what this draws (`chatRoom`).
+  const room = chatRoom({ width, height, fullscreen, error, input, cursor, queued, pendingQuestion, pendingConfirm, askNotice, contextPanel, contextCacheLine, contextRecallLine, todo, pager, picker, panel });
+  const { boxW, boxH, wrap, fieldRows, visible, planList, planShown, planSummary, confirmAsk, besides } = room;
   const m = (theme?.modals?.chat ?? {}) as Record<string, string | undefined>;
-  const fieldW = chatFieldWidth(width, fullscreen); // the prompt lives in the gutter
-  const fieldRows = inputVisualRows(input, cursor, fieldW);
   const tokens = imageNumbers.length ? imageTokenRanges(input, (n) => imageNumbers.includes(n)) : [];
   // The field's own text, a token among it drawn as an attachment. Not dim: in the field
   // dim means "offered, not yours yet".
   const typed = (text: string, from: number, key: string) =>
     splitTokens(text, from, tokens).map((p, j) => h(Text, { key: `${key}${j}`, wrap: 'truncate', ...(p.token ? { color: m.accent } : {}) }, p.text));
-  const caretLi = Math.max(0, fieldRows.findIndex((r) => r.caret !== ''));
-  const MAX_INPUT_LINES = 5;
-  const visible = windowAround(fieldRows, caretLi, MAX_INPUT_LINES).items;
   // The conversation is a scroll box that takes what the column leaves, so the plan,
   // the queue line, the field and the question block (each `flexShrink: 0`) take their
   // own rows. Heights are added up for one thing only: whether the plan fits whole.
   // The todo plan block: in-progress items first, then pending, capped at
   // MAX_VISIBLE_PLAN active rows; done items are counted, not listed.
-  // An open question takes the plan's room: the person is answering, not planning.
-  const planList = (pendingQuestion ? [] : (todo ?? [])) as PlanItem[];
-  const { shown: planShown, summary: planSummary } = planView(planList);
   // Inline completion: the part of the offer not typed yet, drawn right after the
   // caret, what its label says, and the other candidates named beside it. Only while
   // the caret is at the end of a one-line field — there is nothing to continue from
@@ -1699,21 +1784,12 @@ export function renderChatModal({
   const ghost = atEnd ? completion?.ghost ?? '' : '';
   const label = atEnd ? completion?.label ?? '' : '';
   const others = atEnd ? completion?.others ?? [] : [];
-  const confirmAsk = pendingConfirm ? confirmView(pendingConfirm, wrap) : null;
-  // What the field's place holds: the question, `/context`, the y/n, or the field.
-  const fieldPlace = pendingQuestion
-    ? askBlockRows(pendingQuestion, wrap)
-    : contextPanel
-    ? contextPanelRows(contextPanel, wrap, contextCacheLine, contextRecallLine)
-    : confirmAsk
-    ? confirmBlockRows(confirmAsk, wrap)
-    : visible.length + (askNotice ? 1 : 0);
-  // Everything in the column but the conversation and the plan — the error, the hint
-  // row, the queue line, the field's place — each with the gap above it. The frame's
-  // border and padding take 4 rows.
-  const besides = [error ? textRows(`⚠ ${error}`, boxW - 4) : 0, 1, queued.length ? 1 : 0, fieldPlace]
-    .filter((n) => n > 0).reduce((a, n) => a + n + 1, 0);
-  const planShape = planFit(boxH - 4, besides, planBlockRows({ shown: planShown, summary: planSummary }));
+  // The tree under the field: what budget leaves it, and the rows that block takes with
+  // its gap — the plan gives way to it only after the list's four rows are safe.
+  const treeShown = tree && !room.hidden ? tree.rows.slice(0, treeBudget({ boxH, besides, planFull: room.planFull, nodes: tree.rows.length, max: tree.rows.length, hidden: false })) : [];
+  const treeLast = treeShown.length > 0 && (tree!.cursor !== null || tree!.ask !== null);
+  const treeBlock = treeShown.length ? 1 + treeShown.length + (treeLast ? 1 : 0) : 0;
+  const planShape = planFit(boxH - 4, besides + treeBlock, room.planFull);
   const oneLine = planShape === 'line' ? planLine(planList) : null;
 
   return h(
@@ -1922,6 +1998,15 @@ export function renderChatModal({
                     : row.after ? typed(row.after, caretAt + row.caret.length, 'a') : null);
               }))),
       ),
+      // The live subagents and tasks, the last block of the column: one line per row, the
+      // cursor's row inverted as a picker's is, and under them the keys or the stop question.
+      // Chrome, not conversation: out of every selection.
+      treeShown.length ? h(Box, { key: 'tree', flexDirection: 'column', width: '100%', flexShrink: 0, selectable: false },
+        treeShown.map((r) => h(Text, {
+          key: r.key || 'more', wrap: 'truncate',
+          ...(r.key !== '' && r.key === tree!.cursor ? { inverse: true } : r.tone === 'warn' ? { color: m.warn } : r.tone === 'dim' ? { dim: true } : {}),
+        }, r.text)),
+        treeLast ? h(Text, { dim: true, wrap: 'truncate' }, tree!.ask ?? `x stop · ${CAP.esc} back`) : null) : null,
     ),
   );
 }
