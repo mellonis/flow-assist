@@ -130,8 +130,9 @@ const NO_TREE_SEL: TreeSel = { at: null, ask: false };
 // The child the chat is watching (AGENTS.md (watching a child)): `path` the labels from the
 // session's child down to it; `ended` how it ended (null while it runs) and `final` its
 // snapshot at that moment; `back` the tree row the cursor stood on when the watch began;
-// `ask` whether the stop question is up.
-interface Watching { node: Conversation; path: string[]; ended: string | null; final: ConversationSnapshot | null; back: string | null; ask: boolean }
+// `ask` whether the stop question is up, `stopped` whether the person answered it with a yes
+// (a node stopped before it began has no end of its own to word).
+interface Watching { node: Conversation; path: string[]; ended: string | null; final: ConversationSnapshot | null; back: string | null; ask: boolean; stopped: boolean }
 
 export function buildAssistantPlugin({ renders, config, make }: BuildAssistantParams): Plugin {
   return make('assistant', {
@@ -437,16 +438,17 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // The mouse press a click may still come out of: the cell it landed on and
           // when. A drag clears it — a drag is a selection and never a fold.
           const pressRef = ui.useRef<{ x: number; y: number; at: number } | null>(null);
-          // The block open in the pager (its fold id), or null — a block a click opened
-          // that is taller than the rows the conversation has for it. The conversation's,
-          // like the folds: Esc closes it, and closing the chat, /clear, a session read
-          // from its file and a session taken back drop it. `pagerShownRef` says whether
-          // the last render drew it: only a pager on screen holds the keys.
+          // The watch's own fold state, the node's rows' end (`toEnd`) and the listeners it holds.
           const [watchFolds, setWatchFoldsState] = ui.useState<FoldState>(allFolded());
           const watchFoldsRef = ui.useRef(watchFolds);
           const setWatchFolds = (s: FoldState) => { watchFoldsRef.current = s; setWatchFoldsState(s); };
           const watchToEndRef = ui.useRef<(() => void) | null>(null);
           const watchOffRef = ui.useRef<Array<() => void>>([]);
+          // The block open in the pager (its fold id), or null — a block a click opened
+          // that is taller than the rows the conversation has for it. The conversation's,
+          // like the folds: Esc closes it, and closing the chat, /clear, a session read
+          // from its file and a session taken back drop it. `pagerShownRef` says whether
+          // the last render drew it: only a pager on screen holds the keys.
           const [pager, setPagerState] = ui.useState<string | null>(null);
           const pagerRef = ui.useRef<string | null>(null);
           const pagerShownRef = ui.useRef(false);
@@ -802,9 +804,6 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             conv.attach(portRef.current);
           }
           markSeenRef.current = () => convRef.current!.markSeen();
-          // The notes mode and the folds of a conversation the chat shows: its remembered
-          // ones when it left them (`leave`), else a conversation's start — the config's
-          // notes mode and everything folded. The pager is closed either way.
           // The watch (AGENTS.md (watching a child)): the chat keeps drawing the session, and
           // draws `node`'s rows in the list's place. Its listener on `closed` goes first, so
           // a node that ends from here on is heard, and reads the snapshot again: the rows
@@ -813,11 +812,11 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const setWatch = (next: Watching | null) => { watchRef.current = next; setWatching(next); };
           const startWatch = (node: Conversation) => {
             if (watchRef.current) endWatch();
-            const state: Watching = { node, path: watchPath(node), ended: null, final: null, back: treeSelRef.current.at, ask: false };
+            const state: Watching = { node, path: watchPath(node), ended: null, final: null, back: treeSelRef.current.at, ask: false, stopped: false };
             const closed = () => {
               const cur = watchRef.current;
               if (!cur || cur.node !== node || cur.ended !== null) return;
-              setWatch({ ...cur, ended: endedWord(node.lastEnd, node.closeReason), final: node.getSnapshot(), ask: false });
+              setWatch({ ...cur, path: watchPath(node), ended: cur.stopped ? endedWord({ outcome: 'stopped' }, null) : endedWord(node.lastEnd, node.closeReason), final: node.getSnapshot(), ask: false });
               host.notify();
             };
             watchOffRef.current = [node.on('closed', closed), node.subscribe(() => host.notify())];
@@ -830,7 +829,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             host.notify();
           };
           // Ends the watch. `stepBack`: the person's Esc, which puts the cursor back on the
-          // node's row when it is still drawn and counts the session's end as seen.
+          // node's row when it is still drawn and no y/n waits anywhere in the session's tree (with
+          // one waiting the cursor stays in the field, so its block is drawn at once), and counts
+          // the session's end as seen.
           const endWatch = (stepBack = false) => {
             const w = watchRef.current;
             if (!w) return;
@@ -843,13 +844,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             askGuard.current.show(null);
             if (stepBack) {
               const props = chatPropsRef.current;
-              if (w.back !== null && props && treeNow({ ...props, watch: null }).view.rows.some((r) => r.key === w.back)) setTreeSel({ at: w.back, ask: false });
+              if (w.back !== null && props && !convRef.current!.offered() && treeNow({ ...props, watch: null }).view.rows.some((r) => r.key === w.back)) setTreeSel({ at: w.back, ask: false });
               markSeenRef.current();
             }
             host.notify();
           };
-          // The session's own y/n or question ends the watch and takes the keys with the
-          // 600 ms pause an own request over the tree cursor has.
+          // The session's own y/n or question ends the watch, takes the keys with the 600 ms
+          // pause an own request over the tree cursor has, and counts the session's end seen.
           const endWatchForOwnAsk = () => {
             endWatch();
             const c = convRef.current!;
@@ -857,7 +858,12 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             ownArmedAt.current = c.confirm ? askClock.now() : null;
             questionSeenRef.current = c.question ?? null;
             questionArmedAt.current = c.question ? askClock.now() : null;
+            // As the pager's close: the session's end is on screen now.
+            markSeenRef.current();
           };
+          // The notes mode and the folds of a conversation the chat shows: its remembered
+          // ones when it left them (`leave`), else a conversation's start — the config's
+          // notes mode and everything folded. The pager is closed either way.
           const restoreView = (of?: Conversation) => {
             const m = of ? viewMemory.current!.get(of) : undefined;
             if (m && of) {
@@ -1887,7 +1893,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             // the chat closed.
             if (!openRef.current || (layoutRef.current === 'panel' && focusRef.current !== 'chat')) return undefined;
             disarmEsc();
-            if (key.name === 'c' && conv.canStop()) { conv.stop(keyGlyph({ name: 'c', ctrl: true })); return 'handled'; }
+            // Not while a watch is up: the session's turn is not what the person is looking at.
+            if (key.name === 'c' && conv.canStop() && !watchRef.current) { conv.stop(keyGlyph({ name: 'c', ctrl: true })); return 'handled'; }
             if (key.name === 'd' && inputRef.current !== '') return 'field';
             return undefined;
           };
@@ -2134,8 +2141,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 }
                 if (w.ask) {
                   if (key.name === 'y' && !key.ctrl && !key.meta) {
+                    // Before the stop: a node that has not begun closes inside it, and the
+                    // `closed` handler's end must stand.
+                    setWatch({ ...w, ask: false, stopped: true });
                     w.node.stopSubtree('x');
-                    setWatch({ ...w, ask: false });
                     host.notify();
                   } else if (key.name === 'n' || key.name === 'escape') { setWatch({ ...w, ask: false }); host.notify(); }
                   return true;
@@ -2514,7 +2523,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const offeredNow = watching ? convRef.current!.offered() : null;
           const elsewhere = offeredNow && offeredNow.path.length && !(() => { for (let a: Conversation | null = offeredNow.owner; a; a = a.parent) if (a === watching!.node) return true; return false; })();
           const watchView: WatchView | null = watching ? {
-            path: watching.path,
+            // Read while the node lives: a task that ends hands its children up, and a child's
+            // labels from the session change with it.
+            path: watching.ended === null ? watchPath(watching.node) : watching.path,
             rows: chatRows(watchSnap.messages as Parameters<typeof chatRows>[0], rowOpts(watchFolds)),
             state: watchState(watchedNode, watching.ended),
             ended: watching.ended !== null,

@@ -12,19 +12,22 @@ What each version of flow-assist brought, newest first. The version is the one i
   hint row says what the node is doing, as its tree row does (`⚙ <latest step>`, `⏸ waiting
   for a y/n`, `○ queued`), with `x stop · Esc back` on the right. Esc steps back and does
   not stop the child; from a watch that began in the rows it puts the cursor on the node's
-  row. `x` asks `stop <name> and N below it? y yes · n no` in the hint row, and `y` stops
-  the node and what it started. The sessions key opens the picker; every other key is
-  swallowed, so nothing is typed, sent or queued. A node that ends
-  stays on screen as it was, the hint row reading `ended: done` (or `failed`, `stopped`),
-  until Esc; an ended row cannot be watched.
+  row, unless a y/n waits somewhere in the tree, in which case the cursor stays in the field
+  and that block is shown at once. `x` asks `stop <name> and N below it? y yes · n no` in the hint row, and `y` stops
+  the node and what it started. The sessions key opens the picker; Ctrl+C never stops your conversation's turn from here
+  and arms the exit; every other key, ⇧⇥ included, is swallowed, so nothing is typed, sent or
+  queued. A node that ends
+  stays on screen as it was, the hint row reading `ended: done` (or `failed`, `stopped`,
+  `limit`, `empty`), until Esc; a node you stopped reads `ended: stopped` even if it had not
+  begun. An ended row cannot be watched.
 - **A y/n of the watched child, or of a node below it, is answered in the watch.** It is
   drawn at the bottom as the same block the conversation shows (`⚠ fix-tests › read-logs ·
   Confirm write: run_command`, `y yes · n no`) and answered by `y` or `n` alone, 600 ms
   after it appears and after your last key; ⏎ and Esc never answer it, and Esc steps back
   with the request still waiting. While one is up `x` is not offered and a stop question
-  that was open is dropped, so a `y` means one thing. A request elsewhere in the tree is one
-  line, `⏸ <name> waits for a y/n — Esc to answer`. The conversation's own y/n or question
-  ends the watch; the y/n waits the same pause.
+  that was open is dropped, so a `y` means one thing. The oldest request of the tree, when it
+  belongs to another node, is one line, `⏸ <name> waits for a y/n — Esc to answer`. The conversation's own y/n or question,
+  the settings file's y/n included, ends the watch; the y/n waits the same pause.
 - **A question of the conversation's own that arrives while the cursor is in the rows, or
   that ends a watch, takes no key for 600 ms.** A ⏎ on its way to the rows does not pick an
   option. With neither on screen a question takes keys at once.

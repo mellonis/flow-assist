@@ -597,10 +597,43 @@ test('a sibling\'s request is one notice line in the watch and no key answers it
   expect(fs.existsSync(file)).toBe(false);
   expect(frameOf(ui)).toContain('⏸ side-go waits for a y/n');
   await ui.press('escape');
-  await settleUntil(() => frameOf(ui).includes(BLOCK) || frameOf(ui).includes('waits for a y/n'));
+  await settle(6);
   expect(watching(ui)).toBe(false);
+  // A request waits in the tree: the cursor goes to the field and the block is drawn at once.
+  expect(frameOf(ui)).toContain(BLOCK);
+  expect(frameOf(ui)).not.toContain('waits for a y/n');
+  clock.t += 50;
+  await ui.press('y');
+  await settle(6);
   expect(fs.existsSync(file)).toBe(false);
+  await ui.press('backspace');
+  clock.t += 700;
+  await ui.press('y');
+  await settleUntil(() => fs.existsSync(file));
+  expect(fs.existsSync(file)).toBe(true);
   b!.release();
+  ui.app.unmount();
+});
+
+test('stepping back from a watch begun in the rows, with the node\'s own request waiting: the block is drawn at once and armed afresh', async () => {
+  const { ui, file, release } = await watchedAsker('WRG', 'wrg-do');
+  await release();
+  clock.t += 5000;
+  await ui.press('escape');
+  await settle(6);
+  expect(watching(ui)).toBe(false);
+  expect(frameOf(ui)).toContain(BLOCK);
+  expect(frameOf(ui)).not.toContain('waits for a y/n');
+  expect(frameOf(ui)).not.toContain(KEYS);
+  clock.t += 50;
+  await ui.press('y');
+  await settle(6);
+  expect(fs.existsSync(file)).toBe(false);
+  await ui.press('backspace');
+  clock.t += 700;
+  await ui.press('y');
+  await settleUntil(() => fs.existsSync(file));
+  expect(fs.existsSync(file)).toBe(true);
   ui.app.unmount();
 });
 
@@ -621,6 +654,8 @@ test('a grandchild\'s request is drawn while its parent is watched, labelled wit
   inner!.release();
   await settleUntil(() => frameOf(ui).includes(BLOCK));
   expect(rowsOf(ui).find((r) => r.includes(BLOCK))).toContain('⚠ outr-go › inner · Confirm write: run_command');
+  // The same request is the block, not also a notice line.
+  expect(frameOf(ui)).not.toContain('waits for a y/n');
   clock.t += 700;
   await ui.press('y');
   await settleUntil(() => fs.existsSync(file));
@@ -825,4 +860,181 @@ test('with the settings file\'s y/n up after a watch, x and y inside the pause s
     a!.release();
     ui.app.unmount();
   } finally { unguardSettings(); }
+});
+
+// ---- the corners ----
+
+test('x, y on a watched node that has not begun ends the watch on `ended: stopped`', async () => {
+  const { children, ui } = await boot([{ mark: 'QAA' }, { mark: 'QBB' }, { mark: 'QCC' }, { mark: 'QDD' }]);
+  for (const m of ['QAA', 'QBB', 'QCC', 'QDD']) await ask(ui, `/subagent ${m} go`);
+  await settleUntil(() => children.slice(0, 3).every((c) => c.held));
+  await settleUntil(() => frameOf(ui).includes('qdd-go'));
+  expect(frameOf(ui)).toContain('○ qdd-go · queued');
+  for (let i = 0; i < 4; i++) await ui.press('down');
+  await ui.press('return');
+  await settle(4);
+  expect(frameOf(ui)).toContain('╭─ ƒ Flow Assist · qdd-go');
+  expect(frameOf(ui)).toContain('○ queued');
+  await ui.press('x');
+  await ui.press('y');
+  await settleUntil(() => frameOf(ui).includes('ended: stopped'));
+  expect(frameOf(ui)).toContain('ended: stopped');
+  expect(frameOf(ui)).not.toContain('x stop');
+  expect(frameOf(ui)).toContain('Esc back');
+  // Nothing more to stop: x asks nothing.
+  await ui.press('x');
+  await settle(4);
+  expect(frameOf(ui)).not.toContain('stop qdd-go');
+  for (const c of children) c.release();
+  ui.app.unmount();
+});
+
+test('the breadcrumb follows a task that hands its child up while the child is watched, and stays as it was once the child ends', async () => {
+  const { children: [outer, inner], ui } = await boot([
+    { mark: 'OUTQ', script: [[{ hold: true }, { tool: 'subagent', args: { task: 'INNQ work', label: 'innq' } }], [{ hold: true }, { text: 'outer settled' }]] },
+    { mark: 'INNQ', script: [[{ hold: true }, { text: 'inner step', tool: 'datetime', args: {} }], [{ hold: true }, { text: 'inner settled' }]] },
+  ]);
+  await ask(ui, '/subagent OUTQ go');
+  await settleUntil(() => outer!.held);
+  outer!.release();
+  await settleUntil(() => inner!.held);
+  await settleUntil(() => frameOf(ui).includes('innq (task)'));
+  await ui.press('down');
+  await ui.press('down');
+  await ui.press('return');
+  await settle(4);
+  expect(frameOf(ui)).toContain('╭─ ƒ Flow Assist · outq-go › innq');
+  outer!.release();
+  await settleUntil(() => !frameOf(ui).includes('outq-go ›'));
+  expect(frameOf(ui)).toContain('╭─ ƒ Flow Assist · innq ');
+  inner!.release();
+  await settleUntil(() => inner!.held);
+  inner!.release();
+  await settleUntil(() => frameOf(ui).includes('ended: done'));
+  expect(frameOf(ui)).toContain('╭─ ƒ Flow Assist · innq ');
+  ui.app.unmount();
+});
+
+test('a session\'s answer that arrives while watching counts as seen when its own y/n ends the watch', async () => {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-watch-seen-')));
+  const own = path.join(dir, 'SEEN.txt');
+  const { children: [a], ui, model, sessions } = await boot([{ mark: 'WATS' }], { main: [[{ hold: true }, { text: 'FIRST-ANSWER' }], [{ tool: 'run_command', args: { command: `touch ${own}` } }], [{ text: 'second done' }]] });
+  await ask(ui, '/subagent WATS do it');
+  await settleUntil(() => a!.held);
+  await ask(ui, 'main go');
+  await settleUntil(() => model.held);
+  // Typed while the turn runs: it is queued, and its turn starts when the first one has answered.
+  await ask(ui, 'second');
+  await settleUntil(() => frameOf(ui).includes('⚙ wats-do'));
+  await watchFromRows(ui);
+  expect(watching(ui)).toBe(true);
+  model.release();
+  await settleUntil(() => frameOf(ui).includes('Confirm write: run_command'));
+  expect(watching(ui)).toBe(false);
+  await sleep(500);
+  const s = answeredSession(sessions);
+  expect(s?.answeredAt).toBeTruthy();
+  expect((s?.seenAt ?? '') >= s!.answeredAt!).toBe(true);
+  a!.release();
+  ui.app.unmount();
+});
+
+test('a docked chat whose keys are the plugin\'s keeps its watch, and a key the plugin leaves untaken is not swallowed by the watch', async () => {
+  const { children: [a], ui } = await boot([{ mark: 'WDK' }], { cols: 160, rows: 40, mode: 'panel' });
+  await ask(ui, '/subagent WDK do it');
+  await settleUntil(() => a!.held);
+  await ask(ui, '/agents');
+  await settleUntil(() => frameOf(ui).includes('Flow Assist · Agents') && frameOf(ui).includes('wdk-do'));
+  await ui.press('return');
+  await settle(4);
+  expect(watching(ui)).toBe(true);
+  // The keyboard goes to the plugin; the chat stays open beside it with its watch.
+  ui.backend.press({ name: ']', ctrl: true });
+  await settle(4);
+  expect(host.current.store.chat.focus).toBe('plugin');
+  expect(watching(ui)).toBe(true);
+  // The host's command line opens on a key nobody above it took.
+  await ui.press(':');
+  await settle(4);
+  expect(frameOf(ui)).toMatch(/^\s*:/m);
+  expect(watching(ui)).toBe(true);
+  a!.release();
+  ui.app.unmount();
+});
+
+test('with the stop question up, y or n with ctrl or meta answers nothing; the question stays and the node runs on', async () => {
+  const { children: [a], ui } = await oneHeld('WCM');
+  await watchFromRows(ui);
+  await ui.press('x');
+  expect(frameOf(ui)).toContain('stop wcm-do-it? y yes · n no');
+  ui.backend.press({ name: 'y', ctrl: true });
+  ui.backend.press({ name: 'y', meta: true });
+  await settle(6);
+  expect(frameOf(ui)).toContain('stop wcm-do-it? y yes · n no');
+  expect(frameOf(ui)).not.toContain('ended:');
+  expect(a!.held).toBe(true);
+  a!.release();
+  ui.app.unmount();
+});
+
+test('a stop question up when the node ends is gone: the hint row says how it ended', async () => {
+  const { children: [a], ui } = await oneHeld('WQE');
+  await watchFromRows(ui);
+  await ui.press('x');
+  expect(frameOf(ui)).toContain('stop wqe-do-it? y yes · n no');
+  a!.release();
+  await settleUntil(() => a!.held);
+  a!.release();
+  await settleUntil(() => frameOf(ui).includes('ended: done'));
+  expect(frameOf(ui)).not.toContain('stop wqe-do-it?');
+  ui.app.unmount();
+});
+
+test('in /agents ⏎ under a stop question starts no watch', async () => {
+  const { children: [a, b], ui } = await boot([{ mark: 'PQA' }, { mark: 'PQB' }]);
+  await ask(ui, '/subagent PQA go');
+  await ask(ui, '/subagent PQB go');
+  await settleUntil(() => a!.held && b!.held);
+  await ask(ui, '/agents');
+  await settleUntil(() => frameOf(ui).includes('Flow Assist · Agents') && frameOf(ui).includes('pqb-go'));
+  await ui.press('down');
+  await ui.press('x');
+  expect(frameOf(ui)).toContain('stop pqb-go? y yes · n no');
+  await ui.press('return');
+  await settle(4);
+  // The panel's own title also opens `╭─ ƒ Flow Assist · `: the watch's hint row is what tells.
+  expect(frameOf(ui)).not.toContain('Esc back');
+  expect(frameOf(ui)).toContain('Flow Assist · Agents');
+  expect(frameOf(ui)).toContain('stop pqb-go? y yes · n no');
+  a!.release();
+  b!.release();
+  ui.app.unmount();
+});
+
+test('Ctrl+C in a watch does not stop the session\'s turn: it arms the exit, and a second one exits', async () => {
+  const { children: [a], ui, model } = await boot([{ mark: 'WCC' }], { main: [[{ hold: true }, { text: 'main answer' }]] });
+  await ask(ui, '/subagent WCC do it');
+  await settleUntil(() => a!.held);
+  await ask(ui, 'main go');
+  await settleUntil(() => model.held);
+  await settleUntil(() => frameOf(ui).includes('⚙ wcc-do'));
+  await watchFromRows(ui);
+  expect(watching(ui)).toBe(true);
+  const consumed = ui.backend.press({ name: 'c', ctrl: true });
+  await settle(6);
+  expect(consumed).toBe(true);
+  expect(ui.exits()).toBe(0);
+  ui.backend.press({ name: 'c', ctrl: true });
+  await settle(6);
+  expect(ui.exits()).toBe(1);
+  // The turn was never stopped: it goes on to its answer.
+  model.release();
+  await settleUntil(() => !model.held);
+  await settle(10);
+  await ui.press('escape');
+  await settle(4);
+  expect(frameOf(ui)).toContain('main answer');
+  expect(frameOf(ui)).not.toContain('stopped (^c)');
+  a!.release();
+  ui.app.unmount();
 });

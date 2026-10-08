@@ -277,23 +277,26 @@ step>`, `⏸ waiting for a y/n`, `○ queued`), and on the right `x stop · Esc 
 PgUp/PgDn and the wheel scroll the rows, which follow their end while they rest there; End
 jumps to it, and the details key opens or folds everything in them. Esc steps back to your
 conversation, where you left it, and does not stop the node; from a watch that began in the
-rows it puts the cursor on that node's row. `x` asks `stop <name> and 2 below it? y yes · n
+rows it puts the cursor on that node's row, unless a y/n waits somewhere in the tree: then the
+cursor stays in the field and that block is shown at once. `x` asks `stop <name> and 2 below it? y yes · n
 no` in the hint row and `y` stops the node and what it started; `n` or Esc drops the
-question. The sessions key opens the picker. Every other key is swallowed: nothing is typed,
-sent or queued. A node that ends stays on screen as it was, the hint row reading `ended:
-done` (or `failed`, `stopped`), until Esc; its result is in your conversation as always.
+question. The sessions key opens the picker. Ctrl+C never stops your conversation's turn from here: it
+arms the exit, and a second one exits. Every other key, ⇧⇥ included, is swallowed: nothing is
+typed, sent or queued. A node that ends stays on screen as it was, the hint row reading `ended:
+done` (or `failed`, `stopped`, `limit`, `empty`), until Esc; a node you stopped reads `ended:
+stopped` even if it had not begun; its result is in your conversation as always.
 
 **A y/n of the watched node, or of one it started, is answered there.** It is drawn at the
 bottom as the same block (`⚠ fix-tests › read-logs · Confirm write: run_command`, `y yes · n
 no`) and answered by `y` or `n` alone, after the pause of a subagent's block (600 ms after it
 appears and after your last key). ⏎ and Esc never answer it; Esc steps back, and the request
-waits in your conversation, armed afresh. While a block is up `x` is not offered, and a stop
-question that was open is dropped, so a `y` always means one thing. A request of a node
-elsewhere in the tree is one line, `⏸ <name> waits for a y/n — Esc to answer`, and no key
+waits in your conversation, where its block is shown at once and armed afresh. While a block is up `x` is not offered, and a stop
+question that was open is dropped, so a `y` always means one thing. The oldest request of the tree, when it belongs to a
+node elsewhere, is one line, `⏸ <name> waits for a y/n — Esc to answer`, and no key
 answers it there. Where the block would not fit the docked chat, a line says there is no room
 and `/subagent stop <name>` declines it.
 
-Your own conversation's y/n or question ends the watch. The y/n waits the same pause before
+Your own conversation's y/n or question, the settings file's y/n included, ends the watch. The y/n waits the same pause before
 a `y` counts; a question that arrives while the cursor is in the rows, or that ends a watch,
 takes no key for 600 ms, so a ⏎ on its way to the rows does not pick an option. With neither
 on screen a question takes keys at once.
