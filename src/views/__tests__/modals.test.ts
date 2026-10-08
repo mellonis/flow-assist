@@ -920,6 +920,7 @@ test('chatRoom says hidden for a question, a y/n, /context, the pager, the picke
   expect(room({ pendingConfirm: { name: 'run_command', args: '{}' } }).hidden).toBe(true);
   expect(room({ pendingQuestion: askStart([{ question: 'q?', header: 'h', options: [{ label: 'a', description: 'd' }, { label: 'b', description: 'e' }] }] as never) }).hidden).toBe(true);
   expect(room({ pager: { rows: [], title: 't' } }).hidden).toBe(true);
+  expect(room({ watch: { path: ['a'], rows: [], state: '', ended: false, ask: null } }).hidden).toBe(true);
   expect(room({ panel: {} }).hidden).toBe(true);
 });
 
@@ -977,4 +978,36 @@ test('the tree is not drawn under a y/n, and a row is cut to one line', async ()
   const h2 = await render(h(renderChatModal, { ...baseChat, height: 60, pendingConfirm: { name: 'run_command', args: '{}' }, tree: { rows: treeRowsOf('a'), more: 0, cursor: null, ask: null } } as never), b2);
   expect(b2.lastFrame).not.toContain('⚙ a · working');
   h2.unmount();
+});
+
+// A watched child (AGENTS.md (watching a child)): its rows in the list's place under a
+// breadcrumb title, the hint row naming what it does and the keys, and none of the session's
+// plan, queue, field, completion or tree.
+test('the chat draws a watched child: breadcrumb title, its rows, state and keys in the hint row, no field, tree or plan', async () => {
+  const o: RowOpts = { wrap: 60, folds: { open: false, except: new Set() }, viewLines: 20, notes: 'step', detailsKey: '^o', renderers: {}, now: 0, palette: {} };
+  const rows = chatRows([{ role: 'user', content: 'child task' }, { role: 'assistant', content: 'child words' }], o);
+  const draw = async (watch: Record<string, unknown>) => {
+    const backend = new TestBackend(100, 24);
+    const handle = await render(h(renderChatModal, {
+      ...baseChat, width: 100, messages: [{ role: 'user', content: 'session words' }], queued: ['queued thing'], input: 'draft text',
+      todo: [{ id: '1', text: 'session plan item', status: 'pending' }], tree: { rows: treeRowsOf('a'), more: 0, cursor: null, ask: null },
+      watch: { path: ['outer', 'inner'], rows, state: '⚙ read_file(a.ts)', ended: false, ask: null, ...watch },
+    } as never), backend);
+    const frame = backend.lastFrame ?? '';
+    handle.unmount();
+    return frame;
+  };
+  const live = await draw({});
+  expect(live).toContain('╭─ ƒ Flow Assist · outer › inner');
+  expect(live).toContain('child words');
+  expect(live).not.toContain('session words');
+  for (const hidden of ['draft text', 'queued thing', 'session plan item', '⚙ a · working', 'history']) expect(live).not.toContain(hidden);
+  const hint = live.split('\n').find((l) => l.includes('⚙ read_file(a.ts)'))!;
+  expect(hint).toMatch(/⚙ read_file\(a\.ts\)\s+x stop · Esc back/);
+  const asking = await draw({ ask: 'stop inner? y yes · n no' });
+  expect(asking).toMatch(/stop inner\? y yes · n no\s+x stop · Esc back/);
+  expect(asking).not.toContain('⚙ read_file(a.ts)');
+  const ended = await draw({ state: 'ended: done', ended: true });
+  expect(ended).toMatch(/ended: done\s+Esc back/);
+  expect(ended).not.toContain('x stop');
 });

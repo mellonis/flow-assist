@@ -39,6 +39,17 @@ function stateOf(n: TreeNode, now: number): string {
   return 'queued';
 }
 
+// What a node does, with its mark: the words of its tree row after the label. The watch's
+// hint row says the same (AGENTS.md (watching a child)).
+export function nodeState(n: TreeNode, now = Date.now()): string {
+  return `${MARK[n.status]} ${stateOf(n, now)}`;
+}
+
+// How a listing words the end of a child: an answer is `done`, the rest by their name.
+export function endedVerdict(outcome: string): string {
+  return outcome === 'answer' ? 'done' : outcome;
+}
+
 // The rows for `nodes` (tree order), at most `max` of them, each one terminal line of
 // `width` cells. With more nodes than rows the last row is `+K more — /agents` and the
 // kept nodes are the ones that need attention, waiting then working then the rest, each
@@ -94,7 +105,7 @@ export function agentsPanelRows(nodes: readonly TreeNode[], ended: readonly Ende
     };
   });
   ended.forEach((e, i) => {
-    const verdict = e.outcome === 'answer' ? 'done' : e.outcome;
+    const verdict = endedVerdict(e.outcome);
     const tokens = e.tokens ? ` · ${e.tokens >= 1e6 ? `${(e.tokens / 1e6).toFixed(1)}M` : e.tokens >= 1000 ? `${Math.round(e.tokens / 1000)}k` : e.tokens} tokens` : '';
     rows.push({ id: `ended:${i}`, text: `${e.label}${e.kind === 'task' ? ' (task)' : ''}`, detail: `${verdict} · ${formatDuration(e.ms)}${tokens}` });
   });

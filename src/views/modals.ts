@@ -1403,6 +1403,20 @@ export interface PagerView {
   title: string;
 }
 
+// A watched child (AGENTS.md (watching a child)): its rows in the conversation's place, the
+// labels from the session's child down to it for the frame title, `state` what it does
+// (the hint row's left text), `ended` whether it has ended, `ask` the stop question that
+// takes the left text's place (null — none). `toEnd` is filled with the jump to the rows'
+// end, for the End key.
+export interface WatchView {
+  path: string[];
+  rows: ChatRow[];
+  state: string;
+  ended: boolean;
+  ask: string | null;
+  toEnd?: { current: (() => void) | null };
+}
+
 // What the pager's title says: a command's own line, else what the block is.
 export function pagerTitle(rows: readonly ChatRow[], id: string): string {
   const kind = id.split(':')[1];
@@ -1486,6 +1500,7 @@ export interface ChatRoomInput {
   contextRecallLine?: string;
   todo?: PlanItem[] | null;
   pager?: PagerView | null;
+  watch?: WatchView | null;
   picker?: PickerState | null;
   panel?: CommandPanelView | null;
 }
@@ -1494,10 +1509,10 @@ export interface ChatRoomInput {
 // act on cannot disagree. `besides` is everything in the column but the conversation, the
 // plan and the tree — the error, the hint row, the queue line, the field's place — each
 // with the gap above it (the frame's border and padding take 4 rows more); `planFull` is
-// the rows of the whole plan block. `hidden`: a question, a y/n, `/context`, the pager, the
-// picker or a command panel takes the column, and the tree is not drawn.
+// the rows of the whole plan block. `hidden`: a question, a y/n, `/context`, the pager, a watched
+// child, the picker or a command panel takes the column, and the tree is not drawn.
 export function chatRoom(p: ChatRoomInput) {
-  const { width, height, error = null, input, cursor = 0, queued = [], pendingQuestion = null, pendingConfirm = null, askNotice = null, contextPanel = null, contextCacheLine = '', contextRecallLine = '', todo = null, pager = null, picker = null, panel = null } = p;
+  const { width, height, error = null, input, cursor = 0, queued = [], pendingQuestion = null, pendingConfirm = null, askNotice = null, contextPanel = null, contextCacheLine = '', contextRecallLine = '', todo = null, pager = null, watch = null, picker = null, panel = null } = p;
   const fullscreen = p.fullscreen ?? false;
   const boxW = chatBoxWidth(width, fullscreen);
   const boxH = chatBoxHeight(height, fullscreen);
@@ -1527,7 +1542,7 @@ export function chatRoom(p: ChatRoomInput) {
   const besides = [error ? textRows(`⚠ ${error}`, boxW - 4) : 0, 1, queued.length ? 1 : 0, fieldPlace]
     .filter((n) => n > 0).reduce((a, n) => a + n + 1, 0);
   const planFull = planBlockRows({ shown: planShown, summary: planSummary });
-  const hidden = !!(pager || picker || panel || contextPanel || pendingQuestion || pendingConfirm);
+  const hidden = !!(pager || watch || picker || panel || contextPanel || pendingQuestion || pendingConfirm);
   return { boxW, boxH, wrap, fieldRows, visible, planList, planShown, planSummary, confirmAsk, fieldPlace, besides, planFull, hidden };
 }
 
@@ -1608,6 +1623,7 @@ export function renderChatModal({
   imageNumbers = [],
   imagesOn = false,
   pager = null,
+  watch = null,
   picker = null,
   pickerOwn = 'idle',
   panel = null,
@@ -1626,6 +1642,8 @@ export function renderChatModal({
   onPickRow?: (index: number) => void;
   // The block open in the pager, drawn in the conversation's place (null — none).
   pager?: PagerView | null;
+  // The child being watched, drawn in the conversation's place (null — none).
+  watch?: WatchView | null;
   width: number;
   height: number;
   theme: Theme | undefined;
@@ -1764,7 +1782,7 @@ export function renderChatModal({
   if (picker && !pendingQuestion && !pendingConfirm) return renderSessionPicker({ width, height, theme, picker, own: pickerOwn, now, error, fullscreen, docked, focused, hover, onPickRow });
   if (panel && !pendingQuestion && !pendingConfirm) return renderCommandPanel({ width, height, theme, panel, error, fullscreen, docked, focused, hover, onPickRow });
   // The column's measures, shared with whoever must know what this draws (`chatRoom`).
-  const room = chatRoom({ width, height, fullscreen, error, input, cursor, queued, pendingQuestion, pendingConfirm, askNotice, contextPanel, contextCacheLine, contextRecallLine, todo, pager, picker, panel });
+  const room = chatRoom({ width, height, fullscreen, error, input, cursor, queued, pendingQuestion, pendingConfirm, askNotice, contextPanel, contextCacheLine, contextRecallLine, todo, pager, watch, picker, panel });
   const { boxW, boxH, wrap, fieldRows, visible, planList, planShown, planSummary, confirmAsk, besides } = room;
   const m = (theme?.modals?.chat ?? {}) as Record<string, string | undefined>;
   const tokens = imageNumbers.length ? imageTokenRanges(input, (n) => imageNumbers.includes(n)) : [];
@@ -1810,7 +1828,8 @@ export function renderChatModal({
         borderColor: docked ? (focused ? m.accent : m.idleBorder) : m.border,
         // What is on screen, after the name — cut to the border, never wrapped.
         // With the pager up, what it holds.
-        borderTitle: pager ? cutStep(`${ASSISTANT_MARK} Flow Assist · ${pager.title}`, Math.max(0, boxW - 4))
+        borderTitle: watch ? cutStep(`${ASSISTANT_MARK} Flow Assist · ${watch.path.join(' › ')}`, Math.max(0, boxW - 4))
+          : pager ? cutStep(`${ASSISTANT_MARK} Flow Assist · ${pager.title}`, Math.max(0, boxW - 4))
           : subject ? cutStep(`${ASSISTANT_MARK} Flow Assist · ${subject}`, Math.max(0, boxW - 4)) : `${ASSISTANT_MARK} Flow Assist`,
         width: boxW,
         height: boxH,
@@ -1825,7 +1844,7 @@ export function renderChatModal({
       },
       // Under the pager the conversation is not drawn and hears no key: PgUp/PgDn and
       // the wheel are the pager's, and the conversation stays where it was left.
-      h(ChatMessages, { messages, rowOpts: { wrap, folds, viewLines, notes, detailsKey, renderers: viewRenderers, now, palette: m, onViewFail }, palette: m, errorColor: theme?.error, onViewport, scrollTo, keysActive: focused && !pager, wheel, toEnd, hidden: !!pager, streaming, hover }),
+      h(ChatMessages, { messages, rowOpts: { wrap, folds, viewLines, notes, detailsKey, renderers: viewRenderers, now, palette: m, onViewFail }, palette: m, errorColor: theme?.error, onViewport, scrollTo, keysActive: focused && !pager && !watch, wheel, toEnd, hidden: !!pager || !!watch, streaming, hover }),
       // The pager, in the conversation's place: the block's rows at the conversation's
       // width, with a scroll of their own.
       pager
@@ -1837,11 +1856,29 @@ export function renderChatModal({
             renderItem: chatRowRenderer({ palette: m, errorColor: theme?.error, wrap, detailsKey }),
           }))
         : null,
+      // A watched child, in the same place: its rows follow the end while the list rests
+      // there, and PgUp/PgDn and the wheel are the list's own. The session's list stays
+      // mounted under it, hidden.
+      watch
+        ? h(ChatClock.Provider, { value: now }, h(ScrollList<ChatRow>, {
+            isActive: focused,
+            anchor: 'bottom',
+            ref: (box: ScrollBoxHandle | null) => { if (watch.toEnd) watch.toEnd.current = box ? () => box.scrollToEnd() : null; },
+            items: watch.rows, rowHeight: 1, scrollbar: true, flexGrow: 1, flexShrink: 1, flexDirection: 'column',
+            keyOf: (_row: ChatRow, i: number) => `watch-${i}`,
+            renderItem: chatRowRenderer({ palette: m, errorColor: theme?.error, wrap, detailsKey }),
+          }))
+        : null,
       error ? h(Text, { color: 'red' }, `⚠ ${error}`) : null,
       // The hint on the left, how full the model's context is on the right — it stays
       // put while the hint changes, and turns yellow when it is time to /compact.
       // Chrome, not conversation: out of every selection. The pager's keys, while it is up.
       pager ? h(Text, { dim: true, selectable: false, wrap: 'truncate' }, `${CAP.page} or the wheel scroll · ${CAP.esc} close`) :
+      // A watched child: what it does (or the stop question) on the left, the keys on the right.
+      watch ? h(Box, { flexDirection: 'row', width: '100%', flexShrink: 0, selectable: false },
+        h(Box, { flexGrow: 1, flexShrink: 1, overflow: 'hidden' },
+          h(Text, watch.ask !== null ? { color: m.warn, wrap: 'truncate' } : { dim: true, wrap: 'truncate' }, watch.ask ?? watch.state)),
+        h(Text, { dim: true, wrap: 'truncate' }, `  ${watch.ended ? '' : 'x stop · '}${CAP.esc} back`)) :
       h(Box, { flexDirection: 'row', width: '100%', flexShrink: 0, selectable: false },
       h(Box, { flexGrow: 1, flexShrink: 1, overflow: 'hidden' },
       (!escArmed && !armedHint && !treeKeys && (streaming || toolLabel))
@@ -1901,7 +1938,7 @@ export function renderChatModal({
       // with too few rows for it (a small docked panel) it gives way first: ONE row,
       // `plan · ⊟ <item>`, cut to the width, and whole again once there is room. The
       // field never shrinks and the conversation keeps a row (`planFit`).
-      pager ? null : oneLine
+      pager || watch ? null : oneLine
         ? h(Box, { key: 'plan', flexDirection: 'row', width: '100%', flexShrink: 0, overflow: 'hidden' },
             h(Text, { dim: true, color: 'magenta', wrap: 'truncate' }, `▸ ${oneLine.head}`),
             h(Text, { color: oneLine.inProgress ? 'yellow' : oneLine.marker.color }, `${oneLine.marker.text} `),
@@ -1918,7 +1955,7 @@ export function renderChatModal({
             planSummary ? h(Text, { dim: true, color: 'yellow' }, planSummary) : null,
           )
         : null,
-      !pager && queued.length
+      !pager && !watch && queued.length
         ? (() => {
             // In a turn the line says when the message reaches the model — after the
             // current step, or held to the turn's end — and ⇥ switches between the two.
@@ -1940,7 +1977,7 @@ export function renderChatModal({
       // The input field group (the y/n confirm block or the multiline input box). It
       // never shrinks: in a small panel the plan gives way (`planFit`), the field and
       // its hint keep their rows. Not drawn under the pager.
-      pager ? null : h(Box, { flexDirection: 'column', width: '100%', flexShrink: 0 },
+      pager || watch ? null : h(Box, { flexDirection: 'column', width: '100%', flexShrink: 0 },
         pendingQuestion
           ? renderAsk(pendingQuestion, m.bg, wrap)
           : contextPanel

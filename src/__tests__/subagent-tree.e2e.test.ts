@@ -296,7 +296,8 @@ test('a key typed in the rows reaches neither the field nor the model, and Esc t
   const before = model.requests.length;
   await ui.press('down');
   expect(inRows(ui)).toBe(true);
-  for (const k of ['q', 'w', 'return', 'tab', 'pageup']) await ui.press(k);
+  // ⏎ on a row is the watch's (subagent-watch.e2e.test.ts), not a key to swallow here.
+  for (const k of ['q', 'w', 'tab', 'pageup']) await ui.press(k);
   await ui.type('hello');
   expect(inRows(ui)).toBe(true);
   expect(model.requests.length).toBe(before);

@@ -33,8 +33,9 @@ import { renderConsole } from '../assistant/console-view.js';
 import { editorReducer } from '@flowtty/core';
 import { z } from 'zod';
 import { appliesOnRestart, modelMaySave, modelMaySet } from '../config/schema.js';
+import { endedWord, watchPath, watchState } from '../assistant/watch.js';
 import { agentRowsOf, agentsPanelRows, stopQuestion, treeCursor, treeRows } from '../assistant/agent-tree.js';
-import { anchorRow, askFieldWidth, blockRows, roomForBlock, chatFieldWidth, chatRoom, chatRows, chatWrapWidth, firstFoldRow, inputVisualRows, liveChatStatus, pagerTitle, pendingChatRows, treeBudget, renderChatStatus, renderChatStrip, rowAnchor, viewGroupFor, type RowOpts, type Viewport } from '../views/modals.js';
+import { anchorRow, askFieldWidth, blockRows, roomForBlock, chatFieldWidth, chatRoom, chatRows, chatWrapWidth, firstFoldRow, inputVisualRows, liveChatStatus, pagerTitle, pendingChatRows, treeBudget, type WatchView, renderChatStatus, renderChatStrip, rowAnchor, viewGroupFor, type RowOpts, type Viewport } from '../views/modals.js';
 import { CHAT_MODES, PLUGIN_MIN_ROWS, chatModeOf, inRect, type ChatMode, type PanelLayout } from '../runtime/panel-layout.js';
 import { recalledFolds, rememberView, type ViewMemory } from '../assistant/view-memory.js';
 import { allFolded, flipFolds, isClicked, isOpen, openInFull, pageable, toggleFold, type FoldState } from '../assistant/folds.js';
@@ -60,7 +61,7 @@ import type { Plugin } from '../loader/plugin.js';
 import type { PluginApi } from '../runtime/plugin-api.js';
 import { isPanelSpec, panelAnswer, panelCursor, panelKey as commandPanelKey, panelKeys, panelRows, panelStart, panelTop, type PanelKeyDef, type PanelSpec, type PanelState } from '../assistant/command-panel.js';
 import type { Command as PluginCommand } from '../loader/plugin.js';
-import type { ChatMsg, ConversationEvent, Offered, SendOptions, ViewPort } from '../assistant/conversation-types.js';
+import type { ChatMsg, ConversationEvent, ConversationSnapshot, Offered, SendOptions, ViewPort } from '../assistant/conversation-types.js';
 import { Conversation, workHome } from '../assistant/conversation.js';
 import { ConversationRegistry } from '../assistant/registry.js';
 import { personSpoke, projectHere } from '../assistant/conversation-session.js';
@@ -126,6 +127,11 @@ type BuildAssistantParams = {
 // The tree cursor's state (AGENTS.md (agent tree)).
 interface TreeSel { at: string | null; ask: boolean }
 const NO_TREE_SEL: TreeSel = { at: null, ask: false };
+// The child the chat is watching (AGENTS.md (watching a child)): `path` the labels from the
+// session's child down to it; `ended` how it ended (null while it runs) and `final` its
+// snapshot at that moment; `back` the tree row the cursor stood on when the watch began;
+// `ask` whether the stop question is up.
+interface Watching { node: Conversation; path: string[]; ended: string | null; final: ConversationSnapshot | null; back: string | null; ask: boolean }
 
 export function buildAssistantPlugin({ renders, config, make }: BuildAssistantParams): Plugin {
   return make('assistant', {
@@ -336,6 +342,14 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // What the chat draws of its conversation: one snapshot, the same object until
           // something drawn changes (`Conversation.getSnapshot`).
           const snap = useSyncExternalStore(conv.subscribe, conv.getSnapshot);
+          // The child the chat is watching, if any: its rows are drawn where the list is, and
+          // the session's values below stay the session's. One more subscription, always
+          // made: the watched conversation's, else the session's again.
+          const [watching, setWatching] = ui.useState<Watching | null>(null);
+          const watchRef = ui.useRef<Watching | null>(null);
+          const watched = watching?.node ?? null;
+          const watchLive = useSyncExternalStore((watched ?? conv).subscribe, (watched ?? conv).getSnapshot);
+          const watchSnap = watching?.final ?? watchLive;
           const messages = snap.messages as ChatMsg[];
           const streaming = snap.busy !== null;
           const { label: toolLabel, phase, verb, toolCount, turnTokens } = snap.activity;
@@ -424,6 +438,11 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // like the folds: Esc closes it, and closing the chat, /clear, a session read
           // from its file and a session taken back drop it. `pagerShownRef` says whether
           // the last render drew it: only a pager on screen holds the keys.
+          const [watchFolds, setWatchFoldsState] = ui.useState<FoldState>(allFolded());
+          const watchFoldsRef = ui.useRef(watchFolds);
+          const setWatchFolds = (s: FoldState) => { watchFoldsRef.current = s; setWatchFoldsState(s); };
+          const watchToEndRef = ui.useRef<(() => void) | null>(null);
+          const watchOffRef = ui.useRef<Array<() => void>>([]);
           const [pager, setPagerState] = ui.useState<string | null>(null);
           const pagerRef = ui.useRef<string | null>(null);
           const pagerShownRef = ui.useRef(false);
@@ -606,7 +625,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const mouse = (key: { name?: string; x?: number; y?: number }): boolean => {
             // While the pager is drawn a click folds nothing in the conversation it
             // stands in for, and a drag is flowtty's selection of the pager's own text.
-            if (pagerShownRef.current) { pressRef.current = null; return false; }
+            if (pagerShownRef.current || watchRef.current) { pressRef.current = null; return false; }
             if (key.name === 'mousedrag') { pressRef.current = null; return false; }
             if (key.name === 'mousedown') { pressRef.current = { x: Number(key.x), y: Number(key.y), at: Date.now() }; return false; }
             const down = pressRef.current;
@@ -767,7 +786,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             portRef.current = {
               // The chat open, and neither the picker, the pager nor a plugin's panel drawn
               // in its place.
-              showsEnd: () => openRef.current && !pickerRef.current && !pagerRef.current && !panelRef.current,
+              showsEnd: () => openRef.current && !pickerRef.current && !pagerRef.current && !panelRef.current && !watchRef.current,
               open: () => openRef.current,
               input: () => inputRef.current,
               // A /command or !command in the field is being run, not drafted (it was
@@ -782,6 +801,46 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // The notes mode and the folds of a conversation the chat shows: its remembered
           // ones when it left them (`leave`), else a conversation's start — the config's
           // notes mode and everything folded. The pager is closed either way.
+          // The watch (AGENTS.md (watching a child)): the chat keeps drawing the session, and
+          // draws `node`'s rows in the list's place. Its listener on `closed` goes first, so
+          // a node that ends from here on is heard, and reads the snapshot again: the rows
+          // told last may come after the listeners are cleared. The subscription redraws the
+          // chat on every change of the node (a child's own `notify` is silent).
+          const setWatch = (next: Watching | null) => { watchRef.current = next; setWatching(next); };
+          const startWatch = (node: Conversation) => {
+            if (watchRef.current) endWatch();
+            const state: Watching = { node, path: watchPath(node), ended: null, final: null, back: treeSelRef.current.at, ask: false };
+            const closed = () => {
+              const cur = watchRef.current;
+              if (!cur || cur.node !== node || cur.ended !== null) return;
+              setWatch({ ...cur, ended: endedWord(node.lastEnd, node.closeReason), final: node.getSnapshot(), ask: false });
+              host.notify();
+            };
+            watchOffRef.current = [node.on('closed', closed), node.subscribe(() => host.notify())];
+            watchRef.current = state;
+            setWatch(state);
+            if (node.closed) closed();
+            setWatchFolds(allFolded());
+            setPager(null);
+            setTreeSel(NO_TREE_SEL);
+            host.notify();
+          };
+          // Ends the watch. `stepBack`: the person's Esc, which puts the cursor back on the
+          // node's row when it is still drawn and counts the session's end as seen.
+          const endWatch = (stepBack = false) => {
+            const w = watchRef.current;
+            if (!w) return;
+            for (const off of watchOffRef.current) off();
+            watchOffRef.current = [];
+            watchToEndRef.current = null;
+            setWatch(null);
+            if (stepBack) {
+              const props = chatPropsRef.current;
+              if (w.back !== null && props && treeNow({ ...props, watch: null }).view.rows.some((r) => r.key === w.back)) setTreeSel({ at: w.back, ask: false });
+              markSeenRef.current();
+            }
+            host.notify();
+          };
           const restoreView = (of?: Conversation) => {
             const m = of ? viewMemory.current!.get(of) : undefined;
             if (m && of) {
@@ -918,12 +977,19 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             },
             confirm: (ev) => {
               if (!ev.request || ev.host) return;
+              // The session's own y/n is what the person must see: it ends a watch, and is
+              // armed as one over the tree cursor is.
+              if (watchRef.current) {
+                endWatch();
+                ownSeenRef.current = convRef.current!.confirm ?? null;
+                ownArmedAt.current = askClock.now();
+              }
               if (contextOpenRef.current) setContextOpen(false);
               // So does a pager: the y/n is what the person must see and answer.
               if (pagerRef.current) setPager(null);
             },
             // A question is answered in the conversation: a pager over it closes.
-            question: (ev) => { if (ev.parked && pagerRef.current) setPager(null); },
+            question: (ev) => { if (ev.parked && pagerRef.current) setPager(null); if (ev.parked && watchRef.current) endWatch(); },
             notice: (ev) => setError(ev.text),
             // Landed while the chat is closed: counted unread, and one alert.
             inbox: (ev) => {
@@ -1219,6 +1285,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // — or, while it works or waits, keeps it loaded and headless until it is quiescent
           // (`retire`).
           const leave = (prev: Conversation) => {
+            endWatch();
             unbindView(prev);
             // The clock, the `/memory` listing and an open `/context` are the session on
             // screen's: a left one's `turn-end` reaches no view to stop the clock, and a
@@ -1236,6 +1303,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // it, and it is what the chat draws from the next render on (and what this render's
           // handler reaches at once).
           const adopt = (next: Conversation) => {
+            endWatch();
             const port = portRef.current!;
             convRef.current?.detach(port);
             // One taken back was unbound when it was left and is bound again here.
@@ -1272,6 +1340,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // The chat's half of a fresh conversation: the field, its bang level, the notes mode, the
           // folds, the pager, the error line, the clock.
           const resetView = () => {
+            endWatch();
             if (tickRef.current) { clearInterval(tickRef.current); tickRef.current = null; }
             setInput(''); inputRef.current = '';
             setCursor(0);
@@ -1604,6 +1673,18 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                     return undefined;
                   },
                 }];
+                // ⏎ on a live row closes the panel and watches that node.
+                const watchKey: PanelKeyDef = {
+                  key: 'return', label: 'watch',
+                  run: (id) => {
+                    if (id === null) return undefined;
+                    const node = id.startsWith('ended:') ? null : asked.nodeByKey(id);
+                    if (!node) return 'it has ended — nothing to watch';
+                    startWatch(node);
+                    setPanel(null);
+                    return undefined;
+                  },
+                };
                 const answerKeys: PanelKeyDef[] = [
                   { key: 'y', label: 'yes', run: (id) => { const key = asking; asking = null; if (key !== null && key === id) asked.nodeByKey(key)?.stopSubtree('x'); host.notify(); return undefined; } },
                   { key: 'n', label: 'no', run: () => { asking = null; return undefined; } },
@@ -1613,7 +1694,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   follow: true,
                   empty: 'no subagents here',
                   rows: () => agentsPanelRows(asked.tree(), asked.endedChildren, Date.now(), pending()),
-                  get keys() { return pending() !== null ? answerKeys : stopKeys; },
+                  get keys() { return pending() !== null ? answerKeys : [...stopKeys, watchKey]; },
                 });
                 return;
               }
@@ -1728,6 +1809,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               inputRef.current = initialText;
               setCursor(Array.from(initialText).length);
             }
+            // A watch whose node ended while the chat was away opens on the session.
+            if (watchRef.current?.ended != null) endWatch();
             conv.markSeen(); // the session's end is on screen now
             disarmEsc();
             host.notify();
@@ -1829,7 +1912,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             const c = convRef.current!;
             // With the cursor in the tree rows a request is not answerable: it is the notice line.
             if (treeSelRef.current.at !== null) return null;
-            if (c.confirm || c.question || pickerRef.current || panelRef.current || contextOpenRef.current || pagerShownRef.current || hostKeys().panel) return null;
+            if (c.confirm || c.question || pickerRef.current || panelRef.current || contextOpenRef.current || pagerShownRef.current || watchRef.current || hostKeys().panel) return null;
             const o = c.offered();
             return o && o.path.length ? o : null;
           };
@@ -1984,6 +2067,28 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 if (key.name === 'escape') { setPager(null); host.notify(); }
                 return true;
               }
+              // A watched child is a reader too (AGENTS.md (watching a child)): its rows scroll
+              // with PgUp/PgDn and the wheel, which the list hears first. The sessions key
+              // opens the picker, Esc steps back, the details key and End act on the watched
+              // rows, `x` asks to stop the node and `y` stops it with what it started; every
+              // other key stops here, so nothing is typed, sent, queued or continued.
+              if (focused && watchRef.current) {
+                const w = watchRef.current;
+                if (isKey(host.keys.sessions ?? [], key)) { endWatch(); openPicker(); return true; }
+                if (w.ask) {
+                  if (key.name === 'y' && !key.ctrl && !key.meta) {
+                    w.node.stopSubtree('x');
+                    setWatch({ ...w, ask: false });
+                    host.notify();
+                  } else if (key.name === 'n' || key.name === 'escape') { setWatch({ ...w, ask: false }); host.notify(); }
+                  return true;
+                }
+                if (key.name === 'escape') endWatch(true);
+                else if (isKey(host.keys.details ?? [], key)) { setWatchFolds(flipFolds(watchFoldsRef.current)); host.notify(); }
+                else if (isKey(host.keys.toEnd ?? [], key)) watchToEndRef.current?.();
+                else if (key.name === 'x' && !key.ctrl && !key.meta && w.ended === null) { setWatch({ ...w, ask: true }); host.notify(); }
+                return true;
+              }
               if (!focused) {
                 // The conversation's own list does not hear the wheel while the plugin
                 // has the keys; over the list it still scrolls it. Over the pager (drawn
@@ -1992,7 +2097,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 const v = viewportRef.current;
                 if ((key.name === 'wheelup' || key.name === 'wheeldown') && v && typeof key.x === 'number' && typeof key.y === 'number'
                   && key.x >= v.left && key.x < v.left + v.width && key.y >= v.top && key.y < v.top + v.height) {
-                  if (!pagerShownRef.current) wheelRef.current?.(key.name === 'wheelup', key.count ?? 1);
+                  if (!pagerShownRef.current && !watchRef.current) wheelRef.current?.(key.name === 'wheelup', key.count ?? 1);
                   return true;
                 }
                 return false;
@@ -2044,6 +2149,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 else if (key.name === 'up') setTreeSel(i <= 0 ? NO_TREE_SEL : { at: stops[i - 1]!.key, ask: false });
                 else if (key.name === 'down') setTreeSel({ at: stops[Math.min(stops.length - 1, i + 1)]!.key, ask: false });
                 else if (key.name === 'x' && !key.ctrl && !key.meta && i >= 0) setTreeSel({ at: sel.at, ask: true });
+                else if (key.name === 'return' && !key.ctrl && !key.meta && i >= 0) {
+                  const node = conv.nodeByKey(sel.at!);
+                  if (node) startWatch(node);
+                }
                 return true;
               }
               // A subagent's y/n, offered while the list is what the chat shows: `y` or `n`
@@ -2340,6 +2449,16 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // started (`tabRef`), not from the field. Only with the caret at the end of a
           // one-line field, where the offer can be drawn.
           const completion = !input.includes('\n') && cursor >= input.length ? lineView(input, tabRef.current, chatComplete) : null;
+          // The watched child as the chat draws it: its own rows and folds, never the session's.
+          const watchedNode = watching ? convRef.current!.tree().find((n) => n.key === watching.node.key) : undefined;
+          const watchView: WatchView | null = watching ? {
+            path: watching.path,
+            rows: chatRows(watchSnap.messages as Parameters<typeof chatRows>[0], rowOpts(watchFolds)),
+            state: watchState(watchedNode, watching.ended),
+            ended: watching.ended !== null,
+            ask: watching.ask ? stopQuestion({ label: watching.node.label, below: watchedNode?.below ?? 0 }) : null,
+            toEnd: watchToEndRef,
+          } : null;
           const chatProps: Record<string, unknown> = {
             width, height, theme: host.config.theme, messages, input, streaming, error, toolLabel, phase, verb, cursor, escArmed,
             // An armed Ctrl+C / Ctrl+D / Ctrl+Z (the App's, `^c again to exit`) — drawn
@@ -2371,6 +2490,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             imagesOn: imageLimits(host.config.ai).enabled,
             fullscreen,
             pager: pagerShown && pager ? { rows: pagerRows, title: pagerTitle(pagerRows, pager) } : null,
+            watch: watchView,
             // Docked beside the plugin's screen: the frame marks which side has the keys.
             docked: layout === 'panel',
             focused,
