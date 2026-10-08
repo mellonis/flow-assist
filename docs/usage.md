@@ -245,9 +245,9 @@ in shell mode). ↑ and ↓ walk the rows; ↑ on the first row, or Esc, goes ba
 and the hint row names the keys while you are in the rows. `x` asks `stop <name> and 2
 below it? y yes · n no` in place of that row; `y` stops the node and everything it started
 (the same stop as `/subagent stop`, written to the journal as yours), `n` or Esc leaves it
-running; with a question up, the first Esc only drops it. The sessions key, Ctrl+C, the
-wheel and PgUp/PgDn still work there; every other key is swallowed: nothing is typed and
-nothing is sent. The
+running; with a question up, the first Esc only drops it. ⏎ on a row shows that node's
+conversation (see below). The sessions key, Ctrl+C, the wheel and PgUp/PgDn still work there;
+every other key is swallowed: nothing is typed and nothing is sent. The
 cursor follows its node when the rows change; when its node ends it moves to the nearest row, and
 with no row left the line has the keys again.
 
@@ -261,9 +261,42 @@ so the rows are away exactly then; `/agents` or `/subagent stop <name>` still re
 **`/agents`** opens the whole tree where the conversation is: the live nodes in tree order
 with `<state> · <time spent>`, then the last twenty that ended (`done`, `failed`, `stopped`, `empty`,
 `limit`, the time and the tokens). ↑ and ↓ move, `x` asks the same question in place of the row and
-`y` stops the node, Esc closes. On an ended row `x` only says there is nothing to stop. The
-cursor stays on its node while others start and end. `/subagent` still prints the
+`y` stops the node, Esc closes. On an ended row `x` only says there is nothing to stop. ⏎ on
+a live row closes the panel and shows that node's conversation; on an ended row it says there
+is nothing to watch. The cursor stays on its node while others start and end. `/subagent` still prints the
 numbered list that `stop <number>` reads.
+
+### Watching a subagent or task
+
+⏎ on a row under the line, or on a live row of `/agents`, shows what that node is doing: its
+conversation takes the list's place, folded the way the chat folds its own. The frame title
+names the path (`ƒ Flow Assist · fix-tests › read-logs`); the line, the plan, the queue and
+the rows are not drawn. The hint row says what the node is doing, as its row did (`⚙ <latest
+step>`, `⏸ waiting for a y/n`, `○ queued`), and on the right `x stop · Esc back`.
+
+PgUp/PgDn and the wheel scroll the rows, which follow their end while they rest there; End
+jumps to it, and the details key opens or folds everything in them. Esc steps back to your
+conversation, where you left it, and does not stop the node; from a watch that began in the
+rows it puts the cursor on that node's row. `x` asks `stop <name> and 2 below it? y yes · n
+no` in the hint row and `y` stops the node and what it started; `n` or Esc drops the
+question. The sessions key opens the picker. Every other key is swallowed: nothing is typed,
+sent or queued. A node that ends stays on screen as it was, the hint row reading `ended:
+done` (or `failed`, `stopped`), until Esc; its result is in your conversation as always.
+
+**A y/n of the watched node, or of one it started, is answered there.** It is drawn at the
+bottom as the same block (`⚠ fix-tests › read-logs · Confirm write: run_command`, `y yes · n
+no`) and answered by `y` or `n` alone, after the pause of a subagent's block (600 ms after it
+appears and after your last key). ⏎ and Esc never answer it; Esc steps back, and the request
+waits in your conversation, armed afresh. While a block is up `x` is not offered, and a stop
+question that was open is dropped, so a `y` always means one thing. A request of a node
+elsewhere in the tree is one line, `⏸ <name> waits for a y/n — Esc to answer`, and no key
+answers it there. Where the block would not fit the docked chat, a line says there is no room
+and `/subagent stop <name>` declines it.
+
+Your own conversation's y/n or question ends the watch. The y/n waits the same pause before
+a `y` counts; a question that arrives while the cursor is in the rows, or that ends a watch,
+takes no key for 600 ms, so a ⏎ on its way to the rows does not pick an option. With neither
+on screen a question takes keys at once.
 
 ## Clicks, folds and the pager
 

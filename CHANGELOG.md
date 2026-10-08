@@ -5,6 +5,30 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **⏎ on a subagent's or task's row, or on a live row in `/agents`, shows that child's
+  conversation.** Its rows take the list's place, folded as the chat folds its own; PgUp/PgDn
+  and the wheel scroll them, End jumps to the end, and the details key opens or folds all of
+  them. The frame title names the path (`ƒ Flow Assist · fix-tests › read-logs`), and the
+  hint row says what the node is doing, as its tree row does (`⚙ <latest step>`, `⏸ waiting
+  for a y/n`, `○ queued`), with `x stop · Esc back` on the right. Esc steps back and does
+  not stop the child; from a watch that began in the rows it puts the cursor on the node's
+  row. `x` asks `stop <name> and N below it? y yes · n no` in the hint row, and `y` stops
+  the node and what it started. The sessions key opens the picker; every other key is
+  swallowed, so nothing is typed, sent or queued. A node that ends
+  stays on screen as it was, the hint row reading `ended: done` (or `failed`, `stopped`),
+  until Esc; an ended row cannot be watched.
+- **A y/n of the watched child, or of a node below it, is answered in the watch.** It is
+  drawn at the bottom as the same block the conversation shows (`⚠ fix-tests › read-logs ·
+  Confirm write: run_command`, `y yes · n no`) and answered by `y` or `n` alone, 600 ms
+  after it appears and after your last key; ⏎ and Esc never answer it, and Esc steps back
+  with the request still waiting. While one is up `x` is not offered and a stop question
+  that was open is dropped, so a `y` means one thing. A request elsewhere in the tree is one
+  line, `⏸ <name> waits for a y/n — Esc to answer`. The conversation's own y/n or question
+  ends the watch; the y/n waits the same pause.
+- **A question of the conversation's own that arrives while the cursor is in the rows, or
+  that ends a watch, takes no key for 600 ms.** A ⏎ on its way to the rows does not pick an
+  option. With neither on screen a question takes keys at once.
+
 - **A conversation's live subagents and tasks are listed under the field.** One row each,
   `⚙ <name> · <latest step>` while it works, `⏸ … · waiting for a y/n`, `○ … · queued` or
   `in 4m` for one that has not started; what a node started is indented under it. The rows

@@ -801,7 +801,9 @@ there is no `/fullscreen`.
   is on screen: then, for 600 ms from that moment, every key is swallowed and none
   answers it. `needRows` and the collapsed chat's `? waiting for you` read the same
   `offered()` as the drawing; the other `conv.confirm` readers (the picker, panel and pager
-  guards, `store.chat.asking`, `inboxHeld`) mean the conversation's own.
+  guards, `store.chat.asking`, `inboxHeld`) mean the conversation's own. While a child is
+  watched its requests are drawn and answered in the watch instead
+  (AGENTS.md (watching a child)); the session's list shows none.
 - **The agent tree (agent tree)** is a conversation's live subagents and tasks, drawn as
   rows under its field and listed by `/agents`. The data is `Conversation.tree()`: the live
   descendants depth first in start order, each a `TreeNode` (`key` — the descendant's
@@ -843,7 +845,7 @@ there is no `/fullscreen`.
   `stopSubtree` on the node (the stop `/subagent stop` makes, journaled as the person's),
   `n` / Esc drop the question (Esc with a question up drops only the question; the next Esc
   leaves the rows), the sessions key clears the cursor and the question and opens the picker,
-  anything else is swallowed. Ctrl+C, the wheel and PgUp/PgDn are heard above this handler.
+  ⏎ on a row starts watching it (AGENTS.md (watching a child)), anything else is swallowed. Ctrl+C, the wheel and PgUp/PgDn are heard above this handler.
   Esc there is never the turn's stop, the field's clear or the exit arm. **A request is not
   answerable from the rows:**
   `childAskNow` is null while the cursor is in them, so a waiting subagent shows as the
@@ -854,11 +856,65 @@ there is no `/fullscreen`.
   conversation on screen changes (`adopt`). `/agents` is a command panel (`follow: true`, so
   its cursor stays on its row id as rows start and end) whose rows are
   `agentsPanelRows`: live nodes with the time spent, then the ended ones; `x` asks in place
-  of the row and `y` stops, as in the rows; an ended row refuses with a notice. A subagent's
+  of the row and `y` stops, as in the rows; ⏎ on a live row closes the panel and starts watching it, on an ended row it says there is nothing to watch. A subagent's
   block is never drawn under it (the panel hides it), so a subagent's request is not
   answerable there. The conversation's own request that arrives while the cursor is in the
   rows or a panel is drawn is armed like one that takes a block's place (`ownArmedAt`): the
-  `y` already on its way to the stop question waits out the 600 ms pause.
+  `y` already on its way to the stop question waits out the 600 ms pause. Its own QUESTION
+  that arrives over the cursor is armed the same way (`questionArmedAt`): every key is
+  swallowed for 600 ms from its appearing, so a ⏎ on its way to the rows picks no option.
+- **Watching a child (watching a child)** shows a live node's conversation in the list's
+  place while the chat's conversation stays the session. ⏎ on a tree row (`startWatch`) or on a
+  live row of `/agents` starts it; `Watching` (`watchRef`, mirrored in state) holds the node,
+  its `path` (labels from the session's child down, `watchPath`), `ended`, `final` and the
+  tree row to return to.
+  **What stays the session's, and why.** `messages`, `streaming`, `drawnRef`,
+  `store.chat`, the port, `postHome`, `/export`, `/title` and `/copy` read the session,
+  watched or not: the watch has its own names (`watched`, `watchSnap`, `watchFolds`). The
+  registry treats a conversation the chat does not show as a left session (its turn headless,
+  a toast when it finishes or waits, its turn counted in `N in background`); a watch leaves
+  nothing, so none of that applies.
+  `showsEnd` is false while watching, so an answer of the session that lands meanwhile is
+  not counted seen until Esc.
+  **Two subscriptions.** The session's `useSyncExternalStore` is unchanged; a second one
+  reads `(watched ?? conv)` for the watched rows. A child's own `deps.notify` is silent
+  and nothing of the session changes when a child's row does, so the watch also calls
+  `node.subscribe(() => host.notify())` and drops it with the watch.
+  **The close order.** `startWatch` subscribes `closed` before anything else; its handler
+  reads `getSnapshot()` again and keeps that as `final`, because the last rows may be told
+  after the node's listeners are cleared. An ended watch stays (`ended: <verdict>`, `x`
+  does nothing) until Esc; opening a chat whose watch has ended opens on the session.
+  **Folds.** `watchFolds` is the watch's own fold state, everything folded at the start: fold
+  ids are indexes into one list, so the session's would open the wrong rows. The details key
+  flips it, End jumps to the end (`watchToEndRef`), the list follows its end while it rests
+  there.
+  **Keys.** One branch, after the pager's and before the question, `/context`, own y/n,
+  tree rows, a subagent's y/n, panel and picker: the sessions key ends the watch and opens
+  the picker; a request of the node answers (below); Esc steps back (`endWatch(true)`: the
+  cursor goes back to the node's row when it is still drawn, the session's end is counted
+  seen) and does not stop the child; the details key and End act on the watched rows; `x`,
+  on a live node, asks `stop <label> and N below it?` in the hint row, `y` calls
+  `stopSubtree` on the node, `n` / Esc drop the question; every other key is swallowed, so
+  nothing reaches the field, the model or the queue. PgUp/PgDn and the wheel belong to the
+  list. The pager is closed on entering and the tree cursor is cleared.
+  **What ends a watch:** Esc, the sessions key, the session's own y/n (not the host's) or
+  parked question, `leave`, `adopt`, `renew` and `resetView`. The own y/n and the own question
+  are armed for 600 ms from the moment they end it. Collapsing the chat keeps the watch.
+  **A y/n in the watch.** `Conversation.offeredWithin(node)` is the oldest request owned
+  by the node or by one below it, `path` counted from the session (so the title names every
+  label, as `offered()` does); `offered()` itself is unchanged. It is drawn as the confirm
+  block at the bottom of the watch (`WatchView.request`), counted by `needRows` through
+  `pendingChatRows` with no plan and no queue, so a docked chat grows as it does for a
+  child's block in the session's view; where that block cannot be given the rows a docked
+  panel may have, one line says there is no room and no key answers. `askGuard.show` sees it
+  when the chat has the keyboard, and `y` / `n` without ctrl or meta, armed, call the
+  owner's `answerConfirm`; ⏎ and Esc never do. A request elsewhere in the tree is one line
+  above the hint row, `⏸ <path> waits for a y/n — Esc to answer`, and takes no key. A
+  node that has ended offers nothing. **One meaning for `y`:** a request in the watch drops
+  a stop question that was up (in the render and at the key), and while one is up `x` is
+  swallowed and the hint row does not offer `x stop`, so at any moment `y` approves a
+  request or stops a node, never either by chance. The guard is told nothing is shown when
+  the watch ends (`endWatch`), so the session's view arms the request afresh.
 - **In a chat with few rows the plan gives way, never the field.** The field's group
   never shrinks (`flexShrink: 0`, its whole height kept, so a 12-row bottom panel with
   a three-item plan still shows the field and its hint) and the conversation keeps at
