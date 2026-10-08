@@ -104,6 +104,39 @@ test('a grandchild\'s request carries both labels, and the answer goes to the gr
   expect(made(rig, 'deep.txt')).toBe(true);
 });
 
+test('offeredWithin gives the oldest request of a node and the nodes below it, labelled from the session', async () => {
+  const model = new ScriptedModel();
+  subScript(model, 'side job').script(write('side.txt'), [{ text: 'side' }]);
+  subScript(model, 'outer job').script([{ hold: true }], [{ text: 'outer' }]);
+  subScript(model, 'inner job').script(write('deep.txt'), [{ text: 'inner' }]);
+  subScript(model, 'quiet job').script([{ hold: true }], [{ text: 'quiet' }]);
+  const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
+  const side = begin(rig, spec('side', 'side job'));
+  await rig.until(() => side.child.confirm !== null);
+  const outer = begin(rig, spec('outer', 'outer job'));
+  const inner = begin(rig, spec('inner', 'inner job'), outer.child);
+  const quiet = begin(rig, spec('quiet', 'quiet job'));
+  await rig.until(() => inner.child.confirm !== null);
+  // The session offers the older request; a node's own view is the oldest within it.
+  expect(rig.conv.offered()!.owner).toBe(side.child);
+  const within = rig.conv.offeredWithin(outer.child)!;
+  expect(within.owner).toBe(inner.child);
+  expect(within.path).toEqual(['outer', 'inner']);
+  expect(rig.conv.offeredWithin(inner.child)!.path).toEqual(['outer', 'inner']);
+  expect(rig.conv.offeredWithin(side.child)!.owner).toBe(side.child);
+  expect(rig.conv.offeredWithin(side.child)!.path).toEqual(['side']);
+  expect(rig.conv.offeredWithin(quiet.child)).toBeNull();
+  // offered() is unchanged by it.
+  expect(rig.conv.offered()!.owner).toBe(side.child);
+  side.child.answerConfirm(false);
+  // A node stopped with its grandchild's request parked has nothing left within it.
+  outer.child.stopSubtree('x');
+  expect(rig.conv.offeredWithin(outer.child)).toBeNull();
+  await Promise.all([side.done, inner.done]);
+  outer.child.close('exit');
+  quiet.child.close('exit');
+});
+
 test('the session\'s own request wins over a child\'s, which is not offered until the own one is answered', async () => {
   const model = new ScriptedModel();
   subScript(model, 'child job').script(write('c.txt'), [{ text: 'c' }]);

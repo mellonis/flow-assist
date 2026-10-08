@@ -40,10 +40,10 @@ const boards = (make: any) => [make('boards', {
 
 const STEP = (mark: string) => [[{ hold: true }, { text: `${mark} step`, tool: 'datetime', args: {} }], [{ hold: true }, { text: `${mark} settled` }]];
 
-async function boot(marks: { mark: string; script?: any[][] }[], opts: { cols?: number; rows?: number; mode?: 'window' | 'panel'; main?: any[][] } = {}) {
+async function boot(marks: { mark: string; script?: any[][] }[], opts: { cols?: number; rows?: number; mode?: 'window' | 'panel'; main?: any[][]; root?: string } = {}) {
   clock.t = 10_000;
   askClock.now = () => clock.t;
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-watch-')));
+  const root = opts.root ?? fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-watch-')));
   const sessions = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-watch-s-'));
   const model = new ScriptedModel();
   const children = marks.map(({ mark, script }) => {
@@ -395,32 +395,6 @@ test('the sessions key ends the watch and opens the picker', async () => {
   ui.app.unmount();
 });
 
-test('a y/n of the watched child is neither drawn nor answered in the watch, and waits for the session after Esc', async () => {
-  const { children: [w], ui, root } = await boot([{ mark: 'ASKW', script: [[{ hold: true }, { tool: 'run_command', args: { command: 'touch ASKW.txt' } }], [{ text: 'ASKW settled' }]] }]);
-  await ask(ui, '/subagent ASKW go');
-  await settleUntil(() => w!.held);
-  await settleUntil(() => frameOf(ui).includes('⚙ askw-go'));
-  await watchFromRows(ui);
-  w!.release();
-  await settleUntil(() => frameOf(ui).includes('waiting for a y/n'));
-  expect(watching(ui)).toBe(true);
-  expect(frameOf(ui)).not.toContain('Confirm write');
-  clock.t += 700;
-  await ui.press('y');
-  await ui.press('return');
-  await settle(6);
-  expect(fs.existsSync(path.join(root, 'ASKW.txt'))).toBe(false);
-  expect(watching(ui)).toBe(true);
-  await ui.press('escape');
-  await settle(4);
-  expect(frameOf(ui)).toContain('⏸ askw-go waits for a y/n — Esc to answer');
-  await ui.press('escape');
-  await settleUntil(() => frameOf(ui).includes('Confirm write: run_command'));
-  expect(frameOf(ui)).toContain('Confirm write: run_command');
-  w!.release();
-  ui.app.unmount();
-});
-
 test('a question of the session ends the watch', async () => {
   const { children: [a], ui, model } = await boot([{ mark: 'WATH' }], { main: [[{ hold: true }, { tool: 'ask_user', args: { questions: [{ question: 'Which branch?', options: [{ label: 'master' }, { label: 'develop' }] }] } }], [{ text: 'Using it.' }]] });
   await ask(ui, '/subagent WATH do it');
@@ -489,5 +463,282 @@ test('a collapsed chat keeps the watch; one whose node ended meanwhile opens on 
   await settle();
   expect(watching(ui)).toBe(false);
   expect(frameOf(ui)).toContain('◆ watg-do-it finished:');
+  ui.app.unmount();
+});
+
+// ---- a y/n in the watch (AGENTS.md (watching a child)) ----
+
+const BLOCK = 'Confirm write: run_command';
+const tmpRoot = () => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-watch-ask-')));
+// A child that waits to be released, asks to write `file`, and then says it is settled.
+const asks = (mark: string, file: string) => [[{ hold: true }, { tool: 'run_command', args: { command: `touch ${file}` } }], [{ text: `${mark} settled` }]];
+
+// One child that will ask, watched; the request lands on `release`.
+async function watchedAsker(mark: string, label: string, opts: Parameters<typeof boot>[1] & { via?: 'agents' } = {}) {
+  const root = tmpRoot();
+  const file = path.join(root, `${mark}.txt`);
+  const b = await boot([{ mark, script: asks(mark, file) }], { root, ...opts });
+  await ask(b.ui, `/subagent ${mark} do it`);
+  await settleUntil(() => b.children[0]!.held);
+  if (opts.via === 'agents') {
+    await ask(b.ui, '/agents');
+    await settleUntil(() => frameOf(b.ui).includes('Flow Assist · Agents') && frameOf(b.ui).includes(label));
+    await b.ui.press('return');
+    await settle(4);
+  } else {
+    await settleUntil(() => frameOf(b.ui).includes(`⚙ ${label}`));
+    await watchFromRows(b.ui);
+  }
+  expect(watching(b.ui)).toBe(true);
+  return { ...b, file, release: async () => { b.children[0]!.release(); await settleUntil(() => frameOf(b.ui).includes(BLOCK)); } };
+}
+
+test('a watched child\'s write is a y/n block at the bottom of the watch; a y inside the pause does nothing, after it approves', async () => {
+  const { ui, file, release } = await watchedAsker('WRA', 'wra-do');
+  await release();
+  expect(watching(ui)).toBe(true);
+  expect(rowsOf(ui).find((r) => r.includes(BLOCK))).toContain('⚠ wra-do-it · Confirm write: run_command');
+  expect(frameOf(ui)).toContain('y yes · n no');
+  expect(frameOf(ui)).not.toContain('Press y to confirm');
+  expect(frameOf(ui)).not.toContain('x stop');
+  expect(frameOf(ui)).toContain('Esc back');
+  clock.t += 50;
+  await ui.press('y');
+  await settle(6);
+  expect(fs.existsSync(file)).toBe(false);
+  expect(frameOf(ui)).toContain(BLOCK);
+  clock.t += 700;
+  await ui.press('y');
+  await settleUntil(() => fs.existsSync(file));
+  expect(fs.existsSync(file)).toBe(true);
+  await settleUntil(() => frameOf(ui).includes('ended: done'));
+  expect(frameOf(ui)).not.toContain(BLOCK);
+  ui.app.unmount();
+});
+
+test('n declines the watched child\'s write after the pause, and a y or n with ctrl does not answer', async () => {
+  const { ui, file, release } = await watchedAsker('WRB', 'wrb-do');
+  await release();
+  clock.t += 700;
+  ui.backend.press({ name: 'y', ctrl: true });
+  ui.backend.press({ name: 'n', meta: true });
+  await settle(6);
+  expect(frameOf(ui)).toContain(BLOCK);
+  clock.t += 700;
+  await ui.press('n');
+  await settleUntil(() => frameOf(ui).includes('ended: done'));
+  expect(fs.existsSync(file)).toBe(false);
+  expect(frameOf(ui)).not.toContain(BLOCK);
+  ui.app.unmount();
+});
+
+test('⏎ and Esc never answer the watched child\'s request; Esc steps back and the request waits in the session\'s view', async () => {
+  const { ui, file, release } = await watchedAsker('WRC', 'wrc-do', { via: 'agents' });
+  await release();
+  clock.t += 700;
+  await ui.press('return');
+  await settle(6);
+  expect(fs.existsSync(file)).toBe(false);
+  expect(frameOf(ui)).toContain(BLOCK);
+  expect(watching(ui)).toBe(true);
+  clock.t += 700;
+  await ui.press('escape');
+  await settle(6);
+  expect(watching(ui)).toBe(false);
+  expect(fs.existsSync(file)).toBe(false);
+  expect(frameOf(ui)).toContain(BLOCK);
+  expect(frameOf(ui)).toContain('y yes · n no');
+  ui.app.unmount();
+});
+
+test('stepping back with a request waiting: a y inside the pause answers nothing in the session\'s view, after it the request is approved', async () => {
+  const { ui, file, release } = await watchedAsker('WRD', 'wrd-do', { via: 'agents' });
+  await release();
+  clock.t += 700;
+  await ui.press('escape');
+  await settle(6);
+  expect(watching(ui)).toBe(false);
+  clock.t += 50;
+  await ui.press('y');
+  await settle(6);
+  expect(fs.existsSync(file)).toBe(false);
+  // The y that did not count typed its letter, as in the session's view anywhere else.
+  await ui.press('backspace');
+  clock.t += 700;
+  await ui.press('y');
+  await settleUntil(() => fs.existsSync(file));
+  expect(fs.existsSync(file)).toBe(true);
+  ui.app.unmount();
+});
+
+test('a sibling\'s request is one notice line in the watch and no key answers it; Esc then shows the block', async () => {
+  const root = tmpRoot();
+  const file = path.join(root, 'SIDE.txt');
+  const { children: [a, b], ui } = await boot([{ mark: 'SIDE', script: asks('SIDE', file) }, { mark: 'QUIET' }], { root });
+  await ask(ui, '/subagent SIDE go');
+  await ask(ui, '/subagent QUIET go');
+  await settleUntil(() => a!.held && b!.held);
+  await settleUntil(() => frameOf(ui).includes('quiet-go'));
+  await ui.press('down');
+  await ui.press('down');
+  await ui.press('return');
+  await settle(4);
+  expect(frameOf(ui)).toContain('╭─ ƒ Flow Assist · quiet-go');
+  a!.release();
+  await settleUntil(() => frameOf(ui).includes('waits for a y/n'));
+  expect(frameOf(ui)).toContain('⏸ side-go waits for a y/n — Esc to answer');
+  expect(frameOf(ui)).not.toContain(BLOCK);
+  expect(frameOf(ui)).toContain('x stop · Esc back');
+  clock.t += 700;
+  await ui.press('y');
+  await ui.press('return');
+  await settle(6);
+  expect(fs.existsSync(file)).toBe(false);
+  expect(frameOf(ui)).toContain('⏸ side-go waits for a y/n');
+  await ui.press('escape');
+  await settleUntil(() => frameOf(ui).includes(BLOCK) || frameOf(ui).includes('waits for a y/n'));
+  expect(watching(ui)).toBe(false);
+  expect(fs.existsSync(file)).toBe(false);
+  b!.release();
+  ui.app.unmount();
+});
+
+test('a grandchild\'s request is drawn while its parent is watched, labelled with both names, and the answer reaches the grandchild', async () => {
+  const root = tmpRoot();
+  const file = path.join(root, 'DEEP.txt');
+  const { children: [outer, inner], ui } = await boot([
+    { mark: 'OUTR', script: [[{ hold: true }, { tool: 'subagent', args: { task: 'INNR work', label: 'inner', write: true } }], [{ hold: true }, { text: 'outer settled' }]] },
+    { mark: 'INNR', script: asks('INNR', file) },
+  ], { root });
+  await ask(ui, '/subagent OUTR go');
+  await settleUntil(() => outer!.held);
+  await settleUntil(() => frameOf(ui).includes('outr-go'));
+  await watchFromRows(ui);
+  expect(frameOf(ui)).toContain('╭─ ƒ Flow Assist · outr-go');
+  outer!.release();
+  await settleUntil(() => inner!.held);
+  inner!.release();
+  await settleUntil(() => frameOf(ui).includes(BLOCK));
+  expect(rowsOf(ui).find((r) => r.includes(BLOCK))).toContain('⚠ outr-go › inner · Confirm write: run_command');
+  clock.t += 700;
+  await ui.press('y');
+  await settleUntil(() => fs.existsSync(file));
+  expect(fs.existsSync(file)).toBe(true);
+  outer!.release();
+  ui.app.unmount();
+});
+
+test('a stop question up when the child\'s request lands is dropped: a y inside the pause stops and approves nothing, after it approves and stops nothing', async () => {
+  const { ui, file, release } = await watchedAsker('WRE', 'wre-do');
+  await ui.press('x');
+  expect(frameOf(ui)).toContain('stop wre-do-it? y yes · n no');
+  await release();
+  expect(frameOf(ui)).not.toContain('stop wre-do-it?');
+  clock.t += 50;
+  await ui.press('y');
+  await settle(6);
+  expect(frameOf(ui)).not.toContain('ended: stopped');
+  expect(frameOf(ui)).toContain(BLOCK);
+  expect(fs.existsSync(file)).toBe(false);
+  clock.t += 700;
+  await ui.press('y');
+  await settleUntil(() => fs.existsSync(file));
+  await settleUntil(() => frameOf(ui).includes('ended: done'));
+  expect(frameOf(ui)).not.toContain('ended: stopped');
+  ui.app.unmount();
+});
+
+test('with a request standing, x asks nothing and a later y stops nothing', async () => {
+  const { ui, file, release } = await watchedAsker('WRF', 'wrf-do');
+  await release();
+  clock.t += 700;
+  await ui.press('x');
+  await settle(4);
+  expect(frameOf(ui)).not.toContain('stop wrf-do-it?');
+  expect(frameOf(ui)).not.toContain('x stop');
+  ui.app.unmount();
+  expect(fs.existsSync(file)).toBe(false);
+});
+
+const chatTop = (ui: UI) => rowsOf(ui).findIndex((l) => l.includes('╭─ ƒ Flow Assist'));
+
+test('a docked chat grows for the watch\'s block as for the session\'s, and is its own size again once it is answered', async () => {
+  const { ui, file, release } = await watchedAsker('WRH', 'wrh-do', { cols: 100, rows: 30, mode: 'panel', via: 'agents' });
+  const before = chatTop(ui);
+  await release();
+  expect(chatTop(ui)).toBeLessThan(before);
+  clock.t += 700;
+  await ui.press('y');
+  await settleUntil(() => fs.existsSync(file));
+  await settleUntil(() => chatTop(ui) === before);
+  expect(chatTop(ui)).toBe(before);
+  ui.app.unmount();
+});
+
+test('where the block would undock the chat, the watch says so in one line and no key answers', async () => {
+  const root = tmpRoot();
+  const file = path.join(root, 'WRI.txt');
+  const { children: [a], ui } = await boot([{ mark: 'WRI', script: asks('WRI', file) }], { root, cols: 100, rows: 20, mode: 'panel' });
+  await ask(ui, '/subagent WRI do it');
+  await settleUntil(() => a!.held);
+  await ask(ui, '/agents');
+  await settleUntil(() => frameOf(ui).includes('Flow Assist · Agents') && frameOf(ui).includes('wri-do'));
+  await ui.press('return');
+  await settle(4);
+  expect(watching(ui)).toBe(true);
+  a!.release();
+  await settleUntil(() => frameOf(ui).includes('no room to show it'));
+  expect(rowsOf(ui).find((r) => r.includes('no room to show it'))).toContain('/subagent stop wri-do-it declines it');
+  expect(frameOf(ui)).toContain('BOARD-SURFACE');
+  expect(frameOf(ui)).not.toContain(BLOCK);
+  expect(frameOf(ui)).not.toContain('x stop');
+  clock.t += 700;
+  await ui.press('y');
+  await settle(4);
+  expect(fs.existsSync(file)).toBe(false);
+  expect(watching(ui)).toBe(true);
+  ui.app.unmount();
+});
+
+// ---- the session's own question over a watch or the tree cursor ----
+
+const QUESTION = [[{ hold: true }, { tool: 'ask_user', args: { questions: [{ question: 'Which branch?', options: [{ label: 'master' }, { label: 'develop' }] }] } }], [{ text: 'Using it.' }]];
+
+for (const where of ['watching', 'the cursor in the rows'] as const) {
+  test(`the session's own question that arrives while ${where} takes no key for the pause, then ⏎ answers it`, async () => {
+    const { children: [a], ui, model } = await boot([{ mark: 'WQA' }], { main: QUESTION });
+    await ask(ui, '/subagent WQA do it');
+    await settleUntil(() => a!.held);
+    await ask(ui, 'main go');
+    await settleUntil(() => model.held);
+    await settleUntil(() => frameOf(ui).includes('⚙ wqa-do'));
+    if (where === 'watching') await watchFromRows(ui);
+    else await ui.press('down');
+    expect(where === 'watching' ? watching(ui) : inRows(ui)).toBe(true);
+    model.release();
+    await settleUntil(() => frameOf(ui).includes('Which branch?'));
+    expect(watching(ui)).toBe(false);
+    clock.t += 50;
+    await ui.press('return');
+    await settle(6);
+    expect(frameOf(ui)).toContain('Which branch?');
+    clock.t += 700;
+    await ui.press('return');
+    await settleUntil(() => !frameOf(ui).includes('Which branch?'));
+    await settleUntil(() => frameOf(ui).includes('Using it.'));
+    a!.release();
+    ui.app.unmount();
+  });
+}
+
+test('a question with no watch and no cursor takes a key at once', async () => {
+  const { ui, model } = await boot([{ mark: 'WQB' }], { main: QUESTION });
+  await ask(ui, 'main go');
+  await settleUntil(() => model.held);
+  model.release();
+  await settleUntil(() => frameOf(ui).includes('Which branch?'));
+  await ui.press('return');
+  await settleUntil(() => frameOf(ui).includes('Using it.'));
+  expect(frameOf(ui)).not.toContain('Which branch?');
   ui.app.unmount();
 });

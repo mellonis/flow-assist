@@ -316,6 +316,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const askGuard = ui.useRef(createAskGuard());
           const ownSeenRef = ui.useRef<unknown>(null);
           const ownArmedAt = ui.useRef<number | null>(null);
+          // The conversation's own question that ended a watch, or came over the tree cursor,
+          // takes no key for the pause from its appearing (AGENTS.md (subagent y/n)).
+          const questionSeenRef = ui.useRef<unknown>(null);
+          const questionArmedAt = ui.useRef<number | null>(null);
           const childBlockRef = ui.useRef(false);
           const bindView = (c: Conversation) => {
             unbindRef.current.set(c, [
@@ -834,6 +838,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             watchOffRef.current = [];
             watchToEndRef.current = null;
             setWatch(null);
+            // A request the watch drew is drawn by the session's view from here on: the guard
+            // sees none in between, so the block arms afresh.
+            askGuard.current.show(null);
             if (stepBack) {
               const props = chatPropsRef.current;
               if (w.back !== null && props && treeNow({ ...props, watch: null }).view.rows.some((r) => r.key === w.back)) setTreeSel({ at: w.back, ask: false });
@@ -989,7 +996,14 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               if (pagerRef.current) setPager(null);
             },
             // A question is answered in the conversation: a pager over it closes.
-            question: (ev) => { if (ev.parked && pagerRef.current) setPager(null); if (ev.parked && watchRef.current) endWatch(); },
+            question: (ev) => {
+              if (ev.parked && pagerRef.current) setPager(null);
+              if (ev.parked && watchRef.current) {
+                endWatch();
+                questionSeenRef.current = convRef.current!.question ?? null;
+                questionArmedAt.current = askClock.now();
+              }
+            },
             notice: (ev) => setError(ev.text),
             // Landed while the chat is closed: counted unread, and one alert.
             inbox: (ev) => {
@@ -1944,6 +1958,18 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             if (!fieldEmpty()) return 'notice';
             return childBlockRows(child, w, false) > dockLimit() ? 'notice' : 'block';
           };
+          // The y/n the watch shows: the oldest parked in the watched node or below it. None once
+          // the node has ended.
+          const watchAskNow = (): Offered | null => {
+            const w = watchRef.current;
+            return w && w.ended === null ? convRef.current!.offeredWithin(w.node) : null;
+          };
+          // The watch's request as a block, or as a notice where the block cannot be given the
+          // rows a docked panel may have.
+          const watchAskShape = (w: number): 'block' | 'notice' | null => {
+            const asked = watchAskNow();
+            return asked ? (childBlockRows(asked, w, false) > dockLimit() ? 'notice' : 'block') : null;
+          };
           // The notice for a block that cannot be shown: the path is cut to leave the
           // instruction whole, which names the label `/subagent stop` takes.
           const tooSmall = (c: Offered): string => {
@@ -1956,6 +1982,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             return `no room for ${label}'s y/n; /subagent stop ${label} declines it`;
           };
           const needRows = (w: number): number => {
+            const asked = watchAskNow();
+            if (asked) return watchAskShape(w) === 'block' ? pendingChatRows({ width: w, confirm: { ...asked.request, path: asked.path }, todo: [], queued: 0 }) : 0;
             const c = conv.confirm;
             const child = childAskNow();
             if (child) {
@@ -1999,7 +2027,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // shown, and getting the keyboard back arms afresh.
           const guardSees = (c: Offered | null): object | null => (c && focusedRef.current && !hostKeys().panel && !hostKeys().line ? c.request : null);
           const shownShape = shownChild ? childShape(dock?.panel.width ?? width) : null;
-          askGuard.current.show(guardSees(shownChild));
+          // A watched child's request is shown the same way: one request at a time.
+          if (watchRef.current?.ask && watchAskNow()) setWatch({ ...watchRef.current, ask: false });
+          askGuard.current.show(guardSees(shownChild ?? (open ? watchAskNow() : null)));
           // The conversation's own y/n that takes a subagent's block's place is armed too:
           // the keys already on their way to the block must not answer it.
           const ownNow = convRef.current!.confirm ?? null;
@@ -2008,6 +2038,12 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             ownArmedAt.current = ownNow && (childBlockRef.current || treeSelRef.current.at !== null || panelRef.current) ? askClock.now() : null;
           }
           childBlockRef.current = !!shownChild && childShape(dock?.panel.width ?? width) === 'block';
+          // Its own question that takes the keys over the tree cursor is armed too.
+          const questionNow = convRef.current!.question ?? null;
+          if (questionNow !== questionSeenRef.current) {
+            questionSeenRef.current = questionNow;
+            questionArmedAt.current = questionNow && treeSelRef.current.at !== null ? askClock.now() : null;
+          }
           // What a plugin says from inside a turn — a tool of its own, a task's — belongs to
           // the session whose work it is, on screen or left (`workHome`); said from nowhere
           // (its own poller, a key), or for a session already put away, to the one on screen.
@@ -2053,8 +2089,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               if (isMouseKey(key.name)) return isMouseButton(key.name) && mouse(key);
               // A subagent's y/n: an answer counts only after a pause (AGENTS.md (subagent
               // y/n)). Every key is noted, whoever takes it; the pause is read as of before it.
-              askGuard.current.show(guardSees(childAskNow()));
+              askGuard.current.show(guardSees(childAskNow() ?? watchAskNow()));
               const askArmed = askGuard.current.press();
+              // A question that arrived over the tree cursor is armed from this key.
+              if (conv.question && conv.question !== questionSeenRef.current) {
+                questionSeenRef.current = conv.question;
+                questionArmedAt.current = treeSelRef.current.at !== null ? askClock.now() : null;
+              }
               // A request that took a block's place under this key is armed from this key.
               if (conv.confirm && conv.confirm !== ownSeenRef.current) {
                 ownSeenRef.current = conv.confirm;
@@ -2073,8 +2114,17 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // rows, `x` asks to stop the node and `y` stops it with what it started; every
               // other key stops here, so nothing is typed, sent, queued or continued.
               if (focused && watchRef.current) {
-                const w = watchRef.current;
+                let w = watchRef.current;
                 if (isKey(host.keys.sessions ?? [], key)) { endWatch(); openPicker(); return true; }
+                // A request of the node (or one below it) is answered here by `y` / `n`, armed;
+                // ⏎ and Esc never answer. While one stands the stop question is gone and `x`
+                // is swallowed, so a `y` means one thing.
+                const asked = watchAskNow();
+                if (asked && w.ask) { w = { ...w, ask: false }; setWatch(w); }
+                if (asked && askArmed && watchAskShape(dock?.panel.width ?? width) === 'block' && (key.name === 'y' || key.name === 'n') && !key.ctrl && !key.meta) {
+                  asked.owner.answerConfirm(key.name === 'y');
+                  return true;
+                }
                 if (w.ask) {
                   if (key.name === 'y' && !key.ctrl && !key.meta) {
                     w.node.stopSubtree('x');
@@ -2086,7 +2136,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 if (key.name === 'escape') endWatch(true);
                 else if (isKey(host.keys.details ?? [], key)) { setWatchFolds(flipFolds(watchFoldsRef.current)); host.notify(); }
                 else if (isKey(host.keys.toEnd ?? [], key)) watchToEndRef.current?.();
-                else if (key.name === 'x' && !key.ctrl && !key.meta && w.ended === null) { setWatch({ ...w, ask: true }); host.notify(); }
+                else if (key.name === 'x' && !key.ctrl && !key.meta && w.ended === null && !asked) { setWatch({ ...w, ask: true }); host.notify(); }
                 return true;
               }
               if (!focused) {
@@ -2107,6 +2157,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // An open question consumes every key too: arrows/digits/Space/⏎ answer it,
               // Esc dismisses it, and in the free-text field every printable key is text.
               if (conv.question) {
+                if (questionArmedAt.current !== null && askClock.now() - questionArmedAt.current < ASK_ARM_MS) return true;
                 // The same width the block draws its field in, so the caret moves the
                 // way it is shown to move.
                 const next = askKey(conv.question.state, key, askFieldWidth(chatWrapWidth(width, fullscreenRef.current)));
@@ -2451,12 +2502,19 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const completion = !input.includes('\n') && cursor >= input.length ? lineView(input, tabRef.current, chatComplete) : null;
           // The watched child as the chat draws it: its own rows and folds, never the session's.
           const watchedNode = watching ? convRef.current!.tree().find((n) => n.key === watching.node.key) : undefined;
+          const watchAsk = watching ? watchAskNow() : null;
+          const watchAskIsBlock = watchAsk ? watchAskShape(dock?.panel.width ?? width) === 'block' : false;
+          const offeredNow = watching ? convRef.current!.offered() : null;
+          const elsewhere = offeredNow && offeredNow.path.length && !(() => { for (let a: Conversation | null = offeredNow.owner; a; a = a.parent) if (a === watching!.node) return true; return false; })();
           const watchView: WatchView | null = watching ? {
             path: watching.path,
             rows: chatRows(watchSnap.messages as Parameters<typeof chatRows>[0], rowOpts(watchFolds)),
             state: watchState(watchedNode, watching.ended),
             ended: watching.ended !== null,
             ask: watching.ask ? stopQuestion({ label: watching.node.label, below: watchedNode?.below ?? 0 }) : null,
+            request: watchAsk && watchAskIsBlock ? { ...watchAsk.request, path: watchAsk.path } : null,
+            notice: watchAsk && !watchAskIsBlock ? `⏸ ${tooSmall(watchAsk)}` : elsewhere ? `⏸ ${offeredNow!.path.join(' › ')} waits for a y/n — ${keyGlyph('escape')} to answer` : null,
+            asked: !!watchAsk,
             toEnd: watchToEndRef,
           } : null;
           const chatProps: Record<string, unknown> = {

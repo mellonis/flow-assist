@@ -458,6 +458,25 @@ export class Conversation {
     walk(this, []);
     return best;
   }
+  // The oldest y/n parked in `node` or in a conversation below it, `path` counted from this
+  // conversation (so the labels are whole, as `offered` gives them). null with none, and
+  // for a node that is not below this conversation. The conversation's own y/n is not
+  // within a child.
+  offeredWithin(node: Conversation): Offered | null {
+    if (node === this) return this.offered();
+    let best: Offered | null = null;
+    const walk = (c: Conversation, path: string[], inside: boolean): void => {
+      for (const child of c.children) {
+        const at = [...path, child.label];
+        const within = inside || child === node;
+        const r = child.confirmDrawn;
+        if (within && r && (!best || r.at < best.request.at)) best = { request: r, owner: child, path: at };
+        walk(child, at, within);
+      }
+    };
+    walk(this, [], false);
+    return best;
+  }
   // Something below this conversation waits for the person.
   get subtreeWaiting(): boolean {
     for (const c of this.children) if (c.confirm || c.subtreeWaiting) return true;

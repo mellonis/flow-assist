@@ -1406,14 +1406,20 @@ export interface PagerView {
 // A watched child (AGENTS.md (watching a child)): its rows in the conversation's place, the
 // labels from the session's child down to it for the frame title, `state` what it does
 // (the hint row's left text), `ended` whether it has ended, `ask` the stop question that
-// takes the left text's place (null — none). `toEnd` is filled with the jump to the rows'
-// end, for the End key.
+// takes the left text's place (null — none). `request` is the y/n of the node or of one
+// below it, drawn as the confirm block at the bottom; `notice` is one line above the hint
+// row (a y/n that waits elsewhere, or one whose block has no room); `asked` is whether the
+// node's own subtree has a y/n parked, which keeps `x stop` out of the hint. `toEnd` is
+// filled with the jump to the rows' end, for the End key.
 export interface WatchView {
   path: string[];
   rows: ChatRow[];
   state: string;
   ended: boolean;
   ask: string | null;
+  request?: ConfirmAsk | null;
+  notice?: string | null;
+  asked?: boolean;
   toEnd?: { current: (() => void) | null };
 }
 
@@ -1530,7 +1536,7 @@ export function chatRoom(p: ChatRoomInput) {
   // An open question takes the plan's room: the person is answering, not planning.
   const planList = (pendingQuestion ? [] : (todo ?? [])) as PlanItem[];
   const { shown: planShown, summary: planSummary } = planView(planList);
-  const confirmAsk = pendingConfirm ? confirmView(pendingConfirm, wrap) : null;
+  const confirmAsk = pendingConfirm ? confirmView(pendingConfirm, wrap) : watch?.request ? confirmView(watch.request, wrap) : null;
   // What the field's place holds: the question, `/context`, the y/n, or the field.
   const fieldPlace = pendingQuestion
     ? askBlockRows(pendingQuestion, wrap)
@@ -1874,11 +1880,15 @@ export function renderChatModal({
       // put while the hint changes, and turns yellow when it is time to /compact.
       // Chrome, not conversation: out of every selection. The pager's keys, while it is up.
       pager ? h(Text, { dim: true, selectable: false, wrap: 'truncate' }, `${CAP.page} or the wheel scroll · ${CAP.esc} close`) :
-      // A watched child: what it does (or the stop question) on the left, the keys on the right.
-      watch ? h(Box, { flexDirection: 'row', width: '100%', flexShrink: 0, selectable: false },
-        h(Box, { flexGrow: 1, flexShrink: 1, overflow: 'hidden' },
-          h(Text, watch.ask !== null ? { color: m.warn, wrap: 'truncate' } : { dim: true, wrap: 'truncate' }, watch.ask ?? watch.state)),
-        h(Text, { dim: true, wrap: 'truncate' }, `  ${watch.ended ? '' : 'x stop · '}${CAP.esc} back`)) :
+      // A watched child: what it does (or the stop question) on the left, the keys on the
+      // right; a y/n that waits elsewhere is one line above, and `x stop` is not offered
+      // while a y/n of the node stands (a `y` means one thing).
+      watch ? h(Box, { flexDirection: 'column', width: '100%', flexShrink: 0 },
+        watch.notice ? h(Text, { color: m.warn, wrap: 'truncate', selectable: false }, watch.notice) : null,
+        h(Box, { flexDirection: 'row', width: '100%', flexShrink: 0, selectable: false },
+          h(Box, { flexGrow: 1, flexShrink: 1, overflow: 'hidden' },
+            h(Text, watch.ask !== null ? { color: m.warn, wrap: 'truncate' } : { dim: true, wrap: 'truncate' }, watch.ask ?? watch.state)),
+          h(Text, { dim: true, wrap: 'truncate' }, `  ${watch.ended || watch.asked ? '' : 'x stop · '}${CAP.esc} back`))) :
       h(Box, { flexDirection: 'row', width: '100%', flexShrink: 0, selectable: false },
       h(Box, { flexGrow: 1, flexShrink: 1, overflow: 'hidden' },
       (!escArmed && !armedHint && !treeKeys && (streaming || toolLabel))
@@ -1977,7 +1987,7 @@ export function renderChatModal({
       // The input field group (the y/n confirm block or the multiline input box). It
       // never shrinks: in a small panel the plan gives way (`planFit`), the field and
       // its hint keep their rows. Not drawn under the pager.
-      pager || watch ? null : h(Box, { flexDirection: 'column', width: '100%', flexShrink: 0 },
+      pager || (watch && !confirmAsk) ? null : h(Box, { flexDirection: 'column', width: '100%', flexShrink: 0 },
         pendingQuestion
           ? renderAsk(pendingQuestion, m.bg, wrap)
           : contextPanel
