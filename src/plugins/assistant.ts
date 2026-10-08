@@ -33,7 +33,7 @@ import { renderConsole } from '../assistant/console-view.js';
 import { editorReducer } from '@flowtty/core';
 import { z } from 'zod';
 import { appliesOnRestart, modelMaySave, modelMaySet } from '../config/schema.js';
-import { agentRowsOf, treeRows } from '../assistant/agent-tree.js';
+import { agentRowsOf, stopQuestion, treeCursor, treeRows } from '../assistant/agent-tree.js';
 import { anchorRow, askFieldWidth, blockRows, roomForBlock, chatFieldWidth, chatRoom, chatRows, chatWrapWidth, firstFoldRow, inputVisualRows, liveChatStatus, pagerTitle, pendingChatRows, treeBudget, renderChatStatus, renderChatStrip, rowAnchor, viewGroupFor, type RowOpts, type Viewport } from '../views/modals.js';
 import { CHAT_MODES, PLUGIN_MIN_ROWS, chatModeOf, inRect, type ChatMode, type PanelLayout } from '../runtime/panel-layout.js';
 import { recalledFolds, rememberView, type ViewMemory } from '../assistant/view-memory.js';
@@ -122,6 +122,10 @@ type BuildAssistantParams = {
   config: Record<string, unknown>;
   make: Make;
 };
+
+// The tree cursor's state (AGENTS.md (agent tree)).
+interface TreeSel { at: string | null; ask: boolean }
+const NO_TREE_SEL: TreeSel = { at: null, ask: false };
 
 export function buildAssistantPlugin({ renders, config, make }: BuildAssistantParams): Plugin {
   return make('assistant', {
@@ -471,6 +475,16 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const [bangLevel, setBangLevelState] = ui.useState<0 | 1 | 2>(0);
           const bangLevelRef = ui.useRef(bangLevel);
           const setBangLevel = (v: 0 | 1 | 2) => { bangLevelRef.current = v; setBangLevelState(v); };
+          // The cursor in the tree rows under the field (AGENTS.md (agent tree)): `at` is the
+          // key of the node it stands on (null — it is in the field), `ask` whether the stop
+          // question for that node is up. Cleared whenever the rows are not drawn.
+          const [, setTreeSelState] = ui.useState<TreeSel>(NO_TREE_SEL);
+          const treeSelRef = ui.useRef<TreeSel>(NO_TREE_SEL);
+          const setTreeSel = (v: TreeSel) => { treeSelRef.current = v; setTreeSelState(v); };
+          // The cursor's place among the stops, for the nearest row when its node ends; the
+          // props the last render drew, which the keys measure the rows from.
+          const treeIdxRef = ui.useRef(0);
+          const chatPropsRef = ui.useRef<Record<string, unknown> | null>(null);
           // A turn that was stopped (Esc, Ctrl+C) or failed does not send the queue: the
           // queued messages come back into the field — in order, joined by blank lines,
           // AHEAD of whatever was typed meanwhile (the order they would have gone out
@@ -1229,6 +1243,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             convRef.current = next;
             registryRef.current!.show(next);
             conv = next;
+            setTreeSel(NO_TREE_SEL);
             next.attach(port);
             // One taken back while it works shows its clock again, from its segment.
             if (next.busy) { setElapsedMs(Date.now() - next.segmentStartedAt); startTicker(); }
@@ -1779,11 +1794,24 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const hostKeys = () => (host.services as { hostKeys?: () => { panel: boolean; line: boolean } }).hostKeys?.() ?? { panel: false, line: false };
           const childAskNow = (): Offered | null => {
             const c = convRef.current!;
+            // With the cursor in the tree rows a request is not answerable: it is the notice line.
+            if (treeSelRef.current.at !== null) return null;
             if (c.confirm || c.question || pickerRef.current || panelRef.current || contextOpenRef.current || pagerShownRef.current || hostKeys().panel) return null;
             const o = c.offered();
             return o && o.path.length ? o : null;
           };
           const fieldEmpty = () => inputRef.current === '' && bangLevelRef.current === 0;
+          // The tree rows the chat draws for `props` (the chat's props without `tree`): the
+          // render and the keys both ask here, so the rows a key reaches are the rows drawn.
+          const treeNow = (props: Record<string, unknown>) => {
+            const room = chatRoom(props as unknown as Parameters<typeof chatRoom>[0]);
+            const nodes = conv.tree();
+            const fit = treeBudget({ boxH: room.boxH, besides: room.besides, planFull: room.planFull, nodes: nodes.length, max: agentRowsOf(host.config as Record<string, unknown>), hidden: room.hidden });
+            const view = fit > 0 ? treeRows(nodes, fit, room.wrap) : { rows: [], more: 0 };
+            return { room, nodes, view };
+          };
+          // The rows a key may move among: the drawn ones, not the `+K more` row.
+          const treeStops = () => (chatPropsRef.current ? treeNow(chatPropsRef.current).view.rows.filter((r) => r.key !== '') : []);
           // The rows a subagent's block needs at a width, with the session's plan or without.
           const childBlockRows = (child: Offered, w: number, plan: boolean): number =>
             pendingChatRows({ width: w, confirm: { ...child.request, path: child.path }, todo: plan ? conv.plan.snapshot() : [], queued: conv.queue.length });
@@ -1845,6 +1873,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             : [];
           const pagerShown = !!pager && pagerRows.length > 0;
           pagerShownRef.current = pagerShown;
+          // The cursor leaves the rows with the keyboard: the chat folded away, the plugin's side
+          // or the runtime's panel or `:` line holding the keys.
+          if (treeSelRef.current.at !== null && (!open || !focused || hostKeys().panel || hostKeys().line)) setTreeSel(NO_TREE_SEL);
           // The subagent's y/n this render draws, if any; the guard learns it is on screen.
           const shownChild = open ? childAskNow() : null;
           // The guard counts a block only while the chat has the keyboard: with the plugin,
@@ -1954,6 +1985,29 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 if (ownArmedAt.current !== null && askClock.now() - ownArmedAt.current < ASK_ARM_MS) return true;
                 if (key.name === 'escape' || key.name === 'n') { conv.answerConfirm(false); return true; }
                 if (key.name === 'y' || key.name === 'return') { conv.answerConfirm(true); return true; }
+                return true;
+              }
+              // The cursor in the tree rows (AGENTS.md (agent tree)): every key is the rows'.
+              // ↑/↓ move, ↑ on the first row and Esc go back to the field, `x` asks to stop
+              // the node and `y` stops it with what it started. Nothing reaches the field, the
+              // model, Esc's stages or a subagent's y/n (`childAskNow` is null here, and this
+              // key was noted by the guard above).
+              if (treeSelRef.current.at !== null) {
+                const sel = treeSelRef.current;
+                const stops = treeStops();
+                const i = stops.findIndex((r) => r.key === sel.at);
+                if (sel.ask) {
+                  if (key.name === 'y' && !key.ctrl && !key.meta) {
+                    conv.nodeByKey(sel.at!)?.stopSubtree('x');
+                    setTreeSel({ at: sel.at, ask: false });
+                    host.notify();
+                  } else if (key.name === 'n' || key.name === 'escape') setTreeSel({ at: sel.at, ask: false });
+                  return true;
+                }
+                if (key.name === 'escape' || !stops.length) setTreeSel(NO_TREE_SEL);
+                else if (key.name === 'up') setTreeSel(i <= 0 ? NO_TREE_SEL : { at: stops[i - 1]!.key, ask: false });
+                else if (key.name === 'down') setTreeSel({ at: stops[Math.min(stops.length - 1, i + 1)]!.key, ask: false });
+                else if (key.name === 'x' && !key.ctrl && !key.meta && i >= 0) setTreeSel({ at: sel.at, ask: true });
                 return true;
               }
               // A subagent's y/n, offered while the list is what the chat shows: `y` or `n`
@@ -2106,6 +2160,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   setBangLevel(0);
                   setField(conv.takeBackLast()!);
                   return true;
+                }
+                // ↓ on an empty field with no history entry shown (before this key) steps into
+                // the tree rows, when any is drawn. The ↓ that ends a history walk is the
+                // history's: it lands on the empty field, and the next one enters.
+                if (key.name === 'down' && inputRef.current === '' && histAt.current === null && bangLevelRef.current === 0) {
+                  const first = treeStops()[0];
+                  if (first) { treeIdxRef.current = 0; setTreeSel({ at: first.key, ask: false }); return true; }
                 }
                 const hist = conv.prompts;
                 const untouched = inputRef.current === '' || (histAt.current != null && inputRef.current === histShown.current);
@@ -2285,6 +2346,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               ? (!fieldEmpty()
                 ? `⏸ ${shownChild.path.join(' › ')} waits for a y/n — ${bangLevel > 0 ? 'leave shell mode' : 'clear the line'} to answer`
                 : `⏸ ${tooSmall(shownChild)}`)
+              : treeSelRef.current.at !== null && !pendingAsk && convRef.current!.offered()?.path.length
+              ? `⏸ ${convRef.current!.offered()!.path.join(' › ')} waits for a y/n — ${keyGlyph('escape')} to answer`
               : null,
             pendingQuestion,
             picker,
@@ -2358,13 +2421,17 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             todo: conv.plan.snapshot(),
           };
           // The live subagents and tasks of this conversation, as rows under the field: as
-          // many as the column has room for (`treeBudget`, the one rule the view applies too).
-          // The cursor is in the field for now.
-          const room = chatRoom(chatProps as unknown as Parameters<typeof chatRoom>[0]);
-          const nodes = conv.tree();
-          const rowsMax = agentRowsOf(host.config as Record<string, unknown>);
-          const fit = treeBudget({ boxH: room.boxH, besides: room.besides, planFull: room.planFull, nodes: nodes.length, max: rowsMax, hidden: room.hidden });
-          const shownTree = fit > 0 ? { ...treeRows(nodes, fit, room.wrap), cursor: null, ask: null } : null;
+          // many as the column has room for (`treeNow`, which the keys ask too). The cursor
+          // follows its node, and goes back to the field when no row is drawn.
+          chatPropsRef.current = chatProps;
+          const { nodes, view, room } = treeNow(chatProps);
+          const was = treeSelRef.current;
+          const at = was.at === null || room.hidden ? null : treeCursor(was.at, treeIdxRef.current, view.rows);
+          const ask = at !== null && at === was.at && was.ask;
+          if (at !== was.at || ask !== was.ask) setTreeSel({ at, ask });
+          treeIdxRef.current = Math.max(0, view.rows.filter((r) => r.key !== '').findIndex((r) => r.key === at));
+          const asked = ask ? nodes.find((n) => n.key === at) : undefined;
+          const shownTree = view.rows.length ? { ...view, cursor: at, ask: asked ? stopQuestion(asked) : null } : null;
           return (host.viewRegistry.chat as (p: Record<string, unknown>) => unknown)({ ...chatProps, tree: shownTree });
         };
       },
