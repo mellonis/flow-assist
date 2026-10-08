@@ -2,7 +2,9 @@
 // are drawn under its field, what a row says, where the cursor goes when the rows change,
 // and the question that guards a stop. Pure: the chat draws what these return.
 import { cutStep } from '../cells.js';
-import type { TreeNode } from './conversation-types.js';
+import type { PanelRow } from './command-panel.js';
+import type { EndedChild, TreeNode } from './conversation-types.js';
+import { formatDuration } from './duration.js';
 
 // One drawn row. `key` is the node's conversation key ('' for the `+K more` row, which is
 // not a stop of the cursor); `tone` is how the chat colours it.
@@ -73,4 +75,28 @@ export function treeCursor(prevKey: string | null, prevIndex: number, rows: read
 // The question under the rows before a stop; `y` stops the node and what it started.
 export function stopQuestion(node: Pick<TreeNode, 'label' | 'below'>): string {
   return `stop ${node.label}${node.below ? ` and ${node.below} below it` : ''}? y yes · n no`;
+}
+
+// `/agents`: the whole tree in the panel's rows. The live nodes first in tree order, indented,
+// each with its state and the time it has spent; then the ended ones as the listing words
+// them. A live row's id is its node key, an ended row's `ended:<n>`. `asking`: the key of a
+// node whose stop question is up, drawn in place of that row's text.
+export function agentsPanelRows(nodes: readonly TreeNode[], ended: readonly EndedChild[], now = Date.now(), asking: string | null = null): PanelRow[] {
+  const rows: PanelRow[] = nodes.map((n): PanelRow => {
+    if (n.key === asking) return { id: n.key, text: stopQuestion(n), tone: 'warn' };
+    const task = n.kind === 'task' ? ' (task)' : '';
+    const spent = n.startedAt !== null ? ` · ${formatDuration(Math.max(0, now - n.startedAt))}` : '';
+    return {
+      id: n.key,
+      text: `${'  '.repeat(n.depth - 1)}${MARK[n.status]} ${n.label}${task}`,
+      detail: `${stateOf(n, now)}${spent}`,
+      ...(n.status === 'waiting' ? { tone: 'warn' as const } : {}),
+    };
+  });
+  ended.forEach((e, i) => {
+    const verdict = e.outcome === 'answer' ? 'done' : e.outcome;
+    const tokens = e.tokens ? ` · ${e.tokens >= 1e6 ? `${(e.tokens / 1e6).toFixed(1)}M` : e.tokens >= 1000 ? `${Math.round(e.tokens / 1000)}k` : e.tokens} tokens` : '';
+    rows.push({ id: `ended:${i}`, text: `${e.label}${e.kind === 'task' ? ' (task)' : ''}`, detail: `${verdict} · ${formatDuration(e.ms)}${tokens}` });
+  });
+  return rows;
 }

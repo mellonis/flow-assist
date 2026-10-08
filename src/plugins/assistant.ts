@@ -33,7 +33,7 @@ import { renderConsole } from '../assistant/console-view.js';
 import { editorReducer } from '@flowtty/core';
 import { z } from 'zod';
 import { appliesOnRestart, modelMaySave, modelMaySet } from '../config/schema.js';
-import { agentRowsOf, stopQuestion, treeCursor, treeRows } from '../assistant/agent-tree.js';
+import { agentRowsOf, agentsPanelRows, stopQuestion, treeCursor, treeRows } from '../assistant/agent-tree.js';
 import { anchorRow, askFieldWidth, blockRows, roomForBlock, chatFieldWidth, chatRoom, chatRows, chatWrapWidth, firstFoldRow, inputVisualRows, liveChatStatus, pagerTitle, pendingChatRows, treeBudget, renderChatStatus, renderChatStrip, rowAnchor, viewGroupFor, type RowOpts, type Viewport } from '../views/modals.js';
 import { CHAT_MODES, PLUGIN_MIN_ROWS, chatModeOf, inRect, type ChatMode, type PanelLayout } from '../runtime/panel-layout.js';
 import { recalledFolds, rememberView, type ViewMemory } from '../assistant/view-memory.js';
@@ -58,7 +58,7 @@ import type { Make } from '../loader/plugin.js';
 import { decodeBangLine, encodeBangLine, keptInHistory, pushHistory, type HistoryCommand } from '../assistant/prompt-history.js';
 import type { Plugin } from '../loader/plugin.js';
 import type { PluginApi } from '../runtime/plugin-api.js';
-import { isPanelSpec, panelAnswer, panelKey as commandPanelKey, panelKeys, panelRows, panelStart, panelTop, type PanelSpec, type PanelState } from '../assistant/command-panel.js';
+import { isPanelSpec, panelAnswer, panelCursor, panelKey as commandPanelKey, panelKeys, panelRows, panelStart, panelTop, type PanelKeyDef, type PanelSpec, type PanelState } from '../assistant/command-panel.js';
 import type { Command as PluginCommand } from '../loader/plugin.js';
 import type { ChatMsg, ConversationEvent, Offered, SendOptions, ViewPort } from '../assistant/conversation-types.js';
 import { Conversation, workHome } from '../assistant/conversation.js';
@@ -80,7 +80,7 @@ import { parseSubagentLine, stopTargetIndex, subagentLabel, subagentListing } fr
 // sessions directory is known (`chatCommandDefs` in the chat).
 type ChatCommand = HistoryCommand & ChatCommandDef;
 const CHAT_COMMAND_DEFS: ChatCommand[] = [
-  { name: 'compact' }, { name: 'context' }, { name: 'subagent' }, { name: 'sub' }, { name: 'copy' }, { name: 'image' }, { name: 'resume' }, { name: 'sessions' }, { name: 'new' }, { name: 'title' }, { name: 'export' }, { name: 'clear' }, { name: 'memory', values: ['project', 'global', 'forget', 'accept'] }, { name: 'workspace' },
+  { name: 'compact' }, { name: 'context' }, { name: 'subagent' }, { name: 'sub' }, { name: 'agents' }, { name: 'copy' }, { name: 'image' }, { name: 'resume' }, { name: 'sessions' }, { name: 'new' }, { name: 'title' }, { name: 'export' }, { name: 'clear' }, { name: 'memory', values: ['project', 'global', 'forget', 'accept'] }, { name: 'workspace' },
   // `cd`'s own argument is a path, not a fixed set of values — its completion is
   // special-cased in `chatComplete`, the way shell mode's own path completion is.
   { name: 'cd' },
@@ -1584,6 +1584,36 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 setError(`not attached: ${why ?? `no image at ${raw}`}`);
                 return;
               }
+              case 'agents': {
+                // The whole tree in the conversation's place (AGENTS.md (agent tree)): the
+                // live nodes, then the ended ones. `x` asks to stop the node under the cursor
+                // and `y` stops it, as the rows under the field do; the question stands in
+                // place of that row's text. The cursor follows its node.
+                setField('');
+                const asked = conv;
+                let asking: string | null = null;
+                const stopKeys: PanelKeyDef[] = [{
+                  key: 'x', label: 'stop',
+                  run: (id) => {
+                    if (id === null) return undefined;
+                    if (id.startsWith('ended:')) return 'it has ended — nothing to stop';
+                    asking = id;
+                    return undefined;
+                  },
+                }];
+                const answerKeys: PanelKeyDef[] = [
+                  { key: 'y', label: 'yes', run: (id) => { const key = asking; asking = null; if (key !== null && key === id) asked.nodeByKey(key)?.stopSubtree('x'); host.notify(); return undefined; } },
+                  { key: 'n', label: 'no', run: () => { asking = null; return undefined; } },
+                ];
+                openPanel({
+                  title: 'Agents',
+                  follow: true,
+                  empty: 'no subagents here',
+                  rows: () => agentsPanelRows(asked.tree(), asked.endedChildren, Date.now(), asking),
+                  get keys() { return asking !== null ? answerKeys : stopKeys; },
+                });
+                return;
+              }
               case 'subagent':
               case 'sub': {
                 // A job of the person's beside the chat: each write asks, its answer a row of the
@@ -2358,7 +2388,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               const top = panelTop(panel);
               // Everything the plugin put in it is redacted before it is drawn.
               return redactDeep({
-                title: top.title, rows: rows.map((r) => ({ ...r })), cursor: Math.min(panel.cursor, Math.max(0, rows.length - 1)),
+                title: top.title, rows: rows.map((r) => ({ ...r })), cursor: panelCursor(panel, rows),
                 notice: rowsError ? `⚠ ${rowsError}` : panel.notice, empty: top.empty ?? '',
                 keys: panelKeys(panel).map((k) => ({ cap: keyGlyph(k.key), label: k.label })), nested: panel.stack.length > 1,
               });
@@ -2372,7 +2402,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               const p = pickerRef.current;
               if (p) { if (p.mode === 'list' && index !== p.cursor) setPicker({ ...p, cursor: index, notice: '' }); return; }
               const q = panelRef.current;
-              if (q && index !== q.cursor) setPanel({ ...q, cursor: index });
+              if (q && index !== panelCursor(q, panelRows(q).rows)) setPanel({ ...q, cursor: index, at: panelRows(q).rows[index]?.id });
             },
             // What this chat's conversation is doing, for its own row: a y/n or a question
             // waits, a turn or a `!command` runs, or an answer or a result came while the

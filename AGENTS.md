@@ -802,6 +802,52 @@ there is no `/fullscreen`.
   answers it. `needRows` and the collapsed chat's `? waiting for you` read the same
   `offered()` as the drawing; the other `conv.confirm` readers (the picker, panel and pager
   guards, `store.chat.asking`, `inboxHeld`) mean the conversation's own.
+- **The agent tree (agent tree)** is a conversation's live subagents and tasks, drawn as
+  rows under its field and listed by `/agents`. The data is `Conversation.tree()`: the live
+  descendants depth first in start order, each a `TreeNode` (`key` — the descendant's
+  conversation key, `label`, `kind`, `depth` from 1, `status` working / waiting / queued /
+  delayed, `latest` — the tool label while one runs, else the round's verb, `below` — its live
+  descendants); `nodeByKey` returns the live descendant of a key. One rule, `childState`,
+  gives a child's status to `runningChildren()` and to `tree()`. Ended children are not
+  nodes: their result is a row of the conversation and `endedChildren` keeps the last
+  twenty. A change reaches the chat as the `tree` event, raised on the conversation where it
+  happened and on every ancestor read at the event (a child may have moved), then the root's
+  `deps.notify()` once: a child that starts, ends, is stopped or handed up, flips busy,
+  parks or has answered a y/n, or ends its delay. A change of the latest step is held: the
+  first goes at once, the rest of a 200 ms window as one at its end, so a child running
+  tool after tool does not redraw the chat at the tool's pace. A closed root says nothing.
+  The rows are `src/assistant/agent-tree.ts`: `treeRows` makes one terminal line per node
+  (`<mark> <label> · <state>`, two cells of indent per level, no clock), keeps at most
+  `ui.agentRows` (4, 0 to 8) and, over that, the waiting nodes first, then the working, then
+  the rest, each in tree order, with a last row `+K more — /agents` that is not a stop of the
+  cursor; `treeCursor` keeps the cursor on its node, else the nearest stop, else nowhere.
+  **One budget serves the draw and the keys.** `chatRoom` measures the column (what the error,
+  hint row, queue line and field's place take, the plan block, and whether a question, a y/n,
+  `/context`, the pager, a picker or a panel hides the tree); `treeBudget` gives `min(rows,
+  nodes)` reduced so the conversation keeps four rows with the whole plan block counted, and
+  keeps one row for the gap above. So the tree gives way first, down to none; then the plan;
+  never the field, the hint row or a y/n. The block is the gap and the rows, nothing else: the
+  stop question takes the place of the cursor row's text and the keys are named in the hint
+  row's left cell. The plugin asks `treeNow` for the rows, in the render and in the key
+  handler alike, so a key reaches exactly the rows that are drawn.
+  **The cursor** (`treeSel`: the node's key and whether its stop question is up) enters with
+  ↓ on an empty field, with no history entry shown before the key (the ↓ that ends a history
+  walk does not also enter) and bang level 0, when a row is drawn. With it in the rows the
+  chat handler gives every key to one branch, after a question, `/context` and an own y/n and
+  before everything else: ↑ / ↓ move, ↑ on the first row and Esc leave, `x` asks, `y` calls
+  `stopSubtree` on the node (the stop `/subagent stop` makes, journaled as the person's),
+  `n` / Esc drop the question, anything else is swallowed. Esc there is never the turn's stop,
+  the field's clear or the exit arm. **A request is not answerable from the rows:**
+  `childAskNow` is null while the cursor is in them, so a waiting subagent shows as the
+  notice line `⏸ <path> waits for a y/n — Esc to answer`, the guard is told nothing is shown
+  (Esc then arms the block afresh), and every key is noted. The cursor and its question are
+  cleared in the render whenever the rows are not drawn (the cursor's node gone with no
+  other row, a hidden state, the chat folded away or without the keyboard) and when the
+  conversation on screen changes (`adopt`). `/agents` is a command panel (`follow: true`, so
+  its cursor stays on its row id as rows start and end) whose rows are
+  `agentsPanelRows`: live nodes with the time spent, then the ended ones; `x` asks in place
+  of the row and `y` stops, as in the rows; an ended row refuses with a notice. A subagent's
+  block is never drawn under it (the panel hides it), so a `y` there answers nothing.
 - **In a chat with few rows the plan gives way, never the field.** The field's group
   never shrinks (`flexShrink: 0`, its whole height kept, so a 12-row bottom panel with
   a three-item plan still shows the field and its hint) and the conversation keeps at

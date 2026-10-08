@@ -36,9 +36,14 @@ export type PanelSpec = {
   keys?: PanelKeyDef[];
   // What the panel says when it has no rows.
   empty?: string;
+  // The cursor stays on the row it was moved to when the rows change under it (a row that
+  // ends, one that appears above), by the row's `id`; when that row is gone it stays at
+  // the place it was. Without it the cursor is an index into the rows.
+  follow?: boolean;
 };
 
-export type PanelState = { stack: PanelSpec[]; cursor: number; notice: string };
+// `at`: the id of the row the cursor was last moved to, read when the top panel follows.
+export type PanelState = { stack: PanelSpec[]; cursor: number; notice: string; at?: string };
 
 // The keys the panel keeps for itself; a plugin's key of the same name is never run.
 export const PANEL_OWN_KEYS = ['up', 'down', 'escape'];
@@ -46,6 +51,15 @@ export const PANEL_OWN_KEYS = ['up', 'down', 'escape'];
 export const panelStart = (spec: PanelSpec): PanelState => ({ stack: [spec], cursor: 0, notice: '' });
 
 export const panelTop = (state: PanelState): PanelSpec => state.stack[state.stack.length - 1]!;
+
+// Where the cursor is in `rows` (the top panel's rows as they are now).
+export function panelCursor(state: PanelState, rows: readonly PanelRow[]): number {
+  if (panelTop(state).follow && state.at !== undefined) {
+    const at = rows.findIndex((r) => r.id === state.at);
+    if (at >= 0) return at;
+  }
+  return Math.min(state.cursor, Math.max(0, rows.length - 1));
+}
 
 // The top panel's rows as the plugin gives them now; a throw is no rows and says why.
 export function panelRows(state: PanelState): { rows: PanelRow[]; error?: string } {
@@ -70,16 +84,18 @@ type Key = { name?: string; ctrl?: boolean; meta?: boolean };
 export function panelKey(state: PanelState, key: Key): PanelStep {
   const { rows } = panelRows(state);
   const last = Math.max(0, rows.length - 1);
-  const cursor = Math.min(state.cursor, last);
+  const cursor = panelCursor(state, rows);
   if (key.name === 'escape') {
     return { state: state.stack.length > 1 ? { stack: state.stack.slice(0, -1), cursor: 0, notice: '' } : null };
   }
-  if (key.name === 'up') return { state: { ...state, cursor: Math.max(0, cursor - 1) } };
-  if (key.name === 'down') return { state: { ...state, cursor: Math.min(last, cursor + 1) } };
+  if (key.name === 'up' || key.name === 'down') {
+    const to = key.name === 'up' ? Math.max(0, cursor - 1) : Math.min(last, cursor + 1);
+    return { state: { ...state, cursor: to, ...(rows[to] ? { at: rows[to]!.id } : {}) } };
+  }
   if (key.ctrl || key.meta) return { state };
   const def = panelKeys(state).find((k) => k.key === key.name);
   if (!def) return { state };
-  return { state: { ...state, cursor, notice: '' }, run: { def, id: rows[cursor]?.id ?? null } };
+  return { state: { ...state, cursor, notice: '', ...(rows[cursor] ? { at: rows[cursor]!.id } : {}) }, run: { def, id: rows[cursor]?.id ?? null } };
 }
 
 const isSpec = (v: unknown): v is PanelSpec => !!v && typeof v === 'object' && typeof (v as PanelSpec).rows === 'function' && typeof (v as PanelSpec).title === 'string';

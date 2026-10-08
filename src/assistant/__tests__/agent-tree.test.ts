@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { agentRowsOf, stopQuestion, treeCursor, treeRows } from '../agent-tree.js';
+import { agentRowsOf, agentsPanelRows, stopQuestion, treeCursor, treeRows } from '../agent-tree.js';
 import type { TreeNode } from '../conversation-types.js';
 
 const node = (key: string, over: Partial<TreeNode> = {}): TreeNode => ({
@@ -67,4 +67,35 @@ test('ui.agentRows defaults to four and is read within 0 to 8', () => {
   expect(agentRowsOf({ ui: { agentRows: 8 } })).toBe(8);
   expect(agentRowsOf({ ui: { agentRows: 9 } })).toBe(4);
   expect(agentRowsOf({ ui: { agentRows: 'x' } })).toBe(4);
+});
+
+test('the /agents rows: live nodes in tree order with their time, then the ended ones as the listing words them', () => {
+  const rows = agentsPanelRows([
+    node('a', { startedAt: 1_000, latest: '⚙ read_file(src/a.ts)', below: 1 }),
+    node('g', { depth: 2, kind: 'task', status: 'waiting', startedAt: 61_000 }),
+    node('q', { status: 'queued', startedAt: null }),
+  ], [
+    { label: 'old', kind: 'subagent', outcome: 'answer', ms: 65_000, tokens: 1500 },
+    { label: 'cut', kind: 'task', outcome: 'stopped', ms: 900, tokens: 0 },
+  ], 121_000);
+  expect(rows.map((r) => r.id)).toEqual(['a', 'g', 'q', 'ended:0', 'ended:1']);
+  expect(rows.map((r) => r.text)).toEqual(['⚙ a', '  ⏸ g (task)', '○ q', 'old', 'cut (task)']);
+  expect(rows.map((r) => r.detail)).toEqual([
+    '⚙ read_file(src/a.ts) · 2m 0s',
+    'waiting for a y/n · 1m 0s',
+    'queued',
+    'done · 1m 5s · 2k tokens',
+    'stopped · <1s',
+  ]);
+  expect(rows[1]!.tone).toBe('warn');
+});
+
+test('a node whose stop question is up shows the question in place of its text', () => {
+  const rows = agentsPanelRows([node('a', { below: 2 }), node('b')], [], 0, 'a');
+  expect(rows[0]).toEqual({ id: 'a', text: 'stop a and 2 below it? y yes · n no', tone: 'warn' });
+  expect(rows[1]!.text).toBe('⚙ b');
+});
+
+test('no nodes, no ended ones: no rows', () => {
+  expect(agentsPanelRows([], [])).toEqual([]);
 });

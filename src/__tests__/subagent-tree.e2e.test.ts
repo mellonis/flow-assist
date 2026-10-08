@@ -484,3 +484,127 @@ test('the chat collapsed and opened again has the cursor in the field', async ()
   a!.release();
   ui.app.unmount();
 });
+
+// ── /agents (AGENTS.md (agent tree))
+const panelOpen = (ui: UI) => frameOf(ui).includes('Flow Assist · Agents');
+
+test('/agents with nothing to show says so, and Esc closes it', async () => {
+  const { ui } = await boot([{ mark: 'AAA' }]);
+  await ask(ui, '/agents');
+  await settleUntil(() => panelOpen(ui));
+  expect(frameOf(ui)).toContain('no subagents here');
+  await ui.press('escape');
+  expect(panelOpen(ui)).toBe(false);
+  ui.app.unmount();
+});
+
+test('/agents lists live nodes in tree order with their time and then the ended ones; x on an ended row is refused', async () => {
+  const { children: [outer, inner, other], ui } = await boot([
+    { mark: 'OUTER', script: [[{ hold: true }, { tool: 'subagent', args: { task: 'INNER work', label: 'inner' } }], [{ hold: true }, { text: 'outer settled' }]] },
+    { mark: 'INNER' },
+    { mark: 'OTHER' },
+  ]);
+  await ask(ui, '/subagent OUTER go');
+  await settleUntil(() => outer!.held);
+  outer!.release();
+  await settleUntil(() => inner!.held);
+  await ask(ui, '/subagent OTHER go');
+  await settleUntil(() => other!.held);
+  await ask(ui, '/agents');
+  await settleUntil(() => panelOpen(ui) && frameOf(ui).includes('inner (task)'));
+  const rows = rowsOf(ui);
+  const at = (t: string) => rows.findIndex((r) => r.includes(t));
+  expect(at('outer-go')).toBeLessThan(at('inner (task)'));
+  expect(at('inner (task)')).toBeLessThan(at('other-go'));
+  expect(rows[at('inner (task)')]!.indexOf('inner')).toBe(rows[at('outer-go')]!.indexOf('outer-go') + 2);
+  expect(rows[at('other-go')]).toMatch(/(<1s|\d+s)/);
+  // An ended one moves below the live ones.
+  other!.release();
+  await settleUntil(() => rowsOf(ui).some((r) => /other-go.*done/.test(r)));
+  const after = rowsOf(ui);
+  expect(after.findIndex((r) => /other-go.*done/.test(r))).toBeGreaterThan(after.findIndex((r) => r.includes('inner (task)')));
+  await ui.press('down'); await ui.press('down'); await ui.press('down');
+  await ui.press('x');
+  await settleUntil(() => frameOf(ui).includes('nothing to stop'));
+  expect(frameOf(ui)).toContain('nothing to stop');
+  expect(frameOf(ui)).not.toContain('y yes · n no');
+  inner!.release();
+  await ui.press('escape');
+  outer!.release();
+  ui.app.unmount();
+});
+
+test('in /agents x asks in place of the row and y stops the node as the person; n and Esc keep it', async () => {
+  const { children: [a, b], ui, sessions } = await boot([{ mark: 'AAA' }, { mark: 'BBB' }]);
+  await ask(ui, '/subagent AAA go');
+  await ask(ui, '/subagent BBB go');
+  await settleUntil(() => a!.held && b!.held);
+  await ask(ui, '/agents');
+  await settleUntil(() => panelOpen(ui) && frameOf(ui).includes('bbb-go'));
+  await ui.press('down');
+  await ui.press('x');
+  expect(frameOf(ui)).toContain('stop bbb-go? y yes · n no');
+  expect(frameOf(ui)).not.toContain('⚙ bbb-go');
+  await ui.press('n');
+  expect(frameOf(ui)).not.toContain('y yes · n no');
+  expect(frameOf(ui)).toContain('⚙ bbb-go');
+  // A y with no question stops nothing.
+  await ui.press('y');
+  await settle(4);
+  expect(frameOf(ui)).toContain('⚙ bbb-go');
+  await ui.press('x');
+  await ui.press('y');
+  await settleUntil(() => rowsOf(ui).some((r) => /bbb-go.*stopped/.test(r)));
+  expect(rowsOf(ui).some((r) => /bbb-go.*stopped/.test(r))).toBe(true);
+  expect(frameOf(ui)).toContain('⚙ aaa-go');
+  expect(journalOf(sessions)).toContain('"stoppedBy":"person"');
+  a!.release();
+  ui.app.unmount();
+});
+
+test('the /agents cursor stays on its node when an earlier node ends', async () => {
+  const { children: [a, b, c], ui } = await boot([{ mark: 'AAA' }, { mark: 'BBB' }, { mark: 'CCC' }]);
+  await ask(ui, '/subagent AAA go');
+  await ask(ui, '/subagent BBB go');
+  await ask(ui, '/subagent CCC go');
+  await settleUntil(() => a!.held && b!.held && c!.held);
+  await ask(ui, '/agents');
+  await settleUntil(() => panelOpen(ui) && frameOf(ui).includes('ccc-go'));
+  await ui.press('down'); await ui.press('down');
+  a!.release();
+  await settleUntil(() => rowsOf(ui).some((r) => /aaa-go.*done/.test(r)));
+  await ui.press('x');
+  expect(frameOf(ui)).toContain('stop ccc-go? y yes · n no');
+  await ui.press('n');
+  b!.release(); c!.release();
+  ui.app.unmount();
+});
+
+test('with a child waiting for a y/n and /agents open, y answers nothing and the block is not drawn', async () => {
+  const { children: [stay, w], ui, root } = await boot([{ mark: 'STAY' }, { mark: 'ASKW', writes: true }]);
+  await ask(ui, '/subagent STAY go');
+  await ask(ui, '/subagent ASKW go');
+  await settleUntil(() => stay!.held && w!.held);
+  await ask(ui, '/agents');
+  await settleUntil(() => panelOpen(ui));
+  w!.release();
+  await settleUntil(() => frameOf(ui).includes('waiting for a y/n'));
+  expect(frameOf(ui)).not.toContain(BLOCK);
+  clock.t += 700;
+  await ui.press('y');
+  await settle(4);
+  expect(fs.existsSync(path.join(root, 'ASKW.txt'))).toBe(false);
+  expect(frameOf(ui)).not.toContain(BLOCK);
+  // Closed, the block comes back, armed afresh.
+  await ui.press('escape');
+  await settleUntil(() => frameOf(ui).includes(BLOCK));
+  expect(frameOf(ui)).toContain(BLOCK);
+  clock.t += 100;
+  await ui.press('backspace');
+  clock.t += 700;
+  await ui.press('y');
+  await settleUntil(() => fs.existsSync(path.join(root, 'ASKW.txt')));
+  expect(fs.existsSync(path.join(root, 'ASKW.txt'))).toBe(true);
+  stay!.release();
+  ui.app.unmount();
+});

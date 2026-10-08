@@ -5,6 +5,25 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **A conversation's live subagents and tasks are listed under the field.** One row each,
+  `⚙ <name> · <latest step>` while it works, `⏸ … · waiting for a y/n`, `○ … · queued` or
+  `in 4m` for one that has not started; what a node started is indented under it. The rows
+  are the last thing in the chat and give way first when the chat is short (the plan comes
+  next, never the field, the hint row or a y/n), and they are not drawn while a question,
+  a y/n, `/context`, the pager, a picker or a command's panel is. `ui.agentRows` sets how
+  many (4 by default, 0 to 8, 0 draws none); with more live nodes than rows the ones
+  that wait for you come first and the last row reads `+K more — /agents`.
+- **↓ on an empty line steps into those rows, and `x` stops one.** ↓ moves the cursor
+  to the first row (not from a history entry, not in shell mode); ↑ and ↓ walk the rows,
+  ↑ on the first and Esc go back to the line. `x` asks `stop <name> and N below it? y yes
+  · n no` in place of that row, and `y` stops the node and what it started, as
+  `/subagent stop` does. While the cursor is in the rows every key is theirs, and a
+  subagent's y/n cannot be answered: a line says `⏸ <name> waits for a y/n — Esc to
+  answer`, and after Esc the block is armed afresh like any block that has just appeared.
+- **`/agents` shows the whole tree.** In the conversation's place: the live nodes in tree
+  order with the time each has spent, then the last twenty that ended with how they ended.
+  `x` and `y` stop the node under the cursor, as in the rows; Esc closes it. A subagent's
+  y/n is not drawn or answerable while it is open.
 - **`/subagent` starts a job beside the chat, and it may write.** `/subagent <prompt>` (or
   `/sub`) hands the prompt, as typed, to a subagent that works while you go on talking;
   its answer lands as a `◆ <label> finished:` message. `--with-context` first on the line
