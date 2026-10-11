@@ -250,3 +250,85 @@ test('no journal line keeps a known secret, whatever event carries it', async ()
     setActiveSecrets(null);
   }
 });
+
+// ─── /export folds a subagent's journal ──────────────────────────────────────────
+
+const A = '2026-10-11T09-00-01-aaaa';
+const B = '2026-10-11T09-00-02-bbbb';
+const C = '2026-10-11T09-00-03-cccc';
+const readerOf = (files: Record<string, JournalEvent[]>) => (id: string) => files[id] ?? null;
+const sub = (label: string, id: string | null, event: 'start' | 'end', over: Record<string, unknown> = {}): JournalEvent => ({ t: 'subagent', label, by: 'person', event, ...(id ? { id } : {}), ...(event === 'end' ? { outcome: 'answer' } : {}), ...over });
+const child = (label: string, id: string, parent: string, ...rest: JournalEvent[]): JournalEvent[] => [
+  { t: 'start', id, parent, root: 'r', label, by: 'person' }, { t: 'row', role: 'user', text: `task of ${label}` }, ...rest, { t: 'answer', text: `answer of ${label}` }, { t: 'end', ms: 1 },
+];
+
+test('the export folds each subagent\'s journal under its start line, nested as the subagents started, each with its own rows and calls', () => {
+  const root: JournalEvent[] = [
+    { t: 'row', role: 'user', text: 'go' },
+    sub('alpha', A, 'start'), sub('alpha', A, 'end'),
+    sub('beta', B, 'start'), sub('beta', B, 'end', { outcome: 'stopped', stoppedBy: 'person' }),
+    { t: 'answer', text: 'all done' },
+  ];
+  const files = {
+    [A]: child('alpha', A, 'r', { t: 'call', name: 'datetime', args: {}, outcome: 'ok', result: 'noon' }, sub('gamma', C, 'start'), sub('gamma', C, 'end')),
+    [B]: child('beta', B, 'r'),
+    [C]: child('gamma', C, A, { t: 'call', name: 'read_file', args: { path: 'x' }, outcome: 'ok', result: 'body' }),
+  };
+  const md = exportMarkdown(root, { title: 't', id: 'r', child: readerOf(files) });
+  expect(md.match(/<details>/g)).toHaveLength(5); // three subagents and two calls
+  expect(md.match(/<\/details>/g)).toHaveLength(5);
+  const at = (needle: string) => md.indexOf(needle);
+  expect(at('<summary>alpha · finished</summary>')).toBeGreaterThan(at('*Subagent «alpha» started'));
+  expect(at('<summary>gamma · finished</summary>')).toBeGreaterThan(at('task of alpha'));
+  expect(at('<summary>gamma · finished</summary>')).toBeLessThan(at('answer of alpha')); // inside alpha's block
+  expect(at('task of gamma')).toBeGreaterThan(at('<summary>gamma · finished</summary>'));
+  expect(at('<summary>read_file · ok</summary>')).toBeGreaterThan(at('task of gamma'));
+  expect(at('<summary>read_file · ok</summary>')).toBeLessThan(at('answer of gamma'));
+  expect(at('answer of gamma')).toBeLessThan(at('answer of alpha'));
+  expect(at('<summary>beta · stopped</summary>')).toBeGreaterThan(at('answer of alpha'));
+  expect(at('answer of beta')).toBeLessThan(at('all done'));
+  expect(at('<summary>datetime · ok</summary>')).toBeLessThan(at('answer of alpha'));
+  expect(md).not.toContain('forked from'); // a child file\'s `parent` is not a fork
+});
+
+test('a subagent whose file is missing or unreadable prints one line saying so', () => {
+  const md = exportMarkdown([sub('alpha', A, 'start'), sub('alpha', A, 'end')], { title: 't', id: 'r', child: () => null });
+  expect(md).toContain('*Subagent «alpha» started (by you)*\n\n*its journal is not there*\n');
+  expect(md).not.toContain('<details>');
+});
+
+test('a subagent that never ended is summarised as not finished; HTML in its label is escaped', () => {
+  const md = exportMarkdown([sub('<b>&', A, 'start')], { title: 't', id: 'r', child: readerOf({ [A]: child('<b>&', A, 'r') }) });
+  expect(md).toContain('<summary>&lt;b&gt;&amp; · did not finish</summary>');
+});
+
+test('a journal that names its own id, or lies deeper than any chain of subagents, is not followed forever', () => {
+  const self = exportMarkdown([sub('loop', A, 'start')], { title: 't', id: 'r', child: readerOf({ [A]: child('loop', A, 'r', sub('loop', A, 'start')) }) });
+  expect(self.match(/<details>/g)).toHaveLength(1);
+  expect(self).toContain('*its journal is nested too deep to show*');
+  const ids = Array.from({ length: 40 }, (_, i) => `2026-10-11T09-00-00-${i.toString(16).padStart(4, '0')}`);
+  const files = Object.fromEntries(ids.map((id, i) => [id, child(`n${i}`, id, 'r', ...(i + 1 < ids.length ? [sub(`n${i + 1}`, ids[i + 1]!, 'start')] : []))]));
+  const deep = exportMarkdown([sub('n0', ids[0]!, 'start')], { title: 't', id: 'r', child: readerOf(files) });
+  expect(deep.match(/<details>/g)!.length).toBeLessThan(40);
+  expect(deep).toContain('*its journal is nested too deep to show*');
+});
+
+test('without a reader, or for a subagent line with no id, the export is what it is for a journal that has no subagent files', () => {
+  const OLD: JournalEvent[] = [
+    { t: 'start', id: 'x' },
+    { t: 'row', role: 'user', text: 'check the clock' },
+    { t: 'subagent', label: 'clock <b>', by: 'person', event: 'start' },
+    { t: 'call-start', subagent: 'clock <b>', id: 'c1', name: 'datetime', args: {} },
+    { t: 'call', subagent: 'clock <b>', id: 'c1', name: 'datetime', args: {}, outcome: 'ok', result: 'noon' },
+    { t: 'subagent', label: 'clock <b>', by: 'person', event: 'end', outcome: 'answer' },
+    { t: 'subagent', label: 'late', by: 'model', event: 'start' },
+    { t: 'subagent', label: 'late', by: 'model', event: 'end', outcome: 'stopped', stoppedBy: 'person' },
+    { t: 'answer', text: 'done' },
+    { t: 'end', ms: 5 },
+  ];
+  // Taken from the export as it was before subagents kept files of their own.
+  const expected = "# Old\n\nSession `2026-09-27T10-00-00-abcd`\n\n**You**\n\ncheck the clock\n\n*Subagent «clock <b>» started (by you)*\n\n<details>\n<summary>datetime · ok · subagent «clock &lt;b&gt;»</summary>\n\nArguments:\n\n```json\n{}\n```\n\nResult:\n\n```\nnoon\n```\n\n</details>\n\n*Subagent «clock <b>» finished*\n\n*Subagent «late» started (by the model)*\n\n*Subagent «late» stopped (by you)*\n\n**Assistant**\n\ndone\n";
+  const opts = { title: 'Old', id: '2026-09-27T10-00-00-abcd' };
+  expect(exportMarkdown(OLD, opts)).toBe(expected);
+  expect(exportMarkdown(OLD, { ...opts, child: () => child('x', A, 'r') })).toBe(expected);
+});

@@ -260,11 +260,13 @@ const CONFIRMED_BY: Record<string, string> = {
   stop: 'a stop (the turn was stopped)', reset: 'a reset of the conversation',
 };
 
+const escapeHtml = (text: string) => text.replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' })[c]!);
+
 // `confirm` — the y/n's answer, when the call waited on one.
 function callBlock(ev: Record<string, unknown>, confirm?: Record<string, unknown>): string {
   const outcome = ev.t === 'call-start' ? 'did not finish' : String(ev.outcome ?? '');
   const head = `${String(ev.name ?? 'call')} · ${outcome}${ev.write ? ' · write' : ''}${typeof ev.task === 'string' ? ` · background task «${ev.task}»` : typeof ev.subagent === 'string' ? ` · subagent «${ev.subagent}»` : ''}`;
-  const out = ['<details>', `<summary>${head.replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' })[c]!)}</summary>`, ''];
+  const out = ['<details>', `<summary>${escapeHtml(head)}</summary>`, ''];
   out.push('Arguments:', '', block(asText(ev.args ?? {}), 'json'), '');
   if (confirm) out.push(`Asked y/n — answered ${String(confirm.answer)} by ${CONFIRMED_BY[String(confirm.by)] ?? String(confirm.by)}.`, '');
   else if (ev.t === 'call-start' && ev.confirm) out.push('It was waiting on a y/n.', '');
@@ -279,15 +281,33 @@ function callBlock(ev: Record<string, unknown>, confirm?: Record<string, unknown
   return out.join('\n');
 }
 
+// How a subagent's `end` line names its outcome.
+const outcomeWord = (ev: JournalEvent): string => (ev.outcome === 'answer' || ev.outcome === 'empty' ? 'finished' : String(ev.outcome ?? 'ended'));
+
 // Who stopped a child that did not finish, as `/export` says it.
 const stoppedByText = (by: string): string => (by === 'person' ? 'by you' : by);
 
-export function exportMarkdown(events: JournalEvent[], opts: { title: string; id: string; noJournal?: boolean }): string {
+// The deepest subagent journal `/export` folds into its parent's: a tree of files deeper
+// than any chain of subagents a session can start is damaged, and drawn as such.
+const MAX_FOLD_DEPTH = 16;
+
+// `child` reads a subagent's journal by its id (the file lies beside the session, whatever
+// the subagent's depth), so this function stays pure; without it a `subagent` line is
+// drawn as its two lines alone.
+export function exportMarkdown(events: JournalEvent[], opts: { title: string; id: string; noJournal?: boolean; child?: (id: string) => JournalEvent[] | null }): string {
   const out: string[] = [`# ${opts.title.replace(/\s+/g, ' ').trim() || opts.id}`, '', `Session \`${opts.id}\``, ''];
   const start = events.find((e) => e.t === 'start');
   if (opts.noJournal) out.push('> This session has no journal (it was saved before journals were kept, or its journal was removed after `sessions.journalDays`): it is rendered from its saved state, whose beginning may be missing and whose tool calls are kept only in short.', '');
   else if (start?.continued) out.push('> The journal began partway through this session: the part before it comes from its saved state, whose beginning may be missing and whose tool calls are kept only in short.', '');
   if (typeof start?.parent === 'string') out.push(`> This session was forked from \`${start.parent}\` — what came before is in that session's journal and its export.`, '');
+  out.push(...eventLines(events, opts.child, new Set(), 0));
+  return `${out.join('\n').trimEnd()}\n`;
+}
+
+// The lines of a journal's events in order. `folding` holds the ids of the subagent
+// journals being drawn around this one, so a file that names itself is not drawn again.
+function eventLines(events: JournalEvent[], child: ((id: string) => JournalEvent[] | null) | undefined, folding: Set<string>, depth: number): string[] {
+  const out: string[] = [];
   // A call is drawn once, where it began: its start holds a place the end fills; a
   // start never ended is drawn as not finished. Keyed by call id and name — a provider
   // may reuse an id in a later round, after the first call with it has ended.
@@ -367,7 +387,17 @@ export function exportMarkdown(events: JournalEvent[], opts: { title: string; id
       case 'subagent':
         out.push(ev.event === 'start'
           ? `*Subagent «${String(ev.label ?? '')}» started (${ev.by === 'person' ? 'by you' : 'by the model'})*${at}`
-          : `*Subagent «${String(ev.label ?? '')}» ${ev.outcome === 'answer' || ev.outcome === 'empty' ? 'finished' : String(ev.outcome ?? 'ended')}${typeof ev.stoppedBy === 'string' ? ` (${stoppedByText(ev.stoppedBy)})` : ''}*${at}`, '');
+          : `*Subagent «${String(ev.label ?? '')}» ${outcomeWord(ev)}${typeof ev.stoppedBy === 'string' ? ` (${stoppedByText(ev.stoppedBy)})` : ''}*${at}`, '');
+        // The subagent's own journal, folded where it began.
+        if (ev.event === 'start' && typeof ev.id === 'string' && child) {
+          const id = ev.id;
+          const ended = events.find((e) => e.t === 'subagent' && e.event === 'end' && e.id === id);
+          const tooDeep = folding.has(id) || depth >= MAX_FOLD_DEPTH;
+          const body = tooDeep ? null : child(id);
+          if (tooDeep) out.push('*its journal is nested too deep to show*', '');
+          else if (!body) out.push('*its journal is not there*', '');
+          else out.push('<details>', `<summary>${escapeHtml(`${String(ev.label ?? '')} · ${ended ? outcomeWord(ended) : 'did not finish'}`)}</summary>`, '', ...eventLines(body, child, new Set([...folding, id]), depth + 1), '</details>', '');
+        }
         break;
       case 'task-end': out.push(`*${String(ev.task ?? '')} stopped (${stoppedByText(String(ev.by ?? ''))})*${at}`, ''); break;
       case 'end': {
@@ -381,5 +411,5 @@ export function exportMarkdown(events: JournalEvent[], opts: { title: string; id
   }
   if (shellOpen) flushOutput(true);
   for (const [k, o] of open) { const c = callOut.get(k); out[o.slot] = callBlock(c ? { ...o.start, output: c.text, outputNote: c.note } : o.start, o.confirm); }
-  return `${out.join('\n').trimEnd()}\n`;
+  return out;
 }

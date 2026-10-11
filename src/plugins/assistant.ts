@@ -21,7 +21,7 @@ import { redactDeep, redactSecrets } from '../assistant/secrets.js';
 import { copyTarget, copyToClipboard } from '../assistant/copy.js';
 import { cdChatTarget, realOf, shellAutoRun, shellRoots, startNote, tildePath } from '../assistant/shell.js';
 import {
-  JOURNAL_DAYS, KEEP_SESSIONS, acquireLock, closeSession, cutTitle, journalPath, listSessions, loadSession, lockPath,
+  JOURNAL_DAYS, KEEP_SESSIONS, acquireLock, closeSession, cutTitle, journalPath, subJournalPath, listSessions, loadSession, lockPath,
   dropEmptyDirs, moveSessionToProject, pickToContinue, projectHome, projectSessions, pruneSessions, removeSession, renameSession, sessionFingerprint,
   sessionRows, sessionTitle, sessionWhen, sessionsDir, sweepJournals, type Session, type SessionRow,
 } from '../assistant/sessions.js';
@@ -1556,9 +1556,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               }
               case 'export': {
                 // `/export [path]`: this session as a markdown document, rendered from its
-                // journal (src/assistant/journal.ts, `exportMarkdown`) — or, for a session
-                // that has none, from what its state holds, saying the beginning may be
-                // missing. The path is the shell's directory's (`~` the home), a file named
+                // journal (src/assistant/journal.ts, `exportMarkdown`), each subagent's journal
+                // folded where it began — or, for a session that has none, from what its state
+                // holds, saying the beginning may be missing. The path is the shell's directory's (`~` the home), a file named
                 // after the session when none is given. The person typed it, so there is no
                 // y/n — that pause is for what the MODEL writes; what is there already is
                 // never overwritten, and the file is the person's alone, as the session is.
@@ -1571,7 +1571,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 const home = id ? (conv.homes.get(id) ?? null) : null;
                 try { events = home ? readJournal(journalPath(home, id)) : null; } catch { /* not an id — no journal */ }
                 const md = events
-                  ? exportMarkdown(events, { title, id })
+                  ? exportMarkdown(events, { title, id, child: (childId) => { try { return readJournal(subJournalPath(home!, id, childId)); } catch { return null; } } })
                   : exportMarkdown(msgs.map((m) => rowOf(m, viewRenderers)).filter((e): e is JournalEvent => e !== null), { title, id: id || 'unsaved', noJournal: true });
                 const target = path.resolve(conv.shell.cwd(), arg.trim() ? arg.trim().replace(/^~(?=\/|$)/, os.homedir()) : `session-${id || 'unsaved'}.md`);
                 try {

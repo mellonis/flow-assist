@@ -188,15 +188,20 @@ test('its start and its end are in the journal of the session that started it, a
   expect(md).toContain('*Subagent «j» finished*');
 });
 
-test('/export draws a subagent\'s calls from its own file, not the session\'s', async () => {
+test('/export draws a subagent\'s calls under its label, folded where it started, from its own file', async () => {
   const model = new ScriptedModel();
   model.script([{ tool: 'datetime', args: {} }], [{ text: 'noon' }]);
   const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
   const { run } = startFrom(rig, spec('clock', 'what time'));
   await run();
   // The calls are in the subagent's file; the session's journal holds only its start and end.
+  const files = new Map(rig.subJournals().map((j) => [j.id, j.events]));
   expect(exportMarkdown(rig.journal(), { title: 't', id: rig.conv.sessionId })).not.toContain('datetime');
-  expect(exportMarkdown(rig.subJournal('clock'), { title: 't', id: 'clock' })).toContain('datetime · ok');
+  const md = exportMarkdown(rig.journal(), { title: 't', id: rig.conv.sessionId, child: (id) => files.get(id) ?? null });
+  const block = md.slice(md.indexOf('<summary>clock · finished</summary>'));
+  expect(md.indexOf('<summary>clock · finished</summary>')).toBeGreaterThan(md.indexOf('*Subagent «clock» started'));
+  expect(block).toContain('<summary>datetime · ok</summary>');
+  expect(block.indexOf('noon')).toBeGreaterThan(block.indexOf('datetime · ok'));
 });
 
 test('an exit close writes the end line of a subagent still running, and no task-end', async () => {

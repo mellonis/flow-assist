@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { readJournal, type JournalEvent } from '../assistant/journal.ts';
-import { ScriptedModel, bootApp, handoff, settle } from './helpers/scripted';
+import { ScriptedModel, bootApp, firstUser, handoff, settle } from './helpers/scripted';
 import type { Make } from '../loader/plugin.ts';
 import { listTree } from './helpers/session-files';
 
@@ -64,6 +64,28 @@ test('/export renders the journal to markdown in the shell\'s directory — ever
   await ask(ui, '/export', 6);
   const named = fs.readdirSync(root).filter((n) => /^session-.*\.md$/.test(n));
   expect(named).toHaveLength(1);
+  ui.app.unmount();
+});
+
+test('/export folds a subagent\'s conversation under the line that started it', async () => {
+  const dir = dirOf();
+  const root = rootOf();
+  const model = new ScriptedModel();
+  const child = model.when((req) => firstUser(req).includes('FOLD-ME'));
+  child.script([{ text: 'The clock is in the third file.' }]);
+  model.script([{ text: 'Hello.' }]);
+  const ui = await bootApp(model, 140, 34, undefined, { sessions: { dir }, shell: { roots: [root] }, ai: { baseUrl: 'http://scripted.model', model: 'scripted', toolLoading: 'all', backgroundFollowUp: false } }, { toastMs: 10_000 });
+  await ui.press('F');
+  await ask(ui, 'hi');
+  await ask(ui, '/subagent FOLD-ME find the clock');
+  await settleUntil(() => (ui.backend.lastFrame ?? '').includes('finished:'));
+  await ask(ui, '/export out.md', 6);
+  const md = fs.readFileSync(path.join(root, 'out.md'), 'utf8');
+  const from = md.indexOf('<summary>fold-me-find · finished</summary>');
+  expect(from).toBeGreaterThan(md.indexOf('*Subagent «fold-me-find» started'));
+  expect(md.indexOf('The clock is in the third file.', from)).toBeGreaterThan(from);
+  expect(md.indexOf('</details>', from)).toBeGreaterThan(md.indexOf('The clock is in the third file.', from));
+  expect(md.indexOf('FOLD-ME find the clock', from)).toBeGreaterThan(from); // its task is its first row
   ui.app.unmount();
 });
 
