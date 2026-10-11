@@ -30,7 +30,7 @@ import {
   applySession, currentProject, ensureSessionId, journal, journaledChatLLM, journalTo, keepPersonWork, markSeen, persist, pushNote,
   releaseLockOf, writeSession, NO_FILE,
 } from './conversation-session.js';
-import { askConfigChanges, compact, runTurn, SUBAGENT_WITHHELD } from './conversation-turn.js';
+import { askConfigChanges, compact, runTurn, turnShape } from './conversation-turn.js';
 import { runShell } from './conversation-shell.js';
 
 export { NO_FILE };
@@ -760,9 +760,9 @@ export class Conversation {
       ...this.deps,
       sessionsDir: () => null, screens: () => undefined, screen: () => [], canAsk: asks,
       notify: () => {}, pushLog: () => {}, current: undefined,
-      // What a subagent's own turn is not offered, a run a tool starts for it is not
+      // What a child's own turn is not offered, a run a tool starts for it is not
       // offered either: the names are added where nested runs inherit them.
-      ...(spec.kind === 'subagent' ? { chatLLM: (m, o) => this.deps.chatLLM(m, { ...o, withholdTools: [...new Set([...SUBAGENT_WITHHELD, ...(o?.withholdTools ?? [])])] }) } : {}),
+      chatLLM: (m, o) => this.deps.chatLLM(m, { ...o, withholdTools: [...new Set([...turnShape(spec.kind).withholdTools, ...(o?.withholdTools ?? [])])] }),
     };
     const child = new Conversation(deps, { kind: spec.kind, policy: asks ? { kind: 'ask' } : { kind: 'always-no' } });
     child.parent = this;

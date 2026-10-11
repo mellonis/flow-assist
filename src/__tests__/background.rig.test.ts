@@ -102,18 +102,19 @@ test('bursts are queued, not dropped: five tasks from one turn all deliver, at m
   expect(peak).toBeGreaterThan(1);
 });
 
-test('a task cannot put a question to the person: ask_user answers "nobody to ask"', async () => {
+test('a task cannot put a question to the person: ask_user is not among its tools', async () => {
   const model = new ScriptedModel();
   model.script([{ tool: 'subagent', args: { task: 'ask', label: 'q' } }], [{ text: 'Started.' }]);
-  taskScript(model, 'ask').script(
-    [{ tool: 'ask_user', args: { questions: [{ question: 'q?', options: [{ label: 'a' }, { label: 'b' }] }] } }],
-    [{ text: 'assumed a' }],
-  );
+  const task = taskScript(model, 'ask');
+  task.script([{ text: 'assumed a' }]);
   const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
   await rig.conv.send('go');
   await settled(rig, 1);
-  expect(String(taskCall(rig, 'q', 'ask_user')?.result)).toMatch(/nobody to ask/i);
   expect(rig.conv.questionDrawn).toBeNull();
+  const offered = ((task.requests[0]?.tools ?? []) as { function: { name: string } }[]).map((t) => t.function.name);
+  expect(offered.length).toBeGreaterThan(0);
+  expect(offered).toContain('todo');
+  expect(offered).not.toContain('ask_user');
 });
 
 test('a task reads the project instructions for its own shell, and its cd answers from its own reading', async () => {

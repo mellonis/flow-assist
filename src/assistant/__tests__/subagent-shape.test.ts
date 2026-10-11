@@ -25,7 +25,8 @@ test('the subagent row: worker-shaped prompt, a boundary and recall, no screens,
   const row = turnShape('subagent');
   expect(row).toEqual({ system: 'subagent', screen: false, boundary: true, recall: true, askUser: false, images: false, withholdTools: SUBAGENT_WITHHELD });
   expect(row).not.toHaveProperty('maxRounds');
-  expect(SUBAGENT_WITHHELD).toEqual(['remind']);
+  expect(SUBAGENT_WITHHELD).toEqual(['remind', 'ask_user']);
+  expect(subagentPrompt('x')).toContain('Where the task leaves something open, make a reasonable assumption, carry on, and name each assumption in your result.');
 });
 
 test('a subagent turn: the framed task, the language directive, no tail, the boundary, recall, nothing to ask, `remind` withheld, a y/n that says no', async () => {
@@ -45,7 +46,7 @@ test('a subagent turn: the framed task, the language directive, no tail, the bou
   expect(typeof o.beforeRequest).toBe('function');
   expect(o.toolCtx.recall).toBeDefined();
   expect(o.toolCtx.askUser).toBeUndefined();
-  expect(o.withholdTools).toEqual(['remind']);
+  expect(o.withholdTools).toEqual(['remind', 'ask_user']);
   expect(await o.confirmWrite('run_command', {}, '')).toBe(false);
 });
 
@@ -99,7 +100,7 @@ test('a child says nothing of a missing memory record and spends nobody\'s once-
   expect(session.messages.some((m) => m.role === 'note')).toBe(true);
 });
 
-test('a run a subagent\'s tool starts through ctx.chatLLM has no `remind` either; a task is offered what it was', async () => {
+test('a run a child\'s tool starts through ctx.chatLLM is offered what the child was not: no `remind` for a subagent, no `ask_user` for either', async () => {
   const seen: Record<string, any>[] = [];
   const chatLLM = (async (_wire: unknown[], o: Record<string, any> = {}) => {
     seen.push({ ...o });
@@ -113,10 +114,10 @@ test('a run a subagent\'s tool starts through ctx.chatLLM has no `remind` either
     await started.child.send('do it');
     await seen[0]!.toolCtx.chatLLM([{ role: 'user', content: 'nested' }], {});
     expect(seen).toHaveLength(2);
-    const expected = kind === 'subagent' ? ['remind'] : undefined;
+    const expected = kind === 'subagent' ? ['remind', 'ask_user'] : ['ask_user'];
     expect(seen[1]!.withholdTools).toEqual(expected);
     // The caller's own list is kept, once.
     await seen[0]!.toolCtx.chatLLM([{ role: 'user', content: 'nested' }], { withholdTools: ['x', 'remind'] });
-    expect(seen[2]!.withholdTools).toEqual(kind === 'subagent' ? ['remind', 'x'] : ['x', 'remind']);
+    expect(seen[2]!.withholdTools).toEqual(kind === 'subagent' ? ['remind', 'ask_user', 'x'] : ['ask_user', 'x', 'remind']);
   }
 });

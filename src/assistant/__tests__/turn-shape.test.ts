@@ -2,7 +2,7 @@
 // turn — the worker prompt, its round cap, nothing of the person's.
 import { expect, test } from 'bun:test';
 import { Conversation } from '../conversation.ts';
-import { ONESHOT_WITHHELD, turnShape, workerPrompt } from '../conversation-turn.ts';
+import { ONESHOT_WITHHELD, TASK_WITHHELD, turnShape, workerPrompt } from '../conversation-turn.ts';
 import { fakeDeps } from './conversation-deps.ts';
 
 function answering(text: string) {
@@ -17,11 +17,11 @@ function answering(text: string) {
 
 test('the table: a row per kind', () => {
   expect(turnShape('session')).toEqual({ system: 'chat', screen: true, boundary: true, recall: true, askUser: true, images: true, withholdTools: [] });
-  expect(turnShape('task')).toEqual({ system: 'worker', screen: false, boundary: false, recall: false, askUser: false, images: false, maxRounds: 12, withholdTools: [] });
+  expect(turnShape('task')).toEqual({ system: 'worker', screen: false, boundary: false, recall: false, askUser: false, images: false, maxRounds: 12, withholdTools: TASK_WITHHELD });
   expect(turnShape('oneshot')).toEqual({ system: 'chat', screen: false, boundary: false, recall: false, askUser: false, images: true, withholdTools: ONESHOT_WITHHELD });
 });
 
-test('a task turn: the worker prompt, twelve rounds, no tail, no boundary, no recall, no ask_user, nothing withheld, a y/n that says no', async () => {
+test('a task turn: the worker prompt, twelve rounds, no tail, no boundary, no recall, no ask_user, it withheld, a y/n that says no', async () => {
   const m = answering('Done.');
   const c = new Conversation(fakeDeps({ chatLLM: m.chatLLM, screen: () => [{ label: 'board', text: 'ON SCREEN' }] as never }), { kind: 'task', policy: { kind: 'always-no' } });
   c.label = 'probe';
@@ -36,8 +36,14 @@ test('a task turn: the worker prompt, twelve rounds, no tail, no boundary, no re
   expect(o.beforeRequest).toBeUndefined();
   expect(o.toolCtx.recall).toBeUndefined();
   expect(o.toolCtx.askUser).toBeUndefined();
-  expect(o.withholdTools).toEqual([]);
+  expect(o.withholdTools).toEqual(['ask_user']);
   expect(await o.confirmWrite('run_command', {}, '')).toBe(false);
+});
+
+test('a task turn\'s prompt asks for its assumptions, and `ask_user` is not among its tools; the one-shot keeps it listed', () => {
+  expect(workerPrompt('x')).toContain('Where the task leaves something open, make a reasonable assumption, carry on, and name each assumption in your result.');
+  expect(TASK_WITHHELD).toEqual(['ask_user']);
+  expect(ONESHOT_WITHHELD).not.toContain('ask_user');
 });
 
 test('a task turn carries no images', async () => {

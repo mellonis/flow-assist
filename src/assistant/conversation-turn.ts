@@ -53,10 +53,12 @@ export interface TurnShape {
 }
 export const ONESHOT_WITHHELD: readonly string[] = ['subagent', 'remind'];
 export const TASK_ROUNDS = 12;
-export const SUBAGENT_WITHHELD: readonly string[] = ['remind'];
+// A child cannot put a question to anyone, so `ask_user` is not offered to it.
+export const TASK_WITHHELD: readonly string[] = ['ask_user'];
+export const SUBAGENT_WITHHELD: readonly string[] = ['remind', 'ask_user'];
 const SHAPES: Record<ConversationKind, TurnShape> = {
   session: { system: 'chat', screen: true, boundary: true, recall: true, askUser: true, images: true, withholdTools: [] },
-  task: { system: 'worker', screen: false, boundary: false, recall: false, askUser: false, images: false, maxRounds: TASK_ROUNDS, withholdTools: [] },
+  task: { system: 'worker', screen: false, boundary: false, recall: false, askUser: false, images: false, maxRounds: TASK_ROUNDS, withholdTools: TASK_WITHHELD },
   subagent: { system: 'subagent', screen: false, boundary: true, recall: true, askUser: false, images: false, withholdTools: SUBAGENT_WITHHELD },
   oneshot: { system: 'chat', screen: false, boundary: false, recall: false, askUser: false, images: true, withholdTools: ONESHOT_WITHHELD },
 };
@@ -65,7 +67,7 @@ export function turnShape(kind: ConversationKind): TurnShape {
 }
 
 // The system prompt of a background worker, with its task.
-const WORKER_PROMPT = 'You are a background worker. Complete the task below autonomously using the available tools, then return ONLY a concise result (a few sentences). Do not ask questions or wait for the user — act. You may spawn a follow-up `subagent` task if the work needs a further step (e.g. "build, then fix and rebuild on failure"), but keep the chain at most ONE level and only if it is genuinely needed. IMPORTANT: if the task asks for the current time, date, weekday, or a relative duration, you MUST call the `datetime` tool to get it (never answer from memory — it will be stale).\n\n';
+const WORKER_PROMPT = 'You are a background worker. Complete the task below autonomously using the available tools, then return ONLY a concise result (a few sentences). Do not ask questions or wait for the user — act. Where the task leaves something open, make a reasonable assumption, carry on, and name each assumption in your result. You may spawn a follow-up `subagent` task if the work needs a further step (e.g. "build, then fix and rebuild on failure"), but keep the chain at most ONE level and only if it is genuinely needed. IMPORTANT: if the task asks for the current time, date, weekday, or a relative duration, you MUST call the `datetime` tool to get it (never answer from memory — it will be stale).\n\n';
 export function workerPrompt(task: string): string {
   return `${WORKER_PROMPT}Task: ${task}`;
 }
