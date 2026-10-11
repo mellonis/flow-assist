@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, spyOn, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -6,7 +6,7 @@ import path from 'node:path';
 import {
   KEEP_MESSAGES, KEEP_VIEWS, SEARCH_TEXT_MAX, SESSION_VERSION, TITLE_MAX, acquireLock, closeSession, cutTitle, journalPath, subJournalPath, listSessions, loadSession,
   lockPath, lockState, makeLockToken, moveSessionToProject, newSessionId, normalizeViews, pruneSessions, releaseLock, sweepJournals, removeSession, renameSession,
-  saveSession, searchText, sessionFingerprint, sessionFingerprintsEqual, sessionRev, sessionRows, sessionTitle,
+  deleteSession, saveSession, searchText, sessionFingerprint, sessionFingerprintsEqual, sessionRev, sessionRows, sessionTitle,
   dropEmptyDirs, pickToContinue, projectHome, projectOf, sessionToContinue, sessionsDir, trimHistory, trimScreen, unseenAnswer, type Session,
 } from '../sessions.ts';
 
@@ -796,7 +796,9 @@ const subTmp = () => {
   fs.mkdirSync(root, { recursive: true });
   return root;
 };
-const subOf = (dir: string, id: string, files: Record<string, string> = { '2026-09-21T09-00-01-bbbb.log.jsonl': '{"t":"start"}\n' }) => {
+// The first line of a subagent's journal: it names the session it belongs to as its `root`.
+const subStart = (root: string, id = '2026-09-21T09-00-01-bbbb') => `${JSON.stringify({ t: 'start', id, parent: root, root, label: 'x', by: 'person' })}\n`;
+const subOf = (dir: string, id: string, files: Record<string, string> = { '2026-09-21T09-00-01-bbbb.log.jsonl': subStart(id) }) => {
   const sub = path.join(dir, `${id}.sub`);
   fs.mkdirSync(sub, { recursive: true });
   for (const [n, body] of Object.entries(files)) fs.writeFileSync(path.join(sub, n), body);
@@ -809,7 +811,7 @@ test('a .sub directory is no part of the tree: a journal-shaped file in it is ne
   const s = session({ id: '2026-09-21T09-00-00-aaaa' });
   saveSession(root, s);
   fs.writeFileSync(journalPath(root, s.id), '{"t":"start"}\n');
-  const sub = subOf(root, s.id, { '2026-09-21T09-00-01-bbbb.log.jsonl': '{"t":"start"}\n', '2026-09-21T09-00-02-cccc.json': '{}' });
+  const sub = subOf(root, s.id, { '2026-09-21T09-00-01-bbbb.log.jsonl': subStart(s.id), '2026-09-21T09-00-02-cccc.json': '{}' });
   const old = new Date(Date.now() - 100 * DAY);
   fs.utimesSync(path.join(sub, '2026-09-21T09-00-01-bbbb.log.jsonl'), old, old);
   expect(sweepJournals(root, 30)).toBe(0); // the session's own journal is fresh
@@ -929,4 +931,113 @@ test('a link inside a .sub is unlinked with it, its target left', () => {
   expect(removeSession(root, s.id, 'tok-me', alive)).toBe('deleted');
   expect(fs.existsSync(sub)).toBe(false);
   expect(fs.readFileSync(path.join(outside, 'keep.txt'), 'utf8')).toBe('x');
+});
+
+// ─── what is a .sub is decided by its content, not its name ──────────────────────
+
+test('a project directory named like a session\'s .sub is walked, listed and kept: its journals do not name it as their root', () => {
+  const root = subTmp();
+  const name = '2026-01-01T00-00-00-abcd.sub';
+  const home = path.join(root, name);
+  const s = session({ id: '2026-09-21T09-00-00-aaaa' });
+  saveSession(home, s);
+  fs.writeFileSync(journalPath(home, s.id), '{"t":"start","id":"2026-09-21T09-00-00-aaaa"}\n');
+  expect(listSessions(root).map((x) => ({ id: x.id, dir: x.dir }))).toEqual([{ id: s.id, dir: home }]);
+  pruneSessions(root, 50);
+  expect(loadSession(home, s.id)).not.toBeNull();
+  expect(fs.existsSync(journalPath(home, s.id))).toBe(true);
+  // A journal in it that names another session as its root does not make it a `.sub` either.
+  const other = '2026-01-02T00-00-00-abce';
+  subOf(root, other, { '2026-09-21T09-00-01-bbbb.log.jsonl': subStart('2026-01-02T00-00-00-ffff') });
+  pruneSessions(root, 50);
+  expect(fs.existsSync(path.join(root, `${other}.sub`))).toBe(true);
+});
+
+test('a real orphan .sub still goes, an empty one with it, and one holding a subdirectory is an ordinary directory', () => {
+  const root = subTmp();
+  const orphan = '2026-09-20T09-00-00-aaaa';
+  const empty = '2026-09-20T09-00-00-bbbb';
+  const nested = '2026-09-20T09-00-00-cccc';
+  subOf(root, orphan);
+  fs.mkdirSync(path.join(root, `${empty}.sub`));
+  const nestedDir = path.join(root, `${nested}.sub`, 'inner');
+  const s = session({ id: '2026-09-21T09-00-00-dddd' });
+  saveSession(nestedDir, s);
+  subOf(root, nested, { '2026-09-21T09-00-01-bbbb.log.jsonl': subStart(nested) });
+  expect(listSessions(root).map((x) => x.id)).toEqual([s.id]);
+  pruneSessions(root, 50);
+  expect(fs.existsSync(path.join(root, `${orphan}.sub`))).toBe(false);
+  expect(fs.existsSync(path.join(root, `${empty}.sub`))).toBe(false);
+  expect(loadSession(nestedDir, s.id)).not.toBeNull();
+});
+
+test('only the first line of each journal is read to decide', () => {
+  const root = subTmp();
+  const id = '2026-09-20T09-00-00-aaaa';
+  // A first line over the bound is unreadable as one, so the directory is not a `.sub`.
+  subOf(root, id, { '2026-09-21T09-00-01-bbbb.log.jsonl': `{"root":"${id}","pad":"${'x'.repeat(70 * 1024)}"}\n` });
+  pruneSessions(root, 50);
+  expect(fs.existsSync(path.join(root, `${id}.sub`))).toBe(true);
+  // A file whose later lines are not JSON is still a journal of that session.
+  const ok = '2026-09-20T09-00-00-bbbb';
+  subOf(root, ok, { '2026-09-21T09-00-01-bbbb.log.jsonl': `${subStart(ok)}not json\n` });
+  pruneSessions(root, 50);
+  expect(fs.existsSync(path.join(root, `${ok}.sub`))).toBe(false);
+});
+
+test('deleteSession with an id that is not one leaves the directory it would name alone', () => {
+  const root = subTmp();
+  const dir = path.join(root, 'home');
+  fs.mkdirSync(dir);
+  const outside = path.join(root, 'x.sub');
+  fs.mkdirSync(outside);
+  fs.writeFileSync(path.join(outside, 'keep.txt'), 'x');
+  const odd = path.join(dir, 'abc.sub');
+  fs.mkdirSync(odd);
+  deleteSession(dir, '../x');
+  deleteSession(dir, 'abc');
+  expect(fs.readFileSync(path.join(outside, 'keep.txt'), 'utf8')).toBe('x');
+  expect(fs.existsSync(odd)).toBe(true);
+});
+
+test('sweepJournals keeps the .sub when the journal cannot be removed', () => {
+  const root = subTmp();
+  const s = session({ id: '2026-09-21T09-00-00-aaaa' });
+  saveSession(root, s);
+  fs.writeFileSync(journalPath(root, s.id), '{"t":"start"}\n');
+  const sub = subOf(root, s.id);
+  const old = new Date(Date.now() - 100 * DAY);
+  fs.utimesSync(journalPath(root, s.id), old, old);
+  const real = fs.unlinkSync;
+  const spy = spyOn(fs, 'unlinkSync').mockImplementation(((p: fs.PathLike) => {
+    if (String(p).endsWith('.log.jsonl')) throw Object.assign(new Error('EACCES'), { code: 'EACCES' });
+    return real(p);
+  }) as typeof fs.unlinkSync);
+  try { expect(sweepJournals(root, 30)).toBe(0); } finally { spy.mockRestore(); }
+  expect(fs.existsSync(sub)).toBe(true);
+  expect(fs.existsSync(journalPath(root, s.id))).toBe(true);
+});
+
+test('a session with a .sub and no journal moves its .sub only after the state file; with a journal, right after it', () => {
+  for (const withJournal of [false, true]) {
+    const root = subTmp();
+    const fromHome = projectHome(root, '/Users/me/from');
+    const toHome = projectHome(root, '/Users/me/to');
+    const s = session({ id: '2026-09-21T09-00-00-aaaa', project: '/Users/me/from' });
+    saveSession(fromHome, s);
+    if (withJournal) fs.writeFileSync(journalPath(fromHome, s.id), '{"t":"start"}\n');
+    subOf(fromHome, s.id);
+    const real = fs.renameSync;
+    // What lies beside the destination `.sub` at the moment it appears.
+    const seen: { state: boolean; journal: boolean }[] = [];
+    const spy = spyOn(fs, 'renameSync').mockImplementation(((from: fs.PathLike, to: fs.PathLike) => {
+      if (String(to) === path.join(toHome, `${s.id}.sub`)) seen.push({ state: fs.existsSync(path.join(toHome, `${s.id}.json`)), journal: fs.existsSync(journalPath(toHome, s.id)) });
+      return real(from, to);
+    }) as typeof fs.renameSync);
+    try { expect(moveSessionToProject(fromHome, s.id, root, '/Users/me/to', 'tok-me', alive)).toBe('moved'); } finally { spy.mockRestore(); }
+    expect(seen).toEqual([withJournal ? { state: false, journal: true } : { state: true, journal: false }]);
+    expect(fs.existsSync(path.join(toHome, `${s.id}.sub`))).toBe(true);
+    expect(fs.existsSync(path.join(fromHome, `${s.id}.sub`))).toBe(false);
+    expect(loadSession(toHome, s.id)).not.toBeNull();
+  }
 });

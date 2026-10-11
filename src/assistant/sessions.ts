@@ -143,7 +143,49 @@ const projectRead = (v: unknown): string | null => (typeof v === 'string' && v ?
 // is not part of the tree: it belongs to the session and goes with it, so what lies in
 // it is never taken for a session's file.
 const MAX_DEPTH = 64;
-const SUB_DIR = /^[0-9T-]{19}-[0-9a-f]{4}\.sub$/;
+const SUB_DIR = /^([0-9T-]{19}-[0-9a-f]{4})\.sub$/;
+const FIRST_LINE_MAX = 64 * 1024;
+
+// The first line of a file, read without the rest of it; null when it is unreadable or
+// longer than `FIRST_LINE_MAX`.
+function firstLineOf(file: string): string | null {
+  let fd: number | null = null;
+  try {
+    fd = fs.openSync(file, 'r');
+    const buf = Buffer.alloc(FIRST_LINE_MAX);
+    const n = fs.readSync(fd, buf, 0, FIRST_LINE_MAX, 0);
+    const text = buf.toString('utf8', 0, n);
+    const nl = text.indexOf('\n');
+    if (nl >= 0) return text.slice(0, nl);
+    return n < FIRST_LINE_MAX ? text : null;
+  } catch { return null; } finally {
+    if (fd !== null) { try { fs.closeSync(fd); } catch { /* closed */ } }
+  }
+}
+
+// Whether a directory entry is a session's `.sub`: a name that is `<session-id>.sub`, a
+// directory (or a link, which is only ever unlinked) holding no directory, whose every
+// journal opens with a line naming that session as its `root`. A name alone is not
+// enough: a project directory can be called anything, and the sessions inside one are
+// the person's, to be listed and kept. A directory of that name that fails the test is
+// an ordinary project directory.
+function isSubDir(dir: string, e: fs.Dirent): boolean {
+  const m = SUB_DIR.exec(e.name);
+  if (!m) return false;
+  if (e.isSymbolicLink()) return true;
+  if (!e.isDirectory()) return false;
+  const sub = path.join(dir, e.name);
+  let inside: fs.Dirent[];
+  try { inside = fs.readdirSync(sub, { withFileTypes: true }); } catch { return false; }
+  if (inside.some((i) => i.isDirectory())) return false;
+  for (const i of inside) {
+    if (!i.name.endsWith(JOURNAL_EXT)) continue;
+    const line = firstLineOf(path.join(sub, i.name));
+    if (line === null) return false;
+    try { if ((JSON.parse(line) as { root?: unknown } | null)?.root !== m[1]) return false; } catch { return false; }
+  }
+  return true;
+}
 function sessionDirs(root: string): string[] {
   const out: string[] = [];
   const walk = (dir: string, depth: number) => {
@@ -151,7 +193,7 @@ function sessionDirs(root: string): string[] {
     try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
     out.push(dir);
     if (depth >= MAX_DEPTH) return;
-    for (const e of entries) if (e.isDirectory() && !SUB_DIR.test(e.name)) walk(path.join(dir, e.name), depth + 1);
+    for (const e of entries) if (e.isDirectory() && !isSubDir(dir, e)) walk(path.join(dir, e.name), depth + 1);
   };
   walk(root, 0);
   return out;
@@ -554,7 +596,7 @@ function orphanSubs(dir: string): string[] {
   try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return []; }
   const out: string[] = [];
   for (const e of entries) {
-    if (!SUB_DIR.test(e.name) || !(e.isDirectory() || e.isSymbolicLink())) continue;
+    if (!isSubDir(dir, e)) continue;
     const id = e.name.slice(0, -'.sub'.length);
     if (fs.existsSync(path.join(dir, `${id}.json`)) || fs.existsSync(journalPath(dir, id))) continue;
     out.push(id);
@@ -854,15 +896,19 @@ export function removeSession(dir: string, id: string, token: string, deps: Lock
 //      same value, a retry costs nothing extra), every other field untouched (a plain
 //      parse-patch-write, not `saveSession`, which would also re-trim the screen and
 //      bump `rev` — a move is not a content edit).
-//   2. The journal, and a `.sub` directory beside it if it has one (the subagents'
-//      journals), move to the destination — each skipped if already there, so a resumed move never re-links
-//      or re-renames what an earlier, interrupted attempt already placed.
+//   2. The journal moves to the destination, and a `.sub` directory beside it (the
+//      subagents' journals) right after it — each skipped if already there, so a resumed
+//      move never re-links or re-renames what an earlier, interrupted attempt already
+//      placed. A `.sub` is moved only to a destination that already holds its journal;
+//      a session with no journal there has it move after the state file (step 3), so a
+//      `.sub` at the destination always has a journal or a state file beside it, and is
+//      never taken for an orphan.
 //   3. The state file itself moves, `renameSync(file, destFile)` — the one moment its
 //      name changes at all, so exactly one `<id>.json` for this id exists at every
 //      instant: a crash before this line leaves it, patched, still at the source,
-//      journal and `.sub` already at the destination waiting for it; a crash after
-//      leaves it at the destination, whole. Never two, never none, never a state file
-//      without its journal. `exists` (destFile already there) refuses rather than
+//      journal (and `.sub`, with one) already at the destination waiting for it; a crash
+//      after leaves it at the destination, whole. Never two, never none, never a state
+//      file without its journal. `exists` (destFile already there) refuses rather than
 //      picking a side — it is checked before step 1 ever touches anything.
 export type MoveOutcome = 'moved' | 'held' | 'ours' | 'missing' | 'here' | 'exists';
 export function moveSessionToProject(dir: string, id: string, root: string, project: string | null, token: string, deps: LockDeps = {}): MoveOutcome {
@@ -898,9 +944,12 @@ export function moveSessionToProject(dir: string, id: string, root: string, proj
     }
     const sub = path.join(dir, `${id}.sub`);
     const destSub = path.join(dest, `${id}.sub`);
-    if (fs.existsSync(sub) && !fs.existsSync(destSub)) fs.renameSync(sub, destSub);
+    const moveSub = () => { if (fs.existsSync(sub) && !fs.existsSync(destSub)) fs.renameSync(sub, destSub); };
+    const journalThere = fs.existsSync(destJrnl);
+    if (journalThere) moveSub();
     // 3. The state file, last — the only step that makes the move visible.
     fs.renameSync(file, destFile);
+    if (!journalThere) moveSub();
     return 'moved';
   } finally {
     releaseLock(dir, id, token);
