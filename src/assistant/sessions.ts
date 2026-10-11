@@ -139,8 +139,11 @@ export function projectHome(root: string, project: string | null): string {
 const projectRead = (v: unknown): string | null => (typeof v === 'string' && v ? v : null);
 
 // Every directory of the tree, the root first. A link is never followed: the tree is
-// ours, and a link in it leads somewhere that is not.
+// ours, and a link in it leads somewhere that is not. A session's `<id>.sub` directory
+// is not part of the tree: it belongs to the session and goes with it, so what lies in
+// it is never taken for a session's file.
 const MAX_DEPTH = 64;
+const SUB_DIR = /^[0-9T-]{19}-[0-9a-f]{4}\.sub$/;
 function sessionDirs(root: string): string[] {
   const out: string[] = [];
   const walk = (dir: string, depth: number) => {
@@ -148,7 +151,7 @@ function sessionDirs(root: string): string[] {
     try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
     out.push(dir);
     if (depth >= MAX_DEPTH) return;
-    for (const e of entries) if (e.isDirectory()) walk(path.join(dir, e.name), depth + 1);
+    for (const e of entries) if (e.isDirectory() && !SUB_DIR.test(e.name)) walk(path.join(dir, e.name), depth + 1);
   };
   walk(root, 0);
   return out;
@@ -525,16 +528,44 @@ export function sessionToContinue(root: string, project: string | null = null): 
   return last ? loadSession(last.dir, last.id) : null;
 }
 
-// The state file and the journal go together.
+// A session's `.sub` directory, with everything in it. The path is the validated id and
+// the literal suffix; a link in that place is unlinked, never followed out of the tree,
+// and nothing below it is followed either (`rmSync` unlinks a link it meets).
+function removeSub(dir: string, id: string): void {
+  const sub = path.join(dir, `${id}.sub`);
+  try {
+    if (!ID.test(id)) return;
+    if (fs.lstatSync(sub).isDirectory()) fs.rmSync(sub, { recursive: true, force: true });
+    else fs.unlinkSync(sub);
+  } catch { /* none, or already gone */ }
+}
+
+// The state file, the journal and the subagents' journals go together.
 export function deleteSession(dir: string, id: string): void {
   try { fs.unlinkSync(fileOf(dir, id)); } catch { /* already gone */ }
   try { fs.unlinkSync(journalPath(dir, id)); } catch { /* none, or already gone */ }
+  removeSub(dir, id);
+}
+
+// The `.sub` entries of a directory whose session has neither a state file nor a
+// journal beside it — what a deleted session or a crash leaves behind.
+function orphanSubs(dir: string): string[] {
+  let entries: fs.Dirent[];
+  try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return []; }
+  const out: string[] = [];
+  for (const e of entries) {
+    if (!SUB_DIR.test(e.name) || !(e.isDirectory() || e.isSymbolicLink())) continue;
+    const id = e.name.slice(0, -'.sub'.length);
+    if (fs.existsSync(path.join(dir, `${id}.json`)) || fs.existsSync(journalPath(dir, id))) continue;
+    out.push(id);
+  }
+  return out;
 }
 
 // Retention, swept at start, and only when the person asks for it: by default (0) a
 // journal lives exactly as long as its session — a session that can still be opened
-// keeps its evidence. With `days` set, a journal not written to for longer goes, and
-// its session, which stays, gets a note row saying so: a state file whose record is
+// keeps its evidence. With `days` set, a journal not written to for longer goes, with
+// its subagents' journals, and its session, which stays, gets a note row saying so: a state file whose record is
 // gone must not look like one that still has it. A journal whose session a live chat
 // holds is left alone, and so is one whose state file never got written (a crash in
 // the first moments of a session) until it is as old as any other.
@@ -556,6 +587,7 @@ export function sweepJournals(root: string, days = JOURNAL_DAYS, now = Date.now(
     if (acquireLock(dir, id, token).status !== 'acquired') continue;
     try {
       try { fs.unlinkSync(file); removed++; } catch { continue; }
+      removeSub(dir, id);
       const s = loadSession(dir, id);
       if (s) saveSession(dir, { ...s, messages: [...s.messages, { role: 'note', content: `Journal removed after ${days} days without a write (sessions.journalDays) — this session's full record is gone.` }] });
     } finally {
@@ -579,6 +611,13 @@ export function pruneSessions(root: string, keep = KEEP_SESSIONS): number {
     if (isLockHeld(s.dir, s.id)) continue;
     deleteSession(s.dir, s.id);
     removed++;
+  }
+  for (const dir of sessionDirs(root)) {
+    for (const id of orphanSubs(dir)) {
+      if (isLockHeld(dir, id)) continue;
+      removeSub(dir, id);
+      byDir.set(dir, byDir.get(dir) ?? []);
+    }
   }
   for (const dir of byDir.keys()) dropEmptyDirs(dir, root);
   for (const dir of sessionDirs(root)) for (const n of namesIn(dir)) {
@@ -815,9 +854,8 @@ export function removeSession(dir: string, id: string, token: string, deps: Lock
 //      same value, a retry costs nothing extra), every other field untouched (a plain
 //      parse-patch-write, not `saveSession`, which would also re-trim the screen and
 //      bump `rev` — a move is not a content edit).
-//   2. The journal, and a `.sub` directory beside it if it has one (nothing writes one
-//      yet, but a session already carries this shape for whatever might), move to the
-//      destination — each skipped if already there, so a resumed move never re-links
+//   2. The journal, and a `.sub` directory beside it if it has one (the subagents'
+//      journals), move to the destination — each skipped if already there, so a resumed move never re-links
 //      or re-renames what an earlier, interrupted attempt already placed.
 //   3. The state file itself moves, `renameSync(file, destFile)` — the one moment its
 //      name changes at all, so exactly one `<id>.json` for this id exists at every

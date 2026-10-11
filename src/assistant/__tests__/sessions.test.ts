@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   KEEP_MESSAGES, KEEP_VIEWS, SEARCH_TEXT_MAX, SESSION_VERSION, TITLE_MAX, acquireLock, closeSession, cutTitle, journalPath, subJournalPath, listSessions, loadSession,
-  lockPath, lockState, makeLockToken, moveSessionToProject, newSessionId, normalizeViews, pruneSessions, releaseLock, removeSession, renameSession,
+  lockPath, lockState, makeLockToken, moveSessionToProject, newSessionId, normalizeViews, pruneSessions, releaseLock, sweepJournals, removeSession, renameSession,
   saveSession, searchText, sessionFingerprint, sessionFingerprintsEqual, sessionRev, sessionRows, sessionTitle,
   dropEmptyDirs, pickToContinue, projectHome, projectOf, sessionToContinue, sessionsDir, trimHistory, trimScreen, unseenAnswer, type Session,
 } from '../sessions.ts';
@@ -785,4 +785,148 @@ test('unseenAnswer: a background result that is the last message is unseen like 
   expect(unseenAnswer(msgs, '2026-09-21T10:00:05.000Z', '2026-09-21T10:00:04.000Z')).toBe(true);
   expect(unseenAnswer(msgs, '2026-09-21T10:00:05.000Z', '2026-09-21T10:00:05.000Z')).toBe(false);
   expect(unseenAnswer([...msgs, { role: 'user', content: 'next' }], '2026-09-21T10:00:05.000Z', '')).toBe(false);
+});
+
+// ─── a session's .sub directory goes where the session goes ─────────────────────
+
+let subSeq = 0;
+const subTmp = () => {
+  const root = path.join(os.tmpdir(), `fa-sub-${process.pid}-${subSeq++}`);
+  fs.rmSync(root, { recursive: true, force: true });
+  fs.mkdirSync(root, { recursive: true });
+  return root;
+};
+const subOf = (dir: string, id: string, files: Record<string, string> = { '2026-09-21T09-00-01-bbbb.log.jsonl': '{"t":"start"}\n' }) => {
+  const sub = path.join(dir, `${id}.sub`);
+  fs.mkdirSync(sub, { recursive: true });
+  for (const [n, body] of Object.entries(files)) fs.writeFileSync(path.join(sub, n), body);
+  return sub;
+};
+const DAY = 24 * 60 * 60 * 1000;
+
+test('a .sub directory is no part of the tree: a journal-shaped file in it is neither a session nor swept on its own', () => {
+  const root = subTmp();
+  const s = session({ id: '2026-09-21T09-00-00-aaaa' });
+  saveSession(root, s);
+  fs.writeFileSync(journalPath(root, s.id), '{"t":"start"}\n');
+  const sub = subOf(root, s.id, { '2026-09-21T09-00-01-bbbb.log.jsonl': '{"t":"start"}\n', '2026-09-21T09-00-02-cccc.json': '{}' });
+  const old = new Date(Date.now() - 100 * DAY);
+  fs.utimesSync(path.join(sub, '2026-09-21T09-00-01-bbbb.log.jsonl'), old, old);
+  expect(sweepJournals(root, 30)).toBe(0); // the session's own journal is fresh
+  expect(fs.existsSync(path.join(sub, '2026-09-21T09-00-01-bbbb.log.jsonl'))).toBe(true);
+  expect(listSessions(root).map((x) => x.id)).toEqual([s.id]);
+  expect(sessionRows(root, 'tok-me', alive).map((x) => x.id)).toEqual([s.id]);
+});
+
+test('sweepJournals removes a session\'s .sub with its journal, when the journal is stale', () => {
+  const root = subTmp();
+  const s = session({ id: '2026-09-21T09-00-00-aaaa' });
+  saveSession(root, s);
+  fs.writeFileSync(journalPath(root, s.id), '{"t":"start"}\n');
+  const sub = subOf(root, s.id);
+  const old = new Date(Date.now() - 100 * DAY);
+  fs.utimesSync(journalPath(root, s.id), old, old);
+  expect(sweepJournals(root, 30)).toBe(1);
+  expect(fs.existsSync(sub)).toBe(false);
+  expect(loadSession(root, s.id)).not.toBeNull(); // the session stays
+});
+
+test('sweepJournals leaves a .sub alone when a live chat holds the session', () => {
+  const root = subTmp();
+  const s = session({ id: '2026-09-21T09-00-00-aaaa' });
+  saveSession(root, s);
+  fs.writeFileSync(journalPath(root, s.id), '{"t":"start"}\n');
+  const sub = subOf(root, s.id);
+  const old = new Date(Date.now() - 100 * DAY);
+  fs.utimesSync(journalPath(root, s.id), old, old);
+  acquireLock(root, s.id, 'tok-other');
+  expect(sweepJournals(root, 30)).toBe(0);
+  expect(fs.existsSync(sub)).toBe(true);
+  expect(fs.existsSync(journalPath(root, s.id))).toBe(true);
+});
+
+test('removeSession takes the .sub with the session, and the project directory is dropped when pruning empties it', () => {
+  const root = subTmp();
+  const home = projectHome(root, '/Users/me/app');
+  const a = session({ id: '2026-09-21T09-00-00-aaaa', project: '/Users/me/app' });
+  saveSession(home, a);
+  const sub = subOf(home, a.id);
+  expect(removeSession(home, a.id, 'tok-me', alive)).toBe('deleted');
+  expect(fs.existsSync(sub)).toBe(false);
+
+  const b = session({ id: '2026-09-22T09-00-00-bbbb', project: '/Users/me/app' });
+  saveSession(home, b);
+  const subB = subOf(home, b.id);
+  expect(pruneSessions(root, 0)).toBe(1);
+  expect(fs.existsSync(subB)).toBe(false);
+  expect(fs.existsSync(home)).toBe(false); // nothing left in it
+});
+
+test('removeSession of a held session leaves its .sub', () => {
+  const root = subTmp();
+  const a = session({ id: '2026-09-21T09-00-00-aaaa' });
+  saveSession(root, a);
+  const sub = subOf(root, a.id);
+  acquireLock(root, a.id, 'tok-other', alive);
+  expect(removeSession(root, a.id, 'tok-me', alive)).toBe('held');
+  expect(fs.existsSync(sub)).toBe(true);
+});
+
+test('pruneSessions removes an orphan .sub, keeps one beside a state file or a journal, and keeps one whose lock is held', () => {
+  const root = subTmp();
+  const orphan = '2026-09-20T09-00-00-aaaa';
+  const withJournal = '2026-09-20T09-00-00-bbbb';
+  const withState = session({ id: '2026-09-20T09-00-00-cccc' });
+  const held = '2026-09-20T09-00-00-dddd';
+  subOf(root, orphan);
+  fs.writeFileSync(journalPath(root, withJournal), '{"t":"start"}\n');
+  subOf(root, withJournal);
+  saveSession(root, withState);
+  subOf(root, withState.id);
+  subOf(root, held);
+  acquireLock(root, held, 'tok-other');
+  pruneSessions(root, 50);
+  expect(fs.existsSync(path.join(root, `${orphan}.sub`))).toBe(false);
+  expect(fs.existsSync(path.join(root, `${withJournal}.sub`))).toBe(true);
+  expect(fs.existsSync(path.join(root, `${withState.id}.sub`))).toBe(true);
+  expect(fs.existsSync(path.join(root, `${held}.sub`))).toBe(true);
+});
+
+test('an orphan .sub in a project directory goes and the directory with it', () => {
+  const root = subTmp();
+  const home = projectHome(root, '/Users/me/app');
+  subOf(home, '2026-09-20T09-00-00-aaaa');
+  pruneSessions(root, 50);
+  expect(fs.existsSync(home)).toBe(false);
+});
+
+test('a .sub that is a link is unlinked, never followed', () => {
+  const root = subTmp();
+  const outside = subTmp();
+  fs.writeFileSync(path.join(outside, 'keep.txt'), 'x');
+  const id = '2026-09-20T09-00-00-aaaa';
+  fs.symlinkSync(outside, path.join(root, `${id}.sub`));
+  pruneSessions(root, 50);
+  expect(fs.existsSync(path.join(root, `${id}.sub`))).toBe(false);
+  expect(fs.readFileSync(path.join(outside, 'keep.txt'), 'utf8')).toBe('x');
+
+  const s = session({ id: '2026-09-21T09-00-00-bbbb' });
+  saveSession(root, s);
+  fs.symlinkSync(outside, path.join(root, `${s.id}.sub`));
+  expect(removeSession(root, s.id, 'tok-me', alive)).toBe('deleted');
+  expect(fs.lstatSync(outside).isDirectory()).toBe(true);
+  expect(fs.readFileSync(path.join(outside, 'keep.txt'), 'utf8')).toBe('x');
+});
+
+test('a link inside a .sub is unlinked with it, its target left', () => {
+  const root = subTmp();
+  const outside = subTmp();
+  fs.writeFileSync(path.join(outside, 'keep.txt'), 'x');
+  const s = session({ id: '2026-09-21T09-00-00-bbbb' });
+  saveSession(root, s);
+  const sub = subOf(root, s.id);
+  fs.symlinkSync(outside, path.join(sub, 'link'));
+  expect(removeSession(root, s.id, 'tok-me', alive)).toBe('deleted');
+  expect(fs.existsSync(sub)).toBe(false);
+  expect(fs.readFileSync(path.join(outside, 'keep.txt'), 'utf8')).toBe('x');
 });
