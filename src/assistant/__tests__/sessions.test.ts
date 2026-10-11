@@ -985,6 +985,64 @@ test('only the first line of each journal is read to decide', () => {
   expect(fs.existsSync(path.join(root, `${ok}.sub`))).toBe(false);
 });
 
+test('a project directory named like a .sub whose sessions have no journal is walked, listed and kept', () => {
+  const root = subTmp();
+  const home = path.join(root, '2026-01-01T00-00-00-abcd.sub');
+  const s = session({ id: '2026-09-21T09-00-00-aaaa' });
+  saveSession(home, s);
+  expect(listSessions(root).map((x) => x.id)).toEqual([s.id]);
+  pruneSessions(root, 50);
+  expect(loadSession(home, s.id)).not.toBeNull();
+  // A directory of the name holding only a file that is no journal is not a `.sub` either.
+  const notes = path.join(root, '2026-01-03T00-00-00-abcd.sub');
+  fs.mkdirSync(notes);
+  fs.writeFileSync(path.join(notes, 'notes.txt'), 'x');
+  pruneSessions(root, 50);
+  expect(fs.readFileSync(path.join(notes, 'notes.txt'), 'utf8')).toBe('x');
+});
+
+test('a project directory named like a .sub keeps its sessions after the retention sweep removed their journals', () => {
+  const root = subTmp();
+  const home = path.join(root, '2026-01-01T00-00-00-abcd.sub');
+  const s = session({ id: '2026-09-21T09-00-00-aaaa' });
+  saveSession(home, s);
+  const jrnl = journalPath(home, s.id);
+  fs.writeFileSync(jrnl, `{"t":"start","id":"${s.id}"}\n`);
+  const old = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+  fs.utimesSync(jrnl, old, old);
+  for (let start = 0; start < 2; start++) {
+    pruneSessions(root, 50);
+    sweepJournals(root, 30);
+  }
+  expect(fs.existsSync(jrnl)).toBe(false);
+  expect(loadSession(home, s.id)).not.toBeNull();
+  expect(listSessions(root).map((x) => x.id)).toEqual([s.id]);
+});
+
+test('a .sub beside its session is that session\'s whatever it holds: nothing in it is swept on its own', () => {
+  const root = subTmp();
+  const s = session({ id: '2026-09-21T09-00-00-aaaa' });
+  saveSession(root, s);
+  fs.writeFileSync(journalPath(root, s.id), `{"t":"start","id":"${s.id}"}\n`);
+  const child = '2026-09-21T09-00-01-bbbb.log.jsonl';
+  const sub = subOf(root, s.id, { [child]: subStart(s.id), '2026-09-21T09-00-02-cccc.log.jsonl': '', 'stray.txt': 'x' });
+  fs.mkdirSync(path.join(sub, 'inner'));
+  const old = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+  fs.utimesSync(path.join(sub, child), old, old);
+  expect(sweepJournals(root, 30)).toBe(0);
+  pruneSessions(root, 50);
+  expect(fs.existsSync(path.join(sub, child))).toBe(true);
+  expect(fs.readdirSync(sub).filter((n) => n.endsWith('.lock'))).toEqual([]);
+});
+
+test('a .sub with nothing beside it whose journal opens with a line that does not parse is left alone', () => {
+  const root = subTmp();
+  const id = '2026-09-20T09-00-00-aaaa';
+  subOf(root, id, { '2026-09-21T09-00-01-bbbb.log.jsonl': '{"root":"2026-09-20T09-00-00-aaaa"\n' });
+  pruneSessions(root, 50);
+  expect(fs.existsSync(path.join(root, `${id}.sub`))).toBe(true);
+});
+
 test('deleteSession with an id that is not one leaves the directory it would name alone', () => {
   const root = subTmp();
   const dir = path.join(root, 'home');

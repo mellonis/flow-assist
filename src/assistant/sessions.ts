@@ -163,23 +163,25 @@ function firstLineOf(file: string): string | null {
   }
 }
 
-// Whether a directory entry is a session's `.sub`: a name that is `<session-id>.sub`, a
-// directory (or a link, which is only ever unlinked) holding no directory, whose every
-// journal opens with a line naming that session as its `root`. A name alone is not
-// enough: a project directory can be called anything, and the sessions inside one are
-// the person's, to be listed and kept. A directory of that name that fails the test is
-// an ordinary project directory.
+// Whether a directory entry is a session's `.sub`. The name is `<session-id>.sub` and
+// the entry is a directory (or a link, which is only ever unlinked). With that session's
+// state file or journal beside it, it is that session's, whatever it holds, and nothing
+// in it is read. With neither beside it, it is a `.sub` only when every entry in it is a
+// plain file ending in `.log.jsonl` whose first line names that session as its `root`
+// (an empty one qualifies). A name alone is not enough: a project directory can be
+// called anything, and the sessions inside one are the person's, to be listed and kept.
+// A directory of that name that fails the test is an ordinary project directory.
 function isSubDir(dir: string, e: fs.Dirent): boolean {
   const m = SUB_DIR.exec(e.name);
   if (!m) return false;
   if (e.isSymbolicLink()) return true;
   if (!e.isDirectory()) return false;
+  if (fs.existsSync(fileOf(dir, m[1]!)) || fs.existsSync(journalPath(dir, m[1]!))) return true;
   const sub = path.join(dir, e.name);
   let inside: fs.Dirent[];
   try { inside = fs.readdirSync(sub, { withFileTypes: true }); } catch { return false; }
-  if (inside.some((i) => i.isDirectory())) return false;
   for (const i of inside) {
-    if (!i.name.endsWith(JOURNAL_EXT)) continue;
+    if (!i.isFile() || !i.name.endsWith(JOURNAL_EXT)) return false;
     const line = firstLineOf(path.join(sub, i.name));
     if (line === null) return false;
     try { if ((JSON.parse(line) as { root?: unknown } | null)?.root !== m[1]) return false; } catch { return false; }
@@ -908,7 +910,10 @@ export function removeSession(dir: string, id: string, token: string, deps: Lock
 //      instant: a crash before this line leaves it, patched, still at the source,
 //      journal (and `.sub`, with one) already at the destination waiting for it; a crash
 //      after leaves it at the destination, whole. Never two, never none, never a state
-//      file without its journal. `exists` (destFile already there) refuses rather than
+//      file without its journal. The one thing a failure can strand: the `.sub` of a
+//      session with NO journal, when its own rename fails or the process dies between
+//      the two renames — it stays at the source with nothing beside it, and the next
+//      prune removes it as an orphan. `exists` (destFile already there) refuses rather than
 //      picking a side — it is checked before step 1 ever touches anything.
 export type MoveOutcome = 'moved' | 'held' | 'ours' | 'missing' | 'here' | 'exists';
 export function moveSessionToProject(dir: string, id: string, root: string, project: string | null, token: string, deps: LockDeps = {}): MoveOutcome {

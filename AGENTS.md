@@ -2048,10 +2048,11 @@ A saved history that holds calls under the name `background` is sent as it is. T
   removed recursively from a path made of the validated id and the literal suffix, a link
   in that place unlinked and never followed). The directory walks (`listSessions`,
   `sessionRows`, `sweepJournals`) do not enter a `<id>.sub`, so a file in it is never taken
-  for a session's or swept on its own. A directory is a `.sub` by its content, not its name
-  alone (`isSubDir`): the name is `<session-id>.sub`, it holds no directory, and the first
-  line of every `*.log.jsonl` in it (only that line is read) names that id as its `root`
-  — an empty directory of the name qualifies. One that fails is an ordinary project
+  for a session's or swept on its own. A directory is a `.sub` by more than its name
+  (`isSubDir`): the name is `<session-id>.sub`, and either that session's state file or
+  journal lies beside it (then nothing in it is read), or every entry in it is a plain
+  `*.log.jsonl` file whose first line (at most 64 KiB of it is read) names that id as its
+  `root` — an empty directory of the name qualifies. One that fails is an ordinary project
   directory: walked, listed, never removed as an orphan. A `.sub` with neither `<id>.json` nor `<id>.log.jsonl`
   beside it, and no held lock, is removed by `pruneSessions`. Nothing removes a journal by age unless the person asks:
   `sessions.journalDays` defaults to 0. Set, `sweepJournals` (at start, beside
@@ -2196,7 +2197,9 @@ A saved history that holds calls under the name `background` is sent as it is. T
   directory beside it if it has one (the subagents' journals), move to the destination,
   each skipped if a resumed attempt already put it there — the `.sub` only once the journal
   is there, and for a session with no journal after the state file, so no `.sub` ever lies
-  at the destination with neither beside it; (3) the state file itself
+  at the destination with neither beside it (if that last rename fails, or the process
+  dies before it, the journal-less session's `.sub` stays at the source alone and the next
+  prune removes it); (3) the state file itself
   moves after the journal, one `renameSync`, the one moment its name changes — so exactly one
   `<id>.json` for this id exists at every instant a crash could land on: never two
   (a crash after step 3 cannot have left one at the source too), never a state file
