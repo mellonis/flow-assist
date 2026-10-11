@@ -908,7 +908,7 @@ there is no `/fullscreen`.
   **What ends a watch:** Esc, the sessions key, the session's own y/n (the settings
   file's included) or parked question, `leave`, `adopt`, `renew` and `resetView`. The own y/n and the own question
   are armed for 600 ms from the moment they end it (`endWatchForOwnAsk`), and the render ends a
-  watch that a session's request somehow stands over, never drawing that request inside it. Collapsing the chat keeps the watch.
+  watch that a session's request stands over, never drawing that request inside it. Collapsing the chat keeps the watch.
   **A y/n in the watch.** `Conversation.offeredWithin(node)` is the oldest request owned
   by the node or by one below it, `path` counted from the session (so the title names every
   label, as `offered()` does); `offered()` stays the oldest request of the whole tree. It is drawn as the confirm

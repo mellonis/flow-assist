@@ -858,7 +858,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             ownArmedAt.current = c.confirm ? askClock.now() : null;
             questionSeenRef.current = c.question ?? null;
             questionArmedAt.current = c.question ? askClock.now() : null;
-            // As the pager's close: the session's end is on screen now.
+            // As the pager's close: the session's end is on screen.
             markSeenRef.current();
           };
           // The notes mode and the folds of a conversation the chat shows: its remembered
@@ -1884,7 +1884,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // open question would swallow them. The open chat speaks first:
           // - Ctrl+C with a turn or a `!command` running stops it, exactly as Esc does
           //   (a pending y/n is declined and a question dismissed first, or the turn
-          //   would wait on them forever) — 'handled', and nothing is armed;
+          //   would wait on them forever) — 'handled', and nothing is armed; while a
+          //   child is watched it stops nothing and arms the exit, as with no turn running;
           // - Ctrl+D in a field with text is the editor's forward delete — 'field', and
           //   the key goes to the handler below; in an empty field it arms the exit.
           // Any of the three disarms Esc's own exit, as every other key does.
