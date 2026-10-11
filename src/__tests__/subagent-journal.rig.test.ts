@@ -173,6 +173,98 @@ test('at exit the file ends `stopped` exit, and so does the session\'s line', as
   expect(rig.journal().find((e) => e.event === 'end')).toMatchObject({ stoppedBy: 'exit' });
 });
 
+// A subagent stopped in the middle of an answer keeps the text so far on its closing line.
+for (const mode of ['person', 'clear', 'exit'] as const) {
+  test(`stopped by ${mode} mid-answer, the closing line of the file carries the text so far as \`cut\``, async () => {
+    const model = new ScriptedModel();
+    const sub = subScript(model, 'halfway');
+    sub.script([{ text: 'half an answer' }, { hold: true }, { text: 'never' }]);
+    const rig = conversationRig(model, { inbox: true, ai: { backgroundFollowUp: false } });
+    const first = rig.conv;
+    rig.registry.show(first);
+    const { child, run } = startFrom(rig, spec('w', 'halfway'));
+    const running = run().catch(() => {});
+    await rig.until(() => sub.held);
+    if (mode === 'person') child.stopSubtree('');
+    else if (mode === 'clear') first.close('clear');
+    else rig.registry.closeAll('exit');
+    sub.release();
+    await running;
+    await new Promise((r) => setTimeout(r, 40));
+    const own = rig.subJournal('w', first.sessionId);
+    expect(own.filter((e) => e.t === 'end')).toHaveLength(1);
+    expect(own.at(-1)).toMatchObject({ t: 'end', stopped: mode, cut: 'half an answer' });
+  });
+}
+
+// The lines of a stopped subagent's children and its pending y/n come before its closing
+// `end`, which is the only `end` in the file.
+for (const mode of ['person', 'clear'] as const) {
+  test(`stopped by ${mode} with a live child that waits on a y/n, the child's lines precede the closing end in both files`, async () => {
+    const model = new ScriptedModel();
+    subScript(model, 'outer job').script([{ hold: true }], [{ text: 'outer' }]);
+    subScript(model, 'inner job').script([{ tool: 'run_command', args: { command: 'echo x > z.txt' } }], [{ text: 'inner' }]);
+    const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
+    const first = rig.conv;
+    const { child: outer, run } = startFrom(rig, spec('outer', 'outer job'));
+    const outerRun = run().catch(() => {});
+    const nested = outer.startChild(spec('inner', 'inner job'), '');
+    if ('refused' in nested) throw new Error(nested.refused);
+    children.push(nested.child);
+    const innerRun = nested.run().catch(() => {});
+    await rig.until(() => nested.child.confirm !== null);
+    if (mode === 'person') outer.stopSubtree(''); else first.close('clear');
+    await Promise.all([outerRun, innerRun]);
+    await new Promise((r) => setTimeout(r, 40));
+    const outerFile = rig.subJournal('outer', first.sessionId);
+    const innerFile = rig.subJournal('inner', first.sessionId);
+    for (const file of [outerFile, innerFile]) {
+      expect(file.filter((e) => e.t === 'end')).toHaveLength(1);
+    }
+    const endAt = (file: typeof outerFile) => file.findIndex((e) => e.t === 'end');
+    expect(outerFile.findIndex((e) => e.t === 'subagent' && e.event === 'end' && e.label === 'inner')).toBeGreaterThan(-1);
+    expect(outerFile.findIndex((e) => e.t === 'subagent' && e.event === 'end' && e.label === 'inner')).toBeLessThan(endAt(outerFile));
+    expect(innerFile.findIndex((e) => e.t === 'confirm')).toBeGreaterThan(-1);
+    expect(innerFile.findIndex((e) => e.t === 'confirm')).toBeLessThan(endAt(innerFile));
+    expect(innerFile[endAt(innerFile)]).toMatchObject({ stopped: mode === 'person' ? 'person' : 'clear' });
+    expect(outerFile[endAt(outerFile)]).toMatchObject({ stopped: mode });
+  });
+}
+
+test('stopped by the person while it waits on its own y/n, the declined answer precedes the closing end', async () => {
+  const model = new ScriptedModel();
+  subScript(model, 'asking').script([{ tool: 'run_command', args: { command: 'echo x > q.txt' } }], [{ text: 'never' }]);
+  const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
+  const { child, run } = startFrom(rig, spec('q', 'asking'));
+  const running = run().catch(() => {});
+  await rig.until(() => child.confirm !== null);
+  child.stopSubtree('');
+  await running;
+  await new Promise((r) => setTimeout(r, 40));
+  const own = rig.subJournal('q');
+  expect(own.filter((e) => e.t === 'end')).toHaveLength(1);
+  const at = own.findIndex((e) => e.t === 'confirm');
+  expect(own[at]).toMatchObject({ answer: 'no', by: 'stop' });
+  expect(at).toBeLessThan(own.findIndex((e) => e.t === 'end'));
+});
+
+test('stopped by the person and then cleared with its session, the file still holds one end', async () => {
+  const model = new ScriptedModel();
+  const sub = subScript(model, 'twice');
+  sub.script([{ hold: true }, { text: 'never' }]);
+  const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
+  const first = rig.conv;
+  const { child, run } = startFrom(rig, spec('t', 'twice'));
+  const running = run().catch(() => {});
+  await rig.until(() => sub.held);
+  child.stopSubtree('');
+  first.close('clear');
+  sub.release();
+  await running;
+  await new Promise((r) => setTimeout(r, 40));
+  expect(rig.subJournal('t', first.sessionId).filter((e) => e.t === 'end')).toMatchObject([{ stopped: 'person' }]);
+});
+
 test('a session with nowhere to keep a journal gives its subagent no file, whether sessions are off or nothing was said yet', async () => {
   const off = new ScriptedModel();
   off.script([{ text: 'done' }]);

@@ -201,6 +201,10 @@ export class Conversation {
   // Never read inside a `setRows` updater: every updater is a pure function of the list;
   // what it needs to know is read when the callback fires, and handed to it.
   roundTools = false;
+  // The text and the reasoning of the round being streamed, for a turn cut off before
+  // the round ends and for the closing line of a subagent stopped mid-round.
+  roundText = '';
+  roundReasoning = '';
   liveBuf = new Map<string, ViewRecord>();
   liveSeen = new Set<string>();
   liveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -530,9 +534,8 @@ export class Conversation {
     if (this.isClosed) return;
     this.closeReason = reason;
     if (reason === 'clear') this.ended = [];
-    // A child stopped with its conversation says so in its session's journal, which its
-    // own filtered route would not carry.
-    if (reason === 'parent') this.journalStopped(by);
+    // The children it started are stopped and a pending y/n declined first, so their
+    // closing lines precede this conversation's own closing `end`.
     if (reason === 'clear' || reason === 'parent') this.stopChildren(by);
     else if (reason === 'park' && this.parent) this.handChildrenUp();
     if (reason === 'clear' || reason === 'parent' || (reason === 'exit' && this.parent)) {
@@ -541,6 +544,9 @@ export class Conversation {
       // At the exit a pending y/n is left as it is, as a session's is.
       if (this.confirm && reason !== 'exit') this.answerConfirm(false, 'reset');
     }
+    // A child stopped with its conversation says so in its session's journal, which its
+    // own filtered route would not carry.
+    if (reason === 'parent') this.journalStopped(by);
     this.dismissQuestion();
     this.isClosed = true;
     if (this.liveTimer) { clearTimeout(this.liveTimer); this.liveTimer = null; }
@@ -629,10 +635,12 @@ export class Conversation {
   stopSubtree(glyph: string): boolean {
     if (this.closed || this.stopRequested) return false;
     this.stopRequested = true;
-    // The file's last word is said before the abort, which would end the turn in the
-    // stop key's name.
-    if (this.subJournalId) closeOwnFile(this, 'person');
+    // The children it started and its own pending y/n go first, so their lines precede
+    // the closing `end` of its file; that line is written before the abort, which would
+    // end the turn in the stop key's name.
     this.stopChildren('person');
+    if (this.canStop() && this.confirm) this.answerConfirm(false, 'stop');
+    if (this.subJournalId) closeOwnFile(this, 'person');
     if (!this.stop(glyph)) this.leaveSchedule?.();
     return true;
   }

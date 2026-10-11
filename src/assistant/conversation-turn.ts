@@ -150,8 +150,8 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
   }, { person: true });
   // The round being written, for a turn cut off before the round ends: its text
   // and its reasoning so far.
-  let roundText = '';
-  let roundReasoning = '';
+  c.roundText = '';
+  c.roundReasoning = '';
   // The output streams of this turn's run_command calls, by call.
   const callOutputs = new Map<string, ReturnType<typeof outputJournal>>();
   // Over the list as it is (`setRows`), never over `rows()` — the list as last
@@ -342,7 +342,9 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
         startChild: (spec: ChildSpec) => c.startChild(spec, journalId),
         childSlots: c.deps.children,
       },
-      confirmWrite: confirmFor(c.policy, { conv: c, journalId, ...(c.kind === 'task' ? { task: c.label } : c.kind === 'subagent' ? { subagent: c.label } : {}) }),
+      // A subagent with a file of its own writes its y/n lines there untagged, like its
+      // calls; one without a home tags them for the journal above.
+      confirmWrite: confirmFor(c.policy, { conv: c, journalId, ...(c.kind === 'task' ? { task: c.label } : c.kind === 'subagent' && !c.subJournalId ? { subagent: c.label } : {}) }),
       // A view a tool opened, and every change to it. Its message is pushed on
       // the FIRST change, so it has its place — and its fold id — from the
       // start: a block opened while it ran is still open when it ends.
@@ -449,7 +451,7 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
       },
       onLive: (delta: string) => {
         if (!delta) return;
-        roundText += delta;
+        c.roundText += delta;
         c.endToolSegment(); // the tool is done: the model is writing
         c.setPhase('writing');
         // Read now, not in the updater (see `c.roundTools`): a tool call that
@@ -466,7 +468,7 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
       // reasoning and content arrive in one chunk as parallel streams: we
       // accumulate reasoning in a separate message field (not content!).
       onReasoning: (delta: string) => {
-        roundReasoning += delta;
+        c.roundReasoning += delta;
         c.endToolSegment(); // the tool is done: the model is thinking
         c.setPhase('thinking');
         c.setRows(cur => {
@@ -487,8 +489,8 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
         // function of the list.
         if (isAnswer) c.content = text;
         // A round's text once, when it is known what it is.
-        if (isAnswer || text.trim() || roundReasoning) c.journalTo(journalId, { t: isAnswer ? 'answer' : 'step', text, ...(roundReasoning ? { reasoning: roundReasoning } : {}) });
-        roundText = ''; roundReasoning = '';
+        if (isAnswer || text.trim() || c.roundReasoning) c.journalTo(journalId, { t: isAnswer ? 'answer' : 'step', text, ...(c.roundReasoning ? { reasoning: c.roundReasoning } : {}) });
+        c.roundText = ''; c.roundReasoning = '';
         // The next round starts knowing nothing — reset here, where the
         // callback fires, never in the updater below.
         c.roundTools = false;
@@ -583,7 +585,7 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
       ...(aborted ? { stopped: c.stopKey || keyGlyph('escape') } : {}), ...(failed ? { failed: failure } : {}),
       ...(roundLimit ? { roundLimit, ...(lastStep ? { lastStep } : {}), ...(limitTokens !== undefined ? { limitBy: 'tokens', turnTokens: limitTokens } : {}) } : {}),
       // A round cut off by Esc or an error never reached `onLiveCommit`.
-      ...(roundText ? { cut: roundText } : {}), ...(roundReasoning ? { reasoning: roundReasoning } : {}),
+      ...(c.roundText ? { cut: c.roundText } : {}), ...(c.roundReasoning ? { reasoning: c.roundReasoning } : {}),
     });
     // A command the turn ran may have changed a settings file (the guard).
     void c.askConfigChanges();

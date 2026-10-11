@@ -356,10 +356,16 @@ test('a bottom panel grows by the notice line when a multi-line draft is in the 
   ui.app.unmount();
 });
 
-// The confirm lines of the session saved in `dir`: its journal's and its subagents'.
-async function confirms(dir: string): Promise<Record<string, unknown>[]> {
+// The confirm lines of the session saved in `dir`: its journal's and its subagents'. A
+// line in a subagent's file (the one whose first line names `label`) carries no `subagent`
+// tag; with `label` the lines of that file only.
+async function confirms(dir: string, label?: string): Promise<Record<string, unknown>[]> {
   await settleUntil(() => listTree(dir).some((n) => n.endsWith('.log.jsonl')), 200);
-  return listTree(dir).filter((n) => n.endsWith('.log.jsonl')).flatMap((file) => fs.readFileSync(path.join(dir, file), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l) as Record<string, unknown>)).filter((e) => e.t === 'confirm');
+  const files = listTree(dir).filter((n) => n.endsWith('.log.jsonl')).map((file) => fs.readFileSync(path.join(dir, file), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l) as Record<string, unknown>));
+  const mine = label === undefined ? files : files.filter((f) => f[0]?.t === 'start' && f[0].label === label);
+  const lines = mine.flatMap((f) => f).filter((e) => e.t === 'confirm');
+  if (label !== undefined) for (const e of lines) expect(e.subagent).toBeUndefined();
+  return lines;
 }
 
 test('--auto answers a write by itself, with no block: the subagent\'s journal says by auto', async () => {
@@ -369,7 +375,7 @@ test('--auto answers a write by itself, with no block: the subagent\'s journal s
   expect(frameOf(ui)).not.toContain(BLOCK);
   expect(fs.existsSync(a!.file)).toBe(true);
   await new Promise((r) => setTimeout(r, 300));
-  expect(await confirms(sessions)).toMatchObject([{ name: 'run_command', answer: 'yes', by: 'auto' }]);
+  expect(await confirms(sessions, 'autoy-one-do')).toMatchObject([{ name: 'run_command', answer: 'yes', by: 'auto' }]);
   ui.app.unmount();
 });
 

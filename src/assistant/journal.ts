@@ -260,23 +260,29 @@ const CONFIRMED_BY: Record<string, string> = {
   stop: 'a stop (the turn was stopped)', reset: 'a reset of the conversation',
 };
 
+// Free text from a subagent, inside its fold: a `</details` in it would close the block
+// early and let the rest pose as the session's own rows, so its `<` is escaped. The
+// exporter's own `</details>` lines are never passed through this.
+const neutralDetails = (text: string) => text.replace(/<\/details/gi, '&lt;/details');
+const asIs = (text: string) => text;
+
 const escapeHtml = (text: string) => text.replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' })[c]!);
 
 // `confirm` — the y/n's answer, when the call waited on one.
-function callBlock(ev: Record<string, unknown>, confirm?: Record<string, unknown>): string {
+function callBlock(ev: Record<string, unknown>, confirm?: Record<string, unknown>, nd: (text: string) => string = asIs): string {
   const outcome = ev.t === 'call-start' ? 'did not finish' : String(ev.outcome ?? '');
   const head = `${String(ev.name ?? 'call')} · ${outcome}${ev.write ? ' · write' : ''}${typeof ev.task === 'string' ? ` · background task «${ev.task}»` : typeof ev.subagent === 'string' ? ` · subagent «${ev.subagent}»` : ''}`;
   const out = ['<details>', `<summary>${escapeHtml(head)}</summary>`, ''];
   out.push('Arguments:', '', block(asText(ev.args ?? {}), 'json'), '');
-  if (confirm) out.push(`Asked y/n — answered ${String(confirm.answer)} by ${CONFIRMED_BY[String(confirm.by)] ?? String(confirm.by)}.`, '');
+  if (confirm) out.push(`Asked y/n — answered ${String(confirm.answer)} by ${nd(CONFIRMED_BY[String(confirm.by)] ?? String(confirm.by))}.`, '');
   else if (ev.t === 'call-start' && ev.confirm) out.push('It was waiting on a y/n.', '');
   if (ev.result !== undefined) out.push('Result:', '', block(asText(ev.result)), '');
   if (typeof ev.output === 'string' && ev.output) out.push('Output, whole:', '', block(ev.output, 'console'), '', ...(ev.outputNote ? [String(ev.outputNote), ''] : []));
   if (ev.raw === null) out.push('Data: none.', '');
   else if (typeof ev.raw === 'string') out.push('Data:', '', block(ev.raw), '');
-  for (const im of Array.isArray(ev.images) ? ev.images as { name?: unknown; width?: unknown; height?: unknown }[] : []) out.push(`Image: ${String(im.name ?? '')}${im.width ? ` · ${String(im.width)}×${String(im.height)}` : ''}`, '');
-  for (const c of Array.isArray(ev.changes) ? ev.changes as { title?: unknown; diff?: unknown }[] : []) out.push(`Changed ${String(c.title ?? '')}:`, '', block(String(c.diff ?? ''), 'diff'), '');
-  for (const v of Array.isArray(ev.views) ? ev.views as { kind?: unknown; text?: unknown }[] : []) if (v.text) out.push(`Shown (${String(v.kind ?? 'view')}):`, '', block(String(v.text)), '');
+  for (const im of Array.isArray(ev.images) ? ev.images as { name?: unknown; width?: unknown; height?: unknown }[] : []) out.push(nd(`Image: ${String(im.name ?? '')}${im.width ? ` · ${String(im.width)}×${String(im.height)}` : ''}`), '');
+  for (const c of Array.isArray(ev.changes) ? ev.changes as { title?: unknown; diff?: unknown }[] : []) out.push(nd(`Changed ${String(c.title ?? '')}:`), '', block(String(c.diff ?? ''), 'diff'), '');
+  for (const v of Array.isArray(ev.views) ? ev.views as { kind?: unknown; text?: unknown }[] : []) if (v.text) out.push(nd(`Shown (${String(v.kind ?? 'view')}):`), '', block(String(v.text)), '');
   out.push('</details>');
   return out.join('\n');
 }
@@ -308,6 +314,10 @@ export function exportMarkdown(events: JournalEvent[], opts: { title: string; id
 // journals being drawn around this one, so a file that names itself is not drawn again.
 function eventLines(events: JournalEvent[], child: ((id: string) => JournalEvent[] | null) | undefined, folding: Set<string>, depth: number): string[] {
   const out: string[] = [];
+  // Inside a fold the child's own text is neutralised (`neutralDetails`); the top level is as written.
+  const nd = depth > 0 ? neutralDetails : asIs;
+  // The ids of the subagents whose start line this journal has held so far.
+  const started = new Set<string>();
   // A call is drawn once, where it began: its start holds a place the end fills; a
   // start never ended is drawn as not finished. Keyed by call id and name — a provider
   // may reuse an id in a later round, after the first call with it has ended.
@@ -333,17 +343,18 @@ function eventLines(events: JournalEvent[], child: ((id: string) => JournalEvent
     // drawn where it stands, not below what came after. A background task's or a
     // subagent's calls run beside a command and do not close it.
     if (shellOpen && ev.t !== 'shell-out' && ev.t !== 'shell-end' && typeof ev.task !== 'string' && typeof ev.subagent !== 'string') flushOutput(true);
-    const text = typeof ev.text === 'string' ? ev.text : '';
+    const rawText = typeof ev.text === 'string' ? ev.text : '';
+    const text = nd(rawText);
     switch (ev.t) {
       case 'row':
         if (ev.role === 'user') out.push(`**${ev.hostAsk ? 'The host asked' : 'You'}**${at}${ev.midTurn ? ' (during the turn, after its last step)' : ''}`, '', text, '');
         else if (ev.role === 'bg') out.push(`**Background result**${at}`, '', text, '');
-        else if (ev.role === 'note') out.push(`*Note${at}:* ${text.split('\n')[0]}`, ...(text.includes('\n') ? ['', block(text.split('\n').slice(1).join('\n'))] : []), '');
+        else if (ev.role === 'note') out.push(`*Note${at}:* ${nd(rawText.split('\n')[0]!)}`, ...(rawText.includes('\n') ? ['', block(rawText.split('\n').slice(1).join('\n'))] : []), '');
         else if (ev.role === 'view') for (const v of Array.isArray(ev.views) ? ev.views as { text?: unknown }[] : []) out.push(block(String(v.text ?? '')), '');
         else if (ev.role === 'assistant') {
-          for (const st of Array.isArray(ev.steps) ? ev.steps as string[] : []) out.push(`*Step:* ${st}`, '');
+          for (const st of Array.isArray(ev.steps) ? ev.steps as string[] : []) out.push(`*Step:* ${nd(st)}`, '');
           const calls = Array.isArray(ev.calls) ? ev.calls as { name?: unknown; outcome?: unknown; args?: unknown }[] : [];
-          if (calls.length) out.push(...calls.map((c) => `- \`${String(c.name)}\` · ${String(c.outcome)}${c.args ? ` · ${JSON.stringify(c.args)}` : ''}`), '');
+          if (calls.length) out.push(...calls.map((c) => nd(`- \`${String(c.name)}\` · ${String(c.outcome)}${c.args ? ` · ${JSON.stringify(c.args)}` : ''}`)), '');
           if (text) out.push(`**Assistant**${at}`, '', text, '');
         }
         break;
@@ -365,12 +376,12 @@ function eventLines(events: JournalEvent[], child: ((id: string) => JournalEvent
         const c = callOut.get(k);
         callOut.delete(k);
         const whole = c ? { ...ev, output: c.text, outputNote: c.note } : ev;
-        if (o) { out[o.slot] = callBlock(whole, o.confirm); open.delete(k); } else out.push(callBlock(whole), '');
+        if (o) { out[o.slot] = callBlock(whole, o.confirm, nd); open.delete(k); } else out.push(callBlock(whole, undefined, nd), '');
         break;
       }
       case 'shell':
         shellOpen = true;
-        out.push(`**${runMark(ev.interactive === true)} ${String(ev.command ?? '')}**${at}`, '');
+        out.push(`**${runMark(ev.interactive === true)} ${nd(String(ev.command ?? ''))}**${at}`, '');
         // A command from a state file carries the output that file kept.
         if (typeof ev.output === 'string') out.push(block(ev.output, 'console'), '');
         break;
@@ -380,18 +391,23 @@ function eventLines(events: JournalEvent[], child: ((id: string) => JournalEvent
         break;
       case 'shell-end':
         flushOutput();
-        out.push(`*${String(ev.status ?? 'ended')}${typeof ev.ms === 'number' ? ` · ${formatDuration(ev.ms)}` : ''}*`, '');
+        out.push(`*${nd(String(ev.status ?? 'ended'))}${typeof ev.ms === 'number' ? ` · ${formatDuration(ev.ms)}` : ''}*`, '');
         break;
-      case 'markup': out.push(`*Note${at}:* ${String(ev.note ?? '')} — the model wrote:`, '', block(String(ev.markup ?? '')), ''); break;
-      case 'compact': out.push('---', '', `**Compacted${ev.auto ? ' automatically' : ''}**${at} — from here on the model was given this summary instead of the conversation above:`, '', quoted(String(ev.summary ?? '')), '', '---', ''); break;
-      case 'subagent':
+      case 'markup': out.push(`*Note${at}:* ${nd(String(ev.note ?? ''))} — the model wrote:`, '', block(String(ev.markup ?? '')), ''); break;
+      case 'compact': out.push('---', '', `**Compacted${ev.auto ? ' automatically' : ''}**${at} — from here on the model was given this summary instead of the conversation above:`, '', quoted(nd(String(ev.summary ?? ''))), '', '---', ''); break;
+      case 'subagent': {
+        const label = nd(String(ev.label ?? ''));
         out.push(ev.event === 'start'
-          ? `*Subagent «${String(ev.label ?? '')}» started (${ev.by === 'person' ? 'by you' : 'by the model'})*${at}`
-          : `*Subagent «${String(ev.label ?? '')}» ${outcomeWord(ev)}${typeof ev.stoppedBy === 'string' ? ` (${stoppedByText(ev.stoppedBy)})` : ''}*${at}`, '');
-        // The subagent's own journal, folded where it began.
-        if (ev.event === 'start' && typeof ev.id === 'string' && child) {
-          const id = ev.id;
-          const ended = events.find((e) => e.t === 'subagent' && e.event === 'end' && e.id === id);
+          ? `*Subagent «${label}» started (${ev.by === 'person' ? 'by you' : 'by the model'})*${at}`
+          : `*Subagent «${label}» ${nd(outcomeWord(ev))}${typeof ev.stoppedBy === 'string' ? ` (${nd(stoppedByText(ev.stoppedBy))})` : ''}*${at}`, '');
+        // The subagent's own journal, folded where it began. A journal that split in a
+        // fork holds the second half under the `end` line alone: that line, with no
+        // `start` of the same id before it, folds the half its session holds.
+        const id = typeof ev.id === 'string' ? ev.id : '';
+        const opens = ev.event === 'start' ? !!id : ev.event === 'end' && !!id && !started.has(id);
+        if (ev.event === 'start' && id) started.add(id);
+        if (opens && child) {
+          const ended = ev.event === 'end' ? ev : events.find((e) => e.t === 'subagent' && e.event === 'end' && e.id === id);
           const tooDeep = folding.has(id) || depth >= MAX_FOLD_DEPTH;
           const body = tooDeep ? null : child(id);
           if (tooDeep) out.push('*its journal is nested too deep to show*', '');
@@ -399,10 +415,11 @@ function eventLines(events: JournalEvent[], child: ((id: string) => JournalEvent
           else out.push('<details>', `<summary>${escapeHtml(`${String(ev.label ?? '')} · ${ended ? outcomeWord(ended) : 'did not finish'}`)}</summary>`, '', ...eventLines(body, child, new Set([...folding, id]), depth + 1), '</details>', '');
         }
         break;
-      case 'task-end': out.push(`*${String(ev.task ?? '')} stopped (${stoppedByText(String(ev.by ?? ''))})*${at}`, ''); break;
+      }
+      case 'task-end': out.push(`*${nd(String(ev.task ?? ''))} stopped (${nd(stoppedByText(String(ev.by ?? '')))})*${at}`, ''); break;
       case 'end': {
-        if (typeof ev.cut === 'string' && ev.cut) out.push(`**Assistant**${at} (cut off)`, '', ev.cut, '');
-        const how = [ev.stopped ? `stopped (${String(ev.stopped)})` : '', ev.failed ? `failed: ${String(ev.failed)}` : '', ev.roundLimit ? `stopped after ${ev.limitBy === 'tokens' ? `${String(ev.turnTokens)} tokens (ai.maxTurnTokens)` : `${String(ev.roundLimit)} rounds (ai.maxRounds)`} — no answer${ev.lastStep ? `; last step: ${String(ev.lastStep)}` : ''}` : ''].filter(Boolean);
+        if (typeof ev.cut === 'string' && ev.cut) out.push(`**Assistant**${at} (cut off)`, '', nd(ev.cut), '');
+        const how = [ev.stopped ? `stopped (${nd(String(ev.stopped))})` : '', ev.failed ? `failed: ${nd(String(ev.failed))}` : '', ev.roundLimit ? `stopped after ${ev.limitBy === 'tokens' ? `${String(ev.turnTokens)} tokens (ai.maxTurnTokens)` : `${String(ev.roundLimit)} rounds (ai.maxRounds)`} — no answer${ev.lastStep ? `; last step: ${nd(String(ev.lastStep))}` : ''}` : ''].filter(Boolean);
         if (how.length) out.push(`*${how.join(' · ')}*`, '');
         break;
       }
@@ -410,6 +427,6 @@ function eventLines(events: JournalEvent[], child: ((id: string) => JournalEvent
     }
   }
   if (shellOpen) flushOutput(true);
-  for (const [k, o] of open) { const c = callOut.get(k); out[o.slot] = callBlock(c ? { ...o.start, output: c.text, outputNote: c.note } : o.start, o.confirm); }
+  for (const [k, o] of open) { const c = callOut.get(k); out[o.slot] = callBlock(c ? { ...o.start, output: c.text, outputNote: c.note } : o.start, o.confirm, nd); }
   return out;
 }

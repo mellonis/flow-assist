@@ -6,6 +6,7 @@ import { afterEach, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
 import { scheduleChild } from '../assistant/child-schedule.ts';
+import { exportMarkdown } from '../assistant/journal.ts';
 import type { Conversation } from '../assistant/conversation.ts';
 import type { ChildSpec } from '../assistant/conversation-types.ts';
 import { ScriptedModel, type RecordedRequest } from './helpers/scripted';
@@ -31,12 +32,17 @@ function begin(rig: Rig, s: ChildSpec, from: Conversation = rig.conv) {
   children.push(started.child);
   return { child: started.child, done: started.run() };
 }
-// The y/n lines of the child `label`: a subagent's are in its own file, a task's in the
-// journal above it, tagged with its label.
-const answers = (rig: Rig, label: string) => [
-  ...rig.journal(),
-  ...rig.subJournals().flatMap((j) => j.events.map((e) => (j.events[0]?.label === label ? { ...e, ownFile: true } : e))),
-].filter((e) => e.t === 'confirm' && (e.ownFile || e.subagent === label || e.task === label)).map(({ ownFile: _, ...e }) => e);
+// The y/n lines of the child `label`: a subagent's are in ITS file (the one whose first
+// line names the label) and carry no `subagent` tag there, none are in the session's
+// journal; a task's are in the journal above it, tagged with its label.
+const answers = (rig: Rig, label: string) => {
+  const own = rig.subJournal(label);
+  if (!own.length) return rig.journal().filter((e) => e.t === 'confirm' && e.task === label);
+  expect(rig.journal().filter((e) => e.t === 'confirm' && e.subagent === label)).toEqual([]);
+  const lines = own.filter((e) => e.t === 'confirm');
+  for (const e of lines) expect(e.subagent).toBeUndefined();
+  return lines;
+};
 
 test('a subagent the person starts parks a write, the session offers it with the label, and a yes runs it', async () => {
   const model = new ScriptedModel();
@@ -263,6 +269,11 @@ test('a read-only child parks nothing: a model\'s subagent and a task decline, j
   const m = begin(rig, spec('model-sub', 'model job', { by: 'model' }));
   expect(await m.done).toMatchObject({ outcome: 'answer' });
   expect(answers(rig, 'model-sub')).toMatchObject([{ answer: 'no', by: 'background' }]);
+  // The export draws that answer inside the subagent's fold.
+  const files = new Map(rig.subJournals().map((j) => [j.id, j.events]));
+  const md = exportMarkdown(rig.journal(), { title: 't', id: rig.conv.sessionId, child: (id) => files.get(id) ?? null });
+  const fold = md.slice(md.indexOf('<summary>model-sub'));
+  expect(fold).toContain('Asked y/n — answered no by');
   const t = begin(rig, { kind: 'task', label: 'plain', prompt: 'write it', by: 'model' });
   expect(await t.done).toMatchObject({ outcome: 'answer' });
   expect(answers(rig, 'plain')).toMatchObject([{ answer: 'no', by: 'background', task: 'plain' }]);

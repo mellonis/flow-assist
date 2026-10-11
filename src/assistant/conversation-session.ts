@@ -133,7 +133,7 @@ export function journalTo(c: Conversation, from: string, ev: JournalEvent): void
 // session at the root of the tree, flat whatever the depth. Its first line says whose it
 // is; every line of the subagent's own follows, and a task or subagent below it writes its
 // lines into the nearest file above (a task has none). The root's home and id are read at
-// each write: a session moved to another project, or forked, is found where it is now.
+// each write: a session moved to another project, or forked, is found wherever it lies.
 const rootOf = (c: Conversation): Conversation => { let r = c; while (r.parent) r = r.parent; return r; };
 const rootJournal = (c: Conversation): { home: string; id: string } | null => {
   const root = rootOf(c);
@@ -161,8 +161,9 @@ const ownerId = (c: Conversation): string => {
 };
 
 // One line into the subagent's own file (none: just the file's first line, which is
-// written whenever the file is not there yet). After its closing `end` (the stop) no further `end` is written, so
-// that line stays the last word.
+// written whenever the file is not there yet). After its closing `end` (the stop) no further `end` is written:
+// it is the only `end` of the file. A call already under way when the subagent stops may
+// write its `call` line after it.
 export function journalToOwnFile(c: Conversation, ev: JournalEvent | null): void {
   const at = rootJournal(c);
   if (!c.subJournalId || !at) return;
@@ -178,10 +179,10 @@ export function journalToOwnFile(c: Conversation, ev: JournalEvent | null): void
 }
 
 // The closing line of a subagent stopped before it finished: what stopped it (`clear`,
-// `exit` or `person`), once.
+// `exit` or `person`), once, with the text and the reasoning of the round it was in
+// (the same `cut` and `reasoning` a turn's own `end` carries when it is cut off).
 export function closeOwnFile(c: Conversation, by: string): void {
-  if (c.subJournalStopped) return;
-  journalToOwnFile(c, { t: 'end', stopped: by });
+  journalToOwnFile(c, { t: 'end', stopped: by, ...(c.roundText ? { cut: c.roundText } : {}), ...(c.roundReasoning ? { reasoning: c.roundReasoning } : {}) });
   c.subJournalStopped = true;
 }
 

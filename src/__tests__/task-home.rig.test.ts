@@ -233,9 +233,11 @@ test('/clear stops a task\'s own task too, each saying so in the session\'s jour
   expect(a!.closeReason).toBe('parent');
   expect(b!.closeReason).toBe('parent');
   await rig.until(() => rig.registry.children.backgroundCount() === 0);
+  // The inner task's line comes before the outer one's: a conversation says it stopped
+  // after the children it stopped.
   expect(taskEnds(rig, first)).toMatchObject([
-    { task: 'a', outcome: 'stopped', by: 'clear' },
     { task: 'b', outcome: 'stopped', by: 'clear' },
+    { task: 'a', outcome: 'stopped', by: 'clear' },
   ]);
   expect(rig.log).toContain('[bg] a stopped with its conversation');
   expect(rig.log).toContain('[bg] b stopped with its conversation');

@@ -93,7 +93,8 @@ test('a model\'s subagent declines a write, journaled `confirm` by background, i
   const own = rig.subJournal('w').filter((e) => ['call-start', 'confirm', 'call'].includes(e.t));
   expect(own.map((e) => e.t)).toEqual(['call-start', 'confirm', 'call']);
   expect(rig.journal().filter((e) => ['call-start', 'confirm', 'call'].includes(e.t))).toEqual([]);
-  expect(own[1]).toMatchObject({ answer: 'no', by: 'background', subagent: 'w' });
+  expect(own[1]).toMatchObject({ answer: 'no', by: 'background' });
+  expect(own[1]!.subagent).toBeUndefined(); // in its own file the line carries no tag
   expect(rig.journal().filter((e) => e.task)).toEqual([]);
   expect(rig.conv.confirm).toBeNull();
 });
