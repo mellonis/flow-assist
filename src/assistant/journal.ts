@@ -10,6 +10,9 @@
 //   start    the journal's first line: the session's id, `parent` when it was forked
 //            from another session, `continued` when it began after the session did
 //            (a session saved before it had a journal: its rows follow, `imported`)
+//            A subagent's file (`<id>.sub/<its id>.log.jsonl`, beside the session's journal)
+//            starts with the same kind: its `id`, `parent` (the journal id of the session or
+//            subagent that started it), `root` (the session), `label` and `by`
 //   row      a row of the conversation — `role` user, bg, note, assistant, view
 //   step     the text of a round that went on to call tools
 //   answer   the final text of a turn
@@ -41,7 +44,10 @@
 //   subagent a subagent started or ended: `label`, `by` (who started it: `model` or
 //            `person`), `event` (`start` or `end`) and, on an end, its `outcome`; one
 //            stopped with its session or at exit also says what stopped it (`stoppedBy`:
-//            `clear`, `exit` or `person`). Tagged `subagent` like its calls.
+//            `clear`, `exit` or `person`), and the `id` of its own file when it has one. Tagged
+//            `subagent` like its calls. A subagent's file holds the same kinds as a session's
+//            journal and ends with an `end` that names what stopped it, when it stopped
+//            before it finished.
 //
 // `/export` renders a journal as markdown (`exportMarkdown`).
 //

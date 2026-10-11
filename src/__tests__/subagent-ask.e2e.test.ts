@@ -356,22 +356,20 @@ test('a bottom panel grows by the notice line when a multi-line draft is in the 
   ui.app.unmount();
 });
 
-// The confirm lines of the session saved in `dir`.
+// The confirm lines of the session saved in `dir`: its journal's and its subagents'.
 async function confirms(dir: string): Promise<Record<string, unknown>[]> {
   await settleUntil(() => listTree(dir).some((n) => n.endsWith('.log.jsonl')), 200);
-  const file = listTree(dir).find((n) => n.endsWith('.log.jsonl'));
-  if (!file) return [];
-  return fs.readFileSync(path.join(dir, file), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l) as Record<string, unknown>).filter((e) => e.t === 'confirm');
+  return listTree(dir).filter((n) => n.endsWith('.log.jsonl')).flatMap((file) => fs.readFileSync(path.join(dir, file), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l) as Record<string, unknown>)).filter((e) => e.t === 'confirm');
 }
 
-test('--auto answers a write by itself, with no block: the journal says by auto under the subagent', async () => {
+test('--auto answers a write by itself, with no block: the subagent\'s journal says by auto', async () => {
   const { sessions, children: [a], ui } = await boot(['AUTOY-ONE'], { autoRun: true });
   await ask(ui, '/subagent --auto AUTOY-ONE do it');
   await settleUntil(() => frameOf(ui).includes('◆ autoy-one-do finished:'));
   expect(frameOf(ui)).not.toContain(BLOCK);
   expect(fs.existsSync(a!.file)).toBe(true);
   await new Promise((r) => setTimeout(r, 300));
-  expect(await confirms(sessions)).toMatchObject([{ name: 'run_command', answer: 'yes', by: 'auto', subagent: 'autoy-one-do' }]);
+  expect(await confirms(sessions)).toMatchObject([{ name: 'run_command', answer: 'yes', by: 'auto' }]);
   ui.app.unmount();
 });
 

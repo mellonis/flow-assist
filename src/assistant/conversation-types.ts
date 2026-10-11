@@ -250,6 +250,10 @@ export interface TreeNode { key: string; label: string; kind: ChildSpec['kind'];
 export type ChildStart =
   | { refused: string }
   | { child: Conversation; run: () => Promise<ChildResult>; armed: (timer: ReturnType<typeof setTimeout>) => void; fired: () => void };
-// A child's way into its parent's journal: called, it keeps only the lines a task
-// journals (`call-start`, `confirm`, `call`); `raw` writes any line, past that filter.
-export type JournalRoute = ((ev: JournalEvent) => void) & { raw: (ev: JournalEvent) => void };
+// A child's way into a journal. Called, it takes a line of the child's own: a child with
+// no file of its own keeps only the lines a task journals (`call-start`, `confirm`,
+// `call`) and writes them, tagged, into its parent's journal; a subagent with a file
+// writes every line into it. `raw` takes a line of a child below it, past that filter:
+// into the same journal. `about` takes a line about the child itself (its `subagent` start
+// and end, a task's `task-end`) and writes it where its parent's lines go.
+export type JournalRoute = ((ev: JournalEvent) => void) & { raw: (ev: JournalEvent) => void; about: (ev: JournalEvent) => void };

@@ -27,7 +27,7 @@ import { workspaceFor } from './workspace.js';
 import { asBackgroundWork, asConversationWork, asForegroundWork, outsideWork, workOwner } from '../runtime/background-work.js';
 import { callOf, childResultText, lastAnswerOf, type BusyKind, type ChatMsg, type ChildResult, type EndedChild, type RunningChild, type ChildSpec, type ChildStart, type CloseReason, type StoppedBy, type JournalRoute, type ConversationDeps, type ConversationEvent, type ConversationKind, type ConversationSnapshot, type ConversationStatus, type Offered, type PendingConfirm, type Queued, type QueueWait, type SendOptions, type TurnEnd, type TreeNode, type ViewPort } from './conversation-types.js';
 import {
-  applySession, currentProject, ensureSessionId, journal, journaledChatLLM, journalTo, keepPersonWork, markSeen, persist, pushNote,
+  applySession, closeOwnFile, currentProject, ensureSessionId, journal, journaledChatLLM, journalTo, journalToOwnFile, keepPersonWork, markSeen, newSubJournalId, persist, pushNote,
   releaseLockOf, writeSession, NO_FILE,
 } from './conversation-session.js';
 import { askConfigChanges, compact, runTurn, turnShape } from './conversation-turn.js';
@@ -64,9 +64,16 @@ export class Conversation {
   // it is (a session 0, its task 1, …).
   parent: Conversation | null = null;
   depth = 0;
-  // A child's journal lines go through this to its parent's (a task keeps no journal of
-  // its own); null for a conversation that journals itself.
+  // A child's journal lines go through this: to its own file (a subagent with one), else
+  // to its parent's journal (a task keeps none of its own); null for a conversation that
+  // journals itself.
   journalRoute: JournalRoute | null = null;
+  // A subagent's journal file: its id (null for a session, a task, and a subagent with
+  // no session home to keep one in), the path last written and whether its stop is
+  // written (src/assistant/conversation-session.ts).
+  subJournalId: string | null = null;
+  subJournalFile: string | null = null;
+  subJournalStopped = false;
   // A child's project is its parent's, whatever directory its shell moves to; undefined:
   // decided as a session decides it.
   inheritedProject: string | null | undefined = undefined;
@@ -556,8 +563,10 @@ export class Conversation {
   // stopped it: `clear` (its session was cleared), `exit`, or `person` (the person stopped
   // it, or the child it was closed with).
   journalStopped(by: StoppedBy): void {
-    if (this.kind === 'subagent') this.journalRoute?.raw({ t: 'subagent', label: this.label, by: this.spawnedBy ?? 'model', event: 'end', outcome: 'stopped', stoppedBy: by });
-    else this.journalRoute?.raw({ t: 'task-end', task: this.label, outcome: 'stopped', by });
+    if (this.kind === 'subagent') {
+      this.journalRoute?.about({ t: 'subagent', label: this.label, by: this.spawnedBy ?? 'model', event: 'end', outcome: 'stopped', ...(this.subJournalId ? { id: this.subJournalId } : {}), stoppedBy: by });
+      if (this.subJournalId) closeOwnFile(this, by);
+    } else this.journalRoute?.about({ t: 'task-end', task: this.label, outcome: 'stopped', by });
   }
 
   // The children whose result came in here, oldest first (at most twenty).
@@ -620,6 +629,9 @@ export class Conversation {
   stopSubtree(glyph: string): boolean {
     if (this.closed || this.stopRequested) return false;
     this.stopRequested = true;
+    // The file's last word is said before the abort, which would end the turn in the
+    // stop key's name.
+    if (this.subJournalId) closeOwnFile(this, 'person');
     this.stopChildren('person');
     if (!this.stop(glyph)) this.leaveSchedule?.();
     return true;
@@ -734,11 +746,12 @@ export class Conversation {
   // task) or a `subagent` conversation with its own plan, shell (starting where this
   // one's is), tool set and abort; no screens, no log lines, nobody to ask unless it may write
   // (`spec.write`, or a subagent the person starts: then its y/n is parked in it and offered
-  // upward, `offered`), and no
-  // journal or state file of its own — its `call-start`, `confirm` and `call` lines go
-  // into this turn's journal, tagged `task: <label>` (`subagent: <label>` for a subagent;
-  // a grandchild's own label kept), and a subagent's `subagent` start and end lines
-  // with them. Refused past
+  // upward, `offered`), and no state file. A subagent keeps a journal file of its own where
+  // the session at the root has a home (`subJournalId`); the `subagent` start and end lines
+  // about it, tagged `subagent: <label>`, go into the journal above it. A task, and a
+  // subagent with no home to keep a file in, write their `call-start`, `confirm` and `call`
+  // lines into the journal above, tagged `task: <label>` (`subagent: <label>`; a
+  // grandchild's own label kept). Refused past
   // `ai.subagentDepth`. It is one of this conversation's `children` from here until its
   // result is in (or, when this is a task that ends first, its parent's). Nothing runs
   // until `run()`, which closes the child when it ends and delivers its result to this
@@ -776,17 +789,29 @@ export class Conversation {
     const kept = new Set(['call-start', 'confirm', 'call']);
     // A task's lines carry `task: <label>`, a subagent's `subagent: <label>`.
     const tag = (ev: JournalEvent): JournalEvent => (spec.kind === 'subagent' ? { subagent: spec.label, ...ev } : { task: spec.label, ...ev });
-    const raw = (ev: JournalEvent): void => {
+    // A line about the child, tagged, goes where this conversation's own lines go: its
+    // file, the file above it, or the session's journal.
+    const about = (ev: JournalEvent): void => {
       const tagged = tag(ev);
       if (this.journalRoute) this.journalRoute.raw(tagged);
       else this.journalTo(journalId, tagged);
     };
-    child.journalRoute = Object.assign((ev: JournalEvent) => { if (kept.has(ev.t)) this.journalTo(journalId, tag(ev)); }, { raw });
+    // A subagent keeps a file of its own where the session at the root has a home for it;
+    // everything else is written into the journal above, a task's three kinds among them.
+    const fileId = spec.kind === 'subagent' ? newSubJournalId(this) : null;
+    if (fileId) {
+      child.subJournalId = fileId;
+      const own = (ev: JournalEvent): void => journalToOwnFile(child, ev);
+      child.journalRoute = Object.assign(own, { raw: own, about });
+      journalToOwnFile(child, null);
+    } else {
+      child.journalRoute = Object.assign((ev: JournalEvent) => { if (kept.has(ev.t)) this.journalTo(journalId, tag(ev)); }, { raw: about, about });
+    }
     child.shell.setCwd(this.shell.cwd());
     this.children.add(child);
     this.emit({ type: 'children', count: this.children.size });
     this.treeChanged(this);
-    if (spec.kind === 'subagent') raw({ t: 'subagent', label: spec.label, by: spec.by, event: 'start' });
+    if (spec.kind === 'subagent') about({ t: 'subagent', label: spec.label, by: spec.by, event: 'start', ...(fileId ? { id: fileId } : {}) });
     let ran = false;
     // The end, as the tool reports it; never throws.
     const outcomeOf = async (): Promise<ChildResult> => {
@@ -820,8 +845,8 @@ export class Conversation {
       // conversation said so when it was closed.
       // A child the person stopped says so, as one closed with its conversation does.
       const byPerson = child.stopRequested && r.outcome === 'stopped';
-      if (spec.kind === 'subagent' && !stopped) raw({ t: 'subagent', label: spec.label, by: spec.by, event: 'end', outcome: r.outcome, ...(byPerson ? { stoppedBy: 'person' } : {}) });
-      else if (byPerson && !stopped) raw({ t: 'task-end', task: spec.label, outcome: 'stopped', by: 'person' });
+      if (spec.kind === 'subagent' && !stopped) about({ t: 'subagent', label: spec.label, by: spec.by, event: 'end', outcome: r.outcome, ...(fileId ? { id: fileId } : {}), ...(byPerson ? { stoppedBy: 'person' } : {}) });
+      else if (byPerson && !stopped) about({ t: 'task-end', task: spec.label, outcome: 'stopped', by: 'person' });
       // Its save and inbox timers go with it; its own live children move to its parent.
       child.close('park');
       // The result goes to the session the chain started from — the nearest ancestor

@@ -196,9 +196,12 @@ test('a child stopped while it waits leaves the counts right and its request dec
   child.stopSubtree('');
   await settledAll(rig);
   expect(counts(rig)).toEqual({ held: 0, waiting: 0, background: 0 });
-  expect(rig.journal().filter((e) => e.t === 'confirm')).toMatchObject([{ answer: 'no', by: 'stop' }]);
+  expect(confirmsOf(rig)).toMatchObject([{ answer: 'no', by: 'stop' }]);
   expect(rig.conv.offered()).toBeNull();
 });
+
+// The y/n lines of a subagent are in its own file: the session's journal, then every file.
+const confirmsOf = (rig: Rig) => [...rig.journal(), ...rig.subJournals().flatMap((j) => j.events)].filter((e) => e.t === 'confirm');
 
 test('children cleared while they wait leave the counts right; a child whose starter ended waits where it was handed', async () => {
   const model = new ScriptedModel();
@@ -212,7 +215,7 @@ test('children cleared while they wait leave the counts right; a child whose sta
   rig.conv.close('clear');
   await settledAll(rig);
   expect(counts(rig)).toEqual({ held: 0, waiting: 0, background: 0 });
-  expect(rig.journal().filter((e) => e.t === 'confirm').map((e) => e.by)).toEqual(['reset', 'reset']);
+  expect(confirmsOf(rig).map((e) => e.by)).toEqual(['reset', 'reset']);
 });
 
 test('a waiting grandchild, scheduled under a child, is counted the same way', async () => {

@@ -144,6 +144,19 @@ export function conversationRig(model: ScriptedModel, opts: RigOptions = {}) {
       if (!sessionsDir || !id) return [];
       return readJournal(journalPath(homeOf(id), id)) ?? [];
     },
+    // The journals of a session's subagents (`<id>.sub`), each with its file name and
+    // its lines; [] with none.
+    subJournals(id = conv.sessionId): { id: string; file: string; events: JournalEvent[] }[] {
+      if (!sessionsDir || !id) return [];
+      const dir = path.join(homeOf(id), `${id}.sub`);
+      let names: string[] = [];
+      try { names = fs.readdirSync(dir).filter((n) => n.endsWith('.log.jsonl')).sort(); } catch { /* none */ }
+      return names.map((n) => ({ id: n.replace(/\.log\.jsonl$/, ''), file: path.join(dir, n), events: readJournal(path.join(dir, n)) ?? [] }));
+    },
+    // The lines of the subagent labelled `label` (the first of them, in order of start).
+    subJournal(label: string, id = conv.sessionId): JournalEvent[] {
+      return rig.subJournals(id).find((j) => j.events[0]?.label === label)?.events ?? [];
+    },
     // A session's state file as a start reads it; null with none.
     sessionFile(id = conv.sessionId): Session | null { return sessionsDir && id ? loadSession(homeOf(id), id) : null; },
     // Waits, a few milliseconds at a time, until `ok()` holds; fails after `ms`.

@@ -31,7 +31,12 @@ function begin(rig: Rig, s: ChildSpec, from: Conversation = rig.conv) {
   children.push(started.child);
   return { child: started.child, done: started.run() };
 }
-const answers = (rig: Rig, label: string) => rig.journal().filter((e) => e.t === 'confirm' && (e.subagent === label || e.task === label));
+// The y/n lines of the child `label`: a subagent's are in its own file, a task's in the
+// journal above it, tagged with its label.
+const answers = (rig: Rig, label: string) => [
+  ...rig.journal(),
+  ...rig.subJournals().flatMap((j) => j.events.map((e) => (j.events[0]?.label === label ? { ...e, ownFile: true } : e))),
+].filter((e) => e.t === 'confirm' && (e.ownFile || e.subagent === label || e.task === label)).map(({ ownFile: _, ...e }) => e);
 
 test('a subagent the person starts parks a write, the session offers it with the label, and a yes runs it', async () => {
   const model = new ScriptedModel();
@@ -48,7 +53,7 @@ test('a subagent the person starts parks a write, the session offers it with the
   o.owner.answerConfirm(true);
   expect(await done).toMatchObject({ outcome: 'answer', text: 'made it' });
   expect(made(rig, 'a.txt')).toBe(true);
-  expect(answers(rig, 'maker')).toMatchObject([{ name: 'run_command', answer: 'yes', by: 'person', subagent: 'maker' }]);
+  expect(answers(rig, 'maker')).toMatchObject([{ name: 'run_command', answer: 'yes', by: 'person' }]);
   expect(rig.conv.offered()).toBeNull();
   expect(rig.conv.subtreeWaiting).toBe(false);
 });
@@ -246,7 +251,7 @@ test('a subagent\'s own auto mode `all` answers by `auto` and parks nothing', as
   child.setAutoMode('all');
   expect(await done).toMatchObject({ outcome: 'answer', text: 'auto done' });
   expect(made(rig, 'auto.txt')).toBe(true);
-  expect(answers(rig, 'auto')).toMatchObject([{ answer: 'yes', by: 'auto', subagent: 'auto' }]);
+  expect(answers(rig, 'auto')).toMatchObject([{ answer: 'yes', by: 'auto' }]);
   expect(rig.conv.offered()).toBeNull();
 });
 

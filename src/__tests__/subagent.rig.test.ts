@@ -1,6 +1,6 @@
 // A subagent is a child conversation of its own kind (AGENTS.md (a conversation starts a
 // child)): read-only, the config's limits, its own summary kept through a compaction, its
-// calls and its start and end in the journal of the session that started it.
+// calls in a file of its own, its start and end in the journal of the session that started it.
 import { afterEach, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -83,16 +83,17 @@ test('a subagent\'s request carries the framed task, the memory block and the la
   expect(rig.sent(0)).toEqual([{ role: 'user', content: 'check the style' }]);
 });
 
-test('a model\'s subagent declines a write, journaled `confirm` by background, tagged `subagent`', async () => {
+test('a model\'s subagent declines a write, journaled `confirm` by background, in its own file', async () => {
   const model = new ScriptedModel();
   model.script([{ tool: 'run_command', args: { command: 'echo x > made.txt' } }], [{ text: 'could not' }]);
   const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
   const { run } = startFrom(rig, spec('w', 'make a file', { by: 'model' }));
   await run();
   expect(fs.existsSync(path.join(rig.root, 'made.txt'))).toBe(false);
-  const tagged = rig.journal().filter((e) => e.subagent === 'w' && e.t !== 'subagent');
-  expect(tagged.map((e) => e.t)).toEqual(['call-start', 'confirm', 'call']);
-  expect(tagged[1]).toMatchObject({ answer: 'no', by: 'background', subagent: 'w' });
+  const own = rig.subJournal('w').filter((e) => ['call-start', 'confirm', 'call'].includes(e.t));
+  expect(own.map((e) => e.t)).toEqual(['call-start', 'confirm', 'call']);
+  expect(rig.journal().filter((e) => ['call-start', 'confirm', 'call'].includes(e.t))).toEqual([]);
+  expect(own[1]).toMatchObject({ answer: 'no', by: 'background', subagent: 'w' });
   expect(rig.journal().filter((e) => e.task)).toEqual([]);
   expect(rig.conv.confirm).toBeNull();
 });
@@ -187,14 +188,15 @@ test('its start and its end are in the journal of the session that started it, a
   expect(md).toContain('*Subagent «j» finished*');
 });
 
-test('/export draws a subagent\'s calls under its label', async () => {
+test('/export draws a subagent\'s calls from its own file, not the session\'s', async () => {
   const model = new ScriptedModel();
   model.script([{ tool: 'datetime', args: {} }], [{ text: 'noon' }]);
   const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
   const { run } = startFrom(rig, spec('clock', 'what time'));
   await run();
-  const md = exportMarkdown(rig.journal(), { title: 't', id: rig.conv.sessionId });
-  expect(md).toContain('datetime · ok · subagent «clock»');
+  // The calls are in the subagent's file; the session's journal holds only its start and end.
+  expect(exportMarkdown(rig.journal(), { title: 't', id: rig.conv.sessionId })).not.toContain('datetime');
+  expect(exportMarkdown(rig.subJournal('clock'), { title: 't', id: 'clock' })).toContain('datetime · ok');
 });
 
 test('an exit close writes the end line of a subagent still running, and no task-end', async () => {
@@ -441,7 +443,9 @@ test('the children closed because their parent was stopped write the person too,
   s.stopSubtree('');
   await settled(rig);
   g.release();
-  expect(endsOf(rig, 'task-end')).toMatchObject([{ task: 'g', outcome: 'stopped', by: 'person' }]);
+  // The grandchild task's line is in the file of the subagent that started it.
+  expect(endsOf(rig, 'task-end')).toEqual([]);
+  expect(rig.subJournal('s').filter((e) => e.t === 'task-end')).toMatchObject([{ task: 'g', outcome: 'stopped', by: 'person' }]);
   expect(endsOf(rig, 'subagent')).toMatchObject([{ label: 's', outcome: 'stopped', stoppedBy: 'person' }]);
 });
 

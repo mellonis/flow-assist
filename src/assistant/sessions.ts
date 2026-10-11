@@ -176,6 +176,13 @@ export function journalPath(dir: string, id: string): string {
   if (!ID.test(id)) throw new Error(`not a session id: ${id}`);
   return path.join(dir, `${id}${JOURNAL_EXT}`);
 }
+// A subagent's journal: flat in its root session's `<id>.sub` directory, whatever its
+// depth — the tree is in the `parent` fields of the files' first lines.
+export function subJournalPath(dir: string, sessionId: string, childId: string): string {
+  if (!ID.test(sessionId)) throw new Error(`not a session id: ${sessionId}`);
+  if (!ID.test(childId)) throw new Error(`not a session id: ${childId}`);
+  return path.join(dir, `${sessionId}.sub`, `${childId}${JOURNAL_EXT}`);
+}
 export const JOURNAL_DAYS = 0;
 
 // The screen list as the state file keeps it: the latest `keep` conversation rows —

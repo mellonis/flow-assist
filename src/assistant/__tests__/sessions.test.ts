@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  KEEP_MESSAGES, KEEP_VIEWS, SEARCH_TEXT_MAX, SESSION_VERSION, TITLE_MAX, acquireLock, closeSession, cutTitle, journalPath, listSessions, loadSession,
+  KEEP_MESSAGES, KEEP_VIEWS, SEARCH_TEXT_MAX, SESSION_VERSION, TITLE_MAX, acquireLock, closeSession, cutTitle, journalPath, subJournalPath, listSessions, loadSession,
   lockPath, lockState, makeLockToken, moveSessionToProject, newSessionId, normalizeViews, pruneSessions, releaseLock, removeSession, renameSession,
   saveSession, searchText, sessionFingerprint, sessionFingerprintsEqual, sessionRev, sessionRows, sessionTitle,
   dropEmptyDirs, pickToContinue, projectHome, projectOf, sessionToContinue, sessionsDir, trimHistory, trimScreen, unseenAnswer, type Session,
@@ -498,6 +498,13 @@ test('removeSession deletes an idle session and its lock; a held one and this to
 });
 
 // ─── sessions per project ─────────────────────────────────────────────────────
+
+test('subJournalPath puts a subagent\'s journal flat in its session\'s .sub directory and refuses an id that is not one', () => {
+  const home = path.join(os.tmpdir(), 'fa-home');
+  expect(subJournalPath(home, '2026-09-21T09-00-00-aaaa', '2026-09-21T09-00-01-bbbb')).toBe(path.join(home, '2026-09-21T09-00-00-aaaa.sub', '2026-09-21T09-00-01-bbbb.log.jsonl'));
+  expect(() => subJournalPath(home, '../x', '2026-09-21T09-00-01-bbbb')).toThrow(/not a session id/);
+  expect(() => subJournalPath(home, '2026-09-21T09-00-00-aaaa', 'c1')).toThrow(/not a session id/);
+});
 
 test('moveSessionToProject moves the state file, its journal and a .sub directory into another project\'s mirror, rewriting `project` and leaving every other field untouched', () => {
   const root = tmp();

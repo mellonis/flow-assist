@@ -8,7 +8,7 @@ import { appendJournal, callEndEvent, callStartEvent, rowOf, type JournalEvent }
 import { createRecallState, saveRecallState } from './recall.js';
 import {
   SESSION_VERSION, acquireLock, journalPath, newSessionId, projectHome, projectOf, releaseLock, saveSession,
-  sessionFingerprint, sessionFingerprintsEqual, sessionTitle, type Session, type SessionFingerprint,
+  sessionFingerprint, sessionFingerprintsEqual, sessionTitle, subJournalPath, type Session, type SessionFingerprint,
 } from './sessions.js';
 import { shellRoots } from './shell.js';
 import { stripToolMarkup } from './tool-markup.js';
@@ -115,8 +115,9 @@ export function snapshotSession(c: Conversation): Session {
 // gives it one — a start with nothing said leaves no journal. A session opened from a
 // state file with no journal beside it (saved before journals, or its journal swept by
 // retention) brings the rows it holds into the journal it starts (`journalImport`),
-// marked `imported`. `forkedTo` redirects an id a fork left to the fork. A child keeps
-// no journal: its lines go through its `journalRoute` to its parent's.
+// marked `imported`. `forkedTo` redirects an id a fork left to the fork. A child has a
+// file of its own only where the session has a home for it (see "A subagent's journal"
+// below): its lines go through its `journalRoute`, to that file or to its parent's journal.
 export function journalTo(c: Conversation, from: string, ev: JournalEvent): void {
   if (c.journalRoute) { c.journalRoute(ev); return; }
   let id = from;
@@ -126,6 +127,62 @@ export function journalTo(c: Conversation, from: string, ev: JournalEvent): void
   if (!home) { c.deps.pushLog(`[session] journal not written: no directory known for ${id}`); return; }
   try { appendJournal(journalPath(home, id), ev); }
   catch (e) { c.deps.pushLog(`[session] journal not written: ${(e as Error).message}`); }
+}
+
+// ── A subagent's journal ── `<home>/<sessionId>.sub/<id>.log.jsonl`, in the home of the
+// session at the root of the tree, flat whatever the depth. Its first line says whose it
+// is; every line of the subagent's own follows, and a task or subagent below it writes its
+// lines into the nearest file above (a task has none). The root's home and id are read at
+// each write: a session moved to another project, or forked, is found where it is now.
+const rootOf = (c: Conversation): Conversation => { let r = c; while (r.parent) r = r.parent; return r; };
+const rootJournal = (c: Conversation): { home: string; id: string } | null => {
+  const root = rootOf(c);
+  if (!root.sessionId || !root.deps.sessionsDir()) return null;
+  const home = homeOf(root, root.sessionId);
+  return home ? { home, id: root.sessionId } : null;
+};
+
+// An id for a subagent's file, not taken in the `.sub` directory of the session `c` belongs
+// to; null where that session has no home (sessions off, or nothing said yet).
+export function newSubJournalId(c: Conversation): string | null {
+  const at = rootJournal(c);
+  if (!at) return null;
+  for (;;) {
+    const id = newSessionId();
+    if (!fs.existsSync(subJournalPath(at.home, at.id, id))) return id;
+  }
+}
+
+// The journal id of the conversation whose file a line of `c`'s lands in: the nearest
+// subagent above with a file, else the session.
+const ownerId = (c: Conversation): string => {
+  for (let up = c.parent; up; up = up.parent) if (up.subJournalId) return up.subJournalId;
+  return rootOf(c).sessionId;
+};
+
+// One line into the subagent's own file (none: just the file's first line, which is
+// written whenever the file is not there yet). After its closing `end` (the stop) no further `end` is written, so
+// that line stays the last word.
+export function journalToOwnFile(c: Conversation, ev: JournalEvent | null): void {
+  const at = rootJournal(c);
+  if (!c.subJournalId || !at) return;
+  if (ev && c.subJournalStopped && ev.t === 'end') return;
+  try {
+    const file = subJournalPath(at.home, at.id, c.subJournalId);
+    if (file !== c.subJournalFile) {
+      if (!fs.existsSync(file)) appendJournal(file, { t: 'start', id: c.subJournalId, parent: ownerId(c), root: at.id, label: c.label, by: c.spawnedBy ?? 'model' });
+      c.subJournalFile = file;
+    }
+    if (ev) appendJournal(file, ev);
+  } catch (e) { rootOf(c).deps.pushLog(`[session] journal not written: ${(e as Error).message}`); }
+}
+
+// The closing line of a subagent stopped before it finished: what stopped it (`clear`,
+// `exit` or `person`), once.
+export function closeOwnFile(c: Conversation, by: string): void {
+  if (c.subJournalStopped) return;
+  journalToOwnFile(c, { t: 'end', stopped: by });
+  c.subJournalStopped = true;
 }
 
 // `person` — the event is something the person said or ran (or the question a turn
