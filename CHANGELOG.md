@@ -28,7 +28,7 @@ What each version of flow-assist brought, newest first. The version is the one i
 - **A child names its assumptions in its result, and `ask_user` is not in a child's tools.**
   Where a task or subagent finds something open it makes a reasonable assumption and says
   which one; a round is not spent on a question that can only be refused. The one-shot
-  prompt still answers that nobody is there to ask.
+  prompt answers that nobody is there to ask.
 - **⏎ on a subagent's or task's row, or on a live row in `/agents`, shows that child's
   conversation.** Its rows take the list's place, folded as the chat folds its own; PgUp/PgDn
   and the wheel scroll them, End jumps to the end, and the details key opens or folds all of

@@ -1994,8 +1994,11 @@ A saved history that holds calls under the name `background` is sent as it is. T
   session's id, or the id of the subagent above), `root` (the session's id), `label`, `by`;
   then every line a session's journal holds — rows, `step`, `answer`, `call-start`,
   `confirm`, `call`, `call-out`, `compact`, `end`. A subagent stopped before it finished
-  ends with `end` carrying `stopped` (`clear`, `exit` or `person`), written once, and no later
-  `end` of its aborted turn follows it. A task has no file: its `call-start`, `confirm`, `call`
+  ends with `end` carrying `stopped` (`clear`, `exit` or `person`) and, when it was
+  mid-round, `cut` (and `reasoning`) with the text so far. It is written once, after the
+  lines of the children it stopped and of its declined y/n, and the aborted turn's own `end`
+  is dropped: the closing `end` is the only `end` of the file. The line of a call already
+  under way when it stopped may follow it. A task has no file: its `call-start`, `confirm`, `call`
   and `task-end` lines are tagged `task` and go to its owner's journal, the nearest
   conversation above it with one — so a task a subagent starts is in that subagent's
   file. A subagent in a session with no home (sessions off, or nothing said yet) has no
@@ -2007,8 +2010,10 @@ A saved history that holds calls under the name `background` is sent as it is. T
   (parent id → fork id, set where `writeSession` forks) and the rest of a turn in
   flight, a `!command` still running and a task's calls (its `journalRoute` writes
   through its parent's `journalTo`, below) land in the fork's journal, never in the
-  parent's, which another writer holds now; a subagent's file follows the session's id,
-  so what it writes after the fork lies in the fork's `.sub`. The redirect is for
+  parent's, which another writer holds; a subagent's file follows the session's id,
+  so what it writes after the fork lies in the fork's `.sub`. The export of each session
+  folds the half of that subagent's conversation it holds: the old session's from the
+  `subagent` start line, the fork's from the `subagent` end line. The redirect is for
   what was in flight: opening the parent again (`applySession`) drops it, and from
   then on the parent writes its own journal. The journal, the save and its fork, and
   opening a session are functions over the conversation in
@@ -2043,7 +2048,11 @@ A saved history that holds calls under the name `background` is sent as it is. T
   removed recursively from a path made of the validated id and the literal suffix, a link
   in that place unlinked and never followed). The directory walks (`listSessions`,
   `sessionRows`, `sweepJournals`) do not enter a `<id>.sub`, so a file in it is never taken
-  for a session's or swept on its own. A `.sub` with neither `<id>.json` nor `<id>.log.jsonl`
+  for a session's or swept on its own. A directory is a `.sub` by its content, not its name
+  alone (`isSubDir`): the name is `<session-id>.sub`, it holds no directory, and the first
+  line of every `*.log.jsonl` in it (only that line is read) names that id as its `root`
+  — an empty directory of the name qualifies. One that fails is an ordinary project
+  directory: walked, listed, never removed as an orphan. A `.sub` with neither `<id>.json` nor `<id>.log.jsonl`
   beside it, and no held lock, is removed by `pruneSessions`. Nothing removes a journal by age unless the person asks:
   `sessions.journalDays` defaults to 0. Set, `sweepJournals` (at start, beside
   `pruneSessions`) removes a journal not written to for longer than that, with its `.sub` — taking the
@@ -2185,8 +2194,10 @@ A saved history that holds calls under the name `background` is sent as it is. T
   and idempotent on a retry — every other field untouched, not `saveSession`, which
   would also re-trim the screen and bump `rev`); (2) the journal, and a `.sub`
   directory beside it if it has one (the subagents' journals), move to the destination,
-  each skipped if a resumed attempt already put it there; (3) the state file itself
-  moves LAST, one `renameSync`, the one moment its name changes — so exactly one
+  each skipped if a resumed attempt already put it there — the `.sub` only once the journal
+  is there, and for a session with no journal after the state file, so no `.sub` ever lies
+  at the destination with neither beside it; (3) the state file itself
+  moves after the journal, one `renameSync`, the one moment its name changes — so exactly one
   `<id>.json` for this id exists at every instant a crash could land on: never two
   (a crash after step 3 cannot have left one at the source too), never a state file
   without its journal (steps 1–2 always finish, and are always resumable, before step
@@ -2978,7 +2989,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   made, so a long run keeps its context; no screen tail; the round boundary on (the
   automatic compaction; the queue finds nothing to do in a child, and the settings-file
   guard never runs in a conversation that has a parent); recall on; no `ask_user`, no images; no round cap of its own, so the config's
-  `ai.maxRounds` and `ai.maxTurnTokens` apply; `ask_user` and `remind` are withheld from its own turn, and `remind` from every run a tool starts through `ctx.chatLLM` (the child's `chatLLM` adds it to the list). The worker prompt both kinds get says not to ask or wait, to make a reasonable assumption where the task leaves something open, and to name each assumption in the result. A child says nothing
+  `ai.maxRounds` and `ai.maxTurnTokens` apply; `remind` and `ask_user` are withheld from its own turn and from every run a tool starts through `ctx.chatLLM` (a subagent's `chatLLM` adds both to the list, a task's adds `ask_user`). The worker prompt both kinds get says not to ask or wait, to make a reasonable assumption where the task leaves something open, and to name each assumption in the result. A child says nothing
   of a missing memory record and spends no flag of the host's once-only note: nobody
   draws its rows.
 - **A host makes its conversations through one registry** (`ConversationRegistry`,
