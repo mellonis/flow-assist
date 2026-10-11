@@ -78,9 +78,20 @@ its name, every `!command` with its whole output (up to 8 MiB), every `/compact`
 — written line by line so a crash loses nothing, and never trimmed. It lives exactly as
 long as its session and goes when the session is deleted; `sessions.journalDays` (0 by
 default) removes one not written to for that many days, and the session then says so in
-a note. `/export [path]` turns the journal into a markdown document you can read — the
+a note.
+
+A subagent keeps its whole conversation in a journal of its own, in a `<id>.sub` directory
+beside the session's: what it was asked, its steps, its calls with their results and your
+y/n, its answer. The session's journal holds only the lines saying it started and ended.
+A background task has no file of its own; its calls are in the journal of whoever started
+it. The `.sub` directory goes with the session — when it is deleted, pruned beyond
+`sessions.keep`, or has its journal removed by `sessions.journalDays` — and moves with it
+into another project.
+
+`/export [path]` turns the journal into a markdown document you can read — the
 conversation, each tool call folded with its arguments and result, the `/compact`
-summaries where they happened — written to the path you give, or to `session-<id>.md` in
+summaries where they happened, each subagent's conversation folded under the line that
+says it started — written to the path you give, or to `session-<id>.md` in
 the shell's directory; it never overwrites a file that is there.
 
 ## What the assistant remembers
@@ -153,7 +164,8 @@ and the footer's `◆ N new` and a desktop notification say something came in.
 `config set ai.backgroundFollowUp false` keeps the results as messages only, read with
 your next message.
 
-A task works on its own: it cannot ask you a question, and Esc in the chat does
+A task works on its own: it is not offered the tool for asking you a question (where the
+task leaves something open it makes an assumption and names it in its result), and Esc in the chat does
 not stop it. Whatever would wait for your y/n (a command, a file change, a fetch off the
 allowlist) is declined, unless the assistant started the task with `write: true`: then each
 write stops for your yes, asked as a subagent's is (see Subagents you start), and the task
@@ -177,8 +189,9 @@ conversation.
 chat: you go on talking while it runs, and its answer lands as a `◆` message when it
 ends, as a background task's does. It may read what the assistant reads without asking
 you. It may also write: each write (a command, a file change, a fetch off the allowlist)
-stops for your y/n, and the y/n is asked where you started the subagent. It cannot ask
-you a question. It gets the
+stops for your y/n, and the y/n is asked where you started the subagent. It is not offered
+the tool for asking you a question; where the job leaves something open it makes an
+assumption and names it in its answer. It gets the
 rounds and the token budget of `ai.maxRounds` and `ai.maxTurnTokens`, not a task's twelve,
 and counts toward the three that run at once. The prompt is sent as you
 typed it, line breaks included (⇧⏎ makes one).

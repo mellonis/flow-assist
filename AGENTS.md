@@ -1258,7 +1258,7 @@ A saved history that holds calls under the name `background` is sent as it is. T
   - the chat's turn — asks: its y/n closure, which the auto mode may answer;
   - a background task — declines: a background task's conversation has the policy
     `always-no`, journaled as a `confirm` line `by: 'background'`, tagged with its label;
-    so does a subagent the model starts. A child that may write (`ChildSpec.write`, and
+    so does a subagent the model starts (its lines are in its own journal, when it has one). A child that may write (`ChildSpec.write`, and
     every subagent the person starts) has the policy `ask` instead, where the host has a
     person at all (see "A conversation starts a child of its own");
   - a tool's `ctx.chatLLM` in the chat (`journaledChatLLM`) —
@@ -1328,7 +1328,9 @@ A saved history that holds calls under the name `background` is sent as it is. T
   "Other…" row the UI always adds) is a pure state machine in
   `src/assistant/ask.ts`; the chat owns only the pause and the render. A
   background task is never given the hook — a question popping up would seize the
-  keyboard mid-sentence — so there the tool answers "nobody to ask".
+  keyboard mid-sentence — and no child is offered the tool (it is withheld, so a round is
+  not spent on a call that can only be refused); the one-shot prompt, which is offered it,
+  gets the answer "nobody to ask".
   **Typing starts the answer**: any printable character opens the free-text field with
   that character in it (navigating to the "Other…" row first is not a step anyone
   guesses at), and a paste on the list opens it with its text. What does NOT open it: `1`–`9`,
@@ -1975,19 +1977,38 @@ A saved history that holds calls under the name `background` is sent as it is. T
     lines to `call-start`, `confirm` and `call`; `/export` draws it as `*<label> stopped
     (<by>)*`, `person` read as `by you`.
   - `subagent` — a subagent started or ended: `label`, `by` (`model` or `person`, who
-    started it), `event` (`start` or `end`) and, on an end, its `outcome`
+    started it), `event` (`start` or `end`), `id` (the name of the subagent's own journal,
+    below; absent when it has none) and, on an end, its `outcome`
     (`answer`, `empty`, `limit`, `failed` or `stopped`); one stopped with its session or at
-    exit, or by the person, says what stopped it in `stoppedBy` (`clear`, `exit` or `person`). Tagged `subagent: <label>`
-    like its calls, written through the route's `raw`; `/export` draws
+    exit, or by the person, says what stopped it in `stoppedBy` (`clear`, `exit` or `person`). Tagged `subagent: <label>`,
+    written through the route's `about` into the journal of the subagent's owner (the
+    session, or the subagent that started it); `/export` draws
     `*Subagent «<label>» started (by you | by the model)*` and `*Subagent «<label>»
-    finished | failed | stopped …*`.
+    finished | failed | stopped …*`, and under the start line the subagent's own journal.
+  **A subagent's journal.** A subagent keeps its whole conversation in
+  `<home>/<sessionId>.sub/<id>.log.jsonl` (600, in a 700 directory; `subJournalPath`):
+  flat in the `.sub` of the session at the root of the tree, whatever the subagent's depth;
+  the tree is in the files, not in the paths. `<id>` is a fresh session-shaped id not taken in that
+  directory, and the home is read at each write, so a session the picker moves is found where it
+  is. The first line is `start` with `id`, `parent` (the journal id of the owner: the
+  session's id, or the id of the subagent above), `root` (the session's id), `label`, `by`;
+  then every line a session's journal holds — rows, `step`, `answer`, `call-start`,
+  `confirm`, `call`, `call-out`, `compact`, `end`. A subagent stopped before it finished
+  ends with `end` carrying `stopped` (`clear`, `exit` or `person`), written once, and no later
+  `end` of its aborted turn follows it. A task has no file: its `call-start`, `confirm`, `call`
+  and `task-end` lines are tagged `task` and go to its owner's journal, the nearest
+  conversation above it with one — so a task a subagent starts is in that subagent's
+  file. A subagent in a session with no home (sessions off, or nothing said yet) has no
+  file; its tagged `call-start`, `confirm` and `call` lines go to its parent's journal and
+  its `subagent` lines carry no `id`.
   A turn's events go to the session its question was journaled in (`journalId`, taken
   in `runTurn`), even when a `/clear` lands mid-turn — they happened there. A FORK is
   different: the conversation goes on in the fork, so `journalTo` follows `forkedTo`
   (parent id → fork id, set where `writeSession` forks) and the rest of a turn in
-  flight, a `!command` still running and a child's calls (its `journalRoute` writes
+  flight, a `!command` still running and a task's calls (its `journalRoute` writes
   through its parent's `journalTo`, below) land in the fork's journal, never in the
-  parent's, which another writer holds now. The redirect is for
+  parent's, which another writer holds now; a subagent's file follows the session's id,
+  so what it writes after the fork lies in the fork's `.sub`. The redirect is for
   what was in flight: opening the parent again (`applySession`) drops it, and from
   then on the parent writes its own journal. The journal, the save and its fork, and
   opening a session are functions over the conversation in
@@ -1995,8 +2016,8 @@ A saved history that holds calls under the name `background` is sent as it is. T
   the journal** — it is the host's record, and a tool's ctx (a plugin's, a remote
   plugin's, a core tool's) carries nothing that writes there; the host writes every line
   from its own hooks. A background task's own calls (`call-start`, `confirm`, `call`)
-  go to the session whose turn started it through the child's `journalRoute` (below),
-  each tagged `task` with its label (`subagent` for a subagent's), its y/n answers `by: 'background'`. A tool that asks
+  go to the journal of its owner through the child's `journalRoute` (below),
+  each tagged `task` with its label, its y/n answers `by: 'background'`. A tool that asks
   the model itself is handed the host's LLM service wrapped (`journaledChatLLM`), which
   adds its own `onToolStart`/`onToolRun` hooks to that run — and a `confirmWrite` hook
   only when the caller passed a confirmation — and writes to the session whose turn
@@ -2017,10 +2038,15 @@ A saved history that holds calls under the name `background` is sent as it is. T
   so a new journal. Opening another session writes nothing to its journal: the next
   event's time shows where it was picked up.
   **A journal lives as long as its session.** Every delete — the picker's, `/sessions`'
-  `KEEP_SESSIONS` pruning (`pruneSessions`) — takes the state file and the journal
-  together (`deleteSession`). Nothing removes a journal by age unless the person asks:
+  `KEEP_SESSIONS` pruning (`pruneSessions`) — takes the state file, the journal and the
+  `.sub` directory with the subagents' journals together (`deleteSession`; the `.sub` is
+  removed recursively from a path made of the validated id and the literal suffix, a link
+  in that place unlinked and never followed). The directory walks (`listSessions`,
+  `sessionRows`, `sweepJournals`) do not enter a `<id>.sub`, so a file in it is never taken
+  for a session's or swept on its own. A `.sub` with neither `<id>.json` nor `<id>.log.jsonl`
+  beside it, and no held lock, is removed by `pruneSessions`. Nothing removes a journal by age unless the person asks:
   `sessions.journalDays` defaults to 0. Set, `sweepJournals` (at start, beside
-  `pruneSessions`) removes a journal not written to for longer than that — taking the
+  `pruneSessions`) removes a journal not written to for longer than that, with its `.sub` — taking the
   session's lock for it, as a rename does, and leaving alone one a live chat holds —
   and appends a note row to that session's state file, `Journal removed after N days
   without a write (sessions.journalDays) — this session's full record is gone.`, so a
@@ -2048,7 +2074,15 @@ A saved history that holds calls under the name `background` is sent as it is. T
   file that has none, nothing journaled since) is rendered from its screen list through
   `rowOf`, and the document says its beginning may be missing and its calls are kept
   only in short; a journal that began partway (`continued`) says the same, and a fork's
-  names its parent. Nothing said yet: nothing to export.
+  names its parent. Nothing said yet: nothing to export. Under a `subagent` start line that
+  has an `id`, the export folds the subagent's journal: a `<details>` block whose summary is
+  `<label> · <outcome>` (`did not finish` when the journal has no end line for it), the
+  file's events rendered as a session's are, recursively — a subagent it started is a block
+  inside it. `exportMarkdown` stays pure: it is handed a reader of a journal by id, which
+  `/export` makes over `subJournalPath`. A file that is not there is one italic line, `its
+  journal is not there`; a journal that names itself, or lies deeper than sixteen levels, is
+  not followed (`its journal is nested too deep to show`). A start line with no `id`, or
+  an export with no reader, is drawn as the two lines alone.
   **The picker** (`/sessions`, and the assistant's `sessions` key — `^s`, `config.keys.sessions`
   moves it) opens on the current project's sessions (`scope: 'project'`; no project is
   the top level's) and Tab switches to every session (`all`), grouped by project — the
@@ -2150,7 +2184,7 @@ A saved history that holds calls under the name `background` is sent as it is. T
   SOURCE (a parse, a patch, a temp file, a rename — same directory, already atomic,
   and idempotent on a retry — every other field untouched, not `saveSession`, which
   would also re-trim the screen and bump `rev`); (2) the journal, and a `.sub`
-  directory beside it if it has one (nothing writes one yet), move to the destination,
+  directory beside it if it has one (the subagents' journals), move to the destination,
   each skipped if a resumed attempt already put it there; (3) the state file itself
   moves LAST, one `renameSync`, the one moment its name changes — so exactly one
   `<id>.json` for this id exists at every instant a crash could land on: never two
@@ -2936,7 +2970,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   called; `canAsk` is always said. What a turn is handed that differs by kind is
   `turnShape` (`conversation-turn.ts`), a table with a row per kind; the `task` row hands the
   worker prompt (plus the project block) as the system prompt, twelve rounds, no screen tail,
-  round boundary, recall, `ask_user` or images, and withholds nothing. The `subagent` row
+  round boundary, recall, `ask_user` or images, and withholds `ask_user` from its tool list. The `subagent` row
   hands the same worker prompt with the person's prompt framed as `The person's task:`,
   then the memory block and the language directive (read once for the message) and,
   read again every round, the project block and the conversation's own summary — a
@@ -2944,7 +2978,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   made, so a long run keeps its context; no screen tail; the round boundary on (the
   automatic compaction; the queue finds nothing to do in a child, and the settings-file
   guard never runs in a conversation that has a parent); recall on; no `ask_user`, no images; no round cap of its own, so the config's
-  `ai.maxRounds` and `ai.maxTurnTokens` apply; `remind` is withheld from its own turn and from every run a tool starts through `ctx.chatLLM` (the child's `chatLLM` adds it to the list). A child says nothing
+  `ai.maxRounds` and `ai.maxTurnTokens` apply; `ask_user` and `remind` are withheld from its own turn, and `remind` from every run a tool starts through `ctx.chatLLM` (the child's `chatLLM` adds it to the list). The worker prompt both kinds get says not to ask or wait, to make a reasonable assumption where the task leaves something open, and to name each assumption in the result. A child says nothing
   of a missing memory record and spends no flag of the host's once-only note: nobody
   draws its rows.
 - **A host makes its conversations through one registry** (`ConversationRegistry`,
@@ -3101,13 +3135,16 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   that can, whatever its spec says. Its
   deps are its parent's with no sessions directory, no screens, no redraw
   (`notify`) and a silent `pushLog`; `canAsk` is true only for a child whose policy
-  asks, and `ask_user` is off in every child. It keeps no journal or state file: its `journalRoute` sends its
-  `call-start`, `confirm` and `call` lines — and nothing else — to its parent's
-  `journalTo` under the parent turn's journal id, tagged `{ task: <label>, ...line }` (a
-  subagent's lines `{ subagent: <label>, ...line }`; a grandchild's own label kept). A
-  subagent also writes `{ t: 'subagent', label, by, event: 'start' | 'end', outcome? }`
-  lines into that journal through the route's `raw`: the start when it is made, the end
-  when its run settles (the journal's line list, above). Its project is its parent's (`inheritedProject`, read
+  asks, and `ask_user` is not in a child's tool list. It keeps no state file. A task has no
+  journal either: its `journalRoute` sends its `call-start`, `confirm` and `call` lines — and
+  nothing else — to its owner's journal (the nearest ancestor with one: the session, or a
+  subagent with a file), tagged `{ task: <label>, ...line }`. A subagent in a session with
+  a home keeps a journal file of its own (`subJournalId`; the journal's line list, above):
+  its route writes every line of the conversation there, and the lines about the subagent
+  itself — `{ t: 'subagent', label, by, event: 'start' | 'end', id, outcome? }` and a task's
+  `task-end` — through the route's `about` into the owner's journal, the start when it is
+  made, the end when its run settles. Without a home its lines go to its parent's journal
+  as a task's do, tagged `{ subagent: <label>, ...line }`. Its project is its parent's (`inheritedProject`, read
   first by `currentProject`), whatever root its shell moves to — the memory and the
   workspace follow it; its shell starts in its parent's directory, and its `cd` moves
   only its own (and the project instructions its per-round prompt reads). A

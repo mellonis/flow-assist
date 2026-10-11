@@ -5,6 +5,30 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **A subagent's whole conversation is on disk, beside its session.** It keeps a journal of
+  its own, `<id>.sub/<child>.log.jsonl` next to the session's, holding what a session's
+  journal holds: what it was asked, its steps, its answer, every call with its result and the
+  y/n it was given. A subagent started by another is in the same `.sub` directory; the
+  `parent` field of each file's first line names the one above it. A background task has no
+  file; its calls are written to the journal of whoever started it, so a task a subagent
+  starts is in that subagent's file. A session with nothing saved yet gives its subagents no
+  file, and their calls go to the session's journal, tagged, as a task's do.
+- **A subagent's calls are not written into its parent's journal; the parent's `subagent`
+  lines carry an `id`** naming the subagent's file. The session's journal keeps the start and
+  the end of each subagent.
+- **Deleting, pruning, sweeping and moving a session take its subagents' journals with it.**
+  The `.sub` directory goes when the session is deleted from the picker, pruned beyond
+  `sessions.keep`, or has its journal removed by `sessions.journalDays`, and moves when the
+  session moves to another project. A `.sub` directory with neither a state file nor a
+  journal beside it is removed at prune, unless that session's lock is held.
+- **`/export` shows each subagent's conversation folded where it started.** Under the line
+  that says a subagent started, a folded block named `<label> · <outcome>` holds its journal
+  as a session's is drawn, with a block of its own inside it for each subagent it started. A
+  journal that is not there is one line saying so.
+- **A child names its assumptions in its result, and `ask_user` is not in a child's tools.**
+  Where a task or subagent finds something open it makes a reasonable assumption and says
+  which one; a round is not spent on a question that can only be refused. The one-shot
+  prompt still answers that nobody is there to ask.
 - **⏎ on a subagent's or task's row, or on a live row in `/agents`, shows that child's
   conversation.** Its rows take the list's place, folded as the chat folds its own; PgUp/PgDn
   and the wheel scroll them, End jumps to the end, and the details key opens or folds all of
