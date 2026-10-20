@@ -455,10 +455,13 @@ limits are yours to set; the assistant cannot change them.
 
 A request that fails for a reason that passes is made again: a 429, 500, 502, 503, 504
 or 529 (the provider is limiting, busy or failing), the same arriving as an error event in
-the middle of a stream, or a connection that could not be made. While a chat turn waits
+the middle of an Anthropic stream, or a connection that could not be made or was lost
+before the answer began. While a chat turn waits
 its status line reads `LLM 429 · retry 2/10 in 3 s` and counts down each second, and the
 log gets a line for each try; a subagent's or a task's wait, and a compaction's, is the log
-line alone. Esc ends the wait and stops the turn.
+line alone. A model request a plugin or a tool makes itself is repeated the same way,
+without showing the wait. Esc ends the wait and stops the turn. A one-shot prompt says
+each repeat on stderr, one line each.
 
 A request is made again only while nothing of its answer has been shown. One that fails
 after its first word fails as it is, so an answer is never shown twice and a tool call
@@ -468,7 +471,8 @@ fails with the provider's words and the count, `… — gave up after 10 retries
 
 `ai.retries` is how many times a request is made again (10 by default; 0 makes one
 request and no more). `ai.retryDelay` is the seconds before each (3 by default); a
-provider's `Retry-After`, in seconds or as a date, is waited instead, up to a minute.
+provider's `Retry-After`, in seconds or as a date in the future, is waited instead, up to a
+minute; `ai.retryDelay` is at most 60.
 `config set ai.retries 0` turns it off; both are yours to set.
 
 ## Shell commands
