@@ -10,6 +10,7 @@ import { estimateTokens, short as shortTokens } from './context-meter.js';
 import { imagesInText, isImageRefusal, wireMessages, type ImageRef } from './images.js';
 import { callEndEvent, callStartEvent, outputJournal } from './journal.js';
 import { llmOpts } from './llm-endpoint.js';
+import { retryClock, retryLabel, type RetryInfo } from './llm-retry.js';
 import { pushHistory } from './prompt-history.js';
 import { decideBatch, recallLimits, type RecallSource } from './recall.js';
 import { screenBlock } from './screen-context.js';
@@ -199,6 +200,9 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
     const chatResult = await c.deps.chatLLM(wire, {
       ...llmOpts(ai),
       signal: abort.signal,
+      // A request that failed for a reason that passes waits to be made again: a log
+      // line, and on a session's status line the countdown.
+      onRetry: (info: RetryInfo) => retryWait(c, info),
       // Debug-log of tool calls (opt-in: config.debug.logTools).
       logTools: !!((c.deps.config() as Record<string, any>)?.debug?.logTools),
       // Plugin ai-tools (aiTools): agentChat runs their own run(args, toolCtx).
@@ -682,6 +686,30 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
   return true;
 }
 
+// A repeat of a failed model request is waiting (./llm-retry.ts). The log gets a line
+// for each. A session's own turn shows the wait on its status line, counting down each
+// second; a child's turn and a compaction (`countdown` false) leave it at the log line, so
+// the agent tree is not redrawn every second for a wait. The function returned takes
+// the countdown down when the wait ends.
+export function retryWait(c: Conversation, info: RetryInfo, countdown = !c.parent): (() => void) | undefined {
+  c.deps.pushLog(`[chat] ${info.message} — retry ${info.attempt}/${info.of} in ${Math.ceil(info.waitMs / 1000)} s`);
+  if (!countdown) return undefined;
+  const until = retryClock.now() + info.waitMs;
+  const show = () => {
+    if (c.closed) return;
+    c.setToolLabel(retryLabel(info, Math.max(0, Math.ceil((until - retryClock.now()) / 1000))));
+    c.deps.notify();
+  };
+  show();
+  const stop = retryClock.every(show, 1000);
+  return () => {
+    stop();
+    if (c.closed) return;
+    c.endToolSegment();
+    c.deps.notify();
+  };
+}
+
 // ── Compaction ── /compact and the automatic one alike: the model's view becomes
 // a handoff (`compactConversation`) that REPLACES the previous summary, which it
 // was shown to carry forward. What the PERSON sees stays — the conversation above
@@ -691,7 +719,7 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
 // asked, and the summary folded under it.
 export async function foldIntoHandoff(c: Conversation, history: ChatMessage[], signal: AbortSignal): ReturnType<typeof compactConversation> {
   const ai = (c.deps.config().ai ?? {}) as Record<string, any>;
-  const result = await c.deps.compact(history, { ...llmOpts(ai), signal, previous: c.summary });
+  const result = await c.deps.compact(history, { ...llmOpts(ai), signal, previous: c.summary, onRetry: (info: RetryInfo) => retryWait(c, info, false) });
   if (!signal.aborted && result.incomplete) c.deps.pushLog(`[compact] no usable handoff after a retry: ${result.incomplete}`);
   return result;
 }

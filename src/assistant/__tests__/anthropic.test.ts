@@ -269,13 +269,13 @@ test('tools are name, description and input_schema only', () => {
 
 test('the endpoint: an OpenAI-compatible API unless the provider says anthropic, which brings its own defaults', () => {
   const env = { LLM_TOKEN: 'l', ANTHROPIC_API_KEY: 'a', MINE: 'm' };
-  expect(llmOpts({ baseUrl: 'http://x/v1', model: 'gpt' }, env)).toEqual({ provider: 'openai', baseUrl: 'http://x/v1', model: 'gpt', token: 'l', tokenEnv: 'LLM_TOKEN', maxTokens: 8192 });
+  expect(llmOpts({ baseUrl: 'http://x/v1', model: 'gpt' }, env)).toEqual({ provider: 'openai', baseUrl: 'http://x/v1', model: 'gpt', token: 'l', tokenEnv: 'LLM_TOKEN', maxTokens: 8192, retries: 10, retryDelay: 3 });
   expect(llmOpts({ provider: 'openai-ish', model: 'gpt' }, env).provider).toBe('openai');
-  expect(llmOpts({ provider: 'anthropic', model: 'claude-sonnet-5' }, env)).toEqual({ provider: 'anthropic', baseUrl: 'https://api.anthropic.com/v1', model: 'claude-sonnet-5', token: 'a', tokenEnv: 'ANTHROPIC_API_KEY', maxTokens: 8192 });
+  expect(llmOpts({ provider: 'anthropic', model: 'claude-sonnet-5' }, env)).toEqual({ provider: 'anthropic', baseUrl: 'https://api.anthropic.com/v1', model: 'claude-sonnet-5', token: 'a', tokenEnv: 'ANTHROPIC_API_KEY', maxTokens: 8192, retries: 10, retryDelay: 3 });
   expect(llmOpts({ provider: 'anthropic', tokenEnv: 'MINE', baseUrl: 'http://proxy/v1', maxTokens: 2000, thinking: { adaptive: true } }, env))
     .toMatchObject({ baseUrl: 'http://proxy/v1', token: 'm', tokenEnv: 'MINE', maxTokens: 2000, thinking: { adaptive: true } });
   expect(llmOpts({ provider: 'anthropic', thinking: { budgetTokens: 2048 } }, env).thinking).toEqual({ budgetTokens: 2048 });
-  expect(llmOpts(undefined, {})).toEqual({ provider: 'openai', tokenEnv: 'LLM_TOKEN', maxTokens: 8192 });
+  expect(llmOpts(undefined, {})).toEqual({ provider: 'openai', tokenEnv: 'LLM_TOKEN', maxTokens: 8192, retries: 10, retryDelay: 3 });
 });
 
 test("a round's tail goes after the cache breakpoint — a text block of the last user turn, or a user turn of its own", () => {

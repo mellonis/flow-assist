@@ -9,6 +9,8 @@
 // Anthropic's own Messages API (./anthropic.ts). What the host keeps — the history, the
 // sessions — has one shape for both; only the request and the stream differ.
 
+import { RETRIES_DEFAULT, RETRY_DELAY_DEFAULT } from './llm-retry.js';
+
 export type Provider = 'openai' | 'anthropic';
 
 // How the model is asked to think, on the Anthropic wire. `adaptive` lets the model
@@ -27,6 +29,10 @@ export interface LlmOpts {
   // The Messages API requires a ceiling on the answer; the OpenAI path does not send one.
   maxTokens: number;
   thinking?: ThinkingConfig;
+  // How many times a request that failed for a reason that passes is repeated, and the
+  // seconds before each repeat (./llm-retry.ts).
+  retries: number;
+  retryDelay: number;
 }
 
 export const ANTHROPIC_BASE_URL = 'https://api.anthropic.com/v1';
@@ -79,5 +85,7 @@ export function llmOpts(ai: unknown, env: Record<string, string | undefined> = p
     tokenEnv,
     maxTokens,
     ...(thinking ? { thinking } : {}),
+    retries: typeof a.retries === 'number' && Number.isInteger(a.retries) && a.retries >= 0 ? a.retries : RETRIES_DEFAULT,
+    retryDelay: typeof a.retryDelay === 'number' && Number.isFinite(a.retryDelay) && a.retryDelay >= 0 ? a.retryDelay : RETRY_DELAY_DEFAULT,
   };
 }

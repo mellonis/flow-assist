@@ -68,7 +68,7 @@ test('a turn stopped before anything completed still ends in a closing word, not
 test('a turn that failed keeps what it did and says it failed — a retry is the person\'s to ask, and allowed', async () => {
   const model = new ScriptedModel();
   model.script([{ tool: 'datetime', args: {} }], [{ text: 'Paris.' }]);
-  const rig = conversationRig(model);
+  const rig = conversationRig(model, { ai: { retries: 0 } });
   // The second request of the first turn fails, as a provider's 500 would.
   const scripted = globalThis.fetch;
   let calls = 0;

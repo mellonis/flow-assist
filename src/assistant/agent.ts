@@ -24,7 +24,7 @@ import { acceptData, isConsoleKind, readLegacyView, type ViewRecord } from './vi
 import { capConsoleData } from './console-view.js';
 import { IMAGE_DEFAULTS, contentText, type ContentPart, type ImageLimits, type ImageRef } from './images.js';
 import { acceptToolImages, imageMark, imageStoreDir, toolImageResult, type ImageMark } from './tool-images.js';
-import { llmErrorMessage } from './llm-error.js';
+import { failedRequest, reach, withRetry, type RetryOpts } from './llm-retry.js';
 import { ANTHROPIC_CONTENT, REQUEST_TAIL, anthropicChatRound, anthropicCompact, summaryHistory } from './anthropic.js';
 import { compactionInstruction, retryNote, summaryProblem } from './compaction.js';
 import { hasToolMarkup, markupToolNames, stripToolMarkup } from './tool-markup.js';
@@ -453,7 +453,25 @@ function roundFor(opts: Record<string, unknown>): NonNullable<AgentOpts['chatRou
   return realChatRound as NonNullable<AgentOpts['chatRound']>;
 }
 
-async function realChatRound(
+// The OpenAI-compatible round, repeated while it fails for a reason that passes and has
+// given nothing to its callbacks (./llm-retry.ts).
+type RoundOpts = {
+  baseUrl?: string;
+  model?: string;
+  token?: string;
+  tokenEnv?: string;
+  tools?: ToolDef[];
+  onDelta?: (d: string) => void;
+  onReasoning?: (d: string) => void;
+  onToolCalls?: () => void;
+  signal?: AbortSignal;
+} & RetryOpts;
+
+function realChatRound(messages: ChatMessage[], o: RoundOpts): Promise<ChatRoundResult> {
+  return withRetry(o, (callbacks) => openAiRound(messages, { ...o, ...callbacks }));
+}
+
+async function openAiRound(
   messages: ChatMessage[],
   {
     baseUrl,
@@ -465,29 +483,19 @@ async function realChatRound(
     onToolCalls = () => {},
     signal,
     tokenEnv,
-  }: {
-    baseUrl?: string;
-    model?: string;
-    token?: string;
-    tokenEnv?: string;
-    tools?: ToolDef[];
-    onDelta?: (d: string) => void;
-    onReasoning?: (d: string) => void;
-    onToolCalls?: () => void;
-    signal?: AbortSignal;
-  },
+  }: RoundOpts,
 ): Promise<ChatRoundResult> {
   requireAiOpts({ baseUrl, model, token, tokenEnv });
   // A streamed response carries token usage only when asked (`stream_options`). Most
   // OpenAI-compatible servers know the field; one that does not may answer 400 — so a
   // refusal that NAMES the field is retried once without it, and that base URL is not
   // asked again. Usage is a nicety; a chat that stops working over it is not.
-  const post = (withUsage: boolean) => fetch(`${baseUrl}/chat/completions`, {
+  const post = (withUsage: boolean) => reach(() => fetch(`${baseUrl}/chat/completions`, {
     method: 'POST',
     signal,
     headers: LLM_HEADERS(token as string),
     body: JSON.stringify({ model, messages: openAiMessages(messages), stream: true, ...(withUsage ? { stream_options: { include_usage: true } } : {}), ...(tools?.length ? { tools } : {}) }),
-  });
+  }), signal);
   const askUsage = !noUsage.has(String(baseUrl));
   let res = await post(askUsage);
   if (!res.ok) {
@@ -497,10 +505,10 @@ async function realChatRound(
       res = await post(false);
       if (!res.ok) {
         const again = await res.text().catch(() => '');
-        throw new Error(llmErrorMessage(res.status, again, { model, requestId: res.headers.get('x-request-id'), statusText: res.statusText }));
+        throw failedRequest(res, again, { model });
       }
     } else {
-      throw new Error(llmErrorMessage(res.status, body, { model, requestId: res.headers.get('x-request-id'), statusText: res.statusText }));
+      throw failedRequest(res, body, { model });
     }
   }
   const reader = res.body?.getReader();
@@ -1342,29 +1350,29 @@ export interface CompactResult { summary: string; incomplete?: string }
 // anything is kept. No tools.
 export async function compactConversation(
   messages: ChatMessage[],
-  { baseUrl, model, token, tokenEnv, provider, maxTokens, thinking, signal, previous = '' }: { baseUrl?: string; model?: string; token?: string; tokenEnv?: string; provider?: string; maxTokens?: number; thinking?: ThinkingConfig; signal?: AbortSignal; previous?: string },
+  { baseUrl, model, token, tokenEnv, provider, maxTokens, thinking, signal, previous = '', retries, retryDelay, onRetry }: { baseUrl?: string; model?: string; token?: string; tokenEnv?: string; provider?: string; maxTokens?: number; thinking?: ThinkingConfig; signal?: AbortSignal; previous?: string } & Pick<RetryOpts, 'retries' | 'retryDelay' | 'onRetry'>,
 ): Promise<CompactResult> {
   requireAiOpts({ baseUrl, model, token, tokenEnv });
   const history = messages.filter((m) => m.role !== 'system').map(compactable);
   const before = stripToolMarkup(previous);
   const compacted = estimateTokens(history.map((m) => contentText(m.content) + JSON.stringify(m.tool_calls ?? '')).join('\n'));
   const instruction: ChatMessage = { role: 'system', content: compactionInstruction(compacted) };
-  const ask = async (note?: string): Promise<string> => {
+  const ask = (note?: string): Promise<string> => withRetry({ retries, retryDelay, signal, onRetry }, async () => {
     const sent = summaryHistory([instruction, ...history], { ...(before ? { previous: before } : {}), ...(note ? { note } : {}) });
     if (provider === 'anthropic') return anthropicCompact(sent, { baseUrl, model, token, maxTokens, thinking, signal });
-    const res = await fetch(`${baseUrl}/chat/completions`, {
+    const res = await reach(() => fetch(`${baseUrl}/chat/completions`, {
       method: 'POST',
       signal,
       headers: LLM_HEADERS(token as string),
       body: JSON.stringify({ model, messages: sent }),
-    });
+    }), signal);
     if (!res.ok) {
       const body = await res.text().catch(() => '');
-      throw new Error(llmErrorMessage(res.status, body, { model, requestId: res.headers.get('x-request-id'), statusText: res.statusText }));
+      throw failedRequest(res, body, { model });
     }
     const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
     return data?.choices?.[0]?.message?.content ?? '';
-  };
+  });
   const first = stripToolMarkup(await ask());
   const problem = summaryProblem(first, compacted);
   if (!problem) return { summary: first };

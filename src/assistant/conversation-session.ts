@@ -10,6 +10,8 @@ import {
   SESSION_VERSION, acquireLock, journalPath, newSessionId, projectHome, projectOf, releaseLock, saveSession,
   sessionFingerprint, sessionFingerprintsEqual, sessionTitle, subJournalPath, type Session, type SessionFingerprint,
 } from './sessions.js';
+import { retryWait } from './conversation-turn.js';
+import type { RetryInfo } from './llm-retry.js';
 import { shellRoots } from './shell.js';
 import { stripToolMarkup } from './tool-markup.js';
 import type { ChatMessage } from './agent.js';
@@ -218,6 +220,9 @@ export function journaledChatLLM(c: Conversation, from: string) {
   return (messages: unknown[], opts: Record<string, any> = {}) => {
     const { confirmWrite: answer, ...rest } = opts;
     return c.deps.chatLLM(messages as ChatMessage[], {
+      // A nested run's repeat of a failed request is a log line, unless the caller
+      // answers it.
+      onRetry: (info: RetryInfo) => retryWait(c, info, false),
       ...rest,
       onToolStart: (call: { id?: string; name: string; args: Record<string, unknown>; confirm: boolean }) => {
         journalTo(c, from, callStartEvent(call));

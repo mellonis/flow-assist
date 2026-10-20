@@ -99,6 +99,12 @@ export const hostConfigSchema = z.object({
     // the context passes `threshold` (0.5 of `ai.contextWindow`) or every `everyTurns`
     // turns (10; 0 — the threshold alone). `enabled: false` sends everything in full.
     recall: z.object({ enabled: z.boolean(), threshold: z.number().positive().max(1), minChars: z.number().int().positive(), everyTurns: z.number().int().min(0) }).partial().optional(),
+    // A request that fails for a reason that passes (a 429, a 5xx, an overloaded or
+    // unreachable provider) is made again before anything of its answer was shown
+    // (src/assistant/llm-retry.ts): up to `retries` repeats (10; 0 — none), `retryDelay`
+    // seconds before each (3), or the provider's own `Retry-After` when it sent one.
+    retries: z.number().int().min(0).optional(),
+    retryDelay: z.number().min(0).optional(),
     // What bounds one turn (src/assistant/rounds.ts): at most `maxRounds` requests
     // (150; 0 — no cap) and `maxTurnTokens` tokens spent across them (2000000, the
     // cached part of each prompt not counted; 0 — no budget). Whichever is reached first

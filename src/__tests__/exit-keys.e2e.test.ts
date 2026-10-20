@@ -177,7 +177,7 @@ test('with a message queued and a tool running, ONE Esc stops the turn; the queu
 
 test('a failed turn does not send the queue either — it comes back into the field', async () => {
   const model = new ScriptedModel();
-  const ui = await bootApp(model, 100, 28);
+  const ui = await bootApp(model, 100, 28, undefined, { ai: { baseUrl: 'http://scripted.model', model: 'scripted', toolLoading: 'all', retries: 0 } });
   // The first request hangs until the test lets it fail, as a provider's 500 would.
   const scripted = globalThis.fetch;
   let failNow: () => void = () => {};

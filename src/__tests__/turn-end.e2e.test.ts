@@ -38,7 +38,7 @@ test('a turn stopped with Esc says so on screen, and the closing word the model 
 test('a turn that failed says the provider\'s error on screen', async () => {
   const model = new ScriptedModel();
   model.script([{ tool: 'datetime', args: {} }], [{ text: 'Paris.' }]);
-  const ui = await bootApp(model, 100, 28);
+  const ui = await bootApp(model, 100, 28, undefined, { ai: { baseUrl: 'http://scripted.model', model: 'scripted', toolLoading: 'all', retries: 0 } });
   // The second request of the first turn fails, as a provider's 500 would.
   const scripted = globalThis.fetch;
   let calls = 0;

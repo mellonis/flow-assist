@@ -18,6 +18,7 @@
 import type { ToolDef } from '../loader/tools.js';
 import type { ChatMessage, ChatRoundResult, TokenUsage } from './agent.js';
 import type { ContentPart } from './images.js';
+import { failedRequest, reach, withRetry, LlmRequestError, type RetryOpts } from './llm-retry.js';
 import { llmErrorMessage } from './llm-error.js';
 import type { ThinkingConfig } from './llm-endpoint.js';
 
@@ -389,7 +390,7 @@ const headers = (token: string): Record<string, string> => ({
 // and the loop drops it for the rest of the turn — or every later round pays the
 // same 400 first.
 async function post(body: AnthropicRequest, o: AnthropicOpts): Promise<{ res: Response; thinkingDropped: boolean }> {
-  const send = (b: AnthropicRequest) => fetch(endpoint(o.baseUrl), { method: 'POST', signal: o.signal, headers: headers(String(o.token)), body: JSON.stringify(b) });
+  const send = (b: AnthropicRequest) => reach(() => fetch(endpoint(o.baseUrl), { method: 'POST', signal: o.signal, headers: headers(String(o.token)), body: JSON.stringify(b) }), o.signal);
   let res = await send(body);
   if (res.ok) return { res, thinkingDropped: false };
   let text = await res.text().catch(() => '');
@@ -401,10 +402,19 @@ async function post(body: AnthropicRequest, o: AnthropicOpts): Promise<{ res: Re
     if (res.ok) return { res, thinkingDropped: true };
     text = await res.text().catch(() => '');
   }
-  throw new Error(llmErrorMessage(res.status, text, { model: o.model, requestId: res.headers.get('request-id'), statusText: res.statusText }));
+  throw failedRequest(res, text, { model: o.model, idHeader: 'request-id' });
 }
 
-export async function anthropicChatRound(
+// One streamed round, repeated while it fails for a reason that passes and has given
+// nothing to its callbacks (./llm-retry.ts).
+export function anthropicChatRound(
+  messages: ChatMessage[],
+  o: AnthropicOpts & RetryOpts & { tools?: ToolDef[] },
+): Promise<ChatRoundResult> {
+  return withRetry(o, (callbacks) => anthropicRound(messages, { ...o, ...callbacks }));
+}
+
+async function anthropicRound(
   messages: ChatMessage[],
   o: AnthropicOpts & { tools?: ToolDef[]; onDelta?: (d: string) => void; onReasoning?: (d: string) => void; onToolCalls?: () => void },
 ): Promise<ChatRoundResult> {
@@ -433,12 +443,12 @@ export async function anthropicChatRound(
     const err = round.error();
     if (err) {
       await reader.cancel().catch(() => {});
-      throw new Error(llmErrorMessage(err.status, err.body, { model: o.model, requestId }));
+      throw new LlmRequestError(llmErrorMessage(err.status, err.body, { model: o.model, requestId }), { status: err.status });
     }
   }
   if (buf) line(buf);
   const err = round.error();
-  if (err) throw new Error(llmErrorMessage(err.status, err.body, { model: o.model, requestId }));
+  if (err) throw new LlmRequestError(llmErrorMessage(err.status, err.body, { model: o.model, requestId }), { status: err.status });
   return { ...round.result(), ...(thinkingDropped ? { thinkingDropped } : {}) };
 }
 

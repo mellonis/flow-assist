@@ -222,7 +222,7 @@ test('a known secret the model writes reaches stdout only as its mark', async ()
 
 test('a failed turn says the provider\'s error on stderr, prints nothing and exits 1', async () => {
   const model = new ScriptedModel();
-  const r = await oneShot(model, { fetch: (async () => new Response('upstream is down', { status: 500 })) as unknown as typeof fetch });
+  const r = await oneShot(model, { ai: { retries: 0 }, fetch: (async () => new Response('upstream is down', { status: 500 })) as unknown as typeof fetch });
   expect(r.code).toBe(1);
   expect(r.out).toBe('');
   expect(said(r.err)).toHaveLength(1);
@@ -241,6 +241,7 @@ test('the failure line is redacted: a known secret in the provider\'s error reac
   await withSecret(async () => {
     const model = new ScriptedModel();
     const r = await oneShot(model, {
+      ai: { retries: 0 },
       before: (config) => { refreshSecrets(config); },
       fetch: (async () => new Response(`upstream is down for ${SECRET}`, { status: 500 })) as unknown as typeof fetch,
     });
