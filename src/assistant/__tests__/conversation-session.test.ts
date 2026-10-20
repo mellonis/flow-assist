@@ -141,3 +141,143 @@ test('a nested run reports its waits as log lines, unless the caller answers the
   expect(answered).toEqual([1]);
   expect(own.log).toEqual([]);
 });
+
+// ─── the auto mode is saved with its session ──────────────────────────────────
+
+// The session as a later process opens it: read from the file, into a conversation of
+// its own, with `shell.autoRun` as the config then says.
+const reopen = (dir: string, home: string, id: string, autoRun = false) => {
+  const deps = fakeDeps({ sessionsDir: () => dir });
+  (deps.config() as { shell: Record<string, unknown> }).shell.autoRun = autoRun;
+  const s = loadSession(home, id)!;
+  const c = Conversation.restore(deps, s, sessionFingerprint(home, id), home);
+  return { c, notes: c.rows().filter((m) => m.role === 'note').map((m) => String(m.content)) };
+};
+
+test('a mode set on a session is written by the save and comes back with a note that names it', () => {
+  const dir = tmp();
+  const { c, home } = opened(dir, session());
+  c.setAutoMode('all');
+  c.save();
+  expect(loadSession(home, c.sessionId)!.autoMode).toBe('all');
+  const withRun = reopen(dir, home, c.sessionId, true);
+  expect(withRun.c.autoMode).toBe('all');
+  expect(withRun.notes).toEqual(['auto: writes + commands — restored with this session']);
+  const without = reopen(dir, home, c.sessionId, false);
+  expect(without.c.autoMode).toBe('all');
+  expect(without.notes).toEqual(['auto: writes — restored with this session']);
+});
+
+test('reads comes back as reads, with its note', () => {
+  const dir = tmp();
+  const { c, home } = opened(dir, session());
+  c.setAutoMode('reads');
+  c.save();
+  const back = reopen(dir, home, c.sessionId, true);
+  expect(back.c.autoMode).toBe('reads');
+  expect(back.notes).toEqual(['auto: reads — restored with this session']);
+});
+
+test('the note is a row of the conversation and a line of its journal, like the other notes', () => {
+  const dir = tmp();
+  const { c, home } = opened(dir, session());
+  c.setAutoMode('all');
+  c.save();
+  const back = reopen(dir, home, c.sessionId);
+  const lines = readJournal(journalPath(home, back.c.sessionId))!;
+  expect(lines.some((l) => l.t === 'row' && l.role === 'note' && l.text === 'auto: writes — restored with this session')).toBe(true);
+});
+
+test('a session saved in ask has no field and opens without a note', () => {
+  const dir = tmp();
+  const { c, home } = opened(dir, session());
+  c.setAutoMode('all');
+  c.save();
+  c.setAutoMode('ask');
+  c.save();
+  expect(loadSession(home, c.sessionId)!.autoMode).toBeUndefined();
+  expect(fs.readFileSync(path.join(home, `${c.sessionId}.json`), 'utf8')).not.toContain('autoMode');
+  const back = reopen(dir, home, c.sessionId);
+  expect(back.c.autoMode).toBe('ask');
+  expect(back.notes).toEqual([]);
+});
+
+test('an older file without the field opens in ask, no note', () => {
+  const dir = tmp();
+  const { c, home } = opened(dir, session());
+  const back = reopen(dir, home, c.sessionId);
+  expect(back.c.autoMode).toBe('ask');
+  expect(back.notes).toEqual([]);
+});
+
+test('a value that is not a mode opens in ask, no note', () => {
+  const dir = tmp();
+  for (const junk of ['everything', 7, null, ['all'], 'ask', 'ALL']) {
+    const s = session();
+    const home = projectHome(dir, null);
+    saveSession(home, { ...s, autoMode: junk } as unknown as Session);
+    const back = reopen(dir, home, s.id);
+    expect(back.c.autoMode).toBe('ask');
+    expect(back.notes).toEqual([]);
+  }
+});
+
+test('a session opened again in the mode it ends with does not say it twice', () => {
+  const dir = tmp();
+  const { c, home } = opened(dir, session());
+  c.setAutoMode('all');
+  c.save();
+  const once = reopen(dir, home, c.sessionId);
+  once.c.save();
+  const twice = reopen(dir, home, c.sessionId);
+  expect(twice.notes).toEqual(['auto: writes — restored with this session']);
+});
+
+test('opening a session saves nothing of its own', () => {
+  const dir = tmp();
+  const { c, home } = opened(dir, session());
+  c.setAutoMode('all');
+  c.save();
+  const back = reopen(dir, home, c.sessionId);
+  expect(back.c.saveTimer).toBeNull();
+});
+
+test('a change of mode is written without a turn or a save call, as other edits are', async () => {
+  const dir = tmp();
+  const { c, home } = opened(dir, session());
+  c.setAutoMode('all');
+  expect(c.saveTimer).not.toBeNull();
+  await new Promise((r) => setTimeout(r, 400));
+  expect(loadSession(home, c.sessionId)!.autoMode).toBe('all');
+  // Setting what is already set marks nothing.
+  c.setAutoMode('all');
+  expect(c.saveTimer).toBeNull();
+});
+
+test('a conversation that opens no session starts in ask and says nothing', () => {
+  const dir = tmp();
+  const { c, home } = opened(dir, session());
+  c.setAutoMode('all');
+  c.save();
+  const fresh = new Conversation(fakeDeps({ sessionsDir: () => dir }));
+  expect(fresh.autoMode).toBe('ask');
+  fresh.setAutoMode('ask');
+  expect(fresh.rows().filter((m) => m.role === 'note')).toEqual([]);
+  expect(loadSession(home, c.sessionId)!.autoMode).toBe('all');
+});
+
+test('a child has no state file: its mode is not written anywhere', async () => {
+  const dir = tmp();
+  const { c, home } = opened(dir, session());
+  const files = () => fs.readdirSync(home).filter((n) => n.endsWith('.json')).sort();
+  const before = files();
+  const started = c.startChild({ kind: 'subagent', label: 'sub', prompt: 'p', by: 'person' } as never, 'j1');
+  expect('refused' in started).toBe(false);
+  const child = (started as { child: Conversation }).child;
+  child.setAutoMode('all');
+  expect(child.deps.sessionsDir()).toBeNull();
+  await new Promise((r) => setTimeout(r, 400));
+  expect(files()).toEqual(before);
+  expect(loadSession(home, c.sessionId)!.autoMode).toBeUndefined();
+  expect(c.autoMode).toBe('ask');
+});

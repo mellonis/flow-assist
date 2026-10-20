@@ -2,9 +2,11 @@
 // working session is a long series of confirmations, and there are stretches — a batch
 // of edits, a clean-up — where the person wants to stop confirming for a while.
 //
-// It belongs to a CONVERSATION and is never saved: a restart, `/clear` and `/resume`
-// all come back to `ask`. A mode that survived a restart would be a
-// standing permission nobody remembers granting.
+// It belongs to a CONVERSATION and is saved with its session: a restart that continues
+// the session, `/resume` and the session picker bring it back, and say so in a note
+// (`autoRestored`), since a mode that survives is a standing permission the person may
+// not remember granting. `/clear` and `/new` start a new session, which asks. A
+// subagent's or a task's mode has no state file to be saved in.
 //
 // The three rungs:
 //   - `ask`    — today's behaviour, and the state every conversation starts in.
@@ -70,6 +72,11 @@ export function autoBadge(mode: AutoMode, autoRun: boolean): string {
   if (mode === 'reads') return 'auto: reads';
   if (mode === 'all') return autoRun ? 'auto: writes + commands' : 'auto: writes';
   return '';
+}
+
+// The note said when a saved session is opened in a mode other than `ask`.
+export function autoRestored(mode: AutoMode, autoRun: boolean): string {
+  return `${autoBadge(mode, autoRun)} — restored with this session`;
 }
 
 // The sentence said when the mode changes.

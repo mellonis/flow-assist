@@ -706,7 +706,14 @@ export class Conversation {
   currentProject(): string | null { return currentProject(this); }
   applySession(s: Session, fingerprint: SessionFingerprint, dir: string): void { applySession(this, s, fingerprint, dir); }
 
-  setAutoMode(mode: AutoMode): void { this.draw('autoMode', mode, true); }
+  // A change marks the session to be written like any other edit, so a kill right after
+  // the key keeps it; `save` false for the opening of a saved session, which has just
+  // read the mode from its file.
+  setAutoMode(mode: AutoMode, save = true): void {
+    if (this.autoMode === mode) return;
+    this.draw('autoMode', mode, true);
+    if (save) this.persist();
+  }
 
   // ── what runs, as the status line draws it
   setToolLabel(v: string): void {

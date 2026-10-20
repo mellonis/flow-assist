@@ -12,7 +12,8 @@ import {
 } from './sessions.js';
 import { retryWait } from './conversation-turn.js';
 import type { RetryInfo } from './llm-retry.js';
-import { shellRoots } from './shell.js';
+import { autoRestored } from './auto.js';
+import { shellAutoRun, shellRoots } from './shell.js';
 import { stripToolMarkup } from './tool-markup.js';
 import type { ChatMessage } from './agent.js';
 import type { ChatMsg } from './conversation-types.js';
@@ -104,6 +105,7 @@ export function snapshotSession(c: Conversation): Session {
     // Refs only — a path and a hash per image, never its bytes.
     images: [...c.images.values()], imageSeq: c.imageSeq,
     recall: saveRecallState(c.recall),
+    ...(c.autoMode !== 'ask' ? { autoMode: c.autoMode } : {}), // `ask` is the absence of the field
     closed: false, // written means in use — a resumed cleared session is open again
     project: c.sessionProject,
     ...(c.answeredAt ? { answeredAt: c.answeredAt } : {}),
@@ -343,7 +345,7 @@ export function applySession(c: Conversation, s: Session, fingerprint: SessionFi
   c.resetLiveViews(); // no live view tracked: the session's views are as saved
   c.resetImages(s.images ?? [], s.imageSeq ?? 0);
   c.recall = createRecallState(s.recall); // the ids are hashes: they still name the same items
-  c.setAutoMode('ask'); // the mode is never saved: an opened session asks
+  c.setAutoMode(s.autoMode ?? 'ask', false); // the mode the session was left in; the file already says it
   c.roundTools = false; // no round is being written
   c.usage = s.usage;
   c.prompts = s.prompts.slice();
@@ -353,6 +355,13 @@ export function applySession(c: Conversation, s: Session, fingerprint: SessionFi
   // — a session that ends in the same note is left as it is). No note waits for a turn's
   // end: none runs.
   c.projectNote = null;
+  // A mode other than `ask` is said once at the opening: it is a standing permission
+  // the person may not remember granting. Not repeated when the session ends in the
+  // same note (a restart that changed nothing).
+  if (c.autoMode !== 'ask') {
+    const note = autoRestored(c.autoMode, shellAutoRun(c.deps.config() as { shell?: unknown }));
+    if (c.currentRows().at(-1)?.content !== note) c.pushNote(note);
+  }
   c.project = { dir: '', root: null, files: [] };
   c.shell.setCwd(s.shellCwd ?? null);
   // What the session's commands told the model is told again.

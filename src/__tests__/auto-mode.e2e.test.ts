@@ -2,7 +2,7 @@
 // What matters is that it is never a hidden state (the hint line says it, mid-answer
 // too), that it never covers a web_fetch the allowlist does not cover, that it covers
 // run_command only when the person also set `shell.autoRun`, and that it is gone after
-// /clear, /resume and a restart.
+// /clear — and that it comes back, said in a note, with the session it was set on.
 import { afterEach, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -164,7 +164,7 @@ test('/auto sets and names the mode, and a word it does not know changes nothing
   ui.app.unmount();
 });
 
-test('/clear and /resume come back to ask', async () => {
+test('/clear starts in ask, and /resume brings the old session back in its mode, with a note', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-auto-'));
   const model = new ScriptedModel();
   model.script([{ text: 'first answer' }]);
@@ -180,19 +180,42 @@ test('/clear and /resume come back to ask', async () => {
   await ui.type('/clear');
   await ui.press('return');
   expect(shownMode(ui.backend.lastFrame)).toBeNull();
+  expect(ui.backend.lastFrame).not.toContain('restored with this session');
 
-  // …and a conversation opened from the list is another conversation, mode included.
+  // …a new conversation has a mode of its own, and the one opened from the list has the
+  // one it was left in.
   await stepAuto(ui);
   expect(shownMode(ui.backend.lastFrame)).toBe('reads');
   await ui.type('/resume 1');
   await ui.press('return');
   await settle(6);
   expect(ui.backend.lastFrame).toContain('first question');
-  expect(shownMode(ui.backend.lastFrame)).toBeNull();
+  expect(shownMode(ui.backend.lastFrame)).toBe('writes');
+  expect(ui.backend.lastFrame).toContain('auto: writes — restored with this session');
   ui.app.unmount();
 });
 
-test('a restart comes back to ask, and the session file never held the mode', async () => {
+test('/new starts in ask and says nothing about a mode', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-auto-'));
+  const model = new ScriptedModel();
+  model.script([{ text: 'first answer' }]);
+  const ui = await boot(model, { sessions: { dir } });
+  await ui.press('F');
+  await ui.type('first question');
+  await ui.press('return');
+  await settleUntil(() => model.requests.length === 1);
+  await settle(10);
+  await stepAuto(ui, 2);
+  expect(shownMode(ui.backend.lastFrame)).toBe('writes');
+  await ui.type('/new');
+  await ui.press('return');
+  await settle(6);
+  expect(shownMode(ui.backend.lastFrame)).toBeNull();
+  expect(ui.backend.lastFrame).not.toContain('restored with this session');
+  ui.app.unmount();
+});
+
+test('a restart that continues the session brings the mode back and says so', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-auto-'));
   const model = new ScriptedModel();
   model.script([{ text: 'first answer' }]);
@@ -207,17 +230,36 @@ test('a restart comes back to ask, and the session file never held the mode', as
   await new Promise((r) => setTimeout(r, 350)); // the debounced save
   const saved = listTree(dir).filter((n) => n.endsWith('.json'));
   expect(saved).toHaveLength(1);
-  expect(fs.readFileSync(path.join(dir, saved[0]!), 'utf8')).not.toContain('auto');
+  expect(JSON.parse(fs.readFileSync(path.join(dir, saved[0]!), 'utf8')).autoMode).toBe('all');
   ui.app.unmount();
 
   const again = new ScriptedModel();
   again.script([{ text: 'second answer' }]);
-  const back = await bootApp(again, 110, 30, (make) => [notebook(make)], { sessions: { dir } });
+  const back = await bootApp(again, 110, 30, (make) => [notebook(make)], { sessions: { dir }, shell: { autoRun: true } });
   await settle(6);
   await back.press('F');
   expect(back.backend.lastFrame).toContain('first question'); // the conversation did come back
-  expect(shownMode(back.backend.lastFrame)).toBeNull(); // the mode did not
+  expect(shownMode(back.backend.lastFrame)).toBe('writes + commands'); // and so did the mode
+  expect(back.backend.lastFrame).toContain('auto: writes + commands — restored with this session');
   back.app.unmount();
+});
+
+test('the mode set right before a kill is kept: the save is not left to a turn', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-auto-'));
+  const model = new ScriptedModel();
+  model.script([{ text: 'first answer' }]);
+  const ui = await boot(model, { sessions: { dir } });
+  await ui.press('F');
+  await ui.type('first question');
+  await ui.press('return');
+  await settleUntil(() => model.requests.length === 1);
+  await settle(10);
+  await new Promise((r) => setTimeout(r, 350));
+  await stepAuto(ui, 1); // the key, and nothing after it
+  await new Promise((r) => setTimeout(r, 350));
+  const saved = listTree(dir).filter((n) => n.endsWith('.json'));
+  expect(JSON.parse(fs.readFileSync(path.join(dir, saved[0]!), 'utf8')).autoMode).toBe('reads');
+  ui.app.unmount();
 });
 
 // ─── shell.autoRun: the person's second consent for run_command ──────────────

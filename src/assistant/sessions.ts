@@ -86,6 +86,7 @@ export interface Session {
   images?: ImageRef[];                 // what each `[Image #N]` of the conversation stands for; absent in older sessions
   imageSeq?: number;                   // the last N given out — numbering goes on from it
   recall?: { stubbed: string[]; turns: number }; // the bulky items sent as stubs (by id) and the turns since the last batch (./recall.ts)
+  autoMode?: 'reads' | 'all';          // the auto mode the session was left in (./auto.ts); absent — `ask`
   closed?: boolean;                    // left with /clear — listed, never continued on start
   project?: string | null;             // the project it started in (`projectOf`), decided once; absent — none
   answeredAt?: string;                 // when an answer or a background result last came; absent — none yet
@@ -440,6 +441,9 @@ export function loadSession(dir: string, id: string): Session | null {
       // items; anything that is not a list of strings reads as nothing stubbed.
       recall: saveRecallState(createRecallState(s.recall)),
       rev: Number.isInteger(s.rev) ? (s.rev as number) : 0,
+      // Anything but the two modes that change what asks reads as `ask`, which is the
+      // field's absence.
+      autoMode: s.autoMode === 'reads' || s.autoMode === 'all' ? s.autoMode : undefined,
       project: projectRead(s.project),
       answeredAt: typeof s.answeredAt === 'string' ? s.answeredAt : '',
       seenAt: typeof s.seenAt === 'string' ? s.seenAt : '',
