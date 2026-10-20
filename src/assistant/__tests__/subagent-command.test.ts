@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { parseSubagentLine, stopTargetIndex, subagentLabel, subagentListing } from '../subagent-command.ts';
+import { parseSubagentLine, stopTargetIndex, subagentLabel, subagentListing, tellTargetIndex } from '../subagent-command.ts';
 
 test('a bare line lists; stop as the first word is the stop command', () => {
   expect(parseSubagentLine('  ')).toEqual({ kind: 'list' });
@@ -67,4 +67,30 @@ test('the listing numbers an idle subagent with the rest, and says answered once
     { label: 'talker', kind: 'subagent', status: 'idle', startedAt: null, until: null, answered: true },
   ], [], 5_000);
   expect(text.split('\n')).toEqual(['1 · worker · working · 5s', '2 · rester · idle', '3 · talker · answered']);
+});
+
+test('`tell` as the first word is the tell command: a target, then the message with its spacing kept; either missing is the usage', () => {
+  expect(parseSubagentLine('tell 2  and  more\nlines')).toEqual({ kind: 'tell', target: '2', text: 'and  more\nlines' });
+  expect(parseSubagentLine('TELL worker  hi')).toEqual({ kind: 'tell', target: 'worker', text: 'hi' });
+  expect(parseSubagentLine('tell worker')).toMatchObject({ kind: 'error' });
+  expect(parseSubagentLine('tell')).toMatchObject({ kind: 'error' });
+  expect(parseSubagentLine('tell   ')).toMatchObject({ kind: 'error' });
+  // After a flag it is a prompt word like any other.
+  expect(parseSubagentLine('--auto tell the story')).toMatchObject({ kind: 'start', prompt: 'tell the story' });
+  expect(parseSubagentLine('telling the story')).toMatchObject({ kind: 'start' });
+});
+
+test('a tell names a child by the number the listing gave it or by its name; a name two children answer to is refused with their numbers', () => {
+  const child = (label: string, status: 'working' | 'idle' = 'idle') => ({ label, kind: 'subagent' as const, status, startedAt: null, until: null });
+  const running = [child('alpha'), child('beta', 'working'), child('alpha')];
+  expect(tellTargetIndex(running, 'beta', null)).toEqual({ at: 1 });
+  expect(tellTargetIndex(running, 'BETA', null)).toEqual({ at: 1 });
+  expect(tellTargetIndex(running, 'alpha', null)).toEqual({ many: [1, 3] });
+  expect(tellTargetIndex(running, 'nobody', null)).toBeNull();
+  // A number is read against the listing the person saw, not the live order.
+  expect(tellTargetIndex(running, '2', ['gone', 'beta'])).toEqual({ at: 1 });
+  expect(tellTargetIndex(running, '1', ['gone', 'beta'])).toBeNull();
+  expect(tellTargetIndex(running, '1', ['alpha'])).toEqual({ many: [1, 3] });
+  expect(tellTargetIndex(running, '2', null)).toBeNull();
+  expect(tellTargetIndex(running, '9', ['beta'])).toBeNull();
 });

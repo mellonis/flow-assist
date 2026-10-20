@@ -7,6 +7,7 @@ import type { EndedChild, RunningChild } from './conversation-types.js';
 export type SubagentLine =
   | { kind: 'list' }
   | { kind: 'stop'; target: string }
+  | { kind: 'tell'; target: string; text: string }
   | { kind: 'start'; prompt: string; withContext: boolean; auto: boolean }
   | { kind: 'error'; text: string };
 
@@ -14,8 +15,8 @@ const FLAGS = ['--with-context', '--auto'] as const;
 
 // The rest of the line after `/subagent` as the person typed it: spacing and line breaks
 // inside the prompt are kept, since the prompt is the work. `--with-context` and `--auto`
-// count only as the first words; `stop` as the very first word is the stop command (a
-// prompt that starts with the word `stop` is written another way).
+// count only as the first words; `stop` and `tell` as the very first word are those
+// commands (a prompt that starts with either word is written another way).
 export function parseSubagentLine(raw: string): SubagentLine {
   let rest = raw.trim();
   if (!rest) return { kind: 'list' };
@@ -23,6 +24,14 @@ export function parseSubagentLine(raw: string): SubagentLine {
   if (stop) {
     const target = (stop[1] ?? '').trim();
     return target ? { kind: 'stop', target } : { kind: 'error', text: '/subagent stop takes a number from the list or a name — /subagent lists them' };
+  }
+  const tell = /^tell(?:\s+([\s\S]*))?$/i.exec(rest);
+  if (tell) {
+    const body = (tell[1] ?? '').trim();
+    const at = body.search(/\s/);
+    const target = at < 0 ? body : body.slice(0, at);
+    const text = at < 0 ? '' : body.slice(at).trim();
+    return target && text ? { kind: 'tell', target, text } : { kind: 'error', text: '/subagent tell takes a number from the list or a name, then the message — /subagent lists them' };
   }
   let withContext = false;
   let auto = false;
@@ -61,6 +70,20 @@ export function stopTargetIndex(running: readonly RunningChild[], target: string
   }
   const wanted = target.toLowerCase();
   return running.findIndex((c) => c.label.toLowerCase() === wanted);
+}
+
+// The child a `tell` names, as an index into `running`: a number is read against `listed`
+// as `stopTargetIndex` reads it, a name against the live children. `many` holds the numbers
+// (as the listing counts them) of every child that answers to the name; null for none.
+export function tellTargetIndex(running: readonly RunningChild[], target: string, listed: readonly string[] | null): { at: number } | { many: number[] } | null {
+  let wanted: string | undefined;
+  if (/^\d+$/.test(target)) wanted = listed?.[Number(target) - 1];
+  else wanted = target;
+  if (wanted === undefined) return null;
+  const lower = wanted.toLowerCase();
+  const hits = running.flatMap((c, i) => (c.label.toLowerCase() === lower ? [i] : []));
+  if (hits.length > 1) return { many: hits.map((i) => i + 1) };
+  return hits.length ? { at: hits[0]! } : null;
 }
 
 const tokenText = (n: number): string => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : String(n));

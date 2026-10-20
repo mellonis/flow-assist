@@ -68,7 +68,7 @@ import { personSpoke, projectHere } from '../assistant/conversation-session.js';
 import { configLineOf, shellCommandOf } from '../assistant/confirm-policy.js';
 import { scheduleChild } from '../assistant/child-schedule.js';
 import { ASK_ARM_MS, askClock, createAskGuard } from '../assistant/child-ask-guard.js';
-import { parseSubagentLine, stopTargetIndex, subagentLabel, subagentListing } from '../assistant/subagent-command.js';
+import { parseSubagentLine, stopTargetIndex, subagentLabel, subagentListing, tellTargetIndex } from '../assistant/subagent-command.js';
 
 // Slash-commands of the chat — a single source for runChatCommand and Tab-completion.
 // `/analyze` is a tracker slash command and is removed.
@@ -1749,6 +1749,26 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   if (!child) { setError(`/subagent stop: no running subagent ${/^\d+$/.test(line.target) ? `numbered ${line.target}` : `«${line.target}»`} — /subagent lists them`); return; }
                   setField('');
                   child.stopSubtree('/subagent stop');
+                  host.notify();
+                  return;
+                }
+                if (line.kind === 'tell') {
+                  const listed = listedRef.current?.conv === conv ? listedRef.current.labels : null;
+                  const running = conv.runningChildren();
+                  const hit = tellTargetIndex(running, line.target, listed);
+                  const numbered = /^\d+$/.test(line.target);
+                  if (hit && 'many' in hit) { setError(`/subagent tell: «${line.target}» names more than one subagent — use a number: ${hit.many.join(', ')}`); return; }
+                  if (!hit) {
+                    const name = numbered ? listed?.[Number(line.target) - 1] : line.target;
+                    const gone = name !== undefined && conv.endedChildren.some((e) => e.label.toLowerCase() === name.toLowerCase());
+                    setError(gone ? `/subagent tell: «${name}» has ended — it takes no more messages` : `/subagent tell: no subagent ${numbered ? `numbered ${line.target}` : `«${line.target}»`} — /subagent lists them`);
+                    return;
+                  }
+                  const child = [...conv.children][hit.at]!;
+                  const sent = child.receive(line.text);
+                  if ('refused' in sent) { setError(`/subagent tell: ${sent.refused}`); return; }
+                  setField('');
+                  say(sent.sent === 'queued' ? `«${child.label}» is working — your message reaches it at its next step` : `message sent to «${child.label}»`);
                   host.notify();
                   return;
                 }
