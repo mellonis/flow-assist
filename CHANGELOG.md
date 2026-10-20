@@ -9,7 +9,7 @@ What each version of flow-assist brought, newest first. The version is the one i
   lands in the conversation as a `◆` message, as a background task's does; the subagent then rests (`◦ <name> ·
   idle` under the field, `idle` in `/subagent`) with no slot and no timer, until you stop it
   (`x` `y` on its row, `/subagent stop`), `/clear` it, or flow-assist exits. A task, and a
-  subagent the assistant starts, still end with their answer.
+  subagent the assistant starts, end with their answer.
 - **`/subagent tell <number or name> <text>`** sends a message to a subagent you started. A
   resting one runs a turn of its own on it, with its original task in front of it, taking a
   slot for that turn like any job; a working one takes it at its next step. The answer to a
@@ -21,11 +21,13 @@ What each version of flow-assist brought, newest first. The version is the one i
 - **A session left with a subagent in it stays open in the process.** It is not put away
   while a subagent rests, so coming back finds the subagent in the same conversation; the
   picker reads it `here` with the session's own status, and it is put away when its last
-  subagent ends. A subagent does not survive a restart; its journal and `/export` keep its
+  subagent ends. Such a session says what lands in it while you are away as a put-away one
+  does: its own unread answer (`● «title» finished — its answer is unread`) and a later
+  answer of a subagent you wrote to (`● «name» answered — open the session to read it`),
+  and it counts in the footer's `●` until you have read them. A subagent does not survive a restart; its journal and `/export` keep its
   conversation.
 - **A subagent's journal says each answer.** The session's journal gets an `answered` line
-  per answer of a subagent you started, and the `end` line when the subagent ends rather than
-  at its first answer; `/export` draws `*Subagent «name» answered*` and, for one still
+  per answer of a subagent you started, and the `end` line when the subagent ends; `/export` draws `*Subagent «name» answered*` and, for one still
   resting, a block summarised `did not finish`.
 
 - **The auto mode is saved with its session and said when it comes back.** A session left in

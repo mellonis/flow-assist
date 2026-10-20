@@ -3147,6 +3147,15 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   named as `movedToWaiting` names it, only after the park went through, only when the
   unread thing is the session's own answer (a task's result has its toast, which says where),
   and never from `closeAll`.
+  A session left that stays loaded for a live child (`retire` kept it, its watch runs) says
+  the same for what lands while nobody looks (`keptSaid`, from the watch's deferred check):
+  its own answer, when it reads `done` (the same toast, once, with the same rule for what
+  is named; the session goes into `keptUnread`, which `attention().done` counts while it is
+  `headless` and which `reclaim` and `park` drop, `park` saying nothing a second time), and
+  a later answer of a subagent the person started (`● «<name>» answered — open the session
+  to read it`, once per answer, kept by `answerCount`; `markAnswered` tells the ancestors
+  through `children`). The session counts in `done` while `unreadAnswers()` is not empty,
+  which the watch's `seeAnswer` empties; a session on screen is never counted.
   `forget(id)` drops one and redraws only when it dropped something; `restore` calls it
   for its conversation, and so do opening a session from its file and the picker's read,
   so a session opened here is never owed (a live one taken back (`reclaim`) was never put
@@ -3346,8 +3355,8 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   (read from `endedChildren`), the ambiguity, the usage, and `receive`'s own. A message sent
   clears the field and says a toast: `message sent to «x»`, or `«x» is working — your
   message reaches it at its next step`. The text keeps its inner spacing and line breaks.
-  The tell is typed in the session's field: no key handling changes, and a subagent's y/n
-  waiting meanwhile is answered only by `y` / `n` on an empty field, as always.
+  The tell is typed in the session's field, so it is ordinary field input; a subagent's y/n
+  waiting meanwhile is answered only by `y` / `n` on an empty field.
 - **Ctrl+C, Ctrl+D and Ctrl+Z take a second press** (`src/runtime/exit-keys.ts`, pure;
   the App owns the arm). flowtty hands these three to the app BEFORE the terminal
   backend acts (exit, exit, suspend — skipped when a `useInput` handler returns strict

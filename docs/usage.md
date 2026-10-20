@@ -35,7 +35,10 @@ answer or background result came while you were not looking — your own session
 too (`this chat · done`), for one that came while the picker was open (your own row
 shows only your own turn; its background tasks, and the turn of a session you left, are
 the footer's `N in background`). A session you left that finishes its turn says so once,
-with a toast (`● «title» finished — its answer is unread`) and no system alert; a
+with a toast (`● «title» finished — its answer is unread`) and no system alert, also when it
+stays open for a subagent; the answer of a subagent you wrote to (`/subagent tell`) that
+lands in a session you left says so once too (`● «name» answered — open the session to
+read it`), and the session counts as `●` until you have read it. A
 background task's result has its own toast. The row under the chat's field shows, at its
 right, `⏸ N` for the other sessions waiting for your answer and `● N` for the ones you
 left whose answer you have not read (nothing when there are none; the session you are in
@@ -49,7 +52,7 @@ Ctrl+R renames, Ctrl+P moves it into the current project (its file and journal w
 Ctrl+X deletes after a y/n.
 A session open in another process can be neither opened, renamed, moved nor deleted
 from here, and your own open session refuses a move too — switch away from it first. A
-`here` one can be opened and renamed, but not moved or deleted until it is put away.
+`here` one can be opened and renamed, but not moved or deleted until it is put away (stopping its subagents puts it away).
 
 ### Naming, `/new`, `/clear` and `/resume`
 
