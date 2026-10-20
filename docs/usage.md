@@ -451,6 +451,26 @@ tokens (ai.maxTurnTokens) — …` — and Enter on the empty field, whose hint 
 `⏎ continue`, sends "continue", so the assistant carries on where it stopped. Both
 limits are yours to set; the assistant cannot change them.
 
+## When a request to the model fails
+
+A request that fails for a reason that passes is made again: a 429, 500, 502, 503, 504
+or 529 (the provider is limiting, busy or failing), the same arriving as an error event in
+the middle of a stream, or a connection that could not be made. While a chat turn waits
+its status line reads `LLM 429 · retry 2/10 in 3 s` and counts down each second, and the
+log gets a line for each try; a subagent's or a task's wait, and a compaction's, is the log
+line alone. Esc ends the wait and stops the turn.
+
+A request is made again only while nothing of its answer has been shown. One that fails
+after its first word fails as it is, so an answer is never shown twice and a tool call
+never runs twice. Anything else a provider refuses (a bad token, a missing model, a
+request too large) fails at once. A request that is still failing after the last try
+fails with the provider's words and the count, `… — gave up after 10 retries`.
+
+`ai.retries` is how many times a request is made again (10 by default; 0 makes one
+request and no more). `ai.retryDelay` is the seconds before each (3 by default); a
+provider's `Retry-After`, in seconds or as a date, is waited instead, up to a minute.
+`config set ai.retries 0` turns it off; both are yours to set.
+
 ## Shell commands
 
 ### Your own: `!command`

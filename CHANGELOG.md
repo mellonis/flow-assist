@@ -5,6 +5,17 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **A request to the model that fails for a reason that passes is made again.** A 429, 500,
+  502, 503, 504 or 529, the same arriving as an error event in a stream, and a connection
+  that could not be made are waited out and repeated, on both wires and in `/compact` and
+  the automatic compaction. A chat turn's status line reads `LLM 429 · retry 2/10 in 3 s`
+  and counts down; a subagent's, a task's and a compaction's wait is a log line. Esc ends
+  the wait and stops the turn. Nothing is repeated once the request has shown a word, a
+  thought or a tool call, so an answer is never shown twice. After the last try the turn
+  fails with the provider's words and `— gave up after 10 retries`.
+- **`ai.retries` and `ai.retryDelay`** set how many times (10; 0 makes one request) and how
+  many seconds apart (3). A provider's `Retry-After` is waited instead, up to a minute.
+
 - **A subagent's whole conversation is on disk, beside its session.** It keeps a journal of
   its own, `<id>.sub/<child>.log.jsonl` next to the session's, holding what a session's
   journal holds: what it was asked, its steps, its answer, every call with its result and the

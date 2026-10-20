@@ -2587,6 +2587,30 @@ body or the `x-request-id` header; a 401/403 adds a generic hint about the token
 `config set ai.model`. It starts `LLM <status>` so `isImageRefusal` still reads it.
 The streamed round and `/compact`'s one-shot both use it.
 
+**A request that fails for a reason that passes is made again** (`src/assistant/llm-retry.ts`).
+`withRetry` runs one attempt of a request and decides whether to make another; the
+OpenAI-compatible round (`realChatRound`), the Anthropic round (`anthropicChatRound`) and
+both compaction paths (`compactConversation`'s `ask`) all go through it. A failed request is
+an `LlmRequestError` (`failedRequest` builds it from the response, `reach` turns a `fetch`
+that rejected into one with `network: true`; an abort and a non-network throw pass through
+untouched) whose message is `llmErrorMessage`'s text, so `isImageRefusal` and every test
+that reads the text hold; it carries `status` and the `Retry-After` in `retryAfterMs`. An
+SSE `error` event is the same error, its status read from its type (`errorStatus`). Repeated:
+429, 500, 502, 503, 504, 529 and a network failure. **A round that gave anything to its
+callbacks is never repeated**: `withRetry` hands the attempt its own `onDelta`, `onReasoning`
+and `onToolCalls`, which note the delivery before they forward, so no caller has to remember
+the rule. The wait is `ai.retryDelay` seconds (3) or `Retry-After` (seconds or an HTTP date,
+capped at 60 s), up to `ai.retries` repeats (10; `llmOpts` reads both and every caller
+spreads them with the endpoint); the last failure's message ends `— gave up after N
+retries`. The abort is read as the turn reads it (`signal.aborted` or `name ===
+'AbortError'`): never repeated, and it ends a wait at once. The two one-shot fallbacks
+(`stream_options`, a refused thinking block) run inside the attempt and are not counted.
+`onRetry(info)` is told before each wait and may return a function called when the wait
+ends: a turn (`retryWait`, `conversation-turn.ts`) logs a line and, for a session's own turn
+(no `parent`), puts `LLM 429 · retry 2/10 in 3 s` on the status line (`toolLabel`) with a
+one-second tick; a child's turn, a compaction and a tool's nested run log only. Time, the
+wait and the tick go through `retryClock`, which tests replace.
+
 **Two wires, one history** (`src/assistant/llm-endpoint.ts`, `src/assistant/anthropic.ts`).
 `ai.provider` picks how the model is reached: unset (or anything but `anthropic`, read
 case-blind) an OpenAI-compatible chat-completions API, `anthropic` Anthropic's own
