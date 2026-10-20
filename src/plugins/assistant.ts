@@ -418,7 +418,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // What is open and what is folded (src/assistant/folds.ts): one global
           // state, plus the blocks a click has made an exception of. `details` (^o)
           // is the master switch; a click opens the block under it alone. The
-          // conversation's, like the auto mode — never saved: `/clear` and a session read
+          // conversation's and never saved: `/clear` and a session read
           // from its file come back to everything folded, a session taken back while it is
           // still loaded here keeps them.
           const [folds, setFoldsState] = ui.useState<FoldState>(allFolded());

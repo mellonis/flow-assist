@@ -5,6 +5,15 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **The auto mode is saved with its session and said when it comes back.** A session left in
+  `reads` or `all` opens in that mode again after a restart that continues it, with `/resume`
+  and from the session picker, and the conversation gets one note, for example `auto: writes
+  + commands — restored with this session` (worded as the hint line, with `shell.autoRun` as
+  it stands then). A mode change is written the way other edits are, so a kill right after
+  Shift+Tab keeps it. A session saved by an older version, or in `ask`, opens asking and says
+  nothing; `/clear`, `/new`, a subagent and a task start asking. `shell.autoRun` is
+  still needed for commands, and `web_fetch` outside the allowlist and `config_set` still ask.
+
 - **A request to the model that fails for a reason that passes is made again.** A 429, 500,
   502, 503, 504 or 529, the same arriving as an error event in an Anthropic stream, and a
   connection that could not be made or was lost before the answer began are waited out and

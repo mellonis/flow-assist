@@ -1298,9 +1298,14 @@ A saved history that holds calls under the name `background` is sent as it is. T
   flag, an MCP tool on the person's `readOnly` list) never reached the y/n anyway — it
   is the rung the cycle passes THROUGH, so one keypress cannot land on "every write
   runs", and it is what the hint line then says. `all` answers a write's y/n for the
-  person. The mode belongs to the CONVERSATION and is never saved: a restart, `/clear`
-  and `/resume` all come back to `ask`, and the session file does not
-  hold it. Three calls are not automatic in any mode on their own — `run_command` unless
+  person. The mode belongs to the CONVERSATION and is saved with its session
+  (`Session.autoMode`, written only when it is not `ask`; an absent or unknown value reads
+  as `ask`): a restart that continues the session, `/resume` and the picker open it in that
+  mode and `applySession` adds one note row (`autoRestored`, worded as the hint badge with
+  `shell.autoRun` as it stands at the opening; journaled and shown like any note, and not
+  repeated when the session already ends in it). `/clear` and `/new` start in `ask`, and a
+  subagent's or task's mode has no state file. `setAutoMode` marks the session for the
+  debounced save like other edits, so a kill right after the key keeps it. Three calls are not automatic in any mode on their own — `run_command` unless
   the person set `shell.autoRun` (the y/n is its only guard, and the command may have
   been written from a page the model just read), `web_fetch` (one that reaches the
   confirmation at all is to a host outside `web.allowlist`, which is exactly what its
@@ -3455,7 +3460,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   - **A block that did not exist yet follows the global state**: with everything open,
     the next turn's tool calls and command output arrive open. `/clear` and `/resume`
     both go back to everything folded with no exceptions — the state
-    is the CONVERSATION's, like the auto mode, and is never saved.
+    is the CONVERSATION's and is never saved.
   - One block does NOT follow it (`isClicked`): the **cap on an open tool trail**. A
     key meaning "open everything" is asking for the trail, not for sixty rows of it,
     and the cap is what keeps an open trail readable.

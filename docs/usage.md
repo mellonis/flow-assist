@@ -203,7 +203,7 @@ the line says so.
 `--auto` first on the line starts the subagent in the auto mode `all`: the writes that mode
 answers are answered without asking, as in a chat (`/auto`), and a command still asks
 unless `shell.autoRun` is on. The mode of the conversation you start it from never passes to a
-subagent; without `--auto` every write asks. The flags may come in either order.
+subagent, and a subagent's mode is not saved; without `--auto` every write asks. The flags may come in either order.
 
 **A subagent's y/n** looks like the assistant's own, with the subagent's name in the title
 (`⚠ fix-tests › read-logs · Confirm write: run_command`), and stands where you type. It is

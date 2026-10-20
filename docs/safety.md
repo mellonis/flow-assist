@@ -31,8 +31,11 @@ open over it.
 Shift+Tab — or `/auto reads|all|off` — says how much you want to confirm while you
 work: `auto: reads` leaves every write asking, `auto: writes` lets writes run without
 the y/n, and the chat's hint line says which is on for as long as it is. It belongs to
-the conversation you are in: a restart, `/clear`, `/new`, opening another session and
-a new task all go back to asking, and nothing about it is saved. Two things always ask,
+the conversation you are in and is saved with its session: a restart that continues the
+session, `/resume` and the session picker bring it back, and a note in the conversation
+says so (`auto: writes — restored with this session`, with `writes + commands` when
+`shell.autoRun` is on). A session saved by an older version, or in `ask`, opens asking
+and says nothing. `/clear`, `/new` and a new task start asking. Two things always ask,
 whatever you set — reading a page from a host that is not on `web.allowlist`, and the
 assistant's `config_set`. A command the assistant runs (`run_command`) asks too, unless
 you also said so yourself: `config set shell.autoRun true` (or `:config set --session
