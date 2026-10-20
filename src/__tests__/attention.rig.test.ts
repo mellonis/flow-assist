@@ -267,7 +267,7 @@ test('a left turn that ends without the session being put away redraws', async (
   const { sub, rig } = await heldTurn();
   const { left: a } = rig.switchTo();
   // A task still counted keeps the session loaded when its own turn ends.
-  const task = {} as Conversation;
+  const task = { unreadAnswers: () => [] } as unknown as Conversation;
   a.children.add(task);
   let heard = 0;
   rig.registry.onChange(() => { heard++; });
@@ -320,14 +320,17 @@ test('the missing-memory note is said once in a session left, and again on scree
 test('a left session whose unread thing is a task\'s result is counted but not announced (the result has its own toast)', async () => {
   const { sub, rig } = await heldTurn();
   const { left: a } = rig.switchTo();
-  const task = {} as Conversation;
+  const task = { unreadAnswers: () => [] } as unknown as Conversation;
   a.children.add(task); // keeps it loaded when its own turn ends
   sub.release();
   await rig.until(() => !a.busy);
+  // The answer landed in the kept session: said once, there.
+  await rig.until(() => finished(rig).length === 1);
   a.deliver('job finished:\nok'); // lands as a row after the answer
   a.children.delete(task);
   a.emit({ type: 'children', count: 0 });
   await rig.until(() => a.closed);
   expect(rig.registry.attention().done).toBe(1);
-  expect(finished(rig)).toEqual([]);
+  // The result adds no toast of this kind: it has its own.
+  expect(finished(rig)).toHaveLength(1);
 });

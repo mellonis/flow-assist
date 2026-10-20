@@ -100,6 +100,9 @@ export class Conversation {
   private idleNow = false;
   // A later answer of a staying subagent that nobody has read: its row says `answered`.
   private answerPending = false;
+  // How many later answers it has given: one more each time `answerPending` is set, so a
+  // watcher can tell a new answer from one it has said already.
+  answerCount = 0;
   // Left by the chat while it has work of its own (the registry's `retire`): kept loaded
   // and locked, drawn by nobody, until nothing of its own is left. A result lands in it
   // as a row and starts no turn (`takeInbox`).
@@ -534,8 +537,9 @@ export class Conversation {
   // a question dismissed; a session left while it works is kept by the registry and
   // closed only once it is quiescent. The tasks it started are stopped only by /clear
   // and by a stop from its own parent (`stopChildren`); a task that ends hands the ones
-  // still live to its parent (`handChildrenUp`); a park of a session has only idle
-  // subagents left, which stay in memory until the exit, and an exit leaves the rest running. Work still in flight afterwards writes its journal
+  // still live to its parent (`handChildrenUp`); a park of a session has no
+  // children left (a session with any live child, an idle subagent included, is not put
+  // away), and an exit leaves the rest running. Work still in flight afterwards writes its journal
   // lines where it happened and nothing else: the object draws nothing more (no
   // listeners), saves nothing (`persist`, `save`) and holds no timer. The save and the
   // lock's release come first, from whoever closes it: the chat for /clear, the
@@ -677,11 +681,23 @@ export class Conversation {
     this.parent?.treeChanged(this.parent);
     this.parent?.childrenChanged();
   }
-  // A later turn answered: the row says so until the person has read it.
+  // A later turn answered: the row says so until the person has read it. The conversations
+  // above hear `children`, so a session the chat has left can say it.
   markAnswered(): void {
     if (this.isClosed) return;
     this.answerPending = true;
+    this.answerCount++;
     this.changed(true);
+    this.parent?.childrenChanged();
+  }
+  // The live descendants whose later answer nobody has read, nearest first.
+  unreadAnswers(): Conversation[] {
+    const out: Conversation[] = [];
+    for (const c of this.children) {
+      if (c.answerPending) out.push(c);
+      out.push(...c.unreadAnswers());
+    }
+    return out;
   }
   // The person reads it (the watch opens on it, or is open when the answer lands).
   seeAnswer(): void {

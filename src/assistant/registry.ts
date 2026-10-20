@@ -246,7 +246,8 @@ export class ConversationRegistry {
       pending = true;
       setTimeout(() => {
         pending = false;
-        if (c.closed || !this.watches.has(c) || !this.quiescent(c)) return;
+        if (c.closed || !this.watches.has(c)) return;
+        if (!this.quiescent(c)) { this.keptSaid(c); return; }
         // A park that throws (a failed save or release) leaves the session loaded, locked
         // and shown `here`, and the log says why. The watch stays, but nothing of the
         // session's own is left to ask for another check: it stays so until the person
@@ -276,6 +277,8 @@ export class ConversationRegistry {
   reclaim(c: Conversation): void {
     this.watches.get(c)?.();
     this.watches.delete(c);
+    this.keptUnread.delete(c);
+    this.answerSaid.delete(c);
     c.headless = false;
     this.waitingSaid.delete(c);
   }
@@ -296,6 +299,8 @@ export class ConversationRegistry {
     c.takeInbox('rows');
     // Read after the inbox landed: what it brought is unseen by a conversation nobody shows.
     const unread = c.status === 'done';
+    // A kept session already said so when its answer landed.
+    const said = this.keptUnread.delete(c);
     c.save({ silent: true });
     c.releaseLock();
     c.close('park');
@@ -303,7 +308,7 @@ export class ConversationRegistry {
     if (unread && c.sessionId) {
       this.unseen.add(c.sessionId);
       // A task's result that landed is already named by its own toast, which says where.
-      if (left && c.messages.findLast((m) => m.role === 'assistant' || m.role === 'bg')?.role === 'assistant') this.finishedSaid(c);
+      if (left && !said && c.messages.findLast((m) => m.role === 'assistant' || m.role === 'bg')?.role === 'assistant') this.finishedSaid(c);
     }
     this.notifyChange();
   }
@@ -314,6 +319,33 @@ export class ConversationRegistry {
     const svc = this.init.services() as { showMessage?: (t: string) => void };
     try { svc.showMessage?.(`● ${this.nameOf(c)} finished — its answer is unread`); } catch { /* a toast is never fatal */ }
   }
+  // A session the chat left that stays loaded for work of its own (a subagent resting in
+  // it, a task running) says what landed in it while nobody looked, as a put-away session
+  // does: its own answer, unread, is said once and counted (`keptUnread`); a later answer of
+  // a subagent the person started is said once per answer (`answerSaid` holds the count of
+  // answers said for each) and counts while it stays unread (`attention`).
+  private keptSaid(c: Conversation): void {
+    if (!c.headless || c.kind !== 'session') return;
+    let said = false;
+    if (!this.keptUnread.has(c) && c.status === 'done') {
+      this.keptUnread.add(c);
+      said = true;
+      if (c.messages.findLast((m) => m.role === 'assistant' || m.role === 'bg')?.role === 'assistant') this.finishedSaid(c);
+    }
+    const told = this.answerSaid.get(c) ?? new Map<Conversation, number>();
+    for (const a of [...told.keys()]) if (a.closed) told.delete(a);
+    for (const a of c.unreadAnswers()) {
+      if (told.get(a) === a.answerCount) continue;
+      told.set(a, a.answerCount);
+      said = true;
+      const svc = this.init.services() as { showMessage?: (t: string) => void };
+      try { svc.showMessage?.(`● «${a.label}» answered — open the session to read it`); } catch { /* a toast is never fatal */ }
+    }
+    this.answerSaid.set(c, told);
+    if (said) this.notifyChange();
+  }
+  private readonly keptUnread = new Set<Conversation>();
+  private readonly answerSaid = new Map<Conversation, Map<Conversation, number>>();
   // Sessions put away with an answer or a result nobody has read, by id, until one is
   // opened here (`forget`). The badge counts them (`attention`); the picker's own `done`
   // is the file's. It does not outlive the process.
@@ -338,15 +370,19 @@ export class ConversationRegistry {
     return n;
   }
   // What the person is owed by the sessions they are not in: the live ones left on a y/n
-  // or a question, and the ones put away unread. The session on screen is in neither: it
-  // is not `headless`, and every way onto the screen forgets its id first.
+  // or a question, and the ones put away unread; a left session that stays loaded for a
+  // subagent counts as `done` while its own answer, or a later answer of a subagent the
+  // person started, is unread. The session on screen is in neither: it is not `headless`,
+  // and every way onto the screen forgets its id first.
   attention(): { waiting: number; done: number } {
     let waiting = 0;
+    let done = this.unseen.size;
     for (const c of this.convs) {
       if (c.closed || c.kind !== 'session' || !c.headless) continue;
       if (this.statusOf(c.sessionId) === 'waiting') waiting++;
+      else if (this.keptUnread.has(c) || c.unreadAnswers().length) done++;
     }
-    return { waiting, done: this.unseen.size };
+    return { waiting, done };
   }
   // What reads the registry hears it changed: the host redraws (the footer's count, the
   // picker), then each `onChange` listener runs — each on its own, so one that throws
