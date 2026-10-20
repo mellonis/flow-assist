@@ -5,7 +5,7 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { agentChat, compactConversation, type ChatMessage } from '../agent';
 import { ANTHROPIC_CONTENT, anthropicChatRound } from '../anthropic';
 import { llmOpts } from '../llm-endpoint';
-import { LlmRequestError, RETRIES_DEFAULT, RETRY_STATUSES, parseRetryAfter, retryClock, retryLabel, withRetry, type RetryInfo } from '../llm-retry';
+import { LlmRequestError, RETRIES_DEFAULT, RETRY_STATUSES, parseRetryAfter, readChunk, retryClock, sleepFor, retryLabel, withRetry, type RetryInfo } from '../llm-retry';
 import { isImageRefusal } from '../images';
 
 const realFetch = globalThis.fetch;
@@ -50,6 +50,13 @@ const anthropicAnswer = (text: string) => sse(
   { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } },
   { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 1 } },
 );
+
+// A connection failure as Bun reports it: a `TypeError` carrying a code.
+const withCode = (message: string, code: string, where: 'error' | 'cause' = 'error'): TypeError => {
+  if (where === 'cause') return new TypeError(message, { cause: Object.assign(new Error(message), { code }) });
+  return Object.assign(new TypeError(message), { code });
+};
+const refused = () => withCode('Unable to connect', 'ConnectionRefused');
 
 const Q: ChatMessage[] = [{ role: 'user', content: 'hi' }];
 const OPENAI = { baseUrl: 'http://model.test', model: 'm', token: 't' };
@@ -99,7 +106,7 @@ test('the statuses that are repeated are exactly the six', () => {
 });
 
 test('a network failure of the request is repeated; a plain error, and the person stopping, are not', async () => {
-  serve(new TypeError('Unable to connect'), openAiAnswer('back'));
+  serve(refused(), openAiAnswer('back'));
   expect((await chat()).content).toBe('back');
   expect(calls).toHaveLength(2);
 
@@ -119,7 +126,7 @@ test('a network failure of the request is repeated; a plain error, and the perso
 });
 
 test('an unreachable provider on the Anthropic wire is repeated, and the give-up names the count', async () => {
-  serve(new TypeError('Unable to connect'));
+  serve(refused());
   const e = await fails(round({ retries: 2 }));
   expect(e.message).toBe('Unable to connect — gave up after 2 retries');
   expect(calls).toHaveLength(3);
@@ -143,7 +150,7 @@ test('an abort during the wait ends the round at once, as an abort', async () =>
 });
 
 test('the real wait ends the moment the signal aborts', async () => {
-  Object.assign(retryClock, { sleep: realClock.sleep });
+  retryClock.sleep = sleepFor;
   const stop = new AbortController();
   const waiting = retryClock.sleep(3_600_000, stop.signal);
   stop.abort();
@@ -193,6 +200,15 @@ test('an error event maps to the status of its type: rate limit, api, timeout, o
   serve(...types.map((t) => sse(streamError(t))), anthropicAnswer('ok'));
   await round({ onRetry: (i: RetryInfo) => { seen.push(i.status); } });
   expect(seen).toEqual([429, 500, 504, 529]);
+});
+
+test('an error event in the last line of the stream, with no newline after it, is repeated like any other', async () => {
+  const last = new Response(`data: ${JSON.stringify(streamError('overloaded_error'))}`, { headers: { 'content-type': 'text/event-stream' } });
+  serve(last, anthropicAnswer('ok'));
+  const seen: (number | undefined)[] = [];
+  expect((await round({ onRetry: (i: RetryInfo) => { seen.push(i.status); } })).content).toBe('ok');
+  expect(seen).toEqual([529]);
+  expect(calls).toHaveLength(2);
 });
 
 test('an error event after a delta fails the round, and the delta was shown once', async () => {
@@ -303,10 +319,10 @@ test('ai.retryDelay is the wait, in seconds', async () => {
   expect(slept).toEqual([500, 500]);
 });
 
-test('Retry-After in seconds replaces the delay; in the past or unreadable it does not', async () => {
+test('Retry-After in seconds replaces the delay; a date in the past or unreadable does not', async () => {
   serve(failing(429, { 'retry-after': '7' }), failing(429, { 'retry-after': 'soon' }), failing(429, { 'retry-after': 'Mon, 19 Oct 2026 12:00:00 GMT' }), openAiAnswer('x'));
   await chat();
-  expect(slept).toEqual([7000, 3000, 0]);
+  expect(slept).toEqual([7000, 3000, 3000]);
 });
 
 test('Retry-After as an HTTP date is the time until it', async () => {
@@ -328,6 +344,15 @@ test('parseRetryAfter reads seconds, fractions and dates', () => {
   expect(parseRetryAfter('', NOW)).toBeUndefined();
   expect(parseRetryAfter(null, NOW)).toBeUndefined();
   expect(parseRetryAfter('-4', NOW)).toBeUndefined();
+});
+
+test('parseRetryAfter takes a date only as an HTTP date in the future', () => {
+  expect(parseRetryAfter('Mon, 19 Oct 2026 12:00:00 GMT', NOW)).toBeUndefined();
+  expect(parseRetryAfter(new Date(NOW).toUTCString(), NOW)).toBeUndefined();
+  for (const garbage of ['1 2', 'Mon 3', '2026-10-21T12:00:00Z', 'Oct 21 2026', 'soon', '12 seconds', 'Tue, 20 Oct 2026 12:00:00']) {
+    expect(parseRetryAfter(garbage, NOW)).toBeUndefined();
+  }
+  expect(parseRetryAfter('Tue, 20 Oct 2026 12:00:09 GMT', NOW)).toBe(9000);
 });
 
 test('each wait is reported before it, and its end is told to what the report returned', async () => {
@@ -378,7 +403,7 @@ const HANDOFF = '## Goal\ng\n## Done\nd\n## In progress\np\n## Open decisions\nn
 const history: ChatMessage[] = [{ role: 'user', content: 'a' }, { role: 'assistant', content: 'b' }];
 
 test('compaction repeats a failed request on the OpenAI wire', async () => {
-  serve(failing(503), new TypeError('Unable to connect'), Response.json({ choices: [{ message: { content: HANDOFF } }] }));
+  serve(failing(503), refused(), Response.json({ choices: [{ message: { content: HANDOFF } }] }));
   const seen: number[] = [];
   const r = await compactConversation(history, { ...OPENAI, retries: 5, retryDelay: 2, onRetry: (i) => { seen.push(i.attempt); } });
   expect(r.summary).toBe(HANDOFF);
@@ -414,4 +439,156 @@ test('ai.retries and ai.retryDelay reach the requests, 10 and 3 when unset or un
   expect(llmOpts({ retries: 4, retryDelay: 1.5 }, {})).toMatchObject({ retries: 4, retryDelay: 1.5 });
   expect(llmOpts({ retries: -1, retryDelay: -2 }, {})).toMatchObject({ retries: 10, retryDelay: 3 });
   expect(llmOpts({ retries: 2.5, retryDelay: 'x' }, {})).toMatchObject({ retries: 10, retryDelay: 3 });
+});
+
+// ─── what counts as the network ───────────────────────────────────────────────
+
+test('an invalid URL or an invalid header fails at once, on every wire, with no repeat', async () => {
+  // As Bun's `fetch` rejects them before any connection: the invalid URL with its own
+  // code, the invalid header with none.
+  const bad = [withCode('fetch() URL is invalid', 'ERR_INVALID_URL'), new TypeError("Header 'x' has invalid value: 'a\nb'")];
+  for (const error of bad) {
+    calls = [];
+    serve(error);
+    const failures = [
+      await fails(chat()),
+      await fails(round()),
+      await fails(compactConversation(history, { ...OPENAI, retries: 5 })),
+      await fails(compactConversation(history, { ...ANTHROPIC, provider: 'anthropic', retries: 5 })),
+    ];
+    for (const e of failures) {
+      expect(e).toBe(error);
+      expect(e).not.toBeInstanceOf(LlmRequestError);
+    }
+    expect(calls).toHaveLength(4);
+  }
+  expect(slept).toEqual([]);
+});
+
+test('a configuration error from fetch is not repeated, even with the code it carries', async () => {
+  serve(withCode('fetch() URL is invalid', 'ERR_INVALID_URL'));
+  expect((await fails(chat())).message).toBe('fetch() URL is invalid');
+  expect((await fails(round())).message).toBe('fetch() URL is invalid');
+  expect(calls).toHaveLength(2);
+  expect(slept).toEqual([]);
+});
+
+test('a TypeError without a connection code is not the network', async () => {
+  serve(new TypeError('Header \'x\' has invalid value'));
+  await fails(chat());
+  await fails(round());
+  expect(calls).toHaveLength(2);
+  expect(slept).toEqual([]);
+});
+
+const CONNECTION_CODES = ['ConnectionRefused', 'ConnectionClosed', 'ECONNRESET', 'ENOTFOUND', 'EAI_AGAIN', 'ETIMEDOUT', 'EPIPE'];
+
+for (const code of CONNECTION_CODES) {
+  test(`a connection failure with the code ${code} is repeated, on the error or on its cause`, async () => {
+    serve(withCode('down', code), withCode('down', code, 'cause'), openAiAnswer('back'));
+    expect((await chat()).content).toBe('back');
+    expect(calls).toHaveLength(3);
+    expect(slept).toEqual([3000, 3000]);
+  });
+}
+
+// ─── a notice that throws ─────────────────────────────────────────────────────
+
+test('an onRetry that throws changes nothing: the wait goes on and the round succeeds', async () => {
+  serve(failing(503), openAiAnswer('fine'));
+  expect((await chat({ onRetry: () => { throw new Error('the status line broke'); } })).content).toBe('fine');
+  expect(slept).toEqual([3000]);
+});
+
+// ─── a failure while the body is read ─────────────────────────────────────────
+
+// A streamed body that gives `chunks` and then fails the way a dropped connection does.
+const dropping = (chunks: string[], code = 'ECONNRESET') => () => {
+  let n = 0;
+  return new Response(new ReadableStream({
+    pull(c) {
+      if (n < chunks.length) c.enqueue(new TextEncoder().encode(chunks[n++]!));
+      else c.error(withCode('The socket connection was closed unexpectedly', code));
+    },
+  }), { headers: { 'content-type': 'text/event-stream' } });
+};
+const openAiDelta = (text: string) => `data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}\n\n`;
+const anthropicDelta = (text: string) => [
+  { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
+  { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } },
+].map((e) => `data: ${JSON.stringify(e)}\n\n`).join('');
+
+test('on the OpenAI wire a connection lost before the first delta is repeated; after one it is not', async () => {
+  serve(dropping([]), openAiAnswer('whole'));
+  expect((await chat()).content).toBe('whole');
+  expect(calls).toHaveLength(2);
+  expect(slept).toEqual([3000]);
+
+  calls = []; slept = [];
+  const shown: string[] = [];
+  serve(dropping([openAiDelta('Hel')]), openAiAnswer('again'));
+  const e = await fails(chat({ onLive: (d: string) => shown.push(d) }));
+  expect(e.message).toStartWith('The socket connection was closed');
+  expect(shown).toEqual(['Hel']);
+  expect(calls).toHaveLength(1);
+  expect(slept).toEqual([]);
+});
+
+test('on the Anthropic wire a connection lost before the first delta is repeated; after one it is not', async () => {
+  serve(dropping([]), anthropicAnswer('whole'));
+  expect((await round()).content).toBe('whole');
+  expect(calls).toHaveLength(2);
+  expect(slept).toEqual([3000]);
+
+  calls = []; slept = [];
+  const shown: string[] = [];
+  serve(dropping([anthropicDelta('Hel')]), anthropicAnswer('again'));
+  const e = await fails(round({ onDelta: (d: string) => shown.push(d) }));
+  expect(e.message).toStartWith('The socket connection was closed');
+  expect(shown).toEqual(['Hel']);
+  expect(calls).toHaveLength(1);
+  expect(slept).toEqual([]);
+});
+
+test('a read that fails without a connection code is not repeated', async () => {
+  const noCode = () => new Response(new ReadableStream({ pull(c) { c.error(new TypeError('bad')); } }), { headers: { 'content-type': 'text/event-stream' } });
+  serve(noCode, openAiAnswer('x'));
+  expect((await fails(chat())).message).toBe('bad');
+  serve(noCode, anthropicAnswer('x'));
+  expect((await fails(round())).message).toBe('bad');
+  expect(slept).toEqual([]);
+});
+
+test('a stop during a read is the stop on both wires, even when the stream fails with a connection code', async () => {
+  for (const run of [(signal: AbortSignal) => chat({ signal }), (signal: AbortSignal) => round({ signal })]) {
+    const stop = new AbortController();
+    calls = [];
+    globalThis.fetch = (async (url: unknown, init: RequestInit) => {
+      calls.push({ url: String(url), body: JSON.parse(String(init.body)) });
+      return new Response(new ReadableStream({
+        start(c) { init.signal?.addEventListener('abort', () => c.error(withCode('terminated', 'ECONNRESET')), { once: true }); },
+      }), { headers: { 'content-type': 'text/event-stream' } });
+    }) as typeof fetch;
+    const running = run(stop.signal);
+    setTimeout(() => stop.abort(), 5);
+    const e = await fails(running);
+    expect(e).not.toBeInstanceOf(LlmRequestError);
+    expect(calls).toHaveLength(1);
+  }
+  expect(slept).toEqual([]);
+});
+
+test('readChunk cancels the reader before it reports the network failure, and leaves other failures alone', async () => {
+  let cancelled = 0;
+  const reader = (error: unknown) => ({ read: async () => { throw error; }, cancel: async () => { cancelled++; } }) as never;
+  const e = await fails(readChunk(reader(withCode('reset', 'ECONNRESET'))));
+  expect(e).toBeInstanceOf(LlmRequestError);
+  expect((e as LlmRequestError).network).toBe(true);
+  expect(cancelled).toBe(1);
+  expect(await fails(readChunk(reader(new TypeError('x'))))).toBeInstanceOf(TypeError);
+  expect(cancelled).toBe(1);
+  const stop = new AbortController();
+  stop.abort();
+  expect(await fails(readChunk(reader(withCode('reset', 'ECONNRESET')), stop.signal))).not.toBeInstanceOf(LlmRequestError);
+  expect(cancelled).toBe(1);
 });

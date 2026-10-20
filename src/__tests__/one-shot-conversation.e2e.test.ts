@@ -229,6 +229,45 @@ test('a failed turn says the provider\'s error on stderr, prints nothing and exi
   expect(r.err).toContain('upstream is down');
 });
 
+// The first request fails as `fail` says, the rest go to the scripted model.
+const failingOnce = (model: ScriptedModel, fail: () => Response): typeof fetch => {
+  model.install();
+  const served = globalThis.fetch;
+  let first = true;
+  return (async (url: Parameters<typeof fetch>[0], init?: RequestInit) => {
+    if (first) { first = false; return fail(); }
+    return served(url, init);
+  }) as typeof fetch;
+};
+
+test('a repeat of a failed request is said on stderr, one line each, and the answer is on stdout', async () => {
+  const model = new ScriptedModel();
+  model.script([{ text: 'Back again.' }]);
+  const r = await oneShot(model, { fetch: failingOnce(model, () => new Response('upstream is busy', { status: 503 })) });
+  expect(r.code).toBe(0);
+  expect(r.out).toContain('Back again.');
+  const lines = said(r.err);
+  expect(lines).toHaveLength(1);
+  expect(lines[0]).toStartWith('[chat] LLM 503');
+  expect(lines[0]).toContain('upstream is busy');
+  expect(lines[0]).toEndWith('retry 1/10 in 3 s');
+});
+
+test('the line of a repeat is redacted: a known secret in the provider\'s error reaches stderr only as its mark', async () => {
+  await withSecret(async () => {
+    const model = new ScriptedModel();
+    model.script([{ text: 'Fine.' }]);
+    const r = await oneShot(model, {
+      before: (config) => { refreshSecrets(config); },
+      fetch: failingOnce(model, () => new Response(`busy for ${SECRET}`, { status: 503 })),
+    });
+    expect(r.code).toBe(0);
+    expect(said(r.err)).toHaveLength(1);
+    expect(r.err).not.toContain(SECRET);
+    expect(r.err).toContain(MARK);
+  });
+});
+
 test('an empty prompt is refused on stderr with exit code 1, and nothing is sent', async () => {
   const model = new ScriptedModel();
   const r = await oneShot(model, { prompt: ['  '] });

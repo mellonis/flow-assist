@@ -24,7 +24,7 @@ import { acceptData, isConsoleKind, readLegacyView, type ViewRecord } from './vi
 import { capConsoleData } from './console-view.js';
 import { IMAGE_DEFAULTS, contentText, type ContentPart, type ImageLimits, type ImageRef } from './images.js';
 import { acceptToolImages, imageMark, imageStoreDir, toolImageResult, type ImageMark } from './tool-images.js';
-import { failedRequest, reach, withRetry, type RetryOpts } from './llm-retry.js';
+import { failedRequest, reach, readChunk, withRetry, type RetryOpts } from './llm-retry.js';
 import { ANTHROPIC_CONTENT, REQUEST_TAIL, anthropicChatRound, anthropicCompact, summaryHistory } from './anthropic.js';
 import { compactionInstruction, retryNote, summaryProblem } from './compaction.js';
 import { hasToolMarkup, markupToolNames, stripToolMarkup } from './tool-markup.js';
@@ -490,12 +490,16 @@ async function openAiRound(
   // OpenAI-compatible servers know the field; one that does not may answer 400 — so a
   // refusal that NAMES the field is retried once without it, and that base URL is not
   // asked again. Usage is a nicety; a chat that stops working over it is not.
-  const post = (withUsage: boolean) => reach(() => fetch(`${baseUrl}/chat/completions`, {
-    method: 'POST',
-    signal,
-    headers: LLM_HEADERS(token as string),
-    body: JSON.stringify({ model, messages: openAiMessages(messages), stream: true, ...(withUsage ? { stream_options: { include_usage: true } } : {}), ...(tools?.length ? { tools } : {}) }),
-  }), signal);
+  const post = (withUsage: boolean) => {
+    const url = `${baseUrl}/chat/completions`;
+    const init: RequestInit = {
+      method: 'POST',
+      signal,
+      headers: LLM_HEADERS(token as string),
+      body: JSON.stringify({ model, messages: openAiMessages(messages), stream: true, ...(withUsage ? { stream_options: { include_usage: true } } : {}), ...(tools?.length ? { tools } : {}) }),
+    };
+    return reach(() => fetch(url, init), signal);
+  };
   const askUsage = !noUsage.has(String(baseUrl));
   let res = await post(askUsage);
   if (!res.ok) {
@@ -522,7 +526,7 @@ async function openAiRound(
   let usage: TokenUsage | undefined;
   let done = false;
   while (!done) {
-    const { value, done: readDone } = await reader.read();
+    const { value, done: readDone } = await readChunk(reader, signal);
     if (readDone) break;
     buf += decoder.decode(value, { stream: true });
     let nl: number;
@@ -1360,12 +1364,14 @@ export async function compactConversation(
   const ask = (note?: string): Promise<string> => withRetry({ retries, retryDelay, signal, onRetry }, async () => {
     const sent = summaryHistory([instruction, ...history], { ...(before ? { previous: before } : {}), ...(note ? { note } : {}) });
     if (provider === 'anthropic') return anthropicCompact(sent, { baseUrl, model, token, maxTokens, thinking, signal });
-    const res = await reach(() => fetch(`${baseUrl}/chat/completions`, {
+    const url = `${baseUrl}/chat/completions`;
+    const init: RequestInit = {
       method: 'POST',
       signal,
       headers: LLM_HEADERS(token as string),
       body: JSON.stringify({ model, messages: sent }),
-    }), signal);
+    };
+    const res = await reach(() => fetch(url, init), signal);
     if (!res.ok) {
       const body = await res.text().catch(() => '');
       throw failedRequest(res, body, { model });

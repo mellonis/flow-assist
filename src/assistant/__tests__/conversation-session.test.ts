@@ -113,3 +113,31 @@ test('a nested run is journaled in the session that started it', async () => {
   expect(lines.filter((l) => l.t !== 'start' && l.t !== 'row').map((l) => l.t)).toEqual(['call-start', 'confirm', 'call']);
   expect(lines.find((l) => l.t === 'confirm')).toMatchObject({ answer: 'no', by: 'plugin' });
 });
+
+test('a nested run reports its waits as log lines, unless the caller answers them', async () => {
+  const dir = tmp();
+  const info = { attempt: 1, of: 10, status: 503, waitMs: 3000, message: 'LLM 503 · m: busy' };
+  const answered: number[] = [];
+  const deps = fakeDeps({
+    sessionsDir: () => dir,
+    chatLLM: (async (_m: unknown, o: Record<string, any>) => {
+      o.onRetry(info);
+      return { content: '' };
+    }) as never,
+  });
+  const c = new Conversation(deps);
+  const id = c.journal({ t: 'row', role: 'user', text: 'go' }, { person: true });
+  await c.journaledChatLLM(id)([], {});
+  expect(deps.log).toEqual(['[chat] LLM 503 · m: busy — retry 1/10 in 3 s']);
+  expect(c.toolLabel).toBe('');
+
+  const own = fakeDeps({
+    sessionsDir: () => dir,
+    chatLLM: (async (_m: unknown, o: Record<string, any>) => { o.onRetry(info); return { content: '' }; }) as never,
+  });
+  const d = new Conversation(own);
+  const did = d.journal({ t: 'row', role: 'user', text: 'go' }, { person: true });
+  await d.journaledChatLLM(did)([], { onRetry: (i: { attempt: number }) => { answered.push(i.attempt); } });
+  expect(answered).toEqual([1]);
+  expect(own.log).toEqual([]);
+});

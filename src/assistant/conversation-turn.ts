@@ -692,7 +692,9 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
 // the agent tree is not redrawn every second for a wait. The function returned takes
 // the countdown down when the wait ends.
 export function retryWait(c: Conversation, info: RetryInfo, countdown = !c.parent): (() => void) | undefined {
-  c.deps.pushLog(`[chat] ${info.message} — retry ${info.attempt}/${info.of} in ${Math.ceil(info.waitMs / 1000)} s`);
+  const line = `[chat] ${info.message} — retry ${info.attempt}/${info.of} in ${Math.ceil(info.waitMs / 1000)} s`;
+  c.deps.pushLog(line);
+  c.deps.retryNotice?.(line);
   if (!countdown) return undefined;
   const until = retryClock.now() + info.waitMs;
   const show = () => {

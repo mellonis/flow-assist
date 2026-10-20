@@ -170,6 +170,10 @@ export interface ConversationDeps {
   notify: () => void;
   showMessage: (text: string) => void;
   pushLog: (line: string) => void;
+  // Told the same line `pushLog` gets for each repeat of a failed model request, for a
+  // host that has no log to show it in (the one-shot prompt, which says it on stderr).
+  // Absent: nothing more.
+  retryNotice?: (line: string) => void;
   sessionsDir: () => string | null;
   lockToken: string;
   // A person is there to answer a y/n or a question. A conversation whose policy is

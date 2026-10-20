@@ -3,6 +3,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { Conversation } from '../conversation.ts';
+import { foldIntoHandoff, retryWait } from '../conversation-turn.ts';
+import { retryClock, type RetryInfo } from '../llm-retry.ts';
 import { STOPPED_TURN } from '../system-prompt.ts';
 import { readJournal } from '../journal.ts';
 import { journalPath } from '../sessions.ts';
@@ -211,4 +213,58 @@ test('nothing quiet is left behind after a land: a later normal item with the sa
   await settleMs();
   expect(asked).toEqual(['x stopped:\nsame']);
   c.clearInbox();
+});
+
+// ── a repeat of a failed model request waits ──────────────────────────────────
+
+const WAIT: RetryInfo = { attempt: 2, of: 10, status: 429, waitMs: 3000, message: 'LLM 429 · m: slow down' };
+const WAIT_LINE = '[chat] LLM 429 · m: slow down — retry 2/10 in 3 s';
+
+test('a wait is one log line, the same one told to the host that asked for it', () => {
+  const told: string[] = [];
+  const deps = fakeDeps({ retryNotice: (line) => told.push(line) });
+  const c = new Conversation(deps);
+  const realEvery = retryClock.every;
+  retryClock.every = () => () => {};
+  try { retryWait(c, WAIT)?.(); } finally { retryClock.every = realEvery; }
+  expect(deps.log).toEqual([WAIT_LINE]);
+  expect(told).toEqual([WAIT_LINE]);
+});
+
+test('the countdown of a wait does not draw on a conversation that has closed', () => {
+  const deps = fakeDeps();
+  const c = new Conversation(deps);
+  const realNow = retryClock.now;
+  const realEvery = retryClock.every;
+  let tick!: () => void;
+  retryClock.now = () => 1_000_000;
+  retryClock.every = (fn) => { tick = fn; return () => {}; };
+  try {
+    const end = retryWait(c, WAIT)!;
+    expect(c.toolLabel).toBe('LLM 429 · retry 2/10 in 3 s');
+    c.close('clear');
+    const drawn = deps.notified();
+    retryClock.now = () => 1_002_000;
+    tick();
+    expect(c.toolLabel).toBe('LLM 429 · retry 2/10 in 3 s');
+    expect(deps.notified()).toBe(drawn);
+    end();
+    expect(deps.notified()).toBe(drawn);
+  } finally {
+    retryClock.now = realNow;
+    retryClock.every = realEvery;
+  }
+});
+
+test('a compaction reports its waits as log lines, with no countdown', async () => {
+  const deps = fakeDeps({
+    compact: (async (_h: unknown, o: { onRetry: (i: RetryInfo) => unknown }) => {
+      expect(o.onRetry(WAIT)).toBeUndefined();
+      return { summary: 'handoff' };
+    }) as never,
+  });
+  const c = new Conversation(deps);
+  expect((await foldIntoHandoff(c, [], new AbortController().signal)).summary).toBe('handoff');
+  expect(deps.log).toEqual([WAIT_LINE]);
+  expect(c.toolLabel).toBe('');
 });

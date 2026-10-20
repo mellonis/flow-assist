@@ -18,7 +18,7 @@
 import type { ToolDef } from '../loader/tools.js';
 import type { ChatMessage, ChatRoundResult, TokenUsage } from './agent.js';
 import type { ContentPart } from './images.js';
-import { failedRequest, reach, withRetry, LlmRequestError, type RetryOpts } from './llm-retry.js';
+import { failedRequest, reach, readChunk, withRetry, LlmRequestError, type RetryOpts } from './llm-retry.js';
 import { llmErrorMessage } from './llm-error.js';
 import type { ThinkingConfig } from './llm-endpoint.js';
 
@@ -390,7 +390,11 @@ const headers = (token: string): Record<string, string> => ({
 // and the loop drops it for the rest of the turn — or every later round pays the
 // same 400 first.
 async function post(body: AnthropicRequest, o: AnthropicOpts): Promise<{ res: Response; thinkingDropped: boolean }> {
-  const send = (b: AnthropicRequest) => reach(() => fetch(endpoint(o.baseUrl), { method: 'POST', signal: o.signal, headers: headers(String(o.token)), body: JSON.stringify(b) }), o.signal);
+  const send = (b: AnthropicRequest) => {
+    const url = endpoint(o.baseUrl);
+    const init: RequestInit = { method: 'POST', signal: o.signal, headers: headers(String(o.token)), body: JSON.stringify(b) };
+    return reach(() => fetch(url, init), o.signal);
+  };
   let res = await send(body);
   if (res.ok) return { res, thinkingDropped: false };
   let text = await res.text().catch(() => '');
@@ -432,7 +436,7 @@ async function anthropicRound(
     try { round.event(JSON.parse(l.slice(5).trim())); } catch { /* not JSON: skipped, as on the OpenAI wire */ }
   };
   for (;;) {
-    const { value, done } = await reader.read();
+    const { value, done } = await readChunk(reader, o.signal);
     if (done) break;
     buf += decoder.decode(value, { stream: true });
     let nl: number;

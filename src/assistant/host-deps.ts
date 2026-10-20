@@ -21,6 +21,8 @@ export interface DepsSource {
   // Tool names every run of the model this conversation makes is not offered — its own
   // turns and each run a tool starts through `ctx.chatLLM` alike.
   withhold?: readonly string[];
+  // Told each repeat of a failed model request, besides the log (ConversationDeps).
+  retryNotice?: (line: string) => void;
   current?: () => Conversation | null | undefined;
 }
 
@@ -46,6 +48,7 @@ export function hostDeps(src: DepsSource): ConversationDeps {
     lockToken: src.lockToken,
     canAsk: src.canAsk,
     screens: () => svc().screens as ReturnType<ConversationDeps['screens']>,
+    ...(src.retryNotice ? { retryNotice: src.retryNotice } : {}),
     ...(src.current ? { current: src.current } : {}),
   };
 }

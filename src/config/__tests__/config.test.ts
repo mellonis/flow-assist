@@ -37,6 +37,13 @@ test('config set ai.backgroundFollowUp takes a boolean — what the chat reads w
   expect(validateConfigWriteValue(hostConfigSchema, 'ai.backgroundFollowUp', 'yes').ok).toBe(false);
 });
 
+test('config set ai.retryDelay takes 0 to 60 seconds', () => {
+  expect(validateConfigWriteValue(hostConfigSchema, 'ai.retryDelay', 60).ok).toBe(true);
+  expect(validateConfigWriteValue(hostConfigSchema, 'ai.retryDelay', 0.5).ok).toBe(true);
+  expect(validateConfigWriteValue(hostConfigSchema, 'ai.retryDelay', 61).ok).toBe(false);
+  expect(validateConfigWriteValue(hostConfigSchema, 'ai.retryDelay', -1).ok).toBe(false);
+});
+
 // The shell's roots are the host's own key; the legacy `fs.roots` is still accepted, so
 // a config file that sets it is not refused.
 test('shell.roots is a host key; a config that still sets fs.roots is accepted', () => {

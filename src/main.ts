@@ -410,6 +410,9 @@ export async function runPrompt(args: string[], config: Record<string, unknown>,
       config: () => config,
       services: () => services as unknown as Record<string, unknown>,
       notify: () => {},
+      // Each repeat of a failed model request is said on stderr, redacted as every other
+      // line of it: the provider's error body is in it.
+      retryNotice: (line) => err(`${redactSecrets(line)}\n`),
       sessionsDir: () => null,
       canAsk: false,
       withhold: ONESHOT_WITHHELD,
