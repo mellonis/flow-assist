@@ -192,8 +192,9 @@ export class ConversationRegistry {
   }
   // How a live session reads to the picker. One held here with nobody drawing it may be
   // running its own turn or waiting for an answer, and its own status says so; with
-  // neither it reads `working` while its tasks run, whatever its last answer or result
-  // (an unseen one reads `done` from its file once it is put away). Kept here, not in
+  // neither it reads `working` while a child of it is at work, whatever its last answer or
+  // result; a session held only for its idle subagents reads by its own status (`done`
+  // while its answer is unread, else `idle`). Kept here, not in
   // `Conversation.status`, which others read as "a turn runs". null when no
   // conversation here holds it.
   statusOf(id: string): ConversationStatus | null {
@@ -201,14 +202,15 @@ export class ConversationRegistry {
     if (!c) return null;
     const own = c.status;
     if (own === 'waiting' || c.subtreeWaiting) return 'waiting';
-    return c.hasLiveChildren ? 'working' : own;
+    return c.hasWorkingChildren ? 'working' : own;
   }
   // Nothing of its own is left (AGENTS.md (a host makes its conversations through one
   // registry)), clause by clause:
   // - `busy`: a turn, a `!command`, a `!!` ask's hop or a slash command runs;
   // - `children`: a task it started has not delivered its result yet, or a subagent it
-  //   started is not idle (an idle one, with nothing of its own at work below it, holds
-  //   nothing: it stays in memory with the parked session);
+  //   started is still there, idle between its turns included: the session stays loaded so
+  //   the person who comes back finds the subagent in the same conversation and can write
+  //   to it;
   // - `confirm`, `question`: a y/n or a question waits for the person;
   // - `queue`: a message waits for the turn's end. The drain shifts the queue and the turn
   //   it starts sets `busy` in the same synchronous step, so `queue.length || busy` covers
@@ -216,14 +218,11 @@ export class ConversationRegistry {
   // - `configAsk`: the settings-file ask is in flight. It clears a microtask after its
   //   y/n's answer, and its loop may park the next change before that.
   quiescent(c: Conversation): boolean {
-    return !c.busy && !c.hasLiveChildren && !c.confirm && !c.question && c.queue.length === 0 && !c.configAsk;
+    return !c.busy && c.children.size === 0 && !c.confirm && !c.question && c.queue.length === 0 && !c.configAsk;
   }
   // What parks each conversation kept headless once it is quiescent: one "off" per
   // conversation, dropping every listener of its watch.
   private readonly watches = new Map<Conversation, () => void>();
-  // The sessions put away with idle subagents still below them: no longer live here, but
-  // the exit writes the end of those subagents.
-  private readonly parkedWithChildren = new Set<Conversation>();
   // The chat leaves `c` (a switch, `/new`). Quiescent, it is parked now; otherwise it
   // stays loaded, locked and headless — its turn going on, its y/n waiting, its tasks
   // running — and is parked once it is quiescent. Whatever may have ended its work asks
@@ -300,8 +299,6 @@ export class ConversationRegistry {
     c.save({ silent: true });
     c.releaseLock();
     c.close('park');
-    // Its idle subagents stay in memory; the exit ends them (`closeAll`).
-    if (c.children.size) this.parkedWithChildren.add(c);
     // Only a park that went through remembers it; one that threw leaves the session live.
     if (unread && c.sessionId) {
       this.unseen.add(c.sessionId);
@@ -403,7 +400,7 @@ export class ConversationRegistry {
       for (const child of c.children) walk(child);
       deepestFirst.push(c);
     };
-    for (const c of [...this.convs, ...this.parkedWithChildren]) walk(c);
+    for (const c of [...this.convs]) walk(c);
     for (const c of deepestFirst) {
       if (!c.parent || c.closed) continue;
       try { c.journalStopped(reason); }

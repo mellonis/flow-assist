@@ -166,24 +166,58 @@ test('the system prompt of every turn carries the original task, never a later m
   expect(rig.sent(-1).at(-1)).toEqual({ role: 'user', content: 'something quite different' });
 });
 
-test('an idle subagent does not hold a session\'s park; one with a task running below it does', async () => {
+test('an idle subagent keeps its session from parking, and reads as the session does, not as work; one with a task running below it reads working', async () => {
   const model = new ScriptedModel();
   subScript(model, 'rest').script([{ text: 'resting' }]);
   const rig = conversationRig(model, { inbox: true, ...noFollowUp });
   const child = scheduled(rig, spec('rester', 'rest'));
   await rig.until(() => child.idle);
   await quiet(rig);
-  expect(rig.registry.quiescent(rig.conv)).toBe(true);
-  expect(rig.registry.statusOf(rig.conv.sessionId)).not.toBe('working');
-  // A task it started is still at work: the session is not at rest.
-  const below = scheduled(rig, { kind: 'task', label: 'below', prompt: 'wait here', by: 'model' }, child);
   expect(rig.registry.quiescent(rig.conv)).toBe(false);
+  expect(rig.registry.statusOf(rig.conv.sessionId)).not.toBe('working');
+  // A task it started is at work below the idle subagent.
+  const below = scheduled(rig, { kind: 'task', label: 'below', prompt: 'wait here', by: 'model' }, child);
   expect(rig.registry.statusOf(rig.conv.sessionId)).toBe('working');
   below.stopSubtree('');
   await quiet(rig);
+  // The stop of the subagent is what lets the session rest.
+  expect(child.stopSubtree('x')).toBe(true);
+  expect(rig.registry.quiescent(rig.conv)).toBe(true);
 });
 
-test('a session left with an idle subagent is put away, and the exit writes the subagent\'s end', async () => {
+test('a session with no children still parks when it is left', async () => {
+  const rig = conversationRig(new ScriptedModel(), { inbox: true, ...noFollowUp });
+  const first = rig.conv;
+  expect(rig.switchTo().outcome).toBe('parked');
+  expect(first.closed).toBe(true);
+});
+
+test('a session left with an idle subagent stays loaded and headless: the subagent is still in it when the person comes back, and a tell reaches it', async () => {
+  const model = new ScriptedModel();
+  subScript(model, 'leave').script([{ text: 'left alone' }], [{ text: 'welcome back' }]);
+  const rig = conversationRig(model, { inbox: true, ...noFollowUp });
+  const first = rig.conv;
+  const child = scheduled(rig, spec('leaver', 'leave'));
+  await rig.until(() => child.idle);
+  await quiet(rig);
+  expect(rig.switchTo().outcome).toBe('kept');
+  expect(first.closed).toBe(false);
+  expect(first.headless).toBe(true);
+  expect(rig.registry.bySession(first.sessionId)).toBe(first);
+  // The picker reads it by its own status, not as work.
+  expect(rig.registry.statusOf(first.sessionId)).not.toBe('working');
+  expect(child.idle).toBe(true);
+  // Coming back: the same conversation object, the same subagent.
+  rig.switchTo(first);
+  expect(rig.conv).toBe(first);
+  expect(first.headless).toBe(false);
+  expect(first.children.has(child)).toBe(true);
+  expect(child.receive('are you there?')).toEqual({ sent: 'started' });
+  await rig.until(() => child.idle && child.lastAnswer() === 'welcome back');
+  expect(lines(rig).map((e) => e.event)).toEqual(['start', 'answered', 'answered']);
+});
+
+test('the exit reaches the idle subagent of a session left loaded: its end line is written', async () => {
   const model = new ScriptedModel();
   subScript(model, 'leave').script([{ text: 'left alone' }]);
   const rig = conversationRig(model, { inbox: true, ...noFollowUp });
@@ -192,13 +226,24 @@ test('a session left with an idle subagent is put away, and the exit writes the 
   await rig.until(() => child.idle);
   await quiet(rig);
   const id = first.sessionId;
-  expect(rig.switchTo().outcome).toBe('parked');
-  expect(first.closed).toBe(true);
-  // It stays in memory, still idle, until the exit.
-  expect(child.closed).toBe(false);
+  expect(rig.switchTo().outcome).toBe('kept');
   rig.registry.closeAll('exit');
   expect(child.closed).toBe(true);
   expect(rig.journal(id).filter((e) => e.t === 'subagent' && e.event === 'end')).toMatchObject([{ label: 'leaver', outcome: 'stopped', stoppedBy: 'exit' }]);
+});
+
+test('stopping the last idle subagent of a left session puts the session away', async () => {
+  const model = new ScriptedModel();
+  subScript(model, 'leave').script([{ text: 'left alone' }]);
+  const rig = conversationRig(model, { inbox: true, ...noFollowUp });
+  const first = rig.conv;
+  const child = scheduled(rig, spec('leaver', 'leave'));
+  await rig.until(() => child.idle);
+  await quiet(rig);
+  expect(rig.switchTo().outcome).toBe('kept');
+  child.stopSubtree('x');
+  await rig.until(() => first.closed, 2_000);
+  expect(first.closed).toBe(true);
 });
 
 test('a stop ends an idle subagent: closed, its row gone, one end line, its file closed once', async () => {

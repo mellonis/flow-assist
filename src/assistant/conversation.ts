@@ -661,12 +661,12 @@ export class Conversation {
 
   // ── a subagent the person started, between its turns
   // Between turns: it has answered and nothing is asked of it. It holds no slot and no
-  // timer, and a session with only idle subagents left may be put away.
+  // timer; it keeps its session loaded.
   get idle(): boolean { return this.staying && this.idleNow && !this.isClosed; }
-  // Something this conversation started is still at work: a child that is not idle, or an
-  // idle one with work of its own below it (a task it started delivers to the session).
-  get hasLiveChildren(): boolean {
-    for (const c of this.children) if (!c.idle || c.hasLiveChildren) return true;
+  // Something this conversation started is at work: a child that is not idle, or an idle
+  // one with work of its own below it (a task it started delivers to the session).
+  get hasWorkingChildren(): boolean {
+    for (const c of this.children) if (!c.idle || c.hasWorkingChildren) return true;
     return false;
   }
   // The turn has ended and nothing waits for it: the subagent rests. The registry's park
