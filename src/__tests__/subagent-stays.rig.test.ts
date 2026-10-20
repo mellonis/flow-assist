@@ -230,6 +230,8 @@ test('the exit reaches the idle subagent of a session left loaded: its end line 
   rig.registry.closeAll('exit');
   expect(child.closed).toBe(true);
   expect(rig.journal(id).filter((e) => e.t === 'subagent' && e.event === 'end')).toMatchObject([{ label: 'leaver', outcome: 'stopped', stoppedBy: 'exit' }]);
+  // Its own file closes once, naming the exit, though its session was left loaded.
+  expect(rig.subJournal('leaver', id).filter((e) => e.t === 'end' && e.stopped)).toMatchObject([{ stopped: 'exit' }]);
 });
 
 test('stopping the last idle subagent of a left session puts the session away', async () => {
@@ -281,6 +283,10 @@ test('a /clear ends an idle subagent with the clear named in its end line', asyn
   first.close('clear');
   expect(child.closed).toBe(true);
   expect(rig.journal(id).filter((e) => e.t === 'subagent' && e.event === 'end')).toMatchObject([{ label: 'wiper', outcome: 'stopped', stoppedBy: 'clear' }]);
+  // Its own file closes once, naming the clear, as its last line.
+  const file = rig.subJournal('wiper', id);
+  expect(file.filter((e) => e.t === 'end' && e.stopped)).toMatchObject([{ stopped: 'clear' }]);
+  expect(file.at(-1)).toMatchObject({ t: 'end', stopped: 'clear' });
 });
 
 test('an exit ends an idle subagent synchronously, like a running one', async () => {
@@ -293,6 +299,10 @@ test('an exit ends an idle subagent synchronously, like a running one', async ()
   rig.registry.closeAll('exit');
   expect(child.closed).toBe(true);
   expect(rig.journal().filter((e) => e.t === 'subagent' && e.event === 'end')).toMatchObject([{ label: 'goer', outcome: 'stopped', stoppedBy: 'exit' }]);
+  // Its own file closes once, naming the exit, as its last line.
+  const file = rig.subJournal('goer');
+  expect(file.filter((e) => e.t === 'end' && e.stopped)).toMatchObject([{ stopped: 'exit' }]);
+  expect(file.at(-1)).toMatchObject({ t: 'end', stopped: 'exit' });
 });
 
 test('a stop of a working later turn ends the subagent: the turn is aborted, its end line says the person stopped it, and nothing is delivered', async () => {
@@ -398,4 +408,71 @@ test('a message that waits past the turn\'s last step starts the next turn throu
   expect(child.lastAnswer()).toBe('then this');
   expect(lines(rig).map((e) => e.event)).toEqual(['start', 'answered', 'answered']);
   expect(bgRows(rig.conv)).toEqual(['late finished:\nonly']);
+});
+
+test('a message that waits past the turn\'s last step is admitted only after that turn has settled: its answer is logged and its phase is back to idle first', async () => {
+  const model = new ScriptedModel();
+  const sub = subScript(model, 'order');
+  sub.script([{ hold: true }, { text: 'only' }], [{ text: 'then this' }]);
+  const rig = conversationRig(model, { inbox: true, ...noFollowUp });
+  const events: string[] = [];
+  const slots = Object.create(rig.registry.children) as typeof rig.registry.children;
+  slots.admit = (run) => { events.push('admit'); return rig.registry.children.admit(run); };
+  const from = rig.conv;
+  const id = from.journal({ t: 'row', role: 'user', text: 'q' }, { person: true });
+  const r = scheduleChild(spec('order', 'order'), 0, {
+    startChild: (sp) => from.startChild(sp, id), slots,
+    showMessage: rig.services.showMessage, pushLog: (line) => { events.push(`log ${line}`); }, notify: () => {},
+  });
+  if ('refused' in r) throw new Error(r.refused);
+  children.push(r.child);
+  await rig.until(() => sub.held);
+  r.child.receive('afterwards');
+  sub.release();
+  await rig.until(() => r.child.idle && r.child.lastAnswer() === 'then this');
+  await quiet(rig);
+  expect(events.filter((e) => e === 'admit' || e.startsWith('log [bg] order:'))).toEqual(['admit', 'log [bg] order: only', 'admit', 'log [bg] order: then this']);
+});
+
+// A later turn at work when the session is cleared or the process exits: the life ends with
+// the one `end` line of that close, the turn's answer is not logged after it, and nothing
+// says the person stopped it.
+async function workingLaterTurn(label: string) {
+  const model = new ScriptedModel();
+  const sub = subScript(model, label);
+  sub.script([{ text: 'first' }], [{ text: 'half' }, { hold: true }, { text: 'never' }]);
+  const rig = conversationRig(model, { inbox: true, ...noFollowUp });
+  const id = rig.conv.sessionId;
+  const child = scheduled(rig, spec(label, label));
+  await rig.until(() => child.idle);
+  await quiet(rig);
+  child.receive('go on');
+  await rig.until(() => sub.held);
+  return { rig, sub, child, id: rig.conv.sessionId || id };
+}
+
+test('a /clear while a later turn works: one end line, no answer logged after it, no stopped toast', async () => {
+  const { rig, sub, child, id } = await workingLaterTurn('clearing');
+  rig.conv.close('clear');
+  sub.release();
+  await rig.until(() => child.closed);
+  await new Promise((r) => setTimeout(r, 50));
+  const subagent = rig.journal(id).filter((e) => e.t === 'subagent' && e.label === 'clearing');
+  expect(subagent.map((e) => e.event)).toEqual(['start', 'answered', 'end']);
+  expect(subagent.at(-1)).toMatchObject({ outcome: 'stopped', stoppedBy: 'clear' });
+  expect(rig.toasts.filter((t) => t.includes('stopped'))).toEqual([]);
+  expect(rig.subJournal('clearing', id).filter((e) => e.t === 'end' && e.stopped)).toHaveLength(1);
+});
+
+test('the exit while a later turn works: one end line, no answer logged after it, no stopped toast', async () => {
+  const { rig, sub, child, id } = await workingLaterTurn('exiting');
+  rig.registry.closeAll('exit');
+  sub.release();
+  await rig.until(() => child.closed);
+  await new Promise((r) => setTimeout(r, 50));
+  const subagent = rig.journal(id).filter((e) => e.t === 'subagent' && e.label === 'exiting');
+  expect(subagent.map((e) => e.event)).toEqual(['start', 'answered', 'end']);
+  expect(subagent.at(-1)).toMatchObject({ outcome: 'stopped', stoppedBy: 'exit' });
+  expect(rig.toasts.filter((t) => t.includes('stopped'))).toEqual([]);
+  expect(rig.subJournal('exiting', id).filter((e) => e.t === 'end' && e.stopped)).toHaveLength(1);
 });
