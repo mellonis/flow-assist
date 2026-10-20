@@ -59,28 +59,39 @@ export function subagentLabel(prompt: string, taken: readonly string[]): string 
   return `${base}-${n}`;
 }
 
+// The running children that carry a label, in listing order, and which of them a listed
+// number means: the k-th one, where k counts how many rows before it in `listed` carry the
+// same label. Labels can repeat (a task the model started may share a subagent's), and a
+// number must name the one row it was printed on.
+function nthWithLabel(running: readonly RunningChild[], listed: readonly string[], number: number, fold: boolean): { label: string; at: number } | null {
+  const label = listed[number - 1];
+  if (label === undefined) return null;
+  const same = (l: string): boolean => (fold ? l.toLowerCase() === label.toLowerCase() : l === label);
+  const k = listed.slice(0, number - 1).filter(same).length;
+  const hits = running.flatMap((c, i) => (same(c.label) ? [i] : []));
+  return { label, at: hits[k] ?? -1 };
+}
+
 // The running child a `stop` names, as an index into `running`: a number is read against
 // `listed`, the labels of the listing the person last saw (null when none was printed),
 // so a job that ended since leaves its number unanswered instead of shifting the others;
 // a name is read against the live children. -1 for none.
 export function stopTargetIndex(running: readonly RunningChild[], target: string, listed: readonly string[] | null): number {
-  if (/^\d+$/.test(target)) {
-    const label = listed?.[Number(target) - 1];
-    return label === undefined ? -1 : running.findIndex((c) => c.label === label);
-  }
+  if (/^\d+$/.test(target)) return listed ? (nthWithLabel(running, listed, Number(target), false)?.at ?? -1) : -1;
   const wanted = target.toLowerCase();
   return running.findIndex((c) => c.label.toLowerCase() === wanted);
 }
 
 // The child a `tell` names, as an index into `running`: a number is read against `listed`
-// as `stopTargetIndex` reads it, a name against the live children. `many` holds the numbers
-// (as the listing counts them) of every child that answers to the name; null for none.
+// as `stopTargetIndex` reads it (it names exactly the row it was printed on), a name
+// against the live children. `many` holds the numbers (as the listing counts them) of
+// every child that answers to a name; a number never gets it. null for none.
 export function tellTargetIndex(running: readonly RunningChild[], target: string, listed: readonly string[] | null): { at: number } | { many: number[] } | null {
-  let wanted: string | undefined;
-  if (/^\d+$/.test(target)) wanted = listed?.[Number(target) - 1];
-  else wanted = target;
-  if (wanted === undefined) return null;
-  const lower = wanted.toLowerCase();
+  if (/^\d+$/.test(target)) {
+    const hit = listed ? nthWithLabel(running, listed, Number(target), true) : null;
+    return hit && hit.at >= 0 ? { at: hit.at } : null;
+  }
+  const lower = target.toLowerCase();
   const hits = running.flatMap((c, i) => (c.label.toLowerCase() === lower ? [i] : []));
   if (hits.length > 1) return { many: hits.map((i) => i + 1) };
   return hits.length ? { at: hits[0]! } : null;

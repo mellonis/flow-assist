@@ -184,10 +184,10 @@ test("a row held here for its background tasks opens on ⏎, keeps its own statu
   expect(rowStatus(rows[1]!, 'idle')).toBe('working');
   const del = press(start, 'down', ctrl('x')).state;
   expect(del.mode).toBe('list');
-  expect(del.notice).toBe('"Left one" is still open here — it cannot be deleted until it is put away');
+  expect(del.notice).toBe('"Left one" is still open here — it cannot be deleted until it is put away (stopping its subagents puts it away)');
   const moved = press(start, 'down', ctrl('p'));
   expect(moved.actions).toEqual([]);
-  expect(moved.state.notice).toBe('"Left one" is still open here — it cannot be moved until it is put away');
+  expect(moved.state.notice).toBe('"Left one" is still open here — it cannot be moved until it is put away (stopping its subagents puts it away)');
   // A rename goes through: the chat routes it to the conversation that holds the session.
   expect(press(start, 'down', ctrl('r')).state.mode).toBe('rename');
 });

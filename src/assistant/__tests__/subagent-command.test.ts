@@ -90,7 +90,28 @@ test('a tell names a child by the number the listing gave it or by its name; a n
   // A number is read against the listing the person saw, not the live order.
   expect(tellTargetIndex(running, '2', ['gone', 'beta'])).toEqual({ at: 1 });
   expect(tellTargetIndex(running, '1', ['gone', 'beta'])).toBeNull();
-  expect(tellTargetIndex(running, '1', ['alpha'])).toEqual({ many: [1, 3] });
+  // A number names the row it was printed on, never the name's several rows.
+  expect(tellTargetIndex(running, '1', ['alpha'])).toEqual({ at: 0 });
   expect(tellTargetIndex(running, '2', null)).toBeNull();
   expect(tellTargetIndex(running, '9', ['beta'])).toBeNull();
+});
+
+test('labels that repeat: a number names exactly the listed row, stop and tell alike', () => {
+  const list = [running('dup'), running('dup', { kind: 'task' })];
+  const listed = ['dup', 'dup'];
+  expect(stopTargetIndex(list, '1', listed)).toBe(0);
+  expect(stopTargetIndex(list, '2', listed)).toBe(1);
+  expect(tellTargetIndex(list, '1', listed)).toEqual({ at: 0 });
+  expect(tellTargetIndex(list, '2', listed)).toEqual({ at: 1 });
+  // Case does not matter to a tell's number, and a row between the repeats does not shift them.
+  const mixed = [running('Dup'), running('other'), running('dup')];
+  expect(tellTargetIndex(mixed, '3', ['Dup', 'other', 'dup'])).toEqual({ at: 2 });
+  expect(stopTargetIndex(mixed, '3', ['Dup', 'other', 'dup'])).toBe(2);
+  // A repeat that ended since leaves its number unanswered.
+  expect(stopTargetIndex([running('dup')], '2', listed)).toBe(-1);
+  expect(tellTargetIndex([running('dup')], '2', listed)).toBeNull();
+  // A name that several answer to is still refused with their numbers.
+  expect(tellTargetIndex(list, 'dup', listed)).toEqual({ many: [1, 2] });
+  // A label made of digits is read as a number.
+  expect(tellTargetIndex([running('2024')], '2024', ['2024'])).toBeNull();
 });

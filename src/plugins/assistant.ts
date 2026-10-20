@@ -1271,7 +1271,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 if (done === 'deleted') dropEmptyDirs(dirOf(a.id), sessDir); // a project's last one
                 const notice = done === 'deleted' ? `Deleted «${titleOf(a.id)}»`
                   : done === 'held' ? `"${titleOf(a.id)}" is open in another flow-assist process — it cannot be deleted`
-                  : a.id !== conv.sessionId ? `"${titleOf(a.id)}" is still open here — it cannot be deleted until it is put away`
+                  : a.id !== conv.sessionId ? `"${titleOf(a.id)}" is still open here — it cannot be deleted until it is put away (stopping its subagents puts it away)`
                   : `"${titleOf(a.id)}" is the session in this chat — it cannot be deleted from here`;
                 setPicker(pickerReload(p, pickerRows(), notice));
                 return;
@@ -1292,7 +1292,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 }
                 const notice = outcome === 'moved' ? `Moved «${titleOf(a.id)}» to ${dest ? tildePath(dest) : 'no project'}`
                   : outcome === 'held' ? `"${titleOf(a.id)}" is open in another flow-assist process — it cannot be moved`
-                  : outcome === 'ours' && a.id !== conv.sessionId ? `"${titleOf(a.id)}" is still open here — it cannot be moved until it is put away`
+                  : outcome === 'ours' && a.id !== conv.sessionId ? `"${titleOf(a.id)}" is still open here — it cannot be moved until it is put away (stopping its subagents puts it away)`
                   : outcome === 'ours' ? `"${titleOf(a.id)}" is the session in this chat — switch away first`
                   : outcome === 'here' ? `"${titleOf(a.id)}" is already in this project`
                   : outcome === 'missing' ? `"${titleOf(a.id)}" is gone — its file was removed`
