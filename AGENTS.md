@@ -808,7 +808,7 @@ there is no `/fullscreen`.
   rows under its field and listed by `/agents`. The data is `Conversation.tree()`: the live
   descendants depth first in start order, each a `TreeNode` (`key` — the descendant's
   conversation key, `label`, `kind`, `depth` from 1, `status` working / waiting / queued /
-  delayed, `latest` — the tool label while one runs, else the round's verb, `below` — its live
+  delayed / idle, `answered` — an idle node whose latest answer nobody has read, `latest` — the tool label while one runs, else the round's verb, `below` — its live
   descendants); `nodeByKey` returns the live descendant of a key. One rule, `childState`,
   gives a child's status to `runningChildren()` and to `tree()`. Ended children are not
   nodes: their result is a row of the conversation and `endedChildren` keeps the last
@@ -821,9 +821,10 @@ there is no `/fullscreen`.
   the root's `notify` runs once, so a child running tool after tool does not redraw the
   chat at the tool's pace. A closed root says nothing.
   The rows are `src/assistant/agent-tree.ts`: `treeRows` makes one terminal line per node
-  (`<mark> <label> · <state>`, two cells of indent per level, no clock), keeps at most
-  `ui.agentRows` (4, 0 to 8) and, over that, the waiting nodes first, then the working, then
-  the rest, each in tree order, with a last row `+K more — /agents` that is not a stop of the
+  (`<mark> <label> · <state>`, two cells of indent per level, no clock; an idle node is
+  `◦ <label> · idle`, or `· answered` while a later answer is unread), keeps at most
+  `ui.agentRows` (4, 0 to 8) and, over that, the waiting nodes first, then the working, then the answered
+  idle ones, then the rest, each in tree order, with a last row `+K more — /agents` that is not a stop of the
   cursor; `treeCursor` keeps the cursor on its node, else the nearest stop, else nowhere.
   **One budget serves the draw and the keys.** `chatRoom` measures the column (what the error,
   hint row, queue line and field's place take, the plan block, and whether a question, a y/n,
@@ -888,6 +889,10 @@ there is no `/fullscreen`.
   does nothing) until Esc; a node the person stopped reads `ended: stopped` whether or not it
   had begun (a queued node closes inside `stopSubtree`, so `y` marks the watch before the
   call and the `closed` handler words the end from the mark); opening a chat whose watch has ended opens on the session.
+  **A subagent that rests is watched like any other**, read-only: opening the watch on it
+  (`startWatch`), and any change of it while the watch is open, marks its latest answer read
+  (`seeAnswer`), which is when the row stops saying `answered`. The first answer is never
+  marked: it is a row of the session.
   **Folds.** `watchFolds` is the watch's own fold state, everything folded at the start: fold
   ids are indexes into one list, so the session's would open the wrong rows. The details key
   flips it, End jumps to the end (`watchToEndRef`), the list follows its end while it rests
@@ -1982,14 +1987,18 @@ A saved history that holds calls under the name `background` is sent as it is. T
     lines to `call-start`, `confirm` and `call`; `/export` draws it as `*<label> stopped
     (<by>)*`, `person` read as `by you`.
   - `subagent` — a subagent started or ended: `label`, `by` (`model` or `person`, who
-    started it), `event` (`start` or `end`), `id` (the name of the subagent's own journal,
-    below; absent when it has none) and, on an end, its `outcome`
+    started it), `event` (`start`, `answered` or `end`), `id` (the name of the subagent's own journal,
+    below; absent when it has none) and, on an answer or an end, its `outcome`
     (`answer`, `empty`, `limit`, `failed` or `stopped`); one stopped with its session or at
     exit, or by the person, says what stopped it in `stoppedBy` (`clear`, `exit` or `person`). Tagged `subagent: <label>`,
     written through the route's `about` into the journal of the subagent's owner (the
     session, or the subagent that started it); `/export` draws
     `*Subagent «<label>» started (by you | by the model)*` and `*Subagent «<label>»
-    finished | failed | stopped …*`, and under the start line the subagent's own journal.
+    finished | failed | stopped …*` (an `answered` line as `*Subagent «<label>» answered*`),
+    and under the start line the subagent's own journal. A subagent the person started writes
+    `answered` once per answer, the first included, and its `end` line only when it ends (a
+    stop, `/clear` or the exit); a task, and a subagent the model started, write `end` at
+    their one answer.
   **A subagent's journal.** A subagent keeps its whole conversation in
   `<home>/<sessionId>.sub/<id>.log.jsonl` (600, in a 700 directory; `subJournalPath`):
   flat in the `.sub` of the session at the root of the tree, whatever the subagent's depth;
@@ -2091,7 +2100,8 @@ A saved history that holds calls under the name `background` is sent as it is. T
   only in short; a journal that began partway (`continued`) says the same, and a fork's
   names its parent. Nothing said yet: nothing to export. Under a `subagent` start line that
   has an `id`, the export folds the subagent's journal: a `<details>` block whose summary is
-  `<label> · <outcome>` (`did not finish` when the journal has no end line for it), the
+  `<label> · <outcome>` (`did not finish` when the journal has no end line for it, as for a
+  subagent that still rests), the
   file's events rendered as a session's are, recursively — a subagent it started is a block
   inside it. `exportMarkdown` stays pure: it is handed a reader of a journal by id, which
   `/export` makes over `subJournalPath`. A file that is not there is one italic line, `its
@@ -2111,7 +2121,8 @@ A saved history that holds calls under the name `background` is sent as it is. T
   (`SessionStatus`) comes from what is on disk and in this process: `working` — this
   chat's session while a turn or a `!command` runs (drawn `this chat · working`), or a
   session this process holds for its background tasks while they run (drawn
-  `here · working`, below); `waiting` — this chat's while a y/n or a question waits
+  `here · working`, below), or for a subagent resting in it (drawn `here` with the
+  session's own status); `waiting` — this chat's while a y/n or a question waits
   (`this chat · waiting`; a y/n or question is drawn over the picker, so the word is
   there for the frame that shows both — `rowStatus` holds it); `held` — another
   process has the lock (`in use elsewhere`, `lockState`); `done` — the last thing said
@@ -3057,8 +3068,12 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   re-raising the signal (`src/__tests__/signal-exit.e2e.test.ts` sends a real SIGTERM).
   A session the chat leaves goes through it, and is put away only once it is
   **quiescent** — `quiescent(c)`, six clauses: no turn, `!command`, `!!` ask's hop or
-  slash command runs (`busy`); no task of its own is counted (`children` — a task is
-  untracked only after its delivery, so its result has landed); no y/n waits
+  slash command runs (`busy`); no child of its own is counted (`children` — a task is
+  untracked only after its delivery, so its result has landed; a subagent the person
+  started stays counted while it rests, so a session with one is kept loaded, headless and
+  locked, and the person who returns finds the subagent in the same conversation; the
+  picker reads such a session by its own status, `working` only while a child is at work,
+  and it is put away when its last child ends or the exit closes it); no y/n waits
   (`confirm`); no question waits (`question`); nothing is queued (`queue` — the drain
   shifts the queue and the turn it starts sets `busy` in the same synchronous step, so
   the two clauses cover that hop between them); no settings-file ask is in flight
@@ -3190,9 +3205,10 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   subagent with a file), tagged `{ task: <label>, ...line }`. A subagent in a session with
   a home keeps a journal file of its own (`subJournalId`; the journal's line list, above):
   its route writes every line of the conversation there, and the lines about the subagent
-  itself — `{ t: 'subagent', label, by, event: 'start' | 'end', id, outcome? }` and a task's
+  itself — `{ t: 'subagent', label, by, event: 'start' | 'answered' | 'end', id, outcome? }` and a task's
   `task-end` — through the route's `about` into the owner's journal, the start when it is
-  made, the end when its run settles. Without a home its lines go to its parent's journal
+  made, the end when its run settles (a subagent the person started: when it is stopped,
+  cleared or the process exits; each answer is an `answered` line). Without a home its lines go to its parent's journal
   as a task's do, tagged `{ subagent: <label>, ...line }`. Its project is its parent's (`inheritedProject`, read
   first by `currentProject`), whatever root its shell moves to — the memory and the
   workspace follow it; its shell starts in its parent's directory, and its `cd` moves
@@ -3202,7 +3218,8 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   delays: the caller schedules `run()` (once: a second call fails with `already run`),
   which sends the task as background work, answers the end
   (`outcome`, the trimmed text, the error, the round or token limit with its last step),
-  closes the child (`park`: its save and inbox timers go) and **delivers its result to
+  closes the child (`park`: its save and inbox timers go; **not a subagent the person
+  started, below**) and **delivers its result to
   the session its chain started from** — the nearest ancestor that has no parent, so a
   grandchild's result goes to the session too, never to the task or subagent that started it
   (which may have ended, or be in its last turn with its inbox about to go) —
@@ -3225,7 +3242,30 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   and their results go to the session; **the rules about "a child" read `parent`, not the
   kind**: this hand-up, the walk to the session (`run`, `workHome`), the abort at
   `close('exit')` and `closeAll`'s end line. The result carries `ms` and `tokens` from the child's
-  last end. **Only `close('clear')` and `close('parent')`
+  last end. **A subagent the person started stays after its answer** (`staying`, set by
+  `startChild` for kind `subagent` with `by: 'person'`; a task, and a subagent the model
+  starts, end as above). `run()` is its first turn: the result is delivered to the session
+  as for any child, the parent's journal gets an `answered` line instead of `end`, and the
+  child is not closed or released: it rests (`idle`, `rest()`), a state of the child and not
+  of its slot. A slot is held per TURN: a rested child holds none and has no timer, and a
+  message (`receive(text)`) that finds it resting starts a turn through the schedule, which
+  admits it like any child's (`queued` while no slot is free). The system prompt keeps the
+  ORIGINAL task for its whole life (`task`; a compaction rebuilds from it too), and each
+  message is an ordinary person turn in its history. The answer to a later turn is NOT
+  delivered: it stays in the child (`answered` on its node until the watch has read it,
+  `seeAnswer`) and an `answered` line is journaled. A message while a turn runs is queued
+  and taken at the child's next request boundary, or by the next turn when none is left;
+  `receive` refuses a task or a model's subagent, a stopped or closed child and an empty
+  text, and `runTurn` refuses a closed conversation. The child ends when stopped
+  (`stopSubtree` on a resting child is `endIdle`: its `end` line says `stopped` by the
+  person, its own file gets its closing `end`, the row goes, `endedChildren` keeps it, and no
+  message is delivered; on a working later turn the turn is aborted and the same end is
+  written when it settles, with nothing delivered; a stopped first turn delivers
+  `stopped:` as for any child), by `/clear` and by the exit. It has no state file
+  and does not survive a restart; its journal and `/export` keep it. A resting child
+  counts as a live child for the registry's `quiescent`, so its session is kept loaded
+  headless, not put away; `hasWorkingChildren` (a child not resting, or a resting one with
+  work below it) is what the picker's `working` reads. **Only `close('clear')` and `close('parent')`
   stop the subtree** (`stopChildren`): each child still counted is closed with
   `'parent'` — its turn aborted, one still armed has its timer cleared and its count
   disarmed (a timer that fired was disarmed when it fired, so only `childTimers` is
@@ -3269,14 +3309,15 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   on its delay, aborts every live conversation's turn (a session's `!command` or turn
   as well as a child's, so every running command's process group is killed and none
   outlives the process; a pending y/n is left as is), and closes the tree itself,
-  deepest first; `close('exit')` of a child stops its own turn.
+  deepest first (a session kept for a resting subagent is among the live conversations, so
+  its subagents are reached); `close('exit')` of a child stops its own turn.
   **The subagent command** (`/subagent`, `/sub`; `src/assistant/subagent-command.ts` for the
   text, the `subagent` case of the chat's command switch for the rest) starts a `subagent`
   child through `scheduleChild` with no delay, `by: 'person'`. It reads the line's RAW rest
   (`cmd`, not the whitespace-split `arg`), so the spacing and line breaks of the prompt
   reach the model; `--with-context` and `--auto` count only as the first words, and `stop`
-  as the first word is the stop command (a prompt that starts with the word `stop` is
-  written another way). Nothing in it is a turn, so it is never refused while one runs;
+  and `tell` as the first word are those commands (a prompt that starts with either word
+  is written another way). Nothing in it is a turn, so it is never refused while one runs;
   the child's lines go to the journal of the conversation's own session, which
   `keepPersonWork` makes when nobody has spoken: the line the person typed becomes the
   first `user` row (display only — the model's history never holds it), which gives the
@@ -3295,7 +3336,18 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   running child by its number in the listing last printed (the chat keeps its labels, so a
   job that ended since leaves its number unanswered rather than shifting the others; with
   no listing printed, a number names nothing) or by its label against the live children,
-  and calls `stopSubtree`.
+  and calls `stopSubtree`. Resting subagents are numbered in the listing with `idle` (or
+  `answered`).
+  **`/subagent tell <n|label> <text>`** writes to a subagent the person started
+  (`tellTargetIndex` resolves the target: a number against the listing last printed, a name
+  case-insensitively against the live children; a name that several children answer to is
+  refused naming their numbers) and calls `Conversation.receive`. The refusals are
+  `setError` lines that keep the line in the field: no such subagent, an ended one
+  (read from `endedChildren`), the ambiguity, the usage, and `receive`'s own. A message sent
+  clears the field and says a toast: `message sent to «x»`, or `«x» is working — your
+  message reaches it at its next step`. The text keeps its inner spacing and line breaks.
+  The tell is typed in the session's field: no key handling changes, and a subagent's y/n
+  waiting meanwhile is answered only by `y` / `n` on an empty field, as always.
 - **Ctrl+C, Ctrl+D and Ctrl+Z take a second press** (`src/runtime/exit-keys.ts`, pure;
   the App owns the arm). flowtty hands these three to the app BEFORE the terminal
   backend acts (exit, exit, suspend — skipped when a `useInput` handler returns strict
@@ -4205,7 +4257,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
     starts no follow-up either: a result lands in it as a row, read with the person's
     next message there. `/clear` empties the inbox; `/new` and opening another session
     land what waits in it as rows of the session left (`park`), or keep it there while
-    that session's tasks run. `/clear` also stops the cleared session's tasks — a
+    that session's tasks run or a subagent rests in it. `/clear` also stops the cleared session's tasks — a
     running one is aborted and delivers nothing, a delayed one is cancelled; after
     `/new` or opening another session a task still running delivers into the session it
     was started from, and a closed one takes nothing.

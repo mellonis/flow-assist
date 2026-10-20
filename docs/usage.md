@@ -25,7 +25,9 @@ keys.sessions <key>` moves it) — lists the current project's saved sessions, n
 first, with their titles, when each was last used, its size, and what it is doing —
 `this chat · working` while an answer or a command runs, `here · working` for a session
 you left while its background tasks run (it stays open in this process until they end,
-and the row changes to the file's status by itself when it is put away; `here · waiting`
+and the row changes to the file's status by itself when it is put away; a session you left
+with a subagent resting in it stays open the same way, and its row reads by the session's
+own status; `here · waiting`
 when it stopped on a y/n or a question — a toast and a system alert say so once, and it
 waits until you open it and answer, since keys typed elsewhere answer nothing there),
 `in use elsewhere` when another flow-assist process has it open, `done` when its last
@@ -55,7 +57,9 @@ A session is named by the first line you wrote; `/title <text>` renames it. `/ne
 starts a fresh session and keeps the current one as it is — a restart before you say
 anything continues it. If an answer is still coming, the session you leave goes on
 working: the picker shows it (`here · working`), and Esc does not reach it from another
-session.
+session. A session you leave with a subagent you started still in it stays open in this
+process too, so coming back finds the subagent where it was; it is put away when the last
+subagent ends.
 `/clear` also starts a fresh session, but it stops an answer that is still coming and
 the session's background tasks, and marks the old session closed, so a restart starts
 empty. `/resume` lists the current
@@ -82,7 +86,7 @@ a note.
 
 A subagent keeps its whole conversation in a journal of its own, in a `<id>.sub` directory
 beside the session's: what it was asked, its steps, its calls with their results and your
-y/n, its answer. The session's journal holds only the lines saying it started and ended.
+y/n, its answer. The session's journal holds only the lines saying it started, answered and ended.
 A background task has no file of its own; its calls are in the journal of whoever started
 it. The `.sub` directory goes with the session — when it is deleted, pruned beyond
 `sessions.keep`, or has its journal removed by `sessions.journalDays` — and moves with it
@@ -186,8 +190,9 @@ conversation.
 ## Subagents you start
 
 **`/subagent <prompt>`** (`/sub` for short) hands a job to a subagent that works beside the
-chat: you go on talking while it runs, and its answer lands as a `◆` message when it
-ends, as a background task's does. It may read what the assistant reads without asking
+chat: you go on talking while it runs, and its first answer lands as a `◆` message, as a
+background task's does. The subagent then stays, resting (`idle`), until you write to it
+again or stop it. It may read what the assistant reads without asking
 you. It may also write: each write (a command, a file change, a fetch off the allowlist)
 stops for your y/n, and the y/n is asked where you started the subagent. It is not offered
 the tool for asking you a question; where the job leaves something open it makes an
@@ -223,15 +228,31 @@ it; `/subagent stop <name>` declines it, with the subagent's name from that line
 already a window shows the block there. In `/subagent`'s list such a job reads `waiting`. A subagent that waits does not count
 toward the three that run at once.
 
-`/subagent` alone lists this conversation's jobs, the running ones numbered
-(`1 · find-the-failing · working · 1m 12s`), then the last twenty that ended
-(`find-the-failing · done · 2m 3s · 14k tokens`). The list is this conversation's; the
+`/subagent` alone lists this conversation's jobs, the live ones numbered
+(`1 · find-the-failing · working · 1m 12s`; a subagent that rests reads `idle`, or
+`answered` when its latest answer to a later message is unread), then the last twenty that
+ended (`find-the-failing · done · 2m 3s · 14k tokens`). The list is this conversation's; the
 `N in background` count on the hint row covers every conversation at once.
 `/subagent stop <number or name>` reads a number against the list you last saw (a job that
 ended since keeps the others' numbers, and its own is answered with a line), so list first;
 a name needs no list. It stops one and whatever it started: what it had written so far comes back as a `◆ <label>
-stopped:` message, with one toast and no follow-up turn. A prompt that begins with the
-word `stop` would be read as this command, so put another word before it.
+stopped:` message, with one toast and no follow-up turn. A resting subagent just ends, with
+no message. A prompt that begins with the word `stop` or `tell` would be read as one of
+these commands, so put another word before it.
+
+**`/subagent tell <number or name> <text>`** writes to a subagent you started, the number
+read against the list you last saw, a name as typed (any case; a name two subagents share
+asks for the number). A resting subagent takes the message as a new turn of its own, with
+its original task still in front of it, and counts toward the three that run at once for as
+long as the turn lasts. One that is working takes the message at its next step. The answer
+to a message does not come into your conversation, and the assistant never sees it: the
+row reads `answered` until you have opened the subagent (⏎ on its row) and read it there.
+A task, a subagent the assistant started, and one that has ended take no messages, and
+the line says so. A subagent ends when you stop it, at `/clear`, and when flow-assist
+exits; it does not come back after a restart, though its journal and `/export` keep what it
+did. Each turn has the usual limits (`ai.maxRounds`, `ai.maxTurnTokens`); the number of
+resting subagents has none. Its y/n during a later turn is asked the same way as in the
+first.
 
 Started in a chat where nothing was said yet, `/subagent` makes the conversation a saved
 session like a first message would; the line you typed is its first message.
@@ -240,7 +261,9 @@ session like a first message would; the line you typed is its first message.
 
 The subagents and tasks a conversation has running are listed under the line you type in,
 one row each: `⚙ <name> · <what it is doing>` while it works, `⏸ <name> · waiting for a
-y/n` when it asks you, `○ <name> · queued` or `· in 4m` when it has not started. What a
+y/n` when it asks you, `○ <name> · queued` or `· in 4m` when it has not started,
+`◦ <name> · idle` when a subagent you started rests after its answer (`· answered` while a
+later answer is unread). What a
 node started stands under it, indented. A task is marked `(task)`. The rows carry no clocks
 (an idle chat does not redraw); `/agents` shows the time. Ended nodes are not rows — their
 `◆` message is already in the conversation, and `/agents` lists the last twenty.
@@ -295,7 +318,8 @@ cursor stays in the field and that block is shown at once. `x` asks `stop <name>
 no` in the hint row and `y` stops the node and what it started; `n` or Esc drops the
 question. The sessions key opens the picker. Ctrl+C never stops your conversation's turn from here: it
 arms the exit, and a second one exits. Every other key, ⇧⇥ included, is swallowed: nothing is
-typed, sent or queued. A node that ends stays on screen as it was, the hint row reading `ended:
+typed, sent or queued, which holds for a resting subagent too; write to it with `/subagent
+tell`. A node that ends stays on screen as it was, the hint row reading `ended:
 done` (or `failed`, `stopped`, `limit`, `empty`), until Esc; a node you stopped reads `ended:
 stopped` even if it had not begun; its result is in your conversation as always.
 
