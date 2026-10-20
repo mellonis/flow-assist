@@ -90,8 +90,8 @@ test('a node handed up to the session when its parent ends appears at depth 1', 
   const innerScript = subScript(model, 'inner job');
   innerScript.script([{ hold: true }], [{ text: 'inner' }]);
   const rig = rigOf(model);
-  const outer = begin(rig, spec('outer', 'outer job'));
-  const inner = begin(rig, spec('inner', 'inner job'), outer.child);
+  const outer = begin(rig, spec('outer', 'outer job', { by: 'model' }));
+  const inner = begin(rig, spec('inner', 'inner job', { by: 'model' }), outer.child);
   await rig.until(() => innerScript.held);
   await outer.done;
   expect(rig.conv.tree().map((n) => [n.label, n.depth])).toEqual([['inner', 1]]);
@@ -194,8 +194,8 @@ test('the root hears of a grandchild that ends, of children stopped with their p
   const rig = rigOf(model);
   const seen = lastSeen(rig);
   // A grandchild ends: the root's latest tree no longer lists it.
-  const outer = begin(rig, spec('outer', 'o'), rig.conv, false);
-  const inner = begin(rig, spec('inner', 'inner job'), outer.child);
+  const outer = begin(rig, spec('outer', 'o', { by: 'model' }), rig.conv, false);
+  const inner = begin(rig, spec('inner', 'inner job', { by: 'model' }), outer.child);
   await rig.until(() => innerScript.held);
   expect(seen.labels).toEqual(['outer', 'inner']);
   innerScript.release();

@@ -66,6 +66,16 @@ async function oneHeld(mark = 'WATA', opts: Parameters<typeof boot>[1] = {}, scr
   await settleUntil(() => frameOf(b.ui).includes(`⚙ ${mark.toLowerCase()}-do`));
   return b;
 }
+// One held background task the model starts (a task ends after its answer; a subagent the
+// person starts stays), named after `mark`, with the cursor on its row.
+async function oneHeldTask(mark: string, opts: Parameters<typeof boot>[1] = {}, script?: any[][]) {
+  const label = `${mark.toLowerCase()}-do-it`;
+  const b = await boot([{ mark, script }], { ...opts, main: [[{ tool: 'subagent', args: { task: `${mark} do it`, label } }], [{ text: 'started' }]] });
+  await ask(b.ui, 'run it');
+  await settleUntil(() => b.children[0]!.held);
+  await settleUntil(() => frameOf(b.ui).includes(`⚙ ${label}`));
+  return b;
+}
 const watchFromRows = async (ui: UI) => { await ui.press('down'); await ui.press('return'); await settle(4); };
 
 // The saved session that has an answer (the sessions directory holds one per conversation).
@@ -139,11 +149,13 @@ test('a watch started from /agents (⏎ closes the panel); an ended row says the
   await settle(4);
   expect(watching(ui)).toBe(false);
   expect(inRows(ui)).toBe(false);
-  // Let AAA end, then ⏎ on its ended row.
+  // Let AAA answer and stop it, then ⏎ on its ended row.
   a!.release();
   await settleUntil(() => a!.held);
   a!.release();
   await settleUntil(() => frameOf(ui).includes('◆ aaa-go finished:'));
+  await ask(ui, '/subagent stop aaa-go');
+  await settleUntil(() => frameOf(ui).includes('aaa-go stopped'));
   await ask(ui, '/agents');
   await settleUntil(() => frameOf(ui).includes('Flow Assist · Agents'));
   await ui.press('down');
@@ -179,24 +191,49 @@ test('in the watch typing, ⏎ and a /command send nothing, and the field is emp
   ui.app.unmount();
 });
 
-test('a child that ends while watched stays on screen with its last answer and `ended: done`; the result is the session\'s after Esc; x does nothing', async () => {
+test('a subagent that answers while watched stays on screen with its last answer and `idle`; stopped, the watch says `ended: stopped`; the first answer is the session\'s after Esc', async () => {
   const { children: [a], ui } = await oneHeld();
   await watchFromRows(ui);
   a!.release();
   await settleUntil(() => a!.held);
   a!.release();
-  await settleUntil(() => frameOf(ui).includes('ended: done'));
+  await settleUntil(() => frameOf(ui).includes('◦ idle'));
   expect(frameOf(ui)).toContain('WATA settled');
-  expect(frameOf(ui)).toMatch(/ended: done\s+Esc back/);
+  expect(frameOf(ui)).toContain('x stop');
+  await ui.press('x');
+  expect(frameOf(ui)).toContain('stop wata-do-it? y yes · n no');
+  await ui.press('y');
+  await settleUntil(() => frameOf(ui).includes('ended: stopped'));
+  expect(frameOf(ui)).toMatch(/ended: stopped\s+Esc back/);
   expect(frameOf(ui)).not.toContain('x stop');
   await ui.press('x');
   await settle(4);
   expect(frameOf(ui)).not.toContain('stop wata-do-it?');
-  expect(frameOf(ui)).toContain('ended: done');
   await ui.press('escape');
   await settle(4);
   expect(watching(ui)).toBe(false);
   expect(frameOf(ui)).toContain('◆ wata-do-it finished:');
+  ui.app.unmount();
+});
+
+test('a task that ends while watched stays on screen with its last answer and `ended: done`; the result is the session\'s after Esc; x does nothing', async () => {
+  const { children: [a], ui } = await oneHeldTask('WATT');
+  await watchFromRows(ui);
+  a!.release();
+  await settleUntil(() => a!.held);
+  a!.release();
+  await settleUntil(() => frameOf(ui).includes('ended: done'));
+  expect(frameOf(ui)).toContain('WATT settled');
+  expect(frameOf(ui)).toMatch(/ended: done\s+Esc back/);
+  expect(frameOf(ui)).not.toContain('x stop');
+  await ui.press('x');
+  await settle(4);
+  expect(frameOf(ui)).not.toContain('stop watt-do-it?');
+  expect(frameOf(ui)).toContain('ended: done');
+  await ui.press('escape');
+  await settle(4);
+  expect(watching(ui)).toBe(false);
+  expect(frameOf(ui)).toContain('◆ watt-do-it finished:');
   ui.app.unmount();
 });
 
@@ -444,8 +481,8 @@ test('a click in the watched rows folds nothing, the session\'s rows included', 
 });
 
 const COLLAPSE = { name: '\\', ctrl: true };
-test('a collapsed chat keeps the watch; one whose node ended meanwhile opens on the session', async () => {
-  const { children: [a], ui } = await oneHeld('WATG', { cols: 160, rows: 40, mode: 'panel' });
+test('a collapsed chat keeps the watch; one whose task ended meanwhile opens on the session', async () => {
+  const { children: [a], ui } = await oneHeldTask('WATG', { cols: 160, rows: 40, mode: 'panel' });
   await watchFromRows(ui);
   ui.backend.press(COLLAPSE);
   await settle();
@@ -893,8 +930,8 @@ test('the breadcrumb follows a task that hands its child up while the child is w
   const { children: [outer, inner], ui } = await boot([
     { mark: 'OUTQ', script: [[{ hold: true }, { tool: 'subagent', args: { task: 'INNQ work', label: 'innq' } }], [{ hold: true }, { text: 'outer settled' }]] },
     { mark: 'INNQ', script: [[{ hold: true }, { text: 'inner step', tool: 'datetime', args: {} }], [{ hold: true }, { text: 'inner settled' }]] },
-  ]);
-  await ask(ui, '/subagent OUTQ go');
+  ], { main: [[{ tool: 'subagent', args: { task: 'OUTQ go', label: 'outq-go' } }], [{ text: 'started' }]] });
+  await ask(ui, 'run it');
   await settleUntil(() => outer!.held);
   outer!.release();
   await settleUntil(() => inner!.held);
@@ -977,8 +1014,8 @@ test('with the stop question up, y or n with ctrl or meta answers nothing; the q
   ui.app.unmount();
 });
 
-test('a stop question up when the node ends is gone: the hint row says how it ended', async () => {
-  const { children: [a], ui } = await oneHeld('WQE');
+test('a stop question up when the task ends is gone: the hint row says how it ended', async () => {
+  const { children: [a], ui } = await oneHeldTask('WQE');
   await watchFromRows(ui);
   await ui.press('x');
   expect(frameOf(ui)).toContain('stop wqe-do-it? y yes · n no');

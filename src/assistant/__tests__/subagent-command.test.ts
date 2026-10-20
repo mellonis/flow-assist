@@ -59,3 +59,12 @@ test('the listing numbers the running ones, then the ended ones with duration an
     'z · stopped · 5s · 800 tokens',
   ]);
 });
+
+test('the listing numbers an idle subagent with the rest, and says answered once a later answer is unread', () => {
+  const text = subagentListing([
+    { label: 'worker', kind: 'subagent', status: 'working', startedAt: 0, until: null },
+    { label: 'rester', kind: 'subagent', status: 'idle', startedAt: null, until: null },
+    { label: 'talker', kind: 'subagent', status: 'idle', startedAt: null, until: null, answered: true },
+  ], [], 5_000);
+  expect(text.split('\n')).toEqual(['1 · worker · working · 5s', '2 · rester · idle', '3 · talker · answered']);
+});

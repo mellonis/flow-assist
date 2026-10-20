@@ -27,15 +27,19 @@ function inTime(ms: number): string {
   return h ? `${h}h${min % 60 ? ` ${min % 60}m` : ''}` : `${min}m`;
 }
 
-const MARK: Record<TreeNode['status'], string> = { waiting: '⏸', working: '⚙', queued: '○', delayed: '○' };
-const TONE: Record<TreeNode['status'], TreeRow['tone']> = { waiting: 'warn', working: 'work', queued: 'dim', delayed: 'dim' };
-// Who is kept when the rows run out: what waits for the person first, then what works.
-const ATTENTION: Record<TreeNode['status'], number> = { waiting: 0, working: 1, queued: 2, delayed: 2 };
+const MARK: Record<TreeNode['status'], string> = { waiting: '⏸', working: '⚙', queued: '○', delayed: '○', idle: '◦' };
+const TONE: Record<TreeNode['status'], TreeRow['tone']> = { waiting: 'warn', working: 'work', queued: 'dim', delayed: 'dim', idle: 'dim' };
+// Who is kept when the rows run out: what waits for the person first, then what works,
+// then an answer not read yet.
+const ATTENTION: Record<TreeNode['status'], number> = { waiting: 0, working: 1, queued: 3, delayed: 3, idle: 4 };
+const attentionOf = (n: TreeNode): number => (n.status === 'idle' && n.answered ? 2 : ATTENTION[n.status]);
+const toneOf = (n: TreeNode): TreeRow['tone'] => (n.status === 'idle' && n.answered ? 'warn' : TONE[n.status]);
 
 function stateOf(n: TreeNode, now: number): string {
   if (n.status === 'waiting') return 'waiting for a y/n';
   if (n.status === 'working') return n.latest || 'working';
   if (n.status === 'delayed') return `in ${inTime(Math.max(0, (n.until ?? now) - now))}`;
+  if (n.status === 'idle') return n.answered ? 'answered' : 'idle';
   return 'queued';
 }
 
@@ -60,12 +64,12 @@ export function treeRows(nodes: readonly TreeNode[], max: number, width: number,
   const over = nodes.length > max;
   let kept = nodes.map((n, i) => ({ n, i }));
   if (over) {
-    kept = kept.sort((a, b) => ATTENTION[a.n.status] - ATTENTION[b.n.status] || a.i - b.i).slice(0, max - 1).sort((a, b) => a.i - b.i);
+    kept = kept.sort((a, b) => attentionOf(a.n) - attentionOf(b.n) || a.i - b.i).slice(0, max - 1).sort((a, b) => a.i - b.i);
   }
   const rows = kept.map(({ n }): TreeRow => {
     const task = n.kind === 'task' ? ' (task)' : '';
     const text = `${'  '.repeat(n.depth - 1)}${MARK[n.status]} ${n.label}${task} · ${stateOf(n, now)}`;
-    return { key: n.key, text: cutStep(text, width), tone: TONE[n.status] };
+    return { key: n.key, text: cutStep(text, width), tone: toneOf(n) };
   });
   const more = nodes.length - kept.length;
   if (over) rows.push({ key: '', text: cutStep(`+${more} more — /agents`, width), tone: 'dim' });
@@ -101,7 +105,7 @@ export function agentsPanelRows(nodes: readonly TreeNode[], ended: readonly Ende
       id: n.key,
       text: `${'  '.repeat(n.depth - 1)}${MARK[n.status]} ${n.label}${task}`,
       detail: `${stateOf(n, now)}${spent}`,
-      ...(n.status === 'waiting' ? { tone: 'warn' as const } : {}),
+      ...(toneOf(n) === 'warn' ? { tone: 'warn' as const } : {}),
     };
   });
   ended.forEach((e, i) => {

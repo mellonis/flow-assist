@@ -291,6 +291,24 @@ test('the export folds each subagent\'s journal under its start line, nested as 
   expect(md).not.toContain('forked from'); // a child file\'s `parent` is not a fork
 });
 
+test('a subagent that stays says each answer: the fold opens once at its start and takes its summary from the end line, an answered line is never an end', () => {
+  const answered = (label: string, id: string): JournalEvent => ({ t: 'subagent', label, by: 'person', event: 'answered', outcome: 'answer', id });
+  const root: JournalEvent[] = [
+    sub('stayer', A, 'start'), answered('stayer', A), answered('stayer', A), sub('stayer', A, 'end', { outcome: 'stopped', stoppedBy: 'person' }),
+    sub('open', B, 'start'), answered('open', B),
+  ];
+  const files = { [A]: child('stayer', A, 'r'), [B]: child('open', B, 'r') };
+  const md = exportMarkdown(root, { title: 't', id: 'r', child: readerOf(files) });
+  expect(md.match(/\*Subagent «stayer» answered\*/g)).toHaveLength(2);
+  expect(md.match(/Subagent «stayer» stopped/g)).toHaveLength(1);
+  expect(md.match(/task of stayer/g)).toHaveLength(1);
+  expect(md).toContain('<summary>stayer · stopped</summary>');
+  // One that has not ended yet is not finished, whatever it answered.
+  expect(md).toContain('<summary>open · did not finish</summary>');
+  expect(md.match(/task of open/g)).toHaveLength(1);
+  expect(md).not.toContain('Subagent «open» finished');
+});
+
 test('a subagent whose file is missing or unreadable prints one line saying so', () => {
   const md = exportMarkdown([sub('alpha', A, 'start'), sub('alpha', A, 'end')], { title: 't', id: 'r', child: () => null });
   expect(md).toContain('*Subagent «alpha» started (by you)*\n\n*its journal is not there*\n');

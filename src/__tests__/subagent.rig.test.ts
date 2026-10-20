@@ -115,7 +115,7 @@ test('its result lands in the session that started it, though another is on scre
   task.release();
   await rig.until(() => bgRows(first).length === 1);
   await settled(rig);
-  expect(child.closed).toBe(true);
+  expect(child.idle).toBe(true);
   expect(bgRows(first)).toEqual(['find finished:\nfound it']);
   expect(bgRows(second)).toEqual([]);
   expect(rig.toasts).toContain('⏳ find done — in «the first»');
@@ -138,7 +138,9 @@ test('a task a subagent starts reports to the session, not to the subagent that 
   await rig.until(() => bgRows(first).length === 2, 5_000);
   await settled(rig);
   expect(bgRows(first)).toEqual(['g finished:\ng done', 's finished:\ns done']);
-  expect(first.children.size).toBe(0);
+  // The subagent stays, idle, after its answer.
+  expect(first.children.size).toBe(1);
+  expect(s.idle).toBe(true);
 });
 
 test('a long run that compacts sends its summary with the next round', async () => {
@@ -177,15 +179,15 @@ test('its start and its end are in the journal of the session that started it, a
   const model = new ScriptedModel();
   model.script([{ text: 'fine' }]);
   const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
-  const { run } = startFrom(rig, spec('j', 'do it'));
+  const { run } = startFrom(rig, spec('j', 'do it', { by: 'model' }));
   await run();
   const lines = rig.journal().filter((e) => e.t === 'subagent');
   expect(lines).toMatchObject([
-    { t: 'subagent', label: 'j', by: 'person', event: 'start', subagent: 'j' },
-    { t: 'subagent', label: 'j', by: 'person', event: 'end', outcome: 'answer', subagent: 'j' },
+    { t: 'subagent', label: 'j', by: 'model', event: 'start', subagent: 'j' },
+    { t: 'subagent', label: 'j', by: 'model', event: 'end', outcome: 'answer', subagent: 'j' },
   ]);
   const md = exportMarkdown(rig.journal(), { title: 't', id: rig.conv.sessionId });
-  expect(md).toContain('*Subagent «j» started (by you)');
+  expect(md).toContain('*Subagent «j» started (by the model)');
   expect(md).toContain('*Subagent «j» finished*');
 });
 
@@ -193,7 +195,7 @@ test('/export draws a subagent\'s calls under its label, folded where it started
   const model = new ScriptedModel();
   model.script([{ tool: 'datetime', args: {} }], [{ text: 'noon' }]);
   const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
-  const { run } = startFrom(rig, spec('clock', 'what time'));
+  const { run } = startFrom(rig, spec('clock', 'what time', { by: 'model' }));
   await run();
   // The calls are in the subagent's file; the session's journal holds only its start and end.
   const files = new Map(rig.subJournals().map((j) => [j.id, j.events]));
@@ -242,7 +244,7 @@ test('a subagent that ends hands the children still live to its parent', async (
   const rig = conversationRig(model, { inbox: true, ai: { backgroundFollowUp: false } });
   const first = rig.conv;
   rig.registry.show(first);
-  const s = scheduled(rig, spec('s', 'one'));
+  const s = scheduled(rig, spec('s', 'one', { by: 'model' }));
   await rig.until(() => s.closed && first.children.size === 1, 5_000);
   const [g] = [...first.children];
   expect(g!.label).toBe('g');
@@ -479,7 +481,7 @@ test('the ended children are remembered as plain data, newest last, twenty at mo
   sub.script(...Array.from({ length: 22 }, (_, i) => [{ text: `r${i}` }]));
   const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
   const first = rig.conv;
-  for (let i = 0; i < 22; i++) await startFrom(rig, spec(`c${i}`, `job ${i}`)).run();
+  for (let i = 0; i < 22; i++) await startFrom(rig, spec(`c${i}`, `job ${i}`, { by: 'model' })).run();
   const ended = first.endedChildren;
   expect(ended).toHaveLength(20);
   expect(ended.map((e) => e.label)).toEqual(Array.from({ length: 20 }, (_, i) => `c${i + 2}`));
@@ -497,7 +499,7 @@ test('a stopped child is remembered with its outcome; one handed up is remembere
   sub.script([{ tool: 'subagent', args: { task: 'two', label: 'g', in: '3 minutes' } }], [{ text: 's done' }]);
   const rig = attachedRig(model, { backgroundFollowUp: false });
   const first = rig.conv;
-  const s = scheduled(rig, spec('s', 'one'));
+  const s = scheduled(rig, spec('s', 'one', { by: 'model' }));
   await rig.until(() => s.closed && first.children.size === 1, 5_000);
   const [g] = [...first.children];
   expect(g!.parent).toBe(first);

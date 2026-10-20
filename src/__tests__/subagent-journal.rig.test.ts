@@ -62,7 +62,7 @@ test('a subagent leaves a file under the session\'s .sub: start first, end last,
   expect(mode(path.dirname(j!.file))).toBe(0o700);
 });
 
-test('the session\'s journal keeps exactly the subagent\'s start and end lines, each with the file\'s id, and none of its calls', async () => {
+test('the session\'s journal keeps exactly the subagent\'s start and answered lines, each with the file\'s id, and none of its calls', async () => {
   const model = new ScriptedModel();
   model.script([{ tool: 'datetime', args: {} }], [{ text: 'noon' }]);
   const rig = conversationRig(model, { ai: { backgroundFollowUp: false } });
@@ -72,7 +72,7 @@ test('the session\'s journal keeps exactly the subagent\'s start and end lines, 
   const own = rig.journal().filter((e) => e.t !== 'row' && e.t !== 'start');
   expect(own).toMatchObject([
     { t: 'subagent', event: 'start', label: 'clock', id },
-    { t: 'subagent', event: 'end', label: 'clock', outcome: 'answer', id },
+    { t: 'subagent', event: 'answered', label: 'clock', outcome: 'answer', id },
   ]);
   expect(own).toHaveLength(2);
 });
@@ -104,8 +104,8 @@ test('a subagent of a subagent lies flat in the root\'s .sub, its parent field n
   expect(files.every((f) => path.dirname(f.file) === path.dirname(files[0]!.file))).toBe(true);
   const inner = files.find((f) => f.events[0]!.label === 'inner')!;
   expect(inner.events[0]).toMatchObject({ t: 'start', parent: middle.subJournalId, root: rig.conv.sessionId });
-  // The inner one's start and end lines are in the middle one's file, not the session's.
-  expect(rig.subJournal('middle').filter((e) => e.t === 'subagent')).toMatchObject([{ event: 'start', label: 'inner', id: inner.id }, { event: 'end', label: 'inner', id: inner.id }]);
+  // The inner one's start and answered lines are in the middle one's file, not the session's.
+  expect(rig.subJournal('middle').filter((e) => e.t === 'subagent')).toMatchObject([{ event: 'start', label: 'inner', id: inner.id }, { event: 'answered', label: 'inner', id: inner.id }]);
   expect(rig.journal().filter((e) => e.t === 'subagent' && e.label === 'inner')).toEqual([]);
 });
 

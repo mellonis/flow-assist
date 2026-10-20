@@ -81,7 +81,9 @@ test('/export folds a subagent\'s conversation under the line that started it', 
   await settleUntil(() => (ui.backend.lastFrame ?? '').includes('finished:'));
   await ask(ui, '/export out.md', 6);
   const md = fs.readFileSync(path.join(root, 'out.md'), 'utf8');
-  const from = md.indexOf('<summary>fold-me-find · finished</summary>');
+  // The subagent stays after its answer, so it has said `answered` and has no end yet.
+  expect(md).toContain('*Subagent «fold-me-find» answered*');
+  const from = md.indexOf('<summary>fold-me-find · did not finish</summary>');
   expect(from).toBeGreaterThan(md.indexOf('*Subagent «fold-me-find» started'));
   expect(md.indexOf('The clock is in the third file.', from)).toBeGreaterThan(from);
   expect(md.indexOf('</details>', from)).toBeGreaterThan(md.indexOf('The clock is in the third file.', from));

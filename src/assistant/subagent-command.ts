@@ -65,13 +65,13 @@ export function stopTargetIndex(running: readonly RunningChild[], target: string
 
 const tokenText = (n: number): string => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : String(n));
 
-// The listing: the running ones numbered (what `stop` takes), then the ended ones.
+// The listing: the live ones numbered (what `stop` and `tell` take), idle ones among them, then the ended ones.
 // A conversation with neither says so.
 export function subagentListing(running: readonly RunningChild[], ended: readonly EndedChild[], now = Date.now()): string {
   if (!running.length && !ended.length) return 'no subagents here';
   const lines: string[] = [];
   running.forEach((c, i) => {
-    const state = c.status === 'delayed' ? `in ${formatDuration(Math.max(0, (c.until ?? now) - now))}` : c.status;
+    const state = c.status === 'delayed' ? `in ${formatDuration(Math.max(0, (c.until ?? now) - now))}` : c.status === 'idle' && c.answered ? 'answered' : c.status;
     const spent = c.status === 'working' && c.startedAt !== null ? ` · ${formatDuration(now - c.startedAt)}` : '';
     lines.push(`${i + 1} · ${c.label}${c.kind === 'task' ? ' (task)' : ''} · ${state}${spent}`);
   });

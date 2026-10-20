@@ -241,19 +241,23 @@ export function childResultText(label: string, r: ChildResult): string {
 export interface EndedChild { label: string; kind: ChildSpec['kind']; outcome: ChildResult['outcome']; ms: number; tokens: number }
 // A child still counted, as a listing reads it. `startedAt`: when its turn began (null
 // before); `until`: when its delay ends (null unless it is delayed).
-export interface RunningChild { label: string; kind: ChildSpec['kind']; status: 'working' | 'waiting' | 'queued' | 'delayed'; startedAt: number | null; until: number | null }
+// `idle`: a subagent the person started, between its turns; `answered` (idle only): a later
+// answer of it the person has not read yet.
+export interface RunningChild { label: string; kind: ChildSpec['kind']; status: 'working' | 'waiting' | 'queued' | 'delayed' | 'idle'; startedAt: number | null; until: number | null; answered?: boolean }
 // A live descendant of a conversation, as the agent tree draws it (`Conversation.tree`).
 // `key` is the descendant's conversation key; `depth` is 1 for a child of the conversation
 // asked; `latest` is the tool it runs, else the verb of its round while it works, else '';
 // `below` counts its live descendants.
-export interface TreeNode { key: string; label: string; kind: ChildSpec['kind']; depth: number; status: RunningChild['status']; latest: string; startedAt: number | null; until: number | null; below: number }
+export interface TreeNode { key: string; label: string; kind: ChildSpec['kind']; depth: number; status: RunningChild['status']; latest: string; startedAt: number | null; until: number | null; below: number; answered?: boolean }
 // What `startChild` hands back: a refusal said to the model, or the child, its run,
 // `armed`, which records the delay timer that will start it, and `fired`, which the
 // caller calls when that timer fires — so a stop disarms only a task still waiting on
-// its delay.
+// its delay. `again` is there for a subagent the person started, which stays after its
+// first answer: it runs one later turn on a message and reports how it ended; its answer
+// is delivered nowhere.
 export type ChildStart =
   | { refused: string }
-  | { child: Conversation; run: () => Promise<ChildResult>; armed: (timer: ReturnType<typeof setTimeout>) => void; fired: () => void };
+  | { child: Conversation; run: () => Promise<ChildResult>; again?: (text: string) => Promise<ChildResult>; armed: (timer: ReturnType<typeof setTimeout>) => void; fired: () => void };
 // A child's way into a journal. Called, it takes a line of the child's own: a child with
 // no file of its own keeps only the lines a task journals (`call-start`, `confirm`,
 // `call`) and writes them, tagged, into its parent's journal; a subagent with a file

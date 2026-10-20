@@ -41,8 +41,10 @@
 //            `outcome` stopped, and `by` — what stopped it (`clear`: its session was
 //            cleared; `exit`: the process exited while it ran or waited; `person`: the person
 //            stopped it, or the job it belonged to)
-//   subagent a subagent started or ended: `label`, `by` (who started it: `model` or
-//            `person`), `event` (`start` or `end`) and, on an end, its `outcome`; one
+//   subagent a subagent started, answered or ended: `label`, `by` (who started it: `model` or
+//            `person`), `event` (`start`, `answered` or `end`) and, on an answer or an end,
+//            its `outcome`. A subagent the person started stays after an answer: it says
+//            `answered` once per answer and `end` only when it ends. One
 //            stopped with its session or at exit also says what stopped it (`stoppedBy`:
 //            `clear`, `exit` or `person`), and the `id` of its own file when it has one. Tagged
 //            `subagent` like its calls. A subagent's file holds the same kinds as a session's
@@ -397,6 +399,8 @@ function eventLines(events: JournalEvent[], child: ((id: string) => JournalEvent
       case 'compact': out.push('---', '', `**Compacted${ev.auto ? ' automatically' : ''}**${at} — from here on the model was given this summary instead of the conversation above:`, '', quoted(nd(String(ev.summary ?? ''))), '', '---', ''); break;
       case 'subagent': {
         const label = nd(String(ev.label ?? ''));
+        // A subagent that stays says each of its answers; its end comes with the stop.
+        if (ev.event === 'answered') { out.push(`*Subagent «${label}» answered*${at}`, ''); break; }
         out.push(ev.event === 'start'
           ? `*Subagent «${label}» started (${ev.by === 'person' ? 'by you' : 'by the model'})*${at}`
           : `*Subagent «${label}» ${nd(outcomeWord(ev))}${typeof ev.stoppedBy === 'string' ? ` (${nd(stoppedByText(ev.stoppedBy))})` : ''}*${at}`, '');

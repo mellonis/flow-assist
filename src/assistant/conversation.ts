@@ -90,6 +90,16 @@ export class Conversation {
   leaveSchedule: (() => boolean) | null = null;
   // `stopSubtree` was called: the child's run, if it has not begun, sends nothing.
   private stopRequested = false;
+  // A subagent the person started stays after its answer, between turns idle, until it is
+  // stopped, its conversation is cleared or the process exits (set by `startChild`). `task`
+  // is the task it was given: it rides the system prompt of every turn, whatever the person
+  // says later. `resume` starts a later turn on a message through the schedule.
+  staying = false;
+  task = '';
+  resume: ((text: string) => void) | null = null;
+  private idleNow = false;
+  // A later answer of a staying subagent that nobody has read: its row says `answered`.
+  private answerPending = false;
   // Left by the chat while it has work of its own (the registry's `retire`): kept loaded
   // and locked, drawn by nobody, until nothing of its own is left. A result lands in it
   // as a row and starts no turn (`takeInbox`).
@@ -524,8 +534,8 @@ export class Conversation {
   // a question dismissed; a session left while it works is kept by the registry and
   // closed only once it is quiescent. The tasks it started are stopped only by /clear
   // and by a stop from its own parent (`stopChildren`); a task that ends hands the ones
-  // still live to its parent (`handChildrenUp`); a park of a session has none left, and
-  // an exit leaves them running. Work still in flight afterwards writes its journal
+  // still live to its parent (`handChildrenUp`); a park of a session has only idle
+  // subagents left, which stay in memory until the exit, and an exit leaves the rest running. Work still in flight afterwards writes its journal
   // lines where it happened and nothing else: the object draws nothing more (no
   // listeners), saves nothing (`persist`, `save`) and holds no timer. The save and the
   // lock's release come first, from whoever closes it: the chat for /clear, the
@@ -586,12 +596,13 @@ export class Conversation {
     });
   }
   // What a child of this conversation is doing: the one rule the listing and the tree share.
-  private childState(c: Conversation): Pick<RunningChild, 'status' | 'startedAt' | 'until'> {
+  private childState(c: Conversation): Pick<RunningChild, 'status' | 'startedAt' | 'until' | 'answered'> {
     const delayed = this.childTimers.has(c);
     return {
-      status: delayed ? 'delayed' : c.confirm ? 'waiting' : c.busy ? 'working' : 'queued',
+      status: delayed ? 'delayed' : c.confirm ? 'waiting' : c.busy ? 'working' : c.idle ? 'idle' : 'queued',
       startedAt: c.busy ? c.turnStartedAt : null,
       until: delayed ? c.delayedUntil : null,
+      ...(c.idle && c.answerPending ? { answered: true } : {}),
     };
   }
   // The live descendants, depth first, the children of each in the order they started.
@@ -604,6 +615,7 @@ export class Conversation {
         const node: TreeNode = {
           key: child.key, label: child.label, kind: child.kind as TreeNode['kind'], depth, status: s.status,
           latest: s.status === 'working' ? child.toolLabel || child.verb : '', startedAt: s.startedAt, until: s.until, below: 0,
+          ...(s.answered ? { answered: true } : {}),
         };
         out.push(node);
         node.below = walk(child, depth + 1);
@@ -641,8 +653,86 @@ export class Conversation {
     this.stopChildren('person');
     if (this.canStop() && this.confirm) this.answerConfirm(false, 'stop');
     if (this.subJournalId) closeOwnFile(this, 'person');
+    // A subagent between its turns has nothing to abort: stopping it ends it.
+    if (this.idle) { this.endIdle(); return true; }
     if (!this.stop(glyph)) this.leaveSchedule?.();
     return true;
+  }
+
+  // ── a subagent the person started, between its turns
+  // Between turns: it has answered and nothing is asked of it. It holds no slot and no
+  // timer, and a session with only idle subagents left may be put away.
+  get idle(): boolean { return this.staying && this.idleNow && !this.isClosed; }
+  // Something this conversation started is still at work: a child that is not idle, or an
+  // idle one with work of its own below it (a task it started delivers to the session).
+  get hasLiveChildren(): boolean {
+    for (const c of this.children) if (!c.idle || c.hasLiveChildren) return true;
+    return false;
+  }
+  // The turn has ended and nothing waits for it: the subagent rests. The registry's park
+  // watch hears the change through `children`.
+  rest(): void {
+    if (this.isClosed || !this.staying) return;
+    this.idleNow = true;
+    this.parent?.treeChanged(this.parent);
+    this.parent?.childrenChanged();
+  }
+  // A later turn answered: the row says so until the person has read it.
+  markAnswered(): void {
+    if (this.isClosed) return;
+    this.answerPending = true;
+    this.changed(true);
+  }
+  // The person reads it (the watch opens on it, or is open when the answer lands).
+  seeAnswer(): void {
+    if (!this.answerPending) return;
+    this.answerPending = false;
+    this.parent?.treeChanged(this.parent);
+  }
+  // The next message that waits for this subagent's turn to end, else null; the queue is
+  // the person's, filled by `receive` while it works.
+  takeQueued(): string | null {
+    const next = this.queue.shift();
+    if (!next) return null;
+    this.syncQueue();
+    return next.text;
+  }
+  // The person writes to this subagent. `started`: it was idle, and a turn begins (queued
+  // for a slot when none is free); `queued`: it works, and the text reaches it at its next
+  // step; otherwise why it takes nothing.
+  receive(text: string): { sent: 'started' | 'queued' } | { refused: string } {
+    const q = text.trim();
+    if (!q) return { refused: 'nothing to send' };
+    if (!this.staying) return { refused: `${this.label} takes no messages — only a subagent you started does` };
+    if (this.isClosed || this.stopRequested) return { refused: `${this.label} has stopped` };
+    if (!this.idleNow) { this.enqueue(q); return { sent: 'queued' }; }
+    if (!this.resume) return { refused: `${this.label} cannot start a turn` };
+    this.idleNow = false;
+    this.parent?.treeChanged(this.parent);
+    this.resume(q);
+    return { sent: 'started' };
+  }
+  // The end of an idle subagent: the parent's journal says it was stopped by the person,
+  // its file is closed, and its row is gone.
+  private endIdle(): void {
+    this.journalStopped('person');
+    this.close('park');
+    this.release({ label: this.label, kind: this.kind as EndedChild['kind'], outcome: 'stopped', ms: 0, tokens: 0 });
+  }
+  // The conversation that started this one stops counting it; `ended` is what it remembers.
+  private release(ended: EndedChild | null): void {
+    const to = this.parent;
+    if (!to) return;
+    if (ended) to.remember(ended);
+    to.children.delete(this);
+    to.childTimers.delete(this);
+    to.childrenChanged();
+    to.treeChanged(to);
+  }
+  // This conversation's count of children moved: it and every one above it hears `children`
+  // (the registry's park watch is on the session).
+  private childrenChanged(): void {
+    for (let a: Conversation | null = this; a; a = a.parent) a.emit({ type: 'children', count: a.children.size });
   }
 
   // Every child still counted is stopped (`'parent'`); one still waiting on its delay has
@@ -771,7 +861,9 @@ export class Conversation {
   // result is in (or, when this is a task that ends first, its parent's). Nothing runs
   // until `run()`, which closes the child when it ends and delivers its result to this
   // conversation's session (itself, unless it is a task) — nothing when /clear stopped
-  // it with its conversation. The caller admits and schedules it, hands its delay timer
+  // it with its conversation. A subagent the person started is not closed by its answer: it
+  // stays idle, `again` runs its later turns, and it ends when it is stopped, cleared or the
+  // process exits. The caller admits and schedules it, hands its delay timer
   // to `armed`, and calls `fired` when that timer fires.
   startChild(spec: ChildSpec, journalId: string): ChildStart {
     const max = wholeOrDefault((this.deps.config().ai as { subagentDepth?: unknown } | undefined)?.subagentDepth, 2, 1);
@@ -827,12 +919,16 @@ export class Conversation {
     this.emit({ type: 'children', count: this.children.size });
     this.treeChanged(this);
     if (spec.kind === 'subagent') about({ t: 'subagent', label: spec.label, by: spec.by, event: 'start', ...(fileId ? { id: fileId } : {}) });
+    // A subagent the person started stays after its answer (see `staying`).
+    const stays = spec.kind === 'subagent' && spec.by === 'person';
+    if (spec.kind === 'subagent') child.task = spec.prompt;
+    child.staying = stays;
     let ran = false;
-    // The end, as the tool reports it; never throws.
-    const outcomeOf = async (): Promise<ChildResult> => {
+    // The end of one turn on `prompt`, as the tool reports it; never throws.
+    const outcomeOf = async (prompt: string): Promise<ChildResult> => {
       try {
         // An empty task starts no turn: a failure, said as one.
-        if (!(await asBackgroundWork(() => child.send(spec.prompt)))) return { outcome: 'failed', text: '', error: 'nothing to send' };
+        if (!(await asBackgroundWork(() => child.send(prompt)))) return { outcome: 'failed', text: '', error: 'nothing to send' };
         const end = child.lastEnd;
         const outcome = (end?.outcome ?? 'failed') as ChildResult['outcome'];
         return {
@@ -848,22 +944,40 @@ export class Conversation {
         return { outcome: 'failed', text: '', error: e instanceof Error ? e.message : String(e) };
       }
     };
+    // What a staying subagent does when a turn ends alive: the next message that waited
+    // for it starts a turn through the schedule, else it rests.
+    const afterAnswer = (): void => {
+      const next = child.takeQueued();
+      if (next !== null) child.resume?.(next);
+      else child.rest();
+    };
+    // The subagent ends after a turn the person stopped: the parent's journal says so, the
+    // child is closed and its row is gone.
+    const endStopped = (r: ChildResult): void => {
+      about({ t: 'subagent', label: spec.label, by: spec.by, event: 'end', outcome: r.outcome, ...(fileId ? { id: fileId } : {}), stoppedBy: 'person' });
+      child.close('park');
+      child.release({ label: spec.label, kind: spec.kind, outcome: r.outcome, ms: r.ms ?? 0, tokens: r.tokens ?? 0 });
+    };
     const run = async (): Promise<ChildResult> => {
       // A child runs once: a second `run` sends nothing on the closed child.
       if (ran) return { outcome: 'failed', text: '', error: 'already run' };
       ran = true;
       // Stopped while it waited for its delay or a slot: it sends nothing.
-      const r: ChildResult = child.closed || child.stopRequested ? { outcome: 'stopped', text: '' } : await outcomeOf();
+      const r: ChildResult = child.closed || child.stopRequested ? { outcome: 'stopped', text: '' } : await outcomeOf(spec.prompt);
       // Stopped with the conversation that holds it, or at exit: its result goes nowhere.
       const stopped = child.closeReason === 'parent' || child.closeReason === 'exit';
       // A subagent says how it ended in its parent's journal; one stopped with its
       // conversation said so when it was closed.
       // A child the person stopped says so, as one closed with its conversation does.
       const byPerson = child.stopRequested && r.outcome === 'stopped';
-      if (spec.kind === 'subagent' && !stopped) about({ t: 'subagent', label: spec.label, by: spec.by, event: 'end', outcome: r.outcome, ...(fileId ? { id: fileId } : {}), ...(byPerson ? { stoppedBy: 'person' } : {}) });
+      // A staying subagent that was not stopped goes on after its answer: the parent's
+      // journal says it answered, and its end is written when it ends.
+      const goesOn = stays && !stopped && !child.closed && !child.stopRequested;
+      if (goesOn) about({ t: 'subagent', label: spec.label, by: spec.by, event: 'answered', outcome: r.outcome, ...(fileId ? { id: fileId } : {}) });
+      else if (spec.kind === 'subagent' && !stopped) about({ t: 'subagent', label: spec.label, by: spec.by, event: 'end', outcome: r.outcome, ...(fileId ? { id: fileId } : {}), ...(byPerson ? { stoppedBy: 'person' } : {}) });
       else if (byPerson && !stopped) about({ t: 'task-end', task: spec.label, outcome: 'stopped', by: 'person' });
       // Its save and inbox timers go with it; its own live children move to its parent.
-      child.close('park');
+      if (!goesOn) child.close('park');
       // The result goes to the session the chain started from — the nearest ancestor
       // that is not a child — never to whatever the chat draws, and never to a child: one
       // that started this child may have ended, or be in its last turn, with its inbox
@@ -885,21 +999,30 @@ export class Conversation {
       } finally {
         // Untracked by the conversation that started it only AFTER the delivery: whoever
         // watches the count reach 0 finds the result already in. Untracked even when the
-        // delivery throws, so a child is never counted forever.
-        if (to) {
-          if (!stopped) to.remember({ label: spec.label, kind: spec.kind, outcome: r.outcome, ms: r.ms ?? 0, tokens: r.tokens ?? 0 });
-          to.children.delete(child);
-          to.childTimers.delete(child);
-          to.emit({ type: 'children', count: to.children.size });
-          to.treeChanged(to);
-        }
+        // delivery throws, so a child is never counted forever. A subagent that goes on
+        // stays counted until it ends.
+        if (!goesOn) child.release(stopped ? null : { label: spec.label, kind: spec.kind, outcome: r.outcome, ms: r.ms ?? 0, tokens: r.tokens ?? 0 });
       }
+      if (goesOn) afterAnswer();
       return { ...r, delivered, ...(landedIn ? { landedIn } : {}), ...(stopped ? { stoppedWithParent: true as const } : {}) };
     };
+    // A later turn of a staying subagent, on the person's message: its answer is kept in
+    // the subagent (its row says `answered`) and goes to no conversation.
+    const again = async (text: string): Promise<ChildResult> => {
+      const r: ChildResult = child.closed || child.stopRequested ? { outcome: 'stopped', text: '' } : await outcomeOf(text);
+      const stopped = child.closeReason === 'parent' || child.closeReason === 'exit';
+      if (stopped || (child.closed && !child.stopRequested)) return { ...r, delivered: '', ...(stopped ? { stoppedWithParent: true as const } : {}) };
+      if (child.stopRequested) { endStopped(r); return { ...r, delivered: '' }; }
+      about({ t: 'subagent', label: spec.label, by: spec.by, event: 'answered', outcome: r.outcome, ...(fileId ? { id: fileId } : {}) });
+      child.markAnswered();
+      afterAnswer();
+      return { ...r, delivered: '' };
+    };
+    if (stays) child.resume = (text) => { void again(text); };
     const armed = (timer: ReturnType<typeof setTimeout>): void => { this.childTimers.set(child, timer); };
     // Whoever counts the child now: the one that started it, or one a task handed it to.
     const fired = (): void => { const up = child.parent; up?.childTimers.delete(child); up?.treeChanged(up); };
-    return { child, run, armed, fired };
+    return { child, run, ...(stays ? { again } : {}), armed, fired };
   }
 
   // ── the work (src/assistant/conversation-turn.ts)

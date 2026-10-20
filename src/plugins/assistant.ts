@@ -819,7 +819,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               setWatch({ ...cur, path: watchPath(node), ended: cur.stopped ? endedWord({ outcome: 'stopped' }, null) : endedWord(node.lastEnd, node.closeReason), final: node.getSnapshot(), ask: false });
               host.notify();
             };
-            watchOffRef.current = [node.on('closed', closed), node.subscribe(() => host.notify())];
+            // A later answer of a subagent that stays is read here: the row stops saying
+            // `answered` when the watch opens on it, and while it is open.
+            watchOffRef.current = [node.on('closed', closed), node.subscribe(() => { node.seeAnswer(); host.notify(); })];
+            node.seeAnswer();
             watchRef.current = state;
             setWatch(state);
             if (node.closed) closed();

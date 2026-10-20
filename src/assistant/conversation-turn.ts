@@ -82,7 +82,7 @@ export function subagentPrompt(task: string): string {
 // never kept in ↑/↓.
 export async function runTurn(c: Conversation, text: string, opts: SendOptions = {}): Promise<boolean> {
   const q = text.trim();
-  if (!q || c.busy) return false;
+  if (!q || c.busy || c.closed) return false;
   // Close the re-entrancy window SYNCHRONOUSLY, before any await: send() is
   // called from the input handler, the inbox, and the slash command. Without
   // this, a follow-up turn for the inbox started while the chat is about to go
@@ -100,8 +100,9 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
   const sysParts = shape.system === 'chat' ? systemParts(cfg, c.screensBlock(), c.memoryBlock(), c.plan.snapshot(), c.summary) : undefined;
   const chatSystem = (parts: ReturnType<typeof systemParts>, fresh: boolean) =>
     joinSystem(fresh ? { ...parts, screens: c.screensBlock(), summary: summaryBlock(c.summary) } : parts, projectBlock(c.project));
-  // A subagent's memory block is read once for the message, as a chat's is.
-  const subagentHead = shape.system === 'subagent' ? [subagentPrompt(q), c.memoryBlock(), languageDirective(cfg)].filter(Boolean).join('\n\n') : '';
+  // A subagent's memory block is read once for the message, as a chat's is. Its task is
+  // the one it was given, whatever the message of this turn says.
+  const subagentHead = shape.system === 'subagent' ? [subagentPrompt(c.task || q), c.memoryBlock(), languageDirective(cfg)].filter(Boolean).join('\n\n') : '';
   const workerSystem = () => shape.system === 'subagent'
     ? [subagentHead, projectBlock(c.project), summaryBlock(c.summary)].filter(Boolean).join('\n\n')
     : [workerPrompt(q), projectBlock(c.project)].filter(Boolean).join('\n\n');

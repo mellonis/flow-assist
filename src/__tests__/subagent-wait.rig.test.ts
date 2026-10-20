@@ -238,7 +238,7 @@ test('a waiting grandchild, scheduled under a child, is counted the same way', a
   expect(counts(rig)).toMatchObject({ held: 1, waiting: 1 });
   expect(rig.conv.runningChildren()).toMatchObject([{ label: 'outer', status: 'working' }]);
   inner.answerConfirm(true);
-  await rig.until(() => !inner.busy && inner.closed);
+  await rig.until(() => !inner.busy && inner.idle);
   outer.stopSubtree('');
   await settledAll(rig);
   expect(counts(rig)).toEqual({ held: 0, waiting: 0, background: 0 });

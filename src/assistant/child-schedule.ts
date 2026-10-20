@@ -2,7 +2,7 @@
 // admit its run into a slot and report how it ended (AGENTS.md (child schedule)). The
 // `subagent` tool and any caller outside a turn share it, so the order is one:
 // start → timer → disarm → fired → admit → run → log / toast → notify.
-import { childResultBody, type ChildSpec, type ChildStart } from './conversation-types.js';
+import { childResultBody, type ChildResult, type ChildSpec, type ChildStart } from './conversation-types.js';
 import type { Conversation } from './conversation.js';
 import type { ChildSlots } from './registry.js';
 
@@ -34,13 +34,15 @@ export function scheduleChild(spec: ChildSpec, delayMs: number, deps: ChildSched
   if ('refused' in started) return { refused: started.refused };
   // The run and what is said of its end: the log, the toast. Shared by the slot a run is
   // admitted into and by a stop that takes a child out of the schedule before it began.
-  const settle = async (): Promise<void> => {
+  // `later`: a turn of a subagent that stays, after its first answer. Its answer goes to
+  // no conversation, so only the log says it.
+  const settle = async (go: () => Promise<ChildResult>, later: boolean): Promise<void> => {
     const failed = (msg: string) => {
       deps.showMessage?.(`⚠ ${label} failed: ${msg}`);
       deps.pushLog?.(`[bg] ${label} error: ${msg}`);
     };
     try {
-      const r = await started.run();
+      const r = await go();
       // Stopped with its conversation (`/clear`, or the exit): only the log says so.
       if (r.stoppedWithParent) { deps.pushLog?.(`[bg] ${label} stopped with its conversation`); return; }
       // Stopped by the person: one line, never also a result toast.
@@ -48,6 +50,7 @@ export function scheduleChild(spec: ChildSpec, delayMs: number, deps: ChildSched
       if (r.outcome === 'failed') { failed(r.error ?? r.outcome); return; }
       // The log says the result without its `<label> finished:` line.
       deps.pushLog?.(`[bg] ${label}: ${childResultBody(r)}`);
+      if (later) return;
       // Landed nowhere (its conversation was closed first): nothing to point at.
       const home = r.landedIn;
       if (!home) return;
@@ -62,12 +65,22 @@ export function scheduleChild(spec: ChildSpec, delayMs: number, deps: ChildSched
       markWaiting(false);
       // The slot frees once this run settles; the notify waits a tick, so the
       // chat's count it redraws has this task gone.
+      if (phase === 'running') phase = 'idle';
+      // A message that reached the child while this turn settled starts the next one.
+      const next = carried;
+      carried = null;
+      if (next !== null) begin(next);
       setTimeout(() => deps.notify?.(), 0);
     }
   };
   // Where the child is in the schedule, for a stop that comes before its run begins.
-  let phase: 'armed' | 'queued' | 'running' = 'armed';
+  // `idle`: a subagent that stays, between its turns; it holds no slot.
+  let phase: 'armed' | 'queued' | 'running' | 'idle' = 'armed';
   let dequeue: (() => boolean) | null = null;
+  // What the slot runs when the child is admitted: the first run, then each later turn.
+  let turn = (): Promise<void> => settle(started.run, false);
+  // The message a child sent to itself to answer while its turn was still settling.
+  let carried: string | null = null;
   // Counted from the moment it is armed, so the chat's «N in background» shows a
   // task waiting on its delay too; a delayed task holds no slot. The timer runs even
   // with no delay: the turn that called this sends its next request first.
@@ -75,7 +88,7 @@ export function scheduleChild(spec: ChildSpec, delayMs: number, deps: ChildSched
     slots.disarm(timer);
     started.fired();
     phase = 'queued';
-    dequeue = slots.admit(async () => { phase = 'running'; await settle(); });
+    dequeue = slots.admit(async () => { phase = 'running'; await turn(); });
   }, delayMs);
   started.armed(timer);
   started.child.on('confirm', (ev) => { if (phase === 'running' || !ev.request) markWaiting(!!ev.request); });
@@ -91,9 +104,20 @@ export function scheduleChild(spec: ChildSpec, delayMs: number, deps: ChildSched
       started.fired();
     } else if (phase !== 'queued' || !dequeue?.()) return false;
     phase = 'running';
-    void settle();
+    void turn();
     return true;
   };
+  // A message to a subagent that stays starts a turn of it: through the same slots as any
+  // child, so it waits for one when none is free. One that comes while a turn settles waits
+  // for it to finish.
+  const again = started.again;
+  const begin = (text: string): void => {
+    if (!again || started.child.closed) return;
+    phase = 'queued';
+    turn = () => settle(() => again(text), true);
+    dequeue = slots.admit(async () => { phase = 'running'; await turn(); });
+  };
+  if (again) started.child.resume = (text) => { if (phase === 'running') carried = text; else begin(text); };
   deps.notify?.();
   return { child: started.child, label };
 }

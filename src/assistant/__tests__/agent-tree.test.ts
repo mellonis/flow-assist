@@ -25,6 +25,16 @@ test('a row is a mark, the label and the state, indented two cells per level', (
   expect(rows.map((r) => r.tone)).toEqual(['work', 'warn', 'dim', 'dim', 'work']);
 });
 
+test('an idle subagent reads idle, and answered once a later answer is unread; with rows short the unread answer is kept before the plain idle ones', () => {
+  const { rows } = treeRows([node('a', { status: 'idle' }), node('b', { status: 'idle', answered: true })], 8, 80, 0);
+  expect(rows.map((r) => r.text)).toEqual(['◦ a · idle', '◦ b · answered']);
+  expect(rows.map((r) => r.tone)).toEqual(['dim', 'warn']);
+  const short = treeRows([node('a', { status: 'idle' }), node('b', { status: 'idle', answered: true }), node('c', { status: 'queued' })], 2, 80, 0);
+  expect(short.rows.map((r) => r.key)).toEqual(['b', '']);
+  const panel = agentsPanelRows([node('a', { status: 'idle', startedAt: null }), node('b', { status: 'idle', answered: true, startedAt: null })], [], 0);
+  expect(panel.map((r) => [r.text, r.detail, r.tone])).toEqual([['◦ a', 'idle', undefined], ['◦ b', 'answered', 'warn']]);
+});
+
 test('with more nodes than rows the waiting ones are kept, in tree order, and the last row counts the rest', () => {
   const nodes = [
     node('w1'), node('q1', { status: 'queued' }), node('p1', { status: 'waiting' }),

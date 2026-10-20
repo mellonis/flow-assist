@@ -112,8 +112,15 @@ test('the listing shows the job running, then done with its duration; nothing is
   await settleUntil(() => frameOf(ui).includes('◆ list-me-now finished:'));
   await settle(6);
   await ask(ui, '/subagent');
-  await settleUntil(() => /list-me-now · done · (<1s|\d+s)/.test(frameOf(ui)));
-  expect(frameOf(ui)).toMatch(/list-me-now · done · (<1s|\d+s)/);
+  // The subagent stays after its answer: it is listed with its number, idle.
+  await settleUntil(() => /1 · list-me-now · idle/.test(frameOf(ui)));
+  expect(frameOf(ui)).toMatch(/1 · list-me-now · idle/);
+  // Stopping an idle one ends it; it is then listed among the ended.
+  await ask(ui, '/subagent stop 1');
+  await settle(6);
+  await ask(ui, '/subagent');
+  await settleUntil(() => /list-me-now · stopped · (<1s|\d+s|0s)/.test(frameOf(ui)));
+  expect(frameOf(ui)).toMatch(/list-me-now · stopped · /);
   // A name that is not running is a line, not a stop.
   await ask(ui, '/subagent stop nobody');
   await settleUntil(() => frameOf(ui).includes('no running subagent'));

@@ -180,7 +180,7 @@ test('a grandchild handed up to the session asks, and the session offers it wher
   let notified = 0;
   rig.conv.on('asking', () => { heard.push('asking'); });
   (rig.conv.deps as { notify: () => void }).notify = () => { notified++; };
-  const outer = begin(rig, spec('outer', 'outer job'));
+  const outer = begin(rig, spec('outer', 'outer job', { by: 'model', write: true }));
   const inner = begin(rig, spec('inner', 'inner job'), outer.child);
   await rig.until(() => innerScript.held);
   await outer.done;

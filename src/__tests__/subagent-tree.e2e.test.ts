@@ -315,19 +315,30 @@ test('a key typed in the rows reaches neither the field nor the model, and Esc t
   ui.app.unmount();
 });
 
-test('the cursor stays on its node when another above ends, moves to the nearest when its own ends, and the field has the keys when none is left', async () => {
+test('the cursor stays on its node when another above goes idle, moves to the nearest when its own is stopped, and the field has the keys when none is left', async () => {
   const { children: [a, b], ui } = await twoHeld();
   await ui.press('down');
   await ui.press('down');
   a!.release();
   await settleUntil(() => frameOf(ui).includes('◆ aaa-go finished:'));
-  await settleUntil(() => !frameOf(ui).includes('⚙ aaa-go'));
+  // The subagent stays after its answer: its row says idle and the cursor is where it was.
+  await settleUntil(() => frameOf(ui).includes('◦ aaa-go · idle'));
   expect(inRows(ui)).toBe(true);
   await ui.press('x');
   expect(frameOf(ui)).toContain('stop bbb-go? y yes · n no');
   await ui.press('n');
   b!.release();
   await settleUntil(() => frameOf(ui).includes('◆ bbb-go finished:'));
+  await settleUntil(() => frameOf(ui).includes('◦ bbb-go · idle'));
+  expect(inRows(ui)).toBe(true);
+  // Stopping an idle one ends it; the cursor goes to the row nearest it.
+  await ui.press('x');
+  await ui.press('y');
+  await settleUntil(() => !frameOf(ui).includes('bbb-go · idle'));
+  expect(inRows(ui)).toBe(true);
+  await ui.press('x');
+  expect(frameOf(ui)).toContain('stop aaa-go? y yes · n no');
+  await ui.press('y');
   await settleUntil(() => !inRows(ui));
   expect(frameOf(ui)).toContain('↑↓ history');
   await ui.type('ok');
@@ -335,14 +346,18 @@ test('the cursor stays on its node when another above ends, moves to the nearest
   ui.app.unmount();
 });
 
-test('the cursor moves to the nearest row when the node under it ends and others are left', async () => {
+test('the cursor moves to the nearest row when the node under it is stopped and others are left', async () => {
   const { children: [a, b], ui } = await twoHeld();
   await ui.press('down');
   b!.release();
   await ui.press('down');
-  // The cursor was on bbb-go; once it ends the cursor is on aaa-go.
   await settleUntil(() => frameOf(ui).includes('◆ bbb-go finished:'));
-  await settleUntil(() => !frameOf(ui).includes('⚙ bbb-go'));
+  await settleUntil(() => frameOf(ui).includes('◦ bbb-go · idle'));
+  expect(inRows(ui)).toBe(true);
+  // The cursor is on bbb-go; once it is stopped the cursor is on aaa-go.
+  await ui.press('x');
+  await ui.press('y');
+  await settleUntil(() => !frameOf(ui).includes('bbb-go'));
   expect(inRows(ui)).toBe(true);
   await ui.press('x');
   expect(frameOf(ui)).toContain('stop aaa-go? y yes · n no');
@@ -350,17 +365,36 @@ test('the cursor moves to the nearest row when the node under it ends and others
   ui.app.unmount();
 });
 
-test('a stop question is dropped when the node it was for has ended', async () => {
+test('a stop question stays up when its node goes idle, and y ends the idle node', async () => {
   const { children: [a, b], ui } = await twoHeld();
   await ui.press('down');
   await ui.press('x');
   expect(frameOf(ui)).toContain('stop aaa-go? y yes · n no');
   a!.release();
   await settleUntil(() => frameOf(ui).includes('◆ aaa-go finished:'));
-  await settleUntil(() => !frameOf(ui).includes('⚙ aaa-go') && !frameOf(ui).includes('stop aaa-go?'));
+  await settle(6);
+  expect(frameOf(ui)).toContain('stop aaa-go? y yes · n no');
+  await ui.press('y');
+  await settleUntil(() => !frameOf(ui).includes('aaa-go?') && !frameOf(ui).includes('◦ aaa-go'));
   expect(frameOf(ui)).not.toContain('y yes · n no');
   expect(inRows(ui)).toBe(true);
   b!.release();
+  ui.app.unmount();
+});
+
+// A task the model starts ends after its answer: its row goes without anyone stopping it.
+test('a stop question is dropped when the task it was for has ended', async () => {
+  const { children: [t], ui } = await boot([{ mark: 'TSKA' }], { main: [[{ tool: 'subagent', args: { task: 'TSKA go', label: 'tska-go' } }], [{ text: 'started' }]] });
+  await ask(ui, 'run it');
+  await settleUntil(() => t!.held);
+  await settleUntil(() => frameOf(ui).includes('⚙ tska-go'));
+  await ui.press('down');
+  await ui.press('x');
+  expect(frameOf(ui)).toContain('stop tska-go');
+  t!.release();
+  await settleUntil(() => frameOf(ui).includes('◆ tska-go finished:'));
+  await settleUntil(() => !frameOf(ui).includes('⚙ tska-go') && !frameOf(ui).includes('stop tska-go'));
+  expect(frameOf(ui)).not.toContain('y yes · n no');
   ui.app.unmount();
 });
 
@@ -544,7 +578,7 @@ test('/agents with nothing to show says so, and Esc closes it', async () => {
   ui.app.unmount();
 });
 
-test('/agents lists live nodes in tree order with their time and then the ended ones; x on an ended row is refused', async () => {
+test('/agents lists live nodes in tree order with their time (a subagent that answered among them, idle) and then the ended ones; x on an ended row is refused', async () => {
   const { children: [outer, inner, other], ui } = await boot([
     { mark: 'OUTER', script: [[{ hold: true }, { tool: 'subagent', args: { task: 'INNER work', label: 'inner' } }], [{ hold: true }, { text: 'outer settled' }]] },
     { mark: 'INNER' },
@@ -564,11 +598,16 @@ test('/agents lists live nodes in tree order with their time and then the ended 
   expect(at('inner (task)')).toBeLessThan(at('other-go'));
   expect(rows[at('inner (task)')]!.indexOf('inner')).toBe(rows[at('outer-go')]!.indexOf('outer-go') + 2);
   expect(rows[at('other-go')]).toMatch(/(<1s|\d+s)/);
-  // An ended one moves below the live ones.
+  // A subagent that answered stays among the live ones, idle; stopped, it moves below them.
   other!.release();
-  await settleUntil(() => rowsOf(ui).some((r) => /other-go.*done/.test(r)));
+  await settleUntil(() => rowsOf(ui).some((r) => /other-go.*idle/.test(r)));
+  await ui.press('down'); await ui.press('down'); await ui.press('down');
+  await ui.press('x');
+  expect(frameOf(ui)).toContain('stop other-go? y yes · n no');
+  await ui.press('y');
+  await settleUntil(() => rowsOf(ui).some((r) => /other-go.*stopped/.test(r)));
   const after = rowsOf(ui);
-  expect(after.findIndex((r) => /other-go.*done/.test(r))).toBeGreaterThan(after.findIndex((r) => r.includes('inner (task)')));
+  expect(after.findIndex((r) => /other-go.*stopped/.test(r))).toBeGreaterThan(after.findIndex((r) => r.includes('inner (task)')));
   await ui.press('down'); await ui.press('down'); await ui.press('down');
   await ui.press('x');
   await settleUntil(() => frameOf(ui).includes('nothing to stop'));
@@ -655,7 +694,7 @@ test('with a child waiting for a y/n and /agents open, y answers nothing and the
   ui.app.unmount();
 });
 
-test('in /agents the question about a node that has ended is dropped: the hint and x come back', async () => {
+test('in /agents the question about a node that goes idle stays: y ends it, and the hint and x come back', async () => {
   const { children: [a, b], ui } = await boot([{ mark: 'AAA' }, { mark: 'BBB' }]);
   await ask(ui, '/subagent AAA go');
   await ask(ui, '/subagent BBB go');
@@ -665,13 +704,34 @@ test('in /agents the question about a node that has ended is dropped: the hint a
   await ui.press('x');
   expect(frameOf(ui)).toContain('stop aaa-go? y yes · n no');
   a!.release();
-  await settleUntil(() => rowsOf(ui).some((r) => /aaa-go.*done/.test(r)));
+  await settleUntil(() => rowsOf(ui).some((r) => /aaa-go.*idle/.test(r)) || frameOf(ui).includes('stop aaa-go? y yes'));
+  await settle(6);
+  expect(frameOf(ui)).toContain('stop aaa-go? y yes · n no');
+  await ui.press('y');
+  await settleUntil(() => rowsOf(ui).some((r) => /aaa-go.*stopped/.test(r)));
   expect(frameOf(ui)).not.toContain('y yes · n no');
   expect(frameOf(ui)).toContain('x stop');
   await ui.press('up');
   await ui.press('x');
   expect(frameOf(ui)).toContain('stop bbb-go? y yes · n no');
   await ui.press('n');
+  b!.release();
+  ui.app.unmount();
+});
+
+test('in /agents the question about a task that has ended is dropped: the hint and x come back', async () => {
+  const { children: [t, b], ui } = await boot([{ mark: 'TSKA' }, { mark: 'BBB' }], { main: [[{ tool: 'subagent', args: { task: 'TSKA go', label: 'tska-go' } }], [{ text: 'started' }]] });
+  await ask(ui, 'run it');
+  await ask(ui, '/subagent BBB go');
+  await settleUntil(() => t!.held && b!.held);
+  await ask(ui, '/agents');
+  await settleUntil(() => panelOpen(ui) && frameOf(ui).includes('bbb-go'));
+  await ui.press('x');
+  expect(frameOf(ui)).toContain('stop tska-go');
+  t!.release();
+  await settleUntil(() => rowsOf(ui).some((r) => /tska-go.*done/.test(r)));
+  expect(frameOf(ui)).not.toContain('y yes · n no');
+  expect(frameOf(ui)).toContain('x stop');
   b!.release();
   ui.app.unmount();
 });
