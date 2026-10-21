@@ -26,7 +26,7 @@ import type { ViewRecord } from './views.js';
 import type { ToolDef } from '../loader/tools.js';
 import { workspaceFor } from './workspace.js';
 import { asBackgroundWork, asConversationWork, asForegroundWork, outsideWork, workOwner } from '../runtime/background-work.js';
-import { callOf, childResultText, frameItem, lastAnswerOf, type BusyKind, type ChatMsg, type ChildResult, type EndedChild, type RunningChild, type ChildSpec, type ChildStart, type CloseReason, type StoppedBy, type JournalRoute, type ConversationDeps, type ConversationEvent, type ConversationKind, type ConversationSnapshot, type ConversationStatus, type InboxItem, type Offered, type PendingConfirm, type Queued, type QueueWait, type SendOptions, type TurnEnd, type TreeNode, type ViewPort } from './conversation-types.js';
+import { callOf, childResultText, frameItem, lastAnswerOf, type BusyKind, type ChatMsg, type ChildResult, type EndedChild, type RunningChild, type ChildSpec, type ChildStart, type CloseReason, type StoppedBy, type JournalRoute, type ConversationDeps, type ConversationEvent, type ConversationKind, type ConversationSnapshot, type ConversationStatus, type InboxItem, type LaterTurn, type Offered, type PendingConfirm, type Queued, type QueueWait, type SendOptions, type TurnEnd, type TreeNode, type ViewPort } from './conversation-types.js';
 import {
   applySession, closeOwnFile, currentProject, ensureSessionId, journal, journaledChatLLM, journalTo, journalToOwnFile, keepPersonWork, markSeen, newSubJournalId, persist, pushNote,
   releaseLockOf, writeSession, NO_FILE,
@@ -97,7 +97,7 @@ export class Conversation {
   // says later. `resume` starts a later turn on a message through the schedule.
   staying = false;
   task = '';
-  resume: ((text: string) => void) | null = null;
+  resume: ((text: string, turn?: LaterTurn) => void) | null = null;
   private idleNow = false;
   // A later answer of a staying subagent that nobody has read: its row says `answered`.
   private answerPending = false;
@@ -877,8 +877,9 @@ export class Conversation {
   // grandchild's own label kept). Refused past
   // `ai.subagentDepth`. It is one of this conversation's `children` from here until its
   // result is in (or, when this is a task that ends first, its parent's). Nothing runs
-  // until `run()`, which closes the child when it ends and delivers its result to this
-  // conversation's session (itself, unless it is a task) — nothing when /clear stopped
+  // until `run()`, which closes the child when it ends and delivers its result to the
+  // nearest conversation from this one upward that takes it (`resultRecipient`: a session
+  // or a subagent that stays, never a task) — nothing when /clear stopped
   // it with its conversation. A subagent the person started is not closed by its answer: it
   // stays idle, `again` runs its later turns, and it ends when it is stopped, cleared or the
   // process exits. The caller admits and schedules it, hands its delay timer
@@ -943,10 +944,10 @@ export class Conversation {
     child.staying = stays;
     let ran = false;
     // The end of one turn on `prompt`, as the tool reports it; never throws.
-    const outcomeOf = async (prompt: string): Promise<ChildResult> => {
+    const outcomeOf = async (prompt: string, options?: SendOptions): Promise<ChildResult> => {
       try {
         // An empty task starts no turn: a failure, said as one.
-        if (!(await asBackgroundWork(() => child.send(prompt)))) return { outcome: 'failed', text: '', error: 'nothing to send' };
+        if (!(await asBackgroundWork(() => child.send(prompt, options)))) return { outcome: 'failed', text: '', error: 'nothing to send' };
         const end = child.lastEnd;
         const outcome = (end?.outcome ?? 'failed') as ChildResult['outcome'];
         return {
@@ -964,10 +965,23 @@ export class Conversation {
     };
     // What a staying subagent does when a turn ends alive: the next message that waited
     // for it starts a turn through the schedule, else it rests.
-    const afterAnswer = (): void => {
+    // The inbox is part of that: the person's message starts the turn with the items that
+    // waited landed as rows just ahead of it; with no message, a follow-up on the inbox.
+    const afterAnswer = (ok: boolean): void => {
       const next = child.takeQueued();
-      if (next !== null) child.resume?.(next);
-      else child.rest();
+      if (next !== null) child.resume?.(next, { readResult: child.landInboxAhead() });
+      else if (!child.takeInbox(ok ? 'turn' : 'rows', true)) child.rest();
+    };
+    // The answer of a turn goes to `home` as this child's result: the first answer, and a
+    // later one that read a child's result.
+    const handTo = (home: Conversation, r: ChildResult): { delivered: string; landedIn: NonNullable<ChildResult['landedIn']> } => {
+      const delivered = childResultText(spec.label, r);
+      // A stopped child's row is read with the person's next message: they have just
+      // stopped the work and asked for no more.
+      home.deliver({ kind: 'result', from: { key: child.key, label: spec.label, what: spec.kind }, text: delivered, quiet: r.outcome === 'stopped' });
+      const shown = home.deps.current?.();
+      // A subagent is never on screen: its watch is opened by the person.
+      return { delivered, landedIn: { title: home.parent ? home.label : home.title, onScreen: !home.parent && (!shown || shown === home) } };
     };
     // The subagent ends after a turn the person stopped: the parent's journal says so, the
     // child is closed and its row is gone.
@@ -996,24 +1010,15 @@ export class Conversation {
       else if (byPerson && !stopped) about({ t: 'task-end', task: spec.label, outcome: 'stopped', by: 'person' });
       // Its save and inbox timers go with it; its own live children move to its parent.
       if (!goesOn) child.close('park');
-      // The result goes to the session the chain started from — the nearest ancestor
-      // that is not a child — never to whatever the chat draws, and never to a child: one
-      // that started this child may have ended, or be in its last turn, with its inbox
-      // about to go. A closed session takes nothing.
-      const to = child.parent;
-      let home = to;
-      while (home?.parent) home = home.parent;
+      // The result goes to the nearest conversation above that takes it (`resultRecipient`):
+      // a session, or a subagent that stays — never a task, which ends after its answer
+      // and takes its inbox with it, and never whatever the chat draws. A closed
+      // conversation takes nothing.
+      const home = resultRecipient(child.parent);
       let delivered = '';
       let landedIn: ChildResult['landedIn'];
       try {
-        if (!stopped && home && !home.closed) {
-          delivered = childResultText(spec.label, r);
-          // A stopped child's row is read with the person's next message: they have just
-          // stopped the work and asked for no more.
-          home.deliver({ kind: 'result', from: { key: child.key, label: spec.label, what: spec.kind }, text: delivered, quiet: r.outcome === 'stopped' });
-          const shown = home.deps.current?.();
-          landedIn = { title: home.title, onScreen: !shown || shown === home };
-        }
+        if (!stopped && home) ({ delivered, landedIn } = handTo(home, r));
       } finally {
         // Untracked by the conversation that started it only AFTER the delivery: whoever
         // watches the count reach 0 finds the result already in. Untracked even when the
@@ -1021,22 +1026,26 @@ export class Conversation {
         // stays counted until it ends.
         if (!goesOn) child.release(stopped ? null : { label: spec.label, kind: spec.kind, outcome: r.outcome, ms: r.ms ?? 0, tokens: r.tokens ?? 0 });
       }
-      if (goesOn) afterAnswer();
+      if (goesOn) afterAnswer(r.outcome === 'answer');
       return { ...r, delivered, ...(landedIn ? { landedIn } : {}), ...(stopped ? { stoppedWithParent: true as const } : {}) };
     };
-    // A later turn of a staying subagent, on the person's message: its answer is kept in
-    // the subagent (its row says `answered`) and goes to no conversation.
-    const again = async (text: string): Promise<ChildResult> => {
-      const r: ChildResult = child.closed || child.stopRequested ? { outcome: 'stopped', text: '' } : await outcomeOf(text);
+    // A later turn of a staying subagent, on the person's message or on its inbox. The
+    // answer to a turn that read only the person's message is kept in the subagent (its
+    // row says `answered`); one that read a child's result goes up, as the first does.
+    const again = async (text: string, turn?: LaterTurn): Promise<ChildResult> => {
+      const r: ChildResult = child.closed || child.stopRequested ? { outcome: 'stopped', text: '' } : await outcomeOf(text, turn?.options);
       const stopped = child.closeReason === 'parent' || child.closeReason === 'exit';
       if (stopped || (child.closed && !child.stopRequested)) return { ...r, delivered: '', ...(stopped ? { stoppedWithParent: true as const } : {}) };
       if (child.stopRequested) { endStopped(r); return { ...r, delivered: '' }; }
       about({ t: 'subagent', label: spec.label, by: spec.by, event: 'answered', outcome: r.outcome, ...(fileId ? { id: fileId } : {}) });
-      child.markAnswered();
-      afterAnswer();
-      return { ...r, delivered: '' };
+      const up = turn?.readResult ? resultRecipient(child.parent) : null;
+      let delivered = '';
+      if (up) delivered = handTo(up, r).delivered;
+      else child.markAnswered();
+      afterAnswer(r.outcome === 'answer');
+      return { ...r, delivered };
     };
-    if (stays) child.resume = (text) => { void again(text); };
+    if (stays) child.resume = (text, turn) => { void again(text, turn); };
     const armed = (timer: ReturnType<typeof setTimeout>): void => { this.childTimers.set(child, timer); };
     // Whoever counts the child now: the one that started it, or one a task handed it to.
     const fired = (): void => { const up = child.parent; up?.childTimers.delete(child); up?.treeChanged(up); };
@@ -1174,6 +1183,8 @@ export class Conversation {
     // names the first (`(+N more)`).
     this.emit({ type: 'inbox', items, shown: this.port?.open() ?? false });
     this.deps.notify();
+    // A child's own `notify` is empty: the host hears of its new rows through the tree.
+    if (this.parent) this.treeChanged(this.parent);
     return taken;
   }
   // A y/n or a question waiting for the person holds the inbox (it lands once
@@ -1185,9 +1196,14 @@ export class Conversation {
   // runs for all of them (`ai.backgroundFollowUp`, true unless set false; false
   // keeps the rows, read with the person's next message). `rows` lands what waits
   // and starts no turn for it.
-  takeInbox(mode: 'turn' | 'rows' = 'turn'): void {
-    if (!this.inbox.length) { this.clearInbox(); return; }
-    if (this.inboxHeld()) return;
+  // A subagent that stays starts that follow-up through its schedule (`resume`), like any
+  // later turn of it, and only from rest: between its turns, a turn is pending there.
+  // `atEnd`: its turn has just ended, the one moment it is not at rest yet. true when a
+  // turn was started.
+  takeInbox(mode: 'turn' | 'rows' = 'turn', atEnd = false): boolean {
+    if (!this.inbox.length) { this.clearInbox(); return false; }
+    if (this.inboxHeld()) return false;
+    if (this.staying && !this.idleNow && !atEnd) return false;
     const followUp = (this.deps.config().ai as { backgroundFollowUp?: unknown } | undefined)?.backgroundFollowUp !== false;
     // A conversation nobody draws starts no turn: what landed is read with the person's
     // next message there.
@@ -1195,9 +1211,23 @@ export class Conversation {
     // with nothing but quiet items there is no turn.
     const quiet = this.inbox.filter((i) => i.quiet);
     if (quiet.length && quiet.length < this.inbox.length) this.inbox = [...quiet, ...this.inbox.filter((i) => !i.quiet)];
-    if (mode === 'rows' || !followUp || this.headless || quiet.length === this.inbox.length) { this.landInbox(); return; }
+    if (mode === 'rows' || !followUp || this.headless || quiet.length === this.inbox.length) { this.landInbox(); return false; }
+    const readResult = this.inbox.some((i) => i.kind === 'result');
     const last = this.landInbox(true).at(-1)!;
-    void this.send(last.text, { fromInbox: true, framed: last.framed });
+    const options: SendOptions = { fromInbox: true, framed: last.framed };
+    if (this.staying && this.resume) {
+      this.idleNow = false;
+      this.parent?.treeChanged(this.parent);
+      this.resume(last.text, { options, readResult });
+    } else void this.send(last.text, options);
+    return true;
+  }
+  // The person's message starts a turn of a subagent: what waits in the inbox lands as
+  // rows just ahead of it, and the turn reads them with it. true when a result landed.
+  landInboxAhead(): boolean {
+    const readResult = this.inbox.some((i) => i.kind === 'result');
+    this.landInbox();
+    return readResult;
   }
   // A turn, a `!command` or a slash command has ended. The person's queued
   // messages go first, in order, and the first carries the inbox: its rows land
@@ -1453,6 +1483,14 @@ export class Conversation {
     if (first || rec.phase !== 'live') { this.flushLive(); return; }
     this.liveTimer ??= setTimeout(() => this.flushLive(), LIVE_REDRAW_MS);
   }
+}
+
+// Who takes the result of a child that `from` started: the first conversation from `from`
+// upward that is open and either a session or a subagent that stays. A task is passed
+// over: it ends after its answer, and its inbox goes with it. null when none is left.
+export function resultRecipient<T extends { parent: T | null | undefined; closed: boolean; staying: boolean }>(from: T | null | undefined): T | null {
+  for (let c = from; c; c = c.parent) if (!c.closed && (!c.parent || c.staying)) return c;
+  return null;
 }
 
 // The session the running work belongs to (src/runtime/background-work.ts): the

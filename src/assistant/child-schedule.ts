@@ -2,7 +2,7 @@
 // admit its run into a slot and report how it ended (AGENTS.md (child schedule)). The
 // `subagent` tool and any caller outside a turn share it, so the order is one:
 // start → timer → disarm → fired → admit → run → log / toast → notify.
-import { childResultBody, type ChildResult, type ChildSpec, type ChildStart } from './conversation-types.js';
+import { childResultBody, type ChildResult, type LaterTurn, type ChildSpec, type ChildStart } from './conversation-types.js';
 import type { Conversation } from './conversation.js';
 import type { ChildSlots } from './registry.js';
 
@@ -69,7 +69,7 @@ export function scheduleChild(spec: ChildSpec, delayMs: number, deps: ChildSched
       // A message that reached the child while this turn settled starts the next one.
       const next = carried;
       carried = null;
-      if (next !== null) begin(next);
+      if (next !== null) begin(next.text, next.turn);
       setTimeout(() => deps.notify?.(), 0);
     }
   };
@@ -80,7 +80,7 @@ export function scheduleChild(spec: ChildSpec, delayMs: number, deps: ChildSched
   // What the slot runs when the child is admitted: the first run, then each later turn.
   let turn = (): Promise<void> => settle(started.run, false);
   // The message a child sent to itself to answer while its turn was still settling.
-  let carried: string | null = null;
+  let carried: { text: string; turn?: LaterTurn } | null = null;
   // Counted from the moment it is armed, so the chat's «N in background» shows a
   // task waiting on its delay too; a delayed task holds no slot. The timer runs even
   // with no delay: the turn that called this sends its next request first.
@@ -111,13 +111,13 @@ export function scheduleChild(spec: ChildSpec, delayMs: number, deps: ChildSched
   // child, so it waits for one when none is free. One that comes while a turn settles waits
   // for it to finish.
   const again = started.again;
-  const begin = (text: string): void => {
+  const begin = (text: string, laterTurn?: LaterTurn): void => {
     if (!again || started.child.closed) return;
     phase = 'queued';
-    turn = () => settle(() => again(text), true);
+    turn = () => settle(() => again(text, laterTurn), true);
     dequeue = slots.admit(async () => { phase = 'running'; await turn(); });
   };
-  if (again) started.child.resume = (text) => { if (phase === 'running') carried = text; else begin(text); };
+  if (again) started.child.resume = (text, laterTurn) => { if (phase === 'running') carried = { text, turn: laterTurn }; else begin(text, laterTurn); };
   deps.notify?.();
   return { child: started.child, label };
 }

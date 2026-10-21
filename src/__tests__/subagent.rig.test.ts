@@ -121,7 +121,7 @@ test('its result lands in the session that started it, though another is on scre
   expect(rig.toasts).toContain('⏳ find done — in «the first»');
 });
 
-test('a task a subagent starts reports to the session, not to the subagent that is still running', async () => {
+test('a task a subagent starts reports to the subagent, whose answer then reaches the session', async () => {
   const model = new ScriptedModel();
   const sub = subScript(model, 'one');
   sub.script([{ tool: 'subagent', args: { task: 'two', label: 'g' } }], [{ hold: true }, { text: 's done' }]);
@@ -130,15 +130,15 @@ test('a task a subagent starts reports to the session, not to the subagent that 
   const first = rig.conv;
   rig.registry.show(first);
   const s = scheduled(rig, spec('s', 'one'));
-  // The task's result is in the session while the subagent that started it still runs.
-  await rig.until(() => sub.held && bgRows(first).length === 1, 5_000);
-  expect(bgRows(first)).toEqual(['g finished:\ng done']);
-  expect(s.inbox).toEqual([]);
+  // The task's result is in the subagent while it still runs; the session has nothing.
+  await rig.until(() => sub.held && s.inbox.length === 1, 5_000);
+  expect(bgRows(first)).toEqual([]);
   sub.release();
-  await rig.until(() => bgRows(first).length === 2, 5_000);
+  await rig.until(() => bgRows(first).length === 1, 5_000);
   await settled(rig);
-  expect(bgRows(first)).toEqual(['g finished:\ng done', 's finished:\ns done']);
-  // The subagent stays, idle, after its answer.
+  expect(bgRows(first)).toEqual(['s finished:\ns done']);
+  // The subagent stays, idle, after its answer; the result waits in it as rows.
+  expect(bgRows(s)).toEqual(['g finished:\ng done']);
   expect(first.children.size).toBe(1);
   expect(s.idle).toBe(true);
 });

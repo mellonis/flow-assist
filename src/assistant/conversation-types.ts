@@ -273,6 +273,10 @@ export interface RunningChild { label: string; kind: ChildSpec['kind']; status: 
 // asked; `latest` is the tool it runs, else the verb of its round while it works, else '';
 // `below` counts its live descendants.
 export interface TreeNode { key: string; label: string; kind: ChildSpec['kind']; depth: number; status: RunningChild['status']; latest: string; startedAt: number | null; until: number | null; below: number; answered?: boolean }
+// How a later turn of a subagent that stays is started: the options its `send` takes (an
+// inbox follow-up is `fromInbox` and framed) and whether it reads a child's result, which
+// sends its answer up.
+export interface LaterTurn { options?: SendOptions; readResult?: boolean }
 // What `startChild` hands back: a refusal said to the model, or the child, its run,
 // `armed`, which records the delay timer that will start it, and `fired`, which the
 // caller calls when that timer fires — so a stop disarms only a task still waiting on
@@ -281,7 +285,7 @@ export interface TreeNode { key: string; label: string; kind: ChildSpec['kind'];
 // is delivered nowhere.
 export type ChildStart =
   | { refused: string }
-  | { child: Conversation; run: () => Promise<ChildResult>; again?: (text: string) => Promise<ChildResult>; armed: (timer: ReturnType<typeof setTimeout>) => void; fired: () => void };
+  | { child: Conversation; run: () => Promise<ChildResult>; again?: (text: string, turn?: LaterTurn) => Promise<ChildResult>; armed: (timer: ReturnType<typeof setTimeout>) => void; fired: () => void };
 // A child's way into a journal. Called, it takes a line of the child's own: a child with
 // no file of its own keeps only the lines a task journals (`call-start`, `confirm`,
 // `call`) and writes them, tagged, into its parent's journal; a subagent with a file
