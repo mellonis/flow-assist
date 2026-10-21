@@ -2,6 +2,7 @@
 // a child)): a `task` conversation whose tool calls are journaled in its parent's turn,
 // tagged with its label, in its parent's project, from its parent's directory — and no
 // file of its own.
+import { resultItem } from '../assistant/__tests__/conversation-deps.ts';
 import { afterEach, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -196,7 +197,7 @@ test('`deliver` on a closed conversation lands nothing', async () => {
   const rows = rig.conv.messages.length;
   const lines = rig.journal().length;
   rig.conv.close('park');
-  rig.conv.deliver('late finished:\nanswer');
+  rig.conv.deliver(resultItem('late finished:\nanswer'));
   await new Promise((r) => setTimeout(r, 450));
   expect(rig.conv.messages.length).toBe(rows);
   expect(rig.journal().length).toBe(lines);

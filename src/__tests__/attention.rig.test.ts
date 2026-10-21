@@ -1,6 +1,7 @@
 // What the registry counts for the person's attention: the sessions left on a y/n or a
 // question, and the ones put away with an answer nobody read (AGENTS.md (a host makes its
 // conversations through one registry)).
+import { resultItem } from '../assistant/__tests__/conversation-deps.ts';
 import { afterEach, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import type { Conversation } from '../assistant/conversation.ts';
@@ -93,7 +94,7 @@ test('a session put away with a result that landed in the park is counted as don
   await rig.idle();
   // A result waiting in the inbox: it lands as a row inside the park, after the answer
   // was read, so only the status read after the landing sees it unseen.
-  rig.conv.inbox.push({ text: 'job finished:\nok', quiet: false });
+  rig.conv.inbox.push({ ...resultItem('job finished:\nok'), nonce: 'abcdef01' });
   const { left: a } = rig.switchTo();
   expect(a.closed).toBe(true);
   expect(rig.registry.attention()).toEqual({ waiting: 0, done: 1 });
@@ -118,7 +119,7 @@ async function putAwayUnread(): Promise<{ rig: Rig; id: string }> {
   rig.registry.show(rig.conv);
   await rig.conv.send('question A');
   await rig.idle();
-  rig.conv.inbox.push({ text: 'job finished:\nok', quiet: false });
+  rig.conv.inbox.push({ ...resultItem('job finished:\nok'), nonce: 'abcdef01' });
   const { left } = rig.switchTo();
   expect(rig.registry.attention().done).toBe(1);
   return { rig, id: left.sessionId };
@@ -326,7 +327,7 @@ test('a left session whose unread thing is a task\'s result is counted but not a
   await rig.until(() => !a.busy);
   // The answer landed in the kept session: said once, there.
   await rig.until(() => finished(rig).length === 1);
-  a.deliver('job finished:\nok'); // lands as a row after the answer
+  a.deliver(resultItem('job finished:\nok')); // lands as a row after the answer
   a.children.delete(task);
   a.emit({ type: 'children', count: 0 });
   await rig.until(() => a.closed);

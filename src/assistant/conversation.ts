@@ -1,5 +1,6 @@
 // A conversation: the model's history and the list the person reads, what runs and what
 // waits, the session it is saved as. The chat draws one and drives it (AGENTS.md, "The chat").
+import crypto from 'node:crypto';
 import { apiHistory, requestTools, type ChatMessage, type TokenUsage } from './agent.js';
 import { askStart, type AskQuestion, type AskState } from './ask.js';
 import type { AutoMode } from './auto.js';
@@ -25,7 +26,7 @@ import type { ViewRecord } from './views.js';
 import type { ToolDef } from '../loader/tools.js';
 import { workspaceFor } from './workspace.js';
 import { asBackgroundWork, asConversationWork, asForegroundWork, outsideWork, workOwner } from '../runtime/background-work.js';
-import { callOf, childResultText, lastAnswerOf, type BusyKind, type ChatMsg, type ChildResult, type EndedChild, type RunningChild, type ChildSpec, type ChildStart, type CloseReason, type StoppedBy, type JournalRoute, type ConversationDeps, type ConversationEvent, type ConversationKind, type ConversationSnapshot, type ConversationStatus, type Offered, type PendingConfirm, type Queued, type QueueWait, type SendOptions, type TurnEnd, type TreeNode, type ViewPort } from './conversation-types.js';
+import { callOf, childResultText, frameItem, lastAnswerOf, type BusyKind, type ChatMsg, type ChildResult, type EndedChild, type RunningChild, type ChildSpec, type ChildStart, type CloseReason, type StoppedBy, type JournalRoute, type ConversationDeps, type ConversationEvent, type ConversationKind, type ConversationSnapshot, type ConversationStatus, type InboxItem, type Offered, type PendingConfirm, type Queued, type QueueWait, type SendOptions, type TurnEnd, type TreeNode, type ViewPort } from './conversation-types.js';
 import {
   applySession, closeOwnFile, currentProject, ensureSessionId, journal, journaledChatLLM, journalTo, journalToOwnFile, keepPersonWork, markSeen, newSubJournalId, persist, pushNote,
   releaseLockOf, writeSession, NO_FILE,
@@ -228,7 +229,8 @@ export class Conversation {
   queue: Queued[] = [];
   // What waits to land: each item's text, and whether it is quiet — it starts no
   // follow-up turn (a stopped child's row).
-  inbox: Array<{ text: string; quiet: boolean }> = [];
+  // `nonce`: made once when the item lands in the inbox, so its frame never changes.
+  inbox: Array<InboxItem & { nonce: string }> = [];
   inboxTimer: ReturnType<typeof setInterval> | null = null;
   // A plugin's news said while a turn runs waits for the turn's end (`note` on the
   // store, bound to `services.chatNote` by the App).
@@ -1008,7 +1010,7 @@ export class Conversation {
           delivered = childResultText(spec.label, r);
           // A stopped child's row is read with the person's next message: they have just
           // stopped the work and asked for no more.
-          home.deliver(delivered, r.outcome === 'stopped' ? { quiet: true } : undefined);
+          home.deliver({ kind: 'result', from: { key: child.key, label: spec.label, what: spec.kind }, text: delivered, quiet: r.outcome === 'stopped' });
           const shown = home.deps.current?.();
           landedIn = { title: home.title, onScreen: !shown || shown === home };
         }
@@ -1133,11 +1135,11 @@ export class Conversation {
   // item is never dropped while the conversation is open: it waits in the inbox until it
   // can land. A closed conversation takes nothing.
   // `quiet`: the item lands as a row and starts no follow-up turn (`takeInbox`).
-  deliver(text: string, opts: { quiet?: boolean } = {}): void {
+  deliver(item: InboxItem): void {
     if (this.closed) return;
-    const q = String(text ?? '').trim();
+    const q = String(item.text ?? '').trim();
     if (!q) return;
-    this.inbox.push({ text: q, quiet: opts.quiet === true });
+    this.inbox.push({ ...item, text: q, quiet: item.quiet === true, nonce: crypto.randomBytes(4).toString('hex') });
     if (!this.inboxTimer) this.inboxTimer = setInterval(() => this.takeInbox(), 400);
     this.takeInbox();
   }
@@ -1149,16 +1151,19 @@ export class Conversation {
   // saying what it is), in the journal — and, with the chat closed, in the
   // unread count and one alert. `keepLast` leaves the last item to `send`, which
   // draws it as the follow-up turn's message. Returns what it took.
-  landInbox(keepLast = false): string[] {
-    const items = this.inbox.map((i) => i.text);
+  // The screen and the journal keep an item's plain text; the model's history keeps it
+  // framed (`frameItem`).
+  landInbox(keepLast = false): Array<{ text: string; framed: string }> {
+    const taken = this.inbox.map((i) => ({ text: i.text, framed: frameItem(i, i.nonce) }));
+    const items = taken.map((i) => i.text);
     if (!items.length) return [];
     this.inbox = [];
     this.clearInbox();
-    const rows = keepLast ? items.slice(0, -1) : items;
+    const rows = keepLast ? taken.slice(0, -1) : taken;
     if (rows.length) {
-      for (const q of rows) this.journal({ t: 'row', role: 'bg', text: q });
-      this.setRows((cur) => [...cur, ...rows.map((q): ChatMsg => ({ role: 'bg', content: q }))]);
-      this.api = [...this.api, ...rows.map((q): ChatMessage => ({ role: 'bg', content: q }))];
+      for (const q of rows) this.journal({ t: 'row', role: 'bg', text: q.text });
+      this.setRows((cur) => [...cur, ...rows.map((q): ChatMsg => ({ role: 'bg', content: q.text }))]);
+      this.api = [...this.api, ...rows.map((q): ChatMessage => ({ role: 'bg', content: q.framed }))];
       // A result is read like an answer: `done` in the picker until a chat shows it.
       const at = new Date().toISOString();
       this.answeredAt = at;
@@ -1169,7 +1174,7 @@ export class Conversation {
     // names the first (`(+N more)`).
     this.emit({ type: 'inbox', items, shown: this.port?.open() ?? false });
     this.deps.notify();
-    return items;
+    return taken;
   }
   // A y/n or a question waiting for the person holds the inbox (it lands once
   // answered); so does a running turn, a `!command` or a slash command, and a
@@ -1192,7 +1197,7 @@ export class Conversation {
     if (quiet.length && quiet.length < this.inbox.length) this.inbox = [...quiet, ...this.inbox.filter((i) => !i.quiet)];
     if (mode === 'rows' || !followUp || this.headless || quiet.length === this.inbox.length) { this.landInbox(); return; }
     const last = this.landInbox(true).at(-1)!;
-    void this.send(last, { fromInbox: true });
+    void this.send(last.text, { fromInbox: true, framed: last.framed });
   }
   // A turn, a `!command` or a slash command has ended. The person's queued
   // messages go first, in order, and the first carries the inbox: its rows land

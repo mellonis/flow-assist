@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { ConversationDeps } from '../conversation-types.ts';
+import type { ConversationDeps, InboxItem } from '../conversation-types.ts';
 
 // A host with nothing behind it: no sessions directory, a memory file and a workspace
 // root of its own (the memory's facts are read from the workspace: one
@@ -27,3 +27,6 @@ export function fakeDeps(over: Partial<ConversationDeps> = {}): ConversationDeps
     ...over, notified: () => notified, log,
   };
 }
+
+// A task's result as an inbox item, for a test that delivers one.
+export const resultItem = (text: string, quiet = false): InboxItem => ({ kind: 'result', from: { key: 'c0', label: 'w', what: 'task' }, text, quiet });

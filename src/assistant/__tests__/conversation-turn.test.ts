@@ -11,7 +11,7 @@ import { journalPath } from '../sessions.ts';
 import { firstStart } from '../memory-trust.ts';
 import { workspaceRoot } from '../workspace.ts';
 import type { ConversationEvent } from '../conversation-types.ts';
-import { fakeDeps } from './conversation-deps.ts';
+import { fakeDeps, resultItem } from './conversation-deps.ts';
 
 const answering = (text: string) => (async (_wire: unknown, o: Record<string, any>) => {
   o.onLive?.(text);
@@ -104,6 +104,8 @@ test('a write asks: the y/n parks, the answer is journaled, and the auto mode an
   expect(confirmLine).toMatchObject({ answer: 'yes', by: 'person', id: 'k1' });
 });
 
+// What the model was asked, without the frame an inbox item arrives in (`frameItem`).
+const unframed = (asked: string[]) => asked.map((t) => t.replace(/^\[[^\n]*\]\n<[a-z-]+ n=[0-9a-f]+>\n/, '').replace(/\n<\/[a-z-]+ n=[0-9a-f]+>$/, ''));
 const asking = (asked: string[]) => (async (wire: { content: unknown }[], o: Record<string, any>) => {
   asked.push(String(wire.at(-1)!.content));
   o.onLiveCommit?.('ok', true);
@@ -116,12 +118,12 @@ test('a background result never enters a running turn; after it, ONE follow-up t
   const landed: Array<{ n: number; shown: boolean }> = [];
   c.on('inbox', (ev) => landed.push({ n: ev.items.length, shown: ev.shown }));
   const turn = c.send('go');
-  c.deliver('task finished:\nall good');
+  c.deliver(resultItem('task finished:\nall good'));
   expect(c.inbox).toHaveLength(1); // held: a turn runs
   await turn;
   await new Promise((r) => setTimeout(r, 20));
-  expect(asked).toEqual(['go', 'task finished:\nall good']);
-  expect(c.api.find((m) => m.content === 'task finished:\nall good')).toMatchObject({ role: 'bg' });
+  expect(unframed(asked)).toEqual(['go', 'task finished:\nall good']);
+  expect(c.api.find((m) => String(m.content).includes('task finished:\nall good'))).toMatchObject({ role: 'bg' });
   expect(c.prompts).toEqual(['go']); // the follow-up is not the person's
   expect(landed).toEqual([{ n: 1, shown: false }]); // no chat: counted unread by the chat's handler
   c.clearInbox();
@@ -138,7 +140,7 @@ test('a queued message carries the inbox: its rows land just ahead of it, and no
     }) as never,
   }));
   const turn = c.send('go');
-  c.deliver('task finished:\nall good');
+  c.deliver(resultItem('task finished:\nall good'));
   c.enqueue('next');
   release();
   await turn;
@@ -152,8 +154,8 @@ test('a queued message carries the inbox: its rows land just ahead of it, and no
 test('with follow-ups off, results land as rows, together, when nothing holds them', () => {
   const c = new Conversation(fakeDeps({ chatLLM: answering('ok') }));
   (c.deps.config().ai as Record<string, unknown>).backgroundFollowUp = false;
-  c.deliver('one');
-  c.deliver('two');
+  c.deliver(resultItem('one'));
+  c.deliver(resultItem('two'));
   expect(c.rows().map((m) => [m.role, m.content])).toEqual([['bg', 'one'], ['bg', 'two']]);
   expect(c.api.map((m) => m.role)).toEqual(['bg', 'bg']);
   c.clearInbox();
@@ -176,12 +178,12 @@ test('quiet items land first, so the follow-up turn answers the item that is not
   const h = heldFirst(asked);
   const c = new Conversation(fakeDeps({ chatLLM: h.chatLLM }));
   const turn = c.send('go');
-  c.deliver('a finished:\nthe news');
-  c.deliver('b stopped:\nwhat it had', { quiet: true });
+  c.deliver(resultItem('a finished:\nthe news'));
+  c.deliver(resultItem('b stopped:\nwhat it had', true));
   h.release();
   await turn;
   await settleMs();
-  expect(asked).toEqual(['go', 'a finished:\nthe news']);
+  expect(unframed(asked)).toEqual(['go', 'a finished:\nthe news']);
   const bg = c.rows().filter((m) => m.role === 'bg').map((m) => m.content);
   // The quiet row is a row before the message the turn answered.
   expect(bg).toEqual(['b stopped:\nwhat it had', 'a finished:\nthe news']);
@@ -193,25 +195,25 @@ test('a normal item with the same text as a quiet one, waiting together, still s
   const h = heldFirst(asked);
   const c = new Conversation(fakeDeps({ chatLLM: h.chatLLM }));
   const turn = c.send('go');
-  c.deliver('x stopped:\nsame', { quiet: true });
-  c.deliver('x stopped:\nsame');
+  c.deliver(resultItem('x stopped:\nsame', true));
+  c.deliver(resultItem('x stopped:\nsame'));
   h.release();
   await turn;
   await settleMs();
-  expect(asked).toEqual(['go', 'x stopped:\nsame']);
+  expect(unframed(asked)).toEqual(['go', 'x stopped:\nsame']);
   c.clearInbox();
 });
 
 test('nothing quiet is left behind after a land: a later normal item with the same text starts its turn', async () => {
   const asked: string[] = [];
   const c = new Conversation(fakeDeps({ chatLLM: asking(asked) }));
-  c.deliver('x stopped:\nsame', { quiet: true });
+  c.deliver(resultItem('x stopped:\nsame', true));
   await settleMs();
   expect(asked).toEqual([]);
   expect(c.rows().filter((m) => m.role === 'bg')).toHaveLength(1);
-  c.deliver('x stopped:\nsame');
+  c.deliver(resultItem('x stopped:\nsame'));
   await settleMs();
-  expect(asked).toEqual(['x stopped:\nsame']);
+  expect(unframed(asked)).toEqual(['x stopped:\nsame']);
   c.clearInbox();
 });
 

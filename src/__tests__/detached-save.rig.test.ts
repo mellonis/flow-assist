@@ -2,6 +2,7 @@
 // when its port left (AGENTS.md (sessions survive a restart)).
 import { afterEach, expect, test } from 'bun:test';
 import { writeSession } from '../assistant/conversation-session.ts';
+import { resultItem } from '../assistant/__tests__/conversation-deps.ts';
 import { ScriptedModel } from './helpers/scripted';
 import { closeRigs, conversationRig, FakePort } from './helpers/conversation';
 
@@ -38,7 +39,7 @@ test('a row that lands after the port left is saved, though the drawn list lacks
   c.attach(port);
   c.drawnRows = [...c.messages]; // the list as the chat last drew it
   c.detach(port);
-  c.deliver('late result');
+  c.deliver(resultItem('late result'));
   expect(c.messages.some((m) => String(m.content).includes('late result'))).toBe(true);
   expect(c.drawnRows.some((m) => String(m.content).includes('late result'))).toBe(false);
   writeSession(c);

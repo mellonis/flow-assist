@@ -8,7 +8,7 @@ import path from 'node:path';
 import type { ChatMessage } from '../../assistant/agent.ts';
 import type { ConfirmPolicy } from '../../assistant/confirm-policy.ts';
 import { Conversation } from '../../assistant/conversation.ts';
-import type { ConversationKind, PendingConfirm, ViewPort } from '../../assistant/conversation-types.ts';
+import { pluginItem, type ConversationKind, type PendingConfirm, ViewPort } from '../../assistant/conversation-types.ts';
 import { readJournal, type JournalEvent } from '../../assistant/journal.ts';
 import { firstStart, firstStartPending } from '../../assistant/memory-trust.ts';
 import { ConversationRegistry } from '../../assistant/registry.ts';
@@ -206,6 +206,6 @@ export function conversationRig(model: ScriptedModel, opts: RigOptions = {}) {
   };
   // A background task's result, delivered as the chat delivers it: into the conversation
   // the rig holds when the task ends.
-  if (opts.inbox) (services as unknown as { postToChat: (text: string) => void }).postToChat = (text) => rig.conv.deliver(text);
+  if (opts.inbox) (services as unknown as { postToChat: (text: string) => void }).postToChat = (text) => rig.conv.deliver(pluginItem(text));
   return rig;
 }

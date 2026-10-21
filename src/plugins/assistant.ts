@@ -61,7 +61,7 @@ import type { Plugin } from '../loader/plugin.js';
 import type { PluginApi } from '../runtime/plugin-api.js';
 import { isPanelSpec, panelAnswer, panelCursor, panelKey as commandPanelKey, panelKeys, panelRows, panelStart, panelTop, type PanelKeyDef, type PanelSpec, type PanelState } from '../assistant/command-panel.js';
 import type { Command as PluginCommand } from '../loader/plugin.js';
-import type { ChatMsg, ConversationEvent, ConversationSnapshot, Offered, SendOptions, ViewPort } from '../assistant/conversation-types.js';
+import { pluginItem, type ChatMsg, type ConversationEvent, ConversationSnapshot, Offered, SendOptions, ViewPort } from '../assistant/conversation-types.js';
 import { Conversation, workHome } from '../assistant/conversation.js';
 import { ConversationRegistry } from '../assistant/registry.js';
 import { personSpoke, projectHere } from '../assistant/conversation-session.js';
@@ -2096,7 +2096,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // plugin's, `Conversation.deliver`), into the session `postHome` names.
           // Registered per render (idempotent); an older copy a detached timer holds
           // asks `postHome` as this one does.
-          (host.services as Record<string, any>).postToChat = (text: string) => postHome().deliver(text);
+          (host.services as Record<string, any>).postToChat = (text: string) => postHome().deliver(pluginItem(text));
           // While the chat is open it owns the KEYBOARD: priority 100 (like log/tags).
           // The host dims the overlay-detail via ui.modalActive, so its consumer (also
           // 100) does not contend for 'r'/'c' etc.
