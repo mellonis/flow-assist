@@ -183,8 +183,8 @@ says so at the end of its result (`stopped after 12 rounds — last: …`). A ta
 one follow-up task of its own; `ai.subagentDepth` (2 by default) is how deep such a chain
 may go. At most three run at once (`sessions.maxRunning`, above); the rest wait their turn.
 
-A task's result goes to the conversation that started it: the session, or, for a task a
-subagent you started began, that subagent (see Subagents you start). Leave that session while the task
+A task's result goes to the session, or, when a subagent you started began the task, to
+that subagent (see Subagents you start). Leave that session while the task
 runs — `/new`, `/resume`, the picker — and it stays open here until the task ends
 (`here · working` in the picker): the result is a message there, not in the chat on
 screen, which gets only a toast naming it, and no turn starts for it. `/clear` stops the
@@ -255,7 +255,7 @@ to a message does not come into your conversation, and the assistant never sees 
 row reads `answered` until you have opened the subagent (⏎ on its row) and read it there.
 A result that a task of the subagent's brings back is read by the subagent in a turn of its
 own, once the turn it is in ends (with your message, if you wrote one meanwhile, in one
-turn); what the subagent then says reaches your conversation as its answers do, a `◆`
+turn); what the subagent then says reaches your conversation as its first answer does, a `◆`
 message. `ai.backgroundFollowUp: false` keeps such results as rows in the subagent, read
 with your next message to it. A task of the subagent's that you stop lands quiet and starts
 nothing.

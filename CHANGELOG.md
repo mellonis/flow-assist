@@ -14,7 +14,8 @@ What each version of flow-assist brought, newest first. The version is the one i
   `ai.backgroundFollowUp: false` keeps rows only, and a stopped child's result lands quiet.
   Whatever lands in an inbox, a result or a plugin's post, reaches the model in a frame
   that marks it as data and not your words, and the system prompt says so; you, the journal
-  and `/export` see the plain text.
+  and `/export` see the plain text. A subagent you stop keeps the results that waited in
+  its inbox as rows in its journal and export.
 - **A subagent you start stays after its answer, and you can write to it.** Its first answer
   lands in the conversation as a `◆` message, as a background task's does; the subagent then rests (`◦ <name> ·
   idle` under the field, `idle` in `/subagent`) with no slot and no timer, until you stop it

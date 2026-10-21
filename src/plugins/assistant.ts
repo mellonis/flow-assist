@@ -61,7 +61,7 @@ import type { Plugin } from '../loader/plugin.js';
 import type { PluginApi } from '../runtime/plugin-api.js';
 import { isPanelSpec, panelAnswer, panelCursor, panelKey as commandPanelKey, panelKeys, panelRows, panelStart, panelTop, type PanelKeyDef, type PanelSpec, type PanelState } from '../assistant/command-panel.js';
 import type { Command as PluginCommand } from '../loader/plugin.js';
-import { pluginItem, type ChatMsg, type ConversationEvent, ConversationSnapshot, Offered, SendOptions, ViewPort } from '../assistant/conversation-types.js';
+import { pluginItem, type ChatMsg, type ConversationEvent, type ConversationSnapshot, type Offered, type SendOptions, type ViewPort } from '../assistant/conversation-types.js';
 import { Conversation, workHome } from '../assistant/conversation.js';
 import { ConversationRegistry } from '../assistant/registry.js';
 import { personSpoke, projectHere } from '../assistant/conversation-session.js';

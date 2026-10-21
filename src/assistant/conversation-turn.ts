@@ -296,10 +296,12 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
         if (c.closed) return append;
         // The person's message stays, the rest is the handoff; what they
         // queued since goes after it, as it would have without the compaction.
-        const resumed: ChatMessage = round === 0 ? asked : { ...asked, content: `${q}\n\n${RESUMED_NOTE}` };
+        // An inbox turn's message is the framed item: the history keeps it as a `bg` entry,
+        // the provider reads it as a `user` message with the frame intact.
+        const resumed: ChatMessage = round === 0 ? asked : { ...asked, content: `${asked.content}\n\n${RESUMED_NOTE}` };
         c.summary = result.summary;
         c.usage = null; // the measured size was of the history just replaced
-        c.api = [resumed];
+        c.api = [opts.fromInbox ? { ...resumed, role: 'bg' } : resumed];
         markCompacted(c, next, result.summary, result.incomplete, true);
         c.persist();
         const sysNow = sysParts ? chatSystem(sysParts, true) : shape.system === 'subagent' ? workerSystem() : '';

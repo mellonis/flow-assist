@@ -5,6 +5,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { scheduleChild } from '../assistant/child-schedule.ts';
 import type { Conversation } from '../assistant/conversation.ts';
 import type { ChildSpec } from '../assistant/conversation-types.ts';
+import { resultItem } from '../assistant/__tests__/conversation-deps.ts';
 import { ScriptedModel, type RecordedRequest } from './helpers/scripted';
 import { closeRigs, conversationRig, type Rig } from './helpers/conversation';
 
@@ -115,6 +116,8 @@ test('a tell and a result together make one turn whose answer goes up; a tell al
   expect(inLastRequest(sub.requests[2]!)).toMatch(FRAMED);
   expect(inLastRequest(sub.requests[2]!)).toContain('and mind this');
   expect(bgRows(session)).toEqual(['s finished:\nfirst done', 's finished:\nboth read']);
+  // A later answer that goes up toasts as the first answer does.
+  expect(rig.toasts.filter((t) => t.startsWith('⏳ s done'))).toHaveLength(2);
   // The tell alone: the answer stays, the row says `answered`.
   expect(child.receive('just you')).toEqual({ sent: 'started' });
   await rig.until(() => child.idle && sub.requests.length === 4);
@@ -163,7 +166,7 @@ test('with ai.backgroundFollowUp false the result lands as rows in the subagent 
   expect(bgRows(session)).toEqual(['s finished:\nstarted it']);
 });
 
-test('a row landing in a subagent tells the tree, so the host redraws', async () => {
+test('a row landing in an idle subagent tells the tree, so the host redraws', async () => {
   const model = new ScriptedModel();
   const sub = subScript(model, 'one');
   sub.script(startsTask, [{ text: 'started it' }]);
@@ -173,11 +176,78 @@ test('a row landing in a subagent tells the tree, so the host redraws', async ()
   const child = scheduled(rig, spec('s', 'one'));
   await rig.until(() => task.held);
   await rig.until(() => child.idle);
-  let heard = 0;
-  rig.conv.on('tree', () => { heard++; });
   task.release();
   await rig.until(() => bgRows(child).length === 1);
+  await quiet(rig);
+  // Nothing else is moving: the landing itself is the only tree event.
+  let heard = 0;
+  rig.conv.on('tree', () => { heard++; });
+  child.deliver(resultItem('x'));
+  expect(bgRows(child)).toEqual(['g finished:\ng done', 'x']);
   expect(heard).toBeGreaterThan(0);
+});
+
+test('a stopped task\'s quiet row does not make the next turn a result-read: a tell\'s answer stays in the subagent', async () => {
+  const model = new ScriptedModel();
+  const sub = subScript(model, 'one');
+  sub.script(startsTask, [{ hold: true }, { text: 'first done' }], [{ text: 'tell answer' }]);
+  const task = taskScript(model, 'two');
+  task.script([{ hold: true }, { text: 'never' }]);
+  main(model);
+  const rig = conversationRig(model, withFollowUp);
+  const session = rig.conv;
+  const child = scheduled(rig, spec('s', 'one'));
+  await rig.until(() => sub.held);
+  await rig.until(() => task.held);
+  const g = [...child.children][0]!;
+  expect(g.stopSubtree('person')).toBe(true);
+  await rig.until(() => child.inbox.length === 1);
+  expect(child.receive('mind this')).toEqual({ sent: 'queued' });
+  sub.release();
+  await rig.until(() => child.idle && sub.requests.length === 3);
+  await quiet(rig);
+  expect(bgRows(session)).toEqual(['s finished:\nfirst done']);
+  expect(session.unreadAnswers()).toEqual([child]);
+  expect(child.lastAnswer()).toBe('tell answer');
+});
+
+test('the same in a later turn of the subagent: its stop lands the waiting result as a row in its journal', async () => {
+  const model = new ScriptedModel();
+  const sub = subScript(model, 'one');
+  sub.script(startsTask, [{ text: 'started it' }], [{ hold: true }, { text: 'never' }]);
+  const task = taskScript(model, 'two');
+  task.script([{ hold: true }, { text: 'g done' }]);
+  main(model);
+  const rig = conversationRig(model, withFollowUp);
+  const child = scheduled(rig, spec('s', 'one'));
+  await rig.until(() => task.held);
+  await rig.until(() => child.idle);
+  expect(child.receive('go on')).toEqual({ sent: 'started' });
+  await rig.until(() => sub.held);
+  task.release();
+  await rig.until(() => child.inbox.length === 1);
+  const id = child.subJournalId!;
+  expect(child.stopSubtree('person')).toBe(true);
+  await rig.until(() => child.closed);
+  expect(rig.journal(id).filter((e) => e.t === 'row' && e.role === 'bg').map((e) => String(e.text))).toEqual(['g finished:\ng done']);
+});
+
+test('a finished task\'s result waiting in a busy subagent survives its stop as a row in its journal', async () => {
+  const model = new ScriptedModel();
+  const sub = subScript(model, 'one');
+  sub.script(startsTask, [{ hold: true }, { text: 'never' }]);
+  const task = taskScript(model, 'two');
+  task.script([{ text: 'g done' }]);
+  main(model);
+  const rig = conversationRig(model, withFollowUp);
+  const child = scheduled(rig, spec('s', 'one'));
+  await rig.until(() => sub.held);
+  await rig.until(() => child.inbox.length === 1);
+  const id = child.subJournalId!;
+  expect(child.stopSubtree('person')).toBe(true);
+  await rig.until(() => child.closed);
+  const rows = rig.journal(id).filter((e) => e.t === 'row' && e.role === 'bg').map((e) => String(e.text));
+  expect(rows).toEqual(['g finished:\ng done']);
 });
 
 test('a task whose result lands in a subagent does not claim it is on screen', async () => {

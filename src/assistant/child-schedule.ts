@@ -34,8 +34,9 @@ export function scheduleChild(spec: ChildSpec, delayMs: number, deps: ChildSched
   if ('refused' in started) return { refused: started.refused };
   // The run and what is said of its end: the log, the toast. Shared by the slot a run is
   // admitted into and by a stop that takes a child out of the schedule before it began.
-  // `later`: a turn of a subagent that stays, after its first answer. Its answer goes to
-  // no conversation, so only the log says it.
+  // `later`: a turn of a subagent that stays, after its first answer. Its answer goes up
+  // only when the turn read a child's result, and is toasted then as the first answer is;
+  // otherwise it stays in the subagent and only the log says it.
   const settle = async (go: () => Promise<ChildResult>, later: boolean): Promise<void> => {
     const failed = (msg: string) => {
       deps.showMessage?.(`⚠ ${label} failed: ${msg}`);
@@ -50,7 +51,7 @@ export function scheduleChild(spec: ChildSpec, delayMs: number, deps: ChildSched
       if (r.outcome === 'failed') { failed(r.error ?? r.outcome); return; }
       // The log says the result without its `<label> finished:` line.
       deps.pushLog?.(`[bg] ${label}: ${childResultBody(r)}`);
-      if (later) return;
+      if (later && !r.landedIn) return;
       // Landed nowhere (its conversation was closed first): nothing to point at.
       const home = r.landedIn;
       if (!home) return;

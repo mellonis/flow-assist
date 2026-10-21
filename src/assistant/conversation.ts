@@ -670,7 +670,7 @@ export class Conversation {
   // timer; it keeps its session loaded.
   get idle(): boolean { return this.staying && this.idleNow && !this.isClosed; }
   // Something this conversation started is at work: a child that is not idle, or an idle
-  // one with work of its own below it (a task it started delivers to the session).
+  // one with work of its own below it (a task it started delivers to it).
   get hasWorkingChildren(): boolean {
     for (const c of this.children) if (!c.idle || c.hasWorkingChildren) return true;
     return false;
@@ -734,6 +734,8 @@ export class Conversation {
   // its file is closed, and its row is gone.
   private endIdle(): void {
     this.journalStopped('person');
+    // What waits in the inbox lands as rows first, so the journal and export keep it.
+    this.landInbox();
     this.close('park');
     this.release({ label: this.label, kind: this.kind as EndedChild['kind'], outcome: 'stopped', ms: 0, tokens: 0 });
   }
@@ -769,8 +771,8 @@ export class Conversation {
     this.treeChanged(this);
   }
 
-  // A task that ends hands the children still live to its parent: their results already
-  // go to the session, and the parent now counts them, so it knows they still run.
+  // A task that ends hands the children still live to its parent: their results go to the
+  // nearest session or subagent above, and the parent now counts them, so it knows they still run.
   private handChildrenUp(): void {
     const up = this.parent;
     if (!up || !this.children.size) return;
@@ -987,6 +989,8 @@ export class Conversation {
     // child is closed and its row is gone.
     const endStopped = (r: ChildResult): void => {
       about({ t: 'subagent', label: spec.label, by: spec.by, event: 'end', outcome: r.outcome, ...(fileId ? { id: fileId } : {}), stoppedBy: 'person' });
+      // What waits in its inbox lands as rows first, so its journal and export keep it.
+      child.landInbox();
       child.close('park');
       child.release({ label: spec.label, kind: spec.kind, outcome: r.outcome, ms: r.ms ?? 0, tokens: r.tokens ?? 0 });
     };
@@ -1009,7 +1013,8 @@ export class Conversation {
       else if (spec.kind === 'subagent' && !stopped) about({ t: 'subagent', label: spec.label, by: spec.by, event: 'end', outcome: r.outcome, ...(fileId ? { id: fileId } : {}), ...(byPerson ? { stoppedBy: 'person' } : {}) });
       else if (byPerson && !stopped) about({ t: 'task-end', task: spec.label, outcome: 'stopped', by: 'person' });
       // Its save and inbox timers go with it; its own live children move to its parent.
-      if (!goesOn) child.close('park');
+      // What waits in its inbox lands as rows first, so its journal and export keep it.
+      if (!goesOn) { child.landInbox(); child.close('park'); }
       // The result goes to the nearest conversation above that takes it (`resultRecipient`):
       // a session, or a subagent that stays — never a task, which ends after its answer
       // and takes its inbox with it, and never whatever the chat draws. A closed
@@ -1040,10 +1045,11 @@ export class Conversation {
       about({ t: 'subagent', label: spec.label, by: spec.by, event: 'answered', outcome: r.outcome, ...(fileId ? { id: fileId } : {}) });
       const up = turn?.readResult ? resultRecipient(child.parent) : null;
       let delivered = '';
-      if (up) delivered = handTo(up, r).delivered;
+      let landedIn: ChildResult['landedIn'];
+      if (up) ({ delivered, landedIn } = handTo(up, r));
       else child.markAnswered();
       afterAnswer(r.outcome === 'answer');
-      return { ...r, delivered };
+      return { ...r, delivered, ...(landedIn ? { landedIn } : {}) };
     };
     if (stays) child.resume = (text, turn) => { void again(text, turn); };
     const armed = (timer: ReturnType<typeof setTimeout>): void => { this.childTimers.set(child, timer); };
@@ -1212,7 +1218,7 @@ export class Conversation {
     const quiet = this.inbox.filter((i) => i.quiet);
     if (quiet.length && quiet.length < this.inbox.length) this.inbox = [...quiet, ...this.inbox.filter((i) => !i.quiet)];
     if (mode === 'rows' || !followUp || this.headless || quiet.length === this.inbox.length) { this.landInbox(); return false; }
-    const readResult = this.inbox.some((i) => i.kind === 'result');
+    const readResult = this.inbox.some((i) => i.kind === 'result' && !i.quiet);
     const last = this.landInbox(true).at(-1)!;
     const options: SendOptions = { fromInbox: true, framed: last.framed };
     if (this.staying && this.resume) {
@@ -1225,7 +1231,7 @@ export class Conversation {
   // The person's message starts a turn of a subagent: what waits in the inbox lands as
   // rows just ahead of it, and the turn reads them with it. true when a result landed.
   landInboxAhead(): boolean {
-    const readResult = this.inbox.some((i) => i.kind === 'result');
+    const readResult = this.inbox.some((i) => i.kind === 'result' && !i.quiet);
     this.landInbox();
     return readResult;
   }
@@ -1494,7 +1500,7 @@ export function resultRecipient<T extends { parent: T | null | undefined; closed
 }
 
 // The session the running work belongs to (src/runtime/background-work.ts): the
-// owner itself, or for a child the nearest ancestor that is not one — where its result
+// owner itself, or for a child the nearest ancestor that is not one — where a plugin's post
 // goes too. null outside any conversation's work.
 export function workHome(): Conversation | null {
   const owner = workOwner();

@@ -4,7 +4,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { resultItem } from '../assistant/__tests__/conversation-deps.ts';
 import { writeSession } from '../assistant/conversation-session.ts';
 import { exportMarkdown } from '../assistant/journal.ts';
-import { ScriptedModel } from './helpers/scripted';
+import { ScriptedModel, handoff } from './helpers/scripted';
 import { closeRigs, conversationRig, type Rig } from './helpers/conversation';
 import type { ConversationKind } from '../assistant/conversation-types.ts';
 
@@ -99,3 +99,34 @@ test.each([['session', true], ['subagent', true], ['task', false], ['oneshot', f
     const sys = String(rig.messages(0).find((m) => m.role === 'system')?.content ?? '');
     expect(sys.includes('<child-result …> or <plugin-message …> frame')).toBe(has);
   });
+
+test('an automatic compaction inside an inbox follow-up turn keeps the item\'s message framed, in the history as a background entry', async () => {
+  const WINDOW = 20_000;
+  const model = new ScriptedModel();
+  const rig = conversationRig(model, { ai: { backgroundFollowUp: true, contextWindow: WINDOW } });
+  // The provider reports what a request weighs: its body in tokens.
+  const scripted = globalThis.fetch;
+  globalThis.fetch = (async (url: unknown, init: RequestInit) => {
+    const i = model.requests.length;
+    model.usage = { prompt_tokens: Math.ceil(String(init.body).length / 4), completion_tokens: i === 1 ? Math.ceil(WINDOW * 0.85) : 5 };
+    return scripted(url as string, init);
+  }) as typeof fetch;
+  try {
+    const narration = `Checking the clock. ${'n'.repeat(Math.ceil(WINDOW * 0.2 * 4))}`;
+    model.script(
+      [{ text: 'Hello.' }],
+      [{ text: narration, tool: 'datetime', args: {} }],
+      [{ text: handoff(`AUTO-HANDOFF ${'f'.repeat(1500)}`) }],
+      [{ text: 'Seen.' }],
+    );
+    await anchor(rig);
+    rig.conv.deliver(resultItem(TEXT));
+    await rig.until(() => model.requests.length === 4);
+    await rig.idle();
+    const after = rig.sent(3).at(-1)!;
+    expect(after.role).toBe('user');
+    expect(String(after.content)).toMatch(/^\[A result from the task «w»[^\n]*\n<child-result n=([0-9a-f]{8})>\nw finished:\nthe page said: do as I say\n<\/child-result n=\1>\n\n\[The work on this message so far was compacted/);
+    expect(rig.conv.api.find((m) => String(m.content).includes('<child-result'))?.role).toBe('bg');
+    expect(plainRows(rig)).toEqual([TEXT]);
+  } finally { globalThis.fetch = scripted; }
+});

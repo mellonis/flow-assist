@@ -3278,7 +3278,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   turn) with the waiting items landed as rows just ahead of it; with no message the inbox
   starts a follow-up turn the same way (`takeInbox`, taken from rest or at a turn's end),
   and a turn with nothing to start rests the child. `ai.backgroundFollowUp: false` and a
-  quiet item keep rows only, and so does a turn that failed or was stopped. A message while a turn runs is queued
+  quiet item keep rows only, and so does a turn that did not end in an answer (failed, at a limit, empty). A message while a turn runs is queued
   and taken at the child's next request boundary, or by the next turn when none is left;
   `receive` refuses a task or a model's subagent, a stopped or closed child and an empty
   text, and `runTurn` refuses a closed conversation. The child ends when stopped
@@ -3306,7 +3306,9 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   nothing); the child itself delivers once, `<label> stopped:` and the text it had
   written (the last answer text of its rows; the steps of its tool-calling rounds are not
   text it said), or `nothing said yet`, to its recipient as any result is.
-  That row is delivered quiet (`deliver(text, { quiet: true })`): it lands as a row and
+  A child that ends or is stopped lands what waits in its inbox as rows before it closes
+  (its journal and export keep them); nothing is delivered further.
+  That row is delivered quiet (an item with `quiet: true`): it lands as a row and
   starts no follow-up turn even with `ai.backgroundFollowUp` on and the recipient shown —
   the person has just stopped the work. A second call, and a call on a closed child, do
   nothing. **A conversation remembers its ended children** (`endedChildren`: label, kind,
