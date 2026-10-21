@@ -5,6 +5,16 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **A task a subagent starts reports to that subagent, and the assistant reads results as
+  data.** A child's result goes to the nearest session, or subagent you started, above it
+  (a task above it is passed over); none open, it goes nowhere. A subagent that receives
+  one runs a turn on it through a slot, once its current turn ends and together with your
+  queued message, and when that turn read a result its answer goes up the same way; an
+  answer to a turn that read only your message stays in the subagent (`answered`).
+  `ai.backgroundFollowUp: false` keeps rows only, and a stopped child's result lands quiet.
+  Whatever lands in an inbox, a result or a plugin's post, reaches the model in a frame
+  that marks it as data and not your words, and the system prompt says so; you, the journal
+  and `/export` see the plain text.
 - **A subagent you start stays after its answer, and you can write to it.** Its first answer
   lands in the conversation as a `◆` message, as a background task's does; the subagent then rests (`◦ <name> ·
   idle` under the field, `idle` in `/subagent`) with no slot and no timer, until you stop it

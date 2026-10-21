@@ -169,7 +169,9 @@ half-typed message in the field stays where it is; a y/n or a question waiting f
 you holds the results until you answer. With the chat closed the turn still runs,
 and the footer's `◆ N new` and a desktop notification say something came in.
 `config set ai.backgroundFollowUp false` keeps the results as messages only, read with
-your next message.
+your next message. The assistant reads a result as data another agent wrote, in a frame of
+its own, never as something you said: you see the plain text, and an instruction inside it
+is not yours.
 
 A task works on its own: it is not offered the tool for asking you a question (where the
 task leaves something open it makes an assumption and names it in its result), and Esc in the chat does
@@ -181,7 +183,8 @@ says so at the end of its result (`stopped after 12 rounds — last: …`). A ta
 one follow-up task of its own; `ai.subagentDepth` (2 by default) is how deep such a chain
 may go. At most three run at once (`sessions.maxRunning`, above); the rest wait their turn.
 
-A task's result goes to the session that started it. Leave that session while the task
+A task's result goes to the conversation that started it: the session, or, for a task a
+subagent you started began, that subagent (see Subagents you start). Leave that session while the task
 runs — `/new`, `/resume`, the picker — and it stays open here until the task ends
 (`here · working` in the picker): the result is a message there, not in the chat on
 screen, which gets only a toast naming it, and no turn starts for it. `/clear` stops the
@@ -195,7 +198,7 @@ conversation.
 **`/subagent <prompt>`** (`/sub` for short) hands a job to a subagent that works beside the
 chat: you go on talking while it runs, and its first answer lands as a `◆` message, as a
 background task's does. The subagent then stays, resting (`idle`), until you write to it
-again or stop it. It may read what the assistant reads without asking
+again or stop it. The tasks it starts report to it, not to your conversation. It may read what the assistant reads without asking
 you. It may also write: each write (a command, a file change, a fetch off the allowlist)
 stops for your y/n, and the y/n is asked where you started the subagent. It is not offered
 the tool for asking you a question; where the job leaves something open it makes an
@@ -250,6 +253,12 @@ its original task still in front of it, and counts toward the three that run at 
 long as the turn lasts. One that is working takes the message at its next step. The answer
 to a message does not come into your conversation, and the assistant never sees it: the
 row reads `answered` until you have opened the subagent (⏎ on its row) and read it there.
+A result that a task of the subagent's brings back is read by the subagent in a turn of its
+own, once the turn it is in ends (with your message, if you wrote one meanwhile, in one
+turn); what the subagent then says reaches your conversation as its answers do, a `◆`
+message. `ai.backgroundFollowUp: false` keeps such results as rows in the subagent, read
+with your next message to it. A task of the subagent's that you stop lands quiet and starts
+nothing.
 A task, a subagent the assistant started, and one that has ended take no messages, and
 the line says so. A subagent ends when you stop it, at `/clear`, and when flow-assist
 exits; it does not come back after a restart, though its journal and `/export` keep what it
