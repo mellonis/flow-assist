@@ -2085,19 +2085,31 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           if (watchRef.current && (convRef.current!.confirm || convRef.current!.question)) endWatchForOwnAsk();
           if (watchRef.current?.ask && watchAskNow()) setWatch({ ...watchRef.current, ask: false });
           askGuard.current.show(guardSees(shownChild ?? (open ? watchAskNow() : null)));
+          // The pause an answer needs is owed again whenever the question has not been on
+          // screen as a block: what was typed is kept (it lives in the question), but a key
+          // right behind whatever took the keys over must not send it.
+          const seenAsBlock = shownShape === 'block' && shownChild?.kind === 'ask' ? shownChild.request : open && watchAskNow()?.kind === 'ask' && watchAskShape(dock?.panel.width ?? width) === 'block' ? watchAskNow()!.request : null;
+          if (childTypedRef.current && childTypedRef.current !== seenAsBlock) childTypedRef.current = null;
+          // Something that holds the keys the person is typing on: the tree cursor or a command
+          // panel. A request of the session's own that takes the keys over either is armed, as
+          // it is over a subagent's block. The picker, `/context` and a pager give way to the
+          // request at once: its first key answers it.
+          const keysHeld = () => treeSelRef.current.at !== null || !!panelRef.current;
           // The conversation's own y/n that takes a subagent's block's place is armed too:
           // the keys already on their way to the block must not answer it.
           const ownNow = convRef.current!.confirm ?? null;
           if (ownNow !== ownSeenRef.current) {
             ownSeenRef.current = ownNow;
-            ownArmedAt.current = ownNow && (childBlockRef.current || treeSelRef.current.at !== null || panelRef.current) ? askClock.now() : null;
+            ownArmedAt.current = ownNow && (childBlockRef.current || keysHeld()) ? askClock.now() : null;
           }
+          const wasChildBlock = childBlockRef.current;
           childBlockRef.current = !!shownChild && childShape(dock?.panel.width ?? width) === 'block';
-          // Its own question that takes the keys over the tree cursor is armed too.
+          // Its own question that takes the keys over the tree cursor, or over a subagent's
+          // block the person may be typing into, is armed too.
           const questionNow = convRef.current!.question ?? null;
           if (questionNow !== questionSeenRef.current) {
             questionSeenRef.current = questionNow;
-            questionArmedAt.current = questionNow && treeSelRef.current.at !== null ? askClock.now() : null;
+            questionArmedAt.current = questionNow && (wasChildBlock || keysHeld()) ? askClock.now() : null;
           }
           // What a plugin says from inside a turn — a tool of its own, a task's — belongs to
           // the session whose work it is, on screen or left (`workHome`); said from nowhere
@@ -2149,12 +2161,12 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // A question that arrived over the tree cursor is armed from this key.
               if (conv.question && conv.question !== questionSeenRef.current) {
                 questionSeenRef.current = conv.question;
-                questionArmedAt.current = treeSelRef.current.at !== null ? askClock.now() : null;
+                questionArmedAt.current = childBlockRef.current || keysHeld() ? askClock.now() : null;
               }
               // A request that took a block's place under this key is armed from this key.
               if (conv.confirm && conv.confirm !== ownSeenRef.current) {
                 ownSeenRef.current = conv.confirm;
-                ownArmedAt.current = childBlockRef.current || treeSelRef.current.at !== null || panelRef.current ? askClock.now() : null;
+                ownArmedAt.current = childBlockRef.current || keysHeld() ? askClock.now() : null;
               }
               // The pager is a reader: Esc brings the conversation back, and every other
               // key stops here — nothing reaches the field, the folds or the model.
