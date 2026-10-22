@@ -261,8 +261,8 @@ test('a question routed to a model is not waiting for the person: no badge, no t
   await rig.until(() => model.held);
   const child = scheduled(rig, taskSpec('maker', 'job'));
   await rig.until(() => child.parentAsk !== null);
-  // Waiting in a model's inbox: the tree is waiting, the person is not asked.
-  expect(session.subtreeWaiting).toBe(true);
+  // Waiting in a model's inbox: nothing waits for the person.
+  expect(session.subtreeWaiting).toBe(false);
   expect(session.askedBelow()).toBeNull();
   // A staying subagent's question is the person's (its route held, as a later route would).
   subScript(model, 'sub job').script([{ hold: true }]);

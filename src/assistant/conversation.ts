@@ -26,7 +26,7 @@ import type { ViewRecord } from './views.js';
 import type { ToolDef } from '../loader/tools.js';
 import { workspaceFor } from './workspace.js';
 import { asBackgroundWork, asConversationWork, asForegroundWork, outsideWork, workOwner } from '../runtime/background-work.js';
-import { callOf, childResultText, frameItem, lastAnswerOf, type BusyKind, type ChatMsg, type ChildResult, type EndedChild, type RunningChild, type ChildSpec, type ChildStart, type CloseReason, type StoppedBy, type JournalRoute, type ConversationDeps, type ConversationEvent, type ConversationKind, type ConversationSnapshot, type ConversationStatus, type InboxItem, type LaterTurn, type Offered, type ParentAskInfo, type PendingConfirm, type Queued, type QueueWait, type SendOptions, type TurnEnd, type TreeNode, type ViewPort } from './conversation-types.js';
+import { callOf, childResultText, frameItem, lastAnswerOf, type BusyKind, type ChatMsg, type ChildQuestion, type ChildResult, type EndedChild, type RunningChild, type ChildSpec, type ChildStart, type CloseReason, type StoppedBy, type JournalRoute, type ConversationDeps, type ConversationEvent, type ConversationKind, type ConversationSnapshot, type ConversationStatus, type InboxItem, type LaterTurn, type Offered, type ParentAskInfo, type PendingConfirm, type Queued, type QueueWait, type SendOptions, type TurnEnd, type TreeNode, type ViewPort } from './conversation-types.js';
 import {
   applySession, closeOwnFile, currentProject, ensureSessionId, journal, journaledChatLLM, journalTo, journalToOwnFile, keepPersonWork, markSeen, newSubJournalId, persist, pushNote,
   releaseLockOf, writeSession, NO_FILE,
@@ -233,7 +233,7 @@ export class Conversation {
   question: { state: AskState; resolve: (done: AskState) => void } | null = null;
   // The question this task or subagent put to the conversation that started it, until it
   // is answered (`ask_parent`): one at a time. It counts as a wait, as a y/n does.
-  parentAsk: (ParentAskInfo & { resolve: (answer: string) => void }) | null = null;
+  parentAsk: (ChildQuestion & { resolve: (answer: string) => void }) | null = null;
   // The questions of children that landed in this conversation's history and have not been
   // answered: the turn that read them ends them with no answer.
   readAsks: string[] = [];
@@ -484,37 +484,35 @@ export class Conversation {
   // oldest parked anywhere below it, with the labels from the first child down to the
   // conversation that owns it. null with none.
   offered(): Offered | null {
-    if (this.confirmDrawn) return { request: this.confirmDrawn, owner: this, path: [] };
-    let best: Offered | null = null;
-    const walk = (c: Conversation, path: string[]): void => {
-      for (const child of c.children) {
-        const at = [...path, child.label];
-        const r = child.confirmDrawn;
-        if (r && (!best || r.at < best.request.at)) best = { request: r, owner: child, path: at };
-        walk(child, at);
-      }
-    };
-    walk(this, []);
-    return best;
+    if (this.confirmDrawn) return { kind: 'confirm', request: this.confirmDrawn, owner: this, path: [] };
+    return this.oldestBelow(this, null);
   }
-  // The oldest y/n parked in `node` or in a conversation below it, `path` counted from this
-  // conversation (so the labels are whole, as `offered` gives them). null with none, and
-  // for a node that is not below this conversation. The conversation's own y/n is not
-  // within a child.
-  offeredWithin(node: Conversation): Offered | null {
-    if (node === this) return this.offered();
+  // The oldest y/n or person-routed question below `from`, restricted to `node` and what is
+  // below it when given. The two are ordered by when they were parked.
+  private oldestBelow(from: Conversation, node: Conversation | null): Offered | null {
     let best: Offered | null = null;
+    const take = (o: Offered): void => { if (!best || o.request.at < best.request.at) best = o; };
     const walk = (c: Conversation, path: string[], inside: boolean): void => {
       for (const child of c.children) {
         const at = [...path, child.label];
-        const within = inside || child === node;
-        const r = child.confirmDrawn;
-        if (within && r && (!best || r.at < best.request.at)) best = { request: r, owner: child, path: at };
+        const within = inside || node === null || child === node;
+        if (within) {
+          if (child.confirmDrawn) take({ kind: 'confirm', request: child.confirmDrawn, owner: child, path: at });
+          else if (child.parentAsk && parentAskDestination(child) === 'person') take({ kind: 'ask', request: child.parentAsk, owner: child, path: at });
+        }
         walk(child, at, within);
       }
     };
-    walk(this, [], false);
+    walk(from, [], false);
     return best;
+  }
+  // The oldest y/n or question parked in `node` or in a conversation below it, `path`
+  // counted from this conversation (so the labels are whole, as `offered` gives them). null
+  // with none, and for a node that is not below this conversation. The conversation's own
+  // y/n is not within a child.
+  offeredWithin(node: Conversation): Offered | null {
+    if (node === this) return this.offered();
+    return this.oldestBelow(this, node);
   }
   // The oldest question to its parent that waits for the PERSON in a conversation below this
   // one (a question routed to a model does not), with the label of the child that asked.
@@ -531,10 +529,10 @@ export class Conversation {
     walk(this);
     return best;
   }
-  // Something below this conversation waits: for the person's y/n, or for the answer to a
-  // question to its parent.
+  // Something below this conversation waits for the person: for a y/n, or for the answer to
+  // a question to its parent (one routed to a model waits for that model).
   get subtreeWaiting(): boolean {
-    for (const c of this.children) if (c.confirm || c.parentAsk || c.subtreeWaiting) return true;
+    for (const c of this.children) if (c.confirm || (c.parentAsk && parentAskDestination(c) === 'person') || c.subtreeWaiting) return true;
     return false;
   }
   // Records the port; the end is seen when the port shows it.
@@ -1134,7 +1132,8 @@ export class Conversation {
     const info: ParentAskInfo = { id: `ask-${++parentAskSeq}`, text, at: parkedAt() };
     this.journal({ t: 'ask-parent', id: info.id, question: text });
     // Parked before the route runs: a route that delivers can settle it before it returns.
-    const waiting = new Promise<string>((resolve) => { this.parentAsk = { ...info, resolve }; });
+    const state = askStart([{ question: text, header: `from «${this.label}»`, options: [] }]);
+    const waiting = new Promise<string>((resolve) => { this.parentAsk = { ...info, state, resolve }; });
     const now = this.routeParentAsk(info);
     if (now) {
       this.parentAsk = null;
@@ -1149,13 +1148,15 @@ export class Conversation {
   }
   private parkedAsk(id: string): boolean { return this.parentAsk?.id === id; }
   // Where a question goes (`parentAskDestination`) and whether it is answered on the spot:
-  // the answer and who gave it, or null to leave it parked. A question to the person
-  // answers at once with the no-answer text; one to a conversation is delivered to its
-  // inbox as framed data and waits for `answer_child`, unless that conversation cannot take
-  // a turn for it (it is left, `ai.backgroundFollowUp` is off) or none is left.
+  // the answer and who gave it, or null to leave it parked. A question to the person stays
+  // parked for the chat to draw (`stepParentAsk`) and is never delivered to an inbox; one to
+  // a conversation is delivered to its inbox as framed data and waits for `answer_child`,
+  // unless that conversation cannot take a turn for it (it is left,
+  // `ai.backgroundFollowUp` is off) or none is left.
   routeParentAsk(ask: ParentAskInfo): { answer: string; by: 'model' | 'person' | 'none' } | null {
     const to = parentAskDestination(this);
-    if (!to || to === 'person') return { answer: NO_ANSWER, by: 'none' };
+    if (to === 'person') return null;
+    if (!to) return { answer: NO_ANSWER, by: 'none' };
     const followUp = (to.deps.config().ai as { backgroundFollowUp?: unknown } | undefined)?.backgroundFollowUp !== false;
     if (to.headless || !followUp) return { answer: NO_ANSWER, by: 'none' };
     openAsks.set(ask.id, { child: this, recipient: to });
@@ -1181,6 +1182,20 @@ export class Conversation {
     this.deps.notify();
     // The inbox the question held lands now (a turn still running holds it on).
     setTimeout(() => this.takeInbox(), 0);
+  }
+  // The person's key stepped the question this conversation asked them: the block redraws,
+  // and a finished one settles the wait. A dismissal or an empty answer is the no-answer text.
+  stepParentAsk(next: AskState): void {
+    const a = this.parentAsk;
+    if (!a) return;
+    if (!next.done) {
+      a.state = next;
+      this.askedUp();
+      return;
+    }
+    const text = next.cancelled ? '' : (next.answers[0]?.other ?? '').trim();
+    if (text) this.answerParentAsk(`The person answered: ${text}`, 'person');
+    else this.answerParentAsk(NO_ANSWER, 'none');
   }
   // `answer_child`: the model of this conversation answers a question a child put to it.
   // What the child reads names who answered. An id that is unknown, settled or another

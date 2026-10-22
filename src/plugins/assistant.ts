@@ -322,6 +322,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const questionSeenRef = ui.useRef<unknown>(null);
           const questionArmedAt = ui.useRef<number | null>(null);
           const childBlockRef = ui.useRef(false);
+          // The question of a subagent whose answer has begun: the pause guards the first key,
+          // and the rest of the answer is typed without it.
+          const childTypedRef = ui.useRef<object | null>(null);
           const bindView = (c: Conversation) => {
             unbindRef.current.set(c, [
               c.on('turn-start', (ev) => viewFx.current['turn-start']?.(ev)),
@@ -1977,9 +1980,22 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           };
           // The rows a key may move among: the drawn ones, not the `+K more` row.
           const treeStops = () => (chatPropsRef.current ? treeNow(chatPropsRef.current).view.rows.filter((r) => r.key !== '') : []);
+          // What the block of a subagent's request is made of: a y/n or a question.
+          const blockOf = (o: Offered) => o.kind === 'confirm' ? { confirm: { ...o.request, path: o.path } } : { question: o.request.state };
+          // The line that says a request waits behind the tree cursor, or elsewhere.
+          const waitsText = (o: Offered, how: string): string =>
+            o.kind === 'ask' ? `⏸ a question from «${o.owner.label}» waits — ${how} to answer` : `⏸ ${o.path.join(' › ')} waits for a y/n — ${how} to answer`;
+          // An answer to a subagent's question counts after the pause (`askGuard`) for its first
+          // key; once a key has counted, the rest of the answer is typed without it.
+          const askTaken = (req: object, armed: boolean): boolean => {
+            if (childTypedRef.current === req) return true;
+            if (!armed) return false;
+            childTypedRef.current = req;
+            return true;
+          };
           // The rows a subagent's block needs at a width, with the session's plan or without.
           const childBlockRows = (child: Offered, w: number, plan: boolean): number =>
-            pendingChatRows({ width: w, confirm: { ...child.request, path: child.path }, todo: plan ? conv.plan.snapshot() : [], queued: conv.queue.length });
+            pendingChatRows({ width: w, ...blockOf(child), todo: plan && child.kind === 'confirm' ? conv.plan.snapshot() : [], queued: conv.queue.length });
           // The most rows a docked panel can be given: past it the plugin has less than its
           // least. A chat that is not docked has no such limit.
           const dockLimit = (): number => !dock ? Infinity : dock.side === 'bottom' ? dock.region.height + dock.panel.height - PLUGIN_MIN_ROWS : dock.panel.height;
@@ -2009,16 +2025,17 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // instruction whole, which names the label `/subagent stop` takes.
           const tooSmall = (c: Offered): string => {
             const label = c.path[c.path.length - 1]!;
-            const tail = ` waits for a y/n — no room to show it; /subagent stop ${label} declines it`;
+            const ask = c.kind === 'ask';
+            const tail = ask ? ` waits — no room to show it; /subagent stop ${label} declines it` : ` waits for a y/n — no room to show it; /subagent stop ${label} declines it`;
             const room = (dock?.panel.width ?? width) - 6 - 2 - tail.length;
-            const path = c.path.join(' › ');
+            const path = ask ? `a question from «${label}»` : c.path.join(' › ');
             if (room >= path.length) return `${path}${tail}`;
             if (room > 1) return `…${path.slice(path.length - room + 1)}${tail}`;
-            return `no room for ${label}'s y/n; /subagent stop ${label} declines it`;
+            return `no room for ${label}'s ${ask ? 'question' : 'y/n'}; /subagent stop ${label} declines it`;
           };
           const needRows = (w: number): number => {
             const asked = watchAskNow();
-            if (asked) return watchAskShape(w) === 'block' ? pendingChatRows({ width: w, confirm: { ...asked.request, path: asked.path }, todo: [], queued: 0 }) : 0;
+            if (asked) return watchAskShape(w) === 'block' ? pendingChatRows({ width: w, ...blockOf(asked), todo: [], queued: 0 }) : 0;
             const c = conv.confirm;
             const child = childAskNow();
             if (child) {
@@ -2028,7 +2045,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               const plan = !block || childBlockRows(child, w, true) <= dockLimit();
               return pendingChatRows({
                 width: w,
-                confirm: block ? { ...child.request, path: child.path } : null,
+                ...(block ? blockOf(child) : { confirm: null }),
                 notice: block ? 0 : Math.min(5, draft) + 1,
                 todo: plan ? conv.plan.snapshot() : [],
                 queued: conv.queue.length,
@@ -2159,8 +2176,16 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // is swallowed, so a `y` means one thing.
                 const asked = watchAskNow();
                 if (asked && w.ask) { w = { ...w, ask: false }; setWatch(w); }
-                if (asked && askArmed && watchAskShape(dock?.panel.width ?? width) === 'block' && (key.name === 'y' || key.name === 'n') && !key.ctrl && !key.meta) {
+                if (asked?.kind === 'confirm' && askArmed && watchAskShape(dock?.panel.width ?? width) === 'block' && (key.name === 'y' || key.name === 'n') && !key.ctrl && !key.meta) {
                   asked.owner.answerConfirm(key.name === 'y');
+                  return true;
+                }
+                // A question of the node: its keys are the question's, after the pause; the
+                // watch swallows every key besides.
+                if (asked?.kind === 'ask') {
+                  if (watchAskShape(dock?.panel.width ?? width) === 'block' && askTaken(asked.request, askArmed)) {
+                    asked.owner.stepParentAsk(askKey(asked.request.state, key, askFieldWidth(chatWrapWidth(width, fullscreenRef.current))));
+                  }
                   return true;
                 }
                 if (w.ask) {
@@ -2251,8 +2276,14 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               // key — ⏎ and Esc included — goes on to its usual handler, and a `y` that does
               // not count types its letter.
               const childAsk = childAskNow();
-              if (childAsk && askArmed && childShape(dock?.panel.width ?? width) === 'block' && (key.name === 'y' || key.name === 'n') && !key.ctrl && !key.meta) {
+              if (childAsk?.kind === 'confirm' && askArmed && childShape(dock?.panel.width ?? width) === 'block' && (key.name === 'y' || key.name === 'n') && !key.ctrl && !key.meta) {
                 childAsk.owner.answerConfirm(key.name === 'y');
+                return true;
+              }
+              // A subagent's question, drawn on an empty field: its keys are the question's.
+              // A key before the pause goes on to the field, as a `y` does.
+              if (childAsk?.kind === 'ask' && childShape(dock?.panel.width ?? width) === 'block' && askTaken(childAsk.request, askArmed)) {
+                childAsk.owner.stepParentAsk(askKey(childAsk.request.state, key, askFieldWidth(chatWrapWidth(width, fullscreenRef.current))));
                 return true;
               }
               // A plugin's panel holds the keys while it is up, as the picker does: ↑/↓, Esc
@@ -2554,8 +2585,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             state: watchState(watchedNode, watching.ended),
             ended: watching.ended !== null,
             ask: watching.ask ? stopQuestion({ label: watching.node.label, below: watchedNode?.below ?? 0 }) : null,
-            request: watchAsk && watchAskIsBlock ? { ...watchAsk.request, path: watchAsk.path } : null,
-            notice: watchAsk && !watchAskIsBlock ? `⏸ ${tooSmall(watchAsk)}` : elsewhere ? `⏸ ${offeredNow!.path.join(' › ')} waits for a y/n — ${keyGlyph('escape')} to answer` : null,
+            request: watchAsk?.kind === 'confirm' && watchAskIsBlock ? { ...watchAsk.request, path: watchAsk.path } : null,
+            question: watchAsk?.kind === 'ask' && watchAskIsBlock ? watchAsk.request.state : null,
+            notice: watchAsk && !watchAskIsBlock ? `⏸ ${tooSmall(watchAsk)}` : elsewhere ? waitsText(offeredNow!, keyGlyph('escape')) : null,
             asked: !!watchAsk,
             toEnd: watchToEndRef,
           } : null;
@@ -2597,15 +2629,17 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             wheel: wheelRef,
             toEnd: toEndRef,
             escWord: layout === 'panel' ? 'collapse' : 'close',
-            pendingConfirm: watching ? null : pendingAsk ?? (shownChild && shownShape === 'block' ? { ...shownChild.request, path: shownChild.path } : null),
+            pendingConfirm: watching ? null : pendingAsk ?? (shownChild?.kind === 'confirm' && shownShape === 'block' ? { ...shownChild.request, path: shownChild.path } : null),
             askNotice: shownChild && shownShape === 'notice' && !pendingAsk
               ? (!fieldEmpty()
-                ? `⏸ ${shownChild.path.join(' › ')} waits for a y/n — ${bangLevel > 0 ? 'leave shell mode' : 'clear the line'} to answer`
+                ? (shownChild.kind === 'ask'
+                  ? `⏸ a question from «${shownChild.owner.label}» waits — ${bangLevel > 0 ? 'leave shell mode' : 'clear the field'} to answer it`
+                  : `⏸ ${shownChild.path.join(' › ')} waits for a y/n — ${bangLevel > 0 ? 'leave shell mode' : 'clear the line'} to answer`)
                 : `⏸ ${tooSmall(shownChild)}`)
               : treeSelRef.current.at !== null && !pendingAsk && convRef.current!.offered()?.path.length
-              ? `⏸ ${convRef.current!.offered()!.path.join(' › ')} waits for a y/n — ${keyGlyph('escape')} to answer`
+              ? waitsText(convRef.current!.offered()!, keyGlyph('escape'))
               : null,
-            pendingQuestion,
+            pendingQuestion: pendingQuestion ?? (!watching && shownChild?.kind === 'ask' && shownShape === 'block' ? shownChild.request.state : null),
             picker,
             // A plugin command's panel: its rows as the plugin gives them now, its keys
             // with their caps.

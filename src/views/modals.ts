@@ -1410,7 +1410,9 @@ export interface PagerView {
 // below it, drawn as the confirm block at the bottom; `notice` is one line above the hint
 // row (a y/n that waits elsewhere, or one whose block has no room); `asked` is whether the
 // node's own subtree has a y/n parked, which keeps `x stop` out of the hint. `toEnd` is
-// filled with the jump to the rows' end, for the End key.
+// filled with the jump to the rows' end, for the End key. `question` is a question to the
+// person from the node or one below it, drawn as the `ask_user` block at the bottom (it
+// takes `request`'s place; the watch has no field).
 export interface WatchView {
   path: string[];
   rows: ChatRow[];
@@ -1418,6 +1420,7 @@ export interface WatchView {
   ended: boolean;
   ask: string | null;
   request?: ConfirmAsk | null;
+  question?: AskState | null;
   notice?: string | null;
   asked?: boolean;
   toEnd?: { current: (() => void) | null };
@@ -1540,6 +1543,8 @@ export function chatRoom(p: ChatRoomInput) {
   // What the field's place holds: the question, `/context`, the y/n, or the field.
   const fieldPlace = pendingQuestion
     ? askBlockRows(pendingQuestion, wrap)
+    : watch?.question
+    ? askBlockRows(watch.question, wrap)
     : contextPanel
     ? contextPanelRows(contextPanel, wrap, contextCacheLine, contextRecallLine)
     : confirmAsk
@@ -1888,7 +1893,7 @@ export function renderChatModal({
         h(Box, { flexDirection: 'row', width: '100%', flexShrink: 0, selectable: false },
           h(Box, { flexGrow: 1, flexShrink: 1, overflow: 'hidden' },
             h(Text, watch.ask !== null ? { color: m.warn, wrap: 'truncate' } : { dim: true, wrap: 'truncate' }, watch.ask ?? watch.state)),
-          h(Text, { dim: true, wrap: 'truncate' }, `  ${watch.ended || watch.asked ? '' : 'x stop · '}${CAP.esc} back`))) :
+          h(Text, { dim: true, wrap: 'truncate' }, `  ${watch.ended || watch.asked ? '' : 'x stop · '}${CAP.esc} ${watch.question ? 'dismiss' : 'back'}`))) :
       h(Box, { flexDirection: 'row', width: '100%', flexShrink: 0, selectable: false },
       h(Box, { flexGrow: 1, flexShrink: 1, overflow: 'hidden' },
       (!escArmed && !armedHint && !treeKeys && (streaming || toolLabel))
@@ -1987,9 +1992,11 @@ export function renderChatModal({
       // The input field group (the y/n confirm block or the multiline input box). It
       // never shrinks: in a small panel the plan gives way (`planFit`), the field and
       // its hint keep their rows. Not drawn under the pager.
-      pager || (watch && !confirmAsk) ? null : h(Box, { flexDirection: 'column', width: '100%', flexShrink: 0 },
+      pager || (watch && !confirmAsk && !watch.question) ? null : h(Box, { flexDirection: 'column', width: '100%', flexShrink: 0 },
         pendingQuestion
           ? renderAsk(pendingQuestion, m.bg, wrap)
+          : watch?.question
+          ? renderAsk(watch.question, m.bg, wrap)
           : contextPanel
           ? renderContextPanel(contextPanel, m.bg, wrap, contextCacheLine, contextRecallLine)
           : confirmAsk
@@ -2399,7 +2406,9 @@ function askView(state: AskState, wrap: number) {
   // typed starts an answer in the person's own words.
   const hint = state.typing
     ? `${CAP.enter} submit · ${CAP.esc} back to the list`
-    : q.multiSelect
+    : q.options.length === 0
+      ? `type your answer · ${CAP.esc} dismiss`
+      : q.multiSelect
       ? `${CAP.upDown} move · ${CAP.space} toggle · ${CAP.enter} confirm · type your own words · ${CAP.esc} dismiss`
       : `${CAP.upDown} move · ${CAP.enter} or a digit to answer · type your own words · ${CAP.esc} dismiss`;
   return {

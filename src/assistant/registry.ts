@@ -143,14 +143,13 @@ export class ConversationRegistry {
     c.on('turn-end', () => { if (c.headless) this.notifyChange(); });
     return c;
   }
-  // What waits below a session, as a toast says it: the older of the oldest y/n and the
-  // oldest question to a parent that waits for the person, named by the child that owns it.
-  // null with neither: a question routed to a model is not for the person.
+  // What waits below a session, as a toast says it: the oldest y/n or question to a parent
+  // that waits for the person, named by the child that owns it. null with neither: a
+  // question routed to a model is not for the person.
   private belowSaid(c: Conversation): string | null {
     const o = c.offered();
-    const q = c.askedBelow();
-    if (o && (!q || o.request.at <= q.ask.at)) return `a y/n from ${o.path[o.path.length - 1] ?? 'a subagent'}`;
-    return q ? `a question from «${q.label}»` : null;
+    if (!o) return null;
+    return o.kind === 'ask' ? `a question from «${o.owner.label}»` : `a y/n from ${o.path[o.path.length - 1] ?? 'a subagent'}`;
   }
   // How a toast names a session.
   private nameOf(c: Conversation): string { return c.title ? `«${c.title}»` : 'an untitled session'; }

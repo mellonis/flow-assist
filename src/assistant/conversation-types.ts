@@ -110,10 +110,17 @@ export interface PendingConfirm { name: string; args: string; command?: string; 
 // as the events and the tree show it. `at` orders it against the y/n parked in the same tree.
 export interface ParentAskInfo { id: string; text: string; at: number }
 
-// The y/n a conversation shows the person: its own, else the oldest of its descendants'.
-// `owner` is the conversation whose request it is, and so the one that takes the answer;
-// `path` is the labels from the first child down to the owner (empty for its own).
-export interface Offered { request: PendingConfirm; owner: Conversation; path: string[] }
+// A question for the person as the chat draws it: the one-item free-text ask the person
+// steps with the `ask_user` keys, held in the child that asked.
+export interface ChildQuestion extends ParentAskInfo { state: AskState }
+
+// What a conversation shows the person: its own y/n, else the oldest y/n or question to
+// its parent of its descendants'. `owner` is the conversation whose request it is, and so
+// the one that takes the answer; `path` is the labels from the first child down to the
+// owner (empty for its own y/n). `kind` says which of the two it is.
+export type Offered =
+  | { kind: 'confirm'; request: PendingConfirm; owner: Conversation; path: string[] }
+  | { kind: 'ask'; request: ChildQuestion; owner: Conversation; path: string[] };
 
 export interface SendOptions {
   hostAsk?: boolean;             // the host's ask after a `!!command`: drawn dim, never in ↑/↓

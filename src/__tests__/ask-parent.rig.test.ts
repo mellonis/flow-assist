@@ -2,6 +2,7 @@
 // and waits for the answer as a child waits on a y/n (AGENTS.md (a conversation starts a
 // child of its own)).
 import { afterEach, expect, test } from 'bun:test';
+import { askKey } from '../assistant/ask.ts';
 import { scheduleChild } from '../assistant/child-schedule.ts';
 import { parkedAt } from '../assistant/confirm-policy.ts';
 import { NO_ANSWER, type Conversation } from '../assistant/conversation.ts';
@@ -203,16 +204,18 @@ test('a second question while one waits is answered at once with the error and l
   child.close('exit');
 });
 
-test('with no route that holds it, a subagent the person started and a task are answered at once and neither hangs', async () => {
+test('with no route that holds it, a task is answered at once and neither it nor a subagent the person dismisses hangs', async () => {
   const model = new ScriptedModel();
   subScript(model, 'sub job').script(ask('sub question?'), [{ text: 'sub done' }]);
   taskScript(model, 'task job').script(ask('task question?'), [{ text: 'task done' }]);
   const rig = conversationRig(model, bg);
   const sub = scheduled(rig, spec('s', 'sub job'));
   const task = scheduled(rig, spec('t', 'task job', { kind: 'task', by: 'model' }));
+  // The subagent the person started waits for the person; the task has no model to take it.
+  await rig.until(() => sub.parentAsk !== null && task.parentAsk === null);
+  sub.stepParentAsk(askKey(sub.parentAsk!.state, { name: 'escape' }));
   await settledAll(rig);
   expect(sub.parentAsk).toBeNull();
-  expect(task.parentAsk).toBeNull();
   const answered = model.requests.map((r) => results(r)).flat().filter((t) => t === NO_ANSWER);
   expect(answered).toHaveLength(2);
   expect(NO_ANSWER).toBe('no answer — proceed on your best assumption and name it in your result');
@@ -224,8 +227,10 @@ test('the journal keeps the question and its answer: a subagent in its own file,
   subScript(model, 'sub job').script(ask('sub question?'), [{ text: 'sub done' }]);
   taskScript(model, 'task job').script(ask('task question?'), [{ text: 'task done' }]);
   const rig = conversationRig(model, bg);
-  scheduled(rig, spec('s', 'sub job'));
+  const sub = scheduled(rig, spec('s', 'sub job'));
   scheduled(rig, spec('t', 'task job', { kind: 'task', by: 'model' }));
+  await rig.until(() => sub.parentAsk !== null);
+  sub.stepParentAsk(askKey(sub.parentAsk!.state, { name: 'escape' }));
   await settledAll(rig);
   const own = rig.subJournal('s');
   const asked = own.find((e) => e.t === 'ask-parent');
