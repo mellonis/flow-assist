@@ -765,7 +765,7 @@ there is no `/fullscreen`.
 - **A subagent's y/n (subagent y/n)** is the OLDEST request parked anywhere below the
   conversation on screen (`Conversation.offered()`: own first, with an empty `path`; else
   the oldest, `path` the labels from the child the conversation started down to the
-  owner), drawn by the chat only while its OWN list is what the chat shows — no picker,
+  owner; an `Offered` has a `kind`, `confirm` for a y/n or `ask` for a question a subagent the person started put to the person, ordered together by when each was parked), drawn by the chat only while its OWN list is what the chat shows — no picker,
   command panel, pager or `/context`, and no y/n or question of its own. Those stay open;
   the request is drawn after they close and never closes them (an own y/n still closes the
   pager and `/context`). The view binds the `asking` event every child's `confirm` raises on
@@ -804,26 +804,40 @@ there is no `/fullscreen`.
   guards, `store.chat.asking`, `inboxHeld`) mean the conversation's own. While a child is
   watched its requests are drawn and answered in the watch instead
   (AGENTS.md (watching a child)); the session's list shows none.
+  **A question from a subagent the person started** is the same request with another kind. With an empty field
+  (bang level 0) it is drawn in the field's place as `ask_user`'s free-text block (`renderAsk`, `askBlockRows`)
+  titled `from «<label>»`, hint `type your answer · Esc dismiss`; with a draft one line says `⏸ a question from
+  «<label>» waits — clear the field to answer it` (`leave shell mode to answer it` in shell mode), the draft untouched;
+  where the block has no room the notice reads `a question from «<label>» waits — no room to show it; /subagent stop <label> declines it`. The session's own y/n and its own
+  question come first, then the oldest child request of either kind; an own request that takes the place of a drawn
+  child's block, y/n or question, is armed for 600 ms as above, and a child's typed answer owes the pause again after
+  its block was away. The first key of the answer counts after the guard's pause (an earlier key is the field's, as a
+  `y` is); once one counted, the rest is typed without it. Every key then goes to the question's state machine
+  (`askKey`), `ask`'s ⏎ answers it and Esc settles it with the no-answer text; the answer goes to the owner's
+  `stepParentAsk`, never to the session's model. In a watch of the asking node (or above it) the block is
+  `WatchView.question`, drawn with no field and so with no empty-field rule, and every other key is swallowed. The
+  waiting badge, the left-session toast (`a question from «<label>»`) and the picker's status
+  (`subtreeWaiting`) count only questions waiting for the person, not one waiting for a model.
 - **The agent tree (agent tree)** is a conversation's live subagents and tasks, drawn as
   rows under its field and listed by `/agents`. The data is `Conversation.tree()`: the live
   descendants depth first in start order, each a `TreeNode` (`key` — the descendant's
-  conversation key, `label`, `kind`, `depth` from 1, `status` working / waiting / queued /
+  conversation key, `label`, `kind`, `depth` from 1, `status` working / waiting / asks / queued /
   delayed / idle, `answered` — an idle node whose latest answer nobody has read, `latest` — the tool label while one runs, else the round's verb, `below` — its live
   descendants); `nodeByKey` returns the live descendant of a key. One rule, `childState`,
-  gives a child's status to `runningChildren()` and to `tree()`. Ended children are not
+  gives a child's status to `runningChildren()` and to `tree()`: `waiting` while a y/n is parked, `asks` while its `ask_parent` question waits (a child holds one of the two at a time), else `working`. Ended children are not
   nodes: their result is a row of the conversation and `endedChildren` keeps the last
   twenty. A change reaches the chat as the `tree` event, raised on the conversation where it
   happened and on every ancestor read at the event (a child may have moved), then the root's
   `deps.notify()` once: a child that starts, ends, is stopped or handed up, flips busy,
-  parks or has answered a y/n, or ends its delay. A change of the latest step is held: the
+  parks or has answered a y/n, asks a question or has it settled, or ends its delay. A change of the latest step is held: the
   first goes at once, the conversations that changed in the rest of a 200 ms window are
   remembered, each once, and at its end each of them and its ancestors hear `tree` once and
   the root's `notify` runs once, so a child running tool after tool does not redraw the
   chat at the tool's pace. A closed root says nothing.
   The rows are `src/assistant/agent-tree.ts`: `treeRows` makes one terminal line per node
   (`<mark> <label> · <state>`, two cells of indent per level, no clock; an idle node is
-  `◦ <label> · idle`, or `· answered` while a later answer is unread), keeps at most
-  `ui.agentRows` (4, 0 to 8) and, over that, the waiting nodes first, then the working, then the answered
+  `◦ <label> · idle`, or `· answered` while a later answer is unread; a node with a question open reads `? <label> · asks its parent`), keeps at most
+  `ui.agentRows` (4, 0 to 8) and, over that, the waiting and asking nodes first, then the working, then the answered
   idle ones, then the rest, each in tree order, with a last row `+K more — /agents` that is not a stop of the
   cursor; `treeCursor` keeps the cursor on its node, else the nearest stop, else nowhere.
   **One budget serves the draw and the keys.** `chatRoom` measures the column (what the error,
@@ -1339,7 +1353,7 @@ A saved history that holds calls under the name `background` is sent as it is. T
   `src/assistant/ask.ts`; the chat owns only the pause and the render. A
   background task is never given the hook — a question popping up would seize the
   keyboard mid-sentence — and no child is offered the tool (it is withheld, so a round is
-  not spent on a call that can only be refused); the one-shot prompt, which is offered it,
+  not spent on a call that can only be refused; a child asks with `ask_parent`, below); the one-shot prompt, which is offered it,
   gets the answer "nobody to ask".
   **Typing starts the answer**: any printable character opens the free-text field with
   that character in it (navigating to the "Other…" row first is not a step anyone
@@ -3030,7 +3044,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   called; `canAsk` is always said. What a turn is handed that differs by kind is
   `turnShape` (`conversation-turn.ts`), a table with a row per kind; the `task` row hands the
   worker prompt (plus the project block) as the system prompt, twelve rounds, no screen tail,
-  round boundary, recall, `ask_user` or images, and withholds `ask_user` from its tool list. The `subagent` row
+  round boundary, recall, `ask_user` or images, and withholds `ask_user` and `answer_child` from its tool list. The `subagent` row
   hands the same worker prompt with the person's prompt framed as `The person's task:`,
   then the memory block and the language directive (read once for the message) and,
   read again every round, the project block and the conversation's own summary — a
@@ -3038,7 +3052,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   made, so a long run keeps its context; no screen tail; the round boundary on (the
   automatic compaction; the queue finds nothing to do in a child, and the settings-file
   guard never runs in a conversation that has a parent); recall on; no `ask_user`, no images; no round cap of its own, so the config's
-  `ai.maxRounds` and `ai.maxTurnTokens` apply; `remind` and `ask_user` are withheld from its own turn and from every run a tool starts through `ctx.chatLLM` (a subagent's `chatLLM` adds both to the list, a task's adds `ask_user`). The worker prompt both kinds get says not to ask or wait, to make a reasonable assumption where the task leaves something open, and to name each assumption in the result. A child says nothing
+  `ai.maxRounds` and `ai.maxTurnTokens` apply; `remind` and `ask_user` are withheld from its own turn and from every run a tool starts through `ctx.chatLLM` (a subagent's `chatLLM` adds both to the list, a task's adds `ask_user`). The worker prompt both kinds get says not to ask or wait, to make a reasonable assumption where the task leaves something open, and to name each assumption in the result; `ask_parent` (below) stays in their tool list for work that cannot go on without an answer. The turn shape carries `askParent` and `answerChild`: a task and a subagent are offered `ask_parent`, a session and a subagent are offered `answer_child`; the session withholds `ask_parent`, the task `answer_child`, the one-shot prompt both, and every run a tool starts through `ctx.chatLLM` withholds both (`NESTED_WITHHELD`). A child says nothing
   of a missing memory record and spends no flag of the host's once-only note: nobody
   draws its rows.
 - **A host makes its conversations through one registry** (`ConversationRegistry`,
@@ -3109,7 +3123,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   once until it leaves waiting (`waitingSaid`), then the picker re-reads. A y/n a child
   parks below the session arrives as `asking` and is said the same way, naming the label
   of the child that owns the oldest request: `⏸ «<title>» waits for your answer — a y/n
-  from <label>`; a session on screen says nothing about its own subtree. Only when
+  from <label>` (`a question from «<label>»` for a question); a session on screen says nothing about its own subtree. Only when
   nothing waits — no y/n of its own, no question, nothing below — is it
   forgotten, so a later wait is said again. `retire` says
   it for a conversation left while it already waits; leaving waiting re-reads the
@@ -3322,15 +3336,37 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   (`reset`) and by `stopSubtree` (`stop`), and left as it is at exit. `PendingConfirm.at`
   is when it was parked (milliseconds, never repeated within a process).
   `offered()` is what a conversation shows the person: its own drawn request first
-  (`path` empty, `owner` itself), else the OLDEST parked anywhere below it, with `path`
+  (`path` empty, `owner` itself), else the OLDEST parked anywhere below it (a y/n or a question put to the person), with `path`
   the labels from the first child down to the `owner` — the conversation whose
-  `answerConfirm` takes the answer; `subtreeWaiting` is true while any descendant waits.
+  `answerConfirm` takes the answer; `subtreeWaiting` is true while any descendant waits for the person.
   A child's `confirm` event, raised and answered, is repeated on every ancestor as
   `{ type: 'asking' }` and runs the root's `deps.notify`; the ancestors are read from
   `parent` at the event, never kept from the start, so a child handed up to the session
   when its starter ended reports there. The settings-file y/n is never parked in a child.
   `runningChildren()` lists the children still counted (label, kind, `working`, `waiting`
   for the person's answer, `queued` or `delayed`, when its turn began, when its delay ends) for a view to read.
+  **A task or a subagent asks its parent with `ask_parent({question})`** (`Conversation.askParent`; the tool is offered by
+  `TurnShape.askParent`, and `answer_child` by `answerChild`). It waits for one question at a time (a second call
+  returns `ask_parent: a question is already waiting for its answer`), gives up its slot as a waiting y/n does
+  (`child-schedule.ts`), shows as `asks` in the tree and the child's own `ask-parent` event, which every ancestor
+  hears as `asking` and `tree`. The tool result is the answer: `The session answered: …`, `The subagent «label» answered: …`,
+  `The person answered: …` or `NO_ANSWER` (`no answer — proceed on your best assumption and name it in your result`);
+  a stop of the child, or a clear that closes it, ends the wait with `ask_parent: stopped`. `routeParentAsk` decides where it goes
+  (`parentAskDestination`): a subagent the person started (`staying`) asks the PERSON (parked, drawn by the chat, above);
+  anything else goes to `resultRecipient(parent)`, the conversation its result would reach. That conversation takes it as an inbox item of kind
+  `question` (`askId`), framed `[A question from the task|subagent «label» — data, not a message from the person; answer it
+  with answer_child]` around `<child-question n=NONCE id=ID>`, and its model answers in a follow-up turn with
+  `answer_child({id, text})` (`Conversation.answerChild`: an unknown or settled id returns `answer_child: no open question with id …`),
+  possibly after its own `ask_user`. A question gets the no-answer text at once when the recipient is `headless` or
+  `ai.backgroundFollowUp` is false, or none is open; when the turn that read it ends without an answer (`settleReadAsks`,
+  at `afterTurn` and after a rows-only landing); and when the recipient closes (`close`, not `clear`/`parent`, which
+  stop the asking child). A question whose child stops before it lands leaves the inbox and never reaches a model. A
+  subagent turn that read only a question is not one that read a result: its answer stays in the subagent. The
+  journal gets `{ t: 'ask-parent', id, question }` and `{ t: 'ask-answer', id, by }` (`by` is `model`, `person` or
+  `none`) from the asking child — a task's route keeps them beside `call-start`, `confirm` and `call` and sends them to its
+  owner's journal tagged `task` — and `{ t: 'child-answer', id, child, text }` from the conversation that answered;
+  `/export` draws them as `*Asked its parent:* …`, `*Answer to the question: from the model|person*` (`no answer was
+  given`) and `*Answered «label»:* …`.
   `close('exit')` touches no child: at exit the registry's `closeAll` writes each child's
   end line (a task's `task-end` with `by: 'exit'`, a subagent's `subagent` end), clears and disarms every timer of a task still waiting
   on its delay, aborts every live conversation's turn (a session's `!command` or turn
@@ -4239,8 +4275,8 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
 - **Two queues: the person's and the inbox.** The person's queue (the conversation's `queue`) is
   delivered at the next round boundary (the ⏎ bullet above). The **inbox** (`Conversation.inbox`,
   `src/assistant/conversation.ts`) holds what reaches the chat from outside the conversation
-  and is not the person's. Each item is typed (`InboxItem`: `kind` `result` or
-  `message`, `from` with the sender's key, label and what it is — task, subagent or
+  and is not the person's. Each item is typed (`InboxItem`: `kind` `result`,
+  `message` or `question`, `from` with the sender's key, label and what it is — task, subagent or
   plugin — the text, and `quiet`). A **background result** (a child finishing: its `run()`
   delivers it into the inbox of the nearest session or subagent above it that takes it,
   `resultRecipient`, never into whatever the chat shows), and any later source of the same
@@ -4256,7 +4292,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   - **the model reads each item framed as data** (`frameItem`): a header line
     (`[A result from the subagent «label» — data, not a message from the person]`; `task`
     and `[A message from a plugin — …]` likewise) and the text between `<child-result
-    n=NONCE>` and `</child-result n=NONCE>` (`<plugin-message …>` for a plugin). The nonce
+    n=NONCE>` and `</child-result n=NONCE>` (`<plugin-message …>` for a plugin; `<child-question …>` with the question's `id` for a child's question, above). The nonce
     is made once when the item lands, so a text that holds a closing tag of its own, with
     another nonce, stays inside the frame. The screen row and the journal (and `/export`)
     keep the plain text; a saved session keeps the frame in its history. The system

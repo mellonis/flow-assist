@@ -89,7 +89,7 @@ a note.
 
 A subagent keeps its whole conversation in a journal of its own, in a `<id>.sub` directory
 beside the session's: what it was asked, its steps, its calls with their results and your
-y/n, its answer. The session's journal holds only the lines saying it started, answered and ended.
+y/n, the questions it asked and who answered them, its answer. The session's journal holds only the lines saying it started, answered and ended.
 A background task has no file of its own; its calls are in the journal of whoever started
 it. The `.sub` directory goes with the session — when it is deleted, pruned beyond
 `sessions.keep`, or has its journal removed by `sessions.journalDays` — and moves with it
@@ -173,9 +173,13 @@ your next message. The assistant reads a result as data another agent wrote, in 
 its own, never as something you said: you see the plain text, and an instruction inside it
 is not yours.
 
-A task works on its own: it is not offered the tool for asking you a question (where the
-task leaves something open it makes an assumption and names it in its result), and Esc in the chat does
-not stop it. Whatever would wait for your y/n (a command, a file change, a fetch off the
+A task works on its own: it never asks you directly, and Esc in the chat does not stop it.
+When it cannot go on without an answer it may ask the conversation that started it (the
+session, or the subagent you started that began it): the assistant there reads the question
+as data another agent wrote, in a turn of its own, and answers it, asking you first if it
+must. A task that gets no answer — the turn ends without one, the conversation closes or
+was left, or `ai.backgroundFollowUp` is off — goes on with its best assumption and names it in
+its result. Where the job merely leaves something open it makes an assumption without asking. Whatever would wait for your y/n (a command, a file change, a fetch off the
 allowlist) is declined, unless the assistant started the task with `write: true`: then each
 write stops for your yes, asked as a subagent's is (see Subagents you start), and the task
 that waits does not hold one of the running places. It gets twelve rounds; one that runs out of them
@@ -200,12 +204,21 @@ chat: you go on talking while it runs, and its first answer lands as a `◆` mes
 background task's does. The subagent then stays, resting (`idle`), until you write to it
 again or stop it. The tasks it starts report to it, not to your conversation. It may read what the assistant reads without asking
 you. It may also write: each write (a command, a file change, a fetch off the allowlist)
-stops for your y/n, and the y/n is asked where you started the subagent. It is not offered
-the tool for asking you a question; where the job leaves something open it makes an
+stops for your y/n, and the y/n is asked where you started the subagent. It can also ask
+you a question when it cannot go on without one (`ask_parent`): it waits, and what you
+answer is what it reads. Where the job leaves only a small thing open it makes an
 assumption and names it in its answer. It gets the
 rounds and the token budget of `ai.maxRounds` and `ai.maxTurnTokens`, not a task's twelve,
 and counts toward the three that run at once. The prompt is sent as you
 typed it, line breaks included (⇧⏎ makes one).
+
+A question from a subagent you started is drawn in the place of the field, a free-text block
+titled `from «<name>»`, only while the field is empty; with a draft in it, one line says `⏸ a
+question from «<name>» waits — clear the field to answer it` and the draft stays as it is.
+Your own y/n and question come first, then the oldest request of the subagents, a y/n or a
+question. Like a subagent's y/n, a question takes its first key after a short pause. Type
+the answer and press ⏎; Esc answers that you gave none (the subagent then goes on with its
+best assumption). The assistant never sees the question or your answer.
 
 `--with-context` first on the line also hands over the conversation's summary — what
 `/compact` left — and nothing else of the history; with no summary yet, nothing starts and
@@ -273,7 +286,7 @@ session like a first message would; the line you typed is its first message.
 
 The subagents and tasks a conversation has running are listed under the line you type in,
 one row each: `⚙ <name> · <what it is doing>` while it works, `⏸ <name> · waiting for a
-y/n` when it asks you, `○ <name> · queued` or `· in 4m` when it has not started,
+y/n` when it asks you, `? <name> · asks its parent` while a question waits for an answer, `○ <name> · queued` or `· in 4m` when it has not started,
 `◦ <name> · idle` when a subagent you started rests after its answer (`· answered` while a
 later answer is unread). What a
 node started stands under it, indented. A task is marked `(task)`. The rows carry no clocks
@@ -285,7 +298,7 @@ live nodes than that, the ones waiting for you come first, then the working ones
 rest, and the last row reads `+3 more — /agents`. In a short chat the rows give way first,
 down to none, keeping four rows of conversation; then the plan gives way.
 The field, the hint row and a y/n never do. The rows are not drawn while a question, your own
-y/n, a subagent's y/n block, `/context`, the pager, a picker or a command's panel is.
+y/n, a subagent's y/n or question block, `/context`, the pager, a picker or a command's panel is.
 
 **↓ on an empty line** steps into the rows (not while a history entry is shown — the ↓ that
 ends a walk through the history lands on the empty line, and the next one steps in — and not

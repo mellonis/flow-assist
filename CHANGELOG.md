@@ -5,6 +5,16 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **A task or a subagent can ask its parent a question.** With `ask_parent` it asks one question
+  and waits, its place given up as for a y/n (`? <name> · asks its parent` under the field); the
+  answer is its tool result. A question from a task goes to the conversation its result would go
+  to, whose assistant reads it as data in a turn of its own and answers with `answer_child`,
+  asking you first if it must; with no answer by the end of that turn, or when that conversation
+  closes or cannot take a turn (left, or `ai.backgroundFollowUp: false`), the asker is told to go
+  on with its best assumption. A subagent you started asks you: the question is drawn in the field's place
+  (only while the field is empty; with a draft, one line says it waits), after your own y/n and
+  question, and Esc gives no answer; the assistant never sees it. The journal and `/export` keep
+  the question and who answered it.
 - **A task a subagent starts reports to that subagent, and the assistant reads results as
   data.** A child's result goes to the nearest session, or subagent you started, above it
   (a task above it is passed over); none open, it goes nowhere. A subagent that receives
