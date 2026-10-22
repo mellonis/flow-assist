@@ -26,7 +26,7 @@ import type { ViewRecord } from './views.js';
 import type { ToolDef } from '../loader/tools.js';
 import { workspaceFor } from './workspace.js';
 import { asBackgroundWork, asConversationWork, asForegroundWork, outsideWork, workOwner } from '../runtime/background-work.js';
-import { callOf, childResultText, frameAnswer, frameItem, lastAnswerOf, type BusyKind, type ChatMsg, type ChildQuestion, type ChildResult, type EndedChild, type RunningChild, type ChildSpec, type ChildStart, type CloseReason, type StoppedBy, type JournalRoute, type ConversationDeps, type ConversationEvent, type ConversationKind, type ConversationSnapshot, type ConversationStatus, type InboxItem, type LaterTurn, type Offered, type ParentAskInfo, type PendingConfirm, type Queued, type QueueWait, type SendOptions, type TurnEnd, type TreeNode, type ViewPort } from './conversation-types.js';
+import { callOf, childResultText, frameAnswer, frameItem, lastAnswerOf, type BusyKind, type AgentRef, type ChatMsg, type ChildQuestion, type ChildResult, type EndedChild, type RunningChild, type ChildSpec, type ChildStart, type CloseReason, type StoppedBy, type JournalRoute, type ConversationDeps, type ConversationEvent, type ConversationKind, type ConversationSnapshot, type ConversationStatus, type InboxItem, type LaterTurn, type Offered, type ParentAskInfo, type PendingConfirm, type Queued, type QueueWait, type SendOptions, type TurnEnd, type TreeNode, type ViewPort } from './conversation-types.js';
 import {
   applySession, closeOwnFile, currentProject, ensureSessionId, journal, journaledChatLLM, journalTo, journalToOwnFile, keepPersonWork, markSeen, newSubJournalId, persist, pushNote,
   releaseLockOf, writeSession, NO_FILE,
@@ -160,6 +160,10 @@ export class Conversation {
   summary = '';
   prompts: string[] = [];
   autoMode: AutoMode = 'ask';
+  // The agent file a child was started from (its journal start lines carry it), and the
+  // tool groups it may use besides the core group (null: every group).
+  agent: AgentRef | null = null;
+  toolGroups: readonly string[] | null = null;
   // Images (src/assistant/images.ts): what each `[Image #N]` of this conversation stands
   // for, and the last N given out. The conversation's, like the plan: saved with the
   // session, emptied by /clear. The TEXT decides what a message sends — the tokens in it
@@ -936,13 +940,16 @@ export class Conversation {
       notify: () => {}, pushLog: () => {}, current: undefined,
       // What a child's own turn is not offered, a run a tool starts for it is not
       // offered either: the names are added where nested runs inherit them.
-      chatLLM: (m, o) => this.deps.chatLLM(m, { ...o, withholdTools: [...new Set([...turnShape(spec.kind).withholdTools, ...(o?.withholdTools ?? [])])] }),
+      // The tool groups a child may use bind its own turns and the runs its tools start.
+      chatLLM: (m, o) => this.deps.chatLLM(m, { ...o, withholdTools: [...new Set([...turnShape(spec.kind).withholdTools, ...(o?.withholdTools ?? [])])], ...(child.toolGroups ? { allowGroups: child.toolGroups } : {}) }),
     };
     const child = new Conversation(deps, { kind: spec.kind, policy: asks ? { kind: 'ask' } : { kind: 'always-no' } });
     child.parent = this;
     child.depth = this.depth + 1;
     child.label = spec.label;
     child.spawnedBy = spec.by;
+    child.agent = spec.agent ?? null;
+    child.toolGroups = spec.toolGroups ?? null;
     // The summary handed over is the start of the subagent's own: it rides every round's
     // system prompt, and a compaction of a long run folds it into the next one.
     if (spec.kind === 'subagent' && spec.summary) child.summary = spec.summary;
@@ -973,7 +980,7 @@ export class Conversation {
     this.children.add(child);
     this.emit({ type: 'children', count: this.children.size });
     this.treeChanged(this);
-    if (spec.kind === 'subagent') about({ t: 'subagent', label: spec.label, by: spec.by, event: 'start', ...(fileId ? { id: fileId } : {}) });
+    if (spec.kind === 'subagent') about({ t: 'subagent', label: spec.label, by: spec.by, event: 'start', ...(fileId ? { id: fileId } : {}), ...(spec.agent ? { agent: spec.agent.id, source: spec.agent.source, path: spec.agent.path, hash: spec.agent.hash } : {}) });
     // A subagent the person started stays after its answer (see `staying`).
     const stays = spec.kind === 'subagent' && spec.by === 'person';
     if (spec.kind === 'subagent') child.task = spec.prompt;

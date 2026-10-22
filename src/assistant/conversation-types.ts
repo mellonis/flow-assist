@@ -214,7 +214,10 @@ export interface ConversationDeps {
 // the parent's summary handed to a subagent as the start of its own.
 // `write`: the child may change things, each write asking the person (a subagent the person
 // starts always may); without it a child declines every write.
-export interface ChildSpec { kind: 'task' | 'subagent'; label: string; prompt: string; by: 'model' | 'person'; summary?: string; write?: boolean }
+// `agent`: the agent file it was started from, recorded in the journal's start lines.
+// `toolGroups`: the tool groups it may use besides the core group (absent: every group).
+export interface AgentRef { id: string; source: 'project' | 'person' | 'plugin'; path: string; hash: string }
+export interface ChildSpec { kind: 'task' | 'subagent'; label: string; prompt: string; by: 'model' | 'person'; summary?: string; write?: boolean; agent?: AgentRef; toolGroups?: readonly string[] }
 // How a child's run ended, as the tool that started it reports it.
 export interface ChildResult {
   outcome: 'answer' | 'empty' | 'limit' | 'stopped' | 'failed';

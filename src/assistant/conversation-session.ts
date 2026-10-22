@@ -175,7 +175,7 @@ export function journalToOwnFile(c: Conversation, ev: JournalEvent | null): void
   try {
     const file = subJournalPath(at.home, at.id, c.subJournalId);
     if (file !== c.subJournalFile) {
-      if (!fs.existsSync(file)) appendJournal(file, { t: 'start', id: c.subJournalId, parent: ownerId(c), root: at.id, label: c.label, by: c.spawnedBy ?? 'model' });
+      if (!fs.existsSync(file)) appendJournal(file, { t: 'start', id: c.subJournalId, parent: ownerId(c), root: at.id, label: c.label, by: c.spawnedBy ?? 'model', ...(c.agent ? { agent: c.agent.id, source: c.agent.source, path: c.agent.path, hash: c.agent.hash } : {}) });
       c.subJournalFile = file;
     }
     if (ev) appendJournal(file, ev);

@@ -266,6 +266,10 @@ export interface AgentOpts {
   // what a tool promises withholds it (the one-shot prompt: no chat for a background
   // result to land in, no screen for a reminder's banner).
   withholdTools?: readonly string[];
+  // Tool groups this run may use besides the core group (`core` itself is always kept).
+  // Judged each time the registry is read, so a group that joins mid-run is excluded
+  // unless named; what it bars is withheld as `withholdTools` withholds.
+  allowGroups?: readonly string[];
   // Any remaining OpenAI-ish options (tools, signal, …) — spread into the round.
   [key: string]: unknown;
 }
@@ -756,6 +760,7 @@ export async function agentChat(
     requestTail,
     systemPrompt,
     withholdTools = [],
+    allowGroups,
     ...opts
   }: AgentOpts = {},
 ): Promise<AgentResult> {
@@ -789,6 +794,7 @@ export async function agentChat(
   // What this run withholds (`AgentOpts.withholdTools`): never in `toolByName`, the
   // catalog or the wire names, so no request, index, `tools_load` or markup check sees it.
   const withheld = new Set(withholdTools);
+  const allowed = allowGroups ? new Set(['core', ...allowGroups]) : null;
   const onWire = (t: ToolDef): ToolDef => {
     const wire = t.function.name.replace(/[^a-zA-Z0-9_-]/g, '__').slice(0, 128);
     realName.set(wire, t.function.name);
@@ -813,6 +819,11 @@ export async function agentChat(
     const at = toolRegistryRevision();
     if (at === toolsAt) return;
     toolsAt = at;
+    if (allowed) {
+      const groupOf = chatToolGroupOf();
+      const names = [...chatToolDefs().map((t) => t.function.name), ...extraTools.map((t) => t.function.name)];
+      for (const n of names) if (!allowed.has(groupOf.get(n) ?? 'other')) withheld.add(n);
+    }
     for (const t of chatToolDefs()) if (!withheld.has(t.function.name)) toolByName.set(t.function.name, t);
     for (const et of extraTools) if (!withheld.has(et.function.name)) toolByName.set(et.function.name, et);
     catalog = toolCatalog(extraTools).filter((e) => !withheld.has(e.name));

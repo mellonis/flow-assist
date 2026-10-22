@@ -25,7 +25,7 @@ export const appliesOnRestart = z.registry<{ reason?: string }>();
 // token, its tools, the shell's and the web's reach, the roots of a plugin. A mark on
 // such a key, on a key under it, or on a key holding one (`plugins.repo` holds
 // `plugins.repo.roots`) is never honoured.
-const LEASH_ROOTS = ['ai', 'shell', 'web', 'fs'];
+const LEASH_ROOTS = ['ai', 'shell', 'web', 'fs', 'agents'];
 const PLUGIN_ROOTS = /^plugins\.[^.]+\.roots(\.|$)/;
 export function isLeashKey(key: string): boolean {
   const parts = key.split('.');
@@ -173,5 +173,8 @@ export const hostConfigSchema = z.object({
   // person lets the model's commands see (src/assistant/secrets.ts). On the leash with
   // the rest of `shell`, so the model can never set either; read live, per command.
   shell: z.object({ timeoutMs: z.number().int().positive(), maxChars: z.number().int().positive(), roots: z.array(z.string()), autoRun: z.boolean(), passEnv: z.array(z.string()) }).partial().optional(),
+  // Agent files (src/assistant/agent-start.ts): `maxAuto`, the highest auto mode an agent
+  // file may run in whatever its `auto` says. On the leash: the model can never raise it.
+  agents: z.object({ maxAuto: z.enum(['ask', 'reads', 'all']) }).partial().optional(),
   plugins: z.record(z.string(), z.unknown()).optional(),
 }).passthrough();

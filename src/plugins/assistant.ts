@@ -12,7 +12,7 @@ import { useSyncExternalStore } from 'react';
 import os from 'node:os';
 import path from 'node:path';
 import { addTrigger } from '../loader/registry.js';
-import { autoBadge, autoCommand, autoSaid, nextAutoMode } from '../assistant/auto.js';
+import { autoBadge, autoCommand, autoSaid, nextAutoMode, type AutoMode } from '../assistant/auto.js';
 import { NOTES_MODES, notesCommand, notesMode, notesSaid, type NotesMode } from '../assistant/step.js';
 import { lineTab, lineView, type TabWalk } from '../config/commandline.js';
 import { completePath, completeSlash, listDirectory, type ChatCommandDef } from '../config/fieldcomplete.js';
@@ -68,9 +68,14 @@ import { personSpoke, projectHere } from '../assistant/conversation-session.js';
 import { configLineOf, shellCommandOf } from '../assistant/confirm-policy.js';
 import { scheduleChild } from '../assistant/child-schedule.js';
 import { ASK_ARM_MS, askClock, createAskGuard } from '../assistant/child-ask-guard.js';
-import { findAgents } from '../assistant/agent-find.js';
+import { findAgents, resolveAgent } from '../assistant/agent-find.js';
+import { parseAgentArgs } from '../assistant/agent-args.js';
+import { absentGroupsNote, agentAutoMode, askBlockedBy, agentRef, agentToolGroups, maxAutoOf } from '../assistant/agent-start.js';
+import { fillPrompt } from '../assistant/agent-file.js';
+import { chatToolGroupOf } from '../loader/tools.js';
+import type { ChildSpec } from '../assistant/conversation-types.js';
 import type { HostServices } from '../runtime/services.js';
-import { agentListing, parseSubagentLine, stopTargetIndex, subagentLabel, subagentListing, tellTargetIndex } from '../assistant/subagent-command.js';
+import { agentListing, parseSubagentLine, stopTargetIndex, subagentLabel, subagentListing, tellTargetIndex, uniqueLabel } from '../assistant/subagent-command.js';
 
 // Slash-commands of the chat — a single source for runChatCommand and Tab-completion.
 // `/analyze` is a tracker slash command and is removed.
@@ -1759,7 +1764,6 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   host.notify();
                   return;
                 }
-                if (line.kind === 'agent') { setError(`/subagent @${line.name}: starting an agent is not available`); return; }
                 if (line.kind === 'stop') {
                   const listed = listedRef.current?.conv === conv ? listedRef.current.labels : null;
                   const at = stopTargetIndex(conv.runningChildren(), line.target, listed);
@@ -1790,25 +1794,64 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   host.notify();
                   return;
                 }
+                if (line.kind === 'agent' && line.auto) { setError('--auto is refused for an agent: the agent\'s file says what it may do'); return; }
                 if (line.withContext && !conv.summary.trim()) { setError('no summary to hand over yet — /compact makes one, or start it without --with-context'); return; }
                 const slots = conv.deps.children;
                 if (!slots) { setError('/subagent: subagents are unavailable here'); return; }
-                // The parent's own journal takes the child's lines: its session is made
-                // here when nobody has spoken (`keepPersonWork`).
-                const journalId = conv.keepPersonWork(`/${cmd.trim()}`);
+                // The start, for a prompt and for an agent file: the parent's own journal takes
+                // the child's lines (its session is made here when nobody has spoken,
+                // `keepPersonWork`). Its mode is set before the schedule's timer lets its
+                // first turn go: the starting conversation's mode is never the child's.
+                const begin = (spec: Pick<ChildSpec, 'label' | 'prompt' | 'agent' | 'toolGroups'>, mode: AutoMode | null, notes: string): boolean => {
+                  const journalId = conv.keepPersonWork(`/${cmd.trim()}`);
+                  const started = scheduleChild(
+                    { kind: 'subagent', by: 'person', ...spec, ...(line.withContext ? { summary: conv.summary } : {}) },
+                    0,
+                    { startChild: (s) => conv.startChild(s, journalId), slots, showMessage: say, pushLog: conv.deps.pushLog, notify: () => host.notify() },
+                  );
+                  if ('refused' in started) { setError(`/subagent: ${started.refused}`); return false; }
+                  if (mode && mode !== 'ask') started.child.setAutoMode(mode);
+                  setField('');
+                  say(`subagent «${spec.label}» started`);
+                  if (notes) conv.pushNote(notes);
+                  host.notify();
+                  return true;
+                };
+                if (line.kind === 'agent') {
+                  const found = agentsFound();
+                  const hit = resolveAgent(line.name, found);
+                  if (!hit.ok) { setError(`/subagent @${line.name}: ${hit.message}`); return; }
+                  const agent = hit.agent;
+                  const id = agent.id;
+                  const parsed = parseAgentArgs(agent.params, line.args);
+                  if (!parsed.ok) { setError(`/subagent @${id}: ${parsed.message}`); return; }
+                  const blocked = askBlockedBy(conv.question, parsed.missing);
+                  if (blocked) { setError(blocked); return; }
+                  const groups = agentToolGroups(agent, new Set(chatToolGroupOf().values()));
+                  const mode = agentAutoMode(agent.auto, maxAutoOf(conv.deps.config()));
+                  const launch = (values: Record<string, string>): void => {
+                    begin({ label: uniqueLabel(id, conv.runningChildren().map((c) => c.label)), prompt: fillPrompt(agent, values), agent: agentRef(agent, id), ...(groups.groups ? { toolGroups: groups.groups } : {}) }, mode, absentGroupsNote(id, groups.absent));
+                  };
+                  if (!parsed.missing.length) { launch(parsed.values); return; }
+                  // One free-text block per missing parameter, in the declared order: the
+                  // session's question slot, drawn in the field's place. Esc, or a dismissed
+                  // question, cancels the start and gives the typed line back.
+                  const typed = `/${cmd.trim()}`;
+                  setField('');
+                  void (async () => {
+                    const values = { ...parsed.values };
+                    for (const name of parsed.missing) {
+                      const done = await conv.askUser([{ question: `Value for «${name}»`, header: `@${id}: ${name}`, options: [] }]);
+                      const text = done.cancelled ? '' : (done.answers[0]?.other ?? '').trim();
+                      if (!text) { setField(typed); host.notify(); return; }
+                      values[name] = text;
+                    }
+                    launch(values);
+                  })();
+                  return;
+                }
                 const label = subagentLabel(line.prompt, conv.runningChildren().map((c) => c.label));
-                const started = scheduleChild(
-                  { kind: 'subagent', label, prompt: line.prompt, by: 'person', ...(line.withContext ? { summary: conv.summary } : {}) },
-                  0,
-                  { startChild: (spec) => conv.startChild(spec, journalId), slots, showMessage: say, pushLog: conv.deps.pushLog, notify: () => host.notify() },
-                );
-                if ('refused' in started) { setError(`/subagent: ${started.refused}`); return; }
-                // Its own mode, set before the schedule's timer lets its first turn go: the
-                // starting conversation's mode is never the child's.
-                if (line.auto) started.child.setAutoMode('all');
-                setField('');
-                say(`subagent «${label}» started`);
-                host.notify();
+                begin({ label, prompt: line.prompt }, line.auto ? 'all' : null, '');
                 return;
               }
               case 'compact': compactNow(); return;

@@ -53,7 +53,9 @@
 //            `clear`, `exit` or `person`), and the `id` of its own file when it has one. Tagged
 //            `subagent` like its calls. A subagent's file holds the same kinds as a session's
 //            journal and ends with an `end` that names what stopped it, when it stopped
-//            before it finished.
+//            before it finished. One started from an agent file also carries, on its `start`
+//            line and on the first line of its own file, `agent` (the file's id), `source`
+//            (`project`, `person` or `plugin`), `path` and `hash` (of the file's bytes).
 //
 // `/export` renders a journal as markdown (`exportMarkdown`).
 //
@@ -423,7 +425,7 @@ function eventLines(events: JournalEvent[], child: ((id: string) => JournalEvent
           const body = tooDeep ? null : child(id);
           if (tooDeep) out.push('*its journal is nested too deep to show*', '');
           else if (!body) out.push('*its journal is not there*', '');
-          else out.push('<details>', `<summary>${escapeHtml(`${String(ev.label ?? '')} · ${ended ? outcomeWord(ended) : 'did not finish'}`)}</summary>`, '', ...eventLines(body, child, new Set([...folding, id]), depth + 1), '</details>', '');
+          else out.push('<details>', `<summary>${escapeHtml(`${typeof ev.agent === 'string' ? `@${ev.agent} · ` : ''}${String(ev.label ?? '')} · ${ended ? outcomeWord(ended) : 'did not finish'}`)}</summary>`, '', ...eventLines(body, child, new Set([...folding, id]), depth + 1), '</details>', '');
         }
         break;
       }

@@ -9,13 +9,27 @@ import type { FoundAgents } from './agent-find.js';
 export type SubagentLine =
   | { kind: 'list' }
   | { kind: 'agents' }
-  | { kind: 'agent'; name: string; args: string }
+  | { kind: 'agent'; name: string; args: string; withContext: boolean; auto: boolean }
   | { kind: 'stop'; target: string }
   | { kind: 'tell'; target: string; text: string }
   | { kind: 'start'; prompt: string; withContext: boolean; auto: boolean }
   | { kind: 'error'; text: string };
 
 const FLAGS = ['--with-context', '--auto'] as const;
+
+// The flags at the start of `rest`, and what follows them.
+function takeFlags(text: string): { withContext: boolean; auto: boolean; rest: string } {
+  let rest = text;
+  let withContext = false;
+  let auto = false;
+  for (;;) {
+    const flag = FLAGS.find((f) => rest === f || rest.startsWith(`${f} `) || rest.startsWith(`${f}\n`) || rest.startsWith(`${f}\t`));
+    if (!flag) break;
+    if (flag === '--auto') auto = true; else withContext = true;
+    rest = rest.slice(flag.length).trimStart();
+  }
+  return { withContext, auto, rest };
+}
 
 // The rest of the line after `/subagent` as the person typed it: spacing and line breaks
 // inside the prompt are kept, since the prompt is the work. `--with-context` and `--auto`
@@ -27,7 +41,11 @@ export function parseSubagentLine(raw: string): SubagentLine {
   let rest = raw.trim();
   if (!rest) return { kind: 'list' };
   const at = /^@(\S*)(?:\s+([\s\S]*))?$/.exec(rest);
-  if (at) return at[1] ? { kind: 'agent', name: at[1], args: (at[2] ?? '').trim() } : { kind: 'agents' };
+  if (at) {
+    if (!at[1]) return { kind: 'agents' };
+    const flags = takeFlags((at[2] ?? '').trim());
+    return { kind: 'agent', name: at[1], args: flags.rest, withContext: flags.withContext, auto: flags.auto };
+  }
   const stop = /^stop(?:\s+([\s\S]*))?$/i.exec(rest);
   if (stop) {
     const target = (stop[1] ?? '').trim();
@@ -41,14 +59,8 @@ export function parseSubagentLine(raw: string): SubagentLine {
     const text = at < 0 ? '' : body.slice(at).trim();
     return target && text ? { kind: 'tell', target, text } : { kind: 'error', text: '/subagent tell takes a number from the list or a name, then the message — /subagent lists them' };
   }
-  let withContext = false;
-  let auto = false;
-  for (;;) {
-    const flag = FLAGS.find((f) => rest === f || rest.startsWith(`${f} `) || rest.startsWith(`${f}\n`) || rest.startsWith(`${f}\t`));
-    if (!flag) break;
-    if (flag === '--auto') auto = true; else withContext = true;
-    rest = rest.slice(flag.length).trimStart();
-  }
+  const { withContext, auto, rest: prompt } = takeFlags(rest);
+  rest = prompt;
   if (!rest) return { kind: 'error', text: '/subagent needs a prompt after its flags — what should it do?' };
   return { kind: 'start', prompt: rest, withContext, auto };
 }
@@ -60,7 +72,11 @@ const LABEL_MAX = 24;
 // conversation's live children): `-2`, `-3` after it.
 export function subagentLabel(prompt: string, taken: readonly string[]): string {
   const words = prompt.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
-  const base = words.slice(0, LABEL_WORDS).join('-').slice(0, LABEL_MAX).replace(/-+$/, '') || 'subagent';
+  return uniqueLabel(words.slice(0, LABEL_WORDS).join('-').slice(0, LABEL_MAX).replace(/-+$/, '') || 'subagent', taken);
+}
+
+// `base`, or `base-2`, `base-3` … when a live label has it.
+export function uniqueLabel(base: string, taken: readonly string[]): string {
   if (!taken.includes(base)) return base;
   let n = 2;
   while (taken.includes(`${base}-${n}`)) n++;

@@ -119,8 +119,10 @@ test('labels that repeat: a number names exactly the listed row, stop and tell a
 test('a first word starting with @ names an agent: @ alone lists them, @name carries the rest of the line', () => {
   expect(parseSubagentLine('@')).toEqual({ kind: 'agents' });
   expect(parseSubagentLine('  @  ')).toEqual({ kind: 'agents' });
-  expect(parseSubagentLine('@new-ticket PRICE-512 fix the export')).toEqual({ kind: 'agent', name: 'new-ticket', args: 'PRICE-512 fix the export' });
-  expect(parseSubagentLine('@x')).toEqual({ kind: 'agent', name: 'x', args: '' });
+  expect(parseSubagentLine('@new-ticket PRICE-512 fix the export')).toEqual({ kind: 'agent', name: 'new-ticket', args: 'PRICE-512 fix the export', withContext: false, auto: false });
+  expect(parseSubagentLine('@x')).toEqual({ kind: 'agent', name: 'x', args: '', withContext: false, auto: false });
+  // The flags come right after the name and are not part of the arguments.
+  expect(parseSubagentLine('@x --with-context --auto T-1 go')).toEqual({ kind: 'agent', name: 'x', args: 'T-1 go', withContext: true, auto: true });
   // Only as the first word.
   expect(parseSubagentLine('mail @bob')).toMatchObject({ kind: 'start', prompt: 'mail @bob' });
 });

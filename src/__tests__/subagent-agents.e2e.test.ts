@@ -103,12 +103,3 @@ test('Tab after /subagent @ completes an agent name', async () => {
   expect(frameOf(ui)).toContain('/subagent @zeta-job');
   ui.app.unmount();
 });
-
-test('/subagent @<name> … is refused while starting an agent is not available', async () => {
-  const { root, ui } = await chat();
-  write(path.join(root, '.flow-assist', 'agents', 'x.md'), doc('An agent'));
-  await ask(ui, '/subagent @x do it');
-  await settleUntil(() => frameOf(ui).includes('starting an agent is not available'));
-  expect(frameOf(ui)).toContain('/subagent @x: starting an agent is not available');
-  ui.app.unmount();
-});
