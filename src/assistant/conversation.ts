@@ -772,7 +772,7 @@ export class Conversation {
   }
 
   // A task that ends hands the children still live to its parent: their results go to the
-  // nearest session or subagent above, and the parent now counts them, so it knows they still run.
+  // nearest session or subagent above, and the parent counts them, so it knows they still run.
   private handChildrenUp(): void {
     const up = this.parent;
     if (!up || !this.children.size) return;
