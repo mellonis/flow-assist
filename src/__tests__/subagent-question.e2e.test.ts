@@ -249,3 +249,22 @@ test('with the cursor in the tree rows the question is a notice, not answerable;
   expect(a!.requests.length).toBe(1); // the wait ended as a stop, not as an answer
   ui.app.unmount();
 });
+
+test('a numeric answer with a space reaches the subagent whole, and Esc after typing dismisses the question', async () => {
+  const { children: [a, b], ui } = await boot(['QNUM', 'QESC']);
+  await ask(ui, '/subagent QNUM count');
+  await settleUntil(() => frameOf(ui).includes(title('qnum-count')));
+  pause();
+  await ui.type('3 files');
+  await ui.press('return');
+  await settleUntil(() => a!.requests.length >= 2);
+  expect(results(a!.requests[1])).toEqual(['The person answered: 3 files']);
+  await ask(ui, '/subagent QESC count');
+  await settleUntil(() => frameOf(ui).includes(title('qesc-count')));
+  pause();
+  await ui.type('abc');
+  await ui.press('escape');
+  await settleUntil(() => b!.requests.length >= 2);
+  expect(results(b!.requests[1])).toEqual([NO_ANSWER]);
+  ui.app.unmount();
+});

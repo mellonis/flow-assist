@@ -68,8 +68,11 @@ export interface AskState {
   cancelled: boolean;
 }
 
+// A question with no options is a free-text question: its field is open from the start, so
+// every printable key (digits and spaces too) is text, and Esc dismisses it.
+const freeText = (q: AskQuestion | undefined): boolean => !!q && q.options.length === 0;
 export const askStart = (questions: AskQuestion[]): AskState =>
-  ({ questions, index: 0, cursor: 0, picked: [], typing: false, text: '', caret: 0, answers: [], done: false, cancelled: false });
+  ({ questions, index: 0, cursor: 0, picked: [], typing: freeText(questions[0]), text: '', caret: 0, answers: [], done: false, cancelled: false });
 
 export interface AskRow { label: string; description?: string; picked: boolean; active: boolean; other: boolean }
 export function askRows(state: AskState): AskRow[] {
@@ -86,7 +89,7 @@ function answer(state: AskState, labels: string[], other?: string): AskState {
   const q = state.questions[state.index]!;
   const answers = [...state.answers, { question: q.question, labels, ...(other ? { other } : {}) }];
   const last = state.index + 1 >= state.questions.length;
-  return { ...state, answers, index: last ? state.index : state.index + 1, cursor: 0, picked: [], typing: false, text: '', caret: 0, done: last };
+  return { ...state, answers, index: last ? state.index : state.index + 1, cursor: 0, picked: [], typing: !last && freeText(state.questions[state.index + 1]), text: '', caret: 0, done: last };
 }
 
 // A key as the chat hands it over — flowtty's, with a paste's text on it.
@@ -120,9 +123,10 @@ export function askKey(state: AskState, key: AskKey, width = 60): AskState {
   // impossible to give as an answer. Every printable key is text here: `y`, `n` and
   // the digits are not shortcuts while the person is writing.
   if (state.typing) {
-    // Esc leaves the field for the list; on the list it dismisses the question. The
+    // Esc leaves the field for the list; on the list it dismisses the question (a free-text
+    // question has no list: Esc dismisses it from the field). The
     // reducer would answer `cancel` — the closest thing first is this file's rule.
-    if (name === 'escape') return { ...state, typing: false };
+    if (name === 'escape') return freeText(q) ? { ...state, done: true, cancelled: true } : { ...state, typing: false };
     const k = name === 'paste' ? { ...key, text: onePasteLine(key.text ?? '') } : key;
     const act = editorReducer({ value: state.text, cursor: state.caret }, k as Parameters<typeof editorReducer>[1], { multiline: false, width });
     if (act.kind === 'submit') {

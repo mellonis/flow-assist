@@ -42,7 +42,7 @@
 //            cleared; `exit`: the process exited while it ran or waited; `person`: the person
 //            stopped it, or the job it belonged to)
 //   ask-parent  a task or a subagent put a question to its parent: `id`, `question`
-//   ask-answer  its settlement: the same `id`, and `by` — `model`, `person` or `none`
+//   ask-answer  its settlement: the same `id`, and `by` — `model`, `person`, `none` or `stop` (the child was stopped or reset while it waited)
 //   child-answer  the answer a session or a subagent gave a child's question with
 //            `answer_child`: the `id`, the child's label (`child`) and the `text`
 //   subagent a subagent started, answered or ended: `label`, `by` (who started it: `model` or
@@ -366,7 +366,7 @@ function eventLines(events: JournalEvent[], child: ((id: string) => JournalEvent
         break;
       case 'step': out.push(`*Step${at}:* ${text}`, ''); break;
       case 'answer': out.push(`**Assistant**${at}`, '', text, ''); break;
-      case 'ask-answer': out.push(`*Answer to the question${at}: ${nd(ev.by === 'none' ? 'no answer was given' : `from the ${String(ev.by)}`)}*`, ''); break;
+      case 'ask-answer': out.push(`*Answer to the question${at}: ${nd(ev.by === 'none' ? 'no answer was given' : ev.by === 'stop' ? 'the asker was stopped' : `from the ${String(ev.by)}`)}*`, ''); break;
       case 'child-answer': out.push(`*Answered «${nd(String(ev.child ?? ''))}»${at}:* ${nd(String(ev.text ?? ''))}`, ''); break;
       case 'ask-parent': out.push(`*Asked its parent${at}:* ${nd(String(ev.question ?? ''))}`, ''); break;
       case 'call-start': open.set(keyOf(ev), { slot: out.length, start: ev }); out.push('', ''); break;

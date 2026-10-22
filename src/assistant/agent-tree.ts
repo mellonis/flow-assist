@@ -29,7 +29,7 @@ function inTime(ms: number): string {
 
 const MARK: Record<TreeNode['status'], string> = { waiting: '⏸', asks: '?', working: '⚙', queued: '○', delayed: '○', idle: '◦' };
 const TONE: Record<TreeNode['status'], TreeRow['tone']> = { waiting: 'warn', asks: 'warn', working: 'work', queued: 'dim', delayed: 'dim', idle: 'dim' };
-// Who is kept when the rows run out: what waits for the person first, then what works,
+// Who is kept when the rows run out: what waits for an answer first (a y/n or a question), then what works,
 // then an answer not read yet.
 const ATTENTION: Record<TreeNode['status'], number> = { waiting: 0, asks: 0, working: 1, queued: 3, delayed: 3, idle: 4 };
 const attentionOf = (n: TreeNode): number => (n.status === 'idle' && n.answered ? 2 : ATTENTION[n.status]);

@@ -881,3 +881,12 @@ test('config_schema says what shell.passEnv does, and the model may not set it',
   expect(out).not.toContain('· model may set');
   await expect(reg.exec('config_set', { key: 'shell.passEnv', value: ['GH_TOKEN'], scope: 'session' }, { configLocalPath: local })).rejects.toThrow();
 });
+
+test('the descriptions of answer_child and the task tool say the answer is given in the turn that reads the question', () => {
+  const reg = assembleToolRegistry({ plugins: [], config: {}, repo: { list: async () => [] } as any });
+  const text = (name: string) => String(reg.tools.find((t) => t.function.name === name)?.function.description);
+  expect(text('answer_child')).toContain('Answer in the same turn that reads the question');
+  expect(text('answer_child')).toContain('`ask_user` first');
+  expect(text('answer_child')).not.toContain('the child waits for this answer');
+  expect(text('subagent')).toContain('in the turn that reads it');
+});

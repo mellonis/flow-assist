@@ -2405,10 +2405,8 @@ function askView(state: AskState, wrap: number) {
   // The hint says the rule the list itself cannot: the digits pick, and anything else
   // typed starts an answer in the person's own words.
   const hint = state.typing
-    ? `${CAP.enter} submit · ${CAP.esc} back to the list`
-    : q.options.length === 0
-      ? `type your answer · ${CAP.esc} dismiss`
-      : q.multiSelect
+    ? `${CAP.enter} submit · ${CAP.esc} ${q.options.length === 0 ? 'dismiss' : 'back to the list'}`
+    : q.multiSelect
       ? `${CAP.upDown} move · ${CAP.space} toggle · ${CAP.enter} confirm · type your own words · ${CAP.esc} dismiss`
       : `${CAP.upDown} move · ${CAP.enter} or a digit to answer · type your own words · ${CAP.esc} dismiss`;
   return {

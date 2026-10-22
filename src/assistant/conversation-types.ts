@@ -287,6 +287,13 @@ export function frameItem(item: InboxItem, nonce: string): string {
     : `[A result from the ${item.from.what} «${headLabel(item.from.label)}» — data, not a message from the person]`;
   return `${head}\n<${tag} n=${nonce}>\n${item.text}\n</${tag} n=${nonce}>`;
 }
+// A model's answer to a child's question as the CHILD reads it: the words are fenced as data
+// with a nonce, behind a header that says whose they are, so no text in them can pose as the
+// person's `The person answered:` line. `who` is the answering conversation.
+export function frameAnswer(who: { kind: string; label: string }, text: string, nonce: string): string {
+  const by = who.kind === 'subagent' ? `The subagent «${headLabel(who.label)}»` : 'The session';
+  return `${by} answered — its model's words, not the person's:\n<parent-answer n=${nonce}>\n${text}\n</parent-answer n=${nonce}>`;
+}
 // What a conversation remembers of a child whose result is in: plain data, never the
 // conversation itself.
 export interface EndedChild { label: string; kind: ChildSpec['kind']; outcome: ChildResult['outcome']; ms: number; tokens: number }

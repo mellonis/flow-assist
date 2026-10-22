@@ -217,7 +217,7 @@ titled `from «<name>»`, only while the field is empty; with a draft in it, one
 question from «<name>» waits — clear the field to answer it` and the draft stays as it is.
 Your own y/n and question come first, then the oldest request of the subagents, a y/n or a
 question. Like a subagent's y/n, a question takes its first key after a short pause. Type
-the answer and press ⏎; Esc answers that you gave none (the subagent then goes on with its
+the answer (numbers and spaces included) and press ⏎; Esc, even after you typed, answers that you gave none (the subagent then goes on with its
 best assumption). The assistant never sees the question or your answer.
 
 `--with-context` first on the line also hands over the conversation's summary — what

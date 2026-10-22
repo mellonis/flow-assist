@@ -157,3 +157,22 @@ test('the result names free text as the person\'s own words', () => {
   const s = press(type(press(askStart(one.questions), '4'), 'use the platform'), 'return');
   expect(askResult(s)).toBe('The user answered:\n- Which library should we use for dates? → (their own words) use the platform');
 });
+
+test('a question with no options opens its field: digits and spaces are text, and Esc dismisses', () => {
+  const free = askStart([{ question: 'How many?', options: [] }]);
+  expect(free.typing).toBe(true);
+  const done = press(type(free, '42'), 'return');
+  expect(done.done).toBe(true);
+  expect(done.answers[0]).toMatchObject({ labels: [], other: '42' });
+  expect(type(free, ' 3 files').text).toBe(' 3 files');
+  const typed = type(free, 'a');
+  expect(typed.text).toBe('a');
+  const gone = press(typed, 'escape');
+  expect(gone).toMatchObject({ done: true, cancelled: true });
+  expect(press(free, 'escape')).toMatchObject({ done: true, cancelled: true });
+});
+
+test('a question with options still returns from its field to the list on Esc', () => {
+  const s = press(type(askStart(one.questions), 'a'), 'escape');
+  expect(s).toMatchObject({ typing: false, done: false });
+});

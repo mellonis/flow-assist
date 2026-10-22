@@ -26,7 +26,7 @@ import type { ViewRecord } from './views.js';
 import type { ToolDef } from '../loader/tools.js';
 import { workspaceFor } from './workspace.js';
 import { asBackgroundWork, asConversationWork, asForegroundWork, outsideWork, workOwner } from '../runtime/background-work.js';
-import { callOf, childResultText, frameItem, lastAnswerOf, type BusyKind, type ChatMsg, type ChildQuestion, type ChildResult, type EndedChild, type RunningChild, type ChildSpec, type ChildStart, type CloseReason, type StoppedBy, type JournalRoute, type ConversationDeps, type ConversationEvent, type ConversationKind, type ConversationSnapshot, type ConversationStatus, type InboxItem, type LaterTurn, type Offered, type ParentAskInfo, type PendingConfirm, type Queued, type QueueWait, type SendOptions, type TurnEnd, type TreeNode, type ViewPort } from './conversation-types.js';
+import { callOf, childResultText, frameAnswer, frameItem, lastAnswerOf, type BusyKind, type ChatMsg, type ChildQuestion, type ChildResult, type EndedChild, type RunningChild, type ChildSpec, type ChildStart, type CloseReason, type StoppedBy, type JournalRoute, type ConversationDeps, type ConversationEvent, type ConversationKind, type ConversationSnapshot, type ConversationStatus, type InboxItem, type LaterTurn, type Offered, type ParentAskInfo, type PendingConfirm, type Queued, type QueueWait, type SendOptions, type TurnEnd, type TreeNode, type ViewPort } from './conversation-types.js';
 import {
   applySession, closeOwnFile, currentProject, ensureSessionId, journal, journaledChatLLM, journalTo, journalToOwnFile, keepPersonWork, markSeen, newSubJournalId, persist, pushNote,
   releaseLockOf, writeSession, NO_FILE,
@@ -577,8 +577,8 @@ export class Conversation {
     if (this.isClosed) return;
     this.closeReason = reason;
     // The questions asked of it get no answer; a clear or a stop of its parent stops the
-    // children that asked, which says so itself.
-    if (reason !== 'clear' && reason !== 'parent') this.settleAsksTo(this);
+    // children that asked, which says so itself, and an exit leaves them as a pending y/n is left.
+    if (reason !== 'clear' && reason !== 'parent' && reason !== 'exit') this.settleAsksTo(this);
     if (reason === 'clear') this.ended = [];
     // The children it started are stopped and a pending y/n declined first, so their
     // closing lines precede this conversation's own closing `end`.
@@ -1176,7 +1176,7 @@ export class Conversation {
       open.recipient.inbox = open.recipient.inbox.filter((i) => i.askId !== a.id);
     }
     const ended = by === 'stop' || by === 'reset';
-    this.journal({ t: 'ask-answer', id: a.id, by: ended ? 'none' : by });
+    this.journal({ t: 'ask-answer', id: a.id, by: by === 'reset' ? 'stop' : by });
     a.resolve(ended ? 'ask_parent: stopped' : answer);
     this.emit({ type: 'ask-parent', ask: null });
     this.deps.notify();
@@ -1205,7 +1205,7 @@ export class Conversation {
     if (!open || open.recipient !== this) return `answer_child: no open question with id ${id}`;
     const child = open.child;
     this.journal({ t: 'child-answer', id, child: child.label, text });
-    child.answerParentAsk(this.kind === 'subagent' ? `The subagent «${this.label}» answered: ${text}` : `The session answered: ${text}`, 'model');
+    child.answerParentAsk(frameAnswer(this, text, crypto.randomBytes(4).toString('hex')), 'model');
     return `answer_child: sent to «${child.label}»`;
   }
   // The questions routed to `to` end with no answer.

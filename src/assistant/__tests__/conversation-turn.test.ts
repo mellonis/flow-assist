@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { Conversation } from '../conversation.ts';
-import { foldIntoHandoff, retryWait } from '../conversation-turn.ts';
+import { FRAME_NOTE, foldIntoHandoff, retryWait, subagentPrompt, workerPrompt } from '../conversation-turn.ts';
 import { retryClock, type RetryInfo } from '../llm-retry.ts';
 import { STOPPED_TURN } from '../system-prompt.ts';
 import { readJournal } from '../journal.ts';
@@ -269,4 +269,17 @@ test('a compaction reports its waits as log lines, with no countdown', async () 
   expect((await foldIntoHandoff(c, [], new AbortController().signal)).summary).toBe('handoff');
   expect(deps.log).toEqual([WAIT_LINE]);
   expect(c.toolLabel).toBe('');
+});
+
+test('the worker prompt lets a child ask once with ask_parent instead of forbidding questions', () => {
+  for (const p of [workerPrompt('x'), subagentPrompt('x')]) {
+    expect(p).toContain('ask_parent');
+    expect(p).not.toContain('Do not ask questions');
+    expect(p).toContain('Do not wait for the user');
+  }
+});
+
+test('the frame note says an answer to a child\'s question is given in the turn that reads it', () => {
+  expect(FRAME_NOTE).toContain('in the turn that reads it');
+  expect(FRAME_NOTE).toContain('ask_user');
 });

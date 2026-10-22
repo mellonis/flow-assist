@@ -152,7 +152,7 @@ test('a stop while the child asks ends its turn, leaves the counts right and ans
   expect(counts(rig)).toEqual({ held: 0, waiting: 0, background: 0 });
   expect(child.parentAsk).toBeNull();
   const lines = rig.subJournal('maker');
-  expect(lines.filter((e) => e.t === 'ask-answer')).toMatchObject([{ by: 'none' }]);
+  expect(lines.filter((e) => e.t === 'ask-answer')).toMatchObject([{ by: 'stop' }]);
   // The answer precedes the closing line of the file.
   expect(lines.findIndex((e) => e.t === 'ask-answer')).toBeLessThan(lines.findIndex((e) => e.t === 'end'));
 });

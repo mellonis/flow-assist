@@ -173,10 +173,20 @@ test('the watch of the asking subagent holds every other key: nothing is typed i
   await rig.ui.press('down', 'return');
   await settleUntil(() => frameOf(rig.ui).includes('╭─ ƒ Flow Assist · '));
   await released(rig, 0);
+  // Before the pause: `x` would ask to stop the node and Esc would leave the watch, if the
+  // watch let either through.
+  await rig.ui.press('x');
+  await rig.ui.press('escape');
+  await settle(4);
+  expect(frameOf(rig.ui)).toContain('╭─ ƒ Flow Assist · ');
+  expect(frameOf(rig.ui)).not.toMatch(/stop [^?\n]*\? y yes · n no/);
   pause();
   await rig.ui.press('tab');
   await rig.ui.press('up');
+  await rig.ui.press('x');
   await settle(4);
+  expect(frameOf(rig.ui)).toContain('╭─ ƒ Flow Assist · ');
+  expect(frameOf(rig.ui)).not.toMatch(/stop [^?\n]*\? y yes · n no/);
   expect(answered(rig, 0)).toBe(false);
   rig.ui.app.unmount();
 });
