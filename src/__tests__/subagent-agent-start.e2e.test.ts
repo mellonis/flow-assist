@@ -8,6 +8,7 @@ import path from 'node:path';
 import { Conversation } from '../assistant/conversation.ts';
 import { exportMarkdown, readJournal, type JournalEvent } from '../assistant/journal.ts';
 import { agentHash } from '../assistant/agent-file.ts';
+import { recordAgentStart } from '../assistant/agent-trust.ts';
 import { refreshToolRegistry } from '../loader/tools.ts';
 import { hostStateDir } from '../config/load.ts';
 import { ScriptedModel, bootApp, firstUser, handoff, settle } from './helpers/scripted';
@@ -21,7 +22,13 @@ afterEach(() => {
 });
 
 const doc = (header: string, body: string) => `---\ndescription: A test agent\n${header}---\n${body}\n`;
-const write = (file: string, text: string) => { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, text); };
+// The files these tests start are project files the person has started before: written
+// with their trust recorded, so a start asks nothing (the trust question has its own file).
+const write = (file: string, text: string) => {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, text);
+  recordAgentStart({ path: file, source: { kind: 'project' }, hash: agentHash(text) });
+};
 type UI = Awaited<ReturnType<typeof bootApp>>;
 const frameOf = (ui: UI) => ui.backend.lastFrame ?? '';
 async function ask(ui: UI, text: string) { await ui.type(text); await ui.press('return'); }

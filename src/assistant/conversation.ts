@@ -941,7 +941,7 @@ export class Conversation {
       // What a child's own turn is not offered, a run a tool starts for it is not
       // offered either: the names are added where nested runs inherit them.
       // The tool groups a child may use bind its own turns and the runs its tools start.
-      chatLLM: (m, o) => this.deps.chatLLM(m, { ...o, withholdTools: [...new Set([...turnShape(spec.kind).withholdTools, ...(o?.withholdTools ?? [])])], ...(child.toolGroups ? { allowGroups: child.toolGroups } : {}) }),
+      chatLLM: (m, o) => this.deps.chatLLM(m, { ...o, withholdTools: [...new Set([...turnShape(spec.kind).withholdTools, ...(o?.withholdTools ?? [])])], ...(child.toolGroups ? { allowGroups: o?.allowGroups ? o.allowGroups.filter((g) => child.toolGroups!.includes(g)) : child.toolGroups } : {}) }),
     };
     const child = new Conversation(deps, { kind: spec.kind, policy: asks ? { kind: 'ask' } : { kind: 'always-no' } });
     child.parent = this;
@@ -949,7 +949,9 @@ export class Conversation {
     child.label = spec.label;
     child.spawnedBy = spec.by;
     child.agent = spec.agent ?? null;
-    child.toolGroups = spec.toolGroups ?? null;
+    // The allow-list is inherited: a child of a conversation that has one gets it, and the
+    // intersection when it names its own.
+    child.toolGroups = this.toolGroups && spec.toolGroups ? spec.toolGroups.filter((g) => this.toolGroups!.includes(g)) : (spec.toolGroups ?? this.toolGroups);
     // The summary handed over is the start of the subagent's own: it rides every round's
     // system prompt, and a compaction of a long run folds it into the next one.
     if (spec.kind === 'subagent' && spec.summary) child.summary = spec.summary;
@@ -1229,6 +1231,19 @@ export class Conversation {
   }
   // The settings-file guard's y/n (src/assistant/conversation-turn.ts), one run at a time.
   askConfigChanges(): Promise<void> { return askConfigChanges(this); }
+  // The y/n before the first start of a project agent file, in the confirmation's place
+  // like the settings guard's: the person's answer only (the auto mode never answers it).
+  // true/false is the person's key; null a stop or a reset that closed it. The caller has
+  // checked that no y/n or question is open.
+  askAgentTrust(r: { title: string; line: string; hint: string }): Promise<boolean | null> {
+    return new Promise<boolean | null>((resolve) => {
+      this.confirm = { name: 'agent', args: '', resolve: (ok, by = 'person') => resolve(by === 'person' ? ok : null) };
+      const request: PendingConfirm = { name: 'agent', args: '', title: r.title, line: r.line, whole: true, hint: r.hint, at: parkedAt() };
+      this.drawConfirm(request);
+      this.emit({ type: 'confirm', request, host: true });
+      this.deps.notify();
+    });
+  }
   // `ask_user`: the same kind of pause as the y/n, but the person picks among options.
   // The chat steps the state key by key (src/assistant/ask.ts) and hands it back.
   askUser(questions: AskQuestion[]): Promise<AskState> {

@@ -72,6 +72,7 @@ import { findAgents, resolveAgent } from '../assistant/agent-find.js';
 import { parseAgentArgs } from '../assistant/agent-args.js';
 import { absentGroupsNote, agentAutoMode, askBlockedBy, agentRef, agentToolGroups, maxAutoOf } from '../assistant/agent-start.js';
 import { fillPrompt } from '../assistant/agent-file.js';
+import { agentChanged, agentTrusted, agentTrustRequest, recordAgentStart } from '../assistant/agent-trust.js';
 import { chatToolGroupOf } from '../loader/tools.js';
 import type { ChildSpec } from '../assistant/conversation-types.js';
 import type { HostServices } from '../runtime/services.js';
@@ -1829,14 +1830,24 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   if (blocked) { setError(blocked); return; }
                   const groups = agentToolGroups(agent, new Set(chatToolGroupOf().values()));
                   const mode = agentAutoMode(agent.auto, maxAutoOf(conv.deps.config()));
-                  const launch = (values: Record<string, string>): void => {
+                  const typed = `/${cmd.trim()}`;
+                  // The person's start is what trusts a file: their own file is recorded at
+                  // the start, a project's after a y/n on its first start (or its change).
+                  const launch = async (values: Record<string, string>): Promise<void> => {
+                    if (agent.source.kind === 'project' && !agentTrusted(agent)) {
+                      if (conv.confirm || conv.question) { setError('answer the open question first'); return; }
+                      setField('');
+                      const yes = await conv.askAgentTrust(agentTrustRequest(agent, id, mode, agentChanged(agent)));
+                      if (yes === null) { setField(typed); host.notify(); return; }
+                      if (!yes) { conv.pushNote(`@${id} was not started: its file is not trusted.`); host.notify(); return; }
+                    }
+                    recordAgentStart(agent);
                     begin({ label: uniqueLabel(id, conv.runningChildren().map((c) => c.label)), prompt: fillPrompt(agent, values), agent: agentRef(agent, id), ...(groups.groups ? { toolGroups: groups.groups } : {}) }, mode, absentGroupsNote(id, groups.absent));
                   };
-                  if (!parsed.missing.length) { launch(parsed.values); return; }
+                  if (!parsed.missing.length) { void launch(parsed.values); return; }
                   // One free-text block per missing parameter, in the declared order: the
                   // session's question slot, drawn in the field's place. Esc, or a dismissed
                   // question, cancels the start and gives the typed line back.
-                  const typed = `/${cmd.trim()}`;
                   setField('');
                   void (async () => {
                     const values = { ...parsed.values };
@@ -1846,7 +1857,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                       if (!text) { setField(typed); host.notify(); return; }
                       values[name] = text;
                     }
-                    launch(values);
+                    await launch(values);
                   })();
                   return;
                 }
