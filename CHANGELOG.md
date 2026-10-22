@@ -5,6 +5,17 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **Agent files: a named subagent in a Markdown file.** A file in the project's
+  `.flow-assist/agents/` (read only inside `shell.roots`), in `~/.config/flow-assist/agents/`
+  or listed by a plugin's manifest under `agents` has a header (`description`, `params`,
+  `tools`, `auto`) and a prompt with `{{param}}` places. `/subagent @<name> <arguments>`
+  starts it (the last parameter takes the rest of the line, `name=value` works, a missing
+  value is asked for) and `/subagent @` lists the files with their errors as `path:line`. It
+  runs in the auto mode its file asks for, never above `agents.maxAuto` (`reads` unless you
+  set it), and `tools:` narrows its tool groups, inherited by what it starts. A project file asks
+  at its first start and after it changes; yours is recorded at your start; a plugin's follows
+  the plugin. The assistant starts a file you have started with the `subagent` tool's `agent`
+  and `args`, from a list in its system prompt. The journal records the file's path and hash.
 - **A task or a subagent can ask its parent a question.** With `ask_parent` it asks one question
   and waits, its place given up as for a y/n (`? <name> · asks its parent` under the field); the
   answer is its tool result. A question from a task goes to the conversation its result would go

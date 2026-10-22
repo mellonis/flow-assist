@@ -45,6 +45,23 @@ A manifest may also list `requiredSettings` — the environment variables the pl
 cannot work without (a token): the host says a plugin is missing settings instead of
 loading it half-working.
 
+### Agents
+
+A manifest may also list `agents` — paths of agent files inside the plugin's directory, each
+a Markdown file that describes a named subagent (docs/usage.md, "Agent files"):
+
+```json
+{ "name": "notes", "version": "0.1.0", "hostApi": 2, "agents": ["agents/summarize.md"] }
+```
+
+An agent is named `<plugin>/<file name without .md>` (`notes/summarize`), and `@summarize`
+reaches it while no other plugin's agent has that short name. A path that leaves the plugin's
+directory (a link out included), a name two of the plugin's files share, a file with an error
+and a value that is not a list of paths are shown as errors by `/subagent @` and the agent is
+not offered. The files are found only while the plugin is installed, enabled and trusted, and
+they need no trust of their own: trusting a plugin trusts its agents, and a plugin linked to a
+development checkout changes its agents without a new trust.
+
 The person sees your plugin in the app's `:plugins` list: its version, its state, what
 it brings, and — on ⏎ — your manifest's description and ranges, why it was skipped (a
 builder that throws says its message there), and its settings. From there they may

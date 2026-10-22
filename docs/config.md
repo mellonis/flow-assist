@@ -53,6 +53,10 @@ assistant may set or save".
   `~/.zshrc`), or start the app from the directory that holds the `.env`.
 - **Who you are**: `config set user.name <name>` (and optionally `user.login`)
   lets the assistant address you. Unset, nothing about you is sent to the LLM.
+- **Agent files**: `agents.maxAuto` (`ask`, `reads` or `all`; `reads` when unset) is the
+  highest auto mode an agent file may run in — its own `auto:` line says what it asks for,
+  and the lower of the two applies. Only you can set it; the assistant cannot. See
+  [usage.md](usage.md), "Agent files".
 - **Reading the web** (`web_fetch`): `web.allowlist`, `web.maxBytes` and
   `web.timeoutMs` — see [safety.md](safety.md), "Reading the web".
 

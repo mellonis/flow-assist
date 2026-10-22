@@ -42,6 +42,9 @@ you also said so yourself: `config set shell.autoRun true` (or `:config set --se
 shell.autoRun true` for this run) together with `auto: writes` lets commands run without
 the y/n, and the hint line then says `auto: writes + commands`.
 Either alone changes nothing, and the assistant can never set `shell.autoRun` itself.
+A subagent that an agent file describes asks for a mode of its own (`auto:` in the file), and
+`agents.maxAuto` (`reads` unless you set it) is the most it gets; the assistant can never set
+that key either (docs/usage.md, "Agent files").
 What ran is still shown: the ✎ diff, the command's block and the tool trail are the same
 either way.
 

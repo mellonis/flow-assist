@@ -212,6 +212,11 @@ rounds and the token budget of `ai.maxRounds` and `ai.maxTurnTokens`, not a task
 and counts toward the three that run at once. The prompt is sent as you
 typed it, line breaks included (⇧⏎ makes one).
 
+**`/subagent @<name> <arguments>`** starts a subagent that an agent file describes, in place
+of a prompt (see Agent files, below); `/subagent @` alone lists the agent files found, with
+the errors of those that cannot be read. `--with-context` goes right after the name; `--auto`
+is refused there, since the file says what the agent may do.
+
 A question from a subagent you started is drawn in the place of the field, a free-text block
 titled `from «<name>»`, only while the field is empty; with a draft in it, one line says `⏸ a
 question from «<name>» waits — clear the field to answer it` and the draft stays as it is.
@@ -362,6 +367,109 @@ Your own conversation's y/n or question, the settings file's y/n included, ends 
 a `y` counts; a question that arrives while the cursor is in the rows, or that ends a watch,
 takes no key for 600 ms, so a ⏎ on its way to the rows does not pick an option. With neither
 on screen a question takes keys at once.
+
+## Agent files
+
+An agent file is a named subagent written down in a Markdown file: a prompt you reuse, with
+the parameters it takes and what it may do. `/subagent @<name> <arguments>` starts it, and the
+assistant can start one by name too. It runs as any subagent you start does (see Subagents
+you start), with the limits its file and your settings give it.
+
+### Where the files are
+
+- **The project's**: `.flow-assist/agents/*.md` in the project, the git repository holding the
+  shell's directory (the directory itself when there is none). They are read only inside
+  `shell.roots`, by real path, as the project instructions are: with no roots set none is read
+  (`/subagent @` says so), and a file that is a link out of the roots is reported as an error
+  and not read.
+- **Your own**: `~/.config/flow-assist/agents/*.md`.
+- **A plugin's**: the files its manifest lists under `agents`, named `<plugin>/<name>`; only
+  an enabled, trusted plugin's are found (docs/plugins.md, "Agents").
+
+A file is read each time it is needed, so a change takes effect at the next start. The name
+is the file's name without `.md`: letters, digits and `-`. `@<name>` takes the name as written
+or, for a plugin's agent, its short name when exactly one plugin agent has it. A project agent and one
+of your own with the same name: the project's is offered, and `/subagent @` marks yours as
+shadowed. A file larger than 32 KiB, or with any error, is not an agent. `/subagent @` lists
+what each error is, as `path:line: message`, and starting a file that has errors says so.
+
+### The file
+
+A header between two `---` lines, then the prompt:
+
+```markdown
+---
+description: Review a branch against the project's rules
+params: ticket, branch?
+tools: repo
+auto: reads
+---
+Review the changes for {{ticket}} on branch {{branch}} (the current branch when empty).
+Read the diff, then answer with the findings, worst first. In a code block, braces such as
+{x} are left alone.
+```
+
+- `description` is required, one line, and is what the listing and Tab completion show.
+- `params` names the values the prompt takes, separated by commas; a trailing `?` makes one
+  optional, and the optional ones come after the required ones.
+- `tools` narrows the tool groups the agent may use (see What it may do).
+- `auto` is `ask`, `reads` or `all`; without it the agent asks.
+- The prompt spells each parameter as `{{name}}`. A `{{name}}` that `params` does not declare is
+  an error, and so is a declared parameter the prompt never uses. A value left out of an
+  optional parameter is the empty text. Single braces are left alone.
+- An unknown or repeated key is an error.
+
+### Arguments
+
+After the name, values go in the order `params` lists them. The last parameter takes the rest
+of the line whole; an earlier one takes one word, or `"several words"` in double quotes. A value
+can also be written `name=value` (`name="several words"`), before the positional ones. A
+required parameter with no value is asked for, one block at a time in the place of the field
+(`@<name>: <param>`); Esc, an empty answer or a dismissed question starts nothing and puts
+the line back in the field. An unknown parameter, one given twice and too many values are
+refused with a line that keeps what you typed.
+
+### What it may do
+
+`auto` is what the agent asks for, and `agents.maxAuto` (`ask`, `reads` or `all`; `reads`
+when unset) is the most you allow: the agent runs in the lower of the two. At `reads` a file
+that says `auto: all` runs in `reads`. `config set agents.maxAuto all` lets such a file
+run without asking; the assistant can never set it. A command still asks unless `shell.autoRun` is on, as for any
+subagent you start (docs/safety.md, "Asking less").
+
+`tools` narrows the groups of tools: the agent gets the `core` group and the groups the
+file lists, and nothing else (without `tools` every group is available). It does not make the agent read-only: the `core` group stays
+whole, with `memory` and `config_set`, which asks as ever; and a group the file lists keeps
+its writing tools, each write asking you as for any subagent you start. A group named in the file that is not loaded is left out, and
+a note says so at the start. A subagent or task the agent starts has the same groups, or fewer.
+
+### Trust
+
+An agent file is somebody else's instructions, so what you have not started does not run on
+the assistant's word.
+
+- A **project file** asks at its first start, and again after its content changes: a y/n shows
+  the file's path, its description, the tool groups, the auto mode after the cap and the
+  parameters. `y` starts the agent and remembers this content; `n` starts nothing.
+- **Your own file** is recorded at your start and asks nothing.
+- A **plugin's file** follows the plugin: a plugin that is installed, trusted and enabled
+  may start its agents without another question. `plugins install` and the kit's `install.sh`
+  trust a plugin, and a plugin linked to a development checkout changes its agents without a
+  new trust.
+
+The record is `agents.accepted.json` in the config directory. A start made from a command the
+assistant runs records nothing.
+
+### The assistant starts one
+
+The system prompt lists the agents the assistant may start, up to twenty: those of the
+project and your own that you have started with their current content, and the plugins'. The
+`subagent` tool takes `agent` and `args` (an object of the parameters); its `task` is then
+only extra instructions, added after the prompt. The agent runs as a background task
+that may write, each write asking you, and its result comes back to the assistant as
+any task's does. A call that names an agent you have not started, an unknown parameter or a missing
+one is answered with why, and nothing starts. The assistant never asks you to trust a file;
+start it once yourself with `/subagent @<name>`.
 
 ## Clicks, folds and the pager
 

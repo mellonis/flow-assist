@@ -1026,6 +1026,18 @@ there is no `/fullscreen`.
 `subagent`, `todo`, `ask_user`, `open_url`, `recall`, `ui_open` (a plugin's entry screen —
 "Screens the model can open" above; offered while one can be opened), plus `host:plugins_list`;
 `workspace_write` and `workspace_list` are the on-demand `workspace` group.
+**`subagent` takes `agent` and `args`** to start an agent file by name
+(`planAgentStart`, `src/assistant/agent-model.ts`; `ctx.agentStarter`, which
+`conversation-turn.ts` builds per call from `findAgents` and `services.agentPlugins`).
+`task` is then optional and is appended after the file's prompt under `Additional
+instructions from the conversation that started you:`; without `agent` it is required. A refusal is the tool's answer, worded for the model, and starts nothing:
+the resolve message, `@id is not trusted here — ask the person to start @id once`
+(checked first, `agentTrusted`), an `args` that is not an object, an unknown parameter
+(naming what it takes), a missing required one. The agent runs as a `task` with
+`write: true` (each write asks the person), the file's tool groups and the capped auto
+mode. The system prompt of every kind that is offered `subagent` ends with a list of
+the agents the model may start (`agentsBlock`: `@id — description (params)`, only those
+`agentTrusted`, at most twenty, read at each build of the prompt).
 A saved history that holds calls under the name `background` is sent as it is. Three rules hold this set together:
 
 - **A plugin's config key is validated by the plugin's schema — everywhere.**
@@ -2012,7 +2024,14 @@ A saved history that holds calls under the name `background` is sent as it is. T
     and under the start line the subagent's own journal. A subagent the person started writes
     `answered` once per answer, the first included, and its `end` line only when it ends (a
     stop, `/clear` or the exit); a task, and a subagent the model started, write `end` at
-    their one answer.
+    their one answer. A subagent started from an agent file adds `agent` (its id), `source`
+    (`project`, `person` or `plugin`), `path` and `hash` (of the file's bytes) to its
+    `start` line, here and in its own file's first line; `/export` heads its fold
+    `@<id> · <label> · <outcome>`.
+  - `task-start` — a background task the model started from an agent file: `label`, `by`
+    and the same `agent`, `source`, `path`, `hash`; a task of no file writes none. Written
+    through the route's `about` into the owner's journal; `/export` draws `Task «<label>»
+    started from @<id> (by the model)`.
   **A subagent's journal.** A subagent keeps its whole conversation in
   `<home>/<sessionId>.sub/<id>.log.jsonl` (600, in a 700 directory; `subJournalPath`):
   flat in the `.sub` of the session at the root of the tree, whatever the subagent's depth;
@@ -3410,6 +3429,59 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   message reaches it at its next step`. The text keeps its inner spacing and line breaks.
   The tell is typed in the session's field, so it is ordinary field input; a subagent's y/n
   waiting meanwhile is answered only by `y` / `n` on an empty field.
+  **The `@` form** (`/subagent @<id> <arguments>`, `/sub @…`; `parseSubagentLine` yields
+  `{kind:'agent'}`, `@` alone `{kind:'agents'}`) starts a subagent from an agent file
+  (below). `@` counts only as the very first word, so `stop`, `tell` and the flags come
+  after the name (`--with-context` is taken right after it; `--auto` is refused with
+  `--auto is refused for an agent: the agent's file says what it may do`). `@` alone puts a
+  note listing the files found (`agentListing`: a markdown list item per agent —
+  `@id — description · <params> · source` — a person's agent hidden by the project's
+  marked shadowed, every file with errors as `path:line: message`, and a line saying the
+  project's agents are not read when `shell.roots` is unset). Tab completes the first word
+  after `/subagent` with `@<id>` and the description. The start (`plugins/assistant.ts`,
+  the `agent` branch): `resolveAgent`, `parseAgentArgs` (pairs `name=value` first, then
+  positional values in the declared order, the declared-last parameter taking the rest of
+  the line; an unknown name, a name twice and an extra value are `setError` refusals that
+  keep the line), one `askUser` free-text block per required parameter without a value
+  (Esc, an empty answer or a dismissed question gives the typed line back), the trust
+  question for a project file (below), then `begin` — the same start the prompt form
+  uses. The prompt is `fillPrompt(agent, values)`; the label is the agent's id made
+  unique among the live children (`uniqueLabel`).
+- **Agent files** (`src/assistant/agent-file.ts` the reader, `agent-find.ts` discovery,
+  `agent-args.ts`, `agent-start.ts`, `agent-trust.ts`, `agent-model.ts`; durable page
+  docs/usage.md, "Agent files"). The file is a header of `key: value` lines between two
+  `---` lines — `description` (required), `params` (names, a trailing `?` for an optional
+  one, the optional ones last), `tools` (tool group ids), `auto` (`ask`, `reads`, `all`) —
+  and a body; `{{name}}` in the body is replaced, single braces never. The reader is our
+  own and total: every error carries the file and its 1-based line, an unknown or repeated
+  key, an undeclared `{{name}}`, a declared parameter the body never spells and a
+  malformed name each fail the file, and a failed file is never offered. A file is read at
+  each use (no cache) and hashed over its bytes (`Agent.hash`, sha-256). Three places
+  (`findAgents`): the project's `.flow-assist/agents/*.md` under the git top level of the
+  shell's directory (else the directory), read only when the real path of the directory and
+  of each file lies inside a `shell.roots` entry — with no roots nothing is read, a link out
+  is an error line, a file over `INSTRUCTIONS_CAP` is an error, never a cut prompt; the
+  person's `agents/*.md` under `hostStateDir()`; and the files a plugin's `manifest.json`
+  lists under `agents` (paths resolved inside the plugin's real directory, id
+  `<plugin>/<name>`; only for plugins `services.agentPlugins()` returns — loaded, enabled,
+  trusted, not built in). A project agent shadows the person's of one name unless the
+  project's has errors. **An agent child** is an ordinary child started with
+  `ChildSpec.agent` (`AgentRef`: id, source, path, hash) and `ChildSpec.toolGroups`.
+  Its auto mode is not in the spec: the starter sets it after `scheduleChild`, as `--auto`
+  does, to `agentAutoMode(file auto, maxAutoOf(config))` — the lower on `ask < reads < all`
+  of the file's mode and `agents.maxAuto` (`reads` when unset or not a mode).
+- **A child's tool groups are an allow-list** (`Conversation.toolGroups`,
+  `AgentOpts.allowGroups`). `tools:` of an agent file gives the child the `core` group
+  plus the groups it names; `readTools` in `agent.ts` withholds every other tool of the
+  registry, judged again on each registry revision, so a group that loads later is held
+  to the list. The `core` group is not narrowed: `memory`, `config_set` and the rest of it
+  stay. The list is applied in the child's `chatLLM` wrapper (`startChild`), which every
+  turn of the child and every nested run a tool starts through `ctx.chatLLM` passes
+  through; a call that already carries an `allowGroups` is intersected with it, so no
+  list widens the one above it. A child started by a child inherits the starter's list,
+  and when its spec names its own, the intersection; a grandchild's list can therefore
+  never exceed its parent's. A named group the registry does not hold is dropped with a
+  `pushNote` row at the start (`@id: group "x" is not loaded — starting without it`).
 - **Ctrl+C, Ctrl+D and Ctrl+Z take a second press** (`src/runtime/exit-keys.ts`, pure;
   the App owns the arm). flowtty hands these three to the app BEFORE the terminal
   backend acts (exit, exit, suspend — skipped when a `useInput` handler returns strict
@@ -4617,6 +4689,10 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   quotes (`unquoteValue`), as a shell takes it off, so a line reads the same in both
   places.
 - Environment: the host reads `LLM_TOKEN` (or `ai.tokenEnv`; `ANTHROPIC_API_KEY` with `ai.provider: 'anthropic'`) and the optional `FLOW_ASSIST_PLUGIN_REGISTRY_URL` / `FLOW_ASSIST_PLUGIN_REGISTRY_PROJECT` / `FLOW_ASSIST_PLUGIN_REGISTRY_TOKEN`; host variables take the `FLOW_ASSIST_` prefix. A plugin owns its own variables and declares them in `requiredSettings`.
+- `agents.maxAuto` (`ask`, `reads` or `all`; `reads` when unset, also when the value is not
+  a mode) — the highest auto mode an agent file may run in (`maxAutoOf`). `agents` is a
+  root of the model's leash (`LEASH_ROOTS`), so no mark on a key under it is honoured and
+  only the person sets it. Its `config_schema` note is `KEY_DEFAULTS['agents.maxAuto']`.
 - `ai.images` (`enabled` true, `maxBytes` 5 MB, `maxPerMessage` 4) — images in the
   chat. On by default: the API cannot be asked whether a model takes images, so a
   machine whose model cannot says `config set ai.images.enabled false`. Its
@@ -4878,6 +4954,21 @@ commands; docs and hints never present either mechanism as a boundary.
     screen, and the host's next write or the person's accept moves it aside and starts
     a new one. Checked at index build only: a hash of text `readFacts` reads anyway and
     one read of the record.
+  - **Agent files** — `agents.accepted.json` (0600): `files`, `<source>:<real path>` →
+    the sha-256 of the bytes the person last started (`agent-trust.ts`). A project file with
+    no record, or another hash, asks at the person's start: the host's y/n slot
+    (`Conversation.askAgentTrust`, `host: true`) shows the path, the description, the tool
+    groups, the auto mode after the cap and the parameters, and says `changed since you last
+    started it` when a record exists under another hash; yes records the hash and starts,
+    no starts nothing, stop or reset gives the typed line back. A person's file is recorded
+    at its start with no question; a plugin's has no record and is trusted with the plugin.
+    There is no first-start rule: nothing is trusted unseen. The model's `subagent`
+    starts only a plugin's file or one whose CURRENT hash is recorded (`agentTrusted`), and
+    nothing in its path asks. `recordAgentStart` writes nothing under `inModelShell()`
+    (`FLOW_ASSIST_MODEL_SHELL=1`), so a command the model runs cannot trust a file it
+    wrote; an unreadable record trusts nothing and is moved aside by the next write. Like
+    the other records this stops the accident, not a same-user process that writes the
+    record itself.
 - **Tests start without either record** (`src/__tests__/helpers/test-setup.ts`, the
   `bunfig.toml` preload): the host's state is one directory per `bun test` process, and
   with one first start per record every test after the first would otherwise meet its
