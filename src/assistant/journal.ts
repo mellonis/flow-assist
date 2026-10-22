@@ -361,7 +361,12 @@ function eventLines(events: JournalEvent[], child: ((id: string) => JournalEvent
         }
         break;
       case 'step': out.push(`*Step${at}:* ${text}`, ''); break;
-      case 'answer': out.push(`**Assistant**${at}`, '', text, ''); break;
+      // The answer to a child's `ask_parent` carries `by`; an assistant's answer carries text.
+      case 'answer':
+        if (typeof ev.by === 'string') out.push(`*Answer to the question${at}: ${nd(ev.by === 'none' ? 'no answer was given' : `from the ${ev.by}`)}*`, '');
+        else out.push(`**Assistant**${at}`, '', text, '');
+        break;
+      case 'ask-parent': out.push(`*Asked its parent${at}:* ${nd(String(ev.question ?? ''))}`, ''); break;
       case 'call-start': open.set(keyOf(ev), { slot: out.length, start: ev }); out.push('', ''); break;
       case 'confirm': { const o = open.get(keyOf(ev)); if (o) o.confirm = ev; break; }
       case 'call-out': {

@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import { apiHistory, requestTools, type ChatMessage, type TokenUsage } from './agent.js';
 import { askStart, type AskQuestion, type AskState } from './ask.js';
 import type { AutoMode } from './auto.js';
-import type { ConfirmPolicy } from './confirm-policy.js';
+import { parkedAt, type ConfirmPolicy } from './confirm-policy.js';
 import { DEFAULT_CONTEXT_WINDOW, readContext, type ContextReading } from './context-meter.js';
 import { dataUrl, imageLimits, imagesInText, readImageData, type ImageRef, type LoadedOk, type ResolvedImage } from './images.js';
 import type { JournalEvent } from './journal.js';
@@ -26,7 +26,7 @@ import type { ViewRecord } from './views.js';
 import type { ToolDef } from '../loader/tools.js';
 import { workspaceFor } from './workspace.js';
 import { asBackgroundWork, asConversationWork, asForegroundWork, outsideWork, workOwner } from '../runtime/background-work.js';
-import { callOf, childResultText, frameItem, lastAnswerOf, type BusyKind, type ChatMsg, type ChildResult, type EndedChild, type RunningChild, type ChildSpec, type ChildStart, type CloseReason, type StoppedBy, type JournalRoute, type ConversationDeps, type ConversationEvent, type ConversationKind, type ConversationSnapshot, type ConversationStatus, type InboxItem, type LaterTurn, type Offered, type PendingConfirm, type Queued, type QueueWait, type SendOptions, type TurnEnd, type TreeNode, type ViewPort } from './conversation-types.js';
+import { callOf, childResultText, frameItem, lastAnswerOf, type BusyKind, type ChatMsg, type ChildResult, type EndedChild, type RunningChild, type ChildSpec, type ChildStart, type CloseReason, type StoppedBy, type JournalRoute, type ConversationDeps, type ConversationEvent, type ConversationKind, type ConversationSnapshot, type ConversationStatus, type InboxItem, type LaterTurn, type Offered, type ParentAskInfo, type PendingConfirm, type Queued, type QueueWait, type SendOptions, type TurnEnd, type TreeNode, type ViewPort } from './conversation-types.js';
 import {
   applySession, closeOwnFile, currentProject, ensureSessionId, journal, journaledChatLLM, journalTo, journalToOwnFile, keepPersonWork, markSeen, newSubJournalId, persist, pushNote,
   releaseLockOf, writeSession, NO_FILE,
@@ -44,6 +44,10 @@ export const LIVE_REDRAW_MS = 200;
 export const MAX_ENDED = 20;
 // How long a change of a child's latest step is held before the tree is told again.
 const TREE_HOLD_MS = 200;
+// What a child is told when the conversation it asked does not take its question.
+export const NO_ANSWER = 'no answer — proceed on your best assumption and name it in your result';
+// Distinguishes the questions of one process.
+let parentAskSeq = 0;
 
 // What an image stands for, as its data is cached: its path and its hash.
 export const imageKey = (r: ImageRef) => `${r.path}\0${r.sha256}`;
@@ -224,6 +228,9 @@ export class Conversation {
   liveTimer: ReturnType<typeof setTimeout> | null = null;
   confirm: { name: string; args: string; input?: string; resolve: (ok: boolean, by?: 'person' | 'stop' | 'reset') => void } | null = null;   // a write's y/n, or the settings guard's (`name: 'config'`)
   question: { state: AskState; resolve: (done: AskState) => void } | null = null;
+  // The question this task or subagent put to the conversation that started it, until it
+  // is answered (`ask_parent`): one at a time. It counts as a wait, as a y/n does.
+  parentAsk: (ParentAskInfo & { resolve: (answer: string) => void }) | null = null;
 
   // ── what waits
   queue: Queued[] = [];
@@ -399,7 +406,7 @@ export class Conversation {
   drawConfirm(p: PendingConfirm | null): void { this.draw('confirmDrawn', p, true); }
   drawQuestion(q: AskState | null): void { this.draw('questionDrawn', q, true); }
   get status(): ConversationStatus {
-    if (this.confirm || this.question) return 'waiting';
+    if (this.confirm || this.question || this.parentAsk) return 'waiting';
     if (this.busy) return 'working';
     return unseenAnswer(this.messages, this.answeredAt, this.seenAt) ? 'done' : 'idle';
   }
@@ -422,7 +429,7 @@ export class Conversation {
   // work, like the listeners `tell` calls.
   emit(ev: ConversationEvent): void {
     outsideWork(() => { for (const fn of [...(this.handlers.get(ev.type) ?? [])]) fn(ev); });
-    if (ev.type === 'confirm' && this.parent) this.askedUp();
+    if ((ev.type === 'confirm' || ev.type === 'ask-parent') && this.parent) this.askedUp();
   }
   // The `tree` events held back: one window per root, 200 ms long, in which the conversations
   // whose latest step changed are remembered, each once, and told at its end (`treeChanged`).
@@ -459,7 +466,7 @@ export class Conversation {
     for (const f of from) for (let a: Conversation | null = f; a; a = a.parent) if (!told.has(a)) { told.add(a); a.emit({ type: 'tree' }); }
     this.deps.notify();
   }
-  // A child's y/n was parked or answered: every conversation above it hears `asking`, and
+  // A child's y/n or question to its parent was parked or answered: every conversation above it hears `asking`, and
   // the host redraws through the root's `notify` (a child's own is silent). The ancestors
   // are read now, from `parent`, so a child handed up to the session reports to it.
   private askedUp(): void {
@@ -503,9 +510,24 @@ export class Conversation {
     walk(this, [], false);
     return best;
   }
-  // Something below this conversation waits for the person.
+  // The oldest question to its parent that waits in a conversation below this one, with the
+  // label of the child that asked. null with none.
+  askedBelow(): { label: string; ask: ParentAskInfo } | null {
+    let best: { label: string; ask: ParentAskInfo } | null = null;
+    const walk = (c: Conversation): void => {
+      for (const child of c.children) {
+        const a = child.parentAsk;
+        if (a && (!best || a.at < best.ask.at)) best = { label: child.label, ask: { id: a.id, text: a.text, at: a.at } };
+        walk(child);
+      }
+    };
+    walk(this);
+    return best;
+  }
+  // Something below this conversation waits: for the person's y/n, or for the answer to a
+  // question to its parent.
   get subtreeWaiting(): boolean {
-    for (const c of this.children) if (c.confirm || c.subtreeWaiting) return true;
+    for (const c of this.children) if (c.confirm || c.parentAsk || c.subtreeWaiting) return true;
     return false;
   }
   // Records the port; the end is seen when the port shows it.
@@ -559,6 +581,7 @@ export class Conversation {
       this.abort = null;
       // At the exit a pending y/n is left as it is, as a session's is.
       if (this.confirm && reason !== 'exit') this.answerConfirm(false, 'reset');
+      if (this.parentAsk && reason !== 'exit') this.answerParentAsk('', 'reset');
     }
     // A child stopped with its conversation says so in its session's journal, which its
     // own filtered route would not carry.
@@ -605,7 +628,7 @@ export class Conversation {
   private childState(c: Conversation): Pick<RunningChild, 'status' | 'startedAt' | 'until' | 'answered'> {
     const delayed = this.childTimers.has(c);
     return {
-      status: delayed ? 'delayed' : c.confirm ? 'waiting' : c.busy ? 'working' : c.idle ? 'idle' : 'queued',
+      status: delayed ? 'delayed' : c.confirm ? 'waiting' : c.parentAsk ? 'asks' : c.busy ? 'working' : c.idle ? 'idle' : 'queued',
       startedAt: c.busy ? c.turnStartedAt : null,
       until: delayed ? c.delayedUntil : null,
       ...(c.idle && c.answerPending ? { answered: true } : {}),
@@ -658,6 +681,7 @@ export class Conversation {
     // end the turn in the stop key's name.
     this.stopChildren('person');
     if (this.canStop() && this.confirm) this.answerConfirm(false, 'stop');
+    if (this.canStop() && this.parentAsk) this.answerParentAsk('', 'stop');
     if (this.subJournalId) closeOwnFile(this, 'person');
     // A subagent between its turns has nothing to abort: stopping it ends it.
     if (this.idle) { this.endIdle(); return true; }
@@ -860,6 +884,7 @@ export class Conversation {
   stop(glyph: string): boolean {
     if (!this.canStop()) return false;
     if (this.confirm) this.answerConfirm(false, 'stop');
+    if (this.parentAsk) this.answerParentAsk('', 'stop');
     this.dismissQuestion();
     this.stopKey = glyph;
     this.abort?.abort();
@@ -914,7 +939,9 @@ export class Conversation {
     // system prompt, and a compaction of a long run folds it into the next one.
     if (spec.kind === 'subagent' && spec.summary) child.summary = spec.summary;
     child.inheritedProject = this.currentProject();
-    const kept = new Set(['call-start', 'confirm', 'call']);
+    const kept = new Set(['call-start', 'confirm', 'call', 'ask-parent']);
+    // The answer to the child's own question carries `by`; its assistant answers (text) stay in its turn.
+    const keeps = (ev: JournalEvent): boolean => kept.has(ev.t) || (ev.t === 'answer' && typeof ev.by === 'string');
     // A task's lines carry `task: <label>`, a subagent's `subagent: <label>`.
     const tag = (ev: JournalEvent): JournalEvent => (spec.kind === 'subagent' ? { subagent: spec.label, ...ev } : { task: spec.label, ...ev });
     // A line about the child, tagged, goes where this conversation's own lines go: its
@@ -933,7 +960,7 @@ export class Conversation {
       child.journalRoute = Object.assign(own, { raw: own, about });
       journalToOwnFile(child, null);
     } else {
-      child.journalRoute = Object.assign((ev: JournalEvent) => { if (kept.has(ev.t)) this.journalTo(journalId, tag(ev)); }, { raw: about, about });
+      child.journalRoute = Object.assign((ev: JournalEvent) => { if (keeps(ev)) this.journalTo(journalId, tag(ev)); }, { raw: about, about });
     }
     child.shell.setCwd(this.shell.cwd());
     this.children.add(child);
@@ -1087,6 +1114,48 @@ export class Conversation {
     this.emit({ type: 'confirm', request: null });
     this.deps.notify();
     // The inbox the y/n held lands now (a turn still running holds it on).
+    setTimeout(() => this.takeInbox(), 0);
+  }
+  // `ask_parent`: a task or a subagent puts one question to the conversation that started
+  // it and waits, its slot given up as for a y/n. A second call while one waits is refused
+  // at once. The route (`routeParentAsk`) answers at once or leaves the question parked for
+  // whoever settles it with `answerParentAsk`.
+  askParent(text: string): Promise<string> {
+    if (this.parentAsk) return Promise.resolve('ask_parent: a question is already waiting for its answer');
+    const info: ParentAskInfo = { id: `ask-${++parentAskSeq}`, text, at: parkedAt() };
+    this.journal({ t: 'ask-parent', id: info.id, question: text });
+    const now = this.routeParentAsk(info);
+    if (now) {
+      this.journal({ t: 'answer', id: info.id, by: now.by });
+      return Promise.resolve(now.answer);
+    }
+    return new Promise<string>((resolve) => {
+      this.parentAsk = { ...info, resolve };
+      this.emit({ type: 'ask-parent', ask: info });
+      this.deps.notify();
+    });
+  }
+  // Where a question goes (`parentAskDestination`) and whether it is answered on the spot:
+  // the answer and who gave it, or null to leave it parked. The person's route and the
+  // recipient's inbox route answer at once with the no-answer text.
+  routeParentAsk(_ask: ParentAskInfo): { answer: string; by: 'model' | 'person' | 'none' } | null {
+    const to = parentAskDestination(this);
+    if (to === 'person') return { answer: NO_ANSWER, by: 'none' };
+    if (to) return { answer: NO_ANSWER, by: 'none' };
+    return { answer: NO_ANSWER, by: 'none' };
+  }
+  // Settles the parked question: `answer` reaches the asking tool. `stop` and `reset` end
+  // the wait with `ask_parent: stopped` instead.
+  answerParentAsk(answer: string, by: 'model' | 'person' | 'none' | 'stop' | 'reset' = 'none'): void {
+    const a = this.parentAsk;
+    if (!a) return;
+    this.parentAsk = null;
+    const ended = by === 'stop' || by === 'reset';
+    this.journal({ t: 'answer', id: a.id, by: ended ? 'none' : by });
+    a.resolve(ended ? 'ask_parent: stopped' : answer);
+    this.emit({ type: 'ask-parent', ask: null });
+    this.deps.notify();
+    // The inbox the question held lands now (a turn still running holds it on).
     setTimeout(() => this.takeInbox(), 0);
   }
   // The settings-file guard's y/n (src/assistant/conversation-turn.ts), one run at a time.
@@ -1497,6 +1566,13 @@ export class Conversation {
 export function resultRecipient<T extends { parent: T | null | undefined; closed: boolean; staying: boolean }>(from: T | null | undefined): T | null {
   for (let c = from; c; c = c.parent) if (!c.closed && (!c.parent || c.staying)) return c;
   return null;
+}
+
+// Who a child's question goes to: the person for a subagent the person started, else the
+// conversation that takes the child's result (`resultRecipient`). null when none is left.
+export function parentAskDestination(c: Conversation): 'person' | Conversation | null {
+  if (c.staying) return 'person';
+  return resultRecipient(c.parent);
 }
 
 // The session the running work belongs to (src/runtime/background-work.ts): the

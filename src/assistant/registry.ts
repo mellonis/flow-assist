@@ -133,8 +133,8 @@ export class ConversationRegistry {
     // A y/n of a child below it, parked or answered; the label is the owner's, read from
     // what the session offers.
     c.on('asking', () => {
-      const o = c.offered();
-      if (c.subtreeWaiting && o) this.movedToWaiting(c, `a y/n from ${o.path[o.path.length - 1] ?? 'a subagent'}`);
+      const what = this.belowSaid(c);
+      if (c.subtreeWaiting && what) this.movedToWaiting(c, what);
       else this.leftWaiting(c);
     });
     c.on('question', (ev) => { if (ev.state && ev.parked) this.movedToWaiting(c, 'a question'); else if (!ev.state) this.leftWaiting(c); });
@@ -142,6 +142,14 @@ export class ConversationRegistry {
     // (the chat hears only the session it shows); whether it is put away is the watch's.
     c.on('turn-end', () => { if (c.headless) this.notifyChange(); });
     return c;
+  }
+  // What waits below a session, as a toast says it: the older of the oldest y/n and the
+  // oldest question to a parent, named by the child that owns it. null with neither.
+  private belowSaid(c: Conversation): string | null {
+    const o = c.offered();
+    const q = c.askedBelow();
+    if (o && (!q || o.request.at <= q.ask.at)) return `a y/n from ${o.path[o.path.length - 1] ?? 'a subagent'}`;
+    return q ? `a question from «${q.label}»` : null;
   }
   // How a toast names a session.
   private nameOf(c: Conversation): string { return c.title ? `«${c.title}»` : 'an untitled session'; }
@@ -237,7 +245,7 @@ export class ConversationRegistry {
     c.headless = true;
     // Left while it already waits: the answer it needs is said now.
     if (c.confirm || c.question) this.movedToWaiting(c, c.question ? 'a question' : c.confirm?.name === 'config' ? 'a settings y/n' : 'a y/n');
-    else if (c.subtreeWaiting) this.movedToWaiting(c, `a y/n from ${c.offered()?.path.at(-1) ?? 'a subagent'}`);
+    else if (c.subtreeWaiting) this.movedToWaiting(c, this.belowSaid(c) ?? 'a y/n from a subagent');
     this.watches.get(c)?.();
     this.watches.delete(c);
     let pending = false;

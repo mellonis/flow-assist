@@ -47,21 +47,25 @@ export interface TurnShape {
   boundary: boolean;
   recall: boolean;
   askUser: boolean;
+  // Whether the turn may put a question to the conversation that started it (`ask_parent`).
+  askParent: boolean;
   images: boolean;
   // A cap on the rounds of a turn, over the config's `ai.maxRounds`.
   maxRounds?: number;
   withholdTools: readonly string[];
 }
-export const ONESHOT_WITHHELD: readonly string[] = ['subagent', 'remind'];
+export const ONESHOT_WITHHELD: readonly string[] = ['subagent', 'remind', 'ask_parent'];
+// A session has nobody above it to ask.
+export const SESSION_WITHHELD: readonly string[] = ['ask_parent'];
 export const TASK_ROUNDS = 12;
 // A child cannot put a question to anyone, so `ask_user` is not offered to it.
 export const TASK_WITHHELD: readonly string[] = ['ask_user'];
 export const SUBAGENT_WITHHELD: readonly string[] = ['remind', 'ask_user'];
 const SHAPES: Record<ConversationKind, TurnShape> = {
-  session: { system: 'chat', screen: true, boundary: true, recall: true, askUser: true, images: true, withholdTools: [] },
-  task: { system: 'worker', screen: false, boundary: false, recall: false, askUser: false, images: false, maxRounds: TASK_ROUNDS, withholdTools: TASK_WITHHELD },
-  subagent: { system: 'subagent', screen: false, boundary: true, recall: true, askUser: false, images: false, withholdTools: SUBAGENT_WITHHELD },
-  oneshot: { system: 'chat', screen: false, boundary: false, recall: false, askUser: false, images: true, withholdTools: ONESHOT_WITHHELD },
+  session: { system: 'chat', screen: true, boundary: true, recall: true, askUser: true, askParent: false, images: true, withholdTools: SESSION_WITHHELD },
+  task: { system: 'worker', screen: false, boundary: false, recall: false, askUser: false, askParent: true, images: false, maxRounds: TASK_ROUNDS, withholdTools: TASK_WITHHELD },
+  subagent: { system: 'subagent', screen: false, boundary: true, recall: true, askUser: false, askParent: true, images: false, withholdTools: SUBAGENT_WITHHELD },
+  oneshot: { system: 'chat', screen: false, boundary: false, recall: false, askUser: false, askParent: false, images: true, withholdTools: ONESHOT_WITHHELD },
 };
 export function turnShape(kind: ConversationKind): TurnShape {
   return SHAPES[kind];
@@ -340,6 +344,8 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
         pluginToken: c.deps.pluginToken,
         // Nobody answers a question where nobody can answer a y/n (`deps.canAsk`).
         askUser: shape.askUser && c.deps.canAsk !== false ? (questions: AskQuestion[]) => c.askUser(questions) : undefined,
+        // A task or a subagent puts its question to the conversation that started it.
+        askParent: shape.askParent && c.parent ? (question: string) => c.askParent(question) : undefined,
         // Every service a tool may call through ctx — flattened, not spread:
         // `host.services` is a per-plugin view whose HOST services sit on its
         // prototype, and `...obj` copies own properties only. A spread would hand

@@ -23,7 +23,7 @@ const subagentOf = (deps: ReturnType<typeof fakeDeps>) => new Conversation(deps,
 
 test('the subagent row: worker-shaped prompt, a boundary and recall, no screens, no ask_user, no images, no round cap of its own', () => {
   const row = turnShape('subagent');
-  expect(row).toEqual({ system: 'subagent', screen: false, boundary: true, recall: true, askUser: false, images: false, withholdTools: SUBAGENT_WITHHELD });
+  expect(row).toEqual({ system: 'subagent', screen: false, boundary: true, recall: true, askUser: false, askParent: true, images: false, withholdTools: SUBAGENT_WITHHELD });
   expect(row).not.toHaveProperty('maxRounds');
   expect(SUBAGENT_WITHHELD).toEqual(['remind', 'ask_user']);
   expect(subagentPrompt('x')).toContain('Where the task leaves something open, make a reasonable assumption, carry on, and name each assumption in your result.');

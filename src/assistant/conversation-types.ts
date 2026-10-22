@@ -106,6 +106,10 @@ export interface TurnEnd {
 // orders the requests of a conversation's children oldest first.
 export interface PendingConfirm { name: string; args: string; command?: string; line?: string; input?: string; title?: string; hint?: string; whole?: boolean; at: number }
 
+// A question a task or a subagent put to the conversation that started it (`ask_parent`),
+// as the events and the tree show it. `at` orders it against the y/n parked in the same tree.
+export interface ParentAskInfo { id: string; text: string; at: number }
+
 // The y/n a conversation shows the person: its own, else the oldest of its descendants'.
 // `owner` is the conversation whose request it is, and so the one that takes the answer;
 // `path` is the labels from the first child down to the owner (empty for its own).
@@ -140,6 +144,7 @@ export type ConversationEvent =
   | { type: 'turn-end'; end: TurnEnd }
   | { type: 'activity' }          // a new segment began: the chat's seconds start again from 0
   | { type: 'confirm'; request: PendingConfirm | null; host?: true }   // `host`: the settings guard's own y/n, which closes no panel
+  | { type: 'ask-parent'; ask: ParentAskInfo | null }   // a task or a subagent asks the conversation above it (null: it was answered or ended)
   | { type: 'question'; state: AskState | null; parked?: boolean }
   | { type: 'tree' }              // something below this conversation changed what the live children show: a start or an end, a status, the latest step
   | { type: 'asking' }            // a y/n of a descendant was parked or answered: what this conversation offers may have changed
@@ -271,9 +276,10 @@ export function frameItem(item: InboxItem, nonce: string): string {
 export interface EndedChild { label: string; kind: ChildSpec['kind']; outcome: ChildResult['outcome']; ms: number; tokens: number }
 // A child still counted, as a listing reads it. `startedAt`: when its turn began (null
 // before); `until`: when its delay ends (null unless it is delayed).
+// `waiting`: a y/n parked; `asks`: a question to its parent waits for the answer.
 // `idle`: a subagent the person started, between its turns; `answered` (idle only): a later
 // answer of it the person has not read yet.
-export interface RunningChild { label: string; kind: ChildSpec['kind']; status: 'working' | 'waiting' | 'queued' | 'delayed' | 'idle'; startedAt: number | null; until: number | null; answered?: boolean }
+export interface RunningChild { label: string; kind: ChildSpec['kind']; status: 'working' | 'waiting' | 'asks' | 'queued' | 'delayed' | 'idle'; startedAt: number | null; until: number | null; answered?: boolean }
 // A live descendant of a conversation, as the agent tree draws it (`Conversation.tree`).
 // `key` is the descendant's conversation key; `depth` is 1 for a child of the conversation
 // asked; `latest` is the tool it runs, else the verb of its round while it works, else '';

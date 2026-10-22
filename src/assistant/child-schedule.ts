@@ -21,8 +21,8 @@ export function scheduleChild(spec: ChildSpec, delayMs: number, deps: ChildSched
   const { slots } = deps;
   const label = spec.label;
   // Whether this child's wait for the person is counted against its slot. A running child
-  // that parks a y/n gives its slot up until the answer; the count is kept here, from the
-  // child's own `confirm` events, so a run that ends while waiting hands it back.
+  // that parks a y/n or a question to its parent gives its slot up until the answer; the count is kept here, from the
+  // child's own `confirm` and `ask-parent` events, so a run that ends while waiting hands it back.
   let counted = false;
   const markWaiting = (on: boolean): void => {
     if (on === counted) return;
@@ -92,7 +92,10 @@ export function scheduleChild(spec: ChildSpec, delayMs: number, deps: ChildSched
     dequeue = slots.admit(async () => { phase = 'running'; await turn(); });
   }, delayMs);
   started.armed(timer);
-  started.child.on('confirm', (ev) => { if (phase === 'running' || !ev.request) markWaiting(!!ev.request); });
+  // One wait whatever it waits for: a y/n or a question to its parent, both at once count once.
+  const waitChanged = (): void => { const w = !!started.child.confirm || !!started.child.parentAsk; if (phase === 'running' || !w) markWaiting(w); };
+  started.child.on('confirm', waitChanged);
+  started.child.on('ask-parent', waitChanged);
   slots.arm(timer);
   // A stop before the run began takes the child out of the schedule — its timer cleared
   // and its count disarmed, or its place in the queue given up — and settles it at once:

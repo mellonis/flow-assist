@@ -27,16 +27,17 @@ function inTime(ms: number): string {
   return h ? `${h}h${min % 60 ? ` ${min % 60}m` : ''}` : `${min}m`;
 }
 
-const MARK: Record<TreeNode['status'], string> = { waiting: '⏸', working: '⚙', queued: '○', delayed: '○', idle: '◦' };
-const TONE: Record<TreeNode['status'], TreeRow['tone']> = { waiting: 'warn', working: 'work', queued: 'dim', delayed: 'dim', idle: 'dim' };
+const MARK: Record<TreeNode['status'], string> = { waiting: '⏸', asks: '?', working: '⚙', queued: '○', delayed: '○', idle: '◦' };
+const TONE: Record<TreeNode['status'], TreeRow['tone']> = { waiting: 'warn', asks: 'warn', working: 'work', queued: 'dim', delayed: 'dim', idle: 'dim' };
 // Who is kept when the rows run out: what waits for the person first, then what works,
 // then an answer not read yet.
-const ATTENTION: Record<TreeNode['status'], number> = { waiting: 0, working: 1, queued: 3, delayed: 3, idle: 4 };
+const ATTENTION: Record<TreeNode['status'], number> = { waiting: 0, asks: 0, working: 1, queued: 3, delayed: 3, idle: 4 };
 const attentionOf = (n: TreeNode): number => (n.status === 'idle' && n.answered ? 2 : ATTENTION[n.status]);
 const toneOf = (n: TreeNode): TreeRow['tone'] => (n.status === 'idle' && n.answered ? 'warn' : TONE[n.status]);
 
 function stateOf(n: TreeNode, now: number): string {
   if (n.status === 'waiting') return 'waiting for a y/n';
+  if (n.status === 'asks') return 'asks its parent';
   if (n.status === 'working') return n.latest || 'working';
   if (n.status === 'delayed') return `in ${inTime(Math.max(0, (n.until ?? now) - now))}`;
   if (n.status === 'idle') return n.answered ? 'answered' : 'idle';

@@ -1929,7 +1929,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // mode — on the footer row in a window or the whole terminal too (Ctrl+] closes
           // those, and the question must not be forgotten behind them).
           const focusCap = bindingGlyph(host.keys.chatFocus);
-          const waiting = !open && (!!pendingAsk || !!pendingQuestion || !!conv.offered());
+          const waiting = !open && (!!pendingAsk || !!pendingQuestion || !!conv.offered() || !!conv.askedBelow());
           const statusRow = !open && (layout === 'panel' || waiting)
             ? renderChatStatus({ theme: host.config.theme as never, streaming, toolLabel, phase, verb, elapsed: elapsedMs, keyHint: focusCap ? `${focusCap} chat` : '', waiting })
             : null;

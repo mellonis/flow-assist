@@ -2,7 +2,7 @@
 // turn — the worker prompt, its round cap, nothing of the person's.
 import { expect, test } from 'bun:test';
 import { Conversation } from '../conversation.ts';
-import { ONESHOT_WITHHELD, TASK_WITHHELD, turnShape, workerPrompt } from '../conversation-turn.ts';
+import { ONESHOT_WITHHELD, SESSION_WITHHELD, TASK_WITHHELD, turnShape, workerPrompt } from '../conversation-turn.ts';
 import { fakeDeps } from './conversation-deps.ts';
 
 function answering(text: string) {
@@ -16,9 +16,9 @@ function answering(text: string) {
 }
 
 test('the table: a row per kind', () => {
-  expect(turnShape('session')).toEqual({ system: 'chat', screen: true, boundary: true, recall: true, askUser: true, images: true, withholdTools: [] });
-  expect(turnShape('task')).toEqual({ system: 'worker', screen: false, boundary: false, recall: false, askUser: false, images: false, maxRounds: 12, withholdTools: TASK_WITHHELD });
-  expect(turnShape('oneshot')).toEqual({ system: 'chat', screen: false, boundary: false, recall: false, askUser: false, images: true, withholdTools: ONESHOT_WITHHELD });
+  expect(turnShape('session')).toEqual({ system: 'chat', screen: true, boundary: true, recall: true, askUser: true, askParent: false, images: true, withholdTools: SESSION_WITHHELD });
+  expect(turnShape('task')).toEqual({ system: 'worker', screen: false, boundary: false, recall: false, askUser: false, askParent: true, images: false, maxRounds: 12, withholdTools: TASK_WITHHELD });
+  expect(turnShape('oneshot')).toEqual({ system: 'chat', screen: false, boundary: false, recall: false, askUser: false, askParent: false, images: true, withholdTools: ONESHOT_WITHHELD });
 });
 
 test('a task turn: the worker prompt, twelve rounds, no tail, no boundary, no recall, no ask_user, it withheld, a y/n that says no', async () => {

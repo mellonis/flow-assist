@@ -49,6 +49,9 @@ export interface CoreCtx {
   // Supplied by an interactive chat: shows the questions and resolves once the
   // person has answered or dismissed them. Absent where there is nobody to ask.
   askUser?: (questions: AskQuestion[]) => Promise<Pick<AskState, 'answers' | 'cancelled'>>;
+  // Supplied to a task or a subagent: puts one question to the conversation that started
+  // it and resolves with the answer (or the reason there is none). Absent for the rest.
+  askParent?: (question: string) => Promise<string>;
   // Supplied by `agentChat` to every call: a tool that edits something reports what
   // it looked like before and after, and the chat shows the diff under the answer.
   // Display only — the model never gets it. Report only a change that was made.
@@ -469,6 +472,16 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
     {
       type: 'function',
       function: {
+        name: 'ask_parent',
+        description: 'Ask the conversation that started you one question and wait for the answer. Use it when the work cannot go on without the answer; for a small thing, take your best assumption and name it in your result. One question at a time.',
+        parameters: { type: 'object', properties: {
+          question: { type: 'string', description: 'The question, complete in itself: the one who answers sees only this.' },
+        }, required: ['question'] },
+      },
+    },
+    {
+      type: 'function',
+      function: {
         name: 'open_url',
         description: 'NAVIGATION ONLY — open a URL in the system browser. It does NOT fetch the page content — it only opens the URL in the user\'s browser. Use it when the user asks to OPEN a page, not to read data (use a read tool for that). Pass a FULL URL; when a tool result carries a ready web link for an entity (a `webUrl` field), pass that link as-is rather than assembling one by hand.',
         parameters: { type: 'object', properties: { url: { type: 'string', description: 'Full URL to open in the browser (e.g. "https://example.com"), or a `webUrl` taken from a tool result.' } }, required: ['url'] },
@@ -517,6 +530,12 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
         if (!ctx.askUser) return 'ask_user: there is nobody to ask here (not an interactive chat). Proceed on your best assumption and say which one you made.';
         const done = await ctx.askUser(parsed.questions);
         return askResult({ ...done, questions: parsed.questions, index: 0, cursor: 0, picked: [], typing: false, text: '', caret: 0, done: true });
+      }
+      case 'ask_parent': {
+        const question = typeof args.question === 'string' ? args.question.trim() : '';
+        if (!question) return 'ask_parent: question must be a non-empty string';
+        if (!ctx.askParent) return 'ask_parent: there is nobody to ask here (this conversation was not started by another). Proceed on your best assumption and say which one you made.';
+        return ctx.askParent(question);
       }
       case 'open_url': {
         // Universal browser opener: the host owns the primitive (openInBrowser).

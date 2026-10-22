@@ -50,7 +50,7 @@ test('a one-shot turn: no screen tail, no round boundary, no recall, no ask_user
   expect(c.lastAnswer()).toBe('Done.');
 });
 
-test('a chat\'s session turn keeps what it had: the screen tail, the boundary, recall, ask_user, a y/n, nothing withheld', async () => {
+test('a chat\'s session turn keeps what it had: the screen tail, the boundary, recall, ask_user, a y/n, only ask_parent withheld', async () => {
   const m = answering('Done.');
   const c = new Conversation(fakeDeps({ chatLLM: m.chatLLM }));
   await c.send('go');
@@ -60,7 +60,7 @@ test('a chat\'s session turn keeps what it had: the screen tail, the boundary, r
   expect(typeof o.toolCtx.recall.items).toBe('function');
   expect(typeof o.toolCtx.askUser).toBe('function');
   expect(typeof o.confirmWrite).toBe('function');
-  expect(o.withholdTools).toEqual([]);
+  expect(o.withholdTools).toEqual(['ask_parent']);
 });
 
 test('a session turn where nobody can answer is handed no ask_user, so no question waits on nobody', async () => {
