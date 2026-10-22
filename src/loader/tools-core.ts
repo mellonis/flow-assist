@@ -19,6 +19,8 @@ import { tildePath } from '../assistant/shell.js';
 import { openInBrowser } from '../runtime/services.js';
 import { inBackgroundWork, inUnattachedWork } from '../runtime/background-work.js';
 import { type ChildSpec, type ChildStart } from '../assistant/conversation-types.js';
+import { planAgentStart, type AgentStarter } from '../assistant/agent-model.js';
+import { absentGroupsNote } from '../assistant/agent-start.js';
 import { scheduleChild } from '../assistant/child-schedule.js';
 import type { ChildSlots } from '../assistant/registry.js';
 import { resolveIdentityToken } from '../runtime/plugin-identity.js';
@@ -73,6 +75,9 @@ export interface CoreCtx {
   // and how to read an attached image's bytes again (src/assistant/recall.ts). Absent
   // where there is no conversation (a background task, the one-shot prompt).
   recall?: RecallSource;
+  // Supplied to a conversation that may start children: what `subagent` needs to start an
+  // agent file by name (src/assistant/agent-model.ts). Absent where there is none.
+  agentStarter?: AgentStarter;
   // Set by `agentChat` for each call: true only when this call was put to the y/n and
   // answered yes. A caller's own `toolCtx` cannot set it.
   confirmedByPerson?: boolean;
@@ -418,14 +423,16 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
       type: 'function',
       function: {
         name: 'subagent',
-        description: 'Run a task in the BACKGROUND: offload a self-contained job to a separate agent run that has tool access; the call returns at once and the chat stays usable. When the task ends, its result comes back to the nearest session or subagent above it — the conversation that started it, or, for a task a subagent began, that subagent (as a framed message that starts its next turn) as a message of its own (`<label> finished:` and the result, or `<label> failed:` and the error, or `<label> stopped:` and what it had written when the person stopped it) — when your current turn ends, never in the middle of it. Then you get one turn for all the results that landed together (or read them with the person\'s queued message). The person may have turned that off (`ai.backgroundFollowUp: false`: the results then wait for their next message), so do not promise to act on results when they arrive ("when they report, I will save each one"): say the results will come into the chat and you will look at them then, or the person can ask you to carry on. When results have arrived since your last answer, your next answer opens with what came back — a line per task — before anything else. Call when the user wants something done later without blocking the conversation — e.g. "count the tests in src in the background", "запусти сборку в фоне". `task` (required): the work to do, in natural language. `label`: a short name for the task/notification (default: the task, clipped). `in`/`at`: an optional delay before it starts (a duration like "10 seconds", or a clock time). The task runs read-only by default (write tools are declined) and bounded (up to 12 tool rounds). `write: true` lets it ask the person for each write — every one stops for their yes, so use it only when the job must change something, never for a read. You may spawn a follow-up `subagent` task for a further step, but keep the chain to ONE level. A task you start may ask you a question (`ask_parent`); it reaches you framed as <child-question …> and you answer it with `answer_child` in the turn that reads it (ask the person with `ask_user` first if they must decide; a turn that ends unanswered tells the task there is no answer). The chat shows how many background tasks are in flight.',
+        description: 'Run a task in the BACKGROUND: offload a self-contained job to a separate agent run that has tool access; the call returns at once and the chat stays usable. When the task ends, its result comes back to the nearest session or subagent above it — the conversation that started it, or, for a task a subagent began, that subagent (as a framed message that starts its next turn) as a message of its own (`<label> finished:` and the result, or `<label> failed:` and the error, or `<label> stopped:` and what it had written when the person stopped it) — when your current turn ends, never in the middle of it. Then you get one turn for all the results that landed together (or read them with the person\'s queued message). The person may have turned that off (`ai.backgroundFollowUp: false`: the results then wait for their next message), so do not promise to act on results when they arrive ("when they report, I will save each one"): say the results will come into the chat and you will look at them then, or the person can ask you to carry on. When results have arrived since your last answer, your next answer opens with what came back — a line per task — before anything else. Call when the user wants something done later without blocking the conversation — e.g. "count the tests in src in the background", "запусти сборку в фоне". `task` (required): the work to do, in natural language. `label`: a short name for the task/notification (default: the task, clipped). `in`/`at`: an optional delay before it starts (a duration like "10 seconds", or a clock time). The task runs read-only by default (write tools are declined) and bounded (up to 12 tool rounds). `write: true` lets it ask the person for each write — every one stops for their yes, so use it only when the job must change something, never for a read. You may spawn a follow-up `subagent` task for a further step, but keep the chain to ONE level. A task you start may ask you a question (`ask_parent`); it reaches you framed as <child-question …> and you answer it with `answer_child` in the turn that reads it (ask the person with `ask_user` first if they must decide; a turn that ends unanswered tells the task there is no answer). The chat shows how many background tasks are in flight. Agents named in the system prompt\'s list start by name: `agent` (and `args`, an object of its parameters); `task` is then only extra instructions, and optional.',
         parameters: { type: 'object', properties: {
           task: { type: 'string', description: 'The work to do in the background, in natural language — e.g. "count the tests in src and report the number".' },
           label: { type: 'string', description: 'Optional short name for the task/notification (default: the task, clipped to ~40 chars).' },
           in: { type: 'string', description: 'Optional delay before it starts, e.g. "10 seconds", "2 minutes".' },
           at: { type: 'string', description: 'Optional clock time to start, "HH:MM" or "HH:MM:SS" (24h); if already past, tomorrow.' },
           write: { type: 'boolean', description: 'Optional, default false (read-only). true: the task may write, and each write stops for the person\'s yes in the chat that started it. Use it only when the job must change something.' },
-        }, required: ['task'] },
+          agent: { type: 'string', description: 'Optional: an agent from the system prompt\'s list, by its id (with or without @). It starts with its own prompt, tools and auto mode; `task` is then optional.' },
+          args: { type: 'object', description: 'With `agent`: its parameter values by name, e.g. {"ticket": "T-1"}.' },
+        }, required: [] },
       },
     },
     {
@@ -760,9 +767,22 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
         // unless `write: true`: then each one asks the person, in the chat that started it. The tool answers at once; when the task ends its result
         // goes into the inbox of the nearest session or subagent above it (`run()` delivers it),
         // and the tool says so in the toast and the log line.
-        const task = String(args.task ?? '').trim();
-        if (!task) return 'task is required — the work to do in the background.';
-        const label = String(args.label ?? '').trim() || task.slice(0, 40);
+        const agentName = String(args.agent ?? '').trim();
+        let task = String(args.task ?? '').trim();
+        if (!agentName && !task) return 'task is required — the work to do in the background.';
+        let label = String(args.label ?? '').trim() || task.slice(0, 40);
+        // A named agent: its file's prompt (parameters filled, `task` after it), label,
+        // tool groups and auto mode; a refusal is the tool's answer, worded for the model.
+        let named: Extract<ReturnType<typeof planAgentStart>, { ok: true }> | null = null;
+        if (agentName) {
+          const starter = (ctx as CoreCtx).agentStarter;
+          if (!starter) return 'subagent: starting an agent by name is not available here.';
+          const plan = planAgentStart(starter, { agent: agentName, args: args.args, prompt: task });
+          if (!plan.ok) return plan.message;
+          named = plan;
+          task = plan.prompt;
+          label = plan.label;
+        }
         // Start delay: `in`/`at` (like remind), or immediately when neither is given.
         let ms = 0;
         const inStr = String(args.in ?? '').trim();
@@ -781,11 +801,16 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
         if (typeof startChild !== 'function' || !slots) return 'Background tasks unavailable: no conversation to run them in (the host must be interactive).';
         // Refused past `ai.subagentDepth`: the refusal is the tool's answer. The schedule
         // itself (AGENTS.md (child schedule)) is one function the slash commands share.
-        const scheduled = scheduleChild({ kind: 'task', label, prompt: task, by: 'model', ...(args.write === true ? { write: true } : {}) }, ms, {
+        // An agent task may write under the person's y/n, as one started with `write: true`
+        // does; whether it can ask is `startChild`'s rule.
+        const writes = args.write === true || !!named;
+        const scheduled = scheduleChild({ kind: 'task', label, prompt: task, by: 'model', ...(writes ? { write: true } : {}), ...(named ? { agent: named.agent, ...(named.toolGroups ? { toolGroups: named.toolGroups } : {}) } : {}) }, ms, {
           startChild: (spec) => startChild.call(c, spec), slots, showMessage: c.showMessage, pushLog: c.pushLog, notify: c.notify,
         });
         if ('refused' in scheduled) return scheduled.refused;
-        return `Background task started (${label})${ms ? `, to begin in ${Math.round(ms / 1000)}s` : ''} — the result appears in the chat when it ends, and you see it on your next turn.${args.write === true ? ' It may ask the person to approve each write, and waits for their answer.' : ''}`;
+        if (named && named.mode !== 'ask') scheduled.child.setAutoMode(named.mode);
+        const absent = named ? absentGroupsNote(named.id, named.absent) : '';
+        return `${absent ? `${absent}\n` : ''}Background task started (${label})${ms ? `, to begin in ${Math.round(ms / 1000)}s` : ''} — the result appears in the chat when it ends, and you see it on your next turn.${writes ? ' It may ask the person to approve each write, and waits for their answer.' : ''}`;
       }
       case 'todo': {
         // Not write-confirmed (like memory): a y/n pause on every `todo add` would

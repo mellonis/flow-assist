@@ -983,6 +983,8 @@ export class Conversation {
     this.emit({ type: 'children', count: this.children.size });
     this.treeChanged(this);
     if (spec.kind === 'subagent') about({ t: 'subagent', label: spec.label, by: spec.by, event: 'start', ...(fileId ? { id: fileId } : {}), ...(spec.agent ? { agent: spec.agent.id, source: spec.agent.source, path: spec.agent.path, hash: spec.agent.hash } : {}) });
+    // A task writes no start line, except one started from an agent file: it names the file.
+    if (spec.kind === 'task' && spec.agent) about({ t: 'task-start', label: spec.label, by: spec.by, agent: spec.agent.id, source: spec.agent.source, path: spec.agent.path, hash: spec.agent.hash });
     // A subagent the person started stays after its answer (see `staying`).
     const stays = spec.kind === 'subagent' && spec.by === 'person';
     if (spec.kind === 'subagent') child.task = spec.prompt;

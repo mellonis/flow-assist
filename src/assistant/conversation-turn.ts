@@ -17,7 +17,10 @@ import { screenBlock } from './screen-context.js';
 import { addCalls, callRun, endRound, startsWithNext, type CallRun, type TurnPart } from './step.js';
 import { STOPPED_TURN, failedTurn, joinSystem, languageDirective, projectBlock, roundCapTurn, summaryBlock, systemParts } from './system-prompt.js';
 import type { ViewRecord } from './views.js';
-import type { ToolDef } from '../loader/tools.js';
+import { chatToolGroupOf, type ToolDef } from '../loader/tools.js';
+import { agentsBlock, type AgentStarter } from './agent-model.js';
+import { findAgents, type PluginAgentSource } from './agent-find.js';
+import { maxAutoOf } from './agent-start.js';
 import { RESTART_NOTE, type ConfigChange } from '../config/load.js';
 import { keyGlyph } from '../playback/keys.js';
 import { answerAt, type ChatMsg, type ChildSpec, type ConversationKind, type SendOptions } from './conversation-types.js';
@@ -69,6 +72,22 @@ const SHAPES: Record<ConversationKind, TurnShape> = {
   subagent: { system: 'subagent', screen: false, boundary: true, recall: true, askUser: false, askParent: true, answerChild: true, images: false, withholdTools: SUBAGENT_WITHHELD },
   oneshot: { system: 'chat', screen: false, boundary: false, recall: false, askUser: false, askParent: false, answerChild: false, images: true, withholdTools: ONESHOT_WITHHELD },
 };
+// What a conversation hands the `subagent` tool to start an agent file by name: the files as
+// they are now (read at each call, nothing kept), the cap on their auto mode, the groups
+// loaded and the labels of its live children.
+export function agentStarterOf(c: Conversation): AgentStarter {
+  return {
+    found: () => findAgents({
+      config: c.deps.config() as Record<string, unknown>,
+      cwd: c.shell.cwd(),
+      plugins: (c.deps.services() as { agentPlugins?: () => PluginAgentSource[] }).agentPlugins?.() ?? [],
+    }),
+    cap: () => maxAutoOf(c.deps.config()),
+    loaded: () => new Set(chatToolGroupOf().values()),
+    labels: () => c.runningChildren().map((r) => r.label),
+  };
+}
+
 export function turnShape(kind: ConversationKind): TurnShape {
   return SHAPES[kind];
 }
@@ -108,14 +127,21 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
   // instructions after it (`TurnShape.system`).
   const sysParts = shape.system === 'chat' ? systemParts(cfg, c.screensBlock(), c.memoryBlock(), c.plan.snapshot(), c.summary) : undefined;
   if (sysParts && c.kind === 'session') sysParts.base = [sysParts.base, FRAME_NOTE].filter(Boolean).join('\n\n');
+  // The agents the model may start by name, listed for the kinds that are offered the
+  // `subagent` tool; read at each build of the prompt.
+  const offersAgents = !shape.withholdTools.includes('subagent');
+  const agentsNow = (): string => {
+    if (!offersAgents) return '';
+    try { return agentsBlock(agentStarterOf(c).found()); } catch { return ''; }
+  };
   const chatSystem = (parts: ReturnType<typeof systemParts>, fresh: boolean) =>
-    joinSystem(fresh ? { ...parts, screens: c.screensBlock(), summary: summaryBlock(c.summary) } : parts, projectBlock(c.project));
+    joinSystem(fresh ? { ...parts, screens: c.screensBlock(), summary: summaryBlock(c.summary) } : parts, [projectBlock(c.project), agentsNow()].filter(Boolean).join('\n\n'));
   // A subagent's memory block is read once for the message, as a chat's is. Its task is
   // the one it was given, whatever the message of this turn says.
   const subagentHead = shape.system === 'subagent' ? [subagentPrompt(c.task || q), FRAME_NOTE, c.memoryBlock(), languageDirective(cfg)].filter(Boolean).join('\n\n') : '';
   const workerSystem = () => shape.system === 'subagent'
-    ? [subagentHead, projectBlock(c.project), summaryBlock(c.summary)].filter(Boolean).join('\n\n')
-    : [workerPrompt(q), projectBlock(c.project)].filter(Boolean).join('\n\n');
+    ? [subagentHead, projectBlock(c.project), agentsNow(), summaryBlock(c.summary)].filter(Boolean).join('\n\n')
+    : [workerPrompt(q), projectBlock(c.project), agentsNow()].filter(Boolean).join('\n\n');
   const sys = sysParts ? chatSystem(sysParts, false) : workerSystem();
   // DISPLAY source vs LLM role are split: a background result stays role 'bg'
   // on screen and in the kept history (it is NOT the person's own message), while
@@ -364,6 +390,8 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
         // for (src/assistant/registry.ts).
         startChild: (spec: ChildSpec) => c.startChild(spec, journalId),
         childSlots: c.deps.children,
+        // What the tool needs to start an agent file by name.
+        agentStarter: agentStarterOf(c),
       },
       // A subagent with a file of its own writes its y/n lines there untagged, like its
       // calls; one without a home tags them for the journal above.
