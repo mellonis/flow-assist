@@ -67,6 +67,9 @@ export interface HostServices {
   // The screens plugins declare, and the rules they open by (./screens.ts) — the model's
   // `ui_open` and the chat's turn end reach them here. Bound by `renderApp`.
   screens?: import('./screens.js').Screens;
+  // The plugins that may offer agent files now: loaded, enabled, trusted. Bound by
+  // `renderApp`.
+  agentPlugins?: () => import('../assistant/agent-find.js').PluginAgentSource[];
   onExit: () => void;
   clearCache: () => void;
   // Counts cache flushes. A flush empties the cache but changes nothing on screen — the

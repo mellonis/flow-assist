@@ -136,6 +136,9 @@ export interface Plugin {
   screens?: Record<string, ScreenDecl>;
   description?: string;
   usesCache?: boolean;
+  // Where the plugin lives on disk, set by the loader (the place its trust was checked
+  // at); absent on a built-in. The host resolves the files a manifest lists against it.
+  dir?: string;
   setup?: (api: unknown) => unknown;
   chatContext?: (api: unknown) => ContextItem[] | null | undefined;
   chatSubject?: (api: unknown) => string | null | undefined;

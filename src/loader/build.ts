@@ -191,7 +191,9 @@ export async function loadEnabledPlugin(name: string, { config, enabledDir, rend
     const sink = log ?? ((line: string) => console.warn(line));
     const say = (line: string) => sink(redactSecrets(line));
     const transport = (remoteTransport ?? transportFor)(manifest, at, { log: say });
-    return remotePlugin({ manifest, transport, config, make, log: say });
+    const remote = await remotePlugin({ manifest, transport, config, make, log: say });
+    remote.dir = at;
+    return remote;
   }
   // Import the entry FILE (not the symlinked directory), so the compiled binary and the
   // runtime resolve plugins the same way — see resolvePluginEntry.
@@ -206,6 +208,7 @@ export async function loadEnabledPlugin(name: string, { config, enabledDir, rend
   // What the plugin IS, in its author's words, for the start screen — from its manifest,
   // unless the shape says it itself.
   plugin.description ??= manifestDescription(at);
+  plugin.dir = at;
   return plugin;
 }
 

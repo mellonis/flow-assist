@@ -534,6 +534,9 @@ export function renderApp(
     say: (line) => (services as unknown as ReactBoundServices).showMessage(line),
   });
   (services as unknown as HostServices).screens = screens;
+  (services as unknown as HostServices).agentPlugins = () => plugins
+    .filter((p) => p.dir && !BUILTIN_PLUGINS.includes(p.name) && !disabledNow.has(p.name) && !site.untrusted.some((u) => u.name === p.name))
+    .map((p) => ({ name: p.name, dir: p.dir! }));
 
   // Shared per-app mutable state (created ONCE; read by the App and the
   // fallback handler so a re-render never resets them).

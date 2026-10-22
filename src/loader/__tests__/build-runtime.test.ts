@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { loadPlugins } from '../build';
 import { createPluginRepo } from '../repo';
-import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { HOST_API } from '../../version';
@@ -246,4 +246,21 @@ test('a trusted plugin is loaded from the place its trust records, not through i
   const plugins = await loading;
   expect(plugins.some((p) => p.name === 'fake')).toBe(true);
   expect(dirs).toEqual([realpathSync(real)]);
+});
+
+test('a loaded plugin carries the directory it was loaded from; a built-in has none', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'fa-plugdir-'));
+  const avail = join(root, 'plugins-available');
+  const enabled = join(root, 'plugins-enabled');
+  mkdirSync(avail, { recursive: true });
+  mkdirSync(enabled, { recursive: true });
+  const dir = join(avail, 'withdir');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'manifest.json'), JSON.stringify({ name: 'withdir', version: '1.0.0', hostApi: HOST_API }));
+  writeFileSync(join(dir, 'index.ts'), 'export default function build(){ return { name: "withdir" }; }');
+  symlinkSync(dir, join(enabled, 'withdir'));
+  const repo = createPluginRepo({ availableDir: avail, enabledDir: enabled, projectRoot: root });
+  const plugins = await loadPlugins({ config: {}, repo, enabledDir: enabled });
+  expect(plugins.find((p) => p.name === 'withdir')?.dir).toBe(realpathSync(dir));
+  expect(plugins.find((p) => p.name === 'core')?.dir).toBeUndefined();
 });

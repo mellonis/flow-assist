@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { parseSubagentLine, stopTargetIndex, subagentLabel, subagentListing, tellTargetIndex } from '../subagent-command.ts';
+import { agentListing, parseSubagentLine, stopTargetIndex, subagentLabel, subagentListing, tellTargetIndex } from '../subagent-command.ts';
 
 test('a bare line lists; stop as the first word is the stop command', () => {
   expect(parseSubagentLine('  ')).toEqual({ kind: 'list' });
@@ -114,4 +114,32 @@ test('labels that repeat: a number names exactly the listed row, stop and tell a
   expect(tellTargetIndex(list, 'dup', listed)).toEqual({ many: [1, 2] });
   // A label made of digits is read as a number.
   expect(tellTargetIndex([running('2024')], '2024', ['2024'])).toBeNull();
+});
+
+test('a first word starting with @ names an agent: @ alone lists them, @name carries the rest of the line', () => {
+  expect(parseSubagentLine('@')).toEqual({ kind: 'agents' });
+  expect(parseSubagentLine('  @  ')).toEqual({ kind: 'agents' });
+  expect(parseSubagentLine('@new-ticket PRICE-512 fix the export')).toEqual({ kind: 'agent', name: 'new-ticket', args: 'PRICE-512 fix the export' });
+  expect(parseSubagentLine('@x')).toEqual({ kind: 'agent', name: 'x', args: '' });
+  // Only as the first word.
+  expect(parseSubagentLine('mail @bob')).toMatchObject({ kind: 'start', prompt: 'mail @bob' });
+});
+
+test('the agent listing: each agent with parameters and source, shadowed marked, errors as path:line, the unread project said', () => {
+  const agent = (id: string, over = {}) => ({ id, name: id.split('/').pop()!, description: `does ${id}`, params: [], tools: null, auto: 'ask' as const, body: 'b', path: `/a/${id}.md`, source: { kind: 'person' as const }, hash: 'h', ...over });
+  const text = agentListing({
+    agents: [agent('plain'), agent('tk/job', { params: [{ name: 'ticket', optional: false }, { name: 'branch', optional: true }], source: { kind: 'plugin', plugin: 'tk' } })],
+    shadowed: [agent('dup')],
+    failed: [],
+    errors: [{ path: '/a/bad.md', line: 4, message: 'unknown key "tool"' }],
+    projectRead: false,
+    projectDir: null,
+    personDir: '/p',
+  });
+  expect(text).toContain('- @plain — does plain · person');
+  expect(text).toContain('- @tk/job — does tk/job · <ticket> [branch] · plugin tk');
+  expect(text).toContain('- @dup — does dup · person (shadowed by the project\'s agent of this name)');
+  expect(text).toContain('- /a/bad.md:4: unknown key "tool"');
+  expect(text).toContain('the project\'s agents are not read — shell.roots is not set');
+  expect(agentListing({ agents: [], shadowed: [], failed: [], errors: [], projectRead: true, projectDir: null, personDir: '/p' })).toBe('no agents found');
 });

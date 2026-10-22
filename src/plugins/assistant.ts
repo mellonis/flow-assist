@@ -68,7 +68,9 @@ import { personSpoke, projectHere } from '../assistant/conversation-session.js';
 import { configLineOf, shellCommandOf } from '../assistant/confirm-policy.js';
 import { scheduleChild } from '../assistant/child-schedule.js';
 import { ASK_ARM_MS, askClock, createAskGuard } from '../assistant/child-ask-guard.js';
-import { parseSubagentLine, stopTargetIndex, subagentLabel, subagentListing, tellTargetIndex } from '../assistant/subagent-command.js';
+import { findAgents } from '../assistant/agent-find.js';
+import type { HostServices } from '../runtime/services.js';
+import { agentListing, parseSubagentLine, stopTargetIndex, subagentLabel, subagentListing, tellTargetIndex } from '../assistant/subagent-command.js';
 
 // Slash-commands of the chat — a single source for runChatCommand and Tab-completion.
 // `/analyze` is a tracker slash command and is removed.
@@ -701,10 +703,16 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             }
             return out;
           };
+          // The agent files, read when asked: the shell's directory now, the plugins
+          // that may offer theirs.
+          const agentsFound = () => findAgents({ config: host.config as Record<string, unknown>, cwd: conv.shell.cwd(), plugins: (host.services as Pick<HostServices, 'agentPlugins'>).agentPlugins?.() ?? [] });
           const chatCommandDefs: ChatCommandDef[] = [
             ...CHAT_COMMAND_DEFS.map((c) => (c.name === 'resume'
               ? { ...c, values: () => resumeList().slice(0, 15).map((s, i) => ({ value: String(i + 1), label: s.title || '(untitled)' })) }
-              : c)),
+              : c.name === 'subagent' || c.name === 'sub'
+                // Only the first word completes, and only an agent: `@` and its names.
+                ? { ...c, complete: (before: string[]) => (before.length ? [] : agentsFound().agents.map((a) => ({ value: `@${a.id}`, label: a.description }))) }
+                : c)),
             ...pluginChatCommands().map(({ name, cmd }) => ({ name, values: cmd.values, complete: cmd.complete })),
           ];
           // What the ↑/↓ history asks of a command: the chat's own, and a plugin's as it
@@ -1745,6 +1753,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   host.notify();
                   return;
                 }
+                if (line.kind === 'agents') {
+                  setField('');
+                  conv.pushNote(agentListing(agentsFound()));
+                  host.notify();
+                  return;
+                }
+                if (line.kind === 'agent') { setError(`/subagent @${line.name}: starting an agent is not available`); return; }
                 if (line.kind === 'stop') {
                   const listed = listedRef.current?.conv === conv ? listedRef.current.labels : null;
                   const at = stopTargetIndex(conv.runningChildren(), line.target, listed);

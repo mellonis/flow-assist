@@ -3,9 +3,13 @@
 // stops through the conversation.
 import { formatDuration } from './duration.js';
 import type { EndedChild, RunningChild } from './conversation-types.js';
+import { paramsText, type AgentSource } from './agent-file.js';
+import type { FoundAgents } from './agent-find.js';
 
 export type SubagentLine =
   | { kind: 'list' }
+  | { kind: 'agents' }
+  | { kind: 'agent'; name: string; args: string }
   | { kind: 'stop'; target: string }
   | { kind: 'tell'; target: string; text: string }
   | { kind: 'start'; prompt: string; withContext: boolean; auto: boolean }
@@ -16,10 +20,14 @@ const FLAGS = ['--with-context', '--auto'] as const;
 // The rest of the line after `/subagent` as the person typed it: spacing and line breaks
 // inside the prompt are kept, since the prompt is the work. `--with-context` and `--auto`
 // count only as the first words; `stop` and `tell` as the very first word are those
-// commands (a prompt that starts with either word is written another way).
+// commands (a prompt that starts with either word is written another way). A first word
+// that starts with `@` names an agent file: `@` alone lists them, `@name …` starts one
+// with the rest of the line as its arguments.
 export function parseSubagentLine(raw: string): SubagentLine {
   let rest = raw.trim();
   if (!rest) return { kind: 'list' };
+  const at = /^@(\S*)(?:\s+([\s\S]*))?$/.exec(rest);
+  if (at) return at[1] ? { kind: 'agent', name: at[1], args: (at[2] ?? '').trim() } : { kind: 'agents' };
   const stop = /^stop(?:\s+([\s\S]*))?$/i.exec(rest);
   if (stop) {
     const target = (stop[1] ?? '').trim();
@@ -114,4 +122,21 @@ export function subagentListing(running: readonly RunningChild[], ended: readonl
     lines.push(`${e.label}${e.kind === 'task' ? ' (task)' : ''} · ${verdict} · ${formatDuration(e.ms)}${e.tokens ? ` · ${tokenText(e.tokens)} tokens` : ''}`);
   }
   return lines.join('\n');
+}
+
+const sourceText = (s: AgentSource): string => (s.kind === 'plugin' ? `plugin ${s.plugin}` : s.kind);
+
+// The agent files found, as a note. A note is drawn as markdown, where single line
+// breaks join, so each agent and each error is a list item: the agent with its
+// description, its parameters and where it comes from, a person's agent hidden by the
+// project's marked; every file with errors as `path:line: message`. With `shell.roots`
+// unset it says the project's agents are not read.
+export function agentListing(found: FoundAgents): string {
+  const item = (a: FoundAgents['agents'][number], extra = ''): string => `- @${a.id} — ${a.description} · ${a.params.length ? `${paramsText(a.params)} · ` : ''}${sourceText(a.source)}${extra}`;
+  const blocks: string[] = [];
+  const agents = [...found.agents.map((a) => item(a)), ...found.shadowed.map((a) => item(a, ' (shadowed by the project\'s agent of this name)'))];
+  blocks.push(agents.length ? agents.join('\n') : 'no agents found');
+  if (found.errors.length) blocks.push(found.errors.map((e) => `- ${e.path}:${e.line}: ${e.message}`).join('\n'));
+  if (!found.projectRead) blocks.push('the project\'s agents are not read — shell.roots is not set');
+  return blocks.join('\n\n');
 }
