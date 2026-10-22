@@ -16,7 +16,7 @@ import { autoRestored } from './auto.js';
 import { shellAutoRun, shellRoots } from './shell.js';
 import { stripToolMarkup } from './tool-markup.js';
 import type { ChatMessage } from './agent.js';
-import type { ChatMsg } from './conversation-types.js';
+import { NESTED_WITHHELD, type ChatMsg } from './conversation-types.js';
 import type { Conversation } from './conversation.js';
 
 // The fingerprint of a session nothing has been read or written for yet — the value
@@ -226,6 +226,8 @@ export function journaledChatLLM(c: Conversation, from: string) {
       // answers it.
       onRetry: (info: RetryInfo) => retryWait(c, info, false),
       ...rest,
+      // A nested run has no parent to ask and no child to answer.
+      withholdTools: [...new Set([...NESTED_WITHHELD, ...((rest.withholdTools as readonly string[] | undefined) ?? [])])],
       onToolStart: (call: { id?: string; name: string; args: Record<string, unknown>; confirm: boolean }) => {
         journalTo(c, from, callStartEvent(call));
         rest.onToolStart?.(call);

@@ -48,6 +48,9 @@ const TREE_HOLD_MS = 200;
 export const NO_ANSWER = 'no answer — proceed on your best assumption and name it in your result';
 // Distinguishes the questions of one process.
 let parentAskSeq = 0;
+// The questions routed to a conversation's model that are not settled, by id: who asked and
+// who was asked.
+const openAsks = new Map<string, { child: Conversation; recipient: Conversation }>();
 
 // What an image stands for, as its data is cached: its path and its hash.
 export const imageKey = (r: ImageRef) => `${r.path}\0${r.sha256}`;
@@ -231,6 +234,9 @@ export class Conversation {
   // The question this task or subagent put to the conversation that started it, until it
   // is answered (`ask_parent`): one at a time. It counts as a wait, as a y/n does.
   parentAsk: (ParentAskInfo & { resolve: (answer: string) => void }) | null = null;
+  // The questions of children that landed in this conversation's history and have not been
+  // answered: the turn that read them ends them with no answer.
+  readAsks: string[] = [];
 
   // ── what waits
   queue: Queued[] = [];
@@ -510,14 +516,15 @@ export class Conversation {
     walk(this, [], false);
     return best;
   }
-  // The oldest question to its parent that waits in a conversation below this one, with the
-  // label of the child that asked. null with none.
+  // The oldest question to its parent that waits for the PERSON in a conversation below this
+  // one (a question routed to a model does not), with the label of the child that asked.
+  // null with none.
   askedBelow(): { label: string; ask: ParentAskInfo } | null {
     let best: { label: string; ask: ParentAskInfo } | null = null;
     const walk = (c: Conversation): void => {
       for (const child of c.children) {
         const a = child.parentAsk;
-        if (a && (!best || a.at < best.ask.at)) best = { label: child.label, ask: { id: a.id, text: a.text, at: a.at } };
+        if (a && parentAskDestination(child) === 'person' && (!best || a.at < best.ask.at)) best = { label: child.label, ask: { id: a.id, text: a.text, at: a.at } };
         walk(child);
       }
     };
@@ -571,6 +578,9 @@ export class Conversation {
   close(reason: CloseReason, by: StoppedBy = 'clear'): void {
     if (this.isClosed) return;
     this.closeReason = reason;
+    // The questions asked of it get no answer; a clear or a stop of its parent stops the
+    // children that asked, which says so itself.
+    if (reason !== 'clear' && reason !== 'parent') this.settleAsksTo(this);
     if (reason === 'clear') this.ended = [];
     // The children it started are stopped and a pending y/n declined first, so their
     // closing lines precede this conversation's own closing `end`.
@@ -939,9 +949,8 @@ export class Conversation {
     // system prompt, and a compaction of a long run folds it into the next one.
     if (spec.kind === 'subagent' && spec.summary) child.summary = spec.summary;
     child.inheritedProject = this.currentProject();
-    const kept = new Set(['call-start', 'confirm', 'call', 'ask-parent']);
-    // The answer to the child's own question carries `by`; its assistant answers (text) stay in its turn.
-    const keeps = (ev: JournalEvent): boolean => kept.has(ev.t) || (ev.t === 'answer' && typeof ev.by === 'string');
+    const kept = new Set(['call-start', 'confirm', 'call', 'ask-parent', 'ask-answer']);
+    const keeps = (ev: JournalEvent): boolean => kept.has(ev.t);
     // A task's lines carry `task: <label>`, a subagent's `subagent: <label>`.
     const tag = (ev: JournalEvent): JournalEvent => (spec.kind === 'subagent' ? { subagent: spec.label, ...ev } : { task: spec.label, ...ev });
     // A line about the child, tagged, goes where this conversation's own lines go: its
@@ -1124,39 +1133,77 @@ export class Conversation {
     if (this.parentAsk) return Promise.resolve('ask_parent: a question is already waiting for its answer');
     const info: ParentAskInfo = { id: `ask-${++parentAskSeq}`, text, at: parkedAt() };
     this.journal({ t: 'ask-parent', id: info.id, question: text });
+    // Parked before the route runs: a route that delivers can settle it before it returns.
+    const waiting = new Promise<string>((resolve) => { this.parentAsk = { ...info, resolve }; });
     const now = this.routeParentAsk(info);
     if (now) {
-      this.journal({ t: 'answer', id: info.id, by: now.by });
+      this.parentAsk = null;
+      this.journal({ t: 'ask-answer', id: info.id, by: now.by });
       return Promise.resolve(now.answer);
     }
-    return new Promise<string>((resolve) => {
-      this.parentAsk = { ...info, resolve };
+    if (this.parkedAsk(info.id)) {
       this.emit({ type: 'ask-parent', ask: info });
       this.deps.notify();
-    });
+    }
+    return waiting;
   }
+  private parkedAsk(id: string): boolean { return this.parentAsk?.id === id; }
   // Where a question goes (`parentAskDestination`) and whether it is answered on the spot:
-  // the answer and who gave it, or null to leave it parked. The person's route and the
-  // recipient's inbox route answer at once with the no-answer text.
-  routeParentAsk(_ask: ParentAskInfo): { answer: string; by: 'model' | 'person' | 'none' } | null {
+  // the answer and who gave it, or null to leave it parked. A question to the person
+  // answers at once with the no-answer text; one to a conversation is delivered to its
+  // inbox as framed data and waits for `answer_child`, unless that conversation cannot take
+  // a turn for it (it is left, `ai.backgroundFollowUp` is off) or none is left.
+  routeParentAsk(ask: ParentAskInfo): { answer: string; by: 'model' | 'person' | 'none' } | null {
     const to = parentAskDestination(this);
-    if (to === 'person') return { answer: NO_ANSWER, by: 'none' };
-    if (to) return { answer: NO_ANSWER, by: 'none' };
-    return { answer: NO_ANSWER, by: 'none' };
+    if (!to || to === 'person') return { answer: NO_ANSWER, by: 'none' };
+    const followUp = (to.deps.config().ai as { backgroundFollowUp?: unknown } | undefined)?.backgroundFollowUp !== false;
+    if (to.headless || !followUp) return { answer: NO_ANSWER, by: 'none' };
+    openAsks.set(ask.id, { child: this, recipient: to });
+    to.deliver({ kind: 'question', askId: ask.id, from: { key: this.key, label: this.label, what: this.kind as 'task' | 'subagent' }, text: `${this.label} asks:\n${ask.text}`, quiet: false });
+    return null;
   }
   // Settles the parked question: `answer` reaches the asking tool. `stop` and `reset` end
-  // the wait with `ask_parent: stopped` instead.
+  // the wait with `ask_parent: stopped` instead. A question still waiting in its
+  // recipient's inbox leaves it: no turn starts for a question nobody waits on.
   answerParentAsk(answer: string, by: 'model' | 'person' | 'none' | 'stop' | 'reset' = 'none'): void {
     const a = this.parentAsk;
     if (!a) return;
     this.parentAsk = null;
+    const open = openAsks.get(a.id);
+    if (open) {
+      openAsks.delete(a.id);
+      open.recipient.inbox = open.recipient.inbox.filter((i) => i.askId !== a.id);
+    }
     const ended = by === 'stop' || by === 'reset';
-    this.journal({ t: 'answer', id: a.id, by: ended ? 'none' : by });
+    this.journal({ t: 'ask-answer', id: a.id, by: ended ? 'none' : by });
     a.resolve(ended ? 'ask_parent: stopped' : answer);
     this.emit({ type: 'ask-parent', ask: null });
     this.deps.notify();
     // The inbox the question held lands now (a turn still running holds it on).
     setTimeout(() => this.takeInbox(), 0);
+  }
+  // `answer_child`: the model of this conversation answers a question a child put to it.
+  // What the child reads names who answered. An id that is unknown, settled or another
+  // conversation's is reported to the model, not thrown.
+  answerChild(id: string, text: string): string {
+    const open = openAsks.get(id);
+    if (!open || open.recipient !== this) return `answer_child: no open question with id ${id}`;
+    const child = open.child;
+    this.journal({ t: 'child-answer', id, child: child.label, text });
+    child.answerParentAsk(this.kind === 'subagent' ? `The subagent «${this.label}» answered: ${text}` : `The session answered: ${text}`, 'model');
+    return `answer_child: sent to «${child.label}»`;
+  }
+  // The questions routed to `to` end with no answer.
+  private settleAsksTo(to: Conversation): void {
+    for (const open of [...openAsks.values()]) if (open.recipient === to) open.child.answerParentAsk(NO_ANSWER, 'none');
+  }
+  // The turn that read the questions in its history has ended: those still open get no answer.
+  settleReadAsks(): void {
+    const ids = this.readAsks.splice(0);
+    for (const id of ids) {
+      const open = openAsks.get(id);
+      if (open?.recipient === this) open.child.answerParentAsk(NO_ANSWER, 'none');
+    }
   }
   // The settings-file guard's y/n (src/assistant/conversation-turn.ts), one run at a time.
   askConfigChanges(): Promise<void> { return askConfigChanges(this); }
@@ -1241,6 +1288,7 @@ export class Conversation {
     const taken = this.inbox.map((i) => ({ text: i.text, framed: frameItem(i, i.nonce) }));
     const items = taken.map((i) => i.text);
     if (!items.length) return [];
+    for (const i of this.inbox) if (i.kind === 'question' && i.askId && openAsks.has(i.askId)) this.readAsks.push(i.askId);
     this.inbox = [];
     this.clearInbox();
     const rows = keepLast ? taken.slice(0, -1) : taken;
@@ -1286,7 +1334,7 @@ export class Conversation {
     // with nothing but quiet items there is no turn.
     const quiet = this.inbox.filter((i) => i.quiet);
     if (quiet.length && quiet.length < this.inbox.length) this.inbox = [...quiet, ...this.inbox.filter((i) => !i.quiet)];
-    if (mode === 'rows' || !followUp || this.headless || quiet.length === this.inbox.length) { this.landInbox(); return false; }
+    if (mode === 'rows' || !followUp || this.headless || quiet.length === this.inbox.length) { this.landInbox(); this.settleReadAsks(); return false; }
     const readResult = this.inbox.some((i) => i.kind === 'result' && !i.quiet);
     const last = this.landInbox(true).at(-1)!;
     const options: SendOptions = { fromInbox: true, framed: last.framed };
@@ -1315,6 +1363,8 @@ export class Conversation {
   // nothing queued lands the inbox as rows only too: a follow-up turn would take
   // the place of its `⏎ continue`, and the continued turn reads the rows.
   afterTurn(ok: boolean, atLimit = false): void {
+    // The questions this turn read and did not answer get no answer.
+    this.settleReadAsks();
     // A screen that waited for this turn opens now — or, the turn stopped or
     // failed, never (src/runtime/screens.ts). Not for a conversation the chat left: the
     // screen is another session's, and what this one deferred went at the leave. The

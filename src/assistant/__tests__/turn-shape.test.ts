@@ -16,9 +16,9 @@ function answering(text: string) {
 }
 
 test('the table: a row per kind', () => {
-  expect(turnShape('session')).toEqual({ system: 'chat', screen: true, boundary: true, recall: true, askUser: true, askParent: false, images: true, withholdTools: SESSION_WITHHELD });
-  expect(turnShape('task')).toEqual({ system: 'worker', screen: false, boundary: false, recall: false, askUser: false, askParent: true, images: false, maxRounds: 12, withholdTools: TASK_WITHHELD });
-  expect(turnShape('oneshot')).toEqual({ system: 'chat', screen: false, boundary: false, recall: false, askUser: false, askParent: false, images: true, withholdTools: ONESHOT_WITHHELD });
+  expect(turnShape('session')).toEqual({ system: 'chat', screen: true, boundary: true, recall: true, askUser: true, askParent: false, answerChild: true, images: true, withholdTools: SESSION_WITHHELD });
+  expect(turnShape('task')).toEqual({ system: 'worker', screen: false, boundary: false, recall: false, askUser: false, askParent: true, answerChild: false, images: false, maxRounds: 12, withholdTools: TASK_WITHHELD });
+  expect(turnShape('oneshot')).toEqual({ system: 'chat', screen: false, boundary: false, recall: false, askUser: false, askParent: false, answerChild: false, images: true, withholdTools: ONESHOT_WITHHELD });
 });
 
 test('a task turn: the worker prompt, twelve rounds, no tail, no boundary, no recall, no ask_user, it withheld, a y/n that says no', async () => {
@@ -36,13 +36,13 @@ test('a task turn: the worker prompt, twelve rounds, no tail, no boundary, no re
   expect(o.beforeRequest).toBeUndefined();
   expect(o.toolCtx.recall).toBeUndefined();
   expect(o.toolCtx.askUser).toBeUndefined();
-  expect(o.withholdTools).toEqual(['ask_user']);
+  expect(o.withholdTools).toEqual(['ask_user', 'answer_child']);
   expect(await o.confirmWrite('run_command', {}, '')).toBe(false);
 });
 
 test('a task turn\'s prompt asks for its assumptions, and `ask_user` is not among its tools; the one-shot keeps it listed', () => {
   expect(workerPrompt('x')).toContain('Where the task leaves something open, make a reasonable assumption, carry on, and name each assumption in your result.');
-  expect(TASK_WITHHELD).toEqual(['ask_user']);
+  expect(TASK_WITHHELD).toEqual(['ask_user', 'answer_child']);
   expect(ONESHOT_WITHHELD).not.toContain('ask_user');
 });
 

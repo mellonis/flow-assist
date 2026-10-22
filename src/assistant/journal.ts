@@ -41,6 +41,10 @@
 //            `outcome` stopped, and `by` — what stopped it (`clear`: its session was
 //            cleared; `exit`: the process exited while it ran or waited; `person`: the person
 //            stopped it, or the job it belonged to)
+//   ask-parent  a task or a subagent put a question to its parent: `id`, `question`
+//   ask-answer  its settlement: the same `id`, and `by` — `model`, `person` or `none`
+//   child-answer  the answer a session or a subagent gave a child's question with
+//            `answer_child`: the `id`, the child's label (`child`) and the `text`
 //   subagent a subagent started, answered or ended: `label`, `by` (who started it: `model` or
 //            `person`), `event` (`start`, `answered` or `end`) and, on an answer or an end,
 //            its `outcome`. A subagent the person started stays after an answer: it says
@@ -361,11 +365,9 @@ function eventLines(events: JournalEvent[], child: ((id: string) => JournalEvent
         }
         break;
       case 'step': out.push(`*Step${at}:* ${text}`, ''); break;
-      // The answer to a child's `ask_parent` carries `by`; an assistant's answer carries text.
-      case 'answer':
-        if (typeof ev.by === 'string') out.push(`*Answer to the question${at}: ${nd(ev.by === 'none' ? 'no answer was given' : `from the ${ev.by}`)}*`, '');
-        else out.push(`**Assistant**${at}`, '', text, '');
-        break;
+      case 'answer': out.push(`**Assistant**${at}`, '', text, ''); break;
+      case 'ask-answer': out.push(`*Answer to the question${at}: ${nd(ev.by === 'none' ? 'no answer was given' : `from the ${String(ev.by)}`)}*`, ''); break;
+      case 'child-answer': out.push(`*Answered «${nd(String(ev.child ?? ''))}»${at}:* ${nd(String(ev.text ?? ''))}`, ''); break;
       case 'ask-parent': out.push(`*Asked its parent${at}:* ${nd(String(ev.question ?? ''))}`, ''); break;
       case 'call-start': open.set(keyOf(ev), { slot: out.length, start: ev }); out.push('', ''); break;
       case 'confirm': { const o = open.get(keyOf(ev)); if (o) o.confirm = ev; break; }

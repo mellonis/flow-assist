@@ -97,7 +97,7 @@ test.each([['session', true], ['subagent', true], ['task', false], ['oneshot', f
     await rig.conv.send('hi');
     await rig.idle();
     const sys = String(rig.messages(0).find((m) => m.role === 'system')?.content ?? '');
-    expect(sys.includes('<child-result …> or <plugin-message …> frame')).toBe(has);
+    expect(sys.includes('<child-result …>, <child-question …> or <plugin-message …> frame')).toBe(has);
   });
 
 test('an automatic compaction inside an inbox follow-up turn keeps the item\'s message framed, in the history as a background entry', async () => {

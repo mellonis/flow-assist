@@ -151,9 +151,9 @@ test('a stop while the child asks ends its turn, leaves the counts right and ans
   expect(counts(rig)).toEqual({ held: 0, waiting: 0, background: 0 });
   expect(child.parentAsk).toBeNull();
   const lines = rig.subJournal('maker');
-  expect(lines.filter((e) => e.t === 'answer')).toMatchObject([{ by: 'none' }]);
+  expect(lines.filter((e) => e.t === 'ask-answer')).toMatchObject([{ by: 'none' }]);
   // The answer precedes the closing line of the file.
-  expect(lines.findIndex((e) => e.t === 'answer')).toBeLessThan(lines.findIndex((e) => e.t === 'end'));
+  expect(lines.findIndex((e) => e.t === 'ask-answer')).toBeLessThan(lines.findIndex((e) => e.t === 'end'));
 });
 
 test('the stop key on a child that asks settles the question and ends the turn', async () => {
@@ -230,13 +230,13 @@ test('the journal keeps the question and its answer: a subagent in its own file,
   const own = rig.subJournal('s');
   const asked = own.find((e) => e.t === 'ask-parent');
   expect(asked).toMatchObject({ question: 'sub question?' });
-  expect(own.find((e) => e.t === 'answer' && e.id === asked!.id)).toMatchObject({ by: 'none' });
+  expect(own.find((e) => e.t === 'ask-answer' && e.id === asked!.id)).toMatchObject({ by: 'none' });
   const inSession = rig.journal();
   const taskAsk = inSession.find((e) => e.t === 'ask-parent' && e.task === 't');
   expect(taskAsk).toMatchObject({ question: 'task question?' });
-  expect(inSession.find((e) => e.t === 'answer' && e.id === taskAsk!.id && e.task === 't')).toMatchObject({ by: 'none' });
-  // Only the answer to the question is kept; the task's own assistant answer (text) is not.
-  expect(inSession.filter((e) => e.t === 'answer' && e.task === 't').every((e) => typeof e.by === 'string')).toBe(true);
+  expect(inSession.find((e) => e.t === 'ask-answer' && e.id === taskAsk!.id && e.task === 't')).toMatchObject({ by: 'none' });
+  // Only the settlement of the question is kept; the task's own assistant answer is not.
+  expect(inSession.filter((e) => e.t === 'answer' && e.task === 't')).toEqual([]);
   const md = exportMarkdown(inSession, { title: 't', id: rig.conv.sessionId, child: (id) => rig.subJournals().find((j) => j.id === id)?.events ?? null });
   expect(md).toContain('Asked its parent');
   expect(md).toContain('sub question?');

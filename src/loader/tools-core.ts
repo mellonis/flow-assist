@@ -52,6 +52,9 @@ export interface CoreCtx {
   // Supplied to a task or a subagent: puts one question to the conversation that started
   // it and resolves with the answer (or the reason there is none). Absent for the rest.
   askParent?: (question: string) => Promise<string>;
+  // Supplied to a session or a subagent: settles a question a child put to it and says
+  // what happened. Absent for the rest.
+  answerChild?: (id: string, text: string) => string;
   // Supplied by `agentChat` to every call: a tool that edits something reports what
   // it looked like before and after, and the chat shows the diff under the answer.
   // Display only — the model never gets it. Report only a change that was made.
@@ -472,6 +475,17 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
     {
       type: 'function',
       function: {
+        name: 'answer_child',
+        description: 'Answer a question a task or subagent you started put to you. The question reaches you framed as <child-question …> with its id; the child waits for this answer and reads it as written.',
+        parameters: { type: 'object', properties: {
+          id: { type: 'string', description: 'The id on the <child-question …> frame.' },
+          text: { type: 'string', description: 'The answer, complete in itself: the child sees only this.' },
+        }, required: ['id', 'text'] },
+      },
+    },
+    {
+      type: 'function',
+      function: {
         name: 'ask_parent',
         description: 'Ask the conversation that started you one question and wait for the answer. Use it when the work cannot go on without the answer; for a small thing, take your best assumption and name it in your result. One question at a time.',
         parameters: { type: 'object', properties: {
@@ -536,6 +550,14 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
         if (!question) return 'ask_parent: question must be a non-empty string';
         if (!ctx.askParent) return 'ask_parent: there is nobody to ask here (this conversation was not started by another). Proceed on your best assumption and say which one you made.';
         return ctx.askParent(question);
+      }
+      case 'answer_child': {
+        const id = typeof args.id === 'string' ? args.id.trim() : '';
+        const text = typeof args.text === 'string' ? args.text.trim() : '';
+        if (!id) return 'answer_child: id must be a non-empty string';
+        if (!text) return 'answer_child: text must be a non-empty string';
+        if (!ctx.answerChild) return 'answer_child: there is no question to answer here';
+        return ctx.answerChild(id, text);
       }
       case 'open_url': {
         // Universal browser opener: the host owns the primitive (openInBrowser).

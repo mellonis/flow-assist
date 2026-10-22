@@ -144,7 +144,8 @@ export class ConversationRegistry {
     return c;
   }
   // What waits below a session, as a toast says it: the older of the oldest y/n and the
-  // oldest question to a parent, named by the child that owns it. null with neither.
+  // oldest question to a parent that waits for the person, named by the child that owns it.
+  // null with neither: a question routed to a model is not for the person.
   private belowSaid(c: Conversation): string | null {
     const o = c.offered();
     const q = c.askedBelow();
@@ -245,7 +246,10 @@ export class ConversationRegistry {
     c.headless = true;
     // Left while it already waits: the answer it needs is said now.
     if (c.confirm || c.question) this.movedToWaiting(c, c.question ? 'a question' : c.confirm?.name === 'config' ? 'a settings y/n' : 'a y/n');
-    else if (c.subtreeWaiting) this.movedToWaiting(c, this.belowSaid(c) ?? 'a y/n from a subagent');
+    else if (c.subtreeWaiting) {
+      const what = this.belowSaid(c);
+      if (what) this.movedToWaiting(c, what);
+    }
     this.watches.get(c)?.();
     this.watches.delete(c);
     let pending = false;

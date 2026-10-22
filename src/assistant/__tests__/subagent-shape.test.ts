@@ -23,7 +23,7 @@ const subagentOf = (deps: ReturnType<typeof fakeDeps>) => new Conversation(deps,
 
 test('the subagent row: worker-shaped prompt, a boundary and recall, no screens, no ask_user, no images, no round cap of its own', () => {
   const row = turnShape('subagent');
-  expect(row).toEqual({ system: 'subagent', screen: false, boundary: true, recall: true, askUser: false, askParent: true, images: false, withholdTools: SUBAGENT_WITHHELD });
+  expect(row).toEqual({ system: 'subagent', screen: false, boundary: true, recall: true, askUser: false, askParent: true, answerChild: true, images: false, withholdTools: SUBAGENT_WITHHELD });
   expect(row).not.toHaveProperty('maxRounds');
   expect(SUBAGENT_WITHHELD).toEqual(['remind', 'ask_user']);
   expect(subagentPrompt('x')).toContain('Where the task leaves something open, make a reasonable assumption, carry on, and name each assumption in your result.');
@@ -114,10 +114,26 @@ test('a run a child\'s tool starts through ctx.chatLLM is offered what the child
     await started.child.send('do it');
     await seen[0]!.toolCtx.chatLLM([{ role: 'user', content: 'nested' }], {});
     expect(seen).toHaveLength(2);
-    const expected = kind === 'subagent' ? ['remind', 'ask_user'] : ['ask_user'];
+    // A nested run is never offered `ask_parent` or `answer_child` either.
+    const expected = kind === 'subagent' ? ['remind', 'ask_user', 'ask_parent', 'answer_child'] : ['ask_user', 'answer_child', 'ask_parent'];
     expect(seen[1]!.withholdTools).toEqual(expected);
     // The caller's own list is kept, once.
     await seen[0]!.toolCtx.chatLLM([{ role: 'user', content: 'nested' }], { withholdTools: ['x', 'remind'] });
-    expect(seen[2]!.withholdTools).toEqual(kind === 'subagent' ? ['remind', 'ask_user', 'x'] : ['ask_user', 'x', 'remind']);
+    expect(seen[2]!.withholdTools).toEqual(kind === 'subagent' ? ['remind', 'ask_user', 'ask_parent', 'answer_child', 'x'] : ['ask_user', 'answer_child', 'ask_parent', 'x', 'remind']);
+  }
+});
+
+test('a run a session\'s or a one-shot\'s tool starts is offered neither ask_parent nor answer_child', async () => {
+  const seen: Record<string, any>[] = [];
+  const chatLLM = (async (_wire: unknown[], o: Record<string, any> = {}) => {
+    seen.push({ ...o });
+    return { content: 'x', transcript: [{ role: 'assistant', content: 'x' }], toolRuns: [] };
+  }) as never;
+  for (const kind of ['session', 'oneshot'] as const) {
+    seen.length = 0;
+    const c = new Conversation(fakeDeps({ chatLLM }), kind === 'oneshot' ? { kind, policy: { kind: 'none' } } : { kind });
+    await c.send('go');
+    await seen[0]!.toolCtx.chatLLM([{ role: 'user', content: 'nested' }], {});
+    expect(seen[1]!.withholdTools).toEqual(expect.arrayContaining(['ask_parent', 'answer_child']));
   }
 });
