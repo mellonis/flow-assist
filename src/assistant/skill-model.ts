@@ -114,32 +114,42 @@ export function skillToolResult(finder: () => FoundSkills, args: Record<string, 
 }
 
 // ── Compaction ── a summary replaces the history, so a loaded skill's text goes with it.
-// The host names the skills the history held — by the frame their text came in, whether
-// the model loaded them or the person did — on one line after the summary, with the
+// The host names the skills the history held on one line after the summary, with the
 // instruction to load each again with the tool; a later compaction carries the line on.
+// The line is the host's, so only what the host itself marked counts: the results of calls
+// to the `skill` tool (by the call's name, never by a result's text, which a page or a
+// command can imitate) and the person's `/skill` messages (marked when sent). An id is kept
+// only in the grammar of a skill's id.
 export const SKILLS_LINE = 'Skills loaded in this conversation (their text is not kept in this summary — load each again with the skill tool before relying on it):';
 const LOADED = /^(?:OK: )?\[The (?:skill «([^»\n]+)»|file [^\n]*? of the skill «([^»\n]+)»)/;
+const SKILL_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?:\/[A-Za-z0-9][A-Za-z0-9._-]{0,63})?$/;
+type Msg = { role?: string; content?: unknown; tool_call_id?: unknown; tool_calls?: unknown; skill?: unknown };
 
-export function loadedSkillIds(messages: ReadonlyArray<{ role?: string; content?: unknown }>): string[] {
+export function loadedSkillIds(messages: ReadonlyArray<Msg>): string[] {
   const ids = new Set<string>();
+  const skillCalls = new Set<string>();
   for (const m of messages) {
-    if ((m.role !== 'tool' && m.role !== 'user') || typeof m.content !== 'string') continue;
+    if (m.role === 'assistant' && Array.isArray(m.tool_calls)) {
+      for (const c of m.tool_calls as Array<{ id?: unknown; function?: { name?: unknown } }>) if (c?.function?.name === SKILL_TOOL && typeof c.id === 'string') skillCalls.add(c.id);
+    }
+    if (m.role === 'user' && typeof m.skill === 'string' && SKILL_ID.test(m.skill)) ids.add(m.skill);
+    if (m.role !== 'tool' || typeof m.content !== 'string' || typeof m.tool_call_id !== 'string' || !skillCalls.has(m.tool_call_id)) continue;
     const hit = LOADED.exec(m.content);
     const id = hit?.[1] ?? hit?.[2];
-    if (id) ids.add(id);
+    if (id && SKILL_ID.test(id)) ids.add(id);
   }
   return [...ids];
 }
 
 const skillsLineIn = (summary: string): string[] => {
   const line = summary.split('\n').find((l) => l.startsWith(SKILLS_LINE));
-  return line ? line.slice(SKILLS_LINE.length).split(',').map((s) => s.trim()).filter(Boolean) : [];
+  return line ? line.slice(SKILLS_LINE.length).split(',').map((x) => x.trim()).filter((x) => SKILL_ID.test(x)) : [];
 };
 
 // `summary` with the skills line: those of `messages` and of the line the summary it
 // replaces carried. A line the model wrote itself is dropped. A conversation that never
 // loaded a skill gets no line.
-export function withLoadedSkills(summary: string, messages: ReadonlyArray<{ role?: string; content?: unknown }>, previous = ''): string {
+export function withLoadedSkills(summary: string, messages: ReadonlyArray<Msg>, previous = ''): string {
   const ids = [...new Set([...skillsLineIn(previous), ...loadedSkillIds(messages)])];
   const body = summary.split('\n').filter((l) => !l.startsWith(SKILLS_LINE)).join('\n').trimEnd();
   return ids.length ? `${body}\n\n${SKILLS_LINE} ${ids.join(', ')}` : summary;

@@ -391,3 +391,10 @@ test('without a reader, or for a subagent line with no id, the export is what it
   expect(exportMarkdown(OLD, opts)).toBe(expected);
   expect(exportMarkdown(OLD, { ...opts, child: () => child('x', A, 'r') })).toBe(expected);
 });
+
+test('/export words a skill load by the person and by an agent', () => {
+  const ev = { t: 'skill-load', name: 'notes', source: 'project', path: '/p/notes/SKILL.md', hash: 'abcdef0123456789' };
+  const md = exportMarkdown([{ ...ev, by: 'person' }, { ...ev, by: 'agent' }], { title: '', id: 'x' });
+  expect(md).toContain('*Skill «notes» loaded by you (project, /p/notes/SKILL.md, content abcdef012345)*');
+  expect(md).toContain('*Skill «notes» loaded by an agent (project, /p/notes/SKILL.md, content abcdef012345)*');
+});

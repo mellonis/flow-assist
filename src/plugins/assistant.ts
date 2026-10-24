@@ -1877,8 +1877,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               case 'skill': {
                 // The person's load: the skill's body, framed, goes to the model
                 // with the person's text as one message. A project skill not recorded at its
-                // current content asks first; what is recorded is the content that was just
-                // read again and sent, never the content that was asked about.
+                // current content asks first; the bytes recorded and sent come from a second read
+                // after the yes, and must hash equal to the content the person was asked about.
                 const line = parseSkillLine(cmd.replace(/^\S+\s*/, ''));
                 if (line.kind === 'error') { setError(line.text); return; }
                 const found = skillsFound();
@@ -1895,7 +1895,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 const id = listed.id;
                 const trust = line.kind === 'trust';
                 if (conv.confirm || conv.question) { setError('answer the open question first'); return; }
-                if (!trust && conv.busy) { setError('/skill: an answer is coming — send it when the answer ends'); return; }
+                if (conv.busy) { setError('/skill: an answer is coming — try again when it ends'); return; }
                 const typed = `/${cmd.trim()}`;
                 const read = () => {
                   const r = loadSkillFresh(listed.dir, listed.source, listed.name);

@@ -283,3 +283,38 @@ test('while an answer is coming /skill is refused and the line stays: it is not 
   expect(model.requests.length).toBe(1);
   ui.app.unmount();
 });
+
+test('Esc still means no on an agent\'s y/n and on a write\'s y/n: only the skill y/n gives the line back', async () => {
+  const { model, ui, root } = await chat();
+  write(path.join(root, '.flow-assist', 'agents', 'job.md'), '---\ndescription: A job\n---\nJOB go\n');
+  await ask(ui, '/subagent @job');
+  await settleUntil(() => frameOf(ui).includes('(y/n)'));
+  await ui.press('escape');
+  await settleUntil(() => frameOf(ui).includes('@job was not started'));
+  expect(frameOf(ui)).toContain('@job was not started: its file is not trusted.');
+  expect(frameOf(ui)).not.toContain('/subagent @job');
+  expect(model.requests.length).toBe(0);
+  // A write's y/n: Esc declines it and the model is told so.
+  model.script([{ tool: 'config_set', args: { key: 'ui.verbs', value: ['Nope'], scope: 'session' } }], [{ text: 'Left it.' }]);
+  await ask(ui, 'change the verbs');
+  await settleUntil(() => frameOf(ui).includes('(y/n)') || frameOf(ui).includes('Confirm write'));
+  await ui.press('escape');
+  await settleUntil(() => model.requests.length === 2);
+  expect(JSON.stringify(model.requests[1]!.messages)).toContain('DECLINED');
+  ui.app.unmount();
+});
+
+test('/skill trust is refused while an answer is coming, and the line stays', async () => {
+  const { model, ui, project: pdir } = await chat();
+  write(path.join(pdir, 'deploy', 'SKILL.md'), doc('Ships it', 'v1'));
+  model.script([{ hold: true }, { text: 'done' }]);
+  await ask(ui, 'first question');
+  await settleUntil(() => model.requests.length === 1);
+  await ask(ui, '/skill trust deploy');
+  await settleUntil(() => frameOf(ui).includes('an answer is coming'));
+  expect(frameOf(ui)).not.toContain('(y/n)');
+  expect(frameOf(ui)).toContain('/skill trust deploy');
+  model.release();
+  await settleUntil(() => frameOf(ui).includes('done'));
+  ui.app.unmount();
+});

@@ -87,18 +87,18 @@ test('a compaction names the skills loaded â€” the person\'s and the model\'s â€
   await rig.idle();
   rig.conv.compact();
   await rig.idle();
-  expect(rig.conv.summary).toBe(`${handoff('FIRST')}\n\n${SKILLS_LINE} notes, deploy`);
+  expect(rig.conv.summary).toBe(`${handoff('FIRST')}\n\n${SKILLS_LINE} deploy, notes`);
   expect(SKILLS_LINE).toContain('load each again with the skill tool');
   // The next request carries it in the system context; the bodies went with the history.
   await rig.conv.send('three');
   await rig.idle();
   const sys = String(rig.messages(-1).find((m) => m.role === 'system')?.content);
-  expect(sys).toContain(`${SKILLS_LINE} notes, deploy`);
+  expect(sys).toContain(`${SKILLS_LINE} deploy, notes`);
   expect(JSON.stringify(rig.sent())).not.toContain('N-BODY');
   // A second compaction, with no skill left in the history: the line stays, the model's own is replaced.
   rig.conv.compact();
   await rig.idle();
-  expect(rig.conv.summary).toBe(`${handoff('SECOND')}\n\n${SKILLS_LINE} notes, deploy`);
+  expect(rig.conv.summary).toBe(`${handoff('SECOND')}\n\n${SKILLS_LINE} deploy, notes`);
 });
 
 test('a conversation that loaded no skill gets no skills line', async () => {

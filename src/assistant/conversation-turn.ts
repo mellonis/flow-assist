@@ -186,7 +186,7 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
   const images = opts.fromInbox || opts.hostAsk || !shape.images ? [] : imagesInText(q, c.images);
   // A follow-up turn for the inbox sends the item framed (`frameItem`); the screen row and
   // the journal row below keep its plain text.
-  const asked: ChatMessage = { role: 'user', content: opts.skill ? opts.skill.framed : opts.fromInbox ? opts.framed ?? q : q, ...(images.length ? { images } : {}) };
+  const asked: ChatMessage = { role: 'user', content: opts.skill ? opts.skill.framed : opts.fromInbox ? opts.framed ?? q : q, ...(opts.skill ? { skill: opts.skill.id } : {}), ...(images.length ? { images } : {}) };
   apiMsgs.push(asked);
   // What goes to the provider: every image of the history as a part — read now,
   // not kept in the history, which holds its ref.
@@ -794,8 +794,9 @@ export async function foldIntoHandoff(c: Conversation, history: ChatMessage[], s
   const ai = (c.deps.config().ai ?? {}) as Record<string, any>;
   const result = await c.deps.compact(history, { ...llmOpts(ai), signal, previous: c.summary, onRetry: (info: RetryInfo) => retryWait(c, info, false) });
   if (!signal.aborted && result.incomplete) c.deps.pushLog(`[compact] no usable handoff after a retry: ${result.incomplete}`);
-  // The skills the history loaded are named after the summary: their text goes with it.
-  return { ...result, summary: withLoadedSkills(result.summary, history, c.summary) };
+  // The skills the history loaded are named after the summary: their text goes with it. The
+  // person's loads are read from the kept history, where their mark is (the model's view drops it).
+  return { ...result, summary: withLoadedSkills(result.summary, [...history, ...c.api.filter((m) => typeof m.skill === 'string')], c.summary) };
 }
 export function markCompacted(c: Conversation, before: number, summary: string, incomplete: string | undefined, auto: boolean): void {
   const after = c.contextReading().used;
