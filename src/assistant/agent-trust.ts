@@ -99,3 +99,27 @@ export function agentTrustRequest(agent: Pick<Agent, 'description' | 'path' | 't
     hint: 'y starts it and remembers this content · n starts nothing',
   };
 }
+
+// A skill's record is kept in the same file under `skill:<real path of its directory>`, the
+// value the hash of the whole directory (`Skill.hash`). A plugin's skill follows the
+// plugin, so it has no record. Recording is the person's act and lives with the commands.
+type RecordedSkill = { dir: string; source: { kind: string }; hash: string };
+export const skillKeyOf = (s: Pick<RecordedSkill, 'dir'>): string => `skill:${realOr(s.dir)}`;
+
+export function skillTrusted(skill: RecordedSkill): boolean {
+  return trustedSkillsNow()(skill);
+}
+
+// One read of the record for a caller that asks about many skills at once.
+export function trustedSkillsNow(): (skill: RecordedSkill) => boolean {
+  const { unreadable, rec } = readRecord();
+  return (skill) => skill.source.kind === 'plugin' || (!unreadable && rec.files[skillKeyOf(skill)] === skill.hash);
+}
+
+// A record exists for the directory under another hash.
+export function skillChanged(skill: RecordedSkill): boolean {
+  if (skill.source.kind === 'plugin') return false;
+  const { unreadable, rec } = readRecord();
+  const was = rec.files[skillKeyOf(skill)];
+  return !unreadable && was !== undefined && was !== skill.hash;
+}

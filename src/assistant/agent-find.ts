@@ -51,7 +51,7 @@ export interface FindAgentsInput {
 }
 
 // A directory that lies inside the roots by its own path and resolves outside them.
-function isLinkOut(dir: string, roots: readonly string[]): boolean {
+export function isLinkOut(dir: string, roots: readonly string[]): boolean {
   return roots.some((r) => within(path.resolve(dir), r)) && !roots.some((r) => within(realOf(dir), r)) && fs.existsSync(dir);
 }
 

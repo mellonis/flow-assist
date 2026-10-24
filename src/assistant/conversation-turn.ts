@@ -20,6 +20,7 @@ import type { ViewRecord } from './views.js';
 import { chatToolGroupOf, type ToolDef } from '../loader/tools.js';
 import { agentsBlock, type AgentStarter } from './agent-model.js';
 import { findAgents, type PluginAgentSource } from './agent-find.js';
+import { findSkills, type FoundSkills } from './skill-find.js';
 import { maxAutoOf } from './agent-start.js';
 import { RESTART_NOTE, type ConfigChange } from '../config/load.js';
 import { keyGlyph } from '../playback/keys.js';
@@ -86,6 +87,16 @@ export function agentStarterOf(c: Conversation): AgentStarter {
     loaded: () => new Set(chatToolGroupOf().values()),
     labels: () => c.runningChildren().map((r) => r.label),
   };
+}
+
+// The skills as they are now: read at each call, nothing kept. One entry per conversation
+// for everything that lists or loads skills.
+export function skillsFinderOf(c: Conversation): () => FoundSkills {
+  return () => findSkills({
+    config: c.deps.config() as Record<string, unknown>,
+    cwd: c.shell.cwd(),
+    plugins: (c.deps.services() as { agentPlugins?: () => PluginAgentSource[] }).agentPlugins?.() ?? [],
+  });
 }
 
 export function turnShape(kind: ConversationKind): TurnShape {
