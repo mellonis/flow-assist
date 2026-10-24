@@ -17,7 +17,7 @@ import path from 'node:path';
 import { hostStateDir } from '../config/load.js';
 import { readPluginManifest } from '../loader/compat.js';
 import { isLinkOut, type FindAgentsInput } from './agent-find.js';
-import { parseSkillFile, skillDirHash, SKILL_CAP, SKILL_FILE, type Skill, type SkillError, type SkillSource } from './skill-file.js';
+import { parseSkillFile, skillDirHashCached, SKILL_CAP, SKILL_FILE, type Skill, type SkillError, type SkillSource } from './skill-file.js';
 import { gitRootOf } from './sessions.js';
 import { realOf, shellRoots, within } from './shell.js';
 
@@ -79,7 +79,7 @@ export function findSkills({ config, cwd, plugins = [], personDir = path.join(ho
     }
     const parsed = parseSkillFile(file, bytes, source, name, realDir);
     if (!parsed.ok) { fail(id, file, source, parsed.errors); return null; }
-    const hashed = skillDirHash(realDir);
+    const hashed = skillDirHashCached(realDir);
     if (!hashed.ok) { refuse(id, file, source, hashed.message); return null; }
     return {
       ...parsed.skill, hash: hashed.hash, files: hashed.files, bytes: hashed.bytes,
@@ -127,7 +127,7 @@ export function findSkills({ config, cwd, plugins = [], personDir = path.join(ho
     }
     const realPlugin = realOf(plugin.dir);
     for (const p of listed as string[]) {
-      const dir = path.resolve(plugin.dir, p.endsWith(SKILL_FILE) ? path.dirname(p) : p);
+      const dir = path.resolve(plugin.dir, path.basename(p) === SKILL_FILE ? path.dirname(p) : p);
       if (!fs.existsSync(path.join(dir, SKILL_FILE))) {
         refuse(`${plugin.name}/${path.basename(dir)}`, path.join(dir, SKILL_FILE), source, `"${p}" has no ${SKILL_FILE}`);
         continue;

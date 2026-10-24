@@ -220,3 +220,32 @@ test('skillsFinderOf reads the conversation\'s config, directory and plugin serv
   cwd = w.root; // not a project: the git top level is the directory itself
   expect(find().skills.map((s) => s.id)).toEqual(['tk/t']);
 });
+
+test('a plugin entry that only ends in SKILL.md is not taken for the file form', () => {
+  const w = world();
+  const plug = tmp('fa-skills-plug-');
+  write(path.join(plug, 'manifest.json'), JSON.stringify({ skills: ['skills/MYSKILL.md'] }));
+  write(path.join(plug, 'skills', 'MYSKILL.md', 'SKILL.md'), doc('inner'));
+  const found = findSkills({ config: w.config, cwd: w.proj, plugins: [{ name: 'tk', dir: plug }], personDir: w.personDir });
+  expect(found.skills).toEqual([]);
+  expect(found.errors[0]!.message).toMatch(/not a skill name/); // read as the directory it is, not as skills/
+});
+
+test('a skill directory over the bound is an error record', () => {
+  const w = world();
+  projectSkill(w, 'big', doc('big'));
+  for (let k = 0; k < 256; k++) write(path.join(w.proj, '.flow-assist', 'skills', 'big', `f${k}`), 'x');
+  const found = findSkills({ config: w.config, cwd: w.proj, personDir: w.personDir });
+  expect(found.skills).toEqual([]);
+  expect(found.errors[0]!.message).toBe('the directory holds more than 256 files');
+});
+
+test('skillsFinderOf offers the plugins its service lists and no others', () => {
+  const w = world();
+  const mk = (n: string) => { const d = tmp('fa-skills-plug-'); write(path.join(d, 'manifest.json'), JSON.stringify({ skills: ['s/t'] })); write(path.join(d, 's', 't', 'SKILL.md'), doc(n)); return d; };
+  const listed = mk('listed');
+  mk('disabled');
+  const c = (services: object) => ({ deps: { config: () => w.config, services: () => services }, shell: { cwd: () => w.proj } });
+  expect(skillsFinderOf(c({ agentPlugins: () => [{ name: 'ok', dir: listed }] }) as never)().skills.map((s) => s.id)).toEqual(['ok/t']);
+  expect(skillsFinderOf(c({}) as never)().skills).toEqual([]);
+});
