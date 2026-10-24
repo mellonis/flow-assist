@@ -137,6 +137,7 @@ export function loadedSkillIds(messages: ReadonlyArray<Msg>): string[] {
         for (const c of m.tool_calls as Array<{ id?: unknown; function?: { name?: unknown } }>) if (c?.function?.name === SKILL_TOOL && typeof c.id === 'string') skillCalls.add(c.id);
       }
     }
+    if (m.role === 'user') skillCalls = new Set();
     if (m.role === 'user' && typeof m.skill === 'string' && SKILL_ID.test(m.skill)) ids.add(m.skill);
     if (m.role === 'user' && Array.isArray(m.skills)) for (const id of m.skills) if (typeof id === 'string' && SKILL_ID.test(id)) ids.add(id);
     if (m.role !== 'tool' || typeof m.content !== 'string' || typeof m.tool_call_id !== 'string' || !skillCalls.has(m.tool_call_id)) continue;

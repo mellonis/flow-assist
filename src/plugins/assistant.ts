@@ -1813,7 +1813,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // the child's lines (its session is made here when nobody has spoken,
                 // `keepPersonWork`). Its mode is set before the schedule's timer lets its
                 // first turn go: the starting conversation's mode is never the child's.
-                const begin = (spec: Pick<ChildSpec, 'label' | 'prompt' | 'agent' | 'toolGroups' | 'skills'>, mode: AutoMode | null, notes: string): boolean => {
+                const begin = (spec: Pick<ChildSpec, 'label' | 'prompt' | 'agent' | 'toolGroups' | 'skills' | 'head'>, mode: AutoMode | null, notes: string): boolean => {
                   const journalId = conv.keepPersonWork(`/${cmd.trim()}`);
                   const started = scheduleChild(
                     { kind: 'subagent', by: 'person', ...spec, ...(line.withContext ? { summary: conv.summary } : {}) },
@@ -1847,7 +1847,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                     // A skill the file names that is missing or not trusted fails the start before anything is asked.
                     const early = preloadSkills(agent.skills, id, skillsFound);
                     if (!early.ok) { setError(`/subagent: ${early.message}`); return; }
-                    if (agent.source.kind === 'project' && !agentTrusted(agent)) {
+                    const asks = agent.source.kind === 'project' && !agentTrusted(agent);
+                    if (asks) {
                       if (conv.confirm || conv.question) { setError('answer the open question first'); return; }
                       setField('');
                       const yes = await conv.askAgentTrust(agentTrustRequest(agent, id, mode, agentChanged(agent)));
@@ -1855,10 +1856,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                       if (!yes) { conv.pushNote(`@${id} was not started: its file is not trusted.`); host.notify(); return; }
                     }
                     // The bodies are read again after the question: what starts is what is trusted now.
-                    const loaded = preloadSkills(agent.skills, id, skillsFound);
+                    const loaded = asks ? preloadSkills(agent.skills, id, skillsFound) : early;
                     if (!loaded.ok) { setError(`/subagent: ${loaded.message}`); return; }
                     // The file is recorded once the start took place: a refused start trusts nothing.
-                    if (begin({ label: uniqueLabel(id, conv.runningChildren().map((c) => c.label)), prompt: withPreload(fillPrompt(agent, values), loaded.text), agent: agentRef(agent, id), ...(groups.groups ? { toolGroups: groups.groups } : {}), ...(loaded.skills.length ? { skills: loaded.skills } : {}) }, mode, [absentGroupsNote(id, groups.absent), preloadNote(id, loaded.skills)].filter(Boolean).join('\n'))) recordAgentStart(agent);
+                    if (begin({ label: uniqueLabel(id, conv.runningChildren().map((c) => c.label)), prompt: withPreload(fillPrompt(agent, values), loaded.text), ...(loaded.skills.length ? { head: fillPrompt(agent, values) } : {}), agent: agentRef(agent, id), ...(groups.groups ? { toolGroups: groups.groups } : {}), ...(loaded.skills.length ? { skills: loaded.skills } : {}) }, mode, [absentGroupsNote(id, groups.absent), preloadNote(id, loaded.skills)].filter(Boolean).join('\n'))) recordAgentStart(agent);
                   };
                   if (!parsed.missing.length) { void launch(parsed.values); return; }
                   // One free-text block per missing parameter, in the declared order: the

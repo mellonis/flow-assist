@@ -175,3 +175,9 @@ test('an agent\'s first message carries its skills as a host mark: counted, in t
   expect(withLoadedSkills('S', msgs)).toBe(`S\n\n${SKILLS_LINE} b, tk/ticket`);
   expect(loadedSkillIds([{ role: 'assistant', content: 'x', skills: ['b'] }])).toEqual([]);
 });
+
+test('a user message ends the pairing: a result after it does not count the earlier skill call', () => {
+  expect(loadedSkillIds([
+    call('c1', 'skill'), { role: 'user', content: 'and then' }, { role: 'tool', tool_call_id: 'c1', content: head('late') },
+  ])).toEqual([]);
+});

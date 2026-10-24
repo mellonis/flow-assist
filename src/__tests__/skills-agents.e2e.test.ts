@@ -6,6 +6,7 @@ import { afterEach, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { spyOn } from 'bun:test';
 import { agentHash, parseAgentFile } from '../assistant/agent-file.ts';
 import { agentTrusted, agentTrustPath, recordAgentStart, skillKeyOf } from '../assistant/agent-trust.ts';
 import { readJournal, type JournalEvent } from '../assistant/journal.ts';
@@ -40,6 +41,13 @@ async function chat(mark: string) {
   return { root, dir, model, child, ui, agents: path.join(root, '.flow-assist', 'agents') };
 }
 // A person's skill, recorded as the person's first use leaves it (or not).
+function record(name: string): void {
+  const fresh = loadSkillFresh(path.join(hostStateDir(), 'skills', name), { kind: 'person' });
+  if (!fresh.ok) throw new Error('unreadable');
+  const files = (JSON.parse(fs.readFileSync(agentTrustPath(), 'utf8')) as { files: Record<string, string> }).files;
+  files[skillKeyOf(fresh.skill)] = fresh.skill.hash;
+  write(agentTrustPath(), JSON.stringify({ files }));
+}
 function person(name: string, body: string, recorded = true): void {
   const dir = path.dirname(write(path.join(hostStateDir(), 'skills', name, 'SKILL.md'), `---\ndescription: ${name} words\n---\n${body}\n`));
   if (!recorded) return;
@@ -64,6 +72,10 @@ test('the person\'s start loads the named skills after the prompt in order, note
   await settleUntil(() => child.requests.length === 1);
   const first = firstUser(child.requests[0]!);
   expect(first.startsWith('GO-P T-1\n\n[The skill «beta» — person, ')).toBe(true);
+  const sys = String((child.requests[0]!.messages as Array<{ role: string; content?: unknown }>).find((m) => m.role === 'system')?.content ?? '');
+  expect(sys).toContain('GO-P T-1');
+  expect(sys).not.toContain('BETA-BODY');
+  expect(sys).not.toContain('ALPHA-BODY');
   expect(first.indexOf('BETA-BODY')).toBeLessThan(first.indexOf('«alpha»'));
   expect(first).toContain('ALPHA-BODY');
   expect(((child.requests[0]!.tools ?? []) as Array<{ function: { name: string } }>).map((t) => t.function.name)).toContain('skill');
@@ -131,5 +143,43 @@ test('the skills are read again after the first-start question: a skill changed 
   expect(frameOf(ui)).toContain('the skill «alpha» is not trusted');
   await settle(10);
   expect(child.requests).toHaveLength(0);
+  ui.app.unmount();
+});
+
+test('the skills are read once when no question was asked, twice when one was (a question costs exactly one more read)', async () => {
+  const { agents, child, ui } = await chat('GO-RD');
+  person('alpha', 'A');
+  // a file beside the body: read by the content walk of a load, not by the listing
+  write(path.join(hostStateDir(), 'skills', 'alpha', 'refs', 'notes.md'), 'n');
+  record('alpha');
+  const reads = () => {
+    const real = fs.readFileSync;
+    let n = 0;
+    const spy = spyOn(fs, 'readFileSync').mockImplementation(((p: unknown, ...rest: unknown[]) => {
+      if (String(p).endsWith(path.join('alpha', 'refs', 'notes.md'))) n++;
+      return (real as (...a: unknown[]) => unknown)(p, ...rest);
+    }) as typeof fs.readFileSync);
+    return { count: () => n, stop: () => spy.mockRestore() };
+  };
+  child.script([{ text: '1' }, { text: '2' }, { text: '3' }]);
+  let started = 0;
+  // One start of `name`, trusted (no question) or changed (the question, answered y); the reads of alpha's file until the child's request.
+  const start = async (name: string, header: string, asked: boolean): Promise<number> => {
+    const text = agentDoc(header, `GO-RD ${name}`);
+    const file = write(path.join(agents, `${name}.md`), text);
+    if (!asked) recordAgentStart({ path: file, source: { kind: 'project' }, hash: agentHash(text) });
+    const r = reads();
+    await ask(ui, `/subagent @${name}`);
+    if (asked) { await settleUntil(() => frameOf(ui).includes('(y/n)')); await ui.press('y'); }
+    started++;
+    await settleUntil(() => child.requests.length === started);
+    r.stop();
+    return r.count();
+  };
+  await start('warm', 'skills: alpha\n', false); // the listing's own hash cache is warm after this
+  const trusted = await start('withskill', 'skills: alpha\n', false);
+  const asked = await start('withq', 'skills: alpha\n', true);
+  expect(trusted).toBe(1);
+  expect(asked).toBe(2);
   ui.app.unmount();
 });

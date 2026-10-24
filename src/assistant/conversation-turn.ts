@@ -165,7 +165,7 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
   const subagentHead = shape.system === 'subagent' ? [subagentPrompt(c.task || q), FRAME_NOTE, c.memoryBlock(), languageDirective(cfg)].filter(Boolean).join('\n\n') : '';
   const workerSystem = () => shape.system === 'subagent'
     ? [subagentHead, projectBlock(c.project), agentsNow(), skillsNowOf(c), summaryBlock(c.summary)].filter(Boolean).join('\n\n')
-    : [workerPrompt(q), projectBlock(c.project), agentsNow(), skillsNowOf(c)].filter(Boolean).join('\n\n');
+    : [workerPrompt(c.task || q), projectBlock(c.project), agentsNow(), skillsNowOf(c)].filter(Boolean).join('\n\n');
   const sys = sysParts ? chatSystem(sysParts, false) : workerSystem();
   // DISPLAY source vs LLM role are split: a background result stays role 'bg'
   // on screen and in the kept history (it is NOT the person's own message), while

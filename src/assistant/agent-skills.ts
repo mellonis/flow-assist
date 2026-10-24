@@ -12,12 +12,16 @@ import { frameSkill } from './skill-model.js';
 export interface PreloadedSkill { id: string; source: string; path: string; hash: string }
 export type Preload = { ok: true; skills: PreloadedSkill[]; text: string } | { ok: false; message: string };
 
+// The framed text of all the skills together is at most this many characters.
+export const PRELOAD_MAX_CHARS = 64 * 1024;
+
 export function preloadSkills(names: readonly string[], agentId: string, finder: () => FoundSkills): Preload {
   if (!names.length) return { ok: true, skills: [], text: '' };
   let found: FoundSkills;
   try { found = finder(); } catch { return { ok: false, message: `@${agentId} names skills, and the skills cannot be read now` }; }
   const skills: PreloadedSkill[] = [];
   const framed: string[] = [];
+  let total = 0;
   for (const name of names) {
     const hit = resolveSkill(name, found);
     if (!hit.ok) return { ok: false, message: `@${agentId} names the skill «${name}»: ${hit.message}` };
@@ -28,8 +32,11 @@ export function preloadSkills(names: readonly string[], agentId: string, finder:
     if (!fresh.ok) return { ok: false, message: refusal };
     const skill: FoundSkill = { ...listed, ...fresh.skill };
     if (!skillTrusted(skill)) return { ok: false, message: refusal };
+    const frame = frameSkill(skill, skill.body);
+    total += frame.length + 2;
+    if (total > PRELOAD_MAX_CHARS) return { ok: false, message: `@${agentId}: the skill «${skill.id}» takes the preload past ${PRELOAD_MAX_CHARS / 1024} KiB — name fewer or smaller skills` };
     skills.push({ id: skill.id, source: skill.source.kind, path: skill.path, hash: skill.hash });
-    framed.push(frameSkill(skill, skill.body));
+    framed.push(frame);
   }
   return { ok: true, skills, text: framed.join('\n\n') };
 }

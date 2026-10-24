@@ -988,7 +988,7 @@ export class Conversation {
     // A subagent the person started stays after its answer (see `staying`).
     const stays = spec.kind === 'subagent' && spec.by === 'person';
     for (const s of spec.skills ?? []) about({ t: 'skill-load', name: s.id, source: s.source, path: s.path, hash: s.hash, by: 'agent', ...(spec.agent ? { agent: spec.agent.id } : {}) });
-    if (spec.kind === 'subagent') child.task = spec.prompt;
+    if (spec.kind === 'subagent' || spec.head !== undefined) child.task = spec.head ?? spec.prompt;
     child.staying = stays;
     let ran = false;
     // The end of one turn on `prompt`, as the tool reports it; never throws.

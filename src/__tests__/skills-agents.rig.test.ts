@@ -5,6 +5,7 @@
 // conversation on the scripted model, no App.
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { Conversation } from '../assistant/conversation.ts';
 import { foldIntoHandoff } from '../assistant/conversation-turn.ts';
@@ -66,6 +67,7 @@ async function call(rig: Rig, model: ScriptedModel, args: Record<string, unknown
   const ev = rig.journal().filter((e) => e.t === 'call' && !e.task && e.name === 'subagent').at(-1);
   return String(ev?.result ?? '');
 }
+const systemOf = (req: { messages: { role: string; content?: unknown }[] }): string => String(req.messages.find((m) => m.role === 'system')?.content ?? '');
 const childDone = (rig: Rig) => rig.until(() => rig.registry.children.backgroundCount() === 0);
 
 test('the named skills are framed after the filled prompt in the file\'s order, before the follow-up; the answer, the journal and the first message name them; the child keeps the skill tool', async () => {
@@ -199,4 +201,52 @@ test('a missing skill and a broken one fail the start too, by name', async () =>
   expect(answer).toContain('@job names the skill «ghost»: skill ghost has errors');
   expect(child.requests).toHaveLength(0);
   expect(rig.registry.children.backgroundCount()).toBe(0);
+});
+
+test('a trusted plugin\'s skill in the list is preloaded without a record', async () => {
+  const { model, child, rig } = rigFor('GO-PL');
+  const plug = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'fa-sk-plug-')));
+  try {
+    write(path.join(plug, 'manifest.json'), JSON.stringify({ name: 'tk', skills: ['skills/ticket'] }));
+    write(path.join(plug, 'skills', 'ticket', 'SKILL.md'), skillDoc('ticket', 'PLUGIN-BODY'));
+    (rig.services as unknown as { agentPlugins: () => unknown }).agentPlugins = () => [{ name: 'tk', dir: plug }];
+    agent(rig, 'job', 'skills: tk/ticket\n', 'GO-PL go');
+    child.script([{ text: 'ok' }]);
+    const answer = await call(rig, model, { agent: 'job' });
+    expect(answer).toContain('@job: skills preloaded — tk/ticket');
+    await rig.until(() => child.requests.length === 1);
+    await childDone(rig);
+    expect(firstUser(child.requests[0]!)).toContain('PLUGIN-BODY');
+    expect(rig.journal().filter((e) => e.t === 'skill-load')[0]).toMatchObject({ name: 'tk/ticket', source: 'plugin', by: 'agent' });
+  } finally { fs.rmSync(plug, { recursive: true, force: true }); }
+});
+
+test('the bodies are sent once: the first message carries them, the child\'s system prompt only the prompt without them', async () => {
+  const { model, child, rig } = rigFor('GO-ONCE');
+  person('alpha', 'ALPHA-BODY');
+  agent(rig, 'job', 'skills: alpha\n', 'GO-ONCE go');
+  child.script([{ text: 'ok' }]);
+  await call(rig, model, { agent: 'job', task: 'FOLLOW' });
+  await rig.until(() => child.requests.length === 1);
+  await childDone(rig);
+  const req = child.requests[0]!;
+  expect(firstUser(req)).toContain('ALPHA-BODY');
+  expect(systemOf(req)).toContain('GO-ONCE go');
+  expect(systemOf(req)).toContain('FOLLOW');
+  expect(systemOf(req)).not.toContain('ALPHA-BODY');
+  expect(systemOf(req)).not.toContain('«alpha»');
+});
+
+test('the preload is capped at 64 KiB in all: the start fails naming the skill that crosses it', async () => {
+  const { model, child, rig } = rigFor('GO-BIG');
+  for (const n of ['a', 'b', 'c']) person(n, `${n.toUpperCase()}${'x'.repeat(25_000)}`);
+  agent(rig, 'two', 'skills: a, b\n', 'GO-BIG two');
+  agent(rig, 'three', 'skills: a, b, c\n', 'GO-BIG three');
+  child.script([{ text: 'ok' }]);
+  expect(await call(rig, model, { agent: 'two' })).toContain('Background task started');
+  await childDone(rig);
+  const answer = await call(rig, model, { agent: 'three' });
+  expect(answer).toContain('the skill «c» takes the preload past 64 KiB');
+  expect(answer).not.toContain('Background task started');
+  expect(child.requests).toHaveLength(1);
 });

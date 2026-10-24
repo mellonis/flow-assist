@@ -27,7 +27,7 @@ export const AGENTS_LISTED_MAX = 20;
 
 export type AgentStartPlan =
   | { ok: false; message: string }
-  | { ok: true; id: string; label: string; prompt: string; mode: AutoMode; agent: AgentRef; toolGroups: string[] | null; absent: string[]; skills: PreloadedSkill[]; note: string };
+  | { ok: true; id: string; label: string; prompt: string; mode: AutoMode; agent: AgentRef; toolGroups: string[] | null; absent: string[]; skills: PreloadedSkill[]; head: string; note: string };
 
 const isMap = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 
@@ -51,13 +51,15 @@ export function planAgentStart(starter: AgentStarter, call: { agent: string; arg
   const extra = call.prompt.trim();
   const loaded: Preload = agent.skills.length ? (starter.preload ? starter.preload(agent.skills, id) : { ok: false, message: `@${id} names skills, which cannot be loaded here` }) : { ok: true, skills: [], text: '' };
   if (!loaded.ok) return { ok: false, message: `subagent: ${loaded.message}` };
-  const body = withPreload(fillPrompt(agent, values), loaded.text);
+  const filled = fillPrompt(agent, values);
+  const body = withPreload(filled, loaded.text);
   const groups = agentToolGroups(agent, starter.loaded());
   return {
     ok: true,
     id,
     label: uniqueLabel(id, starter.labels()),
     prompt: extra ? `${body}\n\n${AGENT_FOLLOW_UP}\n${extra}` : body,
+    head: extra ? `${filled}\n\n${AGENT_FOLLOW_UP}\n${extra}` : filled,
     mode: agentAutoMode(agent.auto, starter.cap()),
     agent: agentRef(agent, id),
     toolGroups: groups.groups,
