@@ -987,6 +987,7 @@ export class Conversation {
     if (spec.kind === 'task' && spec.agent) about({ t: 'task-start', label: spec.label, by: spec.by, agent: spec.agent.id, source: spec.agent.source, path: spec.agent.path, hash: spec.agent.hash });
     // A subagent the person started stays after its answer (see `staying`).
     const stays = spec.kind === 'subagent' && spec.by === 'person';
+    for (const s of spec.skills ?? []) about({ t: 'skill-load', name: s.id, source: s.source, path: s.path, hash: s.hash, by: 'agent', ...(spec.agent ? { agent: spec.agent.id } : {}) });
     if (spec.kind === 'subagent') child.task = spec.prompt;
     child.staying = stays;
     let ran = false;
@@ -1044,7 +1045,7 @@ export class Conversation {
       if (ran) return { outcome: 'failed', text: '', error: 'already run' };
       ran = true;
       // Stopped while it waited for its delay or a slot: it sends nothing.
-      const r: ChildResult = child.closed || child.stopRequested ? { outcome: 'stopped', text: '' } : await outcomeOf(spec.prompt);
+      const r: ChildResult = child.closed || child.stopRequested ? { outcome: 'stopped', text: '' } : await outcomeOf(spec.prompt, spec.skills?.length ? { preloaded: spec.skills.map((s) => s.id) } : undefined);
       // Stopped with the conversation that holds it, or at exit: its result goes nowhere.
       const stopped = child.closeReason === 'parent' || child.closeReason === 'exit';
       // A subagent says how it ended in its parent's journal; one stopped with its

@@ -92,7 +92,7 @@ const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? '' 
 
 // What the person is asked before the first start of a project agent file: the file, what
 // it will be allowed (its tool groups, its auto mode after the cap) and what it takes.
-export function agentTrustRequest(agent: Pick<Agent, 'description' | 'path' | 'tools' | 'params' | 'body'>, id: string, mode: AutoMode, changed: boolean): { title: string; line: string; hint: string } {
+export function agentTrustRequest(agent: Pick<Agent, 'description' | 'path' | 'tools' | 'params' | 'body'> & { skills?: readonly string[] }, id: string, mode: AutoMode, changed: boolean): { title: string; line: string; hint: string } {
   return {
     title: `⚠ ${changed ? `@${id} changed since you last started it` : `@${id} is a project file you have not started`} — start it? (y/n)`,
     line: [
@@ -100,6 +100,7 @@ export function agentTrustRequest(agent: Pick<Agent, 'description' | 'path' | 't
       `file: ${agent.path}`,
       `tool groups: ${agent.tools ? ['core', ...agent.tools.filter((g) => g !== 'core')].join(', ') : 'every group'}`,
       `auto mode: ${mode}`,
+      ...(agent.skills?.length ? [`skills: ${agent.skills.join(', ')} (loaded into its first message)`] : []),
       `parameters: ${agent.params.length ? paramsText(agent.params) : 'none'}`,
       `prompt: ${plural(agent.body.split('\n').length, 'line')}, ${plural(agent.body.length, 'character')}`,
     ].join('\n'),

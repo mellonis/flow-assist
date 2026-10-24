@@ -7,6 +7,7 @@
 //   params:      comma-separated names, a trailing `?` marks an optional one, optional
 //                ones only after the required ones; the body spells one `{{name}}`
 //   tools:       comma-separated tool group ids
+//   skills:      comma-separated skill names, loaded into the agent's first message when it starts
 //   auto:        ask | reads | all (omitted: ask)
 //
 // An unknown or repeated key is an error, a `{{name}}` the header does not declare is
@@ -23,6 +24,7 @@ export interface Agent {
   description: string;
   params: AgentParam[];
   tools: string[] | null; // null — the key is omitted
+  skills: string[]; // the skills preloaded at the start, in order; [] — the key is omitted
   auto: AgentAuto;
   body: string;
   path: string;
@@ -32,9 +34,11 @@ export interface Agent {
 export interface AgentError { path: string; line: number; message: string }
 export type ParsedAgent = { ok: true; agent: Agent } | { ok: false; errors: AgentError[] };
 
-export const AGENT_KEYS = ['description', 'params', 'tools', 'auto'] as const;
+export const AGENT_KEYS = ['description', 'params', 'tools', 'skills', 'auto'] as const;
 export const AGENT_AUTOS: readonly AgentAuto[] = ['ask', 'reads', 'all'];
 const NAME = /^[A-Za-z0-9-]+$/;
+// A skill's name: `name`, or `<plugin>/<name>` (the grammar of a skill id).
+const SKILL_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?:\/[A-Za-z0-9][A-Za-z0-9._-]{0,63})?$/;
 const PARAM = /^[A-Za-z_][A-Za-z0-9_]*$/;
 // A placeholder stays on one line: a `{{ … }}` that spans lines is body text, not a parameter.
 const PLACEHOLDER = /\{\{([^{}\n]*)\}\}/g;
@@ -110,6 +114,17 @@ export function parseAgentFile(file: string, content: string | Uint8Array, sourc
     }
   }
 
+  const skills: string[] = [];
+  const skillsAt = seen.get('skills');
+  if (skillsAt && skillsAt.value) {
+    for (const part of skillsAt.value.split(',')) {
+      const id = part.trim();
+      if (!SKILL_NAME.test(id)) { err(skillsAt.line, `malformed skill name «${id}» — a name, or plugin/name`); continue; }
+      if (skills.includes(id)) { err(skillsAt.line, `skill "${id}" is named twice`); continue; }
+      skills.push(id);
+    }
+  }
+
   let auto: AgentAuto = 'ask';
   const autoAt = seen.get('auto');
   if (autoAt) {
@@ -131,7 +146,7 @@ export function parseAgentFile(file: string, content: string | Uint8Array, sourc
 
   if (errors.length || name === null || !description) return { ok: false, errors };
   const body = lines.slice(close + 1).join('\n').replace(/^\s*\n/, '').trimEnd();
-  return { ok: true, agent: { name, description: description.value, params, tools, auto, body, path: file, source, hash: agentHash(typeof content === 'string' ? Buffer.from(content, 'utf8') : content) } };
+  return { ok: true, agent: { name, description: description.value, params, tools, skills, auto, body, path: file, source, hash: agentHash(typeof content === 'string' ? Buffer.from(content, 'utf8') : content) } };
 }
 
 // The body with every `{{name}}` replaced by its value; a name with none (an optional

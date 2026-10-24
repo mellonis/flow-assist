@@ -9,6 +9,7 @@ import { agentAutoMode, agentRef, agentToolGroups } from './agent-start.js';
 import type { AutoMode } from './auto.js';
 import type { AgentRef } from './conversation-types.js';
 import { uniqueLabel } from './subagent-command.js';
+import { preloadNote, withPreload, type Preload, type PreloadedSkill } from './agent-skills.js';
 
 // What the host gives a `subagent` call so it can start an agent: the agent files as of
 // now, the cap on their auto mode, the tool groups loaded, the labels of the live children.
@@ -17,6 +18,8 @@ export interface AgentStarter {
   cap: () => AutoMode;
   loaded: () => ReadonlySet<string>;
   labels: () => string[];
+  // The agent's `skills:` resolved now (agent-skills.ts); absent: no skill can be preloaded.
+  preload?: (names: readonly string[], agentId: string) => Preload;
 }
 
 export const AGENT_FOLLOW_UP = 'Additional instructions from the conversation that started you:';
@@ -24,7 +27,7 @@ export const AGENTS_LISTED_MAX = 20;
 
 export type AgentStartPlan =
   | { ok: false; message: string }
-  | { ok: true; id: string; label: string; prompt: string; mode: AutoMode; agent: AgentRef; toolGroups: string[] | null; absent: string[] };
+  | { ok: true; id: string; label: string; prompt: string; mode: AutoMode; agent: AgentRef; toolGroups: string[] | null; absent: string[]; skills: PreloadedSkill[]; note: string };
 
 const isMap = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 
@@ -46,7 +49,9 @@ export function planAgentStart(starter: AgentStarter, call: { agent: string; arg
   const missing = agent.params.filter((p) => !p.optional && !(Object.hasOwn(values, p.name) ? values[p.name]! : '').trim()).map((p) => p.name);
   if (missing.length) return { ok: false, message: `subagent: @${id} needs ${missing.join(', ')}` };
   const extra = call.prompt.trim();
-  const body = fillPrompt(agent, values);
+  const loaded: Preload = agent.skills.length ? (starter.preload ? starter.preload(agent.skills, id) : { ok: false, message: `@${id} names skills, which cannot be loaded here` }) : { ok: true, skills: [], text: '' };
+  if (!loaded.ok) return { ok: false, message: `subagent: ${loaded.message}` };
+  const body = withPreload(fillPrompt(agent, values), loaded.text);
   const groups = agentToolGroups(agent, starter.loaded());
   return {
     ok: true,
@@ -57,6 +62,8 @@ export function planAgentStart(starter: AgentStarter, call: { agent: string; arg
     agent: agentRef(agent, id),
     toolGroups: groups.groups,
     absent: groups.absent,
+    skills: loaded.skills,
+    note: preloadNote(id, loaded.skills),
   };
 }
 

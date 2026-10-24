@@ -72,6 +72,7 @@ import { findAgents, resolveAgent } from '../assistant/agent-find.js';
 import { parseAgentArgs } from '../assistant/agent-args.js';
 import { absentGroupsNote, agentAutoMode, askBlockedBy, agentRef, agentToolGroups, maxAutoOf } from '../assistant/agent-start.js';
 import { fillPrompt } from '../assistant/agent-file.js';
+import { preloadNote, preloadSkills, withPreload } from '../assistant/agent-skills.js';
 import { agentChanged, agentTrusted, agentTrustRequest, recordAgentStart, recordSkillLoad, skillChanged, skillTrusted, trustedSkillsNow } from '../assistant/agent-trust.js';
 import { findSkills, resolveSkill, type FoundSkill } from '../assistant/skill-find.js';
 import { loadSkillFresh } from '../assistant/skill-file.js';
@@ -1812,7 +1813,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 // the child's lines (its session is made here when nobody has spoken,
                 // `keepPersonWork`). Its mode is set before the schedule's timer lets its
                 // first turn go: the starting conversation's mode is never the child's.
-                const begin = (spec: Pick<ChildSpec, 'label' | 'prompt' | 'agent' | 'toolGroups'>, mode: AutoMode | null, notes: string): boolean => {
+                const begin = (spec: Pick<ChildSpec, 'label' | 'prompt' | 'agent' | 'toolGroups' | 'skills'>, mode: AutoMode | null, notes: string): boolean => {
                   const journalId = conv.keepPersonWork(`/${cmd.trim()}`);
                   const started = scheduleChild(
                     { kind: 'subagent', by: 'person', ...spec, ...(line.withContext ? { summary: conv.summary } : {}) },
@@ -1843,6 +1844,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   // The person's start is what trusts a file: their own file is recorded at
                   // the start, a project's after a y/n on its first start (or its change).
                   const launch = async (values: Record<string, string>): Promise<void> => {
+                    // A skill the file names that is missing or not trusted fails the start before anything is asked.
+                    const early = preloadSkills(agent.skills, id, skillsFound);
+                    if (!early.ok) { setError(`/subagent: ${early.message}`); return; }
                     if (agent.source.kind === 'project' && !agentTrusted(agent)) {
                       if (conv.confirm || conv.question) { setError('answer the open question first'); return; }
                       setField('');
@@ -1850,8 +1854,11 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                       if (yes === null) { setField(typed); host.notify(); return; }
                       if (!yes) { conv.pushNote(`@${id} was not started: its file is not trusted.`); host.notify(); return; }
                     }
+                    // The bodies are read again after the question: what starts is what is trusted now.
+                    const loaded = preloadSkills(agent.skills, id, skillsFound);
+                    if (!loaded.ok) { setError(`/subagent: ${loaded.message}`); return; }
                     // The file is recorded once the start took place: a refused start trusts nothing.
-                    if (begin({ label: uniqueLabel(id, conv.runningChildren().map((c) => c.label)), prompt: fillPrompt(agent, values), agent: agentRef(agent, id), ...(groups.groups ? { toolGroups: groups.groups } : {}) }, mode, absentGroupsNote(id, groups.absent))) recordAgentStart(agent);
+                    if (begin({ label: uniqueLabel(id, conv.runningChildren().map((c) => c.label)), prompt: withPreload(fillPrompt(agent, values), loaded.text), agent: agentRef(agent, id), ...(groups.groups ? { toolGroups: groups.groups } : {}), ...(loaded.skills.length ? { skills: loaded.skills } : {}) }, mode, [absentGroupsNote(id, groups.absent), preloadNote(id, loaded.skills)].filter(Boolean).join('\n'))) recordAgentStart(agent);
                   };
                   if (!parsed.missing.length) { void launch(parsed.values); return; }
                   // One free-text block per missing parameter, in the declared order: the

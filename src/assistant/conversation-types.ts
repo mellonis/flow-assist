@@ -1,5 +1,6 @@
 // The vocabulary of a conversation: what the chat draws (`ChatMsg`), what waits, what
 // runs, what the chat is told, and what a conversation needs from the host and the chat.
+import type { PreloadedSkill } from './agent-skills.js';
 import type { AgentOpts, AgentResult, ChatMessage } from './agent.js';
 import type { ChildSlots } from './registry.js';
 import type { AskState } from './ask.js';
@@ -126,6 +127,7 @@ export interface SendOptions {
   hostAsk?: boolean;             // the host's ask after a `!!command`: drawn dim, never in ↑/↓
   fromInbox?: boolean;           // the inbox's follow-up turn (`ai.backgroundFollowUp`, on unless set false): role `bg`, never in ↑/↓, the field and its history walk left alone
   skill?: { id: string; source: string; path: string; hash: string; framed: string }; // the person's `/skill`: the message goes to the model as `framed` (the body, then the person's text); the screen row and the journal keep the line as typed, and a `skill-load` line records which content it was
+  preloaded?: readonly string[]; // an agent's first message: the ids of the skills its text carries, marked on the message for the compaction line
   framed?: string;               // with `fromInbox`: the item as the model reads it (`frameItem`); the screen row and the journal keep the plain text
 }
 
@@ -217,8 +219,9 @@ export interface ConversationDeps {
 // starts always may); without it a child declines every write.
 // `agent`: the agent file it was started from, recorded in the journal's start lines.
 // `toolGroups`: the tool groups it may use besides the core group (absent: every group).
+// `skills`: the skills of the agent file already in `prompt`; the first message carries their ids as a mark, and a `skill-load` line records each.
 export interface AgentRef { id: string; source: 'project' | 'person' | 'plugin'; path: string; hash: string }
-export interface ChildSpec { kind: 'task' | 'subagent'; label: string; prompt: string; by: 'model' | 'person'; summary?: string; write?: boolean; agent?: AgentRef; toolGroups?: readonly string[] }
+export interface ChildSpec { kind: 'task' | 'subagent'; label: string; prompt: string; by: 'model' | 'person'; summary?: string; write?: boolean; agent?: AgentRef; toolGroups?: readonly string[]; skills?: readonly PreloadedSkill[] }
 // How a child's run ended, as the tool that started it reports it.
 export interface ChildResult {
   outcome: 'answer' | 'empty' | 'limit' | 'stopped' | 'failed';

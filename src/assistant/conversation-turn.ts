@@ -20,6 +20,7 @@ import type { ViewRecord } from './views.js';
 import { chatToolGroupOf, type ToolDef } from '../loader/tools.js';
 import { agentsBlock, type AgentStarter } from './agent-model.js';
 import { findAgents, type PluginAgentSource } from './agent-find.js';
+import { preloadSkills } from './agent-skills.js';
 import { findSkills, type FoundSkills } from './skill-find.js';
 import { skillsBlock, withLoadedSkills } from './skill-model.js';
 import { SKILL_TOOL } from './skill-file.js';
@@ -88,6 +89,7 @@ export function agentStarterOf(c: Conversation): AgentStarter {
     cap: () => maxAutoOf(c.deps.config()),
     loaded: () => new Set(chatToolGroupOf().values()),
     labels: () => c.runningChildren().map((r) => r.label),
+    preload: (names, agentId) => preloadSkills(names, agentId, skillsFinderOf(c)),
   };
 }
 
@@ -186,7 +188,7 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
   const images = opts.fromInbox || opts.hostAsk || !shape.images ? [] : imagesInText(q, c.images);
   // A follow-up turn for the inbox sends the item framed (`frameItem`); the screen row and
   // the journal row below keep its plain text.
-  const asked: ChatMessage = { role: 'user', content: opts.skill ? opts.skill.framed : opts.fromInbox ? opts.framed ?? q : q, ...(opts.skill ? { skill: opts.skill.id } : {}), ...(images.length ? { images } : {}) };
+  const asked: ChatMessage = { role: 'user', content: opts.skill ? opts.skill.framed : opts.fromInbox ? opts.framed ?? q : q, ...(opts.skill ? { skill: opts.skill.id } : {}), ...(opts.preloaded?.length ? { skills: [...opts.preloaded] } : {}), ...(images.length ? { images } : {}) };
   apiMsgs.push(asked);
   // What goes to the provider: every image of the history as a part — read now,
   // not kept in the history, which holds its ref.
@@ -796,7 +798,7 @@ export async function foldIntoHandoff(c: Conversation, history: ChatMessage[], s
   if (!signal.aborted && result.incomplete) c.deps.pushLog(`[compact] no usable handoff after a retry: ${result.incomplete}`);
   // The skills the history loaded are named after the summary: their text goes with it. The
   // person's loads are read from the kept history, where their mark is (the model's view drops it).
-  return { ...result, summary: withLoadedSkills(result.summary, [...history, ...c.api.filter((m) => typeof m.skill === 'string')], c.summary) };
+  return { ...result, summary: withLoadedSkills(result.summary, [...history, ...c.api.filter((m) => typeof m.skill === 'string' || Array.isArray(m.skills))], c.summary) };
 }
 export function markCompacted(c: Conversation, before: number, summary: string, incomplete: string | undefined, auto: boolean): void {
   const after = c.contextReading().used;

@@ -123,3 +123,23 @@ test('a parameter named like an Object.prototype member is filled from its own v
   expect(fillPrompt(r.agent, { toString: 'now' })).toBe('Go now.');
   expect(fillPrompt(r.agent, {})).toBe('Go .');
 });
+
+test('skills: a comma-separated list of names in order; omitted or empty is none; plugin/name is a name', () => {
+  const at = (header: string) => parseAgentFile('/a/b.md', `---\ndescription: d\n${header}\n---\nbody`);
+  const some = at('skills: notes, tk/ticket,deploy');
+  expect(some.ok && some.agent.skills).toEqual(['notes', 'tk/ticket', 'deploy']);
+  const none = parseAgentFile('/a/b.md', '---\ndescription: d\n---\nbody');
+  expect(none.ok && none.agent.skills).toEqual([]);
+  const empty = at('skills:');
+  expect(empty.ok && empty.agent.skills).toEqual([]);
+});
+
+test('skills: a malformed or repeated name is an error on the key\'s line, and the key is in the unknown-key list', () => {
+  const at = (header: string) => errorsOf(`---\ndescription: d\n${header}\n---\nbody`);
+  expect(at('skills: a b')[0]).toMatchObject({ path: P, line: 3, message: expect.stringContaining('malformed skill name «a b»') });
+  expect(at('skills: a,,b')[0]).toMatchObject({ line: 3, message: expect.stringContaining('malformed skill name «»') });
+  expect(at('skills: ../x')[0]).toMatchObject({ line: 3, message: expect.stringContaining('malformed skill name') });
+  expect(at('skills: a, a')[0]).toMatchObject({ line: 3, message: expect.stringContaining('skill "a" is named twice') });
+  expect(at('skills: a\nskills: b')[0]).toMatchObject({ line: 4, message: expect.stringContaining('duplicate key "skills"') });
+  expect(at('skill: a')[0]!.message).toContain('skills');
+});

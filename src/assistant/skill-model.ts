@@ -118,21 +118,27 @@ export function skillToolResult(finder: () => FoundSkills, args: Record<string, 
 // instruction to load each again with the tool; a later compaction carries the line on.
 // The line is the host's, so only what the host itself marked counts: the results of calls
 // to the `skill` tool (by the call's name, never by a result's text, which a page or a
-// command can imitate) and the person's `/skill` messages (marked when sent). An id is kept
+// command can imitate) and the messages the host marked when it sent them (the person's `/skill`, an agent's first message). An id is kept
 // only in the grammar of a skill's id.
 export const SKILLS_LINE = 'Skills loaded in this conversation (their text is not kept in this summary — load each again with the skill tool before relying on it):';
 const LOADED = /^(?:OK: )?\[The (?:skill «([^»\n]+)»|file [^\n]*? of the skill «([^»\n]+)»)/;
 const SKILL_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?:\/[A-Za-z0-9][A-Za-z0-9._-]{0,63})?$/;
-type Msg = { role?: string; content?: unknown; tool_call_id?: unknown; tool_calls?: unknown; skill?: unknown };
+type Msg = { role?: string; content?: unknown; tool_call_id?: unknown; tool_calls?: unknown; skill?: unknown; skills?: unknown };
 
 export function loadedSkillIds(messages: ReadonlyArray<Msg>): string[] {
   const ids = new Set<string>();
-  const skillCalls = new Set<string>();
+  // The skill calls of the assistant message just before: call ids repeat from round to
+  // round, so a result is paired with the calls of its own round only.
+  let skillCalls = new Set<string>();
   for (const m of messages) {
-    if (m.role === 'assistant' && Array.isArray(m.tool_calls)) {
-      for (const c of m.tool_calls as Array<{ id?: unknown; function?: { name?: unknown } }>) if (c?.function?.name === SKILL_TOOL && typeof c.id === 'string') skillCalls.add(c.id);
+    if (m.role === 'assistant') {
+      skillCalls = new Set();
+      if (Array.isArray(m.tool_calls)) {
+        for (const c of m.tool_calls as Array<{ id?: unknown; function?: { name?: unknown } }>) if (c?.function?.name === SKILL_TOOL && typeof c.id === 'string') skillCalls.add(c.id);
+      }
     }
     if (m.role === 'user' && typeof m.skill === 'string' && SKILL_ID.test(m.skill)) ids.add(m.skill);
+    if (m.role === 'user' && Array.isArray(m.skills)) for (const id of m.skills) if (typeof id === 'string' && SKILL_ID.test(id)) ids.add(id);
     if (m.role !== 'tool' || typeof m.content !== 'string' || typeof m.tool_call_id !== 'string' || !skillCalls.has(m.tool_call_id)) continue;
     const hit = LOADED.exec(m.content);
     const id = hit?.[1] ?? hit?.[2];

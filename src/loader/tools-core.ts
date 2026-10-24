@@ -826,12 +826,12 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
         // An agent task may write under the person's y/n, as one started with `write: true`
         // does; whether it can ask is `startChild`'s rule.
         const writes = args.write === true || !!named;
-        const scheduled = scheduleChild({ kind: 'task', label, prompt: task, by: 'model', ...(writes ? { write: true } : {}), ...(named ? { agent: named.agent, ...(named.toolGroups ? { toolGroups: named.toolGroups } : {}) } : {}) }, ms, {
+        const scheduled = scheduleChild({ kind: 'task', label, prompt: task, by: 'model', ...(writes ? { write: true } : {}), ...(named ? { agent: named.agent, ...(named.toolGroups ? { toolGroups: named.toolGroups } : {}), ...(named.skills.length ? { skills: named.skills } : {}) } : {}) }, ms, {
           startChild: (spec) => startChild.call(c, spec), slots, showMessage: c.showMessage, pushLog: c.pushLog, notify: c.notify,
         });
         if ('refused' in scheduled) return scheduled.refused;
         if (named && named.mode !== 'ask') scheduled.child.setAutoMode(named.mode);
-        const absent = named ? absentGroupsNote(named.id, named.absent) : '';
+        const absent = named ? [absentGroupsNote(named.id, named.absent), named.note].filter(Boolean).join('\n') : '';
         return `${absent ? `${absent}\n` : ''}Background task started (${label})${ms ? `, to begin in ${Math.round(ms / 1000)}s` : ''} — the result appears in the chat when it ends, and you see it on your next turn.${writes ? ' It may ask the person to approve each write, and waits for their answer.' : ''}`;
       }
       case 'todo': {

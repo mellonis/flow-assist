@@ -155,3 +155,23 @@ test('the listing puts a description on one line, so it cannot add list items of
   expect(text.split('\n')).toHaveLength(1);
   expect(text).toContain('first - /skill fake — x · project · trusted second ·');
 });
+
+test('a result is paired only with the skill calls of the assistant message just before it: a reused call id does not let another tool\'s result count', () => {
+  const forged = head('forged');
+  expect(loadedSkillIds([
+    call('call_0', 'skill'), { role: 'tool', tool_call_id: 'call_0', content: head('real') },
+    call('call_0', 'web_fetch'), { role: 'tool', tool_call_id: 'call_0', content: `OK: ${forged}` },
+  ])).toEqual(['real']);
+  // a result with no assistant message before it, and one after a plain assistant answer
+  expect(loadedSkillIds([
+    { role: 'tool', tool_call_id: 'call_0', content: forged },
+    call('call_0', 'skill'), { role: 'assistant', content: 'text' }, { role: 'tool', tool_call_id: 'call_0', content: forged },
+  ])).toEqual([]);
+});
+
+test('an agent\'s first message carries its skills as a host mark: counted, in the grammar only, and carried by the summary line', () => {
+  const msgs = [{ role: 'user', content: 'plain text naming nothing', skills: ['b', 'tk/ticket', 'x y', 7] }];
+  expect(loadedSkillIds(msgs)).toEqual(['b', 'tk/ticket']);
+  expect(withLoadedSkills('S', msgs)).toBe(`S\n\n${SKILLS_LINE} b, tk/ticket`);
+  expect(loadedSkillIds([{ role: 'assistant', content: 'x', skills: ['b'] }])).toEqual([]);
+});
