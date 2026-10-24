@@ -21,6 +21,8 @@ import { chatToolGroupOf, type ToolDef } from '../loader/tools.js';
 import { agentsBlock, type AgentStarter } from './agent-model.js';
 import { findAgents, type PluginAgentSource } from './agent-find.js';
 import { findSkills, type FoundSkills } from './skill-find.js';
+import { skillsBlock } from './skill-model.js';
+import { SKILL_TOOL } from './skill-file.js';
 import { maxAutoOf } from './agent-start.js';
 import { RESTART_NOTE, type ConfigChange } from '../config/load.js';
 import { keyGlyph } from '../playback/keys.js';
@@ -99,6 +101,20 @@ export function skillsFinderOf(c: Conversation): () => FoundSkills {
   });
 }
 
+// The agents the model may start by name, listed for the kinds that are offered the
+// `subagent` tool; read at each build of the prompt. '' with none.
+export function agentsNowOf(c: Conversation): string {
+  if (turnShape(c.kind).withholdTools.includes('subagent')) return '';
+  try { return agentsBlock(agentStarterOf(c).found()); } catch { return ''; }
+}
+
+// The skills the model may load, listed for every kind that has the core tools; read at
+// each build of the prompt. '' with none.
+export function skillsNowOf(c: Conversation): string {
+  if (turnShape(c.kind).withholdTools.includes(SKILL_TOOL)) return '';
+  try { return skillsBlock(skillsFinderOf(c)()); } catch { return ''; }
+}
+
 export function turnShape(kind: ConversationKind): TurnShape {
   return SHAPES[kind];
 }
@@ -138,21 +154,16 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
   // instructions after it (`TurnShape.system`).
   const sysParts = shape.system === 'chat' ? systemParts(cfg, c.screensBlock(), c.memoryBlock(), c.plan.snapshot(), c.summary) : undefined;
   if (sysParts && c.kind === 'session') sysParts.base = [sysParts.base, FRAME_NOTE].filter(Boolean).join('\n\n');
-  // The agents the model may start by name, listed for the kinds that are offered the
-  // `subagent` tool; read at each build of the prompt.
-  const offersAgents = !shape.withholdTools.includes('subagent');
-  const agentsNow = (): string => {
-    if (!offersAgents) return '';
-    try { return agentsBlock(agentStarterOf(c).found()); } catch { return ''; }
-  };
+  // The agents the model may start and the skills it may load: read at each build of the prompt.
+  const agentsNow = (): string => agentsNowOf(c);
   const chatSystem = (parts: ReturnType<typeof systemParts>, fresh: boolean) =>
-    joinSystem(fresh ? { ...parts, screens: c.screensBlock(), summary: summaryBlock(c.summary) } : parts, [projectBlock(c.project), agentsNow()].filter(Boolean).join('\n\n'));
+    joinSystem(fresh ? { ...parts, screens: c.screensBlock(), summary: summaryBlock(c.summary) } : parts, [projectBlock(c.project), agentsNow(), skillsNowOf(c)].filter(Boolean).join('\n\n'));
   // A subagent's memory block is read once for the message, as a chat's is. Its task is
   // the one it was given, whatever the message of this turn says.
   const subagentHead = shape.system === 'subagent' ? [subagentPrompt(c.task || q), FRAME_NOTE, c.memoryBlock(), languageDirective(cfg)].filter(Boolean).join('\n\n') : '';
   const workerSystem = () => shape.system === 'subagent'
-    ? [subagentHead, projectBlock(c.project), agentsNow(), summaryBlock(c.summary)].filter(Boolean).join('\n\n')
-    : [workerPrompt(q), projectBlock(c.project), agentsNow()].filter(Boolean).join('\n\n');
+    ? [subagentHead, projectBlock(c.project), agentsNow(), skillsNowOf(c), summaryBlock(c.summary)].filter(Boolean).join('\n\n')
+    : [workerPrompt(q), projectBlock(c.project), agentsNow(), skillsNowOf(c)].filter(Boolean).join('\n\n');
   const sys = sysParts ? chatSystem(sysParts, false) : workerSystem();
   // DISPLAY source vs LLM role are split: a background result stays role 'bg'
   // on screen and in the kept history (it is NOT the person's own message), while
@@ -403,6 +414,7 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
         childSlots: c.deps.children,
         // What the tool needs to start an agent file by name.
         agentStarter: agentStarterOf(c),
+        skills: skillsFinderOf(c),
       },
       // A subagent with a file of its own writes its y/n lines there untagged, like its
       // calls; one without a home tags them for the journal above.

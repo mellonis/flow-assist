@@ -35,6 +35,8 @@ export interface Skill {
 export type ParsedSkill = { ok: true; skill: Omit<Skill, 'hash' | 'files' | 'bytes'> } | { ok: false; errors: SkillError[] };
 
 export const SKILL_FILE = 'SKILL.md';
+// The core tool that loads a skill into the conversation.
+export const SKILL_TOOL = 'skill';
 export const SKILL_CAP = INSTRUCTIONS_CAP;
 const NAME = /^[A-Za-z0-9-]+$/;
 const KEY = /^([A-Za-z_][A-Za-z0-9_.-]*):(?:[ \t]+(.*))?$/;

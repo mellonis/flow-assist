@@ -20,6 +20,9 @@ import { openInBrowser } from '../runtime/services.js';
 import { inBackgroundWork, inUnattachedWork } from '../runtime/background-work.js';
 import { type ChildSpec, type ChildStart } from '../assistant/conversation-types.js';
 import { planAgentStart, type AgentStarter } from '../assistant/agent-model.js';
+import { skillToolResult } from '../assistant/skill-model.js';
+import { SKILL_TOOL } from '../assistant/skill-file.js';
+import type { FoundSkills } from '../assistant/skill-find.js';
 import { absentGroupsNote } from '../assistant/agent-start.js';
 import { scheduleChild } from '../assistant/child-schedule.js';
 import type { ChildSlots } from '../assistant/registry.js';
@@ -78,6 +81,9 @@ export interface CoreCtx {
   // Supplied to a conversation that may start children: what `subagent` needs to start an
   // agent file by name (src/assistant/agent-model.ts). Absent where there is none.
   agentStarter?: AgentStarter;
+  // Supplied to every conversation: the skills as they are now, read at each call
+  // (src/assistant/skill-model.ts). Absent where there is none.
+  skills?: () => FoundSkills;
   // Set by `agentChat` for each call: true only when this call was put to the y/n and
   // answered yes. A caller's own `toolCtx` cannot set it.
   confirmedByPerson?: boolean;
@@ -520,6 +526,17 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
     {
       type: 'function',
       function: {
+        name: 'skill',
+        description: 'Load a skill: instructions the person or a plugin wrote for a kind of task, kept in a directory. The system prompt lists the skills you may load, `name — description`; load one when its description fits the task, and follow what it says. `name`: the skill, as listed. `file` (optional): one file beside its body, a path relative to the skill\'s directory (a reference page, a script to read), when the body points at it; a path never leaves that directory. The skill comes back framed as instructions with its source and path; the host never cuts or stubs it. If a skill you loaded is no longer in the conversation (a stub, or after /compact), load it again with this tool. A skill the person has not run with `/skill <name>` once, or that changed since, is refused: ask them to run it.',
+        parameters: { type: 'object', properties: {
+          name: { type: 'string', description: 'The skill, as the system prompt lists it (a plugin\'s is `<plugin>/<name>`).' },
+          file: { type: 'string', description: 'Optional: a file beside the skill\'s body, relative to its directory, e.g. "references/api.md".' },
+        }, required: ['name'] },
+      },
+    },
+    {
+      type: 'function',
+      function: {
         name: 'recall',
         description: 'Read again a bulky item the conversation shows as a stub — an image the person attached (sent to you again as an image), the output of a command the person ran (`! …`), or a large tool result. A stub names the item\'s id, e.g. [! brew update — exit 0 · 24.7 s · 120 lines — recall("out:7d41e0aa")]; pass that id (a unique prefix is enough). The item comes back whole for THIS turn only — call again in a later turn if it is needed again. Nothing else is recalled: content that was never stubbed is already in the conversation.',
         parameters: { type: 'object', properties: { id: { type: 'string', description: 'The id from the stub — "img:…", "out:…" or "res:…" — or a unique prefix of it.' } }, required: ['id'] },
@@ -530,6 +547,11 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
   ] as ToolDef[]).filter((t) => (t.function.name !== 'recall' || recallLimits((config as { ai?: unknown }).ai).enabled) && (t.function.name !== 'ui_open' || !!opts.uiOpen)),
   exec: async (name, args, ctx: CoreCtx) => {
     switch (name) {
+      case 'skill': {
+        if (!ctx.skills) return `${SKILL_TOOL}: skills are not available here.`;
+        // `{ text, raw }`: the framed text for the model, the bare data beside it (`toolReturn`).
+        return skillToolResult(ctx.skills, args) as unknown as string;
+      }
       case 'recall': {
         // The items are the conversation's (`ctx.recall`, supplied by the chat — src/
         // assistant/recall.ts); a run with no conversation of its own (a background

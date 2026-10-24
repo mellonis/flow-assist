@@ -28,6 +28,7 @@ import type { ChatMessage } from './agent.js';
 import { contentText, type ImageRef, type ResolvedImage } from './images.js';
 import { RUN_MARK, runMark } from './shell.js';
 import { formatDuration } from './duration.js';
+import { SKILL_TOOL } from './skill-file.js';
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 // `ai.recall`: on by default. `threshold` is the share of `ai.contextWindow` past which
@@ -147,7 +148,8 @@ export function bulkyItems(api: ChatMessage[], minChars: number): BulkyItem[] {
       add({ id, hash, kind: 'out', stub: shellStub(id, shellMetaOf(m.shell), m.content), chars: m.content.length, lines: countLines(m.content), content: m.content });
       continue;
     }
-    if (m.role === 'tool' && typeof m.content === 'string' && m.content.length >= minChars) {
+    // A loaded skill is never bulky: the model is told to follow it for the whole task.
+    if (m.role === 'tool' && typeof m.content === 'string' && m.content.length >= minChars && calls.get(String(m.tool_call_id))?.name !== SKILL_TOOL) {
       const hash = hashOf(m.content);
       const id = itemId('res', hash);
       add({ id, hash, kind: 'res', stub: resultStub(id, m.content, calls.get(String(m.tool_call_id)) ?? null), chars: m.content.length, lines: countLines(m.content), content: m.content, ...(typeof m.tool_call_id === 'string' ? { callId: m.tool_call_id } : {}) });

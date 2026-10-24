@@ -63,7 +63,7 @@ export function planAgentStart(starter: AgentStarter, call: { agent: string; arg
 export const AGENT_DESCRIPTION_MAX = 200;
 
 // One line, at most 200 characters, an ellipsis where it was cut.
-const clip = (text: string): string => {
+export const clip = (text: string): string => {
   const one = text.replace(/\s+/g, ' ').trim();
   return one.length > AGENT_DESCRIPTION_MAX ? `${one.slice(0, AGENT_DESCRIPTION_MAX - 1).trimEnd()}…` : one;
 };

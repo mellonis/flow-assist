@@ -38,6 +38,7 @@ import {
   type CatalogEntry, type ToolLoading, type ToolSet,
 } from './tool-loading.js';
 import { TOOL_RESULT_MAX_CHARS_DEFAULT, capToolResult, resolveToolResultCap } from './tool-result-cap.js';
+import { SKILL_TOOL } from './skill-file.js';
 import { toolArgsError } from './tool-args.js';
 import { planReminder, type Plan } from './plan.js';
 import { RAW_OMITTED, RAW_RESULT, findToolResult, keptRaw, toolReturn, type FoundResult } from './tool-results.js';
@@ -1298,7 +1299,9 @@ export async function agentChat(
         // A result whose content is not its data plus the tag (cut, or framed by the
         // tool) keeps the data beside it, never sent — what a later call's
         // `resultInput` reads (src/assistant/tool-results.ts, `keptRaw`).
-        const sent = capToolResult(modelToolResult(outcome, detailStr), resultCap);
+        // A loaded skill is whole: its body is capped when read (32 KiB), a file beside it
+        // by the tool itself, so the model never gets half the instructions.
+        const sent = tc.name === SKILL_TOOL ? modelToolResult(outcome, detailStr) : capToolResult(modelToolResult(outcome, detailStr), resultCap);
         const kept = outcome === 'ok' || outcome === 'applied' ? keptRaw(sent, whole === undefined ? detailStr : whole) : {};
         current.push({ role: 'tool', tool_call_id: tc.id, content: sent, ...(outcome !== 'error' && attached.length ? { images: attached } : {}), ...kept });
         if ((outcome === 'ok' || outcome === 'applied') && tc.name !== 'todo') workAt = current.length - 1;

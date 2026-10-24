@@ -31,7 +31,7 @@ import {
   applySession, closeOwnFile, currentProject, ensureSessionId, journal, journaledChatLLM, journalTo, journalToOwnFile, keepPersonWork, markSeen, newSubJournalId, persist, pushNote,
   releaseLockOf, writeSession, NO_FILE,
 } from './conversation-session.js';
-import { askConfigChanges, compact, runTurn, turnShape } from './conversation-turn.js';
+import { agentsNowOf, askConfigChanges, compact, runTurn, skillsNowOf, turnShape } from './conversation-turn.js';
 import { runShell } from './conversation-shell.js';
 
 export { NO_FILE };
@@ -1502,7 +1502,7 @@ export class Conversation {
       // The tools the next request will CARRY — with tools on demand, the core ones,
       // what was loaded and the index; not every tool there is.
       // The history as it goes out: a stubbed item counts as its stub, not its content.
-      { system: [baseStatic(cfg), this.screensBlock(), projectBlock(this.project)].filter(Boolean).join('\n\n'), memory: this.memoryBlock(), plan: planBlock(this.plan.snapshot()), summary: summaryBlock(this.summary), screen: screenBlock(screen), tools: requestTools(this.deps.pluginAiTools() as ToolDef[], toolLoadingMode(cfg.ai), this.toolSet), messages: [...this.sentHistory(), ...extra] },
+      { system: [baseStatic(cfg), this.screensBlock(), projectBlock(this.project), agentsNowOf(this), skillsNowOf(this)].filter(Boolean).join('\n\n'), memory: this.memoryBlock(), plan: planBlock(this.plan.snapshot()), summary: summaryBlock(this.summary), screen: screenBlock(screen), tools: requestTools(this.deps.pluginAiTools() as ToolDef[], toolLoadingMode(cfg.ai), this.toolSet), messages: [...this.sentHistory(), ...extra] },
       this.contextWindow(),
       u ? u.promptTokens + u.completionTokens : undefined,
     );
