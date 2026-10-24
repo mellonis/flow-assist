@@ -126,7 +126,7 @@ export function askPerson(c: Conversation, journalId: string): ConfirmWrite {
     // block says where a command's stdin comes from.
     const input = info?.input ? `${info.input}${info.inputId ? ` (${info.inputId})` : ''}` : undefined;
     // The answer goes into the journal as it is given.
-    const answered = (ok: boolean, by: 'person' | 'stop' | 'reset' = 'person') => {
+    const answered = (ok: boolean, by: 'person' | 'stop' | 'reset' | 'dismiss' = 'person') => {
       c.journalTo(journalId, { t: 'confirm', ...(info?.id ? { id: info.id } : {}), name, answer: ok ? 'yes' : 'no', by });
       resolve(ok);
     };

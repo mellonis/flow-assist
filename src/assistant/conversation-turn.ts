@@ -21,7 +21,7 @@ import { chatToolGroupOf, type ToolDef } from '../loader/tools.js';
 import { agentsBlock, type AgentStarter } from './agent-model.js';
 import { findAgents, type PluginAgentSource } from './agent-find.js';
 import { findSkills, type FoundSkills } from './skill-find.js';
-import { skillsBlock } from './skill-model.js';
+import { skillsBlock, withLoadedSkills } from './skill-model.js';
 import { SKILL_TOOL } from './skill-file.js';
 import { maxAutoOf } from './agent-start.js';
 import { RESTART_NOTE, type ConfigChange } from '../config/load.js';
@@ -186,7 +186,7 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
   const images = opts.fromInbox || opts.hostAsk || !shape.images ? [] : imagesInText(q, c.images);
   // A follow-up turn for the inbox sends the item framed (`frameItem`); the screen row and
   // the journal row below keep its plain text.
-  const asked: ChatMessage = { role: 'user', content: opts.fromInbox ? opts.framed ?? q : q, ...(images.length ? { images } : {}) };
+  const asked: ChatMessage = { role: 'user', content: opts.skill ? opts.skill.framed : opts.fromInbox ? opts.framed ?? q : q, ...(images.length ? { images } : {}) };
   apiMsgs.push(asked);
   // What goes to the provider: every image of the history as a part — read now,
   // not kept in the history, which holds its ref.
@@ -210,6 +210,7 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
     ...(images.length ? { images: images.map((r) => ({ n: r.n, name: r.name, path: r.path })) } : {}),
     ...(opts.hostAsk ? { hostAsk: true } : {}),
   }, { person: true });
+  if (opts.skill) c.journal({ t: 'skill-load', name: opts.skill.id, source: opts.skill.source, path: opts.skill.path, hash: opts.skill.hash, by: 'person' });
   // The round being written, for a turn cut off before the round ends: its text
   // and its reasoning so far.
   c.roundText = '';
@@ -793,7 +794,8 @@ export async function foldIntoHandoff(c: Conversation, history: ChatMessage[], s
   const ai = (c.deps.config().ai ?? {}) as Record<string, any>;
   const result = await c.deps.compact(history, { ...llmOpts(ai), signal, previous: c.summary, onRetry: (info: RetryInfo) => retryWait(c, info, false) });
   if (!signal.aborted && result.incomplete) c.deps.pushLog(`[compact] no usable handoff after a retry: ${result.incomplete}`);
-  return result;
+  // The skills the history loaded are named after the summary: their text goes with it.
+  return { ...result, summary: withLoadedSkills(result.summary, history, c.summary) };
 }
 export function markCompacted(c: Conversation, before: number, summary: string, incomplete: string | undefined, auto: boolean): void {
   const after = c.contextReading().used;

@@ -1,0 +1,131 @@
+import { afterEach, expect, test } from 'bun:test';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { agentTrustPath, recordAgentStart, recordSkillLoad, skillChanged, skillTrusted } from '../agent-trust.ts';
+import { parseSkillLine, skillListing, skillTrustRequest, skillTyped } from '../skill-command.ts';
+import type { FoundSkill, FoundSkills } from '../skill-find.ts';
+import { loadedSkillIds, SKILLS_LINE, withLoadedSkills } from '../skill-model.ts';
+
+const made: string[] = [];
+afterEach(() => {
+  delete process.env.FLOW_ASSIST_MODEL_SHELL;
+  fs.rmSync(agentTrustPath(), { force: true });
+  for (const d of made.splice(0)) fs.rmSync(d, { recursive: true, force: true });
+});
+
+test('the line: nothing lists, trust takes one name, anything else is a name and the text as typed', () => {
+  expect(parseSkillLine('')).toEqual({ kind: 'list' });
+  expect(parseSkillLine('   ')).toEqual({ kind: 'list' });
+  expect(parseSkillLine('trust deploy')).toEqual({ kind: 'trust', name: 'deploy' });
+  expect(parseSkillLine('trust').kind).toBe('error');
+  expect(parseSkillLine('trust a b').kind).toBe('error');
+  expect(parseSkillLine('deploy')).toEqual({ kind: 'load', name: 'deploy', text: '' });
+  expect(parseSkillLine('deploy to staging')).toEqual({ kind: 'load', name: 'deploy', text: 'to staging' });
+  expect(parseSkillLine('deploy  line one\n  line two ')).toEqual({ kind: 'load', name: 'deploy', text: 'line one\n  line two' });
+  expect(parseSkillLine('tk/ticket T-1')).toEqual({ kind: 'load', name: 'tk/ticket', text: 'T-1' });
+  // `trust` only as the first word; a longer word that starts with it is a name.
+  expect(parseSkillLine('trustworthy x')).toEqual({ kind: 'load', name: 'trustworthy', text: 'x' });
+});
+
+test('the typed form leaves the host\'s default text out', () => {
+  expect(skillTyped('deploy', '')).toBe('/skill deploy');
+  expect(skillTyped('deploy', 'to staging')).toBe('/skill deploy to staging');
+});
+
+const skill = (o: Partial<FoundSkill> & { id: string }): FoundSkill => ({
+  name: o.id.split('/').pop()!, description: `${o.id} words`, body: 'b', path: `/p/${o.id}/SKILL.md`, dir: `/p/${o.id}`, source: { kind: 'project' }, notes: [], hash: 'h', files: 1, bytes: 10, plugin: null, shadowed: false, ...o,
+});
+const found = (o: Partial<FoundSkills>): FoundSkills => ({ skills: [], shadowed: [], failed: [], errors: [], projectRead: true, projectDir: null, personDir: '/me', ...o });
+
+test('the listing: name, description, source, trust state, ignored keys, errors as path:line, shadowed, unread project', () => {
+  const text = skillListing(found({
+    skills: [
+      skill({ id: 'deploy', notes: ['allowed-tools', 'model'] }),
+      skill({ id: 'notes', source: { kind: 'person' } }),
+      skill({ id: 'tk/ticket', plugin: 'tk', source: { kind: 'plugin', plugin: 'tk' } }),
+      skill({ id: 'old' }),
+    ],
+    shadowed: [skill({ id: 'deploy', source: { kind: 'person' }, shadowed: true })],
+    errors: [{ path: '/me/skills/bad/SKILL.md', line: 3, message: 'has no description' }],
+    projectRead: false,
+  }), (s) => (s.id === 'deploy' ? 'trusted' : s.id === 'old' ? 'changed' : s.source.kind === 'plugin' ? 'plugin' : 'new'));
+  const lines = text.split('\n');
+  expect(lines).toContain('- /skill deploy — deploy words · project · trusted · ignored: allowed-tools, model');
+  expect(lines).toContain('- /skill notes — notes words · person · not loaded yet — /skill notes or /skill trust notes');
+  expect(lines).toContain('- /skill tk/ticket — tk/ticket words · plugin tk · trusted with its plugin');
+  expect(lines).toContain('- /skill old — old words · project · changed since you loaded it — /skill old asks again');
+  expect(lines).toContain('- /skill deploy — deploy words · person · not offered (shadowed by the project\'s skill of this name)');
+  expect(lines).toContain('- /me/skills/bad/SKILL.md:3: has no description');
+  expect(lines.at(-1)).toBe('the project\'s skills are not read — shell.roots is not set');
+  expect(skillListing(found({}), () => 'new')).toBe('no skills found');
+});
+
+test('the trust question shows the source, the path, the file count and the size, and says what each answer does', () => {
+  const s = skill({ id: 'deploy', files: 3, bytes: 5000 });
+  const load = skillTrustRequest(s, 'deploy', false, false);
+  expect(load.title).toBe('⚠ skill «deploy» is a project skill you have not loaded — load it? (y/n)');
+  expect(load.line.split('\n')).toEqual(['deploy — deploy words', 'source: project', 'path: /p/deploy/SKILL.md', '3 files, 5 KB']);
+  expect(load.hint).toContain('Esc keeps the line');
+  expect(skillTrustRequest(skill({ id: 'a', files: 1, bytes: 10 }), 'a', false, false).line).toContain('1 file, 10 B');
+  expect(skillTrustRequest(s, 'deploy', true, false).title).toBe('⚠ skill «deploy» changed since you last loaded it — load it? (y/n)');
+  expect(skillTrustRequest(s, 'deploy', false, true).title).toContain('— trust it? (y/n)');
+  expect(skillTrustRequest(s, 'deploy', false, true).hint).toContain('n records nothing');
+});
+
+function dirOf(hash: string, kind: 'project' | 'person' | 'plugin' = 'project') {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-skill-rec-'));
+  made.push(dir);
+  return { dir, source: { kind } as { kind: 'project' | 'person' | 'plugin' }, hash };
+}
+
+test('recording a skill writes its directory\'s hash under skill:<dir> in the shared record, keeping an agent\'s line', () => {
+  const agentFile = path.join(os.tmpdir(), 'fa-rec-agent.md');
+  recordAgentStart({ path: agentFile, source: { kind: 'project' }, hash: 'agent-hash' });
+  const s = dirOf('h1');
+  expect(skillTrusted(s)).toBe(false);
+  expect(recordSkillLoad(s)).toBe(true);
+  expect(skillTrusted(s)).toBe(true);
+  const files = (JSON.parse(fs.readFileSync(agentTrustPath(), 'utf8')) as { files: Record<string, string> }).files;
+  expect(Object.keys(files).sort()).toEqual([`project:${path.resolve(agentFile)}`, `skill:${fs.realpathSync(s.dir)}`].sort());
+  expect(files[`skill:${fs.realpathSync(s.dir)}`]).toBe('h1');
+  expect(fs.statSync(agentTrustPath()).mode & 0o777).toBe(0o600);
+  // Another content of the same directory is untrusted and reads as changed until recorded.
+  expect(skillTrusted({ ...s, hash: 'h2' })).toBe(false);
+  expect(skillChanged({ ...s, hash: 'h2' })).toBe(true);
+  recordSkillLoad({ ...s, hash: 'h2' });
+  expect(skillTrusted({ ...s, hash: 'h2' })).toBe(true);
+});
+
+test('a plugin\'s skill writes no record, and a process the model\'s command started writes none', () => {
+  const plug = dirOf('h', 'plugin');
+  expect(recordSkillLoad(plug)).toBe(false);
+  expect(fs.existsSync(agentTrustPath())).toBe(false);
+  process.env.FLOW_ASSIST_MODEL_SHELL = '1';
+  expect(recordSkillLoad(dirOf('h'))).toBe(false);
+  expect(fs.existsSync(agentTrustPath())).toBe(false);
+});
+
+test('the skills a history loaded are found by the frame their text came in: tool results, the person\'s message, a file beside a body', () => {
+  const head = (id: string) => `[The skill «${id}» — person, /x/SKILL.md, content abc — instructions for this task]\n<skill n=1 name=${id}>\nb\n</skill n=1>`;
+  const file = '[The file references/a.md of the skill «deploy» — project, /y, content abc — instructions]\n<skill-file n=2 name=deploy file=references/a.md>\nb\n</skill-file n=2>';
+  expect(loadedSkillIds([
+    { role: 'user', content: 'plain' },
+    { role: 'tool', content: `OK: ${head('notes')}` },
+    { role: 'user', content: `${head('tk/ticket')}\n\ngo` },
+    { role: 'tool', content: file },
+    { role: 'tool', content: head('notes') },
+    { role: 'tool', content: 'skill: x is not trusted here' },
+    { role: 'assistant', content: head('ghost') },
+    { role: 'user', content: [{ type: 'text' }] },
+  ])).toEqual(['notes', 'tk/ticket', 'deploy']);
+});
+
+test('the summary gets one line naming the skills, the previous summary\'s carried on, a line the model wrote replaced; none, none', () => {
+  const msg = [{ role: 'tool', content: '[The skill «b» — person, /x, content abc — instr]' }];
+  expect(withLoadedSkills('S', msg)).toBe(`S\n\n${SKILLS_LINE} b`);
+  expect(withLoadedSkills('S', msg, `old\n\n${SKILLS_LINE} a, b`)).toBe(`S\n\n${SKILLS_LINE} a, b`);
+  expect(withLoadedSkills(`S\n${SKILLS_LINE} invented\n`, [], `x\n${SKILLS_LINE} a`)).toBe(`S\n\n${SKILLS_LINE} a`);
+  expect(withLoadedSkills('S', [])).toBe('S');
+  expect(SKILLS_LINE).toContain('load each again with the skill tool');
+});

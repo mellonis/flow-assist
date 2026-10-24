@@ -72,7 +72,11 @@ import { findAgents, resolveAgent } from '../assistant/agent-find.js';
 import { parseAgentArgs } from '../assistant/agent-args.js';
 import { absentGroupsNote, agentAutoMode, askBlockedBy, agentRef, agentToolGroups, maxAutoOf } from '../assistant/agent-start.js';
 import { fillPrompt } from '../assistant/agent-file.js';
-import { agentChanged, agentTrusted, agentTrustRequest, recordAgentStart } from '../assistant/agent-trust.js';
+import { agentChanged, agentTrusted, agentTrustRequest, recordAgentStart, recordSkillLoad, skillChanged, skillTrusted, trustedSkillsNow } from '../assistant/agent-trust.js';
+import { findSkills, resolveSkill, type FoundSkill } from '../assistant/skill-find.js';
+import { loadSkillFresh } from '../assistant/skill-file.js';
+import { frameSkill } from '../assistant/skill-model.js';
+import { parseSkillLine, SKILL_DEFAULT_TEXT, skillListing, skillTrustRequest, skillTyped } from '../assistant/skill-command.js';
 import { chatToolGroupOf } from '../loader/tools.js';
 import type { ChildSpec } from '../assistant/conversation-types.js';
 import type { HostServices } from '../runtime/services.js';
@@ -89,7 +93,7 @@ import { agentListing, parseSubagentLine, stopTargetIndex, subagentLabel, subage
 // sessions directory is known (`chatCommandDefs` in the chat).
 type ChatCommand = HistoryCommand & ChatCommandDef;
 const CHAT_COMMAND_DEFS: ChatCommand[] = [
-  { name: 'compact' }, { name: 'context' }, { name: 'subagent' }, { name: 'sub' }, { name: 'agents' }, { name: 'copy' }, { name: 'image' }, { name: 'resume' }, { name: 'sessions' }, { name: 'new' }, { name: 'title' }, { name: 'export' }, { name: 'clear' }, { name: 'memory', values: ['project', 'global', 'forget', 'accept'] }, { name: 'workspace' },
+  { name: 'compact' }, { name: 'context' }, { name: 'subagent' }, { name: 'sub' }, { name: 'agents' }, { name: 'skill' }, { name: 'copy' }, { name: 'image' }, { name: 'resume' }, { name: 'sessions' }, { name: 'new' }, { name: 'title' }, { name: 'export' }, { name: 'clear' }, { name: 'memory', values: ['project', 'global', 'forget', 'accept'] }, { name: 'workspace' },
   // `cd`'s own argument is a path, not a fixed set of values — its completion is
   // special-cased in `chatComplete`, the way shell mode's own path completion is.
   { name: 'cd' },
@@ -712,13 +716,18 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // The agent files, read when asked: the shell's directory now, the plugins
           // that may offer theirs.
           const agentsFound = () => findAgents({ config: host.config as Record<string, unknown>, cwd: conv.shell.cwd(), plugins: (host.services as Pick<HostServices, 'agentPlugins'>).agentPlugins?.() ?? [] });
+          // The skills, read the same way.
+          const skillsFound = () => findSkills({ config: host.config as Record<string, unknown>, cwd: conv.shell.cwd(), plugins: (host.services as Pick<HostServices, 'agentPlugins'>).agentPlugins?.() ?? [] });
           const chatCommandDefs: ChatCommandDef[] = [
             ...CHAT_COMMAND_DEFS.map((c) => (c.name === 'resume'
               ? { ...c, values: () => resumeList().slice(0, 15).map((s, i) => ({ value: String(i + 1), label: s.title || '(untitled)' })) }
               : c.name === 'subagent' || c.name === 'sub'
                 // Only the first word completes, and only an agent: `@` and its names.
                 ? { ...c, complete: (before: string[]) => (before.length ? [] : agentsFound().agents.map((a) => ({ value: `@${a.id}`, label: a.description }))) }
-                : c)),
+                : c.name === 'skill'
+                  // The first word: `trust` or a skill's name; after `trust`, a name.
+                  ? { ...c, complete: (before: string[]) => (before.length > 1 || (before.length === 1 && before[0] !== 'trust') ? [] : [...(before.length ? [] : [{ value: 'trust', label: 'record a project skill without loading it' }]), ...skillsFound().skills.map((s) => ({ value: s.id, label: s.description }))]) }
+                  : c)),
             ...pluginChatCommands().map(({ name, cmd }) => ({ name, values: cmd.values, complete: cmd.complete })),
           ];
           // What the ↑/↓ history asks of a command: the chat's own, and a plugin's as it
@@ -1865,6 +1874,63 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 begin({ label, prompt: line.prompt }, line.auto ? 'all' : null, '');
                 return;
               }
+              case 'skill': {
+                // The person's load: the skill's body, framed, goes to the model
+                // with the person's text as one message. A project skill not recorded at its
+                // current content asks first; what is recorded is the content that was just
+                // read again and sent, never the content that was asked about.
+                const line = parseSkillLine(cmd.replace(/^\S+\s*/, ''));
+                if (line.kind === 'error') { setError(line.text); return; }
+                const found = skillsFound();
+                if (line.kind === 'list') {
+                  setField('');
+                  const trusted = trustedSkillsNow();
+                  conv.pushNote(skillListing(found, (s) => (s.source.kind === 'plugin' ? 'plugin' : trusted(s) ? 'trusted' : skillChanged(s) ? 'changed' : 'new')));
+                  host.notify();
+                  return;
+                }
+                const hit = resolveSkill(line.name, found);
+                if (!hit.ok) { setError(`/skill ${line.name}: ${hit.message}`); return; }
+                const listed = hit.skill;
+                const id = listed.id;
+                const trust = line.kind === 'trust';
+                if (conv.confirm || conv.question) { setError('answer the open question first'); return; }
+                if (!trust && conv.busy) { setError('/skill: an answer is coming — send it when the answer ends'); return; }
+                const typed = `/${cmd.trim()}`;
+                const read = () => {
+                  const r = loadSkillFresh(listed.dir, listed.source, listed.name);
+                  return r.ok ? { ok: true as const, skill: { ...listed, ...r.skill } as FoundSkill } : { ok: false as const, message: r.errors[0]?.message ?? 'cannot be read' };
+                };
+                void (async () => {
+                  const first = read();
+                  if (!first.ok) { setError(`/skill ${id}: ${first.message}`); return; }
+                  let skill = first.skill;
+                  if (skill.source.kind === 'project' && !skillTrusted(skill)) {
+                    setField('');
+                    const yes = await conv.askAgentTrust(skillTrustRequest(skill, id, skillChanged(skill), trust), 'skill');
+                    if (yes === null) { setField(typed); host.notify(); return; }
+                    if (!yes) { conv.pushNote(`skill «${id}» was not ${trust ? 'trusted' : 'loaded'}: its content is not trusted.`); host.notify(); return; }
+                    const again = read();
+                    if (!again.ok || again.skill.hash !== skill.hash) {
+                      conv.pushNote(`skill «${id}» changed while you were asked — nothing was recorded; run /skill ${trust ? 'trust ' : ''}${id} again.`);
+                      host.notify();
+                      return;
+                    }
+                    skill = again.skill;
+                    if (!recordSkillLoad(skill)) { conv.pushNote(`skill «${id}» was not recorded: the trust record cannot be written here.`); host.notify(); return; }
+                  } else if (skill.source.kind === 'person') recordSkillLoad(skill);
+                  if (trust) {
+                    setField('');
+                    conv.pushNote(skill.source.kind === 'plugin' ? `skill «${id}» follows its plugin's trust — nothing to record.` : `skill «${id}» is trusted: the model may load this content (${skill.files} file${skill.files === 1 ? '' : 's'}).`);
+                    host.notify();
+                    return;
+                  }
+                  const framed = `${frameSkill(skill, skill.body)}\n\n${line.text || SKILL_DEFAULT_TEXT}`;
+                  const sent = await conv.send(skillTyped(id, line.text), { skill: { id, source: skill.source.kind, path: skill.path, hash: skill.hash, framed } });
+                  if (!sent) { setField(typed); setError('/skill: nothing was sent — an answer is coming'); host.notify(); }
+                })();
+                return;
+              }
               case 'compact': compactNow(); return;
               case 'exit': closeChat(); return;
               default: {
@@ -2318,6 +2384,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               }
               if (conv.confirm) {
                 if (ownArmedAt.current !== null && askClock.now() - ownArmedAt.current < ASK_ARM_MS) return true;
+                if (key.name === 'escape' && conv.confirm.name === 'skill') { conv.answerConfirm(false, 'dismiss'); return true; }
                 if (key.name === 'escape' || key.name === 'n') { conv.answerConfirm(false); return true; }
                 if (key.name === 'y' || key.name === 'return') { conv.answerConfirm(true); return true; }
                 return true;

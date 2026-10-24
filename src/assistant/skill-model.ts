@@ -112,3 +112,35 @@ export function skillToolResult(finder: () => FoundSkills, args: Record<string, 
   if (!read.ok) return read.message;
   return { text: frameSkill(skill, read.text, { file: read.rel }), raw: read.text };
 }
+
+// ── Compaction ── a summary replaces the history, so a loaded skill's text goes with it.
+// The host names the skills the history held — by the frame their text came in, whether
+// the model loaded them or the person did — on one line after the summary, with the
+// instruction to load each again with the tool; a later compaction carries the line on.
+export const SKILLS_LINE = 'Skills loaded in this conversation (their text is not kept in this summary — load each again with the skill tool before relying on it):';
+const LOADED = /^(?:OK: )?\[The (?:skill «([^»\n]+)»|file [^\n]*? of the skill «([^»\n]+)»)/;
+
+export function loadedSkillIds(messages: ReadonlyArray<{ role?: string; content?: unknown }>): string[] {
+  const ids = new Set<string>();
+  for (const m of messages) {
+    if ((m.role !== 'tool' && m.role !== 'user') || typeof m.content !== 'string') continue;
+    const hit = LOADED.exec(m.content);
+    const id = hit?.[1] ?? hit?.[2];
+    if (id) ids.add(id);
+  }
+  return [...ids];
+}
+
+const skillsLineIn = (summary: string): string[] => {
+  const line = summary.split('\n').find((l) => l.startsWith(SKILLS_LINE));
+  return line ? line.slice(SKILLS_LINE.length).split(',').map((s) => s.trim()).filter(Boolean) : [];
+};
+
+// `summary` with the skills line: those of `messages` and of the line the summary it
+// replaces carried. A line the model wrote itself is dropped. A conversation that never
+// loaded a skill gets no line.
+export function withLoadedSkills(summary: string, messages: ReadonlyArray<{ role?: string; content?: unknown }>, previous = ''): string {
+  const ids = [...new Set([...skillsLineIn(previous), ...loadedSkillIds(messages)])];
+  const body = summary.split('\n').filter((l) => !l.startsWith(SKILLS_LINE)).join('\n').trimEnd();
+  return ids.length ? `${body}\n\n${SKILLS_LINE} ${ids.join(', ')}` : summary;
+}

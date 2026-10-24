@@ -125,6 +125,7 @@ export type Offered =
 export interface SendOptions {
   hostAsk?: boolean;             // the host's ask after a `!!command`: drawn dim, never in ↑/↓
   fromInbox?: boolean;           // the inbox's follow-up turn (`ai.backgroundFollowUp`, on unless set false): role `bg`, never in ↑/↓, the field and its history walk left alone
+  skill?: { id: string; source: string; path: string; hash: string; framed: string }; // the person's `/skill`: the message goes to the model as `framed` (the body, then the person's text); the screen row and the journal keep the line as typed, and a `skill-load` line records which content it was
   framed?: string;               // with `fromInbox`: the item as the model reads it (`frameItem`); the screen row and the journal keep the plain text
 }
 

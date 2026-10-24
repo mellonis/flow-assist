@@ -62,12 +62,12 @@ export function agentChanged(agent: Recorded): boolean {
   return !unreadable && was !== undefined && was !== agent.hash;
 }
 
-// The person started this agent file with this content. False when nothing was written:
-// a plugin's file (no record), a process the model's command started, a failed write.
-export function recordAgentStart(agent: Recorded): boolean {
-  if (agent.source.kind === 'plugin' || inModelShell()) return false;
+// One record line written: read, set, write tmp + rename. False when nothing was written:
+// a process the model's command started, a failed write.
+function writeRecord(key: string, hash: string): boolean {
+  if (inModelShell()) return false;
   const { unreadable, rec } = readRecord();
-  rec.files[keyOf(agent)] = agent.hash;
+  rec.files[key] = hash;
   const file = agentTrustPath();
   try {
     fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -79,6 +79,13 @@ export function recordAgentStart(agent: Recorded): boolean {
     fs.renameSync(tmp, file);
     return true;
   } catch { return false; }
+}
+
+// The person started this agent file with this content. False when nothing was written:
+// a plugin's file (no record), a process the model's command started, a failed write.
+export function recordAgentStart(agent: Recorded): boolean {
+  if (agent.source.kind === 'plugin') return false;
+  return writeRecord(keyOf(agent), agent.hash);
 }
 
 const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? '' : 's'}`;
@@ -102,7 +109,7 @@ export function agentTrustRequest(agent: Pick<Agent, 'description' | 'path' | 't
 
 // A skill's record is kept in the same file under `skill:<real path of its directory>`, the
 // value the hash of the whole directory (`Skill.hash`). A plugin's skill follows the
-// plugin, so it has no record. Recording is the person's act and lives with the commands.
+// plugin, so it has no record. Recording is the person's act: `recordSkillLoad`.
 type RecordedSkill = { dir: string; source: { kind: string }; hash: string };
 export const skillKeyOf = (s: Pick<RecordedSkill, 'dir'>): string => `skill:${realOr(s.dir)}`;
 
@@ -122,4 +129,12 @@ export function skillChanged(skill: RecordedSkill): boolean {
   const { unreadable, rec } = readRecord();
   const was = rec.files[skillKeyOf(skill)];
   return !unreadable && was !== undefined && was !== skill.hash;
+}
+
+// The person loaded this skill directory with this content (or trusted it). False when
+// nothing was written: a plugin's skill (no record), a process the model's command started,
+// a failed write.
+export function recordSkillLoad(skill: RecordedSkill): boolean {
+  if (skill.source.kind === 'plugin') return false;
+  return writeRecord(skillKeyOf(skill), skill.hash);
 }

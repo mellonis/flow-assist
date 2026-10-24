@@ -233,7 +233,7 @@ export class Conversation {
   liveBuf = new Map<string, ViewRecord>();
   liveSeen = new Set<string>();
   liveTimer: ReturnType<typeof setTimeout> | null = null;
-  confirm: { name: string; args: string; input?: string; resolve: (ok: boolean, by?: 'person' | 'stop' | 'reset') => void } | null = null;   // a write's y/n, or the settings guard's (`name: 'config'`)
+  confirm: { name: string; args: string; input?: string; resolve: (ok: boolean, by?: 'person' | 'stop' | 'reset' | 'dismiss') => void } | null = null;   // a write's y/n, or the settings guard's (`name: 'config'`)
   question: { state: AskState; resolve: (done: AskState) => void } | null = null;
   // The question this task or subagent put to the conversation that started it, until it
   // is answered (`ask_parent`): one at a time. It counts as a wait, as a y/n does.
@@ -1123,7 +1123,7 @@ export class Conversation {
   // Resolves the y/n pause: ok=true confirms the writing op (tool runs),
   // ok=false declines it (agentChat returns «declined» as the tool result).
   // `by` — who settled it: the person's key, or a stop or reset that closed it.
-  answerConfirm(ok: boolean, by: 'person' | 'stop' | 'reset' = 'person'): void {
+  answerConfirm(ok: boolean, by: 'person' | 'stop' | 'reset' | 'dismiss' = 'person'): void {
     const p = this.confirm;
     if (!p) return;
     this.confirm = null;
@@ -1237,10 +1237,12 @@ export class Conversation {
   // like the settings guard's: the person's answer only (the auto mode never answers it).
   // true/false is the person's key; null a stop or a reset that closed it. The caller has
   // checked that no y/n or question is open.
-  askAgentTrust(r: { title: string; line: string; hint: string }): Promise<boolean | null> {
+  // `name: 'skill'` is the skill's y/n, where Esc dismisses it (null, like a stop) rather
+  // than answering no, so the caller can give the typed line back.
+  askAgentTrust(r: { title: string; line: string; hint: string }, name: 'agent' | 'skill' = 'agent'): Promise<boolean | null> {
     return new Promise<boolean | null>((resolve) => {
-      this.confirm = { name: 'agent', args: '', resolve: (ok, by = 'person') => resolve(by === 'person' ? ok : null) };
-      const request: PendingConfirm = { name: 'agent', args: '', title: r.title, line: r.line, whole: true, hint: r.hint, at: parkedAt() };
+      this.confirm = { name, args: '', resolve: (ok, by = 'person') => resolve(by === 'person' ? ok : null) };
+      const request: PendingConfirm = { name, args: '', title: r.title, line: r.line, whole: true, hint: r.hint, at: parkedAt() };
       this.drawConfirm(request);
       this.emit({ type: 'confirm', request, host: true });
       this.deps.notify();

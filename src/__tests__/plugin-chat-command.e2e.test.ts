@@ -59,7 +59,7 @@ test('/name runs a plugin command marked for the chat; its later words complete;
   expect(frame(ui)).toContain('[srv] restarting safari');
   ui.app.unmount();
   // An unknown command names the plugin's among the ones there are.
-  const wide = await bootApp(new ScriptedModel(), 260, 30, guest({ ran: [] }));
+  const wide = await bootApp(new ScriptedModel(), 300, 30, guest({ ran: [] }));
   await wide.press('F');
   await wide.type('/nope');
   await wide.press('return');
