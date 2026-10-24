@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from 'bun:test';
 import fs from 'node:fs';
+import { spyOn } from 'bun:test';
 import os from 'node:os';
 import path from 'node:path';
 import { agentTrustPath, skillChanged, skillKeyOf, skillTrusted, trustedSkillsNow } from '../agent-trust.ts';
@@ -248,4 +249,20 @@ test('skillsFinderOf offers the plugins its service lists and no others', () => 
   const c = (services: object) => ({ deps: { config: () => w.config, services: () => services }, shell: { cwd: () => w.proj } });
   expect(skillsFinderOf(c({ agentPlugins: () => [{ name: 'ok', dir: listed }] }) as never)().skills.map((s) => s.id)).toEqual(['ok/t']);
   expect(skillsFinderOf(c({}) as never)().skills).toEqual([]);
+});
+
+test('a second findSkills over unchanged skills reads only each SKILL.md', () => {
+  const w = world();
+  projectSkill(w, 'one', doc('one'));
+  projectSkill(w, 'two', doc('two'));
+  for (const n of ['one', 'two']) write(path.join(w.proj, '.flow-assist', 'skills', n, 'refs', 'a.md'), 'ref');
+  const first = findSkills({ config: w.config, cwd: w.proj, personDir: w.personDir });
+  const spy = spyOn(fs, 'readFileSync');
+  try {
+    const second = findSkills({ config: w.config, cwd: w.proj, personDir: w.personDir });
+    expect(second.skills.map((s) => s.hash)).toEqual(first.skills.map((s) => s.hash));
+    const read = spy.mock.calls.map((c) => String(c[0]));
+    expect(read.every((f) => f.endsWith('SKILL.md'))).toBe(true);
+    expect(read).toHaveLength(2);
+  } finally { spy.mockRestore(); }
 });

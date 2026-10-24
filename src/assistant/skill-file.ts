@@ -238,19 +238,28 @@ export function skillDirHash(dir: string): DirHash {
 // signature of the directory (path, size, mtime, ctime, inode, mode per file) differs from
 // the last call's for this real directory. ctime cannot be set by a program, so a file
 // rewritten with its mtime put back still differs.
+// The cache holds at most SKILL_HASH_CACHE_MAX directories; the least recently asked goes first.
+export const SKILL_HASH_CACHE_MAX = 128;
 const hashCache = new Map<string, { signature: string; result: DirHash }>();
 export function clearSkillHashCache(): void { hashCache.clear(); }
+export const skillHashCacheSize = (): number => hashCache.size;
 export function skillDirHashCached(dir: string): DirHash {
   const scan = scanSkillDir(dir);
   if (!scan.ok) return scan;
   let key: string;
   try { key = fs.realpathSync(dir); } catch { key = dir; }
   const hit = hashCache.get(key);
-  if (hit && hit.signature === scan.signature) return hit.result;
+  if (hit && hit.signature === scan.signature) {
+    hashCache.delete(key);
+    hashCache.set(key, hit); // most recently asked last
+    return hit.result;
+  }
   const data = readAll(scan.entries);
   if (typeof data === 'string') return { ok: false, message: data };
   const result: DirHash = { ok: true, hash: digest(scan.entries, data), files: scan.entries.length, bytes: scan.bytes };
+  hashCache.delete(key);
   hashCache.set(key, { signature: scan.signature, result });
+  while (hashCache.size > SKILL_HASH_CACHE_MAX) hashCache.delete(hashCache.keys().next().value!);
   return result;
 }
 
