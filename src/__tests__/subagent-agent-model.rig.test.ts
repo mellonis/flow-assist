@@ -42,7 +42,7 @@ function rigFor(mark: string, opts: { agents?: Record<string, unknown> } = {}) {
   const rig = conversationRig(model, {
     ai: { backgroundFollowUp: false },
     guests: (make) => [make('guest', { tools: [
-      { id: 'wb-band', tools: [BAND], exec: async () => 'band seen' },
+      { id: 'notes', tools: [BAND], exec: async () => 'band seen' },
       { id: 'other', tools: [OTHER], exec: async () => 'elsewhere' },
     ] }) as never],
     ...(opts.agents ? { extra: { agents: opts.agents } } : {}),
@@ -64,7 +64,7 @@ test('the model starts an agent by name: the filled prompt, the id as label, the
   const spy = spyOn(Conversation.prototype, 'setAutoMode').mockImplementation(function (this: Conversation, mode: string) { if (this.parent) modes.push(mode); });
   try {
     const { model, child, rig } = rigFor('GO-A');
-    project(rig, 'job', doc('params: ticket\ntools: wb-band\nauto: all\n', 'GO-A ticket={{ticket}}'));
+    project(rig, 'job', doc('params: ticket\ntools: notes\nauto: all\n', 'GO-A ticket={{ticket}}'));
     child.script([{ text: 'child done' }]);
     const answer = await call(rig, model, { agent: '@job', args: { ticket: 'T-1' } });
     expect(answer).toContain('Background task started (job)');
@@ -159,6 +159,19 @@ test('refusals are the tool\'s answer, worded for the model, and nothing starts'
   expect(await said({ agent: 'loose', args: { ticket: 'a' } })).toBe('subagent: @loose is not trusted here — ask the person to start @loose once');
   expect(child.requests).toHaveLength(0);
   expect(rig.journal().filter((e) => e.t === 'task-start')).toHaveLength(0);
+});
+
+test('a parameter named like an Object.prototype member is asked for, and filled from the given value', async () => {
+  const { model, child, rig } = rigFor('GO-P');
+  project(rig, 'job', doc('params: toString\n', 'GO-P {{toString}}'));
+  child.script([{ text: 'ok' }]);
+  const first = await call(rig, model, { agent: 'job' });
+  expect(first).toBe('subagent: @job needs toString');
+  expect(child.requests).toHaveLength(0);
+  await call(rig, model, { agent: 'job', args: { toString: 'x' } });
+  await rig.until(() => child.requests.length === 1);
+  await childDone(rig);
+  expect(firstUser(child.requests[0]!)).toBe('GO-P x');
 });
 
 test('a person\'s agent the person never started is untrusted; once started by the person it starts', async () => {

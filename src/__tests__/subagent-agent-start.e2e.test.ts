@@ -49,7 +49,7 @@ async function chat(mark: string, opts: { agents?: Record<string, unknown>; gues
   const model = new ScriptedModel();
   const child = model.when((req) => firstUser(req).includes(mark));
   const groups: { id: string; tools: unknown[]; exec: (name: string, args: unknown, ctx: Record<string, unknown>) => Promise<string> }[] = [
-    { id: 'wb-band', tools: [BAND], exec: async (_n, _a, ctx) => {
+    { id: 'notes', tools: [BAND], exec: async (_n, _a, ctx) => {
       const llm = (ctx as { chatLLM?: (m: unknown[], o: object) => Promise<unknown> }).chatLLM;
       if (llm) await llm([{ role: 'user', content: 'NESTED-Q' }], {});
       return 'band seen';
@@ -238,7 +238,7 @@ const group = (g: string) => `tools: ${g}\n`;
 
 test('tools: names the groups; the child\'s request lists the core group and those only', async () => {
   const { agents, child, ui } = await chat('TOOLS-A');
-  write(path.join(agents, 'job.md'), doc(group('wb-band'), 'TOOLS-A go'));
+  write(path.join(agents, 'job.md'), doc(group('notes'), 'TOOLS-A go'));
   child.script([{ text: 'ok' }]);
   await ask(ui, '/subagent @job');
   await settleUntil(() => child.requests.length === 1);
@@ -263,7 +263,7 @@ test('with tools omitted the child gets every group, as a /subagent prompt does'
 
 test('a group that joins mid-run is excluded unless named', async () => {
   const { agents, child, groups, plugin, ui } = await chat('TOOLS-C');
-  write(path.join(agents, 'job.md'), doc(group('wb-band'), 'TOOLS-C go'));
+  write(path.join(agents, 'job.md'), doc(group('notes'), 'TOOLS-C go'));
   child.script([{ tool: 'band_look', args: {} }, { hold: true }], [{ text: 'ok' }]);
   await ask(ui, '/subagent @job');
   await settleUntil(() => child.requests.length === 1);
@@ -280,7 +280,7 @@ test('a group that joins mid-run is excluded unless named', async () => {
 
 test('a nested run the child\'s tool starts gets the same restriction', async () => {
   const { agents, child, model, ui } = await chat('TOOLS-D');
-  write(path.join(agents, 'job.md'), doc(group('wb-band'), 'TOOLS-D go'));
+  write(path.join(agents, 'job.md'), doc(group('notes'), 'TOOLS-D go'));
   const nested = model.when((req) => firstUser(req).includes('NESTED-Q'));
   nested.script([{ text: 'nested answer' }]);
   child.script([{ tool: 'band_look', args: {} }], [{ text: 'ok' }]);
@@ -296,7 +296,7 @@ test('a nested run the child\'s tool starts gets the same restriction', async ()
 
 test('a named group that is not loaded is reported in a note and the agent starts without it', async () => {
   const { agents, child, ui } = await chat('TOOLS-E');
-  write(path.join(agents, 'job.md'), doc('tools: wb-band, gitlab\n', 'TOOLS-E go'));
+  write(path.join(agents, 'job.md'), doc('tools: notes, gitlab\n', 'TOOLS-E go'));
   child.script([{ text: 'ok' }]);
   await ask(ui, '/subagent @job');
   await settleUntil(() => child.requests.length === 1);

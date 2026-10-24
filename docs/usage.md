@@ -439,8 +439,8 @@ subagent you start (docs/safety.md, "Asking less").
 
 `tools` narrows the groups of tools: the agent gets the `core` group and the groups the
 file lists, and nothing else (without `tools` every group is available). It does not make the agent read-only: the `core` group stays
-whole, with `memory` and `config_set`, which asks as ever; and a group the file lists keeps
-its writing tools, each write asking you as for any subagent you start. A group named in the file that is not loaded is left out, and
+whole, with `memory` and `config_set`, which asks; and a group the file lists keeps
+its writing tools, each write asking you unless its auto mode answers, as for any subagent you start. A group named in the file that is not loaded is left out, and
 a note says so at the start. A subagent or task the agent starts has the same groups, or fewer.
 
 ### Trust
@@ -449,13 +449,13 @@ An agent file is somebody else's instructions, so what you have not started does
 the assistant's word.
 
 - A **project file** asks at its first start, and again after its content changes: a y/n shows
-  the file's path, its description, the tool groups, the auto mode after the cap and the
-  parameters. `y` starts the agent and remembers this content; `n` starts nothing.
+  the file's path, its description, the tool groups, the auto mode after the cap, the
+  parameters and the size of the prompt. `y` starts the agent and remembers this content; `n` starts nothing.
 - **Your own file** is recorded at your start and asks nothing.
 - A **plugin's file** follows the plugin: a plugin that is installed, trusted and enabled
-  may start its agents without another question. `plugins install` and the kit's `install.sh`
-  trust a plugin, and a plugin linked to a development checkout changes its agents without a
-  new trust.
+  may start its agents without another question. `plugins install` trusts a plugin, and so does an
+  installer that runs `plugins trust … --yes` as it installs, its agents with it; a plugin
+  linked to a development checkout changes its agents without a new trust.
 
 The record is `agents.accepted.json` in the config directory. A start made from a command the
 assistant runs records nothing.
@@ -466,7 +466,7 @@ The system prompt lists the agents the assistant may start, up to twenty: those 
 project and your own that you have started with their current content, and the plugins'. The
 `subagent` tool takes `agent` and `args` (an object of the parameters); its `task` is then
 only extra instructions, added after the prompt. The agent runs as a background task
-that may write, each write asking you, and its result comes back to the assistant as
+that may write, each write asking you unless its auto mode answers, and its result comes back to the assistant as
 any task's does. A call that names an agent you have not started, an unknown parameter or a missing
 one is answered with why, and nothing starts. The assistant never asks you to trust a file;
 start it once yourself with `/subagent @<name>`.

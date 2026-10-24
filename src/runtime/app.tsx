@@ -73,6 +73,7 @@ import { redactDeep } from '../assistant/secrets.js';
 import { isRemotePlugin, stopRemotePlugin } from '../remote/index.js';
 import { UntrustedPluginError } from '../loader/build.js';
 import { createScreens } from './screens.js';
+import { agentPluginsOf } from '../assistant/agent-plugins.js';
 import { outsideWork } from './background-work.js';
 import { FOOTER_ROWS, TITLE_ROWS, chatModeOf, panelLayout, type ChatMode, type PanelLayout } from './panel-layout.js';
 
@@ -534,9 +535,7 @@ export function renderApp(
     say: (line) => (services as unknown as ReactBoundServices).showMessage(line),
   });
   (services as unknown as HostServices).screens = screens;
-  (services as unknown as HostServices).agentPlugins = () => plugins
-    .filter((p) => p.dir && !BUILTIN_PLUGINS.includes(p.name) && !disabledNow.has(p.name) && !site.untrusted.some((u) => u.name === p.name))
-    .map((p) => ({ name: p.name, dir: p.dir! }));
+  (services as unknown as HostServices).agentPlugins = () => agentPluginsOf(plugins, { builtins: BUILTIN_PLUGINS, disabled: disabledNow, untrusted: site.untrusted });
 
   // Shared per-app mutable state (created ONCE; read by the App and the
   // fallback handler so a re-render never resets them).

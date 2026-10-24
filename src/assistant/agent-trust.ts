@@ -47,6 +47,13 @@ export function agentTrusted(agent: Recorded): boolean {
   return !unreadable && rec.files[keyOf(agent)] === agent.hash;
 }
 
+// The same check as `agentTrusted` against one read of the record, for a caller that
+// asks about many agents at once.
+export function trustedNow(): (agent: Recorded) => boolean {
+  const { unreadable, rec } = readRecord();
+  return (agent) => agent.source.kind === 'plugin' || (!unreadable && rec.files[keyOf(agent)] === agent.hash);
+}
+
 // A record exists for the file under another hash.
 export function agentChanged(agent: Recorded): boolean {
   if (agent.source.kind === 'plugin') return false;
@@ -74,9 +81,11 @@ export function recordAgentStart(agent: Recorded): boolean {
   } catch { return false; }
 }
 
+const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? '' : 's'}`;
+
 // What the person is asked before the first start of a project agent file: the file, what
 // it will be allowed (its tool groups, its auto mode after the cap) and what it takes.
-export function agentTrustRequest(agent: Pick<Agent, 'description' | 'path' | 'tools' | 'params'>, id: string, mode: AutoMode, changed: boolean): { title: string; line: string; hint: string } {
+export function agentTrustRequest(agent: Pick<Agent, 'description' | 'path' | 'tools' | 'params' | 'body'>, id: string, mode: AutoMode, changed: boolean): { title: string; line: string; hint: string } {
   return {
     title: `⚠ ${changed ? `@${id} changed since you last started it` : `@${id} is a project file you have not started`} — start it? (y/n)`,
     line: [
@@ -85,6 +94,7 @@ export function agentTrustRequest(agent: Pick<Agent, 'description' | 'path' | 't
       `tool groups: ${agent.tools ? ['core', ...agent.tools.filter((g) => g !== 'core')].join(', ') : 'every group'}`,
       `auto mode: ${mode}`,
       `parameters: ${agent.params.length ? paramsText(agent.params) : 'none'}`,
+      `prompt: ${plural(agent.body.split('\n').length, 'line')}, ${plural(agent.body.length, 'character')}`,
     ].join('\n'),
     hint: 'y starts it and remembers this content · n starts nothing',
   };

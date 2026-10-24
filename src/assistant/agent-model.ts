@@ -2,7 +2,7 @@
 // gave are checked against the file's parameters and every refusal is worded for the
 // model to read (never a question to the person). Also the block of the system prompt
 // that lists the agents it may start. Pure but for the trust record the check reads.
-import { agentTrusted } from './agent-trust.js';
+import { agentTrusted, trustedNow } from './agent-trust.js';
 import { fillPrompt, paramsText } from './agent-file.js';
 import { resolveAgent, type FoundAgent, type FoundAgents } from './agent-find.js';
 import { agentAutoMode, agentRef, agentToolGroups } from './agent-start.js';
@@ -41,9 +41,9 @@ export function planAgentStart(starter: AgentStarter, call: { agent: string; arg
   if (unknown.length) {
     return { ok: false, message: `subagent: @${id} has no parameter ${unknown.map((k) => `«${k}»`).join(', ')}${declared.length ? ` — it takes ${paramsText(agent.params)}` : ' — it takes none'}` };
   }
-  const values: Record<string, string> = {};
+  const values: Record<string, string> = Object.create(null) as Record<string, string>;
   for (const [k, v] of Object.entries(given)) values[k] = typeof v === 'string' ? v : v === null || v === undefined ? '' : JSON.stringify(v);
-  const missing = agent.params.filter((p) => !p.optional && !(values[p.name] ?? '').trim()).map((p) => p.name);
+  const missing = agent.params.filter((p) => !p.optional && !(Object.hasOwn(values, p.name) ? values[p.name]! : '').trim()).map((p) => p.name);
   if (missing.length) return { ok: false, message: `subagent: @${id} needs ${missing.join(', ')}` };
   const extra = call.prompt.trim();
   const body = fillPrompt(agent, values);
@@ -60,14 +60,22 @@ export function planAgentStart(starter: AgentStarter, call: { agent: string; arg
   };
 }
 
+export const AGENT_DESCRIPTION_MAX = 200;
+
+// One line, at most 200 characters, an ellipsis where it was cut.
+const clip = (text: string): string => {
+  const one = text.replace(/\s+/g, ' ').trim();
+  return one.length > AGENT_DESCRIPTION_MAX ? `${one.slice(0, AGENT_DESCRIPTION_MAX - 1).trimEnd()}…` : one;
+};
+
 const lineOf = (a: FoundAgent): string => {
   const params = a.params.length ? ` (${paramsText(a.params)})` : '';
-  return `@${a.id} — ${a.description.replace(/\s+/g, ' ').trim()}${params}`;
+  return `@${a.id} — ${clip(a.description)}${params}`;
 };
 
 // The system prompt's list of the agents the model may start: the trusted ones only, at
 // most twenty. '' when there is none.
-export function agentsBlock(found: Pick<FoundAgents, 'agents'>, trusted: (a: FoundAgent) => boolean = agentTrusted): string {
+export function agentsBlock(found: Pick<FoundAgents, 'agents'>, trusted: (a: FoundAgent) => boolean = trustedNow()): string {
   const lines = found.agents.filter(trusted).slice(0, AGENTS_LISTED_MAX).map(lineOf);
   return lines.length ? ['Agents you can start by name with the subagent tool (agent, args):', ...lines].join('\n') : '';
 }

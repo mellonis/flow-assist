@@ -50,6 +50,11 @@ export interface FindAgentsInput {
   personDir?: string;
 }
 
+// A directory that lies inside the roots by its own path and resolves outside them.
+function isLinkOut(dir: string, roots: readonly string[]): boolean {
+  return roots.some((r) => within(path.resolve(dir), r)) && !roots.some((r) => within(realOf(dir), r)) && fs.existsSync(dir);
+}
+
 export function findAgents({ config, cwd, plugins = [], personDir = path.join(hostStateDir(), 'agents') }: FindAgentsInput): FoundAgents {
   const out: FoundAgents = { agents: [], shadowed: [], failed: [], errors: [], projectRead: true, projectDir: null, personDir };
   const fail = (id: string, file: string, source: AgentSource, errors: AgentError[]) => {
@@ -93,6 +98,7 @@ export function findAgents({ config, cwd, plugins = [], personDir = path.join(ho
   out.projectDir = projectDir;
   const project: AgentSource = { kind: 'project' };
   if (!roots.length) out.projectRead = false;
+  else if (isLinkOut(projectDir, roots)) refuse('.flow-assist/agents', projectDir, project, 'the agents directory is a link out of shell.roots — not read');
   else if (roots.some((r) => within(realOf(projectDir), r))) {
     for (const file of mdFiles(projectDir)) {
       const a = load(file, project, (n) => n, (real) => (roots.some((r) => within(real, r)) ? null : 'the file is a link out of shell.roots — not read'));

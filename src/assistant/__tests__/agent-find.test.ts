@@ -93,7 +93,9 @@ test('a whole agents directory that is a link out of the roots is not read', () 
   write(path.join(outside, 'evil.md'), doc('planted'));
   fs.mkdirSync(path.join(w.proj, '.flow-assist'), { recursive: true });
   fs.symlinkSync(outside, path.join(w.proj, '.flow-assist', 'agents'));
-  expect(findAgents({ config: w.config, cwd: w.proj, personDir: w.personDir }).agents).toEqual([]);
+  const found = findAgents({ config: w.config, cwd: w.proj, personDir: w.personDir });
+  expect(found.agents).toEqual([]);
+  expect(found.errors).toEqual([{ path: path.join(w.proj, '.flow-assist', 'agents'), line: 1, message: expect.stringContaining('link out of shell.roots') }]);
 });
 
 test('a file over the instructions\' cap is an error, not a cut prompt', () => {

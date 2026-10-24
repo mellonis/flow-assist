@@ -108,3 +108,18 @@ test('fillPrompt fills each placeholder; a missing optional is empty; a value is
 test('the parameters read as the listing shows them', () => {
   expect(paramsText([{ name: 'ticket', optional: false }, { name: 'branch', optional: true }])).toBe('<ticket> [branch]');
 });
+
+test('a {{ … }} that spans lines is body text: the reader passes it and fillPrompt keeps it verbatim', () => {
+  const body = 'Template:\n{{\n "a": 1\n}}\nend';
+  const r = parseAgentFile(P, `---\ndescription: d\n---\n${body}`);
+  expect(r.ok).toBe(true);
+  if (!r.ok) return;
+  expect(fillPrompt(r.agent, {})).toBe(body);
+});
+
+test('a parameter named like an Object.prototype member is filled from its own value only', () => {
+  const r = parseAgentFile(P, '---\ndescription: d\nparams: toString, other?\n---\nGo {{toString}}.{{other}}');
+  if (!r.ok) throw new Error('bad');
+  expect(fillPrompt(r.agent, { toString: 'now' })).toBe('Go now.');
+  expect(fillPrompt(r.agent, {})).toBe('Go .');
+});

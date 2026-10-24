@@ -43,7 +43,7 @@ async function chat(opts: { guests?: (make: any) => unknown[] } = {}) {
   fs.mkdirSync(path.join(root, '.git'));
   const model = new ScriptedModel();
   const groups = [
-    { id: 'wb-band', tools: [BAND], exec: async () => 'band seen' },
+    { id: 'notes', tools: [BAND], exec: async () => 'band seen' },
     { id: 'other', tools: [OTHER], exec: async () => 'elsewhere' },
   ];
   const extra = { sessions: { dir }, shell: { roots: [root] }, ai: { baseUrl: 'http://scripted.model', model: 'scripted', toolLoading: 'all', backgroundFollowUp: false, subagentDepth: 4 } };
@@ -57,7 +57,7 @@ test('a project agent\'s first start asks with what it will be allowed; yes reco
   const { agents, model, ui } = await chat();
   const child = model.when((req) => firstUser(req).includes('TRUST-A'));
   const file = path.join(agents, 'job.md');
-  write(file, doc('params: ticket\ntools: wb-band\nauto: all\n', 'TRUST-A {{ticket}}', 'Does the job'));
+  write(file, doc('params: ticket\ntools: notes\nauto: all\n', 'TRUST-A {{ticket}}', 'Does the job'));
   child.script([{ text: 'one' }], [{ text: 'two' }]);
   await ask(ui, '/subagent @job T-1');
   await settleUntil(() => frameOf(ui).includes('(y/n)'));
@@ -65,9 +65,10 @@ test('a project agent\'s first start asks with what it will be allowed; yes reco
   expect(f).toContain('@job is a project file you have not started');
   expect(f).toContain('Does the job');
   expect(f).toContain(file);
-  expect(f).toContain('tool groups: core, wb-band');
+  expect(f).toContain('tool groups: core, notes');
   expect(f).toContain('auto mode: reads');
   expect(f).toContain('<ticket>');
+  expect(f).toContain('prompt: 1 line, 18 characters');
   expect(child.requests.length).toBe(0);
   expect(agentTrusted(agentAt(file))).toBe(false);
   await ui.press('y');
@@ -118,6 +119,25 @@ test('an edited file asks again and says it changed', async () => {
   await ui.press('y');
   await settleUntil(() => child.requests.length === 2);
   expect(agentTrusted(agentAt(file))).toBe(true);
+  ui.app.unmount();
+});
+
+test('a start the slot refuses records nothing: the file stays untrusted', async () => {
+  const { agents, model, ui } = await chat();
+  const child = model.when((req) => firstUser(req).includes('TRUST-R'));
+  const file = path.join(agents, 'job.md');
+  write(file, doc('', 'TRUST-R go'));
+  child.script([{ text: 'x' }]);
+  const spy = spyOn(Conversation.prototype, 'startChild').mockImplementation(() => ({ refused: 'no room' }) as never);
+  try {
+    await ask(ui, '/subagent @job');
+    await settleUntil(() => frameOf(ui).includes('(y/n)'));
+    await ui.press('y');
+    await settleUntil(() => frameOf(ui).includes('no room'));
+    expect(frameOf(ui)).toContain('no room');
+    expect(agentTrusted(agentAt(file))).toBe(false);
+  } finally { spy.mockRestore(); }
+  expect(child.requests.length).toBe(0);
   ui.app.unmount();
 });
 
@@ -198,7 +218,7 @@ test('an unreadable record trusts nothing and is kept beside the new one', () =>
 test('a task an agent starts through the subagent tool, and a grandchild, get the agent\'s tool groups', async () => {
   const { agents, model, ui } = await chat();
   const file = path.join(agents, 'job.md');
-  write(file, doc('tools: wb-band\n', 'KIDS-A go'));
+  write(file, doc('tools: notes\n', 'KIDS-A go'));
   recordAgentStart(agentAt(file));
   const top = model.when((req) => firstUser(req).includes('KIDS-A'));
   const task = model.when((req) => firstUser(req).includes('KIDS-TASK'));
@@ -218,10 +238,32 @@ test('a task an agent starts through the subagent tool, and a grandchild, get th
   ui.app.unmount();
 });
 
+test('a child that names no tool groups of its own inherits its starter\'s list', async () => {
+  const { agents, model, ui } = await chat();
+  const file = path.join(agents, 'job.md');
+  write(file, doc('tools: notes\n', 'KIDS-C go'));
+  recordAgentStart(agentAt(file));
+  const top = model.when((req) => firstUser(req).includes('KIDS-C'));
+  const inner = model.when((req) => firstUser(req).includes('KIDS-PLAIN'));
+  top.script([{ hold: true }, { text: 'idle' }]);
+  inner.script([{ text: 'ok' }]);
+  const spy = spyOn(Conversation.prototype, 'startChild');
+  await ask(ui, '/subagent @job');
+  await settleUntil(() => top.requests.length === 1);
+  const parent = spy.mock.results.map((r) => r.value as { child?: Conversation }).find((r) => r.child)!.child!;
+  const out = scheduleChild(
+    { kind: 'subagent', label: 'plain', prompt: 'KIDS-PLAIN go', by: 'person' },
+    0,
+    { startChild: (s) => parent.startChild(s, 'j'), slots: parent.deps.children!, showMessage() {}, pushLog() {}, notify() {} },
+  );
+  expect('child' in out && out.child.toolGroups).toEqual(['notes']);
+  ui.app.unmount();
+});
+
 test('a child that names its own tool groups gets the intersection with its starter\'s', async () => {
   const { agents, model, ui } = await chat();
   const file = path.join(agents, 'job.md');
-  write(file, doc('tools: wb-band, other\n', 'KIDS-B go'));
+  write(file, doc('tools: notes, other\n', 'KIDS-B go'));
   recordAgentStart(agentAt(file));
   const top = model.when((req) => firstUser(req).includes('KIDS-B'));
   const inner = model.when((req) => firstUser(req).includes('KIDS-INNER'));
@@ -232,11 +274,11 @@ test('a child that names its own tool groups gets the intersection with its star
   await settleUntil(() => top.requests.length === 1);
   const parent = spy.mock.results.map((r) => r.value as { child?: Conversation }).find((r) => r.child)!.child!;
   const out = scheduleChild(
-    { kind: 'subagent', label: 'inner', prompt: 'KIDS-INNER go', by: 'person', toolGroups: ['wb-band', 'third'] },
+    { kind: 'subagent', label: 'inner', prompt: 'KIDS-INNER go', by: 'person', toolGroups: ['notes', 'third'] },
     0,
     { startChild: (s) => parent.startChild(s, 'j'), slots: parent.deps.children!, showMessage() {}, pushLog() {}, notify() {} },
   );
-  expect('child' in out && out.child.toolGroups).toEqual(['wb-band']);
+  expect('child' in out && out.child.toolGroups).toEqual(['notes']);
   await settleUntil(() => inner.requests.length === 1);
   const names = toolNames(inner.requests[0]!);
   expect(names).toContain('band_look');

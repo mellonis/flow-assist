@@ -47,3 +47,13 @@ test('a start that must ask is blocked by the session\'s own question, one that 
   expect(askBlockedBy(null, ['a'])).toBeNull();
   expect(askBlockedBy({}, [])).toBeNull();
 });
+
+test('parseAgentArgs: a parameter named like an Object.prototype member is not given by the prototype', () => {
+  const ps = params('toString,constructor?');
+  const r = parseAgentArgs(ps, '');
+  expect(r).toMatchObject({ ok: true, missing: ['toString'] });
+  expect(r.ok && Object.hasOwn(r.values, 'toString')).toBe(false);
+  expect(parseAgentArgs(ps, 'toString=x')).toMatchObject({ ok: true, missing: [] });
+  expect(parseAgentArgs(ps, 'a b')).toMatchObject({ ok: true, values: { toString: 'a', constructor: 'b' }, missing: [] });
+  expect(parseAgentArgs(ps, 'toString=1 toString=2')).toMatchObject({ ok: false });
+});

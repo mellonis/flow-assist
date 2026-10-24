@@ -1841,8 +1841,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                       if (yes === null) { setField(typed); host.notify(); return; }
                       if (!yes) { conv.pushNote(`@${id} was not started: its file is not trusted.`); host.notify(); return; }
                     }
-                    recordAgentStart(agent);
-                    begin({ label: uniqueLabel(id, conv.runningChildren().map((c) => c.label)), prompt: fillPrompt(agent, values), agent: agentRef(agent, id), ...(groups.groups ? { toolGroups: groups.groups } : {}) }, mode, absentGroupsNote(id, groups.absent));
+                    // The file is recorded once the start took place: a refused start trusts nothing.
+                    if (begin({ label: uniqueLabel(id, conv.runningChildren().map((c) => c.label)), prompt: fillPrompt(agent, values), agent: agentRef(agent, id), ...(groups.groups ? { toolGroups: groups.groups } : {}) }, mode, absentGroupsNote(id, groups.absent))) recordAgentStart(agent);
                   };
                   if (!parsed.missing.length) { void launch(parsed.values); return; }
                   // One free-text block per missing parameter, in the declared order: the

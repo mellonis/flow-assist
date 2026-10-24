@@ -36,7 +36,8 @@ export const AGENT_KEYS = ['description', 'params', 'tools', 'auto'] as const;
 export const AGENT_AUTOS: readonly AgentAuto[] = ['ask', 'reads', 'all'];
 const NAME = /^[A-Za-z0-9-]+$/;
 const PARAM = /^[A-Za-z_][A-Za-z0-9_]*$/;
-const PLACEHOLDER = /\{\{([^{}]*)\}\}/g;
+// A placeholder stays on one line: a `{{ … }}` that spans lines is body text, not a parameter.
+const PLACEHOLDER = /\{\{([^{}\n]*)\}\}/g;
 
 export const agentHash = (bytes: string | Uint8Array): string => createHash('sha256').update(bytes).digest('hex');
 
@@ -137,7 +138,7 @@ export function parseAgentFile(file: string, content: string | Uint8Array, sourc
 // parameter left out) is the empty string. One pass: a value is never read for
 // placeholders again.
 export function fillPrompt(agent: Pick<Agent, 'body'>, values: Readonly<Record<string, string>>): string {
-  return agent.body.replace(PLACEHOLDER, (_, inner: string) => values[inner.trim()] ?? '');
+  return agent.body.replace(PLACEHOLDER, (_, inner: string) => (Object.hasOwn(values, inner.trim()) ? values[inner.trim()] : undefined) ?? '');
 }
 
 // `<ticket> [branch]`: the parameters as the listing shows them.
