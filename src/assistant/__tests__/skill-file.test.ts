@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import { spyOn } from 'bun:test';
 import os from 'node:os';
 import path from 'node:path';
-import { clearSkillHashCache, loadSkillFresh, parseSkillFile, skillDirHash, skillDirHashCached, skillHashCacheSize, SKILL_CAP, SKILL_HASH_CACHE_MAX, SKILL_MAX_BYTES, SKILL_MAX_FILES } from '../skill-file.ts';
+import { clearSkillHashCache, loadSkillFresh, parseSkillFile, skillDirHash, skillDirHashCached, skillHashCacheSize, trimSkillHashCache, SKILL_CAP, SKILL_HASH_CACHE_MAX, SKILL_MAX_BYTES, SKILL_MAX_FILES } from '../skill-file.ts';
 
 const made: string[] = [];
 const tmp = (p: string) => { const d = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), p))); made.push(d); return d; };
@@ -191,6 +191,7 @@ test('the hash cache holds a bounded number of directories and drops the least r
   const first = skillDir({ 'SKILL.md': 'first' });
   skillDirHashCached(first);
   for (let k = 0; k < SKILL_HASH_CACHE_MAX; k++) skillDirHashCached(skillDir({ 'SKILL.md': `s${k}` }));
+  trimSkillHashCache(0);
   expect(skillHashCacheSize()).toBe(SKILL_HASH_CACHE_MAX);
   const spy = spyOn(fs, 'readFileSync');
   try {

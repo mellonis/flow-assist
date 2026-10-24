@@ -55,6 +55,9 @@ test('the listing: name, description, source, trust state, ignored keys, errors 
   expect(lines).toContain('- /skill notes — notes words · person · not loaded yet — /skill notes or /skill trust notes');
   expect(lines).toContain('- /skill tk/ticket — tk/ticket words · plugin tk · trusted with its plugin');
   expect(lines).toContain('- /skill old — old words · project · changed since you loaded it — /skill old asks again');
+  const own = skillListing(found({ skills: [skill({ id: 'mine', source: { kind: 'person' } })] }), () => 'changed');
+  expect(own).toContain('changed since you loaded it — /skill mine records it again');
+  expect(own).not.toContain('asks again');
   expect(lines).toContain('- /skill deploy — deploy words · person · not offered (shadowed by the project\'s skill of this name)');
   expect(lines).toContain('- /me/skills/bad/SKILL.md:3: has no description');
   expect(lines.at(-1)).toBe('the project\'s skills are not read — shell.roots is not set');

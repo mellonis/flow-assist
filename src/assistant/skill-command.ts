@@ -48,6 +48,9 @@ const STATE_TEXT: Record<SkillState, string> = {
   plugin: 'trusted with its plugin',
 };
 
+// Your own skill is recorded again without a question, so its changed text says that.
+const PERSON_CHANGED = 'changed since you loaded it — /skill <name> records it again';
+
 // The skills found, as a note. A note is drawn as markdown, where single line breaks join,
 // so each skill and each error is a list item: the skill with its description, where it
 // comes from, whether the model may load it, and the header keys that are read and
@@ -56,7 +59,7 @@ const STATE_TEXT: Record<SkillState, string> = {
 export function skillListing(found: FoundSkills, stateOf: (s: FoundSkill) => SkillState): string {
   const item = (s: FoundSkill, extra = ''): string => {
     const notes = s.notes.length ? ` · ignored: ${s.notes.join(', ')}` : '';
-    return `- /skill ${s.id} — ${s.description.replace(/\s+/g, ' ').trim()} · ${sourceText(s)} · ${s.shadowed ? 'not offered' : STATE_TEXT[stateOf(s)].replaceAll('<name>', s.id)}${notes}${extra}`;
+    return `- /skill ${s.id} — ${s.description.replace(/\s+/g, ' ').trim()} · ${sourceText(s)} · ${s.shadowed ? 'not offered' : (s.source.kind === 'person' && stateOf(s) === 'changed' ? PERSON_CHANGED : STATE_TEXT[stateOf(s)]).replaceAll('<name>', s.id)}${notes}${extra}`;
   };
   const blocks: string[] = [];
   const skills = [...found.skills.map((s) => item(s)), ...found.shadowed.map((s) => item(s, ' (shadowed by the project\'s skill of this name)'))];

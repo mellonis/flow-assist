@@ -3515,8 +3515,8 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   person's own skill is recorded at the first `/skill`; a project skill asks (the host's y/n
   slot, `askAgentTrust(…, 'skill')`; Esc dismisses it and returns the typed line, where an agent
   y/n takes Esc as no); after yes a second fresh read must give the same hash before the record
-  is written. `/skill`, `/skill trust <name>` and `/skill <name> [text]` are refused while a turn
-  runs or a question is open; the person's message reaches the model as `frameSkill`'s block then the
+  is written. `/skill trust <name>` and `/skill <name> [text]` are refused while a turn
+  runs or a question is open (the bare listing is not); the person's message reaches the model as `frameSkill`'s block then the
   text (`SendOptions.skill`) while the row, the journal and ↑ keep the typed line. An agent's
   `skills:` is resolved at the start by the model's rule (`preloadSkills`; a failure names
   the skill and the command), framed after the filled prompt and before the follow-up in the

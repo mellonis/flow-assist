@@ -240,7 +240,9 @@ export function skillDirHash(dir: string): DirHash {
 // signature of the directory (path, size, mtime, ctime, inode, mode per file) differs from
 // the last call's for this real directory. ctime cannot be set by a program, so a file
 // rewritten with its mtime put back still differs.
-// The cache holds at most SKILL_HASH_CACHE_MAX directories; the least recently asked goes first.
+// The cache is trimmed by trimSkillHashCache after a find: it keeps at least
+// SKILL_HASH_CACHE_MAX directories, and at least as many as the skills that find saw, so
+// one find never evicts what a later one reads; the least recently asked goes first.
 export const SKILL_HASH_CACHE_MAX = 128;
 const hashCache = new Map<string, { signature: string; result: DirHash }>();
 export function clearSkillHashCache(): void { hashCache.clear(); }
@@ -261,8 +263,11 @@ export function skillDirHashCached(dir: string): DirHash {
   const result: DirHash = { ok: true, hash: digest(scan.entries, data), files: scan.entries.length, bytes: scan.bytes };
   hashCache.delete(key);
   hashCache.set(key, { signature: scan.signature, result });
-  while (hashCache.size > SKILL_HASH_CACHE_MAX) hashCache.delete(hashCache.keys().next().value!);
   return result;
+}
+export function trimSkillHashCache(seen: number): void {
+  const max = Math.max(SKILL_HASH_CACHE_MAX, seen);
+  while (hashCache.size > max) hashCache.delete(hashCache.keys().next().value!);
 }
 
 // A skill read for loading: one walk, every file read once, the hash and the body taken

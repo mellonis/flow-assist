@@ -1,4 +1,5 @@
-// Where skills are, read at the moment of the call (no cache). The places are those of the
+// Where skills are, read at the moment of the call (the directory hash is
+// cached by stat signature). The places are those of the
 // agent files, with a directory per skill, `<name>/SKILL.md`:
 //
 // - the project's: `<project>/.flow-assist/skills/<name>/`, `<project>` being the git top
@@ -17,7 +18,7 @@ import path from 'node:path';
 import { hostStateDir } from '../config/load.js';
 import { readPluginManifest } from '../loader/compat.js';
 import { isLinkOut, type FindAgentsInput } from './agent-find.js';
-import { parseSkillFile, skillDirHashCached, SKILL_CAP, SKILL_FILE, type Skill, type SkillError, type SkillSource } from './skill-file.js';
+import { parseSkillFile, skillDirHashCached, trimSkillHashCache, SKILL_CAP, SKILL_FILE, type Skill, type SkillError, type SkillSource } from './skill-file.js';
 import { gitRootOf } from './sessions.js';
 import { realOf, shellRoots, within } from './shell.js';
 
@@ -138,6 +139,7 @@ export function findSkills({ config, cwd, plugins = [], personDir = path.join(ho
       else out.skills.push(s);
     }
   }
+  trimSkillHashCache(out.skills.length + out.shadowed.length);
   return out;
 }
 

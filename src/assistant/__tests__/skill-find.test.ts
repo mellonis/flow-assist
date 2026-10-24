@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { agentTrustPath, skillChanged, skillKeyOf, skillTrusted, trustedSkillsNow } from '../agent-trust.ts';
 import { skillsFinderOf } from '../conversation-turn.ts';
-import { SKILL_CAP } from '../skill-file.ts';
+import { SKILL_CAP, SKILL_HASH_CACHE_MAX } from '../skill-file.ts';
 import { findSkills, resolveSkill } from '../skill-find.ts';
 
 const made: string[] = [];
@@ -249,6 +249,21 @@ test('skillsFinderOf offers the plugins its service lists and no others', () => 
   const c = (services: object) => ({ deps: { config: () => w.config, services: () => services }, shell: { cwd: () => w.proj } });
   expect(skillsFinderOf(c({ agentPlugins: () => [{ name: 'ok', dir: listed }] }) as never)().skills.map((s) => s.id)).toEqual(['ok/t']);
   expect(skillsFinderOf(c({}) as never)().skills).toEqual([]);
+});
+
+test('more skill directories than the cache bound: a second find still reads only the SKILL.md files', () => {
+  const w = world();
+  const n = SKILL_HASH_CACHE_MAX + 5;
+  for (let k = 0; k < n; k++) projectSkill(w, `s${k}`, doc(`d${k}`));
+  const first = findSkills({ config: w.config, cwd: w.proj, personDir: w.personDir });
+  expect(first.skills).toHaveLength(n);
+  const spy = spyOn(fs, 'readFileSync');
+  try {
+    findSkills({ config: w.config, cwd: w.proj, personDir: w.personDir });
+    const read = spy.mock.calls.map((c) => String(c[0]));
+    expect(read.every((f) => f.endsWith('SKILL.md'))).toBe(true);
+    expect(read).toHaveLength(n);
+  } finally { spy.mockRestore(); }
 });
 
 test('a second findSkills over unchanged skills reads only each SKILL.md', () => {

@@ -554,7 +554,7 @@ skill is neither listed to it nor loaded, and a call that names one is told to a
 The system prompt lists the skills it may load, one line each (`name — description`, the
 description cut at 200 characters), sorted by name, thirty at most and then `… N more`. The
 `skill` tool takes `name` and returns the instructions framed with their source and path; with
-`file` it returns one file beside them, by a path inside the skill's directory. The text is
+`file` it returns one file beside them, by a path inside the skill's directory. A file's text is
 cut at the tool-result limit (40 000 characters, or `ai.toolResultMaxChars` when that is lower).
 A skill that cannot be read answers as an untrusted one does.
 
@@ -570,8 +570,8 @@ y/n and its fence of `shell.roots`, and a skill's directory gives it no exceptio
 An agent file's `skills:` key names skills (comma-separated, a plugin's as `<plugin>/<name>`)
 that are loaded into the agent's first message when it starts, after its prompt. Each must be
 one the assistant may load, as above: a start that names a missing, ambiguous or untrusted skill
-fails, saying which and what to run, and nothing starts. The bodies together are limited to
-64 KiB. The agent keeps the `skill` tool. The start note and the journal list the skills.
+fails, saying which and what to run, and nothing starts. The bodies together, framed, are limited to
+64 K characters. The agent keeps the `skill` tool. The start note and the journal list the skills.
 
 ## Clicks, folds and the pager
 

@@ -14,7 +14,7 @@ What each version of flow-assist brought, newest first. The version is the one i
   turn with one loaded, and `/skill trust <name>` records one without loading it. Trust covers the
   skill's whole directory: a project skill asks at your first use and after any file in it
   changes, yours is recorded at your first use, a plugin's follows the plugin, and the assistant
-  loads only what is recorded. A loaded skill is never stubbed or cut, and a compaction summary
+  loads only what is recorded. A loaded skill's body is never stubbed or cut (a file beside it is cut at the tool-result limit), and a compaction summary
   names the skills that were loaded. An agent file's `skills:` key loads skills into the agent's
   first message. The journal records a person's or an agent's load as `skill-load`.
 - **Agent files: a named subagent in a Markdown file.** A file in the project's

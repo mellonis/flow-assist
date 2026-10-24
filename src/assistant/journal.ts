@@ -44,9 +44,10 @@
 //   task-start  a background task started from an agent file: `label`, `by`, and `agent`
 //            (the file's id), `source`, `path` and `hash`, as a subagent's `start` carries
 //            them. A task started from a prompt writes none. Tagged `task` like its calls.
-//   skill-load  the person loaded a skill with `/skill`: `name` (its id), `source`
-//            (`project`, `person` or `plugin`), `path`, `hash` (of the skill's directory) and
-//            `by` (`person`). The model's load is its `skill` call.
+//   skill-load  the person loaded a skill with `/skill`, or an agent's start preloaded one:
+//            `name` (its id), `source` (`project`, `person` or `plugin`), `path`, `hash` (of
+//            the skill's directory) and `by` (`person` or `agent`; an agent's adds `agent`,
+//            its id). The model's load is its `skill` call.
 //   ask-parent  a task or a subagent put a question to its parent: `id`, `question`
 //   ask-answer  its settlement: the same `id`, and `by` — `model`, `person`, `none` or `stop` (the child was stopped or reset while it waited)
 //   child-answer  the answer a session or a subagent gave a child's question with
