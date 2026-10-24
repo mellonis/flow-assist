@@ -62,6 +62,24 @@ not offered. The files are found only while the plugin is installed, enabled and
 they need no trust of their own: trusting a plugin trusts its agents, and a plugin linked to a
 development checkout changes its agents without a new trust.
 
+### Skills
+
+A manifest may also list `skills` — directories inside the plugin's directory, each holding a
+`SKILL.md` and any files beside it (docs/usage.md, "Skills"); the path of the `SKILL.md` itself
+is accepted too:
+
+```json
+{ "name": "notes", "version": "0.1.0", "hostApi": 2, "skills": ["skills/new-ticket"] }
+```
+
+A skill is named `<plugin>/<directory name>` (`notes/new-ticket`), and `new-ticket` reaches it
+while no other plugin's skill has that short name. A path that leaves the plugin's directory (a
+link out included), a name two of the plugin's entries share, a skill with an error and a value
+that is not a list of paths are shown as errors by `/skill`, and the skill is not offered. The
+skills are found only while the plugin is installed, enabled and trusted, and they need no trust
+of their own: trusting a plugin trusts its skills, and a plugin linked to a development checkout
+changes its skills without a new trust.
+
 The person sees your plugin in the app's `:plugins` list: its version, its state, what
 it brings, and — on ⏎ — your manifest's description and ranges, why it was skipped (a
 builder that throws says its message there), and its settings. From there they may

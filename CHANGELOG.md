@@ -5,6 +5,18 @@ What each version of flow-assist brought, newest first. The version is the one i
 
 ## Unreleased
 
+- **Skills: instructions the assistant loads on demand.** A directory with a `SKILL.md` (a
+  header with `name` and `description`, then the instructions; other keys are ignored, so a skill
+  written for another assistant loads as it is) in the project's `.flow-assist/skills/`, in
+  `~/.config/flow-assist/skills/` or listed by a plugin's manifest under `skills`. The system
+  prompt lists the skills the assistant may load, and the `skill` tool returns one's text, or a file
+  beside it, framed as the skill's own words. `/skill` lists them, `/skill <name> [text]` sends a
+  turn with one loaded, and `/skill trust <name>` records one without loading it. Trust covers the
+  skill's whole directory: a project skill asks at your first use and after any file in it
+  changes, yours is recorded at your first use, a plugin's follows the plugin, and the assistant
+  loads only what is recorded. A loaded skill is never stubbed or cut, and a compaction summary
+  names the skills that were loaded. An agent file's `skills:` key loads skills into the agent's
+  first message. The journal records a person's or an agent's load as `skill-load`.
 - **Agent files: a named subagent in a Markdown file.** A file in the project's
   `.flow-assist/agents/` (read only inside `shell.roots`), in `~/.config/flow-assist/agents/`
   or listed by a plugin's manifest under `agents` has a header (`description`, `params`,

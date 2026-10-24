@@ -1023,7 +1023,7 @@ there is no `/fullscreen`.
 ## What the model can do (the `core` tool group)
 
 `memory`, `workspace_read`, `config_schema`, `config_set`, `datetime`, `remind`,
-`subagent`, `todo`, `ask_user`, `open_url`, `recall`, `ui_open` (a plugin's entry screen —
+`subagent`, `skill`, `todo`, `ask_user`, `open_url`, `recall`, `ui_open` (a plugin's entry screen —
 "Screens the model can open" above; offered while one can be opened), plus `host:plugins_list`;
 `workspace_write` and `workspace_list` are the on-demand `workspace` group.
 **`subagent` takes `agent` and `args`** to start an agent file by name
@@ -1038,6 +1038,26 @@ the resolve message, `@id is not trusted here — ask the person to start @id on
 mode. The system prompt of every kind that is offered `subagent` ends with a list of
 the agents the model may start (`agentsBlock`: `@id — description (params)`, only those
 `agentTrusted`, at most twenty, read at each build of the prompt).
+**`skill(name, file?)` loads a skill** (`skillToolResult`, `src/assistant/skill-model.ts`;
+`ctx.skills`, which `conversation-turn.ts` builds per call as `skillsFinderOf`). It reads the
+skill's directory afresh (`loadSkillFresh`: one walk, every file read once, the body and the hash
+taken from those bytes) and answers only when that fresh hash is recorded or the skill is a
+plugin's (`skillTrusted`); a changed or unrecorded skill, and any load failure, answer with the
+one refusal `ask the person to run /skill <id> once`, never file text. The body comes back as
+`frameSkill`'s nonce-tagged block (source, path, 12 hex of the hash in its header), `raw`
+being the bare body. With `file`, one file the same walk held: a path inside the directory
+(absolute, `~`, drive, `..` and a link out are refused), cut at `min(40 000,
+ai.toolResultMaxChars)`. The tool's results are exempt from the recall stub (`bulkyItems`) and
+from `capToolResult` — by the tool's name, so a plugin tool `skill` is offered as
+`<plugin>__skill` and is cut and stubbed like any. Every kind offered the core tools gets the
+skills block after the agents block (`skillsBlock`: `id — description`, control characters
+to spaces, 200 characters, sorted, at most `SKILLS_LISTED_MAX` = 30, then `… N more`; only
+recorded skills and trusted plugins'); `/context` counts both blocks. A compaction summary
+ends with the line naming the skills loaded (`withLoadedSkills`, in `foldIntoHandoff`): the
+results of calls named `skill`, the person's `/skill` message (marked `skill: <id>`) and an
+agent's preload (marked `skills: [ids]`), each id matching the skill-id grammar; text that
+merely looks like a frame header counts for nothing.
+
 A saved history that holds calls under the name `background` is sent as it is. Three rules hold this set together:
 
 - **A plugin's config key is validated by the plugin's schema — everywhere.**
@@ -2028,6 +2048,11 @@ A saved history that holds calls under the name `background` is sent as it is. T
     (`project`, `person` or `plugin`), `path` and `hash` (of the file's bytes) to its
     `start` line, here and in its own file's first line; `/export` heads its fold
     `@<id> · <label> · <outcome>`.
+  - `skill-load` — a skill put in the conversation by the person (`/skill <name>`, `by:
+    'person'`) or by an agent's preload (`by: 'agent'`, with `agent`, the route tagging it):
+    `name` (the id), `source`, `path`, `hash` (of the directory). The model's own load is its
+    `call` event. `/export` draws `*Skill «x» loaded by you | by an agent (source, path,
+    content <12 hex>)*`; the person's turn row is the typed `/skill <name> [text]`.
   - `task-start` — a background task the model started from an agent file: `label`, `by`
     and the same `agent`, `source`, `path`, `hash`; a task of no file writes none. Written
     through the route's `about` into the owner's journal; `/export` draws `Task «<label>»
@@ -3451,7 +3476,7 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   `agent-args.ts`, `agent-start.ts`, `agent-trust.ts`, `agent-model.ts`; durable page
   docs/usage.md, "Agent files"). The file is a header of `key: value` lines between two
   `---` lines — `description` (required), `params` (names, a trailing `?` for an optional
-  one, the optional ones last), `tools` (tool group ids), `auto` (`ask`, `reads`, `all`) —
+  one, the optional ones last), `tools` (tool group ids), `skills` (skill ids, comma-separated), `auto` (`ask`, `reads`, `all`) —
   and a body; `{{name}}` in the body is replaced, single braces never. The reader is our
   own and total: every error carries the file and its 1-based line, an unknown or repeated
   key, an undeclared `{{name}}`, a declared parameter the body never spells and a
@@ -3470,6 +3495,34 @@ replaces the WORD being completed (`stem + candidate`), a command name or a
   Its auto mode is not in the spec: the starter sets it after `scheduleChild`, as `--auto`
   does, to `agentAutoMode(file auto, maxAutoOf(config))` — the lower on `ask < reads < all`
   of the file's mode and `agents.maxAuto` (`reads` when unset or not a mode).
+- **Skills** (`skill-file.ts` the reader and `loadSkillFresh`, `skill-find.ts` discovery,
+  `skill-model.ts` the tool and prompt block, `skill-command.ts` the `/skill` line,
+  `agent-skills.ts` the preload; durable pages docs/usage.md, "Skills", and docs/plugins.md,
+  "Skills"). A skill is a directory with `SKILL.md`: a frontmatter between two `---` lines, read
+  by our own reader (plain, quoted, `>` and `|` scalars; lists and nested maps read and ignored;
+  `name` must equal the directory, `description` required; other keys come back as `notes`),
+  then a body that no `{{}}` pass touches. `SKILL.md` over `SKILL_CAP` (32 KiB) is an error, never a cut.
+  Three places (`findSkills`): the project's `.flow-assist/skills/<name>/` (same `shell.roots`
+  rule as agent files), the person's `skills/` under `hostStateDir()`, and a plugin manifest's
+  `skills` (directories, or a path ending in `SKILL.md`, resolved inside the plugin; id
+  `<plugin>/<name>`, only for `services.agentPlugins()`); a project skill shadows the person's.
+  The directory hash (`skillDirHash`, sha-256 over each sorted relative path, size, execute bit
+  and content) covers every file; the walk is bounded (`SKILL_MAX_FILES` 256,
+  `SKILL_MAX_BYTES` 2 MiB) and a link out is an error; `findSkills` takes it through a bounded,
+  stat-keyed cache, while the tool, `/skill` and a preload read afresh. **Trust** is the
+  `skill:<real path of the directory>` key of the same `agents.accepted.json` (`skillTrusted`,
+  `recordSkillLoad`; a plugin's skill has none; nothing is written under `inModelShell()`). The
+  person's own skill is recorded at the first `/skill`; a project skill asks (the host's y/n
+  slot, `askAgentTrust(…, 'skill')`; Esc dismisses it and returns the typed line, where an agent
+  y/n takes Esc as no); after yes a second fresh read must give the same hash before the record
+  is written. `/skill`, `/skill trust <name>` and `/skill <name> [text]` are refused while a turn
+  runs or a question is open; the person's message reaches the model as `frameSkill`'s block then the
+  text (`SendOptions.skill`) while the row, the journal and ↑ keep the typed line. An agent's
+  `skills:` is resolved at the start by the model's rule (`preloadSkills`; a failure names
+  the skill and the command), framed after the filled prompt and before the follow-up in the
+  first message (`ChildSpec.skills`; `ChildSpec.head` keeps the bodies out of a task's system
+  prompt), at most `PRELOAD_MAX_CHARS` (64 KiB) in all; the person's start reads again after
+  the first-start y/n.
 - **A child's tool groups are an allow-list** (`Conversation.toolGroups`,
   `AgentOpts.allowGroups`). `tools:` of an agent file gives the child the `core` group
   plus the groups it names; `readTools` in `agent.ts` withholds every other tool of the
@@ -4969,6 +5022,10 @@ commands; docs and hints never present either mechanism as a boundary.
     wrote; an unreadable record trusts nothing and is moved aside by the next write. Like
     the other records this stops the accident, not a same-user process that writes the
     record itself.
+  - **Skills** — the same file, keys `skill:<real path of the directory>` → the sha-256 of the
+    directory (`skill-file.ts`, read by `agent-trust.ts`'s `skillTrusted`, written only by
+    `recordSkillLoad`). The model's `skill` tool and an agent's preload load only a recorded
+    current hash or a plugin's skill; an unreadable record trusts nothing.
 - **Tests start without either record** (`src/__tests__/helpers/test-setup.ts`, the
   `bunfig.toml` preload): the host's state is one directory per `bun test` process, and
   with one first start per record every test after the first would otherwise meet its

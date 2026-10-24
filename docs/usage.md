@@ -413,6 +413,7 @@ Read the diff, then answer with the findings, worst first. In a code block, brac
 - `params` names the values the prompt takes, separated by commas; a trailing `?` makes one
   optional, and the optional ones come after the required ones.
 - `tools` narrows the tool groups the agent may use (see What it may do).
+- `skills` names skills loaded into the agent's first message (see Skills, below).
 - `auto` is `ask`, `reads` or `all`; without it the agent asks.
 - The prompt spells each parameter as `{{name}}`. A `{{name}}` that `params` does not declare is
   an error, and so is a declared parameter the prompt never uses. A value left out of an
@@ -470,6 +471,107 @@ that may write, each write asking you unless its auto mode answers, and its resu
 any task's does. A call that names an agent you have not started, an unknown parameter or a missing
 one is answered with why, and nothing starts. The assistant never asks you to trust a file;
 start it once yourself with `/subagent @<name>`.
+
+## Skills
+
+A skill is a directory of instructions the model loads into the current conversation when a
+task calls for them: a way to write a ticket, a checklist for a release, the notes for a tool.
+An agent file (above) starts a separate subagent with a prompt of its own; a skill starts
+nothing — its text joins the conversation you are in, and the assistant follows it there.
+
+### Where the skills are
+
+- **The project's**: `.flow-assist/skills/<name>/SKILL.md` in the project, read only inside
+  `shell.roots` as the agent files are (with no roots set none is read, and `/skill` says so).
+- **Your own**: `~/.config/flow-assist/skills/<name>/SKILL.md`.
+- **A plugin's**: the directories its manifest lists under `skills`, named `<plugin>/<name>`;
+  only an enabled, trusted plugin's are found (docs/plugins.md, "Skills").
+
+The name is the directory's name: letters, digits and `-`. A project skill and one of your own
+with the same name: the project's is offered, and `/skill` marks yours as shadowed. A plugin's
+skill is reached by its short name while no other plugin's skill has it. A skill is read each
+time it is needed, so a change takes effect at the next use.
+
+### The file
+
+`SKILL.md` has a header between two `---` lines, then the instructions:
+
+```markdown
+---
+name: new-ticket
+description: Write a ticket from a rough note, in the team's format
+---
+Turn the note into a ticket: a one-line title, the problem, the expected result.
+The format is in references/format.md; read it first.
+```
+
+- `name`, when present, is the directory's name; another value is an error naming both.
+- `description` is required, and is what the listing and the assistant's list show.
+- Any other key (`license`, `allowed-tools`, …) is read and ignored, so a skill written for
+  another assistant loads as it is; `/skill` notes the ignored keys once. A skill grants no tools
+  and picks no model.
+- Values may be quoted, or written as `>` and `|` blocks; the instructions are not a template:
+  `{{…}}` is left as written.
+- A `SKILL.md` over 32 KiB is an error, never a cut. `/skill` lists the errors as
+  `path:line: message`, and a skill with one is not offered.
+
+Files beside `SKILL.md` (a reference page, a script, a template) belong to the skill; the
+instructions can point at them. A directory may hold up to 256 files and 2 MiB, and a link that
+leaves it is an error.
+
+### `/skill`
+
+- `/skill` lists the skills: each one's name, description, source and trust, the keys it
+  ignores, its errors and the ones another skill shadows. Tab completes names.
+- `/skill <name> [text]` sends a turn: the skill's text, framed as the skill's own words and not
+  yours, then your text (`apply this skill` when you write none). The chat shows the line you
+  typed.
+- `/skill trust <name>` records a skill without loading it.
+
+`/skill <name>` and `/skill trust <name>` are refused while an answer is running or a
+question waits; the line stays in the field.
+
+### Trust
+
+A skill is somebody else's instructions, and the files beside it are part of what the model is
+told to use, so trust covers the whole directory: every file in it, by content.
+
+- A **project skill** asks at your first `/skill <name>` or `/skill trust <name>`, and again
+  after anything in its directory changes: a y/n shows the source, the path, the number of
+  files and their size. `y` records this content (and `/skill <name>` goes on to load it); `n`
+  records nothing. Esc closes the question and gives the typed line back to the field.
+- **Your own skill** is recorded at your first use and asks nothing.
+- A **plugin's skill** follows the plugin, as a plugin's agent does; a plugin linked to a
+  development checkout changes its skills without a new trust.
+
+The record is `agents.accepted.json` in the config directory, beside the agent files'. The
+assistant loads only a skill whose current content is recorded, or a trusted plugin's; any other
+skill is neither listed to it nor loaded, and a call that names one is told to ask you to run
+`/skill <name>` once. A command the assistant runs records nothing.
+
+### What the assistant sees
+
+The system prompt lists the skills it may load, one line each (`name — description`, the
+description cut at 200 characters), sorted by name, thirty at most and then `… N more`. The
+`skill` tool takes `name` and returns the instructions framed with their source and path; with
+`file` it returns one file beside them, by a path inside the skill's directory. The text is
+cut at the tool-result limit (40 000 characters, or `ai.toolResultMaxChars` when that is lower).
+A skill that cannot be read answers as an untrusted one does.
+
+A loaded skill is not stubbed or cut as other bulky results are. After `/compact` or an
+automatic compaction the summary names the skills that were loaded, and the assistant loads
+them again before relying on them.
+
+A file beside a skill can be read, not run from the skill's directory: `run_command` keeps its
+y/n and its fence of `shell.roots`, and a skill's directory gives it no exception.
+
+### Agent files and skills
+
+An agent file's `skills:` key names skills (comma-separated, a plugin's as `<plugin>/<name>`)
+that are loaded into the agent's first message when it starts, after its prompt. Each must be
+one the assistant may load, as above: a start that names a missing, ambiguous or untrusted skill
+fails, saying which and what to run, and nothing starts. The bodies together are limited to
+64 KiB. The agent keeps the `skill` tool. The start note and the journal list the skills.
 
 ## Clicks, folds and the pager
 
@@ -730,7 +832,7 @@ works (`/new`, `/resume`) opens nothing over the one you are in — the assistan
 told you are away — and a screen it had waiting when you left is dropped. A plugin's own field is not
 watched: a screen may open while you type there. In the panel the screen is beside the chat; in a
 window, or with the chat over the whole terminal, it is behind the chat until you close
-it. Esc closes it as ever. The assistant never opens `:plugins`, `/mcp`, the sessions or
+it. Esc closes it. The assistant never opens `:plugins`, `/mcp`, the sessions or
 the settings for you — those stay yours — and never a plugin you have not trusted or
 have disabled. A plugin in another language is opened at its entry, as its key opens
 it.
