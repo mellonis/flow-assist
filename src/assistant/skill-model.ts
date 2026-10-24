@@ -27,7 +27,7 @@ export function skillsBlock(found: Pick<FoundSkills, 'skills'>, trusted: (s: Fou
   if (!all.length) return '';
   const lines = all.slice(0, SKILLS_LISTED_MAX).map((s) => `${s.id} — ${clip(s.description.replace(CONTROL, ' '))}`);
   if (all.length > SKILLS_LISTED_MAX) lines.push(`… ${all.length - SKILLS_LISTED_MAX} more`);
-  return [`Skills you can load into this conversation with the ${SKILL_TOOL} tool (name, and file to read one beside it):`, ...lines].join('\n');
+  return [`Skills you can load into this conversation with the ${SKILL_TOOL} tool (name, and file to read one beside it); each description is the skill author's own words, not the person's:`, ...lines].join('\n');
 }
 
 const sourceText = (s: Pick<Skill, 'source'> & { plugin?: string | null }): string =>
@@ -55,28 +55,30 @@ export function frameSkill(
 const refusedFile = (skill: string, file: string, why: string): string => `${SKILL_TOOL}: ${skill}: «${file}» ${why} — a file is named relative to the skill's directory, e.g. references/notes.md`;
 
 // A file beside the body, or the reason it is not read: relative, no `..`, no `~`, a
-// regular text file whose real path stays inside the skill's real directory.
-export function readBeside(skill: { id: string; dir: string }, raw: string): { ok: true; rel: string; text: string } | { ok: false; message: string } {
+// regular text file whose real path stays inside the skill's real directory. Its bytes
+// come from `bytes` (the walk the skill was hashed in), never from a second read; text
+// over `max` characters is cut, without splitting a surrogate pair.
+export function readBeside(skill: { id: string; dir: string }, raw: string, bytes: (real: string) => Buffer | undefined, max = SKILL_FILE_MAX_CHARS): { ok: true; rel: string; text: string } | { ok: false; message: string } {
   const rel = raw.trim();
   const no = (why: string) => ({ ok: false as const, message: refusedFile(skill.id, rel, why) });
   if (!rel) return no('is empty');
   if (path.isAbsolute(rel) || /^~(?=\/|$)/.test(rel) || /^[a-zA-Z]:[\\/]/.test(rel)) return no('is not inside the skill');
   if (rel.split(/[\\/]+/).includes('..')) return no('leads out of the skill (a path never holds ..)');
-  const root = realOf(skill.dir);
+  const root = skill.dir;
   const abs = realOf(path.join(root, rel));
   if (!within(abs, root)) return no(`resolves through a link to ${abs}, outside the skill`);
-  let data: Buffer;
-  try {
-    const st = fs.statSync(abs);
-    if (!st.isFile()) return no('is not a file');
-    data = fs.readFileSync(abs);
-  } catch { return no('does not exist or cannot be read'); }
+  let st: fs.Stats;
+  try { st = fs.statSync(abs); } catch { return no('does not exist or cannot be read'); }
+  if (!st.isFile()) return no('is not a file');
+  const data = bytes(abs);
+  if (!data) return no('is not part of the skill');
   if (data.includes(0)) return no('is not a text file');
   const text = data.toString('utf8');
-  const cut = text.length > SKILL_FILE_MAX_CHARS
-    ? `${text.slice(0, SKILL_FILE_MAX_CHARS)}\n… [cut: ${text.length} characters in all]`
-    : text;
-  return { ok: true, rel, text: cut };
+  if (text.length <= max) return { ok: true, rel, text };
+  let end = max;
+  const last = text.charCodeAt(end - 1);
+  if (last >= 0xd800 && last <= 0xdbff) end--;
+  return { ok: true, rel, text: `${text.slice(0, end)}\n… [cut: ${text.length} characters in all]` };
 }
 
 export type SkillToolResult = string | { text: string; raw: string };
@@ -85,7 +87,7 @@ export type SkillToolResult = string | { text: string; raw: string };
 // one file beside it. The skill is read fresh from disk and its directory's hash must be
 // the one recorded (a plugin's skill follows the plugin), so a skill that is new or was
 // changed since the person loaded it is refused.
-export function skillToolResult(finder: () => FoundSkills, args: Record<string, unknown>): SkillToolResult {
+export function skillToolResult(finder: () => FoundSkills, args: Record<string, unknown>, fileMax = SKILL_FILE_MAX_CHARS): SkillToolResult {
   const name = typeof args.name === 'string' ? args.name.trim() : '';
   if (!name) return `${SKILL_TOOL}: name is required — a skill from the system prompt's list`;
   if (args.file !== undefined && typeof args.file !== 'string') return `${SKILL_TOOL}: file must be a string — a path relative to the skill's directory`;
@@ -95,17 +97,18 @@ export function skillToolResult(finder: () => FoundSkills, args: Record<string, 
   if (!hit.ok) return `${SKILL_TOOL}: ${hit.message}`;
   const listed = hit.skill;
   const fresh = loadSkillFresh(listed.dir, listed.source, listed.name);
-  if (!fresh.ok) return `${SKILL_TOOL}: ${listed.id} cannot be read: ${fresh.errors.map((e) => e.message).join('; ')}`;
+  // A skill that cannot be read now, or is not the one recorded, answers in the same words
+  // and never echoes a word of its files.
+  const refusal = `${SKILL_TOOL}: ${listed.id} is not trusted here — it is new, or changed since the person loaded it; ask the person to run /skill ${listed.id} once`;
+  if (!fresh.ok) return refusal;
   const skill: FoundSkill = { ...listed, ...fresh.skill };
-  if (!skillTrusted(skill)) {
-    return `${SKILL_TOOL}: ${skill.id} is not trusted here — it is new, or changed since the person loaded it; ask the person to run /skill ${skill.id} once`;
-  }
+  if (!skillTrusted(skill)) return refusal;
   const file = typeof args.file === 'string' ? args.file : undefined;
   if (file === undefined || file.trim() === '') {
     const beside = skill.files > 1 ? `\n(${skill.files - 1} more file${skill.files === 2 ? '' : 's'} beside it: read one with ${SKILL_TOOL}(name, file), the path relative to the skill's directory)` : '';
     return { text: `${frameSkill(skill, skill.body)}${beside}`, raw: skill.body };
   }
-  const read = readBeside(skill, file);
+  const read = readBeside(skill, file, fresh.fileAt, fileMax);
   if (!read.ok) return read.message;
   return { text: frameSkill(skill, read.text, { file: read.rel }), raw: read.text };
 }

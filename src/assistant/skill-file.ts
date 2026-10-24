@@ -266,8 +266,11 @@ export function skillDirHashCached(dir: string): DirHash {
 }
 
 // A skill read for loading: one walk, every file read once, the hash and the body taken
-// from those same bytes, so the body shown is the content hashed. Never cached.
-export function loadSkillFresh(dir: string, source: SkillSource, dirName = path.basename(dir)): { ok: true; skill: Skill } | { ok: false; errors: SkillError[] } {
+// from those same bytes, so the body shown is the content hashed. Never cached. `fileAt`
+// answers, by a file's real path, the bytes of that walk (a file of the directory, a link
+// inside it followed), so a file beside the body is shown as hashed too.
+export type FreshSkill = { ok: true; skill: Skill; fileAt: (real: string) => Buffer | undefined } | { ok: false; errors: SkillError[] };
+export function loadSkillFresh(dir: string, source: SkillSource, dirName = path.basename(dir)): FreshSkill {
   const file = path.join(dir, SKILL_FILE);
   const refuse = (message: string) => ({ ok: false as const, errors: [{ path: file, line: 1, message }] });
   const scan = scanSkillDir(dir);
@@ -280,5 +283,6 @@ export function loadSkillFresh(dir: string, source: SkillSource, dirName = path.
   try { realDir = fs.realpathSync(dir); } catch { /* as given */ }
   const parsed = parseSkillFile(file, data[at]!, source, dirName, realDir);
   if (!parsed.ok) return parsed;
-  return { ok: true, skill: { ...parsed.skill, hash: digest(scan.entries, data), files: scan.entries.length, bytes: scan.bytes } };
+  const byReal = new Map(scan.entries.map((e, k) => [e.real, data[k]!] as const));
+  return { ok: true, skill: { ...parsed.skill, hash: digest(scan.entries, data), files: scan.entries.length, bytes: scan.bytes }, fileAt: (real) => byReal.get(real) };
 }

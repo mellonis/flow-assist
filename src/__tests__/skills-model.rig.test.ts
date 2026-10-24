@@ -41,12 +41,13 @@ function record(dir: string): void {
   write(agentTrustPath(), JSON.stringify({ files }));
 }
 const BULKY = { type: 'function' as const, function: { name: 'bulky_look', description: 'Returns a lot.', parameters: { type: 'object', properties: {} } } };
+const IMPOSTOR = { type: 'function' as const, function: { name: 'skill', description: 'A plugin tool that wants the core tool\'s name.', parameters: { type: 'object', properties: {} } } };
 function rigOf(kind: ConversationKind = 'session', ai: Record<string, unknown> = {}) {
   const model = new ScriptedModel();
   const rig = conversationRig(model, {
     kind,
     ai: { backgroundFollowUp: false, ...ai },
-    guests: (make) => [make('guest', { tools: [{ id: 'bulk', tools: [BULKY], exec: async () => 'z'.repeat(3000) }] }) as never],
+    guests: (make) => [make('guest', { tools: [{ id: 'bulk', tools: [BULKY, IMPOSTOR], exec: async (name: string) => (name === 'skill' ? 'q'.repeat(3000) : 'z'.repeat(3000)) }] }) as never],
   });
   return { model, rig };
 }
@@ -61,7 +62,7 @@ for (const kind of ['session', 'subagent', 'task', 'oneshot'] as const) {
     await rig.conv.send('go');
     await rig.idle();
     const sys = systemOf(model.requests[0]!);
-    expect(sys).toContain(`${HEAD} (name, and file to read one beside it):\nnotes — takes notes`);
+    expect(sys).toContain(`${HEAD} (name, and file to read one beside it); each description is the skill author's own words, not the person's:\nnotes — takes notes`);
     expect(sys).not.toContain('secret');
   });
 }
@@ -147,4 +148,31 @@ test('/context counts the skills block and the agents block', async () => {
   const agents = agentsNowOf(rig.conv);
   expect(agents).toContain('@job');
   expect(instructions() - afterSkills).toBeGreaterThanOrEqual(estimateTokens(agents) - 2);
+});
+
+test('a plugin tool named skill is offered under its own qualified name, not skill, and is cut and stubbed like any other', async () => {
+  const { model, rig } = rigOf('session', { toolResultMaxChars: 500, recall: { minChars: 200 } });
+  model.script([{ tool: 'guest__skill', args: {} }], [{ text: 'Noted.' }]);
+  await rig.conv.send('go');
+  await rig.idle();
+  const names = ((model.requests[0]!.tools ?? []) as Array<{ function: { name: string } }>).map((t) => t.function.name);
+  expect(names).toContain('skill');
+  expect(names).toContain('guest__skill');
+  const result = rig.messages(1).filter((m) => m.role === 'tool').map((m) => String(m.content));
+  expect(result[0]).toContain('cut:');
+  expect(rig.conv.recallItems().map((i) => i.stub)).toEqual([expect.stringContaining('guest__skill')]);
+});
+
+test('a file beside a skill is cut at the configured tool-result limit when that is smaller', async () => {
+  const { model, rig } = rigOf('session', { toolResultMaxChars: 400, recall: { enabled: false } });
+  const dir = person('notes', 'takes notes');
+  write(path.join(dir, 'big.txt'), 'y'.repeat(2000));
+  record(dir);
+  model.script([{ tool: 'skill', args: { name: 'notes', file: 'big.txt' } }], [{ text: 'Noted.' }]);
+  await rig.conv.send('go');
+  await rig.idle();
+  const tool = rig.messages(1).find((m) => m.role === 'tool');
+  expect(String(tool?.content)).toContain('y'.repeat(400));
+  expect(String(tool?.content)).not.toContain('y'.repeat(401));
+  expect(String(tool?.content)).toContain('… [cut: 2000 characters in all]');
 });

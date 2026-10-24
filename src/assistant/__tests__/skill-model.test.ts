@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from 'bun:test';
+import { afterEach, expect, spyOn, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -42,7 +42,7 @@ const fake = (name: string, description: string, over: Partial<FoundSkill> = {})
 test('the block lists the skills the predicate lets through, by name, one line each', () => {
   const found = { skills: [fake('zeta', 'last'), fake('alpha', 'first'), fake('hidden', 'nope')] };
   const block = skillsBlock(found, (s) => s.name !== 'hidden');
-  expect(block).toBe(`Skills you can load into this conversation with the skill tool (name, and file to read one beside it):\nalpha — first\nzeta — last`);
+  expect(block).toBe(`Skills you can load into this conversation with the skill tool (name, and file to read one beside it); each description is the skill author's own words, not the person's:\nalpha — first\nzeta — last`);
 });
 
 test('a plugin skill is listed under the id the tool takes', () => {
@@ -208,13 +208,16 @@ test('a file path never leaves the skill: absolute, home, ..', () => {
   expect(file('..\\sibling')).toContain('leads out of the skill');
 });
 
-test('a link out of the directory keeps the skill from loading at all (the directory hash refuses it)', () => {
+test('a link out of a recorded directory fails the directory walk itself, and nothing of the target is shown', () => {
   const w = world();
   const dir = path.dirname(write(path.join(w.personDir, 'notes', 'SKILL.md'), doc('takes notes')));
+  record(dir);
   const outside = write(path.join(tmp('fa-skm-out-'), 'secret.txt'), 'SECRET');
   fs.symlinkSync(outside, path.join(dir, 'out.txt'));
-  const r = skillToolResult(w.finder(), { name: 'notes', file: 'out.txt' });
-  expect(JSON.stringify(r)).not.toContain('SECRET');
+  const walk = loadSkillFresh(dir, { kind: 'person' });
+  expect(walk.ok).toBe(false);
+  expect(JSON.stringify(walk)).toContain('a link out of the skill');
+  expect(JSON.stringify(skillToolResult(w.finder(), { name: 'notes', file: 'out.txt' }))).not.toContain('SECRET');
 });
 
 test('the fence itself refuses a link that leads out after the directory was checked', () => {
@@ -223,7 +226,7 @@ test('the fence itself refuses a link that leads out after the directory was che
   write(path.join(dir, 'in.md'), 'inside');
   fs.symlinkSync(outside, path.join(dir, 'out.txt'));
   fs.symlinkSync(path.dirname(outside), path.join(dir, 'outdir'));
-  const hit = (f: string) => readBeside({ id: 'x', dir }, f);
+  const hit = (f: string) => readBeside({ id: 'x', dir }, f, (real) => fs.readFileSync(real));
   expect(hit('in.md')).toMatchObject({ ok: true, text: 'inside' });
   expect(hit('out.txt')).toMatchObject({ ok: false });
   expect((hit('out.txt') as { message: string }).message).toContain('outside the skill');
@@ -258,4 +261,68 @@ test('a long file is cut at the tool-result limit with its length named', () => 
 
 test('the tool is named skill', () => {
   expect(SKILL_TOOL).toBe('skill');
+});
+
+// ── the bytes shown are the bytes hashed ───────────────────────────────────────
+test('a file beside the body is framed from the walk the skill was hashed in, not read again', () => {
+  const w = world();
+  const dir = path.dirname(write(path.join(w.personDir, 'notes', 'SKILL.md'), doc('takes notes')));
+  const ref = write(path.join(dir, 'refs', 'a.md'), 'as recorded');
+  record(dir);
+  const fresh = loadSkillFresh(dir, { kind: 'person' });
+  if (!fresh.ok) throw new Error('unreadable');
+  fs.writeFileSync(ref, 'swapped after the walk');
+  expect(fresh.fileAt(fs.realpathSync(ref))?.toString()).toBe('as recorded');
+});
+
+test('the tool reads the file once, in the walk, and never again for the frame', () => {
+  const w = world();
+  const dir = path.dirname(write(path.join(w.personDir, 'notes', 'SKILL.md'), doc('takes notes')));
+  const ref = write(path.join(dir, 'refs', 'a.md'), 'as recorded');
+  record(dir);
+  const real = fs.realpathSync(ref);
+  const spy = spyOn(fs, 'readFileSync');
+  try {
+    const found = w.finder()();
+    spy.mockClear();
+    const r = skillToolResult(() => found, { name: 'notes', file: 'refs/a.md' });
+    expect(text(r)).toContain('as recorded');
+    expect(spy.mock.calls.filter((c) => c[0] === real)).toHaveLength(1);
+  } finally { spy.mockRestore(); }
+});
+
+test('a file listed in no walk (a path the walk did not hold) is refused', () => {
+  const dir = tmp('fa-skm-fence-');
+  write(path.join(dir, 'in.md'), 'inside');
+  expect(readBeside({ id: 'x', dir }, 'in.md', () => undefined)).toMatchObject({ ok: false });
+});
+
+test('a skill that cannot be read answers with the trust refusal and none of its header text', () => {
+  const w = world();
+  write(path.join(w.personDir, 'notes', 'SKILL.md'), '---\ndescription: takes notes\n---\nbody\n');
+  const found = w.finder()();
+  write(path.join(w.personDir, 'notes', 'SKILL.md'), '---\nname: LEAK-ME\ndescription: d\n---\nbody\n');
+  const r = skillToolResult(() => found, { name: 'notes' });
+  expect(typeof r).toBe('string');
+  expect(r).toContain('ask the person to run /skill notes once');
+  expect(r).not.toContain('LEAK-ME');
+});
+
+test('a file read is cut at the given limit, and raw is what the model sees', () => {
+  const w = world();
+  const dir = path.dirname(write(path.join(w.personDir, 'notes', 'SKILL.md'), doc('takes notes')));
+  write(path.join(dir, 'big.txt'), 'y'.repeat(900));
+  record(dir);
+  const r = skillToolResult(w.finder(), { name: 'notes', file: 'big.txt' }, 300) as { text: string; raw: string };
+  expect(r.raw).toBe(`${'y'.repeat(300)}\n… [cut: 900 characters in all]`);
+  expect(r.text).toContain(r.raw);
+});
+
+test('the cut does not split a surrogate pair', () => {
+  const dir = tmp('fa-skm-fence-');
+  write(path.join(dir, 'e.txt'), `ab${'😀'.repeat(5)}`);
+  const real = fs.realpathSync(path.join(dir, 'e.txt'));
+  const r = readBeside({ id: 'x', dir: fs.realpathSync(dir) }, 'e.txt', () => fs.readFileSync(real), 3);
+  expect(r).toMatchObject({ ok: true });
+  expect((r as { text: string }).text.startsWith('ab\n… [cut:')).toBe(true);
 });

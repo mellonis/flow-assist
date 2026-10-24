@@ -20,7 +20,7 @@ import { openInBrowser } from '../runtime/services.js';
 import { inBackgroundWork, inUnattachedWork } from '../runtime/background-work.js';
 import { type ChildSpec, type ChildStart } from '../assistant/conversation-types.js';
 import { planAgentStart, type AgentStarter } from '../assistant/agent-model.js';
-import { skillToolResult } from '../assistant/skill-model.js';
+import { SKILL_FILE_MAX_CHARS, skillToolResult } from '../assistant/skill-model.js';
 import { SKILL_TOOL } from '../assistant/skill-file.js';
 import type { FoundSkills } from '../assistant/skill-find.js';
 import { absentGroupsNote } from '../assistant/agent-start.js';
@@ -36,7 +36,7 @@ import { SHELL_DEFAULTS } from '../assistant/shell.js';
 import { parseAskArgs, askResult, type AskQuestion, type AskState } from '../assistant/ask.js';
 import type { Change } from '../assistant/diff.js';
 import { TOOLS_LOAD } from '../assistant/tool-loading.js';
-import { TOOL_RESULT_MAX_CHARS_CEILING, TOOL_RESULT_MAX_CHARS_DEFAULT } from '../assistant/tool-result-cap.js';
+import { TOOL_RESULT_MAX_CHARS_CEILING, TOOL_RESULT_MAX_CHARS_DEFAULT, toolResultCapFromConfig } from '../assistant/tool-result-cap.js';
 import { IMAGE_DEFAULTS, type ImageRef } from '../assistant/images.js';
 import { AUTO_COMPACT_DEFAULTS } from '../assistant/compaction.js';
 import { MAX_ROUNDS_DEFAULT, MAX_TURN_TOKENS_DEFAULT } from '../assistant/rounds.js';
@@ -550,7 +550,7 @@ export const coreTools = (config: Record<string, unknown>, resolvedKeys?: Record
       case 'skill': {
         if (!ctx.skills) return `${SKILL_TOOL}: skills are not available here.`;
         // `{ text, raw }`: the framed text for the model, the bare data beside it (`toolReturn`).
-        return skillToolResult(ctx.skills, args) as unknown as string;
+        return skillToolResult(ctx.skills, args, Math.min(SKILL_FILE_MAX_CHARS, toolResultCapFromConfig((config as { ai?: unknown }).ai))) as unknown as string;
       }
       case 'recall': {
         // The items are the conversation's (`ctx.recall`, supplied by the chat — src/
