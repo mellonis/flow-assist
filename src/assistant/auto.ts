@@ -20,7 +20,8 @@
 //     automatic (below).
 //
 // Three calls are not automatic in any mode on their own:
-//   - `run_command` — the y/n is its only guard, and the command may have been written
+//   - `run_command` and `shell_kill` — the y/n is the only guard of the first, and the
+//     command may have been written
 //     from a page or a ticket the model read a minute ago. The person may lift that
 //     on purpose with `shell.autoRun: true` (read by the chat and passed in here, as
 //     `autoRun`): then `all` answers it like any other write. Both consents are
@@ -29,7 +30,8 @@
 //     host's shell group made (`hostShell`, from `isHostShellTool` in
 //     src/loader/tools-shell.ts), never by the name: a plugin's tool called
 //     `run_command` — qualified, or holding the bare name while the host's shell is
-//     off — is not the host's shell;
+//     off — is not the host's shell. `shell_kill` ends a process the person may be
+//     relying on (a dev server), and is lifted by the same key and the same def check;
 //   - `web_fetch` — a fetch that reaches the confirmation at all is one to a host
 //     outside `web.allowlist` (that is exactly what its `write` flag tests), and a URL
 //     can carry out anything the model has seen. Should that flag ever become a plain
@@ -85,7 +87,7 @@ export function autoSaid(mode: AutoMode, autoRun: boolean): string {
   if (mode === 'all') {
     return autoRun
       ? 'auto: writes + commands — writes and commands run without asking (shell.autoRun); an unlisted web_fetch and config_set still ask'
-      : 'auto: writes — writes run without asking; run_command, an unlisted web_fetch and config_set still ask';
+      : 'auto: writes — writes run without asking; run_command, shell_kill, an unlisted web_fetch and config_set still ask';
   }
   return 'auto off — every write asks again';
 }
@@ -95,10 +97,10 @@ export function autoSaid(mode: AutoMode, autoRun: boolean): string {
 // same name gets the qualified spelling, and it is covered too. `autoRun` (the
 // person's `shell.autoRun`) lifts `run_command` only when `hostShell` says the call is
 // the host's own shell tool.
-const NEVER_AUTO = ['run_command', 'web_fetch', 'config_set'];
+const NEVER_AUTO = ['run_command', 'shell_kill', 'web_fetch', 'config_set'];
 export type AutoRun = { autoRun: boolean; hostShell: boolean };
 export function neverAutomatic(name: string, { autoRun, hostShell }: AutoRun): boolean {
-  if (autoRun && hostShell && name === 'run_command') return false;
+  if (autoRun && hostShell && (name === 'run_command' || name === 'shell_kill')) return false;
   return NEVER_AUTO.some((n) => name === n || name.endsWith(`:${n}`));
 }
 

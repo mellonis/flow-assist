@@ -36,6 +36,9 @@ export const JOB_KILL_GRACE_MS = 2000;
 export const MAX_ENDED_JOBS = 20;
 // The most matching lines one `grep` returns.
 export const GREP_LINES = 100;
+// How long the model's `run_command({ background: true })` waits before it answers: a
+// command that ends within it is an ordinary foreground result and leaves no job.
+export const BACKGROUND_SETTLE_MS = 2000;
 
 // `shell.maxBackground` / `shell.jobChars`, a bad value falling back to the default. Read
 // when a job starts: a lowered limit does not end the jobs that run.
@@ -80,6 +83,9 @@ export class ShellJob {
   readonly pid: number | undefined;
   // The conversation that owns it, set by the one that started it (opaque here).
   owner: object | null = null;
+  // The cursor up to which the model has been shown the output: what `run_command` returned
+  // and what its reads returned since. The model's next plain read starts there.
+  told = 0;
   endedAt: number | null = null;
   // Set when the shell could not be started.
   error: string | undefined;
@@ -88,6 +94,9 @@ export class ShellJob {
   // The position of `buf[0]` in everything the job printed.
   private base = 0;
   private newlines = 0;
+  // Whether the buffer starts at the start of a line (the character before it, if any, was
+  // a newline); false after the ring buffer has cut a line in two.
+  private baseAtLine = true;
   private lastChar = '';
   private killedBy: JobKilledBy | null = null;
   private killTimer: ReturnType<typeof setTimeout> | null = null;
@@ -170,7 +179,9 @@ export class ShellJob {
     const r = this.read(since);
     let text = r.text;
     let start = r.from;
-    if (r.dropped > 0) {
+    // The buffer's first line may be the tail of one the ring buffer cut: it is skipped,
+    // however the cursor got here (a drop under it, or a read that stopped at the start).
+    if (r.from === this.base && !this.baseAtLine) {
       const nl = text.indexOf('\n');
       if (nl < 0) return { lines: [], next: r.from + (this.running ? 0 : text.length), dropped: r.dropped, more: 0 };
       start += nl + 1;
@@ -263,7 +274,12 @@ export class ShellJob {
     this.buf += text;
     for (let i = text.indexOf('\n'); i >= 0; i = text.indexOf('\n', i + 1)) this.newlines++;
     this.lastChar = text[text.length - 1]!;
-    if (this.buf.length > this.chars) { this.base += this.buf.length - this.chars; this.buf = this.buf.slice(-this.chars); }
+    if (this.buf.length > this.chars) {
+      const cut = this.buf.length - this.chars;
+      this.baseAtLine = this.buf[cut - 1] === '\n';
+      this.base += cut;
+      this.buf = this.buf.slice(-this.chars);
+    }
     for (const fn of [...this.outputs]) { try { fn(text); } catch { /* a listener never breaks the job */ } }
   }
   private finish(status: JobStatus): void {

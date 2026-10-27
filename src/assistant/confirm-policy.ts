@@ -71,13 +71,23 @@ export function confirmFor(policy: ConfirmPolicy, scope: ConfirmScope): ConfirmW
 }
 
 // The command of a `run_command` call, so the y/n block can show the line itself
-// rather than its JSON. null — some other tool, or arguments that do not parse.
-export function shellCommandOf(name: string, args: string): string | null {
-  if (name !== 'run_command' && !name.endsWith(':run_command')) return null;
+// rather than its JSON; a background one is marked `[background]`, so the block says the
+// command keeps running. A `shell_kill` shows the job it ends: its id and command, as
+// `jobCommand` knows them. null — some other tool, or arguments that do not parse.
+export function shellCommandOf(name: string, args: string, jobCommand?: (id: string) => string | undefined): string | null {
+  const bare = name.replace(/^.*:/, '');
+  if (bare !== 'run_command' && bare !== 'shell_kill') return null;
+  if (bare === 'shell_kill' && name !== 'shell_kill') return null;
   try {
-    const a = JSON.parse(args) as { command?: unknown; cwd?: unknown };
+    const a = JSON.parse(args) as { command?: unknown; cwd?: unknown; background?: unknown; id?: unknown };
+    if (bare === 'shell_kill') {
+      if (typeof a.id !== 'string') return null;
+      const command = jobCommand?.(a.id);
+      return command !== undefined ? `kill ${a.id}: ${command}` : `kill ${a.id}`;
+    }
     if (typeof a.command !== 'string') return null;
-    return typeof a.cwd === 'string' && a.cwd.trim() ? `${a.command}   # in ${a.cwd}` : a.command;
+    const line = typeof a.cwd === 'string' && a.cwd.trim() ? `${a.command}   # in ${a.cwd}` : a.command;
+    return a.background === true ? `[background] ${line}` : line;
   } catch {
     return null;
   }
@@ -120,7 +130,7 @@ export function askPerson(c: Conversation, journalId: string): ConfirmWrite {
       return;
     }
     const args = typeof argsStr === 'string' ? argsStr : JSON.stringify(argsStr ?? '');
-    const command = shellCommandOf(name, args);
+    const command = shellCommandOf(name, args, (id) => c.jobById(id)?.command);
     const line = configLineOf(name, args);
     // The tool whose earlier result the call takes as its input — the
     // block says where a command's stdin comes from.

@@ -371,6 +371,9 @@ export async function runTurn(c: Conversation, text: string, opts: SendOptions =
       toolCtx: {
         plan: c.plan,
         shell: c.shell,
+        // The background shells of this conversation: started, read and ended by the model's
+        // tools (src/loader/tools-shell.ts), and by no other conversation's.
+        jobs: c.jobPort(),
         // The key that stopped this turn, which a stopped command names.
         stopKey: () => c.stopKey,
         // The model's history as the chat keeps it — whole, never stubbed —

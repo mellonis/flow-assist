@@ -35,6 +35,18 @@ test('a run_command that is not the host\'s shell tool is never lifted, even hol
   expect(neverAutomatic('run_command', plugin)).toBe(true);
 });
 
+test('shell_kill is never automatic on its own: the auto mode answers it only with shell.autoRun and the host\'s own def', () => {
+  const on = { autoRun: true, hostShell: true };
+  const off = { autoRun: false, hostShell: true };
+  const plugin = { autoRun: true, hostShell: false };
+  expect(autoConfirms('all', 'shell_kill', off)).toBe(false);
+  expect(autoConfirms('all', 'shell_kill', plugin)).toBe(false);
+  expect(autoConfirms('all', 'x:shell_kill', on)).toBe(false);
+  expect(autoConfirms('all', 'shell_kill', on)).toBe(true);
+  for (const mode of ['ask', 'reads'] as const) expect(autoConfirms(mode, 'shell_kill', on)).toBe(false);
+  expect(neverAutomatic('shell_kill', off)).toBe(true);
+});
+
 test('the hint line says writes + commands only when both hold', () => {
   expect(autoBadge('all', true)).toBe('auto: writes + commands');
   expect(autoBadge('all', false)).toBe('auto: writes');
@@ -43,7 +55,7 @@ test('the hint line says writes + commands only when both hold', () => {
 });
 
 test('the change message names what still asks', () => {
-  expect(autoSaid('all', false)).toContain('run_command, an unlisted web_fetch and config_set still ask');
+  expect(autoSaid('all', false)).toContain('run_command, shell_kill, an unlisted web_fetch and config_set still ask');
   const both = autoSaid('all', true);
   expect(both).toStartWith('auto: writes + commands');
   expect(both).toContain('an unlisted web_fetch and config_set still ask');

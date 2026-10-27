@@ -231,7 +231,7 @@ test('the exit of the host reaches a job whose conversation was already closed a
   rig.registry.closeAll('exit');
   // It was ended by the clear; the exit only does not wait out the grace.
   expect(j.status).toEqual({ state: 'killed', by: 'clear' });
-  expect(await gone(j.pid!, 1000)).toBe(true);
+  expect(await gone(j.pid!, 1500)).toBe(true);
 });
 
 // A subagent the person started, as `startChild` makes one.

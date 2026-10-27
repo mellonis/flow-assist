@@ -20,6 +20,10 @@ import { redactSecrets } from './secrets.js';
 import { unseenAnswer, type Session, type SessionFingerprint } from './sessions.js';
 import { createShellState, tildePath, type ShellState } from './shell.js';
 import { MAX_ENDED_JOBS, type JobKilledBy, type JobSpec, type ShellJob } from './shell-job.js';
+import { jobEndText } from './job-text.js';
+
+// How many turns in a row the end of a shell may start by itself, without a message from the person.
+export const MAX_WAKES = 3;
 import { baseStatic, memoryBlock, planBlock, projectBlock, summaryBlock } from './system-prompt.js';
 import { createToolSet, toolLoadingMode, type ToolSet } from './tool-loading.js';
 import { pickVerb, verbList } from './verbs.js';
@@ -27,7 +31,7 @@ import type { ViewRecord } from './views.js';
 import type { ToolDef } from '../loader/tools.js';
 import { workspaceFor } from './workspace.js';
 import { asBackgroundWork, asConversationWork, asForegroundWork, outsideWork, workOwner } from '../runtime/background-work.js';
-import { callOf, childResultText, frameAnswer, frameItem, lastAnswerOf, type BusyKind, type AgentRef, type ChatMsg, type ChildQuestion, type ChildResult, type EndedChild, type RunningChild, type ChildSpec, type ChildStart, type CloseReason, type StoppedBy, type JournalRoute, type ConversationDeps, type ConversationEvent, type ConversationKind, type ConversationSnapshot, type ConversationStatus, type InboxItem, type LaterTurn, type Offered, type ParentAskInfo, type PendingConfirm, type Queued, type QueueWait, type SendOptions, type TurnEnd, type TreeNode, type ViewPort } from './conversation-types.js';
+import { callOf, childResultText, frameAnswer, frameItem, lastAnswerOf, type BusyKind, type AgentRef, type ChatMsg, type ChildQuestion, type ChildResult, type EndedChild, type RunningChild, type ChildSpec, type ChildStart, type CloseReason, type StoppedBy, type JournalRoute, type ConversationDeps, type ConversationEvent, type ConversationKind, type ConversationSnapshot, type ConversationStatus, type InboxItem, type JobPort, type LaterTurn, type Offered, type ParentAskInfo, type PendingConfirm, type Queued, type QueueWait, type SendOptions, type TurnEnd, type TreeNode, type ViewPort } from './conversation-types.js';
 import {
   applySession, closeOwnFile, currentProject, ensureSessionId, journal, journaledChatLLM, journalTo, journalToOwnFile, keepPersonWork, markSeen, newSubJournalId, persist, pushNote,
   releaseLockOf, writeSession, NO_FILE,
@@ -827,8 +831,12 @@ export class Conversation {
   // limit, or no host support). Its journal lines — `job-start`, `job-out` as it prints,
   // `job-end` — go where this conversation's own go; the end line is written before the
   // group dies at an exit. The job is returned running: the caller adds its own listeners
-  // (`onEnd` for the model's inbox, `onOutput` for a view).
-  startJob(spec: JobSpec): { job: ShellJob } | { refused: string } {
+  // (`onOutput` for a view). Its end goes to the inbox of the conversation that takes
+  // results (`deliverJobEnd`).
+  // `probe`: the model's `run_command` waits a moment to see whether the command ends by
+  // itself. Until `keepJob` the job writes no journal line, shows nowhere and tells no
+  // inbox; one that ended meanwhile leaves nothing behind (it was a foreground command).
+  startJob(spec: JobSpec, opts: { probe?: boolean } = {}): { job: ShellJob } | { refused: string } {
     const jobs = this.deps.jobs;
     if (!jobs) return { refused: 'background shells are not available here' };
     if (this.isClosed) return { refused: 'this conversation has ended' };
@@ -837,16 +845,17 @@ export class Conversation {
     const job = started.job;
     job.owner = this;
     this.jobs.set(job.id, job);
-    const journalId = this.journal({ t: 'job-start', id: job.id, command: spec.command, cwd: tildePath(spec.cwd), by: spec.by }, { person: spec.by === 'person' });
-    const out = outputJournal((ev) => this.journalTo(journalId, { ...ev, t: 'job-out', id: job.id }));
+    let wired = false;
+    let ended = false;
+    let journalId = '';
+    let out: ReturnType<typeof outputJournal> | null = null;
     // The end line is written once: when the job ends, or — for a kill this conversation
     // asks for (`killJobs`) — at once, so it precedes the closing line of a file the
     // conversation is about to close.
-    let ended = false;
     const writeEnd = (killedBy?: JobKilledBy): void => {
-      if (ended) return;
+      if (!wired || ended) return;
       ended = true;
-      out.end();
+      out!.end();
       const s = job.status;
       this.journalTo(journalId, {
         t: 'job-end', id: job.id, ms: job.ms,
@@ -855,22 +864,76 @@ export class Conversation {
       });
     };
     this.endWriters.set(job, writeEnd);
-    job.onOutput((chunk) => { if (!ended) out.push(chunk); });
+    const wire = (): void => {
+      if (wired) return;
+      wired = true;
+      journalId = this.journal({ t: 'job-start', id: job.id, command: spec.command, cwd: tildePath(spec.cwd), by: spec.by }, { person: spec.by === 'person' });
+      const sink = outputJournal((ev) => this.journalTo(journalId, { ...ev, t: 'job-out', id: job.id }));
+      out = sink;
+      const sofar = job.read(0).text;
+      if (sofar) sink.push(sofar);
+      job.onOutput((chunk) => { if (!ended) sink.push(chunk); });
+      this.childrenChanged();
+      this.treeChanged(this);
+    };
+    this.jobWires.set(job, wire);
     job.onEnd(() => {
       writeEnd();
-      (job.owner as Conversation).jobEnded(job);
+      (job.owner as Conversation).jobEnded(job, wired);
     });
-    this.childrenChanged();
-    this.treeChanged(this);
+    if (!opts.probe) wire();
     return { job };
   }
+  private readonly jobWires = new WeakMap<ShellJob, () => void>();
+  // The model's `run_command` found the job still running after the settle: from here it is
+  // a job like any other. false when it ended meanwhile.
+  keepJob(job: ShellJob): boolean {
+    if (!job.running || this.jobs.get(job.id) !== job) return false;
+    this.jobWires.get(job)?.();
+    return true;
+  }
+  // What a tool may do with the background shells of this conversation (`ctx.jobs`).
+  jobPort(): JobPort {
+    return {
+      start: (spec) => this.startJob(spec, { probe: true }),
+      keep: (job) => this.keepJob(job),
+      find: (id) => this.jobById(id),
+      running: () => [...this.jobs.values()],
+      ended: () => this.endedJobs,
+      kill: (job, by) => {
+        if (this.jobs.get(job.id) !== job || !job.kill(by)) return false;
+        this.endWriters.get(job)?.(by);
+        return true;
+      },
+    };
+  }
   // A job of this conversation ended: its record and buffer move to the ended ones, unless
-  // the conversation is closed (a /clear keeps nothing).
-  private jobEnded(job: ShellJob): void {
+  // the conversation is closed (a /clear keeps nothing) or the job was never kept (a
+  // command that ended within the settle is a foreground result, not a job).
+  private jobEnded(job: ShellJob, kept: boolean): void {
     this.jobs.delete(job.id);
+    if (!kept) return;
     if (!this.isClosed) this.endedJobs = [...this.endedJobs, job].slice(-MAX_ENDED_JOBS);
+    this.deliverJobEnd(job);
     this.childrenChanged();
     this.treeChanged(this);
+  }
+  // The end of a job goes to the inbox of the conversation that takes results, framed as
+  // data (`frameItem`): the exit code or the kill, how long, the last lines. A kill the
+  // person or the model asked for is quiet (a row, no turn), and the ends a closing
+  // conversation causes say nothing. Only a job the model started, ended on its own, may
+  // wake the model (`takeInbox`).
+  private deliverJobEnd(job: ShellJob): void {
+    const s = job.status;
+    const killedBy = s.state === 'killed' ? s.by : null;
+    if (killedBy === 'exit' || killedBy === 'clear' || killedBy === 'parent') return;
+    const to = resultRecipient<Conversation>(this);
+    if (!to) return;
+    const quiet = killedBy !== null && killedBy !== 'signal';
+    to.deliver({
+      kind: 'result', from: { key: job.id, label: job.id, what: 'shell' }, text: jobEndText(job), quiet,
+      wake: job.by === 'model' && to.kind === 'session', job: { id: job.id, command: job.command },
+    });
   }
   // The last twenty jobs that ended here, oldest first.
   get endedShellJobs(): readonly ShellJob[] { return this.endedJobs; }
@@ -1191,6 +1254,9 @@ export class Conversation {
   // task whose result it reads. A session's turn is never background work; a task's
   // stays under the mark `startChild` sends it with.
   send(text: string, opts?: SendOptions): Promise<boolean> {
+    // A message from the person ends a run of woken turns (`mayWake`); the inbox's own
+    // follow-up and the host's ask do not.
+    if (!opts?.fromInbox && !opts?.hostAsk) this.wakeRun = 0;
     const turn = () => asConversationWork(this, () => runTurn(this, text, opts));
     return this.kind === 'session' ? asForegroundWork(turn) : turn();
   }
@@ -1437,6 +1503,24 @@ export class Conversation {
   // queued message about to go out, which carries the inbox itself. A draft
   // in the field and a closed chat hold nothing.
   inboxHeld(): boolean { return this.busy || !!this.confirm || !!this.question || this.queue.length > 0; }
+  // The woken turns since the person last wrote: a background shell the model started
+  // ended while it was idle, and the end started a turn by itself.
+  private wakeRun = 0;
+  // May the end of a shell the model started start a turn of the model by itself? Only a
+  // session the chat shows (the host's one on screen; a left, headless one waits for the
+  // person — `takeInbox` starts no turn for it at all), idle and with no question drawn
+  // (`inboxHeld`, checked by the caller), and no more than MAX_WAKES times in a row without
+  // a message from the person.
+  private mayWake(): boolean {
+    if (this.kind !== 'session' || this.wakeRun >= MAX_WAKES) return false;
+    const shown = this.deps.current?.();
+    return !shown || shown === this;
+  }
+  // A line in the list and the journal that is neither the person's nor the model's.
+  private noteRow(text: string): void {
+    this.journal({ t: 'row', role: 'note', text });
+    this.setRows((cur) => [...cur, { role: 'note', content: text }]);
+  }
   // Takes the inbox when nothing holds it: the items land, and ONE follow-up turn
   // runs for all of them (`ai.backgroundFollowUp`, true unless set false; false
   // keeps the rows, read with the person's next message). `rows` lands what waits
@@ -1454,9 +1538,28 @@ export class Conversation {
     // next message there.
     // Quiet items go first, so the item the follow-up turn answers is never one of them;
     // with nothing but quiet items there is no turn.
-    const quiet = this.inbox.filter((i) => i.quiet);
-    if (quiet.length && quiet.length < this.inbox.length) this.inbox = [...quiet, ...this.inbox.filter((i) => !i.quiet)];
-    if (mode === 'rows' || !followUp || this.headless || quiet.length === this.inbox.length) { this.landInbox(); this.settleReadAsks(); return false; }
+    // An item that cannot start a turn lands as a row: a quiet one, and the end of a
+    // background shell that may not wake the model now (`mayWake`).
+    const may = this.mayWake();
+    const starts = (i: InboxItem): boolean => !i.quiet && (i.from.what !== 'shell' || (i.wake === true && may));
+    const idle = this.inbox.filter((i) => !starts(i));
+    if (idle.length && idle.length < this.inbox.length) this.inbox = [...idle, ...this.inbox.filter(starts)];
+    const shellEnds = this.inbox.filter((i) => i.from.what === 'shell' && i.wake === true && !i.quiet);
+    const turn = mode === 'turn' && followUp && !this.headless && idle.length < this.inbox.length;
+    // A turn driven by the ends of the model's own shells alone is a woken turn: it counts
+    // until the person writes, and the person is told. At the cap the end only lands, and
+    // the person is told that instead.
+    const woken = turn && this.inbox.filter(starts).every((i) => i.from.what === 'shell');
+    const capped = !turn && shellEnds.length > 0 && mode === 'turn' && followUp && !this.headless && this.kind === 'session' && this.wakeRun >= MAX_WAKES;
+    if (woken || capped) {
+      const names = shellEnds.map((i) => i.from.label).join(', ');
+      for (const i of shellEnds) this.emit({ type: 'shell-wake', job: i.job?.id ?? i.from.key, command: i.job?.command ?? '', woke: woken });
+      this.noteRow(woken
+        ? `${names} ended — waking the model`
+        : `${names} ended — the model has been woken ${MAX_WAKES} times in a row without a message from you, so it reads this with your next message`);
+    }
+    if (woken) this.wakeRun++;
+    if (!turn) { this.landInbox(); this.settleReadAsks(); return false; }
     const readResult = this.inbox.some((i) => i.kind === 'result' && !i.quiet);
     const last = this.landInbox(true).at(-1)!;
     const options: SendOptions = { fromInbox: true, framed: last.framed };

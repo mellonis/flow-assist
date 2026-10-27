@@ -383,6 +383,38 @@ test('after a drop, grep skips the fragment the buffer starts in', async () => {
   expect(r.lines).toEqual([]);
 });
 
+test('a cursor at the buffer\'s start, inside a line the ring buffer cut, still skips that fragment; with no newline in the buffer nothing is returned and the drop is told once', async () => {
+  const j = jobs({ jobChars: 20 }).job(`printf 'aaaaaaaaaaaaaaaaaaaaneedle one\nneedle two\n'`);
+  await j.wait(3000);
+  expect(j.read().text).toContain('one');
+  // The cursor is exactly where the buffer starts: no drop under it, and the first line is a fragment.
+  const at = j.grep('one', j.droppedChars);
+  expect(at.dropped).toBe(0);
+  expect(at.lines).toEqual([]);
+  const two = j.grep('needle', j.droppedChars);
+  expect(two.lines).toEqual(['needle two']);
+
+  const running = jobs({ jobChars: 20 }).job(`printf 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'; sleep 30`);
+  expect(await until(() => running.total >= 40)).toBe(true);
+  const first = running.grep('b');
+  expect(first.lines).toEqual([]);
+  expect(first.dropped).toBe(20);
+  expect(first.next).toBe(20);
+  const again = running.grep('b', first.next);
+  expect(again.lines).toEqual([]);
+  expect(again.dropped).toBe(0);
+  expect(again.next).toBe(20);
+  running.killNow('exit');
+});
+
+test('a ring buffer cut exactly at a line start loses no line to grep', async () => {
+  const j = jobs({ jobChars: 8 }).job(`printf 'xxxxxxxx\nneedle1\n'`);
+  await j.wait(3000);
+  const r = j.grep('needle');
+  expect(r.dropped).toBeGreaterThan(0);
+  expect(r.lines).toEqual(['needle1']);
+});
+
 test('a kill always ends the job: a process that left the group and holds the pipes does not keep it alive', async () => {
   const dir = tmp();
   const pidFile = path.join(dir, 'pid');

@@ -2204,7 +2204,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             return pendingChatRows({
               width: w,
               question: conv.question?.state ?? null,
-              confirm: c ? { name: c.name, args: c.args, command: shellCommandOf(c.name, c.args) ?? undefined, line: configLineOf(c.name, c.args) ?? undefined, ...(c.input ? { input: c.input } : {}) } : null,
+              confirm: c ? { name: c.name, args: c.args, command: shellCommandOf(c.name, c.args, (id) => conv.jobById(id)?.command) ?? undefined, line: configLineOf(c.name, c.args) ?? undefined, ...(c.input ? { input: c.input } : {}) } : null,
               todo: conv.plan.snapshot(),
               queued: conv.queue.length,
             });
