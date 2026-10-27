@@ -20,7 +20,8 @@ import { redactSecrets } from './secrets.js';
 import { unseenAnswer, type Session, type SessionFingerprint } from './sessions.js';
 import { createShellState, tildePath, type ShellState } from './shell.js';
 import { MAX_ENDED_JOBS, type JobKilledBy, type JobSpec, type ShellJob } from './shell-job.js';
-import { jobEndText } from './job-text.js';
+import { jobEndText, jobHow } from './job-text.js';
+import { formatDuration } from './duration.js';
 
 // How many turns in a row the end of a shell may start by itself, without a message from the person.
 export const MAX_WAKES = 3;
@@ -37,7 +38,7 @@ import {
   releaseLockOf, writeSession, NO_FILE,
 } from './conversation-session.js';
 import { agentsNowOf, askConfigChanges, compact, runTurn, skillsNowOf, turnShape } from './conversation-turn.js';
-import { runShell } from './conversation-shell.js';
+import { runBackgroundShell, runShell } from './conversation-shell.js';
 
 export { NO_FILE };
 // Live views, coalesced: the latest record per view waits at most
@@ -101,6 +102,10 @@ export class Conversation {
   // buffer kept; emptied by /clear.
   readonly jobs = new Map<string, ShellJob>();
   private endedJobs: ShellJob[] = [];
+  // The jobs that have shown in the tree (kept ones; a probe has not), and the ended ones the
+  // person has not opened yet, by id: their rows stay until the person looks.
+  private readonly shownJobSet = new WeakSet<ShellJob>();
+  private readonly unreadJobs = new Set<string>();
   // The last twenty children whose result came in here, as plain data; emptied by /clear.
   private ended: EndedChild[] = [];
   // A child's place in the host's schedule, set by `scheduleChild`: when its delay ends,
@@ -594,7 +599,7 @@ export class Conversation {
     // The questions asked of it get no answer; a clear or a stop of its parent stops the
     // children that asked, which says so itself, and an exit leaves them as a pending y/n is left.
     if (reason !== 'clear' && reason !== 'parent' && reason !== 'exit') this.settleAsksTo(this);
-    if (reason === 'clear') { this.ended = []; this.endedJobs = []; }
+    if (reason === 'clear') { this.ended = []; this.endedJobs = []; this.unreadJobs.clear(); }
     // The children it started are stopped and a pending y/n declined first, so their
     // closing lines precede this conversation's own closing `end`.
     if (reason === 'clear' || reason === 'parent') this.stopChildren(by);
@@ -679,10 +684,55 @@ export class Conversation {
         node.below = walk(child, depth + 1);
         count += 1 + node.below;
       }
+      for (const job of c.shellRows()) {
+        out.push(c.jobNode(job, depth));
+        count += 1;
+      }
       return count;
     };
     walk(this, 1);
     return out;
+  }
+  // The jobs this conversation draws in the tree, in the order they started: the ones that
+  // run (and have been kept), then the ended ones nobody has opened.
+  private shellRows(): ShellJob[] {
+    const out = [...this.jobs.values()].filter((j) => this.shownJobSet.has(j));
+    for (const j of this.endedJobs) if (this.unreadJobs.has(j.id)) out.push(j);
+    return out.sort((a, b) => a.startedAt - b.startedAt);
+  }
+  private jobNode(job: ShellJob, depth: number): TreeNode {
+    const running = job.running;
+    return {
+      key: `job:${job.id}`, label: job.id, kind: 'shell', depth, status: running ? 'working' : 'idle', latest: '',
+      startedAt: job.startedAt, until: null, below: 0, ...(running ? {} : { answered: true }),
+      shell: { id: job.id, command: job.command, state: job.statusText, running, ms: job.ms, lines: job.lines },
+    };
+  }
+  // The job a tree key names, with the conversation that holds it, else null.
+  jobByKey(key: string): { job: ShellJob; owner: Conversation } | null {
+    for (const j of this.shellRows()) if (`job:${j.id}` === key) return { job: j, owner: this };
+    for (const child of this.children) {
+      const found = child.jobByKey(key);
+      if (found) return found;
+    }
+    return null;
+  }
+  // The running, shown jobs of this conversation and of every one below it.
+  shownJobs(): ShellJob[] {
+    const out = [...this.jobs.values()].filter((j) => this.shownJobSet.has(j));
+    for (const child of this.children) out.push(...child.shownJobs());
+    return out;
+  }
+  // The person opened an ended job's output: its row leaves the tree.
+  readJob(job: ShellJob): void {
+    if (this.unreadJobs.delete(job.id)) this.treeChanged(this);
+  }
+  // The person ends a job of this conversation (the tree's `y`, the leave question).
+  killJob(job: ShellJob, by: JobKilledBy = 'person'): boolean {
+    if (this.jobs.get(job.id) !== job || !job.kill(by)) return false;
+    this.endWriters.get(job)?.(by);
+    this.treeChanged(this);
+    return true;
   }
   // The live descendant with this key, else null.
   nodeByKey(key: string): Conversation | null {
@@ -873,7 +923,8 @@ export class Conversation {
       out = sink;
       const sofar = job.read(0).text;
       if (sofar) sink.push(sofar);
-      job.onOutput((chunk) => { if (!ended) sink.push(chunk); });
+      job.onOutput((chunk) => { if (!ended) sink.push(chunk); this.treeChanged(this, true); });
+      this.shownJobSet.add(job);
       this.childrenChanged();
       this.treeChanged(this);
     };
@@ -914,11 +965,29 @@ export class Conversation {
   private jobEnded(job: ShellJob, kept: boolean): void {
     this.jobs.delete(job.id);
     if (!kept) return;
-    if (!this.isClosed) this.endedJobs = [...this.endedJobs, job].slice(-MAX_ENDED_JOBS);
+    const by = job.status.state === 'killed' ? job.status.by : null;
+    if (!this.isClosed) {
+      this.endedJobs = [...this.endedJobs, job].slice(-MAX_ENDED_JOBS);
+      // Its row stays until the person opens it — unless the person ended it themselves.
+      if (by !== 'person') this.unreadJobs.add(job.id);
+      for (const id of [...this.unreadJobs]) if (!this.endedJobs.some((j) => j.id === id)) this.unreadJobs.delete(id);
+    }
     this.deliverJobEnd(job);
+    this.tellJobEnd(job, by);
     this.childrenChanged();
     this.treeChanged(this);
   }
+  // The job ends are told to the person with a toast, whoever started the job and whichever
+  // conversation holds it (a left session's too): how it ended and after how long. The ones a
+  // closing conversation or the exit causes say nothing. A wake already told it, with the
+  // end, in the same toast (`takeInbox`).
+  private tellJobEnd(job: ShellJob, by: JobKilledBy | null): void {
+    if (by === 'exit' || by === 'clear' || by === 'parent') return;
+    if (this.toldWake.delete(job.id)) return;
+    try { this.deps.showMessage(`${job.id} ${jobHow(job)} after ${formatDuration(job.ms)}`); } catch { /* a toast is never fatal */ }
+  }
+  // The jobs whose wake toast has said their end already.
+  private readonly toldWake = new Set<string>();
   // The end of a job goes to the inbox of the conversation that takes results, framed as
   // data (`frameItem`): the exit code or the kill, how long, the last lines. A kill the
   // person or the model asked for is quiet (a row, no turn), and the ends a closing
@@ -929,8 +998,10 @@ export class Conversation {
     const killedBy = s.state === 'killed' ? s.by : null;
     if (killedBy === 'exit' || killedBy === 'clear' || killedBy === 'parent') return;
     // To the owner itself, never re-routed: the conversation that holds the job is the one
-    // that can read and end it. A subagent still running reads it at its next round; one
-    // that has ended had its jobs killed with it, so there is no end to deliver.
+    // that can read and end it. A subagent's model reads it only while its turn is still
+    // going (at its next round); a job end that lands after that turn is read by nobody
+    // there, and the person's toast tells (`tellJobEnd`). One that has ended had its jobs
+    // killed with it, so there is no end to deliver.
     const to = this;
     const quiet = killedBy !== null && killedBy !== 'signal';
     to.deliver({
@@ -1268,6 +1339,8 @@ export class Conversation {
   // The person's `!command`, or `!!command` with `interactive` (src/assistant/conversation-shell.ts);
   // the caller has refused a busy conversation and an empty command.
   runShell(cmd: string, interactive = false): Promise<void> { return runShell(this, cmd, interactive); }
+  // The person's `!command &`: `command` is the line without its trailing `&`.
+  runBackground(command: string, line: string): boolean { return runBackgroundShell(this, command, line); }
 
   // ── the y/n and the question
   // Resolves the y/n pause: ok=true confirms the writing op (tool runs),
@@ -1556,7 +1629,16 @@ export class Conversation {
     const capped = !turn && shellEnds.length > 0 && mode === 'turn' && followUp && !this.headless && this.kind === 'session' && this.wakeRun >= MAX_WAKES;
     if (woken || capped) {
       const names = shellEnds.map((i) => i.from.label).join(', ');
-      for (const i of shellEnds) this.emit({ type: 'shell-wake', job: i.job?.id ?? i.from.key, command: i.job?.command ?? '', woke: woken });
+      for (const i of shellEnds) {
+        this.emit({ type: 'shell-wake', job: i.job?.id ?? i.from.key, command: i.job?.command ?? '', woke: woken });
+        // The person is told: how it ended, and whether the model was woken by it.
+        const ended = this.jobById(i.job?.id ?? i.from.key);
+        const end = ended ? `${ended.id} ${jobHow(ended)} after ${formatDuration(ended.ms)}` : `${i.from.label} ended`;
+        try {
+          this.deps.showMessage(woken ? `${end} — waking the model` : `${end} — the model was not woken (woken ${MAX_WAKES} times in a row without a message from you)`);
+          this.toldWake.add(i.job?.id ?? i.from.key);
+        } catch { /* a toast is never fatal */ }
+      }
       const away = this.deps.current?.();
       const why = away && away !== this ? ` and this is not the session on screen` : '';
       this.noteRow(woken

@@ -29,7 +29,10 @@ import { exportMarkdown, readJournal, rowOf, type JournalEvent } from '../assist
 import { pickerKey, pickerReload, pickerStart, type PickerAction, type PickerState } from '../assistant/session-picker.js';
 import type { ChangeView } from '../assistant/diff.js';
 import { VIEW_CAPS, fence, type ViewRenderers } from '../assistant/views.js';
-import { renderConsole } from '../assistant/console-view.js';
+import { capConsoleData, renderConsole } from '../assistant/console-view.js';
+import { backgroundCommand } from '../assistant/background-bang.js';
+import { formatDuration } from '../assistant/duration.js';
+import type { ShellJob } from '../assistant/shell-job.js';
 import { editorReducer } from '@flowtty/core';
 import { z } from 'zod';
 import { appliesOnRestart, modelMaySave, modelMaySet } from '../config/schema.js';
@@ -136,6 +139,19 @@ type BuildAssistantParams = {
   config: Record<string, unknown>;
   make: Make;
 };
+
+// The pager of a background shell: the one block of the synthetic list its output stands in.
+const JOB_PAGER_ID = '0:view:0';
+// That list: one `!command`-like message with a console view of what the job has printed
+// (its tail, as a view keeps it), live while it runs.
+function jobMessages(job: ShellJob): ChatMsg[] {
+  const s = job.status;
+  const data = capConsoleData({
+    command: job.command, cwd: tildePath(job.cwd), text: job.read(0).text, showCwd: true,
+    ...(s.state === 'running' ? {} : { exitCode: s.state === 'exited' ? s.code : null, ms: job.ms, status: job.statusText }),
+  });
+  return [{ role: 'shell', content: '', command: job.command, views: [{ kind: 'console', data, phase: s.state === 'running' ? 'live' : 'done', startedAt: job.startedAt, callId: `job#${job.id}`, turn: 0 }] } as unknown as ChatMsg];
+}
 
 // The tree cursor's state (AGENTS.md (agent tree)).
 interface TreeSel { at: string | null; ask: boolean }
@@ -468,7 +484,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           const [pager, setPagerState] = ui.useState<string | null>(null);
           const pagerRef = ui.useRef<string | null>(null);
           const pagerShownRef = ui.useRef(false);
-          const setPager = (id: string | null) => { pagerRef.current = id; if (!id) pagerShownRef.current = false; setPagerState(id); if (!id) markSeenRef.current(); };
+          // The background shell whose output the pager shows, if it is the pager of one.
+          const jobPagerRef = ui.useRef<{ job: ShellJob; owner: Conversation } | null>(null);
+          const setPager = (id: string | null) => { pagerRef.current = id; if (!id) { pagerShownRef.current = false; jobPagerRef.current = null; } else if (id !== JOB_PAGER_ID) jobPagerRef.current = null; setPagerState(id); if (!id) markSeenRef.current(); };
           // Process indicator: spinner + the seconds of whatever is running NOW.
           // `conv.turnStartedAt` — when the turn started, which is what the finished answer's quiet
           // line says (`· 12.4s`). `conv.segmentStartedAt` — when the thing on the status line started:
@@ -837,6 +855,24 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // told last may come after the listeners are cleared. The subscription redraws the
           // chat on every change of the node (a child's own `notify` is silent).
           const setWatch = (next: Watching | null) => { watchRef.current = next; setWatching(next); };
+          // A background shell's row stopped: a shell is killed (TERM, then KILL), a node
+          // stopped with what it started.
+          const stopRow = (key: string) => {
+            const shell = convRef.current!.jobByKey(key);
+            if (shell) shell.owner.killJob(shell.job, 'person');
+            else convRef.current!.nodeByKey(key)?.stopSubtree('x');
+          };
+          // A background shell opened: its output as a console block in the pager, growing
+          // while the job prints (the render reads the job at every draw). Opening it reads it,
+          // and the row of an ended one leaves the tree.
+          const openJobView = (job: ShellJob, owner: Conversation) => {
+            if (watchRef.current) endWatch();
+            owner.readJob(job);
+            jobPagerRef.current = { job, owner };
+            setPager(JOB_PAGER_ID);
+            setTreeSel(NO_TREE_SEL);
+            host.notify();
+          };
           const startWatch = (node: Conversation) => {
             if (watchRef.current) endWatch();
             const state: Watching = { node, path: watchPath(node), ended: null, final: null, back: treeSelRef.current.at, ask: false, stopped: false };
@@ -1067,8 +1103,14 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // `!command` / `!!command`: refused while anything runs, and said how to use when empty
           // (the chat's own words); the conversation runs it (src/assistant/conversation-shell.ts).
           const runShellCommand = (cmd: string, interactive = false): void => {
-            if (conv.busy) { setError('an answer or a command is still running — wait, or stop it with Esc'); return; }
+            if (conv.busy && (interactive || backgroundCommand(cmd) === null)) { setError('an answer or a command is still running — wait, or stop it with Esc'); return; }
             if (!cmd) { setError(interactive ? '!! runs an interactive program with the terminal — e.g. !!git add -p' : '! runs a shell command — e.g. !git status'); return; }
+            // A trailing `&` starts a background shell: the field is free at once.
+            const background = interactive ? null : backgroundCommand(cmd);
+            if (background !== null) {
+              if (conv.runBackground(background, cmd)) { setField(''); setError(null); setBangLevel(0); }
+              return;
+            }
             void conv.runShell(cmd, interactive);
           };
 
@@ -1164,8 +1206,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
               host.notify();
               return true;
             }
-            const live = registryRef.current!.bySession(id);
-            return live ? reclaimLive(prev, live) : openFromFile(prev, id, title, dir);
+            return askLeave(prev, () => {
+              const live = registryRef.current!.bySession(id);
+              return live ? reclaimLive(prev, live) : openFromFile(prev, id, title, dir);
+            });
           };
           // A session left while it works or waits is still loaded here, holding its lock: the
           // chat takes that conversation back, with the draft it kept — never a second one
@@ -1342,6 +1386,32 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             const text = portRef.current!.draft();
             return text ? { text, at: cursorRef.current } : null;
           };
+          // Leaving a session (`/new`, a switch) that has background shells running asks once,
+          // listing them: stop them (TERM, then KILL) and leave as usual, or keep them running
+          // — the session then stays loaded and headless with its jobs, shown as working in the
+          // picker — and Esc stays where it is. Without any it just goes. `go` is the leave;
+          // the answer runs it. true while the question is up too: the switch is taken over by
+          // it (a picker closes), not refused.
+          const askLeave = (prev: Conversation, go: () => boolean): boolean => {
+            if (!prev.shownJobs().length) return go();
+            if (prev.confirm || prev.question) { setError('background shells are running — answer the question that waits first, then leave'); return false; }
+            const done = (stop: boolean) => {
+              if (stop) for (const j of prev.shownJobs()) (j.owner as Conversation).killJob(j, 'person');
+              setPanel(null);
+              go();
+              host.notify();
+            };
+            openPanel({
+              title: 'Background shells are running — stop them, or keep them running?',
+              follow: true,
+              rows: () => prev.shownJobs().map((j) => ({ id: j.id, text: `${j.id} · ${j.command.replace(/\s+/g, ' ').slice(0, 80)} running`, detail: formatDuration(j.ms) })),
+              keys: [
+                { key: 's', label: 'stop', run: () => { done(true); return undefined; } },
+                { key: 'k', label: 'keep running', run: () => { done(false); return undefined; } },
+              ],
+            });
+            return true;
+          };
           // The chat leaves `prev` for another: its view handlers go, and the registry parks it
           // — or, while it works or waits, keeps it loaded and headless until it is quiescent
           // (`retire`).
@@ -1416,13 +1486,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // `/new`: a fresh session, the one being left written and kept as it is — not
           // closed (what `/clear` does), so a restart with nothing said since continues
           // it. A turn or a `!command` still running goes on in the session left.
-          const startNew = (): boolean => {
+          const startNew = (): boolean => askLeave(convRef.current!, () => {
             const prev = convRef.current!;
             prev.save();
             renew(prev, 'new');
             (host.services as Record<string, any>).showMessage?.('New session — /sessions lists the others');
             return true;
-          };
+          });
 
           // A plugin's panel takes the conversation's place, as the picker does: the chat
           // opens and takes the keyboard for it, and a pending y/n or question is answered
@@ -1675,6 +1745,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 return;
               }
               case 'new':
+                // The question about background shells stands in the field's place.
+                if (conv.shownJobs().length) setField('');
                 startNew();
                 return;
               case 'context':
@@ -1724,12 +1796,13 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 let asking: string | null = null;
                 // The question about a node that has ended is dropped where it is read, so the
                 // hint and `x` come back.
-                const pending = (): string | null => { if (asking !== null && !asked.nodeByKey(asking)) asking = null; return asking; };
+                const pending = (): string | null => { if (asking !== null && !asked.nodeByKey(asking) && !asked.jobByKey(asking)?.job.running) asking = null; return asking; };
                 const stopKeys: PanelKeyDef[] = [{
                   key: 'x', label: 'stop',
                   run: (id) => {
                     if (id === null) return undefined;
                     if (id.startsWith('ended:')) return 'it has ended — nothing to stop';
+                    if (id.startsWith('job:') && !asked.jobByKey(id)?.job.running) return 'it has ended — nothing to stop';
                     asking = id;
                     return undefined;
                   },
@@ -1740,6 +1813,8 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   run: (id) => {
                     if (id === null) return undefined;
                     const node = id.startsWith('ended:') ? null : asked.nodeByKey(id);
+                    const shell = id.startsWith('job:') ? asked.jobByKey(id) : null;
+                    if (shell) { openJobView(shell.job, shell.owner); setPanel(null); return undefined; }
                     if (!node) return 'it has ended — nothing to watch';
                     startWatch(node);
                     setPanel(null);
@@ -1747,7 +1822,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                   },
                 };
                 const answerKeys: PanelKeyDef[] = [
-                  { key: 'y', label: 'yes', run: (id) => { const key = asking; asking = null; if (key !== null && key === id) asked.nodeByKey(key)?.stopSubtree('x'); host.notify(); return undefined; } },
+                  { key: 'y', label: 'yes', run: (id) => { const key = asking; asking = null; if (key !== null && key === id) { const shell = asked.jobByKey(key); if (shell) shell.owner.killJob(shell.job, 'person'); else asked.nodeByKey(key)?.stopSubtree('x'); } host.notify(); return undefined; } },
                   { key: 'n', label: 'no', run: () => { asking = null; return undefined; } },
                 ];
                 openPanel({
@@ -2214,8 +2289,9 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
           // plugin keeps it on screen, as it keeps the picker, and gets it back live. It is
           // drawn in the conversation's place inside the chat's own frame, laid out at the
           // conversation's width — the width it was measured against.
+          const pagerMessages = jobPagerRef.current ? jobMessages(jobPagerRef.current.job) : messages;
           const pagerRows = pager && !picker && open
-            ? blockRows(messages as Parameters<typeof blockRows>[0], { ...rowOpts(openInFull(folds, pager)), viewLines: VIEW_CAPS.lines }, pager)
+            ? blockRows(pagerMessages as Parameters<typeof blockRows>[0], { ...rowOpts(openInFull(folds, pager)), viewLines: VIEW_CAPS.lines }, pager)
             : [];
           const pagerShown = !!pager && pagerRows.length > 0;
           pagerShownRef.current = pagerShown;
@@ -2418,7 +2494,7 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 const i = stops.findIndex((r) => r.key === sel.at);
                 if (sel.ask) {
                   if (key.name === 'y' && !key.ctrl && !key.meta) {
-                    conv.nodeByKey(sel.at!)?.stopSubtree('x');
+                    stopRow(sel.at!);
                     setTreeSel({ at: sel.at, ask: false });
                     host.notify();
                   } else if (key.name === 'n' || key.name === 'escape') setTreeSel({ at: sel.at, ask: false });
@@ -2427,10 +2503,15 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
                 if (key.name === 'escape' || !stops.length) setTreeSel(NO_TREE_SEL);
                 else if (key.name === 'up') setTreeSel(i <= 0 ? NO_TREE_SEL : { at: stops[i - 1]!.key, ask: false });
                 else if (key.name === 'down') setTreeSel({ at: stops[Math.min(stops.length - 1, i + 1)]!.key, ask: false });
-                else if (key.name === 'x' && !key.ctrl && !key.meta && i >= 0) setTreeSel({ at: sel.at, ask: true });
+                else if (key.name === 'x' && !key.ctrl && !key.meta && i >= 0) {
+                  // An ended shell has nothing to kill; opening it reads it and its row goes.
+                  if (!conv.jobByKey(sel.at!) || conv.jobByKey(sel.at!)!.job.running) setTreeSel({ at: sel.at, ask: true });
+                }
                 else if (key.name === 'return' && !key.ctrl && !key.meta && i >= 0) {
                   const node = conv.nodeByKey(sel.at!);
+                  const shell = conv.jobByKey(sel.at!);
                   if (node) startWatch(node);
+                  else if (shell) openJobView(shell.job, shell.owner);
                 }
                 return true;
               }
@@ -2861,9 +2942,10 @@ export function buildAssistantPlugin({ renders, config, make }: BuildAssistantPa
             onViewFail,
             // Background tasks in flight — armed, queued or running — over every
             // conversation of the registry, so the count outlives `/clear` (the tool
-            // notifies when one is armed and when it ends), and the turns of sessions
-            // left running (`leftRunning`, redrawn by the registry when one ends).
-            bgCount: registryRef.current!.children.backgroundCount() + registryRef.current!.leftRunning(),
+            // notifies when one is armed and when it ends), the turns of sessions
+            // left running (`leftRunning`, redrawn by the registry when one ends) and
+            // the background shells that run (`shellCount`).
+            bgCount: registryRef.current!.children.backgroundCount() + registryRef.current!.leftRunning() + registryRef.current!.shellCount(),
             // The other sessions that wait for an answer or were put away unread: the
             // one on screen never counts itself.
             ...(() => { const o = registryRef.current!.attention(); return { waitingElsewhere: o.waiting, unreadElsewhere: o.done }; })(),

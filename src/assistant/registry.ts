@@ -395,6 +395,13 @@ export class ConversationRegistry {
     for (const c of this.convs) if (!c.closed && c.kind === 'session' && c.headless && c.busy) n++;
     return n;
   }
+  // The background shells running in any live session or below one: the footer's
+  // `N in background` counts them with the tasks.
+  shellCount(): number {
+    let n = 0;
+    for (const c of this.convs) if (!c.closed) n += c.shownJobs().length;
+    return n;
+  }
   // What the person is owed by the sessions they are not in: the live ones left on a y/n
   // or a question, and the ones put away unread; a left session that stays loaded for a
   // subagent counts as `done` while its own answer, or a later answer of a subagent the

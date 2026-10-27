@@ -12,6 +12,24 @@ import { keyGlyph } from '../playback/keys.js';
 import { callOf } from './conversation-types.js';
 import type { Conversation } from './conversation.js';
 
+// ── `!command &` — the person starts a background shell (./shell-job.ts) ──
+// The same command, directory and whole environment as `!command`; but the conversation is
+// not busy, nothing is waited for, and the field is free at once. The block the job leaves
+// is its tree row (AGENTS.md (agent tree)); a start the host refuses (the limit, with the
+// running jobs listed) is said as the `!` errors are. `line` is what was typed, `command`
+// what runs: the line is kept for ↑.
+export function runBackgroundShell(c: Conversation, command: string, line: string): boolean {
+  const started = c.startJob({ command, cwd: c.shell.cwd(), by: 'person' });
+  if ('refused' in started) {
+    c.emit({ type: 'notice', text: `!: ${started.refused}`, level: 'error' });
+    return false;
+  }
+  pushHistory(c.prompts, encodeBangLine(1, line));
+  c.deps.showMessage(`${started.job.id} started in the background · ${command.length > 60 ? `${command.slice(0, 60)}…` : command}`);
+  c.deps.notify();
+  return true;
+}
+
 // ── `!command` — the person runs a shell command (src/assistant/shell.ts) ──
 // The chat is busy exactly as while an answer is written — the same spinner,
 // and Esc stops it — but no model turn is spent: the result joins the model's

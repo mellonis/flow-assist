@@ -1,7 +1,7 @@
 // The agent tree as rows (AGENTS.md (agent tree)): which live descendants of a conversation
 // are drawn under its field, what a row says, where the cursor goes when the rows change,
 // and the question that guards a stop. Pure: the chat draws what these return.
-import { cutStep } from '../cells.js';
+import { cellWidth, cutStep } from '../cells.js';
 import type { PanelRow } from './command-panel.js';
 import type { EndedChild, TreeNode } from './conversation-types.js';
 import { formatDuration } from './duration.js';
@@ -27,6 +27,8 @@ function inTime(ms: number): string {
   return h ? `${h}h${min % 60 ? ` ${min % 60}m` : ''}` : `${min}m`;
 }
 
+// A background shell is drawn with a mark of its own; its status only ranks it.
+const SHELL_MARK = '○';
 const MARK: Record<TreeNode['status'], string> = { waiting: '⏸', asks: '?', working: '⚙', queued: '○', delayed: '○', idle: '◦' };
 const TONE: Record<TreeNode['status'], TreeRow['tone']> = { waiting: 'warn', asks: 'warn', working: 'work', queued: 'dim', delayed: 'dim', idle: 'dim' };
 // Who is kept when the rows run out: what waits for an answer first (a y/n or a question), then what works,
@@ -35,7 +37,26 @@ const ATTENTION: Record<TreeNode['status'], number> = { waiting: 0, asks: 0, wor
 const attentionOf = (n: TreeNode): number => (n.status === 'idle' && n.answered ? 2 : ATTENTION[n.status]);
 const toneOf = (n: TreeNode): TreeRow['tone'] => (n.status === 'idle' && n.answered ? 'warn' : TONE[n.status]);
 
+// A shell's time, to the minute and rounded down: `<1m`, `4m`, `1h 2m` — a row with a seconds
+// clock would redraw an idle chat.
+function spanOf(ms: number): string {
+  const min = Math.floor(Math.max(0, ms) / 60000);
+  if (min < 1) return '<1m';
+  const h = Math.floor(min / 60);
+  return h ? `${h}h${min % 60 ? ` ${min % 60}m` : ''}` : `${min}m`;
+}
+// What a background shell says of itself after its id and command: how it runs or ended, and
+// how many lines it has printed.
+function shellState(n: TreeNode): string {
+  const sh = n.shell!;
+  const how = sh.running ? `running ${spanOf(sh.ms)}` : sh.state.replace(/^killed \(.*\)$/, 'killed');
+  return how;
+}
+const linesText = (n: number): string => `${n} ${n === 1 ? 'line' : 'lines'}`;
+const oneLine = (s: string): string => s.replace(/\s+/g, ' ').trim();
+
 function stateOf(n: TreeNode, now: number): string {
+  if (n.shell) return shellState(n);
   if (n.status === 'waiting') return 'waiting for a y/n';
   if (n.status === 'asks') return 'asks its parent';
   if (n.status === 'working') return n.latest || 'working';
@@ -47,12 +68,21 @@ function stateOf(n: TreeNode, now: number): string {
 // What a node does, with its mark: the words of its tree row after the label. The watch's
 // hint row says the same (AGENTS.md (watching a child)).
 export function nodeState(n: TreeNode, now = Date.now()): string {
-  return `${MARK[n.status]} ${stateOf(n, now)}`;
+  return `${n.shell ? SHELL_MARK : MARK[n.status]} ${stateOf(n, now)}`;
 }
 
 // How a listing words the end of a child: an answer is `done`, the rest by their name.
 export function endedVerdict(outcome: string): string {
   return outcome === 'answer' ? 'done' : outcome;
+}
+
+// A shell's row: `○ sh-3 · bun run dev · running 4m · 312 lines`. The command gives way
+// first when the row is cut, so the state and the count stay on screen.
+function shellRowText(n: TreeNode, width: number): string {
+  const head = `${'  '.repeat(n.depth - 1)}${SHELL_MARK} ${n.label} · `;
+  const tail = ` · ${shellState(n)} · ${linesText(n.shell!.lines)}`;
+  const room = Math.max(8, width - cellWidth(head) - cellWidth(tail));
+  return cutStep(`${head}${cutStep(oneLine(n.shell!.command), room)}${tail}`, width);
 }
 
 // The rows for `nodes` (tree order), at most `max` of them, each one terminal line of
@@ -68,6 +98,7 @@ export function treeRows(nodes: readonly TreeNode[], max: number, width: number,
     kept = kept.sort((a, b) => attentionOf(a.n) - attentionOf(b.n) || a.i - b.i).slice(0, max - 1).sort((a, b) => a.i - b.i);
   }
   const rows = kept.map(({ n }): TreeRow => {
+    if (n.shell) return { key: n.key, text: shellRowText(n, width), tone: toneOf(n) };
     const task = n.kind === 'task' ? ' (task)' : '';
     const text = `${'  '.repeat(n.depth - 1)}${MARK[n.status]} ${n.label}${task} · ${stateOf(n, now)}`;
     return { key: n.key, text: cutStep(text, width), tone: toneOf(n) };
@@ -89,7 +120,8 @@ export function treeCursor(prevKey: string | null, prevIndex: number, rows: read
 }
 
 // The question that stands in place of the cursor's row before a stop; `y` stops the node and what it started.
-export function stopQuestion(node: Pick<TreeNode, 'label' | 'below'>): string {
+export function stopQuestion(node: Pick<TreeNode, 'label' | 'below'> & { kind?: TreeNode['kind'] }): string {
+  if (node.kind === 'shell') return `kill ${node.label}? y yes · n no`;
   return `stop ${node.label}${node.below ? ` and ${node.below} below it` : ''}? y yes · n no`;
 }
 
@@ -100,6 +132,14 @@ export function stopQuestion(node: Pick<TreeNode, 'label' | 'below'>): string {
 export function agentsPanelRows(nodes: readonly TreeNode[], ended: readonly EndedChild[], now = Date.now(), asking: string | null = null): PanelRow[] {
   const rows: PanelRow[] = nodes.map((n): PanelRow => {
     if (n.key === asking) return { id: n.key, text: stopQuestion(n), tone: 'warn' };
+    if (n.shell) {
+      return {
+        id: n.key,
+        text: `${'  '.repeat(n.depth - 1)}${SHELL_MARK} ${n.label} · ${oneLine(n.shell.command)}`,
+        detail: `${shellState(n)} · ${linesText(n.shell.lines)}`,
+        ...(toneOf(n) === 'warn' ? { tone: 'warn' as const } : {}),
+      };
+    }
     const task = n.kind === 'task' ? ' (task)' : '';
     const spent = n.startedAt !== null ? ` · ${formatDuration(Math.max(0, now - n.startedAt))}` : '';
     return {

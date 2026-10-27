@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { cellWidth } from '../../cells.js';
 import { agentRowsOf, agentsPanelRows, stopQuestion, treeCursor, treeRows } from '../agent-tree.js';
 import type { TreeNode } from '../conversation-types.js';
 
@@ -108,4 +109,59 @@ test('a node whose stop question is up shows the question in place of its text',
 
 test('no nodes, no ended ones: no rows', () => {
   expect(agentsPanelRows([], [])).toEqual([]);
+});
+
+const shell = (id: string, over: Partial<NonNullable<TreeNode['shell']>> = {}, node_: Partial<TreeNode> = {}): TreeNode => ({
+  key: `job:${id}`, label: id, kind: 'shell', depth: 1, status: 'working', latest: '', startedAt: 0, until: null, below: 0,
+  shell: { id, command: 'bun run dev', state: 'running', running: true, ms: 4 * 60_000 + 20_000, lines: 312, ...over }, ...node_,
+});
+
+test('a background shell row reads id, command, how it runs to the minute, and its line count', () => {
+  const { rows } = treeRows([
+    shell('sh-3'),
+    shell('sh-4', { ms: 20_000, lines: 1 }),
+    shell('sh-5', { state: 'exited 0', running: false, lines: 7 }, { status: 'idle', answered: true }),
+    shell('sh-6', { state: 'exited 2', running: false, lines: 0 }, { status: 'idle', answered: true }),
+    shell('sh-7', { state: 'killed (person)', running: false, lines: 2 }, { status: 'idle', answered: true, depth: 2 }),
+  ], 8, 100, 0);
+  expect(rows.map((r) => r.text)).toEqual([
+    '○ sh-3 · bun run dev · running 4m · 312 lines',
+    '○ sh-4 · bun run dev · running <1m · 1 line',
+    '○ sh-5 · bun run dev · exited 0 · 7 lines',
+    '○ sh-6 · bun run dev · exited 2 · 0 lines',
+    '  ○ sh-7 · bun run dev · killed · 2 lines',
+  ]);
+  expect(rows.map((r) => r.tone)).toEqual(['work', 'work', 'warn', 'warn', 'warn']);
+});
+
+test('a shell row that does not fit gives up the command, not its state and count', () => {
+  const { rows } = treeRows([shell('sh-3', {}, {}), { ...shell('sh-9'), shell: { ...shell('sh-9').shell!, command: 'cargo watch -x "test --workspace" --why --ignore-nothing' } }], 8, 44, 0);
+  for (const r of rows) {
+    expect(r.text.endsWith(' · running 4m · 312 lines')).toBe(true);
+    expect(cellWidth(r.text)).toBeLessThanOrEqual(44);
+  }
+  expect(rows[1]!.text).toContain('…');
+});
+
+test('with rows short a running shell ranks like a working child and an unread ended one like an answered idle subagent', () => {
+  const nodes = [
+    node('idle', { status: 'idle' }),
+    shell('sh-1', { state: 'exited 0', running: false }, { status: 'idle', answered: true }),
+    shell('sh-2'),
+    node('queued', { status: 'queued' }),
+    node('asks', { status: 'waiting' }),
+  ];
+  expect(treeRows(nodes, 4, 80, 0).rows.map((r) => r.key)).toEqual(['job:sh-1', 'job:sh-2', 'asks', '']);
+  expect(treeRows(nodes, 3, 80, 0).rows.map((r) => r.key)).toEqual(['job:sh-2', 'asks', '']);
+});
+
+test('killing a shell asks to kill it, and /agents lists it with its state in the detail', () => {
+  expect(stopQuestion(shell('sh-3'))).toBe('kill sh-3? y yes · n no');
+  expect(stopQuestion({ label: 'a', below: 2 })).toBe('stop a and 2 below it? y yes · n no');
+  const panel = agentsPanelRows([shell('sh-3'), shell('sh-5', { state: 'exited 0', running: false }, { status: 'idle', answered: true })], [], 0, 'job:sh-3');
+  expect(panel.map((r) => [r.id, r.text, r.detail, r.tone])).toEqual([
+    ['job:sh-3', 'kill sh-3? y yes · n no', undefined, 'warn'],
+    ['job:sh-5', '○ sh-5 · bun run dev', 'exited 0 · 312 lines', 'warn'],
+  ]);
+  expect(agentsPanelRows([shell('sh-3')], [], 0)[0]).toMatchObject({ text: '○ sh-3 · bun run dev', detail: 'running 4m · 312 lines' });
 });
