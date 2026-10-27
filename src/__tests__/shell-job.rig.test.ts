@@ -6,6 +6,7 @@ import { afterEach, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { hostStateDir } from '../config/load.ts';
 import type { Conversation } from '../assistant/conversation.ts';
 import { exportMarkdown } from '../assistant/journal.ts';
 import type { ShellJob } from '../assistant/shell-job.ts';
@@ -163,8 +164,8 @@ test('a program that ignores SIGTERM is killed two seconds after the close', asy
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fa-job-pid-'));
   dirs.push(dir);
   const pidFile = path.join(dir, 'pid');
-  const j = await start(c, `trap '' TERM; echo $$ > '${pidFile}'; sleep 30`);
-  await rig.until(() => fs.existsSync(pidFile) && fs.readFileSync(pidFile, 'utf8').trim() !== '');
+  const j = await start(c, `trap '' TERM; echo $$ > '${pidFile}'; echo ready; sleep 30`);
+  await rig.until(() => j.total > 0);
   c.close('clear');
   await new Promise((r) => setTimeout(r, 500));
   expect(groupAlive(j.pid!)).toBe(true);
@@ -174,7 +175,8 @@ test('a program that ignores SIGTERM is killed two seconds after the close', asy
 test('a job a closed conversation was still ending does not count against the limit, and /clear then a new start works at once', async () => {
   const rig = rigWith({ maxBackground: 1 });
   const c = rig.conv;
-  const j = await start(c, `trap '' TERM; sleep 30`);
+  const j = await start(c, `trap '' TERM; echo ready; sleep 30`);
+  await rig.until(() => j.total > 0);
   c.close('clear');
   expect(j.killing).toBe(true);
   const next = rig.fresh();
@@ -185,7 +187,8 @@ test('a job a closed conversation was still ending does not count against the li
 test('the conversation\'s close at exit kills its group at once, with no grace period', async () => {
   const rig = rigWith();
   const c = rig.conv;
-  const j = await start(c, `trap '' TERM; sleep 30`);
+  const j = await start(c, `trap '' TERM; echo ready; sleep 30`);
+  await rig.until(() => j.total > 0);
   c.close('exit');
   expect(j.running).toBe(false);
   expect(j.status).toEqual({ state: 'killed', by: 'exit' });
@@ -221,7 +224,8 @@ test('the exit of the host: the end line is written before the group dies, the s
 test('the exit of the host reaches a job whose conversation was already closed and whose group is still in its SIGTERM grace', async () => {
   const rig = rigWith();
   const c = rig.conv;
-  const j = await start(c, `trap '' TERM; sleep 30`);
+  const j = await start(c, `trap '' TERM; echo ready; sleep 30`);
+  await rig.until(() => j.total > 0);
   c.close('clear');
   expect(groupAlive(j.pid!)).toBe(true);
   rig.registry.closeAll('exit');
@@ -260,18 +264,46 @@ test('clearing the session kills a subagent\'s job too (by: clear)', async () =>
   expect(j.status).toEqual({ state: 'killed', by: 'clear' });
 });
 
-test('a subagent that ends on its own hands the jobs it left running up to its parent, which then owns them', async () => {
+test('a subagent that ends on its own kills the jobs it left running (by: parent); nothing is handed to its parent', async () => {
   const rig = rigWith();
   const sub = subagent(rig);
   const j = await start(sub, 'sleep 30', 'model');
   sub.close('park');
-  expect(j.running).toBe(true);
-  expect(sub.jobs.size).toBe(0);
-  expect(rig.conv.jobs.get(j.id)).toBe(j);
-  expect(rig.registry.quiescent(rig.conv)).toBe(false);
-  j.kill('person');
+  expect(j.killing).toBe(true);
+  expect(rig.conv.jobs.size).toBe(0);
+  expect(await gone(j.pid!)).toBe(true);
   await j.wait(3000);
-  expect(rig.conv.endedShellJobs).toEqual([j]);
+  expect(j.status).toEqual({ state: 'killed', by: 'parent' });
+});
+
+test('a subagent\'s job-end lands in its file before the file\'s closing end line, for a stop and for the exit', async () => {
+  const order = (rig: Rig) => rig.subJournal('sub').map((e) => e.t).filter((t) => t === 'job-end' || t === 'end');
+  const stopRig = rigWith();
+  const sub = subagent(stopRig);
+  await start(sub, 'sleep 30', 'model');
+  sub.stopSubtree('x');
+  await stopRig.until(() => order(stopRig).includes('job-end'));
+  expect(order(stopRig)).toEqual(['job-end', 'end']);
+  closeRigs();
+
+  const exitRig = rigWith();
+  const sub2 = subagent(exitRig);
+  await start(sub2, 'sleep 30', 'model');
+  exitRig.registry.closeAll('exit');
+  expect(order(exitRig)).toEqual(['job-end', 'end']);
+});
+
+test('at exit the jobs are ended before any session lock is released', async () => {
+  const rig = rigWith();
+  const a = rig.conv;
+  a.ensureSessionId();
+  const j = await start(a, 'sleep 30');
+  const seen: string[] = [];
+  j.onEnd(() => seen.push('job end'));
+  const release = a.releaseLock.bind(a);
+  a.releaseLock = () => { seen.push('release'); release(); };
+  rig.registry.closeAll('exit');
+  expect(seen).toEqual(['job end', 'release']);
 });
 
 test('without a host that keeps jobs, a start is refused rather than thrown', () => {
@@ -279,4 +311,10 @@ test('without a host that keeps jobs, a start is refused rather than thrown', ()
   const c = rig.conv;
   const bare = Object.create(c, { deps: { value: { ...c.deps, jobs: undefined } } }) as Conversation;
   expect(bare.startJob({ command: 'true', cwd: '/', by: 'model' })).toEqual({ refused: 'background shells are not available here' });
+});
+
+test('a rig lists no job in the shared state directory', async () => {
+  const rig = rigWith();
+  await start(rig.conv, 'sleep 30');
+  expect(fs.existsSync(path.join(hostStateDir(), 'shell-jobs.json'))).toBe(false);
 });

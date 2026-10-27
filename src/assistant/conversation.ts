@@ -596,11 +596,11 @@ export class Conversation {
     if (reason === 'clear' || reason === 'parent') this.stopChildren(by);
     else if (reason === 'park' && this.parent) this.handChildrenUp();
     // Its background shells end with it: SIGTERM then SIGKILL for a clear or a stop, SIGKILL
-    // at once for an exit (nothing waits for a grace period there); a subagent that ends
-    // on its own hands the ones still running up, as it hands up its tasks.
+    // at once for an exit (nothing waits for a grace period there). A subagent that ends on
+    // its own kills the ones still running too (`parent`): a job outlives no conversation.
     if (reason === 'clear' || reason === 'parent') this.killJobs(by);
     else if (reason === 'exit') for (const j of [...this.jobs.values()]) j.killNow('exit');
-    else if (reason === 'park' && this.parent) this.handJobsUp();
+    else if (reason === 'park' && this.parent) this.killJobs('parent');
     if (reason === 'clear' || reason === 'parent' || (reason === 'exit' && this.parent)) {
       this.abort?.abort();
       this.abort = null;
@@ -839,16 +839,26 @@ export class Conversation {
     this.jobs.set(job.id, job);
     const journalId = this.journal({ t: 'job-start', id: job.id, command: spec.command, cwd: tildePath(spec.cwd), by: spec.by }, { person: spec.by === 'person' });
     const out = outputJournal((ev) => this.journalTo(journalId, { ...ev, t: 'job-out', id: job.id }));
-    job.onOutput((chunk) => out.push(chunk));
-    job.onEnd((j) => {
+    // The end line is written once: when the job ends, or — for a kill this conversation
+    // asks for (`killJobs`) — at once, so it precedes the closing line of a file the
+    // conversation is about to close.
+    let ended = false;
+    const writeEnd = (killedBy?: JobKilledBy): void => {
+      if (ended) return;
+      ended = true;
       out.end();
-      const s = j.status;
+      const s = job.status;
       this.journalTo(journalId, {
-        t: 'job-end', id: j.id, ms: j.ms,
-        ...(s.state === 'killed' ? { killed: true, by: s.by } : { code: s.state === 'exited' ? s.code : null, by: 'self' }),
-        ...(j.error ? { error: j.error } : {}),
+        t: 'job-end', id: job.id, ms: job.ms,
+        ...(killedBy ? { killed: true, by: killedBy } : s.state === 'killed' ? { killed: true, by: s.by } : { code: s.state === 'exited' ? s.code : null, by: 'self' }),
+        ...(job.error ? { error: job.error } : {}),
       });
-      (j.owner as Conversation).jobEnded(j);
+    };
+    this.endWriters.set(job, writeEnd);
+    job.onOutput((chunk) => { if (!ended) out.push(chunk); });
+    job.onEnd(() => {
+      writeEnd();
+      (job.owner as Conversation).jobEnded(job);
     });
     this.childrenChanged();
     this.treeChanged(this);
@@ -871,18 +881,12 @@ export class Conversation {
   // Ends every running job: SIGTERM, SIGKILL two seconds later. Each one's end comes when
   // its pipes close.
   killJobs(by: JobKilledBy): void {
-    for (const j of [...this.jobs.values()]) j.kill(by);
+    for (const j of [...this.jobs.values()]) {
+      if (j.kill(by)) this.endWriters.get(j)?.(by);
+    }
   }
-  // A subagent that ends hands the jobs still running to its parent.
-  private handJobsUp(): void {
-    const up = this.parent;
-    if (!up || !this.jobs.size) return;
-    for (const j of this.jobs.values()) { j.owner = up; up.jobs.set(j.id, j); }
-    this.jobs.clear();
-    up.childrenChanged();
-    up.treeChanged(up);
-  }
-
+  // Writes a job's end line ahead of its end (a kill asked for); set by `startJob`.
+  private readonly endWriters = new WeakMap<ShellJob, (killedBy?: JobKilledBy) => void>();
   // A task that ends hands the children still live to its parent: their results go to the
   // nearest session or subagent above, and the parent counts them, so it knows they still run.
   private handChildrenUp(): void {

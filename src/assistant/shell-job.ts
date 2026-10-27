@@ -34,6 +34,8 @@ export const JOB_DEFAULTS = { maxBackground: 4, jobChars: 64_000 };
 export const JOB_KILL_GRACE_MS = 2000;
 // How many ended jobs a conversation keeps (record and buffer).
 export const MAX_ENDED_JOBS = 20;
+// The most matching lines one `grep` returns.
+export const GREP_LINES = 100;
 
 // `shell.maxBackground` / `shell.jobChars`, a bad value falling back to the default. Read
 // when a job starts: a lowered limit does not end the jobs that run.
@@ -45,9 +47,10 @@ export function jobLimits(config: { shell?: unknown } | undefined): { maxBackgro
 
 // Who started the job, and who ended it. A job that ends by itself is `exited`; one that
 // was ended from outside is `killed` — by the person, by the model's tool, with its
-// conversation (`clear`), with the process (`exit`), or by a signal nobody here sent.
+// conversation (`clear`), with the subagent that owned it (`parent`), with the process
+// (`exit`), or by a signal nobody here sent.
 export type JobStarter = 'model' | 'person';
-export type JobKilledBy = 'person' | 'model' | 'clear' | 'exit' | 'signal';
+export type JobKilledBy = 'person' | 'model' | 'clear' | 'exit' | 'parent' | 'signal';
 export type JobStatus =
   | { state: 'running' }
   | { state: 'exited'; code: number | null }
@@ -88,6 +91,7 @@ export class ShellJob {
   private lastChar = '';
   private killedBy: JobKilledBy | null = null;
   private killTimer: ReturnType<typeof setTimeout> | null = null;
+  private reapTimer: ReturnType<typeof setTimeout> | null = null;
   private exitCode: number | null = null;
   private exitSignal: string | null = null;
   private readonly child: ChildProcess;
@@ -95,7 +99,7 @@ export class ShellJob {
   private readonly ends = new Set<(job: ShellJob) => void>();
   private readonly secrets = [secretStream(), secretStream()];
 
-  constructor(readonly id: string, spec: JobSpec, private readonly chars: number) {
+  constructor(readonly id: string, spec: JobSpec, private readonly chars: number, private readonly graceMs = JOB_KILL_GRACE_MS) {
     this.command = spec.command;
     this.cwd = spec.cwd;
     this.by = spec.by;
@@ -150,17 +154,39 @@ export class ShellJob {
   }
   // The last `n` lines the buffer holds.
   tail(n: number): JobRead {
+    if (!(n >= 1) || !this.buf) return { text: '', from: this.total, next: this.total, dropped: 0 };
     const lines = this.buf.replace(/\n$/, '').split('\n');
-    const take = lines.slice(-Math.max(0, n));
-    const text = take.length && this.buf ? take.join('\n') + (this.buf.endsWith('\n') ? '\n' : '') : '';
+    const take = lines.slice(-Math.floor(n));
+    const text = take.join('\n') + (this.buf.endsWith('\n') ? '\n' : '');
     return { text, from: this.total - text.length, next: this.total, dropped: 0 };
   }
   // The lines after the cursor that contain `literal` (not a pattern; case-sensitive),
-  // in order, and the cursor to read from next. An empty literal matches nothing.
-  grep(literal: string, since = 0): { lines: string[]; next: number; dropped: number } {
+  // in order, at most GREP_LINES of them, and the cursor to read from next. `more` counts
+  // the matching lines past the cap. The cursor stops after the last complete line, so a
+  // line still being written is read whole next time (an ended job's last line counts as
+  // complete); after a drop the fragment the buffer starts in is skipped. An empty
+  // literal matches nothing.
+  grep(literal: string, since = 0): { lines: string[]; next: number; dropped: number; more: number } {
     const r = this.read(since);
-    const lines = literal ? r.text.split('\n').filter((l) => l.includes(literal)) : [];
-    return { lines, next: r.next, dropped: r.dropped };
+    let text = r.text;
+    let start = r.from;
+    if (r.dropped > 0) {
+      const nl = text.indexOf('\n');
+      if (nl < 0) return { lines: [], next: r.from + (this.running ? 0 : text.length), dropped: r.dropped, more: 0 };
+      start += nl + 1;
+      text = text.slice(nl + 1);
+    }
+    const complete = this.running ? text.slice(0, text.lastIndexOf('\n') + 1) : text;
+    if (!literal) return { lines: [], next: start + complete.length, dropped: r.dropped, more: 0 };
+    const lines: string[] = [];
+    let more = 0;
+    let used = 0;
+    let next = start + complete.length;
+    for (const line of complete.split('\n')) {
+      if (lines.length < GREP_LINES) { used += line.length + 1; if (line.includes(literal)) lines.push(line); if (lines.length === GREP_LINES) next = Math.min(next, start + used); }
+      else if (line.includes(literal)) more++;
+    }
+    return { lines, next, dropped: r.dropped, more };
   }
 
   // Waits until the job has ended or `ms` has passed, or the signal aborts: true when it
@@ -195,9 +221,27 @@ export class ShellJob {
     if (!this.running || this.killedBy) return false;
     this.killedBy = by;
     this.signalGroup('SIGTERM');
-    this.killTimer = setTimeout(() => this.signalGroup('SIGKILL'), JOB_KILL_GRACE_MS);
+    this.killTimer = setTimeout(() => { this.killTimer = null; this.signalGroup('SIGKILL'); this.reapAfterKill(); }, this.graceMs);
     this.killTimer.unref?.();
     return true;
+  }
+  // After SIGKILL the job ends when its pipes close — but a process that left the group
+  // (a daemon that called setsid) can hold them for good. Once the shell is reaped, the
+  // pipes are closed from here and the job ends as killed: a kill always ends the job.
+  private reapAfterKill(): void {
+    if (!this.running) return;
+    if (this.child.exitCode === null && this.child.signalCode === null) {
+      this.reapTimer = setTimeout(() => this.reapAfterKill(), 100);
+      this.reapTimer.unref?.();
+      return;
+    }
+    this.reapTimer = setTimeout(() => {
+      this.reapTimer = null;
+      this.child.stdout?.destroy();
+      this.child.stderr?.destroy();
+      this.finish({ state: 'killed', by: this.killedBy ?? 'signal' });
+    }, 200);
+    this.reapTimer.unref?.();
   }
   // For a host that is exiting: the job's end is announced first, then the group gets
   // SIGKILL — all synchronous.
@@ -229,12 +273,15 @@ export class ShellJob {
     this.state = status;
     this.endedAt = Date.now();
     if (this.killTimer) { clearTimeout(this.killTimer); this.killTimer = null; }
+    if (this.reapTimer) { clearTimeout(this.reapTimer); this.reapTimer = null; }
+    this.outputs.clear();
     const ends = [...this.ends];
     this.ends.clear();
     for (const fn of ends) { try { fn(this); } catch { /* a listener never breaks the job */ } }
     // After the listeners have heard it: a group the kill left stragglers in does not
     // outlive the job's end (with no group left this reaches nothing), and at an exit
-    // this is the SIGKILL itself.
+    // this is the SIGKILL itself. The group id is not checked for liveness: a pid reused as a
+    // new group leader inside this window (milliseconds, and only after the ids wrap) would be hit.
     if (this.killedBy) this.signalGroup('SIGKILL');
   }
 }

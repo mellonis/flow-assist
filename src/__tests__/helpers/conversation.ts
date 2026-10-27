@@ -52,6 +52,8 @@ export type Rig = ReturnType<typeof conversationRig>;
 // LLM_TOKEN the first of them found.
 const made: Conversation[] = [];
 const registries: ConversationRegistry[] = [];
+// The temporary directories the rigs made, removed with them.
+const rigDirs: string[] = [];
 let tokenBefore: { value: string | undefined } | null = null;
 
 // Cancels every background task still waiting on its delay, closes every conversation a
@@ -60,6 +62,7 @@ let tokenBefore: { value: string | undefined } | null = null;
 export function closeRigs(): void {
   for (const r of registries.splice(0)) r.children.cancelArmed();
   for (const c of made.splice(0)) c.close('exit');
+  for (const d of rigDirs.splice(0)) fs.rmSync(d, { recursive: true, force: true });
   if (!tokenBefore) return;
   if (tokenBefore.value === undefined) delete process.env.LLM_TOKEN; else process.env.LLM_TOKEN = tokenBefore.value;
   tokenBefore = null;
@@ -71,7 +74,7 @@ export function conversationRig(model: ScriptedModel, opts: RigOptions = {}) {
   model.install();
   // By their real paths: the shell compares roots by it, and the temporary directory may
   // be a symbolic link (macOS).
-  const tmp = (prefix: string) => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
+  const tmp = (prefix: string) => { const d = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix))); rigDirs.push(d); return d; };
   const root = tmp('fa-rig-root-');
   const sessionsDir = opts.sessions === false ? null : tmp('fa-rig-sessions-');
   const config: Record<string, unknown> = {
@@ -101,6 +104,8 @@ export function conversationRig(model: ScriptedModel, opts: RigOptions = {}) {
     notify: () => {},
     sessionsDir: () => sessionsDir,
     canAsk: opts.canAsk ?? true,
+    // The running jobs are not listed in the host's shared state directory from a test.
+    jobsFile: null,
   });
   registries.push(registry);
   const deps = registry.deps();

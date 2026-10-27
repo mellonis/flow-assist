@@ -434,3 +434,20 @@ test('/export says a background shell never ended when the journal has no end fo
   expect(md).toContain('hi');
   expect(md).toContain('*did not finish — the journal has no end for this job*');
 });
+
+test('/export: a job id opened again (a session resumed after a crash counts from sh-1 again) leaves the first one drawn as unfinished', () => {
+  const md = exportMarkdown([
+    { t: 'job-start', id: 'sh-1', command: 'first server', cwd: '~', by: 'model' },
+    { t: 'job-out', id: 'sh-1', text: 'one\n' },
+    { t: 'job-start', id: 'sh-1', command: 'second server', cwd: '~', by: 'model' },
+    { t: 'job-out', id: 'sh-1', text: 'two\n' },
+    { t: 'job-end', id: 'sh-1', ms: 1000, code: 0, by: 'self' },
+  ], { title: 't', id: 's' });
+  const first = md.slice(md.indexOf('first server'), md.indexOf('second server'));
+  expect(first).toContain('one');
+  expect(first).toContain('did not finish');
+  const second = md.slice(md.indexOf('second server'));
+  expect(second).toContain('two');
+  expect(second).toContain('*exit 0');
+  expect(second).not.toContain('did not finish');
+});

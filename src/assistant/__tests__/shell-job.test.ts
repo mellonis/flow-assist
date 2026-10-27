@@ -2,11 +2,11 @@
 // reaches what the command started, and only a real pipe that a program left running
 // keeps a job alive after its shell has gone.
 import { afterEach, expect, test } from 'bun:test';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { JOB_DEFAULTS, ShellJobs, jobLimits, type ShellJob } from '../shell-job.ts';
+import { GREP_LINES, JOB_DEFAULTS, ShellJob, ShellJobs, jobLimits } from '../shell-job.ts';
 
 const dirs: string[] = [];
 const jobsMade: ShellJob[] = [];
@@ -331,4 +331,118 @@ test('no state file configured: nothing is written and nothing is read', () => {
   const { set, job } = jobs({}, null);
   job('true');
   expect(set.scanLeftovers()).toEqual([]);
+});
+
+// A job made directly, with a short grace period before SIGKILL.
+function direct(command: string, graceMs = 100, chars = 1000): ShellJob {
+  const j = new ShellJob('sh-x', { command, cwd: tmp(), by: 'model' }, chars, graceMs);
+  jobsMade.push(j);
+  return j;
+}
+
+test('tail(0) and a negative count give nothing; an empty buffer gives nothing', async () => {
+  const j = jobs().job(`printf 'a\\nb\\nc\\n'`);
+  await j.wait(3000);
+  expect(j.tail(0).text).toBe('');
+  expect(j.tail(-3).text).toBe('');
+  expect(j.tail(1).text).toBe('c\n');
+  const empty = jobs().job('true');
+  await empty.wait(3000);
+  expect(empty.tail(5).text).toBe('');
+});
+
+test('grep returns at most GREP_LINES matches and says how many more; its cursor continues after the last one returned', async () => {
+  const j = jobs().job(`i=0; while [ $i -lt 130 ]; do echo "hit $i"; i=$((i+1)); done; echo miss`);
+  await j.wait(3000);
+  const first = j.grep('hit');
+  expect(first.lines).toHaveLength(GREP_LINES);
+  expect(first.lines[0]).toBe('hit 0');
+  expect(first.more).toBe(30);
+  const rest = j.grep('hit', first.next);
+  expect(rest.lines[0]).toBe('hit 100');
+  expect(rest.lines).toHaveLength(30);
+  expect(rest.more).toBe(0);
+});
+
+test('grep\'s cursor never consumes a line still being written, so a match split across two reads is found', async () => {
+  const j = jobs().job(`printf 'abc ne'; sleep 0.4; printf 'edle\\nx\\n'`);
+  await until(() => j.total > 0);
+  const early = j.grep('needle');
+  expect(early.lines).toEqual([]);
+  expect(early.next).toBe(0);
+  await j.wait(3000);
+  expect(j.grep('needle', early.next).lines).toEqual(['abc needle']);
+});
+
+test('after a drop, grep skips the fragment the buffer starts in', async () => {
+  const j = jobs({ jobChars: 20 }).job(`printf 'aaaaaaaaaaaaaaaaaaaaneedle one\\nneedle two\\n'`);
+  await j.wait(3000);
+  const r = j.grep('one');
+  expect(r.dropped).toBeGreaterThan(0);
+  expect(j.read().text).toContain('one');
+  expect(r.lines).toEqual([]);
+});
+
+test('a kill always ends the job: a process that left the group and holds the pipes does not keep it alive', async () => {
+  const dir = tmp();
+  const pidFile = path.join(dir, 'pid');
+  const j = direct(`perl -MPOSIX -e 'POSIX::setsid(); sleep 30' & echo $! > '${pidFile}'; echo ready; sleep 30`);
+  await until(() => readPid(pidFile) !== null && j.total > 0);
+  const daemon = readPid(pidFile)!;
+  // Held back until it has left the group (its group id is its own).
+  const pgidOf = () => Number(execFileSync('ps', ['-o', 'pgid=', '-p', String(daemon)], { encoding: 'utf8' }).trim());
+  expect(await until(() => { try { return pgidOf() === daemon; } catch { return false; } })).toBe(true);
+  try {
+    j.kill('person');
+    expect(await j.wait(3000)).toBe(true);
+    expect(j.status).toEqual({ state: 'killed', by: 'person' });
+  } finally {
+    try { process.kill(daemon, 'SIGKILL'); } catch { /* gone */ }
+  }
+});
+
+test('the SIGKILL timer is cleared when the job ends first: no signal reaches the group later', async () => {
+  const j = direct('sleep 30', 150);
+  await until(() => groupAlive(j.pid!));
+  j.kill('person');
+  await j.wait(3000);
+  const calls: string[] = [];
+  const real = process.kill;
+  process.kill = ((pid: number, sig?: string | number) => { calls.push(`${pid}:${String(sig)}`); return real.call(process, pid, sig as never); }) as typeof process.kill;
+  try { await new Promise((r) => setTimeout(r, 400)); } finally { process.kill = real; }
+  expect(calls).toEqual([]);
+});
+
+// `process.kill` made to fail for a group, as it does just after a spawn: the calls to a
+// single pid are recorded and let through.
+function withoutGroup<T>(run: (single: string[]) => T): T {
+  const single: string[] = [];
+  const real = process.kill;
+  process.kill = ((pid: number, sig?: string | number) => {
+    if (pid < 0) throw Object.assign(new Error('ESRCH'), { code: 'ESRCH' });
+    single.push(`${pid}:${String(sig)}`);
+    return real.call(process, pid, sig as never);
+  }) as typeof process.kill;
+  try { return run(single); } finally { process.kill = real; }
+}
+
+test('when the group is not there yet, the unreaped shell itself is signalled', async () => {
+  const j = direct('sleep 30');
+  const single = withoutGroup((calls) => { j.kill('person'); return calls; });
+  expect(single).toEqual([`${j.pid}:SIGTERM`]);
+  expect(await j.wait(3000)).toBe(true);
+});
+
+test('once the shell is reaped, its pid is not signalled: it may belong to someone else by now', async () => {
+  const j = direct('true');
+  await j.wait(3000);
+  const single = withoutGroup((calls) => { (j as unknown as { signalGroup(s: string): void }).signalGroup('SIGKILL'); return calls; });
+  expect(single).toEqual([]);
+});
+
+test('an ended job holds no output listeners', async () => {
+  const j = jobs().job('echo hi');
+  j.onOutput(() => {});
+  await j.wait(3000);
+  expect((j as unknown as { outputs: Set<unknown> }).outputs.size).toBe(0);
 });

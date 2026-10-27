@@ -432,7 +432,13 @@ function eventLines(events: JournalEvent[], child: ((id: string) => JournalEvent
         flushOutput();
         out.push(`*${nd(String(ev.status ?? 'ended'))}${typeof ev.ms === 'number' ? ` · ${formatDuration(ev.ms)}` : ''}*`, '');
         break;
-      case 'job-start': jobs.set(String(ev.id ?? ''), { slot: out.length, start: ev, text: '', note: '' }); out.push('', ''); break;
+      case 'job-start': {
+        // An id still open (a session resumed after a crash counts from sh-1 again): the earlier
+        // job never ended in this journal.
+        const open = jobs.get(String(ev.id ?? ''));
+        if (open) out[open.slot] = jobBlock(open, null);
+        jobs.set(String(ev.id ?? ''), { slot: out.length, start: ev, text: '', note: '' }); out.push('', ''); break;
+      }
       case 'job-out': {
         const j = jobs.get(String(ev.id ?? ''));
         if (!j) break;

@@ -456,6 +456,11 @@ export class ConversationRegistry {
   // closed conversation has no listeners, and `park` skips a closed one): its lock is
   // gone by then, and another process may already hold the session.
   closeAll(reason: Extract<CloseReason, 'exit'>): void {
+    // First of all: every background shell's end line is written and its group sent SIGKILL
+    // before any lock is released or any child's closing line is written, so a job's end
+    // precedes the closing line of the subagent that owned it, and no other process can take
+    // a session while one of its jobs still writes into the journal.
+    this.jobs.killAll(reason);
     this.flushAll();
     const deepestFirst: Conversation[] = [];
     const walk = (c: Conversation): void => {
@@ -482,9 +487,6 @@ export class ConversationRegistry {
     // written; before `close`, which clears the handlers. The stop key names the
     // reason, so the journal and the export say the run stopped at exit, not by Esc; a
     // pending y/n is left as it is (unlike `stop`, which declines it).
-    // Every background shell: its end line is written, then its group gets SIGKILL — a
-    // group left would outlive us.
-    this.jobs.killAll(reason);
     for (const c of deepestFirst) {
       try { if (c.abort) { c.stopKey = reason; c.abort.abort(); } } catch { /* exiting */ }
     }
