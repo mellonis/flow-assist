@@ -406,3 +406,118 @@ test('the ends a closing conversation causes say nothing: the exit of the host l
   expect(rig.conv.inbox).toEqual([]);
   expect(bgApi(rig)).toEqual([]);
 });
+
+// A subagent as `startChild` makes one: `by: 'model'` is a non-staying one, `by: 'person'` stays.
+function subagentOf(rig: Rig, by: 'model' | 'person'): Conversation {
+  const started = rig.conv.startChild({ kind: 'subagent', label: 'sub', prompt: 'p', by }, rig.conv.ensureSessionId());
+  if (!('child' in started)) throw new Error(started.refused);
+  return started.child;
+}
+
+test('the end of a job goes to its owner and no further: a model-started subagent reads it itself and the session\'s model is not woken', async () => {
+  const model = new ScriptedModel();
+  model.script(START, [{ text: 'should not be asked' }]);
+  const rig = conversationRig(model);
+  await anchor(rig);
+  const seen = wakes(rig.conv);
+  const sub = subagentOf(rig, 'model');
+  expect(sub.staying).toBe(false);
+  const j = job(sub, 'echo sub-out');
+  await j.wait(3000);
+  await rig.until(() => sub.api.some((m) => m.role === 'bg'));
+  await settleTick();
+  expect(String(sub.api.find((m) => m.role === 'bg')!.content)).toContain('sh-1 · echo sub-out — exited 0');
+  expect(bgApi(rig)).toEqual([]);
+  expect(seen).toEqual([]);
+  expect(model.requests).toHaveLength(1);
+});
+
+test('a staying subagent\'s job end also stays with it and wakes nobody', async () => {
+  const model = new ScriptedModel();
+  model.script(START, [{ text: 'should not be asked' }]);
+  const rig = conversationRig(model);
+  await anchor(rig);
+  const seen = wakes(rig.conv);
+  const sub = subagentOf(rig, 'person');
+  const j = job(sub, 'echo stay-out');
+  await j.wait(3000);
+  await rig.until(() => sub.inbox.length === 1);
+  expect(sub.inbox[0]!.from.what).toBe('shell');
+  await settleTick();
+  expect(bgApi(rig)).toEqual([]);
+  expect(seen).toEqual([]);
+});
+
+test('a job that is being killed, or whose conversation is closed, is not kept: nothing is journaled for it', async () => {
+  const model = new ScriptedModel();
+  model.script(START);
+  const rig = conversationRig(model);
+  await anchor(rig);
+  const port = rig.conv.jobPort();
+  const a = port.start({ command: 'sleep 30', cwd: rig.conv.shell.cwd(), by: 'model' });
+  if (!('job' in a)) throw new Error(a.refused);
+  strays.push(a.job);
+  a.job.kill('person');
+  expect(port.keep(a.job)).toBe(false);
+  await a.job.wait(5000);
+  const b = port.start({ command: 'sleep 31', cwd: rig.conv.shell.cwd(), by: 'model' });
+  if (!('job' in b)) throw new Error(b.refused);
+  strays.push(b.job);
+  // Parked while the settle waits: closed, its job neither ended nor being killed.
+  rig.conv.close('park');
+  expect(b.job.running && !b.job.killing).toBe(true);
+  expect(port.keep(b.job)).toBe(false);
+  expect(rig.journal().filter((e) => e.t === 'job-start')).toEqual([]);
+});
+
+test('a job kept after the settle is journaled with the time it was spawned', async () => {
+  const model = new ScriptedModel();
+  model.script(START);
+  const rig = conversationRig(model);
+  await anchor(rig);
+  const port = rig.conv.jobPort();
+  const r = port.start({ command: 'sleep 30', cwd: rig.conv.shell.cwd(), by: 'model' });
+  if (!('job' in r)) throw new Error(r.refused);
+  strays.push(r.job);
+  await new Promise((res) => setTimeout(res, 300));
+  expect(port.keep(r.job)).toBe(true);
+  const start = rig.journal().find((e) => e.t === 'job-start')!;
+  expect(start.at).toBe(new Date(r.job.startedAt).toISOString());
+});
+
+test('the port\'s kill refuses a job of another conversation by itself, whatever find says', async () => {
+  const model = new ScriptedModel();
+  model.script(START);
+  const rig = conversationRig(model);
+  const other = rig.registry.fresh({ kind: 'session', policy: { kind: 'ask' } });
+  const theirs = job(other, 'sleep 30');
+  expect(rig.conv.jobPort().kill(theirs, 'model')).toBe(false);
+  expect(theirs.killing).toBe(false);
+  expect(other.jobPort().kill(theirs, 'model')).toBe(true);
+  other.close('exit');
+});
+
+test('the cap note names what blocks the wake: the cap, and the session not being on screen when that holds too', async () => {
+  const model = new ScriptedModel();
+  model.script(START, [{ text: 'w1' }], [{ text: 'w2' }], [{ text: 'w3' }]);
+  const rig = conversationRig(model);
+  await anchor(rig);
+  for (let n = 1; n <= 3; n++) {
+    job(rig.conv, `echo run${n}`);
+    await rig.until(() => model.requests.length === 1 + n);
+    await rig.idle();
+  }
+  // At the cap and shown: the cap alone.
+  const a = job(rig.conv, 'echo run4');
+  await a.wait(3000);
+  await rig.until(() => notes(rig).length === 4);
+  expect(notes(rig).at(-1)).not.toContain('not the session on screen');
+  // At the cap and not shown: both.
+  const other = rig.registry.fresh({ kind: 'session', policy: { kind: 'ask' } });
+  rig.registry.show(other);
+  const b = job(rig.conv, 'echo run5');
+  await b.wait(3000);
+  await rig.until(() => notes(rig).length === 5);
+  expect(notes(rig).at(-1)).toContain('woken 3 times in a row without a message from you and this is not the session on screen, so it reads this with your next message');
+  other.close('exit');
+});

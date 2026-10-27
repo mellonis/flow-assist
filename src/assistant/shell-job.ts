@@ -170,12 +170,12 @@ export class ShellJob {
     return { text, from: this.total - text.length, next: this.total, dropped: 0 };
   }
   // The lines after the cursor that contain `literal` (not a pattern; case-sensitive),
-  // in order, at most GREP_LINES of them, and the cursor to read from next. `more` counts
+  // in order, at most GREP_LINES of them (and `cap` characters, when given), and the cursor to read from next. `more` counts
   // the matching lines past the cap. The cursor stops after the last complete line, so a
   // line still being written is read whole next time (an ended job's last line counts as
   // complete); after a drop the fragment the buffer starts in is skipped. An empty
   // literal matches nothing.
-  grep(literal: string, since = 0): { lines: string[]; next: number; dropped: number; more: number } {
+  grep(literal: string, since = 0, cap?: number): { lines: string[]; next: number; dropped: number; more: number } {
     const r = this.read(since);
     let text = r.text;
     let start = r.from;
@@ -192,10 +192,17 @@ export class ShellJob {
     const lines: string[] = [];
     let more = 0;
     let used = 0;
+    let chars = 0;
+    let stopped = false;
     let next = start + complete.length;
     for (const line of complete.split('\n')) {
-      if (lines.length < GREP_LINES) { used += line.length + 1; if (line.includes(literal)) lines.push(line); if (lines.length === GREP_LINES) next = Math.min(next, start + used); }
-      else if (line.includes(literal)) more++;
+      const hit = line.includes(literal);
+      if (stopped) { if (hit) more++; continue; }
+      // A match past the line cap, or past `cap` characters of matches (the first one
+      // always comes), is left for the next read: the cursor stops before it.
+      if (hit && (lines.length >= GREP_LINES || (cap !== undefined && lines.length > 0 && chars + line.length + 1 > cap))) { stopped = true; next = start + used; more++; continue; }
+      used += line.length + 1;
+      if (hit) { lines.push(line); chars += line.length + 1; }
     }
     return { lines, next, dropped: r.dropped, more };
   }

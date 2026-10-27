@@ -415,6 +415,21 @@ test('a ring buffer cut exactly at a line start loses no line to grep', async ()
   expect(r.lines).toEqual(['needle1']);
 });
 
+test('grep with a character cap returns the first matches that fit, leaves the rest to the next read, and its cursor stops before the first one left', async () => {
+  const j = jobs().job(`for i in 1 2 3 4 5; do echo "hit-$i-xxxxxxxx"; done`);
+  await j.wait(3000);
+  // Each match is 14 characters and a newline: two fit in 30.
+  const first = j.grep('hit', 0, 30);
+  expect(first.lines).toEqual(['hit-1-xxxxxxxx', 'hit-2-xxxxxxxx']);
+  expect(first.more).toBe(3);
+  expect(first.next).toBe(30);
+  const rest = j.grep('hit', first.next, 30);
+  expect(rest.lines).toEqual(['hit-3-xxxxxxxx', 'hit-4-xxxxxxxx']);
+  expect(j.grep('hit', rest.next, 30).lines).toEqual(['hit-5-xxxxxxxx']);
+  // The first match always comes, however long.
+  expect(j.grep('hit', 0, 3).lines).toEqual(['hit-1-xxxxxxxx']);
+});
+
 test('a kill always ends the job: a process that left the group and holds the pipes does not keep it alive', async () => {
   const dir = tmp();
   const pidFile = path.join(dir, 'pid');

@@ -362,9 +362,12 @@ function jobTool(name: 'shell_output' | 'shell_kill' | 'shell_list', args: Recor
     const literal = String(args.grep);
     if (!literal) throw new Error('shell_output: grep must not be empty');
     const since = args.since != null ? wholeNumber(name, 'since', args.since) : 0;
-    const g = job.grep(literal, since);
-    const more = g.more ? `\n${g.more} more matching lines are not shown (at most 100).` : '';
-    return `${head}${lost(g.dropped)}\n${dataBlock(job, clip(g.lines.join('\n')))}${more}\nnext: ${g.next}`;
+    const g = job.grep(literal, since, maxChars);
+    // One match longer than the cap is cut, and said to be.
+    const first = g.lines.join('\n');
+    const cut = first.length > maxChars;
+    const more = g.more ? `\n${g.more} more matching lines are not shown (at most 100 lines or ${maxChars} characters); read on from next.` : '';
+    return `${head}${lost(g.dropped)}\n${dataBlock(job, cut ? first.slice(0, maxChars) : first)}${cut ? '\nthe match above is cut at the character cap.' : ''}${more}\nnext: ${g.next}`;
   }
   if (args.tail != null) {
     const n = wholeNumber(name, 'tail', args.tail);

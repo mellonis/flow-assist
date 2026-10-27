@@ -224,7 +224,21 @@ test('shell_output grep says how many matches it did not show', async () => {
   await r.run('run_command', { command: 'i=0; while [ $i -lt 130 ]; do echo hit$i; i=$((i+1)); done; sleep 30', background: true });
   expect(await until(() => r.mine[0]!.lines >= 130)).toBe(true);
   const g = await r.run('shell_output', { id: 'sh-1', grep: 'hit' });
-  expect(g).toContain('30 more matching lines are not shown (at most 100)');
+  expect(g).toContain('30 more matching lines are not shown (at most 100 lines or 20000 characters)');
+});
+
+test('shell_output grep that the character cap cuts says so and moves next only past what it returned', async () => {
+  const r = rig({ maxChars: 40 });
+  await r.run('run_command', { command: 'for i in 1 2 3 4 5 6; do echo "match-$i-yyyyyyyyyy"; done; sleep 30', background: true });
+  expect(await until(() => r.mine[0]!.lines >= 6)).toBe(true);
+  const first = await r.run('shell_output', { id: 'sh-1', grep: 'match' });
+  expect(first).toContain('match-1-yyyyyyyyyy\nmatch-2-yyyyyyyyyy\n</program-output');
+  expect(first).not.toContain('match-3');
+  expect(first).toMatch(/4 more matching lines are not shown \(at most 100 lines or 40 characters\)/);
+  const next = Number(/next: (\d+)/.exec(first)![1]);
+  expect(next).toBe(38);
+  const second = await r.run('shell_output', { id: 'sh-1', grep: 'match', since: next });
+  expect(second).toContain('match-3-yyyyyyyyyy\nmatch-4-yyyyyyyyyy\n');
 });
 
 test('shell_output says how much the ring buffer dropped', async () => {

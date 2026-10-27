@@ -867,7 +867,8 @@ export class Conversation {
     const wire = (): void => {
       if (wired) return;
       wired = true;
-      journalId = this.journal({ t: 'job-start', id: job.id, command: spec.command, cwd: tildePath(spec.cwd), by: spec.by }, { person: spec.by === 'person' });
+      // Stamped with the spawn time: a job kept after the settle started then, not now.
+      journalId = this.journal({ t: 'job-start', id: job.id, command: spec.command, cwd: tildePath(spec.cwd), by: spec.by, at: new Date(job.startedAt).toISOString() }, { person: spec.by === 'person' });
       const sink = outputJournal((ev) => this.journalTo(journalId, { ...ev, t: 'job-out', id: job.id }));
       out = sink;
       const sofar = job.read(0).text;
@@ -888,7 +889,7 @@ export class Conversation {
   // The model's `run_command` found the job still running after the settle: from here it is
   // a job like any other. false when it ended meanwhile.
   keepJob(job: ShellJob): boolean {
-    if (!job.running || this.jobs.get(job.id) !== job) return false;
+    if (this.isClosed || !job.running || job.killing || this.jobs.get(job.id) !== job) return false;
     this.jobWires.get(job)?.();
     return true;
   }
@@ -927,8 +928,10 @@ export class Conversation {
     const s = job.status;
     const killedBy = s.state === 'killed' ? s.by : null;
     if (killedBy === 'exit' || killedBy === 'clear' || killedBy === 'parent') return;
-    const to = resultRecipient<Conversation>(this);
-    if (!to) return;
+    // To the owner itself, never re-routed: the conversation that holds the job is the one
+    // that can read and end it. A subagent still running reads it at its next round; one
+    // that has ended had its jobs killed with it, so there is no end to deliver.
+    const to = this;
     const quiet = killedBy !== null && killedBy !== 'signal';
     to.deliver({
       kind: 'result', from: { key: job.id, label: job.id, what: 'shell' }, text: jobEndText(job), quiet,
@@ -1554,9 +1557,11 @@ export class Conversation {
     if (woken || capped) {
       const names = shellEnds.map((i) => i.from.label).join(', ');
       for (const i of shellEnds) this.emit({ type: 'shell-wake', job: i.job?.id ?? i.from.key, command: i.job?.command ?? '', woke: woken });
+      const away = this.deps.current?.();
+      const why = away && away !== this ? ` and this is not the session on screen` : '';
       this.noteRow(woken
         ? `${names} ended — waking the model`
-        : `${names} ended — the model has been woken ${MAX_WAKES} times in a row without a message from you, so it reads this with your next message`);
+        : `${names} ended — the model has been woken ${MAX_WAKES} times in a row without a message from you${why}, so it reads this with your next message`);
     }
     if (woken) this.wakeRun++;
     if (!turn) { this.landInbox(); this.settleReadAsks(); return false; }
